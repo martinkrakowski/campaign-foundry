@@ -4261,3 +4261,82 @@ describe("the pre-type draft (T2 / D112)", () => {
     });
   });
 });
+
+describe("VE1 — undo and redo in the editor", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    localStorage.setItem("cf:brief-picked", "1");
+    localStorage.setItem("cf:presentation", "everything");
+  });
+
+  const nameField = () => screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement;
+  const audienceField = () => screen.getByLabelText(messages.targetAudienceLabel) as HTMLInputElement;
+
+  test("⌘Z steps back over a typed word; ⇧⌘Z replays it", async () => {
+    const user = userEvent.setup();
+    routes({});
+    renderWithRun(<NewEditor />);
+    await waitFor(() => expect(nameField().value).toBe(""));
+    await user.type(nameField(), "Spring");
+    await waitFor(() => expect(nameField().value).toBe("Spring"));
+    // One step back over the whole word, from outside the field: the editor owns
+    // the chord only when no text field has the caret.
+    fireEvent.keyDown(document.body, { key: "z", metaKey: true });
+    await waitFor(() => expect(nameField().value).toBe(""));
+    fireEvent.keyDown(document.body, { key: "z", metaKey: true, shiftKey: true });
+    await waitFor(() => expect(nameField().value).toBe("Spring"));
+  });
+
+  test("Ctrl+Z undoes where ⌘Z does", async () => {
+    const user = userEvent.setup();
+    routes({});
+    renderWithRun(<NewEditor />);
+    await waitFor(() => expect(nameField().value).toBe(""));
+    await user.type(nameField(), "Spring");
+    fireEvent.keyDown(document.body, { key: "z", ctrlKey: true });
+    await waitFor(() => expect(nameField().value).toBe(""));
+  });
+
+  test("⌘Z inside a text field is left to the field's own undo", async () => {
+    const user = userEvent.setup();
+    routes({});
+    renderWithRun(<NewEditor />);
+    await waitFor(() => expect(nameField().value).toBe(""));
+    await user.type(nameField(), "Spring");
+    // The caret is in the field: the chord belongs to the field's native undo.
+    fireEvent.keyDown(nameField(), { key: "z", metaKey: true });
+    expect(nameField().value).toBe("Spring");
+    // The editor's stack is untouched — the same chord from outside steps back.
+    fireEvent.keyDown(document.body, { key: "z", metaKey: true });
+    await waitFor(() => expect(nameField().value).toBe(""));
+  });
+
+  test("the route's load is a new baseline: ⌘Z after it does nothing", async () => {
+    routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
+    renderWithRun(<Editor id="camp" />);
+    await waitFor(() => expect(nameField().value).toBe("camp"));
+    fireEvent.keyDown(document.body, { key: "z", metaKey: true });
+    expect(nameField().value).toBe("camp");
+  });
+
+  test("the autosaved draft stays exactly EditorState's keys through an undo and a retype", async () => {
+    const user = userEvent.setup();
+    routes({});
+    renderWithRun(<NewEditor />);
+    await waitFor(() => expect(nameField().value).toBe(""));
+    await user.type(nameField(), "Spring");
+    await user.type(audienceField(), "Family");
+    // One step back undoes the audience run only — the name stands, so the
+    // editor is still dirty and autosave writes the post-undo state.
+    fireEvent.keyDown(document.body, { key: "z", metaKey: true });
+    await waitFor(() => expect(audienceField().value).toBe(""));
+    await waitFor(() => expect(localStorage.getItem("cf:draft:new")).not.toBeNull());
+    const stored = JSON.parse(localStorage.getItem("cf:draft:new") as string) as {
+      state: Record<string, unknown>;
+    };
+    // History leaking into the persisted shape would come back through `restore`
+    // as a phantom draft (R6): the object on disk is exactly what it was before VE1.
+    expect(Object.keys(stored.state).sort()).toEqual(Object.keys(initialEditorState()).sort());
+    expect(stored.state.campaignName).toBe("Spring");
+  });
+});

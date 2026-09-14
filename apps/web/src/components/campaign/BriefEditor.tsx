@@ -1,6 +1,6 @@
 "use client";
 
-import { useReducer, useState, useEffect, useMemo, useCallback, useRef, useLayoutEffect, type ReactNode, type RefObject } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef, useLayoutEffect, type ReactNode, type RefObject } from "react";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { Button, Input, SegBar, OverflowMenu, ConfirmDialog, useDialogFocusTrap } from "@/components/ui";
 import { useRun } from "@/lib/run-context";
@@ -21,7 +21,6 @@ import {
   type BriefEntry,
 } from "@/lib/briefs-api";
 import {
-  editorReducer,
   initialEditorState,
   toBrief,
   isDirtySinceSave,
@@ -35,6 +34,7 @@ import {
   blankBrief,
   slugify,
 } from "@/components/campaign/editor-state";
+import { useEditorHistory, useHistoryKeys } from "@/components/campaign/editor-history";
 import {
   validateState,
   validateWarnings,
@@ -176,7 +176,13 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   const { setDirty, setDraftRun } = useEditorDirty();
   const { openCreateDialog, seedVersion } = useCreateCampaign();
   const { setPanels, setTopPanels } = useEditorPanels();
-  const [state, dispatch] = useReducer(editorReducer, initialEditorState());
+  // VE1 — history lives in the hook, never in `EditorState` (R6): `state` is the
+  // present draft, so persistence and the stored-draft diff see exactly what they
+  // saw before, and `dispatch` is a drop-in for the reducer's. The keyboard
+  // shortcut is wired once here (task 6).
+  const history = useEditorHistory(initialEditorState());
+  const { state, dispatch } = history;
+  useHistoryKeys(history);
   const [errors, setErrors] = useState<Record<string, FieldErrors>>({});
   const [warnings, setWarnings] = useState<Record<string, FieldWarnings>>({});
   // Not a boolean: the section that blocks is what the refusal needs to scroll to, and
