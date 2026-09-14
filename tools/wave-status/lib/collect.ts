@@ -4,6 +4,8 @@ import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { readEvents } from "./events.js";
 import { mergeStatus } from "./merge.js";
+import { readBacklog } from "./backlog.js";
+import { artifactPathFor } from "../../plan-verify/lib/artifact.js";
 import type { LaneObservation, PrChecks, WaveEvent, WaveStatus } from "./types.js";
 
 /**
@@ -33,6 +35,7 @@ export interface CollectDeps {
   readonly pgrep: (pattern: string) => Promise<number>;
   readonly gh: (args: readonly string[]) => Promise<string>;
   readonly git?: (args: readonly string[]) => Promise<string>;
+  readonly planVerifyArtifactPath?: string;
 }
 
 /** Wave log directories live directly under here: `~/.waves/wave*`. */
@@ -284,10 +287,13 @@ export async function collect(
   }
 
   const status = mergeStatus(events, observed, now, orderedWaves);
+  const backlogPath = deps.planVerifyArtifactPath ?? artifactPathFor(process.env, root);
+  const backlog = await readBacklog(deps.readFile, backlogPath);
+  const withBacklog: WaveStatus = { ...status, backlog };
   // A corpus with rows missing is not one the page may read as complete: a
   // lane that joined no PR may be a lane whose PR was in an unreadable row.
   // Name the gap so no face of this tool can render it as "no PR".
-  return corpus.skipped > 0 ? { ...status, prs: { skipped: corpus.skipped } } : status;
+  return corpus.skipped > 0 ? { ...withBacklog, prs: { skipped: corpus.skipped } } : withBacklog;
 }
 
 /**

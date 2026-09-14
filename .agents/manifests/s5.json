@@ -1,0 +1,253 @@
+{
+  "version": 1,
+  "lane": "S5",
+  "mutations": [
+    {
+      "file": "tools/plan-verify/cli.ts",
+      "before": "  try {\n    await io.writeArtifact(path, serializeArtifact(artifact));\n  } catch (err: unknown) {\n    io.log(`WARN: could not write artifact ${path}: ${errorText(err)}`);\n  }",
+      "after": "  try {\n    await io.writeArtifact(path, serializeArtifact(artifact));\n  } catch (err: unknown) {\n    io.log(`WARN: could not write artifact ${path}: ${errorText(err)}`);\n    return 1;\n  }",
+      "because": "An artifact write failure is an environment problem rather than a broken premise; letting write errors change the exit code would report passing premises as a failing gate. The cli test pins that the holding exit code 0 is preserved.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "tools/plan-verify/__tests__/cli.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/lib/render.ts",
+      "before": "  if (backlog.state === \"absent\") {\n    return [\"backlog: no plan:verify run recorded\"];\n  }",
+      "after": "  if (backlog.state === \"absent\") {\n    return [];\n  }",
+      "because": "An absent artifact means no verify run has occurred yet; collapsing absence into an empty list would make an unmeasured backlog look like an empty set of verified premises. The render test asserts the explicit absent banner.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "tools/wave-status/lib/__tests__/render.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/public/index.html",
+      "before": "        if (!backlog || backlog.state === \"absent\") {\n          provEl.innerHTML = \"\";\n          bodyEl.innerHTML = '<div class=\"backlog-empty\">no plan:verify run recorded</div>';\n          return;\n        }",
+      "after": "        if (!backlog || backlog.state === \"absent\") {\n          provEl.innerHTML = \"\";\n          bodyEl.innerHTML = '<ul class=\"backlog-list\"></ul>';\n          return;\n        }",
+      "because": "The web page must never confuse an absent artifact with zero recorded premises; rendering an empty list hides the fact that plan:verify has not been run. The page test verifies that the empty state explicitly announces no plan:verify run recorded.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "tools/wave-status/__tests__/page.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/lib/render.ts",
+      "before": "  const lines: string[] = [\n    `backlog (${scopeDesc}) — ${sanitize(artifact.at)} [${sanitize(artifact.git.branch)}@${headSha}]`,\n  ];",
+      "after": "  const lines: string[] = [\n    `backlog (${scopeDesc}) — ${sanitize(artifact.at)}`,\n  ];",
+      "because": "Git branch and commit provenance pin the exact code revision against which the backlog was verified; dropping provenance detaches premise verdicts from source state. The render test pins the presence of branch and short SHA in the header.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "tools/wave-status/lib/__tests__/render.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/public/index.html",
+      "before": "        provEl.innerHTML =\n          `<span class=\"backlog-scope ${isPartial ? \"warn\" : \"ok\"}\">${esc(scopeLabel)}</span>` +\n          `<span class=\"sep\">·</span>` +\n          `<span class=\"backlog-at\">${esc(artifact.at)}</span>` +\n          `<span class=\"sep\">·</span>` +\n          `<span class=\"backlog-git\">${esc(branch)}@${esc(headSha)}</span>`;",
+      "after": "        provEl.innerHTML =\n          `<span class=\"backlog-scope ${isPartial ? \"warn\" : \"ok\"}\">${esc(scopeLabel)}</span>` +\n          `<span class=\"sep\">·</span>` +\n          `<span class=\"backlog-at\">${esc(artifact.at)}</span>`;",
+      "because": "Without git provenance the browser backlog display cannot confirm which commit produced the premise verdicts; dropping the branch and commit metadata leaves operator status without attribution. The page test verifies that the git element renders branch and head commit.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "tools/wave-status/__tests__/page.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/plan-verify/cli.ts",
+      "before": "  const scope: ArtifactScope = isSubset ? { kind: \"partial\", plans } : { kind: \"full\" };",
+      "after": "  const scope: ArtifactScope = { kind: \"full\" };",
+      "because": "A targeted check of a subset of plans must record its partial scope in the artifact; marking it as a full run allows a partial verification to pose as the entire backlog. The cli subset test pins that partial runs record kind: partial and the exact plan list.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "tools/plan-verify/__tests__/cli.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/lib/render.ts",
+      "before": "  const scopeDesc =\n    artifact.scope.kind === \"partial\"\n      ? `partial run (${artifact.plans.map(sanitize).join(\", \")})`\n      : `full run`;",
+      "after": "  const scopeDesc = `full run`;",
+      "because": "The terminal renderer must explicitly distinguish a partial verification run from a complete one; masking a partial run as full conceals untracked plans from the CLI output. The render test checks that partial runs display the targeted plans in their heading.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "tools/wave-status/lib/__tests__/render.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/public/index.html",
+      "before": "        const isPartial = artifact.scope.kind === \"partial\";",
+      "after": "        const isPartial = false;",
+      "because": "On the browser dashboard, a partial run must be highlighted with the warning tone and labelled with plan counts; suppressing the partial flag leaves operators unaware that only a fraction of the backlog was verified. The page test verifies the partial run scope pill and warn styling.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "tools/wave-status/__tests__/page.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/lib/backlog.ts",
+      "before": "    if (err !== null && typeof err === \"object\" && \"code\" in err && (err as { code: unknown }).code === \"ENOENT\") {\n      return { state: \"absent\" };\n    }\n    return { state: \"unknown\" };",
+      "after": "    return { state: \"absent\" };",
+      "because": "When an artifact exists but cannot be read due to file permissions or disk errors, reporting absent misrepresents a readable filesystem failure as a missing file. The backlog unit tests assert that non-ENOENT read failures result in state: unknown.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "tools/wave-status/lib/__tests__/backlog.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/lib/backlog.ts",
+      "before": "import { parseArtifact, type PlanVerifyArtifact } from \"../../plan-verify/lib/artifact.js\";",
+      "after": "import { parseArtifact, type PlanVerifyArtifact } from \"../../plan-verify/lib/artifact.js\";\nimport { execFile } from \"node:child_process\";\nexecFile(\"sh\", [\"-c\", \"true\"], () => {});",
+      "because": "D106/S5: the status server must never run a shell. The server test that injected a throwing executor could not catch this — the server has no executor seam and server.test.ts mocks node:child_process — so the charter is checked against the source: every subprocess must be one of pgrep, gh, git.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "tools/wave-status/__tests__/charter.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/lib/backlog.ts",
+      "before": "import { parseArtifact, type PlanVerifyArtifact } from \"../../plan-verify/lib/artifact.js\";",
+      "after": "import { parseArtifact, type PlanVerifyArtifact } from \"../../plan-verify/lib/artifact.js\";\nimport { verifyPremises } from \"../../plan-verify/lib/verify.js\";\nvoid verifyPremises;",
+      "because": "S5 owner decision: wave-status imports the artifact's type and path from plan-verify and nothing that executes premises. Importing the verifier is the natural way a live-execution panel would creep back in.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "tools/wave-status/__tests__/charter.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/plan-verify/lib/verify.ts",
+      "before": "    } catch (err: unknown) {\n      const message = errorText(err);\n      results.push({\n        premise,\n        status: \"error\",\n        exitCode: 1,\n        output: message,\n        reason: message,\n      });\n    }",
+      "after": "    } catch (err: unknown) {\n      const message = errorText(err);\n      results.push({\n        premise,\n        status: \"stale\",\n        exitCode: 1,\n        output: message,\n        reason: message,\n      });\n    }",
+      "because": "An executor error is an infrastructure failure asserting no verdict; reporting it as stale wrongly instructs the orchestrator that the premise gap is closed and to retire a live lane. The verifier test asserts that thrown executor errors produce status: error.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "tools/plan-verify/lib/__tests__/verify.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/lib/collect.ts",
+      "before": "  const backlogPath = deps.planVerifyArtifactPath ?? artifactPathFor(process.env, root);",
+      "after": "  const backlogPath = deps.planVerifyArtifactPath ?? artifactPathFor(process.env);",
+      "because": "A wave scan using a selected root must locate its backlog artifact relative to that root; falling back to module-load process.env reads another workspace's backlog. The collect unit test asserts that default backlog path derivation targets the selected root.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "tools/wave-status/__tests__/collect.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/lib/render.ts",
+      "before": "      const reasonText = p.reason !== undefined && p.reason !== \"\" ? ` — ${sanitize(p.reason)}` : \"\";",
+      "after": "      const reasonText = p.reason !== undefined && p.reason !== \"\" ? ` — ${p.reason}` : \"\";",
+      "because": "Artifact premise failure reasons can carry terminal control sequences from subprocess output into the operator console; leaving them unsanitized allows bytes from disk to reprogram the terminal. The render test asserts that reason strings in terminal output have control bytes stripped.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "tools/wave-status/lib/__tests__/render.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/plan-verify/lib/artifact.ts",
+      "before": "    if (typeof rawItem.plan !== \"string\" || rawItem.plan === \"\") {\n      throw new Error(\"malformed artifact: premise entry missing plan\");\n    }",
+      "after": "    /* no premise plan validation */",
+      "because": "Coercing missing or non-string premise plans with String() turns undefined or null into valid-looking provenance records; invalid records must be refused so readBacklog marks them unknown. The artifact parser test asserts that missing, null or empty premise plans throw.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "tools/plan-verify/lib/__tests__/artifact.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/plan-verify/cli.ts",
+      "before": "export async function runCli(io: PlanVerifyIo): Promise<number> {\n  let branch = PROVENANCE_UNKNOWN;\n  let head = PROVENANCE_UNKNOWN;\n  try {\n    const b = (await io.git([\"rev-parse\", \"--abbrev-ref\", \"HEAD\"])).trim();\n    if (b !== \"\") branch = b;\n  } catch {\n    // unknown\n  }\n  try {\n    const h = (await io.git([\"rev-parse\", \"HEAD\"])).trim();\n    if (h !== \"\") head = h;\n  } catch {\n    // unknown\n  }\n\n  const isSubset = io.argv.length > 0;",
+      "after": "export async function runCli(io: PlanVerifyIo): Promise<number> {\n  const isSubset = io.argv.length > 0;",
+      "because": "Reading git provenance after premises finish allows concurrent git operations to attribute verdicts to a commit they never ran against. The cli test asserts that git branch and head are read before any premise executes.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "tools/plan-verify/__tests__/cli.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/plan-verify/lib/artifact.ts",
+      "before": "  await io.writeFile(tmp, contents, \"utf8\");\n  await io.rename(tmp, path);",
+      "after": "  await io.writeFile(path, contents, \"utf8\");",
+      "because": "Writing directly to the artifact path truncates the file in place, exposing concurrent readers to half-written JSON fragments. The atomic write test asserts that contents are written to a temporary sibling file and renamed into place.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "tools/plan-verify/lib/__tests__/artifact.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/public/index.html",
+      "before": "        const headSha = artifact.git.head.slice(0, 8);\n        const branch = artifact.git.branch;",
+      "after": "        const headSha = artifact.git ? artifact.git.head.slice(0, 8) : \"unknown\";\n        const branch = artifact.git ? artifact.git.branch : \"unknown\";",
+      "because": "The backlog page renderer must not maintain redundant defensive fallbacks for fields guaranteed by parseArtifact; the parser and page must enforce a single unified schema. The page test verifies that renderBacklog contains no defensive ternary fallbacks for git provenance.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "tools/wave-status/__tests__/page.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/lib/render.ts",
+      "before": "      ? `partial run (${artifact.plans.map(sanitize).join(\", \")})`",
+      "after": "      ? `partial run (${artifact.plans.join(\", \")})`",
+      "because": "Every artifact-derived value reaching the terminal is sanitized against control bytes, including a partial run's plan list; the premise-row test used a full run, so the heading's plan list went unguarded.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "tools/wave-status/lib/__tests__/render.test.ts"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

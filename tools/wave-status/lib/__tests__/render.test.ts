@@ -377,3 +377,150 @@ describe("renderStatus", () => {
     expect(isLaneStalled(lane)).toBe(false);
   });
 });
+
+describe("renderStatus — backlog panel", () => {
+  const recordedArtifact = {
+    version: 1,
+    at: "2026-09-13T12:00:00.000Z",
+    git: { branch: "feat/s5-backlog-panel", head: "0a1b2c3d4e5f60718293a4b5c6d7e8f901234567" },
+    scope: { kind: "full" as const },
+    plans: ["docs/planning/a.md"],
+    premises: [
+      { lane: "W1", plan: "docs/planning/a.md", status: "holds" as const },
+      { lane: "S5", plan: "docs/planning/S5.md", status: "stale" as const, reason: "already merged" },
+      { lane: "T9", plan: "docs/planning/t9.md", status: "timed-out" as const },
+    ],
+  };
+
+  test("no artifact renders 'no plan:verify run recorded', never zero items", () => {
+    const status: WaveStatus = {
+      generatedAt: TS,
+      waves: [],
+      backlog: { state: "absent" },
+    };
+    const out = renderStatus(status, { color: false });
+    expect(out).toContain("no plan:verify run recorded");
+  });
+
+  test("an unreadable or malformed artifact renders as unknown, not an empty list", () => {
+    const status: WaveStatus = {
+      generatedAt: TS,
+      waves: [],
+      backlog: { state: "unknown" },
+    };
+    const out = renderStatus(status, { color: false });
+    expect(out).toContain("backlog: unknown");
+  });
+
+  test("a recorded artifact renders provenance prominently (timestamp, branch, head, scope)", () => {
+    const status: WaveStatus = {
+      generatedAt: TS,
+      waves: [],
+      backlog: { state: "recorded", artifact: recordedArtifact },
+    };
+    const out = renderStatus(status, { color: false });
+    expect(out).toContain("2026-09-13T12:00:00.000Z");
+    expect(out).toContain("feat/s5-backlog-panel");
+    expect(out).toContain("0a1b2c3d");
+    expect(out).toContain("full run");
+    expect(out).toContain("W1 (docs/planning/a.md): holds");
+    expect(out).toContain("S5 (docs/planning/S5.md): stale — already merged");
+    expect(out).toContain("T9 (docs/planning/t9.md): timed-out");
+  });
+
+  test("a partial run is rendered as partial and names its plans, never the whole backlog", () => {
+    const partialArtifact = {
+      ...recordedArtifact,
+      scope: { kind: "partial" as const, plans: ["docs/planning/a.md"] },
+    };
+    const status: WaveStatus = {
+      generatedAt: TS,
+      waves: [],
+      backlog: { state: "recorded", artifact: partialArtifact },
+    };
+    const out = renderStatus(status, { color: false });
+    expect(out).toContain("partial run");
+    expect(out).not.toContain("full run");
+    expect(out).toContain("docs/planning/a.md");
+  });
+
+  test("a recorded artifact with no premises renders (no premises)", () => {
+    const emptyArtifact = {
+      ...recordedArtifact,
+      premises: [],
+    };
+    const status: WaveStatus = {
+      generatedAt: TS,
+      waves: [],
+      backlog: { state: "recorded", artifact: emptyArtifact },
+    };
+    const out = renderStatus(status, { color: false });
+    expect(out).toContain("(no premises)");
+  });
+
+  test("a recorded artifact renders colored statuses when color is enabled", () => {
+    const status: WaveStatus = {
+      generatedAt: TS,
+      waves: [],
+      backlog: { state: "recorded", artifact: recordedArtifact },
+    };
+    const out = renderStatus(status, { color: true });
+    expect(out).toContain("\x1b[36mholds\x1b[0m");
+    expect(out).toContain("\x1b[31mstale\x1b[0m");
+    expect(out).toContain("\x1b[33mtimed-out\x1b[0m");
+  });
+
+  test("artifact values in terminal output are sanitized against control bytes", () => {
+    const maliciousArtifact = {
+      version: 1,
+      at: "2026-09-13T12:00:00.000Z\x1b[2J",
+      git: {
+        branch: "feat/s5\x07-bad",
+        head: "0a1b2c3d\x1b[31m4e5f60718293a4b5c6d7e8f901234567",
+      },
+      scope: { kind: "full" as const },
+      plans: ["docs/planning/a.md"],
+      premises: [
+        {
+          lane: "W1\x1b[1A",
+          plan: "docs/p\x00lan.md",
+          status: "stale" as const,
+          reason: "gap closed\x1b[31m exploit",
+        },
+      ],
+    };
+    const status: WaveStatus = {
+      generatedAt: TS,
+      waves: [],
+      backlog: { state: "recorded", artifact: maliciousArtifact },
+    };
+    const out = renderStatus(status, { color: false });
+    expect(out).not.toContain("\x1b");
+    expect(out).not.toContain("\x07");
+    expect(out).not.toContain("\x00");
+    expect(out).toContain("W1[1A (docs/plan.md): stale — gap closed[31m exploit");
+    expect(out).toContain("feat/s5-bad");
+    expect(out).toContain("2026-09-13T12:00:00.000Z[2J");
+  });
+
+  test("a partial run's plan list is sanitized too, not just the premise rows", () => {
+    const status: WaveStatus = {
+      generatedAt: TS,
+      waves: [],
+      backlog: {
+        state: "recorded",
+        artifact: {
+          version: 1,
+          at: "2026-09-13T12:00:00.000Z",
+          git: { branch: "main", head: "0a1b2c3d4e5f60718293a4b5c6d7e8f901234567" },
+          scope: { kind: "partial" as const, plans: ["docs/planning/a\x1b[2J.md"] },
+          plans: ["docs/planning/a\x1b[2J.md"],
+          premises: [],
+        },
+      },
+    };
+    const out = renderStatus(status, { color: false });
+    expect(out).not.toContain("\x1b");
+    expect(out).toContain("partial run (docs/planning/a[2J.md)");
+  });
+});

@@ -42,6 +42,34 @@ describe("verifyPremises", () => {
     expect(r[0]?.status).toBe("timed-out");
   });
 
+  test("a failed check records the *why* its verdict has none", async () => {
+    const r = await verifyPremises([premise("M4", "closed")], {
+      execute: execWith({ closed: 1 }, "  already in main  "),
+    });
+    expect(r[0]?.reason).toBe("already in main");
+  });
+
+  test("a holding premise records no reason", async () => {
+    const r = await verifyPremises([premise("W1", "open")], { execute: execWith({ open: 0 }) });
+    expect(r[0]).not.toHaveProperty("reason");
+  });
+
+  test("an executor that throws is a failed check with a reason, never a crashed run", async () => {
+    const r = await verifyPremises(
+      [premise("Z9", "boom"), premise("W1", "open")],
+      {
+        execute: async (script: string) => {
+          if (script === "boom") throw new Error("spawn sh ENOENT");
+          return { exitCode: 0, output: "" };
+        },
+      },
+    );
+    expect(r[0]?.status).toBe("error");
+    expect(r[0]?.reason).toContain("spawn sh ENOENT");
+    expect(r[1]?.status).toBe("holds");
+    expect(exitCodeFor(r)).toBe(EXIT_TIMED_OUT);
+  });
+
   test("a hanging premise does not stop the premises queued after it", async () => {
     const r = await verifyPremises([premise("W1", "hang"), premise("W2", "ok")], { execute: killed });
     expect(r.map((x) => x.status)).toEqual(["timed-out", "holds"]);
@@ -108,9 +136,34 @@ describe("formatReport", () => {
     );
     expect(formatReport(r)).toContain("1 stale, 1 timed out, 1 holding.");
   });
+
+  test("names an errored premise and says it could not be checked, never to not dispatch", async () => {
+    const r = await verifyPremises(
+      [premise("Z9", "boom"), premise("W1", "open")],
+      {
+        execute: async (script: string) => {
+          if (script === "boom") throw new Error("spawn sh ENOENT");
+          return { exitCode: 0, output: "" };
+        },
+      },
+    );
+    const text = formatReport(r);
+    expect(text).toContain("ERROR  Z9  (p.md)");
+    expect(text).toContain("the premise could not be checked: spawn sh ENOENT");
+    expect(text).not.toContain("Do not dispatch it");
+    expect(text).toContain("1 error, 1 holding.");
+  });
 });
 
 describe("exitCodeFor", () => {
+  test("is its own code when an executor errors, so CI sees a check that could not decide", async () => {
+    const r = await verifyPremises([premise("Z9", "boom")], {
+      execute: async () => {
+        throw new Error("spawn sh ENOENT");
+      },
+    });
+    expect(exitCodeFor(r)).toBe(EXIT_TIMED_OUT);
+  });
   test("is non-zero when any premise is stale, so CI can refuse", async () => {
     const r = await verifyPremises([premise("A", "a"), premise("B", "b")], {
       execute: execWith({ a: 0, b: 1 }),

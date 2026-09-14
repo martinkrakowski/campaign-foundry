@@ -275,12 +275,58 @@ export function renderStatus(status: WaveStatus, opts?: RenderOptions): string {
     .map((line) => truncate(line, width))
     .join("\n");
 
+  const sections: string[] = [];
+  if (body !== "") sections.push(body);
+
   // The gap the page refuses to render as "no PR". Here every PR cell would
   // otherwise read as absence — and a bare em dash is read as absence too.
-  if (status.prs === undefined) return body;
-  const gap = truncate(
-    `prs: ${status.prs.skipped} row(s) could not be read — a lane with no PR may be one of them`,
-    width,
-  );
-  return body === "" ? gap : `${body}\n\n${gap}`;
+  if (status.prs !== undefined) {
+    sections.push(
+      truncate(
+        `prs: ${status.prs.skipped} row(s) could not be read — a lane with no PR may be one of them`,
+        width,
+      ),
+    );
+  }
+
+  if (status.backlog !== undefined) {
+    const backlogLines = renderBacklog(status.backlog, color).map((line) => truncate(line, width));
+    sections.push(backlogLines.join("\n"));
+  }
+
+  return sections.join("\n\n");
+}
+
+function renderBacklog(backlog: NonNullable<WaveStatus["backlog"]>, color: boolean): string[] {
+  if (backlog.state === "absent") {
+    return ["backlog: no plan:verify run recorded"];
+  }
+  if (backlog.state === "unknown") {
+    return ["backlog: unknown"];
+  }
+  const { artifact } = backlog;
+  const scopeDesc =
+    artifact.scope.kind === "partial"
+      ? `partial run (${artifact.plans.map(sanitize).join(", ")})`
+      : `full run`;
+  const headSha = sanitize(artifact.git.head).slice(0, 8);
+  const lines: string[] = [
+    `backlog (${scopeDesc}) — ${sanitize(artifact.at)} [${sanitize(artifact.git.branch)}@${headSha}]`,
+  ];
+  if (artifact.premises.length === 0) {
+    lines.push(`${ROW_INDENT}(no premises)`);
+  } else {
+    for (const p of artifact.premises) {
+      const reasonText = p.reason !== undefined && p.reason !== "" ? ` — ${sanitize(p.reason)}` : "";
+      const statusText = color
+        ? p.status === "holds"
+          ? withCode(CYAN, p.status)
+          : p.status === "stale"
+            ? withCode(RED, p.status)
+            : withCode(YELLOW, p.status)
+        : p.status;
+      lines.push(`${ROW_INDENT}${sanitize(p.lane)} (${sanitize(p.plan)}): ${statusText}${reasonText}`);
+    }
+  }
+  return lines;
 }

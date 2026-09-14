@@ -124,6 +124,8 @@ export interface PrCorpusGap {
   readonly skipped: number;
 }
 
+import type { BacklogState } from "./backlog.js";
+
 export interface WaveStatus {
   readonly generatedAt: string;
   readonly prs?: PrCorpusGap;
@@ -131,4 +133,5 @@ export interface WaveStatus {
     readonly id: string;
     readonly lanes: readonly LaneStatus[];
   }[];
+  readonly backlog?: BacklogState;
 }

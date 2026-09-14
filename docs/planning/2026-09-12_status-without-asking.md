@@ -45,7 +45,7 @@ lanes are dispatched now.
 | **S2** | **Attach PR facts to event-only lanes** (C2), and derive liveness for them. | A lane with events and no log shows its PR and its liveness. |
 | **S3** | **One PR-facts lane: threads (H1) and the `none` split (H2) together.** Both change `LaneObservation.pr`, both edit `prFacts`, both update the same three consumers. | A PR with an unresolved thread reads as needing attention with CI green. *Could not ask* renders differently from *nothing to ask about*, and nothing throws on either. |
 | **S4** | **Render `detail.seat`, and make emitting it required** rather than customary (M2). | A lane's row names the seat that ran it; a lane dispatched without one says **unknown** rather than guessing. |
-| **S5** | **A backlog panel from `plan:verify`.** | The panel matches `yarn plan:verify` for the same tree, by **importing `parsePremises`/`verifyPremises`** rather than re-implementing them — the only non-drifting option. |
+| **S5** | **A backlog panel from `plan:verify`.** | `tools/wave-status` imports the artifact **type and path** from `tools/plan-verify` — the producer owns the shape, so the two cannot drift — and **never calls `verifyPremises` or anything that executes a script.** |
 
 **Order.** S1 → S2 → S3, strictly: all three edit `prFacts` in one loop, and the repository's own
 rule is never to let two lanes own a file at once (SKILL.md:234). S4 and S5 are independent of them
@@ -120,9 +120,4 @@ omitted this and S1 would have hit it first.
 
 **S3 — shipped in this PR.**
 
-```premise S5
-# The page cannot show premise state without wiring to the tool that computes
-# it. Probing the wiring, because "premise" as an English word is house
-# vocabulary and would retire this lane on any passing comment.
-! grep -rq 'plan-verify' tools/wave-status --include=*.ts
-```
+**S5 — shipped in this PR.**

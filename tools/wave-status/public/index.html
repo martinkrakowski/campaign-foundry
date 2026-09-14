@@ -905,6 +905,66 @@
         padding: var(--space-4) var(--space-3);
         color: var(--color-text-muted);
       }
+      #backlog-pane {
+        border-top: 1px solid var(--color-border);
+        padding: var(--space-4);
+        background: var(--color-surface);
+      }
+      .backlog-toolbar {
+        display: flex;
+        align-items: baseline;
+        gap: var(--space-3);
+        margin-bottom: var(--space-3);
+      }
+      .backlog-title {
+        font-size: 13px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--color-text-secondary);
+      }
+      .backlog-provenance {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        color: var(--color-text-muted);
+        display: flex;
+        gap: var(--space-2);
+        flex-wrap: wrap;
+      }
+      .backlog-empty,
+      .backlog-unknown {
+        font-size: 12px;
+        color: var(--color-text-muted);
+        padding: var(--space-2) 0;
+      }
+      .backlog-list {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
+      }
+      .backlog-item {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        font-size: 12px;
+      }
+      .backlog-lane {
+        font-family: var(--font-mono);
+        font-weight: 600;
+        color: var(--color-text-primary);
+      }
+      .backlog-plan {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        color: var(--color-text-muted);
+      }
+      .backlog-reason {
+        color: var(--color-text-secondary);
+        font-size: 11px;
+      }
       @media (max-width: 760px) {
         #filter {
           width: 150px;
@@ -1034,6 +1094,13 @@
             </tr>
           </thead>
         </table>
+      </section>
+      <section id="backlog-pane" aria-label="Backlog">
+        <div class="backlog-toolbar">
+          <span class="backlog-title">backlog</span>
+          <div id="backlog-provenance" class="backlog-provenance"></div>
+        </div>
+        <div id="backlog-body"></div>
       </section>
       <section id="log-pane" hidden tabindex="-1" aria-label="Log">
         <header id="log-toolbar">
@@ -1906,6 +1973,64 @@
         return counts;
       }
 
+      function renderBacklog(backlog) {
+        const pane = document.getElementById("backlog-pane");
+        const provEl = document.getElementById("backlog-provenance");
+        const bodyEl = document.getElementById("backlog-body");
+        if (!pane || !provEl || !bodyEl) return;
+
+        if (!backlog || backlog.state === "absent") {
+          provEl.innerHTML = "";
+          bodyEl.innerHTML = '<div class="backlog-empty">no plan:verify run recorded</div>';
+          return;
+        }
+
+        if (backlog.state === "unknown") {
+          provEl.innerHTML = "";
+          bodyEl.innerHTML = '<div class="backlog-unknown">unknown</div>';
+          return;
+        }
+
+        const artifact = backlog.artifact;
+        const isPartial = artifact.scope.kind === "partial";
+        const scopeLabel = isPartial
+          ? `partial run (${artifact.scope.plans.length} plans)`
+          : `full run (${artifact.plans.length} plans)`;
+        const headSha = artifact.git.head.slice(0, 8);
+        const branch = artifact.git.branch;
+
+        provEl.innerHTML =
+          `<span class="backlog-scope ${isPartial ? "warn" : "ok"}">${esc(scopeLabel)}</span>` +
+          `<span class="sep">·</span>` +
+          `<span class="backlog-at">${esc(artifact.at)}</span>` +
+          `<span class="sep">·</span>` +
+          `<span class="backlog-git">${esc(branch)}@${esc(headSha)}</span>`;
+
+        if (artifact.premises.length === 0) {
+          bodyEl.innerHTML = '<div class="backlog-empty">no premises</div>';
+          return;
+        }
+
+        const items = artifact.premises.map((p) => {
+          let tone = "info";
+          if (p.status === "stale") tone = "bad";
+          else if (p.status === "timed-out" || p.status === "error") tone = "warn";
+          else if (p.status === "holds") tone = "info";
+
+          const reasonHtml = p.reason ? ` <span class="backlog-reason">${esc(p.reason)}</span>` : "";
+          return (
+            `<li class="backlog-item backlog-item-${esc(p.status)}">` +
+            `<span class="backlog-lane">${esc(p.lane)}</span>` +
+            `<span class="pill ${tone}"><span class="pill-dot"></span>${esc(p.status)}</span>` +
+            `<span class="backlog-plan">(${esc(p.plan)})</span>` +
+            reasonHtml +
+            `</li>`
+          );
+        });
+
+        bodyEl.innerHTML = `<ul class="backlog-list">${items.join("")}</ul>`;
+      }
+
       // The seat that ran the lane, or an honest "unknown" when no event ever
       // named one. It is never inferred from the lane's name, its worktree or
       // its model family: an absent record is a gap, not a guess. The word is
@@ -2168,6 +2293,7 @@
         // header into a different total, and with the default view (no filter,
         // hide-inactive off) it is every lane on the page.
         renderSummaryBar(renderedLanes, nowMs);
+        renderBacklog(status.backlog);
 
         // Update follow control visibility based on the selected lane's alive state
         if (selectedWave !== null && selectedLane !== null) {
