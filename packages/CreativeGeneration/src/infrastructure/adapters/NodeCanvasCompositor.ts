@@ -1157,6 +1157,9 @@ function drawHtml(c: LayerDrawContext): void {
       case "button": {
         const radius = Math.min(8, boxH / 2, boxW / 2);
         ctx.save();
+        ctx.beginPath();
+        ctx.rect(boxX, boxY, boxW, boxH);
+        ctx.clip();
         ctx.fillStyle = prepared.brandColor;
         ctx.beginPath();
         ctx.roundRect(boxX, boxY, boxW, boxH, radius);
@@ -1176,6 +1179,9 @@ function drawHtml(c: LayerDrawContext): void {
       }
       case "text": {
         ctx.save();
+        ctx.beginPath();
+        ctx.rect(boxX, boxY, boxW, boxH);
+        ctx.clip();
         ctx.fillStyle = "#ffffff";
         ctx.textAlign = prepared.style.align;
         ctx.textBaseline = "alphabetic";

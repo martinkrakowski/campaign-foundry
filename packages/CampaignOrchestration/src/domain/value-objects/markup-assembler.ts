@@ -132,7 +132,7 @@ export function assembleHtml(options: AssembleHtmlOptions): AssembledHtml {
             ? ` onclick="window.open(window.${CLICK_TAG_VARIABLE})"`
             : "";
         const cursor = clickDestination !== undefined ? "cursor: pointer;" : "";
-        const buttonStyle = `${baseStyle} background-color: ${brandColor}; border-radius: ${radius}px; color: #ffffff; font-family: ${resolvedStyle.fontFamily}, sans-serif; font-weight: ${resolvedStyle.fontWeight}; font-size: ${fontSize}px; text-align: center; display: flex; align-items: center; justify-content: center; border: none; padding: 0; ${cursor}`;
+        const buttonStyle = `${baseStyle} background-color: ${brandColor}; border-radius: ${radius}px; color: #ffffff; font-family: ${resolvedStyle.fontFamily}, sans-serif; font-weight: ${resolvedStyle.fontWeight}; font-size: ${fontSize}px; text-align: center; display: flex; align-items: center; justify-content: center; border: none; padding: 0; overflow: hidden; ${cursor}`;
         const text = escapeHtml(element.text ?? "");
         elementMarkup.push(
           `<button type="button" style="${buttonStyle}"${navAttr}>${text}</button>`,
