@@ -2,6 +2,8 @@ import { describe, test, expect, vi, afterEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { Fragment } from "react";
 import { Field } from "../IdentitySection";
+import { CopySection } from "../CopySection";
+import { validateCopyWarnings } from "../../validate";
 import { LayoutSection } from "../LayoutSection";
 import { PolicySection } from "../PolicySection";
 import { ProductsSection } from "../ProductsSection";
@@ -230,6 +232,100 @@ describe("Field — assistive technology describedby and invalid attributes", ()
 
     const control = screen.getByTestId("fragment-control");
     expect(control.hasAttribute("aria-describedby")).toBe(false);
+  });
+
+  test("with a warning only: aria-describedby names the warning element and resolves to warning text; aria-invalid is not set", () => {
+    render(
+      <Field label="Headline" warning={'Contains prohibited term "guaranteed" — remove before generation.'}>
+        <input data-testid="control" />
+      </Field>,
+    );
+
+    const control = screen.getByTestId("control");
+    const describedBy = control.getAttribute("aria-describedby");
+    expect(describedBy).toBeTruthy();
+
+    const warningEl = document.getElementById(describedBy!);
+    expect(warningEl).not.toBeNull();
+    expect(warningEl?.textContent).toBe(
+      'Contains prohibited term "guaranteed" — remove before generation.',
+    );
+
+    expect(control.hasAttribute("aria-invalid")).toBe(false);
+  });
+
+  test("with a warning only, function children: the spread target names the warning element; aria-invalid is not set", () => {
+    render(
+      <Field label="Headline" warning={'Contains prohibited term "miracle" — remove before generation.'}>
+        {(control) => <input data-testid="spread-target" {...control} />}
+      </Field>,
+    );
+
+    const target = screen.getByTestId("spread-target");
+    const describedBy = target.getAttribute("aria-describedby");
+    expect(describedBy).toBeTruthy();
+    expect(document.getElementById(describedBy!)?.textContent).toBe(
+      'Contains prohibited term "miracle" — remove before generation.',
+    );
+    expect(target.hasAttribute("aria-invalid")).toBe(false);
+  });
+
+  test("with hint and warning: aria-describedby names both, hint first; both ids resolve to text", () => {
+    render(
+      <Field label="Headline" hint="Keep it short" warning={'Contains prohibited term "cure" — remove before generation.'}>
+        <input data-testid="control" />
+      </Field>,
+    );
+
+    const control = screen.getByTestId("control");
+    const describedBy = control.getAttribute("aria-describedby");
+    expect(describedBy).toBeTruthy();
+
+    const ids = describedBy!.split(" ");
+    expect(ids).toHaveLength(2);
+    const [hintId, warningId] = ids;
+    expect(document.getElementById(hintId!)?.textContent).toBe("Keep it short");
+    expect(document.getElementById(warningId!)?.textContent).toBe(
+      'Contains prohibited term "cure" — remove before generation.',
+    );
+    expect(control.hasAttribute("aria-invalid")).toBe(false);
+  });
+
+  test("with error and warning: the warning is not rendered and not referenced", () => {
+    render(
+      <Field label="Headline" error="Headline is required" warning={'Contains prohibited term "cure" — remove before generation.'}>
+        <input data-testid="control" />
+      </Field>,
+    );
+
+    const control = screen.getByTestId("control");
+    const ids = control.getAttribute("aria-describedby")!.split(" ");
+    for (const id of ids) {
+      expect(document.getElementById(id)?.textContent).not.toContain("prohibited");
+    }
+    expect(document.body.textContent).not.toContain("prohibited");
+    expect(control.getAttribute("aria-invalid")).toBe("true");
+  });
+
+  test("call-site test: CopySection headline input is described by the prohibited-terms warning", () => {
+    const state = { ...initialEditorState(), campaignMessage: "Guaranteed results" };
+    render(
+      <CopySection
+        state={state}
+        dispatch={vi.fn()}
+        errors={{}}
+        warnings={validateCopyWarnings(state)}
+      />,
+    );
+
+    const headline = screen.getByRole("textbox", { name: messages.headlineLabel });
+    const describedBy = headline.getAttribute("aria-describedby");
+    expect(describedBy).toBeTruthy();
+
+    const warningEl = document.getElementById(describedBy!);
+    expect(warningEl).not.toBeNull();
+    expect(warningEl?.textContent).toBe(messages.prohibitedTerminology("guaranteed"));
+    expect(headline.hasAttribute("aria-invalid")).toBe(false);
   });
 
   test("call-site test: LayoutSection with a hinted Slider and a hinted ChipGroup", () => {

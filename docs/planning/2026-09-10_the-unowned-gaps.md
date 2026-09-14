@@ -434,3 +434,28 @@ coalesces the same fields to `""` independently so `.trim()` cannot throw.
 string field to `""`. `canonicalBrief` applies the dirty-state rule above so the snapshot is the
 form `toBrief` writes. Validate reports the empty-field error instead of throwing; a freshly
 opened null-scalar brief is not dirty.
+
+---
+
+## 21. A Field warning is invisible to assistive technology (X19)
+
+**Evidence.** X15 linked `Field`'s hint and error to its control through `aria-describedby`, but
+`Field` (`apps/web/src/components/campaign/sections/IdentitySection.tsx`) built the description
+list from hint and error only (`if (hint) describedByIds.push(hintId); if (error)
+describedByIds.push(errorId);`) and rendered the **warning** span — shown only when there is no
+error — with no id (`<span className="mt-1 block text-[11px] text-warning">{warning}</span>`). The
+prohibited-terms warnings on the headline and localized headline (`CopySection.tsx`, the two
+`Field` call sites passing `warning=`) were therefore never referenced by anything.
+
+**Consequence.** A screen-reader user focusing a headline containing a prohibited term hears the
+label and nothing about the compliance warning. This is the advisory feedback — it never blocks
+Save — so it is exactly the signal that exists only visually: a sighted editor fixes the copy
+before generating, an AT user has no reason to.
+
+**Fix.** Give the warning span a stable `useId` id and include it in the describedby list whenever
+it renders (which is only without an error), in both the element-clone path and the
+function-children path X15 added. `aria-invalid` stays error-only: a warning is not invalid.
+
+**X19 — shipped in this PR.** `Field` names the warning element in `aria-describedby` for the
+warning-only and hint + warning cases on both children paths, with the hint first; an error +
+warning field references only the error, since the warning is not rendered there.
