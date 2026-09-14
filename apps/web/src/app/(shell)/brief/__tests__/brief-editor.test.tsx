@@ -4392,7 +4392,16 @@ describe("VE1 — undo and redo in the editor", () => {
       metaKey: true,
     });
     expect(nameField().value).toBe("Spring");
-    // The editor stack is untouched — the same chord from outside steps back.
+    // Wherever the chord lands while the modal is open — here the document body,
+    // as after a click on the scrim — the page behind an aria-modal dialog is inert:
+    // the draft must not move.
+    fireEvent.keyDown(document.body, { key: "z", metaKey: true });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(nameField().value).toBe("Spring");
+    // Close the dialog: the editor stack was untouched all along, so the same chord
+    // now steps back.
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: /Save as/ })).toBeNull());
     fireEvent.keyDown(document.body, { key: "z", metaKey: true });
     await waitFor(() => expect(nameField().value).toBe(""));
   });
