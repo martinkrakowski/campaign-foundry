@@ -579,12 +579,16 @@ describe("report persistence", () => {
 
     await writeReport(result([asset()]));
 
-    const perCampaign = renames.find((r) => r.to === target);
-    expect(perCampaign).toBeDefined();
-    // The staged name is a unique sibling — never the target itself.
-    expect(perCampaign!.from).not.toBe(target);
-    expect(perCampaign!.from.startsWith(`${target}.`)).toBe(true);
-    expect(perCampaign!.from.endsWith(".tmp")).toBe(true);
+    // Both destinations — the per-campaign report and the latest pointer — are
+    // staged: either one written in place is a torn file a reader can parse.
+    for (const destination of [target, resolve(root, "report.json")]) {
+      const operation = renames.find((r) => r.to === destination);
+      expect(operation).toBeDefined();
+      // The staged name is a unique sibling — never the target itself.
+      expect(operation!.from).not.toBe(destination);
+      expect(operation!.from.startsWith(`${destination}.`)).toBe(true);
+      expect(operation!.from.endsWith(".tmp")).toBe(true);
+    }
     // And no temp name survives the write.
     expect(readdirSync(resolve(root, "reports"))).toEqual(["camp.json"]);
   });
