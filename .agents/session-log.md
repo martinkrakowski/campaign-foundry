@@ -5006,3 +5006,10 @@ Added `yarn sweep attribute --pr <n>`. Each github-actions thread is attributed 
   the API. `fromBrief` still reads the raw brief (not the canonicalised one) so
   dropping `?? ""` is a caught mutation.
 - **Left open:** none.
+
+## 2026-09-14 — X19 (lane: feat/x19-field-warning-describedby)
+
+`Field` now names its warning element in `aria-describedby` (both children paths); `aria-invalid`
+stays error-only. Tests: warning-only, function-children, hint + warning, error + warning, and a
+real `CopySection` prohibited-terms call site. Docs: HL5b marked shipped, gap 21 recorded with an
+X19 manifest (2 mutations, both caught). Full gate green, 100 % coverage.
