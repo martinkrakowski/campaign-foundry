@@ -59,11 +59,32 @@ than invent a second spelling of).
 
 ## 4. Two questions this plan must answer before S5 is dispatched
 
-**Does the read-only server execute shell?** Its charter is that it starts nothing, kills nothing and
-merges nothing (`server.ts:114-118`, D106). A premise is arbitrary `sh` — X1 runs `npx prettier` —
-and `plan:verify` executes them with `sh -c`. Running them on a 15-second poll inside a long-lived
-localhost server **is a charter change**. The plan does not make it: S5 reads a result the CLI wrote,
-or re-runs only when a plan file changes. Whichever is chosen goes in the lane brief explicitly.
+**Does the read-only server execute shell? — ANSWERED 2026-09-13, owner decision: no. S5 reads an
+artifact the CLI wrote.**
+
+A premise is arbitrary POSIX `sh`: `plan-verify/cli.ts:46` runs each one as
+`execFile("sh", ["-c", script], …)`, and they are not all greps — X1's is
+`! npx --no-install prettier --find-config-path package.json`, which spawns npx. The server polls
+every 15 seconds (`DEFAULT_POLL_MS = 15_000`).
+
+**One correction to how this question was originally posed.** It implied the charter forbids
+subprocesses. It does not — `collect.ts` already imports `execFile` and shells out to `gh` and
+`pgrep` on every poll. The charter's line (D106) is not *no subprocess*; it is **fixed commands with
+fixed arguments, never arbitrary text read out of a file**. Posed properly the question is whether
+anyone who can edit a file under `docs/planning/` should get code execution inside a long-lived
+localhost server every fifteen seconds, and that answers itself.
+
+**The decision.** `plan:verify` writes a result artifact; the page reads it. The panel answers *what
+is left*, which changes when a PR merges — minutes or hours — not every fifteen seconds, and
+`plan:verify` already runs in CI on every PR (`ci.yml:95`), so an artifact exists at exactly the
+cadence the answer changes.
+
+**The panel must render the artifact's timestamp.** A stale panel says it is stale rather than
+presenting an old number as a current one — the failure this whole plan exists to remove.
+
+**Rejected: re-running only when a plan file changes.** It keeps the full authority of live execution
+while looking like a compromise, and "only when a plan file changes" is exactly when an edited plan
+file would execute.
 
 **Does S3 only read threads?** V4 in the verification-budget plan owns *resolving* them. The same
 GraphQL endpoint does both, so S3's brief must say read-only.
