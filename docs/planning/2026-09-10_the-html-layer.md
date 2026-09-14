@@ -115,6 +115,16 @@ beyond the brief's family, and any third-party script. Each breaks either the fa
 | **HL4** | **The markup assembler** — server-side, self-contained, `clickTag` wired, weight measured and refused over budget. | The HTML unit itself |
 | **HL5** | **The editor tooling** — add text, add button, add image, set the destination, per-element style overrides, live weight meter, sandboxed preview. | What the owner asked for |
 
+**HL5 is split (2026-09-14), because one lane covering all of it would be a 40-file diff and part of it is undecided:**
+
+| Slice | Scope | State |
+|---|---|---|
+| **HL5a** | Element editing: add, remove and reorder `text` / `button` / `image` elements in the `html` layer; edit text and frame. | Ready. |
+| **HL5b** | The click-destination input. `editor-state.ts` already carries `clickDestination` with its patch and validation; no editor section renders it. | Ready — smallest slice. |
+| **HL5c** | The live weight meter reading `profile.maxBytes` (HL-D6). | **Blocked on X14** — no platform profile declares `html`, so there is no budget to read. |
+| **HL5d** | Editor preview of the `html` layer through the canvas rendition, satisfying HL-D7 without putting user content in the app DOM. | Ready once HL5a exists; verify first whether the existing preview path already draws the layer. |
+| **HL5e** | Per-element style overrides. | **Blocked on an owner decision.** HL-D1 sketched `style?` on an element, HL-D4 says style comes from the brief's `creative-style`, and the vocabulary HL1 shipped is `{ kind, text?, frame }` with no style. Overrides mean a vocabulary change carried through both renderers and the fidelity between them. |
+
 **Order.** HL1 → HL2 → **HL3 → HL4** → HL5. **HL3 before HL4 is the load-bearing choice**: build the
 fallback first and the markup is written to match a rendering that already exists, rather than the
 fallback being reverse-engineered from markup and quietly diverging.
