@@ -1,4 +1,4 @@
-import { fetchAllThreads } from "./sweep.js";
+import { errorText, fetchAllThreads } from "./sweep.js";
 
 /**
  * The question `scripts/merge-prs.sh` asks immediately before `gh pr merge`:
@@ -22,10 +22,6 @@ export type MergeGateDecision =
 
 export interface MergeGateDeps {
   readonly gh: (args: readonly string[]) => Promise<string>;
-}
-
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 /**
@@ -81,7 +77,7 @@ export async function mergeGate(
     return {
       kind: "refuse",
       reasons: [
-        `could not decide — the head of PR #${plan.pr} could not be read: ${messageOf(error)}`,
+        `could not decide — the head of PR #${plan.pr} could not be read: ${errorText(error)}`,
       ],
     };
   }

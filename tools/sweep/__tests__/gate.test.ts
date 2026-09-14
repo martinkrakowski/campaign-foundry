@@ -167,6 +167,17 @@ describe("mergeGate — the head the checks were verified on", () => {
     expect(joined).toContain("HTTP 502");
   });
 
+  test("a head read that throws something other than an Error is still reported", async () => {
+    const decision = await mergeGate(plan, {
+      gh: async (args) => {
+        if (args[0] === "pr") throw "gh: not logged in";
+        return page([node("PRRT_a", true)]);
+      },
+    });
+    expect(decision.kind).toBe("refuse");
+    expect(reasonsOf(decision).join("\n")).toContain("gh: not logged in");
+  });
+
   test("a head answer that is empty refuses rather than matching", async () => {
     const s = stub(() => page([node("PRRT_a", true)]), "");
     const decision = await mergeGate(plan, { gh: s.gh });

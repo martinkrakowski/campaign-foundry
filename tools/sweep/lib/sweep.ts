@@ -42,7 +42,12 @@ function excerptOf(body: string): string {
   return flat.length <= EXCERPT_CHARS ? flat : `${flat.slice(0, EXCERPT_CHARS)}…`;
 }
 
-function failureText(error: unknown): string {
+/**
+ * What a thrown thing says, whatever it is. `gh` and `JSON.parse` are not the
+ * only things that can fail in a run, and a rejection carrying a string is
+ * reported as that string rather than as `undefined`.
+ */
+export function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
@@ -100,7 +105,7 @@ export async function fetchAllThreads(
     try {
       reply = JSON.parse(await gh(ghArgs)) as SweepReply;
     } catch (error) {
-      failures.push(failureText(error));
+      failures.push(errorText(error));
       break;
     }
     const errorReasons = reply.errors?.map((e) => String(e.message ?? "unknown GraphQL error"));

@@ -98,6 +98,36 @@ describe("runCli — edges", () => {
     expect(err.join(" ")).toContain("'undefined' is not a command");
   });
 
+  test("a non-Error throw from the WRITE is reported and exits 1", async () => {
+    // The fetch is wrapped — an unreadable page is a refusal now — so the
+    // catch-all in runCli is reached through the mutation, which is not: a
+    // string thrown there must still be named, not swallowed by the exit code.
+    const err: string[] = [];
+    const code = await runCli({
+      argv: ["threads", "--pr", "361", "--thread", "PRRT_a", "--body", "x", "--post"],
+      log: () => undefined,
+      logError: (t) => err.push(t),
+      readFile: async () => "",
+      gh: async (args) => {
+        // Both calls carry `query=` — the fetch's value is the query, the
+        // write's is the mutation — so the write is the one named "mutation".
+        if (args.some((a) => a.includes("mutation"))) throw "write-failed-as-a-string";
+        return JSON.stringify({
+          data: {
+            repository: {
+              pullRequest: {
+                id: "PR_I_1",
+                reviewThreads: { nodes: [{ id: "PRRT_a", isResolved: false }] },
+              },
+            },
+          },
+        });
+      },
+    });
+    expect(code).toBe(1);
+    expect(err.join(" ")).toContain("write-failed-as-a-string");
+  });
+
   test("a non-Error throw from gh is reported and exits 1", async () => {
     const err: string[] = [];
     const code = await runCli({

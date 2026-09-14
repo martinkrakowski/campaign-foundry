@@ -1,7 +1,7 @@
 import { pathToFileURL } from "node:url";
 import { SWEEP_USAGE, parseGateArgs, parseSweepArgs } from "./lib/args.js";
 import { mergeGate, type MergeGatePlan } from "./lib/gate.js";
-import { sweep, type SweepPlan } from "./lib/sweep.js";
+import { sweep, errorText, type SweepPlan } from "./lib/sweep.js";
 import { SweepRefusal } from "./lib/types.js";
 
 export const SWEEP_COMMAND = "threads";
@@ -31,7 +31,7 @@ async function runGate(rest: readonly string[], io: SweepCliIo): Promise<number>
   try {
     plan = parseGateArgs(rest);
   } catch (error) {
-    io.logError(error instanceof Error ? error.message : String(error));
+    io.logError(errorText(error));
     return 2;
   }
   const decision = await mergeGate(plan, { gh: io.gh });
@@ -106,7 +106,7 @@ export async function runCli(io: SweepCliIo): Promise<number> {
       for (const reason of error.reasons) io.logError(`  ${reason}`);
       return 1;
     }
-    io.logError(error instanceof Error ? error.message : String(error));
+    io.logError(errorText(error));
     return 1;
   }
 }
