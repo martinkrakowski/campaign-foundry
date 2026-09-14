@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "lane": "X13",
+  "mutations": [
+    {
+      "file": "tools/sweep/lib/sweep.ts",
+      "before": "  } while (cursor !== null);",
+      "after": "  } while (false);",
+      "because": "A page is 100 threads. Stopping after the first one judges a PR on its first hundred and calls the rest clean — an open finding on page two is invisible, which is the shape of the gap X13 records: the merge condition holding on a PR it was never fully asked about. The gate reads two pages precisely so this mutation has somewhere to hide.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/sweep/__tests__/gate.test.ts",
+        "-t",
+        "one unresolved thread on the second page is refused and named"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/sweep/lib/gate.ts",
+      "before": "  if (fetched.failures.length > 0) {",
+      "after": "  if (false) {",
+      "because": "An unreadable page must be 'could not decide', never 'no threads': a partial read that merges is a guess dressed as a verdict, and it fails silently — the one outcome a gate must not have. This is the mutation that turns the tool from a check into a rubber stamp, and it is why the refusal says 'could not decide' rather than reporting a count.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/sweep/__tests__/gate.test.ts",
+        "-t",
+        "a GraphQL error on the second page refuses as could-not-decide"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/sweep/lib/gate.ts",
+      "before": "  const open = fetched.threads.filter((t) => !t.isResolved);",
+      "after": "  const open = fetched.threads.filter(() => false);",
+      "because": "The other way to lose the threads: read every page and then ignore what they said. A gate that never sees an open thread merges straight through a review that is still waiting for an answer, which is the exact regression the wave's merge discipline exists to prevent.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/sweep/__tests__/gate.test.ts",
+        "-t",
+        "one unresolved thread on the second page is refused and named"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/sweep/lib/gate.ts",
+      "before": "  if (head !== plan.head) {",
+      "after": "  if (false) {",
+      "because": "The head re-check is the half of the condition the script already half-had: it verified checks on a SHA and merged by PR number. Drop the comparison and a push landing after the check read rides in on another commit's green — the race that held #381 together by luck alone. The operator is told both SHAs so the failure names what moved.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/sweep/__tests__/gate.test.ts",
+        "-t",
+        "a head that moved is refused, naming both SHAs"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

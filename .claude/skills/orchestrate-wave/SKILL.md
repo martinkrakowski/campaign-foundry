@@ -293,11 +293,15 @@ that did not happen.
    **A green gate is not a merge condition on its own.** Merge only when, on the PR's *final* head:
    every check-run conclusion is success, skipped or neutral (read conclusions, not the rollup line —
    `neutral` is what informational checks report); the review bots have had time to post on that head;
-   and **zero review threads are unresolved**. **`scripts/merge-prs.sh` does not enforce this yet** — it
-   never queries review threads and does not wait for bots after its refresh push (recorded as X13 in
-   `docs/planning/2026-09-10_the-unowned-gaps.md`). Until it does, check the final-head condition yourself
-   immediately before merging, and re-check after any push the script makes. On
-   2026-09-13 a merge gated on CI alone raced the bots — nothing was missed that time, but only by
+   and **zero review threads are unresolved**. **`scripts/merge-prs.sh` enforces this**: once the
+   required check has concluded green on the head it pushed, it settles for the review bots
+   (`REVIEW_SETTLE_SECONDS`, default 120), then refuses to merge while any review thread is unresolved
+   — naming each open thread's first-comment author and an excerpt — and re-reads the PR's head
+   immediately before `gh pr merge`, refusing if it is no longer the SHA whose checks were read. The
+   decision itself lives in TypeScript (`tools/sweep`, `yarn sweep gate --pr <n> --sha <sha>`), because
+   it has to be tested and the runners have no zsh; the script is only its caller. A page of threads
+   that could not be read is "could not decide" and refuses — never a silent zero (X13).
+   On 2026-09-13 a merge gated on CI alone raced the bots — nothing was missed that time, but only by
    luck — and the full condition later held back a PR whose final-head review found a real defect
    the gate could not see.
    After each merge lands, emit `merge settled` with the merge SHA in `--detail`.
