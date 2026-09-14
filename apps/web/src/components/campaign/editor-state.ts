@@ -1027,6 +1027,11 @@ export function canonicalBrief(brief: CampaignBrief): CampaignBrief {
   // A pre-L3a brief (and a few fixtures) carries no template; absence is
   // not a default to rewrite, so the brief is returned as it arrived.
   if (brief.template === undefined) return brief;
+  // A stored snapshot (or any other caller) can carry a template that
+  // fails isBriefTemplate: null, a non-array layers list, a null entry.
+  // Mapping those throws. Before X16 they were held verbatim; every path
+  // through here must do the same, so discard does not lose the file.
+  if (!isBriefTemplate(brief.template)) return brief;
   const template = canonicalTemplate(brief.template);
   return template === brief.template ? brief : { ...brief, template };
 }
@@ -2637,19 +2642,14 @@ export function normalizeDraftState(raw: Record<string, unknown>): EditorState {
   // A draft persisted before X16 may still carry a raw `enabled: true` /
   // `elements: []` snapshot. Canonicalise it so recovery does not restore a
   // "difference" that is only the default spelled out, and so a restored
-  // draft is not dirty against its own snapshot. The snapshot arrived from
-  // localStorage unvalidated: canonicalBrief throws on a null template, a
-  // non-array layers list, or a null entry, and the loader's catch would
-  // discard the whole draft. The same isBriefTemplate contract used on
-  // raw.template above is the gate — a snapshot that fails it is kept
-  // verbatim.
+  // draft is not dirty against its own snapshot. canonicalBrief itself
+  // leaves a template it does not recognise unchanged, so a corrupt
+  // snapshot is kept verbatim rather than throwing.
   const source: EditorSource =
     resolvedSource.kind === "file" && resolvedSource.savedSnapshot
       ? {
           ...resolvedSource,
-          savedSnapshot: isBriefTemplate(resolvedSource.savedSnapshot.template)
-            ? canonicalBrief(resolvedSource.savedSnapshot)
-            : resolvedSource.savedSnapshot,
+          savedSnapshot: canonicalBrief(resolvedSource.savedSnapshot),
         }
       : resolvedSource;
   const v = (
