@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "lane": "M3",
+  "mutations": [
+    {
+      "file": "apps/web/src/components/campaign/editor-state.ts",
+      "before": "      if (!action.enabled && !disableableLayerIds(state).includes(action.id)) {\n        return state;\n      }",
+      "after": "      // mutated: the required-kind guard is gone",
+      "because": "MP-D4: the last enabled instance of a required kind must be refused, or the editor hands the boundary a template it refuses to parse — an image-text brief whose only image is switched off leaves nothing to paint the ground. The offer is absent from the section and the refusal is in the reducer; removing it makes the toggle a way to build an unsaveable brief.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/sections/__tests__/template-section.test.tsx",
+        "-t",
+        "the last enabled required layer offers no toggle"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/derive.ts",
+      "before": "  const draws = (layers: readonly CreativeTemplateLayer[]) =>\n    layers.filter((layer) => layer.enabled !== false);",
+      "after": "  const draws = (layers: readonly CreativeTemplateLayer[]) => layers;",
+      "because": "MP-D3: occlusion is evaluated over the enabled subset, because a disabled layer draws nothing and so occludes nothing. Computing it over the whole array leaves a notice standing for a layer that no longer paints (and silently swallows the notice when it is switched back on, since the pair never left the list).",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/sections/__tests__/template-section.test.tsx",
+        "apps/web/src/components/campaign/__tests__/derive.test.ts",
+        "-t",
+        "MP-D3"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
