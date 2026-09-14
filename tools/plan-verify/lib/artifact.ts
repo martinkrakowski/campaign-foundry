@@ -117,8 +117,11 @@ export function parseArtifact(text: string): PlanVerifyArtifact {
   if (typeof rawGit.head !== "string" || rawGit.head === "") {
     throw new Error("malformed artifact: git provenance missing head");
   }
+  if (typeof rawGit.branch !== "string" || rawGit.branch === "") {
+    throw new Error("malformed artifact: git provenance missing branch");
+  }
   const git: GitProvenance = {
-    branch: String(rawGit.branch),
+    branch: rawGit.branch,
     head: rawGit.head,
   };
 
@@ -172,9 +175,12 @@ export function parseArtifact(text: string): PlanVerifyArtifact {
         throw new Error("malformed artifact: premise reason must be a string");
       }
     }
+    if (typeof rawItem.plan !== "string" || rawItem.plan === "") {
+      throw new Error("malformed artifact: premise entry missing plan");
+    }
     premises.push({
       lane: rawItem.lane,
-      plan: String(rawItem.plan),
+      plan: rawItem.plan,
       status: rawItem.status,
       ...(typeof rawItem.reason === "string" ? { reason: rawItem.reason } : {}),
     });
