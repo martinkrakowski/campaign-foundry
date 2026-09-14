@@ -2637,12 +2637,19 @@ export function normalizeDraftState(raw: Record<string, unknown>): EditorState {
   // A draft persisted before X16 may still carry a raw `enabled: true` /
   // `elements: []` snapshot. Canonicalise it so recovery does not restore a
   // "difference" that is only the default spelled out, and so a restored
-  // draft is not dirty against its own snapshot.
+  // draft is not dirty against its own snapshot. The snapshot arrived from
+  // localStorage unvalidated: canonicalBrief throws on a null template, a
+  // non-array layers list, or a null entry, and the loader's catch would
+  // discard the whole draft. The same isBriefTemplate contract used on
+  // raw.template above is the gate — a snapshot that fails it is kept
+  // verbatim.
   const source: EditorSource =
     resolvedSource.kind === "file" && resolvedSource.savedSnapshot
       ? {
           ...resolvedSource,
-          savedSnapshot: canonicalBrief(resolvedSource.savedSnapshot),
+          savedSnapshot: isBriefTemplate(resolvedSource.savedSnapshot.template)
+            ? canonicalBrief(resolvedSource.savedSnapshot)
+            : resolvedSource.savedSnapshot,
         }
       : resolvedSource;
   const v = (
