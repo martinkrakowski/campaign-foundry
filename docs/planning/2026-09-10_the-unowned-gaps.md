@@ -394,7 +394,9 @@ canonical form for an `html` layer's `elements`, so a loaded `elements: []` has 
 with like — or have the value comparison treat those defaults as absent. Normalising at load keeps `valuesEqual`
 generic, and it is the recommended shape.
 
-```premise X16
-# Loading a brief does not canonicalise an explicit `enabled: true` to absent.
-! grep -qE 'enabled === true|canonicalLayer|normali[sz]eLayer' apps/web/src/components/campaign/editor-state.ts
-```
+**X16 — shipped in this PR.** `canonicalBrief` / `canonicalTemplate` in `editor-state.ts` map each
+template layer's `enabled: true` to absent and an empty `elements` array to absent, and change nothing
+else. `fromBrief` builds both the draft and `savedSnapshot` from that form; `save` / `apply` snapshots,
+recovered drafts, and the Generate-target comparison (`runBrief`) use the same function. `valuesEqual`
+stays generic. An off→on toggle (or add→remove element) on a hand-authored explicit-default brief is
+therefore not dirty.
