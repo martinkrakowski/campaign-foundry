@@ -21,9 +21,9 @@
     },
     {
       "file": "packages/CreativeGeneration/src/infrastructure/adapters/NodeCanvasCompositor.ts",
-      "before": "      case \"button\": {\n        const radius = Math.min(8, boxH / 2, boxW / 2);\n        ctx.save();\n        ctx.beginPath();\n        ctx.rect(boxX, boxY, boxW, boxH);\n        ctx.clip();\n        ctx.fillStyle = prepared.brandColor;",
+      "before": "      case \"button\": {\n        const radius = Math.min(8, boxH / 2, boxW / 2);\n        ctx.save();\n        // Clip to the rounded shape the button is filled with: the markup's\n        // `border-radius` + `overflow: hidden` clips its label to that shape too.\n        ctx.beginPath();\n        ctx.roundRect(boxX, boxY, boxW, boxH, radius);\n        ctx.clip();\n        ctx.fillStyle = prepared.brandColor;",
       "after": "      case \"button\": {\n        const radius = Math.min(8, boxH / 2, boxW / 2);\n        ctx.save();\n        ctx.fillStyle = prepared.brandColor;",
-      "because": "drawHtml must clip button element drawing to the element's own rectangle frame so an overflowing button label paints no pixels outside its frame.",
+      "because": "drawHtml must clip button element drawing to the element's own frame (its rounded rectangle) so an overflowing button label paints no pixels outside its frame.",
       "command": [
         "yarn",
         "vitest",
@@ -50,6 +50,21 @@
         "packages/CampaignOrchestration/src/domain/value-objects/__tests__/markup-assembler.test.ts",
         "-t",
         "a button element's style contains overflow: hidden"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CreativeGeneration/src/infrastructure/adapters/NodeCanvasCompositor.ts",
+      "before": "        ctx.beginPath();\n        ctx.roundRect(boxX, boxY, boxW, boxH, radius);\n        ctx.clip();",
+      "after": "        ctx.beginPath();\n        ctx.rect(boxX, boxY, boxW, boxH);\n        ctx.clip();",
+      "because": "A button must clip to the same rounded rectangle it is filled with, matching the markup's border-radius + overflow: hidden; a rectangular clip lets the label paint in the corners the markup clips away.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "packages/CreativeGeneration/src/infrastructure/adapters/__tests__/NodeCanvasCompositor.clipping.test.ts",
+        "-t",
+        "same rounded rectangle it fills"
       ],
       "verdict": "caught"
     }
