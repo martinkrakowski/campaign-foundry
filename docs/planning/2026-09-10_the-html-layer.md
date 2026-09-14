@@ -120,7 +120,7 @@ beyond the brief's family, and any third-party script. Each breaks either the fa
 | Slice | Scope | State |
 |---|---|---|
 | **HL5a** | Element editing: add, remove and reorder `text` / `button` / `image` elements in the `html` layer; edit text and frame. | **Shipped.** |
-| **HL5b** | The click-destination input. `editor-state.ts` already carries `clickDestination` with its patch and validation; no editor section renders it. | Ready — smallest slice. |
+| **HL5b** | The click-destination input. `editor-state.ts` already carries `clickDestination` with its patch and validation; no editor section renders it. | **Shipped.** The `OutputSection` renders the click-destination input. |
 | **HL5c** | The live weight meter reading `profile.maxBytes` (HL-D6). | **Blocked on X14** — no platform profile declares `html`, so there is no budget to read. |
 | **HL5d** | Editor preview of the `html` layer through the canvas rendition, satisfying HL-D7 without putting user content in the app DOM. | **Shipped.** The existing preview path already drew the layer; four tests now pin it. |
 | **HL5e** | Per-element style overrides. | **Blocked on an owner decision.** HL-D1 sketched `style?` on an element, HL-D4 says style comes from the brief's `creative-style`, and the vocabulary HL1 shipped is `{ kind, text?, frame }` with no style. Overrides mean a vocabulary change carried through both renderers and the fidelity between them. |
