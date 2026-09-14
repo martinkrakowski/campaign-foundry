@@ -1355,8 +1355,46 @@ describe("draft storage", () => {
     }
   });
 
-  test("a stored template with an obeying non-canonical layer order is kept verbatim (L3a, L8)", () => {
-    // Authored layer order that satisfies the type's ordering constraints (D128)
+  test("a restored draft whose template fails the required-kind guard falls back to canonical (X11)", () => {
+    // X11 tightened `isBriefTemplate` to mirror the API's required-kind rule;
+    // the restore path was never touched. This proves the claim: a draft that
+    // is well-formed in every other way but the API would refuse — a required
+    // kind missing, or its only instance disabled — now fails the guard here,
+    // so the restore falls back to the canonical template instead of handing
+    // the compositor a brief the boundary rejects.
+    const state: EditorState = {
+      ...base(),
+      briefId: "camp",
+      type: "social-post",
+    };
+    const canonical = templateFromCanonical("social-post");
+    const store = (template: unknown) =>
+      localStorage.setItem(
+        getDraftKey(state),
+        JSON.stringify({ state: { ...state, template }, timestamp: 1 }),
+      );
+
+    for (const refused of [
+      // Missing a required kind entirely: the five-field shape and the layer
+      // entries are all legal; no `image` layer exists to draw.
+      { ...canonical, layers: canonical.layers.filter((l) => l.kind !== "image") },
+      // The only instance of a required kind switched off: present, but no
+      // enabled instance — "required" means enabled (D129/MP-D4).
+      {
+        ...canonical,
+        layers: canonical.layers.map((l) =>
+          l.kind === "static-text" ? { ...l, enabled: false } : l,
+        ),
+      },
+    ]) {
+      store(refused);
+      const restored = loadDraftFromStorage(state);
+      expect(restored).not.toBeNull();
+      expect(restored?.template).toEqual(templateFromCanonical("social-post"));
+    }
+  });
+
+  test("a stored template with an obeying non-canonical layer order is kept verbatim (L3a, L8)", () => {    // Authored layer order that satisfies the type's ordering constraints (D128)
     // must survive save → load → save intact rather than be restored to the canonical order.
     const canonical = templateFromCanonical("paid-social");
     // Swap accent (index 2) and static-text (index 3): obeys shade directly above image and logo above image.

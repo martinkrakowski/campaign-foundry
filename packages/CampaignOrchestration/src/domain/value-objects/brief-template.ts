@@ -300,12 +300,13 @@ export function satisfiesOrderConstraints(
 }
 
 /**
- * The one shape contract a persisted brief's template must satisfy (L3a, L3b, L8m).
+ * The one shape contract a persisted brief's template must satisfy (L3a, L3b, L8m, X11).
  *
  * A type predicate, not a validator: `unknown` becomes a `BriefTemplate` only
- * through this check, and anything else is not one. `id` is a canonical member,
- * `version` a positive integer, `creativeType` and `unit` vocabulary members,
- * and `layers` an array. It is the single guard used at both storage boundaries
+ * through this check, and anything else is not one. `id` is a canonical member
+ * and matches the canonical template of its `creativeType`, `version` a
+ * positive integer, `creativeType` and `unit` vocabulary members, and `layers`
+ * a non-empty array. It is the single guard used at both storage boundaries
  * — the editor's draft restore and the run context's `cf:brief` restore — so a
  * half-written template can never be cast through and reach `toBrief`. Array
  * position IS z-order (D128): a template whose layer order violates the creative
@@ -317,35 +318,92 @@ export function satisfiesOrderConstraints(
  * the run. An `html` layer's `elements`, when present, must be well-formed
  * elements of the vocabulary (HL1), so the two renderers never receive a list
  * the other cannot draw. Every `layers` entry must itself be a layer — a non-null, non-array
- * object naming a string `id` and a vocabulary `kind` (L5): a `null`, a bare
+ * object naming a non-empty string `id` and a vocabulary `kind` (L5): a `null`, a bare
  * string or a kindless object is not a layer, and admitting one crashes the
  * first consumer that dereferences `layer.kind`. And ids are unique within the
- * list, the rule the API's `validateTemplate` already applies, so the two
- * boundaries cannot disagree about a draft's shape.
+ * list, the rule the API's `validateTemplate` already applies.
+ *
+ * Beyond the per-entry shape, the guard mirrors every table rule the API's
+ * `validateTemplate` applies to the layer list, read from the same
+ * `CREATIVE_TYPE_RULES` (X11): a kind must be one the creative type `accepts`
+ * (D124); each kind must not exceed its `maxOf` cap and each `sharedBudgets`
+ * group must not exceed its `max`, counted by presence — a disabled layer
+ * still holds its slot (D124, MP-D5); and every kind in `required` must have
+ * at least one ENABLED instance, absent `enabled` counting as enabled (D129,
+ * MP-D4) — a draft whose only required layer is switched off, or whose
+ * required layer was deleted, is refused here exactly as the API refuses it,
+ * so it can never reach the compositor and render incomplete. With every rule
+ * mirrored, the two boundaries cannot disagree about a draft's shape; a
+ * restored draft that fails here falls back to the canonical template.
  */
 export function isBriefTemplate(value: unknown): value is BriefTemplate {
   if (typeof value !== "object" || value === null || Array.isArray(value))
     return false;
   const raw = value as Record<string, unknown>;
-  return (
-    typeof raw.id === "string" &&
-    (CANONICAL_TEMPLATE_IDS as readonly string[]).includes(raw.id) &&
-    typeof raw.version === "number" &&
-    Number.isInteger(raw.version) &&
-    raw.version > 0 &&
-    typeof raw.creativeType === "string" &&
-    (CREATIVE_TYPES as readonly string[]).includes(raw.creativeType) &&
-    typeof raw.unit === "string" &&
-    (ADVERTISING_UNITS as readonly string[]).includes(raw.unit) &&
-    Array.isArray(raw.layers) &&
-    raw.layers.every(isLayerEntry) &&
-    new Set(raw.layers.map((layer) => (layer as LayerEntry).id)).size ===
-      raw.layers.length &&
-    satisfiesOrderConstraints(
-      raw.creativeType as CreativeType,
-      raw.layers as readonly LayerEntry[],
+  if (
+    !(
+      typeof raw.id === "string" &&
+      (CANONICAL_TEMPLATE_IDS as readonly string[]).includes(raw.id) &&
+      typeof raw.version === "number" &&
+      Number.isInteger(raw.version) &&
+      raw.version > 0 &&
+      typeof raw.creativeType === "string" &&
+      (CREATIVE_TYPES as readonly string[]).includes(raw.creativeType) &&
+      typeof raw.unit === "string" &&
+      (ADVERTISING_UNITS as readonly string[]).includes(raw.unit) &&
+      Array.isArray(raw.layers) &&
+      raw.layers.length > 0 &&
+      raw.layers.every(isLayerEntry) &&
+      new Set(raw.layers.map((layer) => (layer as LayerEntry).id)).size ===
+        raw.layers.length
     )
-  );
+  ) {
+    return false;
+  }
+  const creativeType = raw.creativeType as CreativeType;
+  if (CANONICAL_TEMPLATES[creativeType].id !== raw.id) return false;
+  const layers = raw.layers as readonly LayerEntry[];
+  if (!satisfiesTypeRules(creativeType, layers)) return false;
+  return satisfiesOrderConstraints(creativeType, layers);
+}
+
+/**
+ * The table half of the guard (X11): the rules `validateTemplate` reads from
+ * `CREATIVE_TYPE_RULES` and nowhere else — `accepts`, `maxOf`, `sharedBudgets`
+ * and `required` — so this boundary and the API consult the same declared data
+ * and cannot drift on a template's shape. Budgets count every layer of a kind
+ * present, disabled included (MP-D5); "required" counts only ENABLED
+ * instances, absent meaning enabled (D129, MP-D4).
+ */
+function satisfiesTypeRules(
+  creativeType: CreativeType,
+  layers: readonly LayerEntry[],
+): boolean {
+  const rules = CREATIVE_TYPE_RULES[creativeType];
+  const counts = new Map<string, number>();
+  const enabledKinds = new Set<string>();
+  for (const layer of layers) {
+    if (!(rules.accepts as readonly string[]).includes(layer.kind)) {
+      return false;
+    }
+    counts.set(layer.kind, (counts.get(layer.kind) ?? 0) + 1);
+    if (layer.enabled !== false) {
+      enabledKinds.add(layer.kind);
+    }
+  }
+  for (const kind of rules.accepts) {
+    const max = rules.maxOf[kind];
+    if (max === undefined) continue;
+    if ((counts.get(kind) ?? 0) > max) return false;
+  }
+  for (const budget of rules.sharedBudgets) {
+    const used = budget.kinds.reduce(
+      (sum, kind) => sum + (counts.get(kind) ?? 0),
+      0,
+    );
+    if (used > budget.max) return false;
+  }
+  return rules.required.every((kind) => enabledKinds.has(kind));
 }
 
 /** The one layer shape every consumer below the guard dereferences. */
@@ -359,7 +417,8 @@ interface LayerEntry {
 
 /**
  * A `layers` entry is a layer (L5): a non-null, non-array object naming a
- * string `id` and a vocabulary `kind` — the fields every consumer below the
+ * non-empty string `id` (the API's `validateTemplate` refuses an empty one)
+ * and a vocabulary `kind` — the fields every consumer below the
  * guard dereferences, and which a `null`, a bare string or a kindless object
  * names neither of — with `enabled`, when present, a boolean (D129), and
  * `props`, when present, a shape that kind may carry (D134), and `elements`,
@@ -381,6 +440,7 @@ function isLayerEntry(layer: unknown): layer is LayerEntry {
   if (
     rec === undefined ||
     typeof rec.id !== "string" ||
+    rec.id.length === 0 ||
     typeof rec.kind !== "string" ||
     !(LAYER_KINDS as readonly string[]).includes(rec.kind)
   ) {
