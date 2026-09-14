@@ -5244,4 +5244,15 @@ describe("the status page — backlog panel (S5)", () => {
     expect(pill!.classList.contains("warn")).toBe(true);
     expect(pill!.classList.contains("info")).toBe(false);
   });
+
+  test("the backlog renderer has no defensive fallbacks for schema fields guaranteed by parseArtifact", () => {
+    const html = readFileSync(PAGE_PATH, "utf8");
+    const backlogFnMatch = html.match(/function renderBacklog\(backlog\) \{[\s\S]*?\n      \}/);
+    expect(backlogFnMatch).not.toBeNull();
+    const fnText = backlogFnMatch![0];
+    expect(fnText).not.toContain("artifact.scope &&");
+    expect(fnText).not.toContain("|| []");
+    expect(fnText).not.toContain("artifact.git ?");
+    expect(fnText).not.toContain("!artifact.premises ||");
+  });
 });
