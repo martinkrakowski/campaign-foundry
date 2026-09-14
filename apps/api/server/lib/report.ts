@@ -131,6 +131,7 @@ export function isPersistedAsset(a: unknown): a is PersistedAsset {
   if (hasRatio === hasSize) return false;
   if (typeof rec.treatment !== "string") return false;
   if (typeof rec.outputPath !== "string") return false;
+  if (rec.clickDestination !== undefined && typeof rec.clickDestination !== "string") return false;
   // `format` is absent on classic rows, else static | motion | html. An unknown format is
   // skipped (and counted) rather than packaged as a still; a motion row without a
   // readable mp4 path or a finite clip length can't be packaged or duration-checked;
