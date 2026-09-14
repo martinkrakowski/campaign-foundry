@@ -13,7 +13,7 @@ import {
   type IncomingMessage,
   type RequestOptions,
 } from "node:http";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -1107,7 +1107,7 @@ describe("the server over real HTTP", () => {
 
   // Platform watchers are load-sensitive; the injected-watcher test is the contract; run with WAVE_STATUS_REAL_WATCH=1 to smoke a real watcher.
   test.skipIf(process.env.WAVE_STATUS_REAL_WATCH !== "1")(
-    "fs.watch on a real wave dir pushes a status event (smoke)",
+    "fs.watch on a real lane log pushes a status event (smoke)",
     async () => {
       const root = await makeFixture();
       let version = 0;
@@ -1123,7 +1123,7 @@ describe("the server over real HTTP", () => {
       try {
         expect(await reader.waitFor(1)).toEqual([JSON.stringify(statusAt(0))]);
         version = 1;
-        await writeFile(join(root, "waveT", "changed.signal"), "changed\n");
+        await appendFile(join(root, "waveT", "t1.log"), "changed\n");
         expect(await reader.waitFor(2, 10_000)).toEqual([
           JSON.stringify(statusAt(0)),
           JSON.stringify(statusAt(1)),
@@ -1134,6 +1134,161 @@ describe("the server over real HTTP", () => {
     },
     15_000,
   );
+
+  /**
+   * X8: the watchers are armed on the lane files themselves, never on the
+   * wave directories. On macOS a directory `fs.watch` is FSEvents-backed, and
+   * its native `close()` flushes the watcher's pending event batch
+   * synchronously — measured at 2–9 s with `fseventsd` backlogged by a full
+   * suite, which is what pushed `close()` past the runner's patience. A file
+   * watcher is kqueue-backed and its `close()` is instant.
+   */
+  test("the watchers are armed on lane files, never on the wave directories", async () => {
+    const root = await makeFixture();
+    await writeFile(join(root, "waveT", "notes.txt"), "not a lane log\n");
+    const armed: string[] = [];
+    await start({
+      port: 0,
+      root,
+      collect: async () => statusAt(0),
+      pollMs: 3_600_000,
+      watch: (path) => {
+        armed.push(path);
+        return {
+          close(): void {
+            /* the test owns the lifetime */
+          },
+        };
+      },
+    });
+    expect(armed.slice().sort()).toEqual(
+      [
+        join(root, "waveT", "events.jsonl"),
+        join(root, "waveT", "gate-t1.log"),
+        join(root, "waveT", "t1.log"),
+        join(root, "waveU", "u2.log"),
+      ].sort(),
+    );
+  });
+
+  test("a lane log created after startup is armed once by the next poll tick", async () => {
+    const root = await makeFixture();
+    const armed: string[] = [];
+    await start({
+      port: 0,
+      root,
+      collect: async () => statusAt(0),
+      pollMs: 20,
+      watch: (path) => {
+        armed.push(path);
+        return {
+          close(): void {
+            /* the test owns the lifetime */
+          },
+        };
+      },
+    });
+    const created = join(root, "waveT", "t2.log");
+    await writeFile(created, "new lane\n");
+    const deadline = Date.now() + 2_000;
+    while (!armed.includes(created)) {
+      if (Date.now() > deadline) {
+        throw new Error(`the new lane log was never armed; have ${armed.join(", ")}`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    // Every tick re-lists the wave dirs; an already-watched path is never armed twice.
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    expect(armed.filter((path) => path === created)).toHaveLength(1);
+  });
+
+  test("a wave directory that vanishes mid-listing is skipped without losing the poll", async () => {
+    const root = await makeFixture();
+    const armed: string[] = [];
+    const handle = await start({
+      port: 0,
+      root,
+      collect: async () => statusAt(0),
+      pollMs: 20,
+      deps: {
+        ...realDeps,
+        readdir: async (dir) => {
+          if (dir === join(root, "waveU")) throw new Error("ENOENT: gone mid-listing");
+          return realDeps.readdir(dir);
+        },
+      },
+      watch: (path) => {
+        armed.push(path);
+        return {
+          close(): void {
+            /* the test owns the lifetime */
+          },
+        };
+      },
+    });
+    // The throw must stay inside the per-directory listing: the server starts,
+    // the other wave dir arms normally, and the tick after it still runs.
+    expect(armed).toContain(join(root, "waveT", "t1.log"));
+    expect(armed).not.toContain(join(root, "waveU", "u2.log"));
+    const before = armed.length;
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    expect(armed.length).toBe(before);
+    await handle.close();
+    handles.pop();
+  });
+
+  test("a syncWatchers in flight when close() runs arms no watcher afterwards", async () => {
+    const root = await makeFixture();
+    let hang = false;
+    let inListing = 0;
+    let release = (): void => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const armed: string[] = [];
+    const handle = await start({
+      port: 0,
+      root,
+      collect: async () => statusAt(0),
+      pollMs: 20,
+      deps: {
+        ...realDeps,
+        readdir: async (dir) => {
+          if (hang) {
+            inListing += 1;
+            await gate;
+          }
+          return realDeps.readdir(dir);
+        },
+      },
+      watch: (path) => {
+        armed.push(path);
+        return {
+          close(): void {
+            /* the test owns the lifetime */
+          },
+        };
+      },
+    });
+    try {
+      hang = true;
+      const deadline = Date.now() + 2_000;
+      while (inListing === 0) {
+        if (Date.now() > deadline) {
+          throw new Error("syncWatchers never read the listing through deps.readdir");
+        }
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      const armedAtClose = armed.length;
+      await handle.close();
+      handles.pop();
+      release();
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      expect(armed.length).toBe(armedAtClose);
+    } finally {
+      release();
+    }
+  });
 
   test("overlapping watch ticks still push the latest status", async () => {
     const root = await makeFixture();
@@ -1340,15 +1495,44 @@ describe("cleanup", () => {
   });
 
   test("close() shuts the server, its watchers and its interval down", async () => {
+    const root = await makeFixture();
+    const collect = vi.fn(async () => statusAt(0));
+    const closedWatchers = new Set<string>();
+    const listeners: Array<() => void> = [];
     const handle = await start({
       port: 0,
-      root: await makeFixture(),
-      collect: async () => statusAt(0),
-      pollMs: 40,
+      root,
+      collect,
+      pollMs: 20,
+      watch: (path, listener) => {
+        listeners.push(listener);
+        return { close: () => closedWatchers.add(path) };
+      },
     });
     const port = handle.port;
+    // The contract the cleanup promises runs against real watchers: a directory
+    // fs.watch whose close() flushes a pending batch is what hung this test
+    // (X8), so here the arming itself is asserted through the injected seam.
+    expect(listeners.length).toBe(4);
+
     await handle.close();
     handles.pop();
+
+    expect([...closedWatchers].sort()).toEqual(
+      [
+        join(root, "waveT", "events.jsonl"),
+        join(root, "waveT", "gate-t1.log"),
+        join(root, "waveT", "t1.log"),
+        join(root, "waveU", "u2.log"),
+      ].sort(),
+    );
+    // Nothing runs after close(): neither a watcher event queued in the same
+    // tick nor the poll interval may start another collection.
+    const collectionsAtClose = collect.mock.calls.length;
+    for (const notify of listeners) notify();
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    expect(collect.mock.calls.length).toBe(collectionsAtClose);
+
     await expect(
       new Promise<void>((resolve, reject) => {
         const req = httpRequest(
