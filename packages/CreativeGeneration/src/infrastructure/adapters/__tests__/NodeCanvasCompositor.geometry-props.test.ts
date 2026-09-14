@@ -291,7 +291,15 @@ describe("accent.fadeHeight is live (C4, R-D3)", () => {
 describe("text typeFloor is live (C4, R-D3)", () => {
   // A message long enough that the autofit loop runs to the floor, so where the
   // floor sits decides the headline's resolved type size — and the line count
-  // that reaches the blit.
+  // that reaches the blit. `pixelSize.height` is squeezed well below the
+  // square default (400): at the natural (unshrunk) font size the wrapped
+  // block does not fit in 400px of headroom either — the autofit loop runs —
+  // but it fits again after only one or two 4px steps, before floor 0.1 and
+  // floor 0.8 (2px vs 19px) diverge, so both floors converge on the same
+  // stopping size and the direction assertion is vacuous. At height 80 the
+  // low floor keeps shrinking (and re-wrapping into more, shorter lines)
+  // past where the high floor is forced to settle — verified empirically:
+  // floor 0.1 -> 4 lines, floor 0.4 (the constant) -> 4 lines, floor 0.8 -> 3.
   const LONG =
     "Stay wild, stay hydrated, and keep every drop exactly where the adventure left it, " +
     "mile after mile, ridge after ridge, river after river under an open sky";
@@ -299,6 +307,7 @@ describe("text typeFloor is live (C4, R-D3)", () => {
   const textReq = (props?: Record<string, number>): TemplateRequest =>
     request({
       message: LONG,
+      pixelSize: { width: SIZE, height: 80 },
       template: templateWith([
         IMAGE,
         { id: "copy", kind: "static-text", ...(props ? { props } : {}) },
