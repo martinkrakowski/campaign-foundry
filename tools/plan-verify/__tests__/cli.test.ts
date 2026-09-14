@@ -184,4 +184,20 @@ describe("the result artifact (S5)", () => {
     expect(artifact.premises).toEqual([]);
     expect(artifact.scope.kind).toBe("full");
   });
+
+  test("reads git branch and head before running the first premise", async () => {
+    const callOrder: string[] = [];
+    const git = vi.fn(async () => {
+      callOrder.push("git");
+      return "feat/branch\n";
+    });
+    const execute = vi.fn(async () => {
+      callOrder.push("execute");
+      return { exitCode: 0, output: "" };
+    });
+    const h = io({ git, deps: { execute } });
+    await runCli(h.io);
+    expect(callOrder.length).toBeGreaterThanOrEqual(2);
+    expect(callOrder.indexOf("git")).toBeLessThan(callOrder.indexOf("execute"));
+  });
 });
