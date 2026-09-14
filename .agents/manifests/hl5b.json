@@ -19,9 +19,9 @@
     },
     {
       "file": "apps/web/src/components/campaign/sections/OutputSection.tsx",
-      "before": "          error={destinationProblem ? messages.clickDestinationProblem(destinationProblem) : undefined}",
+      "before": "          error={errors.clickDestination}",
       "after": "          error={undefined}",
-      "because": "An invalid destination must show the domain's problem inline; dropping it leaves the field silently wrong until generation (HL-D3).",
+      "because": "An invalid destination must show the structural error inline; dropping it leaves the field silently wrong until generation (HL-D3). The section reads the same validateOutput result Save consults, so the message and the refusal cannot disagree.",
       "command": [
         "yarn",
         "vitest",
@@ -29,6 +29,23 @@
         "--project",
         "web",
         "apps/web/src/components/campaign/sections/__tests__/output-section.test.tsx"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/validate.ts",
+      "before": "  const destination = state.clickDestination.trim();\n  const destinationProblem = clickDestinationProblem(destination === \"\" ? undefined : destination);\n  if (destinationProblem !== undefined) {\n    errors.clickDestination = messages.clickDestinationInvalid(destinationProblem);\n  }",
+      "after": "  // mutated: the click-destination check is removed",
+      "because": "The structural validation that decides Save must refuse a destination the API's boundary refuses (load-brief.ts's validateClickDestination). Removing the check lets an invalid destination show an inline error but still save, and the server then rejects the brief.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx",
+        "-t",
+        "click destination"
       ],
       "verdict": "caught"
     }
