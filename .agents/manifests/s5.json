@@ -235,6 +235,19 @@
         "tools/wave-status/__tests__/page.test.ts"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/lib/render.ts",
+      "before": "      ? `partial run (${artifact.plans.map(sanitize).join(\", \")})`",
+      "after": "      ? `partial run (${artifact.plans.join(\", \")})`",
+      "because": "Every artifact-derived value reaching the terminal is sanitized against control bytes, including a partial run's plan list; the premise-row test used a full run, so the heading's plan list went unguarded.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "tools/wave-status/lib/__tests__/render.test.ts"
+      ],
+      "verdict": "caught"
     }
   ]
 }

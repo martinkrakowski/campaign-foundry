@@ -307,7 +307,7 @@ function renderBacklog(backlog: NonNullable<WaveStatus["backlog"]>, color: boole
   const { artifact } = backlog;
   const scopeDesc =
     artifact.scope.kind === "partial"
-      ? `partial run (${artifact.plans.join(", ")})`
+      ? `partial run (${artifact.plans.map(sanitize).join(", ")})`
       : `full run`;
   const headSha = sanitize(artifact.git.head).slice(0, 8);
   const lines: string[] = [
