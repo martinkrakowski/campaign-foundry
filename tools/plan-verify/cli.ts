@@ -23,10 +23,10 @@ export interface PlanVerifyIo {
   /** Lists the plan directory. Only consulted when `argv` is empty. */
   readonly listPlanDir: () => Promise<readonly string[]>;
   readonly deps: VerifyDeps;
-  readonly now?: () => string;
-  readonly git?: (args: readonly string[]) => Promise<string>;
-  readonly artifactPath?: () => string;
-  readonly writeArtifact?: (path: string, contents: string) => Promise<void>;
+  readonly now: () => string;
+  readonly git: (args: readonly string[]) => Promise<string>;
+  readonly artifactPath: () => string;
+  readonly writeArtifact: (path: string, contents: string) => Promise<void>;
 }
 
 export const PLAN_DIR = "docs/planning";
@@ -45,37 +45,32 @@ export async function runCli(io: PlanVerifyIo): Promise<number> {
 
   let branch = PROVENANCE_UNKNOWN;
   let head = PROVENANCE_UNKNOWN;
-  if (io.git) {
-    try {
-      const b = (await io.git(["rev-parse", "--abbrev-ref", "HEAD"])).trim();
-      if (b !== "") branch = b;
-    } catch {
-      // unknown
-    }
-    try {
-      const h = (await io.git(["rev-parse", "HEAD"])).trim();
-      if (h !== "") head = h;
-    } catch {
-      // unknown
-    }
+  try {
+    const b = (await io.git(["rev-parse", "--abbrev-ref", "HEAD"])).trim();
+    if (b !== "") branch = b;
+  } catch {
+    // unknown
+  }
+  try {
+    const h = (await io.git(["rev-parse", "HEAD"])).trim();
+    if (h !== "") head = h;
+  } catch {
+    // unknown
   }
 
-  const now = io.now ? io.now() : new Date().toISOString();
   const scope: ArtifactScope = isSubset ? { kind: "partial", plans } : { kind: "full" };
   const artifact = buildArtifact(results, {
-    at: now,
+    at: io.now(),
     git: { branch, head },
     scope,
     plans,
   });
 
-  const path = io.artifactPath ? io.artifactPath() : artifactPathFor(process.env);
-  if (io.writeArtifact) {
-    try {
-      await io.writeArtifact(path, serializeArtifact(artifact));
-    } catch (err: unknown) {
-      io.log(`WARN: could not write artifact ${path}: ${errorText(err)}`);
-    }
+  const path = io.artifactPath();
+  try {
+    await io.writeArtifact(path, serializeArtifact(artifact));
+  } catch (err: unknown) {
+    io.log(`WARN: could not write artifact ${path}: ${errorText(err)}`);
   }
 
   return exitCodeFor(results);

@@ -443,4 +443,30 @@ describe("renderStatus — backlog panel", () => {
     expect(out).not.toContain("full run");
     expect(out).toContain("docs/planning/a.md");
   });
+
+  test("a recorded artifact with no premises renders (no premises)", () => {
+    const emptyArtifact = {
+      ...recordedArtifact,
+      premises: [],
+    };
+    const status: WaveStatus = {
+      generatedAt: TS,
+      waves: [],
+      backlog: { state: "recorded", artifact: emptyArtifact },
+    };
+    const out = renderStatus(status, { color: false });
+    expect(out).toContain("(no premises)");
+  });
+
+  test("a recorded artifact renders colored statuses when color is enabled", () => {
+    const status: WaveStatus = {
+      generatedAt: TS,
+      waves: [],
+      backlog: { state: "recorded", artifact: recordedArtifact },
+    };
+    const out = renderStatus(status, { color: true });
+    expect(out).toContain("\x1b[36mholds\x1b[0m");
+    expect(out).toContain("\x1b[31mstale\x1b[0m");
+    expect(out).toContain("\x1b[33mtimed-out\x1b[0m");
+  });
 });

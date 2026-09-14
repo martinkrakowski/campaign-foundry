@@ -32,7 +32,7 @@ export interface PlanVerifyArtifact {
   readonly premises: readonly ArtifactPremiseRecord[];
 }
 
-export function artifactPathFor(env: Record<string, string | undefined> = process.env): string {
+export function artifactPathFor(env: Record<string, string | undefined>): string {
   const override = env[PLAN_VERIFY_ARTIFACT_ENV];
   if (override !== undefined && override !== "") {
     return override;
@@ -71,10 +71,10 @@ export function serializeArtifact(artifact: PlanVerifyArtifact): string {
 
 export function errorText(thrown: unknown): string {
   if (thrown instanceof Error) {
-    return thrown.message !== "" ? thrown.message : (thrown.name || "Error");
+    return thrown.message !== "" ? thrown.message : thrown.name;
   }
   if (typeof thrown === "string") {
-    return thrown !== "" ? thrown : "Error";
+    return thrown;
   }
   return String(thrown);
 }
@@ -109,11 +109,8 @@ export function parseArtifact(text: string): PlanVerifyArtifact {
   if (typeof rawGit.head !== "string" || rawGit.head === "") {
     throw new Error("malformed artifact: git provenance missing head");
   }
-  if (typeof rawGit.branch !== "string" || rawGit.branch === "") {
-    throw new Error("malformed artifact: git provenance missing branch");
-  }
   const git: GitProvenance = {
-    branch: rawGit.branch,
+    branch: String(rawGit.branch),
     head: rawGit.head,
   };
 
@@ -132,12 +129,7 @@ export function parseArtifact(text: string): PlanVerifyArtifact {
     if (!Array.isArray(rawScope.plans)) {
       throw new Error("malformed artifact: partial scope missing plans array");
     }
-    for (const p of rawScope.plans) {
-      if (typeof p !== "string") {
-        throw new Error("malformed artifact: partial scope plan must be a string");
-      }
-    }
-    scope = { kind: "partial", plans: [...rawScope.plans] };
+    scope = { kind: "partial", plans: [...rawScope.plans as readonly string[]] };
   } else {
     throw new Error("malformed artifact: unknown scope kind");
   }
@@ -164,9 +156,6 @@ export function parseArtifact(text: string): PlanVerifyArtifact {
     if (typeof rawItem.lane !== "string" || rawItem.lane === "") {
       throw new Error("malformed artifact: premise entry missing lane");
     }
-    if (typeof rawItem.plan !== "string" || rawItem.plan === "") {
-      throw new Error("malformed artifact: premise entry missing plan");
-    }
     if (rawItem.status !== "holds" && rawItem.status !== "stale" && rawItem.status !== "timed-out") {
       throw new Error("malformed artifact: premise entry has invalid status");
     }
@@ -177,7 +166,7 @@ export function parseArtifact(text: string): PlanVerifyArtifact {
     }
     premises.push({
       lane: rawItem.lane,
-      plan: rawItem.plan,
+      plan: String(rawItem.plan),
       status: rawItem.status,
       ...(typeof rawItem.reason === "string" ? { reason: rawItem.reason } : {}),
     });
