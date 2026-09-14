@@ -1,0 +1,125 @@
+{
+  "version": 1,
+  "lane": "X8",
+  "mutations": [
+    {
+      "file": "tools/wave-status/server.ts",
+      "before": "          if (!file.endsWith(\".log\") && !file.endsWith(\".jsonl\")) continue;\n          const path = join(dir, file);",
+      "after": "          const path = join(dir, file);",
+      "because": "The scope filter is the fix's other half: without it the server re-arms watchers on every entry a wave directory holds (notes.txt included), and the armed set stops being the lane artefacts — the exact list the premise test pins.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/wave-status/__tests__/server.test.ts",
+        "-t",
+        "the watchers are armed on lane files, never on the wave directories"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/server.ts",
+      "before": "          const path = join(dir, file);",
+      "after": "          const path = dir;",
+      "because": "The revert of the mechanism itself: arm the WAVE DIRECTORY — the FSEvents-backed watch whose native close() flushes a pending event batch synchronously, the call measured at 2–9 s with fseventsd backlogged and the await that put this lane's timeout shape (5 142 ms) on close(). The file-scoped premise test is the guard, and the cleanup test's four closed paths name it.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/wave-status/__tests__/server.test.ts",
+        "-t",
+        "the watchers are armed on lane files, never on the wave directories"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/server.ts",
+      "before": "      const names = await deps.readdir(options.root);\n      for (const name of names) {\n        if (!name.startsWith(\"wave\")) continue;\n        const dir = join(options.root, name);\n        let files: readonly string[];\n        try {\n          files = await deps.readdir(dir);",
+      "after": "      const names = await readdir(options.root);\n      for (const name of names) {\n        if (!name.startsWith(\"wave\")) continue;\n        const dir = join(options.root, name);\n        let files: readonly string[];\n        try {\n          files = await readdir(dir);",
+      "because": "Listings must run through the injected deps seam or the shutdown contract is untestable: a test can no longer hold a listing in flight across close(), and the lane cannot prove that a late listing arms nothing after the close. The seam swap is also what the direct-import version silently bypasses.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/wave-status/__tests__/server.test.ts",
+        "-t",
+        "a syncWatchers in flight when close\\(\\) runs arms no watcher afterwards"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/server.ts",
+      "before": "        // close() may have run while a listing was in flight: never arm a\n        // watcher after the shutdown has already closed the set it joins.\n        if (closed) return;",
+      "after": "        // A listing that resolves after close() arms anyway.",
+      "because": "The guard against a listing that resolves after close(): without it, syncWatchers arms watchers that no shutdown will ever close — the leak X8's diagnosis names, and the second flake-shape waiting to happen.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/wave-status/__tests__/server.test.ts",
+        "-t",
+        "a syncWatchers in flight when close\\(\\) runs arms no watcher afterwards"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/server.ts",
+      "before": "            watchPath(path, () => {\n              // A queued fs event must not resurrect collection after close.\n              if (!closed) requestRefresh(false);\n            }),",
+      "after": "            watchPath(path, () => requestRefresh(false)),",
+      "because": "close() ends the HTTP server and clears the interval, but a queued fs-event callback still holds requestRefresh: without the closed check a server that is already shutting down starts a fresh collection — the interval 'shut down' only in name, which is what the cleanup test's post-close quiet asserts.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/wave-status/__tests__/server.test.ts",
+        "-t",
+        "close\\(\\) shuts the server, its watchers and its interval down"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/server.ts",
+      "before": "    closed = true;\n    clearInterval(timer);",
+      "after": "    clearInterval(timer);",
+      "because": "The flag is the promise both guards read: without it, close() clears the interval but every later callback and every in-flight listing still behaves as if the server were live. The cleanup test counts collections after close() and catches the resurrection.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/wave-status/__tests__/server.test.ts",
+        "-t",
+        "close\\(\\) shuts the server, its watchers and its interval down"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/server.ts",
+      "before": "    clearInterval(timer);\n    for (const watcher of watchers) watcher.close();",
+      "after": "    clearInterval(timer);",
+      "because": "Shutdown must close the watchers it armed — the namesake duty of the cleanup test and of the listen-failure path; dropping the loop leaks one OS watch registration per lane file per server.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/wave-status/__tests__/server.test.ts",
+        "-t",
+        "close\\(\\) shuts the server, its watchers and its interval down"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

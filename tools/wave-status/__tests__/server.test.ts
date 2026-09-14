@@ -1282,8 +1282,13 @@ describe("the server over real HTTP", () => {
       const armedAtClose = armed.length;
       await handle.close();
       handles.pop();
+      // A lane log that appears while a listing is parked must still not be
+      // armed after the close: create it before releasing the parked readdir.
+      const late = join(root, "waveU", "u3.log");
+      await writeFile(late, "too late\n");
       release();
       await new Promise((resolve) => setTimeout(resolve, 80));
+      expect(armed).not.toContain(late);
       expect(armed.length).toBe(armedAtClose);
     } finally {
       release();
