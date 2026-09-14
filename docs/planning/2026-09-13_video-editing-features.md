@@ -262,10 +262,7 @@ still open**. `yarn plan:verify` runs them.
 ! grep -rqs 'useEditorHistory' apps/web/src/components/campaign
 ```
 
-```premise VE2
-# The video adapter has no single-frame seam, so the preview cannot show a moment of the motion.
-! grep -qs 'compositeFrame' packages/CampaignOrchestration/src/application/ports/out/VideoCompositorPort.ts
-```
+**VE2 — shipped in this PR.**
 
 ```premise VE3
 # No audio codec in the encoder, or no audio extension accepted for upload — either keeps the lane open.
