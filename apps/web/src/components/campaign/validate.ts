@@ -17,6 +17,11 @@ import {
 // list here is the drift that let a draft the parser refuses look clean (B3).
 import { MOTION_KINDS } from "@campaignfoundry/CampaignOrchestration/motion-kinds";
 
+// The domain's one click-destination decision (HL2), shared with the API boundary
+// (`validateClickDestination`, load-brief.ts) so Save refuses exactly what the API
+// refuses (HL5b). Never a second URL check in the editor.
+import { clickDestinationProblem } from "@campaignfoundry/CampaignOrchestration/click-destination";
+
 // The float slack on the dwell floor is IMPORTED, not restated: 3 × 1.2 is
 // 3.5999999999999996, and an editor with its own copy of the tolerance would eventually
 // disagree with `timelineProblem` about the boundary case. Same reasoning as the one
@@ -364,6 +369,17 @@ export function validateOutput(state: EditorState): FieldErrors {
   const unknownPlatforms = state.platforms.filter((id) => PLATFORM_PROFILES[id] === undefined);
   if (unknownPlatforms.length > 0) {
     errors.platforms = messages.platformsUnknown(unknownPlatforms);
+  }
+  // HL5b: the API's boundary refuses a click destination that is not an absolute URL
+  // (load-brief.ts's `validateClickDestination`), so the structural validation that
+  // decides Save must refuse it too — otherwise the operator sees an inline error,
+  // saves anyway, and the server rejects the brief. The domain's
+  // `clickDestinationProblem` is the one decision; an empty field is "no destination"
+  // and stays valid, exactly as absent does at the boundary.
+  const destination = state.clickDestination.trim();
+  const destinationProblem = clickDestinationProblem(destination === "" ? undefined : destination);
+  if (destinationProblem !== undefined) {
+    errors.clickDestination = messages.clickDestinationInvalid(destinationProblem);
   }
   // Per-card gating is the single, non-red home for the "motion not available / needs
   // randomized mode" notices (D7: gates are never red). They are surfaced on the

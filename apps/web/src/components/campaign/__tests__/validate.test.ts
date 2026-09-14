@@ -27,6 +27,9 @@ import {
   PROHIBITED_TERMS,
 } from "../validate";
 import { PROHIBITED_TERMS as DOMAIN_PROHIBITED_TERMS } from "@campaignfoundry/GovernanceAndCompliance";
+// The domain's one click-destination decision — the same one the API's boundary
+// (`validateClickDestination`, load-brief.ts) reads, so the client mirror cannot drift.
+import { clickDestinationProblem } from "@campaignfoundry/CampaignOrchestration/click-destination";
 import { initialEditorState, editorReducer, toBrief, type EditorState } from "../editor-state";
 // The real gate Save hits, imported across apps for the divergence tests below: tests
 // may cross package boundaries (arch test-double rules), and a mirror without the
@@ -450,6 +453,24 @@ describe("validateOutput", () => {
     );
     expect(errors.platforms).toBeUndefined();
     expect(errors.formats).toBeUndefined();
+  });
+
+  test("an invalid click destination is an error; empty and valid are not (HL5b)", () => {
+    // The API refuses `example.com/landing` at the boundary (load-brief.ts's
+    // validateClickDestination), so the structural validation that decides Save
+    // must refuse it too: the domain's clickDestinationProblem is the one decision.
+    const problem = clickDestinationProblem("example.com/landing");
+    expect(problem).toBeDefined();
+    expect(validateOutput(valid({ clickDestination: "example.com/landing" })).clickDestination).toBe(
+      messages.clickDestinationInvalid(problem!),
+    );
+    // An empty field is "no destination", the one absence that is always valid.
+    expect(validateOutput(valid({ clickDestination: "" })).clickDestination).toBeUndefined();
+    expect(validateOutput(valid({ clickDestination: "   " })).clickDestination).toBeUndefined();
+    // An absolute URL is what the API accepts, so it stays clean here.
+    expect(
+      validateOutput(valid({ clickDestination: "https://example.com/landing" })).clickDestination,
+    ).toBeUndefined();
   });
 });
 

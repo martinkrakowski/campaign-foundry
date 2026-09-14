@@ -29,6 +29,7 @@ const LABEL_TO_KEY: Record<string, string> = {
   "Platforms": "platforms",
   "Motion Kind": "motion",
   "Duration": "duration",
+  "Click destination": "clickDestination",
 };
 
 /**
@@ -68,6 +69,7 @@ export const KNOWN_KEY_PATTERNS: RegExp[] = [
   /^platforms$/,
   /^motion$/,
   /^duration$/,
+  /^clickDestination$/,
 ];
 
 /** Check if a key matches any known pattern. */

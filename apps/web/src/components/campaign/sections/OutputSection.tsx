@@ -1,7 +1,7 @@
 "use client";
 
 import type { Dispatch } from "react";
-import { FieldLine, PlatformCard, DurationStrip } from "@/components/ui";
+import { FieldLine, Input, PlatformCard, DurationStrip } from "@/components/ui";
 import { MOTION_KINDS } from "@campaignfoundry/CampaignOrchestration/motion-kinds";
 import { PLATFORM_PROFILES, isPlatformVisible } from "@campaignfoundry/Distribution/platform-profiles";
 import type { EditorState, EditorAction } from "@/components/campaign/editor-state";
@@ -11,7 +11,7 @@ import { motionPackagedRatios } from "@/components/campaign/validate";
 import { RATIO_OPTIONS } from "@/components/campaign/editor-state";
 import { ratioDisplayName } from "@/components/campaign/display-names";
 import * as messages from "@/components/campaign/messages";
-import { SectionShell } from "./IdentitySection";
+import { SectionShell, Field } from "./IdentitySection";
 import { ProbeRow } from "../ProbeRow";
 import { FormatPanel, formatGate } from "../FormatPanel";
 import { MotionKindPanel } from "../MotionKindPanel";
@@ -71,7 +71,7 @@ export function OutputSection({
   const hasExcludedRatio = motionOnly && packaged.size < RATIO_OPTIONS.length;
 
   const outputErrorCount = Object.keys(errors).filter((k) =>
-    ["formats", "platforms", "motion", "duration"].includes(k),
+    ["formats", "platforms", "motion", "duration", "clickDestination"].includes(k),
   ).length;
 
   const staticGate = formatGate("static", state, state.capabilities);
@@ -141,6 +141,24 @@ export function OutputSection({
           </div>
           {errors.formats ? <FieldLine tone="error">{errors.formats}</FieldLine> : null}
         </fieldset>
+
+        {/* Click destination (HL5b, HL-D3): where the ad goes when clicked. The
+            Output section owns it because it belongs to the campaign's output,
+            not to any one product or format. */}
+        <Field
+          fieldKey="clickDestination"
+          label={messages.clickDestinationLabel}
+          hint={messages.clickDestinationHelp}
+          error={errors.clickDestination}
+        >
+          <Input
+            aria-label={messages.clickDestinationLabel}
+            value={state.clickDestination}
+            placeholder={messages.clickDestinationPlaceholder}
+            onChange={(e) => dispatch({ type: "patch", patch: { clickDestination: e.target.value } })}
+            invalid={errors.clickDestination !== undefined}
+          />
+        </Field>
 
         {/* Video options (Motion kinds & Duration) */}
         {motionRequested ? (

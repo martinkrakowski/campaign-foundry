@@ -11,6 +11,7 @@ import { CreateCampaignDialog } from "@/components/shell/CreateCampaignDialog";
 import { BrowseBriefsButton } from "@/components/shell/Sidebar";
 import type { BriefEntry } from "@/lib/briefs-api";
 import { DEFAULT_CAMPAIGN_TYPE } from "@campaignfoundry/CampaignOrchestration/campaign-types";
+import { clickDestinationProblem } from "@campaignfoundry/CampaignOrchestration/click-destination";
 import { templateFromCanonical } from "@campaignfoundry/CampaignOrchestration/brief-template";
 import { fromBrief, initialEditorState, saveDraftToStorage } from "@/components/campaign/editor-state";
 import { sectionOrder, SECTION_TITLES } from "@/components/campaign/sections";
@@ -1357,6 +1358,27 @@ describe("BriefPage — data flow", () => {
     // both refused: no write left the page, and the refusal is on screen
     expect(writes(calls)).toEqual([]);
     expect(screen.getByText(messages.targetRegion)).toBeTruthy();
+  });
+
+  test("Save refuses a click destination the API would refuse, and writes nothing (HL5b)", async () => {
+    // The API's boundary refuses a destination that is not an absolute URL
+    // (load-brief.ts's validateClickDestination). Save must refuse the same thing:
+    // otherwise the operator sees an inline error, saves anyway, and the server
+    // rejects the brief. The structural validation now carries the destination.
+    const user = userEvent.setup();
+    const calls = routes({});
+    renderWithRun(<NewEditor />);
+    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""));
+
+    await fillValidDraft(user);
+    await user.type(screen.getByLabelText(messages.clickDestinationLabel), "example.com/landing");
+
+    await saveVia(user, "Save");
+
+    expect(writes(calls)).toEqual([]);
+    expect(
+      screen.getByText(messages.clickDestinationInvalid(clickDestinationProblem("example.com/landing")!)),
+    ).toBeTruthy();
   });
 
   test("Save as… onto an existing id asks before overwriting, and honours a refusal", async () => {
