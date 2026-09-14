@@ -4992,3 +4992,7 @@ the Map) retargeted rather than dropped. Full gate 0 with 100 % on all four coun
 **Seats and cost.** hy4 (opencode/openrouter): M3, HL5a (+1 fix round), HL5d — reliable, honest reports. deepseek: L12 — work committed, then hung on a provider step; orchestrator finished it. agy gemini: X15 (+1 fix round). Sonnet reserve: C4. **grok-4.6 high, first implementer measurement (owner's instruction 2026-09-14):** X16 lane 18 min · 362k in / 45.5k out (40.9k reasoning) · 6.30M cache read · 54 turns · $1.41; fix 1 8 min · 234k / 17.4k · 1.69M cache · $0.48; fix 2 killed by host memory pressure after committing (typecheck-failing casts finished by the orchestrator). Rounds to green: 3. A detached `nohup … --always-approve` launch is refused by the auto-mode classifier; grok lanes run as harness background tasks.
 
 **Host.** Memory-pressure kills hit gates, watchers and one grok round; fseventsd held ~8 GB through the session. Gates run serially with `--maxWorkers=2`; the gate script now refuses a dirty tree or an in-progress rebase (a masked rebase failure had gated a half-rebased tree once).
+
+## 2026-09-14 — V3 sweep attribute
+
+Added `yarn sweep attribute --pr <n>`. Each github-actions thread is attributed only when its suggestion text occurs in exactly one PR-Agent workflow log (decoded); none or several stays unattributed; a failed fetch or log read exits 1. The premise V3 fence stays.
