@@ -4885,3 +4885,42 @@ the Map) retargeted rather than dropped. Full gate 0 with 100 % on all four coun
   - `yarn build`, `yarn typecheck`, `yarn lint`, `yarn lint:arch`: all 0.
 
 
+## 2026-09-14 — HL5a: element editing for the `html` layer
+
+- **Mode:** Implementer
+- **Changes:**
+  - `packages/CampaignOrchestration/package.json`: one `./html-element` subpath export, mirroring
+    `./click-destination` (the leaf, so the barrel's node:fs hitchhikers stay out of the bundle).
+  - `editor-state.ts`: five actions — `addHtmlElement`, `removeHtmlElement`, `moveHtmlElement`,
+    `setHtmlElementText`, `setHtmlElementFrame` — each addressing the layer by `layerId`;
+    `htmlElementEdit` (the one guard: layer present, kind `html`, index in range), `withElements`
+    (canonical form), `newHtmlElement` (per-kind default frame, catalog copy), `clampedFrame`;
+    `isBeatIndex`/`isLayerIndex` now delegate to one `isListIndex`.
+  - `sections/HtmlElementsEditor.tsx` (new): the add offer, and per element a kind label, a copy
+    input, four frame inputs (`min 0 max 1 step 0.01`), an anchor select, and move/remove.
+  - `sections/TemplateSection.tsx`: renders it inside the row of each layer of kind `html`.
+  - `messages.ts`: the element catalogue (append-only). `messages.test.ts` covers the new
+    formatters, including an unknown kind reading as itself.
+  - `docs/planning/2026-09-10_the-html-layer.md`: HL5a shipped in §2 and a §5 paragraph; the
+    premise renamed `HL5` → `HL5c` and narrowed to `maxBytes|weight.?meter|budget.?meter`.
+  - `.agents/manifests/hl5a.json`: three mutations, all replay caught.
+- **Decisions:**
+  - Elements ride inside the html layer's own `<li>` rather than as a second list item: the list
+    stays one row per layer, and "beneath" is literal.
+  - Up is toward the start of the list (`to: index - 1`), the arrow's own meaning, so the first
+    element has no up and the last no down — the opposite of the layer list, where array position
+    is z-order and index 0 is the bottom.
+  - `setHtmlElementFrame` returns the same state object when the patch is what the frame already
+    holds, so a no-op edit is not a history entry (the `setLayerEnabled` rule).
+  - The copy input reads `element.text` with no `?? ""`: the domain marks `text` required on the
+    two kinds that reach it, and the fallback was a branch no test could take.
+- **Tests written red first:** 23 reducer tests (happy paths, every no-op shape by identity,
+  clamp and non-finite refusal, image refuses copy, last-remove deletes the key and round-trips
+  `valuesEqual`, and the invariant over a scripted sequence of all five actions), 18 component
+  tests (offers only on `html` layers, absent move controls at the ends, every input and control
+  named, and `<img src=x onerror=…>` staying an input value with no `img[src="x"]` in the DOM),
+  and one undo test. Full gate 0 with 100 % on all four counters (4 889 tests); `plan:verify` 0.
+- **Left open:**
+  - No preview of the markup in the app (HL-D7) — that is HL5d, through the canvas rendition.
+  - `derive.ts` was left untouched: nothing the editor offers needed a derivation from
+    `CREATIVE_TYPE_RULES`, and an element kind is never at a cap.
