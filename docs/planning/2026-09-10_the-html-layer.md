@@ -122,7 +122,7 @@ beyond the brief's family, and any third-party script. Each breaks either the fa
 | **HL5a** | Element editing: add, remove and reorder `text` / `button` / `image` elements in the `html` layer; edit text and frame. | **Shipped.** |
 | **HL5b** | The click-destination input. `editor-state.ts` already carries `clickDestination` with its patch and validation; no editor section renders it. | Ready — smallest slice. |
 | **HL5c** | The live weight meter reading `profile.maxBytes` (HL-D6). | **Blocked on X14** — no platform profile declares `html`, so there is no budget to read. |
-| **HL5d** | Editor preview of the `html` layer through the canvas rendition, satisfying HL-D7 without putting user content in the app DOM. | Ready once HL5a exists; verify first whether the existing preview path already draws the layer. |
+| **HL5d** | Editor preview of the `html` layer through the canvas rendition, satisfying HL-D7 without putting user content in the app DOM. | **Shipped.** The existing preview path already drew the layer; four tests now pin it. |
 | **HL5e** | Per-element style overrides. | **Blocked on an owner decision.** HL-D1 sketched `style?` on an element, HL-D4 says style comes from the brief's `creative-style`, and the vocabulary HL1 shipped is `{ kind, text?, frame }` with no style. Overrides mean a vocabulary change carried through both renderers and the fidelity between them. |
 
 **Order.** HL1 → HL2 → **HL3 → HL4** → HL5. **HL3 before HL4 is the load-bearing choice**: build the
@@ -171,6 +171,23 @@ now live in `html-element.ts`; both layer shapes declare `elements`, and the sha
 **HL4 — shipped in this PR.** Server-side markup assembler produces the HTML creative unit from the layer element list, wires `clickTag` variable declaration per HL-D3, enforces weight budget against `profile.maxBytes` per HL-D6, and the generation path emits `format: "html"` with both `htmlBundlePath` and `htmlFallbackPath` populated and verified during platform packaging.
 
 **HL5a — shipped in this PR.** Element editing: five reducer actions address an `html` layer by id — add, remove, move, set text, set frame — and the editor beneath each `html` layer offers the three kinds with per-element copy, frame and anchor controls. Every action is a no-op when the layer is not `html` or the index is out of range; an `image` element never carries copy; a frame value is clamped into `[0, 1]`, so after any sequence of these actions every layer still satisfies `layerElementsProblem` — the editor never produces what the boundary refuses. Removing the last element deletes the `elements` key, so an add-then-remove is `valuesEqual` to the template that was loaded. User text reaches the DOM only as an input's value (HL-D7): no preview of the markup is rendered into the app, which is what leaves HL5d — the canvas rendition — as the way to see one.
+
+**HL5d — shipped in this PR.** The preview path was **already complete**: `preview-frame.post.ts` runs
+`PreviewCreativeFrameUseCase` with the real `NodeCanvasCompositor`, the use case passes `brief.template`
+into the composite request and folds it into the frame cache key, HL3's `html` entry in `LAYER_DRAWERS`
+draws the element list, and the web client renders the answer as `<img src={dataUrl}>` — so user text
+never enters the app DOM as markup (HL-D7). No production code was changed for this lane. What the lane
+added is the proof: `preview-frame.test.ts` asks the route for one cell with and without a `text`
+element and compares decoded pixels — different inside the element's own frame, byte-identical outside
+it — plus a copy change moving key and pixels, markup-as-copy rendering `image/png` because it is drawn
+as text, and a disabled `html` layer rendering what the template renders with it absent. Three mutations
+in `.agents/manifests/hl5d.json` pin those: dropping `template` from the request, emptying the `html`
+drawer, and removing the `enabled === false` skip from the still-frame dispatch loop.
+
+One boundary fact the tests record rather than change: a brief whose **only** `html` layer is disabled
+is refused with 400, because `html` is a required kind for `image-html` and MP-D4 refuses disabling the
+last enabled instance of one. The disabled-layer test therefore adds a second, disabled `html` layer
+alongside the enabled one — which is also what X9's own promise is about.
 
 ```premise HL5c
 # What is still open of the tooling lane is the live weight meter reading
