@@ -350,7 +350,10 @@ describe("the html layer (HL5d)", () => {
     });
 
     expect(second.key).not.toBe(first.key);
-    expect(diffByRegion(second.frame, first.frame).inside).toBeGreaterThan(0);
+    const diff = diffByRegion(second.frame, first.frame);
+    expect(diff.inside).toBeGreaterThan(0);
+    // The copy stays inside its own frame (X10), so nothing outside it moves.
+    expect(diff.outside).toBe(0);
   });
 
   test("an element whose copy is markup renders image/png — drawn as text, never parsed", async () => {
