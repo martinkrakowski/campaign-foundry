@@ -10,10 +10,21 @@ import {
 import { DISPLAY_SIZE_VALUES, type DisplaySize } from "../../domain/value-objects/display-sizes.js";
 import type { BackgroundSource } from "../../domain/value-objects/BackgroundSource.vo.js";
 import type { LayoutKind, ToneKind } from "../../domain/value-objects/Treatment.vo.js";
-import type { AnchorKind } from "../../domain/value-objects/variation-defaults.js";
+import {
+  MAX_DURATION_SEC,
+  MIN_DURATION_SEC,
+  type AnchorKind,
+} from "../../domain/value-objects/variation-defaults.js";
+import {
+  MOTION_FPS,
+  MOTION_KINDS,
+  type MotionKind,
+} from "../../domain/value-objects/MotionKind.vo.js";
 import type { CompositeRequest, CompositorPort } from "../ports/out/CompositorPort.js";
 import type { BackgroundContext, ImageGeneratorPort } from "../ports/out/ImageGeneratorPort.js";
 import type { PlatformSafeZoneResolver } from "../ports/out/PlatformProfilePort.js";
+import type { VideoCompositeRequest, VideoCompositorPort } from "../ports/out/VideoCompositorPort.js";
+import type { CopyTimeline } from "../../domain/value-objects/CopyTimeline.vo.js";
 import { unionSafeInsets } from "./GenerateCampaignUseCase.use-case.js";
 
 /**
@@ -29,6 +40,9 @@ export interface PreviewCellSelection {
   readonly tone: ToneKind;
   /** Absent → the compositor derives from layout, exactly as the run does. */
   readonly anchor?: AnchorKind;
+  readonly motion?: MotionKind;
+  readonly durationSec?: number;
+  readonly atSec?: number;
 }
 
 /** One composited preview frame: the PNG bytes, their content identity, provenance. */
@@ -74,6 +88,7 @@ export interface PreviewCreativeFrameDeps {
   /** Safe-inset source for `output.platforms` (D11). Absent → no insets are ever passed. */
   readonly platformSafeZones?: PlatformSafeZoneResolver;
   readonly frameCache?: PreviewFrameCache;
+  readonly videoCompositor?: VideoCompositorPort;
 }
 
 /** Social fingerprints keep the `ratio` key so style-less hashes stay put. */
@@ -81,6 +96,13 @@ function canvasFingerprint(spec: CanvasSpec): { readonly ratio: AspectRatioValue
   const exclusive = spec as { readonly ratio: AspectRatioValue } | { readonly size: DisplaySize };
   if ("ratio" in exclusive) return { ratio: exclusive.ratio };
   return { size: exclusive.size };
+}
+
+export interface ScrubFingerprint {
+  readonly frameIndex: number;
+  readonly motion: MotionKind;
+  readonly durationSec: number;
+  readonly timeline?: CopyTimeline;
 }
 
 /**
@@ -93,6 +115,7 @@ function canvasFingerprint(spec: CanvasSpec): { readonly ratio: AspectRatioValue
 export function compositeRequestFingerprint(
   request: CompositeRequest,
   hash: FrameFingerprintHash,
+  scrub?: ScrubFingerprint,
 ): string {
   return hash(
     JSON.stringify({
@@ -112,6 +135,14 @@ export function compositeRequestFingerprint(
       // drop this line and the new "template alone moves the key" test goes
       // red).
       ...(request.template !== undefined ? { template: request.template } : {}),
+      ...(scrub !== undefined
+        ? {
+            frameIndex: scrub.frameIndex,
+            motion: scrub.motion,
+            durationSec: scrub.durationSec,
+            ...(scrub.timeline !== undefined ? { timeline: scrub.timeline } : {}),
+          }
+        : {}),
     }),
   );
 }
@@ -153,6 +184,38 @@ export class PreviewCreativeFrameUseCase {
         new Error(`Unsupported display size "${size}" (expected one of ${DISPLAY_SIZE_VALUES.join(", ")})`),
       );
     }
+
+    const { motion, durationSec, atSec } = selection;
+    const hasMotion = motion !== undefined;
+    const hasDuration = durationSec !== undefined;
+    const hasAtSec = atSec !== undefined;
+    if ((hasMotion || hasDuration || hasAtSec) && !(hasMotion && hasDuration && hasAtSec)) {
+      return err(new Error("Preview cell must carry motion, durationSec and atSec together or not at all."));
+    }
+    if (hasMotion) {
+      if (!(MOTION_KINDS as readonly string[]).includes(motion!)) {
+        return err(new Error(`Preview cell motion must be one of ${MOTION_KINDS.join(", ")}.`));
+      }
+      if (
+        typeof durationSec !== "number" ||
+        !Number.isFinite(durationSec) ||
+        durationSec < MIN_DURATION_SEC ||
+        durationSec > MAX_DURATION_SEC
+      ) {
+        return err(
+          new Error(
+            `Preview cell durationSec must be a finite number in [${MIN_DURATION_SEC}, ${MAX_DURATION_SEC}].`,
+          ),
+        );
+      }
+      if (typeof atSec !== "number" || !Number.isFinite(atSec) || atSec < 0 || atSec > durationSec) {
+        return err(new Error(`Preview cell atSec must be a finite number in [0, ${durationSec}].`));
+      }
+      if (!this.deps.videoCompositor) {
+        return err(new Error("Cannot render motion preview: no video compositor is wired."));
+      }
+    }
+
     // The background port speaks the social vocabulary; a display size borrows
     // its nearest orientation and the compositor stretches the result over the
     // exact canvas. Ratio validation (including the axis vocabulary) stays here.
@@ -168,7 +231,20 @@ export class PreviewCreativeFrameUseCase {
       product,
       backgroundRatio.value,
     );
-    const cacheKey = compositeRequestFingerprint(request, this.deps.hash);
+
+    let scrub: ScrubFingerprint | undefined;
+    if (hasMotion) {
+      const frames = Math.round(durationSec! * MOTION_FPS);
+      const frameIndex = Math.round((atSec! / durationSec!) * (frames - 1));
+      scrub = {
+        frameIndex,
+        motion: motion!,
+        durationSec: durationSec!,
+        ...(brief.copy?.timeline !== undefined ? { timeline: brief.copy.timeline } : {}),
+      };
+    }
+
+    const cacheKey = compositeRequestFingerprint(request, this.deps.hash, scrub);
     const cached = this.deps.frameCache?.get(cacheKey);
     if (cached !== undefined) {
       return ok({
@@ -180,12 +256,31 @@ export class PreviewCreativeFrameUseCase {
       });
     }
 
-    const composite = await this.deps.compositor.compositeAsset(request);
-    this.deps.frameCache?.set(cacheKey, { image: composite.image, logoApplied: composite.logoApplied });
+    let image: Uint8Array;
+    let logoApplied: boolean;
+    if (hasMotion) {
+      const videoRequest: VideoCompositeRequest = {
+        ...request,
+        fps: MOTION_FPS,
+        durationSec: durationSec!,
+        motion: motion!,
+        sampleAt: [],
+        ...(brief.copy?.timeline !== undefined ? { timeline: brief.copy.timeline } : {}),
+      };
+      const composite = await this.deps.videoCompositor!.compositeFrame(videoRequest, atSec!);
+      image = composite.image;
+      logoApplied = composite.logoApplied;
+    } else {
+      const composite = await this.deps.compositor.compositeAsset(request);
+      image = composite.image;
+      logoApplied = composite.logoApplied;
+    }
+
+    this.deps.frameCache?.set(cacheKey, { image, logoApplied });
     return ok({
-      image: composite.image,
+      image,
       cacheKey,
-      logoApplied: composite.logoApplied,
+      logoApplied,
       canvas: selection.canvas,
       backgroundSource,
     });

@@ -5,9 +5,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Writable } from "node:stream";
 import { createCanvas, type Canvas, type SKRSContext2D } from "@napi-rs/canvas";
-import type { VideoCompositeRequest, VideoCompositeResult, VideoCompositorPort } from "@campaignfoundry/CampaignOrchestration";
+import type {
+  CompositeResult,
+  CopyTimeline,
+  MotionKind,
+  ResolvedBeat,
+  VideoCompositeRequest,
+  VideoCompositeResult,
+  VideoCompositorPort,
+} from "@campaignfoundry/CampaignOrchestration";
 import { restT } from "@campaignfoundry/CampaignOrchestration";
-import type { CopyTimeline, ResolvedBeat } from "@campaignfoundry/CampaignOrchestration";
 // Static import (not createRequire) so bundlers such as Nitro trace the package
 // and its binary into the production output.
 import ffmpegStatic from "ffmpeg-static";
@@ -127,6 +134,31 @@ export class CanvasFfmpegVideoCompositor implements VideoCompositorPort {
     });
 
     return { video, poster, sampledFrames, logoApplied: prepared.logoApplied };
+  }
+
+  async compositeFrame(
+    request: VideoCompositeRequest,
+    atSec: number,
+  ): Promise<CompositeResult> {
+    validateRequest(request);
+    const frames = Math.round(request.durationSec * request.fps);
+    if (frames < 2) {
+      throw new VideoCompositeValidationError("durationSec * fps must yield at least 2 frames");
+    }
+    if (typeof atSec !== "number" || !Number.isFinite(atSec) || atSec < 0 || atSec > request.durationSec) {
+      throw new VideoCompositeValidationError(
+        `atSec must be a finite number in [0, ${request.durationSec}] (got ${String(atSec)})`,
+      );
+    }
+
+    const prepared = await NodeCanvasCompositor.prepare(request, this.fontFamily);
+    const canvas = createCanvas(prepared.width, prepared.height);
+    const ctx = canvas.getContext("2d");
+
+    const i = Math.round((atSec / request.durationSec) * (frames - 1));
+    drawEncodedFrame(ctx, prepared, request.motion, i, frames);
+    const image = new Uint8Array(canvas.toBuffer("image/png"));
+    return { image, logoApplied: prepared.logoApplied };
   }
 
   private async encodeFrames(
@@ -304,6 +336,16 @@ function ffmpegArgs(width: number, height: number, fps: number, outPath: string)
   ];
 }
 
+function drawEncodedFrame(
+  ctx: SKRSContext2D,
+  prepared: Prepared,
+  motion: MotionKind,
+  i: number,
+  frames: number,
+): void {
+  NodeCanvasCompositor.draw(ctx, prepared, i / (frames - 1), motion);
+}
+
 async function writeFrames(
   stdin: Writable,
   canvas: Canvas,
@@ -313,7 +355,7 @@ async function writeFrames(
   frames: number,
 ): Promise<void> {
   for (let i = 0; i < frames; i++) {
-    NodeCanvasCompositor.draw(ctx, prepared, i / (frames - 1), request.motion);
+    drawEncodedFrame(ctx, prepared, request.motion, i, frames);
     await writeWithBackpressure(stdin, Buffer.from(canvas.data()));
   }
   stdin.end();

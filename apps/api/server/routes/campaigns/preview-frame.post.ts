@@ -3,17 +3,25 @@ import {
   ANCHOR_VALUES,
   DISPLAY_SIZE_VALUES,
   LAYOUT_VALUES,
+  MAX_DURATION_SEC,
+  MIN_DURATION_SEC,
+  MOTION_KINDS,
   PreviewCreativeFrameUseCase,
   RATIO_VALUES,
   TONE_VALUES,
   type AspectRatioValue,
   type CampaignBrief,
   type DisplaySize,
+  type MotionKind,
   type PreviewCellSelection,
   type PreviewFrameCacheEntry,
 } from "@campaignfoundry/CampaignOrchestration";
 import { errorMessage } from "@campaignfoundry/shared";
-import { NodeCanvasCompositor, ProceduralBackgroundGenerator } from "@campaignfoundry/CreativeGeneration";
+import {
+  CanvasFfmpegVideoCompositor,
+  NodeCanvasCompositor,
+  ProceduralBackgroundGenerator,
+} from "@campaignfoundry/CreativeGeneration";
 import { parseBrief } from "../../lib/load-brief.js";
 import { LruCache } from "../../lib/preview-cache.js";
 import { platformZones } from "../../lib/platform-zones.js";
@@ -48,6 +56,7 @@ export const PREVIEW_FRAME_CACHE_ENTRIES = 32;
 /** The preview's background source, wired directly (D52 credit safety). Exported for the wiring test. */
 export const previewBackgroundGenerator = new ProceduralBackgroundGenerator();
 export const previewCompositor = new NodeCanvasCompositor(process.env.MESSAGE_FONT);
+export const previewVideoCompositor = new CanvasFfmpegVideoCompositor({ fontFamily: process.env.MESSAGE_FONT });
 export const previewFrameCache = new LruCache<PreviewFrameCacheEntry>(PREVIEW_FRAME_CACHE_ENTRIES);
 
 const sha256 = (input: string | Uint8Array): string =>
@@ -56,6 +65,7 @@ const sha256 = (input: string | Uint8Array): string =>
 const previewUseCase = new PreviewCreativeFrameUseCase({
   imageGenerator: previewBackgroundGenerator,
   compositor: previewCompositor,
+  videoCompositor: previewVideoCompositor,
   hash: sha256,
   platformSafeZones: platformZones,
   frameCache: previewFrameCache,
@@ -75,7 +85,7 @@ function parsePreviewCell(value: unknown): PreviewCellSelection {
     throw new Error("Preview cell must be an object.");
   }
   const cell = value as Record<string, unknown>;
-  const { productId, canvas, layout, tone, anchor } = cell;
+  const { productId, canvas, layout, tone, anchor, motion, durationSec, atSec } = cell;
   if (typeof productId !== "string") {
     throw new Error('Preview cell requires a string "productId".');
   }
@@ -103,6 +113,30 @@ function parsePreviewCell(value: unknown): PreviewCellSelection {
   if (anchor !== undefined && (typeof anchor !== "string" || !(ANCHOR_VALUES as readonly string[]).includes(anchor))) {
     throw new Error(`Preview cell anchor must be one of ${ANCHOR_VALUES.join(", ")}.`);
   }
+  const hasMotion = motion !== undefined;
+  const hasDuration = durationSec !== undefined;
+  const hasAtSec = atSec !== undefined;
+  if ((hasMotion || hasDuration || hasAtSec) && !(hasMotion && hasDuration && hasAtSec)) {
+    throw new Error("Preview cell must carry motion, durationSec and atSec together or not at all.");
+  }
+  if (hasMotion) {
+    if (typeof motion !== "string" || !(MOTION_KINDS as readonly string[]).includes(motion)) {
+      throw new Error(`Preview cell motion must be one of ${MOTION_KINDS.join(", ")}.`);
+    }
+    if (
+      typeof durationSec !== "number" ||
+      !Number.isFinite(durationSec) ||
+      durationSec < MIN_DURATION_SEC ||
+      durationSec > MAX_DURATION_SEC
+    ) {
+      throw new Error(
+        `Preview cell durationSec must be a finite number in [${MIN_DURATION_SEC}, ${MAX_DURATION_SEC}].`,
+      );
+    }
+    if (typeof atSec !== "number" || !Number.isFinite(atSec) || atSec < 0 || atSec > durationSec) {
+      throw new Error(`Preview cell atSec must be a finite number in [0, ${durationSec}].`);
+    }
+  }
   return {
     productId,
     canvas: hasRatio
@@ -111,6 +145,13 @@ function parsePreviewCell(value: unknown): PreviewCellSelection {
     layout: layout as PreviewCellSelection["layout"],
     tone: tone as PreviewCellSelection["tone"],
     ...(anchor !== undefined ? { anchor: anchor as PreviewCellSelection["anchor"] } : {}),
+    ...(hasMotion
+      ? {
+          motion: motion as MotionKind,
+          durationSec,
+          atSec,
+        }
+      : {}),
   };
 }
 

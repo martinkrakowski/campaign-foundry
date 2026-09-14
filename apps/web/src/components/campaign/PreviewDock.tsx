@@ -1,8 +1,8 @@
-import type { CSSProperties, ReactNode } from "react";
+import { useState, type CSSProperties, type ReactNode } from "react";
 import type { AspectRatioValue, CanvasSpec } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import { RATIO_VALUES } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import { DISPLAY_SIZE_VALUES } from "@campaignfoundry/CampaignOrchestration/display-sizes";
-import type { CampaignBrief, Style } from "@campaignfoundry/CampaignOrchestration";
+import { DEFAULT_DURATION_SEC, type CampaignBrief, type Style } from "@campaignfoundry/CampaignOrchestration";
 import type { MotionKind } from "@campaignfoundry/CampaignOrchestration/motion-kinds";
 import { PLATFORM_PROFILES } from "@campaignfoundry/Distribution/platform-profiles";
 import { CreativePreview, type CreativePreviewProps } from "@/components/campaign/CreativePreview";
@@ -173,6 +173,15 @@ export function PreviewPicture(props: {
  */
 export function PreviewDock(props: PreviewShowcaseProps): ReactNode {
   const spec = props.spec ?? derivePreviewSpec(props.platformId, props.ratio, props.brief?.output?.sizes);
+  const durationSec = props.brief?.variation?.axes?.duration?.[0] ?? DEFAULT_DURATION_SEC;
+  const [scrubSec, setScrubSec] = useState(0);
+  const [committedSec, setCommittedSec] = useState(0);
+  const hasMotion = props.motion !== undefined;
+
+  const handleCommit = (val: number) => {
+    setCommittedSec(val);
+  };
+
   return (
     <div className="flex min-w-0 flex-col gap-3">
       <Eyebrow as="p">{messages.previewLegend}</Eyebrow>
@@ -185,9 +194,33 @@ export function PreviewDock(props: PreviewShowcaseProps): ReactNode {
         primaryColor={props.primaryColor}
         headline={props.headline}
         motion={props.motion}
+        durationSec={hasMotion ? durationSec : undefined}
+        atSec={hasMotion ? committedSec : undefined}
         spec={spec}
         className="block h-auto w-full"
       />
+      {hasMotion ? (
+        <div className="flex items-center gap-2 px-1">
+          <input
+            type="range"
+            aria-label="Scrub preview"
+            min={0}
+            max={durationSec}
+            step="any"
+            value={scrubSec}
+            onChange={(e) => {
+              const val = Number(e.target.value);
+              setScrubSec(val);
+            }}
+            onPointerUp={(e) => handleCommit(Number(e.currentTarget.value))}
+            onMouseUp={(e) => handleCommit(Number(e.currentTarget.value))}
+            onTouchEnd={(e) => handleCommit(Number(e.currentTarget.value))}
+            onKeyUp={(e) => handleCommit(Number(e.currentTarget.value))}
+            onBlur={(e) => handleCommit(Number(e.currentTarget.value))}
+            className="h-1.5 min-w-0 flex-1 cursor-pointer appearance-none rounded-full bg-surface-2 accent-brand-primary"
+          />
+        </div>
+      ) : null}
       <div className="flex items-center gap-2">
         <PreviewSwatch primaryColor={props.primaryColor} />
         <PreviewCaption
