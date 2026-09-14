@@ -319,10 +319,17 @@ describe("isBriefTemplate layer props (L3b, D134)", () => {
   });
 
   test("refuses props on a kind that carries none, the empty object included", () => {
-    // Each layer under test sits on a type that accepts its kind, so the props
-    // verdict — not X11's `accepts` mirror — is what refuses it.
+    // `html` sits on a type that accepts it, so the props verdict — not X11's
+    // `accepts` mirror — is what refuses it there. `fill` is accepted by no
+    // creative type (D131), so the whole-template check refuses it for that
+    // reason alone; its props rule is asserted directly, or it goes untested.
     expect(withLayer({ id: "html", kind: "html", props: { alt: "x" } }, "image-html")).toBe(false);
     expect(withLayer({ id: "fill", kind: "fill", props: { alpha: 0.5 } })).toBe(false);
+    expect(layerPropsProblem("fill", { alpha: 0.5 })).toEqual({
+      path: "",
+      must: 'be absent for layer kind "fill"',
+      value: { alpha: 0.5 },
+    });
     // The empty object names no prop, but it is still props on a kind that
     // carries none: the "must be absent" verdict is reached before any
     // entries are walked.

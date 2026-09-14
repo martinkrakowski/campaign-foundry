@@ -137,6 +137,19 @@
         "empty-string id"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/brief-template.ts",
+      "before": "  fill: [],",
+      "after": "  fill: [\"alpha\"],",
+      "because": "The fill props rule must be asserted directly: fill is accepted by no creative type (D131), so after X11 the whole-template guard refuses a fill layer for that reason alone, and an isBriefTemplate assertion stayed green with fill allowed to carry alpha. layerPropsProblem(\"fill\", ...) is the only place that rule is observable.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/brief-template.test.ts"
+      ],
+      "verdict": "caught"
     }
   ]
 }
