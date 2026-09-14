@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "lane": "X15",
+  "mutations": [
+    {
+      "file": "apps/web/src/components/campaign/sections/IdentitySection.tsx",
+      "before": "        ...(mergedDescribedBy ? { \"aria-describedby\": mergedDescribedBy } : {}),",
+      "after": "        // mutated: aria-describedby dropped",
+      "because": "Field controls must attach aria-describedby naming hint and error elements so assistive technology announces guidance.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/sections/__tests__/field.test.tsx",
+        "-t",
+        "with a hint only"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/sections/IdentitySection.tsx",
+      "before": "  const invalid = error ? \"true\" : undefined;",
+      "after": "  const invalid = \"true\";",
+      "because": "aria-invalid must be set only when an error is present; setting it unconditionally marks valid fields as invalid to screen readers.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/sections/__tests__/field.test.tsx",
+        "-t",
+        "with a hint only"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
