@@ -288,10 +288,8 @@ and Qodo did not (§8.1 of the verification-budget plan).
 **Fix shape.** Verify the field in the guard — absent, or a string — the same way `videoPath` and
 `durationSec` are verified for motion rows.
 
-```premise X12
-# isPersistedAsset declares clickDestination but never checks it.
-! grep -q 'rec.clickDestination' apps/api/server/lib/report.ts
-```
+**X12 — shipped in this PR.** Its premise was retired when it landed; `plan:verify` no
+longer tracks it.
 
 ---
 

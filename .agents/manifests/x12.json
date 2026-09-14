@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "lane": "X12",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/report.ts",
+      "before": "  if (typeof rec.outputPath !== \"string\") return false;\n  if (rec.clickDestination !== undefined && typeof rec.clickDestination !== \"string\") return false;\n",
+      "after": "  if (typeof rec.outputPath !== \"string\") return false;\n",
+      "because": "The new check is the whole lane: remove it and a row carrying clickDestination as a number, null or object passes the type predicate, so the string the type promises is never verified and PackageForPlatformUseCase decides clickTag presence from a value the guard only believed.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "apps/api/server/lib/__tests__/report.test.ts",
+        "-t",
+        "clickDestination"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
