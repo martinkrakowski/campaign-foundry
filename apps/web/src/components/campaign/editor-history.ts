@@ -194,9 +194,9 @@ export function useEditorHistory(initial: EditorState): EditorHistory {
  * can flip. Ignored while the keystroke lands inside a native text field: the
  * field has its own undo and owns the chord there (the same `isTypingTarget`
  * the step walk defers to). An empty stack is a no-op inside the reducer, so
- * the shortcut needs no guard of its own. An open modal dialog owns the keyboard
- * the same way a field does: a chord landing inside `[role="dialog"]` /
- * `[aria-modal="true"]` is left to the dialog.
+ * the shortcut needs no guard of its own. While a modal dialog is open the page
+ * behind it is inert, so the chord is ignored whenever one is in the document —
+ * not only when it lands inside the dialog.
  */
 export function useHistoryKeys(
   history: Pick<EditorHistory, "undo" | "redo">,
@@ -210,13 +210,14 @@ export function useHistoryKeys(
       if (event.altKey) return;
       if (event.key.toLowerCase() !== "z") return;
       if (isTypingTarget(event.target)) return;
-      // An open modal owns the keyboard: focus sits on one of the dialog's own
-      // controls (a button, its fields), and ⌘Z there must not reach through the
-      // scrim and undo the draft underneath. The shared dialog shell marks itself
-      // `role="dialog"` with `aria-modal="true"` — either is the modal's word for
-      // "open here", so the guard accepts both. A non-Element target (a window-
-      // level dispatch) has no dialog ancestor and is not filtered.
-      if (event.target instanceof Element && event.target.closest('[role="dialog"], [aria-modal="true"]')) return;
+      // An open modal makes the page behind it inert: ⌘Z must not reach through
+      // the scrim and undo the draft underneath — wherever the chord lands. Checking
+      // only the event target missed a chord on the document body (focus drops there
+      // after a click on the scrim). Every modal in the app renders only while open
+      // and carries `aria-modal="true"` (dialog shell, command bar, model selector,
+      // mobile menu, grid preview), so its presence in the document is the signal.
+      // `role="dialog"` alone is not: a non-modal dialog would switch undo off.
+      if (document.querySelector('[aria-modal="true"]')) return;
       event.preventDefault();
       if (event.shiftKey) {
         actions.current.redo();

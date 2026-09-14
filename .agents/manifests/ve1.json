@@ -140,7 +140,7 @@
     },
     {
       "file": "apps/web/src/components/campaign/editor-history.ts",
-      "before": "      if (event.target instanceof Element && event.target.closest('[role=\"dialog\"], [aria-modal=\"true\"]')) return;",
+      "before": "      if (document.querySelector('[aria-modal=\"true\"]')) return;",
       "after": "      // VE1 dialog guard removed",
       "because": "Remove the modal-dialog guard from the chord handler: with a dialog open and focus on one of its buttons, ⌘Z reaches through the scrim and edits the brief behind it — the second reported bug, invisible to the typing-target check that was the only deferral before.",
       "command": [
@@ -152,6 +152,19 @@
         "apps/web/src/components/campaign/__tests__/editor-history.test.tsx",
         "-t",
         "⌘Z from a control inside an open modal dialog is left alone"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/editor-history.ts",
+      "before": "      if (document.querySelector('[aria-modal=\"true\"]')) return;",
+      "after": "      if (event.target instanceof Element && event.target.closest('[aria-modal=\"true\"]')) return;",
+      "because": "While a modal is open the page behind it is inert: the history shortcut must be ignored whenever an aria-modal element is in the document, not only when the chord lands inside it. A target-only check let ⌘Z on the document body (focus after a scrim click) undo the draft behind an open Save-as dialog.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx"
       ],
       "verdict": "caught"
     }
