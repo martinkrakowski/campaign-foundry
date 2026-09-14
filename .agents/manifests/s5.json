@@ -43,8 +43,8 @@
     },
     {
       "file": "tools/wave-status/lib/render.ts",
-      "before": "  const lines: string[] = [\n    `backlog (${scopeDesc}) — ${artifact.at} [${artifact.git.branch}@${headSha}]`,\n  ];",
-      "after": "  const lines: string[] = [\n    `backlog (${scopeDesc}) — ${artifact.at}`,\n  ];",
+      "before": "  const lines: string[] = [\n    `backlog (${scopeDesc}) — ${sanitize(artifact.at)} [${sanitize(artifact.git.branch)}@${headSha}]`,\n  ];",
+      "after": "  const lines: string[] = [\n    `backlog (${scopeDesc}) — ${sanitize(artifact.at)}`,\n  ];",
       "because": "Git branch and commit provenance pin the exact code revision against which the backlog was verified; dropping provenance detaches premise verdicts from source state. The render test pins the presence of branch and short SHA in the header.",
       "command": [
         "yarn",
@@ -95,7 +95,7 @@
     },
     {
       "file": "tools/wave-status/public/index.html",
-      "before": "        const isPartial = artifact.scope && artifact.scope.kind === \"partial\";",
+      "before": "        const isPartial = artifact.scope.kind === \"partial\";",
       "after": "        const isPartial = false;",
       "because": "On the browser dashboard, a partial run must be highlighted with the warning tone and labelled with plan counts; suppressing the partial flag leaves operators unaware that only a fraction of the backlog was verified. The page test verifies the partial run scope pill and warn styling.",
       "command": [
@@ -142,6 +142,97 @@
         "vitest",
         "run",
         "tools/wave-status/__tests__/charter.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/plan-verify/lib/verify.ts",
+      "before": "    } catch (err: unknown) {\n      const message = errorText(err);\n      results.push({\n        premise,\n        status: \"error\",\n        exitCode: 1,\n        output: message,\n        reason: message,\n      });\n    }",
+      "after": "    } catch (err: unknown) {\n      const message = errorText(err);\n      results.push({\n        premise,\n        status: \"stale\",\n        exitCode: 1,\n        output: message,\n        reason: message,\n      });\n    }",
+      "because": "An executor error is an infrastructure failure asserting no verdict; reporting it as stale wrongly instructs the orchestrator that the premise gap is closed and to retire a live lane. The verifier test asserts that thrown executor errors produce status: error.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "tools/plan-verify/lib/__tests__/verify.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/lib/collect.ts",
+      "before": "  const backlogPath = deps.planVerifyArtifactPath ?? artifactPathFor(process.env, root);",
+      "after": "  const backlogPath = deps.planVerifyArtifactPath ?? artifactPathFor(process.env);",
+      "because": "A wave scan using a selected root must locate its backlog artifact relative to that root; falling back to module-load process.env reads another workspace's backlog. The collect unit test asserts that default backlog path derivation targets the selected root.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "tools/wave-status/__tests__/collect.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/lib/render.ts",
+      "before": "      const reasonText = p.reason !== undefined && p.reason !== \"\" ? ` — ${sanitize(p.reason)}` : \"\";",
+      "after": "      const reasonText = p.reason !== undefined && p.reason !== \"\" ? ` — ${p.reason}` : \"\";",
+      "because": "Artifact premise failure reasons can carry terminal control sequences from subprocess output into the operator console; leaving them unsanitized allows bytes from disk to reprogram the terminal. The render test asserts that reason strings in terminal output have control bytes stripped.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "tools/wave-status/lib/__tests__/render.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/plan-verify/lib/artifact.ts",
+      "before": "    if (typeof rawItem.plan !== \"string\" || rawItem.plan === \"\") {\n      throw new Error(\"malformed artifact: premise entry missing plan\");\n    }",
+      "after": "    /* no premise plan validation */",
+      "because": "Coercing missing or non-string premise plans with String() turns undefined or null into valid-looking provenance records; invalid records must be refused so readBacklog marks them unknown. The artifact parser test asserts that missing, null or empty premise plans throw.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "tools/plan-verify/lib/__tests__/artifact.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/plan-verify/cli.ts",
+      "before": "export async function runCli(io: PlanVerifyIo): Promise<number> {\n  let branch = PROVENANCE_UNKNOWN;\n  let head = PROVENANCE_UNKNOWN;\n  try {\n    const b = (await io.git([\"rev-parse\", \"--abbrev-ref\", \"HEAD\"])).trim();\n    if (b !== \"\") branch = b;\n  } catch {\n    // unknown\n  }\n  try {\n    const h = (await io.git([\"rev-parse\", \"HEAD\"])).trim();\n    if (h !== \"\") head = h;\n  } catch {\n    // unknown\n  }\n\n  const isSubset = io.argv.length > 0;",
+      "after": "export async function runCli(io: PlanVerifyIo): Promise<number> {\n  const isSubset = io.argv.length > 0;",
+      "because": "Reading git provenance after premises finish allows concurrent git operations to attribute verdicts to a commit they never ran against. The cli test asserts that git branch and head are read before any premise executes.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "tools/plan-verify/__tests__/cli.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/plan-verify/lib/artifact.ts",
+      "before": "  await io.writeFile(tmp, contents, \"utf8\");\n  await io.rename(tmp, path);",
+      "after": "  await io.writeFile(path, contents, \"utf8\");",
+      "because": "Writing directly to the artifact path truncates the file in place, exposing concurrent readers to half-written JSON fragments. The atomic write test asserts that contents are written to a temporary sibling file and renamed into place.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "tools/plan-verify/lib/__tests__/artifact.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/public/index.html",
+      "before": "        const headSha = artifact.git.head.slice(0, 8);\n        const branch = artifact.git.branch;",
+      "after": "        const headSha = artifact.git ? artifact.git.head.slice(0, 8) : \"unknown\";\n        const branch = artifact.git ? artifact.git.branch : \"unknown\";",
+      "because": "The backlog page renderer must not maintain redundant defensive fallbacks for fields guaranteed by parseArtifact; the parser and page must enforce a single unified schema. The page test verifies that renderBacklog contains no defensive ternary fallbacks for git provenance.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "tools/wave-status/__tests__/page.test.ts"
       ],
       "verdict": "caught"
     }
