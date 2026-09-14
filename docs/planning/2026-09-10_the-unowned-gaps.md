@@ -316,3 +316,26 @@ recorded GraphQL answer, as the wave-status tooling tests `gh`.
 # merge-prs.sh never looks at review threads before merging.
 ! grep -qE 'isResolved|reviewThreads' scripts/merge-prs.sh
 ```
+
+---
+
+## 17. No platform accepts the HTML unit, so it is never packaged (X14)
+
+**Evidence.** `PackageForPlatformUseCase` packages an `html` asset only for a profile whose `formats` include
+`"html"` (`wantsHtml`, `PackageForPlatformUseCase.use-case.ts:142`). All ten profiles in
+`PlatformProfile.vo.ts` declare `["static"]` or `["motion"]` — including the three display profiles,
+`google-display`, `meta-audience-network` and `display-web`. `"html"` appears only in the `PlatformFormat`
+union and two helpers.
+
+**Consequence.** HL4 (#377) generates the HTML unit, wires `clickTag`, and adds packaging checks for its
+raster fallback, its `clickTag` and its byte budget — and **no production path reaches them**, because no
+platform ever selects an `html` row. It also leaves HL5's live weight meter (HL-D6) with no `maxBytes` to read.
+
+**This needs an owner decision, not a lane default.** Which placements accept HTML5 display units, and each
+one's byte budget, are ad-spec facts; HL-D6 already says the budget is per placement and must not be a single
+constant.
+
+```premise X14
+# No platform profile declares the html format.
+! grep -qE 'formats: \[[^]]*"html"' packages/Distribution/src/domain/value-objects/PlatformProfile.vo.ts
+```
