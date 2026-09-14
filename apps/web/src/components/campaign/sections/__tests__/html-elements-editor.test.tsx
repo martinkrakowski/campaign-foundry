@@ -81,6 +81,28 @@ function Harness({ initial }: { initial: EditorState }) {
   return <TemplateSection state={state} dispatch={dispatch} errors={{}} />;
 }
 
+/**
+ * The element editor alone, driven by the real reducer, with the frame the STATE
+ * holds spelled out beside it. A typing test has to read both: the string in the
+ * box is what the user sees, but only the state says what was committed — a
+ * value the box shows and the draft never sent would otherwise pass.
+ */
+function FrameHarness({ initial }: { initial: EditorState }) {
+  const [state, dispatch] = useReducer(editorReducer, initial);
+  const elements =
+    state.template.layers.find((layer) => layer.id === "html")?.elements ?? [];
+  return (
+    <>
+      <HtmlElementsEditor
+        layerId="html"
+        elements={elements}
+        dispatch={dispatch}
+      />
+      <span data-testid="stored-frame-x">{String(elements[0]?.frame.x)}</span>
+    </>
+  );
+}
+
 describe("HtmlElementsEditor — where it appears (HL5a)", () => {
   test("the html layer's row carries the element editor; no other row does", () => {
     render(<TemplateSection state={htmlState()} dispatch={vi.fn()} errors={{}} />);
@@ -245,6 +267,35 @@ describe("HtmlElementsEditor — one element's controls (HL5a)", () => {
         (option) => option.textContent,
       ),
     ).toEqual(["Top", "Middle", "Bottom"]);
+  });
+
+  test("a frame input is named by what the field means, never by its schema key", () => {
+    render(
+      <HtmlElementsEditor
+        layerId="html"
+        elements={[text]}
+        dispatch={vi.fn()}
+      />,
+    );
+    const words = [
+      "horizontal position",
+      "vertical position",
+      "width",
+      "height",
+    ];
+    for (const word of words) {
+      expect(
+        screen.getByRole("spinbutton", { name: `Element 1 ${word}` }),
+      ).toBeTruthy();
+    }
+    // The keys are for code: `x` on a label reads as a letter, not a place.
+    for (const field of ["x", "y", "w", "h"] as const) {
+      expect(
+        screen.queryByRole("spinbutton", {
+          name: `Element 1 ${field}`,
+        }),
+      ).toBeNull();
+    }
   });
 
   test("typing in the copy input dispatches setHtmlElementText with what was typed", () => {
@@ -466,6 +517,62 @@ describe("HtmlElementsEditor — move and remove (HL5a)", () => {
     );
     expect(valueOf(copy(1))).toBe("Shop now");
     expect(valueOf(copy(2))).toBe("Stay wild");
+  });
+});
+
+describe("HtmlElementsEditor — a frame value is typed one digit at a time (HL5a)", () => {
+  /** The frame's `x` in the state the reducer holds — the value a Save would write. */
+  const storedX = () =>
+    document.querySelector('[data-testid="stored-frame-x"]')?.textContent;
+
+  const xInput = () =>
+    screen.getByRole("spinbutton", {
+      name: messages.htmlElementFrameLabel(1, "x"),
+    });
+
+  test("a decimal fraction can be typed digit by digit: 0.25 reaches the state", async () => {
+    const user = userEvent.setup();
+    render(<FrameHarness initial={withElements(text)} />);
+    await user.clear(xInput());
+    await user.type(xInput(), "0.25");
+    expect(valueOf(xInput())).toBe("0.25");
+    expect(storedX()).toBe("0.25");
+  });
+
+  test("clearing the field commits nothing — never a zero the user did not type", async () => {
+    const user = userEvent.setup();
+    render(<FrameHarness initial={withElements(text)} />);
+    expect(storedX()).toBe("0.1");
+    await user.clear(xInput());
+    await user.tab();
+    // The box was emptied and left: the stored frame is the one it had, and the
+    // box shows it again — an empty field is a state of the box, not a number.
+    expect(storedX()).toBe("0.1");
+    expect(valueOf(xInput())).toBe("0.1");
+  });
+
+  test("leaving the field shows the stored, clamped value — 1.5 was stored as 1", async () => {
+    const user = userEvent.setup();
+    render(<FrameHarness initial={withElements(text)} />);
+    await user.clear(xInput());
+    await user.type(xInput(), "1.5");
+    // While the caret is in the box the user's own characters are on screen…
+    expect(valueOf(xInput())).toBe("1.5");
+    await user.tab();
+    // …and once it leaves, the number the state clamped to (D130).
+    expect(storedX()).toBe("1");
+    expect(valueOf(xInput())).toBe("1");
+  });
+
+  test("a half-typed number is not a number — '1e' commits nothing", async () => {
+    const user = userEvent.setup();
+    render(<FrameHarness initial={withElements(text)} />);
+    await user.clear(xInput());
+    await user.type(xInput(), "1e");
+    expect(storedX()).toBe("0.1");
+    expect(valueOf(xInput())).toBe("1e");
+    await user.tab();
+    expect(valueOf(xInput())).toBe("0.1");
   });
 });
 
