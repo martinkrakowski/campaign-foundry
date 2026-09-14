@@ -198,13 +198,13 @@ export class PreviewCreativeFrameUseCase {
       }
       if (
         typeof durationSec !== "number" ||
-        !Number.isFinite(durationSec) ||
+        !Number.isInteger(durationSec) ||
         durationSec < MIN_DURATION_SEC ||
         durationSec > MAX_DURATION_SEC
       ) {
         return err(
           new Error(
-            `Preview cell durationSec must be a finite number in [${MIN_DURATION_SEC}, ${MAX_DURATION_SEC}].`,
+            `Preview cell durationSec must be an integer in [${MIN_DURATION_SEC}, ${MAX_DURATION_SEC}].`,
           ),
         );
       }
