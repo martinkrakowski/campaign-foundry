@@ -724,7 +724,7 @@ export function axisProductSize(state: EditorState): number {
  */
 function withCountClamp(state: EditorState): EditorState {
   const axisMax = axisProductSize(state);
-  const count = Number.parseInt(state.variation.count, 10) || 0;
+  const count = parsePolicyInteger(state.variation.count) ?? 0;
   if (count > axisMax) {
     return {
       ...state,
@@ -2071,6 +2071,23 @@ export function isDefaultOutput(state: EditorState): boolean {
   );
 }
 
+/**
+ * X18: the one parser for the free-typed policy integers (count, seed,
+ * minDistance, perProduct, perRatio). A draft means an integer only if it is
+ * a plain digit string (optionally signed, optionally with an exponent —
+ * `1e5` means 100000, which the validators already accepted); decimal form
+ * (`42.0`), trailing garbage (`12abc`) and blank mean nothing and return
+ * `undefined`. Validators and `toBrief` share it so the value validation
+ * accepts is exactly the value the save writes — previously `Number(value)`
+ * on one side and `parseInt(value, 10)` on the other saved `1e5` as `1`.
+ */
+export function parsePolicyInteger(value: string): number | undefined {
+  const trimmed = value.trim();
+  if (trimmed === "" || !/^[+-]?\d+(e[+-]?\d+)?$/i.test(trimmed)) return undefined;
+  const num = Number(trimmed);
+  return Number.isInteger(num) ? num : undefined;
+}
+
 export function toBrief(state: EditorState): CampaignBrief {
   // D99: a classic brief cannot request the motion format — the run paths
   // refuse the combination every time, because the classic product × ratio ×
@@ -2169,16 +2186,19 @@ export function toBrief(state: EditorState): CampaignBrief {
       ? { ...withTreatments, clickDestination: destination }
       : withTreatments;
   }
-  const count = parseInt(state.variation.count, 10) || 0;
-  const seed = parseInt(state.variation.seed, 10);
-  const minDistance = parseInt(state.variation.minDistance, 10);
-  const perProduct = parseInt(state.variation.perProduct, 10);
-  const perRatio = parseInt(state.variation.perRatio, 10);
-  // Build the object first and drop it when nothing survives: blank inputs parse to NaN,
-  // which is neither > 0 nor === 0, and would otherwise emit an empty `coverage: {}`.
+  // X18: every policy integer goes through the validator's own parser, so a
+  // draft that passes validation saves exactly the number it was validated as.
+  const count = parsePolicyInteger(state.variation.count) ?? 0;
+  const seed = parsePolicyInteger(state.variation.seed);
+  const minDistance = parsePolicyInteger(state.variation.minDistance);
+  const perProduct = parsePolicyInteger(state.variation.perProduct);
+  const perRatio = parsePolicyInteger(state.variation.perRatio);
+  // Build the object first and drop it when nothing survives: blank inputs parse to
+  // undefined, which is neither > 0 nor === 0, and would otherwise emit an empty
+  // `coverage: {}`.
   const coverageFields = {
-    ...(perProduct > 0 ? { perProduct } : {}),
-    ...(perRatio > 0 ? { perRatio } : {}),
+    ...(perProduct !== undefined && perProduct > 0 ? { perProduct } : {}),
+    ...(perRatio !== undefined && perRatio > 0 ? { perRatio } : {}),
   };
   const coverage =
     Object.keys(coverageFields).length > 0
@@ -2212,8 +2232,8 @@ export function toBrief(state: EditorState): CampaignBrief {
     ...withLocalized,
     variation: {
       count,
-      ...(isFinite(seed) ? { seed } : {}),
-      ...(isFinite(minDistance) ? { minDistance } : {}),
+      ...(seed !== undefined ? { seed } : {}),
+      ...(minDistance !== undefined ? { minDistance } : {}),
       ...(coverage !== undefined ? { coverage } : {}),
       axes,
     },
@@ -2943,7 +2963,7 @@ export function canPlan(state: EditorState): boolean {
     state.mode === "variation" &&
     state.briefId.length > 0 &&
     state.products.some((product) => product.id.length > 0) &&
-    parseInt(state.variation.count, 10) >= 1
+    (parsePolicyInteger(state.variation.count) ?? 0) >= 1
   );
 }
 
