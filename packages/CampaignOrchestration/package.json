@@ -62,6 +62,10 @@
       "types": "./src/domain/value-objects/click-destination.ts",
       "default": "./src/domain/value-objects/click-destination.ts"
     },
+    "./html-element": {
+      "types": "./src/domain/value-objects/html-element.ts",
+      "default": "./src/domain/value-objects/html-element.ts"
+    },
     "./motion-kinds": {
       "types": "./src/domain/value-objects/MotionKind.vo.ts",
       "default": "./src/domain/value-objects/MotionKind.vo.ts"

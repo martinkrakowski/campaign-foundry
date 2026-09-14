@@ -1223,3 +1223,91 @@ export function clickDestinationInvalid(problem: { readonly must: string }): str
   return `That is not a destination we can use — it must ${problem.must}.`;
 }
 
+/* ── The html layer's elements (HL5a, HL-D1, HL-D2) ──────────────────────── */
+
+/** The element list's name, said above it and used as its accessible name. */
+export const htmlElementsLabel = "Elements";
+
+/** Said while the layer holds none — the offer below it is the next step. */
+export const htmlElementsEmpty = "No elements yet — add one below.";
+
+/** The add row's group name. */
+export const htmlElementAddLabel = "Add an element";
+
+/**
+ * An add control's description (D18): the control's accessible name is the raw
+ * kind id — `text`, `button`, `image` — the way a layer's add control names
+ * itself by its kind; the words live here. `kindName` is a display label
+ * (`htmlElementKindLabel`), never a raw id.
+ */
+export function htmlElementAddDescription(kindName: string): string {
+  return `Add a ${kindName.toLowerCase()} element`;
+}
+
+/**
+ * An element row's accessible name: its position in the list, one-based. An
+ * element has no id of its own, so the position it holds in the layer is the
+ * identity every control on the row is named by — the same reason a beat's
+ * controls name themselves by position.
+ */
+export function htmlElementName(position: number): string {
+  return `Element ${position}`;
+}
+
+/** A move-up control's description: up is toward the start of the list. */
+export function htmlElementMoveUpDescription(position: number): string {
+  return `Move element ${position} up`;
+}
+
+/** A move-down control's description: down is toward the end of the list. */
+export function htmlElementMoveDownDescription(position: number): string {
+  return `Move element ${position} down`;
+}
+
+/** A remove control's description — the same contract as the row's other controls. */
+export function htmlElementRemoveDescription(position: number): string {
+  return `Remove element ${position}`;
+}
+
+/**
+ * The copy input's label — carried by the `text` and `button` kinds only. An
+ * `image` element has no copy, so it carries no input rather than a disabled
+ * one (DESIGN.md §1.5).
+ */
+export function htmlElementTextLabel(position: number): string {
+  return `Element ${position} text`;
+}
+
+/** A frame input's label; `field` is the frame's own name (`x`, `y`, `w`, `h`). */
+export function htmlElementFrameLabel(position: number, field: string): string {
+  return `Element ${position} ${field}`;
+}
+
+/** The anchor select's label. */
+export function htmlElementAnchorLabel(position: number): string {
+  return `Element ${position} anchor`;
+}
+
+/**
+ * The copy a new element starts with (HL5a): something a person can see and
+ * replace, never an empty field — an element with nothing to say is an element
+ * neither renderer can place. Only the `text` and `button` kinds ask: an
+ * `image` element carries no copy at all, and the domain refuses it one.
+ */
+export function htmlElementDefaultCopy(kind: string): string {
+  return kind === "button" ? "Shop now" : "Your message here";
+}
+
+/**
+ * Display words for an element kind (HL5a, D18) — the LAYER_KIND_META pattern
+ * one file up. The kind's raw id stays the accessible name of the control that
+ * offers it; these are the words the eye reads and the description carries. An
+ * unknown kind reads as itself rather than as an empty label.
+ */
+export function htmlElementKindLabel(kind: string): string {
+  if (kind === "text") return "Text";
+  if (kind === "button") return "Button";
+  if (kind === "image") return "Image";
+  return kind;
+}
+

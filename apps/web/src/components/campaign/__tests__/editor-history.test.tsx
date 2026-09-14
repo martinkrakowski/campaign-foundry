@@ -1,6 +1,7 @@
 import { describe, test, expect, vi, afterEach } from "vitest";
 import { renderHook, act, fireEvent } from "@testing-library/react";
 import type { CopyPool } from "@campaignfoundry/CampaignOrchestration";
+import { CANONICAL_TEMPLATES } from "@campaignfoundry/CampaignOrchestration/creative-templates";
 import {
   initialEditorState,
   blankBrief,
@@ -237,6 +238,53 @@ describe("useEditorHistory — the layer toggle is an ordinary undoable edit (L9
     // The last enabled instance of a required kind (MP-D4): the reducer's
     // no-op is not an edit, so the stack stays empty.
     send(hook, { type: "setLayerEnabled", id: "image", enabled: false });
+    expect(hook.result.current.canUndo).toBe(false);
+  });
+});
+
+describe("useEditorHistory — an html element edit is an ordinary undoable edit (HL5a, VE1)", () => {
+  // The canonical `image-html` template's own layer list: image, html, logo.
+  const CANONICAL = CANONICAL_TEMPLATES["image-html"];
+  const renderHtml = () =>
+    renderHook(() =>
+      useEditorHistory({
+        ...initialEditorState(),
+        template: {
+          id: CANONICAL.id,
+          version: CANONICAL.version,
+          creativeType: CANONICAL.creativeType,
+          unit: CANONICAL.unit,
+          layers: CANONICAL.layers,
+        },
+      }),
+    );
+
+  test("undo after adding an element restores the template the add replaced, exactly", () => {
+    const hook = renderHtml();
+    const before = hook.result.current.state.template;
+    send(hook, { type: "addHtmlElement", layerId: "html", kind: "text" });
+    expect(
+      hook.result.current.state.template.layers.find(
+        (layer) => layer.id === "html",
+      )?.elements,
+    ).toHaveLength(1);
+    act(() => hook.result.current.undo());
+    // `toStrictEqual`, so an `elements: undefined` the add might have left
+    // behind would fail here — undo restores the layer objects, not their shape.
+    expect(hook.result.current.state.template).toStrictEqual(before);
+    act(() => hook.result.current.redo());
+    expect(
+      hook.result.current.state.template.layers.find(
+        (layer) => layer.id === "html",
+      )?.elements,
+    ).toHaveLength(1);
+  });
+
+  test("a refused element edit leaves nothing to undo", () => {
+    const hook = renderHtml();
+    // A layer that is not of kind `html` carries no elements, so the action is
+    // a no-op — an edit that never happened is not an undo step.
+    send(hook, { type: "addHtmlElement", layerId: "logo", kind: "text" });
     expect(hook.result.current.canUndo).toBe(false);
   });
 });
