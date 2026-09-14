@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { SWEEP_COMMAND, runCli, type SweepCliIo } from "../cli.js";
+import { SWEEP_COMMAND, ghChildEnv, runCli, type SweepCliIo } from "../cli.js";
 
 const ok = (over: Partial<SweepCliIo> = {}): { io: SweepCliIo; log: string[]; err: string[] } => {
   const log: string[] = [];
@@ -320,3 +320,13 @@ describe("runCli", () => {
     expect(err.join(" ")).toContain("string failure");
   });
 });
+
+describe("ghChildEnv", () => {
+  test("drops FORCE_COLOR so gh writes JSON that JSON.parse can read", () => {
+    const env = ghChildEnv({ FORCE_COLOR: "1", CLICOLOR_FORCE: "1", PATH: "/bin" });
+    expect(env.FORCE_COLOR).toBeUndefined();
+    expect(env.CLICOLOR_FORCE).toBeUndefined();
+    expect(env.PATH).toBe("/bin");
+  });
+});
+
