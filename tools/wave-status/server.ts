@@ -94,7 +94,7 @@ export interface StartOptions {
    * Tests inject `gh` (and wrap `open`) here; `collect` still wins when set.
    */
   readonly deps?: CollectDeps;
-  /** The slow poll that catches `gh`-only changes; `fs.watch` covers the rest. */
+  /** The slow poll that catches `gh`-only changes and new lane files; `fs.watch` covers writes to the rest. */
   readonly pollMs?: number;
   /** Overridable so tests can point at a missing page. */
   readonly indexHtmlPath?: string;
@@ -138,6 +138,7 @@ export async function startServer(options: StartOptions): Promise<ServerHandle> 
   let refreshRunning = false;
   let refreshQueued = false;
   let queuedRefreshPr = false;
+  let closed = false;
   let prCache: PrCorpus | undefined;
 
   /**
@@ -194,16 +195,49 @@ export async function startServer(options: StartOptions): Promise<ServerHandle> 
   };
 
   const scanRoots = resolveScanRoots(options.root, options.legacyRoots);
+  /**
+   * Arm one watcher per lane artefact (`*.log`, `events.jsonl`) under each
+   * `wave*` directory — on the files, never on the directories. X8: on macOS a
+   * directory `fs.watch` is FSEvents-backed and its native `close()` flushes
+   * the watcher's pending event batch synchronously; under a backlogged
+   * `fseventsd` (a full suite hammering the temp dir) that flush measured
+   * 2–9 s, and it hung the awaited `close()` behind it. A file watcher is
+   * kqueue-backed and closes in ~0 ms. The cost of the narrower scope: a lane
+   * log created after startup is armed by the next poll tick, not the instant
+   * it appears, and a file replaced under a new inode re-arms the same way.
+   * Listings go through `deps.readdir` so a test can hold one in flight across
+   * a close.
+   */
   const syncWatchers = async (): Promise<void> => {
     try {
-      const names = await readdir(options.root);
+      const names = await deps.readdir(options.root);
       for (const name of names) {
-        if (!name.startsWith("wave") || watched.has(name)) continue;
-        watched.add(name);
-        watchers.push(watchPath(join(options.root, name), () => requestRefresh(false)));
+        if (!name.startsWith("wave")) continue;
+        const dir = join(options.root, name);
+        let files: readonly string[];
+        try {
+          files = await deps.readdir(dir);
+        } catch {
+          continue; // the wave dir vanished mid-listing; the next tick retries
+        }
+        // close() may have run while a listing was in flight: never arm a
+        // watcher after the shutdown has already closed the set it joins.
+        if (closed) return;
+        for (const file of files) {
+          if (!file.endsWith(".log") && !file.endsWith(".jsonl")) continue;
+          const path = join(dir, file);
+          if (watched.has(path)) continue;
+          watched.add(path);
+          watchers.push(
+            watchPath(path, () => {
+              // A queued fs event must not resurrect collection after close.
+              if (!closed) requestRefresh(false);
+            }),
+          );
+        }
       }
     } catch {
-      // No wave directories (yet); the poll picks them up.
+      // No wave log root (yet); the poll picks it up.
     }
   };
 
@@ -268,12 +302,23 @@ export async function startServer(options: StartOptions): Promise<ServerHandle> 
   }, options.pollMs ?? DEFAULT_POLL_MS);
   timer.unref();
 
+  /**
+   * The one shutdown both paths run (X8): stop the timer, refuse any further
+   * arming or refreshing, close every watcher, and hand back. It is
+   * synchronous by construction — the awaited half of `close()` is only ever
+   * the HTTP server, whose teardown has a bound.
+   */
+  const shutdown = (): void => {
+    closed = true;
+    clearInterval(timer);
+    for (const watcher of watchers) watcher.close();
+  };
+
   const server = createServer((req, res) => void handle(req, res));
   try {
     await listen(server, options.port);
   } catch (error) {
-    clearInterval(timer);
-    for (const watcher of watchers) watcher.close();
+    shutdown();
     server.close();
     throw error;
   }
@@ -284,8 +329,7 @@ export async function startServer(options: StartOptions): Promise<ServerHandle> 
     port: address.port,
     url: `http://127.0.0.1:${address.port}`,
     close: async () => {
-      clearInterval(timer);
-      for (const watcher of watchers) watcher.close();
+      shutdown();
       for (const client of clients) client.end();
       clients.clear();
       await new Promise<void>((resolve) => {
