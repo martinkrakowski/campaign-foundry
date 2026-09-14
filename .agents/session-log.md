@@ -5026,3 +5026,4 @@ X19 manifest (2 mutations, both caught). Full gate green, 100 % coverage.
   counters. plan:verify: 12 premises hold. mutate:verify x20.json: 4/4 caught.
 
 - 2026-09-14 X18 (implementer): one policy-integer parser () now backs both 's gates and //;  saves as 100000, / are refused; branch feat/x18-policy-number-parsing, manifest .agents/manifests/x18.json.
+- 2026-09-14 X18 (implementer): one policy-integer parser (`parsePolicyInteger`) now backs both `validatePolicy`'s gates and `toBrief`/`withCountClamp`/`canPlan`; `1e5` saves as 100000, `42.0`/`12abc` are refused; branch feat/x18-policy-number-parsing, manifest .agents/manifests/x18.json.
