@@ -1295,6 +1295,174 @@ describe("the server over real HTTP", () => {
     }
   });
 
+  test("a refresh queued behind an in-flight one does not run after close()", async () => {
+    const root = await makeFixture();
+    let blocked = false;
+    let release = (): void => undefined;
+    let gate = Promise.resolve();
+    const collect = vi.fn(async () => {
+      if (blocked) await gate;
+      return statusAt(0);
+    });
+    const listeners: Array<(eventType?: string) => void> = [];
+    const handle = await start({
+      port: 0,
+      root,
+      collect,
+      pollMs: 3_600_000,
+      watch: (_path, listener) => {
+        listeners.push(listener);
+        return {
+          close(): void {
+            /* the test owns the lifetime */
+          },
+        };
+      },
+    });
+    // The startup collection is the first; `start()` awaits it before returning.
+    const atStart = collect.mock.calls.length;
+    expect(atStart).toBe(1);
+
+    // Put one refresh in flight, then queue a second behind it in the same tick.
+    gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    blocked = true;
+    listeners[0]?.();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    listeners[1]?.();
+    expect(collect.mock.calls.length).toBe(atStart + 1);
+
+    // Close while the first is still in flight; the queued one must never run.
+    await handle.close();
+    handles.pop();
+    release();
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    expect(collect.mock.calls.length).toBe(atStart + 1);
+  });
+
+  test("a watcher emitting error is caught and its path is re-armed on the next tick", async () => {
+    const root = await makeFixture();
+    const target = join(root, "waveT", "t1.log");
+    const armed: string[] = [];
+    const errors: Array<() => void> = [];
+    const closed: string[] = [];
+    const handle = await start({
+      port: 0,
+      root,
+      collect: async () => statusAt(0),
+      pollMs: 20,
+      watch: (path, _listener, onError) => {
+        if (path === target) {
+          armed.push(path);
+          errors.push(onError);
+          return { close: () => closed.push(path) };
+        }
+        return {
+          close(): void {
+            /* the other lanes are not the subject here */
+          },
+        };
+      },
+    });
+    expect(armed).toEqual([target]);
+    const index = armed.indexOf(target);
+
+    // An `error` event with no listener throws out of the EventEmitter; the
+    // server must absorb it and drop this watcher rather than fall over.
+    expect(() => errors[index]?.()).not.toThrow();
+    expect(closed).toContain(target);
+
+    // The path was forgotten, so the next poll tick re-arms the current file.
+    const deadline = Date.now() + 2_000;
+    while (armed.filter((path) => path === target).length < 2) {
+      if (Date.now() > deadline) {
+        throw new Error(`the errored watcher never re-armed ${target}; armed ${armed.length}x`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    await handle.close();
+    handles.pop();
+  });
+
+  test("a watch that throws for one file still arms the others and retries it next tick", async () => {
+    const root = await makeFixture();
+    const vanishing = join(root, "waveT", "gate-t1.log");
+    const armed: string[] = [];
+    let throwOnce = true;
+    const handle = await start({
+      port: 0,
+      root,
+      collect: async () => statusAt(0),
+      pollMs: 20,
+      watch: (path) => {
+        if (path === vanishing && throwOnce) {
+          throwOnce = false;
+          throw new Error(`ENOENT: ${path} vanished between readdir and watch`);
+        }
+        armed.push(path);
+        return {
+          close(): void {
+            /* the test owns the lifetime */
+          },
+        };
+      },
+    });
+    // One vanished watch must not abort the tick: every other lane file armed.
+    expect(armed).toContain(join(root, "waveT", "t1.log"));
+    expect(armed).toContain(join(root, "waveT", "events.jsonl"));
+    expect(armed).toContain(join(root, "waveU", "u2.log"));
+    // The failing path is not marked watched, so it is not silently skipped.
+    expect(armed).not.toContain(vanishing);
+
+    // A later tick (the throw is spent now) re-lists and arms the vanished file.
+    const deadline = Date.now() + 2_000;
+    while (!armed.includes(vanishing)) {
+      if (Date.now() > deadline) {
+        throw new Error(`the vanished file was never retried; have ${armed.join(", ")}`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    await handle.close();
+    handles.pop();
+  });
+
+  test("a watcher that reports rename is closed and its path is re-armed next tick", async () => {
+    const root = await makeFixture();
+    const target = join(root, "waveT", "t1.log");
+    const armed: string[] = [];
+    const closed: string[] = [];
+    const changes = new Map<string, (eventType?: string) => void>();
+    const handle = await start({
+      port: 0,
+      root,
+      collect: async () => statusAt(0),
+      pollMs: 20,
+      watch: (path, listener) => {
+        armed.push(path);
+        changes.set(path, listener);
+        return { close: () => closed.push(path) };
+      },
+    });
+    expect(armed.filter((path) => path === target)).toHaveLength(1);
+
+    // The lane log is replaced at the same path (a new inode): the watcher
+    // reports `rename`, so the dead watcher is closed and the path forgotten.
+    changes.get(target)?.("rename");
+    expect(closed).toContain(target);
+
+    // The path was forgotten, so the next poll tick arms the current file.
+    const deadline = Date.now() + 2_000;
+    while (armed.filter((path) => path === target).length < 2) {
+      if (Date.now() > deadline) {
+        throw new Error(`rename never re-armed ${target}; armed ${armed.length}x`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    await handle.close();
+    handles.pop();
+  });
+
   test("overlapping watch ticks still push the latest status", async () => {
     const root = await makeFixture();
     let version = 0;
