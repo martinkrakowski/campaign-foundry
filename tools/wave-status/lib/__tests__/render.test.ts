@@ -469,4 +469,39 @@ describe("renderStatus — backlog panel", () => {
     expect(out).toContain("\x1b[31mstale\x1b[0m");
     expect(out).toContain("\x1b[33mtimed-out\x1b[0m");
   });
+
+  test("artifact values in terminal output are sanitized against control bytes", () => {
+    const maliciousArtifact = {
+      version: 1,
+      at: "2026-09-13T12:00:00.000Z\x1b[2J",
+      git: {
+        branch: "feat/s5\x07-bad",
+        head: "0a1b2c3d\x1b[31m4e5f60718293a4b5c6d7e8f901234567",
+      },
+      scope: { kind: "full" as const },
+      plans: ["docs/planning/a.md"],
+      premises: [
+        {
+          lane: "W1\x1b[1A",
+          plan: "docs/p\x00lan.md",
+          status: "stale" as const,
+          reason: "gap closed\x1b[31m exploit",
+        },
+      ],
+    };
+    const status: WaveStatus = {
+      generatedAt: TS,
+      waves: [],
+      backlog: { state: "recorded", artifact: maliciousArtifact },
+    };
+    const out = renderStatus(status, { color: false });
+    expect(out).not.toContain("\x1b[2J");
+    expect(out).not.toContain("\x07");
+    expect(out).not.toContain("\x1b[31m");
+    expect(out).not.toContain("\x1b[1A");
+    expect(out).not.toContain("\x00");
+    expect(out).toContain("W1 (docs/plan.md): stale — gap closed exploit");
+    expect(out).toContain("feat/s5-bad");
+    expect(out).toContain("2026-09-13T12:00:00.000Z");
+  });
 });
