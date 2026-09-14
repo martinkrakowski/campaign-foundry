@@ -41,6 +41,36 @@ const ok = (over: Partial<SweepCliIo> = {}): { io: SweepCliIo; log: string[]; er
   };
 };
 
+/** `sweep gate`: the PR with no unresolved threads, on the head it was verified on. */
+const okGate = (over: Partial<SweepCliIo> = {}): { io: SweepCliIo; log: string[]; err: string[] } => {
+  const log: string[] = [];
+  const err: string[] = [];
+  return {
+    log,
+    err,
+    io: {
+      argv: ["gate", "--pr", "361", "--sha", "abc1234"],
+      log: (text) => log.push(text),
+      logError: (text) => err.push(text),
+      readFile: async () => "",
+      gh: async (args) =>
+        args[0] === "pr"
+          ? "abc1234\n"
+          : JSON.stringify({
+              data: {
+                repository: {
+                  pullRequest: {
+                    id: "PR_I_1",
+                    reviewThreads: { nodes: [{ id: "PRRT_a", isResolved: true }] },
+                  },
+                },
+              },
+            }),
+      ...over,
+    },
+  };
+};
+
 describe("runCli", () => {
   test("only the `threads` verb exists", async () => {
     const { io, err } = ok({ argv: ["resolve", "--pr", "1"] });
@@ -216,6 +246,51 @@ describe("runCli", () => {
     });
     expect(await runCli(io)).toBe(1);
     expect(err.join(" ")).toContain("HTTP 401");
+  });
+
+  test("`gate` exits 0 and says the merge condition is met", async () => {
+    const { io, log } = okGate();
+    expect(await runCli(io)).toBe(0);
+    expect(log.join("\n")).toContain("merge condition met");
+    expect(log.join("\n")).toContain("PR #361");
+  });
+
+  test("`gate` exits 1 and lists every reason when the condition is unmet", async () => {
+    const { io, err, log } = okGate({
+      argv: ["gate", "--pr", "361", "--sha", "abc1234"],
+      gh: async (args) =>
+        args[0] === "pr"
+          ? "deadbeef\n"
+          : JSON.stringify({
+              data: {
+                repository: {
+                  pullRequest: {
+                    id: "PR_I_1",
+                    reviewThreads: { nodes: [{ id: "PRRT_a", isResolved: false }] },
+                  },
+                },
+              },
+            }),
+    });
+    expect(await runCli(io)).toBe(1);
+    expect(err.join("\n")).toContain("refusing to merge PR #361");
+    expect(err.join("\n")).toContain("PRRT_a");
+    expect(err.join("\n")).toContain("deadbeef");
+    expect(log.join("\n")).not.toContain("merge condition met");
+  });
+
+  test("`gate` with a bad command line exits 2 before any gh call", async () => {
+    let ghCalls = 0;
+    const { io, err } = okGate({
+      argv: ["gate", "--pr", "361"],
+      gh: async (args) => {
+        ghCalls += 1;
+        return args[0] === "pr" ? "abc1234\n" : "{}";
+      },
+    });
+    expect(await runCli(io)).toBe(2);
+    expect(ghCalls).toBe(0);
+    expect(err.join("\n")).toContain("--sha is required");
   });
 
   test("a non-Error throw while the body is read exits 2 with its message", async () => {

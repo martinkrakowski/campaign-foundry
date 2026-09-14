@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { SWEEP_USAGE, parseSweepArgs } from "../lib/args.js";
+import { GATE_USAGE, SWEEP_USAGE, parseGateArgs, parseSweepArgs } from "../lib/args.js";
 
 const argv = (extra: readonly string[] = []): string[] => [
   "--pr",
@@ -104,5 +104,36 @@ describe("parseSweepArgs", () => {
     })();
     expect(message).toContain("unknown argument '--yolo'");
     expect(message).toContain(SWEEP_USAGE);
+  });
+});
+
+describe("parseGateArgs", () => {
+  test("the happy path: the PR and the head the checks were verified on", () => {
+    expect(parseGateArgs(["--pr", "361", "--sha", "abc1234"])).toEqual({ pr: 361, head: "abc1234" });
+  });
+
+  test("a missing --pr is refused", () => {
+    expect(() => parseGateArgs(["--sha", "abc1234"])).toThrow(/--pr is required/);
+  });
+
+  test("a non-numeric --pr is refused", () => {
+    expect(() => parseGateArgs(["--pr", "abc", "--sha", "abc1234"])).toThrow(/wants a number/);
+  });
+
+  test("a missing --sha is refused — an unchecked head is not a merge condition", () => {
+    expect(() => parseGateArgs(["--pr", "361"])).toThrow(/--sha is required/);
+  });
+
+  test("an option starved of its value is refused, with the gate usage", () => {
+    for (const flag of ["--pr", "--sha"]) {
+      expect(() => parseGateArgs([flag])).toThrow(new RegExp(`missing value for ${flag}`));
+    }
+    expect(GATE_USAGE).toContain("sweep gate");
+  });
+
+  test("an unknown argument is refused", () => {
+    expect(() => parseGateArgs(["--pr", "361", "--sha", "abc1234", "--yolo"])).toThrow(
+      /unknown argument '--yolo'/,
+    );
   });
 });
