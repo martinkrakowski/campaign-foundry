@@ -4971,3 +4971,24 @@ the Map) retargeted rather than dropped. Full gate 0 with 100 % on all four coun
   layer the Template section actually offers). BriefEditor:367 left as a whole-state
   compare; recovery canonicalises via `normalizeDraftState` instead.
 - **Left open:** none.
+
+## 2026-09-14 — wave record: M3 → X16 (#395–#403)
+
+**Merged:** M3 layer toggle #395 · L12 atomic report write #396 · C4 geometry props live #397 · X15 Field hints/errors reach assistive tech #398 · HL5a html element editing #399 · X16 recorded #400 · HL5d preview already draws the html layer #401 · cast: every implementer seat is grok-4.6 #402 · X16 canonical layer defaults #403.
+
+**Defects the review stage caught before merge (all fixed, each pinned by a caught mutation):**
+- X15 — `Field` cloned its first child, but only kit `Input` forwarded the attribute: ~14 of 24 hinted/errored fields (every Slider, Stepper, ChipGroup, SwatchPicker, LogoField, wrapper call site) still announced nothing; the lane's tests rendered a raw `<input>`. Fixed with kit forwarding, a function-children form, and call-site tests rendering the real sections.
+- HL5a — clearing a frame input committed `Number("") === 0`; typing runs were one undo step per keystroke; frame inputs were labelled `x/y/w/h`. (The orchestrator's claim that `0.25` could not be typed did **not** reproduce under happy-dom; the lane reported that rather than claiming a catch.)
+- L12 — the rename-targeting test asserted only the per-campaign file; writing `report.json` in place passed it (CodeRabbit). Also the cleanup `unlink` ENOENT swallow was uncovered.
+- X16 — canonicalising an unvalidated stored snapshot threw and discarded the whole draft (Qodo), and a second path through `discard` → `fromBrief` threw too (CodeRabbit); fixed once, in `canonicalBrief`.
+- M3 — the plan claimed the motion path still drew disabled layers; X9 had already fixed it.
+
+**Refuted (mechanism given in each thread):** PR-Agent's delete-leaves-prototype-entry, IconButton-drops-describedby, missing `ANCHOR_VALUES` import, null-`c.layer`, out-of-range props (boundary validates), cloneElement-loses-key; Qodo's "§1.5 does not exist" (§1 principle 5); Qodo's "the preview does not refetch on a toggle"; Qodo's non-unique mutation anchor (indentation makes it unique). The orchestrator mis-stated one refutation reason on #401 (fixture spread order) and corrected it in-thread.
+
+**Tests changed after implementation, checked and legitimate:** M3's occlusion fixture had the draw order inverted (bottom-first, D128); C4's typeFloor fixture never ran the autofit loop at 400px; HL5a's mocked-dispatch tests moved from keystroke runs to one change event, with a real-reducer typing test kept; HL5d's disabled-layer test added a second html layer because MP-D4 refuses disabling the only one.
+
+**Deferred:** X16's "explicit default" class is closed; HL5c waits on X14; HL5e, C4 `anchor`/`alpha`, K1, VE-Q1–Q4 and X1 wait on owner decisions; V3 is open.
+
+**Seats and cost.** hy4 (opencode/openrouter): M3, HL5a (+1 fix round), HL5d — reliable, honest reports. deepseek: L12 — work committed, then hung on a provider step; orchestrator finished it. agy gemini: X15 (+1 fix round). Sonnet reserve: C4. **grok-4.6 high, first implementer measurement (owner's instruction 2026-09-14):** X16 lane 18 min · 362k in / 45.5k out (40.9k reasoning) · 6.30M cache read · 54 turns · $1.41; fix 1 8 min · 234k / 17.4k · 1.69M cache · $0.48; fix 2 killed by host memory pressure after committing (typecheck-failing casts finished by the orchestrator). Rounds to green: 3. A detached `nohup … --always-approve` launch is refused by the auto-mode classifier; grok lanes run as harness background tasks.
+
+**Host.** Memory-pressure kills hit gates, watchers and one grok round; fseventsd held ~8 GB through the session. Gates run serially with `--maxWorkers=2`; the gate script now refuses a dirty tree or an in-progress rebase (a masked rebase failure had gated a half-rebased tree once).
