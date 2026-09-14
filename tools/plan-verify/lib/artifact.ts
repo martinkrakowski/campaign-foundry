@@ -156,7 +156,7 @@ export function parseArtifact(text: string): PlanVerifyArtifact {
     if (typeof rawItem.lane !== "string" || rawItem.lane === "") {
       throw new Error("malformed artifact: premise entry missing lane");
     }
-    if (rawItem.status !== "holds" && rawItem.status !== "stale" && rawItem.status !== "timed-out") {
+    if (rawItem.status !== "holds" && rawItem.status !== "stale" && rawItem.status !== "timed-out" && rawItem.status !== "error") {
       throw new Error("malformed artifact: premise entry has invalid status");
     }
     if ("reason" in rawItem) {

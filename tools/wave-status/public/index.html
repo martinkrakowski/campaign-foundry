@@ -2016,7 +2016,7 @@
         const items = artifact.premises.map((p) => {
           let tone = "info";
           if (p.status === "stale") tone = "bad";
-          else if (p.status === "timed-out") tone = "warn";
+          else if (p.status === "timed-out" || p.status === "error") tone = "warn";
           else if (p.status === "holds") tone = "info";
 
           const reasonHtml = p.reason ? ` <span class="backlog-reason">${esc(p.reason)}</span>` : "";

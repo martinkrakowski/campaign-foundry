@@ -15,8 +15,9 @@ export interface Premise {
  * `timed-out` — the script ran past its budget and was killed, so there is no
  * verdict. It is neither `holds` (that would hide a check that never finished)
  * nor `stale` (that would accuse a lane that may still be live).
+ * `error` — the executor threw, so the premise could not be checked: no verdict.
  */
-export type PremiseStatus = "holds" | "stale" | "timed-out";
+export type PremiseStatus = "holds" | "stale" | "timed-out" | "error";
 
 export interface PremiseResult {
   readonly premise: Premise;

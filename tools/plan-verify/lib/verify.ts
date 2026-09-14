@@ -33,7 +33,7 @@ export async function verifyPremises(
       const message = errorText(err);
       results.push({
         premise,
-        status: "stale",
+        status: "error",
         exitCode: 1,
         output: message,
         reason: message,
@@ -50,6 +50,7 @@ export async function verifyPremises(
 export function formatReport(results: readonly PremiseResult[]): string {
   const stale = results.filter((r) => r.status === "stale");
   const timedOut = results.filter((r) => r.status === "timed-out");
+  const error = results.filter((r) => r.status === "error");
   const lines: string[] = [];
   for (const r of stale) {
     lines.push(
@@ -67,14 +68,21 @@ export function formatReport(results: readonly PremiseResult[]): string {
     );
     if (r.output !== "") lines.push(`  ${r.output.split("\n").join("\n  ")}`);
   }
-  const held = results.length - stale.length - timedOut.length;
-  if (stale.length > 0 || timedOut.length > 0) lines.push("");
+  for (const r of error) {
+    lines.push(
+      `ERROR  ${r.premise.lane}  (${r.premise.plan})`,
+      `  the premise could not be checked: ${r.output}`,
+    );
+  }
+  const held = results.length - stale.length - timedOut.length - error.length;
+  if (stale.length > 0 || timedOut.length > 0 || error.length > 0) lines.push("");
   lines.push(
-    stale.length === 0 && timedOut.length === 0
+    stale.length === 0 && timedOut.length === 0 && error.length === 0
       ? `${held} premise(s) hold; no lane is stale.`
       : [
           ...(stale.length > 0 ? [`${stale.length} stale`] : []),
           ...(timedOut.length > 0 ? [`${timedOut.length} timed out`] : []),
+          ...(error.length > 0 ? [`${error.length} error`] : []),
           `${held} holding`,
         ].join(", ") + ".",
   );
@@ -82,11 +90,12 @@ export function formatReport(results: readonly PremiseResult[]): string {
 }
 
 /**
- * A timed-out premise exits non-zero too — a check that could not decide did
- * not pass. Stale wins when both appear because it is the actionable verdict.
+ * A timed-out premise or executor error exits non-zero too — a check that could
+ * not decide did not pass. Stale wins when both appear because it is the
+ * actionable verdict.
  */
 export function exitCodeFor(results: readonly PremiseResult[]): number {
   if (results.some((r) => r.status === "stale")) return EXIT_STALE_FOUND;
-  if (results.some((r) => r.status === "timed-out")) return EXIT_TIMED_OUT;
+  if (results.some((r) => r.status === "timed-out" || r.status === "error")) return EXIT_TIMED_OUT;
   return EXIT_ALL_HOLD;
 }
