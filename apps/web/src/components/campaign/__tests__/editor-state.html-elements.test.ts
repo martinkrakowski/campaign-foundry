@@ -8,6 +8,7 @@ import {
   type Frame,
   type HtmlElement,
 } from "@campaignfoundry/CampaignOrchestration/html-element";
+import type { BriefTemplate } from "@campaignfoundry/CampaignOrchestration/brief-template";
 import {
   editorReducer,
   initialEditorState,
@@ -33,16 +34,23 @@ import * as messages from "../messages";
 
 const CANONICAL = CANONICAL_TEMPLATES["image-html"];
 
-/** A draft pinned to the canonical `image-html` template: image, html, logo. */
+/**
+ * The canonical `image-html` template, materialised: image, html, logo. No
+ * campaign type seeds it — D120's presets name the three social types — so the
+ * pinned id is the library's own, spelled out rather than derived.
+ */
+const htmlTemplate = (): BriefTemplate => ({
+  id: "canonical-image-html",
+  version: CANONICAL.version,
+  creativeType: CANONICAL.creativeType,
+  unit: CANONICAL.unit,
+  layers: CANONICAL.layers,
+});
+
+/** A draft pinned to the canonical `image-html` template. */
 const htmlState = (): EditorState => ({
   ...initialEditorState(),
-  template: {
-    id: CANONICAL.id,
-    version: CANONICAL.version,
-    creativeType: CANONICAL.creativeType,
-    unit: CANONICAL.unit,
-    layers: CANONICAL.layers,
-  },
+  template: htmlTemplate(),
 });
 
 const reduce = (state: EditorState, ...actions: EditorAction[]): EditorState =>

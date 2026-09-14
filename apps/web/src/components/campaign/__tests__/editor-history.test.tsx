@@ -244,13 +244,14 @@ describe("useEditorHistory — the layer toggle is an ordinary undoable edit (L9
 
 describe("useEditorHistory — an html element edit is an ordinary undoable edit (HL5a, VE1)", () => {
   // The canonical `image-html` template's own layer list: image, html, logo.
+  // No campaign type seeds it, so the pinned id is spelled out.
   const CANONICAL = CANONICAL_TEMPLATES["image-html"];
   const renderHtml = () =>
     renderHook(() =>
       useEditorHistory({
         ...initialEditorState(),
         template: {
-          id: CANONICAL.id,
+          id: "canonical-image-html",
           version: CANONICAL.version,
           creativeType: CANONICAL.creativeType,
           unit: CANONICAL.unit,

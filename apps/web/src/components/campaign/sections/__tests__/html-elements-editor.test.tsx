@@ -1,10 +1,11 @@
 import { describe, test, expect, vi } from "vitest";
 import { useReducer } from "react";
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
   CANONICAL_TEMPLATES,
 } from "@campaignfoundry/CampaignOrchestration/creative-templates";
+import type { BriefTemplate } from "@campaignfoundry/CampaignOrchestration/brief-template";
 import type { HtmlElement } from "@campaignfoundry/CampaignOrchestration/html-element";
 import {
   editorReducer,
@@ -27,29 +28,35 @@ import * as messages from "../../messages";
 
 const CANONICAL = CANONICAL_TEMPLATES["image-html"];
 
+/** No campaign type seeds `image-html`, so the pinned id is spelled out. */
+const htmlTemplate = (): BriefTemplate => ({
+  id: "canonical-image-html",
+  version: CANONICAL.version,
+  creativeType: CANONICAL.creativeType,
+  unit: CANONICAL.unit,
+  layers: CANONICAL.layers,
+});
+
 const frame = { x: 0.1, y: 0.2, w: 0.5, h: 0.3, anchor: "middle" } as const;
 
 const htmlState = (over: Partial<EditorState> = {}): EditorState => ({
   ...initialEditorState(),
-  template: {
-    id: CANONICAL.id,
-    version: CANONICAL.version,
-    creativeType: CANONICAL.creativeType,
-    unit: CANONICAL.unit,
-    layers: CANONICAL.layers,
-  },
+  template: htmlTemplate(),
   ...over,
 });
 
-const withElements = (...elements: HtmlElement[]): EditorState => ({
-  ...htmlState(),
-  template: {
-    ...htmlState().template,
-    layers: htmlState().template.layers.map((layer) =>
-      layer.id === "html" ? { ...layer, elements } : layer,
-    ),
-  },
-});
+const withElements = (...elements: HtmlElement[]): EditorState => {
+  const base = htmlState();
+  return {
+    ...base,
+    template: {
+      ...base.template,
+      layers: base.template.layers.map((layer) =>
+        layer.id === "html" ? { ...layer, elements } : layer,
+      ),
+    },
+  };
+};
 
 const text: HtmlElement = { kind: "text", text: "Stay wild", frame };
 const button: HtmlElement = { kind: "button", text: "Shop now", frame };
@@ -240,21 +247,24 @@ describe("HtmlElementsEditor — one element's controls (HL5a)", () => {
     ).toEqual(["Top", "Middle", "Bottom"]);
   });
 
-  test("typing in the copy input dispatches setHtmlElementText with what was typed", async () => {
-    const user = userEvent.setup();
+  test("typing in the copy input dispatches setHtmlElementText with what was typed", () => {
+    // A change, not a keystroke-by-keystroke `user.type`: the input is
+    // controlled, so React restores the value the props carry after every
+    // event a mocked dispatch does not answer — each character would arrive as
+    // the first character of a fresh value. The real-reducer test below types
+    // for real, where the state does answer.
     const dispatch = vi.fn();
     render(
       <HtmlElementsEditor
         layerId="html"
-        elements={[text]}
+        elements={[{ kind: "text", text: "", frame }]}
         dispatch={dispatch}
       />,
     );
-    const input = screen.getByRole("textbox", {
-      name: messages.htmlElementTextLabel(1),
-    });
-    await user.clear(input);
-    await user.type(input, "Go");
+    fireEvent.change(
+      screen.getByRole("textbox", { name: messages.htmlElementTextLabel(1) }),
+      { target: { value: "Go" } },
+    );
     expect(dispatch).toHaveBeenCalledWith({
       type: "setHtmlElementText",
       layerId: "html",
@@ -263,8 +273,7 @@ describe("HtmlElementsEditor — one element's controls (HL5a)", () => {
     });
   });
 
-  test("each frame field dispatches setHtmlElementFrame with the field it names", async () => {
-    const user = userEvent.setup();
+  test("each frame field dispatches setHtmlElementFrame with the field it names", () => {
     const dispatch = vi.fn();
     render(
       <HtmlElementsEditor
@@ -279,11 +288,12 @@ describe("HtmlElementsEditor — one element's controls (HL5a)", () => {
       ["w", "0.6"],
       ["h", "0.7"],
     ] as const) {
-      const input = screen.getByRole("spinbutton", {
-        name: messages.htmlElementFrameLabel(1, field),
-      });
-      await user.clear(input);
-      await user.type(input, value);
+      fireEvent.change(
+        screen.getByRole("spinbutton", {
+          name: messages.htmlElementFrameLabel(1, field),
+        }),
+        { target: { value } },
+      );
       expect(dispatch).toHaveBeenCalledWith({
         type: "setHtmlElementFrame",
         layerId: "html",
