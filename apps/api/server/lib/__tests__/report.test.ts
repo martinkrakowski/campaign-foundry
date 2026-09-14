@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import {
@@ -16,6 +16,27 @@ import {
   writeReport,
 } from "../report.js";
 import { hashBytes } from "../brief-files.js";
+
+// node:fs/promises is an ESM namespace (not spy-able), so the report's write path is
+// routed through an overridable hook. A test can land half a payload and pause — the
+// torn file a crash leaves behind — and let a reader run while it is on disk. Left
+// unset, every call passes straight through to the real implementation.
+const fsHook = vi.hoisted(() => ({
+  writeFile: undefined as undefined | ((path: string, data: unknown) => Promise<void>),
+  rename: undefined as undefined | ((from: string, to: string) => Promise<void>),
+}));
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  return {
+    ...actual,
+    writeFile: (path: string, data: unknown) =>
+      fsHook.writeFile
+        ? fsHook.writeFile(path, data)
+        : (actual.writeFile as unknown as (p: string, d: unknown) => Promise<void>)(path, data),
+    rename: (from: string, to: string) =>
+      fsHook.rename ? fsHook.rename(from, to) : actual.rename(from, to),
+  };
+});
 
 type ReportAsset = GeneratedAsset & { brandCompliant: boolean };
 
@@ -49,6 +70,8 @@ describe("report persistence", () => {
     process.env.OUTPUT_DIR = root;
   });
   afterEach(() => {
+    fsHook.writeFile = undefined;
+    fsHook.rename = undefined;
     rmSync(root, { recursive: true, force: true });
     if (orig === undefined) delete process.env.OUTPUT_DIR;
     else process.env.OUTPUT_DIR = orig;
@@ -485,5 +508,70 @@ describe("report persistence", () => {
     );
     expect(path).toBe(resolve(root, "report.json"));
     expect(readAssets(path)[0].complianceScore).toBe(0.7);
+  });
+
+  test("a reader racing a write never parses a partial report", async () => {
+    // Seed a whole report, so the racing reader has a previous version to find.
+    await writeReport(result([asset()]));
+    const target = campaignReportPath(root, "camp")!;
+    const real = await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
+
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    let landed!: () => void;
+    const halfWritten = new Promise<void>((r) => (landed = r));
+    fsHook.writeFile = async (path, data) => {
+      const bytes = Buffer.from(String(data));
+      // Half the payload on disk, then hold the write open — the exact moment a crash
+      // or a concurrent reader sees a truncated report if this path is the target.
+      await real.writeFile(path, bytes.subarray(0, Math.floor(bytes.length / 2)));
+      landed();
+      await gate;
+      await real.writeFile(path, bytes);
+    };
+
+    const writing = writeReport(result([asset({ complianceScore: 0.9 }), beta()]));
+    await halfWritten;
+    // The writer is mid-write and a reader runs. It must see the whole prior report,
+    // never the half-payload the writer has staged.
+    await expect(readReport(root, "camp")).resolves.toMatchObject({ assets: expect.any(Array) });
+    release();
+    await writing;
+    expect(readAssets(target).map((a) => a.productId).sort()).toEqual(["alpha", "beta"]);
+  });
+
+  test("a write that fails before the rename leaves the previous report intact", async () => {
+    await writeReport(result([asset()]));
+    const target = campaignReportPath(root, "camp")!;
+    const before = readFileSync(target);
+    fsHook.rename = async () => {
+      throw new Error("simulated crash before the rename");
+    };
+
+    await expect(writeReport(result([beta()]))).rejects.toThrow("simulated crash before the rename");
+    // The old bytes survive and nothing half-written is left behind.
+    expect(readFileSync(target)).toEqual(before);
+    expect(readdirSync(resolve(root, "reports")).some((n) => n.endsWith(".tmp"))).toBe(false);
+  });
+
+  test("the atomic write renames a temp sibling over the target", async () => {
+    const target = campaignReportPath(root, "camp")!;
+    const renames: Array<{ from: string; to: string }> = [];
+    const real = await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
+    fsHook.rename = async (from, to) => {
+      renames.push({ from, to });
+      await real.rename(from, to);
+    };
+
+    await writeReport(result([asset()]));
+
+    const perCampaign = renames.find((r) => r.to === target);
+    expect(perCampaign).toBeDefined();
+    // The staged name is a unique sibling — never the target itself.
+    expect(perCampaign!.from).not.toBe(target);
+    expect(perCampaign!.from.startsWith(`${target}.`)).toBe(true);
+    expect(perCampaign!.from.endsWith(".tmp")).toBe(true);
+    // And no temp name survives the write.
+    expect(readdirSync(resolve(root, "reports"))).toEqual(["camp.json"]);
   });
 });
