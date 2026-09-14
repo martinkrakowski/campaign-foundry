@@ -400,3 +400,37 @@ else. `fromBrief` builds both the draft and `savedSnapshot` from that form; `sav
 recovered drafts, and the Generate-target comparison (`runBrief`) use the same function. `valuesEqual`
 stays generic. An off→on toggle (or add→remove element) on a hand-authored explicit-default brief is
 therefore not dirty.
+
+---
+
+## 20. Opening a brief with an empty scalar field crashes the editor (X17)
+
+**Evidence.** The API boundary keeps `null` legal for the brief's scalar copy fields (D68):
+`apps/api/server/lib/load-brief.ts` refuses only a non-string that is not null for `targetRegion`,
+`targetAudience`, `campaignMessage`, `localizedMessage`. A YAML brief with `targetAudience:` (empty)
+therefore lists and opens. `fromBrief` copied `targetRegion`, `targetAudience` and `campaignMessage`
+without `?? ""` (only `localizedMessage` and `clickDestination` had it), and `validate.ts` called
+`state.targetAudience.trim()` — TypeError, the editor crashed. Products failed the same way:
+`{ ...emptyProduct(i + 1, p.primaryColor), ...p }` let `name: null` overwrite the default, and
+`validate.ts` called `product.name.trim()`. The same class includes every product string the editor
+`.trim()`s or reads as a string (`logoPath`, `inputAsset` in `toProduct`).
+
+**Consequence.** An operator's half-written brief is listed (D15 leniency) and then crashes the
+editor on open, so it cannot be fixed in the UI. The picker and the editor disagree about whether
+the file is usable.
+
+**Fix.** In `fromBrief`, coalesce every null/absent string scalar the draft holds as a string to
+`""` (brief-level and per-product), matching the existing `localizedMessage ?? ""`. Do not change
+the API.
+
+**The dirty-state rule.** `toBrief` always emits `targetRegion`, `targetAudience`,
+`campaignMessage` and the product fields `id`, `name`, `primaryColor`, `logoPath` as strings
+(empty included). It omits `localizedMessage`, `clickDestination`, and product `inputAsset` when
+empty. `canonicalBrief` maps null on the always-emitted fields to `""` and drops a null key on
+the omitted fields, so a freshly opened null-scalar brief compares equal to the draft. `fromBrief`
+coalesces the same fields to `""` independently so `.trim()` cannot throw.
+
+**X17 — shipped in this PR.** `fromBrief` coalesces the brief-level scalars and every product
+string field to `""`. `canonicalBrief` applies the dirty-state rule above so the snapshot is the
+form `toBrief` writes. Validate reports the empty-field error instead of throwing; a freshly
+opened null-scalar brief is not dirty.

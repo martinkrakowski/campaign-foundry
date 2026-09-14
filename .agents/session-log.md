@@ -4996,3 +4996,13 @@ the Map) retargeted rather than dropped. Full gate 0 with 100 % on all four coun
 ## 2026-09-14 — V3 sweep attribute
 
 Added `yarn sweep attribute --pr <n>`. Each github-actions thread is attributed only when its suggestion text occurs in exactly one PR-Agent workflow log (decoded); none or several stays unattributed; a failed fetch or log read exits 1. The premise V3 fence stays.
+## 2026-09-14 — X17: opening a brief with an empty scalar field must not crash the editor
+
+- **Mode:** Implementer
+- **Changes:** `fromBrief` coalesces null brief/product string scalars to `""`;
+  `canonicalBrief` maps always-emitted nulls to `""` and drops omit-when-empty
+  null keys so a freshly opened file is not dirty.
+- **Decisions:** `toBrief` is the form the snapshot must match; do not change
+  the API. `fromBrief` still reads the raw brief (not the canonicalised one) so
+  dropping `?? ""` is a caught mutation.
+- **Left open:** none.

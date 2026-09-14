@@ -1,0 +1,60 @@
+{
+  "version": 1,
+  "lane": "X17",
+  "mutations": [
+    {
+      "file": "apps/web/src/components/campaign/editor-state.ts",
+      "before": "    targetAudience: brief.targetAudience ?? \"\",",
+      "after": "    targetAudience: brief.targetAudience,",
+      "because": "fromBrief must coalesce a D68-legal null targetAudience to an empty string. Dropping ?? \"\" copies null through and validateIdentity throws on .trim() instead of reporting the empty-audience error.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/validate.test.ts",
+        "-t",
+        "a null targetAudience is an identity error, not a throw",
+        "--maxWorkers=2"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/editor-state.ts",
+      "before": "          ...emptyProduct(i + 1, p.primaryColor),\n          ...p,\n          id: p.id ?? \"\",\n          name: p.name ?? \"\",\n          primaryColor: p.primaryColor ?? \"\",\n          logoPath: p.logoPath ?? \"\",\n          inputAsset: p.inputAsset ?? \"\",\n          idTouched: true,",
+      "after": "          ...emptyProduct(i + 1, p.primaryColor),\n          ...p,\n          idTouched: true,",
+      "because": "Spreading the product over emptyProduct lets name: null overwrite the default. Without the per-field ?? \"\", validateProducts throws on product.name.trim() instead of reporting the product-name error.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/validate.test.ts",
+        "-t",
+        "a product with a null name is a product-name error, not a throw",
+        "--maxWorkers=2"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/editor-state.ts",
+      "before": "const REQUIRED_BRIEF_STRINGS = [\n  \"targetRegion\",\n  \"targetAudience\",\n  \"campaignMessage\",\n] as const;",
+      "after": "const REQUIRED_BRIEF_STRINGS = [\n  \"targetRegion\",\n  \"campaignMessage\",\n] as const;",
+      "because": "canonicalBrief must map a null targetAudience to \"\" so the snapshot matches toBrief. Leaving the raw null in the snapshot makes a freshly opened file read dirty only because null became \"\".",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/editor-state.test.ts",
+        "-t",
+        "a freshly opened brief with a null scalar is not dirty",
+        "--maxWorkers=2"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
