@@ -27,6 +27,7 @@ import {
   isDirtySinceApply,
   isPristine,
   valuesEqual,
+  canonicalBrief,
   getDraftKey,
   saveDraftToStorage,
   loadDraftFromStorage,
@@ -569,7 +570,8 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
    * committed brief.
    */
   const draftDiffers = useMemo(
-    () => !isPristine(state) && !valuesEqual(draftBrief, runBrief),
+    () =>
+      !isPristine(state) && !valuesEqual(draftBrief, canonicalBrief(runBrief)),
     [state, draftBrief, runBrief],
   );
 

@@ -4671,6 +4671,49 @@ describe("canonical layer defaults (X16)", () => {
     expect(canonicalTemplate(untouched)).toBe(untouched);
     const brief = savedBrief();
     expect(canonicalBrief(brief)).toBe(brief);
+
+    const both = htmlTemplate({ enabled: true, elements: [] });
+    expect(
+      canonicalTemplate(both).layers.find((layer) => layer.id === "html"),
+    ).toEqual({ id: "html", kind: "html" });
+  });
+
+  test("a restored draft whose snapshot still carries enabled: true is not dirty", () => {
+    const template = withLayer(
+      templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+      "image",
+      { enabled: true },
+    );
+    const rawBrief = savedBrief({ template });
+    const restored = normalizeDraftState({
+      ...fromBrief(rawBrief, { file: "camp.yaml" }),
+      template,
+      source: {
+        kind: "file",
+        file: "camp.yaml",
+        loadedId: "camp",
+        savedSnapshot: rawBrief,
+        revision: undefined,
+      },
+    });
+    expect(
+      "enabled" in restored.template.layers.find((layer) => layer.id === "image")!,
+    ).toBe(false);
+    expect(isDirtySinceSave(restored)).toBe(false);
+
+    const noSnapshot = normalizeDraftState({
+      source: {
+        kind: "file",
+        file: "camp.yaml",
+        loadedId: "camp",
+        savedSnapshot: null,
+        revision: undefined,
+      },
+    });
+    expect(noSnapshot.source.kind).toBe("file");
+    expect(
+      noSnapshot.source.kind === "file" && noSnapshot.source.savedSnapshot,
+    ).toBeNull();
   });
 
   test("save and apply carrying a server brief with enabled: true do not leave the draft dirty", () => {
