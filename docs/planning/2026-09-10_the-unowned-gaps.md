@@ -292,3 +292,27 @@ and Qodo did not (§8.1 of the verification-budget plan).
 # isPersistedAsset declares clickDestination but never checks it.
 ! grep -q 'rec.clickDestination' apps/api/server/lib/report.ts
 ```
+
+---
+
+## 16. The merge script does not enforce the merge condition (X13)
+
+**Evidence.** `SKILL.md` stage 5 prescribes `scripts/merge-prs.sh` and, since 2026-09-14, requires a
+merge only when the PR's *final* head has passing conclusions, the review bots have posted, and **zero
+review threads are unresolved**. The script never queries review threads, and after it merges
+`origin/main` into a lane and pushes the refreshed head it waits for check registration and CI, not for
+review bots. On that refreshed head a bot can post a finding the merge never sees.
+
+**Why it matters.** Both halves of this wave's merge discipline were earned the hard way: a merge gated on
+CI alone raced the bots on #381, and the full condition held back #384 for a real defect found only on its
+final head. A script that silently does less than the stage it implements invites exactly the regression
+the rule exists to prevent.
+
+**Fix shape.** After the refresh push and CI, wait for review bots on the new head, then refuse to merge
+while `reviewThreads` has any unresolved node; name the open threads in the refusal. Test it against a
+recorded GraphQL answer, as the wave-status tooling tests `gh`.
+
+```premise X13
+# merge-prs.sh never looks at review threads before merging.
+! grep -qE 'isResolved|reviewThreads' scripts/merge-prs.sh
+```

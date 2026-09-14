@@ -23,13 +23,12 @@ templates A–D, invariants, failure playbook) and `docs/workflows/orchestrator-
 where they differ; it deliberately does not copy them, so they cannot drift apart.
 
 - The cast, and each seat's track record: [references/cast.md](references/cast.md)
-- **The implementer seat is `agy gemini-3.8-flash-high`** (2026-09-10, owner's choice — it bills to a
-  separate pool). Dispatch it detached with an `EXIT` marker; **record the worktree tip first**, and
-  **watch the quota** — it stalled mid-lane once and stranded a finished feature uncommitted.
-  **`Agent` · `subagent_type: "claude"` · `model: "sonnet"` is the reserve**, and keeps the critical
-  path, where a stall is expensive. Reviewers stay in-house: a second `Agent` that is
-  **not** the implementer. `scripts/dispatch-lane.sh` and every external CLI it drives are
-  **retired**; the script stays only to read old wave logs.
+- **The current seats are in `references/cast.md`, and it is the authority** — this file does not
+  restate them, because it drifted once already: it named `agy gemini-3.8-flash-high` as the
+  implementer long after the roster moved to `openrouter/qwen/qwen3.8-flash` primary with gemini as
+  the reserve. Whatever the seat, **record the worktree tip first** and watch the provider's quota.
+  Reviewers stay in-house: a second `Agent` that is **not** the implementer. `scripts/dispatch-lane.sh`
+  is **retired** — its detached launch killed lanes (below); it stays only to read old wave logs.
 
 ## Naming waves and lanes
 
@@ -253,14 +252,22 @@ that did not happen.
    <log> 2>&1; echo \"EXIT \$?\" >> <log>" < /dev/null > /dev/null 2>&1 & disown` — and never through
    `scripts/dispatch-lane.sh`, whose detached launch killed every lane it started on 2026-09-13. The
    brief path **must be absolute**: the command `cd`s into the worktree first and `briefs/` exists only
-   in the main checkout. Liveness differs by CLI: `opencode run --format json` streams, so a 0-byte log
-   after ~30 s is a dead lane; `agy --print` writes nothing until it exits, so watch its process
-   (`pgrep -f 'cd <worktree> && agy'`) and the worktree's commits instead.
+   in the main checkout. The template assumes paths without spaces or glob characters, true of this
+   repo's worktrees; quote them for the inner shell if that ever changes. Liveness differs by CLI:
+   `opencode run --format json` streams within seconds, so a log still at 0 bytes after ~30 s **with no
+   `opencode run` process for that worktree** (`pgrep -f 'cd <worktree> && opencode'`) is a dead lane;
+   `agy --print` writes nothing until it exits, so watch its process and the worktree's commits. Never
+   call a lane dead from the log alone.
    **Every brief carries the checkpoint rule**: commit the failing tests locally the moment they have
    been seen to fail, commit again after each green step, push only when the gate passes. On
    2026-09-13 provider failures (one 522, six 429s) killed seven lane runs. The two that had written
    nothing to disk lost the whole run; every other one resumed from what it had committed — or, once,
    from uncommitted files that happened to survive in the worktree, which is luck, not a method.
+   **This is a scoped exception to `.agents/testing.md` ("a red suite blocks the commit"), pending the
+   owner's confirmation:** it covers only *local, unpushed* checkpoint commits on a lane branch inside
+   its worktree. A lane branch is never pushed red, and PRs squash-merge, so no red commit reaches
+   `origin` or `main`. If the owner does not confirm it, the fallback is to write the failing tests to
+   disk early and snapshot the worktree from outside, never committing red.
    The per-lane `implement settled|failed` events **are** the completion record of a dispatch —
    `implement settled` when a lane's `EXIT` marker lands, `implement failed` on a non-zero
    marker or a lane killed without one; and `gate settled` with the gate exit and the four
@@ -284,8 +291,12 @@ that did not happen.
 5. **Merge** (you). Sequential, via `scripts/merge-prs.sh` — each merge invalidates the CI of
    everything behind it. If main goes red: stop, reproduce locally, ship a minimal hotfix, resume.
    **A green gate is not a merge condition on its own.** Merge only when, on the PR's *final* head:
-   every check-run conclusion is success or skipped (read conclusions, not the rollup line); the
-   review bots have had time to post on that head; and **zero review threads are unresolved**. On
+   every check-run conclusion is success, skipped or neutral (read conclusions, not the rollup line —
+   `neutral` is what informational checks report); the review bots have had time to post on that head;
+   and **zero review threads are unresolved**. **`scripts/merge-prs.sh` does not enforce this yet** — it
+   never queries review threads and does not wait for bots after its refresh push (recorded as X13 in
+   `docs/planning/2026-09-10_the-unowned-gaps.md`). Until it does, check the final-head condition yourself
+   immediately before merging, and re-check after any push the script makes. On
    2026-09-13 a merge gated on CI alone raced the bots — nothing was missed that time, but only by
    luck — and the full condition later held back a PR whose final-head review found a real defect
    the gate could not see.
