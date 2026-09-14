@@ -461,6 +461,90 @@ describe("validatePolicy", () => {
   });
 });
 
+describe("X18 — the policy integer validated is the policy integer saved", () => {
+  const randomized = (over: Partial<EditorState["variation"]> = {}) => {
+    const state = valid({ mode: "variation" });
+    return { ...state, variation: { ...state.variation, ...over } };
+  };
+
+  type PolicyField = "count" | "seed" | "minDistance" | "perProduct" | "perRatio";
+  const fields: PolicyField[] = ["count", "seed", "minDistance", "perProduct", "perRatio"];
+
+  /** The integer `toBrief` actually wrote for that field, or undefined when absent. */
+  const savedValue = (state: EditorState, field: PolicyField): number | undefined => {
+    const variation = toBrief(state).variation as Record<string, unknown> | undefined;
+    const coverage = variation?.coverage as Record<string, unknown> | undefined;
+    switch (field) {
+      case "count":
+      case "seed":
+      case "minDistance":
+        return variation?.[field] as number | undefined;
+      case "perProduct":
+      case "perRatio":
+        return coverage?.[field] as number | undefined;
+    }
+  };
+
+  // Free-typed drafts the two sides used to disagree about: `Number` reads "1e5"
+  // as 100000 (so validation accepted it) while `parseInt` truncates it to 1 (so
+  // the save wrote a different number than the one green-checked). Whitespace,
+  // decimal form, trailing garbage and blank must agree the same way.
+  const drafts = [" 42 ", "42.0", "1e5", "1e-5", "12abc", ""];
+
+  // perRatio "1e5" means a floor of 100000 over 3 drawable ratios, so its base
+  // count must be 300000 or the floor-vs-count rule (not the integer rule)
+  // rejects the draft and the agreement is never observed.
+  const base: Record<PolicyField, Partial<EditorState["variation"]>> = {
+    count: {},
+    seed: {},
+    minDistance: {},
+    perProduct: {},
+    perRatio: { count: "300000" },
+  };
+
+  test("for every policy field, validate accepts a draft only if toBrief saves exactly its value", () => {
+    for (const field of fields) {
+      for (const draft of drafts) {
+        const state = randomized({ ...base[field], [field]: draft });
+        const accepted = validatePolicy(state)[field] === undefined;
+        const saved = savedValue(state, field);
+        if (draft.trim() === "") {
+          // A blank optional field is valid and saves as the absent key; a blank
+          // required count is refused outright.
+          expect(accepted, `${field}="${draft}"`).toBe(field !== "count");
+          if (accepted) expect(saved, `${field}="${draft}"`).toBeUndefined();
+        } else if (accepted) {
+          expect(saved, `${field}="${draft}"`).toBe(Number(draft));
+        }
+      }
+    }
+  });
+
+  test("a free-typed exponent seed validates and saves as the integer it means", () => {
+    const state = randomized({ seed: "1e5" });
+    expect(validatePolicy(state).seed).toBeUndefined();
+    expect(toBrief(state).variation?.seed).toBe(100000);
+    expect(() => parse(state)).not.toThrow();
+  });
+
+  test("a decimal-form draft is refused by validation, never truncated into a save", () => {
+    expect(validatePolicy(randomized({ seed: "42.0" })).seed).toBe(messages.seed);
+    expect(validatePolicy(randomized({ count: "42.0" })).count).toBe(messages.count);
+    expect(savedValue(randomized({ seed: "42.0" }), "seed")).toBeUndefined();
+  });
+
+  test("a draft with trailing garbage is refused and never saved as its prefix", () => {
+    expect(validatePolicy(randomized({ seed: "12abc" })).seed).toBe(messages.seed);
+    expect(savedValue(randomized({ seed: "12abc" }), "seed")).toBeUndefined();
+  });
+
+  test("whitespace around an integer draft is tolerated by both sides", () => {
+    const state = randomized({ seed: " 42 " });
+    expect(validatePolicy(state).seed).toBeUndefined();
+    expect(savedValue(state, "seed")).toBe(42);
+  });
+});
+
 describe("validateOutput", () => {
   // Briefs that request motion are randomized here: on a classic brief the mode rule
   // ("switch to Randomized") correctly outranks every capability/compatibility message.
