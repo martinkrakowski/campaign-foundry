@@ -32,12 +32,20 @@ export interface PlanVerifyArtifact {
   readonly premises: readonly ArtifactPremiseRecord[];
 }
 
-export function artifactPathFor(env: Record<string, string | undefined>): string {
+export function artifactPathFor(
+  env: Record<string, string | undefined>,
+  defaultRoot?: string,
+): string {
   const override = env[PLAN_VERIFY_ARTIFACT_ENV];
   if (override !== undefined && override !== "") {
     return override;
   }
-  const root = env.WAVE_LOG_ROOT && env.WAVE_LOG_ROOT !== "" ? env.WAVE_LOG_ROOT : join(homedir(), ".waves");
+  const root =
+    defaultRoot !== undefined && defaultRoot !== ""
+      ? defaultRoot
+      : env.WAVE_LOG_ROOT && env.WAVE_LOG_ROOT !== ""
+        ? env.WAVE_LOG_ROOT
+        : join(homedir(), ".waves");
   return join(root, ARTIFACT_FILE_NAME);
 }
 

@@ -65,6 +65,14 @@ describe("artifactPathFor", () => {
     expect(path).toBe(join(homedir(), ".waves", ARTIFACT_FILE_NAME));
     expect(path).not.toContain("docs");
   });
+
+  test("uses defaultRoot when provided and not overridden", () => {
+    expect(artifactPathFor({}, "/custom/root")).toBe(join("/custom/root", ARTIFACT_FILE_NAME));
+  });
+
+  test("an empty defaultRoot falls back to env or homedir", () => {
+    expect(artifactPathFor({ WAVE_LOG_ROOT: "/w" }, "")).toBe(join("/w", ARTIFACT_FILE_NAME));
+  });
 });
 
 describe("buildArtifact", () => {

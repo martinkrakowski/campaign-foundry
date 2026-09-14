@@ -287,7 +287,7 @@ export async function collect(
   }
 
   const status = mergeStatus(events, observed, now, orderedWaves);
-  const backlogPath = deps.planVerifyArtifactPath ?? artifactPathFor(process.env);
+  const backlogPath = deps.planVerifyArtifactPath ?? artifactPathFor(process.env, root);
   const backlog = await readBacklog(deps.readFile, backlogPath);
   const withBacklog: WaveStatus = { ...status, backlog };
   // A corpus with rows missing is not one the page may read as complete: a
@@ -789,7 +789,6 @@ export const realDeps: CollectDeps = {
         }
       });
     }),
-  planVerifyArtifactPath: artifactPathFor(process.env),
 };
 
 /**
