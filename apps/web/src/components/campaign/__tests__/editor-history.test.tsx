@@ -425,6 +425,25 @@ describe("useHistoryKeys", () => {
     expect(history.redo).not.toHaveBeenCalled();
   });
 
+  test("⌘Z from a control inside an open modal dialog is left alone", () => {
+    const history = { undo: vi.fn(), redo: vi.fn() };
+    mount(history);
+    // The shared dialog shell's shape (packages/ui dialog-shell.tsx): a
+    // `role="dialog"` with `aria-modal="true"`. Focus on its button is the dialog's,
+    // and ⌘Z there must not reach through the scrim to the draft behind it.
+    const dialog = document.createElement("div");
+    dialog.setAttribute("role", "dialog");
+    dialog.setAttribute("aria-modal", "true");
+    const button = document.createElement("button");
+    dialog.appendChild(button);
+    document.body.appendChild(dialog);
+    act(() => {
+      fireEvent.keyDown(button, { key: "z", metaKey: true });
+    });
+    expect(history.undo).not.toHaveBeenCalled();
+    expect(history.redo).not.toHaveBeenCalled();
+  });
+
   test("the shortcut prevents the browser default and stops after unmount", () => {
     const history = { undo: vi.fn(), redo: vi.fn() };
     const { unmount } = mount(history);
