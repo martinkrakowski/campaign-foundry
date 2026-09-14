@@ -23,7 +23,7 @@ export interface AttributeDeps {
   readonly gh: (args: readonly string[]) => Promise<string>;
 }
 
-const SUGGESTION_TRAIL = /\s*\[([^,\]]+),\s*importance:\s*\d+\]\s*$/;
+const SUGGESTION_TRAIL = /\s*\[([^,\]]+),\s*importance:\s*\d+\]/;
 
 export function normaliseWs(text: string): string {
   return text.replace(/\s+/g, " ").trim();

@@ -353,6 +353,19 @@ describe("sweep attribute — bodies that cannot be matched", () => {
     expect(log).toContain("PRRT_plain unattributed open");
   });
 
+  test("a Suggestion followed by a fenced code block still matches the log", async () => {
+    const body =
+      `**Suggestion:** ${SUGGESTION_API} [possible issue, importance: 2]\n` +
+      "```suggestion\n  const decode = async () => {};\n```";
+    const s = stub({
+      nodes: [threadNode("PRRT_fence", true, "github-actions", body)],
+    });
+    const { code, log } = await runAttribute(["--pr", "401"], s.gh);
+    expect(code).toBe(0);
+    expect(log).toContain("PRRT_fence API resolved");
+    expect(log).not.toContain("PRRT_fence unattributed");
+  });
+
   test("a Suggestion with no trailing [label, importance: n] is unattributed", async () => {
     const s = stub({
       nodes: [threadNode("PRRT_trail", false, "github-actions", `**Suggestion:** ${SUGGESTION_API}`)],
