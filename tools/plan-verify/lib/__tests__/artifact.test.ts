@@ -221,6 +221,42 @@ describe("parseArtifact", () => {
         (raw.premises as Record<string, unknown>[])[0].reason = 7;
       }),
     ],
+    [
+      "git provenance missing a branch",
+      corrupt((raw) => {
+        delete (raw.git as Record<string, unknown>).branch;
+      }),
+    ],
+    [
+      "git provenance with an empty branch",
+      corrupt((raw) => {
+        (raw.git as Record<string, unknown>).branch = "";
+      }),
+    ],
+    [
+      "git provenance with a non-string branch",
+      corrupt((raw) => {
+        (raw.git as Record<string, unknown>).branch = { name: "feat" };
+      }),
+    ],
+    [
+      "a premise record missing its plan",
+      corrupt((raw) => {
+        delete (raw.premises as Record<string, unknown>[])[0].plan;
+      }),
+    ],
+    [
+      "a premise record with an empty plan",
+      corrupt((raw) => {
+        (raw.premises as Record<string, unknown>[])[0].plan = "";
+      }),
+    ],
+    [
+      "a premise record with a non-string plan",
+      corrupt((raw) => {
+        (raw.premises as Record<string, unknown>[])[0].plan = null;
+      }),
+    ],
   ])("refuses %s", (_name, text) => {
     expect(() => parseArtifact(text as string)).toThrow(/malformed|not valid JSON/);
   });
