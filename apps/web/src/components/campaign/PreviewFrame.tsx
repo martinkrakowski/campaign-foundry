@@ -30,6 +30,8 @@ export function PreviewFrame({
   primaryColor,
   headline,
   motion,
+  durationSec,
+  atSec,
   spec,
   ratio,
   className,
@@ -42,6 +44,8 @@ export function PreviewFrame({
   readonly primaryColor: string;
   readonly headline?: string;
   readonly motion?: MotionKind;
+  readonly durationSec?: number;
+  readonly atSec?: number;
   readonly spec?: CanvasSpec;
   /**
    * @deprecated Prefer `spec`. Social-ratio shorthand kept so existing
@@ -64,14 +68,16 @@ export function PreviewFrame({
     ) {
       return undefined;
     }
+    const hasMotion = motion !== undefined && durationSec !== undefined && atSec !== undefined;
     return {
       productId: product.id,
       canvas,
       layout,
       tone,
       ...(anchor !== undefined ? { anchor } : {}),
+      ...(hasMotion ? { motion, durationSec, atSec } : {}),
     };
-  }, [brief, layout, tone, anchor, canvas]);
+  }, [brief, layout, tone, anchor, canvas, motion, durationSec, atSec]);
   const { frame } = usePreviewFrame(brief, cell);
 
   if (frame !== null) {

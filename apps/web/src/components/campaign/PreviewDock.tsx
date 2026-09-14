@@ -1,8 +1,9 @@
-import type { CSSProperties, ReactNode } from "react";
+import { useState, type CSSProperties, type ReactNode, type SyntheticEvent } from "react";
 import type { AspectRatioValue, CanvasSpec } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import { RATIO_VALUES } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import { DISPLAY_SIZE_VALUES } from "@campaignfoundry/CampaignOrchestration/display-sizes";
 import type { CampaignBrief, Style } from "@campaignfoundry/CampaignOrchestration";
+import { DEFAULT_DURATION_SEC } from "@campaignfoundry/CampaignOrchestration/variation-defaults";
 import type { MotionKind } from "@campaignfoundry/CampaignOrchestration/motion-kinds";
 import { PLATFORM_PROFILES } from "@campaignfoundry/Distribution/platform-profiles";
 import { CreativePreview, type CreativePreviewProps } from "@/components/campaign/CreativePreview";
@@ -173,6 +174,17 @@ export function PreviewPicture(props: {
  */
 export function PreviewDock(props: PreviewShowcaseProps): ReactNode {
   const spec = props.spec ?? derivePreviewSpec(props.platformId, props.ratio, props.brief?.output?.sizes);
+  const durationSec = props.brief?.variation?.axes?.duration?.[0] ?? DEFAULT_DURATION_SEC;
+  const [scrubSec, setScrubSec] = useState(0);
+  const [committedSec, setCommittedSec] = useState(0);
+  const hasMotion = props.motion !== undefined;
+  const clampedScrubSec = Math.min(Math.max(0, scrubSec), Math.max(0, durationSec));
+  const clampedCommittedSec = Math.min(Math.max(0, committedSec), Math.max(0, durationSec));
+
+  const handleCommit = (e: SyntheticEvent<HTMLInputElement>) => {
+    setCommittedSec(Number(e.currentTarget.value));
+  };
+
   return (
     <div className="flex min-w-0 flex-col gap-3">
       <Eyebrow as="p">{messages.previewLegend}</Eyebrow>
@@ -185,9 +197,30 @@ export function PreviewDock(props: PreviewShowcaseProps): ReactNode {
         primaryColor={props.primaryColor}
         headline={props.headline}
         motion={props.motion}
+        durationSec={hasMotion ? durationSec : undefined}
+        atSec={hasMotion ? clampedCommittedSec : undefined}
         spec={spec}
         className="block h-auto w-full"
       />
+      {hasMotion ? (
+        <div className="flex items-center gap-2 px-1">
+          <input
+            type="range"
+            aria-label={messages.previewScrubLabel}
+            min={0}
+            max={durationSec}
+            step="any"
+            value={clampedScrubSec}
+            onChange={(e) => {
+              const val = Number(e.target.value);
+              setScrubSec(val);
+            }}
+            onPointerUp={handleCommit}
+            onKeyUp={handleCommit}
+            className="h-1.5 min-w-0 flex-1 cursor-pointer appearance-none rounded-full bg-surface-2 accent-brand-primary"
+          />
+        </div>
+      ) : null}
       <div className="flex items-center gap-2">
         <PreviewSwatch primaryColor={props.primaryColor} />
         <PreviewCaption

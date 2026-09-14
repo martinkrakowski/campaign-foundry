@@ -1,0 +1,96 @@
+{
+  "version": 1,
+  "lane": "VE2",
+  "mutations": [
+    {
+      "file": "packages/CreativeGeneration/src/infrastructure/adapters/CanvasFfmpegVideoCompositor.ts",
+      "before": "function drawEncodedFrame(\n  ctx: SKRSContext2D,\n  prepared: Prepared,\n  motion: MotionKind,\n  i: number,\n  frames: number,\n): void {\n  NodeCanvasCompositor.draw(ctx, prepared, i / (frames - 1), motion);\n}",
+      "after": "function drawEncodedFrame(\n  ctx: SKRSContext2D,\n  prepared: Prepared,\n  motion: MotionKind,\n  i: number,\n  frames: number,\n): void {\n  NodeCanvasCompositor.draw(ctx, prepared, i / frames, motion);\n}",
+      "because": "The named VE2 mutation: encoded frame clock must be i / (frames - 1), not i / frames. Using frames instead of frames - 1 makes the final frame t < 1.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CreativeGeneration/src/infrastructure/adapters/__tests__/CanvasFfmpegVideoCompositor.scrub.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CreativeGeneration/src/infrastructure/adapters/CanvasFfmpegVideoCompositor.ts",
+      "before": "function drawEncodedFrame(\n  ctx: SKRSContext2D,\n  prepared: Prepared,\n  motion: MotionKind,\n  i: number,\n  frames: number,\n): void {\n  NodeCanvasCompositor.draw(ctx, prepared, i / (frames - 1), motion);\n}",
+      "after": "function drawEncodedFrame(\n  ctx: SKRSContext2D,\n  prepared: Prepared,\n  motion: MotionKind,\n  i: number,\n  frames: number,\n): void {\n  NodeCanvasCompositor.draw(ctx, prepared, i / (frames - 1), motion, undefined, 1);\n}",
+      "because": "compositeFrame must not pass effectT = 1; encoded frames omit the effect clock so text effects animate over the video rather than remaining frozen at settled rest.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CreativeGeneration/src/infrastructure/adapters/__tests__/CanvasFfmpegVideoCompositor.scrub.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/application/use-cases/PreviewCreativeFrameUseCase.use-case.ts",
+      "before": "      ...(scrub !== undefined\n        ? {\n            frameIndex: scrub.frameIndex,\n            motion: scrub.motion,\n            durationSec: scrub.durationSec,\n            ...(scrub.timeline !== undefined ? { timeline: scrub.timeline } : {}),\n          }\n        : {}),",
+      "after": "      ...(scrub !== undefined\n        ? {\n            motion: scrub.motion,\n            durationSec: scrub.durationSec,\n            ...(scrub.timeline !== undefined ? { timeline: scrub.timeline } : {}),\n          }\n        : {}),",
+      "because": "Dropping frameIndex (derived from atSec) from the scrub fingerprint would cause different scrub positions on the same creative to collide in the frame cache.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/application/use-cases/__tests__/PreviewCreativeFrameUseCase.use-case.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/application/use-cases/PreviewCreativeFrameUseCase.use-case.ts",
+      "before": "            ...(scrub.timeline !== undefined ? { timeline: scrub.timeline } : {}),",
+      "after": "            // timeline omitted from scrub fingerprint",
+      "because": "Dropping copy timeline from the scrub fingerprint would cause the same scrub position on different timelines to share a cache key.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/application/use-cases/__tests__/PreviewCreativeFrameUseCase.use-case.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/PreviewDock.tsx",
+      "before": "        durationSec={hasMotion ? durationSec : undefined}\n        atSec={hasMotion ? clampedCommittedSec : undefined}",
+      "after": "        durationSec={hasMotion ? durationSec : undefined}\n        atSec={hasMotion ? committedSec : undefined}",
+      "because": "Passing un-clamped committedSec to PreviewFrame causes atSec > durationSec when the clip is shortened, leading to API cell refusal and fallback.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/preview-dock.test.tsx"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/application/use-cases/PreviewCreativeFrameUseCase.use-case.ts",
+      "before": "      if (\n        typeof durationSec !== \"number\" ||\n        !Number.isInteger(durationSec) ||\n        durationSec < MIN_DURATION_SEC ||\n        durationSec > MAX_DURATION_SEC\n      ) {",
+      "after": "      if (\n        typeof durationSec !== \"number\" ||\n        !Number.isFinite(durationSec) ||\n        durationSec < MIN_DURATION_SEC ||\n        durationSec > MAX_DURATION_SEC\n      ) {",
+      "because": "Allowing non-integer durationSec permits fractional clip lengths that the domain refuses.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/application/use-cases/__tests__/PreviewCreativeFrameUseCase.use-case.test.ts"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

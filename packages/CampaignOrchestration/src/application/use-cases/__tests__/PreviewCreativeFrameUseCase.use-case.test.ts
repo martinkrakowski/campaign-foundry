@@ -15,7 +15,9 @@ import { DEFAULT_CAMPAIGN_TYPE } from "../../../domain/value-objects/campaign-ty
 import { templateFromCanonical } from "../../../domain/value-objects/brief-template.js";
 import type { CampaignBrief } from "../../../domain/entities/CampaignBrief.js";
 import type { Product } from "../../../domain/entities/Product.js";
-import { fakeCompositor, fakeImageGenerator } from "./_fakes.js";
+import { fakeCompositor, fakeImageGenerator, fakeVideoCompositor } from "./_fakes.js";
+import { MOTION_FPS } from "../../../domain/value-objects/MotionKind.vo.js";
+import type { CopyTimeline } from "../../../domain/value-objects/CopyTimeline.vo.js";
 
 /** The same sha256 the composition root injects — real hashing, real keys. */
 const sha256 = (input: string | Uint8Array): string =>
@@ -394,4 +396,214 @@ test("the brief's template rides the frame request exactly as it rides the run (
   const result = await new PreviewCreativeFrameUseCase(d).execute(baseBrief({ template }), cell());
   expect(result.success).toBe(true);
   expect(d.compositor.compositeAsset).toHaveBeenCalledWith(expect.objectContaining({ template }));
+});
+
+// --- VE2: scrubbing through the video compositor -----------------------------
+
+const scrubTimeline: CopyTimeline = {
+  beats: [
+    { text: "Alpha", weight: 1 },
+    { text: "Beta", weight: 1 },
+  ],
+  transition: "fade",
+  keyBeat: 1,
+};
+
+const motionCell = (over: Record<string, unknown> = {}) =>
+  cell({ motion: "ken-burns-in", durationSec: 6, atSec: 2, ...over });
+
+describe("PreviewCreativeFrameUseCase — the scrub cell (VE-D5/VE-D6)", () => {
+  test.each([
+    ["motion only", { motion: "ken-burns-in" }],
+    ["durationSec only", { durationSec: 6 }],
+    ["atSec only", { atSec: 2 }],
+    ["motion and durationSec, no atSec", { motion: "ken-burns-in", durationSec: 6 }],
+    ["motion and atSec, no durationSec", { motion: "ken-burns-in", atSec: 2 }],
+    ["durationSec and atSec, no motion", { durationSec: 6, atSec: 2 }],
+  ])("rejects a cell carrying %s — the three fields travel together or not at all", async (_label, over) => {
+    const videoCompositor = fakeVideoCompositor();
+    const d = deps({ videoCompositor });
+    const result = await new PreviewCreativeFrameUseCase(d).execute(baseBrief(), cell(over));
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.error.message).toMatch(/motion, durationSec and atSec together/);
+    expect(d.imageGenerator.resolveBackground).not.toHaveBeenCalled();
+    expect(d.compositor.compositeAsset).not.toHaveBeenCalled();
+    expect(videoCompositor.compositeFrame).not.toHaveBeenCalled();
+  });
+
+  test("rejects a motion kind outside the vocabulary, before any port is called", async () => {
+    const d = deps({ videoCompositor: fakeVideoCompositor() });
+    const result = await new PreviewCreativeFrameUseCase(d).execute(
+      baseBrief(),
+      motionCell({ motion: "spin-cycle" }),
+    );
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.error.message).toMatch(/motion must be one of/);
+    expect(d.imageGenerator.resolveBackground).not.toHaveBeenCalled();
+  });
+
+  test.each([1, 2.5, 31, 32.5, Number.NaN, "6"] as const)(
+    "rejects non-integer or out-of-range durationSec %s",
+    async (durationSec) => {
+      const d = deps({ videoCompositor: fakeVideoCompositor() });
+      const result = await new PreviewCreativeFrameUseCase(d).execute(
+        baseBrief(),
+        motionCell({ durationSec: durationSec as unknown as number }),
+      );
+      expect(result.success).toBe(false);
+      if (!result.success)
+        expect(result.error.message).toMatch(/durationSec must be an integer in \[2, 30\]/);
+      expect(d.imageGenerator.resolveBackground).not.toHaveBeenCalled();
+    },
+  );
+
+  test.each([-0.5, 6.001, Number.NaN, "2" as unknown as number])(
+    "rejects atSec %s outside [0, durationSec]",
+    async (atSec) => {
+      const d = deps({ videoCompositor: fakeVideoCompositor() });
+      const result = await new PreviewCreativeFrameUseCase(d).execute(
+        baseBrief(),
+        motionCell({ atSec: atSec as unknown as number }),
+      );
+      expect(result.success).toBe(false);
+      if (!result.success)
+        expect(result.error.message).toMatch(/atSec must be a finite number in \[0, 6\]/);
+      expect(d.imageGenerator.resolveBackground).not.toHaveBeenCalled();
+    },
+  );
+
+  test("a motion cell with no video compositor wired is rejected before any port is called", async () => {
+    const d = deps();
+    const result = await new PreviewCreativeFrameUseCase(d).execute(baseBrief(), motionCell());
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.error.message).toMatch(/no video compositor is wired/);
+    expect(d.imageGenerator.resolveBackground).not.toHaveBeenCalled();
+    expect(d.compositor.compositeAsset).not.toHaveBeenCalled();
+  });
+
+  test("a scrub cell renders through compositeFrame — never compositeAsset — with fps MOTION_FPS and the brief's timeline (R2)", async () => {
+    const videoCompositor = fakeVideoCompositor();
+    const d = deps({ videoCompositor });
+    const result = await new PreviewCreativeFrameUseCase(d).execute(
+      baseBrief({ copy: { timeline: scrubTimeline } }),
+      motionCell(),
+    );
+    expect(result.success).toBe(true);
+    expect(d.compositor.compositeAsset).not.toHaveBeenCalled();
+    expect(videoCompositor.compositeFrame).toHaveBeenCalledTimes(1);
+    const [request, atSec] = vi.mocked(videoCompositor.compositeFrame).mock.calls[0];
+    expect(atSec).toBe(2);
+    expect(request).toMatchObject({
+      message: "Hallo",
+      fps: MOTION_FPS,
+      durationSec: 6,
+      motion: "ken-burns-in",
+      timeline: scrubTimeline,
+    });
+    expect(request.sampleAt).toEqual([]);
+    if (!result.success) return;
+    expect(result.value.image).toEqual(new Uint8Array([11, 12, 13]));
+    expect(result.value.logoApplied).toBe(true);
+    expect(result.value.backgroundSource).toBe("procedural");
+  });
+
+  test("the video request carries the timeline only when the brief declares one", async () => {
+    const videoCompositor = fakeVideoCompositor();
+    const d = deps({ videoCompositor });
+    const result = await new PreviewCreativeFrameUseCase(d).execute(baseBrief(), motionCell());
+    expect(result.success).toBe(true);
+    const request = vi.mocked(videoCompositor.compositeFrame).mock.calls[0][0];
+    expect("timeline" in request).toBe(false);
+  });
+
+  test("a cell without the new fields still takes today's still path and never touches compositeFrame", async () => {
+    const videoCompositor = fakeVideoCompositor();
+    const d = deps({ videoCompositor });
+    const result = await new PreviewCreativeFrameUseCase(d).execute(baseBrief(), cell());
+    expect(result.success).toBe(true);
+    expect(d.compositor.compositeAsset).toHaveBeenCalledTimes(1);
+    expect(videoCompositor.compositeFrame).not.toHaveBeenCalled();
+  });
+});
+
+describe("PreviewCreativeFrameUseCase — the scrub frame fingerprint (R8)", () => {
+  test("the frame fields move the key away from the same cell's still key", async () => {
+    const still = await new PreviewCreativeFrameUseCase(deps()).execute(baseBrief(), cell());
+    const scrub = await new PreviewCreativeFrameUseCase(deps({ videoCompositor: fakeVideoCompositor() })).execute(
+      baseBrief(),
+      motionCell(),
+    );
+    expect(still.success && scrub.success).toBe(true);
+    if (!still.success || !scrub.success) return;
+    expect(scrub.value.cacheKey).not.toBe(still.value.cacheKey);
+  });
+
+  test("two scrub positions that land on the same frame index share a key and composite once — the index is hashed, not raw atSec", async () => {
+    const videoCompositor = fakeVideoCompositor();
+    const cache = memoryCache();
+    const d = deps({ videoCompositor, frameCache: cache });
+    const useCase = new PreviewCreativeFrameUseCase(d);
+    // durationSec 6 → frames 180 → index round(atSec/6 × 179): both land on 60.
+    const first = await useCase.execute(baseBrief(), motionCell({ atSec: 2.0 }));
+    const second = await useCase.execute(baseBrief(), motionCell({ atSec: 2.005 }));
+    expect(first.success && second.success).toBe(true);
+    if (!first.success || !second.success) return;
+    expect(second.value.cacheKey).toBe(first.value.cacheKey);
+    expect(videoCompositor.compositeFrame).toHaveBeenCalledTimes(1);
+  });
+
+  test("two scrub positions on different frame indices never share a key", async () => {
+    const a = await new PreviewCreativeFrameUseCase(deps({ videoCompositor: fakeVideoCompositor() })).execute(
+      baseBrief(),
+      motionCell({ atSec: 0.5 }),
+    );
+    const b = await new PreviewCreativeFrameUseCase(deps({ videoCompositor: fakeVideoCompositor() })).execute(
+      baseBrief(),
+      motionCell({ atSec: 5.5 }),
+    );
+    expect(a.success && b.success).toBe(true);
+    if (!a.success || !b.success) return;
+    expect(a.value.cacheKey).not.toBe(b.value.cacheKey);
+  });
+
+  test("a different motion or duration on the same position never shares a key", async () => {
+    const run = (over: Record<string, unknown>) =>
+      new PreviewCreativeFrameUseCase(deps({ videoCompositor: fakeVideoCompositor() })).execute(
+        baseBrief(),
+        motionCell(over),
+      );
+    const base = await run({});
+    const otherMotion = await run({ motion: "accent-wipe" });
+    const otherDuration = await run({ durationSec: 4 });
+    expect(base.success && otherMotion.success && otherDuration.success).toBe(true);
+    if (!base.success || !otherMotion.success || !otherDuration.success) return;
+    expect(otherMotion.value.cacheKey).not.toBe(base.value.cacheKey);
+    expect(otherDuration.value.cacheKey).not.toBe(base.value.cacheKey);
+  });
+
+  test("the brief's copy timeline enters the frame fingerprint — the same position on another timeline is another frame", async () => {
+    const withTimeline = await new PreviewCreativeFrameUseCase(
+      deps({ videoCompositor: fakeVideoCompositor() }),
+    ).execute(baseBrief({ copy: { timeline: scrubTimeline } }), motionCell());
+    const without = await new PreviewCreativeFrameUseCase(
+      deps({ videoCompositor: fakeVideoCompositor() }),
+    ).execute(baseBrief(), motionCell());
+    expect(withTimeline.success && without.success).toBe(true);
+    if (!withTimeline.success || !without.success) return;
+    expect(withTimeline.value.cacheKey).not.toBe(without.value.cacheKey);
+  });
+
+  test("a scrub cache hit returns the stored frame without compositing again", async () => {
+    const videoCompositor = fakeVideoCompositor();
+    const cache = memoryCache();
+    const d = deps({ videoCompositor, frameCache: cache });
+    const useCase = new PreviewCreativeFrameUseCase(d);
+    const first = await useCase.execute(baseBrief(), motionCell());
+    const second = await useCase.execute(baseBrief(), motionCell());
+    expect(first.success && second.success).toBe(true);
+    if (!first.success || !second.success) return;
+    expect(videoCompositor.compositeFrame).toHaveBeenCalledTimes(1);
+    expect(second.value.image).toEqual(first.value.image);
+    expect(second.value.cacheKey).toBe(first.value.cacheKey);
+  });
 });

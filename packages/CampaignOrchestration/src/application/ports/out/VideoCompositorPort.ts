@@ -1,4 +1,4 @@
-import type { CompositeRequest } from "./CompositorPort.js";
+import type { CompositeRequest, CompositeResult } from "./CompositorPort.js";
 import type { CopyTimeline } from "../../../domain/value-objects/CopyTimeline.vo.js";
 import type { MotionKind } from "../../../domain/value-objects/MotionKind.vo.js";
 
@@ -24,4 +24,6 @@ export interface VideoCompositeResult {
 
 export interface VideoCompositorPort {
   compositeVideo(request: VideoCompositeRequest): Promise<VideoCompositeResult>;
+  compositeFrame(request: VideoCompositeRequest, atSec: number): Promise<CompositeResult>;
 }
+
