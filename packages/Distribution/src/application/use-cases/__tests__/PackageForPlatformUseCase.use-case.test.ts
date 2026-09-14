@@ -58,6 +58,7 @@ const exec = (
     skipped: number;
     include: string[];
     capabilities: { motion: boolean };
+    clickDestination?: string;
     /**
      * Profile lookup override for platforms `platformProfile` does not know —
      * how a test registers a profile that declares `html` (none ships one yet,
@@ -545,5 +546,53 @@ describe("PackageForPlatformUseCase — html (D122)", () => {
     expect(result.success).toBe(true);
     if (!result.success) return;
     expect(result.value.platforms[0].items[0].checks).toEqual({ size: "fail" });
+  });
+
+  test("refuses an html asset when clickDestination is set on brief/asset but bundle lacks clickTag variable (HL4)", async () => {
+    // A bundle that contains no clickTag variable (e.g. bare html or an <a href>)
+    const bundleWithoutClickTag = new TextEncoder().encode("<!DOCTYPE html><html><body><a href=\"https://example.com\">Click</a></body></html>");
+    const store = fakeStore(bundleWithoutClickTag);
+    const result = await exec(store, {
+      assets: [html({ clickDestination: "https://example.com/landing" })],
+      platforms: ["html-banner"],
+      profiles: { "html-banner": HTML_PROFILE },
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.message).toContain("clickTag");
+      expect(result.error.message).toContain("alpha/v1");
+    }
+    expect(store.writePackaged).not.toHaveBeenCalled();
+    expect(store.writeManifest).not.toHaveBeenCalled();
+  });
+
+  test("refuses an html asset when clickDestination is set at input level but bundle lacks clickTag (HL4)", async () => {
+    const bundleWithoutClickTag = new TextEncoder().encode("<!DOCTYPE html><html><body>Hello</body></html>");
+    const store = fakeStore(bundleWithoutClickTag);
+    const result = await exec(store, {
+      assets: [html()],
+      platforms: ["html-banner"],
+      profiles: { "html-banner": HTML_PROFILE },
+      clickDestination: "https://example.com/landing",
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.message).toContain("clickTag");
+      expect(result.error.message).toContain("alpha/v1");
+    }
+  });
+
+  test("packages an html asset when clickDestination is set and bundle declares var clickTag (HL4)", async () => {
+    const bundleWithClickTag = new TextEncoder().encode("<!DOCTYPE html><html><head><script>var clickTag = \"https://example.com/landing\";</script></head><body><button onclick=\"window.open(window.clickTag)\">Click</button></body></html>");
+    const store = fakeStore(bundleWithClickTag);
+    const result = await exec(store, {
+      assets: [html({ clickDestination: "https://example.com/landing" })],
+      platforms: ["html-banner"],
+      profiles: { "html-banner": HTML_PROFILE },
+    });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.platforms[0].items[0].format).toBe("html");
+    expect(store.writePackaged).toHaveBeenCalled();
   });
 });

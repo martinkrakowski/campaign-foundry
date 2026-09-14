@@ -311,6 +311,24 @@ describe("report persistence", () => {
     expect(isPersistedAsset({ ...motion, format: "static", videoPath: undefined, durationSec: undefined })).toBe(true);
   });
 
+  test("isPersistedAsset validates html rows and requires htmlBundlePath and htmlFallbackPath (HL4)", () => {
+    const htmlRow = {
+      productId: "alpha",
+      aspectRatio: "1:1",
+      treatment: "default",
+      outputPath: "alpha/1x1.png",
+      format: "html",
+      htmlBundlePath: "alpha/1x1/index.html",
+      htmlFallbackPath: "alpha/1x1/fallback.png",
+      clickDestination: "https://example.com/landing",
+    };
+    expect(isPersistedAsset(htmlRow)).toBe(true);
+    expect(isPersistedAsset({ ...htmlRow, htmlBundlePath: undefined })).toBe(false);
+    expect(isPersistedAsset({ ...htmlRow, htmlBundlePath: 123 })).toBe(false);
+    expect(isPersistedAsset({ ...htmlRow, htmlFallbackPath: undefined })).toBe(false);
+    expect(isPersistedAsset({ ...htmlRow, htmlFallbackPath: null })).toBe(false);
+  });
+
   test("isPersistedAsset requires the four strings plus integer variantIndex and attempt on variation rows", () => {
     const variation = {
       productId: "alpha",

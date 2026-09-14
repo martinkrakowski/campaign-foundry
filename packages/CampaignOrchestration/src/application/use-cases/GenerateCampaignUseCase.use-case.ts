@@ -10,6 +10,7 @@ import type { MotionKind } from "../../domain/value-objects/MotionKind.vo.js";
 import { DEFAULT_TREATMENT, SAFE_ID_PATTERN } from "../../domain/value-objects/Treatment.vo.js";
 import { clickDestinationProblem } from "../../domain/value-objects/click-destination.js";
 import { styleProblem } from "../../domain/value-objects/creative-style.js";
+import { assembleHtml } from "../../domain/value-objects/markup-assembler.js";
 import { PipelineExecutionLog } from "../../domain/value-objects/PipelineExecutionLog.vo.js";
 import type { PipelineResult } from "../../domain/value-objects/PipelineResult.vo.js";
 import type { VariationPlan } from "../../domain/value-objects/VariationPlan.vo.js";
@@ -326,11 +327,32 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
 
           // SaveOutputFiles — the use case owns the path (OutputDirectoryConvention).
           // A size is already path-safe ("728x90"); a ratio slugs its colons away.
-          const outputPath = namespaceByTreatment
-            ? `${product.id}/${canvas.replace(":", "x")}/${treatment.id}.png`
-            : `${product.id}/${canvas.replace(":", "x")}.png`;
+          const isHtml = brief.template.creativeType === "image-html";
+          const basePath = namespaceByTreatment
+            ? `${product.id}/${canvas.replace(":", "x")}/${treatment.id}`
+            : `${product.id}/${canvas.replace(":", "x")}`;
+          const outputPath = `${basePath}.png`;
           await this.deps.exporter.saveToDirectory(composite.image, outputPath);
           if (canvas === "1:1" && treatment === treatments[0]) heroImage = composite.image;
+
+          let htmlBundlePath: string | undefined;
+          let htmlFallbackPath: string | undefined;
+          if (isHtml) {
+            htmlFallbackPath = `${basePath}/fallback.png`;
+            htmlBundlePath = `${basePath}/index.html`;
+            await this.deps.exporter.saveToDirectory(composite.image, htmlFallbackPath);
+            const htmlElements = brief.template.layers
+              .filter((l) => l.kind === "html" && l.enabled !== false)
+              .flatMap((l) => l.elements ?? []);
+            const assembled = assembleHtml({
+              elements: htmlElements,
+              canvas: spec,
+              brandColor: product.primaryColor,
+              style: brief.style,
+              clickDestination: brief.clickDestination,
+            });
+            await this.deps.exporter.saveToDirectory(assembled.bytes, htmlBundlePath);
+          }
 
           cellAssets.push({
             productId: product.id,
@@ -342,6 +364,14 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
             logoApplied: composite.logoApplied,
             treatment: treatment.id,
             backgroundSource: background.source,
+            ...(isHtml
+              ? {
+                  format: "html",
+                  htmlBundlePath,
+                  htmlFallbackPath,
+                  ...(brief.clickDestination !== undefined ? { clickDestination: brief.clickDestination } : {}),
+                }
+              : {}),
           });
           log.record(
             "CompositeVariations",
@@ -495,6 +525,7 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
         timeline,
         brief.style,
         brief.template,
+        brief.clickDestination,
       ),
     );
 
@@ -535,6 +566,7 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     timeline: CopyTimeline | undefined,
     style: CampaignBrief["style"],
     template: CampaignBrief["template"],
+    clickDestination?: string,
   ): Promise<{ asset: GeneratedAsset; heroImage?: Uint8Array }> {
     const cellContext: BackgroundContext = {
       ...context,
@@ -626,6 +658,26 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     // export and packaging key on the row, and a stale mp4 would still be served.
     await this.deps.exporter.remove(videoPath);
 
+    const isHtml = template.creativeType === "image-html";
+    let htmlBundlePath: string | undefined;
+    let htmlFallbackPath: string | undefined;
+    if (isHtml) {
+      htmlFallbackPath = `${basePath}/fallback.png`;
+      htmlBundlePath = `${basePath}/index.html`;
+      await this.deps.exporter.saveToDirectory(composite.image, htmlFallbackPath);
+      const htmlElements = template.layers
+        .filter((l) => l.kind === "html" && l.enabled !== false)
+        .flatMap((l) => l.elements ?? []);
+      const assembled = assembleHtml({
+        elements: htmlElements,
+        canvas: { ratio: ratio.value },
+        brandColor: product.primaryColor,
+        style,
+        clickDestination,
+      });
+      await this.deps.exporter.saveToDirectory(assembled.bytes, htmlBundlePath);
+    }
+
     // Key order matches the classic/static row exactly, so static variation
     // reports stay byte-identical to the pre-motion pipeline.
     const asset: GeneratedAsset = {
@@ -634,8 +686,15 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
       passedCompliance: visual.passed,
       logoApplied: composite.logoApplied,
       ...lineage,
-      format: "static",
+      format: isHtml ? "html" : "static",
       descriptor,
+      ...(isHtml
+        ? {
+            htmlBundlePath,
+            htmlFallbackPath,
+            ...(clickDestination !== undefined ? { clickDestination } : {}),
+          }
+        : {}),
     };
     log.record(
       "CompositeVariations",

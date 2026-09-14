@@ -1,0 +1,81 @@
+{
+  "version": 1,
+  "lane": "HL4",
+  "mutations": [
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/markup-assembler.ts",
+      "before": "  if (clickDestination !== undefined) {\n    headScripts.push(\n      `<script>var ${CLICK_TAG_VARIABLE} = ${JSON.stringify(clickDestination)};</script>`,\n    );\n  }",
+      "after": "  // clickTag script omitted",
+      "because": "assembleHtml must emit a var clickTag declaration in the head scripts when clickDestination is present (HL-D3) so ad servers can wire and track click navigation.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/markup-assembler.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/markup-assembler.ts",
+      "before": "        const navAttr =\n          clickDestination !== undefined\n            ? ` onclick=\"window.open(window.${CLICK_TAG_VARIABLE})\"`\n            : \"\";",
+      "after": "        const navAttr = \"\";",
+      "because": "assembleHtml must wire interactive button elements to navigate via window.open(window.clickTag) when clickDestination is present (HL-D3).",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/markup-assembler.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/markup-assembler.ts",
+      "before": "  if (profile !== undefined && bytes.length > profile.maxBytes) {",
+      "after": "  if (profile !== undefined && bytes.length > 150 * 1024) {",
+      "because": "assembleHtml must check bundle weight against the supplied profile.maxBytes budget rather than a hardcoded constant (HL-D6), refusing over-budget units.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/markup-assembler.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/Distribution/src/application/use-cases/PackageForPlatformUseCase.use-case.ts",
+      "before": "    if (destination !== undefined) {\n      const bundleText = new TextDecoder().decode(bundle);\n      if (!bundleText.includes(CLICK_TAG_VARIABLE)) {\n        throw new Error(\n          `HTML asset ${assetIdentity(asset)} has clickDestination but bundle is missing \"${CLICK_TAG_VARIABLE}\" variable declaration.`,\n        );\n      }\n    }",
+      "after": "    // clickTag verification omitted",
+      "because": "PackageForPlatformUseCase must refuse an HTML creative unit whose brief carried a clickDestination when its bundle lacks the required clickTag variable declaration.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/Distribution/src/application/use-cases/__tests__/PackageForPlatformUseCase.use-case.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/application/use-cases/GenerateCampaignUseCase.use-case.ts",
+      "before": "            ...(isHtml\n              ? {\n                  format: \"html\",\n                  htmlBundlePath,\n                  htmlFallbackPath,\n                  ...(brief.clickDestination !== undefined ? { clickDestination: brief.clickDestination } : {}),\n                }\n              : {}),",
+      "after": "            ...(isHtml\n              ? {\n                  htmlBundlePath,\n                  htmlFallbackPath,\n                  ...(brief.clickDestination !== undefined ? { clickDestination: brief.clickDestination } : {}),\n                }\n              : {}),",
+      "because": "GenerateCampaignUseCase must emit format: \"html\" on generated assets for image-html briefs so that downstream systems distinguish HTML units from static images.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/application/use-cases/__tests__/GenerateCampaignUseCase.use-case.test.ts"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

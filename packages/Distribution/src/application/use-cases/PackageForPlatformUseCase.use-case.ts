@@ -1,4 +1,4 @@
-import { assetIdentity } from "@campaignfoundry/CampaignOrchestration";
+import { assetIdentity, CLICK_TAG_VARIABLE } from "@campaignfoundry/CampaignOrchestration";
 import { ok, err, errorMessage, type Result } from "@campaignfoundry/shared";
 import {
   isPlatformVisible,
@@ -30,6 +30,8 @@ export interface PackageableAsset {
   readonly htmlBundlePath?: string;
   /** The required raster fallback rendition (D122) — html rows only. */
   readonly htmlFallbackPath?: string;
+  /** The click destination URL (HL2, HL-D3). */
+  readonly clickDestination?: string;
   readonly durationSec?: number;
 }
 
@@ -48,6 +50,8 @@ export interface PackageForPlatformInput {
   readonly include?: readonly string[];
   /** Host capabilities; motion platforms are visible only with `motion: true`. Default: static only. */
   readonly capabilities?: PlatformCapabilities;
+  /** The brief's click destination URL (HL2, HL-D3). */
+  readonly clickDestination?: string;
 }
 
 export interface PackagedPlatform {
@@ -165,7 +169,7 @@ export class PackageForPlatformUseCase {
             isMotionAsset(asset)
               ? await this.packageMotion(platformId, profile, asset)
               : isHtmlAsset(asset)
-                ? await this.packageHtml(platformId, profile, asset)
+                ? await this.packageHtml(platformId, profile, asset, input.clickDestination)
                 : await this.packageStatic(platformId, profile, asset),
           );
         }
@@ -252,8 +256,18 @@ export class PackageForPlatformUseCase {
     platformId: string,
     profile: PlatformProfile,
     asset: PackageableAsset & { htmlBundlePath: string; htmlFallbackPath: string },
+    briefDestination?: string,
   ): Promise<PackageManifestItem> {
     const bundle = await this.store.readAsset(asset.htmlBundlePath);
+    const destination = asset.clickDestination ?? briefDestination;
+    if (destination !== undefined) {
+      const bundleText = new TextDecoder().decode(bundle);
+      if (!bundleText.includes(CLICK_TAG_VARIABLE)) {
+        throw new Error(
+          `HTML asset ${assetIdentity(asset)} has clickDestination but bundle is missing "${CLICK_TAG_VARIABLE}" variable declaration.`,
+        );
+      }
+    }
     const fallback = await this.store.readAsset(asset.htmlFallbackPath);
     const packagedPath = await this.store.writePackaged(platformId, asset.htmlBundlePath, bundle);
     const fallbackPath = await this.store.writePackaged(platformId, asset.htmlFallbackPath, fallback);

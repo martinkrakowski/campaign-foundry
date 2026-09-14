@@ -75,6 +75,8 @@ export interface GeneratedAsset {
    * has one. An HTML asset without it is invalid.
    */
   readonly htmlFallbackPath?: string;
+  /** The click destination URL (HL2, HL-D3). */
+  readonly clickDestination?: string;
   /** Clip length in seconds. Motion variants only. */
   readonly durationSec?: number;
   /** Relative path of the print-proof PDF, when one was generated. */
