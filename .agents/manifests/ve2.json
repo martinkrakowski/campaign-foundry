@@ -61,6 +61,36 @@
         "packages/CampaignOrchestration/src/application/use-cases/__tests__/PreviewCreativeFrameUseCase.use-case.test.ts"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/PreviewDock.tsx",
+      "before": "        durationSec={hasMotion ? durationSec : undefined}\n        atSec={hasMotion ? clampedCommittedSec : undefined}",
+      "after": "        durationSec={hasMotion ? durationSec : undefined}\n        atSec={hasMotion ? committedSec : undefined}",
+      "because": "Passing un-clamped committedSec to PreviewFrame causes atSec > durationSec when the clip is shortened, leading to API cell refusal and fallback.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/preview-dock.test.tsx"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/application/use-cases/PreviewCreativeFrameUseCase.use-case.ts",
+      "before": "      if (\n        typeof durationSec !== \"number\" ||\n        !Number.isInteger(durationSec) ||\n        durationSec < MIN_DURATION_SEC ||\n        durationSec > MAX_DURATION_SEC\n      ) {",
+      "after": "      if (\n        typeof durationSec !== \"number\" ||\n        !Number.isFinite(durationSec) ||\n        durationSec < MIN_DURATION_SEC ||\n        durationSec > MAX_DURATION_SEC\n      ) {",
+      "because": "Allowing non-integer durationSec permits fractional clip lengths that the domain refuses.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/application/use-cases/__tests__/PreviewCreativeFrameUseCase.use-case.test.ts"
+      ],
+      "verdict": "caught"
     }
   ]
 }
