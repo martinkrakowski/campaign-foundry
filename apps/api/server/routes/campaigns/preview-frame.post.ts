@@ -148,8 +148,8 @@ function parsePreviewCell(value: unknown): PreviewCellSelection {
     ...(hasMotion
       ? {
           motion: motion as MotionKind,
-          durationSec,
-          atSec,
+          durationSec: durationSec as number,
+          atSec: atSec as number,
         }
       : {}),
   };
