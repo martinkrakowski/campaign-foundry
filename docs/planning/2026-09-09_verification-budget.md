@@ -292,3 +292,59 @@ that way, V3 has no arithmetic to run.
 One further caution for whoever closes this lane: of PR-Agent's six refutations, **every one was
 refuted with a named mechanism and line numbers**, not with a judgement call — which is the standard
 V-D4 sets. A refuted rate assembled from softer refutations would not support the same decision.
+
+### 8.1 Amendment — the same wave, three more PRs (2026-09-13, later)
+
+§8 measured #369–#371. The wave continued, and three more PRs were dispositioned finding by finding
+against their branches: **#374** (X9), **#376** (S3) and **#377** (HL4). Every thread below was
+verified against the code; none is counted from a bot's self-description. §8's table stands as a
+record of what was known then; this one supersedes it as the wave's figure.
+
+| Bot | Threads | Verified real | Refuted | Refuted % |
+|---|---|---|---|---|
+| **Qodo** | 14 | 11 | 3 | **21 %** |
+| **PR-Agent** | 15 | 3 | 12 | **80 %** |
+| **CodeRabbit** | 0 | 0 | 0 | — rate limited throughout |
+
+**Qodo's eleven** include every defect that blocked a merge this wave: the event-only row dropping its
+gate log (#369); the html drawer painting the first layer for every dispatch (#371); a review blocker
+hidden from the attention view, an unknown check count printed as `0`, a non-advancing cursor, and a
+malformed page read as `ready` (#376); and **two script-injection holes in the publicly served ad
+unit** (#377). Its three refutations were all on #370.
+
+**PR-Agent's three real findings**, and whether each was already covered:
+
+- `collect.ts:590`, a missing `hasNextPage` read as a completed page (#376) — **also Qodo's**.
+- `markup-assembler.ts`, `brandColor` interpolated into CSS unescaped (#377) — **also Qodo's**.
+- `report.ts`, the `isPersistedAsset` type predicate not verifying `clickDestination` (#377) —
+  **PR-Agent alone.** Low severity: it needs a malformed report row. Recorded as **X12**.
+
+So the marginal value of PR-Agent this wave — what would have been lost had it been off — is **one
+low-severity finding in fifteen threads.**
+
+### Per workflow
+
+Attribution by each workflow's `paths` filter, which decides whether it can run at all (UI Review has
+none; API is `apps/api/**`; Architecture is `packages/*/src/**` plus web TS):
+
+| | Threads | Real | Refuted | Refuted % |
+|---|---|---|---|---|
+| **UI Review** — PRs only it could review (#369, #376) | 5 | 1 | 4 | **80 %** |
+| **API Review** — attributable alone | 0 | — | — | no data |
+| **Unattributable** — #370, #371, #377, where two or three workflows were eligible | 10 | 2 | 8 | 80 % |
+
+**UI Review crosses V3's 60 % line on its own attributable threads — but on n = 5.** API Review has
+**no** attributable thread at all: it never ran on a PR without another PR-Agent workflow beside it.
+
+### Where that leaves the decision
+
+- **UI Review**: the arithmetic says disable; the sample is five. One more wave recorded at sweep
+  time settles it either way.
+- **API Review**: not decidable from this wave, by construction. It needs a PR touching only
+  `apps/api/**` — or per-comment workflow attribution, which §8 already identified as the fix.
+- **Architecture Review** stays exempt, as V3 states. Nothing here argues otherwise: none of the ten
+  unattributable threads can be pinned on it, and the plan's rule is not to cut a passing reviewer by
+  accident.
+
+**V3 stays open.** Its fence stays. What changed is that the case against UI Review is now numerical
+rather than anecdotal, and the one question left is sample size.

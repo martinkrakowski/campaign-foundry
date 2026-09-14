@@ -269,3 +269,26 @@ fails should fall back to the canonical template is the lane's to decide and to 
 # isBriefTemplate does not enforce required kinds at all — the API does.
 ! grep -q 'required' packages/CampaignOrchestration/src/domain/value-objects/brief-template.ts
 ```
+
+---
+
+## 15. A persisted row's click destination is believed, not checked (X12)
+
+**Evidence.** `apps/api/server/lib/report.ts` declares `clickDestination?: string` on the persisted
+asset row (HL4), and `isPersistedAsset` — a **type predicate** — verifies `htmlBundlePath` and
+`htmlFallbackPath` for html rows but never `clickDestination`. The file states its own rule a few
+lines above the guard: *whatever this type claims, callers believe after the guard returns.* The row's
+destination flows into `PackageForPlatformUseCase`, which decides from it whether a bundle must carry
+a `clickTag`.
+
+**Severity: low.** It needs a malformed report row. It is recorded because it is exactly the class the
+file's own comment exists to prevent, and because it was the only finding this wave that PR-Agent made
+and Qodo did not (§8.1 of the verification-budget plan).
+
+**Fix shape.** Verify the field in the guard — absent, or a string — the same way `videoPath` and
+`durationSec` are verified for motion rows.
+
+```premise X12
+# isPersistedAsset declares clickDestination but never checks it.
+! grep -q 'rec.clickDestination' apps/api/server/lib/report.ts
+```
