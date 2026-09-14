@@ -259,3 +259,13 @@ a filesystem, so this narrows the race rather than closing it. It also says noth
 **L12** — the same measurement left 13 of 200 reports unreadable, because
 `report.ts:195-196` writes both files with `writeFile` and no temp-and-rename; that gap is
 untouched here. A premise for a closed lane is noise.
+
+**L12 — shipped in this PR.** Its premise is retired when it lands; `plan:verify` no
+longer tracks it. `writeReport` stages each of the two files — the per-campaign report and the
+`report.json` latest pointer — in a unique pid-and-random sibling temp and renames it over the
+target, the exact pattern `FsBriefStore` and `FsPoolStore` already use (L9), so a crash or a
+concurrent reader never sees a torn report instead of the 13-of-200 the lane measured. L11's
+`expectedRevision` guard is untouched: atomicity is about torn files, not about the race D79
+narrows. Three tests pin it — a reader racing a half-written payload parses the prior report, a
+failed rename leaves the previous bytes in place with no temp behind, and the write renames a
+temp sibling rather than the target.

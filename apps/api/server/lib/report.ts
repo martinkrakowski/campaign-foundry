@@ -1,9 +1,30 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
+import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { assetIdentity, SAFE_ID_PATTERN } from "@campaignfoundry/CampaignOrchestration";
 import type { GeneratedAsset, PipelineResult } from "@campaignfoundry/CampaignOrchestration";
 import { hashBytes, isErrno } from "./brief-files.js";
 import { outputRoot } from "./config.js";
+
+/**
+ * Atomic write: unique temp sibling then rename, so a crash never leaves
+ * half-written JSON and a concurrent reader never parses a torn report. The temp
+ * name is per-process and random — the pattern both stores use (L9) — because a
+ * fixed one would be shared by two overlapping writers: the first rename consumes
+ * it and the second writer's rename fails with ENOENT though both writes were fine.
+ * The report has no lock to make a shared temp safe, which is exactly why this lane
+ * reuses the stores' naming rather than inventing a third shape.
+ */
+async function writeAtomic(dest: string, content: string): Promise<void> {
+  const tmp = `${dest}.${process.pid}-${randomBytes(4).toString("hex")}.tmp`;
+  try {
+    await writeFile(tmp, content);
+    await rename(tmp, dest);
+  } catch (error) {
+    await unlink(tmp).catch(() => undefined);
+    throw error;
+  }
+}
 
 /** Persisted asset = the entity plus the derived `brandCompliant` view field. */
 type ReportAsset = GeneratedAsset & { brandCompliant: boolean };
@@ -266,7 +287,7 @@ export async function writeReport(
     null,
     2,
   );
-  if (perCampaign) await writeFile(perCampaign, payload);
-  await writeFile(latest, payload);
+  if (perCampaign) await writeAtomic(perCampaign, payload);
+  await writeAtomic(latest, payload);
   return perCampaign ?? latest;
 }

@@ -4808,6 +4808,11 @@ the Map) retargeted rather than dropped. Full gate 0 with 100 % on all four coun
 `plan:verify` 0 (13 premises). The `watch` seam's listener now takes the event type and a third
 `onError`; existing seams that ignore them are unaffected.
 
+## 2026-09-14 — L12: the report write is atomic
+
+- `writeReport` stages the per-campaign report and the `report.json` latest pointer in a unique pid-and-random temp sibling and renames it over the target — the `FsBriefStore`/`FsPoolStore` pattern (L9) — so a crash or a concurrent reader never parses a torn report (the plan measured 13 of 200 unreadable).
+- Seat: deepseek-v4.1-flash wrote the red tests, the fix and the plan note, then hung on a provider step with its work committed; the orchestrator stopped it and finished the gate.
+- Orchestrator addition: the cleanup `unlink` swallows its own ENOENT when the staging write failed before the temp existed; a test pins that the original error surfaces, and the manifest carries that mutation (caught) beside the lane's in-place-write mutation (caught).
 ## 2026-09-14 — M3: the layer on/off toggle in the Template section
 
 - **Mode:** Implementer
