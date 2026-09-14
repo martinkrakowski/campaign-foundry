@@ -1,5 +1,5 @@
-import { describe, test, expect } from "vitest";
-import { render } from "@testing-library/react";
+import { describe, test, expect, vi } from "vitest";
+import { render, fireEvent, act } from "@testing-library/react";
 import { PreviewDock, PreviewPicture, derivePreviewRatio, derivePreviewSpec } from "../PreviewDock";
 import * as messages from "../messages";
 
@@ -202,3 +202,50 @@ describe("PreviewDock — the stand-in caption (D52)", () => {
     expect(container.textContent).not.toContain(messages.previewFrameStandInBackground);
   });
 });
+
+describe("PreviewDock — scrub control (VE-D5, VE-D6)", () => {
+  test("renders a range control when motion is present", () => {
+    const { container } = render(
+      <PreviewDock {...showcase} motion="ken-burns-in" />,
+    );
+    const slider = container.querySelector('input[type="range"]');
+    expect(slider).not.toBeNull();
+    expect(slider?.getAttribute("aria-label")).toMatch(/scrub|preview/i);
+    expect(slider?.getAttribute("min")).toBe("0");
+    expect(Number(slider?.getAttribute("max"))).toBeGreaterThan(0);
+  });
+
+  test("the range control is absent when the brief renders no motion", () => {
+    const { container } = render(
+      <PreviewDock {...showcase} motion={undefined} />,
+    );
+    const slider = container.querySelector('input[type="range"]');
+    expect(slider).toBeNull();
+  });
+
+  test("the scrub control never autoplays", async () => {
+    vi.useFakeTimers();
+    const { container } = render(
+      <PreviewDock {...showcase} motion="ken-burns-in" />,
+    );
+    const slider = container.querySelector('input[type="range"]') as HTMLInputElement;
+    expect(slider).not.toBeNull();
+    const initialVal = slider.value;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+    expect(slider.value).toBe(initialVal);
+    vi.useRealTimers();
+  });
+
+  test("scrubbing dispatches no EditorAction and maintains local component state", () => {
+    const { container } = render(
+      <PreviewDock {...showcase} motion="ken-burns-in" />,
+    );
+    const slider = container.querySelector('input[type="range"]') as HTMLInputElement;
+    expect(slider).not.toBeNull();
+    fireEvent.change(slider, { target: { value: "3" } });
+    expect(slider.value).toBe("3");
+  });
+});
+

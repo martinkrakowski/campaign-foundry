@@ -59,6 +59,11 @@ export const fakeVideoCompositor = (opts: { logoApplied?: boolean; frames?: numb
     sampledFrames: Array.from({ length: opts.frames ?? 5 }, (_, i) => new Uint8Array([i])),
     logoApplied: opts.logoApplied ?? true,
   })),
+  // VE2: the single-frame seam answers distinguishable bytes, never a spawn.
+  compositeFrame: vi.fn(async () => ({
+    image: new Uint8Array([11, 12, 13]),
+    logoApplied: opts.logoApplied ?? true,
+  })),
 });
 
 export type RecordingExporter = ExportPort & {

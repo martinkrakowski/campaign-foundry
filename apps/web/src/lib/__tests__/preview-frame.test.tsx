@@ -246,3 +246,55 @@ describe("identity-scoped frame retention (the stale-frame finding on PR #177)",
     expect(result.current.frame).toBe(first);
   });
 });
+
+describe("usePreviewFrame — scrub cell fields (VE2)", () => {
+  test("passes motion, durationSec and atSec in the cell when present", async () => {
+    vi.useFakeTimers();
+    vi.mocked(globalThis.fetch).mockResolvedValue(pngResponse());
+    renderHook(() =>
+      usePreviewFrame(
+        brief(),
+        cell({ motion: "ken-burns-in", durationSec: 6, atSec: 2 }),
+      ),
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(PREVIEW_FRAME_DEBOUNCE_MS);
+    });
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+    const [, init] = vi.mocked(globalThis.fetch).mock.calls[0];
+    const body = JSON.parse((init as RequestInit).body as string);
+    expect(body.cell).toMatchObject({
+      motion: "ken-burns-in",
+      durationSec: 6,
+      atSec: 2,
+    });
+  });
+
+  test("changing atSec refetches the frame", async () => {
+    vi.useFakeTimers();
+    vi.mocked(globalThis.fetch).mockResolvedValue(pngResponse());
+    const stableBrief = brief();
+    const { rerender } = renderHook(
+      ({ atSec }) =>
+        usePreviewFrame(
+          stableBrief,
+          cell({ motion: "ken-burns-in", durationSec: 6, atSec }),
+        ),
+      { initialProps: { atSec: 1 } },
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(PREVIEW_FRAME_DEBOUNCE_MS);
+    });
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+
+    rerender({ atSec: 4 });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(PREVIEW_FRAME_DEBOUNCE_MS);
+    });
+    expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+    const [, secondInit] = vi.mocked(globalThis.fetch).mock.calls[1];
+    const body = JSON.parse((secondInit as RequestInit).body as string);
+    expect(body.cell.atSec).toBe(4);
+  });
+});
+

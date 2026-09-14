@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { createApp, createRouter, toWebHandler, type EventHandler } from "h3";
 import {
   AssetReusingImageGenerator,
+  CanvasFfmpegVideoCompositor,
   FireflyImageGenerator,
   GeminiImageGenerator,
   NodeCanvasCompositor,
@@ -15,6 +16,7 @@ import route, {
   previewBackgroundGenerator,
   previewCompositor,
   previewFrameCache,
+  previewVideoCompositor,
 } from "../preview-frame.post.js";
 
 const mount = () => {
@@ -137,6 +139,19 @@ describe("POST /campaigns/preview-frame", () => {
       expect(previewBackgroundGenerator).not.toBeInstanceOf(chainLink);
     }
     expect(previewCompositor).toBeInstanceOf(NodeCanvasCompositor);
+    expect(previewVideoCompositor).toBeInstanceOf(CanvasFfmpegVideoCompositor);
+  });
+
+  test("a scrub cell with motion, durationSec, atSec renders image/png and returns cache key", async () => {
+    const res = await mount()(
+      jsonReq({
+        brief: brief(),
+        cell: cell({ motion: "ken-burns-in", durationSec: 6, atSec: 2 }),
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("image/png");
+    expect(res.headers.get("x-preview-frame-cache-key")).toMatch(/^[a-f0-9]{64}$/);
   });
 
   test.each([
@@ -165,6 +180,12 @@ describe("POST /campaigns/preview-frame", () => {
     ["an unknown tone", { brief: brief(), cell: cell({ tone: "loud" }) }, /tone must be one of/],
     ["an unknown anchor", { brief: brief(), cell: cell({ anchor: "left" }) }, /anchor must be one of/],
     ["a non-string anchor", { brief: brief(), cell: cell({ anchor: 3 }) }, /anchor must be one of/],
+    ["motion without durationSec and atSec", { brief: brief(), cell: cell({ motion: "ken-burns-in" }) }, /motion, durationSec and atSec together/],
+    ["durationSec without motion and atSec", { brief: brief(), cell: cell({ durationSec: 6 }) }, /motion, durationSec and atSec together/],
+    ["atSec without motion and durationSec", { brief: brief(), cell: cell({ atSec: 2 }) }, /motion, durationSec and atSec together/],
+    ["an unknown motion kind", { brief: brief(), cell: cell({ motion: "spin", durationSec: 6, atSec: 2 }) }, /motion must be one of/],
+    ["durationSec out of range", { brief: brief(), cell: cell({ motion: "ken-burns-in", durationSec: 35, atSec: 2 }) }, /durationSec/],
+    ["atSec out of range", { brief: brief(), cell: cell({ motion: "ken-burns-in", durationSec: 6, atSec: 8 }) }, /atSec/],
   ])("rejects %s with 400", async (_label, body, message) => {
     const res = await mount()(jsonReq(body));
     expect(res.status).toBe(400);

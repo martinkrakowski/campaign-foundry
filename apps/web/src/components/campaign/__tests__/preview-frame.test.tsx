@@ -155,4 +155,18 @@ describe("PreviewFrame (D52)", () => {
     withAnchor.unmount();
     withoutAnchor.unmount();
   });
+
+  test("the cell request carries motion, durationSec and atSec when motion is active", async () => {
+    vi.useFakeTimers();
+    vi.mocked(globalThis.fetch).mockResolvedValue(pngResponse());
+    renderFrame({ motion: "ken-burns-in", durationSec: 6, atSec: 2 } as never);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(PREVIEW_FRAME_DEBOUNCE_MS);
+    });
+    const body = JSON.parse((vi.mocked(globalThis.fetch).mock.calls[0][1] as RequestInit).body as string);
+    expect(body.cell.motion).toBe("ken-burns-in");
+    expect(body.cell.durationSec).toBe(6);
+    expect(body.cell.atSec).toBe(2);
+  });
 });
+
