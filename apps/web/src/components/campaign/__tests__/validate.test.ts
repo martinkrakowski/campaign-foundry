@@ -30,7 +30,8 @@ import { PROHIBITED_TERMS as DOMAIN_PROHIBITED_TERMS } from "@campaignfoundry/Go
 // The domain's one click-destination decision — the same one the API's boundary
 // (`validateClickDestination`, load-brief.ts) reads, so the client mirror cannot drift.
 import { clickDestinationProblem } from "@campaignfoundry/CampaignOrchestration/click-destination";
-import { initialEditorState, editorReducer, toBrief, type EditorState } from "../editor-state";
+import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
+import { initialEditorState, editorReducer, toBrief, fromBrief, type EditorState } from "../editor-state";
 // The real gate Save hits, imported across apps for the divergence tests below: tests
 // may cross package boundaries (arch test-double rules), and a mirror without the
 // parser it mirrors is exactly the drift these tests exist to catch.
@@ -300,6 +301,56 @@ describe("validateProducts", () => {
     expect(errors["product-1-name"]).toBe(messages.productName);
     expect(errors["product-1-color"]).toBe(messages.productColor);
     expect(errors["product-1-logo"]).toBe(messages.productLogo);
+  });
+});
+
+/**
+ * D68 keeps `null` legal on the brief's scalar copy fields (a YAML `targetAudience:`
+ * with no value). The editor must treat that as empty, not crash on `.trim()`.
+ */
+const listed = (over: Record<string, unknown>): EditorState =>
+  fromBrief({ ...toBrief(valid()), ...over } as CampaignBrief);
+
+describe("null scalars from a listed brief do not crash the editor (X17)", () => {
+  test("a null targetAudience is an identity error, not a throw", () => {
+    expect(validateIdentity(listed({ targetAudience: null })).targetAudience).toBe(
+      messages.targetAudience,
+    );
+  });
+
+  test("a null targetRegion is an identity error, not a throw", () => {
+    expect(validateIdentity(listed({ targetRegion: null })).targetRegion).toBe(
+      messages.targetRegion,
+    );
+  });
+
+  test("a null campaignMessage is a copy error, not a throw", () => {
+    expect(validateCopy(listed({ campaignMessage: null })).campaignMessage).toBe(
+      messages.campaignMessage,
+    );
+  });
+
+  test("a product with a null name is a product-name error, not a throw", () => {
+    const brief = toBrief(valid());
+    const errors = validateProducts(
+      listed({ products: [{ ...brief.products[0], name: null }] }),
+    );
+    expect(errors["product-0-name"]).toBe(messages.productName);
+  });
+
+  test("a product with a null logoPath is a product-logo error, not a throw", () => {
+    const brief = toBrief(valid());
+    const errors = validateProducts(
+      listed({ products: [{ ...brief.products[0], logoPath: null }] }),
+    );
+    expect(errors["product-0-logo"]).toBe(messages.productLogo);
+  });
+
+  test("a product with a null inputAsset serialises without throwing", () => {
+    const brief = toBrief(valid());
+    expect(() =>
+      toBrief(listed({ products: [{ ...brief.products[0], inputAsset: null }] })),
+    ).not.toThrow();
   });
 });
 

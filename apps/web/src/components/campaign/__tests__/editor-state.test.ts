@@ -998,6 +998,48 @@ describe("fromBrief", () => {
     expect(state.localizedMessage).toBe("");
   });
 
+  test("a freshly opened brief with a null scalar is not dirty", () => {
+    const state = fromBrief(
+      savedBrief({ targetAudience: null as unknown as string }),
+      { file: "camp.yaml" },
+    );
+    expect(isDirtySinceSave(state)).toBe(false);
+  });
+
+  test("a freshly opened brief with a null localizedMessage is not dirty", () => {
+    const state = fromBrief(
+      savedBrief({ localizedMessage: null as unknown as string }),
+      { file: "camp.yaml" },
+    );
+    expect(isDirtySinceSave(state)).toBe(false);
+  });
+
+  test("a freshly opened brief with a null product name is not dirty", () => {
+    const brief = savedBrief();
+    const state = fromBrief(
+      {
+        ...brief,
+        products: [{ ...brief.products[0], name: null as unknown as string }],
+      },
+      { file: "camp.yaml" },
+    );
+    expect(isDirtySinceSave(state)).toBe(false);
+  });
+
+  test("a freshly opened brief with a null product inputAsset is not dirty", () => {
+    const brief = savedBrief();
+    const state = fromBrief(
+      {
+        ...brief,
+        products: [
+          { ...brief.products[0], inputAsset: null as unknown as string },
+        ],
+      },
+      { file: "camp.yaml" },
+    );
+    expect(isDirtySinceSave(state)).toBe(false);
+  });
+
   test("treatments, mode, output and localizedMessage are carried through when present", () => {
     const state = fromBrief(
       savedBrief({
