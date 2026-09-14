@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { ATTRIBUTE_USAGE, parseAttributeArgs } from "../lib/args.js";
+import { decodeRunLog, RUN_LIST_LIMIT } from "../lib/attribute.js";
 import { runCli, type SweepCliIo } from "../cli.js";
 
 /** Longer than the 80-char excerpt, so matching the excerpt cannot succeed. */
@@ -11,6 +12,9 @@ const WORKFLOW = {
   API: "PR-Agent API Review",
   Architecture: "PR-Agent Architecture Review",
 } as const;
+
+/** Default `headSha` / commit oid the stub ties to the PR unless a test overrides. */
+const DEFAULT_HEAD = "sha-this-pr";
 
 /** U+2011 NON-BREAKING HYPHEN — the character PR-Agent puts in `cache‑key`. */
 const NBH = "\u2011";
@@ -74,6 +78,10 @@ interface StubOpts {
   readonly logErrors?: Record<number, Error>;
   readonly listRaw?: Record<string, string>;
   readonly listError?: Record<string, Error>;
+  readonly commits?: readonly string[];
+  readonly commitsError?: Error;
+  readonly prViewRaw?: string;
+  readonly runHeads?: Record<number, string>;
 }
 
 function stub(over: StubOpts = {}): {
@@ -100,6 +108,16 @@ function stub(over: StubOpts = {}): {
       }
       if (args[0] === "pr") {
         if (over.branchError !== undefined) throw over.branchError;
+        const jsonAt = args.indexOf("--json");
+        const fields = jsonAt >= 0 ? String(args[jsonAt + 1] ?? "") : "";
+        if (fields.includes("commits")) {
+          if (over.commitsError !== undefined) throw over.commitsError;
+          if (over.prViewRaw !== undefined) return over.prViewRaw;
+          return `${JSON.stringify({
+            headRefName: over.branch ?? "feat/example",
+            commits: (over.commits ?? [DEFAULT_HEAD]).map((oid) => ({ oid })),
+          })}\n`;
+        }
         return `${over.branch ?? "feat/example"}\n`;
       }
       if (args[0] === "run" && args[1] === "list") {
@@ -116,7 +134,14 @@ function stub(over: StubOpts = {}): {
               : name === WORKFLOW.Architecture
                 ? runs.Architecture
                 : [];
-        return JSON.stringify(ids.map((databaseId) => ({ databaseId })));
+        const defaultHead = over.commits?.[0] ?? DEFAULT_HEAD;
+        return JSON.stringify(
+          ids.map((databaseId) => ({
+            databaseId,
+            headSha: over.runHeads?.[databaseId] ?? defaultHead,
+            event: "pull_request",
+          })),
+        );
       }
       if (args[0] === "run" && args[1] === "view") {
         const id = Number(args[2]);
@@ -171,6 +196,12 @@ describe("parseAttributeArgs", () => {
 
   test("an unknown argument is refused", () => {
     expect(() => parseAttributeArgs(["--pr", "401", "--yolo"])).toThrow(/unknown argument '--yolo'/);
+  });
+
+  test("usage names the issue_comment coverage limit so /improve threads stay unattributed", () => {
+    expect(ATTRIBUTE_USAGE).toMatch(/issue_comment/);
+    expect(ATTRIBUTE_USAGE).toMatch(/\/improve/);
+    expect(ATTRIBUTE_USAGE).toMatch(/unattributed/);
   });
 });
 
@@ -233,6 +264,40 @@ describe("sweep attribute — matching a thread to one workflow", () => {
     expect(log).not.toContain("PRRT_esc unattributed");
     expect(suggestion).toContain('"');
     expect(suggestion).toContain(NBH);
+  });
+
+  test("a log whose JSON text contains a literal \\\\n and an escaped quote matches a thread body containing \\n literally", async () => {
+    const suggestion = `preserve a literal \\n and a "quoted" token in the suggestion`;
+    const s = stub({
+      nodes: [threadNode("PRRT_bs", false, "github-actions", suggestionBody(suggestion))],
+      logs: { 111: aiLog(suggestion) },
+    });
+    const { code, log } = await runAttribute(["--pr", "401"], s.gh);
+    expect(code).toBe(0);
+    expect(log).toContain("PRRT_bs API open");
+    expect(log).not.toContain("PRRT_bs unattributed");
+  });
+
+  test("a run whose headSha is not among the PR's commits is ignored: a thread matched only by it is unattributed", async () => {
+    const s = stub({
+      commits: [DEFAULT_HEAD],
+      runs: { UI: [10], API: [11], Architecture: [] },
+      runHeads: { 10: "sha-other-pr", 11: DEFAULT_HEAD },
+      logs: { 10: aiLog(SUGGESTION_API), 11: aiLog("an unrelated suggestion that lives only in this log") },
+    });
+    const { code, log } = await runAttribute(["--pr", "401"], s.gh);
+    expect(code).toBe(0);
+    expect(log).toContain("PRRT_api unattributed resolved");
+    expect(log).not.toContain("PRRT_api UI");
+    expect(log).not.toContain("PRRT_api API");
+    expect(log).toContain("unattributed 1 threads 1 resolved");
+    const listCalls = s.calls.filter((c) => c[0] === "run" && c[1] === "list");
+    expect(listCalls.length).toBeGreaterThan(0);
+    expect(listCalls.every((c) => c.includes("databaseId,headSha,event"))).toBe(true);
+    const commitView = s.calls.find(
+      (c) => c[0] === "pr" && c[1] === "view" && String(c[c.indexOf("--json") + 1] ?? "").includes("commits"),
+    );
+    expect(commitView).toBeDefined();
   });
 
   test("a non-github-actions thread (CodeRabbit, Qodo) is not listed", async () => {
@@ -340,6 +405,96 @@ describe("sweep attribute — fail closed", () => {
     const { code, err } = await runAttribute(["--pr", "401"], s.gh);
     expect(code).toBe(1);
     expect(err).toMatch(/databaseId/);
+  });
+
+  test("a run list of exactly the limit exits 1, naming the workflow", async () => {
+    const ids = Array.from({ length: RUN_LIST_LIMIT }, (_, i) => i + 1);
+    const logs: Record<number, string> = { 999: aiLog(SUGGESTION_API) };
+    for (const id of ids) logs[id] = aiLog("unrelated text that must not become a match");
+    const s = stub({
+      runs: { UI: ids, API: [999], Architecture: [] },
+      logs,
+    });
+    const { code, err, log } = await runAttribute(["--pr", "401"], s.gh);
+    expect(code).toBe(1);
+    expect(err).toContain(WORKFLOW.UI);
+    expect(err).toMatch(/truncated|limit|50/);
+    expect(log).not.toContain("PRRT_api");
+  });
+
+  test("the PR's commits cannot be read — exit 1, nothing attributed", async () => {
+    const s = stub({ commitsError: new Error("gh pr view: HTTP 502") });
+    const { code, err, log } = await runAttribute(["--pr", "401"], s.gh);
+    expect(code).toBe(1);
+    expect(err).toContain("HTTP 502");
+    expect(err).toMatch(/commit/i);
+    expect(log).not.toContain("PRRT_api");
+  });
+
+  test.each([
+    ["missing", { databaseId: 1, event: "pull_request" }],
+    ["empty", { databaseId: 1, headSha: "", event: "pull_request" }],
+    ["numeric", { databaseId: 1, headSha: 1, event: "pull_request" }],
+  ])("a run list row with %s headSha exits 1, naming the workflow", async (_label, row) => {
+    const s = stub({
+      listRaw: { [WORKFLOW.UI]: JSON.stringify([row]) },
+      logs: { 1: aiLog("unrelated"), 111: aiLog(SUGGESTION_API) },
+    });
+    const { code, err, log } = await runAttribute(["--pr", "401"], s.gh);
+    expect(code).toBe(1);
+    expect(err).toContain(WORKFLOW.UI);
+    expect(err).toMatch(/headSha/);
+    expect(log).not.toContain("PRRT_api");
+  });
+
+  test.each([
+    ["invalid JSON", "nope"],
+    ["array", "[]"],
+    ["null", "null"],
+    ["number", "1"],
+    ["missing commits", "{}"],
+    ["commits not array", '{"commits":1}'],
+    ["empty commits", '{"commits":[]}'],
+    ["null row", '{"commits":[null]}'],
+    ["scalar row", '{"commits":[1]}'],
+    ["array row", '{"commits":[[]]}'],
+    ["no oid", '{"commits":[{}]}'],
+    ["empty oid", '{"commits":[{"oid":""}]}'],
+    ["numeric oid", '{"commits":[{"oid":1}]}'],
+  ])("commits payload %s exits 1", async (_label, raw) => {
+    const s = stub({ prViewRaw: raw });
+    const { code, err, log } = await runAttribute(["--pr", "401"], s.gh);
+    expect(code).toBe(1);
+    expect(err).toMatch(/commit/i);
+    expect(log).not.toContain("PRRT_api");
+  });
+});
+
+describe("decodeRunLog", () => {
+  test("a quoted JSON string is parsed, so \\\\n is a literal backslash-n", () => {
+    expect(decodeRunLog('"keep \\\\n and \\"q\\""')).toBe('keep \\n and "q"');
+  });
+
+  test("an unquoted \\\\n is a literal backslash-n, not a newline", () => {
+    expect(decodeRunLog("\\\\n")).toBe("\\n");
+  });
+
+  test("unquoted escapes still decode (a log line with no JSON object)", () => {
+    expect(decodeRunLog('\\"cache\\u2011key\\"')).toBe(`"cache${NBH}key"`);
+    expect(decodeRunLog("line\\nbreak")).toBe("line\nbreak");
+  });
+
+  test("a quoted region that is not valid JSON is left in place", () => {
+    expect(decodeRunLog('"\\x" leftover')).toBe('"\\x" leftover');
+    expect(decodeRunLog('"unterminated')).toBe('"unterminated');
+    expect(decodeRunLog('"trailing\\')).toBe('"trailing\\');
+  });
+
+  test("unknown or truncated escapes are left in place", () => {
+    expect(decodeRunLog("\\x")).toBe("\\x");
+    expect(decodeRunLog("trailing\\")).toBe("trailing\\");
+    expect(decodeRunLog("\\uZZZZ")).toBe("\\uZZZZ");
+    expect(decodeRunLog("\\u12")).toBe("\\u12");
   });
 });
 

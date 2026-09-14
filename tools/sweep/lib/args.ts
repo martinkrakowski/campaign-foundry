@@ -145,7 +145,9 @@ export interface AttributeArgs {
   readonly pr: number;
 }
 
-export const ATTRIBUTE_USAGE = "usage: sweep attribute --pr <number>";
+export const ATTRIBUTE_USAGE =
+  "usage: sweep attribute --pr <number>\n" +
+  "UI reviews triggered by an /improve comment (issue_comment) run on the default branch, so they are not found by the PR's commits and come out unattributed (safe). An Architecture log with no model response is the same.";
 
 /**
  * Parses `sweep attribute --pr <n>`.
@@ -154,6 +156,11 @@ export const ATTRIBUTE_USAGE = "usage: sweep attribute --pr <number>";
  * runs, and the threads all follow from it. Anything else on the command
  * line is a mistake, not an option, because a guessed flag would look like
  * a filter the tool does not have.
+ *
+ * Coverage that stays `unattributed` (safe): UI reviews triggered by an
+ * `/improve` comment (`issue_comment`) run on the default branch, so they
+ * are not among the PR's commits. An Architecture run whose log carries
+ * no model response has nothing to match — observed on the HL5d PR.
  */
 export function parseAttributeArgs(argv: readonly string[]): AttributeArgs {
   let pr: number | undefined;

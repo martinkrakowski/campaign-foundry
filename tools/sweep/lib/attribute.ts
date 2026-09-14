@@ -50,34 +50,139 @@ export function suggestionOf(body: string): string | null {
  * match is against this decoded form, because the thread body is plain text
  * and the job log is the JSON-escaped `{"text": "..."}` line `gh run view
  * --log` prints.
+ *
+ * Each JSON string is `JSON.parse`d; leftover escapes (a log line with no
+ * object) are parsed the same way, one token at a time. Sequential `replace`
+ * calls would decode `\\n` as a newline and turn a literal backslash-n in
+ * the model's text into a false miss — or worse, a false single match.
  */
 export function decodeRunLog(raw: string): string {
   return unescapeJsonEscapes(raw);
 }
 
+function parseJsonStringLiteral(quoted: string): string | null {
+  try {
+    // Caller passes a JSON string literal (`"..."`); parse then yields a string.
+    return JSON.parse(quoted) as string;
+  } catch {
+    return null;
+  }
+}
+
+/** A JSON string starting at `start`, or null if this `"` is not a string opener. */
+function takeJsonString(raw: string, start: number): { value: string; end: number } | null {
+  let i = start + 1;
+  while (i < raw.length) {
+    if (raw[i] === "\\") {
+      i += 2;
+      continue;
+    }
+    if (raw[i] === '"') {
+      const value = parseJsonStringLiteral(raw.slice(start, i + 1));
+      if (value === null) return null;
+      return { value, end: i + 1 };
+    }
+    i += 1;
+  }
+  return null;
+}
+
+/** One JSON escape at `i` (`\n`, `\"`, `\\`, `\uXXXX`), parsed as a quoted literal. */
+function takeJsonEscape(raw: string, i: number): { value: string; end: number } | null {
+  if (raw[i] !== "\\") return null;
+  const width = raw[i + 1] === "u" ? 6 : 2;
+  const value = parseJsonStringLiteral(`"${raw.slice(i, i + width)}"`);
+  if (value === null) return null;
+  return { value, end: i + width };
+}
+
 function unescapeJsonEscapes(raw: string): string {
-  return raw
-    .replace(/\\u([0-9a-fA-F]{4})/g, (_, hex: string) => String.fromCharCode(Number.parseInt(hex, 16)))
-    .replace(/\\n/g, "\n")
-    .replace(/\\"/g, '"')
-    .replace(/\\\\/g, "\\");
+  let out = "";
+  let i = 0;
+  while (i < raw.length) {
+    if (raw[i] === '"') {
+      const taken = takeJsonString(raw, i);
+      if (taken !== null) {
+        out += taken.value;
+        i = taken.end;
+        continue;
+      }
+    }
+    const escaped = takeJsonEscape(raw, i);
+    if (escaped !== null) {
+      out += escaped.value;
+      i = escaped.end;
+      continue;
+    }
+    out += raw[i];
+    i += 1;
+  }
+  return out;
 }
 
 function isPrAgentAuthor(login: string): boolean {
   return login.replace(/\[bot\]$/, "") === "github-actions";
 }
 
-function runIdsFromList(stdout: string, workflow: string): number[] {
+/** `gh run list --limit` — a page that fills this is incomplete, never "the last 50". */
+export const RUN_LIST_LIMIT = 50;
+
+/** Fields `gh run list --json` must return so a reused branch name cannot pin a match. */
+export const RUN_LIST_JSON_FIELDS = "databaseId,headSha,event";
+
+function oidOf(row: unknown): string | undefined {
+  if (row === null || typeof row !== "object") return undefined;
+  const oid = (row as { oid?: unknown }).oid;
+  return typeof oid === "string" && oid !== "" ? oid : undefined;
+}
+
+/**
+ * Commit oids of the PR, as `gh pr view --json commits` returns them. An
+ * unreadable list is a failure: a partial set would drop a run and can turn
+ * a two-workflow match into a false single attribution.
+ */
+function commitShasFromView(stdout: string, pr: number): Set<string> {
+  const parsed: unknown = JSON.parse(stdout);
+  const commits =
+    parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as { commits?: unknown }).commits
+      : undefined;
+  if (!Array.isArray(commits) || commits.length === 0) {
+    throw new Error(`the commits of PR #${pr} could not be read`);
+  }
+  const shas = new Set<string>();
+  for (const row of commits) {
+    const oid = oidOf(row);
+    if (oid === undefined) {
+      throw new Error(`the commits of PR #${pr} could not be read`);
+    }
+    shas.add(oid);
+  }
+  return shas;
+}
+
+function runIdsFromList(stdout: string, workflow: string, commitShas: ReadonlySet<string>): number[] {
   const parsed: unknown = JSON.parse(stdout);
   if (!Array.isArray(parsed)) {
     throw new Error(`run list for ${workflow} was not a JSON array`);
   }
+  if (parsed.length === RUN_LIST_LIMIT) {
+    throw new Error(
+      `run list for ${workflow} was truncated at ${String(RUN_LIST_LIMIT)} — older runs were not searched`,
+    );
+  }
   const ids: number[] = [];
   for (const row of parsed) {
-    const id = (row as { databaseId?: unknown }).databaseId;
+    const rec = row as { databaseId?: unknown; headSha?: unknown };
+    const id = rec.databaseId;
     if (typeof id !== "number") {
       throw new Error(`run list for ${workflow} carried a row with no databaseId`);
     }
+    const headSha = rec.headSha;
+    if (typeof headSha !== "string" || headSha === "") {
+      throw new Error(`run list for ${workflow} carried a row with no headSha`);
+    }
+    if (!commitShas.has(headSha)) continue;
     ids.push(id);
   }
   return ids;
@@ -88,8 +193,15 @@ function runIdsFromList(stdout: string, workflow: string): number[] {
  * whose decoded job log contains that thread's suggestion text.
  *
  * Exactly one matching workflow → that workflow; none or several →
- * `unattributed`. A partial read (threads or a log) is a failure, not a
- * split of what happened to come back — same fail-closed rule as `gate`.
+ * `unattributed`. A partial read (threads, commits, a truncated run list,
+ * or a log) is a failure, not a split of what happened to come back — same
+ * fail-closed rule as `gate`. Runs are kept only when `headSha` is a commit
+ * of this PR; a reused head-branch name cannot import an older PR's log.
+ *
+ * Coverage that stays `unattributed` (safe, not a guess): UI reviews
+ * triggered by an `/improve` comment (`issue_comment`) run on the default
+ * branch, so they are not among the PR's commits; an Architecture run
+ * whose log carries no model response has nothing to match.
  */
 export async function attribute(plan: AttributeArgs, deps: AttributeDeps): Promise<AttributeDecision> {
   const fetched = await fetchAllThreads(plan.pr, deps.gh);
@@ -128,6 +240,19 @@ export async function attribute(plan: AttributeArgs, deps: AttributeDeps): Promi
     };
   }
 
+  let commitShas: Set<string>;
+  try {
+    const commitsRaw = await deps.gh(["pr", "view", String(plan.pr), "--json", "commits"]);
+    commitShas = commitShasFromView(commitsRaw, plan.pr);
+  } catch (error) {
+    return {
+      kind: "fail",
+      reasons: [
+        `could not attribute — the commits of PR #${plan.pr} could not be read: ${errorText(error)}`,
+      ],
+    };
+  }
+
   const decodedByWorkflow: { key: WorkflowKey; decoded: string }[] = [];
   for (const wf of PR_AGENT_WORKFLOWS) {
     let ids: number[];
@@ -140,11 +265,11 @@ export async function attribute(plan: AttributeArgs, deps: AttributeDeps): Promi
         "--workflow",
         wf.name,
         "--json",
-        "databaseId",
+        RUN_LIST_JSON_FIELDS,
         "--limit",
-        "50",
+        String(RUN_LIST_LIMIT),
       ]);
-      ids = runIdsFromList(listed, wf.name);
+      ids = runIdsFromList(listed, wf.name, commitShas);
     } catch (error) {
       return {
         kind: "fail",

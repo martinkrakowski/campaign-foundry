@@ -355,3 +355,12 @@ rather than anecdotal, and the one question left is sample size.
 against that workflow's decoded job log. Exactly one matching workflow → attributed; none or several
 → `unattributed`, never a guess. A thread fetch or log read that fails exits 1 (fail closed, like
 `gate`). The `premise V3` fence stays: V3's disable/keep decision still needs a recorded wave.
+
+A missing log can only remove matches, so it can turn a true two-workflow ambiguity into a false
+single attribution. The verb therefore refuses a run list that fills its limit (the page is not
+treated as complete), keeps only runs whose `headSha` is a commit of this PR (a reused head-branch
+name cannot import an older PR's log), and decodes each JSON string with `JSON.parse` rather than
+ordered `replace` calls. Two coverage limits stay `unattributed` and are not searched further: UI
+reviews triggered by an `/improve` comment (`issue_comment`) run on the default branch, so they are
+not among the PR's commits; and on the HL5d PR the Architecture run's log carried no model response,
+so its threads there were `unattributed`. Both are the safe outcome of the same rule.

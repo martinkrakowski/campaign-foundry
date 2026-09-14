@@ -73,8 +73,14 @@ async function runGate(rest: readonly string[], io: SweepCliIo): Promise<number>
  * `sweep attribute --pr <n>`
  *
  * Exit codes: 0 every github-actions thread was printed (attributed or
- * unattributed); 1 the threads or a job log could not be read — nothing was
- * guessed; 2 the command line itself is wrong.
+ * unattributed); 1 the threads, the PR's commits, a truncated run list, or
+ * a job log could not be read — nothing was guessed; 2 the command line
+ * itself is wrong.
+ *
+ * UI reviews triggered by an `/improve` comment (`issue_comment`) run on
+ * the default branch, so they are not found by the PR's commits and come
+ * out `unattributed` (safe). An Architecture log with no model response is
+ * the same — observed on the HL5d PR.
  */
 async function runAttribute(rest: readonly string[], io: SweepCliIo): Promise<number> {
   let plan: AttributeArgs;
