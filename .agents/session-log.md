@@ -4784,3 +4784,26 @@ mutations replayed caught in `.agents/manifests/x8.json`, including the revert o
 (`const path = dir`). Full gate 0 with 100 % on all four counters (4 787 tests, 257 files);
 `plan:verify` 0 (14 premises); the gaps plan §11 now names the mechanism and retires the "No premise
 yet" paragraph. No wave-event emission: this lane arrived without a wave log root, as before.
+
+## 2026-09-14 — X8 remediation: file watchers must survive files that change under them
+
+Narrowing to file watchers was right, but a file watcher meets three things a directory watcher never
+did: the watched file can vanish, be replaced under a new inode, or disappear between the listing and
+the `watch`. Each was a live defect against this branch's own "nothing runs after close" contract.
+
+Fix 1 — `requestRefresh` now refuses once `closed`, and `shutdown` empties the queue. `begin`'s drain
+loop runs only while `refreshQueued` is set, so the cleared queue is the load-bearing refusal; the
+top guard stops fresh post-close events, and neither masks the other because the drain calls `begin`
+directly rather than the guarded `requestRefresh`. Fix 2 — the default `watch` wires an `error`
+listener (an unhandled `EventEmitter` error on a deleted lane log would take the whole server down);
+`syncWatchers` now always passes one so the seam can drive it. Fix 3 — the ledger is a Map keyed by
+path; a path joins only after its watcher is created, `watch` is guarded per file, and a `rename` or
+`error` closes the watcher and forgets the path so the next poll tick arms the current file.
+
+Four tests written red first against the pre-fix server (queued-before-close, error re-arm, a throwing
+watch that still arms its neighbours and retries, and a rename re-arm). Twelve mutations replay caught
+in `.agents/manifests/x8.json`: one per fix, plus the two existing entries whose code the remediation
+moved (the closed-check centralised into `requestRefresh`, and the shutdown watcher loop now driving
+the Map) retargeted rather than dropped. Full gate 0 with 100 % on all four counters (4 820 tests);
+`plan:verify` 0 (13 premises). The `watch` seam's listener now takes the event type and a third
+`onError`; existing seams that ignore them are unaffected.
