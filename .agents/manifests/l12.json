@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "lane": "l12",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/report.ts",
+      "before": "    await writeFile(tmp, content);\n    await rename(tmp, dest);",
+      "after": "    await writeFile(dest, content);",
+      "because": "The defect this lane fixes, restored: both report files are written in place again, with no temp sibling and no rename, so a write that is still in flight is a truncated file a concurrent reader parses. The torn-read test lands half a payload and reads it back mid-write; under the direct write that half file IS the target and JSON.parse fails, which is the 13-of-200 unreadable reports the plan measured.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/report.test.ts"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
