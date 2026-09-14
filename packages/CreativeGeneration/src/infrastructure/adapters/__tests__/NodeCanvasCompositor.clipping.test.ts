@@ -89,7 +89,72 @@ async function renderHtmlElement(element: HtmlElement) {
   return { ctx, width: prepared.width, height: prepared.height };
 }
 
+/**
+ * A context that records every call made on it, delegating each to a real canvas.
+ * Used where a pixel comparison cannot discriminate: the label's glyph band sits at
+ * 45 % of the button height, so the region between a rectangular and a rounded clip
+ * is reached by at most sub-pixel anti-aliasing, and no pixel assertion bites reliably.
+ */
+function recordingContext(width: number, height: number) {
+  const target = createCanvas(width, height).getContext("2d");
+  const calls: { name: string; args: unknown[] }[] = [];
+  const ctx = new Proxy(target, {
+    get(t, prop, receiver) {
+      const value = Reflect.get(t, prop, t);
+      if (typeof value !== "function") return value;
+      return (...args: unknown[]) => {
+        calls.push({ name: String(prop), args });
+        return (value as (...a: unknown[]) => unknown).apply(t, args);
+      };
+    },
+    set(t, prop, value) {
+      return Reflect.set(t, prop, value, t);
+    },
+  }) as SKRSContext2D;
+  return { ctx, calls };
+}
+
 describe("html layer clipping (X10)", () => {
+  test("a button clips to the same rounded rectangle it fills, as the markup's border-radius does", async () => {
+    // The markup gives a button `border-radius: <radius>px; overflow: hidden`, which clips its label to
+    // the rounded shape. The canvas must clip to that same shape, with the same radius as its own fill.
+    const element: HtmlElement = {
+      kind: "button",
+      text: "MMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM",
+      frame: { x: 0.2, y: 0.2, w: 0.4, h: 0.1, anchor: "middle" },
+    };
+    const template: BriefTemplate = {
+      id: "canonical-image-html",
+      version: 1,
+      creativeType: "image-html",
+      unit: "standard-web",
+      layers: [{ id: "html", kind: "html", elements: [element] }],
+    };
+    const req: CompositeRequest & { template: BriefTemplate } = {
+      background: createBackground(),
+      message: "Test message",
+      brandColor: "#1473E6",
+      logoPath: "assets/inputs/hydra-logo.png",
+      canvas: { ratio: "1:1" },
+      layout: "headline-bottom",
+      tone: "bold",
+      pixelSize: { width: WIDTH, height: HEIGHT },
+      template,
+    };
+    const prepared = await NodeCanvasCompositor.prepare(req);
+    const { ctx, calls } = recordingContext(prepared.width, prepared.height);
+    NodeCanvasCompositor.draw(ctx, prepared, 1);
+
+    const clipAt = calls.findIndex((c) => c.name === "clip");
+    expect(clipAt).toBeGreaterThan(0);
+    const clipShape = calls.slice(0, clipAt).reverse().find((c) => c.name === "rect" || c.name === "roundRect");
+    const fillAt = calls.findIndex((c, i) => i > clipAt && c.name === "fill");
+    const fillShape = calls.slice(clipAt, fillAt).reverse().find((c) => c.name === "rect" || c.name === "roundRect");
+
+    expect(fillShape?.name).toBe("roundRect");
+    expect(clipShape).toEqual(fillShape);
+  });
+
   test("text: label far longer than its frame clips drawing to the element frame", async () => {
     const frame = { x: 0.2, y: 0.2, w: 0.6, h: 0.2, anchor: "top" as const };
     const longText =
