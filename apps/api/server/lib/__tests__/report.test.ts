@@ -329,6 +329,23 @@ describe("report persistence", () => {
     expect(isPersistedAsset({ ...htmlRow, htmlFallbackPath: null })).toBe(false);
   });
 
+  test("isPersistedAsset refuses a present, non-string clickDestination (X12)", () => {
+    const row = {
+      productId: "alpha",
+      aspectRatio: "1:1",
+      treatment: "default",
+      outputPath: "alpha/1x1.png",
+    };
+    // Absent stays valid: not every creative is clickable.
+    expect(isPersistedAsset(row)).toBe(true);
+    // A string destination rides through, as HL4 wrote it.
+    expect(isPersistedAsset({ ...row, clickDestination: "https://example.com/landing" })).toBe(true);
+    // Present but not a string is a malformed row — the guard refuses what the type promises.
+    expect(isPersistedAsset({ ...row, clickDestination: 42 })).toBe(false);
+    expect(isPersistedAsset({ ...row, clickDestination: null })).toBe(false);
+    expect(isPersistedAsset({ ...row, clickDestination: { url: "https://example.com" } })).toBe(false);
+  });
+
   test("isPersistedAsset requires the four strings plus integer variantIndex and attempt on variation rows", () => {
     const variation = {
       productId: "alpha",
