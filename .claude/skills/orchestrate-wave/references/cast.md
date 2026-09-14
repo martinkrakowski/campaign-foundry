@@ -3,6 +3,25 @@
 Re-probe before trusting any row: `grok models`, `agy models`, `opencode models`. Two of these
 fail with a misleading error rather than "no such model".
 
+## Seats — owner's instruction, 2026-09-14: every implementer seat is grok-4.6
+
+**This supersedes every "grok never implements" line below and the rotation in the 2026-09-08 and
+2026-09-12 tables.** Implementers and remediators run grok-4.6 at high effort; the other seats
+(orchestrator, final sweep, merge) are unchanged. The older tables stay as the record they are.
+
+| Seat | Command (probed live 2026-09-14, after the 16:28 quota reset) |
+|---|---|
+| **implementer / remediator** | `grok -p "$(cat BRIEF.md)" --model grok-4.6 --effort high --always-approve --output-format streaming-json`, in the lane worktree, with an `EXIT` marker. `--always-approve` is what lets a headless run edit files and run commands; a foreground probe created a file and ran `ls` with it. |
+
+- **There is no grok mini.** `grok models` lists `grok-4.6` (default) and `grok-4.5` only. `grok-4.6-mini`,
+  `grok-4.5-mini`, `grok-4-mini`, `grok-3-mini`, `grok-mini` and `grok-code-fast-1` each answer
+  `unknown model id`; `grok-4.5` answers. The cheaper seat, if one is wanted, is `grok-4.5`.
+- **Orchestrator's recommendation, not the owner's rule: one grok lane at a time until the quota is measured.** The 2026-09-13 burn came from nine
+  implementations in two days at high effort; record `billed in/out · cache read · wall min · rounds
+  to green` per lane in the wave record, so a burn shows before the quota does (HTTP 402).
+- **grok can sit silent for a long time and then deliver** (see Traps): a quiet log is *unknown*, not
+  dead — wait on the `EXIT` marker, then derive status from the branch.
+
 ## Seats — the order the owner set on 2026-09-08 (implementers reordered the same day)
 
 Implementers rotate in this order; the next seat takes a lane only when the one before it is
