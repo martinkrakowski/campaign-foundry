@@ -1365,4 +1365,42 @@ describe("cleanup", () => {
       }),
     ).rejects.toThrow("connection refused — server is closed");
   });
+
+  test("the server path never invokes an executor (inject one that throws)", async () => {
+    const root = await makeFixture();
+    const throwingExecutor = vi.fn(async () => {
+      throw new Error("D106 violation: server must never execute premises");
+    });
+    const depsWithExecutor = {
+      ...realDeps,
+      execute: throwingExecutor,
+      gh: async () => "[]",
+      pgrep: async () => 0,
+    };
+    const handle = await start({
+      port: 0,
+      root,
+      deps: depsWithExecutor as unknown as typeof realDeps,
+    });
+    const res = await new Promise<{ status: number; body: string }>((resolve, reject) => {
+      const req = httpRequest(
+        { host: "127.0.0.1", port: handle.port, path: "/api/status" },
+        (res) => {
+          const chunks: Buffer[] = [];
+          res.on("data", (chunk) => chunks.push(chunk));
+          res.on("end", () =>
+            resolve({
+              status: res.statusCode ?? 0,
+              body: Buffer.concat(chunks).toString("utf8"),
+            }),
+          );
+          res.on("error", reject);
+        },
+      );
+      req.on("error", reject);
+      req.end();
+    });
+    expect(res.status).toBe(200);
+    expect(throwingExecutor).not.toHaveBeenCalled();
+  });
 });

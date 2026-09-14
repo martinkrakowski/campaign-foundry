@@ -377,3 +377,70 @@ describe("renderStatus", () => {
     expect(isLaneStalled(lane)).toBe(false);
   });
 });
+
+describe("renderStatus — backlog panel", () => {
+  const recordedArtifact = {
+    version: 1,
+    at: "2026-09-13T12:00:00.000Z",
+    git: { branch: "feat/s5-backlog-panel", head: "0a1b2c3d4e5f60718293a4b5c6d7e8f901234567" },
+    scope: { kind: "full" as const },
+    plans: ["docs/planning/a.md"],
+    premises: [
+      { lane: "W1", plan: "docs/planning/a.md", status: "holds" as const },
+      { lane: "S5", plan: "docs/planning/S5.md", status: "stale" as const, reason: "already merged" },
+      { lane: "T9", plan: "docs/planning/t9.md", status: "timed-out" as const },
+    ],
+  };
+
+  test("no artifact renders 'no plan:verify run recorded', never zero items", () => {
+    const status: WaveStatus = {
+      generatedAt: TS,
+      waves: [],
+      backlog: { state: "absent" },
+    };
+    const out = renderStatus(status, { color: false });
+    expect(out).toContain("no plan:verify run recorded");
+  });
+
+  test("an unreadable or malformed artifact renders as unknown, not an empty list", () => {
+    const status: WaveStatus = {
+      generatedAt: TS,
+      waves: [],
+      backlog: { state: "unknown" },
+    };
+    const out = renderStatus(status, { color: false });
+    expect(out).toContain("backlog: unknown");
+  });
+
+  test("a recorded artifact renders provenance prominently (timestamp, branch, head, scope)", () => {
+    const status: WaveStatus = {
+      generatedAt: TS,
+      waves: [],
+      backlog: { state: "recorded", artifact: recordedArtifact },
+    };
+    const out = renderStatus(status, { color: false });
+    expect(out).toContain("2026-09-13T12:00:00.000Z");
+    expect(out).toContain("feat/s5-backlog-panel");
+    expect(out).toContain("0a1b2c3d");
+    expect(out).toContain("full run");
+    expect(out).toContain("W1 (docs/planning/a.md): holds");
+    expect(out).toContain("S5 (docs/planning/S5.md): stale — already merged");
+    expect(out).toContain("T9 (docs/planning/t9.md): timed-out");
+  });
+
+  test("a partial run is rendered as partial and names its plans, never the whole backlog", () => {
+    const partialArtifact = {
+      ...recordedArtifact,
+      scope: { kind: "partial" as const, plans: ["docs/planning/a.md"] },
+    };
+    const status: WaveStatus = {
+      generatedAt: TS,
+      waves: [],
+      backlog: { state: "recorded", artifact: partialArtifact },
+    };
+    const out = renderStatus(status, { color: false });
+    expect(out).toContain("partial run");
+    expect(out).not.toContain("full run");
+    expect(out).toContain("docs/planning/a.md");
+  });
+});

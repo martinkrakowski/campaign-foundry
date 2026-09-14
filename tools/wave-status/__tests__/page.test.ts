@@ -5147,3 +5147,79 @@ describe("the status page", () => {
     }
   });
 });
+
+describe("the status page — backlog panel (S5)", () => {
+  const recordedArtifact = {
+    version: 1,
+    at: "2026-09-13T12:00:00.000Z",
+    git: { branch: "feat/s5-backlog-panel", head: "0a1b2c3d4e5f60718293a4b5c6d7e8f901234567" },
+    scope: { kind: "full" as const },
+    plans: ["docs/planning/a.md"],
+    premises: [
+      { lane: "W1", plan: "docs/planning/a.md", status: "holds" as const },
+      { lane: "S5", plan: "docs/planning/S5.md", status: "stale" as const, reason: "already merged" },
+      { lane: "T9", plan: "docs/planning/t9.md", status: "timed-out" as const },
+    ],
+  };
+
+  test("the page shows 'no plan:verify run recorded' for a missing artifact", async () => {
+    const status: WaveStatus = {
+      ...statusAt(),
+      backlog: { state: "absent" },
+    };
+    const page = await loadPage(status);
+    const panel = page.window.document.querySelector("#backlog-pane, #backlog-panel");
+    expect(panel).not.toBeNull();
+    expect(panel!.textContent).toContain("no plan:verify run recorded");
+  });
+
+  test("the page shows 'unknown' for a malformed or unreadable artifact", async () => {
+    const status: WaveStatus = {
+      ...statusAt(),
+      backlog: { state: "unknown" },
+    };
+    const page = await loadPage(status);
+    const panel = page.window.document.querySelector("#backlog-pane, #backlog-panel");
+    expect(panel).not.toBeNull();
+    expect(panel!.textContent).toContain("unknown");
+    expect(panel!.querySelector(".backlog-list")).toBeNull();
+  });
+
+  test("a partial run is never rendered as the whole backlog", async () => {
+    const status: WaveStatus = {
+      ...statusAt(),
+      backlog: {
+        state: "recorded",
+        artifact: {
+          ...recordedArtifact,
+          scope: { kind: "partial", plans: ["docs/planning/a.md"] },
+        },
+      },
+    };
+    const page = await loadPage(status);
+    const panel = page.window.document.querySelector("#backlog-pane, #backlog-panel");
+    expect(panel).not.toBeNull();
+    expect(panel!.textContent).toContain("partial");
+    expect(panel!.textContent).not.toContain("full run");
+  });
+
+  test("a recorded artifact renders provenance prominently and lists premises", async () => {
+    const status: WaveStatus = {
+      ...statusAt(),
+      backlog: { state: "recorded", artifact: recordedArtifact },
+    };
+    const page = await loadPage(status);
+    const panel = page.window.document.querySelector("#backlog-pane, #backlog-panel");
+    expect(panel).not.toBeNull();
+    expect(panel!.textContent).toContain("2026-09-13T12:00:00.000Z");
+    expect(panel!.textContent).toContain("feat/s5-backlog-panel");
+    expect(panel!.textContent).toContain("0a1b2c3d");
+    expect(panel!.textContent).toContain("W1");
+    expect(panel!.textContent).toContain("holds");
+    expect(panel!.textContent).toContain("S5");
+    expect(panel!.textContent).toContain("stale");
+    expect(panel!.textContent).toContain("already merged");
+    expect(panel!.textContent).toContain("T9");
+    expect(panel!.textContent).toContain("timed-out");
+  });
+});
