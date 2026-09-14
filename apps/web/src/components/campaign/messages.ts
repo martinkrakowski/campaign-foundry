@@ -11,6 +11,11 @@
  * "Randomized" — the caller converts via `display-names.ts`.
  */
 
+// The leaf, never the barrel: the type vocabulary rides the same rule as the
+// one `display-names.ts` spells out. Type-only, so nothing is pulled in at
+// runtime by the file every other one imports.
+import type { Frame } from "@campaignfoundry/CampaignOrchestration/html-element";
+
 // --- Identity ---
 
 /** `briefId` */
@@ -1278,9 +1283,32 @@ export function htmlElementTextLabel(position: number): string {
   return `Element ${position} text`;
 }
 
-/** A frame input's label; `field` is the frame's own name (`x`, `y`, `w`, `h`). */
-export function htmlElementFrameLabel(position: number, field: string): string {
-  return `Element ${position} ${field}`;
+/**
+ * A frame's numeric fields — the ones an element editor gives a number input.
+ * Derived from the domain's own `Frame`, so a fifth field is a field with no
+ * words below rather than a raw key on a label.
+ */
+export type FrameNumberField = Exclude<keyof Frame, "anchor">;
+
+/**
+ * What a frame field is called, in words (D18): the label is read aloud by a
+ * screen reader and read on screen by a person, and neither of them is reading
+ * a schema — `x` on a label is a letter, "horizontal position" is a place.
+ * Keyed by the field, so a frame field with no words here is a compile error.
+ */
+const FRAME_FIELD_WORDS: Readonly<Record<FrameNumberField, string>> = {
+  x: "horizontal position",
+  y: "vertical position",
+  w: "width",
+  h: "height",
+};
+
+/** A frame input's label; `field` is the frame's own key, named here in words. */
+export function htmlElementFrameLabel(
+  position: number,
+  field: FrameNumberField,
+): string {
+  return `Element ${position} ${FRAME_FIELD_WORDS[field]}`;
 }
 
 /** The anchor select's label. */

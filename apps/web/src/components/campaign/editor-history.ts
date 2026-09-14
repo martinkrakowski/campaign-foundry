@@ -46,10 +46,11 @@ function phaseOf(
  * The coalescing key for a keystroke-driven action: consecutive edits carrying the
  * same key collapse into ONE history entry, so typing a word is one undo step and
  * the entry reverts the whole run. `patch` can name several fields at once, and
- * `setProduct`/`setTreatment` carry a patch too — the identity is the field set,
- * sorted so a re-arrival in another order cannot split the run. Every other
- * action (a toggle, an add, a remove) is its own entry, and returns null: null
- * never matches a previous key, so it also ENDS any run in progress.
+ * `setProduct`/`setTreatment`/`setHtmlElementFrame` carry a patch too — the
+ * identity is the field set, sorted so a re-arrival in another order cannot split
+ * the run. Every other action (a toggle, an add, a remove) is its own entry, and
+ * returns null: null never matches a previous key, so it also ENDS any run in
+ * progress.
  *
  * `setPool` is deliberately in the undoable set (null key): it writes
  * `variation.headline`, which is a draft field, so dropping the headline axis
@@ -69,6 +70,13 @@ function coalesceKeyOf(action: EditorAction): string | null {
       return `setBeatText:${action.index}`;
     case "setVariation":
       return `setVariation:${action.field}`;
+    // An html element's copy and frame (HL5a): the same rule the beat's copy
+    // has, keyed by the layer AND the element inside it — copy typed into the
+    // second element is not a continuation of a run in the first.
+    case "setHtmlElementText":
+      return `setHtmlElementText:${action.layerId}:${action.index}`;
+    case "setHtmlElementFrame":
+      return `setHtmlElementFrame:${action.layerId}:${action.index}:${Object.keys(action.patch).sort().join(",")}`;
     default:
       return null;
   }

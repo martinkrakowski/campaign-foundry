@@ -46,6 +46,36 @@
         "apps/web/src/components/campaign/__tests__/editor-state.html-elements.test.ts"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/sections/HtmlElementsEditor.tsx",
+      "before": "          if (raw.trim() === \"\") return;\n          const parsed = Number(raw);\n          if (!Number.isFinite(parsed)) return;\n          onCommit(parsed);",
+      "after": "          onCommit(Number(raw));",
+      "because": "The string in a frame box and the number in the draft are not the same thing. Committing `Number(e.target.value)` on every keystroke turns an emptied field into `Number(\"\") === 0` — a zero the user never typed, written to the frame the moment they cleared it to start again — and hands the reducer a NaN as soon as the box holds a half-typed value. Only a draft that parses to a finite number may leave the box.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/sections/__tests__/html-elements-editor.test.tsx"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/editor-history.ts",
+      "before": "    case \"setHtmlElementText\":\n      return `setHtmlElementText:${action.layerId}:${action.index}`;",
+      "after": "    // mutated: a run of copy typed into one element is no longer coalesced",
+      "because": "Undo is measured in what the user did, not in keystrokes: without a coalescing key the element's copy costs one undo per character, so stepping back over a sentence takes as many presses as it has letters — and ⌘Z becomes a way to lose a word one letter at a time. The beat's copy has had the same key since VE1; an element's copy is the same edit.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/editor-history.test.tsx"
+      ],
+      "verdict": "caught"
     }
   ]
 }

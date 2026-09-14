@@ -564,13 +564,19 @@ describe("HtmlElementsEditor — a frame value is typed one digit at a time (HL5
     expect(valueOf(xInput())).toBe("1");
   });
 
-  test("a half-typed number is not a number — '1e' commits nothing", async () => {
+  test("a half-typed number is not a number — the box keeps '1e', the draft keeps 1", async () => {
     const user = userEvent.setup();
     render(<FrameHarness initial={withElements(text)} />);
     await user.clear(xInput());
     await user.type(xInput(), "1e");
-    expect(storedX()).toBe("0.1");
+    // "1" was a number and was committed (clamped to the top of the range);
+    // "1e" is not one, so the characters stay in the box and nothing more is
+    // written — the draft is never handed a NaN.
+    expect(storedX()).toBe("1");
     expect(valueOf(xInput())).toBe("1e");
+    // …and finishing it commits the number the box now holds.
+    await user.type(xInput(), "-1");
+    expect(storedX()).toBe("0.1");
     await user.tab();
     expect(valueOf(xInput())).toBe("0.1");
   });

@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, type Dispatch } from "react";
+import { useId, useState, type Dispatch } from "react";
 import { Button, IconButton, Input } from "@/components/ui";
 import type {
   EditorAction,
@@ -43,7 +43,12 @@ import { Field } from "./IdentitySection";
  */
 
 /** A frame's numeric fields, in the order the row shows them. */
-const FRAME_NUMBER_FIELDS = ["x", "y", "w", "h"] as const;
+const FRAME_NUMBER_FIELDS = [
+  "x",
+  "y",
+  "w",
+  "h",
+] as const satisfies readonly messages.FrameNumberField[];
 
 /** The one frame patch a number input can write — never a stringly-typed key. */
 function framePatch(field: (typeof FRAME_NUMBER_FIELDS)[number], value: number): Partial<Frame> {
@@ -57,6 +62,58 @@ function framePatch(field: (typeof FRAME_NUMBER_FIELDS)[number], value: number):
     case "h":
       return { h: value };
   }
+}
+
+/**
+ * One frame field's number input (HL5a).
+ *
+ * What the user types is a STRING and what the draft holds is a CLAMPED NUMBER,
+ * and the gap between them is where a decimal point goes to die. A controlled
+ * `value={String(frame[field])}` re-renders after every keystroke with the
+ * number's own rendering of what was typed, so a half-typed `0.` — which the
+ * reducer stores as `0` — comes back as `"0"`, the point is gone and `0.25`
+ * can never be finished. Worse, a field the user emptied reads as
+ * `Number("") === 0`: a zero nobody typed, committed to the draft.
+ *
+ * So the box keeps its own draft string while it is being edited and hands a
+ * number to the reducer only once the draft parses to a finite one. Blur drops
+ * the draft and the box goes back to showing the stored — clamped — value,
+ * which is also how a number the domain refuses but the box allows (1.5) is
+ * corrected in front of the user rather than behind their back.
+ */
+function FrameNumberInput({
+  label,
+  value,
+  onCommit,
+}: {
+  label: string;
+  value: number;
+  onCommit: (value: number) => void;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  return (
+    <Field label={label}>
+      <Input
+        type="number"
+        min={0}
+        max={1}
+        step={0.01}
+        value={draft ?? String(value)}
+        onChange={(e) => {
+          const raw = e.target.value;
+          setDraft(raw);
+          // Empty, and half-typed to something that is no number yet ("1e"):
+          // states of the box, not numbers. Nothing is committed, and the
+          // characters stay on screen so the next digit finishes the value.
+          if (raw.trim() === "") return;
+          const parsed = Number(raw);
+          if (!Number.isFinite(parsed)) return;
+          onCommit(parsed);
+        }}
+        onBlur={() => setDraft(null)}
+      />
+    </Field>
+  );
 }
 
 export function HtmlElementsEditor({
@@ -119,26 +176,19 @@ export function HtmlElementsEditor({
                 )}
                 <div className="flex flex-wrap items-start gap-2">
                   {FRAME_NUMBER_FIELDS.map((field) => (
-                    <Field
+                    <FrameNumberInput
                       key={field}
                       label={messages.htmlElementFrameLabel(position, field)}
-                    >
-                      <Input
-                        type="number"
-                        min={0}
-                        max={1}
-                        step={0.01}
-                        value={String(element.frame[field])}
-                        onChange={(e) =>
-                          dispatch({
-                            type: "setHtmlElementFrame",
-                            layerId,
-                            index,
-                            patch: framePatch(field, Number(e.target.value)),
-                          })
-                        }
-                      />
-                    </Field>
+                      value={element.frame[field]}
+                      onCommit={(value) =>
+                        dispatch({
+                          type: "setHtmlElementFrame",
+                          layerId,
+                          index,
+                          patch: framePatch(field, value),
+                        })
+                      }
+                    />
                   ))}
                   <Field label={messages.htmlElementAnchorLabel(position)}>
                     <select
