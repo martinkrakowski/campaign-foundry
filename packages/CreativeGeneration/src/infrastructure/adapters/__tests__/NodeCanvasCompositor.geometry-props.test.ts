@@ -291,15 +291,22 @@ describe("accent.fadeHeight is live (C4, R-D3)", () => {
 describe("text typeFloor is live (C4, R-D3)", () => {
   // A message long enough that the autofit loop runs to the floor, so where the
   // floor sits decides the headline's resolved type size — and the line count
-  // that reaches the blit. `pixelSize.height` is squeezed well below the
-  // square default (400): at the natural (unshrunk) font size the wrapped
-  // block does not fit in 400px of headroom either — the autofit loop runs —
-  // but it fits again after only one or two 4px steps, before floor 0.1 and
-  // floor 0.8 (2px vs 19px) diverge, so both floors converge on the same
-  // stopping size and the direction assertion is vacuous. At height 80 the
-  // low floor keeps shrinking (and re-wrapping into more, shorter lines)
-  // past where the high floor is forced to settle — verified empirically:
-  // floor 0.1 -> 4 lines, floor 0.4 (the constant) -> 4 lines, floor 0.8 -> 3.
+  // that reaches the blit. At the original 400x400 canvas the wrapped block
+  // already fits at the natural (unshrunk) font size — the loop's very first
+  // attempt — so it never even runs once, for ANY floor: the direction
+  // assertion was vacuous regardless of implementation (verified empirically:
+  // floor 0.1, 0.4 and 0.8 all produced the identical fontSize=24, lines=5).
+  //
+  // `pixelSize.height` is squeezed to 80 so the loop actually runs. At that
+  // height a floor of 0.8 (19px) stalls too high to fit vertically — 19px
+  // minFirst + a 4-line span still exceeds 80px — so `settleLayout` truncates
+  // the wrapped 4 lines down to the 3 that fit, ellipsizing the last one. A
+  // floor of 0.1 (2px) lets the loop keep shrinking until it reaches 16px,
+  // where the SAME 4-line wrap fits with no truncation at all. So the gap
+  // isn't "the low floor wraps into more lines" — both wrap into 4 raw lines —
+  // it's that only the high floor is forced into the ellipsis/truncation path
+  // (verified empirically: floor 0.1 -> 4 lines, floor 0.4 (the constant, also
+  // below 16px) -> 4 lines, floor 0.8 -> 3 lines).
   const LONG =
     "Stay wild, stay hydrated, and keep every drop exactly where the adventure left it, " +
     "mile after mile, ridge after ridge, river after river under an open sky";
