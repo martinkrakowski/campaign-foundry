@@ -4807,3 +4807,34 @@ moved (the closed-check centralised into `requestRefresh`, and the shutdown watc
 the Map) retargeted rather than dropped. Full gate 0 with 100 % on all four counters (4 820 tests);
 `plan:verify` 0 (13 premises). The `watch` seam's listener now takes the event type and a third
 `onError`; existing seams that ignore them are unaffected.
+
+## 2026-09-14 — M3: the layer on/off toggle in the Template section
+
+- **Mode:** Implementer
+- **Changes:**
+  - `derive.ts`: `leavesARequiredKind` extracted so `removableLayerIds` and the new
+    `disableableLayerIds` share one rule; `toggleableLayerIds` (disabled layers plus the
+    disableable ones); `findOcclusionDeltaOverEnabled`, which drops disabled layers from both
+    sides before the domain's own delta (MP-D3).
+  - `editor-state.ts`: `setLayerEnabled` action and case — refuses the last enabled instance of a
+    required kind, no-ops on an unknown id or an already-held state, and recomputes the occlusion
+    notice over the enabled subset; add/remove/move now use the same enabled-subset delta.
+  - `TemplateSection.tsx`: a per-layer toggle (◉ / ○) labelled from `messages.ts` through
+    `aria-describedby`, offered only where `toggleableLayerIds` allows.
+  - `messages.ts`: `templateDisableDescription`, `templateEnableDescription` (append-only).
+  - `.agents/manifests/m3.json`: two mutations (required-kind guard removed; occlusion computed
+    over all layers), both replay caught.
+- **Decisions:**
+  - Canonical form: switching on REMOVES the `enabled` key, so the only `enabled` a brief ever
+    carries is `enabled: false` and an off→on round trip returns the layer to the shape it was
+    loaded with (asserted with `toStrictEqual`).
+  - Occlusion filtering lives in `derive.ts`, not in `creative-types.ts` — M3 does not own the
+    domain file, and the wrapper keeps MP-D3's two rules (enabled for occlusion, full array for
+    order) in one place.
+  - VE1 needed no change: `setLayerEnabled` is neither a baseline nor a server answer, so it is
+    an ordinary undoable edit by construction; two tests pin undo and redo.
+- **Left open:**
+  - M3's DoD half that is still open: the motion path draws the ground trio by kind (F1, MP-D2),
+    so a disabled layer is absent from the still path only. Recorded in the plan's Premises.
+  - The row shows a disabled layer's state only in the glyph and the control's description; no
+    visible "off" text was added.
