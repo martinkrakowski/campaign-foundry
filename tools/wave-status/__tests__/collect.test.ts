@@ -47,6 +47,7 @@ interface FakeTree {
   readonly pgrep?: (pattern: string) => Promise<number>;
   readonly gh?: (args: readonly string[]) => Promise<string>;
   readonly git?: (args: readonly string[]) => Promise<string>;
+  readonly planVerifyArtifactPath?: string;
 }
 
 function fakeDeps({
@@ -55,26 +56,30 @@ function fakeDeps({
   pgrep = async () => 0,
   gh = async () => "[]",
   git,
+  planVerifyArtifactPath = "/plan-verify.json",
 }: FakeTree): CollectDeps {
+  const missing = (what: string, path: string): Error =>
+    Object.assign(new Error(`ENOENT: ${what} ${path}`), { code: "ENOENT" });
   return {
     readdir: async (dir) => {
       const names = dirs[dir];
-      if (names === undefined) throw new Error(`ENOENT: readdir ${dir}`);
+      if (names === undefined) throw missing("readdir", dir);
       return names;
     },
     readFile: async (path) => {
       const text = files[path];
-      if (text === undefined) throw new Error(`ENOENT: readFile ${path}`);
+      if (text === undefined) throw missing("readFile", path);
       return text;
     },
     open: async (path) => {
       const text = files[path];
-      if (text === undefined) throw new Error(`ENOENT: open ${path}`);
+      if (text === undefined) throw missing("open", path);
       const data = Buffer.from(text, "utf8");
       return memoryHandle(data);
     },
     pgrep,
     gh,
+    planVerifyArtifactPath,
     ...(git ? { git } : {}),
   };
 }
@@ -573,7 +578,11 @@ describe("collect", () => {
 
   test("an unreadable wave-log root is an empty status", async () => {
     const status = await collect(fakeDeps({}), "/does-not-exist", "now");
-    expect(status).toEqual({ generatedAt: "now", waves: [] });
+    expect(status).toEqual({
+      generatedAt: "now",
+      waves: [],
+      backlog: { state: "absent" },
+    });
   });
 
   test("a lane log that vanishes between listing and reading drops the log, keeps the row", async () => {

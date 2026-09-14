@@ -1,16 +1,42 @@
 import { describe, expect, test, vi } from "vitest";
 import { PLAN_DIR, runCli, type PlanVerifyIo } from "../cli.js";
+import { ARTIFACT_VERSION, parseArtifact } from "../lib/artifact.js";
 
-const io = (over: Partial<PlanVerifyIo> = {}): { io: PlanVerifyIo; log: ReturnType<typeof vi.fn> } => {
+interface Written {
+  readonly path: string;
+  readonly contents: string;
+}
+
+interface Harness {
+  readonly io: PlanVerifyIo;
+  readonly log: ReturnType<typeof vi.fn>;
+  readonly gitCalls: () => readonly (readonly string[])[];
+  readonly artifact: () => Written | undefined;
+}
+
+const io = (over: Partial<PlanVerifyIo> = {}): Harness => {
   const log = vi.fn((_t: string): void => undefined);
+  const gitArgs: (readonly string[])[] = [];
+  let written: Written | undefined;
   return {
     log,
+    gitCalls: () => gitArgs,
+    artifact: () => written,
     io: {
       argv: [],
       log,
       readFile: async () => "```premise W1\ntrue\n```",
       listPlanDir: async (): Promise<readonly string[]> => ["a.md"],
       deps: { execute: async () => ({ exitCode: 0, output: "" }) },
+      now: () => "2026-09-13T12:00:00.000Z",
+      git: async (args) => {
+        gitArgs.push(args);
+        return args[1] === "--abbrev-ref" ? "feat/test-branch\n" : "deadbeef\n";
+      },
+      artifactPath: () => "/tmp/plan-verify.json",
+      writeArtifact: async (path, contents) => {
+        written = { path, contents };
+      },
       ...over,
     },
   };
@@ -56,5 +82,106 @@ describe("runCli", () => {
   test("an emptied premise fails the run, naming the plan and the lane", async () => {
     const { io: i } = io({ readFile: async () => "```premise W9\n   \n```" });
     await expect(runCli(i)).rejects.toThrow(/EMPTY\s+W9\s+\(docs\/planning\/a\.md\)/);
+  });
+});
+
+describe("the result artifact (S5)", () => {
+  test("a holding run records provenance and verdicts the page can render", async () => {
+    const h = io();
+    expect(await runCli(h.io)).toBe(0);
+    expect(h.artifact()?.path).toBe("/tmp/plan-verify.json");
+    expect(parseArtifact(h.artifact()!.contents)).toEqual({
+      version: ARTIFACT_VERSION,
+      at: "2026-09-13T12:00:00.000Z",
+      git: { branch: "feat/test-branch", head: "deadbeef" },
+      scope: { kind: "full" },
+      plans: [`${PLAN_DIR}/a.md`],
+      premises: [{ lane: "W1", plan: `${PLAN_DIR}/a.md`, status: "holds" }],
+    });
+  });
+
+  test("a stale run records it too — the verdict the gate failed on is the backlog's news", async () => {
+    const h = io({ deps: { execute: async () => ({ exitCode: 1, output: "merged already" }) } });
+    expect(await runCli(h.io)).toBe(1);
+    expect(parseArtifact(h.artifact()!.contents).premises[0]).toEqual({
+      lane: "W1",
+      plan: `${PLAN_DIR}/a.md`,
+      status: "stale",
+      reason: "merged already",
+    });
+  });
+
+  test("a timed-out run records it too", async () => {
+    const h = io({
+      deps: { execute: async () => ({ exitCode: 1, output: "", timedOut: true }) },
+    });
+    expect(await runCli(h.io)).toBe(2);
+    expect(parseArtifact(h.artifact()!.contents).premises[0]?.status).toBe("timed-out");
+  });
+
+  test("a subset run records itself as partial — never the whole backlog", async () => {
+    const h = io({ argv: ["docs/planning/one.md"] });
+    expect(await runCli(h.io)).toBe(0);
+    const artifact = parseArtifact(h.artifact()!.contents);
+    expect(artifact.scope).toEqual({ kind: "partial", plans: ["docs/planning/one.md"] });
+    expect(artifact.plans).toEqual(["docs/planning/one.md"]);
+  });
+
+  test("provenance comes from fixed git commands, and nothing else", async () => {
+    const h = io();
+    await runCli(h.io);
+    expect(h.gitCalls()).toEqual([
+      ["rev-parse", "--abbrev-ref", "HEAD"],
+      ["rev-parse", "HEAD"],
+    ]);
+  });
+
+  test("a git that cannot answer records unknown provenance, and still writes", async () => {
+    const h = io({
+      git: async () => {
+        throw new Error("not a git repository");
+      },
+    });
+    expect(await runCli(h.io)).toBe(0);
+    expect(parseArtifact(h.artifact()!.contents).git).toEqual({
+      branch: "unknown",
+      head: "unknown",
+    });
+  });
+
+  test("an empty git answer is unknown provenance, not an empty string", async () => {
+    const h = io({ git: async () => "  \n" });
+    await runCli(h.io);
+    expect(parseArtifact(h.artifact()!.contents).git.branch).toBe("unknown");
+  });
+
+  test("a failed artifact write warns and leaves a holding exit code unchanged", async () => {
+    const h = io({
+      writeArtifact: async () => {
+        throw new Error("read-only filesystem");
+      },
+    });
+    expect(await runCli(h.io)).toBe(0);
+    const warn = h.log.mock.calls.map((c) => String(c[0])).find((t) => t.includes("WARN"));
+    expect(warn).toContain("read-only filesystem");
+    expect(warn).toContain("/tmp/plan-verify.json");
+  });
+
+  test("a failed artifact write leaves a stale run exiting stale — the gate is first", async () => {
+    const h = io({
+      deps: { execute: async () => ({ exitCode: 1, output: "" }) },
+      writeArtifact: async () => {
+        throw new Error("disk full");
+      },
+    });
+    expect(await runCli(h.io)).toBe(1);
+  });
+
+  test("a run that found no premises still records — a full run with an empty backlog", async () => {
+    const h = io({ readFile: async () => "# prose only" });
+    expect(await runCli(h.io)).toBe(0);
+    const artifact = parseArtifact(h.artifact()!.contents);
+    expect(artifact.premises).toEqual([]);
+    expect(artifact.scope.kind).toBe("full");
   });
 });
