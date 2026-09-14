@@ -17,6 +17,19 @@ export const SWEEP_COMMAND = "threads";
 export const GATE_COMMAND = "gate";
 export const ATTRIBUTE_COMMAND = "attribute";
 
+/**
+ * `gh` colorizes JSON when `FORCE_COLOR` is set, even if stdout is not a
+ * TTY — `JSON.parse` then dies on the ANSI prefix, which is how a working
+ * GraphQL reply looks like a failed fetch. Drop the color force so the
+ * child writes the bytes the parsers already test.
+ */
+export function ghChildEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const next = { ...env };
+  delete next["FORCE_COLOR"];
+  delete next["CLICOLOR_FORCE"];
+  return next;
+}
+
 export interface SweepCliIo {
   readonly argv: readonly string[];
   readonly log: (text: string) => void;
@@ -164,7 +177,7 @@ if (process.argv[1]) {
       readFile: (path) => readFile(path, "utf8"),
       gh: (args) =>
         new Promise((resolve, reject) => {
-          execFile("gh", [...args], { maxBuffer: 16 * 1024 * 1024 }, (error, stdout, stderr) => {
+          execFile("gh", [...args], { maxBuffer: 16 * 1024 * 1024, env: ghChildEnv(process.env) }, (error, stdout, stderr) => {
             if (error !== null) {
               reject(new Error(`gh ${args.slice(0, 2).join(" ")}: ${stderr.trim() || error.message}`));
             } else {
