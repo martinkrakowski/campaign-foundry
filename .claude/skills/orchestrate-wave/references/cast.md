@@ -3,6 +3,20 @@
 Re-probe before trusting any row: `grok models`, `agy models`, `opencode models`. Two of these
 fail with a misleading error rather than "no such model".
 
+## Seats — owner's instruction, 2026-09-14 (later): every implementer seat is qwen3.8-flash
+
+**Supersedes the grok-4.6 instruction directly below** for implementers and remediators, as a measurement.
+Invocation: `opencode run --format json --auto --model openrouter/qwen/qwen3.8-flash --variant high "$(cat BRIEF.md)"`
+in the lane worktree (probed live: answers). Lanes run **strictly serially**, each followed by the orchestrator's gate —
+two concurrent implementer runs plus a gate ran this host out of memory and the harness killed all of them.
+
+- **qwen was rate-limited on 6 of its 15 runs earlier on 2026-09-13/14** (HTTP 429 from OpenRouter). The runner retries a
+  429-failed run up to three times with 2- and 4-minute backoff and records every attempt, so the rate-limit cost is
+  part of the measurement rather than hidden by a seat switch.
+- **grok-4.6's measurement so far** (three implementer lanes, before this switch): X16 lane $1.41 / 18 min, fixes
+  $0.48 / 8 min and one killed; V3 lane $1.36 / 24 min, fix $0.32 / 8 min; X17 lane $1.18 / 17 min. Every grok lane
+  needed at least one fix round after bot review.
+
 ## Seats — owner's instruction, 2026-09-14: every implementer seat is grok-4.6
 
 **This supersedes every "grok never implements" line below and the rotation in the 2026-09-08 and
