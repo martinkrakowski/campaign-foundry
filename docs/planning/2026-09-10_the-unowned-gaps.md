@@ -488,3 +488,30 @@ input only for the prohibited-terms warning when no error renders; the text inpu
 `aria-invalid`, because a weight error must not announce valid wording as invalid. `Stepper` forwards
 `aria-invalid` to its spinbutton alongside the `aria-describedby` it already forwarded. No visible
 change.
+
+---
+
+## 23. The seed the editor validates is not the seed it saves (X18)
+
+**Evidence.** `validatePolicy` checked the variation policy numbers with `Number(value)` +
+`Number.isInteger` (`isIntegerAtLeast` / `isIntegerInRange`,
+`apps/web/src/components/campaign/validate.ts`), while `toBrief` in `editor-state.ts` saved the same
+drafts with `parseInt(value, 10)` — as did `withCountClamp`, `canPlan`, and the floor-vs-count rule
+inside the validator itself.
+
+**Consequence.** The two parsers disagree on every non-trivial form: a free-typed seed of `1e5`
+validated as the integer 100000 and was **saved as `1`**; a draft of `12abc` was refused by
+validation yet would have truncated to `12` on any path that saved without the gate. The editor
+showed green beside a number the file would not carry.
+
+**Fix shape, when it is worth one.** One exported parser for both sides — draft string in, the
+integer it means (digit string, optional sign, optional exponent) or `undefined` out — read by the
+validators and by every `parseInt` site on the policy numbers. Validation acceptance must be exactly
+the save.
+
+**X18 — shipped in this PR.** `parsePolicyInteger` in `editor-state.ts` is that parser: it accepts a
+trimmed `[+-]?digits` with an optional integer exponent (`1e5` → 100000, ` 42 ` → 42) and refuses
+decimal form (`42.0`), trailing garbage (`12abc`) and blank — so `42.0` now validates as an error
+instead of silently saving 42. `isIntegerAtLeast` / `isIntegerInRange` in `validate.ts`, the
+floor-vs-count rule, `toBrief`, `withCountClamp` and `canPlan` all read through it; the API and the
+input controls are unchanged.

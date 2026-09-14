@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "lane": "X18",
+  "mutations": [
+    {
+      "file": "apps/web/src/components/campaign/editor-state.ts",
+      "before": "  const seed = parsePolicyInteger(state.variation.seed);",
+      "after": "  const seed = parseInt(state.variation.seed, 10);",
+      "because": "toBrief must save through the validator's parser: reverting the seed to parseInt truncates a free-typed `1e5` (validated as 100000) back to 1, and emits NaN for a blank draft, which the X18 agreement test catches as a save that is not the validated value.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/validate.test.ts",
+        "-t",
+        "X18",
+        "--maxWorkers=2"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/validate.ts",
+      "before": "function isIntegerInRange(value: string, min: number, max: number): boolean {\n  const num = parsePolicyInteger(value);\n  return num !== undefined && num >= min && num <= max;\n}",
+      "after": "function isIntegerInRange(value: string, min: number, max: number): boolean {\n  const num = Number(value);\n  return Number.isInteger(num) && num >= min && num <= max;\n}",
+      "because": "The validator must accept exactly what the helper saves: `Number(\"42.0\")` is the integer 42, so reverting this gate to Number re-accepts a decimal-form draft that parsePolicyInteger — and therefore toBrief — refuses, and the agreement test fails on a validated value that is never saved.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/validate.test.ts",
+        "-t",
+        "X18",
+        "--maxWorkers=2"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
