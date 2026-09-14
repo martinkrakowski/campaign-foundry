@@ -16,7 +16,14 @@ const ghFetch = (nodes: readonly { id: string; isResolved: boolean }[], writeRes
       );
     }
     return JSON.stringify({
-      data: { repository: { pullRequest: { id: "PR_I_1", reviewThreads: { nodes } } } },
+      data: {
+        repository: {
+          pullRequest: {
+            id: "PR_I_1",
+            reviewThreads: { pageInfo: { hasNextPage: false, endCursor: null }, nodes },
+          },
+        },
+      },
     });
   };
 
@@ -84,7 +91,17 @@ describe("mutation shape", () => {
       gh: async (args) => {
         calls.push([...args]);
         return JSON.stringify({
-          data: { repository: { pullRequest: { id: "PR_I_1", reviewThreads: { nodes: [{ id: "PRRT_a", isResolved: false }] } } } },
+          data: {
+            repository: {
+              pullRequest: {
+                id: "PR_I_1",
+                reviewThreads: {
+                  pageInfo: { hasNextPage: false, endCursor: null },
+                  nodes: [{ id: "PRRT_a", isResolved: false }],
+                },
+              },
+            },
+          },
         });
       },
       out: () => undefined,
@@ -129,7 +146,10 @@ describe("runCli — edges", () => {
             repository: {
               pullRequest: {
                 id: "PR_I_1",
-                reviewThreads: { nodes: [{ id: "PRRT_a", isResolved: false }] },
+                reviewThreads: {
+                  pageInfo: { hasNextPage: false, endCursor: null },
+                  nodes: [{ id: "PRRT_a", isResolved: false }],
+                },
               },
             },
           },
