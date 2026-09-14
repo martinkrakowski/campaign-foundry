@@ -442,8 +442,8 @@ describe("PreviewCreativeFrameUseCase — the scrub cell (VE-D5/VE-D6)", () => {
     expect(d.imageGenerator.resolveBackground).not.toHaveBeenCalled();
   });
 
-  test.each([1, 31, 32.5, Number.NaN, "6"] as const)(
-    "rejects durationSec %s outside [2, 30]",
+  test.each([1, 2.5, 31, 32.5, Number.NaN, "6"] as const)(
+    "rejects non-integer or out-of-range durationSec %s",
     async (durationSec) => {
       const d = deps({ videoCompositor: fakeVideoCompositor() });
       const result = await new PreviewCreativeFrameUseCase(d).execute(
@@ -452,7 +452,7 @@ describe("PreviewCreativeFrameUseCase — the scrub cell (VE-D5/VE-D6)", () => {
       );
       expect(result.success).toBe(false);
       if (!result.success)
-        expect(result.error.message).toMatch(/durationSec must be a finite number in \[2, 30\]/);
+        expect(result.error.message).toMatch(/durationSec must be an integer in \[2, 30\]/);
       expect(d.imageGenerator.resolveBackground).not.toHaveBeenCalled();
     },
   );
