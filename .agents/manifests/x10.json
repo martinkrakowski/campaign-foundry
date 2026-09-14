@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "lane": "X10",
+  "mutations": [
+    {
+      "file": "packages/CreativeGeneration/src/infrastructure/adapters/NodeCanvasCompositor.ts",
+      "before": "      case \"text\": {\n        ctx.save();\n        ctx.beginPath();\n        ctx.rect(boxX, boxY, boxW, boxH);\n        ctx.clip();\n        ctx.fillStyle = \"#ffffff\";",
+      "after": "      case \"text\": {\n        ctx.save();\n        ctx.fillStyle = \"#ffffff\";",
+      "because": "drawHtml must clip text element drawing to the element's own rectangle frame so an overflowing text label paints no pixels outside its frame.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CreativeGeneration/src/infrastructure/adapters/__tests__/NodeCanvasCompositor.clipping.test.ts",
+        "-t",
+        "text: label far longer than its frame clips drawing to the element frame"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CreativeGeneration/src/infrastructure/adapters/NodeCanvasCompositor.ts",
+      "before": "      case \"button\": {\n        const radius = Math.min(8, boxH / 2, boxW / 2);\n        ctx.save();\n        ctx.beginPath();\n        ctx.rect(boxX, boxY, boxW, boxH);\n        ctx.clip();\n        ctx.fillStyle = prepared.brandColor;",
+      "after": "      case \"button\": {\n        const radius = Math.min(8, boxH / 2, boxW / 2);\n        ctx.save();\n        ctx.fillStyle = prepared.brandColor;",
+      "because": "drawHtml must clip button element drawing to the element's own rectangle frame so an overflowing button label paints no pixels outside its frame.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CreativeGeneration/src/infrastructure/adapters/__tests__/NodeCanvasCompositor.clipping.test.ts",
+        "-t",
+        "button: label far longer than its frame clips drawing to the element frame"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/markup-assembler.ts",
+      "before": "        const buttonStyle = `${baseStyle} background-color: ${brandColor}; border-radius: ${radius}px; color: #ffffff; font-family: ${resolvedStyle.fontFamily}, sans-serif; font-weight: ${resolvedStyle.fontWeight}; font-size: ${fontSize}px; text-align: center; display: flex; align-items: center; justify-content: center; border: none; padding: 0; overflow: hidden; ${cursor}`;",
+      "after": "        const buttonStyle = `${baseStyle} background-color: ${brandColor}; border-radius: ${radius}px; color: #ffffff; font-family: ${resolvedStyle.fontFamily}, sans-serif; font-weight: ${resolvedStyle.fontWeight}; font-size: ${fontSize}px; text-align: center; display: flex; align-items: center; justify-content: center; border: none; padding: 0; ${cursor}`;",
+      "because": "assembleHtml must give button elements overflow: hidden so that button text does not overflow its element frame, matching the canvas renderer.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/markup-assembler.test.ts",
+        "-t",
+        "a button element's style contains overflow: hidden"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
