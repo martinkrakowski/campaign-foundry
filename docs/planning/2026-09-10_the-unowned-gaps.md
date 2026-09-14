@@ -459,3 +459,28 @@ function-children path X15 added. `aria-invalid` stays error-only: a warning is 
 **X19 — shipped in this PR.** `Field` names the warning element in `aria-describedby` for the
 warning-only and hint + warning cases on both children paths, with the hint first; an error +
 warning field references only the error, since the warning is not rendered there.
+
+---
+
+## 22. Timeline beat errors and warnings are invisible to assistive technology (X20)
+
+**Evidence.** `TimelineSection` renders each beat's message — `errors["copy-timeline-beat-<i>"]
+(weight out of range, dwell under the floor) and `warnings["copy-timeline-beat-<i>"]` (prohibited
+terms in the beat's text) — as a plain `<span>` with no id (`TimelineSection.tsx:119-122`),
+bypassing `Field` entirely. The text `Input` carries only an `aria-label`, and neither it nor
+the weight `Stepper` sets `aria-invalid` or `aria-describedby`. Found by re-checking X15's scope:
+`Field` fixed the 34 fields that use it; the beat rows build their controls by hand and were left behind.
+
+**Consequence.** A beat under the dwell floor or with an out-of-range weight shows red text that a
+screen-reader user never hears, and the control stays announced as valid. The one editor surface that
+flags a structural breach is the one that cannot be read out.
+
+**Fix.** X15's shape, applied outside `Field`: a `useId`-derived id on each beat's message span; the
+text input is `aria-describedby`-linked to the message present and `aria-invalid="true"` while an error
+shows; a weight/dwell error additionally describes and invalidates the stepper (the kit `Stepper`
+forwards both, per X15). No visible change.
+
+**X20 — shipped in this PR.** `TimelineSection` names each beat's message element and links it
+(`aria-describedby`) to the text input for any message and to the weight stepper for an error,
+carrying `aria-invalid` on both while an error shows; `Stepper` forwards `aria-invalid` to its
+spinbutton alongside the `aria-describedby` it already forwarded. No visible change.

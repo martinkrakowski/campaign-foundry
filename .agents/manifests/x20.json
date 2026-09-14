@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "lane": "X20",
+  "mutations": [
+    {
+      "file": "apps/web/src/components/campaign/TimelineSection.tsx",
+      "before": "                    aria-invalid={beatError ? \"true\" : undefined}",
+      "after": "                    /* mutated: aria-invalid dropped */",
+      "because": "A beat error must mark its text input aria-invalid so assistive technology announces the invalid state, not just shows red.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/TimelineSection.test.tsx",
+        "-t",
+        "a beat error marks its text input invalid"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/TimelineSection.tsx",
+      "before": "                    aria-describedby={beatMessage ? beatMessageId : undefined}",
+      "after": "                    /* mutated: aria-describedby dropped */",
+      "because": "The beat's message span must be named by aria-describedby on the text input, or the message is invisible to assistive technology.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/TimelineSection.test.tsx",
+        "-t",
+        "a warning describes the beat's text input"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/ui/src/stepper.tsx",
+      "before": "        aria-describedby={ariaDescribedBy}",
+      "after": "        /* mutated: aria-describedby dropped */",
+      "because": "Dropping Stepper's aria-describedby forwarding prevents weight/dwell errors from being announced on the spinbutton.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/TimelineSection.test.tsx",
+        "-t",
+        "a beat error also describes and invalidates its weight stepper"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/ui/src/stepper.tsx",
+      "before": "        aria-invalid={ariaInvalid}",
+      "after": "        /* mutated: aria-invalid dropped */",
+      "because": "Without forwarding aria-invalid, the weight stepper never announces the error state to assistive technology.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/TimelineSection.test.tsx",
+        "-t",
+        "a beat error also describes and invalidates its weight stepper"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
