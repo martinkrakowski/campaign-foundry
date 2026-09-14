@@ -160,9 +160,9 @@ real behaviour change or a bug, and both want a decision.
 **M3 — shipped in this PR.** The toggle is a `setLayerEnabled` action on the reducer, refused for the
 last enabled instance of a required kind through the same rule `removableLayerIds` uses, and offered
 per row only where it can be honoured — never present-and-disabled (F5). Occlusion is computed over
-the layers that draw (MP-D3). The half of M3's DoD that is **not** met here is the draw path: the
-motion path still draws the ground trio by kind (F1, MP-D2), so a disabled layer is absent from the
-still path only.
+the layers that draw (MP-D3). The draw half of M3's DoD shipped before this PR, in X9: both
+dispatch loops — the still path and `drawTimeline` — skip a layer whose `enabled` is `false` before
+any kind dispatch, so a disabled layer is absent from the still and the motion frame alike.
 
 **M4 — shipped in an earlier motion lane — `prepare` memoises per-text layout, so `draw` never re-wraps.** Its premise was retired when it landed; `plan:verify` no
 longer tracks it.
