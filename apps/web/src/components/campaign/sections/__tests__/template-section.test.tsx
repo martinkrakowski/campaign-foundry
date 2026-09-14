@@ -144,7 +144,14 @@ describe("TemplateSection — the layer list (L5, D124)", () => {
   test("removing a layer removes exactly it, and the order of the rest is unchanged", async () => {
     const user = userEvent.setup();
     render(<Harness initial={state()} />);
-    await user.click(list().getByRole("button", { name: "shade" }));
+    // The remove control, named by its description: the row carries a toggle
+    // with the same accessible name (D18), so the id alone is ambiguous here.
+    await user.click(
+      list().getByRole("button", {
+        name: "shade",
+        description: messages.templateRemoveDescription("Shade"),
+      }),
+    );
     const rows = screen.getAllByRole("listitem");
     expect(rows).toHaveLength(4);
     expect(within(rows[0]).queryByText("Shade")).toBeNull();
@@ -170,7 +177,14 @@ describe("TemplateSection — the layer list (L5, D124)", () => {
     render(
       <TemplateSection state={duplicated} dispatch={vi.fn()} errors={{}} />,
     );
-    expect(list().getAllByRole("button", { name: "shade" })).toHaveLength(2);
+    // One remove control per row — scoped by description, since each row's
+    // toggle carries the same raw id as its name.
+    expect(
+      list().getAllByRole("button", {
+        name: "shade",
+        description: messages.templateRemoveDescription("Shade"),
+      }),
+    ).toHaveLength(2);
   });
 
   test("removing one of two layers sharing an id removes exactly it, the duplicate stays (L5)", () => {
@@ -251,7 +265,10 @@ describe("TemplateSection — the layer list (L5, D124)", () => {
 
   test("each control names itself by its raw id; the display words live in the description", () => {
     render(<TemplateSection state={state()} dispatch={vi.fn()} errors={{}} />);
-    const remove = list().getByRole("button", { name: "shade" });
+    const remove = list().getByRole("button", {
+      name: "shade",
+      description: messages.templateRemoveDescription("Shade"),
+    });
     expect(
       document.getElementById(remove.getAttribute("aria-describedby") ?? "")
         ?.textContent,
@@ -545,6 +562,241 @@ describe("TemplateSection — layer reordering (L8, D128)", () => {
         description: messages.templateMoveDownDescription("Accent"),
       }),
     ).toBeNull();
+  });
+});
+
+describe("TemplateSection — the layer toggle (L9, D129, MP-D3, MP-D4)", () => {
+  test("disabling an optional layer serialises enabled: false, and the brief round-trips", () => {
+    const base = state();
+    const off = editorReducer(base, {
+      type: "setLayerEnabled",
+      id: "shade",
+      enabled: false,
+    });
+    // `enabled: false` is the only `enabled` a brief ever carries: absent means
+    // enabled, so switching off writes the field and switching on removes it —
+    // an off→on round trip returns the layer to the shape it was loaded with.
+    expect(off.template.layers.find((layer) => layer.id === "shade")).toEqual({
+      id: "shade",
+      kind: "shade",
+      enabled: false,
+    });
+    expect(toBrief(off).template.layers).toContainEqual({
+      id: "shade",
+      kind: "shade",
+      enabled: false,
+    });
+    // The saved brief reloads with the layer still off, in its slot (MP-D3's
+    // other half: order constraints still see the whole array).
+    const reloaded = fromBrief(toBrief(off));
+    expect(reloaded.template.layers.map((layer) => layer.id)).toEqual(
+      base.template.layers.map((layer) => layer.id),
+    );
+    expect(
+      reloaded.template.layers.find((layer) => layer.id === "shade")?.enabled,
+    ).toBe(false);
+    // Back on: no `enabled` key at all — `toStrictEqual`, so a leftover
+    // `enabled: undefined` would fail here.
+    expect(
+      editorReducer(off, { type: "setLayerEnabled", id: "shade", enabled: true })
+        .template.layers,
+    ).toStrictEqual(base.template.layers);
+  });
+
+  test("the last enabled required layer offers no toggle, and the reducer refuses it", () => {
+    render(<TemplateSection state={state()} dispatch={vi.fn()} errors={{}} />);
+    // Absent from the offer, never present-and-disabled (DESIGN.md §1.5): image
+    // and static-text are the type's required kinds, each present once.
+    expect(
+      list().queryByRole("button", {
+        name: "image",
+        description: messages.templateDisableDescription("Image"),
+      }),
+    ).toBeNull();
+    expect(
+      list().queryByRole("button", {
+        name: "static-text",
+        description: messages.templateDisableDescription("Static text"),
+      }),
+    ).toBeNull();
+    expect(
+      list().getByRole("button", {
+        name: "shade",
+        description: messages.templateDisableDescription("Shade"),
+      }),
+    ).toBeTruthy();
+    // And the refusal is in the draft itself, the way `removeLayer`'s is.
+    const base = state();
+    expect(
+      editorReducer(base, {
+        type: "setLayerEnabled",
+        id: "image",
+        enabled: false,
+      }),
+    ).toBe(base);
+    expect(
+      editorReducer(base, {
+        type: "setLayerEnabled",
+        id: "static-text",
+        enabled: false,
+      }),
+    ).toBe(base);
+  });
+
+  test("a toggle for an unknown id, or one asking for the state the layer already holds, changes nothing", () => {
+    const base = state();
+    expect(
+      editorReducer(base, {
+        type: "setLayerEnabled",
+        id: "no-such-layer",
+        enabled: false,
+      }),
+    ).toBe(base);
+    // An enabled layer asked to go on: no edit, so no history entry either.
+    expect(
+      editorReducer(base, { type: "setLayerEnabled", id: "shade", enabled: true }),
+    ).toBe(base);
+    const off = editorReducer(base, {
+      type: "setLayerEnabled",
+      id: "shade",
+      enabled: false,
+    });
+    expect(
+      editorReducer(off, { type: "setLayerEnabled", id: "shade", enabled: false }),
+    ).toBe(off);
+  });
+
+  test("the toggle dispatches setLayerEnabled with the layer id and the state it asks for", async () => {
+    const user = userEvent.setup();
+    const dispatch = vi.fn();
+    render(<TemplateSection state={state()} dispatch={dispatch} errors={{}} />);
+    await user.click(
+      list().getByRole("button", {
+        name: "shade",
+        description: messages.templateDisableDescription("Shade"),
+      }),
+    );
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "setLayerEnabled",
+      id: "shade",
+      enabled: false,
+    });
+  });
+
+  test("the toggle names itself by its raw id; the display words live in the description", () => {
+    render(<TemplateSection state={state()} dispatch={vi.fn()} errors={{}} />);
+    const toggle = list().getByRole("button", {
+      name: "shade",
+      description: messages.templateDisableDescription("Shade"),
+    });
+    expect(
+      document.getElementById(toggle.getAttribute("aria-describedby") ?? "")
+        ?.textContent,
+    ).toBe(messages.templateDisableDescription("Shade"));
+  });
+
+  test("switching a layer off and back on through the real reducer swaps the offer", async () => {
+    const user = userEvent.setup();
+    render(<Harness initial={state()} />);
+    await user.click(
+      list().getByRole("button", {
+        name: "shade",
+        description: messages.templateDisableDescription("Shade"),
+      }),
+    );
+    // Off: the row offers the way back and nothing else — no downgrade to a
+    // disabled control, and no other row moved.
+    expect(
+      list().getByRole("button", {
+        name: "shade",
+        description: messages.templateEnableDescription("Shade"),
+      }),
+    ).toBeTruthy();
+    expect(
+      list().queryByRole("button", {
+        name: "shade",
+        description: messages.templateDisableDescription("Shade"),
+      }),
+    ).toBeNull();
+    expect(screen.getAllByRole("listitem")).toHaveLength(5);
+
+    await user.click(
+      list().getByRole("button", {
+        name: "shade",
+        description: messages.templateEnableDescription("Shade"),
+      }),
+    );
+    expect(
+      list().getByRole("button", {
+        name: "shade",
+        description: messages.templateDisableDescription("Shade"),
+      }),
+    ).toBeTruthy();
+  });
+
+  test("a disabled layer produces no occlusion warning, and re-enabling it brings it back (MP-D3)", async () => {
+    const user = userEvent.setup();
+    render(<Harness initial={state()} />);
+
+    // Accent (index 2) moves above the headline: the advisory appears.
+    let rows = screen.getAllByRole("listitem");
+    await user.click(
+      within(rows[2]).getByRole("button", {
+        name: "accent",
+        description: messages.templateMoveUpDescription("Accent"),
+      }),
+    );
+    expect(screen.getByRole("status").textContent).toBe(
+      "the accent layer now sits above the headline and will mute it",
+    );
+
+    // Switch the occluding layer off: it draws nothing, so it occludes nothing.
+    rows = screen.getAllByRole("listitem");
+    await user.click(
+      within(rows[3]).getByRole("button", {
+        name: "accent",
+        description: messages.templateDisableDescription("Accent"),
+      }),
+    );
+    expect(screen.queryByRole("status")).toBeNull();
+
+    // Back on: the occlusion is real again, and the note says so.
+    rows = screen.getAllByRole("listitem");
+    await user.click(
+      within(rows[3]).getByRole("button", {
+        name: "accent",
+        description: messages.templateEnableDescription("Accent"),
+      }),
+    );
+    expect(screen.getByRole("status").textContent).toBe(
+      "the accent layer now sits above the headline and will mute it",
+    );
+  });
+
+  test("moving a disabled layer into an occluding position raises no warning (MP-D3)", async () => {
+    const user = userEvent.setup();
+    render(<Harness initial={state()} />);
+
+    // Accent off first — the order constraints still police the move (MP-D3:
+    // the full array), but the layer paints nothing.
+    let rows = screen.getAllByRole("listitem");
+    await user.click(
+      within(rows[2]).getByRole("button", {
+        name: "accent",
+        description: messages.templateDisableDescription("Accent"),
+      }),
+    );
+    rows = screen.getAllByRole("listitem");
+    await user.click(
+      within(rows[2]).getByRole("button", {
+        name: "accent",
+        description: messages.templateMoveUpDescription("Accent"),
+      }),
+    );
+    // The move happened — accent is above the headline — and no notice fires.
+    rows = screen.getAllByRole("listitem");
+    expect(rows[3].textContent).toContain("accent");
+    expect(screen.queryByRole("status")).toBeNull();
   });
 });
 

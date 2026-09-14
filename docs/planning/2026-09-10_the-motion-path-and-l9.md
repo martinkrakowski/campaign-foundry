@@ -121,7 +121,7 @@ required layer*.
 | **M1** | **The motion path iterates the list.** Keep the drawn order identical for canonical templates so goldens do not move; the change is *where the order comes from*, not what it is. Prove byte-identity on the canonical set before anything else. | `NodeCanvasCompositor.ts`, its tests | L9 becomes possible |
 | **M1b** | **Wire `template` through the port.** Add it to `CompositeRequest`, pass it from both use cases, and decide whether the kit's `PREVIEW_LAYER_ORDER` follows the brief or stays canonical — it derives from `CANONICAL_TEMPLATES` today, so preview and compositor agree only because **both** ignore the brief. **Must land after M1.** | `CompositorPort.ts`, both use cases, port test doubles, possibly `preview-layers.ts` | The arc stops being inert |
 | **M2** | **`enabled` reaches the boundary**: the field, its validation in `isBriefTemplate` and `validateTemplate`, its slot in `LAYER_KEY_ORDER`, and MP-D4/MP-D5 counting rules. | `creative-templates.ts`, `brief-template.ts`, `brief-yaml.ts`, `load-brief.ts` | The contract L9's UI needs |
-| **M3** | **The toggle itself** (D129) — the control, the reducer action, and MP-D3's occlusion rule over the enabled subset. | `editor-state.ts`, `derive.ts`, `TemplateSection.tsx`, `messages.ts` | L9 |
+| **M3** | **The toggle itself** (D129) — the control, the reducer action, and MP-D3's occlusion rule over the enabled subset. **Shipped in this PR.** | `editor-state.ts`, `derive.ts`, `TemplateSection.tsx`, `messages.ts` | L9 |
 | **M4** | **Amend the templates plan**: F3's L7 status, F4's ownership list, F5's DoD wording, and D136 as half-shipped. | `2026-09-08_creative-templates-and-units.md` | The plan stops asserting things that are not true |
 
 **Order.** M1 → **M1b** → M2 → M3, strictly. M4 whenever. **M1 is the gate**: if the canonical goldens move,
@@ -156,6 +156,13 @@ real behaviour change or a bug, and both want a decision.
 ---
 
 ## Premises
+
+**M3 — shipped in this PR.** The toggle is a `setLayerEnabled` action on the reducer, refused for the
+last enabled instance of a required kind through the same rule `removableLayerIds` uses, and offered
+per row only where it can be honoured — never present-and-disabled (F5). Occlusion is computed over
+the layers that draw (MP-D3). The draw half of M3's DoD shipped before this PR, in X9: both
+dispatch loops — the still path and `drawTimeline` — skip a layer whose `enabled` is `false` before
+any kind dispatch, so a disabled layer is absent from the still and the motion frame alike.
 
 **M4 — shipped in an earlier motion lane — `prepare` memoises per-text layout, so `draw` never re-wraps.** Its premise was retired when it landed; `plan:verify` no
 longer tracks it.

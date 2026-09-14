@@ -210,6 +210,37 @@ describe("useEditorHistory — setPool is a draft edit, so it is undoable", () =
   });
 });
 
+describe("useEditorHistory — the layer toggle is an ordinary undoable edit (L9, VE1)", () => {
+  test("undo after a toggle restores the layer list it replaced, exactly", () => {
+    const hook = render();
+    const before = hook.result.current.state.template.layers;
+    send(hook, { type: "setLayerEnabled", id: "shade", enabled: false });
+    expect(
+      hook.result.current.state.template.layers.find(
+        (layer) => layer.id === "shade",
+      )?.enabled,
+    ).toBe(false);
+    act(() => hook.result.current.undo());
+    // `toStrictEqual`, so an `enabled: undefined` left behind by the toggle
+    // would fail here — undo must restore the layer objects, not their shape.
+    expect(hook.result.current.state.template.layers).toStrictEqual(before);
+    act(() => hook.result.current.redo());
+    expect(
+      hook.result.current.state.template.layers.find(
+        (layer) => layer.id === "shade",
+      )?.enabled,
+    ).toBe(false);
+  });
+
+  test("a refused toggle leaves nothing to undo", () => {
+    const hook = render();
+    // The last enabled instance of a required kind (MP-D4): the reducer's
+    // no-op is not an edit, so the stack stays empty.
+    send(hook, { type: "setLayerEnabled", id: "image", enabled: false });
+    expect(hook.result.current.canUndo).toBe(false);
+  });
+});
+
 describe("useEditorHistory — coalescing", () => {
   test("typing a word is one undo step (patch)", () => {
     const hook = render();
