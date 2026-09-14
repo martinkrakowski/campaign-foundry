@@ -16,6 +16,21 @@
         "apps/api/server/lib/__tests__/report.test.ts"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/report.ts",
+      "before": "    await unlink(tmp).catch(() => undefined);",
+      "after": "    await unlink(tmp);",
+      "because": "A staging write that fails before its temp exists leaves nothing to unlink; without the swallow, the cleanup's ENOENT replaces the real failure and the caller is told the wrong thing. The disk-full test asserts the original error surfaces.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/report.test.ts"
+      ],
+      "verdict": "caught"
     }
   ]
 }

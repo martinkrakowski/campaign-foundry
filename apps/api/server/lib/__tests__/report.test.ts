@@ -554,6 +554,20 @@ describe("report persistence", () => {
     expect(readdirSync(resolve(root, "reports")).some((n) => n.endsWith(".tmp"))).toBe(false);
   });
 
+  test("a write that fails before its temp exists surfaces that failure, not the cleanup's", async () => {
+    await writeReport(result([asset()]));
+    const target = campaignReportPath(root, "camp")!;
+    const before = readFileSync(target);
+    // The staging write itself fails, so there is no temp for the cleanup to unlink:
+    // the unlink's own ENOENT must be swallowed, or it would replace the real error.
+    fsHook.writeFile = async () => {
+      throw new Error("simulated disk full");
+    };
+
+    await expect(writeReport(result([beta()]))).rejects.toThrow("simulated disk full");
+    expect(readFileSync(target)).toEqual(before);
+  });
+
   test("the atomic write renames a temp sibling over the target", async () => {
     const target = campaignReportPath(root, "camp")!;
     const renames: Array<{ from: string; to: string }> = [];
