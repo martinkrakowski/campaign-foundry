@@ -30,13 +30,25 @@ describe("sweep — refusals that keep half a class from landing", () => {
     ).rejects.toThrow(/not a review-thread node/);
   });
 
-  test("a pull request whose reviewThreads field is absent reads as no threads", async () => {
+  test("a pull request whose reviewThreads field is absent is a failed read, not an empty one", async () => {
+    // Changed 2026-09-14, and the change is the point: this used to assert that
+    // an absent connection reads as "no threads", which is how a PR with an open
+    // thread was reported as having none. `fetchAllThreads` now decides whether
+    // a merge happens, so a read that measured nothing must be recorded, not
+    // reported as an empty answer — and the sweep refuses the whole run on it
+    // rather than reporting one id as wrong. A refused read posts nothing,
+    // which is what the `--post` below is here to prove.
+    const calls: string[][] = [];
     await expect(
-      sweep({ pr: 361, requested: ["PRRT_a"], disposition: "x" }, false, {
-        gh: async () => JSON.stringify({ data: { repository: { pullRequest: { id: "PR_I_1" } } } }),
+      sweep({ pr: 361, requested: ["PRRT_a"], disposition: "x" }, true, {
+        gh: async (args) => {
+          calls.push([...args]);
+          return JSON.stringify({ data: { repository: { pullRequest: { id: "PR_I_1" } } } });
+        },
         out: () => undefined,
       }),
-    ).rejects.toThrow(/PRRT_a: not a review-thread node/);
+    ).rejects.toThrow(/returned errors: .*reviewThreads/);
+    expect(calls.filter((c) => c.some((a) => a.includes("mutation")))).toEqual([]);
   });
 
   test("a GraphQL error without a message is refused, not swallowed", async () => {
