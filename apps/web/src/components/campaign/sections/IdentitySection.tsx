@@ -1,6 +1,17 @@
 "use client";
 
-import { useId, useState, useRef, useEffect, useCallback, useMemo, type Dispatch } from "react";
+import {
+  useId,
+  useState,
+  useRef,
+  useEffect,
+  useCallback,
+  useMemo,
+  Children,
+  isValidElement,
+  cloneElement,
+  type Dispatch,
+} from "react";
 import { Input, ChipGroup, WorldMap, REGION_FOOTPRINTS, MAP_WIDTH, MAP_HEIGHT } from "@/components/ui";
 import type { EditorState, EditorAction } from "@/components/campaign/editor-state";
 import type { FieldErrors } from "@/components/campaign/validate";
@@ -99,17 +110,48 @@ export function Field({
   fieldKey?: string;
   as?: "label" | "div";
 }) {
+  const id = useId();
+  const hintId = `${id}-hint`;
+  const errorId = `${id}-error`;
+
+  const describedByIds: string[] = [];
+  if (hint) describedByIds.push(hintId);
+  if (error) describedByIds.push(errorId);
+  const describedBy = describedByIds.length > 0 ? describedByIds.join(" ") : undefined;
+  const invalid = error ? "true" : undefined;
+
+  let attached = false;
+  const enhancedChildren = Children.map(children, (child) => {
+    if (!attached && isValidElement(child)) {
+      attached = true;
+      const childProps = child.props as Record<string, unknown>;
+      const existingDescribedBy = childProps["aria-describedby"] as string | undefined;
+      const mergedDescribedBy = [existingDescribedBy, describedBy].filter(Boolean).join(" ") || undefined;
+      return cloneElement(child, {
+        ...(mergedDescribedBy ? { "aria-describedby": mergedDescribedBy } : {}),
+        ...(invalid ? { "aria-invalid": invalid } : {}),
+      } as Record<string, unknown>);
+    }
+    return child;
+  });
+
   const derivedKey = fieldKey ?? keyForLabel(label);
   const Wrapper = as;
   return (
     <div data-field-key={derivedKey}>
       <Wrapper className="block">
         <span className="mb-1.5 block text-[11px] text-text-muted">{label}</span>
-        {children}
+        {enhancedChildren}
       </Wrapper>
-      {hint ? <span className="mt-1 block text-[11px] text-text-muted">{hint}</span> : null}
+      {hint ? (
+        <span id={hintId} className="mt-1 block text-[11px] text-text-muted">
+          {hint}
+        </span>
+      ) : null}
       {error ? (
-        <span className="mt-1 block text-[11px] text-error">{error}</span>
+        <span id={errorId} className="mt-1 block text-[11px] text-error">
+          {error}
+        </span>
       ) : warning ? (
         <span className="mt-1 block text-[11px] text-warning">{warning}</span>
       ) : null}
