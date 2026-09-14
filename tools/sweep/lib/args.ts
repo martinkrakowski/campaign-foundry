@@ -139,3 +139,37 @@ export function parseGateArgs(argv: readonly string[]): GateArgs {
   if (head === undefined) throw new Error(`a --sha is required\n${GATE_USAGE}`);
   return { pr, head };
 }
+
+/** `sweep attribute --pr <n>`: the PR whose github-actions threads will be split by workflow. */
+export interface AttributeArgs {
+  readonly pr: number;
+}
+
+export const ATTRIBUTE_USAGE = "usage: sweep attribute --pr <number>";
+
+/**
+ * Parses `sweep attribute --pr <n>`.
+ *
+ * The PR is the only input: the head branch, the three PR-Agent workflow
+ * runs, and the threads all follow from it. Anything else on the command
+ * line is a mistake, not an option, because a guessed flag would look like
+ * a filter the tool does not have.
+ */
+export function parseAttributeArgs(argv: readonly string[]): AttributeArgs {
+  let pr: number | undefined;
+
+  for (let i = 0; i < argv.length; i++) {
+    const flag = argv[i];
+    switch (flag) {
+      case "--pr": {
+        pr = numberAfter(argv, ++i, flag, ATTRIBUTE_USAGE);
+        break;
+      }
+      default:
+        throw new Error(`unknown argument '${String(flag)}'\n${ATTRIBUTE_USAGE}`);
+    }
+  }
+
+  if (pr === undefined) throw new Error(`a --pr is required\n${ATTRIBUTE_USAGE}`);
+  return { pr };
+}

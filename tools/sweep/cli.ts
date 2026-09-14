@@ -1,11 +1,21 @@
 import { pathToFileURL } from "node:url";
-import { SWEEP_USAGE, parseGateArgs, parseSweepArgs } from "./lib/args.js";
+import {
+  ATTRIBUTE_USAGE,
+  GATE_USAGE,
+  SWEEP_USAGE,
+  parseAttributeArgs,
+  parseGateArgs,
+  parseSweepArgs,
+  type AttributeArgs,
+} from "./lib/args.js";
+import { attribute } from "./lib/attribute.js";
 import { mergeGate, type MergeGatePlan } from "./lib/gate.js";
 import { sweep, errorText, type SweepPlan } from "./lib/sweep.js";
 import { SweepRefusal } from "./lib/types.js";
 
 export const SWEEP_COMMAND = "threads";
 export const GATE_COMMAND = "gate";
+export const ATTRIBUTE_COMMAND = "attribute";
 
 export interface SweepCliIo {
   readonly argv: readonly string[];
@@ -47,6 +57,30 @@ async function runGate(rest: readonly string[], io: SweepCliIo): Promise<number>
 }
 
 /**
+ * `sweep attribute --pr <n>`
+ *
+ * Exit codes: 0 every github-actions thread was printed (attributed or
+ * unattributed); 1 the threads or a job log could not be read — nothing was
+ * guessed; 2 the command line itself is wrong.
+ */
+async function runAttribute(rest: readonly string[], io: SweepCliIo): Promise<number> {
+  let plan: AttributeArgs;
+  try {
+    plan = parseAttributeArgs(rest);
+  } catch (error) {
+    io.logError(errorText(error));
+    return 2;
+  }
+  const decision = await attribute(plan, { gh: io.gh });
+  if (decision.kind === "fail") {
+    for (const reason of decision.reasons) io.logError(reason);
+    return 1;
+  }
+  for (const line of decision.lines) io.log(line);
+  return 0;
+}
+
+/**
  * `sweep threads --pr … --thread … (--body … | --body-file …) [--post]`
  *
  * Exit codes: 0 the class was disposed (or previewed); 1 the sweep refused
@@ -62,9 +96,14 @@ export async function runCli(io: SweepCliIo): Promise<number> {
   if (command === GATE_COMMAND) {
     return runGate(rest, io);
   }
+  if (command === ATTRIBUTE_COMMAND) {
+    return runAttribute(rest, io);
+  }
   if (command !== SWEEP_COMMAND) {
     io.logError(`sweep: '${String(command)}' is not a command.`);
     io.logError(SWEEP_USAGE);
+    io.logError(GATE_USAGE);
+    io.logError(ATTRIBUTE_USAGE);
     return 2;
   }
   let plan: SweepPlan;

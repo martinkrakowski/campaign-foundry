@@ -17,6 +17,8 @@ export interface ReviewThread extends ThreadState {
   readonly author: string;
   /** The first comment's body, flattened and shortened enough to recognise. */
   readonly excerpt: string;
+  /** The first comment's full body — attribution matches against it, not the excerpt. */
+  readonly body: string;
 }
 
 /** The pull request shape the fetch response is expected to carry. */

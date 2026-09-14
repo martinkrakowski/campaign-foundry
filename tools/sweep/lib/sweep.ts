@@ -151,11 +151,13 @@ export async function fetchAllThreads(
     }
     for (const n of threadsPage.nodes ?? []) {
       const first = n.comments?.nodes?.[0];
+      const body = first?.body ?? "";
       threads.push({
         id: String(n.id),
         isResolved: n.isResolved === true,
         author: first?.author?.login ?? "unknown",
-        excerpt: excerptOf(first?.body ?? ""),
+        excerpt: excerptOf(body),
+        body,
       });
     }
     const pageInfo = threadsPage.pageInfo;
