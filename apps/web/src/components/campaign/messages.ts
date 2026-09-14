@@ -1241,7 +1241,7 @@ export const htmlElementAddLabel = "Add an element";
  * (`htmlElementKindLabel`), never a raw id.
  */
 export function htmlElementAddDescription(kindName: string): string {
-  return `Add a ${kindName.toLowerCase()} element`;
+  return `Add ${kindName}`;
 }
 
 /**
