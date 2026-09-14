@@ -15,6 +15,7 @@ export interface SliderProps {
   disabled?: boolean;
   invalid?: boolean;
   "aria-label": string;
+  "aria-describedby"?: string;
   /** Rendered after the value in the readout, e.g. "s". */
   suffix?: string;
   /**
@@ -41,6 +42,7 @@ export function Slider({
   suffix,
   readout,
   "aria-label": ariaLabel,
+  "aria-describedby": ariaDescribedBy,
 }: SliderProps): ReactNode {
   const safeMax = Math.max(min, max);
   const clamped = Math.min(Math.max(value, min), safeMax);
@@ -50,6 +52,7 @@ export function Slider({
         <input
           type="range"
           aria-label={ariaLabel}
+          aria-describedby={ariaDescribedBy}
           min={min}
           max={safeMax}
           step={step}
@@ -62,6 +65,7 @@ export function Slider({
             "disabled:cursor-not-allowed disabled:opacity-50",
           )}
         />
+
         {readout ?? (
           <span
             className={cn(

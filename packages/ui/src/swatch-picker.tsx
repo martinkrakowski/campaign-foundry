@@ -25,6 +25,7 @@ export interface SwatchPickerProps {
   readonly invalid?: boolean;
   readonly disabled?: boolean;
   readonly readOnly?: boolean;
+  readonly "aria-describedby"?: string;
   /** Size of swatches: "default" (24px) or "lg" (52px for step cards). */
   readonly size?: "default" | "lg";
 }
@@ -49,6 +50,7 @@ export function SwatchPicker({
   disabled = false,
   readOnly = false,
   size = "default",
+  "aria-describedby": ariaDescribedBy,
 }: SwatchPickerProps): ReactNode {
   const normalizedValue = value.trim().toUpperCase();
   const isPaletteMatch = swatches.some((hex) => hex.toUpperCase() === normalizedValue);
@@ -65,6 +67,7 @@ export function SwatchPicker({
     <div
       role="group"
       aria-label={label ? `${label} options` : undefined}
+      aria-describedby={ariaDescribedBy}
       className="flex flex-wrap items-center gap-3"
     >
       <div className="flex flex-wrap items-center gap-2">

@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "lane": "X15",
+  "mutations": [
+    {
+      "file": "apps/web/src/components/campaign/sections/IdentitySection.tsx",
+      "before": "          ...(mergedDescribedBy ? { \"aria-describedby\": mergedDescribedBy } : {}),",
+      "after": "          // mutated: aria-describedby dropped",
+      "because": "Field controls must attach aria-describedby naming hint and error elements so assistive technology announces guidance.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/sections/__tests__/field.test.tsx",
+        "-t",
+        "with a hint only"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/sections/IdentitySection.tsx",
+      "before": "  const invalid = error ? \"true\" : undefined;",
+      "after": "  const invalid = \"true\";",
+      "because": "aria-invalid must be set only when an error is present; setting it unconditionally marks valid fields as invalid to screen readers.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/sections/__tests__/field.test.tsx",
+        "-t",
+        "with a hint only"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/ui/src/slider.tsx",
+      "before": "          aria-describedby={ariaDescribedBy}",
+      "after": "          /* mutated: aria-describedby dropped */",
+      "because": "Dropping Slider's aria-describedby forwarding prevents hinted sliders from announcing their description to screen readers.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/sections/__tests__/field.test.tsx",
+        "-t",
+        "LayoutSection with a hinted Slider"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/sections/PolicySection.tsx",
+      "before": "          <Field label=\"Seed\" error={errors.seed} hint=\"Fixes the draw, so the same brief plans the same creatives\">\n            {(control) => (\n              <div className=\"flex items-center gap-2\">\n                <Input\n                  {...control}\n                  type=\"number\"\n                  placeholder=\"Auto\"\n                  // the Field label wraps both this input and the Pick button, so it names\n                  // neither on its own — the input carries its own name.\n                  aria-label=\"Seed\"\n                  value={state.variation.seed}\n                  invalid={Boolean(errors.seed)}\n                  onChange={(e) => dispatch({ type: \"setVariation\", field: \"seed\", value: e.target.value })}\n                />\n                <Button\n                  variant=\"secondary\"\n                  size=\"sm\"\n                  aria-label={state.variation.seed.trim() === \"\" ? \"Pick a seed\" : \"Clear the seed\"}\n                  onClick={() =>\n                    dispatch({\n                      type: \"setVariation\",\n                      field: \"seed\",\n                      value: state.variation.seed.trim() === \"\" ? String(Math.floor(Math.random() * 0xffffffff)) : \"\",\n                    })\n                  }\n                >\n                  {state.variation.seed.trim() === \"\" ? \"Pick\" : \"Clear\"}\n                </Button>\n              </div>\n            )}\n          </Field>",
+      "after": "          <Field label=\"Seed\" error={errors.seed} hint=\"Fixes the draw, so the same brief plans the same creatives\">\n            <div className=\"flex items-center gap-2\">\n              <Input\n                type=\"number\"\n                placeholder=\"Auto\"\n                // the Field label wraps both this input and the Pick button, so it names\n                // neither on its own — the input carries its own name.\n                aria-label=\"Seed\"\n                value={state.variation.seed}\n                invalid={Boolean(errors.seed)}\n                onChange={(e) => dispatch({ type: \"setVariation\", field: \"seed\", value: e.target.value })}\n              />\n              <Button\n                variant=\"secondary\"\n                size=\"sm\"\n                aria-label={state.variation.seed.trim() === \"\" ? \"Pick a seed\" : \"Clear the seed\"}\n                onClick={() =>\n                  dispatch({\n                    type: \"setVariation\",\n                    field: \"seed\",\n                    value: state.variation.seed.trim() === \"\" ? String(Math.floor(Math.random() * 0xffffffff)) : \"\",\n                  })\n                }\n              >\n                {state.variation.seed.trim() === \"\" ? \"Pick\" : \"Clear\"}\n              </Button>\n            </div>\n          </Field>",
+      "because": "Wrapping child controls in element children prevents Field from attaching aria-describedby to the real control; wrapper call sites must use function children.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/sections/__tests__/field.test.tsx",
+        "-t",
+        "PolicySection seed Field with an error"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

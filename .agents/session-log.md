@@ -4843,3 +4843,45 @@ the Map) retargeted rather than dropped. Full gate 0 with 100 % on all four coun
     so a disabled layer is absent from the still path only. Recorded in the plan's Premises.
   - The row shows a disabled layer's state only in the glyph and the control's description; no
     visible "off" text was added.
+
+## 2026-09-14 — X15: Field hints and errors must reach assistive technology
+
+- **Mode:** Implementer
+- **Changes:**
+  - `IdentitySection.tsx`: `Field` assigns stable `useId` ids (`${id}-hint`, `${id}-error`) to its hint and error elements; attaches `aria-describedby` naming present elements in hint-then-error order (neither present → no attribute) and `aria-invalid="true"` while an error is shown; uses `Children.map` with `isValidElement` and `cloneElement` to attach attributes to the first control child while preserving subsequent children untouched without breakage.
+  - `field.test.tsx`: 9 focused unit tests verifying hint only, error only, both, neither, wrapper variants (`as="label"` vs `as="div"`), multiple children handling, existing `aria-describedby` preservation, native controls (`<select>`), and non-element children.
+  - `.agents/manifests/x15.json`: 2 mutations (drop `aria-describedby`, set `aria-invalid` regardless of error), both replay caught.
+  - `docs/planning/2026-09-10_the-unowned-gaps.md`: retired premise fence for X15.
+- **Decisions:**
+  - Mechanism: `cloneElement` on the first valid React element child was chosen over context. Reading all call sites showed fields pass diverse controls including native `<select>`, `Stepper`, `Slider`, `ChipGroup`, and `Input`. A context read only by `Input` would fail to reach native `<select>` or require modifying many separate components, violating the "Change — once, in Field" constraint. `cloneElement` targets the primary control directly without touching call sites.
+  - Multiple children: Handled by cloning only the first valid React element child, leaving subsequent siblings (such as secondary readouts or copy buttons, e.g. in `briefId`) intact in the DOM.
+- **Verification:**
+  - Full gate green: `yarn build && yarn typecheck && yarn lint && yarn lint:arch && yarn sync:check && yarn test:cov` (100% on all four counters: 11371/11371 stmts, 8190/8190 branch, 2262/2262 funcs, 10242/10242 lines).
+  - `yarn plan:verify`: 0 (12 premises hold, no stale lane).
+  - `./scripts/verify-manifests.sh`: 0 (replayed `.agents/manifests/x15.json`, 2 mutations caught).
+
+## 2026-09-14 — X15 fix: descriptions reach controls at real call sites
+
+- **Mode:** Implementer
+- **Changes:**
+  - `packages/ui/src/slider.tsx`: accepts `aria-describedby` prop and forwards it to the range `<input>`.
+  - `packages/ui/src/stepper.tsx`: accepts `aria-describedby` prop and places it on the `role="spinbutton"` element.
+  - `packages/ui/src/chip-group.tsx`: accepts `aria-describedby` prop and places it on the `role="group"` element.
+  - `packages/ui/src/swatch-picker.tsx`: accepts `aria-describedby` prop and places it on the `role="group"` element.
+  - `apps/web/src/components/campaign/LogoField.tsx`: accepts `aria-describedby` prop and places it on its accessible control (`aria-label="Logo Path"`).
+  - `IdentitySection.tsx`: `Field` additionally accepts `children` as a function `(control: { "aria-describedby"?: string; "aria-invalid"?: "true" }) => ReactNode` without cloning; when element children are passed, skips `Fragment` children without attaching props.
+  - Wrapper call sites: `CopySection` (`campaignMessage`), `PolicySection` (`seed`), `IdentitySection` (`targetRegion`), and `ProductsSection` (`product-id`) switch to function children spreading `control` onto their inner control.
+  - `TreatmentsSection.tsx`: native `<select>` controls explicitly declare `aria-invalid` from errors directly, keeping `aria-invalid` single-sourced.
+  - Unit & call-site tests: added kit component `aria-describedby` placement tests, function-children test, and real-section tests for `LayoutSection` (hinted Slider and ChipGroup), `PolicySection` (seed Field with error), and `ProductsSection` (`LogoField` with error).
+  - `.agents/manifests/x15.json`: extended to 4 caught mutations (dropping Slider forwarding, switching PolicySection seed to element children, dropping describedby, unconditional invalid).
+  - `docs/planning/2026-09-10_the-unowned-gaps.md`: updated X15 shipped note to detail the mechanism.
+- **Decisions:**
+  - Preserved single-source `aria-invalid`: kit components preserve existing `invalid` handling; native controls declare `aria-invalid` at the call site.
+  - Wrapper call sites explicitly use function children; `Field` skips `Fragment` elements rather than recursing.
+- **Verification:**
+  - `yarn test:cov --maxWorkers=2`: 100% on all four counters (11377/11377 stmts, 8201/8201 branch, 2266/2266 funcs, 10248/10248 lines).
+  - `yarn plan:verify`: 0 (12 premises hold).
+  - `yarn mutate:verify .agents/manifests/x15.json`: 0 (all 4 mutations caught).
+  - `yarn build`, `yarn typecheck`, `yarn lint`, `yarn lint:arch`: all 0.
+
+

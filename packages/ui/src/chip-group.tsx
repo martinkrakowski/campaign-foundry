@@ -25,6 +25,7 @@ export interface ChipGroupProps {
   readonly invalid?: boolean;
   readonly disabled?: boolean;
   readonly readOnly?: boolean;
+  readonly "aria-describedby"?: string;
 }
 
 /**
@@ -47,6 +48,7 @@ export function ChipGroup({
   invalid = false,
   disabled = false,
   readOnly = false,
+  "aria-describedby": ariaDescribedBy,
 }: ChipGroupProps): ReactNode {
   const isCustomValue = value !== "" && !options.includes(value);
   const [customOpen, setCustomOpen] = useState(false);
@@ -77,7 +79,12 @@ export function ChipGroup({
   };
 
   return (
-    <div role="group" aria-label={label ? `${label} options` : undefined} className="space-y-2">
+    <div
+      role="group"
+      aria-label={label ? `${label} options` : undefined}
+      aria-describedby={ariaDescribedBy}
+      className="space-y-2"
+    >
       {/* The chips are the visible control; this mirrors them for assistive tech. It has
           to carry their gating too — disabling the buttons alone leaves a writable input
           for exactly the users who cannot see that the group is unavailable. The same

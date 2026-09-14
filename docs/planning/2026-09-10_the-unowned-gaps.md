@@ -366,7 +366,10 @@ field announces nothing about why. Found by Qodo on HL5b (#390), which used the 
 the hint and error elements that are present, and set `aria-invalid` while an error shows. It must work for both
 `as="label"` and `as="div"` wrappers and for the controls passed as children.
 
-```premise X15
-# The shared Field component never links its hint or error to its control.
-! awk '/^export function Field\(/,/^}$/' apps/web/src/components/campaign/sections/IdentitySection.tsx | grep -q 'aria-describedby'
-```
+**X15 — shipped in this PR.** Its premise was retired when it landed; `plan:verify` no
+longer tracks it. `Field` assigns stable `useId` ids to hint and error elements, accepts
+either element children (cloning the first valid non-Fragment child to attach `aria-describedby`
+and `aria-invalid`) or a function `(control) => ReactNode` for wrapper call sites to spread
+onto their real control directly without cloning. Kit components (`Slider`, `Stepper`, `ChipGroup`,
+`SwatchPicker`, and `LogoField`) accept `aria-describedby` and place it on their accessible element,
+and `aria-invalid` stays single-sourced at call sites.

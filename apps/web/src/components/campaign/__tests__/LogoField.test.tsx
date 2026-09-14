@@ -138,4 +138,18 @@ describe("LogoField", () => {
     );
     expect(screen.getByText("File too large")).toBeTruthy();
   });
+
+  test("rendered with aria-describedby, the logo path input carries it", () => {
+    render(
+      <LogoField
+        value="logo.png"
+        onChange={vi.fn()}
+        onUploadFile={vi.fn()}
+        aria-describedby="logo-error-id"
+      />,
+    );
+    const input = screen.getByLabelText(messages.logoPathAria);
+    expect(input.getAttribute("aria-describedby")).toBe("logo-error-id");
+  });
 });
+

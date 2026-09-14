@@ -51,42 +51,48 @@ function ProductRow({
           error={errors[`product-${index}-id`]}
           as={showIdInput ? "label" : "div"}
         >
-          {showIdInput ? (
-            <Input
-              value={product.id}
-              placeholder={messages.productIdPlaceholder}
-              onChange={(e) =>
-                dispatch({ type: "setProduct", key: product.key, patch: { id: e.target.value } })
-              }
-              invalid={hasIdError}
-              autoFocus={editingId}
-            />
-          ) : (
-            <div className="flex h-10 items-center justify-between rounded-md border border-border bg-surface-2 px-3">
-              <span className="font-mono text-[12px] text-text-primary truncate">
-                {product.id || messages.productIdReadout}
-              </span>
-              <button
-                type="button"
-                onClick={() => setEditingId(true)}
-                className="font-mono text-[11px] text-text-muted hover:text-text-emphasis transition-colors"
-                aria-label={messages.productIdEditAria}
-              >
-                {messages.productIdEdit}
-              </button>
-              <input
-                type="text"
-                aria-label={messages.productIdLabel}
-                className="sr-only"
+          {(control) =>
+            showIdInput ? (
+              <Input
+                {...control}
                 value={product.id}
+                placeholder={messages.productIdPlaceholder}
                 onChange={(e) =>
                   dispatch({ type: "setProduct", key: product.key, patch: { id: e.target.value } })
                 }
-                tabIndex={-1}
+                invalid={hasIdError}
+                autoFocus={editingId}
               />
-            </div>
-          )}
+            ) : (
+              <div className="flex h-10 items-center justify-between rounded-md border border-border bg-surface-2 px-3">
+                <span className="font-mono text-[12px] text-text-primary truncate">
+                  {product.id || messages.productIdReadout}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setEditingId(true)}
+                  className="font-mono text-[11px] text-text-muted hover:text-text-emphasis transition-colors"
+                  aria-label={messages.productIdEditAria}
+                >
+                  {messages.productIdEdit}
+                </button>
+                <input
+                  {...control}
+                  type="text"
+                  aria-label={messages.productIdLabel}
+                  className="sr-only"
+                  value={product.id}
+                  onChange={(e) =>
+                    dispatch({ type: "setProduct", key: product.key, patch: { id: e.target.value } })
+                  }
+                  tabIndex={-1}
+                />
+
+              </div>
+            )
+          }
         </Field>
+
       </div>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">

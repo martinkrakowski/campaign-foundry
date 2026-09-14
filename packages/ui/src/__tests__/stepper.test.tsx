@@ -80,4 +80,10 @@ describe("Stepper", () => {
     expect(up.disabled).toBe(true);
     expect(down.disabled).toBe(true);
   });
+
+  test("rendered with aria-describedby, the spinbutton element carries it", () => {
+    const { readout } = setup({ "aria-describedby": "stepper-hint-id" });
+    expect(readout.getAttribute("aria-describedby")).toBe("stepper-hint-id");
+  });
 });
+

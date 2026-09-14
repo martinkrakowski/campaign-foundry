@@ -10,6 +10,7 @@ export interface StepperProps {
   disabled?: boolean;
   invalid?: boolean;
   "aria-label": string;
+  "aria-describedby"?: string;
   /**
    * Allow an unset value, shown as "Auto". Stepping below `min` returns to it. These
    * fields are genuinely optional — the planner has its own default — and a plain
@@ -36,6 +37,7 @@ export function Stepper({
   allowUnset = false,
   unsetLabel = "Auto",
   "aria-label": ariaLabel,
+  "aria-describedby": ariaDescribedBy,
 }: StepperProps): ReactNode {
   const unset = value.trim() === "";
   const current = unset ? min : Number(value);
@@ -80,6 +82,7 @@ export function Stepper({
         role="spinbutton"
         tabIndex={-1}
         aria-label={ariaLabel}
+        aria-describedby={ariaDescribedBy}
         aria-valuenow={unset ? undefined : numeric}
         aria-valuemin={min}
         aria-valuemax={max}
