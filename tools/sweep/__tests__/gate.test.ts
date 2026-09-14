@@ -272,6 +272,28 @@ describe("mergeGate — a read that stopped early is undecidable, never complete
     expect(joined).toMatch(/still asking for page 201/);
     expect(reads).toBe(200);
   });
+
+  test("a page that says there is no next page and carries no nodes is zero threads, not an unread page", async () => {
+    // The counterweight to the case above it: what makes a read complete is
+    // `pageInfo`, not `nodes`. A connection that reports no next page and no
+    // nodes is a PR with no threads — calling it unread would refuse every
+    // PR that has none.
+    const s = stub(() =>
+      JSON.stringify({
+        data: {
+          repository: {
+            pullRequest: {
+              id: "PR_I_1",
+              reviewThreads: { pageInfo: { hasNextPage: false, endCursor: null } },
+            },
+          },
+        },
+      }),
+    );
+    const decision = await mergeGate(plan, { gh: s.gh });
+    expect(decision.kind).toBe("merge");
+    expect(decision.kind === "merge" ? decision.summary : "").toContain("0 review thread(s)");
+  });
 });
 
 describe("mergeGate — the head the checks were verified on", () => {

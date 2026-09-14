@@ -27,6 +27,7 @@ const ok = (over: Partial<SweepCliIo> = {}): { io: SweepCliIo; log: string[]; er
                   pullRequest: {
                     id: "PR_I_1",
                     reviewThreads: {
+                      pageInfo: { hasNextPage: false, endCursor: null },
                       nodes: [
                         { id: "PRRT_a", isResolved: false },
                         { id: "PRRT_b", isResolved: false },
@@ -61,7 +62,10 @@ const okGate = (over: Partial<SweepCliIo> = {}): { io: SweepCliIo; log: string[]
                 repository: {
                   pullRequest: {
                     id: "PR_I_1",
-                    reviewThreads: { nodes: [{ id: "PRRT_a", isResolved: true }] },
+                    reviewThreads: {
+                      pageInfo: { hasNextPage: false, endCursor: null },
+                      nodes: [{ id: "PRRT_a", isResolved: true }],
+                    },
                   },
                 },
               },
@@ -117,6 +121,7 @@ describe("runCli", () => {
                   pullRequest: {
                     id: "PR_I_1",
                     reviewThreads: {
+                      pageInfo: { hasNextPage: false, endCursor: null },
                       nodes: [
                         { id: "PRRT_a", isResolved: false },
                         { id: "PRRT_b", isResolved: false },
@@ -172,6 +177,7 @@ describe("runCli", () => {
                   pullRequest: {
                     id: "PR_I_1",
                     reviewThreads: {
+                      pageInfo: { hasNextPage: false, endCursor: null },
                       nodes: [
                         { id: "PRRT_a", isResolved: false },
                         { id: "PRRT_b", isResolved: false },
@@ -213,6 +219,7 @@ describe("runCli", () => {
                   pullRequest: {
                     id: "PR_I_1",
                     reviewThreads: {
+                      pageInfo: { hasNextPage: false, endCursor: null },
                       nodes: [
                         { id: "PRRT_a", isResolved: false },
                         { id: "PRRT_b", isResolved: false },
@@ -268,7 +275,10 @@ describe("runCli", () => {
                 repository: {
                   pullRequest: {
                     id: "PR_I_1",
-                    reviewThreads: { nodes: [{ id: "PRRT_a", isResolved: true }] },
+                    reviewThreads: {
+                      pageInfo: { hasNextPage: false, endCursor: null },
+                      nodes: [{ id: "PRRT_a", isResolved: true }],
+                    },
                   },
                 },
               },
