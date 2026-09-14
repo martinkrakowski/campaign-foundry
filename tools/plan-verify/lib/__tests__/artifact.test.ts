@@ -11,6 +11,7 @@ import {
   errorText,
   parseArtifact,
   serializeArtifact,
+  writeArtifact,
   type ArtifactScope,
   type GitProvenance,
 } from "../artifact.js";
@@ -297,4 +298,46 @@ describe("errorText", () => {
 
 test("PROVENANCE_UNKNOWN is exported so no consumer re-invents a spelling", () => {
   expect(PROVENANCE_UNKNOWN).toBe("unknown");
+});
+
+describe("writeArtifact", () => {
+  test("writes to a temporary sibling file and renames it over the target", async () => {
+    const operations: { op: string; path?: string; oldPath?: string; newPath?: string }[] = [];
+    const fs = {
+      mkdir: async (p: string) => {
+        operations.push({ op: "mkdir", path: p });
+      },
+      writeFile: async (p: string) => {
+        operations.push({ op: "writeFile", path: p });
+      },
+      rename: async (oldPath: string, newPath: string) => {
+        operations.push({ op: "rename", oldPath, newPath });
+      },
+    };
+    const target = "/custom/dir/plan-verify.json";
+    await writeArtifact(target, '{"version":1}', fs);
+    expect(operations[0]).toEqual({ op: "mkdir", path: "/custom/dir" });
+    expect(operations[1]?.op).toBe("writeFile");
+    expect(operations[1]?.path).not.toBe(target);
+    expect(operations[1]?.path?.startsWith("/custom/dir/")).toBe(true);
+    expect(operations[2]).toEqual({
+      op: "rename",
+      oldPath: operations[1]?.path,
+      newPath: target,
+    });
+  });
+
+  test("writes atomically to disk when using the default filesystem implementation", async () => {
+    const { mkdtemp, readFile, rm } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const dir = await mkdtemp(join(tmpdir(), "artifact-write-"));
+    try {
+      const target = join(dir, "plan-verify.json");
+      await writeArtifact(target, '{"test":true}');
+      const content = await readFile(target, "utf8");
+      expect(content).toBe('{"test":true}');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });
