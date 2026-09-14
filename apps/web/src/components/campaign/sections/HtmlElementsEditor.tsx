@@ -101,7 +101,11 @@ export function HtmlElementsEditor({
                 {element.kind === "image" ? null : (
                   <Field label={messages.htmlElementTextLabel(position)}>
                     <Input
-                      value={element.text ?? ""}
+                      // No `?? ""` fallback: the domain marks `text` required on
+                      // the two kinds that reach this input, so an element
+                      // without copy cannot be in the draft — and a fallback
+                      // would be a branch no test could ever take.
+                      value={element.text}
                       onChange={(e) =>
                         dispatch({
                           type: "setHtmlElementText",
