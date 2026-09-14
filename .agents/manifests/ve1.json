@@ -1,0 +1,172 @@
+{
+  "version": 1,
+  "lane": "VE1",
+  "mutations": [
+    {
+      "file": "apps/web/src/components/campaign/editor-history.ts",
+      "before": "      present: carryServerFields(previous, history.present),",
+      "after": "      present: previous,",
+      "because": "Carry source BACK on undo instead of forward (R5): the revision the server just handed back rewinds to the pre-save value, and the next conditional save If-Matches a revision that no longer exists — the undo itself creates the conflict the carry rule exists to prevent.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/editor-history.test.tsx",
+        "-t",
+        "leaves source.revision unchanged by the undo"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/editor-history.ts",
+      "before": "    return {\n      past: [],\n      present: editorReducer(history.present, action),\n      future: [],\n      lastKey: null,\n    };",
+      "after": "    return {\n      past: history.past,\n      present: editorReducer(history.present, action),\n      future: history.future,\n      lastKey: null,\n    };",
+      "because": "Leave the stacks intact after a baseline replace: undoing a load/discard/restore walks back into a draft that no longer exists — the stored-draft restore would offer an undo over state the user never had in this session.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/editor-history.test.tsx",
+        "-t",
+        "replaces the baseline and clears undo AND redo"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/editor-history.ts",
+      "before": "  \"apply\",\n  \"save\",",
+      "after": "  \"apply\",",
+      "because": "Make save undoable: the save receipt is a server answer (R4), and an undo step over it would present a draft revert that also implies an unsent write — the revision guard then lies about what has been saved.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/editor-history.test.tsx",
+        "-t",
+        "save alone creates no undo step"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/editor-history.ts",
+      "before": "  const coalesced = key !== null && key === history.lastKey;",
+      "after": "  const coalesced = false;",
+      "because": "Turn coalescing off: every keystroke becomes its own history entry, so undoing 'a word' takes a hundred presses and the acceptance criterion 'typing a word is one undo step' is what breaks first.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/editor-history.test.tsx",
+        "-t",
+        "typing a word is one undo step"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/editor-history.ts",
+      "before": "  \"loadPool\",\n  \"apply\",",
+      "after": "  \"loadPool\",\n  \"setPool\",\n  \"apply\",",
+      "because": "Move setPool to the non-undoable side of the line: the lane's stated decision is that setPool IS a draft edit (it writes variation.headline), and an undo that could not step back over the dropped headline is the observable half of that decision.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/editor-history.test.tsx",
+        "-t",
+        "undoing setPool reverts variation.headline"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/BriefEditor.tsx",
+      "before": "  useHistoryKeys(history);",
+      "after": "  // VE1 keyboard wiring removed",
+      "because": "Drop the keyboard wiring in the component that owns it: the hook can be perfectly correct and the user still has no ⌘Z — the editor-level suite pins the chord through the real page, not just the hook.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx",
+        "-t",
+        "VE1 — undo and redo in the editor"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/BriefEditor.tsx",
+      "before": "    if (!isPristine(state)) {\n      draftDivergedRef.current = true;\n      saveDraftToStorage(state);\n      return;\n    }\n    if (draftDivergedRef.current) purgeDraftFromStorage(state);",
+      "after": "    if (isPristine(state)) {\n      purgeDraftFromStorage(state);\n      return;\n    }\n    saveDraftToStorage(state);",
+      "because": "Purge on EVERY pristine render, not only on a return to pristine: mount starts pristine and the capabilities answer re-renders pristine again, so a stored draft whose visible content matches the blank editor is eaten before and after the restore flow reads it — with no diverging state to trigger the write-back that would hide this for a draft with visible edits. The reload finds nothing because the purge that was meant to clean up after undo ran on the very render that came to recover.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx",
+        "-t",
+        "a draft stored before mount is still offered for restore on mount"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/BriefEditor.tsx",
+      "before": "    if (!isPristine(state)) {\n      draftDivergedRef.current = true;\n      saveDraftToStorage(state);\n      return;\n    }\n    if (draftDivergedRef.current) purgeDraftFromStorage(state);",
+      "after": "    if (isPristine(state)) return;\n    saveDraftToStorage(state);",
+      "because": "Drop the return-to-pristine purge (the finding as reported): the autosave effect still never removes a stored draft, so an undone brief comes back after reload — with undo one keystroke away made returning to exactly pristine easy, the stale draft arrives with no history left to undo it.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx",
+        "-t",
+        "undoing back to pristine purges the autosaved draft"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/editor-history.ts",
+      "before": "      if (document.querySelector('[aria-modal=\"true\"]')) return;",
+      "after": "      // VE1 dialog guard removed",
+      "because": "Remove the modal-dialog guard from the chord handler: with a dialog open and focus on one of its buttons, ⌘Z reaches through the scrim and edits the brief behind it — the second reported bug, invisible to the typing-target check that was the only deferral before.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/editor-history.test.tsx",
+        "-t",
+        "⌘Z from a control inside an open modal dialog is left alone"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/editor-history.ts",
+      "before": "      if (document.querySelector('[aria-modal=\"true\"]')) return;",
+      "after": "      if (event.target instanceof Element && event.target.closest('[aria-modal=\"true\"]')) return;",
+      "because": "While a modal is open the page behind it is inert: the history shortcut must be ignored whenever an aria-modal element is in the document, not only when the chord lands inside it. A target-only check let ⌘Z on the document body (focus after a scrim click) undo the draft behind an open Save-as dialog.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

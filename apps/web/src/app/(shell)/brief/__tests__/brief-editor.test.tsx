@@ -4261,3 +4261,148 @@ describe("the pre-type draft (T2 / D112)", () => {
     });
   });
 });
+
+describe("VE1 — undo and redo in the editor", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    localStorage.setItem("cf:brief-picked", "1");
+    localStorage.setItem("cf:presentation", "everything");
+  });
+
+  const nameField = () => screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement;
+  const audienceField = () => screen.getByLabelText(messages.targetAudienceLabel) as HTMLInputElement;
+
+  test("⌘Z steps back over a typed word; ⇧⌘Z replays it", async () => {
+    const user = userEvent.setup();
+    routes({});
+    renderWithRun(<NewEditor />);
+    await waitFor(() => expect(nameField().value).toBe(""));
+    await user.type(nameField(), "Spring");
+    await waitFor(() => expect(nameField().value).toBe("Spring"));
+    // One step back over the whole word, from outside the field: the editor owns
+    // the chord only when no text field has the caret.
+    fireEvent.keyDown(document.body, { key: "z", metaKey: true });
+    await waitFor(() => expect(nameField().value).toBe(""));
+    fireEvent.keyDown(document.body, { key: "z", metaKey: true, shiftKey: true });
+    await waitFor(() => expect(nameField().value).toBe("Spring"));
+  });
+
+  test("Ctrl+Z undoes where ⌘Z does", async () => {
+    const user = userEvent.setup();
+    routes({});
+    renderWithRun(<NewEditor />);
+    await waitFor(() => expect(nameField().value).toBe(""));
+    await user.type(nameField(), "Spring");
+    fireEvent.keyDown(document.body, { key: "z", ctrlKey: true });
+    await waitFor(() => expect(nameField().value).toBe(""));
+  });
+
+  test("⌘Z inside a text field is left to the field's own undo", async () => {
+    const user = userEvent.setup();
+    routes({});
+    renderWithRun(<NewEditor />);
+    await waitFor(() => expect(nameField().value).toBe(""));
+    await user.type(nameField(), "Spring");
+    // The caret is in the field: the chord belongs to the field's native undo.
+    fireEvent.keyDown(nameField(), { key: "z", metaKey: true });
+    expect(nameField().value).toBe("Spring");
+    // The editor's stack is untouched — the same chord from outside steps back.
+    fireEvent.keyDown(document.body, { key: "z", metaKey: true });
+    await waitFor(() => expect(nameField().value).toBe(""));
+  });
+
+  test("the route's load is a new baseline: ⌘Z after it does nothing", async () => {
+    routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
+    renderWithRun(<Editor id="camp" />);
+    await waitFor(() => expect(nameField().value).toBe("camp"));
+    fireEvent.keyDown(document.body, { key: "z", metaKey: true });
+    expect(nameField().value).toBe("camp");
+  });
+
+  test("the autosaved draft stays exactly EditorState's keys through an undo and a retype", async () => {
+    const user = userEvent.setup();
+    routes({});
+    renderWithRun(<NewEditor />);
+    await waitFor(() => expect(nameField().value).toBe(""));
+    await user.type(nameField(), "Spring");
+    await user.type(audienceField(), "Family");
+    // One step back undoes the audience run only — the name stands, so the
+    // editor is still dirty and autosave writes the post-undo state.
+    fireEvent.keyDown(document.body, { key: "z", metaKey: true });
+    await waitFor(() => expect(audienceField().value).toBe(""));
+    await waitFor(() => expect(localStorage.getItem("cf:draft:new")).not.toBeNull());
+    const stored = JSON.parse(localStorage.getItem("cf:draft:new") as string) as {
+      state: Record<string, unknown>;
+    };
+    // History leaking into the persisted shape would come back through `restore`
+    // as a phantom draft (R6): the object on disk is exactly what it was before VE1.
+    expect(Object.keys(stored.state).sort()).toEqual(Object.keys(initialEditorState()).sort());
+    expect(stored.state.campaignName).toBe("Spring");
+  });
+
+  test("undoing back to pristine purges the autosaved draft", async () => {
+    const user = userEvent.setup();
+    routes({});
+    renderWithRun(<NewEditor />);
+    await waitFor(() => expect(nameField().value).toBe(""));
+    await user.type(nameField(), "Spring");
+    await waitFor(() => expect(localStorage.getItem("cf:draft:new")).not.toBeNull());
+    // Undo steps every edit back: the draft is pristine again, so the recovery copy
+    // holds nothing to recover — and a stale one would come back on reload with no
+    // history left to undo it.
+    fireEvent.keyDown(document.body, { key: "z", metaKey: true });
+    await waitFor(() => expect(nameField().value).toBe(""));
+    await waitFor(() => expect(localStorage.getItem("cf:draft:new")).toBeNull());
+  });
+
+  test("a draft stored before mount is still offered for restore on mount", async () => {
+    routes({});
+    // A legacy-shaped draft: its visible content matches the pristine editor and it
+    // carries the host verdict it saved with, so the restore it is offered lands
+    // back on a pristine state — and the capabilities answer arriving a moment later
+    // re-renders pristine again. A purge keyed on pristine ALONE fires on both, with
+    // no diverging edit to undo and no re-save to bring the draft back: the mount
+    // eats the very draft the mount came for. The return-to-pristine purge must
+    // know this render is the START, not a RETURN.
+    saveDraftToStorage({ ...initialEditorState(), capabilities: { motion: true } });
+    renderWithRun(<NewEditor />);
+    await waitFor(() => expect(nameField().value).toBe(""));
+    // Let the capabilities answer land and its (still-pristine) render flush.
+    await new Promise((r) => setTimeout(r, 50));
+    // Still there — and still the draft that was stored, not a rewrite of it: the
+    // mount read it and left it alone until something diverges.
+    const stored = JSON.parse(localStorage.getItem("cf:draft:new") ?? "null") as {
+      state: { capabilities: unknown };
+    } | null;
+    expect(stored?.state.capabilities).toEqual({ motion: true });
+  });
+
+  test("⌘Z inside an open dialog does not edit the draft behind it", async () => {
+    const user = userEvent.setup();
+    routes({});
+    renderWithRun(<NewEditor />);
+    await waitFor(() => expect(nameField().value).toBe(""));
+    await user.type(nameField(), "Spring");
+    await saveVia(user, "Save as");
+    const dialog = await screen.findByRole("dialog", { name: /Save as/ });
+    // Focus sits on one of the dialog's buttons: the chord belongs to the open
+    // dialog, never to the draft underneath the scrim.
+    fireEvent.keyDown(within(dialog).getByRole("button", { name: "Cancel" }), {
+      key: "z",
+      metaKey: true,
+    });
+    expect(nameField().value).toBe("Spring");
+    // Wherever the chord lands while the modal is open — here the document body,
+    // as after a click on the scrim — the page behind an aria-modal dialog is inert:
+    // the draft must not move.
+    fireEvent.keyDown(document.body, { key: "z", metaKey: true });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(nameField().value).toBe("Spring");
+    // Close the dialog: the editor stack was untouched all along, so the same chord
+    // now steps back.
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: /Save as/ })).toBeNull());
+    fireEvent.keyDown(document.body, { key: "z", metaKey: true });
+    await waitFor(() => expect(nameField().value).toBe(""));
+  });
+});

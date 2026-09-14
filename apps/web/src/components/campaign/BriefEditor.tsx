@@ -1,6 +1,6 @@
 "use client";
 
-import { useReducer, useState, useEffect, useMemo, useCallback, useRef, useLayoutEffect, type ReactNode, type RefObject } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef, useLayoutEffect, type ReactNode, type RefObject } from "react";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { Button, Input, SegBar, OverflowMenu, ConfirmDialog, useDialogFocusTrap } from "@/components/ui";
 import { useRun } from "@/lib/run-context";
@@ -21,7 +21,6 @@ import {
   type BriefEntry,
 } from "@/lib/briefs-api";
 import {
-  editorReducer,
   initialEditorState,
   toBrief,
   isDirtySinceSave,
@@ -35,6 +34,7 @@ import {
   blankBrief,
   slugify,
 } from "@/components/campaign/editor-state";
+import { useEditorHistory, useHistoryKeys } from "@/components/campaign/editor-history";
 import {
   validateState,
   validateWarnings,
@@ -176,7 +176,13 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   const { setDirty, setDraftRun } = useEditorDirty();
   const { openCreateDialog, seedVersion } = useCreateCampaign();
   const { setPanels, setTopPanels } = useEditorPanels();
-  const [state, dispatch] = useReducer(editorReducer, initialEditorState());
+  // VE1 — history lives in the hook, never in `EditorState` (R6): `state` is the
+  // present draft, so persistence and the stored-draft diff see exactly what they
+  // saw before, and `dispatch` is a drop-in for the reducer's. The keyboard
+  // shortcut is wired once here (task 6).
+  const history = useEditorHistory(initialEditorState());
+  const { state, dispatch } = history;
+  useHistoryKeys(history);
   const [errors, setErrors] = useState<Record<string, FieldErrors>>({});
   const [warnings, setWarnings] = useState<Record<string, FieldWarnings>>({});
   // Not a boolean: the section that blocks is what the refusal needs to scroll to, and
@@ -476,9 +482,21 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
 
   // Auto-save, but only for a draft that has actually diverged from a pristine editor.
   // Writing unconditionally would recreate the key that Save and Discard just purged.
+  // VE1 adds the return half: a draft that UNDO steps back to pristine holds nothing
+  // to recover, and a stale copy would come back on reload with no history left to
+  // undo it — so the key is purged. The flag is what distinguishes that RETURN from
+  // the START: the first render is always pristine, and the recovery effect above may
+  // still be waiting on the route's load before it reads storage. Purging there would
+  // delete the draft the reload came for; only a draft that has diverged in THIS
+  // session may purge.
+  const draftDivergedRef = useRef(false);
   useEffect(() => {
-    if (isPristine(state)) return;
-    saveDraftToStorage(state);
+    if (!isPristine(state)) {
+      draftDivergedRef.current = true;
+      saveDraftToStorage(state);
+      return;
+    }
+    if (draftDivergedRef.current) purgeDraftFromStorage(state);
   }, [state]);
 
   // W1 — the create dialog's seed (D65/D66). The editor consumes it on mount on the

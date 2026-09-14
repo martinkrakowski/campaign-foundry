@@ -257,10 +257,7 @@ run concurrently with each other.
 Each open lane states the gap that makes it necessary as a script that exits 0 **while the gap is
 still open**. `yarn plan:verify` runs them.
 
-```premise VE1
-# No undo history exists for the editor.
-! grep -rqs 'useEditorHistory' apps/web/src/components/campaign
-```
+**VE1 — shipped in this PR.**
 
 **VE2 — shipped in this PR.**
 
