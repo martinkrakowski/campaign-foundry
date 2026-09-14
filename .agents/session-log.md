@@ -4752,3 +4752,58 @@ been encoding the defect — and now say the read was complete. Counterweight te
 Six new manifest entries, one per guard, each mutated to the defect itself: stop, and say nothing. All ten X13
 entries replay caught. Gate green, 100 % on all four counters (4811 tests); `yarn plan:verify` — 13 premises
 hold.
+
+## 2026-09-14 — X8: the second server.test.ts flake, mechanism found and shipped
+
+Diagnosis-first lane, so the record starts with the reproduction rather than the fix. The 5 142 ms
+timeout shape is real and reachable: ten concurrent runs of `server.test.ts` put the `cleanup >`
+`close()` test over vitest's 5 000 ms default inside a handful of batches. Phase-level instrumentation
+(nanosecond timing inside `close()`, scratch only, never committed) showed `server.close` plus
+`closeAllConnections` finishing in 0–1 ms every single time — the keep-alive socket the gaps plan had
+already refuted stays refuted — while the one line `for (const watcher of watchers) watcher.close()`
+ate 2.8–9.3 s in the same runs.
+
+The mechanism is macOS-specific and platform-bound: a directory `fs.watch` is FSEvents-backed, and
+`FSWatcher.close()` flushes the watcher's pending event batch synchronously inside the native call.
+With `fseventsd` backlogged by a full suite hammering the temp dir, closing 96 directory watchers
+measured 28–41 s; the same count armed on the lane *files* (kqueue-backed) measured 0 ms. The flaky
+test is the only shutdown test whose watchers are armed on just-written directories and closed within
+milliseconds of arming, which is why it, and not its neighbours, crossed the line.
+
+Fix: `syncWatchers` arms one watcher per lane artefact (`*.log`, `events.jsonl`) under each wave
+directory, never on the directory; listings go through the existing `deps.readdir` seam so the
+post-close race is testable at all; and both shutdown paths share one synchronous `shutdown()` that
+sets a `closed` flag, clears the interval, closes every watcher armed, refuses late listings, and
+keeps a queued fs event from resurrecting a collection. Named cost: a lane log created after startup
+is armed by the next poll tick rather than the instant it appears, which is now asserted as behaviour.
+
+Four tests written red first (file scope, poll-tick discovery, a listing that survives its own close,
+`close()` closing what it armed and starting nothing after), the platform smoke test moved from a
+directory watch to a lane-file watch and proven to still fire under `WAVE_STATUS_REAL_WATCH=1`. Seven
+mutations replayed caught in `.agents/manifests/x8.json`, including the revert of the scope itself
+(`const path = dir`). Full gate 0 with 100 % on all four counters (4 787 tests, 257 files);
+`plan:verify` 0 (14 premises); the gaps plan §11 now names the mechanism and retires the "No premise
+yet" paragraph. No wave-event emission: this lane arrived without a wave log root, as before.
+
+## 2026-09-14 — X8 remediation: file watchers must survive files that change under them
+
+Narrowing to file watchers was right, but a file watcher meets three things a directory watcher never
+did: the watched file can vanish, be replaced under a new inode, or disappear between the listing and
+the `watch`. Each was a live defect against this branch's own "nothing runs after close" contract.
+
+Fix 1 — `requestRefresh` now refuses once `closed`, and `shutdown` empties the queue. `begin`'s drain
+loop runs only while `refreshQueued` is set, so the cleared queue is the load-bearing refusal; the
+top guard stops fresh post-close events, and neither masks the other because the drain calls `begin`
+directly rather than the guarded `requestRefresh`. Fix 2 — the default `watch` wires an `error`
+listener (an unhandled `EventEmitter` error on a deleted lane log would take the whole server down);
+`syncWatchers` now always passes one so the seam can drive it. Fix 3 — the ledger is a Map keyed by
+path; a path joins only after its watcher is created, `watch` is guarded per file, and a `rename` or
+`error` closes the watcher and forgets the path so the next poll tick arms the current file.
+
+Four tests written red first against the pre-fix server (queued-before-close, error re-arm, a throwing
+watch that still arms its neighbours and retries, and a rename re-arm). Twelve mutations replay caught
+in `.agents/manifests/x8.json`: one per fix, plus the two existing entries whose code the remediation
+moved (the closed-check centralised into `requestRefresh`, and the shutdown watcher loop now driving
+the Map) retargeted rather than dropped. Full gate 0 with 100 % on all four counters (4 820 tests);
+`plan:verify` 0 (13 premises). The `watch` seam's listener now takes the event type and a third
+`onError`; existing seams that ignore them are unaffected.

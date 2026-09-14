@@ -79,7 +79,11 @@ export function routeFor(
   return { kind: "notFound" };
 }
 
-export type WatchFn = (path: string, listener: () => void) => Pick<FSWatcher, "close">;
+export type WatchFn = (
+  path: string,
+  listener: (eventType?: string) => void,
+  onError: () => void,
+) => Pick<FSWatcher, "close">;
 
 export interface StartOptions {
   readonly port: number;
@@ -94,7 +98,7 @@ export interface StartOptions {
    * Tests inject `gh` (and wrap `open`) here; `collect` still wins when set.
    */
   readonly deps?: CollectDeps;
-  /** The slow poll that catches `gh`-only changes; `fs.watch` covers the rest. */
+  /** The slow poll that catches `gh`-only changes and new lane files; `fs.watch` covers writes to the rest. */
   readonly pollMs?: number;
   /** Overridable so tests can point at a missing page. */
   readonly indexHtmlPath?: string;
@@ -128,16 +132,29 @@ export async function startServer(options: StartOptions): Promise<ServerHandle> 
   const tokensCssPath =
     options.tokensCssPath ??
     fileURLToPath(new URL("../../apps/web/src/styles/tokens.css", import.meta.url));
-  const watchPath = options.watch ?? ((path, listener) => fsWatch(path, listener));
+  const watchPath: WatchFn =
+    options.watch ??
+    ((path, listener, onError) => {
+      // A bare `fsWatch(path, listener)` is the X8 crash: an `FSWatcher` is an
+      // `EventEmitter`, and when the file it watches is deleted it can emit
+      // `error` — which with no listener throws and takes the status server
+      // down. Lane logs are deleted and recreated routinely, so wire one.
+      const watcher = fsWatch(path, listener);
+      watcher.on("error", onError);
+      return watcher;
+    });
 
   const clients = new Set<ServerResponse>();
-  const watchers: Pick<FSWatcher, "close">[] = [];
-  const watched = new Set<string>();
+  // A file watcher is armed once per path and dropped the moment that path is
+  // removed or replaced, so the same inode is never watched twice and a vanished
+  // file is re-armed by the next poll tick. `watched` is the arming ledger.
+  const watched = new Map<string, Pick<FSWatcher, "close">>();
   let lastJson = "";
   let lastComparable: string | undefined;
   let refreshRunning = false;
   let refreshQueued = false;
   let queuedRefreshPr = false;
+  let closed = false;
   let prCache: PrCorpus | undefined;
 
   /**
@@ -175,12 +192,7 @@ export async function startServer(options: StartOptions): Promise<ServerHandle> 
   };
 
   /** Coalesce overlapping watch/poll ticks so a change during an in-flight collect is not dropped. */
-  const requestRefresh = (refreshPr: boolean): void => {
-    if (refreshRunning) {
-      refreshQueued = true;
-      queuedRefreshPr = queuedRefreshPr || refreshPr;
-      return;
-    }
+  const begin = (refreshPr: boolean): void => {
     refreshRunning = true;
     void refresh(refreshPr).finally(() => {
       refreshRunning = false;
@@ -188,22 +200,94 @@ export async function startServer(options: StartOptions): Promise<ServerHandle> 
         refreshQueued = false;
         const nextPr = queuedRefreshPr;
         queuedRefreshPr = false;
-        requestRefresh(nextPr);
+        begin(nextPr);
       }
     });
   };
 
+  /**
+   * The single refresh entry point. It refuses once `closed`, so neither a
+   * watcher event that lands after `close()` nor a late poll tick can start a
+   * collection. A refresh queued behind one already in flight is picked up by
+   * `begin`'s drain loop — and `shutdown` empties that queue, so a refresh
+   * queued before `close()` is never run after it.
+   */
+  const requestRefresh = (refreshPr: boolean): void => {
+    if (closed) return;
+    if (refreshRunning) {
+      refreshQueued = true;
+      queuedRefreshPr = queuedRefreshPr || refreshPr;
+      return;
+    }
+    begin(refreshPr);
+  };
+
   const scanRoots = resolveScanRoots(options.root, options.legacyRoots);
+  /**
+   * Arm one watcher per lane artefact (`*.log`, `events.jsonl`) under each
+   * `wave*` directory — on the files, never on the directories. X8: on macOS a
+   * directory `fs.watch` is FSEvents-backed and its native `close()` flushes
+   * the watcher's pending event batch synchronously; under a backlogged
+   * `fseventsd` (a full suite hammering the temp dir) that flush measured
+   * 2–9 s, and it hung the awaited `close()` behind it. A file watcher is
+   * kqueue-backed and closes in ~0 ms. The cost of the narrower scope: a lane
+   * log created after startup is armed by the next poll tick, not the instant
+   * it appears, and a file replaced under a new inode re-arms the same way.
+   * Listings go through `deps.readdir` so a test can hold one in flight across
+   * a close.
+   */
   const syncWatchers = async (): Promise<void> => {
     try {
-      const names = await readdir(options.root);
+      const names = await deps.readdir(options.root);
       for (const name of names) {
-        if (!name.startsWith("wave") || watched.has(name)) continue;
-        watched.add(name);
-        watchers.push(watchPath(join(options.root, name), () => requestRefresh(false)));
+        if (!name.startsWith("wave")) continue;
+        const dir = join(options.root, name);
+        let files: readonly string[];
+        try {
+          files = await deps.readdir(dir);
+        } catch {
+          continue; // the wave dir vanished mid-listing; the next tick retries
+        }
+        // close() may have run while a listing was in flight: never arm a
+        // watcher after the shutdown has already closed the set it joins.
+        if (closed) return;
+        for (const file of files) {
+          if (!file.endsWith(".log") && !file.endsWith(".jsonl")) continue;
+          const path = join(dir, file);
+          if (watched.has(path)) continue;
+          try {
+            const watcher = watchPath(
+              path,
+              (eventType) => {
+                // A `rename` means the file was removed or replaced under a new
+                // inode — a kqueue watch on the old inode goes dead, so live
+                // pushes stop for it forever. Close this watcher and forget the
+                // path so the next poll tick arms the file that is there now.
+                if (eventType === "rename") {
+                  watched.delete(path);
+                  watcher.close();
+                  return;
+                }
+                requestRefresh(false);
+              },
+              () => {
+                // The watcher emitted `error` (its file vanished). Forget the path
+                // and close it; the next poll tick re-arms if the file is back.
+                watched.delete(path);
+                watcher.close();
+              },
+            );
+            // Arm first, ledger second: if `watchPath` threw, the path is not
+            // marked watched and this `catch` keeps the tick going to the rest.
+            watched.set(path, watcher);
+          } catch {
+            // The file vanished between the listing and the watch; the next tick
+            // re-lists and re-arms whatever is present.
+          }
+        }
       }
     } catch {
-      // No wave directories (yet); the poll picks them up.
+      // No wave log root (yet); the poll picks it up.
     }
   };
 
@@ -268,12 +352,30 @@ export async function startServer(options: StartOptions): Promise<ServerHandle> 
   }, options.pollMs ?? DEFAULT_POLL_MS);
   timer.unref();
 
+  /**
+   * The one shutdown both paths run (X8): stop the timer, refuse any further
+   * arming or refreshing, close every watcher, and hand back. It is
+   * synchronous by construction — the awaited half of `close()` is only ever
+   * the HTTP server, whose teardown has a bound.
+   */
+  const shutdown = (): void => {
+    closed = true;
+    clearInterval(timer);
+    for (const watcher of watched.values()) watcher.close();
+    watched.clear();
+    // Empty the queue: `begin`'s drain only restarts while `refreshQueued` is
+    // set, so dropping it here means a refresh queued behind one already in
+    // flight at close() is never run after the shutdown. `requestRefresh` also
+    // refuses once `closed`, so nothing re-fills the queue afterwards.
+    refreshQueued = false;
+    queuedRefreshPr = false;
+  };
+
   const server = createServer((req, res) => void handle(req, res));
   try {
     await listen(server, options.port);
   } catch (error) {
-    clearInterval(timer);
-    for (const watcher of watchers) watcher.close();
+    shutdown();
     server.close();
     throw error;
   }
@@ -284,8 +386,7 @@ export async function startServer(options: StartOptions): Promise<ServerHandle> 
     port: address.port,
     url: `http://127.0.0.1:${address.port}`,
     close: async () => {
-      clearInterval(timer);
-      for (const watcher of watchers) watcher.close();
+      shutdown();
       for (const client of clients) client.end();
       clients.clear();
       await new Promise<void>((resolve) => {

@@ -1,0 +1,210 @@
+{
+  "version": 1,
+  "lane": "X8",
+  "mutations": [
+    {
+      "file": "tools/wave-status/server.ts",
+      "before": "          if (!file.endsWith(\".log\") && !file.endsWith(\".jsonl\")) continue;\n          const path = join(dir, file);",
+      "after": "          const path = join(dir, file);",
+      "because": "The scope filter is the fix's other half: without it the server re-arms watchers on every entry a wave directory holds (notes.txt included), and the armed set stops being the lane artefacts — the exact list the premise test pins.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/wave-status/__tests__/server.test.ts",
+        "-t",
+        "the watchers are armed on lane files, never on the wave directories"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/server.ts",
+      "before": "          const path = join(dir, file);",
+      "after": "          const path = dir;",
+      "because": "The revert of the mechanism itself: arm the WAVE DIRECTORY — the FSEvents-backed watch whose native close() flushes a pending event batch synchronously, the call measured at 2–9 s with fseventsd backlogged and the await that put this lane's timeout shape (5 142 ms) on close(). The file-scoped premise test is the guard, and the cleanup test's four closed paths name it.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/wave-status/__tests__/server.test.ts",
+        "-t",
+        "the watchers are armed on lane files, never on the wave directories"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/server.ts",
+      "before": "      const names = await deps.readdir(options.root);\n      for (const name of names) {\n        if (!name.startsWith(\"wave\")) continue;\n        const dir = join(options.root, name);\n        let files: readonly string[];\n        try {\n          files = await deps.readdir(dir);",
+      "after": "      const names = await readdir(options.root);\n      for (const name of names) {\n        if (!name.startsWith(\"wave\")) continue;\n        const dir = join(options.root, name);\n        let files: readonly string[];\n        try {\n          files = await readdir(dir);",
+      "because": "Listings must run through the injected deps seam or the shutdown contract is untestable: a test can no longer hold a listing in flight across close(), and the lane cannot prove that a late listing arms nothing after the close. The seam swap is also what the direct-import version silently bypasses.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/wave-status/__tests__/server.test.ts",
+        "-t",
+        "a syncWatchers in flight when close\\(\\) runs arms no watcher afterwards"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/server.ts",
+      "before": "        // close() may have run while a listing was in flight: never arm a\n        // watcher after the shutdown has already closed the set it joins.\n        if (closed) return;",
+      "after": "        // A listing that resolves after close() arms anyway.",
+      "because": "The guard against a listing that resolves after close(): without it, syncWatchers arms watchers that no shutdown will ever close — the leak X8's diagnosis names, and the second flake-shape waiting to happen.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/wave-status/__tests__/server.test.ts",
+        "-t",
+        "a syncWatchers in flight when close\\(\\) runs arms no watcher afterwards"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/server.ts",
+      "before": "  const requestRefresh = (refreshPr: boolean): void => {\n    if (closed) return;\n    if (refreshRunning) {\n",
+      "after": "  const requestRefresh = (refreshPr: boolean): void => {\n    if (refreshRunning) {\n",
+      "because": "X8's fix #1 moved the closed-check out of the watcher callback and into requestRefresh itself, so the guard is now in one place and covers the drain and the poll tick too. Revert it and the close() test's post-close watcher event reaches a refresh that no longer refuses once closed — a collection runs after the server has shut down, the exact resurrection the callback's old `if (!closed)` used to stop.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/wave-status/__tests__/server.test.ts",
+        "-t",
+        "close\\(\\) shuts the server, its watchers and its interval down"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/server.ts",
+      "before": "    closed = true;\n    clearInterval(timer);",
+      "after": "    clearInterval(timer);",
+      "because": "The flag is the promise both guards read: without it, close() clears the interval but every later callback and every in-flight listing still behaves as if the server were live. The cleanup test counts collections after close() and catches the resurrection.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/wave-status/__tests__/server.test.ts",
+        "-t",
+        "close\\(\\) shuts the server, its watchers and its interval down"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/server.ts",
+      "before": "    clearInterval(timer);\n    for (const watcher of watched.values()) watcher.close();\n",
+      "after": "    clearInterval(timer);\n",
+      "because": "The ledger is now a Map keyed by path (so rename/error can drop a single watcher), and shutdown closes it through that Map. Reverting the loop leaks one OS watch registration per lane file per server and drops the namesake duty of the close() cleanup test.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/wave-status/__tests__/server.test.ts",
+        "-t",
+        "close\\(\\) shuts the server, its watchers and its interval down"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/server.ts",
+      "before": "    refreshQueued = false;\n    queuedRefreshPr = false;\n  };",
+      "after": "  };",
+      "because": "Fix #1: shutdown must empty the queued refresh. begin's drain only restarts while refreshQueued is set, so leaving the queue populated at close() lets a refresh queued behind an in-flight one run after the shutdown. requestRefresh's own top guard does NOT cover this: the drain calls begin directly, so the cleared queue is the load-bearing refusal — drop it and the queued-before-close test sees the extra collection.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/wave-status/__tests__/server.test.ts",
+        "-t",
+        "a refresh queued behind an in-flight one does not run after close\\(\\)"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/server.ts",
+      "before": "              () => {\n                // The watcher emitted `error` (its file vanished). Forget the path\n                // and close it; the next poll tick re-arms if the file is back.\n                watched.delete(path);\n                watcher.close();\n              },\n",
+      "after": "              () => {},\n",
+      "because": "Fix #2: an FSWatcher is an EventEmitter and a file watcher's `error` (deleted lane log) throws when unhandled, taking the status server down. The handler forgets the path and closes the watcher so the next poll tick re-arms a recreated file. Revert it to a no-op and the error test's re-arm never happens.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/wave-status/__tests__/server.test.ts",
+        "-t",
+        "a watcher emitting error is caught and its path is re-armed"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/server.ts",
+      "before": "                if (eventType === \"rename\") {\n                  watched.delete(path);\n                  watcher.close();\n                  return;\n                }\n                requestRefresh(false);\n",
+      "after": "                requestRefresh(false);\n",
+      "because": "Fix #3: a file replaced at the same path is a new inode; the kqueue watcher on the old inode goes dead and live pushes stop forever. Reporting `rename` must close that watcher and forget the path so the next tick arms the current file. Revert it (treat rename as a plain change) and the rename test's closed/re-arm assertions both fail.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/wave-status/__tests__/server.test.ts",
+        "-t",
+        "a watcher that reports rename is closed and its path is re-armed"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/server.ts",
+      "before": "          try {\n            const watcher = watchPath(\n              path,\n              (eventType) => {\n                // A `rename` means the file was removed or replaced under a new\n                // inode — a kqueue watch on the old inode goes dead, so live\n                // pushes stop for it forever. Close this watcher and forget the\n                // path so the next poll tick arms the file that is there now.\n                if (eventType === \"rename\") {\n                  watched.delete(path);\n                  watcher.close();\n                  return;\n                }\n                requestRefresh(false);\n              },\n              () => {\n                // The watcher emitted `error` (its file vanished). Forget the path\n                // and close it; the next poll tick re-arms if the file is back.\n                watched.delete(path);\n                watcher.close();\n              },\n            );\n            // Arm first, ledger second: if `watchPath` threw, the path is not\n            // marked watched and this `catch` keeps the tick going to the rest.\n            watched.set(path, watcher);\n          } catch {\n            // The file vanished between the listing and the watch; the next tick\n            // re-lists and re-arms whatever is present.\n          }\n",
+      "after": "          const watcher = watchPath(\n            path,\n            (eventType) => {\n              if (eventType === \"rename\") {\n                watched.delete(path);\n                watcher.close();\n                return;\n              }\n              requestRefresh(false);\n            },\n            () => {\n              watched.delete(path);\n              watcher.close();\n            },\n          );\n          watched.set(path, watcher);\n",
+      "because": "Fix #3: without a per-file guard, a `watch` that throws (the file vanished between readdir and watch) escapes the per-file loop into the whole-scan catch, so every remaining file that tick is skipped. Drop the try/catch and the throwing test can no longer arm the other lane files in the same tick.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/wave-status/__tests__/server.test.ts",
+        "-t",
+        "a watch that throws for one file"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/server.ts",
+      "before": "          if (watched.has(path)) continue;\n          try {\n",
+      "after": "          if (watched.has(path)) continue;\n          // BUGGY: mark the path watched before the watcher exists.\n          watched.set(path, {\n            close(): void {\n              /* placeholder */\n            },\n          });\n          try {\n",
+      "because": "Fix #3: the path must join the ledger only once a watcher actually exists. Marking it first means a failed watch leaves the path 'watched' forever and it is never retried. Reorder it before the watch and the throwing test's 'retries the failed one next tick' assertion never sees the file re-armed.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/wave-status/__tests__/server.test.ts",
+        "-t",
+        "a watch that throws for one file"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
