@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "lane": "v3",
+  "mutations": [
+    {
+      "file": "tools/sweep/lib/attribute.ts",
+      "before": "    const workflow: Attribution = matched.length === 1 ? matched[0] : \"unattributed\";",
+      "after": "    const workflow: Attribution = matched.length >= 1 ? matched[0] : \"unattributed\";",
+      "because": "V3's split is worthless if a thread that appears in two workflows is pinned on the first one that happened to match. Taking matches[0] on length >= 1 turns an unattributed collision into a false UI (or API) count, which is exactly the guess the fail-closed rule exists to refuse. Caught by the two-logs test asserting unattributed, not UI.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/sweep/__tests__/attribute.test.ts",
+        "-t",
+        "text present in two logs is unattributed, never the first match"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/sweep/lib/attribute.ts",
+      "before": "export function decodeRunLog(raw: string): string {\n  return unescapeJsonEscapes(raw);\n}",
+      "after": "export function decodeRunLog(raw: string): string {\n  return raw;\n}",
+      "because": "The job log stores the model's response JSON-escaped (\\n, \\\", \\u2011). Matching the thread's plain suggestion against the raw log misses every quote, every newline, and the non-breaking hyphen PR-Agent actually writes, so a real API thread looks unattributed. Caught by the escape test, whose log is the escaped form of the thread text.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/sweep/__tests__/attribute.test.ts",
+        "-t",
+        "JSON escapes"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
