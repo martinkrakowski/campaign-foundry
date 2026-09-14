@@ -1199,9 +1199,12 @@ export const clickDestinationPlaceholder = "https://example.com/landing";
 /**
  * `clickDestination` — the domain's problem, in the editor's voice (D2). The
  * `must` clause is the domain's own (`clickDestinationProblem`); the web app
- * never writes a second URL check, so the two cannot disagree.
+ * never writes a second URL check, so the two cannot disagree. Named for the
+ * failure it formats, not the domain function it wraps: two exported functions
+ * called `clickDestinationProblem` invited reviewers to confuse the decision
+ * with its sentence.
  */
-export function clickDestinationProblem(problem: { readonly must: string }): string {
+export function clickDestinationInvalid(problem: { readonly must: string }): string {
   return `That is not a destination we can use — it must ${problem.must}.`;
 }
 

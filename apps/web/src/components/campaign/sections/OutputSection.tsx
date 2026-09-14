@@ -3,7 +3,6 @@
 import type { Dispatch } from "react";
 import { FieldLine, Input, PlatformCard, DurationStrip } from "@/components/ui";
 import { MOTION_KINDS } from "@campaignfoundry/CampaignOrchestration/motion-kinds";
-import { clickDestinationProblem } from "@campaignfoundry/CampaignOrchestration/click-destination";
 import { PLATFORM_PROFILES, isPlatformVisible } from "@campaignfoundry/Distribution/platform-profiles";
 import type { EditorState, EditorAction } from "@/components/campaign/editor-state";
 import { PLATFORM_ORDER } from "@/components/campaign/editor-state";
@@ -72,16 +71,11 @@ export function OutputSection({
   const hasExcludedRatio = motionOnly && packaged.size < RATIO_OPTIONS.length;
 
   const outputErrorCount = Object.keys(errors).filter((k) =>
-    ["formats", "platforms", "motion", "duration"].includes(k),
+    ["formats", "platforms", "motion", "duration", "clickDestination"].includes(k),
   ).length;
 
   const staticGate = formatGate("static", state, state.capabilities);
   const motionGate = formatGate("motion", state, state.capabilities);
-
-  // HL5b/HL-D3: an empty field is a valid "no destination", so it reaches the
-  // domain as absent and only a typed value is checked. The domain decides.
-  const destination = state.clickDestination.trim();
-  const destinationProblem = clickDestinationProblem(destination === "" ? undefined : destination);
 
   return (
     <SectionShell id="output" title="5 · Output" errorCount={outputErrorCount} compact={compact}>
@@ -155,14 +149,14 @@ export function OutputSection({
           fieldKey="clickDestination"
           label={messages.clickDestinationLabel}
           hint={messages.clickDestinationHelp}
-          error={destinationProblem ? messages.clickDestinationProblem(destinationProblem) : undefined}
+          error={errors.clickDestination}
         >
           <Input
             aria-label={messages.clickDestinationLabel}
             value={state.clickDestination}
             placeholder={messages.clickDestinationPlaceholder}
             onChange={(e) => dispatch({ type: "patch", patch: { clickDestination: e.target.value } })}
-            invalid={destinationProblem !== undefined}
+            invalid={errors.clickDestination !== undefined}
           />
         </Field>
 
