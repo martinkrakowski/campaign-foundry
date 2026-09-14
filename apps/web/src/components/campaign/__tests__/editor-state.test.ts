@@ -1040,6 +1040,22 @@ describe("fromBrief", () => {
     expect(isDirtySinceSave(state)).toBe(false);
   });
 
+  test("a loaded product inputAsset is kept and the brief is not dirty", () => {
+    const brief = savedBrief();
+    const state = fromBrief(
+      {
+        ...brief,
+        products: [
+          { ...brief.products[0], inputAsset: "assets/inputs/bg.png" },
+        ],
+      },
+      { file: "camp.yaml" },
+    );
+    expect(state.products[0].inputAsset).toBe("assets/inputs/bg.png");
+    expect(toBrief(state).products[0].inputAsset).toBe("assets/inputs/bg.png");
+    expect(isDirtySinceSave(state)).toBe(false);
+  });
+
   test("treatments, mode, output and localizedMessage are carried through when present", () => {
     const state = fromBrief(
       savedBrief({
