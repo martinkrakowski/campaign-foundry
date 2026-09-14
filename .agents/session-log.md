@@ -4652,3 +4652,49 @@ The second row source built `obs: { alive }` inline while the log loop read `gat
 ## 2026-09-13 — VE1 resumed after a 429: checkpoint commits saved the lane
 
 The first VE1 run died upstream after its checkpoint commit — the failing-tests commit and the uncommitted hook survived verbatim, which is the checkpoint rule paying for itself. Resume: hook committed green as-is (34 tests), then five editor-level wiring tests written red first (4 of 5 fail; the load-baseline test passes trivially without any undo, recorded rather than hidden), then the four-line BriefEditor swap. One committed test had an invalid cast (`EditorState as Record<string, unknown>`) — fixed with `as unknown as` only; no test semantics touched. `setPool` decision, stated in code and pinned by test: undoable as a draft edit (it writes `variation.headline` and `headlineAxisDropped`), while the `pool` value itself carries forward on undo with the other server answers. Six mutations replayed caught, including the brief's three named ones; fence retired; gate green with 100 % on all four counters (4641 tests). No wave-event emission: this resumed lane arrived without a wave log root, and inventing a wave id would write a lie into the log.
+
+## 2026-09-13/14 — Orchestrator wave record: the gaps, the HTML layer, status-without-asking, and video Phase A
+
+**Merged (16):** #369 S2 `588e99d` · #370 X2 `4016f3b` · #371 HL3 `7630cb8` · #372 gaps X8–X10 `4700ba1` ·
+#373 V3 measurement `422077c` · #374 X9 `dc141d4` · #375 X11 gap `4628315` · #376 S3 `ae27ed5` · #377 HL4
+`a5a7c42` · #378 S5 decision `6e92473` · #379 V3 amendment + X12 `ec5cc43` · #380 X11 `1f85d04` · #381 S5
+`90ea759` · #382 video editing plan `245ea85` · #383 VE2 `8f91445` · #384 VE1 `72447bf`.
+
+**What the review layer bought.** Every defect that blocked a merge came from a bot review verified
+against the branch, not from the gate: S2's event-only rows dropping the gate log; HL3's drawer painting
+the first html layer for every dispatch; S3's review blocker hidden from the attention view and an unknown
+check count printed as `0`; **two script-injection holes in HL4's publicly served ad unit** (a `</script>`
+breakout through `JSON.stringify`, and `brandColor` unescaped in a style attribute); S5 reporting an
+executor failure as "gap closed, do not dispatch"; VE2's scrub position not clamped to a shorter clip; VE1
+restoring a fully undone draft on reload, and ⌘Z reaching the draft behind an open modal. Qodo produced all
+of them; on VE1's final head CodeRabbit then showed the modal fix was incomplete (a chord on the body still
+reached the draft). Measured per bot in
+`2026-09-09_verification-budget.md` §8.1: Qodo 11 real of 14, PR-Agent 3 of 15 with one unique low finding.
+
+**Refuted, and why (representative).** PR-Agent's suggestions to keep undo history across `load`/`restore`,
+restore the exact previous `EditorState`, or make `save` undoable — each would splice an old document onto a
+new source or step the saved revision backwards. Escaping claims naming the terminal renderer as HTML. A
+`messages.ts` rule applied to the standalone wave-status page, which D2 does not cover.
+
+**Defects in the orchestrator's own briefs and plans — the most useful finding of the wave.**
+- S5's brief prescribed "inject an executor that throws" to prove the server never runs a premise; the
+  server has no executor seam and the suite mocks `child_process`, so the test could not fail. Replaced by a
+  source-level charter test, proven by two mutations.
+- VE1's fix brief specified a *target*-only dialog guard; CodeRabbit showed a chord on the body still reached
+  the draft, and the lane's test pinned that behaviour. Fixed to "any `aria-modal` element in the document".
+- The video plan's first draft ranked captions first (they would duplicate burned-in copy), treated the
+  decorative `ScrubBar` as a player, and had an off-by-one frame formula; the plan review then found four
+  blocking errors (R1–R4). All corrected before dispatch.
+- A merge gated on CI alone raced the review bots (#381 — nothing was missed, by luck); the merge
+  condition now requires zero unresolved threads on the final head, and it held back #384 for a real
+  defect.
+
+**Operational.** `dispatch-lane.sh`'s detached launch killed every lane it started, and a relative brief path
+handed opencode an empty prompt; the first three dispatches were lost before the inner command was run by hand.
+Provider failures (one 522, six 429s) killed seven runs; all six 429s struck while two qwen lanes ran at once.
+Lanes launched directly with a checkpoint-commit rule lost minutes, not runs. Both lessons are now in
+`SKILL.md` and `references/cast.md`.
+
+**Deferred.** Video Phases B–C wait on VE-Q1..Q4 (music rights, voiceover source, scene budget, footage
+decoding). K2–K5 wait on the three K1 model decisions. Open lanes: HL5, X8 (diagnosis first), X10, X12, V3 (a
+sweep-time per-workflow record), X1 (a deliberate quiet window).

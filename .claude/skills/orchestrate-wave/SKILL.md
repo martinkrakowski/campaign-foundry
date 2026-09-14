@@ -248,6 +248,19 @@ that did not happen.
    carrying the seat that runs it in `--detail` — `--detail '{"seat":"<implementer model>"}'` — because
    the status page names the seat that ran each lane, and a lane whose record never names one reads
    **unknown**. The seat is a property of the lane, so later stages need not repeat it.
+   **When the seat is an external CLI** (the `openrouter/` roster in `references/cast.md`), launch it
+   directly from a tool call — `nohup zsh -c "cd <worktree> && <cli> … \"\$(cat <ABSOLUTE brief>)\" >
+   <log> 2>&1; echo \"EXIT \$?\" >> <log>" < /dev/null > /dev/null 2>&1 & disown` — and never through
+   `scripts/dispatch-lane.sh`, whose detached launch killed every lane it started on 2026-09-13. The
+   brief path **must be absolute**: the command `cd`s into the worktree first and `briefs/` exists only
+   in the main checkout. Liveness differs by CLI: `opencode run --format json` streams, so a 0-byte log
+   after ~30 s is a dead lane; `agy --print` writes nothing until it exits, so watch its process
+   (`pgrep -f 'cd <worktree> && agy'`) and the worktree's commits instead.
+   **Every brief carries the checkpoint rule**: commit the failing tests locally the moment they have
+   been seen to fail, commit again after each green step, push only when the gate passes. On
+   2026-09-13 provider failures (one 522, six 429s) killed seven lane runs. The two that had written
+   nothing to disk lost the whole run; every other one resumed from what it had committed — or, once,
+   from uncommitted files that happened to survive in the worktree, which is luck, not a method.
    The per-lane `implement settled|failed` events **are** the completion record of a dispatch —
    `implement settled` when a lane's `EXIT` marker lands, `implement failed` on a non-zero
    marker or a lane killed without one; and `gate settled` with the gate exit and the four
@@ -270,6 +283,12 @@ that did not happen.
    `deferred` counts in `--detail`.
 5. **Merge** (you). Sequential, via `scripts/merge-prs.sh` — each merge invalidates the CI of
    everything behind it. If main goes red: stop, reproduce locally, ship a minimal hotfix, resume.
+   **A green gate is not a merge condition on its own.** Merge only when, on the PR's *final* head:
+   every check-run conclusion is success or skipped (read conclusions, not the rollup line); the
+   review bots have had time to post on that head; and **zero review threads are unresolved**. On
+   2026-09-13 a merge gated on CI alone raced the bots — nothing was missed that time, but only by
+   luck — and the full condition later held back a PR whose final-head review found a real defect
+   the gate could not see.
    After each merge lands, emit `merge settled` with the merge SHA in `--detail`.
 6. **Close the wave** (you, immediately — not later). Append the orchestrator's wave record to
    `.agents/session-log.md`: what merged with its commits, what was refuted **and why**, what the
