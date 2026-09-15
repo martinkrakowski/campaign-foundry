@@ -135,6 +135,10 @@ export function resolveTracks(
       textTracks.push(...tracks);
       continue;
     }
+    // pairs[0] is the outgoing (or only) beat's local -- non-text layers have
+    // no per-beat multiplicity of their own, and no compositor path today
+    // reads a `beat`- or `effect`-clock track on a ground layer (`image`,
+    // `video`); this is the one local value there is to give one.
     byLayer.set(layer.id, foldPose(tracks, clocks, pairs[0].local));
   }
 

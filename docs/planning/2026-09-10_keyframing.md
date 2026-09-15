@@ -273,6 +273,17 @@ anywhere in that file today (checked, not assumed); K4 adding the drop makes it 
 # holds past K4's merge. Retire or rewrite it by hand at that point, the
 # same known limit the previous fence carried; `plan:verify` only fails on
 # STALE, so nothing else will remind you.
+#
+# The OTHER way this can fail: K5's own fence below greps the same directory
+# for the same word (`\btracks?\b`, word-boundary), one level up. The line
+# K4 actually writes -- `Array.isArray(layer.tracks) && layer.tracks.length
+# === 0` -- has a word boundary at the `.` in `layer.tracks`, so it flips
+# BOTH fences at once (verified: `echo 'layer.tracks' | grep -qiE
+# '\btracks?\b'` exits 0). A K4 PR that retires this fence in the completing
+# commit will also flip K5's from holding to failing `plan:verify` as STALE
+# in the same commit, for a lane K4 did not ship. K4's brief must rewrite
+# K5's fence too, in the same PR -- narrow it to the editor's track-editing
+# UI once one exists, or exclude `canonicalLayer` explicitly.
 ! grep -q 'tracks' apps/web/src/components/campaign/editor-state.ts
 ```
 

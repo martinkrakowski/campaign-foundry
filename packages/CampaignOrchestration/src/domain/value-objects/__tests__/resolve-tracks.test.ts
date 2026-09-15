@@ -1,7 +1,7 @@
 import { describe, test, expect } from "vitest";
 import { beatAt, resolveTimeline, type CopyTimeline } from "../CopyTimeline.vo.js";
 import { easeOutCubic } from "../easing.js";
-import { IDENTITY_POSE, poseOf, resolveTracks, type TrackedLayer } from "../resolve-tracks.js";
+import { IDENTITY_POSE, IMPLICIT_BEAT, poseOf, resolveTracks, type TrackedLayer } from "../resolve-tracks.js";
 import type { Track } from "../tracks.js";
 
 /** A single-stop track holds its one value everywhere — a cheap constant fixture. */
@@ -254,7 +254,10 @@ describe("resolveTracks — copy is one pose per (beat, mix), not per text layer
   test("no text layer at all still emits one identity copy entry per pair", () => {
     const layers: TrackedLayer[] = [{ id: "img", kind: "image", tracks: [constant("dy", 99)] }];
     const result = resolveTracks(layers, [], { t: 0 });
-    expect(result.copy).toEqual([{ beat: { text: "", startT: 0, endT: 1, fadeInT: 0 }, mix: 1, pose: IDENTITY_POSE }]);
+    expect(result.copy).toHaveLength(1);
+    expect(result.copy[0]!.beat).toBe(IMPLICIT_BEAT);
+    expect(result.copy[0]!.mix).toBe(1);
+    expect(result.copy[0]!.pose).toEqual(IDENTITY_POSE);
   });
 });
 
