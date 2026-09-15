@@ -21,6 +21,12 @@ export const MIN_DWELL_SEC = 1.2;
 /** The largest number of beats a timeline may carry. Also provisional. */
 export const MAX_BEATS = 8;
 /**
+ * The largest number of DISTINCT per-beat backgrounds a timeline may name (VE-D10).
+ * The cap counts distinct values regardless of their source — a beat that names no
+ * background spends nothing from it, and repeats of one scene are one scene.
+ */
+export const MAX_SCENES = 3;
+/**
  * Upper bound on a beat's weight.
  *
  * Weights are bounded to [1, MAX_WEIGHT] by the parser, this VO and the editor alike,
@@ -35,6 +41,12 @@ export interface CopyBeat {
   readonly text: string;
   /** An integer in [1, MAX_WEIGHT]. */
   readonly weight: number;
+  /**
+   * An asset path — the same kind of reference a product's `inputAsset` holds (VE5a).
+   * Absent means the creative's background, as today; at most MAX_SCENES distinct
+   * values may appear in one timeline (VE-D10).
+   */
+  readonly background?: string;
 }
 
 export interface CopyTimeline {
@@ -207,6 +219,12 @@ export function timelineProblem(t: CopyTimeline, durations: readonly number[]): 
   }
   if (!Number.isInteger(t.keyBeat) || t.keyBeat < 1 || t.keyBeat > t.beats.length) {
     return `copy.timeline.keyBeat must be an integer in [1, ${t.beats.length}].`;
+  }
+  const scenes = new Set(
+    t.beats.flatMap((beat) => (beat.background !== undefined ? [beat.background] : [])),
+  );
+  if (scenes.size > MAX_SCENES) {
+    return `copy.timeline.beats name more than ${MAX_SCENES} distinct backgrounds (max ${MAX_SCENES}).`;
   }
 
   const total = t.beats.reduce((sum, beat) => sum + beat.weight, 0);
