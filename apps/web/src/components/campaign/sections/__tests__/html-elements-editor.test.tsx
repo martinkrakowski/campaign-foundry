@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import {
   CANONICAL_TEMPLATES,
 } from "@campaignfoundry/CampaignOrchestration/creative-templates";
+import { assembleHtml } from "@campaignfoundry/CampaignOrchestration/markup-assembler";
 import type { BriefTemplate } from "@campaignfoundry/CampaignOrchestration/brief-template";
 import type { HtmlElement } from "@campaignfoundry/CampaignOrchestration/html-element";
 import {
@@ -622,5 +623,121 @@ describe("HtmlElementsEditor — user text never reaches the DOM as markup (HL-D
         }),
       ),
     ).toBe("<b>bold</b>");
+  });
+});
+
+describe("HtmlWeightMeter — the live weight of the html unit (HL5c, HL-D6)", () => {
+  /** The element editor's state, aimed at one html placement at one size. */
+  const meterWith = (
+    elements: HtmlElement[],
+    over: Partial<EditorState> = {},
+  ): EditorState => ({
+    ...withElements(...elements),
+    platforms: ["google-display-html"],
+    sizes: ["300x250"],
+    ...over,
+  });
+
+  /** The weight the assembler reports for exactly these inputs. */
+  const assembledBytes = (elements: readonly HtmlElement[]): number =>
+    assembleHtml({
+      elements,
+      canvas: { size: "300x250" },
+      brandColor: "#1473E6",
+      style: {},
+    }).byteLength;
+
+  test("the meter reads the measured weight against the placement's own budget", () => {
+    render(
+      <TemplateSection
+        state={meterWith([text])}
+        dispatch={vi.fn()}
+        errors={{}}
+      />,
+    );
+    expect(
+      screen.getByText(
+        messages.htmlWeightMeterText(
+          assembledBytes([text]),
+          150 * 1024,
+          "Google Display (HTML5)",
+        ),
+      ),
+    ).toBeTruthy();
+    // The fallback sentence: its bytes join the same budget at packaging.
+    expect(screen.getByText(messages.htmlWeightFallbackNote)).toBeTruthy();
+  });
+
+  test("over budget, the meter says so with the overage", () => {
+    const big: HtmlElement = {
+      kind: "text",
+      text: "A".repeat(200_000),
+      frame,
+    };
+    render(
+      <TemplateSection state={meterWith([big])} dispatch={vi.fn()} errors={{}} />,
+    );
+    expect(
+      screen.getByText(messages.htmlWeightOverage(assembledBytes([big]) - 150 * 1024)),
+    ).toBeTruthy();
+  });
+
+  test("no meter without an html profile", () => {
+    // The default draft selects the static platforms — no html budget exists
+    // to read (HL-D6), so the meter shows nothing rather than a made-up number.
+    render(
+      <TemplateSection
+        state={withElements(text)}
+        dispatch={vi.fn()}
+        errors={{}}
+      />,
+    );
+    expect(screen.queryByText(/KB of/)).toBeNull();
+    expect(screen.queryByText(messages.htmlWeightFallbackNote)).toBeNull();
+  });
+
+  test("no meter on non-html layers", () => {
+    render(
+      <TemplateSection
+        state={meterWith([], { template: initialEditorState().template })}
+        dispatch={vi.fn()}
+        errors={{}}
+      />,
+    );
+    expect(screen.queryByText(/KB of/)).toBeNull();
+  });
+
+  test("the meter measures the markup without ever putting it in the DOM (HL-D7)", () => {
+    const hostile: HtmlElement = {
+      kind: "text",
+      text: '<img src=x onerror="window.__m=1">',
+      frame,
+    };
+    render(
+      <TemplateSection
+        state={meterWith([hostile], {
+          clickDestination: "https://example.com/<script>bad</script>",
+        })}
+        dispatch={vi.fn()}
+        errors={{}}
+      />,
+    );
+    // The hostile strings are counted — but nothing was parsed out of them.
+    expect(screen.getByText(messages.htmlWeightFallbackNote)).toBeTruthy();
+    expect(document.querySelector('img[src="x"]')).toBeNull();
+    expect(document.querySelector("script")).toBeNull();
+    expect((window as unknown as { __m?: number }).__m).toBeUndefined();
+    // And no user text reaches the DOM outside an input's value: the meter's
+    // own sentence carries numbers and the profile label, never the copy.
+    const offenders = Array.from(document.querySelectorAll("*")).filter(
+      (el) =>
+        el.tagName !== "INPUT" &&
+        Array.from(el.childNodes).some(
+          (node) =>
+            node.nodeType === 3 &&
+            (node.textContent ?? "").includes("onerror"),
+        ),
+    );
+    expect(offenders).toEqual([]);
   });
 });
