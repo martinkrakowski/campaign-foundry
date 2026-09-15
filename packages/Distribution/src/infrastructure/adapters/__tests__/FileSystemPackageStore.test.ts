@@ -130,4 +130,39 @@ describe("FileSystemPackageStore", () => {
     expect(path).toBe("packages/camp/linkedin/manifest.json");
     expect(existsSync(resolve(root, path))).toBe(true);
   });
+
+  test("a staging dir removed by a concurrent store's sweep makes the next write reject instead of silently resurrecting it, and a prior committed package for that platform is untouched", async () => {
+    // A prior, legitimate package run for this platform already committed.
+    const prior = new FileSystemPackageStore(root, "camp");
+    await prior.writePackaged("instagram-feed", "alpha/old.png", bytes());
+    await prior.writeManifest("instagram-feed", manifest());
+    expect(existsSync(resolve(root, "packages/camp/instagram-feed/alpha/old.png"))).toBe(true);
+
+    // Request A starts a new run for the same platform and stages one file.
+    const a = new FileSystemPackageStore(root, "camp");
+    await a.writePackaged("instagram-feed", "alpha/1.png", bytes());
+
+    // Concurrent request B — its own store instance — starts staging the same
+    // platform: `ensureStaging`'s stale-staging sweep deletes A's still-live
+    // staging dir (it only matches on the `<platform>.staging-` prefix, not
+    // on who owns it).
+    const b = new FileSystemPackageStore(root, "camp");
+    await b.writePackaged("instagram-feed", "beta/1.png", bytes());
+
+    // A's next write would otherwise recreate the missing staging tree via
+    // `mkdir(dirname(target), { recursive: true })` and silently resume,
+    // committing a manifest that lists a file (alpha/1.png) that no longer
+    // exists on disk. It must fail loudly instead.
+    await expect(a.writePackaged("instagram-feed", "alpha/2.png", bytes())).rejects.toThrow(
+      /staging directory.*removed/i,
+    );
+    // The same store keeps refusing rather than quietly starting over —
+    // starting a fresh staging dir here could stomp on B's still-live one.
+    await expect(a.writeManifest("instagram-feed", manifest())).rejects.toThrow(
+      /staging directory.*removed/i,
+    );
+
+    // A never reached `rm(finalDir)` + `rename`: the prior commit stands.
+    expect(existsSync(resolve(root, "packages/camp/instagram-feed/alpha/old.png"))).toBe(true);
+  });
 });
