@@ -3,7 +3,7 @@ import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { SAFE_ID_PATTERN } from "@campaignfoundry/CampaignOrchestration";
 import { outputRoot } from "../../../../lib/config.js";
-import { resolveConfined } from "../../../../lib/confined-path.js";
+import { resolveConfinedForRead } from "../../../../lib/confined-path.js";
 import { measure, storeZipStream, type ZipEntry } from "../store-zip.js";
 
 type FileEntry = ZipEntry & { readonly path: string };
@@ -56,7 +56,14 @@ export default defineEventHandler(async (event) => {
     return { error: "Invalid platform id" };
   }
 
-  const platformDir = resolveConfined(outputRoot(), "packages", campaignId, platformId);
+  let platformDir: string;
+  try {
+    // The platform dir may be a symlink aiming outside the output root.
+    platformDir = await resolveConfinedForRead(outputRoot(), "packages", campaignId, platformId);
+  } catch {
+    setResponseStatus(event, 404);
+    return { error: "Not found" };
+  }
 
   try {
     const st = await stat(platformDir);

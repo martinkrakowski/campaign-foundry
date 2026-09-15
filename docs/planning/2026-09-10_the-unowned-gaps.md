@@ -696,3 +696,67 @@ not belong to the platform being committed. The pinned crash-leftover test
 (`__tests__/FileSystemPackageStore.test.ts`, "a failed package never leaves a mixed final directory;
 a later commit drops leftover staging") passes unchanged. Mutation manifest:
 `.agents/manifests/x23.json` — removing either guard makes its corresponding test fail (2/2 caught).
+
+---
+
+## 29. A read route served any symlink inside the output root, even one pointing outside it (X26)
+
+**Evidence.** `resolveConfined` (`apps/api/server/lib/confined-path.ts`) guards only lexically —
+`resolve` + `startsWith(root + sep)`. The three read routes built on it (`GET /output/**`,
+`GET /campaigns/packages/:campaignId`, `GET /campaigns/packages/:campaignId/:platform.zip`) then
+`stat` / `createReadStream` / `readFile` the result, and every one of those follows symlinks. A
+link planted inside the root aimed at anything on the filesystem: `output/leak.txt → /etc/shadow`,
+or `output/packages/camp → <elsewhere>`. The write side had refused symlinked targets since
+`SYMLINK_WRITE_ERROR` (`briefs.ts`, pinned in `briefs.test.ts`); the read side had no equivalent.
+
+**Consequence.** Any process able to drop a file under the output root — a compromised generation
+job, a shared volume — turned a public GET into an arbitrary file read outside it. No `..` needed,
+so the lexical guard never fired: the traversal arrived as a filename.
+
+**Fix.** A read-side helper beside `resolveConfined`: `resolveConfinedForRead(base, ...segments)`
+keeps the lexical check, then compares `realpath(target)` against `realpath(base)` — comparing
+both sides keeps a legitimately symlinked root (macOS `/tmp` → `/private/tmp`) working. A target
+whose real path escapes throws like an escape does today; a missing target is returned untouched,
+so each route's existing not-found path decides unchanged. Each route turns the throw into its own
+not-found answer (the output route keeps 400 for lexical escapes only). `resolveConfined` itself
+stays lexical: write paths call it before the file exists, where realpath has nothing to resolve.
+
+**X26 — shipped in this PR.** The three routes call the new helper. Unit tests pin the helper's
+four behaviours (outside symlink refused, inside symlink allowed, symlinked root allowed, missing
+target untouched) and one route test per route pins that a symlink under the served root answers
+that route's existing 404 body with none of the outside file's bytes in the response; a listing
+test also pins that an inside symlink stays readable. Dropping the realpath comparison kills the
+output-route symlink test (`.agents/manifests/x26.json`).
+
+**X26 round 2 — the check and the read were still two lookups by the same pathname.** Qodo and
+CodeRabbit found that `resolveConfinedForRead` validated `realpath(target)` but returned the
+lexical `target`; every caller then re-looked the checked entry up by that same pathname (`stat`,
+`createReadStream`, `readFile`, `readdir`). A process with write access to the output tree —
+exactly the actor this section already assumes — could replace the checked entry with an
+outside-pointing symlink in the window between the check and that second lookup, and the read
+would follow it. **Fix:** `resolveConfinedForRead` now returns the real path it validated
+(`realTarget`) instead of the lexical one, so a caller operating on the return value has no
+symlink component left to re-follow; the ENOENT and symlinked-root behaviours are unchanged. The
+output route additionally opens that real path once with
+`fs.promises.open(realTarget, O_RDONLY | O_NOFOLLOW)` and takes both the size and the streamed
+bytes from that single handle (closed on every exit, including a client abort) — a final-component
+swap between the helper's check and this open now fails the open itself (`ELOOP`), answering the
+route's existing 404, rather than depending on a second realpath comparison. The two package
+routes needed no restructuring beyond consuming the corrected return value; their zip walk already
+skips symlinked entries via `Dirent.isFile()`/`isDirectory()` (readdir's dirent type does not
+follow the link), now pinned by a dedicated test.
+
+**Residual — stated precisely, not more.** Node has no `openat`/`O_BENEATH`: there is no way to
+open a path relative to an already-verified directory file descriptor and refuse a symlink in an
+*intermediate* component. `O_NOFOLLOW` on the final open covers a swap of the last path segment
+only. Replacing a real *directory* on the confined path with a symlink, between
+`resolveConfinedForRead`'s check and the subsequent open/stat/readdir, is not closed by this fix —
+the read would still follow it. Closing that would require holding an fd on each verified directory
+and resolving every remaining segment against it (no such primitive exists in Node's fs API today),
+or moving the output tree to a filesystem/mount arrangement where the output process cannot itself
+be raced by whatever else has write access to it. The threat this leaves open therefore still
+requires write access to the output tree (a compromised generation job, a shared volume — the same
+actor named above) plus precise timing of an intermediate-directory swap, not just a planted file.
+Mutation manifest: `.agents/manifests/x26.json` — dropping the realpath-vs-root comparison, the
+ENOENT passthrough, the real-path return, or `O_NOFOLLOW` on the output route's open each kill a
+distinct test (4/4 caught).

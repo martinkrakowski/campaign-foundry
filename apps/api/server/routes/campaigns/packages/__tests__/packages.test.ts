@@ -163,6 +163,41 @@ describe("GET /campaigns/packages/:campaignId", () => {
     const res = await listCall("camp");
     expect(res.status).toBe(404);
   });
+
+  test("returns 404 when the campaign dir is a symlink pointing outside the output root", async () => {
+    const outside = mkdtempSync(join(tmpdir(), "cf-pkg-outside-"));
+    try {
+      mkdirSync(join(outside, "instagram-feed"), { recursive: true });
+      writeFileSync(join(outside, "instagram-feed/manifest.json"), JSON.stringify(manifest("leaked")));
+      mkdirSync(resolve(dir, "packages"), { recursive: true });
+      symlinkSync(outside, resolve(dir, "packages/camp"));
+      const res = await listCall("camp");
+      expect(res.status).toBe(404);
+      const body = await res.text();
+      expect(JSON.parse(body)).toEqual({ error: "No packages found" });
+      expect(body).not.toContain("leaked");
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  test("still lists a manifest that is a symlink staying inside the campaign dir", async () => {
+    mkdirSync(resolve(dir, "packages/camp/instagram-feed"), { recursive: true });
+    mkdirSync(resolve(dir, "packages/camp/meta-feed"), { recursive: true });
+    writeFileSync(
+      resolve(dir, "packages/camp/instagram-feed/manifest.json"),
+      JSON.stringify(manifest("instagram-feed")),
+    );
+    writeFileSync(resolve(dir, "packages/camp/meta-manifest.json"), JSON.stringify(manifest("meta-feed")));
+    symlinkSync(
+      resolve(dir, "packages/camp/meta-manifest.json"),
+      resolve(dir, "packages/camp/meta-feed/manifest.json"),
+    );
+    const res = await listCall("camp");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { platforms: Array<{ platformId: string }> };
+    expect(body.platforms.map((p) => p.platformId)).toEqual(["instagram-feed", "meta-feed"]);
+  });
 });
 
 describe("GET /campaigns/packages/:campaignId/:platformId.zip", () => {
@@ -189,6 +224,40 @@ describe("GET /campaigns/packages/:campaignId/:platformId.zip", () => {
     // The bytes between the first local header and the next entry are the file itself.
     const firstNameLen = buf.readUInt16LE(26);
     expect(buf.subarray(30 + firstNameLen, 30 + firstNameLen + png.length)).toEqual(png);
+  });
+
+  test("skips a symlinked file inside the platform dir when walking for the zip", async () => {
+    // Dirent.isFile()/isDirectory() (from readdir's withFileTypes) already report false for a
+    // symlink entry, so collectEntries's `else if (entry.isFile())` naturally excludes it —
+    // pinned explicitly here so a future refactor of the walk cannot silently start following it.
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+    mkdirSync(resolve(dir, "packages/camp/instagram-feed"), { recursive: true });
+    writeFileSync(resolve(dir, "packages/camp/instagram-feed/real.png"), png);
+    symlinkSync(
+      resolve(dir, "packages/camp/instagram-feed/real.png"),
+      resolve(dir, "packages/camp/instagram-feed/alias.png"),
+    );
+    const res = await zipCall("camp", "instagram-feed.zip");
+    expect(res.status).toBe(200);
+    const buf = Buffer.from(await res.arrayBuffer());
+    const files = parseCentralDirectory(buf);
+    expect(files.map((f) => f.name).sort()).toEqual(["real.png"]);
+  });
+
+  test("returns 404 when the platform dir is a symlink pointing outside the output root", async () => {
+    const outside = mkdtempSync(join(tmpdir(), "cf-zip-outside-"));
+    try {
+      writeFileSync(join(outside, "secret.png"), "DO-NOT-SERVE");
+      mkdirSync(resolve(dir, "packages/camp"), { recursive: true });
+      symlinkSync(outside, resolve(dir, "packages/camp/instagram-feed"));
+      const res = await zipCall("camp", "instagram-feed.zip");
+      expect(res.status).toBe(404);
+      const body = await res.text();
+      expect(JSON.parse(body)).toEqual({ error: "Not found" });
+      expect(body).not.toContain("DO-NOT-SERVE");
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
   });
 
   test("returns 409 when the platform folder is rewritten during the walk", async () => {

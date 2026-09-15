@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "lane": "X26",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/confined-path.ts",
+      "before": "  const realRoot = await realpath(resolve(base));\n  if (realTarget !== realRoot && !realTarget.startsWith(realRoot + sep)) {\n    throw new Error(\"Path escapes the allowed directory.\");\n  }\n  return realTarget;",
+      "after": "  return realTarget;",
+      "because": "Dropping the realpath-vs-root comparison restores the original gap: the lexical check passes for a symlink inside the root, and every route that follows the returned path serves the outside file with 200 instead of its 404.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--maxWorkers=2",
+        "--project",
+        "api",
+        "apps/api/server/routes/__tests__/routes.test.ts",
+        "-t",
+        "symlink"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/confined-path.ts",
+      "before": "    if ((error as NodeJS.ErrnoException).code === \"ENOENT\") return target;\n    throw error;",
+      "after": "    throw error;",
+      "because": "Without the missing-target passthrough, realpath's ENOENT propagates as an escape — the helper throws where today's behaviour (and every caller's not-found path) requires returning the path untouched for the caller's own stat to 404.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--maxWorkers=2",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/confined-path.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/confined-path.ts",
+      "before": "  return realTarget;\n}",
+      "after": "  return target;\n}",
+      "because": "Returning the lexical target again reopens the TOCTOU window this round closes: callers would look the checked entry up a second time by a pathname that could have been swapped for a symlink since the check, instead of by the already-validated real path.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--maxWorkers=2",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/confined-path.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/output/[...path].get.ts",
+      "before": "constants.O_RDONLY | constants.O_NOFOLLOW",
+      "after": "constants.O_RDONLY",
+      "because": "Without O_NOFOLLOW, an entry swapped for an outside-pointing symlink between resolveConfinedForRead's check and this route's own open() is followed instead of rejected with ELOOP, streaming the outside file's bytes with 200 instead of 404.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--maxWorkers=2",
+        "--project",
+        "api",
+        "apps/api/server/routes/__tests__/routes.test.ts",
+        "-t",
+        "swapped for an outside symlink"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
