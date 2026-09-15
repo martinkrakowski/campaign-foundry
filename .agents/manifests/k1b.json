@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "lane": "K1b",
+  "mutations": [
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/resolve-tracks.ts",
+      "before": "  const ease = EASINGS[a.easing ?? DEFAULT_EASING];",
+      "after": "  const ease = EASINGS[b.easing ?? DEFAULT_EASING];",
+      "because": "K1b's rule is that a segment eases with its STARTING stop's easing (a); an ending stop's own override (b) never applies to the segment before it. Reading b's easing instead makes the segment ease with the wrong stop's override, which the linear-override-on-the-starting-stop fixture's first segment (still ease-out-cubic, despite the ending stop declaring \"linear\") is built to catch.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/resolve-tracks.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/resolve-tracks.ts",
+      "before": "  for (const track of tracks) {",
+      "after": "  for (const track of [...tracks].reverse()) {",
+      "because": "K-D9 folds two-or-more tracks on one (layer, property) in DECLARATION order. Folding in reverse is invisible for exactly two operands (IEEE-754 multiplication is exactly commutative for a single pair, and the two-dy-track add fixture is likewise order-blind), which is why the float-order fixture uses three opacity tracks (0.1, 0.2, 0.3): folding them in declaration order gives 1*0.1*0.2*0.3 = 0.006000000000000001, and in reverse gives 1*0.3*0.2*0.1 = 0.006 -- a different double in the last bit, which the fixture asserts exactly.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/resolve-tracks.test.ts"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
