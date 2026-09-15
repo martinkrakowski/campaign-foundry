@@ -30,6 +30,7 @@ import {
   layerElementsProblem,
   layerEnabledProblem,
   layerPropsProblem,
+  outputFamilyProblem,
   satisfiesOrderConstraints,
   styleProblem,
   templateFromCanonical,
@@ -764,6 +765,33 @@ function validateOutput(value: unknown, capabilities: Capabilities): void {
 }
 
 /**
+ * The creative type's `outputFamilies` (D119, X14): a brief whose derived
+ * formats — `output.formats`, or its `[static]` default, exactly as the
+ * planner and the compatibility check above read it — name a family the
+ * template's type does not produce runs, emits rows, and packages nothing
+ * against the profiles that format ships. Declared-table compatibility, not
+ * a capability: structural, never lenient, authoring mode included (the
+ * `validateSizes` convention) — and the decision is the domain's own
+ * `outputFamilyProblem`, shared with the editor's `validateOutput` mirror so
+ * the two boundaries cannot drift.
+ */
+function validateTemplateOutputFamilies(
+  creativeType: CreativeType,
+  output: unknown,
+): void {
+  const formats =
+    ((output as Record<string, unknown> | undefined)?.formats as
+      | readonly string[]
+      | undefined) ?? ["static"];
+  const problem = outputFamilyProblem(creativeType, formats);
+  if (problem !== undefined) {
+    throw new Error(
+      `Campaign brief field "output.formats" includes "${problem.format}", which creative type "${problem.creativeType}" does not produce.`,
+    );
+  }
+}
+
+/**
  * `formats: motion` with an explicitly empty motion axis is a contradiction: the
  * brief asks for clips but forbids every kind. An absent axis means all kinds.
  */
@@ -1159,6 +1187,7 @@ export function parseBrief(
   );
   validateVariation(record.variation, effectiveCapabilities);
   validateOutput(record.output, effectiveCapabilities);
+  validateTemplateOutputFamilies(template.creativeType, record.output);
   validateMotionAxisRequested(record);
   validateCopy(record, enforceCapabilities);
   // Motion is a variation axis: only the planner draws clips, and the classic

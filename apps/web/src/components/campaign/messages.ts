@@ -197,6 +197,15 @@ export function formatsUnsupported(format: string, candidates: string[]): string
   return `None of your platforms can take ${format} — add one of ${joinList(candidates)}, or turn ${format} off.`;
 }
 /**
+ * `formats.outOfType` (X14) — `format` is a display label; `creativeType` is
+ * the domain's own name for what the pinned template can make. The platform
+ * cards already hide what the type cannot ship; this names the mismatch a
+ * loaded draft still carries.
+ */
+export function formatsOutOfType(format: string, creativeType: string): string {
+  return `${format} is not something a ${creativeType} creative can make — turn it off, or start the campaign from a type that ships ${format}.`;
+}
+/**
  * `platforms.unknown` — `ids` are the entries no platform matches (a loaded file can
  * carry one). There is no display label for an id we do not know, so the value itself
  * is named: it is the thing to find and remove.

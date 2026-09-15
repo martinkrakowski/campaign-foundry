@@ -2,6 +2,7 @@ import { describe, test, expect, vi } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderToString } from "react-dom/server";
+import { CANONICAL_TEMPLATES } from "@campaignfoundry/CampaignOrchestration/creative-templates";
 import { initialEditorState, emptyProduct, type EditorState } from "../editor-state";
 import { IdentitySection, CopySection, ProductsSection, TreatmentsSection, OutputSection } from "../sections";
 import { ErrorStrip } from "../ErrorStrip";
@@ -459,6 +460,43 @@ describe("OutputSection", () => {
     render(<OutputSection state={state({ formats: ["static", "motion"] })} dispatch={vi.fn()} errors={{}} />);
     expect(screen.getByRole("button", { name: "instagram-story" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "youtube-short" })).toBeTruthy();
+  });
+
+  test("the html profiles are offered only to a template whose creative type produces html (X14)", () => {
+    // image-text ships static and motion (D119): a format-selection drift must
+    // not tempt it into a profile the boundary will refuse. Absent, never
+    // present-and-disabled (DESIGN.md §1 principle 5).
+    const { unmount } = render(
+      <OutputSection
+        state={state({
+          formats: ["html"],
+          platforms: ["google-display-html", "display-web-html"],
+        })}
+        dispatch={vi.fn()}
+        errors={{}}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "google-display-html" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "display-web-html" })).toBeNull();
+    unmount();
+
+    // image-html ships html: the same two profiles join the offer.
+    render(
+      <OutputSection
+        state={state({
+          template: {
+            ...CANONICAL_TEMPLATES["image-html"],
+            id: "canonical-image-html",
+          },
+          formats: ["html"],
+          platforms: ["google-display-html"],
+        })}
+        dispatch={vi.fn()}
+        errors={{}}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "google-display-html" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "display-web-html" })).toBeTruthy();
   });
 
   test("a capability-off host hides motion platforms but keeps the brief's own read-only (D12)", async () => {

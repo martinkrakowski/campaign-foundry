@@ -37,6 +37,42 @@
         "--maxWorkers=2"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/load-brief.ts",
+      "before": "  validateOutput(record.output, effectiveCapabilities);\n  validateTemplateOutputFamilies(template.creativeType, record.output);\n  validateMotionAxisRequested(record);",
+      "after": "  validateOutput(record.output, effectiveCapabilities);\n  validateMotionAxisRequested(record);",
+      "because": "Drop the boundary's output-family refusal: an image-text brief still passes with formats it can never produce (the platform/format agreement above only asks that a requested format has a shipper, not that the creative type makes it), runs, emits static rows, and packages nothing against the html profiles — exactly the silent dead end the refusal exists to close.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/load-brief.test.ts",
+        "-t",
+        "an image-text brief selecting google-display-html is refused, naming html and image-text",
+        "--maxWorkers=2"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/app/(shell)/export/page.tsx",
+      "before": "    const profile = platformProfile(id);\n    if (!profile?.formats.some((format) => runFormats.has(format))) return false;\n    const slots = profile?.sizes;",
+      "after": "    const profile = platformProfile(id);\n    const slots = profile?.sizes;",
+      "because": "Offer a display profile on its sizes alone again: the html profiles list the same five IAB units as the static ones, so a static run gets \"Google Display (HTML5)\" in the picker and its Package action deterministically finds no eligible asset — the size filter cannot see the format mismatch, only the format filter can.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/export/__tests__/export.test.tsx",
+        "-t",
+        "a static run is not offered the html profiles",
+        "--maxWorkers=2"
+      ],
+      "verdict": "caught"
     }
   ]
 }

@@ -57,13 +57,20 @@ export default function ExportPage() {
   // the run contains a motion creative, since the API produces those only while
   // its ffmpeg probe is on, so the run is the proof.
   const hasMotion = assets.some((a) => a.format === "motion");
+  // Formats present in the run — an asset with no `format` key is a static one.
+  const runFormats = new Set(assets.map((a) => a.format ?? "static"));
   // A display profile joins the picker only when the run produced an asset at one
   // of its sizes: the API fails a display profile with nothing to package, so on a
   // social-only run its Package action would deterministically error. Hidden, on
   // the same terms as motion platforms — the picker lists what can be packaged.
+  // X14: and it must produce a format the profile packages, not just a matching
+  // size — the html profiles list the same IAB units as the static ones, but a
+  // static run holds nothing they could package.
   const runSizes = new Set(assets.flatMap((a) => (a.size === undefined ? [] : [a.size])));
   const platforms = visiblePlatformIds({ motion: hasMotion }).filter((id) => {
-    const slots = platformProfile(id)?.sizes;
+    const profile = platformProfile(id);
+    if (!profile?.formats.some((format) => runFormats.has(format))) return false;
+    const slots = profile?.sizes;
     return slots === undefined || slots.some((slot) => runSizes.has(slot.size));
   });
   // A selection made while a motion platform was visible must not survive a run
