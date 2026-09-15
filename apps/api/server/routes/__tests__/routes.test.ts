@@ -1,5 +1,6 @@
-import { describe, test, expect, beforeEach, afterEach } from "vitest";
+import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createApp, createRouter, toWebHandler, type EventHandler } from "h3";
@@ -12,6 +13,20 @@ import resultHandler from "../campaigns/result.get.js";
 import packageHandler from "../campaigns/package.post.js";
 import jobHandler from "../campaigns/jobs/[id].get.js";
 import outputHandler from "../output/[...path].get.js";
+
+// node:fs/promises is an ESM namespace (not spy-able); route `open` through an
+// overridable hook so a test can swap the checked file for a symlink between
+// resolveConfinedForRead's check and the output route's own open (TOCTOU).
+type OpenFn = (path: string, flags: number) => Promise<import("node:fs/promises").FileHandle>;
+const fsHook = vi.hoisted(() => ({ open: undefined as undefined | OpenFn }));
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  return {
+    ...actual,
+    open: (path: string, flags?: number) =>
+      fsHook.open ? fsHook.open(path, flags as number) : actual.open(path, flags as number),
+  };
+});
 
 /** Mount one handler and return a `Request → Response` web handler. */
 const web = (method: "get" | "post", path: string, handler: EventHandler) => {
@@ -55,6 +70,7 @@ beforeEach(() => {
 });
 afterEach(async () => {
   await resetJobs();
+  fsHook.open = undefined;
   rmSync(dir, { recursive: true, force: true });
   for (const k of KEYS) {
     if (snap[k] === undefined) delete process.env[k];
@@ -556,6 +572,61 @@ describe("GET /output/**", () => {
     } finally {
       rmSync(outside, { recursive: true, force: true });
     }
+  });
+
+  test("404s and streams nothing when the checked file is swapped for an outside symlink before open", async () => {
+    // resolveConfinedForRead's realpath check passes on the plain file it sees. Before the
+    // route's own open() runs, an attacker with write access to the output tree replaces
+    // the same pathname with a symlink pointing outside the root — the TOCTOU window this
+    // lane closes with O_NOFOLLOW on the open, not with a second realpath check.
+    const outside = mkdtempSync(join(tmpdir(), "cf-output-outside-"));
+    try {
+      writeFileSync(join(outside, "secret.txt"), "DO-NOT-SERVE");
+      writeFileSync(resolve(dir, "swap.txt"), "original");
+      // resolveConfinedForRead returns realpath(target): on macOS the mkdtemp'd dir itself
+      // sits under a symlinked prefix (/var → /private/var), so match on the real path the
+      // route will actually pass to open(), not the lexical one built from `dir`.
+      const swapTarget = await realpath(resolve(dir, "swap.txt"));
+      fsHook.open = async (path, flags) => {
+        if (path === swapTarget) {
+          rmSync(swapTarget);
+          symlinkSync(join(outside, "secret.txt"), swapTarget);
+        }
+        const actual = await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
+        return actual.open(path, flags);
+      };
+      const res = await call("swap.txt");
+      expect(res.status).toBe(404);
+      const body = await res.text();
+      expect(JSON.parse(body)).toEqual({ error: "Not found" });
+      expect(body).not.toContain("DO-NOT-SERVE");
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  test("content-length and streamed bytes both come from the handle opened at check time, not a later read of the path", async () => {
+    // If size and stream came from two separate lookups by pathname, a file replaced
+    // between them could answer with one file's length and another file's bytes.
+    // Using one already-open handle for both makes that impossible: whatever the path
+    // does afterward, this response is self-consistent with what was open()ed.
+    const original = "original-content-that-is-longer-than-the-replacement";
+    const lexicalTarget = resolve(dir, "swap.png");
+    writeFileSync(lexicalTarget, original);
+    const swapTarget = await realpath(lexicalTarget);
+    fsHook.open = async (path, flags) => {
+      const actual = await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
+      const handle = await actual.open(path, flags);
+      if (path === swapTarget) {
+        rmSync(swapTarget);
+        writeFileSync(swapTarget, "short");
+      }
+      return handle;
+    };
+    const res = await call("swap.png");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-length")).toBe(String(original.length));
+    expect(await res.text()).toBe(original);
   });
 
   test("404s the root path when the root directory exists", async () => {

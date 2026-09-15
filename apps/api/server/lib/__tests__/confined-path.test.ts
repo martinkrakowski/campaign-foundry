@@ -1,7 +1,8 @@
 import { describe, test, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join, resolve, sep } from "node:path";
 import { resolveConfined, resolveConfinedForRead } from "../confined-path.js";
 
 const base = resolve("/tmp/cf-confine");
@@ -52,22 +53,29 @@ describe("resolveConfinedForRead", () => {
     );
   });
 
-  test("allows a symlink inside the root pointing at another file inside it", async () => {
+  test("allows a symlink inside the root pointing at another file inside it, and returns its real path", async () => {
     const root = join(dir, "root");
     mkdirSync(root);
     writeFileSync(join(root, "real.png"), "inside");
     symlinkSync(join(root, "real.png"), join(root, "alias.png"));
-    await expect(resolveConfinedForRead(root, "alias.png")).resolves.toBe(join(root, "alias.png"));
+    // dir (mkdtempSync under os.tmpdir()) can itself sit under a symlinked prefix
+    // (macOS /var → /private/var), so compare against the file's own real path
+    // rather than reconstructing it from the lexical `root`.
+    const realFile = await realpath(join(root, "real.png"));
+    await expect(resolveConfinedForRead(root, "alias.png")).resolves.toBe(realFile);
   });
 
-  test("allows a real root reached through a symlinked path", async () => {
+  test("allows a real root reached through a symlinked path, and returns the real path", async () => {
     // The macOS /tmp → /private/tmp shape: root itself lives under a symlink.
     const real = join(dir, "real");
     mkdirSync(real);
     writeFileSync(join(real, "a.png"), "x");
     const alias = join(dir, "alias");
     symlinkSync(real, alias);
-    await expect(resolveConfinedForRead(alias, "a.png")).resolves.toBe(join(alias, "a.png"));
+    const realRoot = await realpath(real);
+    const resolved = await resolveConfinedForRead(alias, "a.png");
+    expect(resolved).toBe(join(realRoot, "a.png"));
+    expect(resolved.startsWith(realRoot + sep)).toBe(true);
   });
 
   test("returns a missing target untouched — today's not-found behaviour stands", async () => {
@@ -80,7 +88,8 @@ describe("resolveConfinedForRead", () => {
     const root = join(dir, "root");
     mkdirSync(root);
     symlinkSync(root, join(root, "self"));
-    await expect(resolveConfinedForRead(root, "self")).resolves.toBe(join(root, "self"));
+    const realRoot = await realpath(root);
+    await expect(resolveConfinedForRead(root, "self")).resolves.toBe(realRoot);
   });
 
   test("propagates a non-ENOENT realpath error (ENOTDIR through a file) instead of hiding it", async () => {

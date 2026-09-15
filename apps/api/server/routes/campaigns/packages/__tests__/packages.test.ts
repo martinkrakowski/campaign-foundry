@@ -226,6 +226,24 @@ describe("GET /campaigns/packages/:campaignId/:platformId.zip", () => {
     expect(buf.subarray(30 + firstNameLen, 30 + firstNameLen + png.length)).toEqual(png);
   });
 
+  test("skips a symlinked file inside the platform dir when walking for the zip", async () => {
+    // Dirent.isFile()/isDirectory() (from readdir's withFileTypes) already report false for a
+    // symlink entry, so collectEntries's `else if (entry.isFile())` naturally excludes it —
+    // pinned explicitly here so a future refactor of the walk cannot silently start following it.
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+    mkdirSync(resolve(dir, "packages/camp/instagram-feed"), { recursive: true });
+    writeFileSync(resolve(dir, "packages/camp/instagram-feed/real.png"), png);
+    symlinkSync(
+      resolve(dir, "packages/camp/instagram-feed/real.png"),
+      resolve(dir, "packages/camp/instagram-feed/alias.png"),
+    );
+    const res = await zipCall("camp", "instagram-feed.zip");
+    expect(res.status).toBe(200);
+    const buf = Buffer.from(await res.arrayBuffer());
+    const files = parseCentralDirectory(buf);
+    expect(files.map((f) => f.name).sort()).toEqual(["real.png"]);
+  });
+
   test("returns 404 when the platform dir is a symlink pointing outside the output root", async () => {
     const outside = mkdtempSync(join(tmpdir(), "cf-zip-outside-"));
     try {
