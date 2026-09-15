@@ -513,5 +513,6 @@ the save.
 trimmed `[+-]?digits` with an optional integer exponent (`1e5` → 100000, ` 42 ` → 42) and refuses
 decimal form (`42.0`), trailing garbage (`12abc`) and blank — so `42.0` now validates as an error
 instead of silently saving 42. `isIntegerAtLeast` / `isIntegerInRange` in `validate.ts`, the
-floor-vs-count rule, `toBrief`, `withCountClamp` and `canPlan` all read through it; the API and the
-input controls are unchanged.
+floor-vs-count rule, `toBrief`, `withCountClamp` and `canPlan` all read through it. The API is
+unchanged; `PolicySection`'s readouts (`PolicySection.tsx`), stepper value and bounds read
+through the same parser.
