@@ -14,8 +14,12 @@ import { NodeCanvasCompositor } from "../NodeCanvasCompositor.js";
  * `logo.margin`, and the text layers' `typeFloor` — must change the drawn
  * result in the direction its name implies, and a layer carrying the prop
  * ABSENT (or an empty `props`) must render byte-identically to the constant it
- * overrides. `anchor` (text) and `alpha` (shade) are out of scope: each shadows
- * a variation axis and is left reading exactly as today.
+ * overrides.
+ *
+ * C4b / R-D4: the text layers' `anchor` prop joins them, but only when no live
+ * `variation.axes.anchor` is present — a prop never shadows a live axis. `alpha`
+ * (shade) is not un-deferred; it is withdrawn (R-D4): the tone axis is never
+ * absent, so an override would always silence it.
  *
  * The assertion surface is pixels: a prop is live iff moving it moves pixels,
  * and byte-neutral when absent iff the frames are equal to the pixel.
@@ -334,6 +338,56 @@ describe("text typeFloor is live (C4, R-D3)", () => {
   test("an absent typeFloor renders byte-identical to the constant", async () => {
     const a = await frame(textReq());
     const b = await frame(textReq({}));
+    expect(sameBytes(a, b)).toBe(true);
+  });
+});
+
+describe("text anchor prop is honoured only without the anchor axis (C4b, R-D4)", () => {
+  test("no axis anchor: the text layer's anchor prop wins over the layout-derived default", async () => {
+    const req = request({
+      // The bottom layout would derive "bottom" absent the prop (D54).
+      layout: "headline-bottom",
+      template: templateWith([IMAGE, { id: "copy", kind: "static-text", props: { anchor: "top" } }]),
+    });
+    const prepared = await NodeCanvasCompositor.prepare(req);
+    expect(prepared.anchor).toBe("top");
+
+    // Pixel proof, not just the field: the prop-driven render is byte-identical
+    // to an explicit axis anchor of "top" on the same layout — the merge moves
+    // the draw, not only `PreparedCreative.anchor`.
+    const withProp = await frame(req);
+    const explicitTop = await frame(
+      request({ layout: "headline-bottom", anchor: "top", template: templateWith([IMAGE, COPY]) }),
+    );
+    expect(sameBytes(withProp, explicitTop)).toBe(true);
+  });
+
+  test("a live anchor axis wins over the text layer's anchor prop", async () => {
+    const req = request({
+      layout: "headline-bottom",
+      anchor: "bottom", // the axis-selected anchor (T4)
+      template: templateWith([IMAGE, { id: "copy", kind: "static-text", props: { anchor: "top" } }]),
+    });
+    const prepared = await NodeCanvasCompositor.prepare(req);
+    expect(prepared.anchor).toBe("bottom");
+
+    const withAxis = await frame(req);
+    const axisAloneNoProp = await frame(
+      request({ layout: "headline-bottom", anchor: "bottom", template: templateWith([IMAGE, COPY]) }),
+    );
+    expect(sameBytes(withAxis, axisAloneNoProp)).toBe(true);
+  });
+
+  test("an absent anchor prop renders byte-identical to the layout-derived default", async () => {
+    const a = await frame(
+      request({ layout: "headline-bottom", template: templateWith([IMAGE, COPY]) }),
+    );
+    const b = await frame(
+      request({
+        layout: "headline-bottom",
+        template: templateWith([IMAGE, { id: "copy", kind: "static-text", props: {} }]),
+      }),
+    );
     expect(sameBytes(a, b)).toBe(true);
   });
 });

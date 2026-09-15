@@ -183,7 +183,8 @@ describe("dumpBrief layer and props order (L3b, D134)", () => {
       unit: "standard-web",
       layers: [
         { kind: "image", id: "bg" },
-        { kind: "shade", id: "tint", props: { alpha: 0.5 } },
+        // `shade` carries no props since R-D4 (withdrawn 2026-09-15).
+        { kind: "shade", id: "tint" },
         { kind: "accent", id: "band", props: { fadeHeight: 0.06, solidHeight: 0.05 } },
         { kind: "static-text", id: "head", props: { typeFloor: 0.4, anchor: "top" } },
         { kind: "logo", id: "mark", props: { margin: 0.04, width: 0 } },
@@ -195,8 +196,9 @@ describe("dumpBrief layer and props order (L3b, D134)", () => {
     const yaml = dumpBrief(templated);
     expect(yaml.indexOf("id: bg")).toBeLessThan(yaml.indexOf("kind: image"));
     expect(yaml.indexOf("id: tint")).toBeLessThan(yaml.indexOf("kind: shade"));
-    expect(yaml.indexOf("kind: shade")).toBeLessThan(yaml.indexOf("props:"));
-    expect(yaml.indexOf("props:")).toBeLessThan(yaml.indexOf("alpha: 0.5"));
+    expect(yaml.indexOf("id: band")).toBeLessThan(yaml.indexOf("kind: accent"));
+    expect(yaml.indexOf("kind: accent")).toBeLessThan(yaml.indexOf("props:"));
+    expect(yaml.indexOf("props:")).toBeLessThan(yaml.indexOf("solidHeight: 0.05"));
   });
 
   test("emits props keys in the order the LayerProps union declares them", () => {
@@ -206,10 +208,10 @@ describe("dumpBrief layer and props order (L3b, D134)", () => {
     expect(yaml.indexOf("width:")).toBeLessThan(yaml.indexOf("margin:"));
   });
 
-  test("a shade layer's props round-trip through YAML verbatim", () => {
+  test("a shade layer carries no props (R-D4) and round-trips through YAML verbatim", () => {
     const yaml = dumpBrief(templated);
     const parsed = parse(yaml) as typeof templated;
-    expect(parsed.template.layers[1]).toEqual({ kind: "shade", id: "tint", props: { alpha: 0.5 } });
+    expect(parsed.template.layers[1]).toEqual({ kind: "shade", id: "tint" });
   });
 
   test("a layer key named after an Object.prototype member survives the dump", () => {
@@ -280,25 +282,25 @@ describe("dumpBrief layer and props order (L3b, D134)", () => {
         layers: [
           { kind: "image", id: "bg" },
           // Keys deliberately scrambled to prove the writer orders them
-          { props: { alpha: 0.5 }, enabled: false, kind: "shade", id: "tint" },
+          { props: { width: 0.16 }, enabled: false, kind: "logo", id: "tint" },
           { id: "band", kind: "accent", enabled: true },
         ],
       },
     };
     const yaml = dumpBrief(withDisabledLayer);
     // Declared key position: id, kind, enabled, props
-    expect(yaml.indexOf("id: tint")).toBeLessThan(yaml.indexOf("kind: shade"));
-    expect(yaml.indexOf("kind: shade")).toBeLessThan(yaml.indexOf("enabled: false"));
+    expect(yaml.indexOf("id: tint")).toBeLessThan(yaml.indexOf("kind: logo"));
+    expect(yaml.indexOf("kind: logo")).toBeLessThan(yaml.indexOf("enabled: false"));
     expect(yaml.indexOf("enabled: false")).toBeLessThan(yaml.indexOf("props:"));
-    expect(yaml.indexOf("props:")).toBeLessThan(yaml.indexOf("alpha: 0.5"));
+    expect(yaml.indexOf("props:")).toBeLessThan(yaml.indexOf("width: 0.16"));
 
     // Round-trip determinism and byte-identity
     const parsed = parse(yaml) as typeof withDisabledLayer;
     expect(parsed.template.layers[1]).toEqual({
       id: "tint",
-      kind: "shade",
+      kind: "logo",
       enabled: false,
-      props: { alpha: 0.5 },
+      props: { width: 0.16 },
     });
     expect(parsed.template.layers[2]).toEqual({
       id: "band",

@@ -527,29 +527,15 @@ describe("parseBrief", () => {
       };
     };
 
-    test("a shade layer with props { alpha: 0.5 } parses and carries the props verbatim", () => {
-      const parsed = parseBrief({
-        ...valid,
-        template: withProps("shade", { alpha: 0.5 }),
-      });
-      expect(
-        parsed.template.layers.find((layer) => layer.kind === "shade"),
-      ).toEqual({
-        id: "shade",
-        kind: "shade",
-        props: { alpha: 0.5 },
-      });
+    test("a shade layer's props are always refused (R-D4 withdrew alpha)", () => {
+      expect(() =>
+        parseBrief({ ...valid, template: withProps("shade", { alpha: 0.5 }) }),
+      ).toThrow(
+        'Campaign brief field "template.layers[1].props" must be absent for layer kind "shade"; got {"alpha":0.5}.',
+      );
     });
 
-    test("0 is a legal fraction: props { alpha: 0 } and { width: 0 } parse", () => {
-      const withZeroAlpha = parseBrief({
-        ...valid,
-        template: withProps("shade", { alpha: 0 }),
-      });
-      expect(
-        withZeroAlpha.template.layers.find((layer) => layer.kind === "shade")
-          ?.props,
-      ).toEqual({ alpha: 0 });
+    test("0 is a legal fraction: props { width: 0 } parses", () => {
       const withZeroWidth = parseBrief({
         ...valid,
         template: withProps("logo", { width: 0 }),
@@ -593,7 +579,7 @@ describe("parseBrief", () => {
       );
     });
 
-    test("an empty props object on a propless kind is refused too; on image and shade it is legal", () => {
+    test("an empty props object on a propless kind is refused too; only image's optional alt keeps it legal", () => {
       // A video layer still carries no props at all, so even the empty object
       // is refused before any entry is walked.
       const videoBase = templateFromCanonical("short-video");
@@ -608,13 +594,16 @@ describe("parseBrief", () => {
       ).toThrow(
         'Campaign brief field "template.layers[0].props" must be absent for layer kind "video"; got {}.',
       );
-      // Image's alt and shade's props are both optional, so the empty object
-      // stays legal on each.
-      expect(() =>
-        parseBrief({ ...valid, template: withProps("image", {}) }),
-      ).not.toThrow();
+      // `shade` joined this set by R-D4 (withdrawn 2026-09-15): the tone axis
+      // is never absent, so an `alpha` override would always silence it.
       expect(() =>
         parseBrief({ ...valid, template: withProps("shade", {}) }),
+      ).toThrow(
+        'Campaign brief field "template.layers[1].props" must be absent for layer kind "shade"; got {}.',
+      );
+      // Image's alt is optional, so the empty object stays legal there.
+      expect(() =>
+        parseBrief({ ...valid, template: withProps("image", {}) }),
       ).not.toThrow();
     });
 
@@ -631,10 +620,10 @@ describe("parseBrief", () => {
 
     test.each([
       [
-        "alpha 1.4 on shade",
-        withProps("shade", { alpha: 1.4 }),
-        1,
-        "alpha",
+        "solidHeight 1.4 on accent",
+        withProps("accent", { solidHeight: 1.4 }),
+        2,
+        "solidHeight",
         "1.4",
       ],
       [
@@ -645,10 +634,10 @@ describe("parseBrief", () => {
         "-0.1",
       ],
       [
-        "a non-numeric alpha",
-        withProps("shade", { alpha: "0.5" }),
-        1,
-        "alpha",
+        "a non-numeric solidHeight",
+        withProps("accent", { solidHeight: "0.5" }),
+        2,
+        "solidHeight",
         '"0.5"',
       ],
     ])("refuses %s", (_label, template, index, field, repr) => {
@@ -699,8 +688,58 @@ describe("parseBrief", () => {
           { enforceCapabilities: false },
         ),
       ).toThrow(
-        'Campaign brief field "template.layers[1].props.alpha" must be a number in [0, 1]; got 1.4.',
+        'Campaign brief field "template.layers[1].props" must be absent for layer kind "shade"; got {"alpha":1.4}.',
       );
+    });
+  });
+
+  describe("anchor prop vs anchor axis (C4b, R-D4)", () => {
+    /** The canonical social-post template with `props` swapped onto one kind's layer. */
+    const withProps = (kind: string, props: unknown) => {
+      const base = templateFromCanonical(DEFAULT_CAMPAIGN_TYPE);
+      return {
+        ...base,
+        layers: base.layers.map((layer) =>
+          layer.kind === kind ? { ...layer, props } : layer,
+        ),
+      };
+    };
+
+    test("refuses a text layer's anchor prop together with a non-empty anchor axis", () => {
+      expect(() =>
+        parseBrief({
+          ...valid,
+          template: withProps("static-text", { anchor: "top" }),
+          variation: { axes: { anchor: ["top", "bottom"] } },
+        }),
+      ).toThrow(
+        /cannot set a text layer's "props\.anchor" together with a non-empty "variation\.axes\.anchor"/,
+      );
+    });
+
+    test("accepts the prop alone (no axis) and the axis alone (no prop)", () => {
+      expect(() =>
+        parseBrief({
+          ...valid,
+          template: withProps("static-text", { anchor: "top" }),
+        }),
+      ).not.toThrow();
+      expect(() =>
+        parseBrief({
+          ...valid,
+          variation: { axes: { anchor: ["top", "bottom"] } },
+        }),
+      ).not.toThrow();
+    });
+
+    test("an empty anchor axis does not conflict — 'present and non-empty' only", () => {
+      expect(() =>
+        parseBrief({
+          ...valid,
+          template: withProps("static-text", { anchor: "top" }),
+          variation: { axes: { anchor: [] } },
+        }),
+      ).not.toThrow();
     });
   });
 
