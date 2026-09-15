@@ -13,6 +13,7 @@ import {
 import {
   isBriefTemplate,
   templateFromCanonical,
+  type BriefTemplate,
 } from "@campaignfoundry/CampaignOrchestration/brief-template";
 import {
   LAYER_KINDS,
@@ -582,15 +583,15 @@ describe("derive.ts", () => {
       layers: { readonly id: string; readonly kind: "html"; readonly elements?: readonly HtmlElement[]; readonly enabled?: boolean }[] = [
         { id: "html", kind: "html" },
       ],
-    ) => ({
+    ): BriefTemplate => ({
       id: "canonical-image-html",
       version: 1,
-      creativeType: "image-html" as const,
+      creativeType: "image-html",
       unit: "standard-web",
       layers: [
-        { id: "image", kind: "image" as const },
+        { id: "image", kind: "image" },
         ...layers,
-        { id: "logo", kind: "logo" as const },
+        { id: "logo", kind: "logo" },
       ],
     });
 
