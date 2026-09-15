@@ -99,6 +99,15 @@ jobs:
       - name: Verify plan premises (yarn plan:verify)
         run: "yarn plan:verify"
 
+      # `arch validate` proves the layer rules; `sync --check` proves the tree
+      # matches what the manifest emits; neither looks at the per-context
+      # INVENTORIES (entities, value objects, use cases, ports, adapters)
+      # listed in `.architecture/manifest.yaml`, and this closes that gap:
+      # a declared entry with no module file, or a module file with no entry,
+      # fails the PR. Sub-second, like the gates above.
+      - name: Verify manifest inventories (yarn arch:inventory)
+        run: "yarn arch:inventory"
+
       # A mutation manifest records the mutations a lane claims its tests catch.
       # Replaying it is what makes the claim evidence rather than a report: two
       # seats this week stated verdicts they had never observed, one quoting

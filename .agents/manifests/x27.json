@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "lane": "X27",
+  "mutations": [
+    {
+      "file": "tools/arch-inventory/lib/inventory.ts",
+      "before": "  { key: \"ports.in\", kind: \"inPort\", layer: \"application\", sub: \"ports/in\" },\n  { key: \"ports.out\", kind: \"outPort\", layer: \"application\", sub: \"ports/out\" },",
+      "after": "  // (mutant) ports lists skipped in the comparison",
+      "because": "Drop the two ports lists from the comparison: an inbound port file that no context declares — exactly the ten-file drift X27 was opened for — now passes the gate in silence, so the missing-ports test must die.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/arch-inventory/lib/__tests__/inventory.test.ts",
+        "-t",
+        "an inbound port file with no declared entry is missing too"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/arch-inventory/lib/inventory.ts",
+      "before": "  const stale = declared.filter((entry) => !present.has(fileForEntry(entry, template, manifest.scope))).sort();",
+      "after": "  const stale = declared.filter(() => false).sort();",
+      "because": "Treat a stale entry as fine: a declared module whose file was deleted or renamed keeps a green gate and a manifest that lies about the code, so the stale-entry test must die.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/arch-inventory/lib/__tests__/inventory.test.ts",
+        "-t",
+        "a declared entry with no module file is stale, per context and list"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/arch-inventory/lib/inventory.ts",
+      "before": "  const duplicates = findDuplicates(declared, template, manifest.scope);",
+      "after": "  const duplicates: readonly string[] = [];",
+      "because": "Drop the duplicate check: two declared names that resolve to the same file (or a literal repeat) keep a green gate even though one of them is a dead entry nothing on disk backs individually, so the duplicate test must die.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/arch-inventory/lib/__tests__/inventory.test.ts",
+        "-t",
+        "two declared entries that resolve to the same file are duplicates"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

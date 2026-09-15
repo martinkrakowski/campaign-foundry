@@ -783,3 +783,102 @@ actor named above) plus precise timing of an intermediate-directory swap, not ju
 Mutation manifest: `.agents/manifests/x26.json` — dropping the realpath-vs-root comparison, the
 ENOENT passthrough, the real-path return, or `O_NOFOLLOW` on the output route's open each kill a
 distinct test (4/4 caught).
+
+---
+
+## 30. The manifest's per-context inventories were stale, and no gate could see it (X27)
+
+**Evidence.** `.architecture/manifest.yaml` lists each bounded context's modules —
+`entities`, `value_objects`, `domain_services`, `use_cases`, `ports.in`, `ports.out`,
+`adapters` — but the lists had drifted from the tree: `ports.in`/`ports.out` were empty for
+every context although ten port files exist (`CampaignOrchestration/src/application/ports/{in,out}/*.ts`
+— `CampaignPipelinePort`, `BackgroundCachePort`, `CompliancePort`, `CompositorPort`,
+`CopyGeneratorPort`, `ExportPort`, `ImageGeneratorPort`, `PlatformProfilePort`,
+`VideoCompositorPort`, plus `Distribution/.../out/PackageStorePort.ts`), every `adapters`
+list was empty although thirteen adapters exist, and four value objects and one use case of
+`CampaignOrchestration` were undeclared. `hexagen arch validate` passes regardless — it
+checks layer rules, not inventory — and `sync --check` only compares the tree against what
+the manifest *emits*, and an empty list emits nothing.
+
+**Consequence.** The manifest — the document the advisory PR reviewer, the ownership
+registry and every new lane reads first — described a system with no ports and no adapters.
+A reader trusting it concludes the hexagonal core has no boundaries at all.
+
+**Fix.** Reconcile every list with the tree, and add the missing gate. The reconciliation
+surfaced a second, deeper drift: hexagen's built-in stub naming (`{name}.in-port.ts`,
+`{name}.adapter.ts`) does not match this repo's committed `<Name>Port.ts` / `<Name>.ts`
+convention, so declaring any port or adapter made `sync --dry-run` plan to **create** a
+duplicate stub beside every real module (e.g. `CampaignPipelinePort.in-port.ts`) — an
+undeclarable gap, not a paperwork one. Aligning `generator.sync.stubs.naming` with the
+files that actually exist removed every creation intent (verified: Stubs 0/0/0 created/
+updated/deleted, 46 skipped, Total ops 0). Kebab-case data modules (`advertising-units.ts`,
+`canvas-util.ts`, …) stay out of inventory by rule: the generator PascalCases every entry
+name when it derives a filename, so such a file can never be a manifest module — the rule
+is stated in `tools/arch-inventory/lib/naming.ts` and applied by the new check.
+
+**X27 — shipped in this PR.** `.architecture/manifest.yaml` now lists all 46 modules
+(10 ports, 13 adapters, the missing value objects and use case included), and
+`tools/arch-inventory` (`yarn arch:inventory`, wired into CI next to `plan:verify`)
+compares each of the seven lists against its folder — stale declared entries and missing
+module files both fail — using the generator's own naming rules read from the manifest, so
+the gate tracks convention changes instead of freezing them. Before the reconciliation it
+reported **28 missing, 0 stale**; on the reconciled manifest it reports no drift. Unit
+tests pin the comparison, the manifest parsing and the CLI exit codes on temp fixtures, not
+the real tree. Mutation manifest: `.agents/manifests/x27.json` — skipping the ports lists in
+the comparison kills the missing-port test, and treating a stale entry as fine kills the
+stale test (2/2 caught).
+
+**X27 — remediation (this PR).** Follow-up review (Qodo/CodeRabbit/PR-Agent) found the tool
+above had re-implemented hexagen's own manifest model — parsing `.architecture/manifest.yaml`
+with the bare `yaml` package (undeclared at the root: a transitive hoist, not a real
+dependency) instead of the generator's own `loadManifest` — and that `.agents/architecture.md`
+pointed contributors at a command that discards the fix. Both are corrected:
+
+- `tools/arch-inventory` now loads the manifest through `@hexagen-monaco/sync`'s own
+  `loadManifest` (anchors, split manifests, and the owned-port object form `{ name, owner? }`
+  are its job, not this tool's), and resolves file names the way the generator does —
+  `DEFAULT_NAMING`, then `generator.sync.stubs.naming`, then a context's own
+  `generator.stubs.naming` override — reusing hexagen's exported `portName` and
+  `sanitizeScope` (`resolveScope` is declared in the package's types but is **not** part of
+  its runtime export list; this tool reimplements its precedence on top of the primitive
+  hexagen does export, and says so in `naming.ts`). The check now also catches two declared
+  entries that resolve to the same file (or a literal repeat), and a bare `{name}` naming
+  template no longer collapses every entry to `"Stub"` (an off-by-`-0` in the suffix-slice).
+  A malformed stub-naming template, or any other failure while resolving the manifest, now
+  exits with the tool's malformed-input code and a message — the CLI no longer rethrows an
+  unrecognized error as an uncaught exception.
+- `.agents/architecture.md` and a new comment above `generator:` in
+  `.architecture/manifest.yaml` now say to declare ports and modules by hand and verify with
+  `yarn arch:inventory` + `yarn sync:dry`, and name why: **`hexagen arch port` and
+  `hexagen arch context` both save the manifest through a path
+  (`generateManifestYaml`/`generateManifestYaml2` → `saveManifest` in
+  `@hexagen-monaco/sync`'s `dist/cli.js`) that keeps only `system, scope, architecture,
+  bounded_contexts, monorepo, apps`** — verified against `dist/cli.js`; it drops the
+  top-level `generator:` block, which holds this repo's `naming` overrides, so the next such
+  command would scaffold duplicate stub files beside every real port and adapter. This is an
+  upstream hexagen-monaco limitation, not a campaign-foundry one: `generateManifestYaml`/
+  `generateManifestYaml2` should preserve `generator:` (or merge into it) the way the
+  separately-exported `saveManifest` in `dist/index.js` already does (`yaml3.dump(manifest)`,
+  no whitelist) — filed for the hexagen-monaco repository, not fixed here.
+
+  One reviewed finding turned out **false** on inspection and was not applied: hexagen does
+  **not** read a layer's configured `subfolders` (`generator.sync.layers.*.subfolders`) to
+  decide where a named entity/port/adapter is written. `buildEmissionPlan` and
+  `resolveEmissionDir` (`dist/index.js`) hard-code the seven emission sites
+  (`domain/entities`, `domain/value-objects`, `domain/services`, `application/use-cases`,
+  `application/ports/in`, `application/ports/out`, `infrastructure/adapters`) and only the
+  layer's own `folder` is manifest-configurable; `subfolders` is read solely by
+  `ensureLayerFolders` to scaffold empty placeholder directories. `tools/arch-inventory`
+  already hard-codes the same seven sites (`inventory.ts`'s `LISTS`), which is the generator's
+  own behavior, not a shortcut — reading `subfolders` instead would have made the check
+  diverge from what hexagen actually does.
+
+  Also confirmed, unchanged (PR-Agent, declined): an empty configured layer `folder` does not
+  produce a leading double slash — hexagen's own `isSafeLayerFolder`/`resolveLayerDir`
+  (`dist/index.js`) already treats an empty string as unsafe and falls back to `src/<layer>`,
+  and this tool's own `layerFolders` does the same.
+
+  Mutation manifest `.agents/manifests/x27.json` now carries three mutations — skipping the
+  ports lists, treating a stale entry as fine, and dropping the duplicate check — all replay
+  as caught (3/3). `yarn arch:inventory` and `yarn sync:dry` were re-run against the real
+  repo after the rewrite: still no drift, still `Total ops : 0`.
