@@ -233,10 +233,8 @@ and its comment in `packages/shared/src/infrastructure/brief-yaml.ts`, and the f
 legal (`brief-yaml.test.ts`, `brief-template.test.ts`). The lane reaches `packages/shared`. Known drift, not blocking: `packages/ui/src/preview-layers.ts` reads `CREATIVE_GEOMETRY.shadeAlpha` directly and
 the SVG stand-in already ignores C4's live props.
 
-```premise C4b
-# Either gap keeps the lane open: the shade layer still accepts an alpha prop, or the compositor never reads a text anchor prop.
-grep -qE 'shade: \[\s*"alpha"\s*\]' packages/CampaignOrchestration/src/domain/value-objects/brief-template.ts || ! grep -qE 'anchor \?\? [A-Za-z_.]*[Aa]nchor' packages/CreativeGeneration/src/infrastructure/adapters/NodeCanvasCompositor.ts
-```
+**C4b — shipped in this PR.** Its premise was retired when it landed; `plan:verify` no
+longer tracks it.
 
 **One committed test needed a fixture fix, not a rewrite.** The red-checkpoint commit's `typeFloor`
 direction test asserted a comparison its own 400×400 fixture could never produce: at that canvas size
