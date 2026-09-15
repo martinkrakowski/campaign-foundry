@@ -19,7 +19,7 @@ import {
 import { cn } from "@/lib/cn";
 import * as messages from "@/components/campaign/messages";
 import type { EditorState, EditorAction } from "@/components/campaign/editor-state";
-import { RATIO_OPTIONS } from "@/components/campaign/editor-state";
+import { parsePolicyInteger, RATIO_OPTIONS } from "@/components/campaign/editor-state";
 import { RatioPanel } from "@/components/campaign/RatioPanel";
 import { ratioDisplayName, anchorDisplayName } from "@/components/campaign/display-names";
 import {
@@ -125,8 +125,11 @@ function RatioAxis({
   errors: FieldErrors;
   compact: boolean;
 }) {
-  const count = Math.max(0, Number.parseInt(state.variation.count, 10) || 0);
-  const floor = Math.max(0, Number.parseInt(state.variation.perRatio, 10) || 0);
+  // X18: every policy integer the section displays reads through the one parser
+  // validation and toBrief save with — `Number.parseInt` truncated a draft of
+  // "1e5" (accepted, saved as 100000) to 1 on screen.
+  const count = Math.max(0, parsePolicyInteger(state.variation.count) ?? 0);
+  const floor = Math.max(0, parsePolicyInteger(state.variation.perRatio) ?? 0);
   const drawable = drawableRatios(state);
   // The same motion narrowing the policy applies: a motion-only plan draws only
   // the ratios its requested platforms package.
@@ -152,7 +155,7 @@ function RatioAxis({
         <Stepper
           aria-label="Coverage per ratio"
           min={0}
-          max={Math.max(1, Number.parseInt(state.variation.count, 10) || 1)}
+          max={Math.max(1, parsePolicyInteger(state.variation.count) ?? 1)}
           value={state.variation.perRatio}
           invalid={Boolean(errors.perRatio)}
           allowUnset
@@ -296,7 +299,7 @@ export function PolicySection({ state, dispatch, errors, compact = false }: { st
               aria-label="Count"
               min={1}
               max={axisMax}
-              value={Number.parseInt(state.variation.count, 10) || 1}
+              value={parsePolicyInteger(state.variation.count) ?? 1}
               invalid={Boolean(errors.count)}
               readout={
                 <span
@@ -305,7 +308,7 @@ export function PolicySection({ state, dispatch, errors, compact = false }: { st
                     errors.count ? "border-error text-error" : "border-border text-text-primary",
                   )}
                 >
-                  {messages.countReadout(Number.parseInt(state.variation.count, 10) || 0, axisMax)}
+                  {messages.countReadout(parsePolicyInteger(state.variation.count) ?? 0, axisMax)}
                 </span>
               }
               onChange={(value) => dispatch({ type: "setVariation", field: "count", value: String(value) })}
@@ -423,7 +426,7 @@ export function PolicySection({ state, dispatch, errors, compact = false }: { st
             <Stepper
               aria-label="Coverage per product"
               min={0}
-              max={Math.max(1, Number.parseInt(state.variation.count, 10) || 1)}
+              max={Math.max(1, parsePolicyInteger(state.variation.count) ?? 1)}
               value={state.variation.perProduct}
               invalid={Boolean(errors.perProduct)}
               allowUnset

@@ -19,7 +19,6 @@ import type { CreativeTemplateLayer } from "@campaignfoundry/CampaignOrchestrati
 import { satisfiesOrderConstraints } from "@campaignfoundry/CampaignOrchestration/brief-template";
 import type { LayerKind } from "@campaignfoundry/CampaignOrchestration/layer-kinds";
 import type { EditorState } from "./editor-state";
-import { axisProductSize } from "./editor-state";
 
 /**
  * Derives default formats from a list of platform IDs.
@@ -60,22 +59,6 @@ export function platformsToSizes(platforms: readonly string[]): DisplaySize[] {
     }
   }
   return DISPLAY_SIZE_VALUES.filter((size) => sizes.has(size));
-}
-
-/**
- * Pure helper to clamp policy count against the axis product size ceiling.
- */
-export function clampPolicy(state: EditorState): EditorState {
-  const axisMax = axisProductSize(state);
-  const count = Number.parseInt(state.variation.count, 10) || 0;
-  if (count > axisMax) {
-    return {
-      ...state,
-      variation: { ...state.variation, count: String(axisMax) },
-      countNotice: axisMax,
-    };
-  }
-  return state.countNotice === null ? state : { ...state, countNotice: null };
 }
 
 /**

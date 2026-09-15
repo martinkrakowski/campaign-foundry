@@ -10,6 +10,7 @@ import {
   anchorAxisActive,
   drawableRatios,
   motionPackagedRatios,
+  parsePolicyInteger,
   timelineDurations,
 } from "./editor-state";
 
@@ -70,15 +71,16 @@ export function maxMinDistance(state: EditorState): number {
   return axes;
 }
 
+// X18: both gates read through the one parser `toBrief` saves with, so the
+// integer a draft validates as is exactly the integer a save writes.
 function isIntegerAtLeast(value: string, min: number): boolean {
-  if (value.trim() === "") return false;
-  const num = Number(value);
-  return Number.isInteger(num) && num >= min;
+  const num = parsePolicyInteger(value);
+  return num !== undefined && num >= min;
 }
 
 function isIntegerInRange(value: string, min: number, max: number): boolean {
-  const num = Number(value);
-  return Number.isInteger(num) && num >= min && num <= max;
+  const num = parsePolicyInteger(value);
+  return num !== undefined && num >= min && num <= max;
 }
 
 function isOptionalIntegerAtLeast(value: string, min: number): boolean {
@@ -291,7 +293,7 @@ export function validatePolicy(state: EditorState): FieldErrors {
   // The planner refuses a plan whose ratio floor cannot fit the count
   // (perRatio × the ratios it will draw > count); the editor says so before
   // the run instead of surfacing the shortfall as a plan error.
-  const floor = Number.parseInt(state.variation.perRatio, 10) || 0;
+  const floor = parsePolicyInteger(state.variation.perRatio) ?? 0;
   const drawable = drawableRatios(state);
   const drawableCount = drawable.length;
   // A selection the motion narrowing empties parses cleanly and saves, then
@@ -305,8 +307,11 @@ export function validatePolicy(state: EditorState): FieldErrors {
         ? messages.ratioNoneDrawablePackaged(packaged.map(ratioDisplayName))
         : messages.ratioNoneDrawableNone();
   }
-  const count = Number.parseInt(state.variation.count, 10) || 0;
-  if (floor > 0 && floor * drawableCount > count) {
+  // X18: the floor rule needs a count the parser reads. A refused count draft
+  // (e.g. "42.0") carries its own error above; treating it as 0 here would
+  // blame a positive floor for the count's failure.
+  const count = parsePolicyInteger(state.variation.count);
+  if (count !== undefined && floor > 0 && floor * drawableCount > count) {
     errors.perRatio = messages.perRatioExceeds(drawableCount, floor, count);
   }
   if (state.variation.layout.length === 0) errors.layout = messages.layout;

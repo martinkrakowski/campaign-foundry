@@ -31,7 +31,7 @@ import { PROHIBITED_TERMS as DOMAIN_PROHIBITED_TERMS } from "@campaignfoundry/Go
 // (`validateClickDestination`, load-brief.ts) reads, so the client mirror cannot drift.
 import { clickDestinationProblem } from "@campaignfoundry/CampaignOrchestration/click-destination";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
-import { initialEditorState, editorReducer, toBrief, fromBrief, type EditorState } from "../editor-state";
+import { initialEditorState, editorReducer, toBrief, fromBrief, parsePolicyInteger, type EditorState } from "../editor-state";
 // The real gate Save hits, imported across apps for the divergence tests below: tests
 // may cross package boundaries (arch test-double rules), and a mirror without the
 // parser it mirrors is exactly the drift these tests exist to catch.
@@ -458,6 +458,119 @@ describe("validatePolicy", () => {
     expect(validatePolicy({ ...randomized(), variation: twoRatios }).perRatio).toBeUndefined();
     // an unset floor never trips it, whatever the count parses to
     expect(validatePolicy(randomized({ perRatio: "", count: "-5" })).perRatio).toBeUndefined();
+  });
+});
+
+describe("X18 — the policy integer validated is the policy integer saved", () => {
+  const randomized = (over: Partial<EditorState["variation"]> = {}) => {
+    const state = valid({ mode: "variation" });
+    return { ...state, variation: { ...state.variation, ...over } };
+  };
+
+  type PolicyField = "count" | "seed" | "minDistance" | "perProduct" | "perRatio";
+  const fields: PolicyField[] = ["count", "seed", "minDistance", "perProduct", "perRatio"];
+
+  /** The integer `toBrief` actually wrote for that field, or undefined when absent. */
+  const savedValue = (state: EditorState, field: PolicyField): number | undefined => {
+    const variation = toBrief(state).variation as Record<string, unknown> | undefined;
+    const coverage = variation?.coverage as Record<string, unknown> | undefined;
+    switch (field) {
+      case "count":
+      case "seed":
+      case "minDistance":
+        return variation?.[field] as number | undefined;
+      case "perProduct":
+      case "perRatio":
+        return coverage?.[field] as number | undefined;
+    }
+  };
+
+  // Free-typed drafts the two sides used to disagree about: `Number` reads "1e5"
+  // as 100000 (so validation accepted it) while `parseInt` truncates it to 1 (so
+  // the save wrote a different number than the one green-checked). Whitespace,
+  // decimal form, trailing garbage and blank must agree the same way.
+  const drafts = [" 42 ", "42.0", "1e5", "1e-5", "12abc", ""];
+
+  // perRatio "1e5" means a floor of 100000 over 3 drawable ratios, so its base
+  // count must be 300000 or the floor-vs-count rule (not the integer rule)
+  // rejects the draft and the agreement is never observed.
+  const base: Record<PolicyField, Partial<EditorState["variation"]>> = {
+    count: {},
+    seed: {},
+    minDistance: {},
+    perProduct: {},
+    perRatio: { count: "300000" },
+  };
+
+  test("for every policy field, validate accepts a draft only if toBrief saves exactly its value", () => {
+    for (const field of fields) {
+      for (const draft of drafts) {
+        const state = randomized({ ...base[field], [field]: draft });
+        const accepted = validatePolicy(state)[field] === undefined;
+        const saved = savedValue(state, field);
+        if (draft.trim() === "") {
+          // A blank optional field is valid and saves as the absent key; a blank
+          // required count is refused outright.
+          expect(accepted, `${field}="${draft}"`).toBe(field !== "count");
+          if (accepted) expect(saved, `${field}="${draft}"`).toBeUndefined();
+        } else if (accepted) {
+          expect(saved, `${field}="${draft}"`).toBe(Number(draft));
+        }
+      }
+    }
+  });
+
+  test("a free-typed exponent seed validates and saves as the integer it means", () => {
+    const state = randomized({ seed: "1e5" });
+    expect(validatePolicy(state).seed).toBeUndefined();
+    expect(toBrief(state).variation?.seed).toBe(100000);
+    expect(() => parse(state)).not.toThrow();
+  });
+
+  test("a decimal-form draft is refused by validation, never truncated into a save", () => {
+    expect(validatePolicy(randomized({ seed: "42.0" })).seed).toBe(messages.seed);
+    expect(validatePolicy(randomized({ count: "42.0" })).count).toBe(messages.count);
+    expect(savedValue(randomized({ seed: "42.0" }), "seed")).toBeUndefined();
+  });
+
+  test("a draft with trailing garbage is refused and never saved as its prefix", () => {
+    expect(validatePolicy(randomized({ seed: "12abc" })).seed).toBe(messages.seed);
+    expect(savedValue(randomized({ seed: "12abc" }), "seed")).toBeUndefined();
+  });
+
+  test("whitespace around an integer draft is tolerated by both sides", () => {
+    const state = randomized({ seed: " 42 " });
+    expect(validatePolicy(state).seed).toBeUndefined();
+    expect(savedValue(state, "seed")).toBe(42);
+  });
+
+  test("an unsafe integer draft parses to nothing, not to the rounded value it names (X18)", () => {
+    // "9007199254740993" (2^53 + 1) is not representable: Number reads it as
+    // 9007199254740992 and isInteger passes, so the draft would validate as one
+    // integer while toBrief saves another. Beyond ±MAX_SAFE_INTEGER the draft
+    // means nothing and must fail like any other refused value.
+    expect(parsePolicyInteger("9007199254740993")).toBeUndefined();
+    // the boundary itself is exact and still parses; as a seed it then fails its
+    // own uint32 range, which is fine — this asserts parsing only
+    expect(parsePolicyInteger("9007199254740991")).toBe(9007199254740991);
+    for (const field of ["seed", "perProduct", "perRatio"] as const) {
+      const errors = validatePolicy(randomized({ [field]: "9007199254740993" }));
+      expect(errors[field], field).toBe(messages[field]);
+      expect(savedValue(randomized({ [field]: "9007199254740993" }), field)).toBeUndefined();
+    }
+  });
+
+  test("a count the parser refuses is blamed on the count only, never on the floor (X18)", () => {
+    // "42.0" fails the shared parser, so the floor-vs-count rule must not
+    // read it as 0 and fabricate a second error blaming perRatio; the count's
+    // own error already covers the invalid draft.
+    const errors = validatePolicy(randomized({ count: "42.0", perRatio: "1" }));
+    expect(errors.count).toBe(messages.count);
+    expect(errors.perRatio).toBeUndefined();
+    // a count that does parse still trips the floor rule
+    expect(validatePolicy(randomized({ count: "5", perRatio: "2" })).perRatio).toBe(
+      messages.perRatioExceeds(3, 2, 5),
+    );
   });
 });
 
