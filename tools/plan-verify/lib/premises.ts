@@ -14,15 +14,27 @@ import type { Premise } from "./types.js";
  *
  * A premise whose script trims to empty is an error, not something to skip:
  * blanking a block would otherwise remove the lane from the check entirely,
- * turning "silence the drift detector" into a valid edit.
+ * turning "silence the drift detector" into a valid edit. An opening fence
+ * that is never closed is the same silent loss, so it is an error too.
  */
 const FENCE = /^```premise[ \t]+(\S+)[ \t]*\r?\n([\s\S]*?)^```[ \t]*$/gm;
 
+/**
+ * Opening lines, counted per line so an unclosed fence is visible: FENCE
+ * matches a whole block and simply skips an opening that is never closed,
+ * which drops the lane from the check — the same silent loss an empty
+ * script causes. An id-less opening is not a premise and is not counted,
+ * matching the behaviour `FENCE` itself pins.
+ */
+const OPENING = /^```premise[ \t]+(\S+)/gm;
+
 export function parsePremises(plan: string, markdown: string): readonly Premise[] {
   const found: Premise[] = [];
-  // `matchAll` needs a fresh lastIndex: FENCE is module-scoped and global.
+  const closed = new Set<number>();
+  // `matchAll` needs a fresh lastIndex: these regexes are module-scoped and global.
   FENCE.lastIndex = 0;
   for (const match of markdown.matchAll(FENCE)) {
+    closed.add(match.index);
     const lane = match[1];
     const script = match[2].trim();
     if (script === "") {
@@ -33,6 +45,16 @@ export function parsePremises(plan: string, markdown: string): readonly Premise[
       );
     }
     found.push({ plan, lane, script });
+  }
+  OPENING.lastIndex = 0;
+  const openings = [...markdown.matchAll(OPENING)];
+  if (openings.length > found.length) {
+    const unclosed = openings.find((m) => !closed.has(m.index));
+    throw new Error(
+      `UNCLOSED  ${unclosed?.[1]}  (${plan})\n` +
+        `  a premise fence that is never closed hides the lane instead of failing it.\n` +
+        `  Close it with a lone \`\`\` line, or delete the whole fence and retire the lane.`,
+    );
   }
   return found;
 }
