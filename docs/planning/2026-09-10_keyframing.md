@@ -70,7 +70,7 @@ stays as it is, and text-effect tracks play on beat-local progress exactly as th
 | Lane | Task | Proof |
 |---|---|---|
 | **K1a** | **Shipped.** **The track model, no resolver.** Easing moves to the domain (K-D7); `Track`/`Stop` value objects (K-D8) and `layerTracksProblem`, validated at both brief boundaries (K-D9's one refusal: a duplicate `t` on one track's same clock). **No compositor *behaviour* change (one import), no rendering, no resolver.** | Round-trips through YAML in declared key order (positional); an invalid track is refused at both boundaries; the compositor's goldens are unchanged. |
-| **K1b** | **Dispatchable next, behind K1a.** **The resolver.** `resolveTracks(tracks, beats, clocks) → { byLayer, copy }` (K-D8), pure, beside `beatAt`. Composition per property (K-D9), folded in declaration order. **No caller in the compositor yet** — K2 wires it. | Interpolation at the default easing per clock; the legacy single-beat path; a crossfade instant's two complementary `copy` mixes; `dy` tracks add and `opacity` tracks multiply in a fixture that proves fold order matters. |
+| **K1b** | **Shipped.** **The resolver.** `resolveTracks(layers, beats, clocks) → { byLayer, copy }` (K-D8), pure, beside `beatAt`, in `resolve-tracks.ts`. Composition per property (K-D9), folded in declaration order. **No caller in the compositor yet** — K2 wires it. | Interpolation at the default easing per clock; the legacy single-beat path; a crossfade instant's two complementary `copy` mixes; `dy` tracks add and `opacity` tracks multiply in a fixture that proves fold order matters. |
 | **K2** | **Express the four `MOTION_KINDS` as tracks and render from the resolver.** The vocabulary the user writes does not change. | **Per-frame byte-identity** for every motion kind across the canonical templates. Any drift stops the lane. |
 | **K3** | **Express the four text effects the same way.** | Per-frame byte-identity, including the beat-local windows and the settled-pose behaviour. |
 | **K4** | **Author tracks directly in a brief**, alongside presets; a hand-authored track and a preset's expansion on one layer and property **compose per K-D9** (no precedence rule) — preset expansions fold **before** hand-authored tracks, K3's existing order, and that is the only order. `html` refuses tracks (K1a), so K4 (and K5) never offer tracks on an `html` layer. | A hand-authored track renders; a track on an absent or disabled layer renders nothing and says nothing; `canonicalLayer` (K5/X16) drops `tracks: []` exactly as it drops `elements: []`. |
@@ -145,45 +145,34 @@ kind) was too wide. The duplicate-`t` refusal (K-D9) is scoped **per clock** (K-
 may be declared in any order, and only a repeated `t` within one clock's own subsequence is refused —
 the same `t` on two different clocks in one track is not a duplicate.
 
-**K1b — dispatchable, not this PR.** The resolver, made concrete enough to brief:
-
-- **Input is the layer list**, `{ id, enabled?, kind, tracks? }[]` — not bare tracks — because K-D4
-  addresses a track by the layer it nests on, and "absent or disabled resolves to nothing" needs the
-  layer's `enabled` flag in hand, not just its tracks.
-- **The legacy (timeline-less) path never calls `beatAt`**, which throws on an empty resolved list
-  (`CopyTimeline.vo.ts`); it uses one implicit beat spanning `[0, 1]` with `local = t` instead, per K-D8.
-- **An `effect`-clock stop's `t` is the raw effect progress** (`effectT ?? local` on the timeline path,
-  `effectT ?? t` on the legacy path, K-D8). The entrance window is expressed as stop *positions*, not a
-  fraction constant re-read from `CREATIVE_GEOMETRY`: e.g. `fade-in` becomes an `opacity` track with
-  stops at `t = 0` and `t = entranceFraction` (`0.3`, `creative-geometry.ts:64`), and holding after the
-  last stop reproduces today's `easeOutCubic(clamp01(local / entranceFraction))` (`NodeCanvasCompositor.ts`
-  `textEffectPose`, ~623) exactly — the hold IS the "no stop past this t" rule below, not a special case.
-- **`Pose = { dx, dy, opacity, scale }`** is a domain type, identities `0, 0, 1, 1` — "no tracks" is the
-  identity pose. The resolver returns scalars; the drawer maps `opacity` to its own `alpha` and owns
-  the scale pivot (the resolver has no notion of a drawing origin).
-- **Interpolation:** a track's stops are read sorted by `t` within their own clock (K1a's validator
-  guarantees no duplicate, but not declared order). Before the first stop and after the last, the
-  value holds at that boundary stop's value. A segment between two stops eases with the **starting**
-  stop's `easing`, defaulting to `ease-out-cubic` (K-D7/K-D8) — an ending stop's own `easing` never
-  applies to the segment before it.
-- **Text-kind layers resolve into `copy`** (one entry per `(beat, mix)`, K-D8); every other kind
-  resolves into `byLayer`. The returned pose **excludes `mix`** — the caller applies the crossfade
-  weight last, preserving K-D9's existing fold order byte for byte:
-  `opacity = (riseAlpha * fx.alpha) * layerAlpha` becomes `(resolvedOpacity) * layerAlpha`, `layerAlpha`
-  applied outside the resolver exactly where it is today.
-
-```premise K1b
-# K1b is the resolver: resolveTracks(tracks, beats, clocks) -> { byLayer, copy },
-# pure, beside beatAt, with no compositor caller yet (K2 wires it). This premise
-# holds while the resolver does not exist; once it lands, retire this fence in
-# the same commit (the completing-PR rule) -- plan:verify only fails on STALE,
-# so a fence left behind after K1b ships would read as coverage and provide
-# none. K1b's own brief also rewrites the K4 premise below: its closing note
-# says K4 is blocked behind K1's resolver, and once that file exists the K4
-# rule has a home to probe (a second input to THAT function), not the whole
-# domain tree for a word.
-! grep -rq 'resolveTracks' packages/CampaignOrchestration/src/domain --include='*.ts'
-```
+**K1b — shipped in this PR.** `resolveTracks(layers, beats, clocks) → { byLayer, copy }` (K-D8), pure,
+beside `beatAt`, is new in `packages/CampaignOrchestration/src/domain/value-objects/resolve-tracks.ts`
+(kebab-case, outside the manifest inventory like `tracks.ts`/`easing.ts` — verified empirically,
+`arch:inventory` clean and `sync:dry` at Total ops 0, not assumed). It takes the layer list, `{ id,
+enabled?, kind, tracks? }[]` — not bare tracks — because K-D4 addresses a track by the layer it nests
+on, and "absent, disabled or trackless resolves to the identity pose" needs the `enabled` flag in
+hand, not just the tracks; a layer id `resolveTracks` never saw reads the same way through the new
+`poseOf(resolved, id)` helper, which defaults a missing `byLayer` key to `IDENTITY_POSE`. `Pose = {
+dx, dy, opacity, scale }` is the new domain type, identities `0, 0, 1, 1`. The legacy (timeline-less)
+path never calls `beatAt` — it uses one implicit beat spanning `[0, 1]` (exported as `IMPLICIT_BEAT`)
+with `local = t` exactly, per K-D8; with a real timeline the beat is selected by `beatAt(beats,
+clocks.copyT ?? clocks.t)`, and a crossfade instant yields two live beats, which is why `copy` is one
+entry per `(beat, mix)` — folded across every enabled, tracked text-kind layer (`static-text`,
+`animated-text`) into ONE pose per beat (K-D6: two text layers already collapse to one beat block),
+never one entry per layer. A stop's `t` reads one of three clocks (K-D8) — `pose` is `clocks.t`
+directly, `beat` is the beat-local progress `NodeCanvasCompositor.drawBeat` already computes, `effect`
+is `effectT ?? local` (unifying the compositor's `effectT ?? local` / `effectT ?? t`, since the legacy
+path's `local` IS `t`). A track's stops are assumed to share one clock, the one its first stop names
+— the validator (K1a) does not forbid a mixed-clock track, but nothing gives one a meaning, so stops
+on any other clock are silently ignored, the same "resolves to nothing" shape K-D4 already uses. Two
+tracks on one (layer, property) fold in **declaration order** (`dx`/`dy` add, `opacity`/`scale`
+multiply); a fixture proves the order matters, but needs **three** tracks, not two, to do it — IEEE-754
+multiplication is exactly commutative for a single pair (`a * b === b * a`, bit for bit), so a
+two-operand product can never distinguish a fold from its reverse. `easing.ts` gains the
+`EasingKind → (t) => number` table (`EASINGS`) K1b reads instead of switching on the string. Red
+tests (15 cases) shown before the implementation; `mutate:verify .agents/manifests/k1b.json`: 2
+mutations re-run, both caught (the ending stop's easing leaking into the segment before it; the fold
+folding in reverse declaration order, caught only by the three-track fixture above).
 
 ```premise K2
 # K2 moves preset application out of the compositor: the draw paths read a
@@ -243,39 +232,48 @@ kept — but the first red is more likely arithmetic than a wrong model.
 **The completing PR retires its own premise fence.** `plan:verify` runs in CI, so a lane that ships
 and leaves its fence behind fails its own build.
 
-### K4's premise was one merge from retiring a live lane
+### K4's premise, rewritten now that K1b's resolver exists (K1b's brief)
 
-It grepped for `precedence` within 160 characters of `track|preset|authored` across the whole
-`CampaignOrchestration/domain` tree, **including tests and comments** — and "preset" is already live
-prose there (`campaign-types.ts:6-16`). **K1's own value object would trigger it**: the natural
-sentence to write is *"precedence between a preset and an authored track is K4's"*, and that retires
-K4 the day K1 merges. It now probes the resolver's own decision rather than the vocabulary around it.
+The previous two attempts (recorded in git history) grepped the whole `CampaignOrchestration/domain`
+tree for a *name* — first "precedence" near "preset"/"track"/"authored" including comments (K1a's own
+doc comment would have matched it), then a `SCREAMING_SNAKE` rule-constant guess. Both failed the same
+way: **a decision has no fixed name**, so no string search reliably detects one. K-D9 also superseded
+the premise's original framing — composition (not precedence) was fixed in K1, so K4 was never going
+to add a rule-naming constant for this fence to find.
+
+K1b gives this a different kind of target: not a decision to name, but a **concrete file** the plan's
+own K4 row (§2) and K1a's DoD already point at — `canonicalLayer`
+(`apps/web/src/components/campaign/editor-state.ts`), which today drops `enabled: true` and
+`elements: []` to their absent defaults (X16, D129, HL5a) and, per §2's K4 row, must drop `tracks: []`
+the same way once a brief can carry a **hand-authored** `tracks` field — the second input this fence
+now probes for is that provenance: a track a human wrote in the brief, not one a preset expanded,
+reaching a place that already special-cases the layer defaults. The word "tracks" does not appear
+anywhere in that file today (checked, not assumed); K4 adding the drop makes it appear.
 
 ```premise K4
-# KNOWN-WEAK, and recorded as such rather than trusted.
+# K4 authors tracks directly in a brief, alongside presets. K-D9 already fixed
+# how a hand-authored track and a preset's expansion on one (layer, property)
+# compose (declaration order, never a precedence rule) -- so K4's own
+# contribution is the AUTHORING surface, not a fold rule, and this fence
+# probes for that surface's editor-side effect instead of a decision name
+# (see the prose above for why the previous two name-probes both failed).
 #
-# (Superseded framing: K-D9 fixes composition in K1, so K4 no longer decides a
-# precedence rule. This fence is left as the record of a known-weak probe and
-# should be rewritten by K4's brief to probe authored tracks in a brief.)
-# K4 decided a precedence RULE between a preset's expansion and a hand-authored
-# track. A rule can be named anything, so no name probe can reliably detect it.
-# Three attempts failed in three different ways: the first matched "precedence"
-# near "preset" across the tree including comments, so K1's own doc comment would
-# have retired K4 on merge; the second probed camelCase in a repository that
-# names fixed rules in SCREAMING_SNAKE; this third one still misses plausible
-# names — PRESET_OVER_AUTHORED and TRACK_SOURCE_ORDER both leave it holding,
-# verified.
+# The concrete second input K1b's existence gives this fence a home to probe:
+# canonicalLayer already drops a layer's redundant defaults (`enabled: true`,
+# `elements: []`); the plan's own K4 row says it must drop `tracks: []` the
+# same way once a brief can carry a hand-authored one. "tracks" appears
+# nowhere in this file today.
 #
-# It is kept because it can only fail SAFE: it holds until one of these names
-# appears, so it cannot retire a live lane. It cannot be relied on to notice
-# that K4 has shipped. **Retire this fence by hand when K4 merges** — the
-# completing-PR rule does not protect a fence that never flips, because
-# plan:verify only fails on STALE.
-#
-# The durable fix is not a better regex. K4 is blocked behind K1's resolver, and
-# once that exists the rule has a home: probe THAT file for a second input, not
-# the whole tree for a word.
-! grep -rqiE '(track|preset)[_-]?precedence|precedence[_-]?(rule|order)|authored[_-]?wins|preset[_-]?wins|reconcile[_-]?tracks|merge[_-]?tracks' packages/CampaignOrchestration/src/domain --include=*.ts
+# How this can still fail SAFE (not notice a shipped K4): if K4 ships by
+# widening `layerTracksProblem`'s authoring surface and K2/K3's preset
+# expansion alone, and defers the editor's canonical-form handling of a
+# hand-authored `tracks` field to K5 (already a separate, scope-deferred
+# lane) -- or if `canonicalLayer` is renamed or restructured for an
+# unrelated reason before then -- this file stays untouched and the fence
+# holds past K4's merge. Retire or rewrite it by hand at that point, the
+# same known limit the previous fence carried; `plan:verify` only fails on
+# STALE, so nothing else will remind you.
+! grep -q 'tracks' apps/web/src/components/campaign/editor-state.ts
 ```
 
 ---
@@ -289,7 +287,7 @@ the poster clock sampling and the crossfade `drawBeat` calls have shifted) — *
 | id | Decision |
 |---|---|
 | **K-D7** | **`easeOutCubic` moves to the domain** (`CampaignOrchestration` `domain/value-objects/easing.ts`, exported from the barrel); the compositor imports it back. K1's "no compositor change" means "no compositor **behaviour** change" — one import, byte-neutral. |
-| **K-D8** | **A stop names its clock**: `clock: "pose" \| "beat" \| "effect"`. `pose` reads `clocks.t` directly. `beat` is beat-local progress — **corrected 2026-09-15 (mechanism, not the decision):** *which* beat is current comes from `clocks.copyT`, via `beatAt(scenes.resolved, copyT)` inside `drawSequencedCopy` (`NodeCanvasCompositor.ts` ~1037), but the progress *within* that beat runs on the **pose clock**: `local = clamp01((t - beat.startT) / (beat.endT - beat.startT))` (~1064) — `copyT` selects the beat, `t` is the axis the progress itself reads. `effect` reads `clocks.effectT`, falling back to the beat-local clock (`local`) on the timeline path and to `t` on the legacy path — unifying `effectT ?? local` with `effectT ?? t`. The poster samples all three independently: `t = restT(request.motion)`, `copyT = posterCopyTAt(...)` (`CanvasFfmpegVideoCompositor.ts` ~122, ~124), `effectT = 1`. The resolver is `resolveTracks(tracks, beats, clocks: { t, copyT?, effectT? }) → { byLayer: Map<layerId, Pose>; copy: ReadonlyArray<{ beat, mix, pose }> }`. The legacy (timeline-less) path is one implicit beat spanning [0, 1] with `local = t`. The copy pose is per **(beat, mix)** because `drawBeat` runs twice at one instant during a crossfade. |
+| **K-D8** | **A stop names its clock**: `clock: "pose" \| "beat" \| "effect"`. `pose` reads `clocks.t` directly. `beat` is beat-local progress — **corrected 2026-09-15 (mechanism, not the decision):** *which* beat is current comes from `clocks.copyT`, via `beatAt(scenes.resolved, copyT)` inside `drawSequencedCopy` (`NodeCanvasCompositor.ts` ~1037), but the progress *within* that beat runs on the **pose clock**: `local = clamp01((t - beat.startT) / (beat.endT - beat.startT))` (~1064) — `copyT` selects the beat, `t` is the axis the progress itself reads. `effect` reads `clocks.effectT`, falling back to the beat-local clock (`local`) on the timeline path and to `t` on the legacy path — unifying `effectT ?? local` with `effectT ?? t`. The poster samples all three independently: `t = restT(request.motion)`, `copyT = posterCopyTAt(...)` (`CanvasFfmpegVideoCompositor.ts` ~122, ~124), `effectT = 1`. The resolver is `resolveTracks(layers, beats, clocks: { t, copyT?, effectT? }) → { byLayer: Map<layerId, Pose>; copy: ReadonlyArray<{ beat, mix, pose }> }` — `layers`, not bare `tracks`, per K-D4 (shipped in K1b). The legacy (timeline-less) path is one implicit beat spanning [0, 1] with `local = t`. The copy pose is per **(beat, mix)** because `drawBeat` runs twice at one instant during a crossfade. |
 | **K-D9** | **Two tracks on one (layer, property) compose; they are never refused.** Operators are fixed per property: `dx`/`dy` **add**, `opacity`/`scale` **multiply**. K1's validator refuses only a stop set with duplicate `t` on one track (per clock, K-D8; declaration order of stops is free). K3 folds in today's order — `opacity = (riseAlpha * fx.alpha) * layerAlpha` — because float multiplication is not associative and the byte gate would move otherwise. K4's "precedence" framing is superseded: composition is fixed in K1. |
 
 Risk carried: the `(beat, mix)` shape brings `CopyTimeline` into the resolver's signature; the alternative (per-layer pose only,
