@@ -38,6 +38,9 @@ import { DWELL_TOLERANCE } from "@campaignfoundry/CampaignOrchestration/copy-tim
 // the two modules were importing each other); re-exported here for their old callers.
 export { axisProductSize, drawableRatios, motionPackagedRatios } from "./editor-state";
 import { PLATFORM_PROFILES, type PlatformProfile } from "@campaignfoundry/Distribution/platform-profiles";
+// The weight derivation (HL5c): the warning and the meter read the one figure,
+// so they cannot disagree about what over budget is.
+import { htmlWeightReading } from "./derive";
 import * as messages from "./messages";
 import { creativeTypeDisplayName, formatDisplayName, modeDisplayName, platformDisplayName, ratioDisplayName } from "./display-names";
 
@@ -496,9 +499,27 @@ export function getTotalErrorCount(sectionErrors: Record<string, FieldErrors>): 
   return Object.values(sectionErrors).reduce((count, errors) => count + Object.keys(errors).length, 0);
 }
 
+/**
+ * The draft's weight warnings (HL5c, HL-D6): an over-budget html unit is a
+ * WARNING, never an error. The meter's figure counts `index.html` alone — the
+ * raster fallback joins the same budget at packaging and does not exist until
+ * generation — so the editor's number is a lower bound and packaging's check
+ * of the finished unit is the enforcement. Refusing Save on a lower bound
+ * would block drafts packaging would have shipped.
+ */
+export function validateTemplateWarnings(state: EditorState): FieldWarnings {
+  const warnings: FieldWarnings = {};
+  const reading = htmlWeightReading(state);
+  if (reading !== undefined && reading.overBy > 0) {
+    warnings.htmlWeight = messages.htmlWeightOverage(reading.overBy);
+  }
+  return warnings;
+}
+
 export function validateWarnings(state: EditorState): Record<string, FieldWarnings> {
   return {
     copy: validateCopyWarnings(state),
+    template: validateTemplateWarnings(state),
   };
 }
 

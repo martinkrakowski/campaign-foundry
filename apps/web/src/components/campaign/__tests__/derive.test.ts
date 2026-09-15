@@ -1,4 +1,4 @@
-import { describe, test, expect } from "vitest";
+import { describe, test, expect, vi } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import { DISPLAY_SIZE_VALUES } from "@campaignfoundry/CampaignOrchestration/display-sizes";
@@ -13,15 +13,21 @@ import {
 import {
   isBriefTemplate,
   templateFromCanonical,
+  type BriefTemplate,
 } from "@campaignfoundry/CampaignOrchestration/brief-template";
 import {
   LAYER_KINDS,
   type LayerKind,
 } from "@campaignfoundry/CampaignOrchestration/layer-kinds";
+import { assembleHtml } from "@campaignfoundry/CampaignOrchestration/markup-assembler";
+import type { HtmlElement } from "@campaignfoundry/CampaignOrchestration/html-element";
+import type { PlatformProfile } from "@campaignfoundry/Distribution/platform-profiles";
 import {
   addableKinds,
   canMoveLayer,
   findLegalInsertionIndex,
+  htmlByteBudget,
+  htmlWeightReading,
   layerMoveDirections,
   platformsToFormats,
   platformsToRatios,
@@ -41,6 +47,24 @@ import {
   editorReducer,
   type EditorState,
 } from "../editor-state";
+
+// The weight meter's memo (HL5c) is only observable at the seam it protects: how
+// many times the markup is actually assembled. Wrap the assembler with a spy that
+// still runs the real thing, so every other assertion in this file keeps reading
+// byte-exact figures while the memo tests count the assemblies behind them.
+const { assembleSpy } = vi.hoisted(() => ({ assembleSpy: vi.fn() }));
+vi.mock("@campaignfoundry/CampaignOrchestration/markup-assembler", async (importOriginal) => {
+  const actual =
+    await importOriginal<
+      typeof import("@campaignfoundry/CampaignOrchestration/markup-assembler")
+    >();
+  assembleSpy.mockImplementation((options) =>
+    actual.assembleHtml(
+      options as Parameters<typeof actual.assembleHtml>[0],
+    ),
+  );
+  return { ...actual, assembleHtml: assembleSpy };
+});
 
 describe("derive.ts", () => {
   describe("platformsToFormats", () => {
@@ -553,6 +577,324 @@ describe("derive.ts", () => {
       expect(typeof findOcclusionDelta).toBe("function");
       expect(OCCLUSION_TABLE).toBeDefined();
       expect("checkTemplateOcclusion" in deriveModule).toBe(false);
+    });
+  });
+
+  describe("html weight meter derivations (HL5c, HL-D6)", () => {
+    const ZERO = { top: 0, right: 0, bottom: 0, left: 0 } as const;
+
+    /** An html profile for the two seams that take an injected table. */
+    const fakeHtml = (
+      id: string,
+      over: Partial<PlatformProfile> = {},
+    ): PlatformProfile => ({
+      id,
+      label: `Fake ${id}`,
+      formats: ["html"],
+      sizes: [{ size: "300x250", insets: ZERO }],
+      safeInsets: ZERO,
+      maxBytes: 64,
+      ...over,
+    });
+
+    const htmlTemplate = (
+      layers: { readonly id: string; readonly kind: "html"; readonly elements?: readonly HtmlElement[]; readonly enabled?: boolean }[] = [
+        { id: "html", kind: "html" },
+      ],
+    ): BriefTemplate => ({
+      id: "canonical-image-html",
+      version: 1,
+      creativeType: "image-html",
+      unit: "standard-web",
+      layers: [
+        { id: "image", kind: "image" },
+        ...layers,
+        { id: "logo", kind: "logo" },
+      ],
+    });
+
+    const frame = { x: 0.1, y: 0.2, w: 0.5, h: 0.3, anchor: "middle" } as const;
+    const text = (value: string): HtmlElement => ({
+      kind: "text",
+      text: value,
+      frame,
+    });
+
+    const meterState = (over: Partial<EditorState> = {}): EditorState =>
+      ({
+        ...initialEditorState(),
+        template: htmlTemplate(),
+        platforms: ["google-display-html"],
+        sizes: ["300x250"],
+        products: [
+          {
+            key: 1,
+            id: "alpha",
+            name: "A",
+            primaryColor: "#1473E6",
+            logoPath: "l.png",
+            inputAsset: "",
+            idTouched: true,
+          },
+        ],
+        ...over,
+      }) as EditorState;
+
+    describe("htmlByteBudget", () => {
+      test("no html profile among the platforms → no budget", () => {
+        expect(htmlByteBudget(["instagram-feed", "google-display"])).toBeUndefined();
+        expect(htmlByteBudget([])).toBeUndefined();
+        // An id no profile matches is skipped, not a crash.
+        expect(htmlByteBudget(["nonexistent-platform"])).toBeUndefined();
+      });
+
+      test("the budget is the selected html profile's own maxBytes (HL-D6)", () => {
+        const budget = htmlByteBudget(["google-display-html"]);
+        expect(budget?.label).toBe("Google Display (HTML5)");
+        expect(budget?.maxBytes).toBe(150 * 1024);
+      });
+
+      test("two html profiles → the SMALLEST maxBytes is the budget", () => {
+        const profiles = {
+          wide: fakeHtml("wide", { maxBytes: 200 * 1024 }),
+          tight: fakeHtml("tight", { maxBytes: 100 * 1024, label: "Tight" }),
+        };
+        const budget = htmlByteBudget(["wide", "tight"], profiles);
+        expect(budget?.maxBytes).toBe(100 * 1024);
+        expect(budget?.label).toBe("Tight");
+        // Order-independent: the tightest wins whichever way they are listed.
+        expect(htmlByteBudget(["tight", "wide"], profiles)?.maxBytes).toBe(
+          100 * 1024,
+        );
+      });
+    });
+
+    describe("htmlWeightReading", () => {
+      test("no html profile selected → no reading", () => {
+        expect(
+          htmlWeightReading(meterState({ platforms: ["instagram-feed"] })),
+        ).toBeUndefined();
+      });
+
+      test("the figure is assembleHtml's byteLength for the same inputs", () => {
+        // Expected computed INDEPENDENTLY here — the same options spelled out,
+        // not the derivation's own internals.
+        const elements = [text("Stay wild"), { kind: "button", text: "Shop", frame } as HtmlElement];
+        const state = meterState({
+          template: htmlTemplate([{ id: "html", kind: "html", elements }]),
+          clickDestination: "https://example.com/shop",
+        });
+        const expected = assembleHtml({
+          elements,
+          canvas: { size: "300x250" },
+          brandColor: "#1473E6",
+          style: {},
+          clickDestination: "https://example.com/shop",
+        }).byteLength;
+        const reading = htmlWeightReading(state);
+        expect(reading?.bytes).toBe(expected);
+        expect(reading?.maxBytes).toBe(150 * 1024);
+        expect(reading?.profileLabel).toBe("Google Display (HTML5)");
+        expect(reading?.overBy).toBe(0);
+      });
+
+      test("adding a text element increases the measured bytes", () => {
+        const before = htmlWeightReading(meterState());
+        const elements = [text("Stay wild")];
+        const after = htmlWeightReading(
+          meterState({ template: htmlTemplate([{ id: "html", kind: "html", elements }]) }),
+        );
+        expect(before).toBeDefined();
+        expect(after?.bytes).toBeGreaterThan(before?.bytes ?? 0);
+      });
+
+      test("the figure is the LARGEST across the selected sizes", () => {
+        const elements = [text("Stay wild")];
+        const state = meterState({
+          template: htmlTemplate([{ id: "html", kind: "html", elements }]),
+          sizes: ["320x50", "300x600"],
+        });
+        const small = assembleHtml({
+          elements,
+          canvas: { size: "320x50" },
+          brandColor: "#1473E6",
+          style: {},
+        }).byteLength;
+        const large = assembleHtml({
+          elements,
+          canvas: { size: "300x600" },
+          brandColor: "#1473E6",
+          style: {},
+        }).byteLength;
+        expect(small).not.toBe(large);
+        expect(htmlWeightReading(state)?.bytes).toBe(Math.max(small, large));
+      });
+
+      test("a disabled html layer's elements are not measured", () => {
+        const measured = [text("Stay wild")];
+        const state = meterState({
+          template: htmlTemplate([
+            { id: "html", kind: "html", elements: measured },
+            {
+              id: "html-off",
+              kind: "html",
+              elements: [text("Z".repeat(100_000))],
+              enabled: false,
+            },
+          ]),
+        });
+        const expected = assembleHtml({
+          elements: measured,
+          canvas: { size: "300x250" },
+          brandColor: "#1473E6",
+          style: {},
+        }).byteLength;
+        expect(htmlWeightReading(state)?.bytes).toBe(expected);
+      });
+
+      test("a selected size the html profile does not carry contributes nothing", () => {
+        // The profile ships only 300x250; the draft also selected 728x90, which
+        // no html placement will ever render.
+        const profiles = { "odd-html": fakeHtml("odd-html", { maxBytes: 150 * 1024 }) };
+        const state = meterState({
+          platforms: ["odd-html"],
+          sizes: ["728x90"],
+        });
+        expect(htmlWeightReading(state, profiles)).toBeUndefined();
+      });
+
+      test("an html profile with no sizes at all yields no reading", () => {
+        const profiles = { "ratio-html": fakeHtml("ratio-html", { sizes: undefined, ratio: "1:1" }) };
+        expect(
+          htmlWeightReading(meterState({ platforms: ["ratio-html"] }), profiles),
+        ).toBeUndefined();
+      });
+
+      test("a brand colour the assembler refuses leaves nothing to measure", () => {
+        expect(
+          htmlWeightReading(
+            meterState({
+              products: [
+                {
+                  key: 1,
+                  id: "alpha",
+                  name: "A",
+                  primaryColor: "not-a-colour",
+                  logoPath: "l.png",
+                  inputAsset: "",
+                  idTouched: true,
+                },
+              ],
+            }),
+          ),
+        ).toBeUndefined();
+        // No product at all — the same refusal, not a crash.
+        expect(htmlWeightReading(meterState({ products: [] }))).toBeUndefined();
+      });
+
+      test("over budget: overBy names the overage; within budget it is zero", () => {
+        const elements = [text("A".repeat(500))];
+        const measured = assembleHtml({
+          elements,
+          canvas: { size: "300x250" },
+          brandColor: "#1473E6",
+          style: {},
+        }).byteLength;
+        const over = htmlWeightReading(
+          meterState({
+            platforms: ["tiny-html"],
+            template: htmlTemplate([{ id: "html", kind: "html", elements }]),
+          }),
+          { "tiny-html": fakeHtml("tiny-html", { maxBytes: 512 }) },
+        );
+        expect(over?.overBy).toBe(measured - 512);
+        expect(over?.profileLabel).toBe("Fake tiny-html");
+        const within = htmlWeightReading(
+          meterState({ platforms: ["roomy-html"] }),
+          { "roomy-html": fakeHtml("roomy-html", { maxBytes: 150 * 1024 }) },
+        );
+        expect(within?.overBy).toBe(0);
+      });
+    });
+
+    // HL5c fix: the reading is shared between the meter and the warning through
+    // one memoised derivation, and it swallows only the failure it expects (an
+    // unweighable brand colour) rather than every assembler error.
+    describe("the memo and the expected failure (HL5c fix)", () => {
+      // A marker the rest of the file never assembles, so the module-level
+      // single-entry memo is guaranteed cold at each call under test. An `image`
+      // element rides along: it carries no `text`, so the key's `el.text ?? ""`
+      // covers the absent-copy branch the text-only fixtures never reach.
+      const meterElements = (marker: string): EditorState =>
+        meterState({
+          template: htmlTemplate([
+            {
+              id: "html",
+              kind: "html",
+              elements: [text(marker), { kind: "image", frame } as HtmlElement],
+            },
+          ]),
+        });
+
+      test("two calls with the same inputs assemble the markup once", () => {
+        const state = meterElements("assemble-once");
+        assembleSpy.mockClear();
+        const first = htmlWeightReading(state);
+        expect(assembleSpy.mock.calls.length).toBeGreaterThan(0);
+        const afterFirst = assembleSpy.mock.calls.length;
+        const second = htmlWeightReading(state);
+        // The second caller (the warning, or a re-render) is served from the memo:
+        // no new assembly, and it is the very same reading object.
+        expect(assembleSpy.mock.calls.length).toBe(afterFirst);
+        expect(second).toBe(first);
+      });
+
+      test("a changed element text re-assembles", () => {
+        htmlWeightReading(meterElements("before-edit"));
+        assembleSpy.mockClear();
+        htmlWeightReading(meterElements("after-edit"));
+        expect(assembleSpy.mock.calls.length).toBeGreaterThan(0);
+      });
+
+      test("a missing or non-hex brand color yields no reading and never calls the assembler", () => {
+        // The one failure this derivation expects is checked up front, so the
+        // assembler is never asked to throw it — no reading, no swallow.
+        const noProducts = { ...meterElements("no-colour"), products: [] };
+        assembleSpy.mockClear();
+        expect(htmlWeightReading(noProducts)).toBeUndefined();
+        expect(assembleSpy).not.toHaveBeenCalled();
+        assembleSpy.mockClear();
+        const badColour = meterState({
+          template: htmlTemplate([
+            { id: "html", kind: "html", elements: [text("bad-colour")] },
+          ]),
+          products: [
+            {
+              key: 1,
+              id: "alpha",
+              name: "A",
+              primaryColor: "rebeccapurple",
+              logoPath: "l.png",
+              inputAsset: "",
+              idTouched: true,
+            },
+          ],
+        });
+        expect(htmlWeightReading(badColour)).toBeUndefined();
+        expect(assembleSpy).not.toHaveBeenCalled();
+      });
+
+      test("an unexpected error from the assembler propagates rather than hiding the meter", () => {
+        const state = meterElements("propagate-boom");
+        assembleSpy.mockClear();
+        assembleSpy.mockImplementationOnce(() => {
+          throw new Error("assembler defect");
+        });
+        expect(() => htmlWeightReading(state)).toThrow("assembler defect");
+        // Nothing was cached on the way out, so the very next call assembles for
+        // real (the spy's default implementation delegates to the assembler).
+        expect(htmlWeightReading(state)?.bytes).toBeGreaterThan(0);
+      });
     });
   });
 });

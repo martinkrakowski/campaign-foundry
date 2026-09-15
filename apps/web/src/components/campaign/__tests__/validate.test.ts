@@ -976,3 +976,56 @@ describe("inline legal lint warnings (R1)", () => {
     }
   });
 });
+
+describe("html weight warning (HL5c, HL-D6)", () => {
+  const frame = { x: 0.1, y: 0.2, w: 0.5, h: 0.3, anchor: "middle" } as const;
+
+  /** An image-html draft aimed at one html placement at one size. */
+  const weightState = (text: string): EditorState =>
+    ({
+      ...valid(),
+      template: {
+        id: "canonical-image-html",
+        version: 1,
+        creativeType: "image-html",
+        unit: "standard-web",
+        layers: [
+          { id: "image", kind: "image" },
+          {
+            id: "html",
+            kind: "html",
+            elements: [{ kind: "text", text, frame }],
+          },
+          { id: "logo", kind: "logo" },
+        ],
+      },
+      platforms: ["google-display-html"],
+      sizes: ["300x250"],
+    }) as EditorState;
+
+  test("an over-budget unit gets a warning — the meter's figure is a lower bound", () => {
+    const warnings = validateWarnings(weightState("A".repeat(200_000)));
+    expect(warnings.template?.htmlWeight).toMatch(/over budget/i);
+    expect(hasSectionWarnings(warnings, "template")).toBe(true);
+    expect(getTotalWarningCount(warnings)).toBeGreaterThan(0);
+  });
+
+  test("the weight never blocks Save: no error section carries an htmlWeight key", () => {
+    // Packaging, with the fallback's bytes counted, is the enforcement (HL-D6);
+    // the editor only warns, so the draft stays saveable while it is measured.
+    const errors = validateState(weightState("A".repeat(200_000)));
+    for (const sectionErrors of Object.values(errors)) {
+      expect(sectionErrors).not.toHaveProperty("htmlWeight");
+    }
+  });
+
+  test("within budget → nothing to warn about", () => {
+    const warnings = validateWarnings(weightState("Stay wild"));
+    expect(hasSectionWarnings(warnings, "template")).toBe(false);
+  });
+
+  test("no html profile selected → no weight warning", () => {
+    const state = { ...weightState("A".repeat(200_000)), platforms: ["instagram-feed"] } as EditorState;
+    expect(hasSectionWarnings(validateWarnings(state), "template")).toBe(false);
+  });
+});

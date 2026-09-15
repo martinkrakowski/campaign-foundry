@@ -1352,3 +1352,36 @@ export function htmlElementKindLabel(kind: string): string {
   return kind;
 }
 
+/* ── The html weight meter (HL5c, HL-D6) ─────────────────────────────────── */
+
+/**
+ * A byte count in the meter's voice: whole KB. Rounded UP, so the meter never
+ * talks about "0 KB" for markup that is not empty, and an overage never
+ * rounds away to nothing — a lower bound shown as zero is a lie of the exact
+ * kind HL-D6 exists to remove.
+ */
+export function weightKb(bytes: number): string {
+  return String(Math.ceil(bytes / 1024));
+}
+
+/** The meter's sentence: what the markup weighs, against which placement. */
+export function htmlWeightMeterText(
+  bytes: number,
+  maxBytes: number,
+  profileLabel: string,
+): string {
+  return `${weightKb(bytes)} KB of ${weightKb(maxBytes)} KB for ${profileLabel}.`;
+}
+
+/**
+ * Why the meter's figure is a lower bound, said beside it: the fallback joins
+ * the same budget at packaging, and its bytes do not exist until generation.
+ */
+export const htmlWeightFallbackNote =
+  "The raster fallback image is added at packaging and counts toward the same budget — its size is unknown until the unit is generated, so packaging's check is the one that enforces it.";
+
+/** The over-budget sentence — the meter's warning and the draft's warning, in one voice. */
+export function htmlWeightOverage(overBytes: number): string {
+  return `Over budget by ${weightKb(overBytes)} KB.`;
+}
+

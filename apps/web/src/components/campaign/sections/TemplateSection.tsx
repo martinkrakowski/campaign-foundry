@@ -6,6 +6,7 @@ import { Button, IconButton } from "@/components/ui";
 import {
   addableKinds,
   canMoveLayer,
+  htmlWeightReading,
   removableLayerIds,
   toggleableLayerIds,
 } from "@/components/campaign/derive";
@@ -61,6 +62,11 @@ export function TemplateSection({ state, dispatch }: SectionProps) {
   const addable = addableKinds(state);
   const removable = removableLayerIds(state);
   const toggleable = toggleableLayerIds(state);
+  // The live weight reading (HL5c, HL-D6), computed once for the section: it
+  // weighs the whole draft's html markup against the tightest selected html
+  // placement, so every html layer's editor shows the same figure. Undefined
+  // when no html placement is selected — then no meter renders at all.
+  const reading = htmlWeightReading(state);
   // The required kinds, as display names: a layer with no remove control is
   // one the boundary would refuse to strip — every template the editor can
   // hold carries each required kind exactly once (a second presence would be
@@ -210,6 +216,7 @@ export function TemplateSection({ state, dispatch }: SectionProps) {
                   layerId={layer.id}
                   elements={layer.elements ?? []}
                   dispatch={dispatch}
+                  reading={reading}
                 />
               ) : null}
             </li>
