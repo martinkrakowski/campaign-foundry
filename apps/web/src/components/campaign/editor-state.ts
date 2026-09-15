@@ -48,6 +48,7 @@ import {
 import { MOTION_KINDS } from "@campaignfoundry/CampaignOrchestration/motion-kinds";
 import {
   MAX_BEATS,
+  MAX_SCENES,
   MAX_WEIGHT,
   MIN_DWELL_SEC,
   timelineProblem,
@@ -79,6 +80,7 @@ export {
   MIN_DURATION_SEC,
   MOTION_KINDS,
   MAX_BEATS,
+  MAX_SCENES,
   MAX_WEIGHT,
   MIN_DWELL_SEC,
 };
@@ -249,6 +251,12 @@ export interface TimelineBeatDraft {
   text: string;
   /** An integer in [1, MAX_WEIGHT] — the Stepper bounds it, timelineProblem holds it. */
   weight: number;
+  /**
+   * The beat's own background (VE5a) — an asset path; absent means the creative's.
+   * Persisted: `toBrief` writes it back, so a loaded brief never loses its scenes
+   * on save (D11). At most MAX_SCENES distinct values per timeline (VE-D10).
+   */
+  background?: string;
 }
 
 export interface TimelineDraft {
@@ -2165,6 +2173,9 @@ export function toBrief(state: EditorState): CampaignBrief {
           beats: state.timeline.beats.map((beat) => ({
             text: beat.text,
             weight: beat.weight,
+            // VE5a: written back only when the beat names one — a draft that never
+            // had a scene must serialise exactly as it did without the field (D3).
+            ...(beat.background !== undefined ? { background: beat.background } : {}),
           })),
           transition: state.timeline.transition,
           keyBeat: state.timeline.keyBeat,
@@ -2353,6 +2364,7 @@ export function fromBrief(
           key: index + 1,
           text: beat.text,
           weight: beat.weight,
+          ...(beat.background !== undefined ? { background: beat.background } : {}),
         })),
         transition: copyTimeline.transition,
         keyBeat: copyTimeline.keyBeat,
@@ -2637,6 +2649,11 @@ function normalizeTimelineDraft(value: unknown): TimelineDraft {
       key: index + 1,
       text: typeof beat.text === "string" ? beat.text : "",
       weight,
+      // A restored draft keeps its scenes (D11); anything that is not a non-empty
+      // string is repaired to "no scene of its own", the parser's spelling.
+      ...(typeof beat.background === "string" && beat.background !== ""
+        ? { background: beat.background }
+        : {}),
     };
   });
   const transition =

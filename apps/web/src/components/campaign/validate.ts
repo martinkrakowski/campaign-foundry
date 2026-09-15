@@ -5,6 +5,7 @@ import {
   LAYOUT_OPTIONS,
   TONE_OPTIONS,
   MAX_BEATS,
+  MAX_SCENES,
   MAX_WEIGHT,
   MIN_DWELL_SEC,
   anchorAxisActive,
@@ -197,6 +198,16 @@ export function validateTimeline(state: EditorState): FieldErrors {
   const keyBeat = state.timeline.keyBeat;
   if (!Number.isInteger(keyBeat) || keyBeat < 1 || keyBeat > beats.length) {
     errors["copy-timeline"] = messages.timelineKeyBeatMissing;
+    return errors;
+  }
+
+  // The scene cap (VE-D10): distinct named backgrounds, counted the same way the domain
+  // counts them — beats naming none spend nothing, repeats are one scene.
+  const scenes = new Set(
+    beats.flatMap((beat) => (beat.background !== undefined ? [beat.background] : [])),
+  );
+  if (scenes.size > MAX_SCENES) {
+    errors["copy-timeline"] = messages.timelineTooManyBackgrounds(MAX_SCENES);
     return errors;
   }
 

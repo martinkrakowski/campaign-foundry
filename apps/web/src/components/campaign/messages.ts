@@ -493,6 +493,10 @@ export function timelineDwellUnderFloor(seconds: number, floorSec: number): stri
 export function timelineTooManyBeats(max: number): string {
   return `A sequence holds at most ${max} beats — remove the extras to save.`;
 }
+/** More distinct per-beat backgrounds than a timeline may name (VE-D10). */
+export function timelineTooManyBackgrounds(max: number): string {
+  return `A sequence names at most ${max} different backgrounds — reuse one or remove the extras to save.`;
+}
 export function timelineBeatWeightOutOfRange(position: number, max: number): string {
   return `Beat ${position}'s share must be a whole number between 1 and ${max}.`;
 }
