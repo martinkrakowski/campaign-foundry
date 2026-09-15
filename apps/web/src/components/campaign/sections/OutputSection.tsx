@@ -3,7 +3,9 @@
 import type { Dispatch } from "react";
 import { FieldLine, Input, PlatformCard, DurationStrip } from "@/components/ui";
 import { MOTION_KINDS } from "@campaignfoundry/CampaignOrchestration/motion-kinds";
+import { CREATIVE_TYPE_RULES } from "@campaignfoundry/CampaignOrchestration/creative-types";
 import { PLATFORM_PROFILES, isPlatformVisible } from "@campaignfoundry/Distribution/platform-profiles";
+import type { PlatformProfile } from "@campaignfoundry/Distribution/platform-profiles";
 import type { EditorState, EditorAction } from "@/components/campaign/editor-state";
 import { PLATFORM_ORDER } from "@/components/campaign/editor-state";
 import type { FieldErrors } from "@/components/campaign/validate";
@@ -43,17 +45,34 @@ export function OutputSection({
   const motionOff = state.capabilities?.motion === false;
 
   // Platforms offered on this host that package at least one requested format.
+  // X14 (DESIGN.md §1 principle 5): and only when the pinned template's
+  // creative type can produce a family they ship — the boundary refuses a
+  // brief whose formats reach outside `outputFamilies`, so a profile that
+  // packages only what this type never makes is absent from the offer, never
+  // present-and-disabled. A loaded brief's own pick of one stays out of sight
+  // too; `validateOutput` names the mismatch so the draft says why Save is
+  // blocked.
   const capabilities = { motion: !motionOff };
+  const families = CREATIVE_TYPE_RULES[state.template.creativeType]
+    .outputFamilies as readonly string[];
+  const shipsThisType = (profile: PlatformProfile): boolean =>
+    profile.formats.some((format) => families.includes(format));
   const offered = Object.values(PLATFORM_PROFILES).filter(
     (profile) =>
       isPlatformVisible(profile, capabilities) &&
+      shipsThisType(profile) &&
       profile.formats.some((format) => state.formats.includes(format)),
   );
   const offeredIds = new Set(offered.map((profile) => profile.id));
 
   // A loaded brief may select platforms hidden on this host (D12: never strip data).
-  // They stay visible and read-only.
-  const hiddenSelected = state.platforms.filter((id) => !offeredIds.has(id));
+  // They stay visible and read-only — except the ones this template's type can
+  // never ship, which the offer withholds entirely (above).
+  const hiddenSelected = state.platforms.filter((id) => {
+    if (offeredIds.has(id)) return false;
+    const profile = PLATFORM_PROFILES[id];
+    return profile === undefined || shipsThisType(profile);
+  });
 
   const allVisiblePlatforms = Array.from(
     new Set([...PLATFORM_ORDER.filter((id) => offeredIds.has(id)), ...hiddenSelected]),

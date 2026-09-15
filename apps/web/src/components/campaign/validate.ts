@@ -1,4 +1,8 @@
 import { MAX_DURATION_SEC, MIN_DURATION_SEC } from "@campaignfoundry/CampaignOrchestration/variation-defaults";
+// The domain's one output-family decision (X14), shared with the API boundary
+// (`validateTemplateOutputFamilies`, load-brief.ts) so Save refuses exactly
+// what the parser refuses — never a second family table in the editor.
+import { outputFamilyProblem } from "@campaignfoundry/CampaignOrchestration/creative-types";
 import { matchProhibitedTerms } from "@campaignfoundry/GovernanceAndCompliance";
 import type { EditorState } from "./editor-state";
 import {
@@ -35,7 +39,7 @@ import { DWELL_TOLERANCE } from "@campaignfoundry/CampaignOrchestration/copy-tim
 export { axisProductSize, drawableRatios, motionPackagedRatios } from "./editor-state";
 import { PLATFORM_PROFILES, type PlatformProfile } from "@campaignfoundry/Distribution/platform-profiles";
 import * as messages from "./messages";
-import { formatDisplayName, modeDisplayName, platformDisplayName, ratioDisplayName } from "./display-names";
+import { creativeTypeDisplayName, formatDisplayName, modeDisplayName, platformDisplayName, ratioDisplayName } from "./display-names";
 
 export const SAFE_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 export const HEX_COLOR_PATTERN = /^#[0-9A-Fa-f]{6}$/;
@@ -377,6 +381,22 @@ export function validateOutput(state: EditorState): FieldErrors {
       errors.formats = messages.formatsUnsupported(formatDisplayName(format), candidates.map(platformDisplayName));
       break;
     }
+  }
+  // X14: a format outside the pinned template's outputFamilies runs, emits
+  // rows, and packages nothing — the parser refuses it
+  // (`validateTemplateOutputFamilies`, load-brief.ts), so the draft that
+  // decides Save refuses it too, through the domain's one decision. It
+  // outranks the format/platform messages above: no platform fix ships a
+  // family this creative type cannot make.
+  const familyProblem = outputFamilyProblem(
+    state.template.creativeType,
+    state.formats,
+  );
+  if (familyProblem !== undefined) {
+    errors.formats = messages.formatsOutOfType(
+      formatDisplayName(familyProblem.format),
+      creativeTypeDisplayName(familyProblem.creativeType),
+    );
   }
   // An id no profile matches used to vanish above: `.filter(profile => …)` silently
   // dropped it from the compatibility check, so the draft looked clean here and the

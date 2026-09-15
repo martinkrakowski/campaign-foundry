@@ -124,6 +124,34 @@ export const CREATIVE_TYPE_RULES: Readonly<
 };
 
 /**
+ * The one output-family decision (X14): does every format the brief asks the
+ * run to produce appear in the creative type's declared `outputFamilies`?
+ * A format outside them names a family the template cannot make — an
+ * `image-text` brief requesting html runs, emits static rows, and packages
+ * nothing against an html profile. Returns the first offender so the API
+ * boundary (`parseBrief`) and the editor's `validateOutput` refuse the same
+ * thing, from the same table, with the same words (the D124 convention).
+ */
+export interface OutputFamilyProblem {
+  readonly format: string;
+  readonly creativeType: CreativeType;
+}
+
+export function outputFamilyProblem(
+  creativeType: CreativeType,
+  formats: readonly string[],
+): OutputFamilyProblem | undefined {
+  const families = CREATIVE_TYPE_RULES[creativeType]
+    .outputFamilies as readonly string[];
+  for (const format of formats) {
+    if (!families.includes(format)) {
+      return { format, creativeType };
+    }
+  }
+  return undefined;
+}
+
+/**
  * Occlusion classification and behavior classes (D135).
  *
  * - `opaque`: full-bleed opacity; anything below is completely hidden.

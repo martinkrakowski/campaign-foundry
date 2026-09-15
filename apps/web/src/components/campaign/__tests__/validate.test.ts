@@ -31,6 +31,7 @@ import { PROHIBITED_TERMS as DOMAIN_PROHIBITED_TERMS } from "@campaignfoundry/Go
 // (`validateClickDestination`, load-brief.ts) reads, so the client mirror cannot drift.
 import { clickDestinationProblem } from "@campaignfoundry/CampaignOrchestration/click-destination";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
+import { CANONICAL_TEMPLATES } from "@campaignfoundry/CampaignOrchestration/creative-templates";
 import { initialEditorState, editorReducer, toBrief, fromBrief, parsePolicyInteger, type EditorState } from "../editor-state";
 // The real gate Save hits, imported across apps for the divergence tests below: tests
 // may cross package boundaries (arch test-double rules), and a mirror without the
@@ -652,6 +653,27 @@ describe("validateOutput", () => {
       validateOutput(valid({ clickDestination: "https://example.com/landing" })).clickDestination,
     ).toBeUndefined();
   });
+
+  test("a format outside the template's output families names the format and the creative type (X14)", () => {
+    // The html profiles ship html; an image-text template produces static and
+    // motion (D119) — the boundary refuses the mismatch, so the draft must too.
+    const errors = validateOutput(valid({ formats: ["html"], platforms: ["google-display-html"] }));
+    expect(errors.formats).toBe(messages.formatsOutOfType("html", "Image & text"));
+    // The copy names the type in words (fix2): the raw domain id never reaches the user.
+    expect(errors.formats).not.toContain("image-text");
+  });
+
+  test("an image-html draft selecting an html platform is clean", () => {
+    const state = valid({
+      template: {
+        ...CANONICAL_TEMPLATES["image-html"],
+        id: "canonical-image-html",
+      },
+      formats: ["html"],
+      platforms: ["google-display-html"],
+    });
+    expect(validateOutput(state)).toEqual({});
+  });
 });
 
 describe("validateOutput — motion needs a randomized campaign", () => {
@@ -788,6 +810,14 @@ describe("the editor says what the parser refuses (B3 divergences)", () => {
     const state = valid({ platforms: ["instagram-feed", "story-tv"] });
     expect(validateState(state).output.platforms).toBe(messages.platformsUnknown(["story-tv"]));
     expect(() => parse(state)).toThrow(/Unknown output platform "story-tv"/);
+  });
+
+  test("a format the template's creative type cannot produce is flagged here and refused by the parser (X14)", () => {
+    const state = valid({ formats: ["html"], platforms: ["google-display-html"] });
+    expect(validateState(state).output.formats).toBe(
+      messages.formatsOutOfType("html", "Image & text"),
+    );
+    expect(() => parse(state)).toThrow(/output\.formats.*"html".*image-text/);
   });
 
   test("a draft that passes every check parses too — the fix is not 'always invalid'", () => {

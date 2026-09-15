@@ -9,6 +9,7 @@ import {
   checkRepositionOcclusion,
   findOcclusionDelta,
   formatOcclusionReason,
+  outputFamilyProblem,
   type CreativeType,
 } from "../creative-types.js";
 import type { ComplianceResult } from "../ComplianceResult.vo.js";
@@ -634,5 +635,46 @@ describe("occlusion table and guard checks (D135, D136)", () => {
       const newVLayer = { kind: "video" as LayerKind };
       expect(findOcclusionDelta([vLayer], [vLayer, newVLayer])).toBeNull();
     });
+  });
+});
+
+describe("outputFamilyProblem (X14)", () => {
+  test("a format outside the type's declared outputFamilies is named with its type", () => {
+    expect(outputFamilyProblem("image-text", ["html"])).toEqual({
+      format: "html",
+      creativeType: "image-text",
+    });
+    // The first offender is the one reported — a list may hold several.
+    expect(outputFamilyProblem("video", ["static", "motion"])).toEqual({
+      format: "static",
+      creativeType: "video",
+    });
+  });
+
+  test("every format inside the table's families passes", () => {
+    expect(outputFamilyProblem("image-text", ["static", "motion"])).toBeUndefined();
+    expect(outputFamilyProblem("image-html", ["html"])).toBeUndefined();
+    expect(outputFamilyProblem("video", ["motion"])).toBeUndefined();
+    // An empty request offends nothing.
+    expect(outputFamilyProblem("image-html", [])).toBeUndefined();
+  });
+
+  test("the decision reads the same table every boundary reads", () => {
+    // Cross-check against the rule data itself: a format the table names never
+    // problems, one it does not always does — the function cannot drift from
+    // the declaration it mirrors.
+    for (const type of CREATIVE_TYPES) {
+      const families = CREATIVE_TYPE_RULES[type].outputFamilies as readonly string[];
+      for (const format of families) {
+        expect(outputFamilyProblem(type, [format])).toBeUndefined();
+      }
+      for (const format of ["static", "motion", "html"]) {
+        if (families.includes(format)) continue;
+        expect(outputFamilyProblem(type, [format])).toEqual({
+          format,
+          creativeType: type,
+        });
+      }
+    }
   });
 });

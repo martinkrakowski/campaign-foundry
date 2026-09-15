@@ -150,6 +150,65 @@ describe("ExportPage — platform packaging", () => {
     expect(screen.queryByRole("button", { name: "meta-audience-network" })).toBeNull();
   });
 
+  test("a static run is not offered the html profiles — packaging them would find nothing (X14)", async () => {
+    // Size alone is not eligibility: google-display-html lists the same five
+    // IAB units as google-display, but it packages html, and this run holds
+    // only static assets — its Package action would deterministically fail.
+    seedPersistedRun([makeAsset({ size: "728x90", outputPath: "alpha/728x90.png" })]);
+    renderWithRun(<ExportPage />);
+    expect(await screen.findByRole("group", { name: "Platforms" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "google-display", pressed: false })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "google-display-html" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "display-web-html" })).toBeNull();
+  });
+
+  test("an html run is offered the html profiles", async () => {
+    const assets = [
+      makeAsset({
+        format: "html",
+        size: "300x250",
+        outputPath: "alpha/300x250.png",
+        htmlBundlePath: "alpha/300x250/index.html",
+      }),
+    ];
+    seedPersistedRun(assets);
+    renderWithRun(<ExportPage />);
+    expect(await screen.findByRole("group", { name: "Platforms" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "google-display-html", pressed: false })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "display-web-html", pressed: false })).toBeTruthy();
+    // The run holds no static asset, so the static display profiles are out on
+    // the same format rule.
+    expect(screen.queryByRole("button", { name: "google-display" })).toBeNull();
+  });
+
+  test("a run whose html assets were rejected is not offered the html profiles (X14 fix2)", async () => {
+    // Packaging sends only the approved keys once decisions exist, so the picker
+    // must offer only what will actually be packaged: the rejected html row is
+    // still in the run, but an approved-static-only run has nothing an html
+    // profile could package — offering it would deterministically error.
+    const assets = [
+      makeAsset({ aspectRatio: undefined, size: "728x90", outputPath: "alpha/728x90.png" }),
+      makeAsset({
+        productId: "gamma",
+        aspectRatio: undefined,
+        size: "728x90",
+        outputPath: "gamma/728x90.png",
+        format: "html",
+        htmlBundlePath: "gamma/728x90/index.html",
+      }),
+    ];
+    localStorage.setItem(
+      "cf:decisions",
+      JSON.stringify({ "alpha/728x90/default": "approved", "gamma/728x90/default": "rejected" }),
+    );
+    seedPersistedRun(assets);
+    renderWithRun(<ExportPage />);
+    expect(await screen.findByRole("group", { name: "Platforms" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "google-display", pressed: false })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "google-display-html" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "display-web-html" })).toBeNull();
+  });
+
   test("sends the approved asset keys as include, and omits include with no decisions", async () => {
     const user = userEvent.setup();
     const assets = [

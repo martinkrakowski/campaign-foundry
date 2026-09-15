@@ -4,6 +4,7 @@ import {
   anchorDisplayName,
   campaignTypeOf,
   canvasDisplayName,
+  creativeTypeDisplayName,
   formatDisplayName,
   modeDisplayName,
   platformDisplayName,
@@ -18,6 +19,7 @@ import { RATIO_VALUES } from "@campaignfoundry/CampaignOrchestration/aspect-rati
 import { ANCHOR_VALUES } from "@campaignfoundry/CampaignOrchestration/variation-defaults";
 import { TEXT_EFFECT_VALUES } from "@campaignfoundry/CampaignOrchestration/creative-style";
 import { CAMPAIGN_TYPES, DEFAULT_CAMPAIGN_TYPE } from "@campaignfoundry/CampaignOrchestration/campaign-types";
+import { CREATIVE_TYPES } from "@campaignfoundry/CampaignOrchestration/creative-types";
 
 describe("display names", () => {
   test("formats read as things a person makes, not enum values", () => {
@@ -117,6 +119,17 @@ describe("display names", () => {
     expect(typeDisplayName("short-video")).toBe("Short-form video");
   });
 
+  test("every creative type the domain knows has a plain-English name (X14 fix2)", () => {
+    // the guard against the fix2 finding: `formatsOutOfType` used to pass the raw
+    // `image-text` id straight into the copy a reviewer reads.
+    for (const type of CREATIVE_TYPES) {
+      expect(creativeTypeDisplayName(type)).not.toBe(type);
+    }
+    expect(creativeTypeDisplayName("image-text")).toBe("Image & text");
+    expect(creativeTypeDisplayName("image-html")).toBe("HTML");
+    expect(creativeTypeDisplayName("video")).toBe("Video");
+  });
+
   test("campaignTypeOf returns the vocabulary member, else the default", () => {
     expect(campaignTypeOf({ type: "social-post" })).toBe("social-post");
     expect(campaignTypeOf({ type: "paid-social" })).toBe("paid-social");
@@ -130,7 +143,7 @@ describe("the display-name rule reaches the messages a user reads", () => {
   test("no validator message leaks a raw platform id, format or ratio", async () => {
     const { validateOutput, validatePolicy } = await import("../validate");
     const { initialEditorState } = await import("../editor-state");
-    const raw = ["instagram-feed", "instagram-reel", "tiktok", "youtube-short", "static", "motion", "9:16", "1:1", "16:9"];
+    const raw = ["instagram-feed", "instagram-reel", "tiktok", "youtube-short", "static", "motion", "9:16", "1:1", "16:9", "image-text", "image-html"];
 
     // a platform that packages none of the requested formats, and a format no platform takes
     const incompatible = { ...initialEditorState("variation"), formats: ["motion"], platforms: ["instagram-feed"] };
@@ -142,9 +155,13 @@ describe("the display-name rule reaches the messages a user reads", () => {
       motion: ["ken-burns-in"],
       variation: { ...initialEditorState("variation").variation, ratio: ["1:1"] },
     };
+    // an image-text draft requesting html: the out-of-type message must name the
+    // type in words too (X14 fix2)
+    const outOfType = { ...initialEditorState("variation"), formats: ["html"], platforms: ["google-display-html"] };
     const shown = [
       ...Object.values(validateOutput(incompatible as never)),
       ...Object.values(validatePolicy(narrowed as never)),
+      ...Object.values(validateOutput(outOfType as never)),
     ];
     expect(shown.length).toBeGreaterThan(0);
     for (const message of shown) {

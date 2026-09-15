@@ -362,10 +362,16 @@ both against the networks' current specs before relying on them.
 `fallback.png`, and generation calls `assembleHtml` without a `profile`, so "refused while building" is packaging-only today.
 The X14 lane states which bytes the budget counts (the shipped zip is what the network measures).
 
-```premise X14
-# No platform profile declares the html format.
-! grep -qE 'formats: \[[^]]*"html"' packages/Distribution/src/domain/value-objects/PlatformProfile.vo.ts
-```
+**X14 — shipped in this PR.** Its premise was retired when it landed; `plan:verify` no
+longer tracks it. The table gained **`google-display-html`** ("Google Display (HTML5)") and
+**`display-web-html`** ("Display web (HTML5)") — each `formats: ["html"]` over the full
+`DISPLAY_ALL_SIZES` with its static sibling's insets, `maxBytes: HTML_MAX_BYTES = 150 * 1024`;
+`meta-audience-network` gained nothing. The size check in `packageHtml` counts **the bytes the
+unit ships as** — `index.html` plus `fallback.png`, the package a network measures on upload —
+not `index.html` alone: a bundle that fits while its fallback crosses the budget records
+`checks.size: "fail"`. The item's `bytes` field still names the bundle, as a motion item names
+its mp4. The 150 KiB figure stays an owner-verifiable ad-spec fact, now a single named constant
+beside `STATIC_MAX_BYTES`, and HL5c's meter has a `profile.maxBytes` to read.
 
 ---
 

@@ -4576,7 +4576,7 @@ describe("display platforms (D116)", () => {
     platforms: ["instagram-feed", "linkedin", "x"],
   } as const;
 
-  test("PLATFORM_ORDER lists the three display ids after the seven social ones", () => {
+  test("PLATFORM_ORDER lists the five display ids after the seven social ones", () => {
     expect(PLATFORM_ORDER).toEqual([
       "instagram-feed",
       "linkedin",
@@ -4588,6 +4588,8 @@ describe("display platforms (D116)", () => {
       "google-display",
       "meta-audience-network",
       "display-web",
+      "google-display-html",
+      "display-web-html",
     ]);
   });
 

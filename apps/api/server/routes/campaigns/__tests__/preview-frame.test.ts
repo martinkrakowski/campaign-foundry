@@ -263,6 +263,9 @@ describe("the html layer (HL5d)", () => {
   ) => ({
     ...brief(),
     template: htmlTemplate(html, extra),
+    // The family an `image-html` template actually produces (D119, X14): the
+    // boundary refuses one left on the static default, preview included.
+    output: { formats: ["html"] },
   });
 
   /** One frame's decoded pixels, as the compositor's own tests decode them. */

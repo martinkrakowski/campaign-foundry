@@ -1,0 +1,114 @@
+{
+  "version": 1,
+  "lane": "X14",
+  "mutations": [
+    {
+      "file": "packages/Distribution/src/domain/value-objects/PlatformProfile.vo.ts",
+      "before": "  \"google-display-html\": {\n    id: \"google-display-html\",\n    label: \"Google Display (HTML5)\",\n    sizes: DISPLAY_ALL_SIZES,\n    formats: [\"html\"],",
+      "after": "  \"google-display-html\": {\n    id: \"google-display-html\",\n    label: \"Google Display (HTML5)\",\n    sizes: DISPLAY_ALL_SIZES,\n    formats: [\"static\"],",
+      "because": "Revert the new placement to the static family: the id still exists and still lists the five IAB units, so the profile-table invariants all hold, but an image-html row is now taken by the static filter and never packaged — X14's whole point (an HTML unit can be packaged) silently disappears behind a green table.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/Distribution/src/application/use-cases/__tests__/PackageForPlatformUseCase.use-case.test.ts",
+        "-t",
+        "packages an image-html asset for google-display-html",
+        "--maxWorkers=2"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/Distribution/src/application/use-cases/PackageForPlatformUseCase.use-case.ts",
+      "before": "      checks: { size: unitBytes <= profile.maxBytes ? \"pass\" : \"fail\" },",
+      "after": "      checks: { size: bundle.length <= profile.maxBytes ? \"pass\" : \"fail\" },",
+      "because": "Count the bundle alone again, as the lane found it: the fallback a network also uploads stops weighing anything, so an html unit that is over its shipped budget records a pass — the undercount X14 says which bytes the budget counts in order to close.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/Distribution/src/application/use-cases/__tests__/PackageForPlatformUseCase.use-case.test.ts",
+        "-t",
+        "the budget counts the whole unit — bundle plus fallback — not the bundle alone",
+        "--maxWorkers=2"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/load-brief.ts",
+      "before": "  validateOutput(record.output, effectiveCapabilities);\n  validateTemplateOutputFamilies(template.creativeType, record.output);\n  validateMotionAxisRequested(record);",
+      "after": "  validateOutput(record.output, effectiveCapabilities);\n  validateMotionAxisRequested(record);",
+      "because": "Drop the boundary's output-family refusal: an image-text brief still passes with formats it can never produce (the platform/format agreement above only asks that a requested format has a shipper, not that the creative type makes it), runs, emits static rows, and packages nothing against the html profiles — exactly the silent dead end the refusal exists to close.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/load-brief.test.ts",
+        "-t",
+        "an image-text brief selecting google-display-html is refused, naming html and image-text",
+        "--maxWorkers=2"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/app/(shell)/export/page.tsx",
+      "before": "    const profile = platformProfile(id);\n    if (!profile?.formats.some((format) => runFormats.has(format))) return false;\n    const slots = profile?.sizes;",
+      "after": "    const profile = platformProfile(id);\n    const slots = profile?.sizes;",
+      "because": "Offer a display profile on its sizes alone again: the html profiles list the same five IAB units as the static ones, so a static run gets \"Google Display (HTML5)\" in the picker and its Package action deterministically finds no eligible asset — the size filter cannot see the format mismatch, only the format filter can.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/export/__tests__/export.test.tsx",
+        "-t",
+        "a static run is not offered the html profiles",
+        "--maxWorkers=2"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/app/(shell)/export/page.tsx",
+      "before": "  const packaged = hasDecisions ? approved : assets;",
+      "after": "  const packaged = assets;",
+      "because": "Derive the offered formats and sizes from every asset again: once review decisions exist packaging sends only the approved keys, so a run with approved statics and rejected html rows still offers \"Google Display (HTML5)\" — a profile whose selection is empty by construction, the offer the buyer can never fill.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/export/__tests__/export.test.tsx",
+        "-t",
+        "a run whose html assets were rejected is not offered the html profiles",
+        "--maxWorkers=2"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/Distribution/src/application/use-cases/PackageForPlatformUseCase.use-case.ts",
+      "before": "        const selected = include === null ? eligible : eligible.filter((a) => include.has(assetIdentity(a)));\n        // A display profile with nothing to package means the run was generated\n        // without `output.sizes` (or for the wrong sizes) — or that the HITL\n        // `include` set left nothing for it. The guard is applied to the\n        // SELECTION, not to eligibility (X14 fix2): a rejected-but-eligible row\n        // must not satisfy the check so the later `include` filter can still\n        // write a successful manifest with `items: []`. A successful empty\n        // manifest would send the buyer an empty package — say so instead.\n        if (profile.sizes !== undefined && selected.length === 0) {\n          throw new Error(\n            `no display assets for ${platformId} — was the campaign generated with output.sizes?`,\n          );\n        }",
+      "after": "        // A display profile with nothing to package means the run was generated\n        // without `output.sizes` (or for the wrong sizes). Writing a successful\n        // empty manifest would send the buyer an empty package — say so instead.\n        if (profile.sizes !== undefined && eligible.length === 0) {\n          throw new Error(\n            `no display assets for ${platformId} — was the campaign generated with output.sizes?`,\n          );\n        }\n        const selected = include === null ? eligible : eligible.filter((a) => include.has(assetIdentity(a)));",
+      "because": "Check eligibility before applying `include` again: a rejected-but-eligible html row satisfies the display guard, the include filter then selects nothing, and the use case writes a successful manifest with `items: []` — the empty package the guard exists to refuse.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/Distribution/src/application/use-cases/__tests__/PackageForPlatformUseCase.use-case.test.ts",
+        "-t",
+        "an include that selects nothing for a display platform is refused, not packaged as an empty manifest",
+        "--maxWorkers=2"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

@@ -349,10 +349,14 @@ describe("parseBrief", () => {
     test("each creative type is measured against its own table row (D124)", () => {
       // video caps logo and shade, and caps animated-text via shared budget — the canonical
       // video template (one of each capped kind) parses, so the caps are read
-      // per type, not baked into the boundary.
+      // per type, not baked into the boundary. Motion formats because that is
+      // the only family `video` produces (D119, X14).
       expect(
-        parseBrief({ ...valid, template: templateFromCanonical("short-video") })
-          .template.creativeType,
+        parseBrief({
+          ...valid,
+          template: templateFromCanonical("short-video"),
+          output: { formats: ["motion"] },
+        }).template.creativeType,
       ).toBe("video");
     });
 
@@ -499,6 +503,8 @@ describe("parseBrief", () => {
         ...valid,
         type: "short-video",
         template: occludingVideo,
+        // The only family a `video` template produces (D119, X14).
+        output: { formats: ["motion"] },
       });
       expect(parsed.template.layers.map((l) => l.kind)).toEqual([
         "video",
@@ -716,6 +722,17 @@ describe("parseBrief", () => {
       ),
     });
 
+    /**
+     * The template's own output family spelled out (X14): `image-html`
+     * produces html, so an html-template brief that leaves `output.formats`
+     * to its `static` default is refused by the boundary as of right now —
+     * these element-shape tests must ask for the format their template ships.
+     */
+    const htmlBrief = {
+      ...valid,
+      output: { formats: ["html"] },
+    };
+
     test("an html layer carrying each element kind parses and carries the list verbatim", () => {
       const elements = [
         { kind: "text", text: "Buy now", frame },
@@ -723,7 +740,7 @@ describe("parseBrief", () => {
         { kind: "image", frame },
       ];
       const parsed = parseBrief({
-        ...valid,
+        ...htmlBrief,
         template: withElements("html", elements),
       });
       expect(
@@ -733,17 +750,17 @@ describe("parseBrief", () => {
 
     test("an html layer with no elements, or an empty list, parses", () => {
       expect(() =>
-        parseBrief({ ...valid, template: withElements("html", undefined) }),
+        parseBrief({ ...htmlBrief, template: withElements("html", undefined) }),
       ).not.toThrow();
       expect(() =>
-        parseBrief({ ...valid, template: withElements("html", []) }),
+        parseBrief({ ...htmlBrief, template: withElements("html", []) }),
       ).not.toThrow();
     });
 
     test("elements on a non-html layer are refused — the kind carries none", () => {
       expect(() =>
         parseBrief({
-          ...valid,
+          ...htmlBrief,
           template: withElements("image", [{ kind: "image", frame }]),
         }),
       ).toThrow(
@@ -753,7 +770,7 @@ describe("parseBrief", () => {
 
     test("elements that are not an array are refused", () => {
       expect(() =>
-        parseBrief({ ...valid, template: withElements("html", "nope") }),
+        parseBrief({ ...htmlBrief, template: withElements("html", "nope") }),
       ).toThrow(
         'Campaign brief field "template.layers[1].elements" must be an array of elements; got "nope".',
       );
@@ -762,7 +779,7 @@ describe("parseBrief", () => {
     test("a malformed element names its index and field", () => {
       expect(() =>
         parseBrief({
-          ...valid,
+          ...htmlBrief,
           template: withElements("html", [{ kind: "link", text: "x", frame }]),
         }),
       ).toThrow(
@@ -770,7 +787,7 @@ describe("parseBrief", () => {
       );
       expect(() =>
         parseBrief({
-          ...valid,
+          ...htmlBrief,
           template: withElements("html", [
             { kind: "text", text: "x", frame: { ...frame, x: 2 } },
           ]),
@@ -780,7 +797,7 @@ describe("parseBrief", () => {
       );
       expect(() =>
         parseBrief({
-          ...valid,
+          ...htmlBrief,
           template: withElements("html", [{ kind: "image", text: "x", frame }]),
         }),
       ).toThrow(
@@ -792,7 +809,7 @@ describe("parseBrief", () => {
       for (const kind of ["text", "button"]) {
         expect(() =>
           parseBrief({
-            ...valid,
+            ...htmlBrief,
             template: withElements("html", [{ kind, frame }]),
           }),
         ).toThrow(
@@ -805,12 +822,74 @@ describe("parseBrief", () => {
       expect(() =>
         parseBrief(
           {
-            ...valid,
+            ...htmlBrief,
             template: withElements("image", [{ kind: "image", frame }]),
           },
           { enforceCapabilities: false },
         ),
       ).toThrow(/template.layers\[0\]\.elements/);
+    });
+  });
+
+  describe("output formats against the template's output families (X14)", () => {
+    /** The canonical image-html template, elements and all — no edits needed. */
+    const htmlTemplate = {
+      id: "canonical-image-html",
+      version: 1,
+      creativeType: "image-html",
+      unit: "standard-web",
+      layers: [
+        { id: "image", kind: "image" },
+        { id: "html", kind: "html" },
+        { id: "logo", kind: "logo" },
+      ],
+    };
+
+    test("an image-text brief selecting google-display-html is refused, naming html and image-text", () => {
+      // The run would emit static rows and package nothing: the format the
+      // html profile ships is not one the template's creative type produces.
+      expect(() =>
+        parseBrief({
+          ...valid,
+          output: { formats: ["html"], platforms: ["google-display-html"] },
+        }),
+      ).toThrow(
+        /output\.formats.*"html".*image-text/,
+      );
+    });
+
+    test("the refusal holds with enforceCapabilities: false (authoring mode too)", () => {
+      // Declared-table compatibility, not a capability: the same D124 rule as
+      // every other template check, refused wherever a brief is parsed.
+      expect(() =>
+        parseBrief(
+          {
+            ...valid,
+            output: { formats: ["html"], platforms: ["google-display-html"] },
+          },
+          { enforceCapabilities: false },
+        ),
+      ).toThrow(/output\.formats.*"html".*image-text/);
+    });
+
+    test("an image-html brief selecting google-display-html loads", () => {
+      expect(() =>
+        parseBrief({
+          ...valid,
+          template: htmlTemplate,
+          output: { formats: ["html"], platforms: ["google-display-html"] },
+        }),
+      ).not.toThrow();
+    });
+
+    test("an image-html brief left on the static default is refused too — derived formats, not just spelled ones", () => {
+      // `output.formats` defaults to [static] exactly as the planner reads it;
+      // an image-html template produces no static family (D122's fallback ships
+      // inside the html unit, not as a row of its own), so the derived request
+      // names a family the type cannot make.
+      expect(() =>
+        parseBrief({ ...valid, template: htmlTemplate }),
+      ).toThrow(/output\.formats.*"static".*image-html/);
     });
   });
 
@@ -1415,9 +1494,25 @@ describe("parseBrief v2 fields", () => {
   });
 
   test("html is always available: accepted as an output format even with the ffmpeg probe off", () => {
+    // The template must be one whose `outputFamilies` include html (X14) —
+    // the point of this test is the capability gate, not the family table.
     expect(
       parseBrief(
-        { ...valid, output: { formats: ["html"] } },
+        {
+          ...valid,
+          template: {
+            id: "canonical-image-html",
+            version: 1,
+            creativeType: "image-html",
+            unit: "standard-web",
+            layers: [
+              { id: "image", kind: "image" },
+              { id: "html", kind: "html" },
+              { id: "logo", kind: "logo" },
+            ],
+          },
+          output: { formats: ["html"] },
+        },
         { capabilities: MOTION_OFF, enforceCapabilities: true },
       ).output?.formats,
     ).toEqual(["html"]);
@@ -1945,9 +2040,12 @@ describe("parseBrief campaign type (D108–D112)", () => {
   });
 
   test("a known type parses and is carried on the parsed brief verbatim", () => {
-    expect(parseBrief({ ...valid, type: "short-video" }).type).toBe(
-      "short-video",
-    );
+    // The video template ships motion alone (D119, X14), so the short-video
+    // case spells its format; the other two parse on the static default.
+    expect(
+      parseBrief({ ...valid, type: "short-video", output: { formats: ["motion"] } })
+        .type,
+    ).toBe("short-video");
     expect(parseBrief({ ...valid, type: "paid-social" }).type).toBe(
       "paid-social",
     );

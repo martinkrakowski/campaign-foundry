@@ -61,6 +61,8 @@ describe("PlatformProfile", () => {
       "google-display",
       "meta-audience-network",
       "display-web",
+      "google-display-html",
+      "display-web-html",
     ]);
     expect(visiblePlatformIds({ motion: true })).toEqual([
       "instagram-feed",
@@ -73,6 +75,8 @@ describe("PlatformProfile", () => {
       "google-display",
       "meta-audience-network",
       "display-web",
+      "google-display-html",
+      "display-web-html",
     ]);
   });
 
@@ -251,6 +255,29 @@ describe("PlatformProfile", () => {
           }
         }
       }
+    });
+
+    // X14 (owner decision 2026-09-15, unowned-gaps "No platform accepts the HTML
+    // unit"): two html5 display placements, separate profiles from their static
+    // siblings — the codebase's own precedent for one network in two families.
+    test("the two html5 display profiles are html-only, carry DISPLAY_ALL_SIZES and a 150 KiB budget (X14)", () => {
+      const googleHtml = platformProfile("google-display-html");
+      const webHtml = platformProfile("display-web-html");
+      expect(googleHtml?.label).toBe("Google Display (HTML5)");
+      expect(webHtml?.label).toBe("Display web (HTML5)");
+      expect(googleHtml?.formats).toEqual(["html"]);
+      expect(webHtml?.formats).toEqual(["html"]);
+      expect(googleHtml?.maxBytes).toBe(150 * 1024);
+      expect(webHtml?.maxBytes).toBe(150 * 1024);
+      // Same units and per-unit insets as the static siblings they sit beside.
+      expect(googleHtml?.sizes?.map((slot) => slot.size)).toEqual(
+        platformProfile("google-display")?.sizes?.map((slot) => slot.size),
+      );
+      expect(webHtml?.sizes).toEqual(platformProfile("display-web")?.sizes);
+      expect(googleHtml?.safeInsets).toEqual(ZERO);
+      expect(webHtml?.safeInsets).toEqual(ZERO);
+      // Meta Audience Network takes no third-party HTML5 display creative.
+      expect(platformProfile("meta-audience-network")?.formats).toEqual(["static"]);
     });
 
     test("isRatioProfile is true only for the seven social profiles", () => {
