@@ -539,3 +539,30 @@ regular file — the root directory, `reports/`, a FIFO — gets the same `{ err
 as a missing path, before a single header is set. Three tests cover it: an existing root 404s, an
 existing subdirectory 404s, an existing file still streams 200 with its size. Removing the
 `isFile()` guard kills both directory tests (`.agents/manifests/x21.json`).
+
+---
+
+## 25. Duplicate 500s where its siblings 400 on a symlinked destination (X22)
+
+**Evidence.** `POST /campaigns/briefs/:id/duplicate` mapped only `isExistsError` → 409 and
+`InvalidCopyPoolError` → 422 in its outer catch; everything else re-threw to a 500. When
+`briefs/<newId>.yaml` is a symlink, `findBriefById` does not see it (`listBriefs` keeps only
+`isFile()` entries), so the request reaches `FsBriefStore.createBrief`, which throws
+`SYMLINK_WRITE_ERROR` — the exact error `briefs.post.ts` and `briefs/[id].put.ts` both answer with
+a 400 `{ error: "Refusing to write through a symlink." }`.
+
+**Consequence.** Duplicating onto a planted symlink — the same attack surface the siblings guard —
+leaked a 500 (and a stack-trace-shaped failure) where every other brief write answers 400,
+treating a client-side path condition as a server fault.
+
+**Fix shape, when it is worth one.** Add the `errorMessage(error) === SYMLINK_WRITE_ERROR` → 400
+branch to the duplicate route's catch, with the siblings' exact body. Note, and deliberately do not
+redesign here: `copyAssets` runs inside the lock before `createBrief`, so a symlinked destination
+can leave `assets/inputs/<newId>/` behind — the pre-existing 409 path (an unparseable destination
+file, which `findBriefById` also skips, turning the `wx` write into an EEXIST) has the identical
+leftover property. Both are asset-copy-before-brief-write by construction.
+
+**X22 — shipped in this PR.** The duplicate route's catch now maps `SYMLINK_WRITE_ERROR` to 400
+with the siblings' exact body, pinned by a test that plants `briefs/copy.yaml` as a symlink to a
+file outside the briefs dir, asserts the 400 and the response body, and asserts the outside file
+is unchanged.
