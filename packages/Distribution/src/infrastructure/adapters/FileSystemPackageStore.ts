@@ -4,6 +4,16 @@ import type { PackageManifest, PackageStorePort } from "../../application/ports/
 import { resolveSafe } from "../safe-path.js";
 
 /**
+ * Shown to the caller (and, through it, the export screen) for every way a
+ * concurrent package request for the same campaign can disturb this one's
+ * staging dir (X23). Deliberately says nothing about staging directories,
+ * sweeps, or paths — those are this adapter's internals, not something the
+ * person waiting on an export needs to parse.
+ */
+const EXPORT_INTERRUPTED_MESSAGE =
+  "Another export of this campaign started while this one was running, so this export was stopped to keep the package intact. Try again.";
+
+/**
  * FileSystemPackageStore — PackageStorePort adapter. Copies already-rendered
  * creatives under <output>/packages/<campaignId>/<platformId>/ and writes the
  * manifest. Each platform is staged in a sibling temp dir, then swapped in with
@@ -39,6 +49,7 @@ export class FileSystemPackageStore implements PackageStorePort {
 
   async writeManifest(platformId: string, manifest: PackageManifest): Promise<string> {
     const staging = await this.ensureStaging(platformId);
+    await this.assertManifestFilesStaged(platformId, staging, manifest);
     const stagedManifest = resolveSafe(staging, "manifest.json", "write");
     await writeFile(stagedManifest, JSON.stringify(manifest, null, 2));
     const finalDir = this.platformDir(platformId);
@@ -60,7 +71,7 @@ export class FileSystemPackageStore implements PackageStorePort {
   private async ensureStaging(platformId: string): Promise<string> {
     const existing = this.staging.get(platformId);
     if (existing) {
-      await this.assertStagingIntact(platformId, existing);
+      await this.assertStagingIntact(existing);
       return existing;
     }
     const finalDir = this.platformDir(platformId);
@@ -78,29 +89,75 @@ export class FileSystemPackageStore implements PackageStorePort {
    * `<platform>.staging-*` sibling (`removeStaleStaging`) without knowing this
    * one is still live (X23). Left unchecked, `writePackaged`'s
    * `mkdir(dirname(target), { recursive: true })` would silently recreate the
-   * missing tree and keep writing, so a later `writeManifest` would commit a
-   * manifest listing files that no longer exist — the class comment's "a
-   * failure never leaves a mixed folder" promise broken by a partial commit
-   * instead. Fail loudly here, before any of that, so the request surfaces as
-   * an error the caller can retry rather than a corrupted package.
+   * missing tree and keep writing. Fail loudly here instead, so the request
+   * surfaces as an error the caller can retry.
    *
    * This is a plain disk check, not an in-memory registry, so it is not
    * process-local: it catches the same race across separate processes
-   * sharing the output root too. What it does not do is prevent the
-   * deletion — the other store's sweep still runs — so the loser of the race
-   * fails and must be retried; it only stops the loser from committing
-   * garbage. A sweep landing between this check and the write it guards
-   * (`writeFile` / `rm`+`rename`) is a narrower, pre-existing TOCTOU window
-   * this does not close.
+   * sharing the output root too. It only narrows the corruption, though — a
+   * sweep can still land between this check and the write it guards,
+   * including a fresh staging dir springing up in its place before this
+   * store's next write. `assertManifestFilesStaged` below closes that gap at
+   * commit time; this check exists to fail fast on the common case (the
+   * whole directory is simply gone) without waiting for the final
+   * verification.
    */
-  private async assertStagingIntact(platformId: string, staging: string): Promise<void> {
+  private async assertStagingIntact(staging: string): Promise<void> {
     try {
       await stat(staging);
     } catch {
-      throw new Error(
-        `Staging directory for platform "${platformId}" was removed before it could be committed ` +
-          `— likely a concurrent package request for the same campaign. Refusing to continue.`,
-      );
+      throw new Error(EXPORT_INTERRUPTED_MESSAGE);
+    }
+  }
+
+  /**
+   * `assertStagingIntact` only proves the staging directory exists at the
+   * moment it is read — it says nothing about what is still inside it. A
+   * sweep (another store's `removeStaleStaging`) can land after that check
+   * and before this call: it deletes the whole staging dir, and if a new
+   * request for the same campaign+platform starts right after, a fresh
+   * staging dir with the same name pattern can exist by the time this runs,
+   * empty of everything this store staged. Without this check, `writeManifest`
+   * would commit that directory anyway — a manifest listing files that are
+   * not there, replacing a previously good package with a broken one (X23
+   * round 2; the exact corruption `assertStagingIntact` alone leaves open).
+   *
+   * Verifies every file the manifest is about to claim — `packagedPath`, and
+   * `posterPath` / `fallbackPath` when present — is actually staged, by
+   * mapping each output-root-relative path back under `staging` (stripping
+   * this platform's own prefix; a path that does not start with it can never
+   * belong to this staging dir and is refused the same way). Throws before
+   * `writeManifest` reaches `rm(finalDir)` + `rename`, so a previously
+   * committed package is never touched by a commit that would not have been
+   * legitimate. A sweep landing after this check still deletes the whole
+   * staging dir, which makes the `rename` below fail outright — an error,
+   * never a partial commit.
+   */
+  private async assertManifestFilesStaged(
+    platformId: string,
+    staging: string,
+    manifest: PackageManifest,
+  ): Promise<void> {
+    const prefix = `${this.toPosixRelative(this.platformDir(platformId))}/`;
+    const claimed = manifest.items.flatMap((item) =>
+      [item.packagedPath, item.posterPath, item.fallbackPath].filter(
+        (path): path is string => path !== undefined,
+      ),
+    );
+    for (const packagedPath of claimed) {
+      if (!(await this.isStagedUnder(staging, prefix, packagedPath))) {
+        throw new Error(EXPORT_INTERRUPTED_MESSAGE);
+      }
+    }
+  }
+
+  private async isStagedUnder(staging: string, prefix: string, packagedPath: string): Promise<boolean> {
+    if (!packagedPath.startsWith(prefix)) return false;
+    try {
+      await stat(resolveSafe(staging, packagedPath.slice(prefix.length), "read"));
+      return true;
+    } catch {
+      return false;
     }
   }
 

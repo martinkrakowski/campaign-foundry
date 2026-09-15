@@ -165,12 +165,12 @@ describe("FileSystemPackageStore", () => {
     // committing a manifest that lists a file (alpha/1.png) that no longer
     // exists on disk. It must fail loudly instead.
     await expect(a.writePackaged("instagram-feed", "alpha/2.png", bytes())).rejects.toThrow(
-      /staging directory.*removed/i,
+      /export/i,
     );
     // The same store keeps refusing rather than quietly starting over —
     // starting a fresh staging dir here could stomp on B's still-live one.
     await expect(a.writeManifest("instagram-feed", manifest())).rejects.toThrow(
-      /staging directory.*removed/i,
+      /export/i,
     );
 
     // A never reached `rm(finalDir)` + `rename`: the prior commit stands.
