@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "lane": "X23",
+  "mutations": [
+    {
+      "file": "packages/Distribution/src/infrastructure/adapters/FileSystemPackageStore.ts",
+      "before": "    if (existing) {\n      await this.assertStagingIntact(platformId, existing);\n      return existing;\n    }",
+      "after": "    if (existing) {\n      return existing;\n    }",
+      "because": "A concurrent store's `removeStaleStaging` sweep can delete a staging dir this instance still owns; without the intact check, `ensureStaging` hands the cached (now-deleted) path straight back and `writePackaged`'s `mkdir(..., { recursive: true })` silently resurrects it, so `writeManifest` commits a manifest listing files that no longer exist. The interleaving test pins that the next write on the swept store rejects instead of resuming.",
+      "command": ["yarn", "vitest", "run", "packages/Distribution/src/infrastructure/adapters/__tests__/FileSystemPackageStore.test.ts"],
+      "verdict": "caught"
+    }
+  ]
+}
