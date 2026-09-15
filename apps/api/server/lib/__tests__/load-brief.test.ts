@@ -924,6 +924,15 @@ describe("parseBrief", () => {
       );
     });
 
+    test("audio.rights must be an object", () => {
+      expect(() => parseBrief({ ...valid, audio: { path: "bed.mp3", rights: "lic-1" } })).toThrow(
+        'Campaign brief field "audio.rights" must be an object.',
+      );
+      expect(() => parseBrief({ ...valid, audio: { path: "bed.mp3" } })).toThrow(
+        'Campaign brief field "audio.rights" must be an object.',
+      );
+    });
+
     test("audio without rights.licenceId is refused, naming the field", () => {
       expect(() =>
         parseBrief({ ...valid, audio: { path: "bed.mp3", rights: { source: "acme" } } }),

@@ -131,7 +131,10 @@ export class PackageForPlatformUseCase {
     // packaging never re-renders (D11) and can happen well after the licence the
     // legal gate cleared has lapsed. Nothing is warned-and-packaged — the whole
     // request refuses, exactly like the missing-fallback guard above.
-    const packagedAtMs = parseExpiresOnMs(input.packagedAt) ?? Date.parse(input.packagedAt);
+    // `packagedAt` is the composition root's own ISO-8601 timestamp (never a brief
+    // value), so it is parsed with `Date.parse` directly rather than the stricter
+    // `parseExpiresOnMs` a brief-supplied `expiresOn` must pass.
+    const packagedAtMs = Date.parse(input.packagedAt);
     const expiredAsset = input.assets.find((asset) => {
       const expiresOn = asset.audioRights?.expiresOn;
       if (expiresOn === undefined) return false;

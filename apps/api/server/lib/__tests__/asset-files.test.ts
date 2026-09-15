@@ -230,6 +230,36 @@ describe("rewriteAssetPath and rewriteAssetPaths", () => {
     expect(extractSourceAssetBriefIds(brief, "target-camp")).toEqual(["source-c"]);
   });
 
+  test("extractSourceAssetBriefIds ignores a root-level audio.path and one already at the target (VE-D8)", async () => {
+    const { extractSourceAssetBriefIds } = await import("../asset-files.js");
+    const base = {
+      schemaVersion: BRIEF_SCHEMA_VERSION,
+      template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+      id: "target-camp",
+      targetRegion: "US",
+      targetAudience: "all",
+      campaignMessage: "msg",
+      products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/p1.png" }],
+    };
+    // Root-level: no `assets/inputs/<id>/` prefix at all — the pattern does not match.
+    expect(
+      extractSourceAssetBriefIds(
+        { ...base, audio: { path: "assets/inputs/shared-bed.mp3", rights: { licenceId: "lic-1", source: "acme" } } },
+        "target-camp",
+      ),
+    ).toEqual([]);
+    // Already scoped to the target brief — matches, but is not a distinct source.
+    expect(
+      extractSourceAssetBriefIds(
+        {
+          ...base,
+          audio: { path: "assets/inputs/target-camp/bed.mp3", rights: { licenceId: "lic-1", source: "acme" } },
+        },
+        "target-camp",
+      ),
+    ).toEqual([]);
+  });
+
   test("extractSourceAssetBriefIds finds distinct source brief IDs excluding target", async () => {
     const { extractSourceAssetBriefIds } = await import("../asset-files.js");
     const brief = {
