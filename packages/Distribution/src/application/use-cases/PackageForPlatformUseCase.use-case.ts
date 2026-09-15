@@ -1,4 +1,10 @@
-import { assetIdentity, CLICK_TAG_VARIABLE } from "@campaignfoundry/CampaignOrchestration";
+import {
+  assetIdentity,
+  CLICK_TAG_VARIABLE,
+  isExpired,
+  parseExpiresOnMs,
+  type AudioRights,
+} from "@campaignfoundry/CampaignOrchestration";
 import { ok, err, errorMessage, type Result } from "@campaignfoundry/shared";
 import {
   isPlatformVisible,
@@ -33,6 +39,12 @@ export interface PackageableAsset {
   /** The click destination URL (HL2, HL-D3). */
   readonly clickDestination?: string;
   readonly durationSec?: number;
+  /**
+   * Music rights record (VE-D8). Packaging never re-renders (D11) and may run
+   * well after the licence expired, so `expiresOn` is re-checked here against
+   * `packagedAt` rather than trusted from the run that produced the asset.
+   */
+  readonly audioRights?: AudioRights;
 }
 
 export interface PackageForPlatformInput {
@@ -125,9 +137,19 @@ export class PackageForPlatformUseCase {
       profiles.push({ platformId, profile });
     }
 
-    const skipped = input.skipped ?? 0;
     const include = input.include === undefined ? null : new Set(input.include);
-    const platforms: PackagedPlatform[] = [];
+
+    // Resolve, per platform, exactly which assets are eligible and selected —
+    // before any I/O and before the expiry check below (VE-D8 fix2 #5): a
+    // licence's expiry must be judged only against assets that will actually be
+    // packaged for the requested platforms, never a row a platform's
+    // format/canvas match (or the HITL `include` set) was always going to drop.
+    const selections: Array<{
+      platformId: string;
+      profile: PlatformProfile;
+      eligible: PackageableAsset[];
+      selected: PackageableAsset[];
+    }> = [];
     for (const { platformId, profile } of profiles) {
       try {
         // A profile takes the rows of its declared formats and ignores the others:
@@ -161,6 +183,61 @@ export class PackageForPlatformUseCase {
           );
         }
         const selected = include === null ? eligible : eligible.filter((a) => include.has(assetIdentity(a)));
+        selections.push({ platformId, profile, eligible, selected });
+      } catch (error) {
+        return err(new Error(`Platform "${platformId}": ${withoutAbsolutePaths(errorMessage(error))}`));
+      }
+    }
+
+    // VE-D8: expiry is re-checked here, against this run's `packagedAt`, because
+    // packaging never re-renders (D11) and can happen well after the licence the
+    // legal gate cleared has lapsed. Checked only against assets selected above —
+    // a rights-bearing row a platform's format/canvas match or `include` drops is
+    // never packaged, so its expiry cannot block a package it plays no part in.
+    // Nothing is warned-and-packaged — the whole request refuses, exactly like
+    // the missing-fallback guard above. `packagedAt` is the composition root's
+    // own ISO-8601 timestamp (never a brief value), so it is parsed with
+    // `Date.parse` directly rather than the stricter `parseExpiresOnMs` a
+    // brief-supplied `expiresOn` must pass — but a value that fails to parse
+    // fails CLOSED (the request is refused) rather than silently comparing
+    // against `NaN`, where every expiry check reads "not expired" (fix2 #6).
+    const packagedAtMs = Date.parse(input.packagedAt);
+    if (!Number.isFinite(packagedAtMs)) {
+      return err(
+        new Error(
+          `Package request's "packagedAt" is not a valid timestamp; got ${JSON.stringify(input.packagedAt)}.`,
+        ),
+      );
+    }
+    // Every selected asset, never deduplicated by `assetIdentity` (VE3a fix3):
+    // the route accepts separate persisted rows without enforcing unique
+    // identities, so keying a Map by identity let a later same-identity row
+    // silently replace an earlier expired one HERE while the packaging loop
+    // below still writes every row `selected` names. A duplicate object
+    // reference (the same asset selected for two platforms) is simply
+    // checked twice — harmless, since the check is pure.
+    const toPackage: PackageableAsset[] = [];
+    for (const { selected } of selections) {
+      toPackage.push(...selected);
+    }
+    const expiredAsset = toPackage.find((asset) => {
+      const expiresOn = asset.audioRights?.expiresOn;
+      if (expiresOn === undefined) return false;
+      const expiresMs = parseExpiresOnMs(expiresOn);
+      return expiresMs !== undefined && isExpired(expiresMs, packagedAtMs);
+    });
+    if (expiredAsset) {
+      return err(
+        new Error(
+          `Asset ${assetIdentity(expiredAsset)} has a music licence ("${expiredAsset.audioRights?.licenceId}") that expired before this package's packagedAt.`,
+        ),
+      );
+    }
+
+    const skipped = input.skipped ?? 0;
+    const platforms: PackagedPlatform[] = [];
+    for (const { platformId, profile, eligible, selected } of selections) {
+      try {
         const included = selected.length;
         const excluded = eligible.length - selected.length;
         const items: PackageManifestItem[] = [];

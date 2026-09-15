@@ -1,8 +1,8 @@
 import { randomBytes } from "node:crypto";
 import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { assetIdentity, SAFE_ID_PATTERN } from "@campaignfoundry/CampaignOrchestration";
-import type { GeneratedAsset, PipelineResult } from "@campaignfoundry/CampaignOrchestration";
+import { assetIdentity, SAFE_ID_PATTERN, isAudioRights } from "@campaignfoundry/CampaignOrchestration";
+import type { AudioRights, GeneratedAsset, PipelineResult } from "@campaignfoundry/CampaignOrchestration";
 import { hashBytes, isErrno } from "./brief-files.js";
 import { outputRoot } from "./config.js";
 
@@ -114,6 +114,8 @@ export type PersistedAsset = {
   /** The click destination URL (HL2, HL-D3). */
   clickDestination?: string;
   durationSec?: number;
+  /** Music rights record (VE-D8) — motion rows only, following `clickDestination`'s chain. */
+  audioRights?: AudioRights;
   /**
    * Planned-axis provenance, on variation rows only — `writeReport` spreads the whole
    * `GeneratedAsset`, so whatever the entity carried is here. Declared because the type
@@ -153,6 +155,18 @@ export function isPersistedAsset(a: unknown): a is PersistedAsset {
   if (typeof rec.treatment !== "string") return false;
   if (typeof rec.outputPath !== "string") return false;
   if (rec.clickDestination !== undefined && typeof rec.clickDestination !== "string") return false;
+  // A malformed rights record is a cosmetic defect like a bad descriptor, but
+  // packaging reads `expiresOn` off it directly (unlike `descriptor`), so it is
+  // validated here rather than left as `unknown` — a row that fails is skipped
+  // and counted, same as a motion row without a readable video path.
+  if (rec.audioRights !== undefined) {
+    if (!isAudioRights(rec.audioRights)) return false;
+    // VE-D8 fix2 #5: music rights describe a motion clip's audio bed — a
+    // static or html row cannot carry one. Without this, a licence attached
+    // to the wrong row (or a copy-paste onto a static row) can expire and
+    // reject a whole package for a row that was never audio.
+    if (rec.format !== "motion") return false;
+  }
   // `format` is absent on classic rows, else static | motion | html. An unknown format is
   // skipped (and counted) rather than packaged as a still; a motion row without a
   // readable mp4 path or a finite clip length can't be packaged or duration-checked;

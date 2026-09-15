@@ -81,6 +81,10 @@
     "./palette-shift": {
       "types": "./src/domain/value-objects/palette-shift.ts",
       "default": "./src/domain/value-objects/palette-shift.ts"
+    },
+    "./audio-rights": {
+      "types": "./src/domain/value-objects/AudioRights.vo.ts",
+      "default": "./src/domain/value-objects/AudioRights.vo.ts"
     }
   },
   "scripts": {

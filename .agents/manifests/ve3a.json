@@ -1,0 +1,159 @@
+{
+  "version": 1,
+  "lane": "VE3a",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/load-brief.ts",
+      "before": "  if (typeof rights.licenceId !== \"string\" || rights.licenceId === \"\") {\n    throw new Error('Campaign brief field \"audio.rights.licenceId\" must be a non-empty string.');\n  }\n",
+      "after": "  // licenceId requirement dropped (VE-D8 mutation (a))\n",
+      "because": "Dropping the load-time licenceId requirement lets an audio block with no licenceId through parseBrief, so the missing-licenceId refusal test must fail.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/load-brief.test.ts",
+        "-t",
+        "audio without rights.licenceId is refused, naming the field"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/Distribution/src/application/use-cases/PackageForPlatformUseCase.use-case.ts",
+      "before": "    if (expiredAsset) {\n      return err(\n        new Error(\n          `Asset ${assetIdentity(expiredAsset)} has a music licence (\"${expiredAsset.audioRights?.licenceId}\") that expired before this package's packagedAt.`,\n        ),\n      );\n    }\n",
+      "after": "    // packaging expiry re-check dropped (VE-D8 mutation (b))\n",
+      "because": "Dropping packaging's expiry re-check against packagedAt lets an expired licence's asset package as if it were still cleared, so the expired-licence refusal test must fail.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/Distribution/src/application/use-cases/__tests__/PackageForPlatformUseCase.use-case.test.ts",
+        "-t",
+        "refuses the whole request when an asset's licence expired before packagedAt, naming the asset and licence; nothing is written"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/application/use-cases/GenerateCampaignUseCase.use-case.ts",
+      "before": "    if (!territoryCovered(brief.targetRegion, rights.territories)) {\n      log.record(\n        \"ExecuteLegalGateCheck\",\n        `Pipeline halted — music licence \"${rights.licenceId}\" does not cover territory \"${brief.targetRegion}\"`,\n        \"error\",\n      );\n      log.complete();\n      return true;\n    }\n",
+      "after": "    // territory halt dropped (VE-D8 mutation (c))\n",
+      "because": "Dropping the legal gate's territory halt lets a run whose targetRegion is outside the licence's territories proceed, so the uncovered-territory halt test must fail.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/application/use-cases/__tests__/GenerateCampaignUseCase.use-case.test.ts",
+        "-t",
+        "halts when targetRegion is not covered by territories"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/editor-state.ts",
+      "before": "  const audio = state.audio !== undefined ? { audio: state.audio } : {};\n",
+      "after": "  // audio write-back dropped from toBrief (VE3a mutation (d))\n  const audio = {};\n",
+      "because": "Dropping the audio write-back from toBrief makes the editor silently strip a loaded brief's licence record on save, so the audio round-trip test must fail.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/editor-state.test.ts",
+        "-t",
+        "a loaded brief with audio round-trips and opens clean"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/AudioRights.vo.ts",
+      "before": "const EXPIRES_ON_PATTERN =\n  /^(\\d{4})-(\\d{2})-(\\d{2})(?:T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|[+-]\\d{2}:\\d{2}))?$/;\n",
+      "after": "const EXPIRES_ON_PATTERN =\n  /^(\\d{4})-(\\d{2})-(\\d{2})(?:T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|[+-]\\d{2}:\\d{2})?)?$/;\n",
+      "because": "Making the Z/offset optional again on a date-time lets an offset-less expiresOn (read as the host's local time) parse, so the no-Z/offset refusal test must fail (VE3a fix2 #1).",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/AudioRights.vo.test.ts",
+        "-t",
+        "refuses a date-time with no Z/offset"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/load-brief.ts",
+      "before": "  assertNoUnknownKeys(audio, AUDIO_KEYS, \"audio\");\n",
+      "after": "  // unknown-key refusal on `audio` dropped (VE3a fix2 mutation #3)\n",
+      "because": "Dropping the unknown-key refusal on `audio` lets a typo'd key (e.g. `track`) load silently instead of refusing, so the unknown-key refusal test must fail.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/load-brief.test.ts",
+        "-t",
+        "has an unknown key refused, naming the key"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/report.ts",
+      "before": "    if (rec.format !== \"motion\") return false;\n",
+      "after": "    // motion-only guard on audioRights dropped (VE3a fix2 mutation #5)\n",
+      "because": "Dropping the motion-only guard lets audioRights on a static/html row pass isPersistedAsset, so a licence attached to the wrong row could reject a whole package again; the non-motion-row refusal test must fail.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/report.test.ts",
+        "-t",
+        "isPersistedAsset refuses audioRights on a non-motion row"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/editor-state.ts",
+      "before": "function normalizeAudioDraft(value: unknown): CampaignBrief[\"audio\"] {\n  return isAudio(value) ? (value as CampaignBrief[\"audio\"]) : undefined;\n}",
+      "after": "function normalizeAudioDraft(value: unknown): CampaignBrief[\"audio\"] {\n  if (value === null || typeof value !== \"object\" || Array.isArray(value))\n    return undefined;\n  const audio = value as Record<string, unknown>;\n  if (typeof audio.path !== \"string\") return undefined;\n  const rights = audio.rights;\n  if (rights === null || typeof rights !== \"object\" || Array.isArray(rights))\n    return undefined;\n  return value as CampaignBrief[\"audio\"];\n}",
+      "because": "Reverting to the shape-only audio retention (path a string, rights an object) lets a record with empty rights survive recovery, so the empty-rights recovery test must fail (VE3a fix3 mutation (a)).",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/editor-state.test.ts",
+        "-t",
+        "normalizeDraftState drops audio with empty rights"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/Distribution/src/application/use-cases/PackageForPlatformUseCase.use-case.ts",
+      "before": "    const toPackage: PackageableAsset[] = [];\n    for (const { selected } of selections) {\n      toPackage.push(...selected);\n    }\n    const expiredAsset = toPackage.find((asset) => {",
+      "after": "    const toPackage = new Map<string, PackageableAsset>();\n    for (const { selected } of selections) {\n      for (const asset of selected) toPackage.set(assetIdentity(asset), asset);\n    }\n    const expiredAsset = [...toPackage.values()].find((asset) => {",
+      "because": "Reverting to an identity-keyed Map lets a later same-identity row silently replace an earlier expired one in the expiry check while packaging still writes every selected asset, so the same-identity test must fail (VE3a fix3 mutation (b)).",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/Distribution/src/application/use-cases/__tests__/PackageForPlatformUseCase.use-case.test.ts",
+        "-t",
+        "refuses the whole request when two selected rows share an identity"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

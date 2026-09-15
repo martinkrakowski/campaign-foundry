@@ -3,6 +3,7 @@
 export * from "./advertising-units.js";
 export * from "./aspect-ratios.js";
 export * from "./AspectRatio.vo.js";
+export * from "./AudioRights.vo.js";
 export * from "./BackgroundSource.vo.js";
 export * from "./brief-schema-version.js";
 export * from "./brief-template.js";

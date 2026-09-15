@@ -1,3 +1,4 @@
+import type { AudioRights } from "../value-objects/AudioRights.vo.js";
 import type { Treatment } from "../value-objects/Treatment.vo.js";
 import type { CopyTimeline } from "../value-objects/CopyTimeline.vo.js";
 import type { Style } from "../value-objects/creative-style.js";
@@ -119,4 +120,17 @@ export interface CampaignBrief {
    * Emitted as a standard `clickTag` variable in HTML units (HL4), never as an `href`.
    */
   readonly clickDestination?: string;
+  /**
+   * Optional music bed reference (VE-D8): a rights record travels with the
+   * asset path because the asset store carries no metadata channel. Absent
+   * means no audio, exactly as today — nothing renders differently (VE-D3).
+   * A missing `rights.licenceId`/`rights.source`, a malformed `expiresOn`, or
+   * `territories` present without `targetRegion` itself being alpha-2 all
+   * refuse the brief at load. Until VE3b renders the bed into the encoder, a
+   * run declaring `audio` is refused with an interim message.
+   */
+  readonly audio?: {
+    readonly path: string;
+    readonly rights: AudioRights;
+  };
 }

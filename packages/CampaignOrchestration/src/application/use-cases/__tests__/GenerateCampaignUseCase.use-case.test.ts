@@ -237,6 +237,93 @@ describe("GenerateCampaignUseCase — legal gate", () => {
   });
 });
 
+describe("GenerateCampaignUseCase — legal gate — music rights (VE-D8)", () => {
+  test("halts when the licence expired before now(), naming the licence", async () => {
+    const d = deps(); // now() = 2026-01-01T00:00:00.000Z
+    const result = await new GenerateCampaignUseCase(d).execute(
+      baseBrief({
+        audio: {
+          path: "assets/inputs/camp/bed.mp3",
+          rights: { licenceId: "lic-expired", source: "acme", expiresOn: "2025-12-31" },
+        },
+      }),
+    );
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.value.halted).toBe(true);
+      expect(result.value.assets).toEqual([]);
+      const halt = result.value.log.entries.find((e) => e.stage === "ExecuteLegalGateCheck" && e.level === "error");
+      expect(halt?.message).toContain("lic-expired");
+    }
+    expect(d.imageGenerator.resolveBackground).not.toHaveBeenCalled();
+  });
+
+  test("does not halt when the licence expires exactly at now() (strict <)", async () => {
+    const d = deps();
+    const result = await new GenerateCampaignUseCase(d).execute(
+      baseBrief({
+        audio: {
+          path: "assets/inputs/camp/bed.mp3",
+          rights: { licenceId: "lic-boundary", source: "acme", expiresOn: "2026-01-01T00:00:00.000Z" },
+        },
+      }),
+    );
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.value.halted).toBe(false);
+  });
+
+  test("halts when targetRegion is not covered by territories", async () => {
+    const d = deps();
+    const result = await new GenerateCampaignUseCase(d).execute(
+      baseBrief({
+        targetRegion: "FR",
+        audio: {
+          path: "assets/inputs/camp/bed.mp3",
+          rights: { licenceId: "lic-territory", source: "acme", territories: ["US"] },
+        },
+      }),
+    );
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.value.halted).toBe(true);
+      const halt = result.value.log.entries.find((e) => e.stage === "ExecuteLegalGateCheck" && e.level === "error");
+      expect(halt?.message).toContain("lic-territory");
+    }
+  });
+
+  test("does not halt when the licence is unexpired and the territory is covered", async () => {
+    const d = deps();
+    const result = await new GenerateCampaignUseCase(d).execute(
+      baseBrief({
+        targetRegion: "DE",
+        audio: {
+          path: "assets/inputs/camp/bed.mp3",
+          rights: { licenceId: "lic-ok", source: "acme", expiresOn: "2027-01-01", territories: ["DE"] },
+        },
+      }),
+    );
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.value.halted).toBe(false);
+  });
+
+  test("a brief without audio gates exactly as today — no extra log entries (VE-D3)", async () => {
+    const withoutAudio = await new GenerateCampaignUseCase(deps()).execute(baseBrief());
+    const withUncleared = await new GenerateCampaignUseCase(deps()).execute(
+      baseBrief({
+        audio: {
+          path: "assets/inputs/camp/bed.mp3",
+          rights: { licenceId: "lic-clean", source: "acme" },
+        },
+      }),
+    );
+    expect(withoutAudio.success && withUncleared.success).toBe(true);
+    if (!withoutAudio.success || !withUncleared.success) return;
+    const gateEntries = (r: typeof withoutAudio.value) =>
+      r.log.entries.filter((e) => e.stage === "ExecuteLegalGateCheck").map((e) => e.message);
+    expect(gateEntries(withUncleared.value)).toEqual(gateEntries(withoutAudio.value));
+  });
+});
+
 describe("GenerateCampaignUseCase — happy path", () => {
   test("produces the full product × ratio matrix for a single (default) treatment", async () => {
     const d = deps();
@@ -1222,6 +1309,27 @@ describe("GenerateCampaignUseCase — motion variants", () => {
     // Every sampled frame was brand-checked (5) plus the one static composite.
     expect(d.compliance.validateBrandColorDensity).toHaveBeenCalledTimes(6);
     expect(result.value.log.entries.some((e) => /ken-burns-in 6s/.test(e.message) && e.level === "info")).toBe(true);
+  });
+
+  test("carries the brief's audio rights onto a motion asset, not its static siblings (VE-D8)", async () => {
+    const rights = { licenceId: "lic-carry", source: "acme", expiresOn: "2027-01-01" };
+    const variants = [motionVariant(), fakeVariant({ index: 1, aspectRatio: "9:16" })];
+    const d = deps({ planner: fakePlanner(fakePlan(variants)) });
+    const result = await new GenerateCampaignUseCase(d).execute(
+      variationBrief({ audio: { path: "assets/inputs/camp/bed.mp3", rights } }),
+    );
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.assets[0].audioRights).toEqual(rights);
+    expect(result.value.assets[1]).not.toHaveProperty("audioRights");
+  });
+
+  test("omits audioRights when the brief carries no audio (VE-D3)", async () => {
+    const d = deps({ planner: fakePlanner(fakePlan([motionVariant()])) });
+    const result = await new GenerateCampaignUseCase(d).execute(variationBrief());
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.assets[0]).not.toHaveProperty("audioRights");
   });
 
   test("records the minimum sampled-frame score and fails the asset when one frame fails", async () => {

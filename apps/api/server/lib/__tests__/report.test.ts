@@ -369,6 +369,77 @@ describe("report persistence", () => {
     expect(isPersistedAsset({ ...row, clickDestination: { url: "https://example.com" } })).toBe(false);
   });
 
+  test("isPersistedAsset refuses a present, malformed audioRights, and accepts a valid one (VE-D8)", () => {
+    const row = {
+      productId: "alpha",
+      aspectRatio: "9:16",
+      treatment: "default",
+      outputPath: "alpha/9x16/v1.png",
+      format: "motion",
+      videoPath: "alpha/9x16/v1.mp4",
+      durationSec: 6,
+    };
+    // Absent stays valid: most assets carry no audio.
+    expect(isPersistedAsset(row)).toBe(true);
+    expect(
+      isPersistedAsset({ ...row, audioRights: { licenceId: "lic-1", source: "acme" } }),
+    ).toBe(true);
+    expect(
+      isPersistedAsset({
+        ...row,
+        audioRights: { licenceId: "lic-1", source: "acme", expiresOn: "2026-12-31", territories: ["US"] },
+      }),
+    ).toBe(true);
+    // Missing licenceId/source, malformed expiresOn, or a non-alpha-2 territories array
+    // are the same failure mode as a motion row without a videoPath: skip, don't throw.
+    expect(isPersistedAsset({ ...row, audioRights: { source: "acme" } })).toBe(false);
+    expect(isPersistedAsset({ ...row, audioRights: { licenceId: "lic-1" } })).toBe(false);
+    expect(
+      isPersistedAsset({ ...row, audioRights: { licenceId: "lic-1", source: "acme", expiresOn: "nope" } }),
+    ).toBe(false);
+    expect(
+      isPersistedAsset({ ...row, audioRights: { licenceId: "lic-1", source: "acme", territories: [] } }),
+    ).toBe(false);
+    expect(isPersistedAsset({ ...row, audioRights: "lic-1" })).toBe(false);
+  });
+
+  test("isPersistedAsset refuses audioRights on a non-motion row (VE-D8 fix2 #5)", () => {
+    const rights = { licenceId: "lic-1", source: "acme" };
+    const staticRow = { productId: "alpha", aspectRatio: "1:1", treatment: "default", outputPath: "alpha/1x1.png" };
+    expect(isPersistedAsset({ ...staticRow, audioRights: rights })).toBe(false);
+    expect(isPersistedAsset({ ...staticRow, format: "static", audioRights: rights })).toBe(false);
+    const htmlRow = {
+      productId: "alpha",
+      aspectRatio: "1:1",
+      treatment: "default",
+      outputPath: "alpha/1x1.png",
+      format: "html",
+      htmlBundlePath: "alpha/1x1/bundle.zip",
+      htmlFallbackPath: "alpha/1x1/fallback.png",
+    };
+    expect(isPersistedAsset({ ...htmlRow, audioRights: rights })).toBe(false);
+  });
+
+  test("audioRights persists on the asset through writeReport/readReport and the guard (VE-D8)", async () => {
+    const rights = { licenceId: "lic-1", source: "acme", expiresOn: "2026-12-31", territories: ["US"] };
+    const path = await writeReport(
+      result([
+        asset({
+          format: "motion",
+          videoPath: "alpha/1x1/v0.mp4",
+          durationSec: 6,
+          audioRights: rights,
+        }),
+      ]),
+    );
+    const per = readAssets(path);
+    expect(per[0].audioRights).toEqual(rights);
+    const stored = await readReport(root, "camp");
+    const rows = (stored as { assets: unknown[] }).assets;
+    expect(isPersistedAsset(rows[0])).toBe(true);
+    expect((rows[0] as { audioRights: unknown }).audioRights).toEqual(rights);
+  });
+
   test("isPersistedAsset requires the four strings plus integer variantIndex and attempt on variation rows", () => {
     const variation = {
       productId: "alpha",
