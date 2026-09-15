@@ -1,7 +1,7 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { SAFE_ID_PATTERN } from "@campaignfoundry/CampaignOrchestration";
 import { outputRoot } from "../../../lib/config.js";
-import { resolveConfined } from "../../../lib/confined-path.js";
+import { resolveConfinedForRead } from "../../../lib/confined-path.js";
 
 /**
  * GET /campaigns/packages/:campaignId — list persisted platform manifests under
@@ -14,7 +14,14 @@ export default defineEventHandler(async (event) => {
     return { error: "Invalid campaign id" };
   }
 
-  const campaignDir = resolveConfined(outputRoot(), "packages", campaignId);
+  let campaignDir: string;
+  try {
+    // The campaign dir, or a manifest inside it, may be a symlink aiming outside the root.
+    campaignDir = await resolveConfinedForRead(outputRoot(), "packages", campaignId);
+  } catch {
+    setResponseStatus(event, 404);
+    return { error: "No packages found" };
+  }
 
   try {
     const st = await stat(campaignDir);
@@ -32,8 +39,8 @@ export default defineEventHandler(async (event) => {
   for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
     if (!entry.isDirectory()) continue;
     if (!SAFE_ID_PATTERN.test(entry.name)) continue;
-    const manifestPath = resolveConfined(campaignDir, entry.name, "manifest.json");
     try {
+      const manifestPath = await resolveConfinedForRead(campaignDir, entry.name, "manifest.json");
       const parsed: unknown = JSON.parse(await readFile(manifestPath, "utf8"));
       if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
         platforms.push(parsed);

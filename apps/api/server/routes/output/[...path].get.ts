@@ -2,7 +2,7 @@ import { createReadStream, type Stats } from "node:fs";
 import { stat } from "node:fs/promises";
 import { extname, resolve } from "node:path";
 import { outputRoot } from "../../lib/config.js";
-import { resolveConfined } from "../../lib/confined-path.js";
+import { resolveConfined, resolveConfinedForRead } from "../../lib/confined-path.js";
 
 const CONTENT_TYPES: Record<string, string> = {
   ".png": "image/png",
@@ -65,6 +65,13 @@ export default defineEventHandler(async (event) => {
     } catch {
       setResponseStatus(event, 400);
       return { error: "Invalid path" };
+    }
+    try {
+      // A symlink inside the root may aim outside it; stat/createReadStream would follow it.
+      target = await resolveConfinedForRead(root, relative);
+    } catch {
+      setResponseStatus(event, 404);
+      return { error: "Not found" };
     }
   }
   let st: Stats;
