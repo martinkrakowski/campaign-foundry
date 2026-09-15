@@ -660,6 +660,55 @@ describe("PackageForPlatformUseCase — html (D122)", () => {
     expect(result.value.platforms[0].items[0].checks).toEqual({ size: "fail" });
   });
 
+  test("the budget counts the whole unit — bundle plus fallback — not the bundle alone (X14)", async () => {
+    // The shipped unit is index.html AND fallback.png; a network measures the
+    // uploaded package. Here the bundle fits the profile's budget on its own and
+    // the fallback is what crosses it, so the only honest verdict is a fail.
+    const maxBytes = 1024;
+    const profile: PlatformProfile = { ...HTML_PROFILE, maxBytes };
+    const bundle = new Uint8Array(maxBytes - 8);
+    const fallback = new Uint8Array(16);
+    const store = fakeStore();
+    const bytesFor: Record<string, Uint8Array> = {
+      "alpha/1x1/index.html": bundle,
+      "alpha/1x1/fallback.png": fallback,
+    };
+    vi.mocked(store.readAsset).mockImplementation(async (relativePath: string) => bytesFor[relativePath]);
+    const result = await exec(store, {
+      assets: [html()],
+      platforms: ["html-banner"],
+      profiles: { "html-banner": profile },
+    });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    const item = result.value.platforms[0].items[0];
+    expect(item.checks).toEqual({ size: "fail" });
+    // Both files were still written — a fail is recorded, not a refusal.
+    expect(store.packaged.map((p) => p.relativePath)).toEqual([
+      "alpha/1x1/index.html",
+      "alpha/1x1/fallback.png",
+    ]);
+  });
+
+  test("a unit whose bundle and fallback together fit the budget records a size pass (X14)", async () => {
+    const maxBytes = 1024;
+    const profile: PlatformProfile = { ...HTML_PROFILE, maxBytes };
+    const store = fakeStore();
+    const bytesFor: Record<string, Uint8Array> = {
+      "alpha/1x1/index.html": new Uint8Array(maxBytes - 8),
+      "alpha/1x1/fallback.png": new Uint8Array(8),
+    };
+    vi.mocked(store.readAsset).mockImplementation(async (relativePath: string) => bytesFor[relativePath]);
+    const result = await exec(store, {
+      assets: [html()],
+      platforms: ["html-banner"],
+      profiles: { "html-banner": profile },
+    });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.platforms[0].items[0].checks).toEqual({ size: "pass" });
+  });
+
   test("refuses an html asset when clickDestination is set on brief/asset but bundle lacks clickTag variable (HL4)", async () => {
     // A bundle that contains no clickTag variable (e.g. bare html or an <a href>)
     const bundleWithoutClickTag = new TextEncoder().encode("<!DOCTYPE html><html><body><a href=\"https://example.com\">Click</a></body></html>");
@@ -708,3 +757,70 @@ describe("PackageForPlatformUseCase — html (D122)", () => {
     expect(store.writePackaged).toHaveBeenCalled();
   });
 });
+
+describe("PackageForPlatformUseCase — shipped html5 display profiles (X14)", () => {
+  /** An `image-html` display row: a size, not a ratio (D113), plus the unit's two files. */
+  const htmlDisplay = (size: DisplaySize, over: Partial<GeneratedAsset> = {}): GeneratedAsset =>
+    asset({
+      size,
+      aspectRatio: undefined,
+      outputPath: `alpha/${size}/fallback.png`,
+      treatment: "image-html",
+      format: "html",
+      htmlBundlePath: `alpha/${size}/index.html`,
+      htmlFallbackPath: `alpha/${size}/fallback.png`,
+      variantIndex: 1,
+      ...over,
+    });
+
+  test("packages an image-html asset for google-display-html: index.html and fallback written, format html on the item", async () => {
+    const store = fakeStore();
+    const result = await exec(store, {
+      assets: [htmlDisplay("300x250")],
+      platforms: ["google-display-html"],
+    });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    const [platform] = result.value.platforms;
+    expect(platform.included).toBe(1);
+    expect(store.reads).toEqual(["alpha/300x250/index.html", "alpha/300x250/fallback.png"]);
+    expect(store.packaged.map((p) => `${p.platformId}/${p.relativePath}`)).toEqual([
+      "google-display-html/alpha/300x250/index.html",
+      "google-display-html/alpha/300x250/fallback.png",
+    ]);
+    expect(platform.items[0].format).toBe("html");
+    expect(platform.items[0].size).toBe("300x250");
+    expect(platform.items[0].checks).toEqual({ size: "pass" });
+    expect(store.manifests[0].manifest.profile.maxBytes).toBe(150 * 1024);
+  });
+
+  test("the static google-display profile does not take the html row — a static profile packages the statics only", async () => {
+    const store = fakeStore();
+    const result = await exec(store, {
+      assets: [
+        htmlDisplay("300x250"),
+        asset({ size: "300x250", aspectRatio: undefined, outputPath: "alpha/300x250.png", treatment: "image-html" }),
+      ],
+      platforms: ["google-display"],
+    });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.platforms[0].items.map((i) => i.source)).toEqual(["alpha/300x250.png"]);
+    expect(store.reads).toEqual(["alpha/300x250.png"]);
+  });
+
+  test("display-web-html packages an image-html asset too, and no other size reaches the unit", async () => {
+    const store = fakeStore();
+    const result = await exec(store, {
+      assets: [htmlDisplay("160x600"), htmlDisplay("300x250", { productId: "beta" })],
+      platforms: ["display-web-html"],
+    });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    const [platform] = result.value.platforms;
+    expect(platform.included).toBe(2);
+    expect(platform.items.map((i) => i.source)).toEqual(["alpha/160x600/index.html", "beta/300x250/index.html"]);
+    expect(platform.items.every((i) => i.format === "html")).toBe(true);
+  });
+});
+
