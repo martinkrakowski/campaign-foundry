@@ -124,8 +124,8 @@ beyond the brief's family, and any third-party script. Each breaks either the fa
 | **HL5b** | The click-destination input, rendered by `OutputSection` over the `clickDestination` patch and validation `editor-state.ts` already carried. | **Shipped.** The `OutputSection` renders the click-destination input. |
 | **HL5c** | The live weight meter reading `profile.maxBytes` (HL-D6). | **Shipped.** The meter reads the selected html profiles' own `maxBytes` (tightest wins) and weighs the assembled markup through `assembleHtml`. |
 | **HL5d** | Editor preview of the `html` layer through the canvas rendition, satisfying HL-D7 without putting user content in the app DOM. | **Shipped.** The existing preview path already drew the layer; four tests now pin it. |
-| **HL5f** | **Renderer fidelity first.** Thread `tone` into `AssembleHtmlOptions` so the markup's font weight matches the canvas's tone-derived weight (today `assembleHtml` falls back to a hard-coded `"bold"`), and pin a canvas-vs-markup geometry fixture for element placement (baseline offsets vs flex alignment are not proven equal). | **Dispatchable** (HL-D8). |
-| **HL5e** | Per-element style overrides: `style?: { fontWeight?, fontFamily? }` on `text` and `button` elements only, absent = the brief's `creative-style` value (HL-D4's override shape), honoured identically by `drawHtml` and `assembleHtml`, editable in the HL5a element editor. | **After HL5f** (HL-D8). |
+| **HL5f** | **Renderer fidelity first.** Thread `tone` into `AssembleHtmlOptions` so the markup's font weight matches the canvas's tone-derived weight (today `assembleHtml` falls back to a hard-coded `"bold"`), and pin a canvas-vs-markup geometry fixture for element placement (baseline offsets vs flex alignment are not proven equal). | **Shipped.** |
+| **HL5e** | Per-element style overrides: `style?: { fontWeight?, fontFamily? }` on `text` and `button` elements only, absent = the brief's `creative-style` value (HL-D4's override shape), honoured identically by `drawHtml` and `assembleHtml`, editable in the HL5a element editor. | **Dispatchable — after HL5f** (HL-D8). |
 
 **Order.** HL1 → HL2 → **HL3 → HL4** → HL5. **HL3 before HL4 is the load-bearing choice**: build the
 fallback first and the markup is written to match a rendering that already exists, rather than the
@@ -193,7 +193,38 @@ alongside the enabled one — which is also what X9's own promise is about.
 
 **HL5c — shipped in this PR.** The live weight meter (HL-D6) reads the placement budget from the table packaging enforces against — `htmlByteBudget` takes the **smallest** `maxBytes` among the selected platforms whose `formats` include `html`, and the meter names that profile — and `htmlWeightReading` weighs the draft's enabled `html` layers' elements through the same `assembleHtml` the generation path runs, taking the largest assembly across the sizes the selection renders html at (each size ships as its own unit against the same budget). The markup is measured, never rendered: the editor shows the numbers and the profile label and no user string leaves an input's value (HL-D7). Over budget the meter says so with the overage and the draft carries a **warning**, not an error — the raster fallback joins the same budget at packaging, so the editor's figure is a lower bound and packaging's check of the finished unit is the enforcement.
 
-```premise HL5f
-# Either gap keeps the lane open: the assembler still resolves weight from a hard-coded fallback, or its options carry no tone.
-grep -q 'resolveStyle(options.style, "bold"' packages/CampaignOrchestration/src/domain/value-objects/markup-assembler.ts || ! grep -qE 'readonly tone[?]?:' packages/CampaignOrchestration/src/domain/value-objects/markup-assembler.ts
-```
+**HL5f — shipped in this PR.** The tone→weight rule (`subtle` → `"500"`, else
+`"bold"`) is now the ONE function `toneFontWeight` (`creative-style.ts`), and
+both renderers call it: `NodeCanvasCompositor.prepare` in place of its old
+inline ternary, and `assembleHtml` in place of its hard-coded `"bold"` —
+`AssembleHtmlOptions` gains an optional `tone`, absent falling back to
+`DEFAULT_TREATMENT.tone` ("bold", the pre-HL5f behaviour unchanged). Generation
+passes the variant's own tone at both `GenerateCampaignUseCase` call sites;
+HL5c's live weight meter passes the draft's first treatment's tone
+(`state.treatments[0]?.tone`).
+
+Element placement: the canvas's per-anchor baseline arithmetic (`drawHtml`'s
+`top`/`middle`/`bottom` branches) is now `htmlTextFirstLineOffset`
+(`html-element.ts`), and `drawHtml` calls it with the real post-wrap line
+count — a byte-identical refactor (the HL3 raster tests and every canvas
+golden pass unchanged). Font size, line height (px) and letter spacing for
+`text` elements are `htmlTextGeometry`; the `button` font size (already the
+same formula in both renderers, now pinned rather than merely coincidental) is
+`htmlButtonFontSize`. The markup positions text with an explicit `padding-top`
+derived from the same offset (`htmlTextPaddingTop`), replacing CSS flex
+`justify-content`, which was never proven equal to the canvas's placement.
+
+**Residual difference, stated precisely (not narrowed — narrowing it needs a
+browser, which D122 refuses):** assembling is server-side with no browser to
+wrap text in, so `assembleHtml` always computes the offset for a single line.
+This is exact for `top` (the offset does not depend on line count at all). For
+`middle`/`bottom`, it is the single-line case: an element whose text wraps to
+`n` lines in the browser renders, on the canvas fallback, `(n - 1) *
+lineHeight / 2` lower for `middle` or `(n - 1) * lineHeight` lower for
+`bottom` than where the markup's fixed single-line offset places it. Font
+size, line height, letter spacing, wrap width (both renderers wrap/lay out at
+the frame's own width, `boxW`, verbatim) and font weight are identical for any
+line count. A fixture test (`NodeCanvasCompositor.html-fidelity.test.ts`) pins
+the shared numbers across a frame x anchor x tone grid; two mutations
+(`.agents/manifests/hl5f.json`) confirm the tone default and the middle-anchor
+offset are load-bearing, not incidental.
