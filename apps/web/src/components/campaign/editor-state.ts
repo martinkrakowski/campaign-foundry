@@ -2959,11 +2959,21 @@ export function nextFreeDuration(
 export const PLAN_DEBOUNCE_MS = 250;
 
 export function canPlan(state: EditorState): boolean {
+  // X18: `toBrief` omits an optional policy draft the parser refuses, so a
+  // plan started against one would estimate a policy the user is not looking
+  // at. A draft may therefore be blank (the key the brief omits anyway) or
+  // parse — never the truncation of a refused value.
+  const draftOrParsed = (value: string): boolean =>
+    value.trim() === "" || parsePolicyInteger(value) !== undefined;
   return (
     state.mode === "variation" &&
     state.briefId.length > 0 &&
     state.products.some((product) => product.id.length > 0) &&
-    (parsePolicyInteger(state.variation.count) ?? 0) >= 1
+    (parsePolicyInteger(state.variation.count) ?? 0) >= 1 &&
+    draftOrParsed(state.variation.seed) &&
+    draftOrParsed(state.variation.minDistance) &&
+    draftOrParsed(state.variation.perProduct) &&
+    draftOrParsed(state.variation.perRatio)
   );
 }
 

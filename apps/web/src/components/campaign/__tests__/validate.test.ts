@@ -543,6 +543,19 @@ describe("X18 — the policy integer validated is the policy integer saved", () 
     expect(validatePolicy(state).seed).toBeUndefined();
     expect(savedValue(state, "seed")).toBe(42);
   });
+
+  test("a count the parser refuses is blamed on the count only, never on the floor (X18)", () => {
+    // "42.0" fails the shared parser, so the floor-vs-count rule must not
+    // read it as 0 and fabricate a second error blaming perRatio; the count's
+    // own error already covers the invalid draft.
+    const errors = validatePolicy(randomized({ count: "42.0", perRatio: "1" }));
+    expect(errors.count).toBe(messages.count);
+    expect(errors.perRatio).toBeUndefined();
+    // a count that does parse still trips the floor rule
+    expect(validatePolicy(randomized({ count: "5", perRatio: "2" })).perRatio).toBe(
+      messages.perRatioExceeds(3, 2, 5),
+    );
+  });
 });
 
 describe("validateOutput", () => {

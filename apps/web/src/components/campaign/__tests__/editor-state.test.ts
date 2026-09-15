@@ -1914,6 +1914,23 @@ describe("canPlan", () => {
       canPlan({ ...noCount, variation: { ...noCount.variation, count: "1e5" } }),
     ).toBe(true);
   });
+
+  test("is false when an optional policy draft is one the parser refuses (X18)", () => {
+    // toBrief omits a seed / minDistance / perProduct / perRatio draft the
+    // shared parser refuses, so planning against "12abc" or "42.0" would
+    // estimate a policy the user is not looking at. Blank is the opposite of
+    // refused — it means "unset", exactly the key the saved brief omits.
+    const s = ready();
+    expect(
+      canPlan({ ...s, variation: { ...s.variation, seed: "12abc" } }),
+    ).toBe(false);
+    expect(
+      canPlan({ ...s, variation: { ...s.variation, seed: "" } }),
+    ).toBe(true);
+    expect(
+      canPlan({ ...s, variation: { ...s.variation, perProduct: "42.0" } }),
+    ).toBe(false);
+  });
 });
 
 describe("the unnamed draft's key (H6/D37)", () => {

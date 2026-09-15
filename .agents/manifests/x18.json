@@ -37,6 +37,42 @@
         "--maxWorkers=2"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/sections/PolicySection.tsx",
+      "before": "messages.countReadout(parsePolicyInteger(state.variation.count) ?? 0, axisMax)",
+      "after": "messages.countReadout(Number.parseInt(state.variation.count, 10) || 0, axisMax)",
+      "because": "Every reader of a policy integer must use the one parser: reverting the count readout to Number.parseInt truncates the accepted, saveable draft \"1e5\" back to 1 on screen, and the PolicySection X18 test — which asserts the readout speaks 100000 (and the slider sits at the ceiling), not parseInt's 1 — fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/sections/__tests__/policy-section.test.tsx",
+        "-t",
+        "X18",
+        "--maxWorkers=2"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/editor-state.ts",
+      "before": "    (parsePolicyInteger(state.variation.count) ?? 0) >= 1 &&\n    draftOrParsed(state.variation.seed) &&\n    draftOrParsed(state.variation.minDistance) &&\n    draftOrParsed(state.variation.perProduct) &&\n    draftOrParsed(state.variation.perRatio)",
+      "after": "    (parsePolicyInteger(state.variation.count) ?? 0) >= 1",
+      "because": "canPlan must refuse a plan whose optional draft toBrief would silently omit: dropping the draftOrParsed conjuncts lets a \"12abc\" seed or \"42.0\" perProduct draft plan anyway, and the canPlan X18 test — false for a refused draft, true when blank — fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/editor-state.test.ts",
+        "-t",
+        "canPlan",
+        "--maxWorkers=2"
+      ],
+      "verdict": "caught"
     }
   ]
 }

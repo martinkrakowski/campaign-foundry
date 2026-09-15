@@ -307,8 +307,11 @@ export function validatePolicy(state: EditorState): FieldErrors {
         ? messages.ratioNoneDrawablePackaged(packaged.map(ratioDisplayName))
         : messages.ratioNoneDrawableNone();
   }
-  const count = parsePolicyInteger(state.variation.count) ?? 0;
-  if (floor > 0 && floor * drawableCount > count) {
+  // X18: the floor rule needs a count the parser reads. A refused count draft
+  // (e.g. "42.0") carries its own error above; treating it as 0 here would
+  // blame a positive floor for the count's failure.
+  const count = parsePolicyInteger(state.variation.count);
+  if (count !== undefined && floor > 0 && floor * drawableCount > count) {
     errors.perRatio = messages.perRatioExceeds(drawableCount, floor, count);
   }
   if (state.variation.layout.length === 0) errors.layout = messages.layout;

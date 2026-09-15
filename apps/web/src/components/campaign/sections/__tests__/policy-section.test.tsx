@@ -78,6 +78,45 @@ describe("PolicySection — the policy numbers", () => {
     expect(screen.getByText(messages.countReadout(12, axisProductSize(state())))).toBeTruthy();
   });
 
+  test("an exponent count draft renders the parsed value, not parseInt's 1 (X18)", () => {
+    // A hand-edited draft can carry count "1e5" — validation accepts it and
+    // toBrief saves 100000. Setting the count by hand is the clamp's exempt
+    // path, so the section genuinely renders against that literal draft: the
+    // slider clamps its own position to the axis ceiling, and every number the
+    // section derives from the draft must come from the shared parser — the
+    // old Number.parseInt read truncated "1e5" to 1.
+    const s = editorReducer(state(), { type: "setVariation", field: "count", value: "1e5" });
+    expect(s.variation.count).toBe("1e5");
+    const axisMax = axisProductSize(s);
+    render(<PolicySection state={s} dispatch={vi.fn()} errors={{}} />);
+
+    const slider = screen.getByLabelText("Count") as HTMLInputElement;
+    // 100000 pinned at the ceiling, not parseInt's 1 pinned near the floor
+    expect(slider.value).toBe(String(axisMax));
+    expect(screen.getByText(messages.countReadout(100000, axisMax))).toBeTruthy();
+    expect(screen.queryByText(messages.countReadout(1, axisMax))).toBeNull();
+    // the floor steppers take their ceiling from the same parse
+    const perRatio = screen.getByRole("spinbutton", { name: "Coverage per ratio" });
+    expect(perRatio.getAttribute("aria-valuemax")).toBe("100000");
+  });
+
+  test("a count draft the shared parser refuses shows the call site's fallback (X18)", () => {
+    // "42.0" meant 42 to the old Number.parseInt readers and means nothing to
+    // the parser validation and toBrief share — the section then falls back the
+    // way each call site always did: 0 for the readout, 1 for the slider and
+    // the floor steppers' ceiling.
+    const s = state();
+    const draft = { ...s, variation: { ...s.variation, count: "42.0" } };
+    renderOpen(<PolicySection state={draft} dispatch={vi.fn()} errors={{ count: "bad count" }} />);
+    const slider = screen.getByLabelText("Count") as HTMLInputElement;
+    expect(slider.value).toBe("1");
+    expect(screen.getByText(messages.countReadout(0, axisProductSize(draft)))).toBeTruthy();
+    const perRatio = screen.getByRole("spinbutton", { name: "Coverage per ratio" });
+    expect(perRatio.getAttribute("aria-valuemax")).toBe("1");
+    const perProduct = screen.getByRole("spinbutton", { name: "Coverage per product" });
+    expect(perProduct.getAttribute("aria-valuemax")).toBe("1");
+  });
+
   test("Min distance steps within the active axes and can be left to the planner", async () => {
     const user = userEvent.setup();
     const dispatch = vi.fn();
