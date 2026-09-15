@@ -224,7 +224,7 @@ export function layerPropsProblem(
  * the boundary's message shape.
  */
 export function templateHasAnchorProp(
-  layers: readonly Pick<CreativeTemplateLayer, "kind" | "props">[],
+  layers: readonly CreativeTemplateLayer[],
 ): boolean {
   return layers.some(
     (layer) =>
