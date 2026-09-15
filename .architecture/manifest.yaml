@@ -100,6 +100,17 @@ generator:
           typecheck: tsc --noEmit
     stubs:
       enabled: true
+      # The committed tree names ports `<Name>Port.ts` and adapters `<Name>.ts`
+      # (PascalCase modules, no per-layer suffix); hexagen's built-in defaults
+      # (`{name}.in-port.ts` etc.) do not match them, so declaring ports or
+      # adapters in any inventory list would make sync scaffold duplicate
+      # stub files next to the real modules. These overrides align emission
+      # with the files the code actually has — with them, every declared
+      # module resolves to an existing file and sync plans zero operations.
+      naming:
+        inPort: '{name}.ts'
+        outPort: '{name}.ts'
+        adapter: '{name}.ts'
     apps:
       enabled: true
 apps:
@@ -151,24 +162,39 @@ bounded_contexts:
           - Variant
         value_objects:
           - AspectRatio
+          - AudioRights
+          - BackgroundSource
           - ComplianceResult
-          - PipelineExecutionLog
-          - LogEntry
-          - PipelineResult
-          - VariationPolicy
-          - VariationPlan
-          - MotionKind
           - CopyPool
+          - CopyTimeline
+          - LogEntry
+          - MotionKind
+          - PipelineExecutionLog
+          - PipelineResult
+          - Treatment
+          - VariationPlan
+          - VariationPolicy
         domain_services: []
       application:
         use_cases:
           - GenerateCampaignUseCase
           - PlanVariationsUseCase
+          - PreviewCreativeFrameUseCase
         ports:
-          in: []
-          out: []
+          in:
+            - CampaignPipelinePort
+          out:
+            - BackgroundCachePort
+            - CompliancePort
+            - CompositorPort
+            - CopyGeneratorPort
+            - ExportPort
+            - ImageGeneratorPort
+            - PlatformProfilePort
+            - VideoCompositorPort
       infrastructure:
-        adapters: []
+        adapters:
+          - NodeCryptoPolicyHasher
     generator:
       eslint:
         template: |
@@ -214,7 +240,16 @@ bounded_contexts:
           in: []
           out: []
       infrastructure:
-        adapters: []
+        adapters:
+          - AssetReusingImageGenerator
+          - CanvasFfmpegVideoCompositor
+          - FileSystemBackgroundCache
+          - FireflyImageGenerator
+          - GeminiImageGenerator
+          - NodeCanvasCompositor
+          - OpenRouterCopyGenerator
+          - OpenRouterImageGenerator
+          - ProceduralBackgroundGenerator
   - name: GovernanceAndCompliance
     type: core
     description: >
@@ -236,7 +271,8 @@ bounded_contexts:
           in: []
           out: []
       infrastructure:
-        adapters: []
+        adapters:
+          - BrandComplianceChecker
   - name: Distribution
     type: core
     description: >
@@ -258,9 +294,12 @@ bounded_contexts:
           - PackageForPlatformUseCase
         ports:
           in: []
-          out: []
+          out:
+            - PackageStorePort
       infrastructure:
-        adapters: []
+        adapters:
+          - FileSystemExporter
+          - FileSystemPackageStore
   - name: ui
     type: generic
     description: >
