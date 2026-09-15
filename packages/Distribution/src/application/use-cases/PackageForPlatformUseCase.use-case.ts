@@ -348,6 +348,10 @@ export class PackageForPlatformUseCase {
     const fallback = await this.store.readAsset(asset.htmlFallbackPath);
     const packagedPath = await this.store.writePackaged(platformId, asset.htmlBundlePath, bundle);
     const fallbackPath = await this.store.writePackaged(platformId, asset.htmlFallbackPath, fallback);
+    // The budget is the unit's, and the unit a network measures is the package it
+    // uploads: `index.html` *and* its raster fallback. Counting the bundle alone
+    // would pass a unit whose fallback pushes it over (X14).
+    const unitBytes = bundle.length + fallback.length;
     return {
       productId: asset.productId,
       aspectRatio: asset.aspectRatio,
@@ -358,7 +362,7 @@ export class PackageForPlatformUseCase {
       packagedPath,
       fallbackPath,
       bytes: bundle.length,
-      checks: { size: bundle.length <= profile.maxBytes ? "pass" : "fail" },
+      checks: { size: unitBytes <= profile.maxBytes ? "pass" : "fail" },
     };
   }
 }

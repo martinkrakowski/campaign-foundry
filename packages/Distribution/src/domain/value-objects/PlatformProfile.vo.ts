@@ -99,6 +99,13 @@ const META_AUDIENCE_NETWORK_SIZES: readonly DisplaySizeSlot[] = [
 const STATIC_MAX_BYTES = 8 * 1024 * 1024;
 /** Documented motion-ish cap (100 MiB). */
 const MOTION_MAX_BYTES = 100 * 1024 * 1024;
+/**
+ * HTML5 display-unit budget (150 KiB) — the zipped-upload figure for the two
+ * html placements below. Owner-verifiable against the networks' current specs
+ * (Google Ads / DV360 HTML5 cap, IAB initial-load guidance); not verified in
+ * code (X14, unowned-gaps "No platform accepts the HTML unit").
+ */
+const HTML_MAX_BYTES = 150 * 1024;
 
 export const PLATFORM_PROFILES: Readonly<Record<string, PlatformProfile>> = {
   "instagram-feed": {
@@ -184,6 +191,27 @@ export const PLATFORM_PROFILES: Readonly<Record<string, PlatformProfile>> = {
     formats: ["static"],
     safeInsets: ZERO_INSETS,
     maxBytes: STATIC_MAX_BYTES,
+  },
+  // X14: one network in two families is the table's own precedent
+  // (`instagram-feed` static vs `instagram-story` motion), so the HTML5 units
+  // get their own profiles rather than a second format on the static ones.
+  // `meta-audience-network` gains no html sibling — it is understood not to
+  // take third-party HTML5 display creatives.
+  "google-display-html": {
+    id: "google-display-html",
+    label: "Google Display (HTML5)",
+    sizes: DISPLAY_ALL_SIZES,
+    formats: ["html"],
+    safeInsets: ZERO_INSETS,
+    maxBytes: HTML_MAX_BYTES,
+  },
+  "display-web-html": {
+    id: "display-web-html",
+    label: "Display web (HTML5)",
+    sizes: DISPLAY_ALL_SIZES,
+    formats: ["html"],
+    safeInsets: ZERO_INSETS,
+    maxBytes: HTML_MAX_BYTES,
   },
 };
 

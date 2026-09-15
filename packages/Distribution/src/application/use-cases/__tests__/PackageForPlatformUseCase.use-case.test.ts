@@ -819,7 +819,7 @@ describe("PackageForPlatformUseCase — shipped html5 display profiles (X14)", (
     if (!result.success) return;
     const [platform] = result.value.platforms;
     expect(platform.included).toBe(2);
-    expect(platform.items.map((i) => i.source)).toEqual(["alpha/160x600/index.html", "beta/300x250/index.html"]);
+    expect(platform.items.map((i) => i.source)).toEqual(["alpha/160x600/index.html", "alpha/300x250/index.html"]);
     expect(platform.items.every((i) => i.format === "html")).toBe(true);
   });
 });
