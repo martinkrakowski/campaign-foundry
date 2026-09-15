@@ -5180,3 +5180,13 @@ the API boundary-refusal call site). Goldens untouched.
 **Decisions:** the markup always computes the offset for one line (no browser to wrap in, D122) — exact for `top`, single-line for `middle`/`bottom`; stated as a residual in the plan, not narrowed.
 
 **Left open:** HL5e (per-element style overrides) is now dispatchable.
+
+### 2026-09-15 — HL5f fix round: flex placement restored
+
+**Mode:** Implementer, continuing PR #428 after orchestrator review. Plan: HL5f in docs/planning/2026-09-10_the-html-layer.md.
+
+**Changes:** reverted `assembleHtml`'s text placement from an explicit `padding-top` (computed for a single line) back to CSS flex `justify-content` per anchor — the padding-top regressed multi-line `middle`/`bottom` text (wrapped lines pushed below the box, clipped by `overflow: hidden`). Removed the now-unused `htmlTextPaddingTop`. Kept `toneFontWeight`, `htmlTextGeometry`/`htmlButtonFontSize`, and `drawHtml`'s byte-identical refactor onto `htmlTextFirstLineOffset` — those were correct.
+
+**Decisions:** no line-count-independent baseline correction was added to the markup — the canvas-vs-flex offset (baseline vs line-box) could not be cleanly separated from the line-count-dependent terms without a browser, so it stays a stated residual rather than an approximated constant.
+
+**Left open:** none new; HL5e remains dispatchable.
