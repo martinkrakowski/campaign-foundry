@@ -73,6 +73,24 @@
         "--maxWorkers=2"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/editor-state.ts",
+      "before": "  return Number.isSafeInteger(num) ? num : undefined;",
+      "after": "  return Number.isInteger(num) ? num : undefined;",
+      "because": "An unsafe integer is not the integer it validates as: reverting to Number.isInteger re-accepts \"9007199254740993\", which Number reads as the representable 9007199254740992, so the draft validates as one integer while toBrief saves another — the exact invariant this lane exists for — and the X18 unsafe-integer test fails on a parse that must return undefined.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/validate.test.ts",
+        "-t",
+        "X18",
+        "--maxWorkers=2"
+      ],
+      "verdict": "caught"
     }
   ]
 }

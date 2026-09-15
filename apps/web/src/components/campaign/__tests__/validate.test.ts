@@ -31,7 +31,7 @@ import { PROHIBITED_TERMS as DOMAIN_PROHIBITED_TERMS } from "@campaignfoundry/Go
 // (`validateClickDestination`, load-brief.ts) reads, so the client mirror cannot drift.
 import { clickDestinationProblem } from "@campaignfoundry/CampaignOrchestration/click-destination";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
-import { initialEditorState, editorReducer, toBrief, fromBrief, type EditorState } from "../editor-state";
+import { initialEditorState, editorReducer, toBrief, fromBrief, parsePolicyInteger, type EditorState } from "../editor-state";
 // The real gate Save hits, imported across apps for the divergence tests below: tests
 // may cross package boundaries (arch test-double rules), and a mirror without the
 // parser it mirrors is exactly the drift these tests exist to catch.
@@ -542,6 +542,22 @@ describe("X18 — the policy integer validated is the policy integer saved", () 
     const state = randomized({ seed: " 42 " });
     expect(validatePolicy(state).seed).toBeUndefined();
     expect(savedValue(state, "seed")).toBe(42);
+  });
+
+  test("an unsafe integer draft parses to nothing, not to the rounded value it names (X18)", () => {
+    // "9007199254740993" (2^53 + 1) is not representable: Number reads it as
+    // 9007199254740992 and isInteger passes, so the draft would validate as one
+    // integer while toBrief saves another. Beyond ±MAX_SAFE_INTEGER the draft
+    // means nothing and must fail like any other refused value.
+    expect(parsePolicyInteger("9007199254740993")).toBeUndefined();
+    // the boundary itself is exact and still parses; as a seed it then fails its
+    // own uint32 range, which is fine — this asserts parsing only
+    expect(parsePolicyInteger("9007199254740991")).toBe(9007199254740991);
+    for (const field of ["seed", "perProduct", "perRatio"] as const) {
+      const errors = validatePolicy(randomized({ [field]: "9007199254740993" }));
+      expect(errors[field], field).toBe(messages[field]);
+      expect(savedValue(randomized({ [field]: "9007199254740993" }), field)).toBeUndefined();
+    }
   });
 
   test("a count the parser refuses is blamed on the count only, never on the floor (X18)", () => {

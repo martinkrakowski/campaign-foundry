@@ -2085,7 +2085,7 @@ export function parsePolicyInteger(value: string): number | undefined {
   const trimmed = value.trim();
   if (trimmed === "" || !/^[+-]?\d+(e[+-]?\d+)?$/i.test(trimmed)) return undefined;
   const num = Number(trimmed);
-  return Number.isInteger(num) ? num : undefined;
+  return Number.isSafeInteger(num) ? num : undefined;
 }
 
 export function toBrief(state: EditorState): CampaignBrief {
