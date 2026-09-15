@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach } from "vitest";
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createApp, createRouter, toWebHandler, type EventHandler } from "h3";
@@ -541,6 +541,21 @@ describe("GET /output/**", () => {
   test("404s a missing file", async () => {
     const res = await call("nope.png");
     expect(res.status).toBe(404);
+  });
+
+  test("404s a symlink under the output root pointing outside it, without leaking its bytes", async () => {
+    const outside = mkdtempSync(join(tmpdir(), "cf-output-outside-"));
+    try {
+      writeFileSync(join(outside, "secret.txt"), "DO-NOT-SERVE");
+      symlinkSync(join(outside, "secret.txt"), resolve(dir, "leak.txt"));
+      const res = await call("leak.txt");
+      expect(res.status).toBe(404);
+      const body = await res.text();
+      expect(JSON.parse(body)).toEqual({ error: "Not found" });
+      expect(body).not.toContain("DO-NOT-SERVE");
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
   });
 
   test("404s the root path when the root directory exists", async () => {
