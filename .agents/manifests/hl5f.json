@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "lane": "HL5f",
+  "mutations": [
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/markup-assembler.ts",
+      "before": "    toneFontWeight(options.tone ?? DEFAULT_TREATMENT.tone),",
+      "after": "    \"bold\",",
+      "because": "HL-D8's gap was the markup ignoring tone and hard-coding \"bold\" while the canvas derived weight from it. Reverting the assembler's default weight to the old literal reopens exactly that gap: a \"subtle\" variant would ship heavier markup than its own raster fallback, silently, because nothing else in the pipeline notices a font-weight mismatch between the two renderers.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/markup-assembler.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/markup-assembler.ts",
+      "before": "        const paddingTop = htmlTextPaddingTop(element.frame.anchor, boxH, fontSize, lineHeight, 1);",
+      "after": "        const paddingTop = element.frame.anchor === \"middle\"\n          ? (boxH - lineHeight) / 2\n          : htmlTextPaddingTop(element.frame.anchor, boxH, fontSize, lineHeight, 1);",
+      "because": "This is the exact regression HL5f closes: a `middle`-anchored text element computed by the old CSS-flex-equivalent arithmetic (half the box minus half the CSS line box) instead of the shared baseline-offset function `drawHtml` also calls. The two differ by a few tenths of a pixel per fontSize unit — small enough to look fine in review, and exactly what \"nothing pins them equal\" (Verified Gap #2) meant before this lane.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "packages/CreativeGeneration/src/infrastructure/adapters/__tests__/NodeCanvasCompositor.html-fidelity.test.ts"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
