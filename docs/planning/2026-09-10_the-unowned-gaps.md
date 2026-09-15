@@ -654,28 +654,45 @@ which only the request handler that owns it knows, and which a per-request store
 
 Chosen instead: **detect at read time and fail loudly.** `ensureStaging`'s cache-hit path now calls
 `assertStagingIntact`, which `stat`s the cached staging directory before handing it back; if it is
-gone, it throws instead of letting `writePackaged`'s recursive `mkdir` resurrect a partial tree. The
-throw happens before `writeManifest` reaches `rm(finalDir)` + `rename`, so a prior committed package
-for that platform is left untouched, and `PackageForPlatformUseCase` already catches store failures
-per platform and returns them as an `err` — the loser's request answers its existing 422 shape, not
-a 500 or a silent corruption. This is a plain disk check, not an in-memory registry, so it is not
-process-local — it catches the same race across separate processes sharing the output root, not
-only within `apps/api`'s single Nitro process (confirmed via `apps/api/nitro.config.ts` and its
-`dev`/`preview` scripts: no cluster/fork). What it does **not** do: it does not prevent the deletion
-— `removeStaleStaging` still sweeps unconditionally, exactly as before, which is what keeps the
-pinned crash-leftover test passing unchanged — so the loser of a genuine race still fails and must
-be retried; it only stops the loser from committing garbage. It also does not close the narrower
-TOCTOU window between the `stat` check and the write it guards (`writeFile`, or `rm`+`rename`): a
-sweep landing in that gap still gets through. That gap, and the pre-existing one where
-`rm(finalDir)` can drop a still-good previous commit before `rename` puts the new one back, are both
-out of scope here.
+gone, it throws instead of letting `writePackaged`'s recursive `mkdir` resurrect a partial tree. This
+is a plain disk check, not an in-memory registry, so it is not process-local — it catches the same
+race across separate processes sharing the output root, not only within `apps/api`'s single Nitro
+process (confirmed via `apps/api/nitro.config.ts` and its `dev`/`preview` scripts: no cluster/fork).
+It does **not** prevent the deletion — `removeStaleStaging` still sweeps unconditionally, exactly as
+before, which is what keeps the pinned crash-leftover test passing unchanged — so the loser of a
+genuine race still fails and must be retried; it only stops the loser from committing garbage.
+
+**Review round 2 (Qodo).** `assertStagingIntact` alone only narrows the corruption, it does not
+close it: a sweep can land *after* that check and *before* the write it guards, and if a new request
+for the same campaign+platform starts right then, a fresh staging dir with the same name pattern can
+exist by the time this store writes again — `assertStagingIntact` would find *a* directory and pass,
+but not the one this manifest was staged into, and `writeManifest` would still commit it. Closed with
+a second, content-level check: `assertManifestFilesStaged` verifies, right before `rm(finalDir)` +
+`rename`, that every file the manifest is about to claim — `packagedPath`, and `posterPath` /
+`fallbackPath` when present — is actually present in the staging dir, by mapping each
+output-root-relative path back under `staging` (stripping this platform's own directory prefix; a
+path that does not start with it is refused the same way — defensive, since every path a real
+manifest carries is produced by this same store's own `writePackaged`). If anything is missing, the
+commit is refused before `finalDir` is touched, so a previously committed package survives
+byte-for-byte. A sweep landing *after* this verification still deletes the whole staging dir, which
+now makes `rename` fail outright — an error, never a partial commit. This closes the TOCTOU
+partial-commit corruption; what remains is the same as before — the loser of a genuine race still
+fails its request and must retry, and the pre-existing window where `rm(finalDir)` can drop a
+still-good previous commit before `rename` puts the new one back is unchanged and still out of scope.
+Both guard errors were also reworded in this round: the message reaches the export screen through
+`PackageForPlatformUseCase`'s existing 422 path, so it now says "Another export of this campaign
+started while this one was running, so this export was stopped to keep the package intact. Try
+again." — no paths, no internal nouns (staging, sweep, directory) — instead of naming the mechanism.
 
 **X23 — shipped in this PR.** `ensureStaging` verifies a cached staging directory still exists
-before reusing it and throws a descriptive error if it does not, pinned by a test that stages two
-platform packages through separate store instances on the same root, has the second's `ensureStaging`
-sweep delete the first's live staging dir, and asserts the first store's next write rejects, its
-second attempt keeps rejecting rather than silently starting over, and a prior committed package for
-that platform is untouched. The pinned crash-leftover test (`__tests__/FileSystemPackageStore.test.ts`,
-"a failed package never leaves a mixed final directory; a later commit drops leftover staging")
-passes unchanged. Mutation manifest: `.agents/manifests/x23.json` — removing the intact check makes
-the interleaving test fail.
+before reusing it, and `writeManifest` additionally verifies every file its manifest claims is
+staged before committing — both throw the same product-facing message and are refused before
+`rm(finalDir)` + `rename` runs. Pinned by: the interleaving test (a second store's sweep deletes the
+first's live staging dir; the first store's next write rejects, keeps rejecting rather than starting
+over, and a prior committed package for that platform is untouched); a test that deletes a
+manifest-claimed file out of an otherwise-intact staging dir and asserts `writeManifest` rejects and
+the previous commit's bytes are unchanged; and a defensive test for a manifest item whose path does
+not belong to the platform being committed. The pinned crash-leftover test
+(`__tests__/FileSystemPackageStore.test.ts`, "a failed package never leaves a mixed final directory;
+a later commit drops leftover staging") passes unchanged. Mutation manifest:
+`.agents/manifests/x23.json` — removing either guard makes its corresponding test fail (2/2 caught).
