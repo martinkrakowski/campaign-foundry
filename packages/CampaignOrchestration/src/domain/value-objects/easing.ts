@@ -29,3 +29,13 @@ export type EasingKind = (typeof EASING_KINDS)[number];
 
 /** The easing a stop resolves to when it names none (K-D8). */
 export const DEFAULT_EASING: EasingKind = "ease-out-cubic";
+
+/**
+ * The easing vocabulary as functions (K1b's first reader): `resolveTracks`
+ * (`resolve-tracks.ts`) looks up a stop's `easing ?? DEFAULT_EASING` here to
+ * ease a segment, rather than switching on the string itself.
+ */
+export const EASINGS: Readonly<Record<EasingKind, (t: number) => number>> = {
+  "ease-out-cubic": easeOutCubic,
+  linear: (t) => t,
+};
