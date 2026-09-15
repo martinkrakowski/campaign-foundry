@@ -165,17 +165,15 @@ describe("assembleHtml (HL4, HL-D3, HL-D6)", () => {
       brandColor: "#000000",
     });
 
-    // HL5f: text elements place with an explicit padding-top (HL-D5/HL-D8),
-    // not CSS flex justify-content — one padding-top per text element.
-    const paddingTops = [...result.html.matchAll(/padding-top: ([\d.]+)px/g)].map((m) =>
-      Number(m[1]),
-    );
-    expect(paddingTops).toHaveLength(3);
-    // top anchor: the baseline sits exactly one fontSize below the box top,
-    // so the padding-top the markup needs is 0 (htmlTextPaddingTop's clamp).
-    expect(paddingTops[2]).toBe(0);
-    // The button is unaffected by HL5f's text-only change: still flex-centred.
+    // HL5f (orchestrator fix round): text elements place with CSS flex
+    // `justify-content`, NOT a padding-top computed for one line — a browser
+    // must lay out however many lines the text actually wraps to, which the
+    // server-side assembler cannot know (no browser, D122). No text or
+    // button element emits a padding-top.
+    expect(result.html).not.toContain("padding-top");
     expect(result.html).toContain("justify-content: center;");
+    expect(result.html).toContain("justify-content: flex-end;");
+    expect(result.html).toContain("justify-content: flex-start;");
   });
 
   describe("HL5f — renderer fidelity: tone-derived weight and shared geometry", () => {
@@ -239,25 +237,29 @@ describe("assembleHtml (HL4, HL-D3, HL-D6)", () => {
       expect(result.html).toContain("font-size: 39px");
     });
 
-    test("a middle-anchored text element's padding-top is the shared baseline-offset formula, hand-computed", () => {
+    test("a multi-line bottom-anchored text element is positioned by flex, not a single-line padding-top", () => {
+      // A narrow box and a long headline: certain to wrap to more than one
+      // line in a real browser. The assembler cannot know how many lines
+      // that will be (no browser to wrap in, D122) — a padding-top computed
+      // for one line would push line 2+ below the box, clipped by
+      // `overflow: hidden` (the regression this test pins).
       const result = assembleHtml({
         elements: [
           {
             kind: "text",
-            text: "Hi",
-            frame: { x: 0, y: 0, w: 1, h: 0.3, anchor: "middle" },
+            text: "This headline is long enough to wrap across more than one line in a real browser",
+            frame: { x: 0, y: 0, w: 0.3, h: 0.3, anchor: "bottom" },
           },
         ],
         canvas: { ratio: "1:1" },
         brandColor: "#1473E6",
-        style: { sizeScale: 0.05, lineHeight: 1.25 },
       });
-      // boxH = 0.3 * 1080 = 324.
-      // fontSize = min(max(12, round(324 * 0.7)), round(1080 * 0.05)) = min(227, 54) = 54.
-      // offset = (324 - 0) / 2 + 54 * 0.35 = 162 + 18.9 = 180.9.
-      // padding-top = offset - fontSize = 180.9 - 54 = 126.9.
-      expect(result.html).toContain("font-size: 54px");
-      expect(result.html).toContain("padding-top: 126.9px");
+      const styleMatch = /<div style="([^"]*)">/.exec(result.html);
+      expect(styleMatch).not.toBeNull();
+      const style = styleMatch![1]!;
+      expect(style).not.toContain("padding-top");
+      expect(style).toContain("display: flex");
+      expect(style).toContain("justify-content: flex-end;");
     });
   });
 

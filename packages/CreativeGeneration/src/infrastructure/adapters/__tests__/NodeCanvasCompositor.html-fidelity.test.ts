@@ -7,10 +7,7 @@ import {
   type AnchorKind,
 } from "@campaignfoundry/CampaignOrchestration";
 import { assembleHtml } from "@campaignfoundry/CampaignOrchestration/markup-assembler";
-import {
-  htmlTextGeometry,
-  htmlTextPaddingTop,
-} from "@campaignfoundry/CampaignOrchestration/html-element";
+import { htmlTextGeometry } from "@campaignfoundry/CampaignOrchestration/html-element";
 import { DEFAULT_STYLE } from "@campaignfoundry/CampaignOrchestration/creative-style";
 import { NodeCanvasCompositor } from "../NodeCanvasCompositor.js";
 import { registerBundledFonts } from "../../fonts.js";
@@ -23,8 +20,14 @@ import { registerBundledFonts } from "../../fonts.js";
  *    result, not against the shared `toneFontWeight` helper directly: a test
  *    that only calls the helper would pass even if the compositor stopped
  *    calling it (comparing the assembler to itself, not to the canvas).
- * 2. Text placement geometry — the exact numbers `htmlTextGeometry` /
- *    `htmlTextPaddingTop` compute, parsed back out of the assembled markup's
+ * 2. Text placement — the markup positions text with CSS flex
+ *    `justify-content` per anchor (orchestrator fix round: a `padding-top`
+ *    computed for one line regressed multi-line text — the browser must lay
+ *    out however many lines the text actually wraps to, which the
+ *    server-side assembler cannot know without a browser, D122). The exact
+ *    numbers both renderers CAN share for any line count — font size, line
+ *    height, letter spacing — are pinned via the one shared
+ *    `htmlTextGeometry` function, parsed back out of the assembled markup's
  *    own inline style, for a grid of frames x anchors x tones.
  */
 
@@ -112,8 +115,13 @@ describe("HL5f — canvas/markup renderer fidelity", () => {
     });
   });
 
-  describe("text placement: the geometry function's numbers equal what the markup emits", () => {
+  describe("text placement: flex justify-content per anchor, shared geometry numbers", () => {
     const anchors: readonly AnchorKind[] = ["top", "middle", "bottom"];
+    const justifyFor: Readonly<Record<AnchorKind, string>> = {
+      top: "flex-start",
+      middle: "center",
+      bottom: "flex-end",
+    };
     const frames = [
       { x: 0.1, y: 0.1, w: 0.5, h: 0.3 },
       { x: 0.0, y: 0.4, w: 1.0, h: 0.12 },
@@ -144,13 +152,17 @@ describe("HL5f — canvas/markup renderer fidelity", () => {
         expect(styleMatch).not.toBeNull();
         const style = styleMatch![1]!;
 
-        // Explicit padding-top, never CSS flex — the gap HL5f closes.
-        expect(style).not.toContain("justify-content");
-        expect(style).not.toContain("display: flex");
+        // CSS flex, not a padding-top computed for one line: the browser
+        // must be free to centre/end-align however many lines this text
+        // actually wraps to.
+        expect(style).toContain("display: flex");
+        expect(style).toContain(`justify-content: ${justifyFor[anchor]};`);
+        expect(style).not.toContain("padding-top");
 
         const fontSize = Number(/font-size: ([\d.]+)px/.exec(style)?.[1]);
         const lineHeightPx = Number(/line-height: ([\d.]+)px/.exec(style)?.[1]);
-        const paddingTop = Number(/padding-top: ([\d.]+)px/.exec(style)?.[1]);
+        const letterSpacingPx = Number(/letter-spacing: ([\d.]+)px/.exec(style)?.[1]);
+        const fontWeight = /font-weight: ([a-z0-9]+);/.exec(style)?.[1];
         const widthPx = Number(/width: ([\d.]+)px/.exec(style)?.[1]);
 
         const boxH = frame.h * CANVAS_PX;
@@ -161,6 +173,9 @@ describe("HL5f — canvas/markup renderer fidelity", () => {
         // number to share, so pin the one that already must agree.
         expect(widthPx).toBe(boxW);
 
+        // The numbers that ARE independent of line count — font size, line
+        // height, letter spacing, weight — still come from the one shared
+        // function and must be equal for any line count.
         const geometry = htmlTextGeometry({
           boxH,
           canvasBasis: CANVAS_PX,
@@ -170,9 +185,8 @@ describe("HL5f — canvas/markup renderer fidelity", () => {
         });
         expect(fontSize).toBe(geometry.fontSize);
         expect(lineHeightPx).toBe(geometry.lineHeight);
-        expect(paddingTop).toBe(
-          htmlTextPaddingTop(anchor, boxH, geometry.fontSize, geometry.lineHeight, 1),
-        );
+        expect(letterSpacingPx).toBe(geometry.letterSpacing);
+        expect(fontWeight).toBe(tone === "subtle" ? "500" : "bold");
       },
     );
   });
