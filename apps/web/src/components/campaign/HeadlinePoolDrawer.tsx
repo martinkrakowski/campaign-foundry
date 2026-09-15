@@ -209,13 +209,21 @@ export function HeadlinePoolDrawer({
         <p className="text-[12px] text-text-muted">
           Approved entries become the <code>headline: {HEADLINE_POOL_REF}</code> axis in the policy section.
         </p>
-        {unavailable ? <p className="text-[13px] text-warning">{unavailable}</p> : null}
+        {unavailable ? (
+          <p role="status" className="text-[13px] text-warning">
+            {unavailable}
+          </p>
+        ) : null}
         {state.headlineAxisDropped ? (
           <p role="status" className="text-[13px] text-warning">
             {HEADLINE_AXIS_DROPPED}
           </p>
         ) : null}
-        {error ? <p className="text-[13px] text-error">{error}</p> : null}
+        {error ? (
+          <p role="alert" className="text-[13px] text-error">
+            {error}
+          </p>
+        ) : null}
         {loading ? (
           // Static blocks plus one spoken sentence: a pulsing skeleton would be a
           // fifth looping animation, and D27 permits exactly four.
