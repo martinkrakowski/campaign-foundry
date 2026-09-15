@@ -209,11 +209,18 @@ export class PackageForPlatformUseCase {
         ),
       );
     }
-    const toPackage = new Map<string, PackageableAsset>();
+    // Every selected asset, never deduplicated by `assetIdentity` (VE3a fix3):
+    // the route accepts separate persisted rows without enforcing unique
+    // identities, so keying a Map by identity let a later same-identity row
+    // silently replace an earlier expired one HERE while the packaging loop
+    // below still writes every row `selected` names. A duplicate object
+    // reference (the same asset selected for two platforms) is simply
+    // checked twice — harmless, since the check is pure.
+    const toPackage: PackageableAsset[] = [];
     for (const { selected } of selections) {
-      for (const asset of selected) toPackage.set(assetIdentity(asset), asset);
+      toPackage.push(...selected);
     }
-    const expiredAsset = [...toPackage.values()].find((asset) => {
+    const expiredAsset = toPackage.find((asset) => {
       const expiresOn = asset.audioRights?.expiresOn;
       if (expiresOn === undefined) return false;
       const expiresMs = parseExpiresOnMs(expiresOn);

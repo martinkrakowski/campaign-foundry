@@ -463,6 +463,28 @@ describe("PackageForPlatformUseCase — music rights (VE-D8)", () => {
     expect(store.writeManifest).not.toHaveBeenCalled();
   });
 
+  test("refuses the whole request when two selected rows share an identity, the first expired and the second not (VE3a fix3)", async () => {
+    // The route accepts separate persisted rows without enforcing unique
+    // identities: both rows below key to the same `alpha/1:1/default`
+    // identity. Deduping the expiry check by identity let the second,
+    // unexpired row silently replace the first in the check while the
+    // packaging loop still wrote both — this must refuse, naming the
+    // expired row's licence.
+    const store = fakeStore();
+    const expired = asset({
+      outputPath: "alpha/1x1-v1.png",
+      audioRights: { licenceId: "lic-1", source: "acme", expiresOn: "2026-08-01" },
+    });
+    const replacement = asset({ outputPath: "alpha/1x1-v2.png" });
+    const result = await exec(store, { assets: [expired, replacement] });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.message).toContain("lic-1");
+      expect(result.error.message).toContain("alpha");
+    }
+    expect(store.writeManifest).not.toHaveBeenCalled();
+  });
+
   test("packages an asset whose licence is valid at packagedAt", async () => {
     const store = fakeStore();
     const result = await exec(store, {

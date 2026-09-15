@@ -6,6 +6,7 @@ import {
   isExpired,
   territoryCovered,
   isAudioRights,
+  isAudio,
 } from "../AudioRights.vo.js";
 
 describe("AudioRights (VE-D8)", () => {
@@ -176,6 +177,59 @@ describe("AudioRights (VE-D8)", () => {
 
     test("refuses a user-assigned territory code (VE-D8 fix2 #4)", () => {
       expect(isAudioRights({ licenceId: "lic-1", source: "acme", territories: ["ZZ"] })).toBe(false);
+    });
+  });
+
+  describe("isAudio (VE3a fix3)", () => {
+    test("accepts a minimal well-formed block", () => {
+      expect(isAudio({ path: "a.mp3", rights: { licenceId: "lic-1", source: "acme" } })).toBe(true);
+    });
+
+    test("accepts a full well-formed block", () => {
+      expect(
+        isAudio({
+          path: "a.mp3",
+          rights: { licenceId: "lic-1", source: "acme", expiresOn: "2026-01-01", territories: ["US"] },
+        }),
+      ).toBe(true);
+    });
+
+    test("refuses non-objects, null, and arrays", () => {
+      expect(isAudio(null)).toBe(false);
+      expect(isAudio("a.mp3")).toBe(false);
+      expect(isAudio(42)).toBe(false);
+      expect(isAudio([])).toBe(false);
+    });
+
+    test("refuses a missing or empty path", () => {
+      expect(isAudio({ rights: { licenceId: "lic-1", source: "acme" } })).toBe(false);
+      expect(isAudio({ path: "", rights: { licenceId: "lic-1", source: "acme" } })).toBe(false);
+      expect(isAudio({ path: 5, rights: { licenceId: "lic-1", source: "acme" } })).toBe(false);
+    });
+
+    test("refuses a missing, null, or non-object rights", () => {
+      expect(isAudio({ path: "a.mp3" })).toBe(false);
+      expect(isAudio({ path: "a.mp3", rights: null })).toBe(false);
+      expect(isAudio({ path: "a.mp3", rights: [] })).toBe(false);
+      expect(isAudio({ path: "a.mp3", rights: "lic-1" })).toBe(false);
+    });
+
+    test("refuses empty rights or a missing licenceId (VE3a fix3)", () => {
+      expect(isAudio({ path: "a.mp3", rights: {} })).toBe(false);
+      expect(isAudio({ path: "a.mp3", rights: { source: "acme" } })).toBe(false);
+    });
+
+    test("refuses an unknown key on audio or on rights (VE3a fix3)", () => {
+      expect(isAudio({ path: "a.mp3", rights: { licenceId: "lic-1", source: "acme" }, track: "extra" })).toBe(false);
+      expect(
+        isAudio({ path: "a.mp3", rights: { licenceId: "lic-1", source: "acme", track: "extra" } }),
+      ).toBe(false);
+    });
+
+    test("refuses an impossible expiresOn (VE3a fix3)", () => {
+      expect(
+        isAudio({ path: "a.mp3", rights: { licenceId: "lic-1", source: "acme", expiresOn: "2024-02-30" } }),
+      ).toBe(false);
     });
   });
 });

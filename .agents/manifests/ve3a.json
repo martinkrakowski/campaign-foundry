@@ -120,6 +120,40 @@
         "isPersistedAsset refuses audioRights on a non-motion row"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/editor-state.ts",
+      "before": "function normalizeAudioDraft(value: unknown): CampaignBrief[\"audio\"] {\n  return isAudio(value) ? (value as CampaignBrief[\"audio\"]) : undefined;\n}",
+      "after": "function normalizeAudioDraft(value: unknown): CampaignBrief[\"audio\"] {\n  if (value === null || typeof value !== \"object\" || Array.isArray(value))\n    return undefined;\n  const audio = value as Record<string, unknown>;\n  if (typeof audio.path !== \"string\") return undefined;\n  const rights = audio.rights;\n  if (rights === null || typeof rights !== \"object\" || Array.isArray(rights))\n    return undefined;\n  return value as CampaignBrief[\"audio\"];\n}",
+      "because": "Reverting to the shape-only audio retention (path a string, rights an object) lets a record with empty rights survive recovery, so the empty-rights recovery test must fail (VE3a fix3 mutation (a)).",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/editor-state.test.ts",
+        "-t",
+        "normalizeDraftState drops audio with empty rights"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/Distribution/src/application/use-cases/PackageForPlatformUseCase.use-case.ts",
+      "before": "    const toPackage: PackageableAsset[] = [];\n    for (const { selected } of selections) {\n      toPackage.push(...selected);\n    }\n    const expiredAsset = toPackage.find((asset) => {",
+      "after": "    const toPackage = new Map<string, PackageableAsset>();\n    for (const { selected } of selections) {\n      for (const asset of selected) toPackage.set(assetIdentity(asset), asset);\n    }\n    const expiredAsset = [...toPackage.values()].find((asset) => {",
+      "because": "Reverting to an identity-keyed Map lets a later same-identity row silently replace an earlier expired one in the expiry check while packaging still writes every selected asset, so the same-identity test must fail (VE3a fix3 mutation (b)).",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/Distribution/src/application/use-cases/__tests__/PackageForPlatformUseCase.use-case.test.ts",
+        "-t",
+        "refuses the whole request when two selected rows share an identity"
+      ],
+      "verdict": "caught"
     }
   ]
 }

@@ -91,6 +91,10 @@ import {
   type DisplaySize,
 } from "@campaignfoundry/CampaignOrchestration/display-sizes";
 import type { LayerKind } from "@campaignfoundry/CampaignOrchestration/layer-kinds";
+// The domain's own audio-rights contract (VE-D8 fix3): the editor's retention
+// rule for a stored or loaded `audio` block reuses this rather than a second
+// copy of the rules parseBrief already enforces.
+import { isAudio } from "@campaignfoundry/CampaignOrchestration/audio-rights";
 import {
   PLATFORM_PROFILES,
   isRatioProfile,
@@ -2427,10 +2431,14 @@ export function fromBrief(
     campaignMessage: brief.campaignMessage ?? "",
     localizedMessage: brief.localizedMessage ?? "",
     clickDestination: brief.clickDestination ?? "",
-    // VE3a (D11): the licence record is copied across untouched — `toBrief`
-    // writes it back, so a load → save never drops it, and `discard` re-runs
-    // this path against the saved snapshot with the same result.
-    ...(brief.audio !== undefined ? { audio: brief.audio } : {}),
+    // VE3a (D11, fix3): the licence record is copied across untouched when it
+    // satisfies the domain's full audio contract (`isAudio`) — `toBrief`
+    // writes it back, so a load → save never drops a valid record, and
+    // `discard` re-runs this path against the (unvalidated) saved snapshot
+    // with the same result. A record short of the contract is dropped here
+    // rather than carried into a save `parseBrief` would refuse with no
+    // control to repair or clear it.
+    ...(isAudio(brief.audio) ? { audio: brief.audio } : {}),
     products,
     nextProductKey,
     treatments,
@@ -2781,22 +2789,16 @@ function normalizeStyleDraft(value: unknown): Style {
 /**
  * Rebuild a persisted `audio` block with the same repair-first,
  * discard-only-when-unusable rigor as the sibling normalizers: a stored value
- * survives only when it is a non-null, non-array object with a string `path`
- * and an object `rights`; anything else is dropped, never dereferenced —
- * recovery must not throw on a hand-edited draft (the X16/X17 lesson). The
- * licence fields are deliberately not re-validated here: the API boundary does
- * that on save, and re-checking them here could strip a record whose shape the
- * draft merely carried through untouched.
+ * survives only when it satisfies the domain's FULL audio contract —
+ * `isAudio` (VE-D8 fix3) — never dereferenced when it does not, so recovery
+ * must not throw on a hand-edited draft (the X16/X17 lesson). Anything short
+ * of that contract (empty rights, a missing `licenceId`, an unknown key, an
+ * impossible `expiresOn`) is dropped rather than carried through: a record
+ * `parseBrief` would refuse must not reach a save the editor offers no control
+ * to repair or clear.
  */
 function normalizeAudioDraft(value: unknown): CampaignBrief["audio"] {
-  if (value === null || typeof value !== "object" || Array.isArray(value))
-    return undefined;
-  const audio = value as Record<string, unknown>;
-  if (typeof audio.path !== "string") return undefined;
-  const rights = audio.rights;
-  if (rights === null || typeof rights !== "object" || Array.isArray(rights))
-    return undefined;
-  return value as CampaignBrief["audio"];
+  return isAudio(value) ? (value as CampaignBrief["audio"]) : undefined;
 }
 
 export function normalizeDraftState(raw: Record<string, unknown>): EditorState {

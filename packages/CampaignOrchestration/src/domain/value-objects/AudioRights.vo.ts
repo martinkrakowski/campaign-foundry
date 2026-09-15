@@ -159,3 +159,39 @@ export function isAudioRights(value: unknown): value is AudioRights {
   }
   return true;
 }
+
+/** The only keys a persisted `audio` block, and its nested `rights` record, may
+ * carry — the boundary's own allow-list (`validateAudio` in load-brief.ts),
+ * restated here so a caller checking the FULL contract (not just `rights`)
+ * cannot drift from what the API load path refuses. */
+const AUDIO_KEYS = ["path", "rights"] as const;
+const AUDIO_RIGHTS_KEYS = ["licenceId", "source", "expiresOn", "territories"] as const;
+
+function hasOnlyKeys(value: Record<string, unknown>, allowed: readonly string[]): boolean {
+  return Object.keys(value).every((key) => allowed.includes(key));
+}
+
+/**
+ * `true` when `value` is a complete, boundary-legal `audio` block: a plain
+ * object carrying only `path`/`rights`, whose `path` is a non-empty string and
+ * whose `rights` carries only the rights vocabulary and passes `isAudioRights`
+ * (VE-D8 fix3). This is the FULL contract `parseBrief` enforces on load/save —
+ * narrower than `isAudioRights` alone, which only proves the nested `rights`
+ * record. A caller retaining a stored or loaded `audio` value (the editor's
+ * draft recovery, a loaded brief carried through untouched) reuses this rather
+ * than a second, drifting copy of the rules: a record this refuses is one
+ * `parseBrief` would refuse too, so it must be dropped before it can produce a
+ * save the user cannot repair or clear.
+ */
+export function isAudio(
+  value: unknown,
+): value is { path: string; rights: AudioRights } {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const rec = value as Record<string, unknown>;
+  if (!hasOnlyKeys(rec, AUDIO_KEYS)) return false;
+  if (typeof rec.path !== "string" || rec.path.length === 0) return false;
+  const rights = rec.rights;
+  if (typeof rights !== "object" || rights === null || Array.isArray(rights)) return false;
+  if (!hasOnlyKeys(rights as Record<string, unknown>, AUDIO_RIGHTS_KEYS)) return false;
+  return isAudioRights(rights);
+}

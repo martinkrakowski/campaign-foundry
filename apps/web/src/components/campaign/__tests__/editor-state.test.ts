@@ -5330,6 +5330,23 @@ describe("the audio block survives the editor untouched (VE3a, D11)", () => {
     expect(normalizeDraftState({}).audio).toBeUndefined();
   });
 
+  test("normalizeDraftState drops audio with empty rights, a missing licenceId, an unknown rights key, or an impossible expiresOn — and keeps a valid record round-tripping (VE3a fix3)", () => {
+    const good = audioBed();
+    for (const rights of [
+      {},
+      { source: "Acme Library" },
+      { licenceId: "LIC-42", source: "Acme Library", track: "extra" },
+      { licenceId: "LIC-42", source: "Acme Library", expiresOn: "2024-02-30" },
+    ]) {
+      const bad = { path: "assets/audio/bed-01.mp3", rights };
+      expect(() => normalizeDraftState({ audio: bad })).not.toThrow();
+      expect(normalizeDraftState({ audio: bad }).audio).toBeUndefined();
+    }
+    const state = normalizeDraftState({ audio: good });
+    expect(state.audio).toEqual(good);
+    expect(toBrief(state).audio).toEqual(good);
+  });
+
   test("a brief without audio serialises exactly as before — no audio key", () => {
     const state = fromBrief(savedBrief(), { file: "camp.yaml" });
     expect("audio" in state).toBe(false);
