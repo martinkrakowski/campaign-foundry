@@ -16,6 +16,9 @@ import {
   DEFAULT_CAMPAIGN_TYPE,
   type CampaignType,
 } from "@campaignfoundry/CampaignOrchestration/campaign-types";
+// The leaf, never the barrel: the creative-type vocabulary rides the same rule
+// as its siblings above.
+import type { CreativeType } from "@campaignfoundry/CampaignOrchestration/creative-types";
 
 /** Display name for a format key. */
 export function formatDisplayName(format: string): string {
@@ -189,6 +192,22 @@ const TYPE_LABELS: Record<CampaignType, string> = {
 
 export function typeDisplayName(type: CampaignType): string {
   return TYPE_LABELS[type];
+}
+
+/**
+ * Display labels for the creative types (X14 fix2) — keyed by the domain's own
+ * union, so a fourth type is a compile error rather than a raw id on screen
+ * (D18). `formatsOutOfType` names the pinned template's type in these words:
+ * "image-text" is the domain's vocabulary, never the reviewer's copy.
+ */
+const CREATIVE_TYPE_LABELS: Record<CreativeType, string> = {
+  "image-text": "Image & text",
+  "image-html": "HTML",
+  video: "Video",
+};
+
+export function creativeTypeDisplayName(type: CreativeType): string {
+  return CREATIVE_TYPE_LABELS[type];
 }
 
 /**

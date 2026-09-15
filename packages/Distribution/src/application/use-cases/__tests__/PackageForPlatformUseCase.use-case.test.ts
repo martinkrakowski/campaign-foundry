@@ -302,17 +302,32 @@ describe("PackageForPlatformUseCase — display profiles (A4b)", () => {
     expect(store.writeManifest).not.toHaveBeenCalled();
   });
 
-  test("an empty include list still writes an (empty) display manifest when eligible assets exist", async () => {
+  test("an include that selects nothing for a display platform is refused, not packaged as an empty manifest (X14 fix2)", async () => {
     const store = fakeStore();
+    // The rejected-html-approval shape: the row IS eligible for
+    // google-display-html (its format and size match), but the approved
+    // `include` set selects none of it. Eligibility before `include` let that
+    // through the display guard and wrote a successful manifest with
+    // `items: []` — the D8 empty package the guard exists to refuse.
     const result = await exec(store, {
-      assets: [displayAsset("728x90")],
-      platforms: ["google-display"],
+      assets: [
+        displayAsset("728x90", {
+          format: "html",
+          htmlBundlePath: "alpha/728x90/index.html",
+          htmlFallbackPath: "alpha/728x90/fallback.png",
+        }),
+      ],
+      platforms: ["google-display-html"],
       include: [],
     });
-    expect(result.success).toBe(true);
-    if (!result.success) return;
-    expect(result.value.platforms[0].items).toEqual([]);
-    expect(store.writeManifest).toHaveBeenCalledTimes(1);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.message).toBe(
+        'Platform "google-display-html": no display assets for google-display-html — was the campaign generated with output.sizes?',
+      );
+    }
+    expect(store.readAsset).not.toHaveBeenCalled();
+    expect(store.writeManifest).not.toHaveBeenCalled();
   });
 
   test("packages only the sizes a display profile accepts; an unaccepted size is not an error", async () => {

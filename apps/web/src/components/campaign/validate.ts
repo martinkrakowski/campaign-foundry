@@ -39,7 +39,7 @@ import { DWELL_TOLERANCE } from "@campaignfoundry/CampaignOrchestration/copy-tim
 export { axisProductSize, drawableRatios, motionPackagedRatios } from "./editor-state";
 import { PLATFORM_PROFILES, type PlatformProfile } from "@campaignfoundry/Distribution/platform-profiles";
 import * as messages from "./messages";
-import { formatDisplayName, modeDisplayName, platformDisplayName, ratioDisplayName } from "./display-names";
+import { creativeTypeDisplayName, formatDisplayName, modeDisplayName, platformDisplayName, ratioDisplayName } from "./display-names";
 
 export const SAFE_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 export const HEX_COLOR_PATTERN = /^#[0-9A-Fa-f]{6}$/;
@@ -395,7 +395,7 @@ export function validateOutput(state: EditorState): FieldErrors {
   if (familyProblem !== undefined) {
     errors.formats = messages.formatsOutOfType(
       formatDisplayName(familyProblem.format),
-      familyProblem.creativeType,
+      creativeTypeDisplayName(familyProblem.creativeType),
     );
   }
   // An id no profile matches used to vanish above: `.filter(profile => …)` silently

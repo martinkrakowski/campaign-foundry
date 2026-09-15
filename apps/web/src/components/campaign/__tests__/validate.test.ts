@@ -658,7 +658,9 @@ describe("validateOutput", () => {
     // The html profiles ship html; an image-text template produces static and
     // motion (D119) — the boundary refuses the mismatch, so the draft must too.
     const errors = validateOutput(valid({ formats: ["html"], platforms: ["google-display-html"] }));
-    expect(errors.formats).toBe(messages.formatsOutOfType("html", "image-text"));
+    expect(errors.formats).toBe(messages.formatsOutOfType("html", "Image & text"));
+    // The copy names the type in words (fix2): the raw domain id never reaches the user.
+    expect(errors.formats).not.toContain("image-text");
   });
 
   test("an image-html draft selecting an html platform is clean", () => {
@@ -813,7 +815,7 @@ describe("the editor says what the parser refuses (B3 divergences)", () => {
   test("a format the template's creative type cannot produce is flagged here and refused by the parser (X14)", () => {
     const state = valid({ formats: ["html"], platforms: ["google-display-html"] });
     expect(validateState(state).output.formats).toBe(
-      messages.formatsOutOfType("html", "image-text"),
+      messages.formatsOutOfType("html", "Image & text"),
     );
     expect(() => parse(state)).toThrow(/output\.formats.*"html".*image-text/);
   });

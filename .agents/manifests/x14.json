@@ -73,6 +73,42 @@
         "--maxWorkers=2"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/app/(shell)/export/page.tsx",
+      "before": "  const packaged = hasDecisions ? approved : assets;",
+      "after": "  const packaged = assets;",
+      "because": "Derive the offered formats and sizes from every asset again: once review decisions exist packaging sends only the approved keys, so a run with approved statics and rejected html rows still offers \"Google Display (HTML5)\" — a profile whose selection is empty by construction, the offer the buyer can never fill.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/export/__tests__/export.test.tsx",
+        "-t",
+        "a run whose html assets were rejected is not offered the html profiles",
+        "--maxWorkers=2"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/Distribution/src/application/use-cases/PackageForPlatformUseCase.use-case.ts",
+      "before": "        const selected = include === null ? eligible : eligible.filter((a) => include.has(assetIdentity(a)));\n        // A display profile with nothing to package means the run was generated\n        // without `output.sizes` (or for the wrong sizes) — or that the HITL\n        // `include` set left nothing for it. The guard is applied to the\n        // SELECTION, not to eligibility (X14 fix2): a rejected-but-eligible row\n        // must not satisfy the check so the later `include` filter can still\n        // write a successful manifest with `items: []`. A successful empty\n        // manifest would send the buyer an empty package — say so instead.\n        if (profile.sizes !== undefined && selected.length === 0) {\n          throw new Error(\n            `no display assets for ${platformId} — was the campaign generated with output.sizes?`,\n          );\n        }",
+      "after": "        // A display profile with nothing to package means the run was generated\n        // without `output.sizes` (or for the wrong sizes). Writing a successful\n        // empty manifest would send the buyer an empty package — say so instead.\n        if (profile.sizes !== undefined && eligible.length === 0) {\n          throw new Error(\n            `no display assets for ${platformId} — was the campaign generated with output.sizes?`,\n          );\n        }\n        const selected = include === null ? eligible : eligible.filter((a) => include.has(assetIdentity(a)));",
+      "because": "Check eligibility before applying `include` again: a rejected-but-eligible html row satisfies the display guard, the include filter then selects nothing, and the use case writes a successful manifest with `items: []` — the empty package the guard exists to refuse.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/Distribution/src/application/use-cases/__tests__/PackageForPlatformUseCase.use-case.test.ts",
+        "-t",
+        "an include that selects nothing for a display platform is refused, not packaged as an empty manifest",
+        "--maxWorkers=2"
+      ],
+      "verdict": "caught"
     }
   ]
 }
