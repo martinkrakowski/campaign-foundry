@@ -23,7 +23,7 @@
 import { resolveCanvas, scaleBasis, type CanvasSpec } from "./aspect-ratios.js";
 import { CLICK_TAG_VARIABLE } from "./click-destination.js";
 import { DEFAULT_STYLE, resolveStyle, toneFontWeight, type Style } from "./creative-style.js";
-import { htmlTextGeometry, htmlButtonFontSize, htmlTextPaddingTop, type HtmlElement } from "./html-element.js";
+import { htmlTextGeometry, htmlButtonFontSize, type HtmlElement } from "./html-element.js";
 import { DEFAULT_TREATMENT, type ToneKind } from "./Treatment.vo.js";
 
 /** HTML-escape user-authored strings for the HTML text / quoted-attribute contexts (HL-D7). */
@@ -175,16 +175,27 @@ export function assembleHtml(options: AssembleHtmlOptions): AssembledHtml {
           lineHeight: resolvedStyle.lineHeight,
           letterSpacing: resolvedStyle.letterSpacing,
         });
-        // HL5f: an explicit `padding-top`, not CSS flex `justify-content` —
-        // the same shared offset the canvas drawer places its baseline from
-        // (`htmlTextFirstLineOffset`), converted to a padding by
-        // `htmlTextPaddingTop`. The markup cannot wrap text itself (no
-        // browser, D122), so it always passes a line count of 1 — exact for
-        // `top`, the single-line case for `middle`/`bottom` (see
-        // `htmlTextFirstLineOffset`'s doc comment for the residual on
-        // multi-line wrapped text).
-        const paddingTop = htmlTextPaddingTop(element.frame.anchor, boxH, fontSize, lineHeight, 1);
-        const textStyle = `${baseStyle} color: #ffffff; font-family: ${resolvedStyle.fontFamily}, sans-serif; font-weight: ${resolvedStyle.fontWeight}; font-size: ${fontSize}px; letter-spacing: ${letterSpacing}px; line-height: ${lineHeight}px; text-align: ${resolvedStyle.align}; padding-top: ${paddingTop}px; overflow: hidden;`;
+        // HL5f (orchestrator fix round): CSS flex `justify-content`, NOT a
+        // padding-top computed for one line. The markup cannot wrap text
+        // itself (no browser, D122) — it does not know how many lines a
+        // headline will actually take, so it cannot compute a fixed offset
+        // that stays correct for any line count. A single-line padding-top
+        // does the opposite: it is exact for exactly one line and WRONG for
+        // every other count, pushing wrapped lines below the box where
+        // `overflow: hidden` clips them. `justify-content` delegates that
+        // question to the browser, which lays out however many lines the
+        // text actually takes — structurally correct for any `n`, and
+        // differing from the canvas's placement only by the canvas's own
+        // baseline-correction terms (stated as the plan's residual, not
+        // narrowed here: see the HL5f entry in
+        // docs/planning/2026-09-10_the-html-layer.md).
+        let justify = "flex-start";
+        if (element.frame.anchor === "middle") {
+          justify = "center";
+        } else if (element.frame.anchor === "bottom") {
+          justify = "flex-end";
+        }
+        const textStyle = `${baseStyle} color: #ffffff; font-family: ${resolvedStyle.fontFamily}, sans-serif; font-weight: ${resolvedStyle.fontWeight}; font-size: ${fontSize}px; letter-spacing: ${letterSpacing}px; line-height: ${lineHeight}px; text-align: ${resolvedStyle.align}; display: flex; flex-direction: column; justify-content: ${justify}; overflow: hidden;`;
         const text = escapeHtml(element.text ?? "");
         elementMarkup.push(`<div style="${textStyle}">${text}</div>`);
         break;

@@ -263,21 +263,23 @@ export function htmlButtonFontSize(boxH: number, canvasBasis: number): number {
  * replicating `drawHtml`'s three anchor branches exactly (`top`: flush by one
  * `fontSize`; `middle`: the wrapped block's span centred in the box, offset by
  * a fixed `fontSize * 0.35` baseline correction; `bottom`: the block's span
- * flush to the box's bottom edge) — this function is now the one source both
- * `drawHtml` and `assembleHtml` (via {@link htmlTextPaddingTop}) call, closing
- * the gap Verified Gaps #2 named: "nothing pins them equal."
+ * flush to the box's bottom edge). `drawHtml` calls this with the REAL
+ * post-wrap line count (`wrapText` measures the real font first) — a
+ * byte-identical refactor of what was three inline branches.
  *
- * `lineCount` is the number of wrapped lines. The canvas knows it exactly —
- * `wrapText` measures the real font before this is called. The markup does
- * not: assembling is server-side with no browser to wrap text in (D122), so
- * `assembleHtml` always passes `1`. That is exact for `top` (line-count never
- * enters the formula) and is the SINGLE-LINE case for `middle`/`bottom`
- * otherwise: an element whose browser-rendered text wraps to `n` lines sits,
- * on the canvas, `(n - 1) * lineHeight / 2` higher for `middle` or
- * `(n - 1) * lineHeight` higher for `bottom` than the markup's fixed
- * single-line offset. This is the stated HL5f residual — recorded in the plan,
- * not narrowed here, because narrowing it needs the actual wrapped line count,
- * which needs a browser.
+ * `assembleHtml` does NOT call this (orchestrator fix round, HL5f): a first
+ * attempt converted this baseline offset into a markup `padding-top` computed
+ * for a single line, which is exact for `top` but WRONG for any `middle` or
+ * `bottom` text that actually wraps to more than one line in the browser —
+ * assembling is server-side with no browser to know the real line count in
+ * (D122), and a fixed single-line padding pushes line 2+ below the box, where
+ * `overflow: hidden` clips it. The markup instead positions with CSS flex
+ * `justify-content`, which the browser resolves against however many lines
+ * the text actually takes — structurally correct for any line count. The
+ * residual against the canvas (stated in the plan, not narrowed here) is the
+ * baseline-correction constant above (`fontSize * 0.35` for `middle`; the
+ * canvas anchors to the alphabetic baseline, the browser's flex centring to
+ * the line box), which does not vary with line count either way.
  */
 export function htmlTextFirstLineOffset(
   anchor: AnchorKind,
@@ -290,38 +292,4 @@ export function htmlTextFirstLineOffset(
   if (anchor === "top") return fontSize;
   if (anchor === "middle") return (boxH - totalSpan) / 2 + fontSize * 0.35;
   return boxH - totalSpan;
-}
-
-/**
- * The markup's own placement number (HL5f): a CSS `padding-top`, derived from
- * the same baseline offset {@link htmlTextFirstLineOffset} returns so the two
- * renderers share the arithmetic rather than the markup restating its own
- * approximation (the gap this replaces: CSS flex `justify-content`, never
- * proven equal to the canvas's baseline placement).
- *
- * A CSS block has no baseline the way `ctx.fillText`'s alphabetic baseline
- * does, so the conversion subtracts one `fontSize` — the canvas's own
- * baseline-below-top distance for a line flush to the box top — leaving the
- * distance from the box top to where the browser's line box would need to
- * start for its rendered line to land at roughly the same offset. This holds
- * to within the font's own ascent/leading metrics (documented residual: close
- * for the bundled faces at the default 1.25 line height, and drifts as
- * `lineHeight` grows past it or for a face with different ascent/descent
- * proportions than Inter/Lora) — it is NOT claimed pixel-exact, only that both
- * renderers now read the same number rather than two independently-guessed
- * ones.
- *
- * Clamped at 0: CSS refuses a negative `padding-top` outright (the whole
- * declaration is dropped, per spec), so a value below zero is normalised here
- * rather than silently losing the property from the emitted markup.
- */
-export function htmlTextPaddingTop(
-  anchor: AnchorKind,
-  boxH: number,
-  fontSize: number,
-  lineHeight: number,
-  lineCount: number,
-): number {
-  const offset = htmlTextFirstLineOffset(anchor, boxH, fontSize, lineHeight, lineCount);
-  return Math.max(0, offset - fontSize);
 }
