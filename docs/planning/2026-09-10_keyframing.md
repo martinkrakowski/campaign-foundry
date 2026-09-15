@@ -68,7 +68,8 @@ stays as it is, and text-effect tracks play on beat-local progress exactly as th
 
 | Lane | Task | Proof |
 |---|---|---|
-| **K1** | **Dispatchable — K-D7–K-D9 answered the three model decisions.** **The track model and its resolver.** Value objects, validation at the brief boundary, the pure resolve function. **No compositor *behaviour* change (K-D7 moves `easeOutCubic` to the domain), no rendering.** | Round-trips through YAML in declared key order; an invalid track is refused at both boundaries. |
+| **K1a** | **Shipped.** **The track model, no resolver.** Easing moves to the domain (K-D7); `Track`/`Stop` value objects (K-D8) and `layerTracksProblem`, validated at both brief boundaries (K-D9's one refusal: a duplicate `t` on one track's same clock). **No compositor *behaviour* change (one import), no rendering, no resolver.** | Round-trips through YAML in declared key order (positional); an invalid track is refused at both boundaries; the compositor's goldens are unchanged. |
+| **K1b** | **Dispatchable next, behind K1a.** **The resolver.** `resolveTracks(tracks, beats, clocks) → { byLayer, copy }` (K-D8), pure, beside `beatAt`. Composition per property (K-D9), folded in declaration order. **No caller in the compositor yet** — K2 wires it. | Interpolation at the default easing per clock; the legacy single-beat path; a crossfade instant's two complementary `copy` mixes; `dy` tracks add and `opacity` tracks multiply in a fixture that proves fold order matters. |
 | **K2** | **Express the four `MOTION_KINDS` as tracks and render from the resolver.** The vocabulary the user writes does not change. | **Per-frame byte-identity** for every motion kind across the canonical templates. Any drift stops the lane. |
 | **K3** | **Express the four text effects the same way.** | Per-frame byte-identity, including the beat-local windows and the settled-pose behaviour. |
 | **K4** | **Author tracks directly in a brief**, alongside presets; a hand-authored track and a preset's expansion on one layer and property **compose per K-D9** (no precedence rule). | A hand-authored track renders; a track on an absent or disabled layer renders nothing and says nothing. |
@@ -108,6 +109,16 @@ open**. `yarn plan:verify` runs them. K1 has no premise here: it is the model la
 lane is downstream of, and it was audited as open at the time these were written. **Probe the thing
 that decides, not a string near it** — a motion kind's *name* may live on as preset vocabulary after
 K2 ships, so these probes sit on the compositor's per-kind pose mechanism, not on the names.
+
+**K1a — shipped in this PR.** `easeOutCubic` moved out of the compositor into
+`packages/CampaignOrchestration/src/domain/value-objects/easing.ts` (K-D7, byte-neutral — one import
+back into `NodeCanvasCompositor.ts`), which also declares the easing vocabulary (`EASING_KINDS`:
+`ease-out-cubic`, `linear`). `Track`/`Stop` and `layerTracksProblem` (K-D8, K-D9) are new in
+`packages/CampaignOrchestration/src/domain/value-objects/tracks.ts`, wired into both boundaries —
+`isLayerEntry` (`brief-template.ts`) and the API's `validateTemplate` (`apps/api/server/lib/load-brief.ts`)
+— and `CreativeTemplateLayer` gains an optional `tracks` field. `LAYER_KEY_ORDER`
+(`packages/shared/src/infrastructure/brief-yaml.ts`) gains `tracks` as its sixth, last key, with its own
+`TRACK_KEY_ORDER`/`STOP_KEY_ORDER`. No resolver, no compositor behaviour change, no rendering — K1b.
 
 ```premise K2
 # K2 moves preset application out of the compositor: the draw paths read a

@@ -5190,3 +5190,15 @@ the API boundary-refusal call site). Goldens untouched.
 **Decisions:** no line-count-independent baseline correction was added to the markup — the canvas-vs-flex offset (baseline vs line-box) could not be cleanly separated from the line-count-dependent terms without a browser, so it stays a stated residual rather than an approximated constant.
 
 **Left open:** none new; HL5e remains dispatchable.
+
+### 2026-09-15 — K1a: the keyframe track model (feat/k1a-track-model)
+
+**Mode:** Implementer. Branch `feat/k1a-track-model`, worktree `cf-k1a`, from `origin/main` (82a474d4). Plan: K1a in docs/planning/2026-09-10_keyframing.md.
+
+**Changes:** `easeOutCubic` moved out of `NodeCanvasCompositor.ts` into `packages/CampaignOrchestration/src/domain/value-objects/easing.ts` (K-D7), byte-neutral — one import back, goldens unchanged. New `tracks.ts`: `Track`/`Stop` value objects and `layerTracksProblem` (K-D8, K-D9), shaped like `layerElementsProblem`; wired into `isLayerEntry` (`brief-template.ts`) and the API's `validateTemplate` (`load-brief.ts`). `LAYER_KEY_ORDER` (`brief-yaml.ts`) gains `tracks` as its sixth, last key, with `TRACK_KEY_ORDER`/`STOP_KEY_ORDER`.
+
+**Decisions:** every layer kind this compositor draws through its own `LAYER_DRAWERS` entry accepts tracks (image, video, shade, accent, static-text, animated-text, logo). `html` refuses — it renders through two independent paths (the canvas drawer and the markup assembler) and only one has any motion mechanism, so a track would render differently depending on which produced the creative. `fill` refuses — no creative type accepts it yet (D131) and this compositor draws it nowhere. `tracks` sits last in `LAYER_KEY_ORDER`: motion is a choreography layered over an already-defined shape (`props`) and content (`elements`). K-D9's only refusal (duplicate `t` on one track's same clock) is the equal case of the same-clock strictly-increasing check, not a second rule; two stops sharing a `t` on different clocks are independent axes and legal, and two tracks composing on one property is never refused. `easing.ts`/`tracks.ts` are kebab-case, hand-written modules outside hexagen's PascalCase inventory (`tools/arch-inventory/lib/naming.ts`), the same class as `html-element.ts`/`brief-template.ts` — no `.architecture/manifest.yaml` entry needed; verified empirically (`arch:inventory` clean, `sync:dry` Total ops 0) rather than assumed.
+
+**Tests:** red committed first for every new export (easing, tracks, the two boundary wirings, the YAML round trip) before the corresponding implementation. `mutate:verify .agents/manifests/k1a.json`: 2 mutations re-run, both caught (the duplicate-`t` refusal; `tracks` dropped from `LAYER_KEY_ORDER`, caught only because the round-trip fixture writes an unnamed key before `tracks` in source order — `orderedKeys` appends unnamed keys at the end, so a plain "tracks appears" assertion would not have noticed).
+
+**Left open:** K1b (the resolver, `resolveTracks`) is dispatchable next, behind this PR.
