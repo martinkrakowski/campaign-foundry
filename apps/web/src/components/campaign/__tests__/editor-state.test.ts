@@ -13,7 +13,7 @@ import {
 import { CANONICAL_TEMPLATES } from "@campaignfoundry/CampaignOrchestration/creative-templates";
 import { DISPLAY_SIZE_VALUES } from "@campaignfoundry/CampaignOrchestration/display-sizes";
 import { timelineProblem } from "@campaignfoundry/CampaignOrchestration/copy-timeline";
-import { axisProductSize } from "../validate";
+import { axisProductSize, validateTimeline } from "../validate";
 import { platformsToFormats } from "../derive";
 import {
   BACKGROUND_OPTIONS,
@@ -43,10 +43,13 @@ import {
   purgeDraftFromStorage,
   canPlan,
   normalizeDraftState,
+  valuesEqual,
   motionPackagedRatios,
   DEFAULT_DURATION_SEC,
   MAX_BEATS,
+  MAX_SCENES,
   MAX_WEIGHT,
+  addBeatBlockedBy,
   formatOcclusionNotice,
   canonicalBrief,
   canonicalTemplate,
@@ -3583,6 +3586,150 @@ describe("copy timeline (E5.1)", () => {
     });
   });
 
+  describe("per-beat backgrounds (VE-D10)", () => {
+    const sceneBrief = (): CampaignBrief =>
+      timelineBrief({
+        copy: {
+          timeline: {
+            beats: [
+              {
+                text: "Stay wild.",
+                weight: 3,
+                background: "assets/inputs/sunset.png",
+              },
+              {
+                text: "Stay hydrated.",
+                weight: 2,
+                background: "assets/inputs/studio.png",
+              },
+              { text: "Find your trail.", weight: 1 },
+            ],
+            transition: "fade",
+            keyBeat: 2,
+          },
+        },
+      });
+
+    test("a brief whose beats carry backgrounds survives load → save unchanged", () => {
+      const brief = sceneBrief();
+      const loaded = fromBrief(brief);
+      expect(loaded.timeline.beats.map((beat) => beat.background)).toEqual([
+        "assets/inputs/sunset.png",
+        "assets/inputs/studio.png",
+        undefined,
+      ]);
+      expect(toBrief(loaded).copy).toEqual(brief.copy);
+      expect(valuesEqual(toBrief(loaded), brief)).toBe(true);
+    });
+
+    test("add, set, remove and move keep the other beats' backgrounds, and add creates none", () => {
+      const state = fromBrief(sceneBrief());
+      const added = reduce(state, { type: "addBeat" });
+      expect(added.timeline.beats[3].background).toBeUndefined();
+      expect(added.timeline.beats[0].background).toBe(
+        "assets/inputs/sunset.png",
+      );
+      const edited = reduce(state, {
+        type: "setBeatText",
+        index: 0,
+        text: "Stay wet.",
+      });
+      expect(edited.timeline.beats[0].background).toBe(
+        "assets/inputs/sunset.png",
+      );
+      const moved = reduce(state, { type: "moveBeat", from: 0, to: 2 });
+      expect(moved.timeline.beats.map((beat) => beat.background)).toEqual([
+        "assets/inputs/studio.png",
+        undefined,
+        "assets/inputs/sunset.png",
+      ]);
+      const removed = reduce(state, { type: "removeBeat", index: 2 });
+      // The WHOLE serialised list, not just the head: removing the background-free
+      // third beat must leave the first two scenes intact, so dropping the second
+      // beat's background on serialisation fails here, not silently.
+      expect(toBrief(removed).copy?.timeline?.beats).toEqual([
+        {
+          text: "Stay wild.",
+          weight: 3,
+          background: "assets/inputs/sunset.png",
+        },
+        {
+          text: "Stay hydrated.",
+          weight: 2,
+          background: "assets/inputs/studio.png",
+        },
+      ]);
+    });
+
+    test("VE-D3: a timeline naming no backgrounds writes no background key anywhere", () => {
+      const written = toBrief(fromBrief(timelineBrief()));
+      expect(JSON.stringify(written.copy?.timeline)).not.toMatch(/background/);
+    });
+
+    test("a restored draft that already over-counts scenes does not block Add beat on the floor", () => {
+      // The scene cap and the dwell floor are different questions. Adding a
+      // background-free beat cannot change the scene count, so a draft already
+      // naming more than MAX_SCENES (a restored one) must not read that violation as
+      // a dwell block — validation still reports the scene error where it belongs.
+      const state = {
+        ...motionState(),
+        duration: [8],
+        timeline: {
+          beats: [
+            { key: 1, text: "A", weight: 1, background: "assets/inputs/a.png" },
+            { key: 2, text: "B", weight: 1, background: "assets/inputs/b.png" },
+            { key: 3, text: "C", weight: 1, background: "assets/inputs/c.png" },
+            { key: 4, text: "D", weight: 1, background: "assets/inputs/d.png" },
+          ],
+          transition: "fade",
+          keyBeat: 1,
+        },
+      } as unknown as EditorState;
+      // Every existing beat, and the one the click would add, clears the 1.2 s floor
+      // at 8 s (5 beats of weight 1 → 1.6 s each), so nothing blocks Add beat:
+      expect(addBeatBlockedBy(state)).toBeUndefined();
+      // yet the draft is genuinely invalid — for the scene cap, from validation:
+      expect(validateTimeline(state)["copy-timeline"]).toBe(
+        messages.timelineTooManyBackgrounds(MAX_SCENES),
+      );
+    });
+
+    test("a recovered snapshot with an empty or non-string background is repaired on load", () => {
+      // `discard` hands `source.savedSnapshot` straight to `fromBrief`, unvalidated: a
+      // "" (an editor blank) or a `5` (a hand-edited field) must not ride through to
+      // `toBrief` and into a save the API refuses. `fromBrief` applies the same repair
+      // `normalizeDraftState` does, and `toBrief` writes a background only when it is a
+      // non-empty string, so the payload the boundary sees carries none of the bad ones.
+      const snapshot = timelineBrief({
+        copy: {
+          timeline: {
+            beats: [
+              { text: "A", weight: 2, background: "assets/inputs/a.png" },
+              { text: "B", weight: 2, background: "" },
+              { text: "C", weight: 2, background: 5 },
+            ],
+            transition: "fade",
+            keyBeat: 1,
+          },
+        },
+      } as unknown as CampaignBrief);
+      const loaded = fromBrief(snapshot);
+      expect(loaded.timeline.beats[0].background).toBe("assets/inputs/a.png");
+      expect(loaded.timeline.beats[1]).not.toHaveProperty("background");
+      expect(loaded.timeline.beats[2]).not.toHaveProperty("background");
+      const written = toBrief(loaded);
+      expect(written.copy?.timeline?.beats).toEqual([
+        { text: "A", weight: 2, background: "assets/inputs/a.png" },
+        { text: "B", weight: 2 },
+        { text: "C", weight: 2 },
+      ]);
+      // and the payload passes the real boundary the save would hit — serialised the
+      // way a brief file is, then parsed by the API's loader, which throws on a bad
+      // background rather than reporting one:
+      expect(() => parseBrief(load(dumpBrief(written)))).not.toThrow();
+    });
+  });
+
   describe("the D5 gate: a timeline serialises only where the parser allows it", () => {
     test("authoring is gated on canSerializeTimeline, never on the beats in the draft", () => {
       const authored = reduce(reduce(motionState(), { type: "addBeat" }), {
@@ -3646,6 +3793,30 @@ describe("copy timeline (E5.1)", () => {
         keyBeat: 1,
       });
       expect(restored.copyExplicit).toBe(false);
+    });
+
+    test("a restored draft keeps a beat's background and repairs the wrong shapes away (VE5a)", () => {
+      const restored = normalizeDraftState({
+        mode: "variation",
+        briefId: "camp",
+        formats: ["static", "motion"],
+        timeline: {
+          beats: [
+            { key: 1, text: "A", weight: 1, background: "assets/inputs/a.png" },
+            { key: 2, text: "B", weight: 1, background: "" },
+            { key: 3, text: "C", weight: 1, background: 5 },
+            { key: 4, text: "D", weight: 1 },
+          ],
+          transition: "fade",
+          keyBeat: 1,
+        },
+      });
+      expect(restored.timeline.beats[0].background).toBe(
+        "assets/inputs/a.png",
+      );
+      expect(restored.timeline.beats[1]).not.toHaveProperty("background");
+      expect(restored.timeline.beats[2]).not.toHaveProperty("background");
+      expect(restored.timeline.beats[3]).not.toHaveProperty("background");
     });
 
     test("a draft with a timeline keeps it, repairing broken beats and clamping keyBeat", () => {

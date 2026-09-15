@@ -2441,6 +2441,60 @@ describe("parseBrief copy.timeline (E4.1 – E4.3)", () => {
       expect(minimal.copy?.timeline?.keyBeat).toBe(1);
     });
 
+    test("VE5a: accepts an optional non-empty string background on a beat", () => {
+      const brief = parseBrief(
+        validMotionTimelineBrief({
+          copy: {
+            timeline: {
+              ...validTimeline,
+              beats: [
+                {
+                  text: "A",
+                  weight: 1,
+                  background: "assets/inputs/x/a.png",
+                },
+                { text: "B", weight: 1 },
+              ],
+            },
+          },
+        }),
+        { enforceCapabilities: false },
+      );
+      // The field round-trips verbatim — the same kind of asset reference a product's
+      // inputAsset holds, and the parser's job is only to refuse the wrong shape.
+      expect(brief.copy?.timeline?.beats[0]).toEqual({
+        text: "A",
+        weight: 1,
+        background: "assets/inputs/x/a.png",
+      });
+      expect(brief.copy?.timeline?.beats[1]).not.toHaveProperty("background");
+    });
+
+    test("VE5a: running mode refuses a fourth distinct background with the domain's message", () => {
+      const brief = validMotionTimelineBrief({
+        variation: {
+          ...v2Brief.variation,
+          axes: { ...staticAxes, motion: ["ken-burns-in"], duration: [6] },
+        },
+        copy: {
+          timeline: {
+            beats: [
+              { text: "A", weight: 1, background: "assets/inputs/1.png" },
+              { text: "B", weight: 1, background: "assets/inputs/2.png" },
+              { text: "C", weight: 1, background: "assets/inputs/3.png" },
+              { text: "D", weight: 1, background: "assets/inputs/4.png" },
+            ],
+          },
+        },
+      });
+      expect(() =>
+        parseBrief(brief, {
+          capabilities: MOTION_ON,
+          enforceCapabilities: true,
+        }),
+      ).toThrow(/more than 3 distinct backgrounds/);
+    });
+
     test("accepts empty copy object (no timeline)", () => {
       const brief = parseBrief({ ...v2Brief, copy: {} });
       expect(brief.copy).toEqual({});
@@ -2621,6 +2675,30 @@ describe("parseBrief copy.timeline (E4.1 – E4.3)", () => {
           },
         }),
         /Campaign brief field "copy\.timeline\.beats\[0\]\.text" must be a string/,
+      ],
+      [
+        "a numeric beat background",
+        validMotionTimelineBrief({
+          copy: {
+            timeline: {
+              ...validTimeline,
+              beats: [{ text: "A", weight: 1, background: 5 }],
+            },
+          },
+        }),
+        /Campaign brief field "copy\.timeline\.beats\[0\]\.background" must be a non-empty string/,
+      ],
+      [
+        "an empty-string beat background",
+        validMotionTimelineBrief({
+          copy: {
+            timeline: {
+              ...validTimeline,
+              beats: [{ text: "A", weight: 1, background: "" }],
+            },
+          },
+        }),
+        /Campaign brief field "copy\.timeline\.beats\[0\]\.background" must be a non-empty string/,
       ],
       [
         "a non-integer weight",

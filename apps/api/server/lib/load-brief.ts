@@ -866,6 +866,17 @@ function validateCopy(
         `Campaign brief field "copy.timeline.beats[${i}].text" must be a string.`,
       );
     }
+    // VE5a: an optional per-beat background — an asset path, the same kind of
+    // reference a product's `inputAsset` holds. Shape only; the scene cap (VE-D10)
+    // is `timelineProblem`'s, so the API and the editor refuse the same thing.
+    if (
+      beat.background !== undefined &&
+      (typeof beat.background !== "string" || beat.background === "")
+    ) {
+      throw new Error(
+        `Campaign brief field "copy.timeline.beats[${i}].background" must be a non-empty string; got ${JSON.stringify(beat.background)}.`,
+      );
+    }
     const weight = beat.weight;
     if (!isFiniteInteger(weight) || weight < 1 || weight > MAX_WEIGHT) {
       throw new Error(
