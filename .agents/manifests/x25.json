@@ -4,9 +4,9 @@
   "mutations": [
     {
       "file": "tools/plan-verify/lib/premises.ts",
-      "before": "  OPENING.lastIndex = 0;\n  const openings = [...markdown.matchAll(OPENING)];\n  if (openings.length > found.length) {\n    const unclosed = openings.find((m) => !closed.has(m.index));\n    throw new Error(\n      `UNCLOSED  ${unclosed?.[1]}  (${plan})\\n` +\n        `  a premise fence that is never closed hides the lane instead of failing it.\\n` +\n        `  Close it with a lone \\`\\`\\` line, or delete the whole fence and retire the lane.`,\n    );\n  }",
+      "before": "  OPENING.lastIndex = 0;\n  const openings = [...markdown.matchAll(OPENING)].filter(\n    (m) => !blocks.some(([start, end]) => m.index >= start && m.index < end),\n  );\n  if (openings.length > 0) {\n    const unclosed = openings[0];\n    throw new Error(\n      `UNCLOSED  ${unclosed[1]}  (${plan})\\n` +\n        `  a premise fence that is never closed — or an opener malformed enough that\\n` +\n        `  no closing fence can match it — hides the lane instead of failing it.\\n` +\n        `  A valid opener is \\`\\`\\`premise <lane> alone on its line; close the fence\\n` +\n        `  with a lone \\`\\`\\` line, or delete the whole fence and retire the lane.`,\n    );\n  }",
       "after": "  return found;",
-      "because": "Removing the opening-vs-matched count check restores the old behaviour: an unclosed fence simply never matches FENCE, the lane disappears from the check, and parsePremises returns quietly.",
+      "because": "Removing the opening-vs-matched check restores the old behaviour: an unclosed or malformed fence simply never matches FENCE, the lane disappears from the check, and parsePremises returns quietly.",
       "command": [
         "yarn",
         "vitest",
@@ -20,9 +20,25 @@
     },
     {
       "file": "tools/plan-verify/lib/premises.ts",
-      "before": "  if (openings.length > found.length) {",
-      "after": "  if (openings.length >= found.length) {",
-      "because": "The check must fire only on a genuine loss; a >= would throw on every well-formed document, so the parse tests pin the boundary.",
+      "before": "  if (openings.length > 0) {",
+      "after": "  if (openings.length >= 0) {",
+      "because": "The check must fire only on a genuine loss; a >= throws on every well-formed document, so the parse tests pin the boundary.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--maxWorkers=2",
+        "--project",
+        "tools",
+        "tools/plan-verify/lib/__tests__/premises.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/plan-verify/lib/premises.ts",
+      "before": "  const openings = [...markdown.matchAll(OPENING)].filter(\n    (m) => !blocks.some(([start, end]) => m.index >= start && m.index < end),\n  );",
+      "after": "  const openings = [...markdown.matchAll(OPENING)];",
+      "because": "Dropping the range filter re-introduces the false positive this fix closes: an opener-shaped line inside a closed premise body (a heredoc quoting ```premise B) is counted as an opening again, so a valid plan throws UNCLOSED and aborts the whole verification run.",
       "command": [
         "yarn",
         "vitest",

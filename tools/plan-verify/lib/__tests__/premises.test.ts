@@ -52,6 +52,33 @@ describe("parsePremises", () => {
     expect(parsePremises("p.md", md)).toEqual([]);
   });
 
+  test("an opener-shaped line inside a closed premise body is not an opening", () => {
+    const md = [
+      "```premise A",
+      "cat <<'EOF'",
+      "```premise B",
+      "quoted from another plan",
+      "EOF",
+      "true",
+      "```",
+    ].join("\n");
+    expect(parsePremises("p.md", md)).toEqual([
+      {
+        plan: "p.md",
+        lane: "A",
+        script: ["cat <<'EOF'", "```premise B", "quoted from another plan", "EOF", "true"].join("\n"),
+      },
+    ]);
+  });
+
+  test("an opener with trailing text is an unclosed-or-malformed error naming the lane", () => {
+    const md = ["```premise A some comment", "true", "```"].join("\n");
+    expect(() => parsePremises("p.md", md)).toThrow(/A/);
+    expect(() => parsePremises("p.md", md)).toThrow(/unclosed/i);
+    expect(() => parsePremises("p.md", md)).toThrow(/malformed/i);
+    expect(() => parsePremises("p.md", md)).toThrow(/alone on its line/);
+  });
+
   test("is re-entrant: the shared global regex cannot skip a document", () => {
     const md = ["```premise W1", "true", "```"].join("\n");
     expect(parsePremises("a.md", md)).toHaveLength(1);

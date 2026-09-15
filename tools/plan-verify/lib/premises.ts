@@ -24,17 +24,21 @@ const FENCE = /^```premise[ \t]+(\S+)[ \t]*\r?\n([\s\S]*?)^```[ \t]*$/gm;
  * matches a whole block and simply skips an opening that is never closed,
  * which drops the lane from the check — the same silent loss an empty
  * script causes. An id-less opening is not a premise and is not counted,
- * matching the behaviour `FENCE` itself pins.
+ * matching the behaviour `FENCE` itself pins. An opening inside a matched
+ * block is likewise not counted: a premise body may legitimately contain an
+ * opener-shaped line (a heredoc quoting another plan), and FENCE has already
+ * consumed it. Every opening outside all blocks is therefore a real one that
+ * no block closed, so it cannot be absent when the count is non-zero.
  */
 const OPENING = /^```premise[ \t]+(\S+)/gm;
 
 export function parsePremises(plan: string, markdown: string): readonly Premise[] {
   const found: Premise[] = [];
-  const closed = new Set<number>();
+  const blocks: Array<readonly [number, number]> = [];
   // `matchAll` needs a fresh lastIndex: these regexes are module-scoped and global.
   FENCE.lastIndex = 0;
   for (const match of markdown.matchAll(FENCE)) {
-    closed.add(match.index);
+    blocks.push([match.index, match.index + match[0].length]);
     const lane = match[1];
     const script = match[2].trim();
     if (script === "") {
@@ -47,13 +51,17 @@ export function parsePremises(plan: string, markdown: string): readonly Premise[
     found.push({ plan, lane, script });
   }
   OPENING.lastIndex = 0;
-  const openings = [...markdown.matchAll(OPENING)];
-  if (openings.length > found.length) {
-    const unclosed = openings.find((m) => !closed.has(m.index));
+  const openings = [...markdown.matchAll(OPENING)].filter(
+    (m) => !blocks.some(([start, end]) => m.index >= start && m.index < end),
+  );
+  if (openings.length > 0) {
+    const unclosed = openings[0];
     throw new Error(
-      `UNCLOSED  ${unclosed?.[1]}  (${plan})\n` +
-        `  a premise fence that is never closed hides the lane instead of failing it.\n` +
-        `  Close it with a lone \`\`\` line, or delete the whole fence and retire the lane.`,
+      `UNCLOSED  ${unclosed[1]}  (${plan})\n` +
+        `  a premise fence that is never closed — or an opener malformed enough that\n` +
+        `  no closing fence can match it — hides the lane instead of failing it.\n` +
+        `  A valid opener is \`\`\`premise <lane> alone on its line; close the fence\n` +
+        `  with a lone \`\`\` line, or delete the whole fence and retire the lane.`,
     );
   }
   return found;
