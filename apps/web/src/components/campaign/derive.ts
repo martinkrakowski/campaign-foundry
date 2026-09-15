@@ -403,19 +403,52 @@ function htmlWeightKey(
   destination: string,
   budget: PlatformProfile,
   // HL5f: the reading now depends on tone (the assembler's default weight),
-  // so a tone-only edit must invalidate the single-entry cache below too.
-  tone: Treatment["tone"] | undefined,
+  // so a change to the SET of tones the draft will generate must invalidate
+  // the single-entry cache below too. Sorted so a re-derivation of the same
+  // set in a different order (e.g. a treatment reorder) is still a cache hit.
+  tones: readonly (Treatment["tone"] | undefined)[],
 ): string {
   return JSON.stringify({
     brandColor,
     destination,
     style,
     sizes,
-    tone,
+    tones: [...tones].sort(),
     maxBytes: budget.maxBytes,
     profileLabel: budget.label,
     elements: elements.map((el) => [el.kind, el.text ?? "", el.frame]),
   });
+}
+
+/**
+ * Every distinct tone the draft will actually write an html bundle for
+ * (Qodo finding, HL5f fix round): generation writes one html unit per
+ * generated variant, and each variant carries its OWN tone —
+ * `GenerateCampaignUseCase` passes `treatment.tone` per treatment in brief
+ * mode and `variant.tone` per variant in variation mode. Reading only the
+ * first treatment's tone (the pre-fix reading) missed every OTHER
+ * treatment's bundle — now that weight follows tone (`toneFontWeight`), a
+ * later bold treatment can outweigh an earlier subtle one and the meter
+ * would silently under-report the real over-budget unit.
+ *
+ * Brief mode: `state.treatments[].tone` — a raw editor string, validated
+ * only at save (`toTreatment`), so anything other than "subtle" collapses to
+ * bold exactly as the compositor's own tone check does. Variation mode:
+ * `state.variation.tone`, the tone AXIS — every value selected there is a
+ * tone some generated variant will carry (the axis is not narrowed further
+ * here; sampling which combinations actually render is the generator's
+ * job, and every axis value remains reachable). No treatments drafted, or
+ * an empty tone axis, → `[undefined]`, so a draft with nothing tone-specific
+ * to say gets exactly the assembler's own "bold" default — the one-tone
+ * reading this replaces.
+ */
+function draftTones(state: EditorState): readonly (Treatment["tone"] | undefined)[] {
+  const raw =
+    state.mode === "variation"
+      ? state.variation.tone
+      : state.treatments.map((treatment) => treatment.tone);
+  const distinct = [...new Set(raw)] as readonly Treatment["tone"][];
+  return distinct.length > 0 ? distinct : [undefined];
 }
 
 /**
@@ -472,13 +505,7 @@ export function htmlWeightReading(
   // throw it: a missing product (`?? ""`) or a colour outside the hex shape has
   // no weighable markup, and the Products section already says so.
   if (!isBrandColor(brandColor)) return undefined;
-  // HL5f: the meter reads the draft's FIRST treatment's tone (the same
-  // "first treatment" convention the print-proof and hero-image paths use
-  // elsewhere) — a raw editor string, validated only at save (`toTreatment`),
-  // so anything other than "subtle" collapses to bold exactly as the
-  // compositor's own tone check does. No treatments drafted yet → undefined →
-  // the assembler's own "bold" default.
-  const tone = state.treatments[0]?.tone as Treatment["tone"] | undefined;
+  const tones = draftTones(state);
 
   const key = htmlWeightKey(
     sizes,
@@ -487,21 +514,23 @@ export function htmlWeightReading(
     state.style,
     destination,
     budget,
-    tone,
+    tones,
   );
   const cached = weightReadingCache;
   if (cached !== undefined && cached.key === key) return cached.reading;
   let bytes = 0;
   for (const size of sizes) {
-    const assembled = assembleHtml({
-      elements,
-      canvas: { size },
-      brandColor,
-      style: state.style,
-      tone,
-      clickDestination: destination === "" ? undefined : destination,
-    });
-    bytes = Math.max(bytes, assembled.byteLength);
+    for (const tone of tones) {
+      const assembled = assembleHtml({
+        elements,
+        canvas: { size },
+        brandColor,
+        style: state.style,
+        tone,
+        clickDestination: destination === "" ? undefined : destination,
+      });
+      bytes = Math.max(bytes, assembled.byteLength);
+    }
   }
   const reading: HtmlWeightReading = {
     bytes,
