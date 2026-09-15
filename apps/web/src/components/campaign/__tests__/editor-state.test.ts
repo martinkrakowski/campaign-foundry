@@ -5247,3 +5247,94 @@ describe("canonical layer defaults (X16)", () => {
     expect(isDirtySinceApply(applied)).toBe(false);
   });
 });
+
+describe("the audio block survives the editor untouched (VE3a, D11)", () => {
+  const audioBed = () => ({
+    path: "assets/audio/bed-01.mp3",
+    rights: {
+      licenceId: "LIC-42",
+      source: "Acme Library",
+      expiresOn: "2027-01-01",
+      territories: ["DE", "FR"],
+    },
+  });
+
+  test("a loaded brief with audio round-trips and opens clean", () => {
+    const brief = savedBrief({ audio: audioBed() });
+    const state = fromBrief(brief, { file: "camp.yaml" });
+    expect(state.audio).toEqual(brief.audio);
+    expect(valuesEqual(toBrief(state), brief)).toBe(true);
+    expect(isDirtySinceSave(state)).toBe(false);
+  });
+
+  test("canonicalBrief leaves audio exactly as it is", () => {
+    const brief = savedBrief({ audio: audioBed() });
+    expect(canonicalBrief(brief).audio).toBe(brief.audio);
+  });
+
+  test("an edit to another field keeps audio byte-for-byte through save", () => {
+    const brief = savedBrief({ audio: audioBed() });
+    const loaded = fromBrief(brief, { file: "camp.yaml" });
+    const edited = reduce(loaded, {
+      type: "patch",
+      patch: { campaignMessage: "New copy" },
+    });
+    const emitted = toBrief(edited);
+    expect(JSON.stringify(emitted.audio)).toBe(JSON.stringify(brief.audio));
+    const saved = reduce(edited, { type: "save", saved: emitted });
+    expect(isDirtySinceSave(saved)).toBe(false);
+    expect(saved.audio).toEqual(brief.audio);
+  });
+
+  test("the variation-mode serialisation writes audio back too", () => {
+    const source: EditorState = {
+      ...initialEditorState("variation"),
+      audio: audioBed(),
+    };
+    const out = toBrief(source);
+    expect(out.audio).toEqual(source.audio);
+    const state = fromBrief(out, { file: "camp.yaml" });
+    expect(state.audio).toEqual(source.audio);
+    expect(valuesEqual(toBrief(state), out)).toBe(true);
+  });
+
+  test("discard restores the saved brief with its audio intact", () => {
+    const brief = savedBrief({ audio: audioBed() });
+    const loaded = fromBrief(brief, { file: "camp.yaml" });
+    const edited = reduce(loaded, {
+      type: "patch",
+      patch: { campaignMessage: "scratch" },
+    });
+    const discarded = reduce(edited, { type: "discard" });
+    expect(discarded.audio).toEqual(brief.audio);
+    expect(toBrief(discarded).audio).toEqual(brief.audio);
+    expect(isDirtySinceSave(discarded)).toBe(false);
+  });
+
+  test("normalizeDraftState keeps a well-formed audio and drops every other shape without throwing", () => {
+    const good = audioBed();
+    expect(normalizeDraftState({ audio: good }).audio).toEqual(good);
+    for (const bad of [
+      null,
+      "x",
+      [],
+      { path: 5 },
+      { path: "a.mp3" },
+      { path: "a.mp3", rights: null },
+      { path: "a.mp3", rights: [] },
+      { path: "a.mp3", rights: "lic" },
+    ]) {
+      expect(() => normalizeDraftState({ audio: bad })).not.toThrow();
+      expect(normalizeDraftState({ audio: bad }).audio).toBeUndefined();
+    }
+    expect(normalizeDraftState({}).audio).toBeUndefined();
+  });
+
+  test("a brief without audio serialises exactly as before — no audio key", () => {
+    const state = fromBrief(savedBrief(), { file: "camp.yaml" });
+    expect("audio" in state).toBe(false);
+    expect("audio" in toBrief(state)).toBe(false);
+    expect("audio" in initialEditorState()).toBe(false);
+    expect("audio" in toBrief(base())).toBe(false);
+  });
+});

@@ -311,6 +311,13 @@ export interface EditorState {
    * Carried through editor state so saving never destroys it.
    */
   clickDestination: string;
+  /**
+   * The brief's optional music bed (VE-D8), held verbatim. This lane authors no
+   * control for it, but a load → save must not drop the licence record (D11):
+   * `fromBrief` copies it in, `toBrief` writes it back only when present, and
+   * the draft normaliser keeps it only when it is a usable `{ path, rights }`.
+   */
+  audio?: CampaignBrief["audio"];
   products: ProductDraft[];
   nextProductKey: number;
   /** The next free `TimelineBeatDraft.key`. Monotonic; never reused within a session. */
@@ -2208,14 +2215,20 @@ export function toBrief(state: EditorState): CampaignBrief {
   const withCopy =
     copy !== undefined ? { ...withLocalized, copy } : withLocalized;
   const destination = state.clickDestination.trim();
+  // VE3a (D11): the music bed's licence record is carried through untouched —
+  // no control in this lane authors or clears it, so a present block is
+  // written back verbatim and an absent one never grows the key. The API
+  // boundary re-validates the rights fields on save, not the editor.
+  const audio = state.audio !== undefined ? { audio: state.audio } : {};
   if (state.mode === "brief") {
     const withTreatments =
       state.treatments.length > 0
         ? { ...withCopy, treatments: state.treatments.map(toTreatment) }
         : withCopy;
+    const withAudio = { ...withTreatments, ...audio };
     return destination
-      ? { ...withTreatments, clickDestination: destination }
-      : withTreatments;
+      ? { ...withAudio, clickDestination: destination }
+      : withAudio;
   }
   // X18: every policy integer goes through the validator's own parser, so a
   // draft that passes validation saves exactly the number it was validated as.
@@ -2270,6 +2283,7 @@ export function toBrief(state: EditorState): CampaignBrief {
     },
     ...(copy !== undefined ? { copy } : {}),
     ...(destination ? { clickDestination: destination } : {}),
+    ...audio,
   };
 }
 
@@ -2413,6 +2427,10 @@ export function fromBrief(
     campaignMessage: brief.campaignMessage ?? "",
     localizedMessage: brief.localizedMessage ?? "",
     clickDestination: brief.clickDestination ?? "",
+    // VE3a (D11): the licence record is copied across untouched — `toBrief`
+    // writes it back, so a load → save never drops it, and `discard` re-runs
+    // this path against the saved snapshot with the same result.
+    ...(brief.audio !== undefined ? { audio: brief.audio } : {}),
     products,
     nextProductKey,
     treatments,
@@ -2760,6 +2778,27 @@ function normalizeStyleDraft(value: unknown): Style {
   return style;
 }
 
+/**
+ * Rebuild a persisted `audio` block with the same repair-first,
+ * discard-only-when-unusable rigor as the sibling normalizers: a stored value
+ * survives only when it is a non-null, non-array object with a string `path`
+ * and an object `rights`; anything else is dropped, never dereferenced —
+ * recovery must not throw on a hand-edited draft (the X16/X17 lesson). The
+ * licence fields are deliberately not re-validated here: the API boundary does
+ * that on save, and re-checking them here could strip a record whose shape the
+ * draft merely carried through untouched.
+ */
+function normalizeAudioDraft(value: unknown): CampaignBrief["audio"] {
+  if (value === null || typeof value !== "object" || Array.isArray(value))
+    return undefined;
+  const audio = value as Record<string, unknown>;
+  if (typeof audio.path !== "string") return undefined;
+  const rights = audio.rights;
+  if (rights === null || typeof rights !== "object" || Array.isArray(rights))
+    return undefined;
+  return value as CampaignBrief["audio"];
+}
+
 export function normalizeDraftState(raw: Record<string, unknown>): EditorState {
   const mode: CampaignMode = raw.mode === "variation" ? "variation" : "brief";
   // D112 — a draft saved before the type existed carries no `type`, and a
@@ -2900,6 +2939,10 @@ export function normalizeDraftState(raw: Record<string, unknown>): EditorState {
     campaignName,
     briefId: str(raw.briefId, initial.briefId),
     clickDestination: str(raw.clickDestination, initial.clickDestination),
+    // Re-asserted, not left to the `...raw` spread: a draft that smuggled a
+    // malformed audio through the spread must have it dropped here, and a
+    // well-formed one is kept verbatim (reference, not copy).
+    audio: normalizeAudioDraft(raw.audio),
     products,
     nextProductKey,
     treatments: list(raw.treatments, initial.treatments),

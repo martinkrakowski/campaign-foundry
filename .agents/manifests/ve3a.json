@@ -52,6 +52,23 @@
         "halts when targetRegion is not covered by territories"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/editor-state.ts",
+      "before": "  const audio = state.audio !== undefined ? { audio: state.audio } : {};\n",
+      "after": "  // audio write-back dropped from toBrief (VE3a mutation (d))\n  const audio = {};\n",
+      "because": "Dropping the audio write-back from toBrief makes the editor silently strip a loaded brief's licence record on save, so the audio round-trip test must fail.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/editor-state.test.ts",
+        "-t",
+        "a loaded brief with audio round-trips and opens clean"
+      ],
+      "verdict": "caught"
     }
   ]
 }
