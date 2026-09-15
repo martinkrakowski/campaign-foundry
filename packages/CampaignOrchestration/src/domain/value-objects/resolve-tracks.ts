@@ -25,12 +25,13 @@
  * `clocks.effectT ?? local`, unifying the compositor's `effectT ?? local`
  * (timeline path) and `effectT ?? t` (legacy path) — the two collapse to one
  * expression because the legacy path defines `local` as `t` (below). A
- * track's stops are assumed to share one clock — the one named by its first
- * stop; the validator (`layerTracksProblem`) permits a track to mix clocks
- * across its stops (it only refuses a duplicate `t` within one clock), but
- * nothing in the plan or the compositor's own mechanism gives a mixed-clock
- * track a meaning, so stops on any other clock are silently ignored, the
- * same "resolves to nothing" shape K-D4 already uses for an absent layer.
+ * track's stops all share one clock — the one named by its first stop — a
+ * boundary invariant (`layerTracksProblem`, K1b review), not an assumption
+ * this module makes: a mixed-clock track was previously accepted and had
+ * its off-clock stops silently ignored here, the exact "accept it and drop
+ * the data" bug this domain refuses everywhere else; the validator now
+ * refuses a mixed-clock track outright, so every stop this function reads is
+ * on the track's one clock.
  *
  * `beats` is the ALREADY-RESOLVED timeline (`CopyTimeline.vo.ts`'s
  * `resolveTimeline` output), or an empty list for the legacy (timeline-less)
@@ -203,7 +204,13 @@ function beatLocal(t: number, beat: ResolvedBeat): number {
   return raw > 1 ? 1 : raw;
 }
 
-/** Folds every track into one pose (K-D9): `dx`/`dy` add, `opacity`/`scale` multiply, in declaration order. */
+/**
+ * Folds every track into one pose (K-D9): `dx`/`dy` add, `opacity`/`scale`
+ * multiply, in declaration order. The switch has no `default` — `property`
+ * is `TrackProperty`, a closed union `layerTracksProblem` already validates
+ * at both brief boundaries, so this is an exhaustive switch over a checked
+ * type, not a guard against a value the type system already refuses.
+ */
 function foldPose(tracks: readonly Track[], clocks: ClockSet, local: number): Pose {
   let dx = 0;
   let dy = 0;
@@ -230,17 +237,16 @@ function foldPose(tracks: readonly Track[], clocks: ClockSet, local: number): Po
 }
 
 /**
- * One track's value at this instant. A track's stops are assumed to share
- * one clock — the one its first stop names (the module contract explains
- * why a mixed-clock track is not given a fold-across-clocks meaning here).
+ * One track's value at this instant. A track's stops all share one clock —
+ * the boundary validator (`layerTracksProblem`, K1b review) refuses a track
+ * whose stops name more than one, so reading the first stop's clock and
+ * sorting the (already homogeneous) list by `t` is total, not an assumption
+ * this function has to guard.
  */
 function trackValue(track: Track, clocks: ClockSet, local: number): number {
   const clock = track.stops[0]!.clock;
   const x = clockSample(clock, clocks, local);
-  const stops = track.stops
-    .filter((stop) => stop.clock === clock)
-    .slice()
-    .sort((a, b) => a.t - b.t);
+  const stops = [...track.stops].sort((a, b) => a.t - b.t);
   return sampleStops(stops, x);
 }
 
@@ -259,7 +265,17 @@ function clockSample(clock: Stop["clock"], clocks: ClockSet, local: number): num
  * The value of a sorted, non-empty stop list at `x`: holds at the boundary
  * stop's value before the first and after the last, else eases between the
  * bracketing pair with the STARTING stop's easing (K1b's own rule — an
- * ending stop's easing never applies to the segment before it).
+ * ending stop's easing never applies to the segment before it). `stops` is
+ * non-empty because `layerTracksProblem` refuses an empty `stops` array at
+ * both brief boundaries before a `Track` ever reaches this module — the same
+ * "validate first" precondition `beatAt` documents for its own resolved
+ * list, not a case this function re-guards.
+ *
+ * `progress` below needs no clamp: the two early returns above already rule
+ * out `x <= first.t` and `x >= last.t`, so by the time the loop runs,
+ * `a.t < x < b.t` for the pair it lands on (`a.t < b.t` strictly, since the
+ * validator refuses a duplicate `t` within this clock) — `progress` is
+ * therefore always in the open interval `(0, 1)`.
  */
 function sampleStops(stops: readonly Stop[], x: number): number {
   const first = stops[0]!;
