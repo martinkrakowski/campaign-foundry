@@ -832,6 +832,21 @@ describe("authoring briefs", () => {
     expect(existsSync(yamlPath("copy", "pools.json"))).toBe(false);
   });
 
+  test("duplicate returns 400 when a symlink sits at briefs/<newId>.yaml", async () => {
+    mkdirSync(join(dir, "briefs"), { recursive: true });
+    writeFileSync(campYaml(), validBrief.replace("id: good", "id: camp"));
+    const outside = join(dir, "outside.yaml");
+    writeFileSync(outside, "ORIGINAL");
+    symlinkSync(outside, yamlPath("copy.yaml"));
+    const { duplicate } = await api();
+    const res = await duplicate()(
+      jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { newId: "copy" }),
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "Refusing to write through a symlink." });
+    expect(readFileSync(outside, "utf8")).toBe("ORIGINAL");
+  });
+
   test("duplicate surfaces an unexpected write error", async () => {
     const { create, duplicate } = await api();
     await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
