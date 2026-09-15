@@ -9,6 +9,12 @@ import { DISPLAY_SIZE_VALUES, type DisplaySize } from "../../domain/value-object
 import type { MotionKind } from "../../domain/value-objects/MotionKind.vo.js";
 import { DEFAULT_TREATMENT, SAFE_ID_PATTERN } from "../../domain/value-objects/Treatment.vo.js";
 import { clickDestinationProblem } from "../../domain/value-objects/click-destination.js";
+import {
+  isExpired,
+  parseExpiresOnMs,
+  territoryCovered,
+  type AudioRights,
+} from "../../domain/value-objects/AudioRights.vo.js";
 import { styleProblem } from "../../domain/value-objects/creative-style.js";
 import { assembleHtml } from "../../domain/value-objects/markup-assembler.js";
 import { PipelineExecutionLog } from "../../domain/value-objects/PipelineExecutionLog.vo.js";
@@ -526,6 +532,7 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
         brief.style,
         brief.template,
         brief.clickDestination,
+        brief.audio?.rights,
       ),
     );
 
@@ -567,6 +574,7 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     style: CampaignBrief["style"],
     template: CampaignBrief["template"],
     clickDestination?: string,
+    audioRights?: AudioRights,
   ): Promise<{ asset: GeneratedAsset; heroImage?: Uint8Array }> {
     const cellContext: BackgroundContext = {
       ...context,
@@ -643,6 +651,7 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
         log,
         writeProof,
         timeline,
+        audioRights,
       );
     }
 
@@ -722,6 +731,7 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     log: PipelineExecutionLog,
     writeProof: boolean,
     timeline: CopyTimeline | undefined,
+    audioRights: AudioRights | undefined,
   ): Promise<{ asset: GeneratedAsset; heroImage?: Uint8Array }> {
     const durationSec = variant.durationSec ?? DEFAULT_DURATION_SEC;
     const video = await this.deps.videoCompositor.compositeVideo({
@@ -761,6 +771,7 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
       },
       videoPath,
       durationSec,
+      ...(audioRights !== undefined ? { audioRights } : {}),
     };
     log.record(
       "CompositeVariations",
@@ -947,7 +958,40 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
       ),
     ];
     if (await this.haltsOnProhibitedCopy(checks, log)) return true;
+    if (this.haltsOnAudioRights(brief, log)) return true;
     log.record("ExecuteLegalGateCheck", "Legal gate passed");
+    return false;
+  }
+
+  /**
+   * VE-D8's second tier: an expired licence or an uncovered territory halts the
+   * run exactly like prohibited copy does. Absent `audio` adds no log entry at
+   * all, so a brief that does not use the feature gates byte-identically (VE-D3).
+   */
+  private haltsOnAudioRights(brief: CampaignBrief, log: PipelineExecutionLog): boolean {
+    if (brief.audio === undefined) return false;
+    const rights = brief.audio.rights;
+    if (rights.expiresOn !== undefined) {
+      const expiresMs = parseExpiresOnMs(rights.expiresOn);
+      if (expiresMs !== undefined && isExpired(expiresMs, this.deps.now().getTime())) {
+        log.record(
+          "ExecuteLegalGateCheck",
+          `Pipeline halted — music licence "${rights.licenceId}" expired on ${rights.expiresOn}`,
+          "error",
+        );
+        log.complete();
+        return true;
+      }
+    }
+    if (!territoryCovered(brief.targetRegion, rights.territories)) {
+      log.record(
+        "ExecuteLegalGateCheck",
+        `Pipeline halted — music licence "${rights.licenceId}" does not cover territory "${brief.targetRegion}"`,
+        "error",
+      );
+      log.complete();
+      return true;
+    }
     return false;
   }
 

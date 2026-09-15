@@ -169,6 +169,67 @@ describe("rewriteAssetPath and rewriteAssetPaths", () => {
     expect(rewritten.products[1].inputAsset).toBe("assets/inputs/reuse-bg.png");
   });
 
+  test("rewriteAssetPaths rewrites brief-level audio.path like logoPath/inputAsset (VE-D8)", async () => {
+    const { rewriteAssetPaths } = await import("../asset-files.js");
+    const brief = {
+      schemaVersion: BRIEF_SCHEMA_VERSION,
+      template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+      id: "new-camp",
+      targetRegion: "US",
+      targetAudience: "all",
+      campaignMessage: "msg",
+      products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/p1.png" }],
+      audio: {
+        path: "assets/inputs/old-camp/bed.mp3",
+        rights: { licenceId: "lic-1", source: "acme" },
+      },
+    };
+
+    const rewritten = rewriteAssetPaths(brief, "old-camp", "new-camp");
+    expect(rewritten.audio?.path).toBe("assets/inputs/new-camp/bed.mp3");
+    expect(rewritten.audio?.rights).toEqual(brief.audio.rights);
+  });
+
+  test("rewriteAssetPaths leaves a root-level audio.path and an absent audio block untouched (VE-D3)", async () => {
+    const { rewriteAssetPaths } = await import("../asset-files.js");
+    const withRootAudio = {
+      schemaVersion: BRIEF_SCHEMA_VERSION,
+      template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+      id: "new-camp",
+      targetRegion: "US",
+      targetAudience: "all",
+      campaignMessage: "msg",
+      products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/p1.png" }],
+      audio: { path: "assets/inputs/shared-bed.mp3", rights: { licenceId: "lic-1", source: "acme" } },
+    };
+    expect(rewriteAssetPaths(withRootAudio, "old-camp", "new-camp").audio?.path).toBe(
+      "assets/inputs/shared-bed.mp3",
+    );
+
+    const withoutAudio = { ...withRootAudio, audio: undefined };
+    delete (withoutAudio as { audio?: unknown }).audio;
+    const rewritten = rewriteAssetPaths(withoutAudio, "old-camp", "new-camp");
+    expect("audio" in rewritten).toBe(false);
+  });
+
+  test("extractSourceAssetBriefIds includes the brief-level audio.path source id (VE-D8)", async () => {
+    const { extractSourceAssetBriefIds } = await import("../asset-files.js");
+    const brief = {
+      schemaVersion: BRIEF_SCHEMA_VERSION,
+      template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+      id: "target-camp",
+      targetRegion: "US",
+      targetAudience: "all",
+      campaignMessage: "msg",
+      products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/p1.png" }],
+      audio: {
+        path: "assets/inputs/source-c/bed.mp3",
+        rights: { licenceId: "lic-1", source: "acme" },
+      },
+    };
+    expect(extractSourceAssetBriefIds(brief, "target-camp")).toEqual(["source-c"]);
+  });
+
   test("extractSourceAssetBriefIds finds distinct source brief IDs excluding target", async () => {
     const { extractSourceAssetBriefIds } = await import("../asset-files.js");
     const brief = {

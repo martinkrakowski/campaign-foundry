@@ -284,10 +284,7 @@ still open**. `yarn plan:verify` runs them.
 
 **VE2 — shipped in this PR.**
 
-```premise VE3a
-# Either gap keeps the lane open: no audio field on the brief, or no licence check at load.
-! grep -qE 'readonly audio\??:' packages/CampaignOrchestration/src/domain/entities/CampaignBrief.ts || ! grep -q 'licenceId' apps/api/server/lib/load-brief.ts
-```
+**VE3a — shipped in this PR.** (`CampaignBrief.audio`, `AudioRights.vo.ts`, checked at load and in the legal gate, carried to packaging's `packagedAt` re-check; a run declaring `audio` is refused with an interim message until VE3b.)
 
 ```premise VE3b
 # Either gap keeps the lane open (||): no audio codec argument in the encoder, or no audio extension accepted for upload.

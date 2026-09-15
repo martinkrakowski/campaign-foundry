@@ -1,4 +1,10 @@
-import { assetIdentity, CLICK_TAG_VARIABLE } from "@campaignfoundry/CampaignOrchestration";
+import {
+  assetIdentity,
+  CLICK_TAG_VARIABLE,
+  isExpired,
+  parseExpiresOnMs,
+  type AudioRights,
+} from "@campaignfoundry/CampaignOrchestration";
 import { ok, err, errorMessage, type Result } from "@campaignfoundry/shared";
 import {
   isPlatformVisible,
@@ -33,6 +39,12 @@ export interface PackageableAsset {
   /** The click destination URL (HL2, HL-D3). */
   readonly clickDestination?: string;
   readonly durationSec?: number;
+  /**
+   * Music rights record (VE-D8). Packaging never re-renders (D11) and may run
+   * well after the licence expired, so `expiresOn` is re-checked here against
+   * `packagedAt` rather than trusted from the run that produced the asset.
+   */
+  readonly audioRights?: AudioRights;
 }
 
 export interface PackageForPlatformInput {
@@ -112,6 +124,24 @@ export class PackageForPlatformUseCase {
       return err(
         new Error(
           `HTML asset ${assetIdentity(withoutFallback)} is missing its required raster fallback rendition ("htmlFallbackPath").`,
+        ),
+      );
+    }
+    // VE-D8: expiry is re-checked here, against this run's `packagedAt`, because
+    // packaging never re-renders (D11) and can happen well after the licence the
+    // legal gate cleared has lapsed. Nothing is warned-and-packaged — the whole
+    // request refuses, exactly like the missing-fallback guard above.
+    const packagedAtMs = parseExpiresOnMs(input.packagedAt) ?? Date.parse(input.packagedAt);
+    const expiredAsset = input.assets.find((asset) => {
+      const expiresOn = asset.audioRights?.expiresOn;
+      if (expiresOn === undefined) return false;
+      const expiresMs = parseExpiresOnMs(expiresOn);
+      return expiresMs !== undefined && isExpired(expiresMs, packagedAtMs);
+    });
+    if (expiredAsset) {
+      return err(
+        new Error(
+          `Asset ${assetIdentity(expiredAsset)} has a music licence ("${expiredAsset.audioRights?.licenceId}") that expired before this package's packagedAt.`,
         ),
       );
     }

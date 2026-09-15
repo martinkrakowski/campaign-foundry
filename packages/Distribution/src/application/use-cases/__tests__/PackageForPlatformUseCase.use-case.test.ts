@@ -443,6 +443,53 @@ describe("PackageForPlatformUseCase — motion", () => {
   });
 });
 
+describe("PackageForPlatformUseCase — music rights (VE-D8)", () => {
+  test("refuses the whole request when an asset's licence expired before packagedAt, naming the asset and licence; nothing is written", async () => {
+    const store = fakeStore();
+    const result = await exec(store, {
+      assets: [
+        asset({
+          audioRights: { licenceId: "lic-1", source: "acme", expiresOn: "2026-08-01" },
+        }),
+      ],
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.message).toContain("lic-1");
+      expect(result.error.message).toContain("alpha");
+    }
+    expect(store.readAsset).not.toHaveBeenCalled();
+    expect(store.writePackaged).not.toHaveBeenCalled();
+    expect(store.writeManifest).not.toHaveBeenCalled();
+  });
+
+  test("packages an asset whose licence is valid at packagedAt", async () => {
+    const store = fakeStore();
+    const result = await exec(store, {
+      assets: [
+        asset({
+          audioRights: { licenceId: "lic-1", source: "acme", expiresOn: "2026-08-26" },
+        }),
+      ],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  test("a licence expiring exactly at packagedAt is still valid (strict <)", async () => {
+    const store = fakeStore();
+    const result = await exec(store, {
+      assets: [asset({ audioRights: { licenceId: "lic-1", source: "acme", expiresOn: PACKAGED_AT } })],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  test("an asset without rights packages exactly as today", async () => {
+    const store = fakeStore();
+    const result = await exec(store, { assets: [asset()] });
+    expect(result.success).toBe(true);
+  });
+});
+
 describe("PackageForPlatformUseCase — html (D122)", () => {
   /** A 1:1 social-shaped profile that declares `html` — no shipped profile does yet; the test registers it. */
   const HTML_PROFILE: PlatformProfile = {

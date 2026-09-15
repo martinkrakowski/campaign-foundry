@@ -887,6 +887,124 @@ describe("parseBrief", () => {
     });
   });
 
+  describe("audio (VE-D8)", () => {
+    const audio = (over: Record<string, unknown> = {}) => ({
+      path: "assets/inputs/camp/bed.mp3",
+      rights: { licenceId: "lic-1", source: "acme", ...over },
+    });
+
+    test("absent audio parses unchanged", () => {
+      const parsed = parseBrief({ ...valid, audio: undefined });
+      expect(parsed.audio).toBeUndefined();
+    });
+
+    test("a well-formed audio block parses and carries it verbatim (authoring mode)", () => {
+      const parsed = parseBrief(
+        { ...valid, audio: audio({ expiresOn: "2027-01-01", territories: ["US", "FR"] }) },
+        { enforceCapabilities: false },
+      );
+      expect(parsed.audio).toEqual({
+        path: "assets/inputs/camp/bed.mp3",
+        rights: { licenceId: "lic-1", source: "acme", expiresOn: "2027-01-01", territories: ["US", "FR"] },
+      });
+    });
+
+    test("audio must be an object", () => {
+      expect(() => parseBrief({ ...valid, audio: "bed.mp3" })).toThrow(
+        'Campaign brief field "audio" must be an object.',
+      );
+    });
+
+    test("audio.path must be a non-empty string", () => {
+      expect(() => parseBrief({ ...valid, audio: { path: "", rights: audio().rights } })).toThrow(
+        'Campaign brief field "audio.path" must be a non-empty string.',
+      );
+      expect(() => parseBrief({ ...valid, audio: { rights: audio().rights } })).toThrow(
+        'Campaign brief field "audio.path" must be a non-empty string.',
+      );
+    });
+
+    test("audio without rights.licenceId is refused, naming the field", () => {
+      expect(() =>
+        parseBrief({ ...valid, audio: { path: "bed.mp3", rights: { source: "acme" } } }),
+      ).toThrow('Campaign brief field "audio.rights.licenceId" must be a non-empty string.');
+    });
+
+    test("audio without rights.source is refused, naming the field", () => {
+      expect(() =>
+        parseBrief({ ...valid, audio: { path: "bed.mp3", rights: { licenceId: "lic-1" } } }),
+      ).toThrow('Campaign brief field "audio.rights.source" must be a non-empty string.');
+    });
+
+    test("a malformed expiresOn is refused, naming the field", () => {
+      for (const expiresOn of ["not-a-date", "2026-13-40", "", 20260101]) {
+        expect(() => parseBrief({ ...valid, audio: audio({ expiresOn }) })).toThrow(
+          /Campaign brief field "audio.rights.expiresOn" must be an ISO-8601 date or date-time/,
+        );
+      }
+    });
+
+    test("a valid expiresOn (date or date-time) parses", () => {
+      expect(parseBrief({ ...valid, audio: audio({ expiresOn: "2027-01-01" }) }).audio?.rights.expiresOn).toBe(
+        "2027-01-01",
+      );
+      expect(
+        parseBrief({ ...valid, audio: audio({ expiresOn: "2027-01-01T12:00:00Z" }) }).audio?.rights.expiresOn,
+      ).toBe("2027-01-01T12:00:00Z");
+    });
+
+    test("territories present but empty is refused, naming the field", () => {
+      expect(() => parseBrief({ ...valid, audio: audio({ territories: [] }) })).toThrow(
+        /Campaign brief field "audio.rights.territories" must be a non-empty array of ISO 3166-1 alpha-2 codes/,
+      );
+    });
+
+    test("territories present but not alpha-2 is refused, naming the field", () => {
+      for (const territories of [["usa"], ["us"], ["U1"], "US", [42]]) {
+        expect(() => parseBrief({ ...valid, audio: audio({ territories }) })).toThrow(
+          /Campaign brief field "audio.rights.territories" must be a non-empty array of ISO 3166-1 alpha-2 codes/,
+        );
+      }
+    });
+
+    test("territories present while targetRegion is not alpha-2 (free text, null, empty) is refused", () => {
+      for (const targetRegion of ["Germany", null, ""]) {
+        expect(() =>
+          parseBrief({ ...valid, targetRegion, audio: audio({ territories: ["US"] }) }),
+        ).toThrow(/Campaign brief field "targetRegion" must be an ISO 3166-1 alpha-2 code/);
+      }
+    });
+
+    test("territories present while targetRegion is alpha-2 (case/whitespace tolerant) parses", () => {
+      const parsed = parseBrief({ ...valid, targetRegion: " us ", audio: audio({ territories: ["US"] }) });
+      expect(parsed.audio?.rights.territories).toEqual(["US"]);
+    });
+
+    test("structural refusals hold with enforceCapabilities: false (authoring mode too)", () => {
+      expect(() =>
+        parseBrief(
+          { ...valid, audio: { path: "bed.mp3", rights: { source: "acme" } } },
+          { enforceCapabilities: false },
+        ),
+      ).toThrow('Campaign brief field "audio.rights.licenceId" must be a non-empty string.');
+    });
+
+    test("enforceCapabilities: true refuses any brief declaring audio with the interim message", () => {
+      expect(() => parseBrief({ ...valid, audio: audio() }, { enforceCapabilities: true })).toThrow(
+        /audio/i,
+      );
+    });
+
+    test("enforceCapabilities: false (authoring) still accepts and round-trips a well-formed audio block", () => {
+      const parsed = parseBrief({ ...valid, audio: audio() }, { enforceCapabilities: false });
+      expect(parsed.audio).toEqual(audio());
+    });
+
+    test("a brief without audio is unaffected by the interim refusal (enforceCapabilities: true)", () => {
+      expect(() => parseBrief({ ...valid }, { enforceCapabilities: true })).not.toThrow();
+    });
+  });
+
   describe("layer enabled (D129, MP-D4, MP-D5)", () => {
     const base = templateFromCanonical("social-post");
 

@@ -21,8 +21,11 @@ import {
   RATIO_VALUES,
   SAFE_ID_PATTERN,
   TONE_VALUES,
+  isAlpha2,
   isPaletteShift,
   isSupportedBriefSchemaVersion,
+  normalizeRegion,
+  parseExpiresOnMs,
   clickDestinationProblem,
   layerElementsProblem,
   layerEnabledProblem,
@@ -940,6 +943,66 @@ function validateCopy(
 }
 
 /**
+ * Structurally validate the optional `audio` block (VE-D8): a music rights
+ * record travels with the asset path because the asset store carries no
+ * metadata channel. Absent means no audio, exactly as today (VE-D3). A
+ * missing licence is a legal fact, so this throws — the same "refuse at
+ * load" tier as every other structural rule in this file, never
+ * warn-and-continue. Checked in authoring mode too (`enforceCapabilities:
+ * false`), same as `validateClickDestination` and `validateStyle`: a brief
+ * with a malformed rights record must not be persistable and unfixable.
+ *
+ * `targetRegion` is free text (`CampaignBrief.ts:24`), so it cannot itself be
+ * matched against `territories` — but when `territories` is present, load
+ * demands `targetRegion` at least look like a code (alpha-2), or the legal
+ * gate's membership check would be comparing a code against prose.
+ */
+function validateAudio(record: Record<string, unknown>): void {
+  if (record.audio === undefined) return;
+  if (!isPlainObject(record.audio)) {
+    throw new Error('Campaign brief field "audio" must be an object.');
+  }
+  const audio = record.audio;
+  if (typeof audio.path !== "string" || audio.path === "") {
+    throw new Error('Campaign brief field "audio.path" must be a non-empty string.');
+  }
+  if (!isPlainObject(audio.rights)) {
+    throw new Error('Campaign brief field "audio.rights" must be an object.');
+  }
+  const rights = audio.rights;
+  if (typeof rights.licenceId !== "string" || rights.licenceId === "") {
+    throw new Error('Campaign brief field "audio.rights.licenceId" must be a non-empty string.');
+  }
+  if (typeof rights.source !== "string" || rights.source === "") {
+    throw new Error('Campaign brief field "audio.rights.source" must be a non-empty string.');
+  }
+  if (rights.expiresOn !== undefined) {
+    if (typeof rights.expiresOn !== "string" || parseExpiresOnMs(rights.expiresOn) === undefined) {
+      throw new Error(
+        `Campaign brief field "audio.rights.expiresOn" must be an ISO-8601 date or date-time; got ${JSON.stringify(rights.expiresOn)}.`,
+      );
+    }
+  }
+  if (rights.territories !== undefined) {
+    const territories = rights.territories;
+    if (
+      !Array.isArray(territories) ||
+      territories.length === 0 ||
+      !territories.every((t) => typeof t === "string" && isAlpha2(t))
+    ) {
+      throw new Error(
+        `Campaign brief field "audio.rights.territories" must be a non-empty array of ISO 3166-1 alpha-2 codes; got ${JSON.stringify(territories)}.`,
+      );
+    }
+    if (!isAlpha2(normalizeRegion(record.targetRegion as string | null | undefined))) {
+      throw new Error(
+        `Campaign brief field "targetRegion" must be an ISO 3166-1 alpha-2 code when "audio.rights.territories" is present; got ${JSON.stringify(record.targetRegion)}.`,
+      );
+    }
+  }
+}
+
+/**
  * The brief-level `style` block (T5): strict, not tolerated. Unknown top-level
  * keys round-trip silently, so `style` must reject its own unknown fields
  * here — a typo (`famiy`) would otherwise save cleanly and never render.
@@ -1063,6 +1126,7 @@ export function parseBrief(
   validateTreatments(record.treatments);
   validateStyle(record.style);
   validateClickDestination(record.clickDestination);
+  validateAudio(record);
   validateMode(record.mode);
   validateType(record.type);
   const template = validateTemplate(
@@ -1086,6 +1150,17 @@ export function parseBrief(
         `Output format "${MOTION_FORMAT}" requires mode "variation" — a classic campaign renders stills only.`,
       );
     }
+  }
+  // VE3a interim state: until VE3b renders the bed into the encoder, a run
+  // (plan or generate) declaring `audio` is refused rather than silently
+  // shipping an MP4 with no music, as if the licence had been honoured.
+  // Authoring mode (`enforceCapabilities: false`) still accepts it so the
+  // brief stays listed and editable. Structural validation above already
+  // ran, so this only ever fires on an otherwise-valid `audio` block.
+  if (enforceCapabilities && record.audio !== undefined) {
+    throw new Error(
+      'Campaign brief field "audio" is not renderable yet — audio bed rendering ships in VE3b.',
+    );
   }
   // A randomized campaign has no meaning without a total: `count` is the planner's
   // one required input (plan D13), so demand it up front rather than at run time.

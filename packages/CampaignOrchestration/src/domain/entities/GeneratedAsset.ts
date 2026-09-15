@@ -1,4 +1,5 @@
 import type { AspectRatioValue } from "../value-objects/aspect-ratios.js";
+import type { AudioRights } from "../value-objects/AudioRights.vo.js";
 import type { DisplaySize } from "../value-objects/display-sizes.js";
 import type { BackgroundSource } from "../value-objects/BackgroundSource.vo.js";
 import type { LayoutKind, ToneKind } from "../value-objects/Treatment.vo.js";
@@ -110,4 +111,11 @@ export interface GeneratedAsset {
   readonly format?: "static" | "motion" | "html";
   /** Planned axes for this slot. Variation assets only. */
   readonly descriptor?: VariantDescriptor;
+  /**
+   * Music rights record (VE-D8), carried from the brief's `audio.rights` so
+   * packaging can re-check expiry against its own `packagedAt` without
+   * re-reading the brief (D11 — packaging never re-renders). Motion assets
+   * only, following `clickDestination`'s chain.
+   */
+  readonly audioRights?: AudioRights;
 }

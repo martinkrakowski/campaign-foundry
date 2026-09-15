@@ -72,9 +72,9 @@ export function rewriteAssetPath(
 }
 
 /**
- * Rewrite all brief-scoped asset paths (`logoPath` and `inputAsset` across all products)
- * on a brief from `fromBriefId` to `toBriefId`. Shared root assets (`assets/inputs/*.png`)
- * are left untouched.
+ * Rewrite all brief-scoped asset paths (`logoPath` and `inputAsset` across all products,
+ * and the brief-level `audio.path`, VE-D8) on a brief from `fromBriefId` to `toBriefId`.
+ * Shared root assets (`assets/inputs/*.png`) are left untouched.
  */
 export function rewriteAssetPaths(
   brief: CampaignBrief,
@@ -99,12 +99,18 @@ export function rewriteAssetPaths(
     }
     return updated;
   });
-  return { ...brief, products };
+  // Absent audio stays absent (VE-D3): spreading `{ ...brief.audio, path }` onto an
+  // undefined `audio` would fabricate a key a byte-identity comparison must never see.
+  if (brief.audio === undefined) return { ...brief, products };
+  const rewrittenAudioPath = rewriteAssetPath(brief.audio.path, fromBriefId, toBriefId, pathMap);
+  const audio =
+    rewrittenAudioPath === brief.audio.path ? brief.audio : { ...brief.audio, path: rewrittenAudioPath };
+  return { ...brief, products, audio };
 }
 
 /**
  * Extract distinct source brief IDs referenced by any brief-scoped asset paths
- * (`assets/inputs/<fromId>/...`) in a brief's products.
+ * (`assets/inputs/<fromId>/...`) in a brief's products, and its `audio.path` (VE-D8).
  */
 export function extractSourceAssetBriefIds(brief: CampaignBrief, targetBriefId: string): string[] {
   if (!brief.products || !Array.isArray(brief.products)) return [];
@@ -117,6 +123,12 @@ export function extractSourceAssetBriefIds(brief: CampaignBrief, targetBriefId: 
           fromIds.add(match[1]);
         }
       }
+    }
+  }
+  if (brief.audio !== undefined) {
+    const match = /^assets\/inputs\/([^/]+)\/.+$/.exec(brief.audio.path);
+    if (match && match[1] !== targetBriefId) {
+      fromIds.add(match[1]);
     }
   }
   return Array.from(fromIds);
