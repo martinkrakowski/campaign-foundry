@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "lane": "VE5a",
+  "mutations": [
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/CopyTimeline.vo.ts",
+      "before": "  const scenes = new Set(\n    t.beats.flatMap((beat) => (beat.background !== undefined ? [beat.background] : [])),\n  );\n  if (scenes.size > MAX_SCENES) {\n    return `copy.timeline.beats name more than ${MAX_SCENES} distinct backgrounds (max ${MAX_SCENES}).`;\n  }",
+      "after": "  // distinct-background count check dropped (VE-D10 mutation (a))",
+      "because": "Dropping the distinct-count check lets a fourth scene through timelineProblem, so the 4-distinct test must fail.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/copy-timeline.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/editor-state.ts",
+      "before": "          beats: state.timeline.beats.map((beat) => ({\n            text: beat.text,\n            weight: beat.weight,\n            // VE5a: written back only when the beat names one — a draft that never\n            // had a scene must serialise exactly as it did without the field (D3).\n            ...(beat.background !== undefined ? { background: beat.background } : {}),\n          })),",
+      "after": "          beats: state.timeline.beats.map((beat) => ({\n            text: beat.text,\n            weight: beat.weight,\n          })),",
+      "because": "Dropping background from toBrief's beat rebuild strips a loaded brief's scenes on save, so the fromBrief → toBrief round-trip test must fail.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/editor-state.test.ts"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

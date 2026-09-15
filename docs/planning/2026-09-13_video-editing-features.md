@@ -299,10 +299,7 @@ still open**. `yarn plan:verify` runs them.
 ! grep -rqiE 'webvtt|\.vtt\b' packages/CampaignOrchestration/src packages/Distribution/src apps/api/server
 ```
 
-```premise VE5a
-# A copy beat carries text and weight only — no per-beat background field.
-! grep -qE '(background|scene)\??:' packages/CampaignOrchestration/src/domain/value-objects/CopyTimeline.vo.ts
-```
+**VE5a — shipped in this PR.** (`CopyBeat.background`, capped by `MAX_SCENES` in `timelineProblem`.)
 
 ```premise VE5b
 # No compositor request carries per-scene grounds (video request, or the base request the poster shares).
