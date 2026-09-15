@@ -188,6 +188,28 @@ describe("HeadlinePoolDrawer", () => {
     expect(await screen.findByText(/bad request/)).toBeTruthy();
   });
 
+  test("a generate failure is announced to screen readers as an alert", async () => {
+    const user = userEvent.setup();
+    routes({ get: () => json(poolBody([])), post: () => json({ error: "bad request" }, 400) });
+    open();
+    await screen.findByText("No headlines yet.");
+
+    await user.click(screen.getByText(/Generate 10 suggestions/));
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("bad request");
+  });
+
+  test("an unavailable response is announced to screen readers as a status", async () => {
+    const user = userEvent.setup();
+    routes({ get: () => json(poolBody([])), post: () => json({ error: "no capacity" }, 503) });
+    open();
+    await screen.findByText("No headlines yet.");
+
+    await user.click(screen.getByText(/Generate 10 suggestions/));
+    const status = await screen.findByRole("status");
+    expect(status.textContent).toContain("no capacity");
+  });
+
   test("an entry can be approved and then rejected", async () => {
     const user = userEvent.setup();
     const calls = routes({

@@ -5044,3 +5044,7 @@ X19 manifest (2 mutations, both caught). Full gate green, 100 % coverage.
 ## 2026-09-14 X22 — duplicate symlink 400
 
 - Gap: `POST /campaigns/briefs/:id/duplicate` re-threw `SYMLINK_WRITE_ERROR` from `createBrief` into a 500 while `briefs.post.ts` / `briefs/[id].put.ts` answer 400. Fix: same errorMessage branch in the duplicate catch; recorded as §25 (X22) of docs/planning/2026-09-10_the-unowned-gaps.md; test plants `briefs/copy.yaml` → outside symlink, asserts 400 + siblings body + outside file unchanged. Gate 0, 100% x4, 2/2 mutations caught.
+
+## 2026-09-15 — X24: Headline Pool drawer outcomes are announced
+
+- `HeadlinePoolDrawer` error paragraph gains `role="alert"`, the unavailable message `role="status"`, matching `AssetPickerDrawer`; tests find them by role; mutation manifest `.agents/manifests/x24.json`. qwen3.8-flash wrote test, fix and the plan entry (§26 (X24) of docs/planning/2026-09-10_the-unowned-gaps.md); its run was killed by host memory pressure during its final gate, so the orchestrator gated it and wrote this entry.
