@@ -1000,7 +1000,7 @@ describe("parseBrief", () => {
 
     test("enforceCapabilities: true refuses any brief declaring audio with the interim message", () => {
       expect(() => parseBrief({ ...valid, audio: audio() }, { enforceCapabilities: true })).toThrow(
-        /audio/i,
+        "is not renderable yet",
       );
     });
 
