@@ -164,27 +164,10 @@ describe("TimelineSection — beat messages reach assistive technology (X20)", (
     screen.getByRole("spinbutton", { name: messages.timelineBeatWeightLabel(position) });
   const describedBy = (el: Element) => el.getAttribute("aria-describedby");
 
-  test("a beat error marks its text input invalid and describes it; the next beat's input carries neither", () => {
-    const error = messages.timelineBeatWeightOutOfRange(1, MAX_WEIGHT);
-    render(
-      <TimelineSection
-        state={withBeats([{ text: "One", weight: 99 }, { text: "Two", weight: 1 }])}
-        dispatch={vi.fn()}
-        errors={{ "copy-timeline-beat-0": error }}
-      />,
-    );
-    const first = textInput(1);
-    expect(first.getAttribute("aria-invalid")).toBe("true");
-    const firstDescribedBy = describedBy(first);
-    expect(firstDescribedBy).toBeTruthy();
-    expect(document.getElementById(firstDescribedBy ?? "")?.textContent).toBe(error);
-
-    const second = textInput(2);
-    expect(second.hasAttribute("aria-invalid")).toBe(false);
-    expect(second.hasAttribute("aria-describedby")).toBe(false);
-  });
-
-  test("a beat error also describes and invalidates its weight stepper", () => {
+  test("a weight error describes and invalidates the stepper, not the text input", () => {
+    // The error keys hold only share failures (out of range, under the floor) — nothing
+    // about the beat's wording. Announcing the text input as invalid for a weight problem
+    // tells a screen-reader user to fix a field that is not wrong.
     const error = messages.timelineBeatWeightOutOfRange(1, MAX_WEIGHT);
     render(
       <TimelineSection
@@ -194,10 +177,17 @@ describe("TimelineSection — beat messages reach assistive technology (X20)", (
       />,
     );
     const stepper = weightSpinbutton(1);
+    expect(stepper.getAttribute("aria-invalid")).toBe("true");
     const stepperDescribedBy = describedBy(stepper);
     expect(stepperDescribedBy).toBeTruthy();
     expect(document.getElementById(stepperDescribedBy ?? "")?.textContent).toBe(error);
-    expect(stepper.getAttribute("aria-invalid")).toBe("true");
+
+    const input = textInput(1);
+    expect(input.hasAttribute("aria-invalid")).toBe(false);
+    expect(input.hasAttribute("aria-describedby")).toBe(false);
+
+    expect(textInput(2).hasAttribute("aria-invalid")).toBe(false);
+    expect(textInput(2).hasAttribute("aria-describedby")).toBe(false);
     expect(weightSpinbutton(2).hasAttribute("aria-describedby")).toBe(false);
     expect(weightSpinbutton(2).hasAttribute("aria-invalid")).toBe(false);
   });
@@ -216,6 +206,10 @@ describe("TimelineSection — beat messages reach assistive technology (X20)", (
     expect(inputDescribedBy).toBeTruthy();
     expect(document.getElementById(inputDescribedBy ?? "")?.textContent).toBe(warning);
     expect(input.hasAttribute("aria-invalid")).toBe(false);
+
+    const stepper = weightSpinbutton(1);
+    expect(stepper.hasAttribute("aria-describedby")).toBe(false);
+    expect(stepper.hasAttribute("aria-invalid")).toBe(false);
   });
 
   test("a clean beat's input and stepper carry no description or invalidity", () => {

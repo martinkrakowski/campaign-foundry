@@ -4,9 +4,9 @@
   "mutations": [
     {
       "file": "apps/web/src/components/campaign/TimelineSection.tsx",
-      "before": "                    aria-invalid={beatError ? \"true\" : undefined}",
-      "after": "                    /* mutated: aria-invalid dropped */",
-      "because": "A beat error must mark its text input aria-invalid so assistive technology announces the invalid state, not just shows red.",
+      "before": "                aria-invalid={beatError ? \"true\" : undefined}",
+      "after": "                /* mutated: aria-invalid dropped */",
+      "because": "A weight error must mark the stepper aria-invalid so assistive technology announces the invalid share, not just shows red.",
       "command": [
         "yarn",
         "vitest",
@@ -15,15 +15,15 @@
         "web",
         "apps/web/src/components/campaign/__tests__/TimelineSection.test.tsx",
         "-t",
-        "a beat error marks its text input invalid"
+        "a weight error describes and invalidates the stepper"
       ],
       "verdict": "caught"
     },
     {
       "file": "apps/web/src/components/campaign/TimelineSection.tsx",
-      "before": "                    aria-describedby={beatMessage ? beatMessageId : undefined}",
+      "before": "                    aria-describedby={textWarning ? beatMessageId : undefined}",
       "after": "                    /* mutated: aria-describedby dropped */",
-      "because": "The beat's message span must be named by aria-describedby on the text input, or the message is invisible to assistive technology.",
+      "because": "The prohibited-terms warning is the only message about the beat's text; dropping its aria-describedby on the text input makes it invisible to assistive technology.",
       "command": [
         "yarn",
         "vitest",
@@ -37,10 +37,10 @@
       "verdict": "caught"
     },
     {
-      "file": "packages/ui/src/stepper.tsx",
-      "before": "        aria-describedby={ariaDescribedBy}",
-      "after": "        /* mutated: aria-describedby dropped */",
-      "because": "Dropping Stepper's aria-describedby forwarding prevents weight/dwell errors from being announced on the spinbutton.",
+      "file": "apps/web/src/components/campaign/TimelineSection.tsx",
+      "before": "                aria-describedby={beatError ? beatMessageId : undefined}",
+      "after": "                /* mutated: aria-describedby dropped */",
+      "because": "The weight error's message must be named by aria-describedby on the stepper, or the share breach is invisible to assistive technology.",
       "command": [
         "yarn",
         "vitest",
@@ -49,7 +49,41 @@
         "web",
         "apps/web/src/components/campaign/__tests__/TimelineSection.test.tsx",
         "-t",
-        "a beat error also describes and invalidates its weight stepper"
+        "a weight error describes and invalidates the stepper"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/TimelineSection.tsx",
+      "before": "                    aria-describedby={textWarning ? beatMessageId : undefined}\n                    value={beat.text}",
+      "after": "                    aria-describedby={textWarning ? beatMessageId : undefined}\n                    aria-invalid={beatError ? \"true\" : undefined}\n                    value={beat.text}",
+      "because": "Regression guard: the error keys only ever hold weight failures, so re-linking the text input's aria-invalid to beatError announces valid wording as invalid.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/TimelineSection.test.tsx",
+        "-t",
+        "a weight error describes and invalidates the stepper"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/ui/src/stepper.tsx",
+      "before": "        aria-describedby={ariaDescribedBy}",
+      "after": "        /* mutated: aria-describedby dropped */",
+      "because": "Dropping Stepper's aria-describedby forwarding prevents weight errors from being announced on the spinbutton.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/TimelineSection.test.tsx",
+        "-t",
+        "a weight error describes and invalidates the stepper"
       ],
       "verdict": "caught"
     },
@@ -66,7 +100,7 @@
         "web",
         "apps/web/src/components/campaign/__tests__/TimelineSection.test.tsx",
         "-t",
-        "a beat error also describes and invalidates its weight stepper"
+        "a weight error describes and invalidates the stepper"
       ],
       "verdict": "caught"
     }

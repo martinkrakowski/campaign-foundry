@@ -476,11 +476,14 @@ screen-reader user never hears, and the control stays announced as valid. The on
 flags a structural breach is the one that cannot be read out.
 
 **Fix.** X15's shape, applied outside `Field`: a `useId`-derived id on each beat's message span; the
-text input is `aria-describedby`-linked to the message present and `aria-invalid="true"` while an error
-shows; a weight/dwell error additionally describes and invalidates the stepper (the kit `Stepper`
-forwards both, per X15). No visible change.
+weight error — all `errors["copy-timeline-beat-<i>"]` hold one, nothing in the error key is ever about
+the beat's wording — describes and invalidates the weight stepper; the prohibited-terms warning, the
+only message about the text, describes the text input, which is never marked invalid (`Stepper` forwards
+`aria-describedby` (X15); this lane adds `aria-invalid`). No visible change.
 
-**X20 — shipped in this PR.** `TimelineSection` names each beat's message element and links it
-(`aria-describedby`) to the text input for any message and to the weight stepper for an error,
-carrying `aria-invalid` on both while an error shows; `Stepper` forwards `aria-invalid` to its
-spinbutton alongside the `aria-describedby` it already forwarded. No visible change.
+**X20 — shipped in this PR.** `TimelineSection` names each beat's message element and links it:
+`aria-describedby` on the weight stepper — plus `aria-invalid` there — for an error, and on the text
+input only for the prohibited-terms warning when no error renders; the text input carries no
+`aria-invalid`, because a weight error must not announce valid wording as invalid. `Stepper` forwards
+`aria-invalid` to its spinbutton alongside the `aria-describedby` it already forwarded. No visible
+change.
