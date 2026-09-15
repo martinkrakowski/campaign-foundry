@@ -659,6 +659,36 @@ describe("isBriefTemplate layer tracks (K1)", () => {
       ]),
     ).toBe(false);
   });
+
+  test("refuses every remaining layerTracksProblem rule at this boundary too", () => {
+    expect(withTracks([{ property: "opacity", stops: "nope" }])).toBe(false);
+    expect(
+      withTracks([{ property: "opacity", stops: [{ t: 0, value: NaN, clock: "pose" }] }]),
+    ).toBe(false);
+    expect(
+      withTracks([{ property: "opacity", stops: [{ t: 0, value: 0, clock: "global" }] }]),
+    ).toBe(false);
+    expect(
+      withTracks([
+        { property: "opacity", stops: [{ t: 0, value: 0, clock: "pose", easing: "bounce" }] },
+      ]),
+    ).toBe(false);
+    expect(
+      withTracks([
+        {
+          property: "opacity",
+          stops: [
+            { t: 0.6, value: 0, clock: "pose" },
+            { t: 0.2, value: 1, clock: "pose" },
+          ],
+        },
+      ]),
+    ).toBe(false);
+    expect(withTracks([{ property: "opacity", stops: track.stops, layer: "image" }])).toBe(false);
+    expect(
+      withTracks([{ property: "opacity", stops: [{ ...track.stops[0], extra: 1 }] }]),
+    ).toBe(false);
+  });
 });
 
 describe("isBriefTemplate mirrors the API's table rules (X11)", () => {

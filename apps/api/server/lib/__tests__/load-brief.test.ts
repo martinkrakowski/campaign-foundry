@@ -949,6 +949,57 @@ describe("parseBrief", () => {
       );
     });
 
+    test("every remaining rule in layerTracksProblem refuses at this boundary too", () => {
+      const cases: ReadonlyArray<readonly [string, unknown, string]> = [
+        [
+          "stops that are not an array",
+          [{ property: "opacity", stops: "nope" }],
+          'Campaign brief field "template.layers[0].tracks[0].stops" must be a non-empty array of stops; got "nope".',
+        ],
+        [
+          "a non-finite value",
+          [{ property: "opacity", stops: [{ t: 0, value: Number.POSITIVE_INFINITY, clock: "pose" }] }],
+          'Campaign brief field "template.layers[0].tracks[0].stops[0].value" must be a finite number; got null.',
+        ],
+        [
+          "an unknown clock",
+          [{ property: "opacity", stops: [{ t: 0, value: 0, clock: "global" }] }],
+          'Campaign brief field "template.layers[0].tracks[0].stops[0].clock" must be one of "pose", "beat", "effect"; got "global".',
+        ],
+        [
+          "an unknown easing",
+          [{ property: "opacity", stops: [{ t: 0, value: 0, clock: "pose", easing: "bounce" }] }],
+          'Campaign brief field "template.layers[0].tracks[0].stops[0].easing" must be one of "ease-out-cubic", "linear"; got "bounce".',
+        ],
+        [
+          "stops out of order (descending), not merely duplicated",
+          [
+            {
+              property: "opacity",
+              stops: [
+                { t: 0.6, value: 0, clock: "pose" },
+                { t: 0.2, value: 1, clock: "pose" },
+              ],
+            },
+          ],
+          'Campaign brief field "template.layers[0].tracks[0].stops[1].t" must be strictly greater than the previous "pose"-clock stop\'s t (0.6); got 0.2.',
+        ],
+        [
+          "an unknown field on a track",
+          [{ property: "opacity", stops: track.stops, layer: "image" }],
+          'Campaign brief field "template.layers[0].tracks[0].layer" must be one of "property", "stops"; got "image".',
+        ],
+        [
+          "an unknown field on a stop",
+          [{ property: "opacity", stops: [{ t: 0, value: 0, clock: "pose", extra: 1 }] }],
+          'Campaign brief field "template.layers[0].tracks[0].stops[0].extra" must be one of "t", "value", "easing", "clock"; got 1.',
+        ],
+      ];
+      for (const [, tracks, message] of cases) {
+        expect(() => parseBrief({ ...valid, template: withTracks("image", tracks) })).toThrow(message);
+      }
+    });
+
     test("a duplicate t on one track's same clock is refused (K-D9)", () => {
       expect(() =>
         parseBrief({
