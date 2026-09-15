@@ -1,4 +1,5 @@
 import { CREATIVE_GEOMETRY } from "./creative-geometry.js";
+import type { ToneKind } from "./Treatment.vo.js";
 
 /**
  * The brief-level creative `style` block (plan 2026-09-01, T5): typography that
@@ -120,6 +121,20 @@ export interface ResolvedStyle {
    * stays four kinds and the resolved field carries none of them.
    */
   readonly textEffect: TextEffectKind | undefined;
+}
+
+/**
+ * The tone-derived font weight (HL5f, D60): `subtle` renders Regular, anything
+ * else — `bold`, and every future tone — renders Bold. This is the ONE place
+ * that rule is spelled: `NodeCanvasCompositor.prepare` used to inline it for
+ * the canvas, and `assembleHtml` used to ignore tone entirely and hard-code
+ * `"bold"` — the exact gap HL-D8 names ("the renderers already disagree
+ * without overrides"). Both now call this function instead of restating the
+ * ternary, so a third tone, or a change to which tones render heavy, cannot
+ * update one renderer and miss the other.
+ */
+export function toneFontWeight(tone: ToneKind): string {
+  return tone === "subtle" ? "500" : "bold";
 }
 
 /**

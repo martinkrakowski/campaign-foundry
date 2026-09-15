@@ -207,3 +207,121 @@ function frameProblem(frame: unknown, path: string): LayerElementsProblem | unde
   }
   return undefined;
 }
+
+/**
+ * An element's text geometry (HL5f, HL-D5/HL-D8): the font size both renderers
+ * derive for a `text` element, gathered here so `drawHtml` (the canvas) and
+ * `assembleHtml` (the markup) read ONE function instead of each restating the
+ * same two-term min — the box's own 0.7-of-height cap (never below 12px, X10's
+ * legibility floor) against the brief's `sizeScale` at the canvas's own basis.
+ * `lineHeight` and `letterSpacing` are plain products of the resolved font
+ * size; gathering them costs nothing and keeps a future third reader from
+ * restating them a third way.
+ */
+export interface HtmlTextGeometryInput {
+  readonly boxH: number;
+  readonly canvasBasis: number;
+  readonly sizeScale: number;
+  readonly lineHeight: number;
+  readonly letterSpacing: number;
+}
+
+export interface HtmlTextGeometry {
+  readonly fontSize: number;
+  /** Pixels — `fontSize * lineHeight` multiplier, not the bare CSS multiplier. */
+  readonly lineHeight: number;
+  /** Pixels — `letterSpacing` em fraction resolved against `fontSize`. */
+  readonly letterSpacing: number;
+}
+
+export function htmlTextGeometry(input: HtmlTextGeometryInput): HtmlTextGeometry {
+  const fontSize = Math.min(
+    Math.max(12, Math.round(input.boxH * 0.7)),
+    Math.round(input.canvasBasis * input.sizeScale),
+  );
+  return {
+    fontSize,
+    lineHeight: fontSize * input.lineHeight,
+    letterSpacing: input.letterSpacing * fontSize,
+  };
+}
+
+/**
+ * The `button` element's font size (HL5f): the box's own 0.45-of-height cap
+ * against a fixed 0.6-of-canvas-basis ceiling. One shared source for the
+ * canvas drawer and the markup assembler, which already computed the exact
+ * same two-term min independently — item 3 of the HL5f change, confirmed
+ * identical and now pinned rather than merely coincidental.
+ */
+export function htmlButtonFontSize(boxH: number, canvasBasis: number): number {
+  return Math.min(Math.round(boxH * 0.45), Math.round(canvasBasis * 0.6));
+}
+
+/**
+ * The canvas's per-anchor vertical placement (HL5f, HL-D5/HL-D8): the offset
+ * from the element's frame TOP to the first line's alphabetic BASELINE,
+ * replicating `drawHtml`'s three anchor branches exactly (`top`: flush by one
+ * `fontSize`; `middle`: the wrapped block's span centred in the box, offset by
+ * a fixed `fontSize * 0.35` baseline correction; `bottom`: the block's span
+ * flush to the box's bottom edge) — this function is now the one source both
+ * `drawHtml` and `assembleHtml` (via {@link htmlTextPaddingTop}) call, closing
+ * the gap Verified Gaps #2 named: "nothing pins them equal."
+ *
+ * `lineCount` is the number of wrapped lines. The canvas knows it exactly —
+ * `wrapText` measures the real font before this is called. The markup does
+ * not: assembling is server-side with no browser to wrap text in (D122), so
+ * `assembleHtml` always passes `1`. That is exact for `top` (line-count never
+ * enters the formula) and is the SINGLE-LINE case for `middle`/`bottom`
+ * otherwise: an element whose browser-rendered text wraps to `n` lines sits,
+ * on the canvas, `(n - 1) * lineHeight / 2` higher for `middle` or
+ * `(n - 1) * lineHeight` higher for `bottom` than the markup's fixed
+ * single-line offset. This is the stated HL5f residual — recorded in the plan,
+ * not narrowed here, because narrowing it needs the actual wrapped line count,
+ * which needs a browser.
+ */
+export function htmlTextFirstLineOffset(
+  anchor: AnchorKind,
+  boxH: number,
+  fontSize: number,
+  lineHeight: number,
+  lineCount: number,
+): number {
+  const totalSpan = (lineCount - 1) * lineHeight;
+  if (anchor === "top") return fontSize;
+  if (anchor === "middle") return (boxH - totalSpan) / 2 + fontSize * 0.35;
+  return boxH - totalSpan;
+}
+
+/**
+ * The markup's own placement number (HL5f): a CSS `padding-top`, derived from
+ * the same baseline offset {@link htmlTextFirstLineOffset} returns so the two
+ * renderers share the arithmetic rather than the markup restating its own
+ * approximation (the gap this replaces: CSS flex `justify-content`, never
+ * proven equal to the canvas's baseline placement).
+ *
+ * A CSS block has no baseline the way `ctx.fillText`'s alphabetic baseline
+ * does, so the conversion subtracts one `fontSize` — the canvas's own
+ * baseline-below-top distance for a line flush to the box top — leaving the
+ * distance from the box top to where the browser's line box would need to
+ * start for its rendered line to land at roughly the same offset. This holds
+ * to within the font's own ascent/leading metrics (documented residual: close
+ * for the bundled faces at the default 1.25 line height, and drifts as
+ * `lineHeight` grows past it or for a face with different ascent/descent
+ * proportions than Inter/Lora) — it is NOT claimed pixel-exact, only that both
+ * renderers now read the same number rather than two independently-guessed
+ * ones.
+ *
+ * Clamped at 0: CSS refuses a negative `padding-top` outright (the whole
+ * declaration is dropped, per spec), so a value below zero is normalised here
+ * rather than silently losing the property from the emitted markup.
+ */
+export function htmlTextPaddingTop(
+  anchor: AnchorKind,
+  boxH: number,
+  fontSize: number,
+  lineHeight: number,
+  lineCount: number,
+): number {
+  const offset = htmlTextFirstLineOffset(anchor, boxH, fontSize, lineHeight, lineCount);
+  return Math.max(0, offset - fontSize);
+}

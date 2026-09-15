@@ -22,8 +22,9 @@
 
 import { resolveCanvas, scaleBasis, type CanvasSpec } from "./aspect-ratios.js";
 import { CLICK_TAG_VARIABLE } from "./click-destination.js";
-import { DEFAULT_STYLE, resolveStyle, type Style } from "./creative-style.js";
-import type { HtmlElement } from "./html-element.js";
+import { DEFAULT_STYLE, resolveStyle, toneFontWeight, type Style } from "./creative-style.js";
+import { htmlTextGeometry, htmlButtonFontSize, htmlTextPaddingTop, type HtmlElement } from "./html-element.js";
+import { DEFAULT_TREATMENT, type ToneKind } from "./Treatment.vo.js";
 
 /** HTML-escape user-authored strings for the HTML text / quoted-attribute contexts (HL-D7). */
 export function escapeHtml(value: string): string {
@@ -89,6 +90,14 @@ export interface AssembleHtmlOptions {
   readonly canvas: CanvasSpec;
   readonly brandColor: string;
   readonly style?: Style;
+  /**
+   * The variant's tone (HL5f, HL-D8): drives the default font weight exactly
+   * as `NodeCanvasCompositor.prepare` derives it for the canvas fallback
+   * (`toneFontWeight`) — a style-supplied `fontWeight` still overrides it.
+   * Absent → `DEFAULT_TREATMENT.tone` ("bold"), the pre-HL5f literal, so an
+   * omitted tone renders exactly what this function always rendered.
+   */
+  readonly tone?: ToneKind;
   readonly clickDestination?: string;
   /** Platform profile or budget. When present, weight is verified against profile.maxBytes (HL-D6). */
   readonly profile?: { readonly maxBytes: number };
@@ -107,7 +116,15 @@ export interface AssembledHtml {
  */
 export function assembleHtml(options: AssembleHtmlOptions): AssembledHtml {
   const { width, height } = resolveCanvas(options.canvas);
-  const resolvedStyle = resolveStyle(options.style, "bold", DEFAULT_STYLE.fontFamily);
+  // HL5f: the default weight is tone-derived, exactly as the canvas fallback
+  // derives it — not the hard-coded "bold" this line used to read regardless
+  // of tone (HL-D8's gap). Absent tone → DEFAULT_TREATMENT.tone, the same
+  // "bold" this function always defaulted to.
+  const resolvedStyle = resolveStyle(
+    options.style,
+    toneFontWeight(options.tone ?? DEFAULT_TREATMENT.tone),
+    DEFAULT_STYLE.fontFamily,
+  );
   const elements = options.elements ?? [];
   const brandColor = safeBrandColor(options.brandColor);
   const clickDestination = options.clickDestination;
@@ -134,10 +151,8 @@ export function assembleHtml(options: AssembleHtmlOptions): AssembledHtml {
     switch (element.kind) {
       case "button": {
         const radius = Math.min(8, boxH / 2, boxW / 2);
-        const fontSize = Math.min(
-          Math.round(boxH * 0.45),
-          Math.round(scaleBasis(options.canvas, width, height) * 0.6),
-        );
+        // HL5f: the same function the canvas drawer calls — `htmlButtonFontSize`.
+        const fontSize = htmlButtonFontSize(boxH, scaleBasis(options.canvas, width, height));
         const navAttr =
           clickDestination !== undefined
             ? ` onclick="window.open(window.${CLICK_TAG_VARIABLE})"`
@@ -151,19 +166,25 @@ export function assembleHtml(options: AssembleHtmlOptions): AssembledHtml {
         break;
       }
       case "text": {
-        const fontSize = Math.min(
-          Math.max(12, Math.round(boxH * 0.7)),
-          Math.round(scaleBasis(options.canvas, width, height) * resolvedStyle.sizeScale),
-        );
-        const letterSpacing = resolvedStyle.letterSpacing * fontSize;
-        const lineHeight = resolvedStyle.lineHeight;
-        let justify = "flex-start";
-        if (element.frame.anchor === "middle") {
-          justify = "center";
-        } else if (element.frame.anchor === "bottom") {
-          justify = "flex-end";
-        }
-        const textStyle = `${baseStyle} color: #ffffff; font-family: ${resolvedStyle.fontFamily}, sans-serif; font-weight: ${resolvedStyle.fontWeight}; font-size: ${fontSize}px; letter-spacing: ${letterSpacing}px; line-height: ${lineHeight}; text-align: ${resolvedStyle.align}; display: flex; flex-direction: column; justify-content: ${justify}; overflow: hidden;`;
+        // HL5f: font size, line height (px) and letter spacing (px) come from
+        // the same function the canvas drawer calls — `htmlTextGeometry`.
+        const { fontSize, lineHeight, letterSpacing } = htmlTextGeometry({
+          boxH,
+          canvasBasis: scaleBasis(options.canvas, width, height),
+          sizeScale: resolvedStyle.sizeScale,
+          lineHeight: resolvedStyle.lineHeight,
+          letterSpacing: resolvedStyle.letterSpacing,
+        });
+        // HL5f: an explicit `padding-top`, not CSS flex `justify-content` —
+        // the same shared offset the canvas drawer places its baseline from
+        // (`htmlTextFirstLineOffset`), converted to a padding by
+        // `htmlTextPaddingTop`. The markup cannot wrap text itself (no
+        // browser, D122), so it always passes a line count of 1 — exact for
+        // `top`, the single-line case for `middle`/`bottom` (see
+        // `htmlTextFirstLineOffset`'s doc comment for the residual on
+        // multi-line wrapped text).
+        const paddingTop = htmlTextPaddingTop(element.frame.anchor, boxH, fontSize, lineHeight, 1);
+        const textStyle = `${baseStyle} color: #ffffff; font-family: ${resolvedStyle.fontFamily}, sans-serif; font-weight: ${resolvedStyle.fontWeight}; font-size: ${fontSize}px; letter-spacing: ${letterSpacing}px; line-height: ${lineHeight}px; text-align: ${resolvedStyle.align}; padding-top: ${paddingTop}px; overflow: hidden;`;
         const text = escapeHtml(element.text ?? "");
         elementMarkup.push(`<div style="${textStyle}">${text}</div>`);
         break;

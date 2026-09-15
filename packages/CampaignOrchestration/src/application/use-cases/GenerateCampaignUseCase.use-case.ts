@@ -355,6 +355,10 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
               canvas: spec,
               brandColor: product.primaryColor,
               style: brief.style,
+              // HL5f: the markup's default weight matches this cell's
+              // treatment tone, the same tone the composite request above
+              // already passes to the canvas fallback.
+              tone: treatment.tone,
               clickDestination: brief.clickDestination,
             });
             await this.deps.exporter.saveToDirectory(assembled.bytes, htmlBundlePath);
@@ -682,6 +686,9 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
         canvas: { ratio: ratio.value },
         brandColor: product.primaryColor,
         style,
+        // HL5f: the markup's default weight matches this variant's tone, the
+        // same tone `request.tone` above already passes to the canvas fallback.
+        tone: variant.tone,
         clickDestination,
       });
       await this.deps.exporter.saveToDirectory(assembled.bytes, htmlBundlePath);

@@ -25,6 +25,10 @@ import type { Style } from "@campaignfoundry/CampaignOrchestration/creative-styl
 import type { HtmlElement } from "@campaignfoundry/CampaignOrchestration/html-element";
 import { satisfiesOrderConstraints } from "@campaignfoundry/CampaignOrchestration/brief-template";
 import type { LayerKind } from "@campaignfoundry/CampaignOrchestration/layer-kinds";
+// Type-only, like `editor-state.ts`'s own `Treatment` import: erased at compile
+// time, so it carries none of the root barrel's runtime (node builtin) weight
+// into the bundle — only `./creative-style`-style leaf imports may do that.
+import type { Treatment } from "@campaignfoundry/CampaignOrchestration";
 import type { EditorState } from "./editor-state";
 
 /**
@@ -398,12 +402,16 @@ function htmlWeightKey(
   style: Style,
   destination: string,
   budget: PlatformProfile,
+  // HL5f: the reading now depends on tone (the assembler's default weight),
+  // so a tone-only edit must invalidate the single-entry cache below too.
+  tone: Treatment["tone"] | undefined,
 ): string {
   return JSON.stringify({
     brandColor,
     destination,
     style,
     sizes,
+    tone,
     maxBytes: budget.maxBytes,
     profileLabel: budget.label,
     elements: elements.map((el) => [el.kind, el.text ?? "", el.frame]),
@@ -464,6 +472,13 @@ export function htmlWeightReading(
   // throw it: a missing product (`?? ""`) or a colour outside the hex shape has
   // no weighable markup, and the Products section already says so.
   if (!isBrandColor(brandColor)) return undefined;
+  // HL5f: the meter reads the draft's FIRST treatment's tone (the same
+  // "first treatment" convention the print-proof and hero-image paths use
+  // elsewhere) — a raw editor string, validated only at save (`toTreatment`),
+  // so anything other than "subtle" collapses to bold exactly as the
+  // compositor's own tone check does. No treatments drafted yet → undefined →
+  // the assembler's own "bold" default.
+  const tone = state.treatments[0]?.tone as Treatment["tone"] | undefined;
 
   const key = htmlWeightKey(
     sizes,
@@ -472,6 +487,7 @@ export function htmlWeightReading(
     state.style,
     destination,
     budget,
+    tone,
   );
   const cached = weightReadingCache;
   if (cached !== undefined && cached.key === key) return cached.reading;
@@ -482,6 +498,7 @@ export function htmlWeightReading(
       canvas: { size },
       brandColor,
       style: state.style,
+      tone,
       clickDestination: destination === "" ? undefined : destination,
     });
     bytes = Math.max(bytes, assembled.byteLength);
