@@ -36,6 +36,22 @@ describe("parsePremises", () => {
     expect(() => parsePremises("docs/planning/p.md", md)).toThrow(/hides the lane/);
   });
 
+  test("an unclosed premise fence is an error naming the plan and the lane", () => {
+    const md = "```premise W1\ntrue\n";
+    expect(() => parsePremises("p.md", md)).toThrow(/UNCLOSED\s+W1\s+\(p\.md\)/);
+    expect(() => parsePremises("p.md", md)).toThrow(/never closed/);
+  });
+
+  test("the second of two fences, when left unclosed, is the one named", () => {
+    const md = ["```premise A", "true", "```", "", "```premise B", "false", ""].join("\n");
+    expect(() => parsePremises("p.md", md)).toThrow(/UNCLOSED\s+B\s+\(p\.md\)/);
+  });
+
+  test("an id-less fence with no close is still ignored, not counted as an opening", () => {
+    const md = ["```premise", "x", "prose that never closes"].join("\n");
+    expect(parsePremises("p.md", md)).toEqual([]);
+  });
+
   test("is re-entrant: the shared global regex cannot skip a document", () => {
     const md = ["```premise W1", "true", "```"].join("\n");
     expect(parsePremises("a.md", md)).toHaveLength(1);
