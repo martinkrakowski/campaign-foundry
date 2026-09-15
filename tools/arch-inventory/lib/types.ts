@@ -30,37 +30,25 @@ export type StubKind =
 export type LayerName = "domain" | "application" | "infrastructure";
 
 /** The seven inventory arrays of one bounded context, always present. */
-export interface ContextInventory {
-  readonly entities: readonly string[];
-  readonly value_objects: readonly string[];
-  readonly domain_services: readonly string[];
-  readonly use_cases: readonly string[];
-  readonly "ports.in": readonly string[];
-  readonly "ports.out": readonly string[];
-  readonly adapters: readonly string[];
-}
+export type ContextLists = Record<ListKey, readonly string[]>;
 
 export interface ContextDecl {
   readonly name: string;
-  readonly inventory: ContextInventory;
+  readonly lists: ContextLists;
 }
 
 export interface Manifest {
   readonly contexts: readonly ContextDecl[];
   /** Stub-naming overrides from `generator.sync.stubs.naming` (may be empty). */
   readonly naming: Partial<Record<StubKind, string>>;
-  /** Layer folder per context package, from `generator.sync.layers`. */
-  readonly layerFolders: Record<LayerName, string>;
+  /** Layer folder inside each context package, from `generator.sync.layers`. */
+  readonly folders: Record<LayerName, string>;
 }
 
-/** One declared entry with no matching module file. */
-export interface ListResult {
-  readonly key: ListKey;
+/** One context x one list: declared entries with no file, files with no entry. */
+export interface Finding {
+  readonly context: string;
+  readonly list: ListKey;
   readonly missing: readonly string[];
   readonly stale: readonly string[];
-}
-
-export interface ContextResult {
-  readonly name: string;
-  readonly lists: readonly ListResult[];
 }

@@ -96,6 +96,17 @@ describe("runCli", () => {
     expect(logError.mock.calls[0]?.[0]).toContain("cannot read");
   });
 
+  test("keeps a non-Error throw from readFile", async () => {
+    const { io: i, logError } = io({
+      readFile: async () => {
+        // eslint-disable-next-line @typescript-eslint/only-throw-error
+        throw "disk on fire";
+      },
+    });
+    expect(await runCli(i)).toBe(EXIT_MALFORMED);
+    expect(logError.mock.calls[0]?.[0]).toContain("disk on fire");
+  });
+
   test("a malformed manifest reports its reason with the path", async () => {
     const { io: i, logError } = io({ readFile: async () => "bounded_contexts: notalist\n" });
     expect(await runCli(i)).toBe(EXIT_MALFORMED);

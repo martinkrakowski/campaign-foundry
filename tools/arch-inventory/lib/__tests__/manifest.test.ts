@@ -73,6 +73,52 @@ describe("parseManifest", () => {
     expect(() => parseManifest("bounded_contexts:\n  - type: core\n")).toThrow(/Demo|name/);
   });
 
+  test("rejects an empty context name", () => {
+    expect(() => parseManifest("bounded_contexts:\n  - name: ''\n")).toThrow(/name/);
+  });
+
+  test("rejects a context entry that is not a mapping", () => {
+    expect(() => parseManifest("bounded_contexts:\n  - oops\n")).toThrow(/non-empty name/);
+  });
+
+  test("rejects a layers block that is not a mapping", () => {
+    expect(() => parseManifest("bounded_contexts:\n  - name: Demo\n    layers: 5\n")).toThrow(
+      /layers must be a mapping/,
+    );
+  });
+
+  test("rejects a list that is not an array at all", () => {
+    expect(() =>
+      parseManifest("bounded_contexts:\n  - name: Demo\n    layers:\n      domain:\n        entities: nope\n"),
+    ).toThrow(/entities must be a list/);
+  });
+
+  test("rejects a generator block that is not a mapping", () => {
+    expect(() => parseManifest("generator: 7\nbounded_contexts: []\n")).toThrow(/generator/);
+  });
+
+  test("rejects a stub-naming value that is not a string", () => {
+    expect(() =>
+      parseManifest(
+        "generator:\n  sync:\n    stubs:\n      naming:\n        inPort: 5\nbounded_contexts: []\n",
+      ),
+    ).toThrow(/inPort/);
+  });
+
+  test("keeps the declared layer folders", () => {
+    const m = parseManifest(
+      "generator:\n  sync:\n    layers:\n      domain: { folder: src/domain }\nbounded_contexts: []\n",
+    );
+    expect(m.folders.domain).toBe("src/domain");
+  });
+
+  test("ignores a generator naming block for kinds it does not know", () => {
+    const m = parseManifest(
+      "generator:\n  sync:\n    stubs:\n      naming:\n        factory: \"{name}.ts\"\nbounded_contexts: []\n",
+    );
+    expect(m.naming).toEqual({});
+  });
+
   test("rejects a context list that is not an array of strings", () => {
     expect(() =>
       parseManifest("bounded_contexts:\n  - name: Demo\n    layers:\n      domain:\n        entities: [12]\n"),

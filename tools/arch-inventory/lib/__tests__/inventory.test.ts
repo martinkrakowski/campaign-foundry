@@ -115,6 +115,19 @@ describe("checkInventory", () => {
     expect(await check(t)).toEqual([]);
   });
 
+  test("a directory that fails for another reason is not silently empty", async () => {
+    await expect(
+      checkInventory(MANIFEST, {
+        listDir: async (dir) => {
+          if (dir.endsWith("adapters")) {
+            throw Object.assign(new Error(`EACCES: ${dir}`), { code: "EACCES" });
+          }
+          return [];
+        },
+      }),
+    ).rejects.toThrow(/EACCES/);
+  });
+
   test("missing and stale findings carry the context and list they belong to", async () => {
     const t = structuredClone(CLEAN);
     t["packages/Demo/src/domain/value-objects"] = ["index.ts"];
