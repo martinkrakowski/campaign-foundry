@@ -1,5 +1,5 @@
 import { describe, test, expect } from "vitest";
-import { beatAt, resolveTimeline, type CopyTimeline, type ResolvedBeat } from "../CopyTimeline.vo.js";
+import { beatAt, resolveTimeline, type CopyTimeline } from "../CopyTimeline.vo.js";
 import { easeOutCubic } from "../easing.js";
 import { IDENTITY_POSE, poseOf, resolveTracks, type TrackedLayer } from "../resolve-tracks.js";
 import type { Track } from "../tracks.js";
