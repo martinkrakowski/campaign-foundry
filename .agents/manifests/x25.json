@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "lane": "X25",
+  "mutations": [
+    {
+      "file": "tools/plan-verify/lib/premises.ts",
+      "before": "  OPENING.lastIndex = 0;\n  const openings = [...markdown.matchAll(OPENING)];\n  if (openings.length > found.length) {\n    const unclosed = openings.find((m) => !closed.has(m.index));\n    throw new Error(\n      `UNCLOSED  ${unclosed?.[1]}  (${plan})\\n` +\n        `  a premise fence that is never closed hides the lane instead of failing it.\\n` +\n        `  Close it with a lone \\`\\`\\` line, or delete the whole fence and retire the lane.`,\n    );\n  }",
+      "after": "  return found;",
+      "because": "Removing the opening-vs-matched count check restores the old behaviour: an unclosed fence simply never matches FENCE, the lane disappears from the check, and parsePremises returns quietly.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--maxWorkers=2",
+        "--project",
+        "tools",
+        "tools/plan-verify/lib/__tests__/premises.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/plan-verify/lib/premises.ts",
+      "before": "  if (openings.length > found.length) {",
+      "after": "  if (openings.length >= found.length) {",
+      "because": "The check must fire only on a genuine loss; a >= would throw on every well-formed document, so the parse tests pin the boundary.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--maxWorkers=2",
+        "--project",
+        "tools",
+        "tools/plan-verify/lib/__tests__/premises.test.ts"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

@@ -588,3 +588,30 @@ live role is right here. No visible change.
 
 **X24 — shipped in this PR.** Both roles are on, pinned by two tests that query by role:
 `findByRole("alert")` after a 400 generate, `findByRole("status")` after a 503.
+
+---
+
+## 27. plan:verify ignores a premise fence that is never closed (X25)
+
+**Evidence.** `tools/plan-verify/lib/premises.ts` matched premises with a whole-block regex whose
+body (`[\s\S]*?`) demands a closing `^```[ \t]*$` line. A plan whose ```` ```premise W1 ```` block
+is never closed does not match at all: the lane vanishes, the run prints "0 premise(s) hold" and
+exits 0. Lines 15–17 already treat an empty script as an error precisely because silently
+dropping a lane "would otherwise remove the lane from the check entirely" — an unclosed fence is
+the identical loss, reachable by the laziest edit imaginable: delete one line from the end of the
+block.
+
+**Consequence.** A premise could be silenced not by retiring the lane but by breaking its fence —
+the drift detector goes blind on that lane with no signal anywhere, and `plan:verify` keeps its
+green exit.
+
+**Fix shape, when it is worth one.** Count opening lines (`^```premise[ \t]+\S`, multiline) and
+throw when there are more openings than matched blocks, naming the first unclosed lane. An
+id-less opener must not be counted — `premises.test.ts` pins that a fence with no lane id is
+ignored.
+
+**X25 — shipped in this PR.** `parsePremises` now collects the index of every FENCE match, counts
+openings with `OPENING`, and throws `UNCLOSED  <lane>  (<plan>)` when a lane is closed zero
+times. Three tests pin it: an unclosed single block names its lane, a second unclosed block
+names the second lane (not the first), and an id-less unclosed fence stays ignored. Removing
+the count check kills the first two (`.agents/manifests/x25.json`).
