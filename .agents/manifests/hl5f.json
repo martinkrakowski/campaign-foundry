@@ -17,9 +17,9 @@
     },
     {
       "file": "packages/CampaignOrchestration/src/domain/value-objects/markup-assembler.ts",
-      "before": "        const paddingTop = htmlTextPaddingTop(element.frame.anchor, boxH, fontSize, lineHeight, 1);",
-      "after": "        const paddingTop = element.frame.anchor === \"middle\"\n          ? (boxH - lineHeight) / 2\n          : htmlTextPaddingTop(element.frame.anchor, boxH, fontSize, lineHeight, 1);",
-      "because": "This is the exact regression HL5f closes: a `middle`-anchored text element computed by the old CSS-flex-equivalent arithmetic (half the box minus half the CSS line box) instead of the shared baseline-offset function `drawHtml` also calls. The two differ by a few tenths of a pixel per fontSize unit — small enough to look fine in review, and exactly what \"nothing pins them equal\" (Verified Gap #2) meant before this lane.",
+      "before": "        let justify = \"flex-start\";\n        if (element.frame.anchor === \"middle\") {\n          justify = \"center\";\n        } else if (element.frame.anchor === \"bottom\") {\n          justify = \"flex-end\";\n        }",
+      "after": "        const justify = \"flex-start\";",
+      "because": "This is the regression the orchestrator's fix round closes: the markup positions text with CSS flex `justify-content`, which must follow the element's own anchor (`top`/`middle`/`bottom`) for the browser to lay out the right side of the box regardless of how many lines the text wraps to. A `justify-content` that no longer follows the anchor renders every text element flush to the top of its frame — a `bottom`-anchored headline (or a `middle`-anchored one) would render in the wrong place with nothing else in the pipeline noticing, the same \"looks fine in review\" shape as the padding-top regression this replaces.",
       "command": [
         "yarn",
         "vitest",
