@@ -783,3 +783,47 @@ actor named above) plus precise timing of an intermediate-directory swap, not ju
 Mutation manifest: `.agents/manifests/x26.json` — dropping the realpath-vs-root comparison, the
 ENOENT passthrough, the real-path return, or `O_NOFOLLOW` on the output route's open each kill a
 distinct test (4/4 caught).
+
+---
+
+## 30. The manifest's per-context inventories were stale, and no gate could see it (X27)
+
+**Evidence.** `.architecture/manifest.yaml` lists each bounded context's modules —
+`entities`, `value_objects`, `domain_services`, `use_cases`, `ports.in`, `ports.out`,
+`adapters` — but the lists had drifted from the tree: `ports.in`/`ports.out` were empty for
+every context although ten port files exist (`CampaignOrchestration/src/application/ports/{in,out}/*.ts`
+— `CampaignPipelinePort`, `BackgroundCachePort`, `CompliancePort`, `CompositorPort`,
+`CopyGeneratorPort`, `ExportPort`, `ImageGeneratorPort`, `PlatformProfilePort`,
+`VideoCompositorPort`, plus `Distribution/.../out/PackageStorePort.ts`), every `adapters`
+list was empty although thirteen adapters exist, and four value objects and one use case of
+`CampaignOrchestration` were undeclared. `hexagen arch validate` passes regardless — it
+checks layer rules, not inventory — and `sync --check` only compares the tree against what
+the manifest *emits*, and an empty list emits nothing.
+
+**Consequence.** The manifest — the document the advisory PR reviewer, the ownership
+registry and every new lane reads first — described a system with no ports and no adapters.
+A reader trusting it concludes the hexagonal core has no boundaries at all.
+
+**Fix.** Reconcile every list with the tree, and add the missing gate. The reconciliation
+surfaced a second, deeper drift: hexagen's built-in stub naming (`{name}.in-port.ts`,
+`{name}.adapter.ts`) does not match this repo's committed `<Name>Port.ts` / `<Name>.ts`
+convention, so declaring any port or adapter made `sync --dry-run` plan to **create** a
+duplicate stub beside every real module (e.g. `CampaignPipelinePort.in-port.ts`) — an
+undeclarable gap, not a paperwork one. Aligning `generator.sync.stubs.naming` with the
+files that actually exist removed every creation intent (verified: Stubs 0/0/0 created/
+updated/deleted, 46 skipped, Total ops 0). Kebab-case data modules (`advertising-units.ts`,
+`canvas-util.ts`, …) stay out of inventory by rule: the generator PascalCases every entry
+name when it derives a filename, so such a file can never be a manifest module — the rule
+is stated in `tools/arch-inventory/lib/naming.ts` and applied by the new check.
+
+**X27 — shipped in this PR.** `.architecture/manifest.yaml` now lists all 46 modules
+(10 ports, 13 adapters, the missing value objects and use case included), and
+`tools/arch-inventory` (`yarn arch:inventory`, wired into CI next to `plan:verify`)
+compares each of the seven lists against its folder — stale declared entries and missing
+module files both fail — using the generator's own naming rules read from the manifest, so
+the gate tracks convention changes instead of freezing them. Before the reconciliation it
+reported **28 missing, 0 stale**; on the reconciled manifest it reports no drift. Unit
+tests pin the comparison, the manifest parsing and the CLI exit codes on temp fixtures, not
+the real tree. Mutation manifest: `.agents/manifests/x27.json` — skipping the ports lists in
+the comparison kills the missing-port test, and treating a stale entry as fine kills the
+stale test (2/2 caught).

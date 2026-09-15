@@ -13,6 +13,11 @@ Two things review the architecture, and they do not overlap.
 import which, package boundaries, cross-layer relative imports, node builtins in domain/application,
 whitelist conformance, subpath conventions, and file placement by layer.
 
+`yarn arch:inventory` (`tools/arch-inventory`) gates the complement the linter cannot see: the
+per-context inventories in `.architecture/manifest.yaml` against the module files on disk. Scaffold
+new ports with `hexagen arch port`, which adds the manifest entry as the port is created, so the
+inventories never drift behind the code again.
+
 `.github/workflows/pr-agent-arch.yml` is an **advisory** LLM reviewer scoped to the
 complement — what the import graph cannot express: whether a port is an abstraction or a
 disguised implementation detail, whether adapter failure modes leak through it, whether a
