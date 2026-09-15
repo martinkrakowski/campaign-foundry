@@ -1,7 +1,8 @@
 # Keyframing — Architecture & Development Plan
 
 **Date:** 2026-09-10 · **Status:** in progress. **Stale as of 2026-09-15: "Nothing dispatched" —
-K1a has shipped and K1b is dispatchable next**, behind it.
+K1a and K1b have both shipped; K2 (express the four `MOTION_KINDS` as tracks and render from the
+resolver) is dispatchable next**, behind them.
 **Verified against:** `main` at `ed5e2dc`.
 **Replaces** the keyframe half of the retired `2026-09-08_motion-composition-implementation-plan.md`.
 
@@ -232,7 +233,7 @@ kept — but the first red is more likely arithmetic than a wrong model.
 **The completing PR retires its own premise fence.** `plan:verify` runs in CI, so a lane that ships
 and leaves its fence behind fails its own build.
 
-### K4's premise, rewritten now that K1b's resolver exists (K1b's brief)
+### K4's premise, rewritten now that K1b's resolver exists (K1b fix round)
 
 The previous two attempts (recorded in git history) grepped the whole `CampaignOrchestration/domain`
 tree for a *name* — first "precedence" near "preset"/"track"/"authored" including comments (K1a's own
@@ -241,50 +242,51 @@ way: **a decision has no fixed name**, so no string search reliably detects one.
 the premise's original framing — composition (not precedence) was fixed in K1, so K4 was never going
 to add a rule-naming constant for this fence to find.
 
-K1b gives this a different kind of target: not a decision to name, but a **concrete file** the plan's
-own K4 row (§2) and K1a's DoD already point at — `canonicalLayer`
-(`apps/web/src/components/campaign/editor-state.ts`), which today drops `enabled: true` and
-`elements: []` to their absent defaults (X16, D129, HL5a) and, per §2's K4 row, must drop `tracks: []`
-the same way once a brief can carry a **hand-authored** `tracks` field — the second input this fence
-now probes for is that provenance: a track a human wrote in the brief, not one a preset expanded,
-reaching a place that already special-cases the layer defaults. The word "tracks" does not appear
-anywhere in that file today (checked, not assumed); K4 adding the drop makes it appear.
+A third attempt (this PR's first pass, since replaced) probed `canonicalLayer`
+(`apps/web/src/components/campaign/editor-state.ts`) instead — a concrete file, not a decision name —
+but review found two defects: it could fail SAFE forever (K4 might defer the editor's canonical-form
+handling of hand-authored tracks to K5), and worse, the line it watched for
+(`layer.tracks`) has a word boundary at the `.` and so also flips K5's *existing* fence
+(`! grep -rqiE '\btracks?\b' apps/web/src/components/campaign --exclude-dir=__tests__`) — a K4 PR
+retiring its own fence would flip K5's to STALE in the same commit, for a lane K4 did not ship.
+
+**What K4 actually delivers** is not an editor default or a fold rule (K-D9 already fixed composition)
+but the thing its own name says: **a brief's own tracks reaching the renderer** — a hand-authored
+`layer.tracks` array read at the point K2/K3 already wired `resolveTracks` into
+`NodeCanvasCompositor.ts`. That file is the right home for a K4 probe, and today it contains no
+`.tracks` property access at all (checked, not assumed) — K2/K3 expand the four `MOTION_KINDS` and the
+four text effects into *synthesized* tracks (built from the motion/effect kind, not read off the
+brief's layer) and pass those to `resolveTracks`; the interim contract (§3) is explicit that nothing in
+the compositor reads a layer's `tracks` field until a lane makes it do so, and expanding a preset needs
+no such read. K4 is that lane.
 
 ```premise K4
 # K4 authors tracks directly in a brief, alongside presets. K-D9 already fixed
 # how a hand-authored track and a preset's expansion on one (layer, property)
-# compose (declaration order, never a precedence rule) -- so K4's own
-# contribution is the AUTHORING surface, not a fold rule, and this fence
-# probes for that surface's editor-side effect instead of a decision name
-# (see the prose above for why the previous two name-probes both failed).
+# compose (declaration order, never a precedence rule), so K4's own
+# contribution is the missing READ: a hand-authored layer.tracks reaching the
+# renderer at all. (Two earlier framings failed first: two name-probes with
+# no fixed decision name to find, then a canonicalLayer probe that could fail
+# safe forever and also flipped K5's own fence in the same commit K4's PR
+# would retire this one -- see the prose above.)
 #
-# The concrete second input K1b's existence gives this fence a home to probe:
-# canonicalLayer already drops a layer's redundant defaults (`enabled: true`,
-# `elements: []`); the plan's own K4 row says it must drop `tracks: []` the
-# same way once a brief can carry a hand-authored one. "tracks" appears
-# nowhere in this file today.
+# By the time K4 ships, K2/K3 have already wired resolveTracks into
+# NodeCanvasCompositor.ts, expanding MOTION_KINDS/text-effect presets into
+# SYNTHESIZED tracks -- built from the motion/effect kind, never read off a
+# layer's own `tracks` field (the interim contract, S3, is explicit that
+# nothing in the compositor reads it until a lane makes it do so). Today
+# this file contains no `.tracks` property access at all (verified). K4 is
+# the lane that adds one -- reading a brief's hand-authored layer.tracks so
+# it can fold alongside (or feed) the preset expansion.
 #
-# How this can still fail SAFE (not notice a shipped K4): if K4 ships by
-# widening `layerTracksProblem`'s authoring surface and K2/K3's preset
-# expansion alone, and defers the editor's canonical-form handling of a
-# hand-authored `tracks` field to K5 (already a separate, scope-deferred
-# lane) -- or if `canonicalLayer` is renamed or restructured for an
-# unrelated reason before then -- this file stays untouched and the fence
-# holds past K4's merge. Retire or rewrite it by hand at that point, the
-# same known limit the previous fence carried; `plan:verify` only fails on
-# STALE, so nothing else will remind you.
-#
-# The OTHER way this can fail: K5's own fence below greps the same directory
-# for the same word (`\btracks?\b`, word-boundary), one level up. The line
-# K4 actually writes -- `Array.isArray(layer.tracks) && layer.tracks.length
-# === 0` -- has a word boundary at the `.` in `layer.tracks`, so it flips
-# BOTH fences at once (verified: `echo 'layer.tracks' | grep -qiE
-# '\btracks?\b'` exits 0). A K4 PR that retires this fence in the completing
-# commit will also flip K5's from holding to failing `plan:verify` as STALE
-# in the same commit, for a lane K4 did not ship. K4's brief must rewrite
-# K5's fence too, in the same PR -- narrow it to the editor's track-editing
-# UI once one exists, or exclude `canonicalLayer` explicitly.
-! grep -q 'tracks' apps/web/src/components/campaign/editor-state.ts
+# How this can still fail: if K2/K3's wiring passes the WHOLE layer object
+# through to resolveTracks (rather than a synthesized-tracks-only view) for
+# an unrelated reason, some ".tracks" access could appear before K4 for
+# reasons that have nothing to do with hand-authored tracks, flipping this
+# fence early on a K2/K3 PR. Re-anchor by symbol at that point rather than
+# trusting the flip; `plan:verify` only fails on STALE, so nothing else will
+# say which lane actually caused it.
+! grep -q '\.tracks' packages/CreativeGeneration/src/infrastructure/adapters/NodeCanvasCompositor.ts
 ```
 
 ---
