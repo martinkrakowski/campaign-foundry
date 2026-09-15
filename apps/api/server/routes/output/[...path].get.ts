@@ -1,5 +1,5 @@
-import { createReadStream, type Stats } from "node:fs";
-import { stat } from "node:fs/promises";
+import { constants, type Stats } from "node:fs";
+import { open, type FileHandle } from "node:fs/promises";
 import { extname, resolve } from "node:path";
 import { outputRoot } from "../../lib/config.js";
 import { resolveConfined, resolveConfinedForRead } from "../../lib/confined-path.js";
@@ -44,6 +44,16 @@ export function parseByteRange(
  * (path-traversal guarded). Honours a single byte range (Safari refuses media
  * from servers without it): 206 + Content-Range, 416 when unsatisfiable,
  * whole file for multi-range requests.
+ *
+ * Opens the checked target exactly once, with `O_NOFOLLOW`, and takes both the
+ * size and the streamed bytes from that one handle. `resolveConfinedForRead`
+ * already validated the real path, but a second lookup of that same pathname
+ * (a `stat` followed by a separate `createReadStream`, as this route used to
+ * do) leaves a window for the checked entry to be swapped for a symlink
+ * between the two: `O_NOFOLLOW` makes a final-component swap fail the open
+ * (ELOOP) instead of following the new link, and using one handle for both
+ * size and bytes means whatever the path does afterward cannot desync the
+ * response's Content-Length from what is actually streamed.
  */
 export default defineEventHandler(async (event) => {
   const relative = getRouterParam(event, "path") ?? "";
@@ -57,7 +67,7 @@ export default defineEventHandler(async (event) => {
   let target: string;
   if (relative === "") {
     // resolveConfined rejects the base itself; GET /output/ targets the root directory,
-    // which stat() happily reports — the isFile check below is what 404s it.
+    // which open() happily reports — the isFile check below is what 404s it.
     target = root;
   } else {
     try {
@@ -67,23 +77,37 @@ export default defineEventHandler(async (event) => {
       return { error: "Invalid path" };
     }
     try {
-      // A symlink inside the root may aim outside it; stat/createReadStream would follow it.
+      // A symlink inside the root may aim outside it; resolveConfinedForRead validates the
+      // real path and returns it, so the open below re-checks the same real path, not a
+      // lexical name that could have been swapped since.
       target = await resolveConfinedForRead(root, relative);
     } catch {
       setResponseStatus(event, 404);
       return { error: "Not found" };
     }
   }
+
+  let handle: FileHandle;
+  try {
+    handle = await open(target, constants.O_RDONLY | constants.O_NOFOLLOW);
+  } catch {
+    // Missing file, or the checked entry was swapped for a symlink before this open
+    // (ELOOP) — both answer the same 404 a plain miss would, and neither streams a byte.
+    setResponseStatus(event, 404);
+    return { error: "Not found" };
+  }
   let st: Stats;
   try {
-    st = await stat(target);
+    st = await handle.stat();
   } catch {
+    await handle.close();
     setResponseStatus(event, 404);
     return { error: "Not found" };
   }
   if (!st.isFile()) {
     // Directories (the root itself, or any folder under it) are not downloadable creatives;
     // streaming one would fail with EISDIR after the 200 headers were already set.
+    await handle.close();
     setResponseStatus(event, 404);
     return { error: "Not found" };
   }
@@ -94,16 +118,25 @@ export default defineEventHandler(async (event) => {
 
   const range = parseByteRange(getRequestHeader(event, "range"), size);
   if (range === null) {
+    await handle.close();
     setResponseStatus(event, 416);
     setHeader(event, "content-range", `bytes */${size}`);
     return { error: "Range not satisfiable" };
   }
+  const stream =
+    range === undefined ? handle.createReadStream() : handle.createReadStream({ start: range.start, end: range.end });
+  // FileHandle read streams close their handle when they end; this is belt-and-suspenders
+  // for every exit, including a client abort (which destroys the stream without an 'end') —
+  // calling handle.close() again once it is already closed does not throw.
+  stream.on("close", () => {
+    void handle.close();
+  });
   if (range === undefined) {
     setHeader(event, "content-length", size);
-    return sendStream(event, createReadStream(target));
+    return sendStream(event, stream);
   }
   setResponseStatus(event, 206);
   setHeader(event, "content-range", `bytes ${range.start}-${range.end}/${size}`);
   setHeader(event, "content-length", range.end - range.start + 1);
-  return sendStream(event, createReadStream(target, { start: range.start, end: range.end }));
+  return sendStream(event, stream);
 });
