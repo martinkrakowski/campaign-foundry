@@ -3722,6 +3722,30 @@ describe("copy timeline (E5.1)", () => {
       expect(restored.copyExplicit).toBe(false);
     });
 
+    test("a restored draft keeps a beat's background and repairs the wrong shapes away (VE5a)", () => {
+      const restored = normalizeDraftState({
+        mode: "variation",
+        briefId: "camp",
+        formats: ["static", "motion"],
+        timeline: {
+          beats: [
+            { key: 1, text: "A", weight: 1, background: "assets/inputs/a.png" },
+            { key: 2, text: "B", weight: 1, background: "" },
+            { key: 3, text: "C", weight: 1, background: 5 },
+            { key: 4, text: "D", weight: 1 },
+          ],
+          transition: "fade",
+          keyBeat: 1,
+        },
+      });
+      expect(restored.timeline.beats[0].background).toBe(
+        "assets/inputs/a.png",
+      );
+      expect(restored.timeline.beats[1]).not.toHaveProperty("background");
+      expect(restored.timeline.beats[2]).not.toHaveProperty("background");
+      expect(restored.timeline.beats[3]).not.toHaveProperty("background");
+    });
+
     test("a draft with a timeline keeps it, repairing broken beats and clamping keyBeat", () => {
       const restored = normalizeDraftState({
         mode: "brief",
