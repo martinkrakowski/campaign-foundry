@@ -67,6 +67,7 @@ produces an HTML layer whose fallback is wrong, and nobody notices until a buyer
 | **HL-D5** | **The raster fallback is produced by the canvas compositor from the same element list**, not by rendering the markup — which means **HL3 adds an `html` entry to `LAYER_DRAWERS`.** | D122 forbids rasterising **markup**. It says nothing against the compositor drawing a *typed element list* natively, and the two are not the same thing. This matters concretely: `canonical-image-html` carries an `html` **layer**, and `drawLayer` throws on any kind absent from the table — so **the fallback render of an `image-html` brief is impossible without that entry.** An earlier draft of the finishing-video plan refused it; that refusal was wrong and is withdrawn. |
 | **HL-D6** | **The weight budget is shown while building — and it is `profile.maxBytes`, not a new constant.** | A builder that lets a user assemble an over-budget unit and finds out at packaging has wasted their work. But `packageHtml` **already enforces `bundle.length <= profile.maxBytes`** per platform, so the number exists and varies by placement. Surfacing a second hard-coded 150 KB beside it would be two budgets disagreeing — the defect this arc exists to remove. **The meter reads the profile.** |
 | **HL-D7** | **User-authored content is never rendered into the app's own DOM.** The editor preview is a sandboxed frame, or it is the canvas rendition. | Text and URLs a user types, assembled into markup and injected into the editor, is an XSS surface in the operator's own tool. |
+| **HL-D8** | **Per-element style waits for renderer fidelity, and then is two fields.** Owner, 2026-09-15 (recommended default, plan-reviewed). HL5f makes the two renderers agree on what they already draw; HL5e then adds `style?: { fontWeight?, fontFamily? }` on `text`/`button` only. HL-D1's `href?` and `style?` sketch never shipped — `href` is withdrawn by HL-D2/HL-D3, and `style` is exactly this. | The renderers already disagree without overrides (markup weight falls back to `"bold"`, the canvas derives weight from tone); adding overrides now inherits that gap. Of `Style`'s fields only `fontWeight` and `fontFamily` are read the same way by both renderers for both text kinds. |
 
 ---
 
@@ -121,9 +122,10 @@ beyond the brief's family, and any third-party script. Each breaks either the fa
 |---|---|---|
 | **HL5a** | Element editing: add, remove and reorder `text` / `button` / `image` elements in the `html` layer; edit text and frame. | **Shipped.** |
 | **HL5b** | The click-destination input, rendered by `OutputSection` over the `clickDestination` patch and validation `editor-state.ts` already carried. | **Shipped.** The `OutputSection` renders the click-destination input. |
-| **HL5c** | The live weight meter reading `profile.maxBytes` (HL-D6). | **Blocked on X14** — no platform profile accepts `html`, so no html placement has a byte budget to read (the display profiles' `maxBytes` is their static budget). |
+| **HL5c** | The live weight meter reading `profile.maxBytes` (HL-D6). | **After X14** — X14's decision (unowned-gaps §17) adds html profiles with their own `maxBytes`; the meter reads that profile's number. |
 | **HL5d** | Editor preview of the `html` layer through the canvas rendition, satisfying HL-D7 without putting user content in the app DOM. | **Shipped.** The existing preview path already drew the layer; four tests now pin it. |
-| **HL5e** | Per-element style overrides. | **Blocked on an owner decision.** HL-D1 sketched `style?` on an element, HL-D4 says style comes from the brief's `creative-style`, and the vocabulary HL1 shipped is `{ kind, text?, frame }` with no style. Overrides mean a vocabulary change carried through both renderers and the fidelity between them. |
+| **HL5f** | **Renderer fidelity first.** Thread `tone` into `AssembleHtmlOptions` so the markup's font weight matches the canvas's tone-derived weight (today `assembleHtml` falls back to a hard-coded `"bold"`), and pin a canvas-vs-markup geometry fixture for element placement (baseline offsets vs flex alignment are not proven equal). | **Dispatchable** (HL-D8). |
+| **HL5e** | Per-element style overrides: `style?: { fontWeight?, fontFamily? }` on `text` and `button` elements only, absent = the brief's `creative-style` value (HL-D4's override shape), honoured identically by `drawHtml` and `assembleHtml`, editable in the HL5a element editor. | **After HL5f** (HL-D8). |
 
 **Order.** HL1 → HL2 → **HL3 → HL4** → HL5. **HL3 before HL4 is the load-bearing choice**: build the
 fallback first and the markup is written to match a rendering that already exists, rather than the
@@ -188,6 +190,11 @@ One boundary fact the tests record rather than change: a brief whose **only** `h
 is refused with 400, because `html` is a required kind for `image-html` and MP-D4 refuses disabling the
 last enabled instance of one. The disabled-layer test therefore adds a second, disabled `html` layer
 alongside the enabled one — which is also what X9's own promise is about.
+
+```premise HL5f
+# The markup assembler still resolves font weight from a hard-coded fallback instead of the variant's tone.
+grep -q 'resolveStyle(options.style, "bold"' packages/CampaignOrchestration/src/domain/value-objects/markup-assembler.ts
+```
 
 ```premise HL5c
 # The live weight meter (HL-D6) needs two things no web, ui or api module

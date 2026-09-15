@@ -209,10 +209,31 @@ point is live: reverting any one of the five back to the constant fails its dire
 
 **`anchor` (text) and `alpha` (shade) are deliberately out of scope, not forgotten.** Both shadow a
 variation axis — `anchor` the T4 anchor axis, `alpha` the tone-derived shade axis — and which of the
-prop or the axis wins when both are present is an owner decision this lane does not make. Both still
+prop or the axis wins when both are present was an owner decision this lane did not make (decided below, R-D4). Both still
 read exactly their axis, unchanged; `LAYER_PROPS` continues to validate them at the boundary, but
 nothing in the compositor consumes them yet. Un-deferring either is a new, small lane once the owner
 picks a side.
+
+**Decision, owner 2026-09-15 (recommended default, plan-reviewed): the axis wins.**
+
+| id | Decision |
+|---|---|
+| **R-D4** | **A prop never shadows a live variation axis.** `anchor` stays in `LAYER_PROPS` and is **honoured only when the brief carries no `variation.axes.anchor`**: the compositor resolves `request.anchor ?? textProps.anchor ?? (layout-derived)`. A brief that sets both a text layer's `anchor` prop and the anchor axis is **refused at the boundary** (API and the editor's draft validation — the domain guard sees only the template), the `validateMotionAxisRequested` cross-field pattern. **`alpha` is removed from `LAYER_PROPS`** (a shade layer carries no props): the tone axis is never absent (it defaults to every tone), so an `alpha` override would always silence it. |
+
+Why: the anchor axis has a real "absent" state — the planner counts `anchor` in variant distance only when the axis is
+present (`VariationPolicy.vo.ts`) and the compositor derives it from layout otherwise (`NodeCanvasCompositor.ts`
+`request.anchor ?? …`) — so honouring the prop there collides with nothing; with the axis present, a per-layer override would
+make two variants that differ only on anchor render identically while still passing `minDistance`. Tone has no absent state.
+
+**Lane C4b** (dispatchable): the boundary refusal (API + editor), the one-line merge in the compositor's anchor
+resolution with a direction test beside the C4 geometry-props tests, and deleting `alpha` from `LAYER_PROPS` and its
+validation. Known drift, not blocking: `packages/ui/src/preview-layers.ts` reads `CREATIVE_GEOMETRY.shadeAlpha` directly and
+the SVG stand-in already ignores C4's live props.
+
+```premise C4b
+# Either gap keeps the lane open: the shade layer still accepts an alpha prop, or the compositor never reads a text anchor prop.
+grep -qE 'shade: \[\s*"alpha"\s*\]' packages/CampaignOrchestration/src/domain/value-objects/brief-template.ts || ! grep -qE 'anchor \?\? [A-Za-z_.]*[Aa]nchor' packages/CreativeGeneration/src/infrastructure/adapters/NodeCanvasCompositor.ts
+```
 
 **One committed test needed a fixture fix, not a rewrite.** The red-checkpoint commit's `typeFloor`
 direction test asserted a comparison its own 400×400 fixture could never produce: at that canvas size

@@ -67,7 +67,7 @@ stays as it is, and text-effect tracks play on beat-local progress exactly as th
 
 | Lane | Task | Proof |
 |---|---|---|
-| **K1** | ⛔ **BLOCKED — see §Amendments: three model decisions are open.** **The track model and its resolver.** Value objects, validation at the brief boundary, the pure resolve function. **No compositor change, no rendering.** | Round-trips through YAML in declared key order; an invalid track is refused at both boundaries. |
+| **K1** | **Dispatchable — K-D7–K-D9 answered the three model decisions.** **The track model and its resolver.** Value objects, validation at the brief boundary, the pure resolve function. **No compositor change, no rendering.** | Round-trips through YAML in declared key order; an invalid track is refused at both boundaries. |
 | **K2** | **Express the four `MOTION_KINDS` as tracks and render from the resolver.** The vocabulary the user writes does not change. | **Per-frame byte-identity** for every motion kind across the canonical templates. Any drift stops the lane. |
 | **K3** | **Express the four text effects the same way.** | Per-frame byte-identity, including the beat-local windows and the settled-pose behaviour. |
 | **K4** | **Author tracks directly in a brief**, alongside presets, with a stated precedence when both name one layer and property. | A hand-authored track renders; a track on an absent or disabled layer renders nothing and says nothing. |
@@ -200,7 +200,22 @@ K4 the day K1 merges. It now probes the resolver's own decision rather than the 
 
 ---
 
-## K1 is not dispatchable yet — three model decisions remain
+## K1 model decisions — owner 2026-09-15 (recommended defaults, plan-reviewed)
+
+**K1 is dispatchable.** The three questions below are answered; the analysis that raised them stays under it as the record.
+Several line references in that analysis have moved (e.g. `easeOutCubic` is now `NodeCanvasCompositor.ts:586`, not `:498`;
+the poster clock sampling and the crossfade `drawBeat` calls have shifted) — **re-anchor by symbol, not line, when briefing.**
+
+| id | Decision |
+|---|---|
+| **K-D7** | **`easeOutCubic` moves to the domain** (`CampaignOrchestration` `domain/value-objects/easing.ts`, exported from the barrel); the compositor imports it back. K1's "no compositor change" means "no compositor **behaviour** change" — one import, byte-neutral. |
+| **K-D8** | **A stop names its clock**: `clock: "pose" \| "beat" \| "effect"`. The resolver is `resolveTracks(tracks, beats, clocks: { t, copyT?, effectT? }) → { byLayer: Map<layerId, Pose>; copy: ReadonlyArray<{ beat, mix, pose }> }`. The legacy (timeline-less) path is one implicit beat spanning [0, 1] with `local = t`, which unifies `effectT ?? local` (timeline path) with `effectT ?? t` (legacy path). The copy pose is per **(beat, mix)** because `drawBeat` runs twice at one instant during a crossfade. |
+| **K-D9** | **Two tracks on one (layer, property) compose; they are never refused.** Operators are fixed per property: `dx`/`dy` **add**, `opacity`/`scale` **multiply**. K1's validator refuses only a stop set with duplicate `t` on one track. K3 folds in today's order — `opacity = (riseAlpha * fx.alpha) * layerAlpha` — because float multiplication is not associative and the byte gate would move otherwise. K4's "precedence" framing is superseded: composition is fixed in K1. |
+
+Risk carried: the `(beat, mix)` shape brings `CopyTimeline` into the resolver's signature; the alternative (per-layer pose only,
+`drawBeat` keeps its own clock) makes K1 simpler but K3 unable to be byte-identical.
+
+## K1 was not dispatchable — the three model decisions (answered above)
 
 The K-D6 gate is satisfied (VF1 = C5, #328). What blocks an honest stage-1 author is that three
 questions cannot be answered without contradicting something the plan already says. **A lane that has
