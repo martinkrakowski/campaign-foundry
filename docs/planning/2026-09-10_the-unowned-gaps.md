@@ -696,3 +696,34 @@ not belong to the platform being committed. The pinned crash-leftover test
 (`__tests__/FileSystemPackageStore.test.ts`, "a failed package never leaves a mixed final directory;
 a later commit drops leftover staging") passes unchanged. Mutation manifest:
 `.agents/manifests/x23.json` — removing either guard makes its corresponding test fail (2/2 caught).
+
+---
+
+## 29. A read route served any symlink inside the output root, even one pointing outside it (X26)
+
+**Evidence.** `resolveConfined` (`apps/api/server/lib/confined-path.ts`) guards only lexically —
+`resolve` + `startsWith(root + sep)`. The three read routes built on it (`GET /output/**`,
+`GET /campaigns/packages/:campaignId`, `GET /campaigns/packages/:campaignId/:platform.zip`) then
+`stat` / `createReadStream` / `readFile` the result, and every one of those follows symlinks. A
+link planted inside the root aimed at anything on the filesystem: `output/leak.txt → /etc/shadow`,
+or `output/packages/camp → <elsewhere>`. The write side had refused symlinked targets since
+`SYMLINK_WRITE_ERROR` (`briefs.ts`, pinned in `briefs.test.ts`); the read side had no equivalent.
+
+**Consequence.** Any process able to drop a file under the output root — a compromised generation
+job, a shared volume — turned a public GET into an arbitrary file read outside it. No `..` needed,
+so the lexical guard never fired: the traversal arrived as a filename.
+
+**Fix.** A read-side helper beside `resolveConfined`: `resolveConfinedForRead(base, ...segments)`
+keeps the lexical check, then compares `realpath(target)` against `realpath(base)` — comparing
+both sides keeps a legitimately symlinked root (macOS `/tmp` → `/private/tmp`) working. A target
+whose real path escapes throws like an escape does today; a missing target is returned untouched,
+so each route's existing not-found path decides unchanged. Each route turns the throw into its own
+not-found answer (the output route keeps 400 for lexical escapes only). `resolveConfined` itself
+stays lexical: write paths call it before the file exists, where realpath has nothing to resolve.
+
+**X26 — shipped in this PR.** The three routes call the new helper. Unit tests pin the helper's
+four behaviours (outside symlink refused, inside symlink allowed, symlinked root allowed, missing
+target untouched) and one route test per route pins that a symlink under the served root answers
+that route's existing 404 body with none of the outside file's bytes in the response; a listing
+test also pins that an inside symlink stays readable. Dropping the realpath comparison kills the
+output-route symlink test (`.agents/manifests/x26.json`).

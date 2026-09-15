@@ -75,100 +75,20 @@ describe("resolveConfinedForRead", () => {
     mkdirSync(root);
     await expect(resolveConfinedForRead(root, "nope.png")).resolves.toBe(join(root, "nope.png"));
   });
-});
 
-describe("resolveConfinedForRead", () => {
-  let dir: string;
-  beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "cf-confine-read-"));
-  });
-  afterEach(() => {
-    rmSync(dir, { recursive: true, force: true });
-  });
-
-  test("refuses a symlink inside the root that points outside it", async () => {
+  test("allows a symlink that resolves to the root itself (a directory 404s downstream)", async () => {
     const root = join(dir, "root");
     mkdirSync(root);
-    writeFileSync(join(dir, "secret.txt"), "outside bytes");
-    symlinkSync(join(dir, "secret.txt"), join(root, "leak.png"));
-    await expect(resolveConfinedForRead(root, "leak.png")).rejects.toThrow(
-      /Path escapes the allowed directory/,
-    );
+    symlinkSync(root, join(root, "self"));
+    await expect(resolveConfinedForRead(root, "self")).resolves.toBe(join(root, "self"));
   });
 
-  test("allows a symlink inside the root that points at another file in the root", async () => {
+  test("propagates a non-ENOENT realpath error (ENOTDIR through a file) instead of hiding it", async () => {
     const root = join(dir, "root");
     mkdirSync(root);
-    writeFileSync(join(root, "real.png"), "inside bytes");
-    symlinkSync(join(root, "real.png"), join(root, "link.png"));
-    await expect(resolveConfinedForRead(root, "link.png")).resolves.toBe(join(root, "link.png"));
-  });
-
-  test("allows a real root reached through a symlinked path", async () => {
-    // e.g. macOS /tmp → /private/tmp: root itself is under a symlink, target is real.
-    const realRoot = join(dir, "real-root");
-    mkdirSync(realRoot);
-    writeFileSync(join(realRoot, "a.png"), "x");
-    const viaLink = join(dir, "link-to-root");
-    symlinkSync(realRoot, viaLink);
-    await expect(resolveConfinedForRead(viaLink, "a.png")).resolves.toBe(join(viaLink, "a.png"));
-  });
-
-  test("a missing target resolves normally (caller decides not-found)", async () => {
-    const root = join(dir, "root");
-    mkdirSync(root);
-    await expect(resolveConfinedForRead(root, "nope.png")).resolves.toBe(join(root, "nope.png"));
+    writeFileSync(join(root, "plain.png"), "x");
+    const rejection = await resolveConfinedForRead(root, "plain.png", "nested").catch((error: unknown) => error);
+    expect((rejection as NodeJS.ErrnoException).code).toBe("ENOTDIR");
   });
 });
 
-describe("resolveConfinedForRead", () => {
-  let dir: string;
-  beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "cf-confine-read-"));
-  });
-  afterEach(() => {
-    rmSync(dir, { recursive: true, force: true });
-  });
-
-  test("refuses a symlink inside the root that points outside it", async () => {
-    const root = join(dir, "root");
-    mkdirSync(root);
-    writeFileSync(join(dir, "secret.txt"), "outside");
-    symlinkSync(join(dir, "secret.txt"), join(root, "leak.png"));
-    await expect(resolveConfinedForRead(root, "leak.png")).rejects.toThrow(
-      /Path escapes the allowed directory/,
-    );
-  });
-
-  test("allows a symlink inside the root that points at another file in the root", async () => {
-    const root = join(dir, "root");
-    mkdirSync(root);
-    writeFileSync(join(root, "real.png"), "inside");
-    symlinkSync(join(root, "real.png"), join(root, "link.png"));
-    await expect(resolveConfinedForRead(root, "link.png")).resolves.toBe(join(root, "link.png"));
-  });
-
-  test("allows a real target reached through a symlinked root", async () => {
-    // The macOS /tmp → /private/tmp shape: the root itself arrives via a symlink.
-    const real = join(dir, "real");
-    mkdirSync(real);
-    writeFileSync(join(real, "a.png"), "x");
-    const alias = join(dir, "alias");
-    symlinkSync(real, alias);
-    await expect(resolveConfinedForRead(alias, "a.png")).resolves.toBe(join(alias, "a.png"));
-  });
-
-  test("returns a missing target unchanged — the caller's not-found path decides", async () => {
-    const root = join(dir, "root");
-    mkdirSync(root);
-    await expect(resolveConfinedForRead(root, "nope.png")).resolves.toBe(join(root, "nope.png"));
-  });
-
-  test("still rejects a lexical escape before touching the filesystem", async () => {
-    const root = join(dir, "root");
-    mkdirSync(root);
-    await expect(resolveConfinedForRead(root, "../outside")).rejects.toThrow(
-      /Path escapes the allowed directory/,
-    );
-  });
-});

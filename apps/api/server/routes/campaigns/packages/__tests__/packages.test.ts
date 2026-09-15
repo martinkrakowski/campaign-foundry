@@ -184,10 +184,13 @@ describe("GET /campaigns/packages/:campaignId", () => {
   test("still lists a manifest that is a symlink staying inside the campaign dir", async () => {
     mkdirSync(resolve(dir, "packages/camp/instagram-feed"), { recursive: true });
     mkdirSync(resolve(dir, "packages/camp/meta-feed"), { recursive: true });
-    const manifestJson = JSON.stringify(manifest("instagram-feed"));
-    writeFileSync(resolve(dir, "packages/camp/instagram-feed/manifest.json"), manifestJson);
-    symlinkSync(
+    writeFileSync(
       resolve(dir, "packages/camp/instagram-feed/manifest.json"),
+      JSON.stringify(manifest("instagram-feed")),
+    );
+    writeFileSync(resolve(dir, "packages/camp/meta-manifest.json"), JSON.stringify(manifest("meta-feed")));
+    symlinkSync(
+      resolve(dir, "packages/camp/meta-manifest.json"),
       resolve(dir, "packages/camp/meta-feed/manifest.json"),
     );
     const res = await listCall("camp");
