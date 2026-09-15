@@ -634,7 +634,7 @@ describe("GET /output/**", () => {
     fsHook.open = async (path, flags) => {
       const actual = await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
       const handle = await actual.open(path, flags);
-      handle.stat = () => Promise.reject(Object.assign(new Error("EIO: i/o error"), { code: "EIO" }));
+      vi.spyOn(handle, "stat").mockRejectedValue(Object.assign(new Error("EIO: i/o error"), { code: "EIO" }));
       return handle;
     };
     const res = await call("flaky.png");
