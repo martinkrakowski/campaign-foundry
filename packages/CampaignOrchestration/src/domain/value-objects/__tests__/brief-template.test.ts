@@ -694,6 +694,29 @@ describe("isBriefTemplate layer tracks (K1)", () => {
     ).toBe(false);
   });
 
+  test("refuses a track whose stops do not all share one clock (K1b review)", () => {
+    expect(
+      withTracks([
+        {
+          property: "opacity",
+          stops: [
+            { t: 0.5, value: 0, clock: "pose" },
+            { t: 0.5, value: 1, clock: "beat" },
+          ],
+        },
+      ]),
+    ).toBe(false);
+  });
+
+  test("accepts two single-clock tracks on the same property instead — the mixed-clock case above expressed as two tracks", () => {
+    expect(
+      withTracks([
+        { property: "opacity", stops: [{ t: 0.5, value: 0, clock: "pose" }] },
+        { property: "opacity", stops: [{ t: 0.5, value: 1, clock: "beat" }] },
+      ]),
+    ).toBe(true);
+  });
+
   test("refuses every remaining layerTracksProblem rule at this boundary too", () => {
     expect(withTracks([{ property: "opacity", stops: "nope" }])).toBe(false);
     expect(

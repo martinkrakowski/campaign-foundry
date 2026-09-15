@@ -228,7 +228,7 @@ describe("layerTracksProblem — structural refusals", () => {
   });
 });
 
-describe("layerTracksProblem — duplicate t, per clock (K-D9's only refusal)", () => {
+describe("layerTracksProblem — one clock per track (K1b review), and duplicate t within it (K-D9)", () => {
   test("accepts stops declared t-ascending within one clock", () => {
     expect(
       layerTracksProblem("image", [
@@ -294,7 +294,22 @@ describe("layerTracksProblem — duplicate t, per clock (K-D9's only refusal)", 
     });
   });
 
-  test("the same numeric t on two DIFFERENT clocks in one track is legal — they are independent axes", () => {
+  test("the same numeric t on two different clocks needs two tracks — one track's stops share one clock (K1b review)", () => {
+    // What the retired test below called "independent axes in one track" is
+    // now expressed as two separate, single-clock tracks composing on the
+    // same property per K-D9 — never refused.
+    expect(
+      layerTracksProblem("image", [
+        { property: "opacity", stops: [{ t: 0.5, value: 0, clock: "pose" }] },
+        { property: "opacity", stops: [{ t: 0.5, value: 1, clock: "beat" }] },
+      ]),
+    ).toBeUndefined();
+  });
+
+  test("refuses a track whose stops do not all share one clock (K1b review)", () => {
+    // Previously legal (the "independent axes" framing above); closed
+    // because the resolver silently ignored the off-clock stop instead of
+    // ever reading it — data loss with no message.
     expect(
       layerTracksProblem("image", [
         {
@@ -305,7 +320,30 @@ describe("layerTracksProblem — duplicate t, per clock (K-D9's only refusal)", 
           ],
         },
       ]),
-    ).toBeUndefined();
+    ).toEqual({
+      path: "[0].stops[1].clock",
+      must: 'be "pose", the clock this track\'s first stop names (a track\'s stops share one clock)',
+      value: "beat",
+    });
+  });
+
+  test("refuses a mixed-clock track even when the differing stop comes first in a longer list", () => {
+    expect(
+      layerTracksProblem("image", [
+        {
+          property: "opacity",
+          stops: [
+            { t: 0, value: 0, clock: "effect" },
+            { t: 0.5, value: 1, clock: "pose" },
+            { t: 1, value: 2, clock: "pose" },
+          ],
+        },
+      ]),
+    ).toEqual({
+      path: "[0].stops[1].clock",
+      must: 'be "effect", the clock this track\'s first stop names (a track\'s stops share one clock)',
+      value: "pose",
+    });
   });
 
   test("two tracks composing on one property is legal — never refused (K-D9)", () => {

@@ -11,8 +11,13 @@
  * three clocks a stop's `t` is measured in (K-D8): `pose` reads the
  * whole-creative `t`, `beat` a beat-local progress a copy timeline derives,
  * and `effect` the text-effect clock (falling back to the beat-local one
- * with no timeline). Two stops in one track may share a numeric `t` on
- * different clocks — they are independent axes — but not on the same one.
+ * with no timeline). **A track's stops all share one clock** — the one its
+ * first stop names (K1b review) — so two clocks on one property is
+ * expressed as two separate (single-clock) tracks, which compose per K-D9,
+ * not as stops on different clocks inside one track: a mixed-clock track
+ * was previously accepted here and had its off-clock stops silently
+ * ignored by the resolver (K1b), the exact kind of data loss this domain
+ * refuses everywhere else.
  *
  * Two tracks may target the same (layer, property): each property fixes how
  * its tracks combine (`dx`/`dy` sum, `opacity`/`scale` multiply, in
@@ -130,9 +135,9 @@ export function layerTracksProblem(
 
 /**
  * One track's contract: a non-null, non-array object naming a vocabulary
- * `property`, carrying only `property` and `stops`, and a non-empty array of
- * well-formed stops with no duplicate `t` on one clock (K-D9) — declaration
- * order is otherwise free.
+ * `property`, carrying only `property` and `stops`, a non-empty array of
+ * well-formed stops that all share one clock (K1b review), and no duplicate
+ * `t` within that clock (K-D9) — declaration order is otherwise free.
  */
 function trackProblem(track: unknown): LayerTracksProblem | undefined {
   if (typeof track !== "object" || track === null || Array.isArray(track)) {
@@ -160,32 +165,39 @@ function trackProblem(track: unknown): LayerTracksProblem | undefined {
   if (!Array.isArray(stops) || stops.length === 0) {
     return { path: ".stops", must: "be a non-empty array of stops", value: stops };
   }
-  // K-D9's only refusal: a duplicate `t` on one track's SAME clock. Scoped
-  // per clock (K-D8) — a stop's `t` only compares to another stop's on the
-  // same axis, so declaration order is free (a track's stops need not be
-  // written t-ascending) and only a repeated `t` within one clock's own
-  // subsequence is refused. The same `t` on two DIFFERENT clocks is not a
-  // duplicate — they are independent axes.
-  const seenTByClock = new Map<StopClock, Set<number>>();
+  // K1b review: a track's stops all share ONE clock — the one its first stop
+  // names. Two clocks on one property is expressed as two separate
+  // (single-clock) tracks, which compose per K-D9 — not as stops on
+  // different clocks inside one track, which used to be accepted here and
+  // had its off-clock stops silently ignored by the resolver (data loss with
+  // no message, closed at this boundary instead). K-D9's only OTHER
+  // refusal is a duplicate `t` within that one clock — declaration order is
+  // otherwise free (a track's stops need not be written t-ascending).
+  let trackClock: StopClock | undefined;
+  const seenT = new Set<number>();
   for (let i = 0; i < stops.length; i += 1) {
     const problem = stopProblem(stops[i]);
     if (problem !== undefined) {
       return { path: `.stops[${i}]${problem.path}`, must: problem.must, value: problem.value };
     }
     const stop = stops[i] as { readonly t: number; readonly clock: StopClock };
-    const seen = seenTByClock.get(stop.clock);
-    if (seen !== undefined && seen.has(stop.t)) {
+    if (trackClock === undefined) {
+      trackClock = stop.clock;
+    } else if (stop.clock !== trackClock) {
+      return {
+        path: `.stops[${i}].clock`,
+        must: `be "${trackClock}", the clock this track's first stop names (a track's stops share one clock)`,
+        value: stop.clock,
+      };
+    }
+    if (seenT.has(stop.t)) {
       return {
         path: `.stops[${i}].t`,
         must: `be unique among this track's "${stop.clock}"-clock stops (duplicate ${stop.t})`,
         value: stop.t,
       };
     }
-    if (seen === undefined) {
-      seenTByClock.set(stop.clock, new Set([stop.t]));
-    } else {
-      seen.add(stop.t);
-    }
+    seenT.add(stop.t);
   }
   return undefined;
 }

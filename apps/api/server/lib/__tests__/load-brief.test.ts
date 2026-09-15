@@ -1006,6 +1006,37 @@ describe("parseBrief", () => {
       );
     });
 
+    test("a track whose stops do not all share one clock is refused (K1b review)", () => {
+      expect(() =>
+        parseBrief({
+          ...valid,
+          template: withTracks("image", [
+            {
+              property: "opacity",
+              stops: [
+                { t: 0.5, value: 0, clock: "pose" },
+                { t: 0.5, value: 1, clock: "beat" },
+              ],
+            },
+          ]),
+        }),
+      ).toThrow(
+        'Campaign brief field "template.layers[0].tracks[0].stops[1].clock" must be "pose", the clock this track\'s first stop names (a track\'s stops share one clock); got "beat".',
+      );
+    });
+
+    test("two single-clock tracks on the same property parse instead — the mixed-clock case above expressed as two tracks", () => {
+      expect(() =>
+        parseBrief({
+          ...valid,
+          template: withTracks("image", [
+            { property: "opacity", stops: [{ t: 0.5, value: 0, clock: "pose" }] },
+            { property: "opacity", stops: [{ t: 0.5, value: 1, clock: "beat" }] },
+          ]),
+        }),
+      ).not.toThrow();
+    });
+
     test("stops declared t-descending parse — declaration order is free, only a duplicate t is refused", () => {
       expect(() =>
         parseBrief({
