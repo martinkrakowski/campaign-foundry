@@ -730,6 +730,95 @@ describe("derive.ts", () => {
         expect(htmlWeightReading(state)?.bytes).toBe(Math.max(small, large));
       });
 
+      test("brief mode: the figure is the max byte count across the draft's distinct treatment tones", () => {
+        // Qodo finding: weight now follows tone (toneFontWeight), so a
+        // later bold treatment can outweigh an earlier subtle one. The
+        // meter must measure every distinct tone generation will actually
+        // write a bundle for, not just the first treatment's.
+        const elements = [text("Stay wild")];
+        const state = meterState({
+          template: htmlTemplate([{ id: "html", kind: "html", elements }]),
+          treatments: [
+            { id: "t1", layout: "headline-bottom", tone: "subtle" },
+            { id: "t2", layout: "headline-bottom", tone: "bold" },
+          ],
+        });
+        const boldBytes = assembleHtml({
+          elements,
+          canvas: { size: "300x250" },
+          brandColor: "#1473E6",
+          style: {},
+          tone: "bold",
+        }).byteLength;
+        const subtleBytes = assembleHtml({
+          elements,
+          canvas: { size: "300x250" },
+          brandColor: "#1473E6",
+          style: {},
+          tone: "subtle",
+        }).byteLength;
+        // Sanity: tone must actually change the byte count, or this test
+        // cannot tell a max-across-tones bug from a first-tone-only one.
+        expect(boldBytes).not.toBe(subtleBytes);
+        expect(htmlWeightReading(state)?.bytes).toBe(boldBytes);
+      });
+
+      test("variation mode: the figure follows the draft's tone AXIS, not the (empty) treatments list", () => {
+        // The buggy reading always fell back to state.treatments[0]?.tone —
+        // empty in variation mode — which defaults to "bold". Picking a
+        // tone axis that does NOT contain "bold" is what makes this red on
+        // that bug (the fallback would coincidentally still answer "bold").
+        const elements = [text("Stay wild")];
+        const state = meterState({
+          mode: "variation",
+          template: htmlTemplate([{ id: "html", kind: "html", elements }]),
+          variation: { ...initialEditorState().variation, tone: ["subtle"] },
+        });
+        const subtleBytes = assembleHtml({
+          elements,
+          canvas: { size: "300x250" },
+          brandColor: "#1473E6",
+          style: {},
+          tone: "subtle",
+        }).byteLength;
+        expect(htmlWeightReading(state)?.bytes).toBe(subtleBytes);
+      });
+
+      test("variation mode: the figure is the max across the axis, not its first entry", () => {
+        // Order "subtle" before "bold" so a first-tone-only implementation
+        // (as opposed to a true max) would answer the smaller figure.
+        const elements = [text("Stay wild")];
+        const state = meterState({
+          mode: "variation",
+          template: htmlTemplate([{ id: "html", kind: "html", elements }]),
+          variation: { ...initialEditorState().variation, tone: ["subtle", "bold"] },
+        });
+        const boldBytes = assembleHtml({
+          elements,
+          canvas: { size: "300x250" },
+          brandColor: "#1473E6",
+          style: {},
+          tone: "bold",
+        }).byteLength;
+        expect(htmlWeightReading(state)?.bytes).toBe(boldBytes);
+      });
+
+      test("an empty tone axis falls back to the compositor's default (undefined tone), as today", () => {
+        const elements = [text("Stay wild")];
+        const state = meterState({
+          mode: "variation",
+          template: htmlTemplate([{ id: "html", kind: "html", elements }]),
+          variation: { ...initialEditorState().variation, tone: [] },
+        });
+        const expected = assembleHtml({
+          elements,
+          canvas: { size: "300x250" },
+          brandColor: "#1473E6",
+          style: {},
+        }).byteLength;
+        expect(htmlWeightReading(state)?.bytes).toBe(expected);
+      });
+
       test("a disabled html layer's elements are not measured", () => {
         const measured = [text("Stay wild")];
         const state = meterState({

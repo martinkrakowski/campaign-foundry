@@ -26,6 +26,10 @@ import {
   type AccentProps,
   type LogoProps,
   type TextProps,
+  toneFontWeight,
+  htmlTextGeometry,
+  htmlButtonFontSize,
+  htmlTextFirstLineOffset,
 } from "@campaignfoundry/CampaignOrchestration";
 import { CREATIVE_GEOMETRY } from "@campaignfoundry/CampaignOrchestration/creative-geometry";
 import { hexToRgb, wrapText } from "./canvas-util.js";
@@ -440,7 +444,10 @@ export class NodeCanvasCompositor implements CompositorPort {
     const shadeAlpha = subtle
       ? CREATIVE_GEOMETRY.shadeAlpha.subtle
       : CREATIVE_GEOMETRY.shadeAlpha.bold;
-    const fontWeight = subtle ? "500" : "bold";
+    // HL5f: the ONE tone→weight rule, shared with `assembleHtml` — the gap
+    // HL-D8 names ("subtle" render Regular, everything else Bold), never
+    // restated as a second ternary.
+    const fontWeight = toneFontWeight(request.tone);
     // The style block (T5): resolved once here, every absent field falling to
     // today's literal (D54) and the weight to the tone-derived one (D60). The
     // brief's family — a parse-validated allowlist member — overrides the
@@ -1248,10 +1255,7 @@ function drawHtml(c: LayerDrawContext): void {
         ctx.fillStyle = "#ffffff";
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
-        const fontSize = Math.min(
-          Math.round(boxH * 0.45),
-          Math.round(scaleBasis(prepared.canvas, width, height) * 0.6),
-        );
+        const fontSize = htmlButtonFontSize(boxH, scaleBasis(prepared.canvas, width, height));
         ctx.font = `${prepared.fontWeight} ${fontSize}px ${prepared.fontFamily}, sans-serif`;
         ctx.fillText(element.text!, boxX + boxW / 2, boxY + boxH / 2);
         ctx.restore();
@@ -1265,25 +1269,26 @@ function drawHtml(c: LayerDrawContext): void {
         ctx.fillStyle = "#ffffff";
         ctx.textAlign = prepared.style.align;
         ctx.textBaseline = "alphabetic";
-        const fontSize = Math.min(
-          Math.max(12, Math.round(boxH * 0.7)),
-          Math.round(scaleBasis(prepared.canvas, width, height) * prepared.style.sizeScale),
-        );
+        // HL5f: font size, line height and letter spacing come from the one
+        // function `assembleHtml` also calls — see `htmlTextGeometry`.
+        const geometry = htmlTextGeometry({
+          boxH,
+          canvasBasis: scaleBasis(prepared.canvas, width, height),
+          sizeScale: prepared.style.sizeScale,
+          lineHeight: prepared.style.lineHeight,
+          letterSpacing: prepared.style.letterSpacing,
+        });
+        const { fontSize, lineHeight, letterSpacing } = geometry;
         ctx.font = `${prepared.fontWeight} ${fontSize}px ${prepared.fontFamily}, sans-serif`;
-        ctx.letterSpacing = `${prepared.style.letterSpacing * fontSize}px`;
+        ctx.letterSpacing = `${letterSpacing}px`;
 
         const lines = wrapText(ctx, element.text!, boxW);
-        const lineHeight = fontSize * prepared.style.lineHeight;
-        const totalSpan = (lines.length - 1) * lineHeight;
-
-        let startY: number;
-        if (element.frame.anchor === "top") {
-          startY = boxY + fontSize;
-        } else if (element.frame.anchor === "middle") {
-          startY = boxY + (boxH - totalSpan) / 2 + fontSize * 0.35;
-        } else {
-          startY = boxY + boxH - totalSpan;
-        }
+        // HL5f: the per-anchor baseline offset comes from the same function
+        // `assembleHtml` derives its `padding-top` from — see
+        // `htmlTextFirstLineOffset`. The canvas passes the REAL wrapped line
+        // count; the markup, with no browser to wrap in, always passes 1 (the
+        // stated HL5f residual for wrapped `middle`/`bottom` text).
+        const startY = boxY + htmlTextFirstLineOffset(element.frame.anchor, boxH, fontSize, lineHeight, lines.length);
 
         let lineX: number;
         if (prepared.style.align === "left") {

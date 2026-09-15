@@ -165,8 +165,102 @@ describe("assembleHtml (HL4, HL-D3, HL-D6)", () => {
       brandColor: "#000000",
     });
 
+    // HL5f (orchestrator fix round): text elements place with CSS flex
+    // `justify-content`, NOT a padding-top computed for one line — a browser
+    // must lay out however many lines the text actually wraps to, which the
+    // server-side assembler cannot know (no browser, D122). No text or
+    // button element emits a padding-top.
+    expect(result.html).not.toContain("padding-top");
     expect(result.html).toContain("justify-content: center;");
     expect(result.html).toContain("justify-content: flex-end;");
+    expect(result.html).toContain("justify-content: flex-start;");
+  });
+
+  describe("HL5f — renderer fidelity: tone-derived weight and shared geometry", () => {
+    const topElement: HtmlElement = {
+      kind: "text",
+      text: "Hi",
+      frame: { x: 0, y: 0, w: 1, h: 0.2, anchor: "top" },
+    };
+
+    test('tone "subtle" with no brief fontWeight renders weight 500, matching the canvas (D60)', () => {
+      const result = assembleHtml({
+        elements: [topElement],
+        canvas: { ratio: "1:1" },
+        brandColor: "#1473E6",
+        tone: "subtle",
+      });
+      expect(result.html).toContain("font-weight: 500;");
+      expect(result.html).not.toContain("font-weight: bold;");
+    });
+
+    test('tone "bold" with no brief fontWeight renders weight bold', () => {
+      const result = assembleHtml({
+        elements: [topElement],
+        canvas: { ratio: "1:1" },
+        brandColor: "#1473E6",
+        tone: "bold",
+      });
+      expect(result.html).toContain("font-weight: bold;");
+    });
+
+    test("no tone supplied at all still defaults to bold — the pre-HL5f behaviour, unchanged", () => {
+      const result = assembleHtml({
+        elements: [topElement],
+        canvas: { ratio: "1:1" },
+        brandColor: "#1473E6",
+      });
+      expect(result.html).toContain("font-weight: bold;");
+    });
+
+    test("a style-supplied fontWeight still overrides tone", () => {
+      const result = assembleHtml({
+        elements: [topElement],
+        canvas: { ratio: "1:1" },
+        brandColor: "#1473E6",
+        tone: "subtle",
+        style: { fontWeight: 700 },
+      });
+      expect(result.html).toContain("font-weight: 700;");
+    });
+
+    test("a button's font size is the canvas's own two-term min, hand-computed (HL5f item 3)", () => {
+      const result = assembleHtml({
+        elements: [
+          { kind: "button", text: "Shop", frame: { x: 0.1, y: 0.1, w: 0.3, h: 0.08, anchor: "middle" } },
+        ],
+        canvas: { ratio: "1:1" },
+        brandColor: "#1473E6",
+      });
+      // "1:1" resolves to 1080x1080; boxH = 0.08 * 1080 = 86.4.
+      // min(round(86.4 * 0.45), round(1080 * 0.6)) = min(39, 648) = 39.
+      expect(result.html).toContain("font-size: 39px");
+    });
+
+    test("a multi-line bottom-anchored text element is positioned by flex, not a single-line padding-top", () => {
+      // A narrow box and a long headline: certain to wrap to more than one
+      // line in a real browser. The assembler cannot know how many lines
+      // that will be (no browser to wrap in, D122) — a padding-top computed
+      // for one line would push line 2+ below the box, clipped by
+      // `overflow: hidden` (the regression this test pins).
+      const result = assembleHtml({
+        elements: [
+          {
+            kind: "text",
+            text: "This headline is long enough to wrap across more than one line in a real browser",
+            frame: { x: 0, y: 0, w: 0.3, h: 0.3, anchor: "bottom" },
+          },
+        ],
+        canvas: { ratio: "1:1" },
+        brandColor: "#1473E6",
+      });
+      const styleMatch = /<div style="([^"]*)">/.exec(result.html);
+      expect(styleMatch).not.toBeNull();
+      const style = styleMatch![1]!;
+      expect(style).not.toContain("padding-top");
+      expect(style).toContain("display: flex");
+      expect(style).toContain("justify-content: flex-end;");
+    });
   });
 
   test("a clickDestination containing </script> cannot break out of the script element (HL-D7)", () => {

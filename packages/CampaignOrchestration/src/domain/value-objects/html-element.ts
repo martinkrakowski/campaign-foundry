@@ -207,3 +207,89 @@ function frameProblem(frame: unknown, path: string): LayerElementsProblem | unde
   }
   return undefined;
 }
+
+/**
+ * An element's text geometry (HL5f, HL-D5/HL-D8): the font size both renderers
+ * derive for a `text` element, gathered here so `drawHtml` (the canvas) and
+ * `assembleHtml` (the markup) read ONE function instead of each restating the
+ * same two-term min — the box's own 0.7-of-height cap (never below 12px, X10's
+ * legibility floor) against the brief's `sizeScale` at the canvas's own basis.
+ * `lineHeight` and `letterSpacing` are plain products of the resolved font
+ * size; gathering them costs nothing and keeps a future third reader from
+ * restating them a third way.
+ */
+export interface HtmlTextGeometryInput {
+  readonly boxH: number;
+  readonly canvasBasis: number;
+  readonly sizeScale: number;
+  readonly lineHeight: number;
+  readonly letterSpacing: number;
+}
+
+export interface HtmlTextGeometry {
+  readonly fontSize: number;
+  /** Pixels — `fontSize * lineHeight` multiplier, not the bare CSS multiplier. */
+  readonly lineHeight: number;
+  /** Pixels — `letterSpacing` em fraction resolved against `fontSize`. */
+  readonly letterSpacing: number;
+}
+
+export function htmlTextGeometry(input: HtmlTextGeometryInput): HtmlTextGeometry {
+  const fontSize = Math.min(
+    Math.max(12, Math.round(input.boxH * 0.7)),
+    Math.round(input.canvasBasis * input.sizeScale),
+  );
+  return {
+    fontSize,
+    lineHeight: fontSize * input.lineHeight,
+    letterSpacing: input.letterSpacing * fontSize,
+  };
+}
+
+/**
+ * The `button` element's font size (HL5f): the box's own 0.45-of-height cap
+ * against a fixed 0.6-of-canvas-basis ceiling. One shared source for the
+ * canvas drawer and the markup assembler, which already computed the exact
+ * same two-term min independently — item 3 of the HL5f change, confirmed
+ * identical and now pinned rather than merely coincidental.
+ */
+export function htmlButtonFontSize(boxH: number, canvasBasis: number): number {
+  return Math.min(Math.round(boxH * 0.45), Math.round(canvasBasis * 0.6));
+}
+
+/**
+ * The canvas's per-anchor vertical placement (HL5f, HL-D5/HL-D8): the offset
+ * from the element's frame TOP to the first line's alphabetic BASELINE,
+ * replicating `drawHtml`'s three anchor branches exactly (`top`: flush by one
+ * `fontSize`; `middle`: the wrapped block's span centred in the box, offset by
+ * a fixed `fontSize * 0.35` baseline correction; `bottom`: the block's span
+ * flush to the box's bottom edge). `drawHtml` calls this with the REAL
+ * post-wrap line count (`wrapText` measures the real font first) — a
+ * byte-identical refactor of what was three inline branches.
+ *
+ * `assembleHtml` does NOT call this (orchestrator fix round, HL5f): a first
+ * attempt converted this baseline offset into a markup `padding-top` computed
+ * for a single line, which is exact for `top` but WRONG for any `middle` or
+ * `bottom` text that actually wraps to more than one line in the browser —
+ * assembling is server-side with no browser to know the real line count in
+ * (D122), and a fixed single-line padding pushes line 2+ below the box, where
+ * `overflow: hidden` clips it. The markup instead positions with CSS flex
+ * `justify-content`, which the browser resolves against however many lines
+ * the text actually takes — structurally correct for any line count. The
+ * residual against the canvas (stated in the plan, not narrowed here) is the
+ * baseline-correction constant above (`fontSize * 0.35` for `middle`; the
+ * canvas anchors to the alphabetic baseline, the browser's flex centring to
+ * the line box), which does not vary with line count either way.
+ */
+export function htmlTextFirstLineOffset(
+  anchor: AnchorKind,
+  boxH: number,
+  fontSize: number,
+  lineHeight: number,
+  lineCount: number,
+): number {
+  const totalSpan = (lineCount - 1) * lineHeight;
+  if (anchor === "top") return fontSize;
+  if (anchor === "middle") return (boxH - totalSpan) / 2 + fontSize * 0.35;
+  return boxH - totalSpan;
+}
