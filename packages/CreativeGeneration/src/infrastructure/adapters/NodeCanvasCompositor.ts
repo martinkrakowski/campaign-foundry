@@ -3,6 +3,7 @@ import { createCanvas, loadImage, type Image, type SKRSContext2D } from "@napi-r
 import {
   CANONICAL_TEMPLATES,
   beatAt,
+  easeOutCubic,
   resolveCanvas,
   resolveTimeline,
   resolveStyle,
@@ -589,10 +590,6 @@ const SIDES = ["top", "right", "bottom", "left"] as const;
 const ELLIPSIS = "…";
 /** Zoom amount applied away from the ken-burns rest pose so scale(restT) === 1. */
 const KEN_BURNS_ZOOM = 0.08;
-
-function easeOutCubic(t: number): number {
-  return 1 - (1 - t) ** 3;
-}
 
 /** The copy layer's whole-block pose at a moment: the text effect's output (T6). */
 interface TextEffectPose {

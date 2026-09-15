@@ -1,0 +1,51 @@
+{
+  "version": 1,
+  "lane": "K1a",
+  "mutations": [
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/tracks.ts",
+      "before": "    if (seen !== undefined && seen.has(stop.t)) {",
+      "after": "    if (false) {",
+      "because": "K-D9's only refusal is a duplicate t on one track's same clock. Disabling the check lets two stops at the exact same t on the same clock through, which K-D9 refuses.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/tracks.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/tracks.ts",
+      "before": "  const seenTByClock = new Map<StopClock, Set<number>>();\n  for (let i = 0; i < stops.length; i += 1) {\n    const problem = stopProblem(stops[i]);\n    if (problem !== undefined) {\n      return { path: `.stops[${i}]${problem.path}`, must: problem.must, value: problem.value };\n    }\n    const stop = stops[i] as { readonly t: number; readonly clock: StopClock };\n    const seen = seenTByClock.get(stop.clock);\n    if (seen !== undefined && seen.has(stop.t)) {\n      return {\n        path: `.stops[${i}].t`,\n        must: `be unique among this track's \"${stop.clock}\"-clock stops (duplicate ${stop.t})`,\n        value: stop.t,\n      };\n    }\n    if (seen === undefined) {\n      seenTByClock.set(stop.clock, new Set([stop.t]));\n    } else {\n      seen.add(stop.t);\n    }\n  }",
+      "after": "  const seenT = new Set<number>();\n  for (let i = 0; i < stops.length; i += 1) {\n    const problem = stopProblem(stops[i]);\n    if (problem !== undefined) {\n      return { path: `.stops[${i}]${problem.path}`, must: problem.must, value: problem.value };\n    }\n    const stop = stops[i] as { readonly t: number; readonly clock: StopClock };\n    if (seenT.has(stop.t)) {\n      return {\n        path: `.stops[${i}].t`,\n        must: `be unique among this track's \"${stop.clock}\"-clock stops (duplicate ${stop.t})`,\n        value: stop.t,\n      };\n    }\n    seenT.add(stop.t);\n  }",
+      "because": "K-D8 scopes the duplicate-t refusal PER CLOCK: two stops sharing a t on different clocks are independent axes and legal. Collapsing the per-clock seen-set to one set across all clocks makes a legal cross-clock duplicate look refused.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/tracks.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/shared/src/infrastructure/brief-yaml.ts",
+      "before": "const LAYER_KEY_ORDER = [\"id\", \"kind\", \"enabled\", \"props\", \"elements\", \"tracks\"] as const;",
+      "after": "const LAYER_KEY_ORDER = [\"id\", \"kind\", \"enabled\", \"props\", \"elements\"] as const;",
+      "because": "orderedKeys appends unnamed keys at the end, so dropping tracks from LAYER_KEY_ORDER does not make it disappear — it falls into the same tail bucket as any other unrecognised key, which a plain 'tracks appears in the output' assertion cannot tell apart from tracks sitting at its declared sixth position. Only a fixture with an unnamed key written before tracks in source order proves the position.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/shared/src/infrastructure/__tests__/brief-yaml.test.ts"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

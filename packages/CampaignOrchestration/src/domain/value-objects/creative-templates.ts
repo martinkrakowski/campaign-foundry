@@ -10,6 +10,7 @@ import type { LayerProps } from "./brief-template.js";
 import type { CreativeType } from "./creative-types.js";
 import type { HtmlElement } from "./html-element.js";
 import type { LayerKind } from "./layer-kinds.js";
+import type { Track } from "./tracks.js";
 
 export const CANONICAL_TEMPLATE_IDS = [
   "canonical-image-text",
@@ -44,6 +45,13 @@ export interface CreativeTemplateLayer {
    * grow the key.
    */
   readonly elements?: readonly HtmlElement[];
+  /**
+   * The layer's own keyframe tracks (K1). Optional, and absent means no
+   * motion — the canonical library's own layers never carry tracks; only a
+   * brief's materialised copy can. Only a kind this compositor draws through
+   * one single mechanism may carry a defined list (K1a's kind decision).
+   */
+  readonly tracks?: readonly Track[];
 }
 
 export interface CreativeTemplate {

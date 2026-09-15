@@ -27,14 +27,25 @@ export const BRIEF_KEY_ORDER = [
   "clickDestination",
 ] as const;
 
-/** A template layer's canonical key order (L3b, D134, D129, HL1): identity, kind, enabled, then its props and elements. */
-const LAYER_KEY_ORDER = ["id", "kind", "enabled", "props", "elements"] as const;
+/**
+ * A template layer's canonical key order (L3b, D134, D129, HL1, K1): identity,
+ * kind, enabled, then its props, elements and — last, deliberately — its
+ * keyframe tracks (K1): motion is a choreography layered over an already-
+ * defined shape and content, so it sits after both.
+ */
+const LAYER_KEY_ORDER = ["id", "kind", "enabled", "props", "elements", "tracks"] as const;
 
 /** One html element's canonical key order (HL1): kind, its copy, then its frame. */
 const ELEMENT_KEY_ORDER = ["kind", "text", "frame"] as const;
 
 /** A frame's canonical key order (D130): the fractions, then the anchor. */
 const FRAME_KEY_ORDER = ["x", "y", "w", "h", "anchor"] as const;
+
+/** One keyframe track's canonical key order (K1): the property, then its stops. */
+const TRACK_KEY_ORDER = ["property", "stops"] as const;
+
+/** One track stop's canonical key order (K1, K-D8): position, value, its easing override, then its clock. */
+const STOP_KEY_ORDER = ["t", "value", "easing", "clock"] as const;
 
 /**
  * The props' canonical key order: the order the domain's `LayerProps` union
@@ -75,9 +86,26 @@ function orderedElement(element: unknown): unknown {
   return ordered;
 }
 
+/** Reorder one keyframe track's keys (property, stops) and each stop's own keys. */
+function orderedTrack(track: unknown): unknown {
+  if (!isPlainRecord(track)) return track;
+  const ordered = orderedKeys(track, TRACK_KEY_ORDER);
+  if (Array.isArray(ordered.stops)) {
+    ordered.stops = ordered.stops.map(orderedStop);
+  }
+  return ordered;
+}
+
+/** Reorder one track stop's keys (t, value, easing, clock). */
+function orderedStop(stop: unknown): unknown {
+  if (!isPlainRecord(stop)) return stop;
+  return orderedKeys(stop, STOP_KEY_ORDER);
+}
+
 /**
- * Reorder a layer's keys (id, kind, enabled, props, elements) and, when it
- * carries props or elements, those keys in their own canonical order.
+ * Reorder a layer's keys (id, kind, enabled, props, elements, tracks) and,
+ * when it carries props, elements or tracks, those keys in their own
+ * canonical order.
  */
 function orderedLayer(layer: unknown): unknown {
   if (!isPlainRecord(layer)) return layer;
@@ -87,6 +115,9 @@ function orderedLayer(layer: unknown): unknown {
   }
   if (Array.isArray(ordered.elements)) {
     ordered.elements = ordered.elements.map(orderedElement);
+  }
+  if (Array.isArray(ordered.tracks)) {
+    ordered.tracks = ordered.tracks.map(orderedTrack);
   }
   return ordered;
 }
@@ -110,7 +141,9 @@ function orderedTemplate(template: unknown): unknown {
  * dump with the layer's own canonical order — `id`, `kind`, `enabled`,
  * `props` and `elements`, with the props keys in the union's order (L3b,
  * D134) and each element's keys and frame keys in order (HL1) — so a save
- * serialises a hand-written layer deterministically too.
+ * serialises a hand-written layer deterministically too. `tracks`, when
+ * present, sits last (K1) with each track's own keys (`property`, `stops`)
+ * and each stop's (`t`, `value`, `easing`, `clock`) in their own order.
  */
 export function dumpBrief(brief: object): string {
   const source = brief as Record<string, unknown>;

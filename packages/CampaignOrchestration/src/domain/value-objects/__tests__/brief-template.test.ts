@@ -598,6 +598,122 @@ describe("isBriefTemplate layer elements (HL1)", () => {
   });
 });
 
+describe("isBriefTemplate layer tracks (K1)", () => {
+  const track = { property: "opacity" as const, stops: [{ t: 0, value: 0, clock: "pose" as const }] };
+
+  /** The canonical image-text template with `tracks` swapped onto its image layer. */
+  const withTracks = (tracks: unknown): boolean =>
+    isBriefTemplate({
+      id: "canonical-image-text",
+      version: 1,
+      creativeType: "image-text",
+      unit: "standard-web",
+      layers: [
+        { id: "image", kind: "image", tracks },
+        { id: "shade", kind: "shade" },
+        { id: "accent", kind: "accent" },
+        { id: "static-text", kind: "static-text" },
+        { id: "logo", kind: "logo" },
+      ],
+    });
+
+  test("accepts a drawing layer carrying tracks, and absent or empty tracks", () => {
+    expect(withTracks(undefined)).toBe(true);
+    expect(withTracks([])).toBe(true);
+    expect(withTracks([track])).toBe(true);
+  });
+
+  test("accepts stops declared t-descending — declaration order is free, only a duplicate t is refused", () => {
+    expect(
+      withTracks([
+        {
+          property: "opacity",
+          stops: [
+            { t: 0.6, value: 0, clock: "pose" },
+            { t: 0.2, value: 1, clock: "pose" },
+          ],
+        },
+      ]),
+    ).toBe(true);
+  });
+
+  test("refuses tracks on shade, logo and accent — no pose mechanism reads eased/motion today (plan review)", () => {
+    for (const kind of ["shade", "logo", "accent"] as const) {
+      expect(
+        isBriefTemplate({
+          id: "canonical-image-text",
+          version: 1,
+          creativeType: "image-text",
+          unit: "standard-web",
+          layers: [
+            { id: "image", kind: "image" },
+            { id: "shade", kind: "shade", ...(kind === "shade" ? { tracks: [track] } : {}) },
+            { id: "accent", kind: "accent", ...(kind === "accent" ? { tracks: [track] } : {}) },
+            { id: "static-text", kind: "static-text" },
+            { id: "logo", kind: "logo", ...(kind === "logo" ? { tracks: [track] } : {}) },
+          ],
+        }),
+      ).toBe(false);
+    }
+  });
+
+  test("refuses tracks on an html layer — the kind's two renderers cannot agree on motion", () => {
+    expect(
+      isBriefTemplate({
+        id: "canonical-image-html",
+        version: 1,
+        creativeType: "image-html",
+        unit: "standard-web",
+        layers: [
+          { id: "image", kind: "image" },
+          { id: "html", kind: "html", tracks: [track] },
+          { id: "logo", kind: "logo" },
+        ],
+      }),
+    ).toBe(false);
+  });
+
+  test("refuses a malformed track — an unknown property, a bad stop", () => {
+    expect(withTracks([{ property: "rotation", stops: track.stops }])).toBe(false);
+    expect(withTracks([{ property: "opacity", stops: [{ t: 2, value: 0, clock: "pose" }] }])).toBe(
+      false,
+    );
+  });
+
+  test("refuses a duplicate t on one track's same clock (K-D9)", () => {
+    expect(
+      withTracks([
+        {
+          property: "opacity",
+          stops: [
+            { t: 0.5, value: 0, clock: "pose" },
+            { t: 0.5, value: 1, clock: "pose" },
+          ],
+        },
+      ]),
+    ).toBe(false);
+  });
+
+  test("refuses every remaining layerTracksProblem rule at this boundary too", () => {
+    expect(withTracks([{ property: "opacity", stops: "nope" }])).toBe(false);
+    expect(
+      withTracks([{ property: "opacity", stops: [{ t: 0, value: NaN, clock: "pose" }] }]),
+    ).toBe(false);
+    expect(
+      withTracks([{ property: "opacity", stops: [{ t: 0, value: 0, clock: "global" }] }]),
+    ).toBe(false);
+    expect(
+      withTracks([
+        { property: "opacity", stops: [{ t: 0, value: 0, clock: "pose", easing: "bounce" }] },
+      ]),
+    ).toBe(false);
+    expect(withTracks([{ property: "opacity", stops: track.stops, layer: "image" }])).toBe(false);
+    expect(
+      withTracks([{ property: "opacity", stops: [{ ...track.stops[0], extra: 1 }] }]),
+    ).toBe(false);
+  });
+});
+
 describe("isBriefTemplate mirrors the API's table rules (X11)", () => {
   /** A well-formed template object for the type, with `layers` swapped in. */
   const asTemplate = (

@@ -870,6 +870,203 @@ describe("parseBrief", () => {
     });
   });
 
+  describe("layer tracks (K1)", () => {
+    const track = { property: "opacity", stops: [{ t: 0, value: 0, clock: "pose" }] };
+
+    /** The canonical image-text template with `tracks` swapped onto one layer. */
+    const withTracks = (layerId: string, tracks: unknown) => ({
+      id: "canonical-image-text",
+      version: 1,
+      creativeType: "image-text",
+      unit: "standard-web",
+      layers: [
+        { id: "image", kind: "image" },
+        { id: "shade", kind: "shade" },
+        { id: "accent", kind: "accent" },
+        { id: "static-text", kind: "static-text" },
+        { id: "logo", kind: "logo" },
+      ].map((layer) => (layer.id === layerId ? { ...layer, tracks } : layer)),
+    });
+
+    test("a drawing layer carrying tracks parses and carries the list verbatim", () => {
+      const parsed = parseBrief({ ...valid, template: withTracks("image", [track]) });
+      expect(
+        parsed.template.layers.find((layer) => layer.kind === "image")?.tracks,
+      ).toEqual([track]);
+    });
+
+    test("a layer with no tracks, or an empty list, parses", () => {
+      expect(() => parseBrief({ ...valid, template: withTracks("image", undefined) })).not.toThrow();
+      expect(() => parseBrief({ ...valid, template: withTracks("image", []) })).not.toThrow();
+    });
+
+    test("tracks on html are refused — the kind's two renderers cannot agree on motion", () => {
+      expect(() =>
+        parseBrief({
+          ...valid,
+          output: { formats: ["html"] },
+          template: {
+            id: "canonical-image-html",
+            version: 1,
+            creativeType: "image-html",
+            unit: "standard-web",
+            layers: [
+              { id: "image", kind: "image" },
+              { id: "html", kind: "html", tracks: [track] },
+              { id: "logo", kind: "logo" },
+            ],
+          },
+        }),
+      ).toThrow(
+        `Campaign brief field "template.layers[1].tracks" must be absent for layer kind "html"; got ${JSON.stringify([track])}.`,
+      );
+    });
+
+    test("tracks that are not an array are refused", () => {
+      expect(() =>
+        parseBrief({ ...valid, template: withTracks("image", "nope") }),
+      ).toThrow(
+        'Campaign brief field "template.layers[0].tracks" must be an array of tracks; got "nope".',
+      );
+    });
+
+    test("a malformed track names its index and field", () => {
+      expect(() =>
+        parseBrief({
+          ...valid,
+          template: withTracks("image", [{ property: "rotation", stops: track.stops }]),
+        }),
+      ).toThrow(
+        'Campaign brief field "template.layers[0].tracks[0].property" must be one of "opacity", "scale", "dx", "dy"; got "rotation".',
+      );
+      expect(() =>
+        parseBrief({
+          ...valid,
+          template: withTracks("image", [{ property: "opacity", stops: [{ t: 2, value: 0, clock: "pose" }] }]),
+        }),
+      ).toThrow(
+        'Campaign brief field "template.layers[0].tracks[0].stops[0].t" must be a number in [0, 1]; got 2.',
+      );
+    });
+
+    test("every remaining rule in layerTracksProblem refuses at this boundary too", () => {
+      const cases: ReadonlyArray<readonly [string, unknown, string]> = [
+        [
+          "stops that are not an array",
+          [{ property: "opacity", stops: "nope" }],
+          'Campaign brief field "template.layers[0].tracks[0].stops" must be a non-empty array of stops; got "nope".',
+        ],
+        [
+          "a non-finite value",
+          [{ property: "opacity", stops: [{ t: 0, value: Number.POSITIVE_INFINITY, clock: "pose" }] }],
+          'Campaign brief field "template.layers[0].tracks[0].stops[0].value" must be a finite number; got null.',
+        ],
+        [
+          "an unknown clock",
+          [{ property: "opacity", stops: [{ t: 0, value: 0, clock: "global" }] }],
+          'Campaign brief field "template.layers[0].tracks[0].stops[0].clock" must be one of "pose", "beat", "effect"; got "global".',
+        ],
+        [
+          "an unknown easing",
+          [{ property: "opacity", stops: [{ t: 0, value: 0, clock: "pose", easing: "bounce" }] }],
+          'Campaign brief field "template.layers[0].tracks[0].stops[0].easing" must be one of "ease-out-cubic", "linear"; got "bounce".',
+        ],
+        [
+          "an unknown field on a track",
+          [{ property: "opacity", stops: track.stops, layer: "image" }],
+          'Campaign brief field "template.layers[0].tracks[0].layer" must be one of "property", "stops"; got "image".',
+        ],
+        [
+          "an unknown field on a stop",
+          [{ property: "opacity", stops: [{ t: 0, value: 0, clock: "pose", extra: 1 }] }],
+          'Campaign brief field "template.layers[0].tracks[0].stops[0].extra" must be one of "t", "value", "easing", "clock"; got 1.',
+        ],
+      ];
+      for (const [, tracks, message] of cases) {
+        expect(() => parseBrief({ ...valid, template: withTracks("image", tracks) })).toThrow(message);
+      }
+    });
+
+    test("a duplicate t on one track's same clock is refused (K-D9)", () => {
+      expect(() =>
+        parseBrief({
+          ...valid,
+          template: withTracks("image", [
+            {
+              property: "opacity",
+              stops: [
+                { t: 0.5, value: 0, clock: "pose" },
+                { t: 0.5, value: 1, clock: "pose" },
+              ],
+            },
+          ]),
+        }),
+      ).toThrow(
+        'Campaign brief field "template.layers[0].tracks[0].stops[1].t" must be unique among this track\'s "pose"-clock stops (duplicate 0.5); got 0.5.',
+      );
+    });
+
+    test("stops declared t-descending parse — declaration order is free, only a duplicate t is refused", () => {
+      expect(() =>
+        parseBrief({
+          ...valid,
+          template: withTracks("image", [
+            {
+              property: "opacity",
+              stops: [
+                { t: 0.6, value: 0, clock: "pose" },
+                { t: 0.2, value: 1, clock: "pose" },
+              ],
+            },
+          ]),
+        }),
+      ).not.toThrow();
+    });
+
+    test("tracks on shade, logo and accent are refused — no pose mechanism reads eased/motion today (plan review)", () => {
+      for (const layerId of ["shade", "accent", "logo"]) {
+        expect(() =>
+          parseBrief({ ...valid, template: withTracks(layerId, [track]) }),
+        ).toThrow(new RegExp(`template\\.layers\\[\\d+\\]\\.tracks" must be absent for layer kind`));
+      }
+    });
+
+    test("two tracks composing on one property is legal — never refused (K-D9)", () => {
+      expect(() =>
+        parseBrief({
+          ...valid,
+          template: withTracks("image", [
+            { property: "dx", stops: [{ t: 0, value: 1, clock: "pose" }] },
+            { property: "dx", stops: [{ t: 0, value: 2, clock: "pose" }] },
+          ]),
+        }),
+      ).not.toThrow();
+    });
+
+    test("the refusal holds with enforceCapabilities: false (authoring mode too)", () => {
+      expect(() =>
+        parseBrief(
+          {
+            ...valid,
+            output: { formats: ["html"] },
+            template: {
+              id: "canonical-image-html",
+              version: 1,
+              creativeType: "image-html",
+              unit: "standard-web",
+              layers: [
+                { id: "image", kind: "image" },
+                { id: "html", kind: "html", tracks: [track] },
+                { id: "logo", kind: "logo" },
+              ],
+            },
+          },
+          { enforceCapabilities: false },
+        ),
+      ).toThrow(/template\.layers\[1\]\.tracks/);
+    });
+  });
+
   describe("output formats against the template's output families (X14)", () => {
     /** The canonical image-html template, elements and all — no edits needed. */
     const htmlTemplate = {

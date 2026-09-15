@@ -5190,3 +5190,32 @@ the API boundary-refusal call site). Goldens untouched.
 **Decisions:** no line-count-independent baseline correction was added to the markup — the canvas-vs-flex offset (baseline vs line-box) could not be cleanly separated from the line-count-dependent terms without a browser, so it stays a stated residual rather than an approximated constant.
 
 **Left open:** none new; HL5e remains dispatchable.
+
+### 2026-09-15 — K1a: the keyframe track model (feat/k1a-track-model)
+
+**Mode:** Implementer. Branch `feat/k1a-track-model`, worktree `cf-k1a`, from `origin/main` (82a474d4). Plan: K1a in docs/planning/2026-09-10_keyframing.md.
+
+**Changes:** `easeOutCubic` moved out of `NodeCanvasCompositor.ts` into `packages/CampaignOrchestration/src/domain/value-objects/easing.ts` (K-D7), byte-neutral — one import back, goldens unchanged. New `tracks.ts`: `Track`/`Stop` value objects and `layerTracksProblem` (K-D8, K-D9), shaped like `layerElementsProblem`; wired into `isLayerEntry` (`brief-template.ts`) and the API's `validateTemplate` (`load-brief.ts`). `LAYER_KEY_ORDER` (`brief-yaml.ts`) gains `tracks` as its sixth, last key, with `TRACK_KEY_ORDER`/`STOP_KEY_ORDER`.
+
+**Decisions:** every layer kind this compositor draws through its own `LAYER_DRAWERS` entry accepts tracks (image, video, shade, accent, static-text, animated-text, logo). `html` refuses — it renders through two independent paths (the canvas drawer and the markup assembler) and only one has any motion mechanism, so a track would render differently depending on which produced the creative. `fill` refuses — no creative type accepts it yet (D131) and this compositor draws it nowhere. `tracks` sits last in `LAYER_KEY_ORDER`: motion is a choreography layered over an already-defined shape (`props`) and content (`elements`). K-D9's only refusal (duplicate `t` on one track's same clock) is the equal case of the same-clock strictly-increasing check, not a second rule; two stops sharing a `t` on different clocks are independent axes and legal, and two tracks composing on one property is never refused. `easing.ts`/`tracks.ts` are kebab-case, hand-written modules outside hexagen's PascalCase inventory (`tools/arch-inventory/lib/naming.ts`), the same class as `html-element.ts`/`brief-template.ts` — no `.architecture/manifest.yaml` entry needed; verified empirically (`arch:inventory` clean, `sync:dry` Total ops 0) rather than assumed.
+
+**Tests:** for every new export (easing, tracks, the two boundary wirings, the YAML round trip), the test was written and run red BEFORE its implementation, then implemented to green — shown, not merely claimed. `mutate:verify .agents/manifests/k1a.json`: 2 mutations re-run, both caught (the duplicate-`t` refusal; `tracks` dropped from `LAYER_KEY_ORDER`, caught only because the round-trip fixture writes an unnamed key before `tracks` in source order — `orderedKeys` appends unnamed keys at the end, so a plain "tracks appears" assertion would not have noticed).
+
+**Left open:** K1b (the resolver, `resolveTracks`) is dispatchable next, behind this PR.
+
+### 2026-09-15 — K1a fix round (PR #429, gated at bbc549c7)
+
+**Mode:** Implementer, fix round. Branch `feat/k1a-track-model`, worktree `cf-k1a`. Plan: K1a in docs/planning/2026-09-10_keyframing.md.
+
+**Changes (all Qodo/plan-review findings, dispositioned by the orchestrator):**
+1. K-D9's duplicate-`t` refusal is now scoped strictly per clock (K-D8): a per-clock `Map<StopClock, Set<number>>` replaces the previous `t <= prevT` ordering check, so a track's stops may be declared in any order and only a repeated `t` within one clock's own subsequence is refused. Message: `be unique among this track's "<clock>"-clock stops (duplicate <t>)`.
+2. `TRACKABLE_LAYER_KINDS` narrowed to `image`, `video`, `static-text`, `animated-text` — the kinds K2/K3 drive. `shade`/`logo` have no pose mechanism (`paintShade`/`drawLogo` read neither `eased` nor `motion`); `accent`'s only motion (the wipe) is a clip-extent animation none of `TRACK_PROPERTIES` represents. `html`/`fill` refuse as before.
+3. `TRACK_PROPERTIES` doc corrected: "the four initial pose properties," not "exactly what the compositor moves" — names the accent-wipe gap explicitly as K2's own representation problem.
+4. `§` references made unambiguous (section names, not bare numbers) in `easing.ts` and `tracks.test.ts`.
+5. `layerTracksProblem`'s doc no longer says "non-empty array of tracks" (contradicted "the empty array included" two lines above) — an empty `tracks` list is the same as absent.
+
+**Plan doc (2026-09-10_keyframing.md), plan review 2026-09-15:** K1a's §5 note now names `TRACKABLE_LAYER_KINDS` and each refusal's reason; K-D9 row states the per-clock scoping; K-D8 row corrected (mechanism, not the decision) — `copyT` selects the beat via `beatAt` in `drawSequencedCopy` (~1037), beat-local progress runs on the pose clock `t` (~1064), cited by symbol. Added a full K1b specification paragraph (input shape, legacy-path `beatAt` avoidance, effect-clock/entrance-window mapping, `Pose` domain type, interpolation rule, copy-vs-byLayer split). K4 row: preset-before-authored fold order stated as the only order; html implication; K5/X16 `canonicalLayer` constraint. §3 DoD split into K1a/K1b bullets plus an explicit interim contract (tracks are accepted-but-inert until K2/K4). §5's stale "K1 has no premise" replaced with a `premise K1b` fence (`! grep -rq 'resolveTracks' ... `), holding until the resolver lands. Stale header ("Nothing dispatched") corrected.
+
+**Mutations:** `.agents/manifests/k1a.json` now carries 3 (all re-verified with `mutate:verify`, not merely re-asserted): (1) disabling the same-clock duplicate check — caught; (2) collapsing the per-clock seen-set to one set across all clocks, making a legal cross-clock duplicate look refused — caught, added per this round's request; (3) dropping `tracks` from `LAYER_KEY_ORDER` — caught, unchanged from the previous round.
+
+**Gate:** full gate rerun in the foreground after these changes; see the fix-round report for exit codes and coverage counters.

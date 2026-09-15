@@ -396,3 +396,136 @@ describe("dumpBrief element order (HL1)", () => {
     expect(parse(yaml)).toEqual(passthrough);
   });
 });
+
+describe("dumpBrief layer tracks order (K1)", () => {
+  // A layer and its tracks/stops written with keys scrambled, so the
+  // assertions below can only pass if the writer orders them.
+  const templated = {
+    ...brief,
+    template: {
+      id: "canonical-image-text",
+      version: 1,
+      creativeType: "image-text",
+      unit: "standard-web",
+      layers: [
+        { kind: "image", id: "bg" },
+        {
+          tracks: [
+            {
+              stops: [
+                { clock: "pose", easing: "linear", value: 1, t: 0 },
+                { clock: "pose", value: 0.5, t: 1 },
+              ],
+              property: "scale",
+            },
+          ],
+          kind: "image",
+          id: "hero",
+        },
+        { kind: "logo", id: "mark" },
+      ],
+    },
+  };
+
+  test("emits a layer's keys as id, kind, props, elements, tracks — tracks last (K1's positional decision)", () => {
+    const yaml = dumpBrief(templated);
+    const heroAt = yaml.indexOf("id: hero");
+    const heroKindAt = yaml.indexOf("kind: image", heroAt);
+    expect(heroAt).toBeLessThan(heroKindAt);
+    expect(heroKindAt).toBeLessThan(yaml.indexOf("tracks:"));
+    expect(yaml.indexOf("tracks:")).toBeLessThan(yaml.indexOf("property: scale"));
+  });
+
+  test("emits a track's keys as property, stops, and a stop's as t, value, easing, clock", () => {
+    const yaml = dumpBrief(templated);
+    expect(yaml.indexOf("property: scale")).toBeLessThan(yaml.indexOf("stops:"));
+    expect(yaml.indexOf("t: 0")).toBeLessThan(yaml.indexOf("value: 1"));
+    expect(yaml.indexOf("value: 1")).toBeLessThan(yaml.indexOf("easing: linear"));
+    expect(yaml.indexOf("easing: linear")).toBeLessThan(yaml.indexOf("clock: pose"));
+    // The second stop carries no easing override; its own key order still holds.
+    expect(yaml.indexOf("t: 1")).toBeLessThan(yaml.indexOf("value: 0.5"));
+  });
+
+  test("a layer's tracks round-trip through YAML and dump byte-identically", () => {
+    const yaml = dumpBrief(templated);
+    expect(parse(yaml)).toEqual(templated);
+    expect(dumpBrief(parse(yaml) as object)).toBe(yaml);
+  });
+
+  test("tracks/stops entries the order cannot name pass through untouched", () => {
+    const passthrough = {
+      ...brief,
+      template: {
+        id: "x",
+        layers: [
+          { id: "a", kind: "image", tracks: "junk" },
+          { id: "b", kind: "image", tracks: ["junk", { stops: "junk" }] },
+          {
+            id: "c",
+            kind: "image",
+            tracks: [{ property: "opacity", stops: ["junk", { clock: "pose", t: 0, value: 0 }] }],
+          },
+        ],
+      },
+    };
+    const yaml = dumpBrief(passthrough);
+    expect(yaml).toContain("tracks: junk");
+    expect(yaml).toContain("stops: junk");
+    expect(yaml).toContain("- junk");
+    expect(parse(yaml)).toEqual(passthrough);
+  });
+
+  test("a layer with no tracks behaves exactly as today — round-trips byte-identically", () => {
+    const propless = {
+      ...brief,
+      template: {
+        id: "canonical-video",
+        version: 1,
+        creativeType: "video",
+        unit: "standard-web",
+        layers: [
+          { id: "video", kind: "video" },
+          { id: "logo", kind: "logo" },
+        ],
+      },
+    };
+    const yaml = dumpBrief(propless);
+    expect(yaml).not.toContain("tracks:");
+    expect(parse(yaml)).toEqual(propless);
+    expect(dumpBrief(parse(yaml) as object)).toBe(yaml);
+  });
+
+  // Positional proof (the plan's own warning): `orderedKeys` appends unnamed
+  // keys at the end, so dropping `tracks` from `LAYER_KEY_ORDER` would still
+  // leave it *somewhere* near the end — a plain "tracks appears" assertion
+  // cannot catch that mutation. This fixture writes an unnamed key ("extra")
+  // BEFORE `tracks` in source order: with `tracks` in `LAYER_KEY_ORDER`, it is
+  // emitted at its declared (sixth) position, always ahead of any unnamed
+  // remainder key regardless of that key's own source position. Drop `tracks`
+  // from the order array and it falls into the "remaining keys" bucket too,
+  // in source order — after "extra" — flipping this assertion (mirrors the
+  // `clickDestination` positional test above).
+  test("tracks sits at its declared (sixth) key position, not merely 'somewhere' (positional proof)", () => {
+    const positional = {
+      ...brief,
+      template: {
+        id: "canonical-image-text",
+        version: 1,
+        creativeType: "image-text",
+        unit: "standard-web",
+        layers: [
+          {
+            extra: "z",
+            tracks: [{ property: "opacity", stops: [{ t: 0, value: 0, clock: "pose" }] }],
+            id: "image",
+            kind: "image",
+          },
+        ],
+      },
+    };
+    const yaml = dumpBrief(positional);
+    expect(yaml.indexOf("tracks:")).toBeLessThan(yaml.indexOf("extra:"));
+    expect(parse(yaml)).toEqual(positional);
+    expect(dumpBrief(parse(yaml) as object)).toBe(yaml);
+  });
+});

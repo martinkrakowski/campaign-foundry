@@ -1,0 +1,239 @@
+/**
+ * Keyframe tracks (K1, K-D7–K-D9): the track model that lets a preset expand
+ * into keyframes (K2/K3) and a user author one directly (K4). This lane
+ * (K1a) ships the value objects and the boundary validation only — no
+ * resolver and no compositor caller (K1b).
+ *
+ * A track binds one layer to one animatable property and a list of stops;
+ * the layer is implicit by nesting (`layers[i].tracks`, K-D4's one
+ * addressing scheme) — a track carries no `layer` field of its own, which is
+ * the second addressing scheme the plan refuses. `Stop.clock` names which of
+ * three clocks a stop's `t` is measured in (K-D8): `pose` reads the
+ * whole-creative `t`, `beat` a beat-local progress a copy timeline derives,
+ * and `effect` the text-effect clock (falling back to the beat-local one
+ * with no timeline). Two stops in one track may share a numeric `t` on
+ * different clocks — they are independent axes — but not on the same one.
+ *
+ * Two tracks may target the same (layer, property): each property fixes how
+ * its tracks combine (`dx`/`dy` sum, `opacity`/`scale` multiply, in
+ * declaration order), and that composition is never refused here.
+ */
+import type { EasingKind } from "./easing.js";
+import { EASING_KINDS } from "./easing.js";
+import type { LayerKind } from "./layer-kinds.js";
+
+/**
+ * A track's four initial pose properties (the keyframing plan's §1 "The
+ * model"), not exactly what the compositor moves today: `accent-wipe`
+ * animates the extent of a fixed-gradient clip rect, which none of these
+ * four represents. K2 owns that as its own representation problem — nothing
+ * wider until something needs it (an unread property is the D134 mistake).
+ */
+export const TRACK_PROPERTIES = ["opacity", "scale", "dx", "dy"] as const;
+
+export type TrackProperty = (typeof TRACK_PROPERTIES)[number];
+
+/** A stop's clock vocabulary (K-D8): which moment its `t` names. */
+export const STOP_CLOCKS = ["pose", "beat", "effect"] as const;
+
+export type StopClock = (typeof STOP_CLOCKS)[number];
+
+/**
+ * One point on a track (K-D8): `t` in [0, 1] of its own `clock`, the value
+ * the property takes there, and an optional easing override — absent means
+ * the domain default (`easeOutCubic`, K-D7).
+ */
+export interface Stop {
+  readonly t: number;
+  readonly value: number;
+  readonly easing?: EasingKind;
+  readonly clock: StopClock;
+}
+
+/** One animatable property on a layer and its stops, in declaration order. */
+export interface Track {
+  readonly property: TrackProperty;
+  readonly stops: readonly Stop[];
+}
+
+/**
+ * The layer kinds a track may nest on (plan review 2026-09-15): only the
+ * kinds K2/K3 drive — `image`, `video`, `static-text`, `animated-text`. This
+ * is narrower than "every kind this compositor draws": `shade` (`paintShade`)
+ * and `logo` (`drawLogo`) read neither `eased` nor `motion` at all — they
+ * have no pose mechanism today — and `accent`'s only motion, the wipe, is a
+ * clip-extent animation that none of `TRACK_PROPERTIES` represents (see its
+ * own doc comment). Accepting tracks on a kind with no pose mechanism would
+ * be the exact D134 mistake this comment cites elsewhere: a vocabulary
+ * member nothing reads.
+ *
+ * `html` refuses for a different reason: it renders through two independent
+ * paths that must agree pixel for pixel (HL1) — the canvas compositor's own
+ * drawer and the markup assembler, which has no motion mechanism at all — so
+ * a track on it would render on one path and not the other. `fill` refuses
+ * because no creative type accepts it yet (D131) and this compositor draws
+ * it nowhere.
+ *
+ * Widening is additive later and never breaks a stored brief: `accent` when
+ * K2 gives the wipe a representable property, `shade`/`logo` with a generic
+ * per-drawer pose wrapper (K4 territory). Narrowing later would refuse
+ * tracks a brief already carries, which this list is written to avoid.
+ */
+const TRACKABLE_LAYER_KINDS: readonly LayerKind[] = [
+  "image",
+  "video",
+  "static-text",
+  "animated-text",
+];
+
+/** Why a layer's `tracks` is not a shape the brief may carry; undefined when it is. */
+export interface LayerTracksProblem {
+  /** The tracks subpath the problem names — `[i]` for a track, `[i].stops[j]` for a stop, `.field` for one value. */
+  readonly path: string;
+  /** The requirement, phrased to follow "must" in a `Campaign brief field …` message. */
+  readonly must: string;
+  /** The offending value, for the message's `got <JSON>` clause. */
+  readonly value: unknown;
+}
+
+const TRACK_FIELDS = ["property", "stops"] as const;
+const STOP_FIELDS = ["t", "value", "easing", "clock"] as const;
+
+/**
+ * The one tracks decision both boundaries read (K1), shaped like
+ * `layerElementsProblem`: `isLayerEntry` refuses on a defined problem and the
+ * API's `validateTemplate` formats the same problem into its message shape —
+ * the two cannot drift. Absent `tracks` is always fine. Only a kind in
+ * `TRACKABLE_LAYER_KINDS` may carry a defined `tracks` — the empty array
+ * included — before any entry is walked. A present list must be an array of
+ * well-formed tracks; empty is the same as absent.
+ */
+export function layerTracksProblem(
+  kind: LayerKind,
+  tracks: unknown,
+): LayerTracksProblem | undefined {
+  if (tracks === undefined) return undefined;
+  if (!TRACKABLE_LAYER_KINDS.includes(kind)) {
+    return { path: "", must: `be absent for layer kind "${kind}"`, value: tracks };
+  }
+  if (!Array.isArray(tracks)) {
+    return { path: "", must: "be an array of tracks", value: tracks };
+  }
+  for (let i = 0; i < tracks.length; i += 1) {
+    const problem = trackProblem(tracks[i]);
+    if (problem !== undefined) {
+      return { path: `[${i}]${problem.path}`, must: problem.must, value: problem.value };
+    }
+  }
+  return undefined;
+}
+
+/**
+ * One track's contract: a non-null, non-array object naming a vocabulary
+ * `property`, carrying only `property` and `stops`, and a non-empty array of
+ * well-formed stops with no duplicate `t` on one clock (K-D9) — declaration
+ * order is otherwise free.
+ */
+function trackProblem(track: unknown): LayerTracksProblem | undefined {
+  if (typeof track !== "object" || track === null || Array.isArray(track)) {
+    return { path: "", must: "be an object", value: track };
+  }
+  const record = track as Record<string, unknown>;
+  for (const field of Object.keys(record)) {
+    if (!(TRACK_FIELDS as readonly string[]).includes(field)) {
+      return {
+        path: `.${field}`,
+        must: `be one of ${TRACK_FIELDS.map((f) => `"${f}"`).join(", ")}`,
+        value: record[field],
+      };
+    }
+  }
+  const property = record.property;
+  if (typeof property !== "string" || !(TRACK_PROPERTIES as readonly string[]).includes(property)) {
+    return {
+      path: ".property",
+      must: `be one of ${TRACK_PROPERTIES.map((p) => `"${p}"`).join(", ")}`,
+      value: property,
+    };
+  }
+  const stops = record.stops;
+  if (!Array.isArray(stops) || stops.length === 0) {
+    return { path: ".stops", must: "be a non-empty array of stops", value: stops };
+  }
+  // K-D9's only refusal: a duplicate `t` on one track's SAME clock. Scoped
+  // per clock (K-D8) — a stop's `t` only compares to another stop's on the
+  // same axis, so declaration order is free (a track's stops need not be
+  // written t-ascending) and only a repeated `t` within one clock's own
+  // subsequence is refused. The same `t` on two DIFFERENT clocks is not a
+  // duplicate — they are independent axes.
+  const seenTByClock = new Map<StopClock, Set<number>>();
+  for (let i = 0; i < stops.length; i += 1) {
+    const problem = stopProblem(stops[i]);
+    if (problem !== undefined) {
+      return { path: `.stops[${i}]${problem.path}`, must: problem.must, value: problem.value };
+    }
+    const stop = stops[i] as { readonly t: number; readonly clock: StopClock };
+    const seen = seenTByClock.get(stop.clock);
+    if (seen !== undefined && seen.has(stop.t)) {
+      return {
+        path: `.stops[${i}].t`,
+        must: `be unique among this track's "${stop.clock}"-clock stops (duplicate ${stop.t})`,
+        value: stop.t,
+      };
+    }
+    if (seen === undefined) {
+      seenTByClock.set(stop.clock, new Set([stop.t]));
+    } else {
+      seen.add(stop.t);
+    }
+  }
+  return undefined;
+}
+
+/**
+ * One stop's contract: `t` and `value` finite numbers ( `t` in [0, 1]),
+ * `clock` a vocabulary member, and an optional `easing` override from the
+ * same vocabulary.
+ */
+function stopProblem(stop: unknown): LayerTracksProblem | undefined {
+  if (typeof stop !== "object" || stop === null || Array.isArray(stop)) {
+    return { path: "", must: "be an object", value: stop };
+  }
+  const record = stop as Record<string, unknown>;
+  for (const field of Object.keys(record)) {
+    if (!(STOP_FIELDS as readonly string[]).includes(field)) {
+      return {
+        path: `.${field}`,
+        must: `be one of ${STOP_FIELDS.map((f) => `"${f}"`).join(", ")}`,
+        value: record[field],
+      };
+    }
+  }
+  const t = record.t;
+  if (typeof t !== "number" || !Number.isFinite(t) || t < 0 || t > 1) {
+    return { path: ".t", must: "be a number in [0, 1]", value: t };
+  }
+  const value = record.value;
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return { path: ".value", must: "be a finite number", value };
+  }
+  const clock = record.clock;
+  if (typeof clock !== "string" || !(STOP_CLOCKS as readonly string[]).includes(clock)) {
+    return {
+      path: ".clock",
+      must: `be one of ${STOP_CLOCKS.map((c) => `"${c}"`).join(", ")}`,
+      value: clock,
+    };
+  }
+  if (record.easing !== undefined) {
+    const easing = record.easing;
+    if (typeof easing !== "string" || !(EASING_KINDS as readonly string[]).includes(easing)) {
+      return {
+        path: ".easing",
+        must: `be one of ${EASING_KINDS.map((e) => `"${e}"`).join(", ")}`,
+        value: easing,
+      };
+    }
+  }
+  return undefined;
+}
