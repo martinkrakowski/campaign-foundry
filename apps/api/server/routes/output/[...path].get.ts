@@ -1,4 +1,4 @@
-import { createReadStream } from "node:fs";
+import { createReadStream, type Stats } from "node:fs";
 import { stat } from "node:fs/promises";
 import { extname, resolve } from "node:path";
 import { outputRoot } from "../../lib/config.js";
@@ -56,7 +56,8 @@ export default defineEventHandler(async (event) => {
   const root = resolve(outputRoot());
   let target: string;
   if (relative === "") {
-    // resolveConfined rejects the base itself; GET /output/ is the root path and 404s via stat.
+    // resolveConfined rejects the base itself; GET /output/ targets the root directory,
+    // which stat() happily reports — the isFile check below is what 404s it.
     target = root;
   } else {
     try {
@@ -66,13 +67,20 @@ export default defineEventHandler(async (event) => {
       return { error: "Invalid path" };
     }
   }
-  let size: number;
+  let st: Stats;
   try {
-    size = (await stat(target)).size;
+    st = await stat(target);
   } catch {
     setResponseStatus(event, 404);
     return { error: "Not found" };
   }
+  if (!st.isFile()) {
+    // Directories (the root itself, or any folder under it) are not downloadable creatives;
+    // streaming one would fail with EISDIR after the 200 headers were already set.
+    setResponseStatus(event, 404);
+    return { error: "Not found" };
+  }
+  const size = st.size;
   setHeader(event, "content-type", CONTENT_TYPES[extname(target).toLowerCase()] ?? "application/octet-stream");
   setHeader(event, "cache-control", "no-store");
   setHeader(event, "accept-ranges", "bytes");

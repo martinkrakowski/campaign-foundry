@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "lane": "X21",
+  "mutations": [
+    {
+      "file": "apps/api/server/routes/output/[...path].get.ts",
+      "before": "  if (!st.isFile()) {\n    // Directories (the root itself, or any folder under it) are not downloadable creatives;\n    // streaming one would fail with EISDIR after the 200 headers were already set.\n    setResponseStatus(event, 404);\n    return { error: \"Not found\" };\n  }",
+      "after": "  // mutated: isFile guard dropped — directories 200 with a stale content-length and EISDIR on read",
+      "because": "stat() succeeds on directories, so without the isFile guard GET /output/ (an existing root) sets 200 headers with the directory's size before the stream fails with EISDIR.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/__tests__/routes.test.ts",
+        "-t",
+        "404s the root path when the root directory exists"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/output/[...path].get.ts",
+      "before": "  if (!st.isFile()) {\n    // Directories (the root itself, or any folder under it) are not downloadable creatives;\n    // streaming one would fail with EISDIR after the 200 headers were already set.\n    setResponseStatus(event, 404);\n    return { error: \"Not found\" };\n  }",
+      "after": "  // mutated: isFile guard dropped — directories 200 with a stale content-length and EISDIR on read",
+      "because": "A folder under the root (e.g. output/reports) must 404 as a non-downloadable path; without the guard it answers 200 with a directory's content-length.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/__tests__/routes.test.ts",
+        "-t",
+        "404s an existing directory under the output root"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

@@ -516,3 +516,26 @@ instead of silently saving 42. `isIntegerAtLeast` / `isIntegerInRange` in `valid
 floor-vs-count rule, `toBrief`, `withCountClamp` and `canPlan` all read through it. The API is
 unchanged; `PolicySection`'s readouts (`PolicySection.tsx`), stepper value and bounds read
 through the same parser.
+
+---
+
+## 24. `GET /output/<directory>` answers 200, as its own comment says it must not (X21)
+
+**Evidence.** `apps/api/server/routes/output/[...path].get.ts` resolved the path and ran
+`size = (await stat(target)).size` inside a try whose catch 404s. The comment claimed
+`GET /output/ … 404s via stat` — but `stat` **succeeds on a directory**. The only root test used a
+root that does not exist, so the directory case was untested.
+
+**Consequence.** `GET /output/`, `/output/reports` or `/output/packages` on a deployed server set
+200 headers carrying a directory's `content-length`, then `createReadStream` failed with EISDIR —
+a half-sent response instead of the clean 404 the route promises for anything that is not a
+downloadable creative.
+
+**Fix shape, when it is worth one.** Keep the `stat` result and 404 (same body as not-found) when
+`!st.isFile()`; keep the comment accurate.
+
+**X21 — shipped in this PR.** The handler now holds the full `Stats`, and any target that is not a
+regular file — the root directory, `reports/`, a FIFO — gets the same `{ error: "Not found" }` 404
+as a missing path, before a single header is set. Three tests cover it: an existing root 404s, an
+existing subdirectory 404s, an existing file still streams 200 with its size. Removing the
+`isFile()` guard kills both directory tests (`.agents/manifests/x21.json`).
