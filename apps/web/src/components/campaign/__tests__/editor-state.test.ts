@@ -43,6 +43,7 @@ import {
   purgeDraftFromStorage,
   canPlan,
   normalizeDraftState,
+  valuesEqual,
   motionPackagedRatios,
   DEFAULT_DURATION_SEC,
   MAX_BEATS,
@@ -3580,6 +3581,79 @@ describe("copy timeline (E5.1)", () => {
       // timeline persists even though this host has no controls for it (D11/D12)
       expect(written.copy).toEqual(timelineBrief().copy);
       expect(written.output?.formats).toContain("motion");
+    });
+  });
+
+  describe("per-beat backgrounds (VE-D10)", () => {
+    const sceneBrief = (): CampaignBrief =>
+      timelineBrief({
+        copy: {
+          timeline: {
+            beats: [
+              {
+                text: "Stay wild.",
+                weight: 3,
+                background: "assets/inputs/sunset.png",
+              },
+              {
+                text: "Stay hydrated.",
+                weight: 2,
+                background: "assets/inputs/studio.png",
+              },
+              { text: "Find your trail.", weight: 1 },
+            ],
+            transition: "fade",
+            keyBeat: 2,
+          },
+        },
+      });
+
+    test("a brief whose beats carry backgrounds survives load → save unchanged", () => {
+      const brief = sceneBrief();
+      const loaded = fromBrief(brief);
+      expect(loaded.timeline.beats.map((beat) => beat.background)).toEqual([
+        "assets/inputs/sunset.png",
+        "assets/inputs/studio.png",
+        undefined,
+      ]);
+      expect(toBrief(loaded).copy).toEqual(brief.copy);
+      expect(valuesEqual(toBrief(loaded), brief)).toBe(true);
+    });
+
+    test("add, set, remove and move keep the other beats' backgrounds, and add creates none", () => {
+      const state = fromBrief(sceneBrief());
+      const added = reduce(state, { type: "addBeat" });
+      expect(added.timeline.beats[3].background).toBeUndefined();
+      expect(added.timeline.beats[0].background).toBe(
+        "assets/inputs/sunset.png",
+      );
+      const edited = reduce(state, {
+        type: "setBeatText",
+        index: 0,
+        text: "Stay wet.",
+      });
+      expect(edited.timeline.beats[0].background).toBe(
+        "assets/inputs/sunset.png",
+      );
+      const moved = reduce(state, { type: "moveBeat", from: 0, to: 2 });
+      expect(moved.timeline.beats.map((beat) => beat.background)).toEqual([
+        "assets/inputs/studio.png",
+        undefined,
+        "assets/inputs/sunset.png",
+      ]);
+      const removed = reduce(state, { type: "removeBeat", index: 2 });
+      expect(
+        toBrief(removed).copy?.timeline?.beats[0],
+      ).toEqual({
+        text: "Stay wild.",
+        weight: 3,
+        background: "assets/inputs/sunset.png",
+      });
+    });
+
+    test("VE-D3: a timeline naming no backgrounds writes no background key anywhere", () => {
+      const written = toBrief(fromBrief(timelineBrief()));
+      expect(JSON.stringify(written.copy?.timeline)).not.toMatch(/background/);
     });
   });
 

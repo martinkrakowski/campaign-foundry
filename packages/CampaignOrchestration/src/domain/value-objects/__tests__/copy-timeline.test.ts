@@ -2,6 +2,7 @@ import { describe, test, expect } from "vitest";
 import {
   beatAt,
   MAX_BEATS,
+  MAX_SCENES,
   MAX_WEIGHT,
   MIN_DWELL_SEC,
   resolveTimeline,
@@ -195,6 +196,61 @@ describe("timelineProblem", () => {
     expect(timelineProblem(t, [3 * MIN_DWELL_SEC])).toBeUndefined();
     // Just below the floor (3.5 / 3 = 1.1667) must still fail.
     expect(timelineProblem(t, [3.5])).toBeDefined();
+  });
+});
+
+describe("timelineProblem — per-beat backgrounds (VE-D10)", () => {
+  const bg = (n: number) => `assets/inputs/x/${n}.png`;
+  const beat = (text: string, background?: string): CopyBeat =>
+    background === undefined ? { text, weight: 1 } : { text, weight: 1, background };
+
+  test("the exported scene cap is the decision's number", () => {
+    expect(MAX_SCENES).toBe(3);
+  });
+
+  test("three distinct backgrounds — with repeats and beats naming none — are valid", () => {
+    const t = timeline([
+      beat(A, bg(1)),
+      beat(B, bg(2)),
+      beat(C, bg(3)),
+      beat(A, bg(1)),
+      beat(B),
+    ]);
+    expect(timelineProblem(t, [15])).toBeUndefined();
+  });
+
+  test("a fourth distinct background is refused, naming the cap", () => {
+    const t = timeline([beat(A, bg(1)), beat(B, bg(2)), beat(C, bg(3)), beat(A, bg(4))]);
+    const problem = timelineProblem(t, [15]);
+    expect(problem).toBeDefined();
+    expect(problem).toMatch(/more than 3 distinct backgrounds/);
+  });
+
+  test("the cap counts distinct values, not beats carrying one", () => {
+    // Eight beats, three scenes, every beat naming one — the beat ceiling is not the
+    // scene ceiling, and repeats must not push the count over.
+    const t = timeline(
+      Array.from({ length: 8 }, (_, i) => beat(`B${i}`, bg((i % 3) + 1))),
+    );
+    expect(timelineProblem(t, [30])).toBeUndefined();
+  });
+
+  test("a timeline naming no backgrounds is valid exactly as before (VE-D3)", () => {
+    const t: CopyTimeline = {
+      beats: [{ text: A, weight: 2 }, { text: B, weight: 3 }],
+      transition: "fade",
+      keyBeat: 1,
+    };
+    expect(timelineProblem(t, [5])).toBeUndefined();
+    // Nothing appears at a key the old serialisation did not carry.
+    expect(JSON.parse(JSON.stringify(t))).toEqual({
+      beats: [
+        { text: A, weight: 2 },
+        { text: B, weight: 3 },
+      ],
+      transition: "fade",
+      keyBeat: 1,
+    });
   });
 });
 

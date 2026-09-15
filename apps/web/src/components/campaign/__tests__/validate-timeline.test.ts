@@ -10,7 +10,7 @@ import * as messages from "../messages";
 import { initialEditorState, asCopyTimeline, timelineDurations, toBrief, type EditorState } from "../editor-state";
 
 const draft = (
-  beats: { text: string; weight: number }[],
+  beats: { text: string; weight: number; background?: string }[],
   over: Partial<EditorState> = {},
 ): EditorState => ({
   ...initialEditorState(),
@@ -62,6 +62,31 @@ describe("validateTimeline mirrors timelineProblem (E5.5)", () => {
     [
       "an empty duration axis reads as the single default",
       draft([{ text: "Long", weight: 20 }, { text: "Blink", weight: 1 }], { duration: [] }),
+    ],
+    [
+      "three distinct backgrounds, with repeats and beats naming none",
+      draft(
+        [
+          { text: "One", weight: 1, background: "assets/inputs/1.png" },
+          { text: "Two", weight: 1, background: "assets/inputs/2.png" },
+          { text: "Three", weight: 1, background: "assets/inputs/3.png" },
+          { text: "Four", weight: 1, background: "assets/inputs/1.png" },
+          { text: "Five", weight: 1 },
+        ],
+        { duration: [15] },
+      ),
+    ],
+    [
+      "a fourth distinct background",
+      draft(
+        [
+          { text: "One", weight: 1, background: "assets/inputs/1.png" },
+          { text: "Two", weight: 1, background: "assets/inputs/2.png" },
+          { text: "Three", weight: 1, background: "assets/inputs/3.png" },
+          { text: "Four", weight: 1, background: "assets/inputs/4.png" },
+        ],
+        { duration: [15] },
+      ),
     ],
   ];
 
@@ -118,6 +143,30 @@ describe("validateTimeline speaks the editor's language, not the parser's", () =
       timeline: { beats: [{ key: 1, text: "One", weight: 1 }], transition: "fade", keyBeat: 4 },
     });
     expect(validateTimeline(stranded)["copy-timeline"]).toBe(messages.timelineKeyBeatMissing);
+  });
+
+  test("the scene cap is flagged in one sentence on the timeline, not per beat", () => {
+    const fourScenes = draft(
+      [
+        { text: "One", weight: 1, background: "assets/inputs/1.png" },
+        { text: "Two", weight: 1, background: "assets/inputs/2.png" },
+        { text: "Three", weight: 1, background: "assets/inputs/3.png" },
+        { text: "Four", weight: 1, background: "assets/inputs/4.png" },
+      ],
+      { duration: [15] },
+    );
+    expect(validateTimeline(fourScenes)["copy-timeline"]).toBe(messages.timelineTooManyBackgrounds(3));
+    // Three distinct values stay clean — the cap counts scenes, not beats that name one.
+    const threeScenes = draft(
+      [
+        { text: "One", weight: 1, background: "assets/inputs/1.png" },
+        { text: "Two", weight: 1, background: "assets/inputs/2.png" },
+        { text: "Three", weight: 1, background: "assets/inputs/3.png" },
+        { text: "Four", weight: 1 },
+      ],
+      { duration: [15] },
+    );
+    expect(flagged(threeScenes)).toBe(false);
   });
 
   test("the errors land under a key the Copy section counts", () => {
