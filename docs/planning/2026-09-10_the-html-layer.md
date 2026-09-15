@@ -122,7 +122,7 @@ beyond the brief's family, and any third-party script. Each breaks either the fa
 |---|---|---|
 | **HL5a** | Element editing: add, remove and reorder `text` / `button` / `image` elements in the `html` layer; edit text and frame. | **Shipped.** |
 | **HL5b** | The click-destination input, rendered by `OutputSection` over the `clickDestination` patch and validation `editor-state.ts` already carried. | **Shipped.** The `OutputSection` renders the click-destination input. |
-| **HL5c** | The live weight meter reading `profile.maxBytes` (HL-D6). | **Dispatchable — X14 shipped.** The html profiles (unowned-gaps "No platform accepts the HTML unit") carry their own `maxBytes`; the meter reads that profile's number. |
+| **HL5c** | The live weight meter reading `profile.maxBytes` (HL-D6). | **Shipped.** The meter reads the selected html profiles' own `maxBytes` (tightest wins) and weighs the assembled markup through `assembleHtml`. |
 | **HL5d** | Editor preview of the `html` layer through the canvas rendition, satisfying HL-D7 without putting user content in the app DOM. | **Shipped.** The existing preview path already drew the layer; four tests now pin it. |
 | **HL5f** | **Renderer fidelity first.** Thread `tone` into `AssembleHtmlOptions` so the markup's font weight matches the canvas's tone-derived weight (today `assembleHtml` falls back to a hard-coded `"bold"`), and pin a canvas-vs-markup geometry fixture for element placement (baseline offsets vs flex alignment are not proven equal). | **Dispatchable** (HL-D8). |
 | **HL5e** | Per-element style overrides: `style?: { fontWeight?, fontFamily? }` on `text` and `button` elements only, absent = the brief's `creative-style` value (HL-D4's override shape), honoured identically by `drawHtml` and `assembleHtml`, editable in the HL5a element editor. | **After HL5f** (HL-D8). |
@@ -191,18 +191,9 @@ is refused with 400, because `html` is a required kind for `image-html` and MP-D
 last enabled instance of one. The disabled-layer test therefore adds a second, disabled `html` layer
 alongside the enabled one — which is also what X9's own promise is about.
 
+**HL5c — shipped in this PR.** The live weight meter (HL-D6) reads the placement budget from the table packaging enforces against — `htmlByteBudget` takes the **smallest** `maxBytes` among the selected platforms whose `formats` include `html`, and the meter names that profile — and `htmlWeightReading` weighs the draft's enabled `html` layers' elements through the same `assembleHtml` the generation path runs, taking the largest assembly across the sizes the selection renders html at (each size ships as its own unit against the same budget). The markup is measured, never rendered: the editor shows the numbers and the profile label and no user string leaves an input's value (HL-D7). Over budget the meter says so with the overage and the draft carries a **warning**, not an error — the raster fallback joins the same budget at packaging, so the editor's figure is a lower bound and packaging's check of the finished unit is the enforcement.
+
 ```premise HL5f
 # Either gap keeps the lane open: the assembler still resolves weight from a hard-coded fallback, or its options carry no tone.
 grep -q 'resolveStyle(options.style, "bold"' packages/CampaignOrchestration/src/domain/value-objects/markup-assembler.ts || ! grep -qE 'readonly tone[?]?:' packages/CampaignOrchestration/src/domain/value-objects/markup-assembler.ts
-```
-
-```premise HL5c
-# The live weight meter (HL-D6) needs two things no web, ui or api module
-# reaches today: the assembled unit's weight (assembleHtml, CampaignOrchestration
-# only) and a placement byte budget (profile.maxBytes, Distribution only).
-# Either crossing into these trees is the meter starting to exist; both legs
-# are probed so a helper that renames the budget still trips the assembler leg.
-# Waits until X14 ships its html profiles (unowned-gaps §17); until then no profile declares html, so the budget
-# an html placement would show does not exist yet.
-! grep -rqiE "maxBytes|byte.?budget|weight.?(meter|budget)|markup-assembler|assembleHtml" apps/web/src packages/ui/src apps/api/server
 ```
