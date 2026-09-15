@@ -210,21 +210,34 @@ count — a byte-identical refactor (the HL3 raster tests and every canvas
 golden pass unchanged). Font size, line height (px) and letter spacing for
 `text` elements are `htmlTextGeometry`; the `button` font size (already the
 same formula in both renderers, now pinned rather than merely coincidental) is
-`htmlButtonFontSize`. The markup positions text with an explicit `padding-top`
-derived from the same offset (`htmlTextPaddingTop`), replacing CSS flex
-`justify-content`, which was never proven equal to the canvas's placement.
+`htmlButtonFontSize`.
+
+**Placement mechanism, revised (orchestrator fix round, code review caught in
+this PR before merge).** A first attempt converted the canvas's baseline
+offset into an explicit markup `padding-top`, computed for a single line —
+exact for `top`, but wrong for any `middle`/`bottom` element whose text
+actually wraps to more than one line in the browser: assembling is
+server-side with no browser to know the real line count in (D122), and a
+fixed single-line padding pushes line 2+ below the box, where
+`overflow: hidden` clips it. The markup instead keeps CSS flex
+`justify-content` per anchor (`top` → `flex-start`, `middle` → `center`,
+`bottom` → `flex-end`), which the browser resolves against however many lines
+the text actually takes — structurally correct for any line count, where the
+padding-top mechanism was correct for exactly one.
 
 **Residual difference, stated precisely (not narrowed — narrowing it needs a
-browser, which D122 refuses):** assembling is server-side with no browser to
-wrap text in, so `assembleHtml` always computes the offset for a single line.
-This is exact for `top` (the offset does not depend on line count at all). For
-`middle`/`bottom`, it is the single-line case: an element whose text wraps to
-`n` lines in the browser renders, on the canvas fallback, `(n - 1) *
-lineHeight / 2` lower for `middle` or `(n - 1) * lineHeight` lower for
-`bottom` than where the markup's fixed single-line offset places it. Font
-size, line height, letter spacing, wrap width (both renderers wrap/lay out at
-the frame's own width, `boxW`, verbatim) and font weight are identical for any
-line count. A fixture test (`NodeCanvasCompositor.html-fidelity.test.ts`) pins
-the shared numbers across a frame x anchor x tone grid; two mutations
-(`.agents/manifests/hl5f.json`) confirm the tone default and the middle-anchor
-offset are load-bearing, not incidental.
+browser, which D122 refuses):** the canvas anchors text to the alphabetic
+BASELINE (`ctx.fillText`'s coordinate is the baseline, and `middle`'s formula
+carries an explicit `fontSize * 0.35` baseline-to-visual-centre correction);
+CSS flex `justify-content` centres/end-aligns the LINE BOX, which has no
+baseline concept and includes the font's own leading. The two are offset from
+each other by a font-metric-dependent constant that does **not** vary with
+line count (it is not a "single line vs many" gap — it exists even for one
+line), and narrowing it further needs the ascent/descent/leading numbers a
+browser computes, not this codebase. Font size, line height, letter spacing,
+wrap width (both renderers wrap/lay out at the frame's own width, `boxW`,
+verbatim) and font weight ARE identical for any line count — those are what
+`NodeCanvasCompositor.html-fidelity.test.ts` pins across a frame x anchor x
+tone grid, alongside the correct `justify-content` per anchor. Two mutations
+(`.agents/manifests/hl5f.json`) confirm the tone default and the
+per-anchor `justify-content` are load-bearing, not incidental.
