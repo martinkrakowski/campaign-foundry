@@ -341,9 +341,26 @@ union and two helpers.
 raster fallback, its `clickTag` and its byte budget — and **no production path reaches them**, because no
 platform ever selects an `html` row. It also leaves HL5's live weight meter (HL-D6) with no `maxBytes` to read.
 
-**This needs an owner decision, not a lane default.** Which placements accept HTML5 display units, and each
+**This needed an owner decision, not a lane default.** Which placements accept HTML5 display units, and each
 one's byte budget, are ad-spec facts; HL-D6 already says the budget is per placement and must not be a single
 constant.
+
+**Decision, owner 2026-09-15 (recommended default, plan-reviewed — the numbers are owner-verifiable).** Add two profiles,
+**`google-display-html`** and **`display-web-html`**, each `formats: ["html"]`, sizes `DISPLAY_ALL_SIZES`, and
+`maxBytes: HTML_MAX_BYTES = 150 * 1024`. **`meta-audience-network` gains no html.** Separate profiles are the codebase's own
+precedent for one network in two families (`instagram-feed` static vs `instagram-story` motion): no type change, `packageHtml`
+and `wantsHtml` work unchanged, and HL-D6 stays one number per profile for HL5c's meter. Tests to update in the lane: `isPlatformVisible` treats `html`
+like `static`, so both hard-coded id arrays in `PlatformProfile.vo.test.ts`'s `visiblePlatformIds` cases gain the two ids;
+the all-profile loops survive because the new profiles carry `sizes`, not a `ratio`. No `campaign-types.ts` change is
+needed — `OutputSection` offers profiles by `formats`, and the boundary accepts any visible id.
+
+**Owner-verifiable, not verified here:** 150 KB is general industry knowledge (Google Ads / DV360 HTML5 zipped upload cap,
+IAB initial-load guidance), and Meta Audience Network is understood not to take third-party HTML5 display creatives — check
+both against the networks' current specs before relying on them.
+
+**Known undercount, recorded for the X14 lane:** `packageHtml` measures `index.html` alone while the unit references
+`fallback.png`, and generation calls `assembleHtml` without a `profile`, so "refused while building" is packaging-only today.
+The X14 lane states which bytes the budget counts (the shipped zip is what the network measures).
 
 ```premise X14
 # No platform profile declares the html format.

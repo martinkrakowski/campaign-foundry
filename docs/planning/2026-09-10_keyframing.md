@@ -46,11 +46,12 @@ A **track** binds one layer id to one animatable property and a list of stops:
   track properties and the fifth is K2's problem to express, which §4 already flags as the gate.
   Nothing wider until something needs it — an unread property is the `props` mistake again (D134
   shipped a vocabulary the compositor still never reads).
-- **Stops** are `{ t, value, easing? }` with `t` in the same normalised clock the draw paths already
-  share, so a track needs no new time concept.
+- **Stops** are `{ t, value, easing? }` ~~with `t` in the same normalised clock the draw paths already
+  share~~ — **superseded by K-D8:** a stop names its clock (`pose`, `beat` or `effect`).
 - **Easing** defaults to `easeOutCubic`, the one the codebase already uses. A per-stop override is
   allowed; a second *default* is not.
-- **Resolution** is a pure function: given tracks and `t`, return a pose per layer. It is the
+- **Resolution** is a pure function: ~~given tracks and `t`, return a pose per layer~~ — **superseded by K-D8:**
+  given tracks, beats and a clock set, return a pose per layer plus a copy pose per (beat, mix). It is the
   keyframe analogue of `beatAt`, and it lives beside it.
 
 **Presets expand into this.** `ken-burns-in` becomes a `scale` track on the image layer; `rise-in`
@@ -67,10 +68,10 @@ stays as it is, and text-effect tracks play on beat-local progress exactly as th
 
 | Lane | Task | Proof |
 |---|---|---|
-| **K1** | ⛔ **BLOCKED — see §Amendments: three model decisions are open.** **The track model and its resolver.** Value objects, validation at the brief boundary, the pure resolve function. **No compositor change, no rendering.** | Round-trips through YAML in declared key order; an invalid track is refused at both boundaries. |
+| **K1** | **Dispatchable — K-D7–K-D9 answered the three model decisions.** **The track model and its resolver.** Value objects, validation at the brief boundary, the pure resolve function. **No compositor *behaviour* change (K-D7 moves `easeOutCubic` to the domain), no rendering.** | Round-trips through YAML in declared key order; an invalid track is refused at both boundaries. |
 | **K2** | **Express the four `MOTION_KINDS` as tracks and render from the resolver.** The vocabulary the user writes does not change. | **Per-frame byte-identity** for every motion kind across the canonical templates. Any drift stops the lane. |
 | **K3** | **Express the four text effects the same way.** | Per-frame byte-identity, including the beat-local windows and the settled-pose behaviour. |
-| **K4** | **Author tracks directly in a brief**, alongside presets, with a stated precedence when both name one layer and property. | A hand-authored track renders; a track on an absent or disabled layer renders nothing and says nothing. |
+| **K4** | **Author tracks directly in a brief**, alongside presets; a hand-authored track and a preset's expansion on one layer and property **compose per K-D9** (no precedence rule). | A hand-authored track renders; a track on an absent or disabled layer renders nothing and says nothing. |
 | **K5** | **The editor surface** — whatever minimum lets a user see and adjust a track. Scope deferred until K1–K4 land. | Out of scope for this document beyond naming it. |
 
 **Order.** The video plan first — **VF2** (an MP4 byte golden) then **VF1** (the full order) — then K1 → K2 → K3 → K4. VF2 matters to K2 specifically: without a byte golden the "byte-identical preset expansion" gate can only compare frames, which is weaker than what D10 claims. **K2 is the gate**: if the four
@@ -84,7 +85,7 @@ stops rather than shipping a second system beside the presets.
 - **K1**: a track survives a brief round trip; `layerPropsProblem`'s sibling refuses malformed ones.
 - **K2/K3**: every preset renders byte-identically through the resolver, per frame, proven through
   `NodeCanvasCompositor.draw`. `restT` and the poster frame are unchanged.
-- **K4**: presets and hand-authored tracks coexist under a written precedence rule.
+- **K4**: presets and hand-authored tracks coexist, composing per K-D9.
 - **Throughout**: `MOTION_KINDS` and `TEXT_EFFECT_VALUES` remain the brief vocabulary. A user who
   never writes a track sees no change, ever.
 
@@ -177,7 +178,10 @@ K4 the day K1 merges. It now probes the resolver's own decision rather than the 
 ```premise K4
 # KNOWN-WEAK, and recorded as such rather than trusted.
 #
-# K4 decides a precedence RULE between a preset's expansion and a hand-authored
+# (Superseded framing: K-D9 fixes composition in K1, so K4 no longer decides a
+# precedence rule. This fence is left as the record of a known-weak probe and
+# should be rewritten by K4's brief to probe authored tracks in a brief.)
+# K4 decided a precedence RULE between a preset's expansion and a hand-authored
 # track. A rule can be named anything, so no name probe can reliably detect it.
 # Three attempts failed in three different ways: the first matched "precedence"
 # near "preset" across the tree including comments, so K1's own doc comment would
@@ -200,7 +204,22 @@ K4 the day K1 merges. It now probes the resolver's own decision rather than the 
 
 ---
 
-## K1 is not dispatchable yet — three model decisions remain
+## K1 model decisions — owner 2026-09-15 (recommended defaults, plan-reviewed)
+
+**K1 is dispatchable.** The three questions below are answered; the analysis that raised them stays under it as the record.
+Several line references in that analysis have moved (e.g. `easeOutCubic` is now `NodeCanvasCompositor.ts:586`, not `:498`;
+the poster clock sampling and the crossfade `drawBeat` calls have shifted) — **re-anchor by symbol, not line, when briefing.**
+
+| id | Decision |
+|---|---|
+| **K-D7** | **`easeOutCubic` moves to the domain** (`CampaignOrchestration` `domain/value-objects/easing.ts`, exported from the barrel); the compositor imports it back. K1's "no compositor change" means "no compositor **behaviour** change" — one import, byte-neutral. |
+| **K-D8** | **A stop names its clock**: `clock: "pose" \| "beat" \| "effect"`, read from `clocks.t`, the beat-local clock derived from `clocks.copyT` and the beat, and `clocks.effectT` (falling back to the beat-local clock) respectively. The resolver is `resolveTracks(tracks, beats, clocks: { t, copyT?, effectT? }) → { byLayer: Map<layerId, Pose>; copy: ReadonlyArray<{ beat, mix, pose }> }`. The legacy (timeline-less) path is one implicit beat spanning [0, 1] with `local = t`, which unifies `effectT ?? local` (timeline path) with `effectT ?? t` (legacy path). The copy pose is per **(beat, mix)** because `drawBeat` runs twice at one instant during a crossfade. |
+| **K-D9** | **Two tracks on one (layer, property) compose; they are never refused.** Operators are fixed per property: `dx`/`dy` **add**, `opacity`/`scale` **multiply**. K1's validator refuses only a stop set with duplicate `t` on one track. K3 folds in today's order — `opacity = (riseAlpha * fx.alpha) * layerAlpha` — because float multiplication is not associative and the byte gate would move otherwise. K4's "precedence" framing is superseded: composition is fixed in K1. |
+
+Risk carried: the `(beat, mix)` shape brings `CopyTimeline` into the resolver's signature; the alternative (per-layer pose only,
+`drawBeat` keeps its own clock) makes K1 simpler but K3 unable to be byte-identical.
+
+## K1 was not dispatchable — the three model decisions (answered above)
 
 The K-D6 gate is satisfied (VF1 = C5, #328). What blocks an honest stage-1 author is that three
 questions cannot be answered without contradicting something the plan already says. **A lane that has
