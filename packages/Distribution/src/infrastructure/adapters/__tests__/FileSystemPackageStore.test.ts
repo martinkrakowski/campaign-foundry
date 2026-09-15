@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, writeFil
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { FileSystemPackageStore } from "../FileSystemPackageStore.js";
-import type { PackageManifest } from "../../../application/ports/out/PackageStorePort.js";
+import type { PackageManifest, PackageManifestItem } from "../../../application/ports/out/PackageStorePort.js";
 import { platformProfile } from "../../../domain/value-objects/PlatformProfile.vo.js";
 
 const bytes = (): Uint8Array => new Uint8Array([137, 80, 78, 71]);
@@ -17,6 +17,17 @@ const manifest = (over: Partial<PackageManifest> = {}): PackageManifest => ({
   excluded: 0,
   profile: platformProfile("instagram-feed")!,
   items: [],
+  ...over,
+});
+
+const item = (over: Partial<PackageManifestItem> = {}): PackageManifestItem => ({
+  productId: "p1",
+  treatment: "classic",
+  format: "static",
+  source: "renders/p1.png",
+  packagedPath: "packages/camp/instagram-feed/alpha/1.png",
+  bytes: 4,
+  checks: { size: "pass" },
   ...over,
 });
 
@@ -129,5 +140,111 @@ describe("FileSystemPackageStore", () => {
     const path = await store.writeManifest("linkedin", manifest({ platformId: "linkedin" }));
     expect(path).toBe("packages/camp/linkedin/manifest.json");
     expect(existsSync(resolve(root, path))).toBe(true);
+  });
+
+  test("a staging dir removed by a concurrent store's sweep makes the next write reject instead of silently resurrecting it, and a prior committed package for that platform is untouched", async () => {
+    // A prior, legitimate package run for this platform already committed.
+    const prior = new FileSystemPackageStore(root, "camp");
+    await prior.writePackaged("instagram-feed", "alpha/old.png", bytes());
+    await prior.writeManifest("instagram-feed", manifest());
+    expect(existsSync(resolve(root, "packages/camp/instagram-feed/alpha/old.png"))).toBe(true);
+
+    // Request A starts a new run for the same platform and stages one file.
+    const a = new FileSystemPackageStore(root, "camp");
+    await a.writePackaged("instagram-feed", "alpha/1.png", bytes());
+
+    // Concurrent request B — its own store instance — starts staging the same
+    // platform: `ensureStaging`'s stale-staging sweep deletes A's still-live
+    // staging dir (it only matches on the `<platform>.staging-` prefix, not
+    // on who owns it).
+    const b = new FileSystemPackageStore(root, "camp");
+    await b.writePackaged("instagram-feed", "beta/1.png", bytes());
+
+    // A's next write would otherwise recreate the missing staging tree via
+    // `mkdir(dirname(target), { recursive: true })` and silently resume,
+    // committing a manifest that lists a file (alpha/1.png) that no longer
+    // exists on disk. It must fail loudly instead.
+    await expect(a.writePackaged("instagram-feed", "alpha/2.png", bytes())).rejects.toThrow(
+      /export/i,
+    );
+    // The same store keeps refusing rather than quietly starting over —
+    // starting a fresh staging dir here could stomp on B's still-live one.
+    await expect(a.writeManifest("instagram-feed", manifest())).rejects.toThrow(
+      /export/i,
+    );
+
+    // A never reached `rm(finalDir)` + `rename`: the prior commit stands.
+    expect(existsSync(resolve(root, "packages/camp/instagram-feed/alpha/old.png"))).toBe(true);
+  });
+
+  test("writeManifest refuses to commit when a file its manifest claims is missing from staging, and the previous commit survives byte-for-byte", async () => {
+    // A prior, legitimate package run for this platform already committed.
+    const prior = new FileSystemPackageStore(root, "camp");
+    await prior.writePackaged("instagram-feed", "alpha/old.png", bytes());
+    await prior.writeManifest(
+      "instagram-feed",
+      manifest({ items: [item({ packagedPath: "packages/camp/instagram-feed/alpha/old.png" })] }),
+    );
+    const priorBytes = readFileSync(resolve(root, "packages/camp/instagram-feed/alpha/old.png"));
+
+    const a = new FileSystemPackageStore(root, "camp");
+    await a.writePackaged("instagram-feed", "alpha/1.png", bytes());
+
+    // `assertStagingIntact` only proves the staging directory itself still
+    // exists — a narrower sweep can land right after that check (and before
+    // the write it guards) and remove just the file a manifest is about to
+    // claim, without disturbing the directory. Simulate that exact gap
+    // directly: the staging dir stands, but the file it once held is gone.
+    const stagingName = readdirSync(resolve(root, "packages/camp")).find((name) =>
+      name.startsWith("instagram-feed.staging-"),
+    );
+    rmSync(resolve(root, "packages/camp", stagingName!, "alpha/1.png"));
+
+    await expect(
+      a.writeManifest(
+        "instagram-feed",
+        manifest({ items: [item({ packagedPath: "packages/camp/instagram-feed/alpha/1.png" })] }),
+      ),
+    ).rejects.toThrow(/export/i);
+
+    // A never reached `rm(finalDir)` + `rename`: the prior commit's bytes
+    // are exactly what they were before A's aborted attempt.
+    expect(
+      readFileSync(resolve(root, "packages/camp/instagram-feed/alpha/old.png")).equals(priorBytes),
+    ).toBe(true);
+  });
+
+  test("writeManifest refuses a manifest item whose packagedPath does not belong to this platform's staging dir", async () => {
+    const a = new FileSystemPackageStore(root, "camp");
+    await a.writePackaged("instagram-feed", "alpha/1.png", bytes());
+    await expect(
+      a.writeManifest(
+        "instagram-feed",
+        // A path rooted at a different platform can never be staged here —
+        // refuse it the same way a genuinely missing file is refused.
+        manifest({ items: [item({ packagedPath: "packages/camp/linkedin/alpha/1.png" })] }),
+      ),
+    ).rejects.toThrow(/export/i);
+  });
+
+  test("writeManifest commits when every manifest-claimed file, including a poster and a fallback path, is present in staging", async () => {
+    await store.writePackaged("instagram-feed", "alpha/1.png", bytes());
+    await store.writePackaged("instagram-feed", "alpha/1-poster.png", bytes());
+    await store.writePackaged("instagram-feed", "alpha/1-fallback.png", bytes());
+    const path = await store.writeManifest(
+      "instagram-feed",
+      manifest({
+        items: [
+          item({
+            format: "motion",
+            packagedPath: "packages/camp/instagram-feed/alpha/1.png",
+            posterPath: "packages/camp/instagram-feed/alpha/1-poster.png",
+            fallbackPath: "packages/camp/instagram-feed/alpha/1-fallback.png",
+          }),
+        ],
+      }),
+    );
+    expect(existsSync(resolve(root, path))).toBe(true);
+    expect(existsSync(resolve(root, "packages/camp/instagram-feed/alpha/1-poster.png"))).toBe(true);
   });
 });
