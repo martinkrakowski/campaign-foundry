@@ -121,7 +121,7 @@ beyond the brief's family, and any third-party script. Each breaks either the fa
 |---|---|---|
 | **HL5a** | Element editing: add, remove and reorder `text` / `button` / `image` elements in the `html` layer; edit text and frame. | **Shipped.** |
 | **HL5b** | The click-destination input, rendered by `OutputSection` over the `clickDestination` patch and validation `editor-state.ts` already carried. | **Shipped.** The `OutputSection` renders the click-destination input. |
-| **HL5c** | The live weight meter reading `profile.maxBytes` (HL-D6). | **Blocked on X14** — no platform profile declares `html`, so there is no budget to read. |
+| **HL5c** | The live weight meter reading `profile.maxBytes` (HL-D6). | **Blocked on X14** — no platform profile accepts `html`, so no html placement has a byte budget to read (the display profiles' `maxBytes` is their static budget). |
 | **HL5d** | Editor preview of the `html` layer through the canvas rendition, satisfying HL-D7 without putting user content in the app DOM. | **Shipped.** The existing preview path already drew the layer; four tests now pin it. |
 | **HL5e** | Per-element style overrides. | **Blocked on an owner decision.** HL-D1 sketched `style?` on an element, HL-D4 says style comes from the brief's `creative-style`, and the vocabulary HL1 shipped is `{ kind, text?, frame }` with no style. Overrides mean a vocabulary change carried through both renderers and the fidelity between them. |
 
@@ -190,12 +190,12 @@ last enabled instance of one. The disabled-layer test therefore adds a second, d
 alongside the enabled one — which is also what X9's own promise is about.
 
 ```premise HL5c
-# What is still open of the tooling lane is the live weight meter reading
-# profile.maxBytes (HL-D6): maxBytes is enforced in Distribution today and
-# reaches neither apps/web nor packages/ui. The element palette the same
-# premise used to probe for shipped with HL5a, so narrowing it to the number
-# the meter must display is what keeps this fence honest about the gap that
-# remains. When the meter ships, that number crosses into the web surface and
-# this flips.
-! grep -rqiE "maxBytes|weight.?meter|budget.?meter" apps/web/src packages/ui/src
+# The live weight meter (HL-D6) needs two things no web, ui or api module
+# reaches today: the assembled unit's weight (assembleHtml, CampaignOrchestration
+# only) and a placement byte budget (profile.maxBytes, Distribution only).
+# Either crossing into these trees is the meter starting to exist; both legs
+# are probed so a helper that renames the budget still trips the assembler leg.
+# Blocked on X14 (unowned-gaps §17): no profile declares html, so the budget
+# an html placement would show does not exist yet.
+! grep -rqiE "maxBytes|byte.?budget|weight.?(meter|budget)|markup-assembler|assembleHtml" apps/web/src packages/ui/src apps/api/server
 ```
