@@ -598,6 +598,69 @@ describe("isBriefTemplate layer elements (HL1)", () => {
   });
 });
 
+describe("isBriefTemplate layer tracks (K1)", () => {
+  const track = { property: "opacity" as const, stops: [{ t: 0, value: 0, clock: "pose" as const }] };
+
+  /** The canonical image-text template with `tracks` swapped onto its image layer. */
+  const withTracks = (tracks: unknown): boolean =>
+    isBriefTemplate({
+      id: "canonical-image-text",
+      version: 1,
+      creativeType: "image-text",
+      unit: "standard-web",
+      layers: [
+        { id: "image", kind: "image", tracks },
+        { id: "shade", kind: "shade" },
+        { id: "accent", kind: "accent" },
+        { id: "static-text", kind: "static-text" },
+        { id: "logo", kind: "logo" },
+      ],
+    });
+
+  test("accepts a drawing layer carrying tracks, and absent or empty tracks", () => {
+    expect(withTracks(undefined)).toBe(true);
+    expect(withTracks([])).toBe(true);
+    expect(withTracks([track])).toBe(true);
+  });
+
+  test("refuses tracks on an html layer — the kind's two renderers cannot agree on motion", () => {
+    expect(
+      isBriefTemplate({
+        id: "canonical-image-html",
+        version: 1,
+        creativeType: "image-html",
+        unit: "standard-web",
+        layers: [
+          { id: "image", kind: "image" },
+          { id: "html", kind: "html", tracks: [track] },
+          { id: "logo", kind: "logo" },
+        ],
+      }),
+    ).toBe(false);
+  });
+
+  test("refuses a malformed track — an unknown property, a bad stop", () => {
+    expect(withTracks([{ property: "rotation", stops: track.stops }])).toBe(false);
+    expect(withTracks([{ property: "opacity", stops: [{ t: 2, value: 0, clock: "pose" }] }])).toBe(
+      false,
+    );
+  });
+
+  test("refuses a duplicate t on one track's same clock (K-D9)", () => {
+    expect(
+      withTracks([
+        {
+          property: "opacity",
+          stops: [
+            { t: 0.5, value: 0, clock: "pose" },
+            { t: 0.5, value: 1, clock: "pose" },
+          ],
+        },
+      ]),
+    ).toBe(false);
+  });
+});
+
 describe("isBriefTemplate mirrors the API's table rules (X11)", () => {
   /** A well-formed template object for the type, with `layers` swapped in. */
   const asTemplate = (

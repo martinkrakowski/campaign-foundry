@@ -26,6 +26,7 @@ import {
 } from "./creative-types.js";
 import { layerElementsProblem, type HtmlElement } from "./html-element.js";
 import { LAYER_KINDS, type LayerKind } from "./layer-kinds.js";
+import { layerTracksProblem, type Track } from "./tracks.js";
 import { ANCHOR_VALUES, type AnchorKind } from "./variation-defaults.js";
 
 export {
@@ -329,7 +330,9 @@ export function satisfiesOrderConstraints(
  * unknown key or a value out of range cannot ride the guard into the editor or
  * the run. An `html` layer's `elements`, when present, must be well-formed
  * elements of the vocabulary (HL1), so the two renderers never receive a list
- * the other cannot draw. Every `layers` entry must itself be a layer — a non-null, non-array
+ * the other cannot draw. A layer's `tracks`, when present, must be well-formed
+ * keyframe tracks (K1), and only a kind this compositor draws through one
+ * single mechanism may carry them. Every `layers` entry must itself be a layer — a non-null, non-array
  * object naming a non-empty string `id` and a vocabulary `kind` (L5): a `null`, a bare
  * string or a kindless object is not a layer, and admitting one crashes the
  * first consumer that dereferences `layer.kind`. And ids are unique within the
@@ -425,6 +428,7 @@ interface LayerEntry {
   readonly enabled?: boolean;
   readonly props?: LayerProps;
   readonly elements?: readonly HtmlElement[];
+  readonly tracks?: readonly Track[];
 }
 
 /**
@@ -433,10 +437,12 @@ interface LayerEntry {
  * and a vocabulary `kind` — the fields every consumer below the
  * guard dereferences, and which a `null`, a bare string or a kindless object
  * names neither of — with `enabled`, when present, a boolean (D129), and
- * `props`, when present, a shape that kind may carry (D134), and `elements`,
- * when present, an `html` layer's element list (HL1) — so an element with an
- * unknown kind, a non-vocabulary anchor or a fraction outside [0, 1] cannot
- * ride the guard into the editor. This is the
+ * `props`, when present, a shape that kind may carry (D134), `elements`,
+ * when present, an `html` layer's element list (HL1), and `tracks`, when
+ * present, that kind's own keyframe tracks (K1) — so an element with an
+ * unknown kind, a non-vocabulary anchor, a fraction outside [0, 1], or a
+ * track on a kind that draws through no single mechanism cannot ride the
+ * guard into the editor. This is the
  * per-layer half of `isBriefTemplate`, the one check a stored draft's entries
  * face, so it carries the whole entry contract, not only the props half it
  * once was: a corrupt entry used to pass as "no props problem" and crash the
@@ -465,7 +471,10 @@ function isLayerEntry(layer: unknown): layer is LayerEntry {
   ) {
     return false;
   }
-  return (
-    layerElementsProblem(rec.kind as LayerKind, rec.elements) === undefined
-  );
+  if (
+    layerElementsProblem(rec.kind as LayerKind, rec.elements) !== undefined
+  ) {
+    return false;
+  }
+  return layerTracksProblem(rec.kind as LayerKind, rec.tracks) === undefined;
 }

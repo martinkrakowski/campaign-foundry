@@ -30,6 +30,7 @@ import {
   layerElementsProblem,
   layerEnabledProblem,
   layerPropsProblem,
+  layerTracksProblem,
   outputFamilyProblem,
   satisfiesOrderConstraints,
   styleProblem,
@@ -328,6 +329,21 @@ export function validateTemplate(
     if (elementsProblem !== undefined) {
       throw new Error(
         `Campaign brief field "template.layers[${i}].elements${elementsProblem.path}" must ${elementsProblem.must}; got ${JSON.stringify(elementsProblem.value)}.`,
+      );
+    }
+
+    // K1 — a layer's own keyframe tracks, when present, must be well-formed and
+    // the kind must be one this compositor draws through one single mechanism.
+    // Structural, never lenient (the `validateSizes` convention): the decision is
+    // the domain's `layerTracksProblem`, shared with `isBriefTemplate` so the two
+    // boundaries cannot drift — only the message shape is local.
+    const tracksProblem = layerTracksProblem(
+      layer.kind as LayerKind,
+      layer.tracks,
+    );
+    if (tracksProblem !== undefined) {
+      throw new Error(
+        `Campaign brief field "template.layers[${i}].tracks${tracksProblem.path}" must ${tracksProblem.must}; got ${JSON.stringify(tracksProblem.value)}.`,
       );
     }
   }
