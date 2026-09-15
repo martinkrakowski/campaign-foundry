@@ -5027,3 +5027,15 @@ X19 manifest (2 mutations, both caught). Full gate green, 100 % coverage.
 
 - 2026-09-14 X18 (implementer): one policy-integer parser () now backs both 's gates and //;  saves as 100000, / are refused; branch feat/x18-policy-number-parsing, manifest .agents/manifests/x18.json.
 - 2026-09-14 X18 (implementer): one policy-integer parser (`parsePolicyInteger`) now backs both `validatePolicy`'s gates and `toBrief`/`withCountClamp`/`canPlan`; `1e5` saves as 100000, `42.0`/`12abc` are refused; branch feat/x18-policy-number-parsing, manifest .agents/manifests/x18.json.
+
+## 2026-09-15 — wave record: V3 → X20 (#405–#411), grok vs qwen as implementers
+
+**Merged:** V3 sweep `attribute` verb #405 · cast: qwen implements #407 · X17 null brief scalars #406 · X19 Field warning describedby #409 · X20 timeline beat aria #410 · plan review: HL5c premise + X16 note #411 · X18 one policy-integer parser #408.
+
+**Defects caught before merge (all fixed, mutation-pinned):** V3 — a truncated or foreign run list could yield a false single attribution; escape decoding order (Qodo). X17 — the canonicaliser threw on an unvalidated snapshot's `products`, re-breaking X16's recovery fix (orchestrator, Qodo, PR-Agent); blank `inputAsset` read dirty. X18 — PolicySection still parsed with `parseInt`; a rejected count fabricated a floor error; `canPlan` estimated a policy the user was not looking at (Qodo); unsafe integers rounded (CodeRabbit); dead `clampPolicy` kept `parseInt` (Fable). X20 — a weight error marked the beat text invalid (Qodo); plan claimed `Stepper` already forwarded `aria-invalid` (Fable). Plan review (Fable, #411) — `premise HL5c` could stay green after the meter shipped.
+
+**Refuted (mechanism in each thread):** PR-Agent's exact-line/case-insensitive/punctuation attribution matching, undefined-key handling, `useId` prefixing, `beat.key` ids, `role="alert"`, the "malformed" `weight.?(meter|budget)` regex (ran it: 4/4 forms match); Qodo's "exponent counts exceed the axis product" (`withCountClamp` runs on every action).
+
+**Measurement.** grok-4.6 high as implementer: X16 3 rounds ≈ $1.89, V3 2 rounds $1.68, X17 lane $1.18 — every lane needed a fix round. qwen3.8-flash: X17 fix $0.04, X18 lane + 3 fixes $0.21, X19 $0.04, X20 lane + fix $0.09 — **$0.39 for 8 rounds, 0 × 429**, same review-finding rate. Two qwen runs hung when started beside a live opencode run; one was killed by host memory pressure. Seat defaults set from this (cast.md, owner decision 2026-09-15).
+
+**Also this wave:** a push-event CI run on #409 timed out four unrelated tests while the PR run on the same SHA passed in 173 s vs main's 182 s — runner load, confirmed by a passing re-run, not a duration regression. Fable plan review was skipped for #399/#400 and run retroactively.

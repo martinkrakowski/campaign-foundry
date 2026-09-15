@@ -3,6 +3,33 @@
 Re-probe before trusting any row: `grok models`, `agy models`, `opencode models`. Two of these
 fail with a misleading error rather than "no such model".
 
+## Seat defaults — owner's decision, 2026-09-15: the orchestrator's recommendation, measured
+
+**This supersedes every seat table below** (they stay as the record). Chosen from this session's measurements:
+qwen3.8-flash ran 8 completed implementer/remediator rounds for **$0.39 total** (5–19 min each, 0 × 429) against
+grok-4.6's ~$1.2–1.9 per lane, with the same rounds-to-green and the same review-finding rate.
+
+| Seat | Default | Command / how |
+|---|---|---|
+| **Implementer** | **qwen3.8-flash**, strictly one run at a time | `opencode run --format json --auto --model openrouter/qwen/qwen3.8-flash --variant high "$(cat BRIEF.md)"` in the lane worktree |
+| **Implementer fallback** (a 429 after the runner's retries, or a hang) | **hy4-preview** | same shape, `--model openrouter/tencent/hy4-preview` — 6/6 clean runs, honest reports |
+| **Hard or cross-cutting lanes** (renderer and goldens, domain canonicalisation over unvalidated data, kit contracts) | **Sonnet 5 reserve** | `Agent` tool, general-purpose, `model: "sonnet"` — the cheap seats and grok regressed exactly here |
+| **Remediator** | the lane's own implementer, narrow brief | fix rounds cost $0.02–0.09 on qwen |
+| **Model reviewer** (rendering, kit, behaviour lanes only) | **grok-4.6 high** | `grok -p "$(cat REVIEW.md)" --model grok-4.6 --effort high` — read-only brief, diff excerpt + file list |
+| **Plan reviewer** | **Fable** (unchanged) | `Agent` · `Plan` · `model: "fable"` — fires on any lane or premise change; skipping it let a premise that could not fail merge (#411) |
+| **Gap finder** | Explore agent | verified file:line findings only; 5 of 5 shipped |
+| **Bots** | Qodo + CodeRabbit kept; PR-Agent measured | `yarn sweep attribute --pr <n>` records PR-Agent threads per workflow for V3's decision |
+| **Orchestrator** (gate, sweep, merge) | never delegated | the gate + bots + plan review caught every defect the seats' own gates passed |
+
+**Rules this default depends on** (each cost a round this session):
+- **Never run two opencode instances at once.** A run started while another was live wrote 0 bytes and hung (41 and 11
+  minutes) — not the instant `database is locked` exit the trap below describes. A live run streams within seconds.
+- **One heavy test run at a time on this host.** Two implementer runs plus a gate ran it out of memory and the harness
+  killed every background task, gates and watchers included.
+- **agy exits 0 on a 503/timeout** — read its JSON `status`. agy is overflow only, for small fully-specified lanes.
+- **Rebasing a lane after siblings merged conflicts in the append-only gap plan and session log.** Keep both; renumber the
+  later section; never pick a side.
+
 ## Seats — owner's instruction, 2026-09-14 (later): every implementer seat is qwen3.8-flash
 
 **Supersedes the grok-4.6 instruction directly below** for implementers and remediators, as a measurement.
