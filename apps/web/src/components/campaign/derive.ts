@@ -8,7 +8,10 @@ import {
   formatsFor,
   type PlatformProfile,
 } from "@campaignfoundry/Distribution/platform-profiles";
-import { assembleHtml } from "@campaignfoundry/CampaignOrchestration/markup-assembler";
+import {
+  assembleHtml,
+  isBrandColor,
+} from "@campaignfoundry/CampaignOrchestration/markup-assembler";
 import {
   CREATIVE_TYPE_RULES,
   type CreativeType,
@@ -18,6 +21,8 @@ import {
 // re-exported unchanged at the foot of this file.
 import { findOcclusionDelta } from "@campaignfoundry/CampaignOrchestration/creative-types";
 import type { CreativeTemplateLayer } from "@campaignfoundry/CampaignOrchestration/creative-templates";
+import type { Style } from "@campaignfoundry/CampaignOrchestration/creative-style";
+import type { HtmlElement } from "@campaignfoundry/CampaignOrchestration/html-element";
 import { satisfiesOrderConstraints } from "@campaignfoundry/CampaignOrchestration/brief-template";
 import type { LayerKind } from "@campaignfoundry/CampaignOrchestration/layer-kinds";
 import type { EditorState } from "./editor-state";
@@ -367,6 +372,45 @@ export function htmlByteBudget(
 }
 
 /**
+ * The single-entry memo behind `htmlWeightReading` (HL5c). One entry, not a map:
+ * the meter and the warning read the same draft in the same tick, so the value
+ * the first caller assembles is exactly the value the second wants — and a
+ * keystroke invalidates it wholesale. A wider cache would hold superseded
+ * readings for nothing.
+ */
+let weightReadingCache:
+  | { readonly key: string; readonly reading: HtmlWeightReading }
+  | undefined;
+
+/**
+ * A stable serialisation of exactly the inputs the reading is a function of —
+ * the gathered html elements, the ship sizes, the brand colour, the style, the
+ * click destination, and the budget (label and figure ride the reading) — so an
+ * unchanged draft reweighs nothing and any change to a weighed input reweighs.
+ * The platforms and profiles the budget was drawn from need no separate slot: a
+ * change to either is a change to the budget's label or `maxBytes` here, and to
+ * the assembled `bytes` through `sizes`/`elements`.
+ */
+function htmlWeightKey(
+  sizes: readonly string[],
+  elements: readonly HtmlElement[],
+  brandColor: string,
+  style: Style,
+  destination: string,
+  budget: PlatformProfile,
+): string {
+  return JSON.stringify({
+    brandColor,
+    destination,
+    style,
+    sizes,
+    maxBytes: budget.maxBytes,
+    profileLabel: budget.label,
+    elements: elements.map((el) => [el.kind, el.text ?? "", el.frame]),
+  });
+}
+
+/**
  * The draft's html unit, weighed (HL5c, HL-D6): the enabled `html` layers'
  * elements — gathered exactly as the generation path gathers them — assembled
  * through the same `assembleHtml` HL4 ships, against the placement budget.
@@ -386,9 +430,18 @@ export function htmlByteBudget(
  * finished unit enforces it — the editor's figure is a lower bound.
  *
  * `undefined` when there is nothing to weigh: no html placement, no selected
- * size that placement carries, or a draft the assembler itself refuses (the
- * brand colour has its own section error; there is no markup to measure
- * until it is a hex colour).
+ * size that placement carries, or a brand colour the assembler's documented hex
+ * shape refuses (the Products section raises that as its own error; there is no
+ * markup to measure until it is a hex colour). The colour is checked against the
+ * assembler's own `isBrandColor` before it is ever asked to build, so the one
+ * failure this derivation expects never becomes a thrown error — any *other*
+ * error the assembler raises is a real defect and is allowed to propagate rather
+ * than being swallowed into a missing meter.
+ *
+ * The reading is memoised through a module-level single-entry cache keyed by the
+ * inputs it reads (below), so the two consumers that share this seam — the meter
+ * in `TemplateSection` and the overage in `validateTemplateWarnings` — assemble
+ * the unit once per change rather than once per keystroke each.
  */
 export function htmlWeightReading(
   state: EditorState,
@@ -406,29 +459,41 @@ export function htmlWeightReading(
     .filter((layer) => layer.kind === "html" && layer.enabled !== false)
     .flatMap((layer) => layer.elements ?? []);
   const destination = state.clickDestination.trim();
+  const brandColor = state.products[0]?.primaryColor ?? "";
+  // The expected failure, checked up front so the assembler is never asked to
+  // throw it: a missing product (`?? ""`) or a colour outside the hex shape has
+  // no weighable markup, and the Products section already says so.
+  if (!isBrandColor(brandColor)) return undefined;
+
+  const key = htmlWeightKey(
+    sizes,
+    elements,
+    brandColor,
+    state.style,
+    destination,
+    budget,
+  );
+  const cached = weightReadingCache;
+  if (cached !== undefined && cached.key === key) return cached.reading;
   let bytes = 0;
-  try {
-    for (const size of sizes) {
-      const assembled = assembleHtml({
-        elements,
-        canvas: { size },
-        brandColor: state.products[0]?.primaryColor ?? "",
-        style: state.style,
-        clickDestination: destination === "" ? undefined : destination,
-      });
-      bytes = Math.max(bytes, assembled.byteLength);
-    }
-  } catch {
-    // The assembler refuses a brand colour outside the documented hex shape —
-    // the Products section says so; there is no unit to weigh yet.
-    return undefined;
+  for (const size of sizes) {
+    const assembled = assembleHtml({
+      elements,
+      canvas: { size },
+      brandColor,
+      style: state.style,
+      clickDestination: destination === "" ? undefined : destination,
+    });
+    bytes = Math.max(bytes, assembled.byteLength);
   }
-  return {
+  const reading: HtmlWeightReading = {
     bytes,
     maxBytes: budget.maxBytes,
     profileLabel: budget.label,
     overBy: Math.max(0, bytes - budget.maxBytes),
   };
+  weightReadingCache = { key, reading };
+  return reading;
 }
 
 // Re-export occlusion table and checks (D135, D136)

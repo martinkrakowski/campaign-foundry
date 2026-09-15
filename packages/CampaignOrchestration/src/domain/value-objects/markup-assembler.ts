@@ -57,6 +57,17 @@ function escapeScriptJson(json: string): string {
 const BRAND_COLOR_PATTERN = /^#[0-9A-Fa-f]{6}$/;
 
 /**
+ * Whether `brandColor` is the documented 6-digit hex shape (HL-D7). Exported so a
+ * caller that must NOT trip the assembler's refusal — the editor's weight meter,
+ * which would otherwise swallow every assembly error to hide this one case — can
+ * check the shape the assembler itself checks, against the one pattern it owns,
+ * rather than restating it.
+ */
+export function isBrandColor(brandColor: string): boolean {
+  return BRAND_COLOR_PATTERN.test(brandColor);
+}
+
+/**
  * Gate the brand colour by **shape** and escape it for the **quoted style-attribute**
  * context (HL-D7). A verbatim `background-color: ${brandColor}` lets a value carrying
  * a quote close the attribute and attach its own handler (e.g. `autofocus onfocus=…`),
@@ -65,7 +76,7 @@ const BRAND_COLOR_PATTERN = /^#[0-9A-Fa-f]{6}$/;
  * with `;`. Every legitimate caller already passes hex; anything else is a defect.
  */
 function safeBrandColor(brandColor: string): string {
-  if (!BRAND_COLOR_PATTERN.test(brandColor)) {
+  if (!isBrandColor(brandColor)) {
     throw new Error(
       `assembleHtml: brandColor must be a 6-digit hex colour like "#1473E6", got ${JSON.stringify(brandColor)}`,
     );

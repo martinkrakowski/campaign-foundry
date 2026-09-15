@@ -33,6 +33,38 @@
         "apps/web/src/components/campaign/sections/__tests__/html-elements-editor.test.tsx"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/derive.ts",
+      "before": "  const cached = weightReadingCache;\n  if (cached !== undefined && cached.key === key) return cached.reading;\n  let bytes = 0;",
+      "after": "  let bytes = 0;",
+      "because": "The weight reading is assembled once per change and shared: the meter (TemplateSection) and the overage (validateTemplateWarnings) both reach htmlWeightReading, so without the memo the whole unit is rebuilt and UTF-8 encoded on every keystroke, twice over. Dropping the cache read leaves the write in place but never served, so two identical calls assemble twice — the assemble-once test sees the second call reach the assembler.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--maxWorkers=2",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/derive.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/derive.ts",
+      "before": "  if (!isBrandColor(brandColor)) return undefined;\n\n  const key = htmlWeightKey(\n    sizes,\n    elements,\n    brandColor,\n    state.style,\n    destination,\n    budget,\n  );\n  const cached = weightReadingCache;\n  if (cached !== undefined && cached.key === key) return cached.reading;\n  let bytes = 0;\n  for (const size of sizes) {\n    const assembled = assembleHtml({\n      elements,\n      canvas: { size },\n      brandColor,\n      style: state.style,\n      clickDestination: destination === \"\" ? undefined : destination,\n    });\n    bytes = Math.max(bytes, assembled.byteLength);\n  }",
+      "after": "  const key = htmlWeightKey(\n    sizes,\n    elements,\n    brandColor,\n    state.style,\n    destination,\n    budget,\n  );\n  const cached = weightReadingCache;\n  if (cached !== undefined && cached.key === key) return cached.reading;\n  let bytes = 0;\n  try {\n    for (const size of sizes) {\n      const assembled = assembleHtml({\n        elements,\n        canvas: { size },\n        brandColor,\n        style: state.style,\n        clickDestination: destination === \"\" ? undefined : destination,\n      });\n      bytes = Math.max(bytes, assembled.byteLength);\n    }\n  } catch {\n    return undefined;\n  }",
+      "because": "The bare catch was the defect: it swallowed every error assembleHtml raises and hid the meter, so a real assembler bug looked like an unweighable draft. The fix checks the one expected failure (a missing or non-hex brand colour) up front and lets anything else propagate. Restoring the bare catch makes a stubbed assembler error disappear, so the propagate test — which asserts the throw reaches the caller — fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--maxWorkers=2",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/derive.test.ts"
+      ],
+      "verdict": "caught"
     }
   ]
 }

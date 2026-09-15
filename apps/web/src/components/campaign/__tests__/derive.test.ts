@@ -1,4 +1,4 @@
-import { describe, test, expect } from "vitest";
+import { describe, test, expect, vi } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import { DISPLAY_SIZE_VALUES } from "@campaignfoundry/CampaignOrchestration/display-sizes";
@@ -47,6 +47,24 @@ import {
   editorReducer,
   type EditorState,
 } from "../editor-state";
+
+// The weight meter's memo (HL5c) is only observable at the seam it protects: how
+// many times the markup is actually assembled. Wrap the assembler with a spy that
+// still runs the real thing, so every other assertion in this file keeps reading
+// byte-exact figures while the memo tests count the assemblies behind them.
+const { assembleSpy } = vi.hoisted(() => ({ assembleSpy: vi.fn() }));
+vi.mock("@campaignfoundry/CampaignOrchestration/markup-assembler", async (importOriginal) => {
+  const actual =
+    await importOriginal<
+      typeof import("@campaignfoundry/CampaignOrchestration/markup-assembler")
+    >();
+  assembleSpy.mockImplementation((options) =>
+    actual.assembleHtml(
+      options as Parameters<typeof actual.assembleHtml>[0],
+    ),
+  );
+  return { ...actual, assembleHtml: assembleSpy };
+});
 
 describe("derive.ts", () => {
   describe("platformsToFormats", () => {
@@ -796,6 +814,86 @@ describe("derive.ts", () => {
           { "roomy-html": fakeHtml("roomy-html", { maxBytes: 150 * 1024 }) },
         );
         expect(within?.overBy).toBe(0);
+      });
+    });
+
+    // HL5c fix: the reading is shared between the meter and the warning through
+    // one memoised derivation, and it swallows only the failure it expects (an
+    // unweighable brand colour) rather than every assembler error.
+    describe("the memo and the expected failure (HL5c fix)", () => {
+      // A marker the rest of the file never assembles, so the module-level
+      // single-entry memo is guaranteed cold at each call under test. An `image`
+      // element rides along: it carries no `text`, so the key's `el.text ?? ""`
+      // covers the absent-copy branch the text-only fixtures never reach.
+      const meterElements = (marker: string): EditorState =>
+        meterState({
+          template: htmlTemplate([
+            {
+              id: "html",
+              kind: "html",
+              elements: [text(marker), { kind: "image", frame } as HtmlElement],
+            },
+          ]),
+        });
+
+      test("two calls with the same inputs assemble the markup once", () => {
+        const state = meterElements("assemble-once");
+        assembleSpy.mockClear();
+        const first = htmlWeightReading(state);
+        expect(assembleSpy.mock.calls.length).toBeGreaterThan(0);
+        const afterFirst = assembleSpy.mock.calls.length;
+        const second = htmlWeightReading(state);
+        // The second caller (the warning, or a re-render) is served from the memo:
+        // no new assembly, and it is the very same reading object.
+        expect(assembleSpy.mock.calls.length).toBe(afterFirst);
+        expect(second).toBe(first);
+      });
+
+      test("a changed element text re-assembles", () => {
+        htmlWeightReading(meterElements("before-edit"));
+        assembleSpy.mockClear();
+        htmlWeightReading(meterElements("after-edit"));
+        expect(assembleSpy.mock.calls.length).toBeGreaterThan(0);
+      });
+
+      test("a missing or non-hex brand color yields no reading and never calls the assembler", () => {
+        // The one failure this derivation expects is checked up front, so the
+        // assembler is never asked to throw it — no reading, no swallow.
+        const noProducts = { ...meterElements("no-colour"), products: [] };
+        assembleSpy.mockClear();
+        expect(htmlWeightReading(noProducts)).toBeUndefined();
+        expect(assembleSpy).not.toHaveBeenCalled();
+        assembleSpy.mockClear();
+        const badColour = meterState({
+          template: htmlTemplate([
+            { id: "html", kind: "html", elements: [text("bad-colour")] },
+          ]),
+          products: [
+            {
+              key: 1,
+              id: "alpha",
+              name: "A",
+              primaryColor: "rebeccapurple",
+              logoPath: "l.png",
+              inputAsset: "",
+              idTouched: true,
+            },
+          ],
+        });
+        expect(htmlWeightReading(badColour)).toBeUndefined();
+        expect(assembleSpy).not.toHaveBeenCalled();
+      });
+
+      test("an unexpected error from the assembler propagates rather than hiding the meter", () => {
+        const state = meterElements("propagate-boom");
+        assembleSpy.mockClear();
+        assembleSpy.mockImplementationOnce(() => {
+          throw new Error("assembler defect");
+        });
+        expect(() => htmlWeightReading(state)).toThrow("assembler defect");
+        // Nothing was cached on the way out, so the very next call assembles for
+        // real (the spy's default implementation delegates to the assembler).
+        expect(htmlWeightReading(state)?.bytes).toBeGreaterThan(0);
       });
     });
   });
