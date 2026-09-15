@@ -22,7 +22,13 @@ import type { EasingKind } from "./easing.js";
 import { EASING_KINDS } from "./easing.js";
 import type { LayerKind } from "./layer-kinds.js";
 
-/** A track's animatable properties (§1): exactly what the compositor moves today. */
+/**
+ * A track's four initial pose properties (the keyframing plan's §1 "The
+ * model"), not exactly what the compositor moves today: `accent-wipe`
+ * animates the extent of a fixed-gradient clip rect, which none of these
+ * four represents. K2 owns that as its own representation problem — nothing
+ * wider until something needs it (an unread property is the D134 mistake).
+ */
 export const TRACK_PROPERTIES = ["opacity", "scale", "dx", "dy"] as const;
 
 export type TrackProperty = (typeof TRACK_PROPERTIES)[number];
@@ -51,25 +57,33 @@ export interface Track {
 }
 
 /**
- * The layer kinds a track may nest on: every kind this compositor draws
- * through its own `LAYER_DRAWERS` entry, minus `html`. `html` renders through
- * two independent paths that must agree pixel for pixel (HL1) — the canvas
- * compositor's own drawer and the markup assembler, which has no motion
- * mechanism at all — so a track on it would render on one path and not the
- * other; that is a standalone decision, not a table the plan carries, and it
- * refuses here for that reason. `fill` refuses for the plainer reason: no
- * creative type accepts it yet (D131) and this compositor draws it nowhere,
- * so a track on it would be the D134 mistake again — a vocabulary member
- * nothing reads.
+ * The layer kinds a track may nest on (plan review 2026-09-15): only the
+ * kinds K2/K3 drive — `image`, `video`, `static-text`, `animated-text`. This
+ * is narrower than "every kind this compositor draws": `shade` (`paintShade`)
+ * and `logo` (`drawLogo`) read neither `eased` nor `motion` at all — they
+ * have no pose mechanism today — and `accent`'s only motion, the wipe, is a
+ * clip-extent animation that none of `TRACK_PROPERTIES` represents (see its
+ * own doc comment). Accepting tracks on a kind with no pose mechanism would
+ * be the exact D134 mistake this comment cites elsewhere: a vocabulary
+ * member nothing reads.
+ *
+ * `html` refuses for a different reason: it renders through two independent
+ * paths that must agree pixel for pixel (HL1) — the canvas compositor's own
+ * drawer and the markup assembler, which has no motion mechanism at all — so
+ * a track on it would render on one path and not the other. `fill` refuses
+ * because no creative type accepts it yet (D131) and this compositor draws
+ * it nowhere.
+ *
+ * Widening is additive later and never breaks a stored brief: `accent` when
+ * K2 gives the wipe a representable property, `shade`/`logo` with a generic
+ * per-drawer pose wrapper (K4 territory). Narrowing later would refuse
+ * tracks a brief already carries, which this list is written to avoid.
  */
 const TRACKABLE_LAYER_KINDS: readonly LayerKind[] = [
   "image",
   "video",
-  "shade",
-  "accent",
   "static-text",
   "animated-text",
-  "logo",
 ];
 
 /** Why a layer's `tracks` is not a shape the brief may carry; undefined when it is. */
@@ -91,8 +105,8 @@ const STOP_FIELDS = ["t", "value", "easing", "clock"] as const;
  * API's `validateTemplate` formats the same problem into its message shape —
  * the two cannot drift. Absent `tracks` is always fine. Only a kind in
  * `TRACKABLE_LAYER_KINDS` may carry a defined `tracks` — the empty array
- * included — before any entry is walked. A present list must be a non-empty
- * array of well-formed tracks.
+ * included — before any entry is walked. A present list must be an array of
+ * well-formed tracks; empty is the same as absent.
  */
 export function layerTracksProblem(
   kind: LayerKind,
@@ -117,7 +131,8 @@ export function layerTracksProblem(
 /**
  * One track's contract: a non-null, non-array object naming a vocabulary
  * `property`, carrying only `property` and `stops`, and a non-empty array of
- * well-formed, in-order stops.
+ * well-formed stops with no duplicate `t` on one clock (K-D9) — declaration
+ * order is otherwise free.
  */
 function trackProblem(track: unknown): LayerTracksProblem | undefined {
   if (typeof track !== "object" || track === null || Array.isArray(track)) {
@@ -145,26 +160,32 @@ function trackProblem(track: unknown): LayerTracksProblem | undefined {
   if (!Array.isArray(stops) || stops.length === 0) {
     return { path: ".stops", must: "be a non-empty array of stops", value: stops };
   }
-  // One `t` sequence per clock (K-D8): two stops on different clocks are
-  // independent axes, so only a same-clock comparison can mean "out of
-  // order" or "duplicate". K-D9's only refusal — a duplicate `t` — is the
-  // equal case of this same strictly-increasing check, not a second rule.
-  const lastTByClock = new Map<StopClock, number>();
+  // K-D9's only refusal: a duplicate `t` on one track's SAME clock. Scoped
+  // per clock (K-D8) — a stop's `t` only compares to another stop's on the
+  // same axis, so declaration order is free (a track's stops need not be
+  // written t-ascending) and only a repeated `t` within one clock's own
+  // subsequence is refused. The same `t` on two DIFFERENT clocks is not a
+  // duplicate — they are independent axes.
+  const seenTByClock = new Map<StopClock, Set<number>>();
   for (let i = 0; i < stops.length; i += 1) {
     const problem = stopProblem(stops[i]);
     if (problem !== undefined) {
       return { path: `.stops[${i}]${problem.path}`, must: problem.must, value: problem.value };
     }
     const stop = stops[i] as { readonly t: number; readonly clock: StopClock };
-    const prevT = lastTByClock.get(stop.clock);
-    if (prevT !== undefined && stop.t <= prevT) {
+    const seen = seenTByClock.get(stop.clock);
+    if (seen !== undefined && seen.has(stop.t)) {
       return {
         path: `.stops[${i}].t`,
-        must: `be strictly greater than the previous "${stop.clock}"-clock stop's t (${prevT})`,
+        must: `be unique among this track's "${stop.clock}"-clock stops (duplicate ${stop.t})`,
         value: stop.t,
       };
     }
-    lastTByClock.set(stop.clock, stop.t);
+    if (seen === undefined) {
+      seenTByClock.set(stop.clock, new Set([stop.t]));
+    } else {
+      seen.add(stop.t);
+    }
   }
   return undefined;
 }

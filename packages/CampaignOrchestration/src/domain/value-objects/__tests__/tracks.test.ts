@@ -8,8 +8,8 @@ const opacityTrack = {
   stops: [{ t: 0, value: 0, clock: "pose" as const }, { t: 1, value: 1, clock: "pose" as const }],
 };
 
-describe("track and stop vocabularies (§1, K-D8)", () => {
-  test("TRACK_PROPERTIES names exactly what the compositor moves today", () => {
+describe("track and stop vocabularies (keyframing plan §1 \"The model\", K-D8)", () => {
+  test("TRACK_PROPERTIES names the four initial pose properties, not every motion the compositor draws", () => {
     expect(TRACK_PROPERTIES).toEqual(["opacity", "scale", "dx", "dy"]);
   });
 
@@ -36,16 +36,8 @@ describe("layerTracksProblem — which kinds accept tracks", () => {
     }
   });
 
-  test("every kind this compositor draws through its own drawer accepts a well-formed track, empty list included", () => {
-    const drawingKinds: LayerKind[] = [
-      "image",
-      "video",
-      "shade",
-      "accent",
-      "static-text",
-      "animated-text",
-      "logo",
-    ];
+  test("the kinds K2/K3 drive accept a well-formed track, empty list included", () => {
+    const drawingKinds: LayerKind[] = ["image", "video", "static-text", "animated-text"];
     for (const kind of drawingKinds) {
       expect(layerTracksProblem(kind, [])).toBeUndefined();
       expect(layerTracksProblem(kind, [opacityTrack])).toBeUndefined();
@@ -71,6 +63,16 @@ describe("layerTracksProblem — which kinds accept tracks", () => {
       must: 'be absent for layer kind "fill"',
       value: [],
     });
+  });
+
+  test("refuses tracks on shade, logo and accent — no pose mechanism reads eased/motion today (plan review)", () => {
+    for (const kind of ["shade", "logo", "accent"] as const) {
+      expect(layerTracksProblem(kind, [opacityTrack])).toEqual({
+        path: "",
+        must: `be absent for layer kind "${kind}"`,
+        value: [opacityTrack],
+      });
+    }
   });
 });
 
@@ -226,8 +228,8 @@ describe("layerTracksProblem — structural refusals", () => {
   });
 });
 
-describe("layerTracksProblem — ordering (K-D9's only refusal)", () => {
-  test("accepts stops strictly increasing in t within one clock", () => {
+describe("layerTracksProblem — duplicate t, per clock (K-D9's only refusal)", () => {
+  test("accepts stops declared t-ascending within one clock", () => {
     expect(
       layerTracksProblem("image", [
         {
@@ -242,7 +244,7 @@ describe("layerTracksProblem — ordering (K-D9's only refusal)", () => {
     ).toBeUndefined();
   });
 
-  test("refuses stops out of order (descending) within one clock", () => {
+  test("accepts stops declared t-descending — declaration order is free, only a duplicate t is refused", () => {
     expect(
       layerTracksProblem("image", [
         {
@@ -253,14 +255,10 @@ describe("layerTracksProblem — ordering (K-D9's only refusal)", () => {
           ],
         },
       ]),
-    ).toEqual({
-      path: "[0].stops[1].t",
-      must: 'be strictly greater than the previous "pose"-clock stop\'s t (0.5)',
-      value: 0.2,
-    });
+    ).toBeUndefined();
   });
 
-  test("refuses a duplicate t within one clock on one track (K-D9)", () => {
+  test("refuses a duplicate t within one clock on one track (K-D9), wherever in the list it repeats", () => {
     expect(
       layerTracksProblem("image", [
         {
@@ -273,7 +271,25 @@ describe("layerTracksProblem — ordering (K-D9's only refusal)", () => {
       ]),
     ).toEqual({
       path: "[0].stops[1].t",
-      must: 'be strictly greater than the previous "pose"-clock stop\'s t (0.5)',
+      must: 'be unique among this track\'s "pose"-clock stops (duplicate 0.5)',
+      value: 0.5,
+    });
+    // Not merely adjacent duplicates — a third, later stop repeating an
+    // earlier clock's t is refused too, out of declaration order.
+    expect(
+      layerTracksProblem("image", [
+        {
+          property: "opacity",
+          stops: [
+            { t: 0.5, value: 0, clock: "pose" },
+            { t: 0.2, value: 1, clock: "pose" },
+            { t: 0.5, value: 2, clock: "pose" },
+          ],
+        },
+      ]),
+    ).toEqual({
+      path: "[0].stops[2].t",
+      must: 'be unique among this track\'s "pose"-clock stops (duplicate 0.5)',
       value: 0.5,
     });
   });

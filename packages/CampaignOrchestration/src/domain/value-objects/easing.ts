@@ -8,7 +8,10 @@
  * *behaviour* change, so the goldens must not move.
  */
 
-/** The one easing every draw path already shares (§0 of the plan). */
+/**
+ * The one easing every draw path already shares (the keyframing plan's §0,
+ * "The question the retired plan did not answer").
+ */
 export function easeOutCubic(t: number): number {
   return 1 - (1 - t) ** 3;
 }

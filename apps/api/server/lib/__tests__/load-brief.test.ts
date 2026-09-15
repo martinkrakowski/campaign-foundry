@@ -972,19 +972,6 @@ describe("parseBrief", () => {
           'Campaign brief field "template.layers[0].tracks[0].stops[0].easing" must be one of "ease-out-cubic", "linear"; got "bounce".',
         ],
         [
-          "stops out of order (descending), not merely duplicated",
-          [
-            {
-              property: "opacity",
-              stops: [
-                { t: 0.6, value: 0, clock: "pose" },
-                { t: 0.2, value: 1, clock: "pose" },
-              ],
-            },
-          ],
-          'Campaign brief field "template.layers[0].tracks[0].stops[1].t" must be strictly greater than the previous "pose"-clock stop\'s t (0.6); got 0.2.',
-        ],
-        [
           "an unknown field on a track",
           [{ property: "opacity", stops: track.stops, layer: "image" }],
           'Campaign brief field "template.layers[0].tracks[0].layer" must be one of "property", "stops"; got "image".',
@@ -1015,8 +1002,33 @@ describe("parseBrief", () => {
           ]),
         }),
       ).toThrow(
-        'Campaign brief field "template.layers[0].tracks[0].stops[1].t" must be strictly greater than the previous "pose"-clock stop\'s t (0.5); got 0.5.',
+        'Campaign brief field "template.layers[0].tracks[0].stops[1].t" must be unique among this track\'s "pose"-clock stops (duplicate 0.5); got 0.5.',
       );
+    });
+
+    test("stops declared t-descending parse — declaration order is free, only a duplicate t is refused", () => {
+      expect(() =>
+        parseBrief({
+          ...valid,
+          template: withTracks("image", [
+            {
+              property: "opacity",
+              stops: [
+                { t: 0.6, value: 0, clock: "pose" },
+                { t: 0.2, value: 1, clock: "pose" },
+              ],
+            },
+          ]),
+        }),
+      ).not.toThrow();
+    });
+
+    test("tracks on shade, logo and accent are refused — no pose mechanism reads eased/motion today (plan review)", () => {
+      for (const layerId of ["shade", "accent", "logo"]) {
+        expect(() =>
+          parseBrief({ ...valid, template: withTracks(layerId, [track]) }),
+        ).toThrow(new RegExp(`template\\.layers\\[\\d+\\]\\.tracks" must be absent for layer kind`));
+      }
     });
 
     test("two tracks composing on one property is legal — never refused (K-D9)", () => {

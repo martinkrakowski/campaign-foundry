@@ -623,6 +623,40 @@ describe("isBriefTemplate layer tracks (K1)", () => {
     expect(withTracks([track])).toBe(true);
   });
 
+  test("accepts stops declared t-descending — declaration order is free, only a duplicate t is refused", () => {
+    expect(
+      withTracks([
+        {
+          property: "opacity",
+          stops: [
+            { t: 0.6, value: 0, clock: "pose" },
+            { t: 0.2, value: 1, clock: "pose" },
+          ],
+        },
+      ]),
+    ).toBe(true);
+  });
+
+  test("refuses tracks on shade, logo and accent — no pose mechanism reads eased/motion today (plan review)", () => {
+    for (const kind of ["shade", "logo", "accent"] as const) {
+      expect(
+        isBriefTemplate({
+          id: "canonical-image-text",
+          version: 1,
+          creativeType: "image-text",
+          unit: "standard-web",
+          layers: [
+            { id: "image", kind: "image" },
+            { id: "shade", kind: "shade", ...(kind === "shade" ? { tracks: [track] } : {}) },
+            { id: "accent", kind: "accent", ...(kind === "accent" ? { tracks: [track] } : {}) },
+            { id: "static-text", kind: "static-text" },
+            { id: "logo", kind: "logo", ...(kind === "logo" ? { tracks: [track] } : {}) },
+          ],
+        }),
+      ).toBe(false);
+    }
+  });
+
   test("refuses tracks on an html layer — the kind's two renderers cannot agree on motion", () => {
     expect(
       isBriefTemplate({
@@ -671,17 +705,6 @@ describe("isBriefTemplate layer tracks (K1)", () => {
     expect(
       withTracks([
         { property: "opacity", stops: [{ t: 0, value: 0, clock: "pose", easing: "bounce" }] },
-      ]),
-    ).toBe(false);
-    expect(
-      withTracks([
-        {
-          property: "opacity",
-          stops: [
-            { t: 0.6, value: 0, clock: "pose" },
-            { t: 0.2, value: 1, clock: "pose" },
-          ],
-        },
       ]),
     ).toBe(false);
     expect(withTracks([{ property: "opacity", stops: track.stops, layer: "image" }])).toBe(false);
