@@ -566,3 +566,25 @@ leftover property. Both are asset-copy-before-brief-write by construction.
 with the siblings' exact body, pinned by a test that plants `briefs/copy.yaml` as a symlink to a
 file outside the briefs dir, asserts the 400 and the response body, and asserts the outside file
 is unchanged.
+
+---
+
+## 26. The Headline Pool drawer's outcome messages are never announced (X24)
+
+**Evidence.** `HeadlinePoolDrawer.tsx` rendered its asynchronous outcome messages as plain
+paragraphs: the unavailable warning and the error (`{error ? <p className="text-[13px]
+text-error">…</p>`) carried no live role, while the sibling `AssetPickerDrawer.tsx` gives its
+error paragraph `role="alert"`. A failed generate or patch — including the 409 "modified by
+another user" — appeared silently for a screen-reader user. The existing tests found the text
+with `findByText`, so nothing pinned the missing role.
+
+**Consequence.** The drawer's only feedback for a rejected write was visual. A screen-reader
+user who pressed Generate and got a 400, or approved an entry into someone else's revision,
+received no announcement at all — the message appeared under a cursor they could not see.
+
+**Fix.** `role="alert"` on the error paragraph, `role="status"` on the unavailable message.
+These messages appear once, after a request settles — not on every keystroke — which is why a
+live role is right here. No visible change.
+
+**X24 — shipped in this PR.** Both roles are on, pinned by two tests that query by role:
+`findByRole("alert")` after a 400 generate, `findByRole("status")` after a 503.

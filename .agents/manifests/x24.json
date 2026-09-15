@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "lane": "X24",
+  "mutations": [
+    {
+      "file": "apps/web/src/components/campaign/HeadlinePoolDrawer.tsx",
+      "before": "          <p role=\"alert\" className=\"text-[13px] text-error\">",
+      "after": "          <p className=\"text-[13px] text-error\">",
+      "because": "Without role=\"alert\" a failed generate or patch — including the 409 conflict — is silent for a screen-reader user, which is the exact gap X24 closes; the alert test queries by role and fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/headline-pool-drawer.test.tsx",
+        "-t",
+        "a generate failure is announced to screen readers as an alert",
+        "--maxWorkers=2"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/HeadlinePoolDrawer.tsx",
+      "before": "          <p role=\"status\" className=\"text-[13px] text-warning\">\n            {unavailable}",
+      "after": "          <p className=\"text-[13px] text-warning\">\n            {unavailable}",
+      "because": "Without role=\"status\" the 503 unavailable warning is never announced, and the status test — which queries findByRole(\"status\") after a 503 generate — fails; no other status element is rendered once the request settles.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/headline-pool-drawer.test.tsx",
+        "-t",
+        "an unavailable response is announced to screen readers as a status",
+        "--maxWorkers=2"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
