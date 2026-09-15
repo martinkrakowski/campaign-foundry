@@ -629,6 +629,19 @@ describe("GET /output/**", () => {
     expect(await res.text()).toBe(original);
   });
 
+  test("404s and closes the handle when the opened handle's stat() fails", async () => {
+    writeFileSync(resolve(dir, "flaky.png"), "x");
+    fsHook.open = async (path, flags) => {
+      const actual = await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
+      const handle = await actual.open(path, flags);
+      handle.stat = () => Promise.reject(Object.assign(new Error("EIO: i/o error"), { code: "EIO" }));
+      return handle;
+    };
+    const res = await call("flaky.png");
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: "Not found" });
+  });
+
   test("404s the root path when the root directory exists", async () => {
     // OUTPUT_DIR is `dir`, which exists — stat() succeeds on a directory, so
     // the handler itself must reject anything that is not a regular file.
