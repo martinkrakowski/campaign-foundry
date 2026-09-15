@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "lane": "C4b",
+  "mutations": [
+    {
+      "file": "packages/CreativeGeneration/src/infrastructure/adapters/NodeCanvasCompositor.ts",
+      "before": "    const anchor: AnchorKind = request.anchor ?? textProps.anchor ?? (top ? \"top\" : \"bottom\");",
+      "after": "    const anchor: AnchorKind = request.anchor ?? (top ? \"top\" : \"bottom\");",
+      "because": "Drop textProps.anchor from the merge chain: a text layer's anchor prop no longer wins over the layout-derived default when the request carries no axis anchor — R-D4's prop-honoured-only-without-the-axis promise broken exactly at the resolution site.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CreativeGeneration/src/infrastructure/adapters/__tests__/NodeCanvasCompositor.geometry-props.test.ts",
+        "-t",
+        "no axis anchor: the text layer's anchor prop wins over the layout-derived default"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/load-brief.ts",
+      "before": "  validateAnchorPropAxis(record, template);",
+      "after": "  // validateAnchorPropAxis(record, template);",
+      "because": "Drop the boundary refusal call: a brief that sets both a text layer's anchor prop and a non-empty variation.axes.anchor is silently accepted instead of refused — R-D4's boundary refusal broken at the one call site that wires it in.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/load-brief.test.ts",
+        "-t",
+        "refuses a text layer's anchor prop together with a non-empty anchor axis"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
