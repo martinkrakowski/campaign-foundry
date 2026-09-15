@@ -159,7 +159,14 @@ export function isPersistedAsset(a: unknown): a is PersistedAsset {
   // packaging reads `expiresOn` off it directly (unlike `descriptor`), so it is
   // validated here rather than left as `unknown` — a row that fails is skipped
   // and counted, same as a motion row without a readable video path.
-  if (rec.audioRights !== undefined && !isAudioRights(rec.audioRights)) return false;
+  if (rec.audioRights !== undefined) {
+    if (!isAudioRights(rec.audioRights)) return false;
+    // VE-D8 fix2 #5: music rights describe a motion clip's audio bed — a
+    // static or html row cannot carry one. Without this, a licence attached
+    // to the wrong row (or a copy-paste onto a static row) can expire and
+    // reject a whole package for a row that was never audio.
+    if (rec.format !== "motion") return false;
+  }
   // `format` is absent on classic rows, else static | motion | html. An unknown format is
   // skipped (and counted) rather than packaged as a still; a motion row without a
   // readable mp4 path or a finite clip length can't be packaged or duration-checked;

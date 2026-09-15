@@ -403,6 +403,23 @@ describe("report persistence", () => {
     expect(isPersistedAsset({ ...row, audioRights: "lic-1" })).toBe(false);
   });
 
+  test("isPersistedAsset refuses audioRights on a non-motion row (VE-D8 fix2 #5)", () => {
+    const rights = { licenceId: "lic-1", source: "acme" };
+    const staticRow = { productId: "alpha", aspectRatio: "1:1", treatment: "default", outputPath: "alpha/1x1.png" };
+    expect(isPersistedAsset({ ...staticRow, audioRights: rights })).toBe(false);
+    expect(isPersistedAsset({ ...staticRow, format: "static", audioRights: rights })).toBe(false);
+    const htmlRow = {
+      productId: "alpha",
+      aspectRatio: "1:1",
+      treatment: "default",
+      outputPath: "alpha/1x1.png",
+      format: "html",
+      htmlBundlePath: "alpha/1x1/bundle.zip",
+      htmlFallbackPath: "alpha/1x1/fallback.png",
+    };
+    expect(isPersistedAsset({ ...htmlRow, audioRights: rights })).toBe(false);
+  });
+
   test("audioRights persists on the asset through writeReport/readReport and the guard (VE-D8)", async () => {
     const rights = { licenceId: "lic-1", source: "acme", expiresOn: "2026-12-31", territories: ["US"] };
     const path = await writeReport(

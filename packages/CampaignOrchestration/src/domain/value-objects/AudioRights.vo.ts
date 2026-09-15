@@ -31,9 +31,23 @@ export interface AudioRights {
 
 const ALPHA2_PATTERN = /^[A-Z]{2}$/;
 
-/** `true` when `code` is exactly two uppercase ASCII letters (ISO 3166-1 alpha-2). */
+/**
+ * ISO 3166-1's user-assigned codes: `AA`, `QM`-`QZ`, `XA`-`XZ`, `ZZ` — reserved
+ * for private use and never assigned to a country or territory. Expressed as a
+ * pattern/range rule, not a pasted list — this is not a country-assignment
+ * check (real assignment is not verified; `QA`, for one, is a real, assigned
+ * code and correctly stays outside this pattern).
+ */
+const USER_ASSIGNED_PATTERN = /^(?:AA|Q[M-Z]|X[A-Z]|ZZ)$/;
+
+/**
+ * `true` when `code` is exactly two uppercase ASCII letters (ISO 3166-1 alpha-2)
+ * AND is not one of the ISO 3166-1 user-assigned codes (`AA`, `QM`-`QZ`,
+ * `XA`-`XZ`, `ZZ`) reserved for private use. Shape-checked only — whether a
+ * code is actually *assigned* to a country is not verified (VE-D8).
+ */
 export function isAlpha2(code: string): boolean {
-  return ALPHA2_PATTERN.test(code);
+  return ALPHA2_PATTERN.test(code) && !USER_ASSIGNED_PATTERN.test(code);
 }
 
 /**
@@ -48,17 +62,53 @@ export function normalizeRegion(targetRegion: string | null | undefined): string
 
 /**
  * Strict ISO-8601 date or date-time: `YYYY-MM-DD`, optionally followed by
- * `THH:MM:SS`, optional fractional seconds, and an optional `Z`/`±HH:MM`
- * offset. Narrower than what `Date.parse` alone accepts (e.g. "March 3 2024"
- * parses in most engines) so a malformed date is refused at load rather than
- * silently accepted in one engine's grammar and not another's.
+ * `THH:MM:SS`, optional fractional seconds, and — when a time is present — a
+ * **required** `Z`/`±HH:MM` offset. Narrower than what `Date.parse` alone
+ * accepts (e.g. "March 3 2024" parses in most engines, and an offset-less
+ * date-time parses as the *host's local time*) so a malformed or
+ * timezone-ambiguous value is refused at load rather than silently accepted
+ * in one engine's grammar, or one server's timezone, and not another's. A
+ * date-time with no offset is refused outright — there is no tolerant
+ * fallback — because there is no correct instant to assign it.
  */
 const EXPIRES_ON_PATTERN =
-  /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})?)?$/;
+  /^(\d{4})-(\d{2})-(\d{2})(?:T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2}))?$/;
 
-/** Parses `expiresOn` to epoch milliseconds, or `undefined` when it is not that shape. */
+/**
+ * `true` when `year`-`month`-`day` (1-indexed month) is a real Gregorian
+ * calendar date. Checked on the digits as written, never on a value `Date`
+ * has already normalised — `Date.UTC(2026, 1, 30)` (Feb 30) silently rolls
+ * over to March 2, which is exactly the failure this guards against.
+ */
+function isValidCalendarDate(year: number, month: number, day: number): boolean {
+  if (month < 1 || month > 12 || day < 1) return false;
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  return day <= daysInMonth;
+}
+
+/**
+ * Parses `expiresOn` to epoch milliseconds, or `undefined` when it is not a
+ * valid, unambiguous ISO-8601 date or date-time (VE-D8 fix2 #1/#2).
+ *
+ * A date-only value (`YYYY-MM-DD`, no time) is UTC and **valid through the
+ * end of that day**: "expires on 2026-06-30" reads as "good through June
+ * 30", not "expires at its first instant" — so it resolves to
+ * `2026-06-30T23:59:59.999Z`, the same instant `isExpired` then compares
+ * against at both the legal gate and packaging. A date-time always carries an
+ * explicit `Z` or offset (the pattern above admits nothing else), so it needs
+ * no such rule — it already names one instant.
+ */
 export function parseExpiresOnMs(value: string): number | undefined {
-  if (!EXPIRES_ON_PATTERN.test(value)) return undefined;
+  const match = EXPIRES_ON_PATTERN.exec(value);
+  if (!match) return undefined;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (!isValidCalendarDate(year, month, day)) return undefined;
+
+  if (!value.includes("T")) {
+    return Date.UTC(year, month - 1, day, 23, 59, 59, 999);
+  }
   const ms = Date.parse(value);
   return Number.isFinite(ms) ? ms : undefined;
 }

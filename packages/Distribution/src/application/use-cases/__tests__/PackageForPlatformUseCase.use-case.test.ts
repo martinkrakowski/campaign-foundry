@@ -488,6 +488,49 @@ describe("PackageForPlatformUseCase — music rights (VE-D8)", () => {
     const result = await exec(store, { assets: [asset()] });
     expect(result.success).toBe(true);
   });
+
+  test("expiry is checked only against assets actually selected for the requested platform (fix2 #5)", async () => {
+    const store = fakeStore();
+    // A 9:16 row is not eligible for instagram-feed (1:1 static) — an expired
+    // licence on it must not block a package it plays no part in.
+    const result = await exec(store, {
+      assets: [
+        asset({
+          aspectRatio: "9:16",
+          outputPath: "alpha/9x16/v1.png",
+          audioRights: { licenceId: "lic-1", source: "acme", expiresOn: "2026-08-01" },
+        }),
+        asset(),
+      ],
+      platforms: ["instagram-feed"],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  test("expiry is checked only against included assets when `include` drops the rights-bearing row (fix2 #5)", async () => {
+    const store = fakeStore();
+    const expired = asset({
+      productId: "alpha",
+      audioRights: { licenceId: "lic-1", source: "acme", expiresOn: "2026-08-01" },
+    });
+    const clean = asset({ productId: "beta", outputPath: "beta/1x1.png" });
+    const result = await exec(store, {
+      assets: [expired, clean],
+      include: ["beta/1:1/default"],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  test("a malformed packagedAt fails closed with a clear error; nothing is written (fix2 #6)", async () => {
+    const store = fakeStore();
+    const result = await exec(store, {
+      assets: [asset({ audioRights: { licenceId: "lic-1", source: "acme", expiresOn: "2026-08-01" } })],
+      packagedAt: "not-a-timestamp",
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.error.message).toMatch(/packagedAt/);
+    expect(store.writeManifest).not.toHaveBeenCalled();
+  });
 });
 
 describe("PackageForPlatformUseCase — html (D122)", () => {

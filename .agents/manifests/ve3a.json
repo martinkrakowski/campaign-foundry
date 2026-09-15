@@ -69,6 +69,57 @@
         "a loaded brief with audio round-trips and opens clean"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/AudioRights.vo.ts",
+      "before": "const EXPIRES_ON_PATTERN =\n  /^(\\d{4})-(\\d{2})-(\\d{2})(?:T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|[+-]\\d{2}:\\d{2}))?$/;\n",
+      "after": "const EXPIRES_ON_PATTERN =\n  /^(\\d{4})-(\\d{2})-(\\d{2})(?:T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|[+-]\\d{2}:\\d{2})?)?$/;\n",
+      "because": "Making the Z/offset optional again on a date-time lets an offset-less expiresOn (read as the host's local time) parse, so the no-Z/offset refusal test must fail (VE3a fix2 #1).",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/AudioRights.vo.test.ts",
+        "-t",
+        "refuses a date-time with no Z/offset"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/load-brief.ts",
+      "before": "  assertNoUnknownKeys(audio, AUDIO_KEYS, \"audio\");\n",
+      "after": "  // unknown-key refusal on `audio` dropped (VE3a fix2 mutation #3)\n",
+      "because": "Dropping the unknown-key refusal on `audio` lets a typo'd key (e.g. `track`) load silently instead of refusing, so the unknown-key refusal test must fail.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/load-brief.test.ts",
+        "-t",
+        "has an unknown key refused, naming the key"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/report.ts",
+      "before": "    if (rec.format !== \"motion\") return false;\n",
+      "after": "    // motion-only guard on audioRights dropped (VE3a fix2 mutation #5)\n",
+      "because": "Dropping the motion-only guard lets audioRights on a static/html row pass isPersistedAsset, so a licence attached to the wrong row could reject a whole package again; the non-motion-row refusal test must fail.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/report.test.ts",
+        "-t",
+        "isPersistedAsset refuses audioRights on a non-motion row"
+      ],
+      "verdict": "caught"
     }
   ]
 }

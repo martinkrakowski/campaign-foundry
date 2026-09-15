@@ -957,12 +957,35 @@ function validateCopy(
  * demands `targetRegion` at least look like a code (alpha-2), or the legal
  * gate's membership check would be comparing a code against prose.
  */
+/** The only keys `audio` and `audio.rights` may carry (VE-D8 fix2 #3). */
+const AUDIO_KEYS = ["path", "rights"] as const;
+const AUDIO_RIGHTS_KEYS = ["licenceId", "source", "expiresOn", "territories"] as const;
+
+/**
+ * Refuse any key outside `allowed` — the allow-list pattern `validateAxes` and
+ * `layerPropsProblem` already use for variation axes and layer props. Without
+ * this, a typo'd key (`territroy`, `expiresOn` misspelled `expierson`) round-trips
+ * silently and the licence loads as worldwide / non-expiring instead of refusing.
+ */
+function assertNoUnknownKeys(
+  value: Record<string, unknown>,
+  allowed: readonly string[],
+  path: string,
+): void {
+  for (const key of Object.keys(value)) {
+    if (!allowed.includes(key)) {
+      throw new Error(`Campaign brief field "${path}" has unknown property "${key}".`);
+    }
+  }
+}
+
 function validateAudio(record: Record<string, unknown>): void {
   if (record.audio === undefined) return;
   if (!isPlainObject(record.audio)) {
     throw new Error('Campaign brief field "audio" must be an object.');
   }
   const audio = record.audio;
+  assertNoUnknownKeys(audio, AUDIO_KEYS, "audio");
   if (typeof audio.path !== "string" || audio.path === "") {
     throw new Error('Campaign brief field "audio.path" must be a non-empty string.');
   }
@@ -970,6 +993,7 @@ function validateAudio(record: Record<string, unknown>): void {
     throw new Error('Campaign brief field "audio.rights" must be an object.');
   }
   const rights = audio.rights;
+  assertNoUnknownKeys(rights, AUDIO_RIGHTS_KEYS, "audio.rights");
   if (typeof rights.licenceId !== "string" || rights.licenceId === "") {
     throw new Error('Campaign brief field "audio.rights.licenceId" must be a non-empty string.');
   }
@@ -1159,7 +1183,7 @@ export function parseBrief(
   // ran, so this only ever fires on an otherwise-valid `audio` block.
   if (enforceCapabilities && record.audio !== undefined) {
     throw new Error(
-      'Campaign brief field "audio" is not renderable yet — audio bed rendering ships in VE3b.',
+      "Music tracks are not rendered yet — remove the audio block to run this campaign.",
     );
   }
   // A randomized campaign has no meaning without a total: `count` is the planner's

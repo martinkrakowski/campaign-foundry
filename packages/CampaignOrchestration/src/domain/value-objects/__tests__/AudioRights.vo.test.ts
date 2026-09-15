@@ -21,6 +21,23 @@ describe("AudioRights (VE-D8)", () => {
       expect(isAlpha2("U1")).toBe(false);
       expect(isAlpha2("")).toBe(false);
     });
+
+    test("refuses the ISO 3166-1 user-assigned codes (VE-D8 fix2 #4)", () => {
+      expect(isAlpha2("AA")).toBe(false);
+      expect(isAlpha2("ZZ")).toBe(false);
+      expect(isAlpha2("QM")).toBe(false);
+      expect(isAlpha2("QZ")).toBe(false);
+      expect(isAlpha2("QT")).toBe(false);
+      expect(isAlpha2("XA")).toBe(false);
+      expect(isAlpha2("XZ")).toBe(false);
+      expect(isAlpha2("XK")).toBe(false);
+    });
+
+    test("does not over-refuse real assigned codes that share a letter with a reserved range", () => {
+      expect(isAlpha2("QA")).toBe(true); // Qatar — real, assigned, outside QM-QZ.
+      expect(isAlpha2("ZA")).toBe(true); // South Africa — real, not ZZ.
+      expect(isAlpha2("AZ")).toBe(true); // Azerbaijan — real, not AA.
+    });
   });
 
   describe("normalizeRegion", () => {
@@ -35,16 +52,49 @@ describe("AudioRights (VE-D8)", () => {
   });
 
   describe("parseExpiresOnMs", () => {
-    test("parses a plain ISO date", () => {
-      expect(parseExpiresOnMs("2026-01-01")).toBe(Date.parse("2026-01-01"));
+    test("a plain ISO date is valid through the end of that UTC day (VE-D8 fix2 #1)", () => {
+      expect(parseExpiresOnMs("2026-01-01")).toBe(Date.UTC(2026, 0, 1, 23, 59, 59, 999));
     });
 
-    test("parses an ISO date-time with an offset", () => {
+    test("parses an ISO date-time with a Z offset", () => {
       expect(parseExpiresOnMs("2026-01-01T12:00:00Z")).toBe(Date.parse("2026-01-01T12:00:00Z"));
+    });
+
+    test("parses an ISO date-time with an explicit numeric offset", () => {
+      expect(parseExpiresOnMs("2026-01-01T12:00:00+05:00")).toBe(Date.parse("2026-01-01T12:00:00+05:00"));
+    });
+
+    test("refuses a date-time with no Z/offset (VE-D8 fix2 #1) — no local-time fallback", () => {
+      // Date.parse alone reads this as the host's local time; there is no
+      // correct instant to assign it, so it is refused outright, not coerced.
+      expect(parseExpiresOnMs("2026-01-01T12:00:00")).toBeUndefined();
+      expect(parseExpiresOnMs("2026-01-01T12:00:00.500")).toBeUndefined();
+    });
+
+    test("refuses an impossible calendar date, date-only (VE-D8 fix2 #2)", () => {
+      expect(parseExpiresOnMs("2026-02-30")).toBeUndefined();
+      expect(parseExpiresOnMs("2026-04-31")).toBeUndefined();
+      expect(parseExpiresOnMs("2026-00-10")).toBeUndefined();
+      expect(parseExpiresOnMs("2026-01-00")).toBeUndefined();
+    });
+
+    test("refuses an impossible calendar date, date-time with offset (VE-D8 fix2 #2)", () => {
+      expect(parseExpiresOnMs("2026-02-30T12:00:00Z")).toBeUndefined();
+    });
+
+    test("accepts a real leap-day and refuses a non-leap-year Feb 29", () => {
+      expect(parseExpiresOnMs("2028-02-29")).toBe(Date.UTC(2028, 1, 29, 23, 59, 59, 999));
+      expect(parseExpiresOnMs("2026-02-29")).toBeUndefined();
     });
 
     test("refuses a non-ISO grammar Date.parse alone would accept", () => {
       expect(parseExpiresOnMs("March 3, 2026")).toBeUndefined();
+    });
+
+    test("refuses an out-of-range time component on an otherwise valid calendar date", () => {
+      // A valid Y-M-D with an impossible hour/minute/second: the regex shape and the
+      // calendar-date check both pass, but Date.parse itself refuses the instant.
+      expect(parseExpiresOnMs("2026-01-01T25:00:00Z")).toBeUndefined();
     });
 
     test("refuses garbage", () => {
@@ -122,6 +172,10 @@ describe("AudioRights (VE-D8)", () => {
       expect(isAudioRights({ licenceId: "lic-1", source: "acme", territories: [] })).toBe(false);
       expect(isAudioRights({ licenceId: "lic-1", source: "acme", territories: ["usa"] })).toBe(false);
       expect(isAudioRights({ licenceId: "lic-1", source: "acme", territories: "US" })).toBe(false);
+    });
+
+    test("refuses a user-assigned territory code (VE-D8 fix2 #4)", () => {
+      expect(isAudioRights({ licenceId: "lic-1", source: "acme", territories: ["ZZ"] })).toBe(false);
     });
   });
 });

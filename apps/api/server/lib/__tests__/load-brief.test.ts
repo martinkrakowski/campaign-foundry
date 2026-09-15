@@ -946,7 +946,19 @@ describe("parseBrief", () => {
     });
 
     test("a malformed expiresOn is refused, naming the field", () => {
-      for (const expiresOn of ["not-a-date", "2026-13-40", "", 20260101]) {
+      for (const expiresOn of [
+        "not-a-date",
+        "2026-13-40",
+        "",
+        20260101,
+        // VE-D8 fix2 #1: no Z/offset — local time on the server would be ambiguous.
+        "2026-06-01T12:00:00",
+        "2026-06-01T12:00:00.500",
+        // VE-D8 fix2 #2: impossible calendar dates Date.parse would otherwise normalise.
+        "2026-02-30",
+        "2026-04-31",
+        "2026-02-30T12:00:00Z",
+      ]) {
         expect(() => parseBrief({ ...valid, audio: audio({ expiresOn }) })).toThrow(
           /Campaign brief field "audio.rights.expiresOn" must be an ISO-8601 date or date-time/,
         );
@@ -976,6 +988,29 @@ describe("parseBrief", () => {
       }
     });
 
+    test("a user-assigned territory code is refused (VE-D8 fix2 #4)", () => {
+      for (const territories of [["ZZ"], ["AA"], ["QT"], ["XK"]]) {
+        expect(() => parseBrief({ ...valid, audio: audio({ territories }) })).toThrow(
+          /Campaign brief field "audio.rights.territories" must be a non-empty array of ISO 3166-1 alpha-2 codes/,
+        );
+      }
+    });
+
+    test("audio has an unknown key refused, naming the key (VE-D8 fix2 #3)", () => {
+      expect(() =>
+        parseBrief({ ...valid, audio: { ...audio(), track: "bed.mp3" } }),
+      ).toThrow('Campaign brief field "audio" has unknown property "track".');
+    });
+
+    test("audio.rights has an unknown key refused, naming the key (VE-D8 fix2 #3)", () => {
+      expect(() =>
+        parseBrief({
+          ...valid,
+          audio: { path: "bed.mp3", rights: { licenceId: "lic-1", source: "acme", territroy: ["US"] } },
+        }),
+      ).toThrow('Campaign brief field "audio.rights" has unknown property "territroy".');
+    });
+
     test("territories present while targetRegion is not alpha-2 (free text, null, empty) is refused", () => {
       for (const targetRegion of ["Germany", null, ""]) {
         expect(() =>
@@ -998,10 +1033,15 @@ describe("parseBrief", () => {
       ).toThrow('Campaign brief field "audio.rights.licenceId" must be a non-empty string.');
     });
 
-    test("enforceCapabilities: true refuses any brief declaring audio with the interim message", () => {
+    test("enforceCapabilities: true refuses any brief declaring audio with a product-facing message, naming no internal milestone (VE-D8 fix2 #7)", () => {
       expect(() => parseBrief({ ...valid, audio: audio() }, { enforceCapabilities: true })).toThrow(
-        "is not renderable yet",
+        "Music tracks are not rendered yet — remove the audio block to run this campaign.",
       );
+      try {
+        parseBrief({ ...valid, audio: audio() }, { enforceCapabilities: true });
+      } catch (error) {
+        expect((error as Error).message).not.toMatch(/VE3b/);
+      }
     });
 
     test("enforceCapabilities: false (authoring) still accepts and round-trips a well-formed audio block", () => {
