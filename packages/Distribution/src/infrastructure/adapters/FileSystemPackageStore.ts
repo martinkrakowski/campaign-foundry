@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, relative, resolve, sep } from "node:path";
 import type { PackageManifest, PackageStorePort } from "../../application/ports/out/PackageStorePort.js";
 import { resolveSafe } from "../safe-path.js";
@@ -59,13 +59,49 @@ export class FileSystemPackageStore implements PackageStorePort {
 
   private async ensureStaging(platformId: string): Promise<string> {
     const existing = this.staging.get(platformId);
-    if (existing) return existing;
+    if (existing) {
+      await this.assertStagingIntact(platformId, existing);
+      return existing;
+    }
     const finalDir = this.platformDir(platformId);
     await mkdir(dirname(finalDir), { recursive: true });
     await this.removeStaleStaging(finalDir);
     const staging = await mkdtemp(`${finalDir}.staging-`);
     this.staging.set(platformId, staging);
     return staging;
+  }
+
+  /**
+   * A staging dir this instance already owns can be deleted out from under it:
+   * another store for the same campaign+platform can start a new request while
+   * this one is still mid-package, and its `ensureStaging` sweeps every
+   * `<platform>.staging-*` sibling (`removeStaleStaging`) without knowing this
+   * one is still live (X23). Left unchecked, `writePackaged`'s
+   * `mkdir(dirname(target), { recursive: true })` would silently recreate the
+   * missing tree and keep writing, so a later `writeManifest` would commit a
+   * manifest listing files that no longer exist — the class comment's "a
+   * failure never leaves a mixed folder" promise broken by a partial commit
+   * instead. Fail loudly here, before any of that, so the request surfaces as
+   * an error the caller can retry rather than a corrupted package.
+   *
+   * This is a plain disk check, not an in-memory registry, so it is not
+   * process-local: it catches the same race across separate processes
+   * sharing the output root too. What it does not do is prevent the
+   * deletion — the other store's sweep still runs — so the loser of the race
+   * fails and must be retried; it only stops the loser from committing
+   * garbage. A sweep landing between this check and the write it guards
+   * (`writeFile` / `rm`+`rename`) is a narrower, pre-existing TOCTOU window
+   * this does not close.
+   */
+  private async assertStagingIntact(platformId: string, staging: string): Promise<void> {
+    try {
+      await stat(staging);
+    } catch {
+      throw new Error(
+        `Staging directory for platform "${platformId}" was removed before it could be committed ` +
+          `— likely a concurrent package request for the same campaign. Refusing to continue.`,
+      );
+    }
   }
 
   private async removeStaleStaging(finalDir: string): Promise<void> {
