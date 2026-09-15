@@ -218,16 +218,19 @@ picks a side.
 
 | id | Decision |
 |---|---|
-| **R-D4** | **A prop never shadows a live variation axis.** `anchor` stays in `LAYER_PROPS` and is **honoured only when the brief carries no `variation.axes.anchor`**: the compositor resolves `request.anchor ?? textProps.anchor ?? (layout-derived)`. A brief that sets both a text layer's `anchor` prop and the anchor axis is **refused at the boundary** (API and the editor's draft validation — the domain guard sees only the template), the `validateMotionAxisRequested` cross-field pattern. **`alpha` is removed from `LAYER_PROPS`** (a shade layer carries no props): the tone axis is never absent (it defaults to every tone), so an `alpha` override would always silence it. |
+| **R-D4** | **A prop never shadows a live variation axis.** (Amends D134, `2026-09-08_creative-templates-and-units.md`: `shade: { alpha? }` is withdrawn.) `anchor` stays in `LAYER_PROPS` and is **honoured only when the brief carries no `variation.axes.anchor`**: the compositor resolves `request.anchor ?? textProps.anchor ?? (layout-derived)`. A brief that sets both a text layer's `anchor` prop and the anchor axis is **refused at the boundary** (API and the editor's draft validation — the domain guard sees only the template), the `validateMotionAxisRequested` cross-field pattern. **`alpha` is removed from `LAYER_PROPS`** (a shade layer carries no props): the tone axis is never absent (it defaults to every tone), so an `alpha` override would always silence it. |
 
 Why: the anchor axis has a real "absent" state — the planner counts `anchor` in variant distance only when the axis is
 present (`VariationPolicy.vo.ts`) and the compositor derives it from layout otherwise (`NodeCanvasCompositor.ts`
 `request.anchor ?? …`) — so honouring the prop there collides with nothing; with the axis present, a per-layer override would
 make two variants that differ only on anchor render identically while still passing `minDistance`. Tone has no absent state.
 
-**Lane C4b** (dispatchable): the boundary refusal (API + editor), the one-line merge in the compositor's anchor
-resolution with a direction test beside the C4 geometry-props tests, and deleting `alpha` from `LAYER_PROPS` and its
-validation. Known drift, not blocking: `packages/ui/src/preview-layers.ts` reads `CREATIVE_GEOMETRY.shadeAlpha` directly and
+**Lane C4b** (dispatchable): the boundary refusal (API + editor); the compositor's anchor resolution reads the text
+prop — `textProps` is declared after the anchor is resolved today, so hoist it above that line, keep the `??` chain on one
+line (the premise is line-based), and drop the stale comment beside it — with a direction test beside the C4
+geometry-props tests; and withdrawing `alpha`: `LAYER_PROPS`, `ShadeProps.alpha` (`brief-template.ts`), `PROPS_KEY_ORDER`
+and its comment in `packages/shared/src/infrastructure/brief-yaml.ts`, and the fixtures that assert `props: { alpha }` is
+legal (`brief-yaml.test.ts`, `brief-template.test.ts`). The lane reaches `packages/shared`. Known drift, not blocking: `packages/ui/src/preview-layers.ts` reads `CREATIVE_GEOMETRY.shadeAlpha` directly and
 the SVG stand-in already ignores C4's live props.
 
 ```premise C4b

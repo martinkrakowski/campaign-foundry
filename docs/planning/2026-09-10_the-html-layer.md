@@ -192,8 +192,8 @@ last enabled instance of one. The disabled-layer test therefore adds a second, d
 alongside the enabled one — which is also what X9's own promise is about.
 
 ```premise HL5f
-# The markup assembler still resolves font weight from a hard-coded fallback instead of the variant's tone.
-grep -q 'resolveStyle(options.style, "bold"' packages/CampaignOrchestration/src/domain/value-objects/markup-assembler.ts
+# Either gap keeps the lane open: the assembler still resolves weight from a hard-coded fallback, or its options carry no tone.
+grep -q 'resolveStyle(options.style, "bold"' packages/CampaignOrchestration/src/domain/value-objects/markup-assembler.ts || ! grep -qE 'readonly tone[?]?:' packages/CampaignOrchestration/src/domain/value-objects/markup-assembler.ts
 ```
 
 ```premise HL5c
@@ -202,7 +202,7 @@ grep -q 'resolveStyle(options.style, "bold"' packages/CampaignOrchestration/src/
 # only) and a placement byte budget (profile.maxBytes, Distribution only).
 # Either crossing into these trees is the meter starting to exist; both legs
 # are probed so a helper that renames the budget still trips the assembler leg.
-# Blocked on X14 (unowned-gaps §17): no profile declares html, so the budget
+# Waits until X14 ships its html profiles (unowned-gaps §17); until then no profile declares html, so the budget
 # an html placement would show does not exist yet.
 ! grep -rqiE "maxBytes|byte.?budget|weight.?(meter|budget)|markup-assembler|assembleHtml" apps/web/src packages/ui/src apps/api/server
 ```

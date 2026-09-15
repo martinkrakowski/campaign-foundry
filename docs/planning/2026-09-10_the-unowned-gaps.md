@@ -349,7 +349,10 @@ constant.
 **`google-display-html`** and **`display-web-html`**, each `formats: ["html"]`, sizes `DISPLAY_ALL_SIZES`, and
 `maxBytes: HTML_MAX_BYTES = 150 * 1024`. **`meta-audience-network` gains no html.** Separate profiles are the codebase's own
 precedent for one network in two families (`instagram-feed` static vs `instagram-story` motion): no type change, `packageHtml`
-and `wantsHtml` work unchanged, and HL-D6 stays one number per profile for HL5c's meter.
+and `wantsHtml` work unchanged, and HL-D6 stays one number per profile for HL5c's meter. Tests to update in the lane: `isPlatformVisible` treats `html`
+like `static`, so both hard-coded id arrays in `PlatformProfile.vo.test.ts`'s `visiblePlatformIds` cases gain the two ids;
+the all-profile loops survive because the new profiles carry `sizes`, not a `ratio`. No `campaign-types.ts` change is
+needed — `OutputSection` offers profiles by `formats`, and the boundary accepts any visible id.
 
 **Owner-verifiable, not verified here:** 150 KB is general industry knowledge (Google Ads / DV360 HTML5 zipped upload cap,
 IAB initial-load guidance), and Meta Audience Network is understood not to take third-party HTML5 display creatives — check
