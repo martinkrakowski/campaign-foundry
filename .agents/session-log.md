@@ -5073,3 +5073,21 @@ untouched) and used it in `GET /output/**`, the package listing and the platform
 escape answers each route's existing 404, the output route keeps 400 for lexical escapes only.
 Tests first (red checkpoint 72e6e79), full gate green with 100% on all four counters;
 `plan:verify` 12/12 hold; `.agents/manifests/x26.json` — 2 mutations, both caught.
+
+## 2026-09-15 — X26 round 2 (lane: feat/x26-read-confinement-realpath)
+
+Closed the follow-up gap in §29 (X26) of docs/planning/2026-09-10_the-unowned-gaps.md: Qodo +
+CodeRabbit found `resolveConfinedForRead` validated `realpath(target)` but returned the lexical
+`target`, so every caller re-looked the checked entry up by that same pathname — a write-capable
+process could swap it for an outside-pointing symlink in the window between the check and that
+second lookup. Fix: the helper now returns the validated real path; the output route opens that
+real path once with `O_RDONLY | O_NOFOLLOW` and takes size and bytes from that single handle
+(closed on every exit, including client abort), so a final-component swap now fails the open
+itself (ELOOP) instead of depending on a second realpath comparison. Package routes needed no
+restructuring beyond the corrected return value; the zip walk's existing symlink skip is now
+pinned by a dedicated test. Tests first (red checkpoint on the real-path and TOCTOU-swap tests),
+full gate green with 100% on all four counters; `plan:verify` holds; `.agents/manifests/x26.json`
+— 4 mutations, all caught. Residual stated in the helper's doc comment and in §29: Node has no
+openat/O_BENEATH, so a swap of an intermediate real directory (not the final component) between
+check and open is not closed — that still requires write access to the output tree plus precise
+timing.
