@@ -5062,3 +5062,14 @@ Three tests added (red checkpoint first); full gate green with 100% on all four 
 ## 2026-09-15 X23 round 2 — close the TOCTOU corruption, product-facing errors
 
 - Qodo review found `assertStagingIntact` only narrowed the corruption: a sweep landing after that stat-check but before the write it guards (or a fresh staging dir springing up in its place) could still let `writeManifest` commit a manifest listing swept files. Fix: `writeManifest` now also calls `assertManifestFilesStaged`, verifying every claimed `packagedPath`/`posterPath`/`fallbackPath` is actually present in staging before `rm(finalDir)`+`rename`; a miss refuses the commit and the previous package survives byte-for-byte. Both guard errors reworded to a product-facing message (no paths, no internal nouns) since they reach the export screen via `PackageForPlatformUseCase`'s 422 path. Recorded in §28 (X23) of docs/planning/2026-09-10_the-unowned-gaps.md. Gate 0, 100% x4, 2/2 mutations caught (.agents/manifests/x23.json).
+
+## 2026-09-15 — X26 (lane: feat/x26-read-confinement-realpath)
+
+Closed §29 (X26) of docs/planning/2026-09-10_the-unowned-gaps.md: read routes served any symlink
+inside the output root, even one pointing outside it — `resolveConfined` is lexical while
+stat/createReadStream/readFile follow links. Added `resolveConfinedForRead` (lexical check +
+`realpath(target)` vs `realpath(base)`, symlinked roots stay allowed, missing targets returned
+untouched) and used it in `GET /output/**`, the package listing and the platform-zip routes; an
+escape answers each route's existing 404, the output route keeps 400 for lexical escapes only.
+Tests first (red checkpoint 72e6e79), full gate green with 100% on all four counters;
+`plan:verify` 12/12 hold; `.agents/manifests/x26.json` — 2 mutations, both caught.
