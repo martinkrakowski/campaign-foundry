@@ -458,7 +458,7 @@ describe("validatePolicy", () => {
     // vacuous check when the message constant does not yet exist, since both
     // sides would then read `undefined`.
     expect(validatePolicy(anchored).anchor).toBe(
-      "This anchor axis conflicts with a layer's fixed anchor prop — turn off the axis or clear the layer's anchor override, not both.",
+      "A layer in this template already fixes its own anchor — clear it before picking anchor cards here; you can't set both.",
     );
     expect(validatePolicy(anchored).anchor).toBe(messages.anchorPropConflict);
     // The same live axis with no anchor prop on any text layer: no conflict.

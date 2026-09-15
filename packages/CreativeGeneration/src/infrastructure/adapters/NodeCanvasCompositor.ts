@@ -422,9 +422,20 @@ export class NodeCanvasCompositor implements CompositorPort {
     const width = request.pixelSize?.width ?? resolved.width;
     const height = request.pixelSize?.height ?? resolved.height;
     const top = request.layout === "headline-top";
-    // The anchor axis (T4): absent → derived from layout, the pre-axis
-    // behaviour bit for bit (D54 — the goldens pin both derived paths).
-    const anchor: AnchorKind = request.anchor ?? (top ? "top" : "bottom");
+    // The resolved draw order (D121/D128) — resolved here so `logoApplied`
+    // below can be derived from what the draw will actually paint, and so
+    // `textProps` is available before anchor resolves (R-D4).
+    const layers = resolveLayerList(request.template, request.creativeType);
+    const textProps = (layers.find(
+      (layer) =>
+        (layer.kind === "static-text" || layer.kind === "animated-text") &&
+        layer.enabled !== false,
+    )?.props ?? {}) as TextProps;
+    // The anchor axis (T4) wins over the text layer's `anchor` prop (R-D4 —
+    // a prop never shadows a live axis): absent axis and absent prop both
+    // fall to layout-derived, the pre-axis behaviour bit for bit (D54 — the
+    // goldens pin both derived paths).
+    const anchor: AnchorKind = request.anchor ?? textProps.anchor ?? (top ? "top" : "bottom");
     const subtle = request.tone === "subtle";
     const shadeAlpha = subtle
       ? CREATIVE_GEOMETRY.shadeAlpha.subtle
@@ -439,20 +450,9 @@ export class NodeCanvasCompositor implements CompositorPort {
 
     const background = await loadImage(Buffer.from(request.background));
 
-    // The resolved draw order (D121/D128) — resolved here so `logoApplied`
-    // below can be derived from what the draw will actually paint.
-    const layers = resolveLayerList(request.template, request.creativeType);
-
     // The autofit floor merge (C4, R-D3): the enabled text layer's `typeFloor`
     // prop over the `CREATIVE_GEOMETRY` default, resolved once because the
     // text-kind budget is one (D124) and `fitText` reads it off `LayoutSource`.
-    // `anchor` is NOT merged here even though it rides the same props object —
-    // it shadows the anchor axis, an open owner decision (see `mergeGeometry`).
-    const textProps = (layers.find(
-      (layer) =>
-        (layer.kind === "static-text" || layer.kind === "animated-text") &&
-        layer.enabled !== false,
-    )?.props ?? {}) as TextProps;
     const headlineTypeFloor = mergeGeometry(
       CREATIVE_GEOMETRY.headlineTypeFloorFraction,
       textProps.typeFloor,

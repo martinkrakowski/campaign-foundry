@@ -37,11 +37,11 @@ export {
  * The per-layer props (D134): overrides of the geometry each layer already
  * reads — nothing invented. Numbers are fractions of the canvas in the same
  * units `CREATIVE_GEOMETRY` uses, so a prop value is comparable to the
- * constant it overrides (0.05 solid, 0.16 logo width, 0.7/0.4 shade alpha).
+ * constant it overrides (0.05 solid, 0.16 logo width, 0.4 autofit floor).
  * Every prop is optional, and absent means the value the layer resolves
  * today — from `CREATIVE_GEOMETRY`, the treatment, or the style, exactly as
- * now. The union is keyed by kind at the validation boundary: `shade` cannot
- * carry `logo`'s props.
+ * now. The union is keyed by kind at the validation boundary: `accent`
+ * cannot carry `logo`'s props.
  *
  * `alt` is the one member that is not geometry (X2): the text alternative an
  * `image` layer carries, the one kind whose whole content is a picture a
@@ -53,13 +53,10 @@ export {
  * saying nothing about it.
  *
  * `video`, `html` and `fill` carry no props at all — theirs arrive with the
- * lanes that draw them.
+ * lanes that draw them. `shade` carries none either (R-D4, withdrawn
+ * 2026-09-15): the tone axis is never absent — it defaults to every tone —
+ * so an `alpha` override would always silence it.
  */
-
-/** `shade`'s props: the contrast shade alpha, the `shadeAlpha` pair (0.7 bold / 0.4 subtle). */
-export interface ShadeProps {
-  readonly alpha?: number;
-}
 
 /** `accent`'s props: solid band and fade heights, × canvas height (0.05 / 0.06). */
 export interface AccentProps {
@@ -88,12 +85,7 @@ export interface ImageProps {
   readonly alt?: string;
 }
 
-export type LayerProps =
-  | ShadeProps
-  | AccentProps
-  | LogoProps
-  | TextProps
-  | ImageProps;
+export type LayerProps = AccentProps | LogoProps | TextProps | ImageProps;
 
 /**
  * The props vocabulary per layer kind (D134), in `LayerProps`' declaration
@@ -101,7 +93,7 @@ export type LayerProps =
  * and an unknown kind carry no props.
  */
 const LAYER_PROPS: Readonly<Record<LayerKind, readonly string[]>> = {
-  shade: ["alpha"],
+  shade: [],
   accent: ["solidHeight", "fadeHeight"],
   logo: ["width", "margin"],
   "static-text": ["anchor", "typeFloor"],
@@ -219,6 +211,26 @@ export function layerPropsProblem(
     }
   }
   return undefined;
+}
+
+/**
+ * Whether any text layer (`static-text` / `animated-text`) in `layers` carries
+ * an `anchor` prop (R-D4) — the domain half of the boundary refusal for a
+ * brief that pins a layer's anchor while a variation axis also decides it.
+ * `BriefTemplate` carries no axis of its own, so axis presence is each
+ * boundary's own read (the API's raw `variation.axes.anchor`, the editor's
+ * `anchorAxisActive`); the two facts are combined by the caller, never here —
+ * the same split `layerPropsProblem` keeps between the domain decision and
+ * the boundary's message shape.
+ */
+export function templateHasAnchorProp(
+  layers: readonly Pick<CreativeTemplateLayer, "kind" | "props">[],
+): boolean {
+  return layers.some(
+    (layer) =>
+      (layer.kind === "static-text" || layer.kind === "animated-text") &&
+      (layer.props as TextProps | undefined)?.anchor !== undefined,
+  );
 }
 
 export interface BriefTemplate {
