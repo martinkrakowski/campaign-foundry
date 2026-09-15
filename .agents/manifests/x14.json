@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "lane": "X14",
+  "mutations": [
+    {
+      "file": "packages/Distribution/src/domain/value-objects/PlatformProfile.vo.ts",
+      "before": "  \"google-display-html\": {\n    id: \"google-display-html\",\n    label: \"Google Display (HTML5)\",\n    sizes: DISPLAY_ALL_SIZES,\n    formats: [\"html\"],",
+      "after": "  \"google-display-html\": {\n    id: \"google-display-html\",\n    label: \"Google Display (HTML5)\",\n    sizes: DISPLAY_ALL_SIZES,\n    formats: [\"static\"],",
+      "because": "Revert the new placement to the static family: the id still exists and still lists the five IAB units, so the profile-table invariants all hold, but an image-html row is now taken by the static filter and never packaged — X14's whole point (an HTML unit can be packaged) silently disappears behind a green table.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/Distribution/src/application/use-cases/__tests__/PackageForPlatformUseCase.use-case.test.ts",
+        "-t",
+        "packages an image-html asset for google-display-html",
+        "--maxWorkers=2"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/Distribution/src/application/use-cases/PackageForPlatformUseCase.use-case.ts",
+      "before": "      checks: { size: unitBytes <= profile.maxBytes ? \"pass\" : \"fail\" },",
+      "after": "      checks: { size: bundle.length <= profile.maxBytes ? \"pass\" : \"fail\" },",
+      "because": "Count the bundle alone again, as the lane found it: the fallback a network also uploads stops weighing anything, so an html unit that is over its shipped budget records a pass — the undercount X14 says which bytes the budget counts in order to close.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/Distribution/src/application/use-cases/__tests__/PackageForPlatformUseCase.use-case.test.ts",
+        "-t",
+        "the budget counts the whole unit — bundle plus fallback — not the bundle alone",
+        "--maxWorkers=2"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
