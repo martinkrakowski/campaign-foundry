@@ -85,5 +85,12 @@ describe("Stepper", () => {
     const { readout } = setup({ "aria-describedby": "stepper-hint-id" });
     expect(readout.getAttribute("aria-describedby")).toBe("stepper-hint-id");
   });
+
+  test("rendered with aria-invalid, the spinbutton element carries it; without, it carries neither", () => {
+    const invalid = setup({ "aria-invalid": "true" });
+    expect(invalid.readout.getAttribute("aria-invalid")).toBe("true");
+    invalid.view.unmount();
+    expect(setup().readout.hasAttribute("aria-invalid")).toBe(false);
+  });
 });
 

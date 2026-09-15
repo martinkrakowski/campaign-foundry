@@ -1,6 +1,6 @@
 "use client";
 
-import type { Dispatch } from "react";
+import { useId, type Dispatch } from "react";
 import { Button, Input, Stepper } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import * as messages from "@/components/campaign/messages";
@@ -46,6 +46,12 @@ export function TimelineSection({
   const blocked = addBeatBlockedBy(state);
   const durations = [...timelineDurations(state)].sort((a, b) => a - b);
   const approved = approvedHeadlineTexts(state.pool);
+  // X15's shape, applied outside `Field`: each beat's message element gets a stable id
+  // and the controls it is about name it via aria-describedby. An error key here is only
+  // ever a share failure (out of range, under the floor) — nothing about the beat's
+  // wording — so it describes and invalidates the weight stepper alone. The prohibited
+  // terms warning is the only message about the text, and describes the text input.
+  const uid = useId();
 
   return (
     <fieldset className="mt-4 space-y-2 border-t border-border pt-3">
@@ -59,17 +65,24 @@ export function TimelineSection({
           {beats.map((beat, index) => {
             const beatError = errors[`copy-timeline-beat-${index}`];
             const beatWarning = warnings[`copy-timeline-beat-${index}`];
+            const beatMessageId = `${uid}-beat-message-${index}`;
+            // The warning is the only message about the text, and it renders only when no
+            // error does — the input is described by it and never by the share error.
+            const textWarning = beatError === undefined ? beatWarning : undefined;
             return (
               <li key={beat.key} className="space-y-1">
                 <div className="flex items-start gap-2">
                   <Input
                     aria-label={messages.timelineBeatTextLabel(index + 1)}
+                    aria-describedby={textWarning ? beatMessageId : undefined}
                     value={beat.text}
                     placeholder={messages.timelineBeatPlaceholder}
                     onChange={(e) => dispatch({ type: "setBeatText", index, text: e.target.value })}
                   />
               <Stepper
                 aria-label={messages.timelineBeatWeightLabel(index + 1)}
+                aria-describedby={beatError ? beatMessageId : undefined}
+                aria-invalid={beatError ? "true" : undefined}
                 value={String(beat.weight)}
                 min={1}
                 max={MAX_WEIGHT}
@@ -117,9 +130,13 @@ export function TimelineSection({
               </button>
             </div>
             {beatError ? (
-              <span className="block text-[11px] text-error">{beatError}</span>
+              <span id={beatMessageId} className="block text-[11px] text-error">
+                {beatError}
+              </span>
             ) : beatWarning ? (
-              <span className="block text-[11px] text-warning">{beatWarning}</span>
+              <span id={beatMessageId} className="block text-[11px] text-warning">
+                {beatWarning}
+              </span>
             ) : null}
           </li>
         );

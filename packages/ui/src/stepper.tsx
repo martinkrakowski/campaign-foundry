@@ -11,6 +11,8 @@ export interface StepperProps {
   invalid?: boolean;
   "aria-label": string;
   "aria-describedby"?: string;
+  /** Announced, not drawn: the red border is `invalid`'s job; this is the spinbutton's. */
+  "aria-invalid"?: "true";
   /**
    * Allow an unset value, shown as "Auto". Stepping below `min` returns to it. These
    * fields are genuinely optional — the planner has its own default — and a plain
@@ -38,6 +40,7 @@ export function Stepper({
   unsetLabel = "Auto",
   "aria-label": ariaLabel,
   "aria-describedby": ariaDescribedBy,
+  "aria-invalid": ariaInvalid,
 }: StepperProps): ReactNode {
   const unset = value.trim() === "";
   const current = unset ? min : Number(value);
@@ -83,6 +86,7 @@ export function Stepper({
         tabIndex={-1}
         aria-label={ariaLabel}
         aria-describedby={ariaDescribedBy}
+        aria-invalid={ariaInvalid}
         aria-valuenow={unset ? undefined : numeric}
         aria-valuemin={min}
         aria-valuemax={max}
