@@ -5048,3 +5048,10 @@ X19 manifest (2 mutations, both caught). Full gate green, 100 % coverage.
 ## 2026-09-15 — X24: Headline Pool drawer outcomes are announced
 
 - `HeadlinePoolDrawer` error paragraph gains `role="alert"`, the unavailable message `role="status"`, matching `AssetPickerDrawer`; tests find them by role; mutation manifest `.agents/manifests/x24.json`. qwen3.8-flash wrote test, fix and the plan entry (§26 (X24) of docs/planning/2026-09-10_the-unowned-gaps.md); its run was killed by host memory pressure during its final gate, so the orchestrator gated it and wrote this entry.
+## 2026-09-14 — X25 (lane: feat/x25-unclosed-premise-fence)
+
+Closed §27 (X25) of docs/planning/2026-09-10_the-unowned-gaps.md: `parsePremises` now counts
+`^```premise[ \t]+\S` openings and throws `UNCLOSED <lane> (<plan>)` when a premise fence is
+never closed, so an unclosed block can no longer drop a lane from `plan:verify` silently.
+Three tests added (red checkpoint first); full gate green with 100% on all four counters;
+`plan:verify` 12/12 hold; `.agents/manifests/x25.json` — 2 mutations, both caught.
