@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "lane": "X22",
+  "mutations": [
+    {
+      "file": "apps/api/server/routes/campaigns/briefs/[id]/duplicate.post.ts",
+      "before": "    if (errorMessage(error) === SYMLINK_WRITE_ERROR) {\n      setResponseStatus(event, 400);\n      return { error: errorMessage(error) };\n    }\n    if (isExistsError(error)) {",
+      "after": "    if (isExistsError(error)) {",
+      "because": "Without the SYMLINK_WRITE_ERROR branch the duplicate route re-throws the store's refusal and answers 500, while its sibling brief routes answer 400.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/briefs.test.ts",
+        "-t",
+        "duplicate returns 400 when a symlink sits at briefs/<newId>.yaml"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/briefs/[id]/duplicate.post.ts",
+      "before": "      setResponseStatus(event, 400);\n      return { error: errorMessage(error) };\n    }\n    if (isExistsError(error)) {",
+      "after": "      setResponseStatus(event, 422);\n      return { error: errorMessage(error) };\n    }\n    if (isExistsError(error)) {",
+      "because": "The status must be exactly the siblings' 400; a 422 here would disagree with briefs.post.ts and briefs/[id].put.ts on the same store error.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/briefs.test.ts",
+        "-t",
+        "duplicate returns 400 when a symlink sits at briefs/<newId>.yaml"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

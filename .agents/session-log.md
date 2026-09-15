@@ -5040,3 +5040,7 @@ X19 manifest (2 mutations, both caught). Full gate green, 100 % coverage.
 
 **Also this wave:** a push-event CI run on #409 timed out four unrelated tests while the PR run on the same SHA passed in 173 s vs main's 182 s — runner load, confirmed by a passing re-run, not a duration regression. Fable plan review was skipped for #399/#400 and run retroactively.
 - X21 (feat/x21-output-directory-404): GET /output/<directory> now 404s — stat succeeds on dirs, so the handler rejects non-regular files before any header; tests first (red on dirs), full gate green, recorded as §24 (X21) of docs/planning/2026-09-10_the-unowned-gaps.md, manifest .agents/manifests/x21.json 2/2 caught.
+
+## 2026-09-14 X22 — duplicate symlink 400
+
+- Gap: `POST /campaigns/briefs/:id/duplicate` re-threw `SYMLINK_WRITE_ERROR` from `createBrief` into a 500 while `briefs.post.ts` / `briefs/[id].put.ts` answer 400. Fix: same errorMessage branch in the duplicate catch; recorded as §25 (X22) of docs/planning/2026-09-10_the-unowned-gaps.md; test plants `briefs/copy.yaml` → outside symlink, asserts 400 + siblings body + outside file unchanged. Gate 0, 100% x4, 2/2 mutations caught.

@@ -139,6 +139,12 @@ export default defineEventHandler(async (event) => {
     setResponseStatus(event, 201);
     return { file: created.file, brief: created.brief };
   } catch (error) {
+    // X22 — the symlink refusal from createBrief must answer 400 exactly like
+    // briefs.post.ts and briefs/[id].put.ts; it used to re-throw into a 500.
+    if (errorMessage(error) === SYMLINK_WRITE_ERROR) {
+      setResponseStatus(event, 400);
+      return { error: errorMessage(error) };
+    }
     if (isExistsError(error)) {
       setResponseStatus(event, 409);
       return { error: `Brief "${newId}" already exists.` };
