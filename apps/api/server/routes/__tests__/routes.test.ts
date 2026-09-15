@@ -543,6 +543,31 @@ describe("GET /output/**", () => {
     expect(res.status).toBe(404);
   });
 
+  test("404s the root path when the root directory exists", async () => {
+    // OUTPUT_DIR is `dir`, which exists — stat() succeeds on a directory, so
+    // the handler itself must reject anything that is not a regular file.
+    const event = { context: { params: {} }, node: { req: {}, res: { statusCode: 200 } } };
+    const body = await (outputHandler as unknown as (e: unknown) => Promise<unknown>)(event);
+    expect(event.node.res.statusCode).toBe(404);
+    expect(body).toEqual({ error: "Not found" });
+  });
+
+  test("404s an existing directory under the output root", async () => {
+    mkdirSync(resolve(dir, "reports"));
+    const res = await call("reports");
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: "Not found" });
+  });
+
+  test("still streams an existing file with 200 and its size", async () => {
+    const bytes = Buffer.from("hello");
+    writeFileSync(resolve(dir, "ok.png"), bytes);
+    const res = await call("ok.png");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-length")).toBe(String(bytes.length));
+    expect(await res.text()).toBe("hello");
+  });
+
   test("400s a path that escapes the output root", async () => {
     // A real HTTP path is normalized before routing, so drive the guard directly with
     // a router param that contains traversal — the case the in-handler check defends.
