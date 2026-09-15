@@ -5121,3 +5121,29 @@ coordinator before proceeding. Red-first on touched tests, then green. Expiry-da
 sync:check/test:cov all exit 0, 100% statements/branches/functions/lines (5162 tests, 266 files).
 plan:verify: 11 premises hold. mutate:verify .agents/manifests/ve3a.json: 7/7 mutations reproduced (3 new,
 for #1/#3/#5). Pushed 545d8ba5..9d2fcef4.
+## 2026-09-15 — X14: two html5 display profiles, and the budget counts the shipped unit
+
+**Shipped:** `google-display-html` ("Google Display (HTML5)") and `display-web-html` ("Display web
+(HTML5)") in `PLATFORM_PROFILES`, each `formats: ["html"]` over the full `DISPLAY_ALL_SIZES` with
+its static sibling's insets and `maxBytes: HTML_MAX_BYTES = 150 * 1024` beside `STATIC_MAX_BYTES`.
+`meta-audience-network` gained nothing. For the first time a production path reaches `wantsHtml` and
+`packageHtml`: an `image-html` display row packages for both new ids (index.html + fallback.png) and
+is still skipped by `google-display`. The `packageHtml` size check now counts the bytes the unit is
+written as — bundle **plus** fallback, the package a network measures — so a bundle that fits while
+its fallback crosses 150 KiB records `checks.size: "fail"`; the item's `bytes` field still names the
+bundle, as a motion item names its mp4. On the web side only `PLATFORM_ORDER` had to be retargeted
+(the editor's full-table expectation); `campaign-types.ts` is unchanged — the preset-coverage tests
+in `PlatformProfile.vo.test.ts` are the proof the html profiles need not be offered by the display
+preset, since `OutputSection` offers by format and the boundary takes any visible id.
+
+**150 KiB is owner-verifiable, not verified in code:** the ad-spec figure (Google Ads / DV360 HTML5
+zipped upload cap, IAB initial-load guidance) is a comment on the constant. So is what the budget
+counts — that part is now pinned by tests.
+
+Tests first (red: 5 in the two Distribution files + 1 in `editor-state.test.ts`), full gate green with
+100% on all four counters; `plan:verify` holds with the X14 premise retired and HL5c marked
+"Dispatchable — X14 shipped"; `.agents/manifests/x14.json` — 2 mutations (the new profile back to
+`formats: ["static"]`; the size check back to `bundle.length`), both caught. Sections: "No platform
+accepts the HTML unit, so it is never packaged (X14)" in
+docs/planning/2026-09-10_the-unowned-gaps.md, and the HL5c lane row in "Lanes" in
+docs/planning/2026-09-10_the-html-layer.md.
