@@ -6,7 +6,9 @@ import {
 import {
   PLATFORM_PROFILES,
   formatsFor,
+  type PlatformProfile,
 } from "@campaignfoundry/Distribution/platform-profiles";
+import { assembleHtml } from "@campaignfoundry/CampaignOrchestration/markup-assembler";
 import {
   CREATIVE_TYPE_RULES,
   type CreativeType,
@@ -319,6 +321,114 @@ export function canMoveLayer(
   direction: MoveDirection,
 ): boolean {
   return layerMoveDirections(state, index).includes(direction);
+}
+
+/**
+ * The weight reading the meter shows (HL5c, HL-D6): the draft's assembled
+ * markup measured against one placement's budget.
+ */
+export interface HtmlWeightReading {
+  /** Assembled `index.html` bytes — the largest across the selected html sizes. */
+  readonly bytes: number;
+  /** The budgeting profile's `maxBytes`, read from the same table packaging enforces against. */
+  readonly maxBytes: number;
+  /** The budgeting profile's display label, so the meter names which placement it speaks for. */
+  readonly profileLabel: string;
+  /** Bytes over the budget; zero when the measured markup fits. */
+  readonly overBy: number;
+}
+
+/**
+ * The html placement budget for a platform selection (HL-D6): the **smallest**
+ * `maxBytes` among the selected platforms whose `formats` include `html` —
+ * the tightest placement is the one that refuses first, so it is the number
+ * the builder must see. Returns the profile itself (label included), or
+ * `undefined` when no selected platform ships html. Never a second constant:
+ * packaging's `packageHtml` enforces exactly this table.
+ *
+ * `profiles` is injectable for tests (a two-profile selection with distinct
+ * budgets needs table entries the production profiles do not carry — the real
+ * html profiles share one figure); every call site passes only the platforms
+ * and reads the shipped table.
+ */
+export function htmlByteBudget(
+  platforms: readonly string[],
+  profiles: Readonly<Record<string, PlatformProfile>> = PLATFORM_PROFILES,
+): PlatformProfile | undefined {
+  let tightest: PlatformProfile | undefined;
+  for (const id of platforms) {
+    const profile = profiles[id];
+    if (profile === undefined || !profile.formats.includes("html")) continue;
+    if (tightest === undefined || profile.maxBytes < tightest.maxBytes) {
+      tightest = profile;
+    }
+  }
+  return tightest;
+}
+
+/**
+ * The draft's html unit, weighed (HL5c, HL-D6): the enabled `html` layers'
+ * elements — gathered exactly as the generation path gathers them — assembled
+ * through the same `assembleHtml` HL4 ships, against the placement budget.
+ * Pure: the assembler is a string builder, so no network and no DOM (HL-D7 —
+ * the markup exists only to count its bytes; nothing here returns it).
+ *
+ * The figure is the **largest** assembly across the sizes the selection will
+ * render html at: each size is packaged as its own unit against the same
+ * budget, and the markup embeds canvas-derived numbers, so a bigger canvas can
+ * cost more bytes. A meter that read one size and passed while another failed
+ * would be two budgets disagreeing — the defect HL-D6 exists to remove.
+ *
+ * The reading deliberately assembles WITHOUT the profile: `assembleHtml`
+ * refuses over-budget markup, and the meter must show the overage, not throw
+ * it away. Over budget is a warning (`overBy`), because the raster fallback
+ * joins the same budget at packaging and only packaging's count of the
+ * finished unit enforces it — the editor's figure is a lower bound.
+ *
+ * `undefined` when there is nothing to weigh: no html placement, no selected
+ * size that placement carries, or a draft the assembler itself refuses (the
+ * brand colour has its own section error; there is no markup to measure
+ * until it is a hex colour).
+ */
+export function htmlWeightReading(
+  state: EditorState,
+  profiles: Readonly<Record<string, PlatformProfile>> = PLATFORM_PROFILES,
+): HtmlWeightReading | undefined {
+  const budget = htmlByteBudget(state.platforms, profiles);
+  if (budget === undefined) return undefined;
+  const shipSizes = new Set(
+    (budget.sizes ?? []).map((slot) => slot.size as string),
+  );
+  const sizes = state.sizes.filter((size) => shipSizes.has(size));
+  if (sizes.length === 0) return undefined;
+  // The same gather GenerateCampaignUseCase runs for its html rows (HL4).
+  const elements = state.template.layers
+    .filter((layer) => layer.kind === "html" && layer.enabled !== false)
+    .flatMap((layer) => layer.elements ?? []);
+  const destination = state.clickDestination.trim();
+  let bytes = 0;
+  try {
+    for (const size of sizes) {
+      const assembled = assembleHtml({
+        elements,
+        canvas: { size },
+        brandColor: state.products[0]?.primaryColor ?? "",
+        style: state.style,
+        clickDestination: destination === "" ? undefined : destination,
+      });
+      bytes = Math.max(bytes, assembled.byteLength);
+    }
+  } catch {
+    // The assembler refuses a brand colour outside the documented hex shape —
+    // the Products section says so; there is no unit to weigh yet.
+    return undefined;
+  }
+  return {
+    bytes,
+    maxBytes: budget.maxBytes,
+    profileLabel: budget.label,
+    overBy: Math.max(0, bytes - budget.maxBytes),
+  };
 }
 
 // Re-export occlusion table and checks (D135, D136)

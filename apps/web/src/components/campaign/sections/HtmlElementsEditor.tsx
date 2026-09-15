@@ -2,6 +2,7 @@
 
 import { useId, useState, type Dispatch } from "react";
 import { Button, IconButton, Input } from "@/components/ui";
+import type { HtmlWeightReading } from "@/components/campaign/derive";
 import type {
   EditorAction,
   Frame,
@@ -24,6 +25,9 @@ import { Field } from "./IdentitySection";
  * section of its own. It adds, removes, reorders and edits them, and nothing
  * else: the frame it writes is geometry, the copy it writes is text, and every
  * value it can produce is one the domain already accepts at the boundary.
+ * Beneath it, when an html placement is selected, rides the live weight meter
+ * (HL5c, HL-D6) — the assembled markup measured against the placement's own
+ * `maxBytes`, numbers only (see the HL-D7 note on the meter itself).
  *
  * A control that cannot act is ABSENT, never present-and-disabled (DESIGN.md
  * §1.5): the first element offers no move up, the last offers no move down, and
@@ -120,10 +124,17 @@ export function HtmlElementsEditor({
   layerId,
   elements,
   dispatch,
+  reading,
 }: {
   layerId: string;
   elements: readonly HtmlElement[];
   dispatch: Dispatch<EditorAction>;
+  /**
+   * The draft's weight reading (HL5c, HL-D6), derived by the section from the
+   * same state this editor edits. Absent when there is nothing to weigh (no
+   * html placement selected) — then no meter renders, never a meter at zero.
+   */
+  reading?: HtmlWeightReading;
 }) {
   // Description ids ride one instance id: the guided walk mounts two live
   // copies of the section during a step change, so a static id would be
@@ -306,6 +317,31 @@ export function HtmlElementsEditor({
           </span>
         ))}
       </div>
+      {/* The live weight meter (HL5c, HL-D6), beneath the editor it weighs.
+          **HL-D7:** `assembleHtml` ran only to count bytes — this renders the
+          numbers and the profile label, never the markup, so what the elements
+          say cannot reach the DOM from here. Over budget is a warning, not a
+          refusal: the fallback's bytes join the same budget at packaging, so
+          this figure is a lower bound and packaging's check enforces it. */}
+      {reading ? (
+        <div className="space-y-1 pt-2">
+          <p className="text-[12px] text-text-muted">
+            {messages.htmlWeightMeterText(
+              reading.bytes,
+              reading.maxBytes,
+              reading.profileLabel,
+            )}
+          </p>
+          {reading.overBy > 0 ? (
+            <p role="status" className="block text-[11px] text-warning">
+              {messages.htmlWeightOverage(reading.overBy)}
+            </p>
+          ) : null}
+          <p className="text-[11px] text-text-muted">
+            {messages.htmlWeightFallbackNote}
+          </p>
+        </div>
+      ) : null}
     </div>
   );
 }
