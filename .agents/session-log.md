@@ -5156,3 +5156,18 @@ docs/planning/2026-09-10_the-html-layer.md.
 ## 2026-09-15 — X27 (manifest inventory reconciliation, lane feat/x27-manifest-inventory)
 
 Closed "The manifest's per-context inventories were stale, and no gate could see it" (§30, X27) of docs/planning/2026-09-10_the-unowned-gaps.md: reconciled all seven inventory lists of `.architecture/manifest.yaml` with the tree (10 ports, 13 adapters, +4 value objects, +1 use case) and added `yarn arch:inventory` (`tools/arch-inventory`) as a CI gate mirroring plan:verify. Key finding: under hexagen's built-in stub naming, declaring any port or adapter made `sync --dry-run` plan to create duplicate stubs (e.g. `CampaignPipelinePort.in-port.ts`) beside the real files — ports were undeclarable, not merely undeclared; aligned `generator.sync.stubs.naming` with the committed `<Name>Port.ts`/`<Name>.ts` convention so every state plans zero sync ops (flagged for owner review). Red committed first (3 test files); pre-reconcile drift 28 missing/0 stale; gate green with 100% coverage on all four counters; plan:verify 12 premises hold; mutation manifest x27 replayed 2/2 caught.
+
+## 2026-09-15 — C4b: anchor prop loses to a live axis, shade alpha withdrawn (feat/c4b-anchor-prop-axis)
+
+Shipped C4b in docs/planning/2026-09-10_reconciliation.md (R-D4): the compositor resolves
+`request.anchor ?? textProps.anchor ?? (layout-derived)` (`textProps` hoisted above the anchor line);
+a brief setting both a text layer's `anchor` prop and a non-empty `variation.axes.anchor` is refused
+at the API (`validateAnchorPropAxis`) and the editor's draft validation (`validatePolicy`), both reading
+the shared domain predicate `templateHasAnchorProp` since `isBriefTemplate` sees only the template, never
+the axes. `alpha` is withdrawn from the shade layer: `LAYER_PROPS.shade` is `[]`, `ShadeProps` and its
+union member are removed, `PROPS_KEY_ORDER` drops `alpha` — the tone axis is never absent, so an override
+would always silence it. Red tests committed first (touched five suites: brief-template, brief-yaml,
+NodeCanvasCompositor geometry-props, load-brief, validate); full gate green with 100% on all four
+coverage counters; `plan:verify` holds (10 premises, C4b's retired); `arch:inventory` unchanged;
+`mutate:verify .agents/manifests/c4b.json`: 2 mutations re-run, both caught (the anchor merge chain,
+the API boundary-refusal call site). Goldens untouched.

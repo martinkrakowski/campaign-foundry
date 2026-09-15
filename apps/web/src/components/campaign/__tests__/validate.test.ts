@@ -434,6 +434,38 @@ describe("validatePolicy", () => {
     expect(validatePolicy(randomized()).anchor).toBeUndefined();
   });
 
+  test("a text layer's anchor prop conflicts with a live anchor axis, the editor's mirror of R-D4", () => {
+    // `isBriefTemplate` sees only the template, never the axes — this is the
+    // one place both facts meet, mirroring `validateAnchorPropAxis` (load-brief.ts).
+    const withAnchorProp = (state: EditorState): EditorState => ({
+      ...state,
+      template: {
+        ...state.template,
+        layers: state.template.layers.map((layer) =>
+          layer.kind === "static-text" ? { ...layer, props: { anchor: "top" as const } } : layer,
+        ),
+      },
+    });
+    // The default selection is the derived top/bottom pair — not live (T4) —
+    // so the prop alone does not conflict.
+    expect(validatePolicy(withAnchorProp(randomized())).anchor).toBeUndefined();
+    // An authored divergence makes the axis live: now the prop conflicts.
+    const anchored = editorReducer(withAnchorProp(randomized()), {
+      type: "toggleAnchor",
+      value: "middle",
+    });
+    // Asserted against the literal, not `messages.anchorPropConflict` — a
+    // vacuous check when the message constant does not yet exist, since both
+    // sides would then read `undefined`.
+    expect(validatePolicy(anchored).anchor).toBe(
+      "A layer in this template already fixes its own anchor — clear it before picking anchor cards here; you can't set both.",
+    );
+    expect(validatePolicy(anchored).anchor).toBe(messages.anchorPropConflict);
+    // The same live axis with no anchor prop on any text layer: no conflict.
+    const noProp = editorReducer(randomized(), { type: "toggleAnchor", value: "middle" });
+    expect(validatePolicy(noProp).anchor).toBeUndefined();
+  });
+
   test("coverage fields are optional integers of at least zero", () => {
     expect(validatePolicy(randomized({ perProduct: "", perRatio: "" }))).toEqual({});
     expect(validatePolicy(randomized({ perProduct: "1.5" })).perProduct).toBe(messages.perProduct);

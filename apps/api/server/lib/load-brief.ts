@@ -34,6 +34,7 @@ import {
   satisfiesOrderConstraints,
   styleProblem,
   templateFromCanonical,
+  templateHasAnchorProp,
   timelineProblem,
   type AdvertisingUnit,
   type BriefTemplate,
@@ -808,6 +809,29 @@ function validateMotionAxisRequested(record: Record<string, unknown>): void {
   }
 }
 
+/**
+ * R-D4: a prop never shadows a live variation axis. A text layer's `anchor`
+ * prop and a non-empty `variation.axes.anchor` would both claim to decide
+ * anchor for the same variant — the compositor's `??` chain picks the axis
+ * (`request.anchor ?? textProps.anchor ?? …`), so the prop would look
+ * accepted but never draw. Refused here, the same cross-field pattern as
+ * `validateMotionAxisRequested`, rather than silently resolved.
+ */
+function validateAnchorPropAxis(
+  record: Record<string, unknown>,
+  template: BriefTemplate,
+): void {
+  const axes = (record.variation as Record<string, unknown> | undefined)
+    ?.axes as Record<string, unknown> | undefined;
+  const anchorAxis = axes?.anchor;
+  const anchorAxisLive = Array.isArray(anchorAxis) && anchorAxis.length > 0;
+  if (anchorAxisLive && templateHasAnchorProp(template.layers)) {
+    throw new Error(
+      'Campaign brief cannot set a text layer\'s "props.anchor" together with a non-empty "variation.axes.anchor" — the axis already decides anchor for every variant.',
+    );
+  }
+}
+
 /** Structurally validate the optional `treatments` array, when present. */
 function validateTreatments(value: unknown): void {
   if (value === undefined) return;
@@ -1189,6 +1213,7 @@ export function parseBrief(
   validateOutput(record.output, effectiveCapabilities);
   validateTemplateOutputFamilies(template.creativeType, record.output);
   validateMotionAxisRequested(record);
+  validateAnchorPropAxis(record, template);
   validateCopy(record, enforceCapabilities);
   // Motion is a variation axis: only the planner draws clips, and the classic
   // product × ratio × treatment matrix has no motion path, so a classic brief that

@@ -3,6 +3,10 @@ import { MAX_DURATION_SEC, MIN_DURATION_SEC } from "@campaignfoundry/CampaignOrc
 // (`validateTemplateOutputFamilies`, load-brief.ts) so Save refuses exactly
 // what the parser refuses — never a second family table in the editor.
 import { outputFamilyProblem } from "@campaignfoundry/CampaignOrchestration/creative-types";
+// The domain's one anchor-prop/axis decision (R-D4), shared with the API boundary
+// (`validateAnchorPropAxis`, load-brief.ts) so Save refuses exactly what the API
+// refuses — `isBriefTemplate` sees only the template, never the axes.
+import { templateHasAnchorProp } from "@campaignfoundry/CampaignOrchestration/brief-template";
 import { matchProhibitedTerms } from "@campaignfoundry/GovernanceAndCompliance";
 import type { EditorState } from "./editor-state";
 import {
@@ -334,7 +338,20 @@ export function validatePolicy(state: EditorState): FieldErrors {
   }
   if (state.variation.layout.length === 0) errors.layout = messages.layout;
   if (state.variation.tone.length === 0) errors.tone = messages.tone;
-  if (state.variation.anchor.length === 0) errors.anchor = messages.anchor;
+  if (state.variation.anchor.length === 0) {
+    errors.anchor = messages.anchor;
+  } else if (
+    // R-D4: the domain guard `isBriefTemplate` sees only the template, never
+    // the variation axes, so the editor's own mirror of the API's boundary
+    // refusal lives here — same rule (a live axis and a text layer's `anchor`
+    // prop can never both be present), `anchorAxisActive` reading exactly
+    // what `toBrief` will carry (T4's conditional-spread, D57), never the raw
+    // selection length.
+    anchorAxisActive(state) &&
+    templateHasAnchorProp(state.template.layers)
+  ) {
+    errors.anchor = messages.anchorPropConflict;
+  }
   if (state.variation.background.length === 0) {
     errors.background = messages.background;
   }

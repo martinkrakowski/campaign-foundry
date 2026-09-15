@@ -9,6 +9,7 @@ import {
   layerPropsProblem,
   satisfiesOrderConstraints,
   templateFromCanonical,
+  templateHasAnchorProp,
   type BriefTemplate,
 } from "../brief-template.js";
 
@@ -295,10 +296,6 @@ describe("isBriefTemplate layer props (L3b, D134)", () => {
   });
 
   test("accepts each kind's own props, and 0 and 1 are legal fractions", () => {
-    expect(withLayer({ id: "shade", kind: "shade", props: {} })).toBe(true);
-    expect(withLayer({ id: "shade", kind: "shade", props: { alpha: 0 } })).toBe(true);
-    expect(withLayer({ id: "shade", kind: "shade", props: { alpha: 0.5 } })).toBe(true);
-    expect(withLayer({ id: "shade", kind: "shade", props: { alpha: 1 } })).toBe(true);
     expect(withLayer({ id: "accent", kind: "accent", props: { solidHeight: 0.05, fadeHeight: 0 } })).toBe(true);
     expect(withLayer({ id: "logo", kind: "logo", props: { width: 0, margin: 1 } })).toBe(true);
     expect(withLayer({ id: "text", kind: "static-text", props: { anchor: "middle", typeFloor: 0.4 } })).toBe(true);
@@ -330,6 +327,14 @@ describe("isBriefTemplate layer props (L3b, D134)", () => {
       must: 'be absent for layer kind "fill"',
       value: { alpha: 0.5 },
     });
+    // `shade` joined this set by R-D4 (withdrawn 2026-09-15): the tone axis is
+    // never absent, so an `alpha` override would always silence it.
+    expect(withLayer({ id: "shade", kind: "shade", props: { alpha: 0.5 } })).toBe(false);
+    expect(layerPropsProblem("shade", { alpha: 0.5 })).toEqual({
+      path: "",
+      must: 'be absent for layer kind "shade"',
+      value: { alpha: 0.5 },
+    });
     // The empty object names no prop, but it is still props on a kind that
     // carries none: the "must be absent" verdict is reached before any
     // entries are walked.
@@ -339,17 +344,24 @@ describe("isBriefTemplate layer props (L3b, D134)", () => {
       must: 'be absent for layer kind "video"',
       value: {},
     });
+    expect(withLayer({ id: "shade", kind: "shade", props: {} })).toBe(false);
+    expect(layerPropsProblem("shade", {})).toEqual({
+      path: "",
+      must: 'be absent for layer kind "shade"',
+      value: {},
+    });
   });
 
   test("refuses alt on a kind that cannot mean it — the vocabulary is per kind", () => {
-    // X2 adds alt to the image kind alone. A shade or an accent is decoration
-    // and a text layer's copy is already text, so alt there is a key the kind
-    // does not carry, refused exactly as any other unknown key is.
-    expect(withLayer({ id: "shade", kind: "shade", props: { alt: "x" } })).toBe(false);
+    // X2 adds alt to the image kind alone. An accent is decoration and a text
+    // layer's copy is already text, so alt there is a key the kind does not
+    // carry, refused exactly as any other unknown key is. (`shade` carries no
+    // props at all since R-D4, asserted above.)
+    expect(withLayer({ id: "accent", kind: "accent", props: { alt: "x" } })).toBe(false);
     expect(withLayer({ id: "video", kind: "video", props: { alt: "x" } }, "video")).toBe(false);
-    expect(layerPropsProblem("shade", { alt: "x" })).toEqual({
+    expect(layerPropsProblem("accent", { alt: "x" })).toEqual({
       path: ".alt",
-      must: 'be one of "alpha" for layer kind "shade"',
+      must: 'be one of "solidHeight", "fadeHeight" for layer kind "accent"',
       value: "x",
     });
     // And the image kind's row is `alt` only: giving an image a geometry prop
@@ -378,19 +390,19 @@ describe("isBriefTemplate layer props (L3b, D134)", () => {
   });
 
   test("refuses an unknown key", () => {
-    expect(withLayer({ id: "shade", kind: "shade", props: { logoWidth: 0.1 } })).toBe(false);
+    expect(withLayer({ id: "accent", kind: "accent", props: { logoWidth: 0.1 } })).toBe(false);
   });
 
   test("refuses a number outside [0, 1]", () => {
-    expect(withLayer({ id: "shade", kind: "shade", props: { alpha: 1.4 } })).toBe(false);
+    expect(withLayer({ id: "accent", kind: "accent", props: { solidHeight: 1.4 } })).toBe(false);
     expect(withLayer({ id: "logo", kind: "logo", props: { width: -0.1 } })).toBe(false);
     expect(withLayer({ id: "text", kind: "static-text", props: { typeFloor: 2 } })).toBe(false);
   });
 
   test("refuses a prop that is not a finite number", () => {
-    expect(withLayer({ id: "shade", kind: "shade", props: { alpha: "0.5" } })).toBe(false);
-    expect(withLayer({ id: "shade", kind: "shade", props: { alpha: Number.NaN } })).toBe(false);
-    expect(withLayer({ id: "shade", kind: "shade", props: { alpha: Number.POSITIVE_INFINITY } })).toBe(false);
+    expect(withLayer({ id: "accent", kind: "accent", props: { solidHeight: "0.5" } })).toBe(false);
+    expect(withLayer({ id: "accent", kind: "accent", props: { solidHeight: Number.NaN } })).toBe(false);
+    expect(withLayer({ id: "accent", kind: "accent", props: { solidHeight: Number.POSITIVE_INFINITY } })).toBe(false);
   });
 
   test("refuses an anchor outside the vocabulary", () => {
@@ -420,6 +432,53 @@ describe("isBriefTemplate layer props (L3b, D134)", () => {
       must: 'be absent for layer kind "bogus"',
       value: {},
     });
+  });
+});
+
+describe("templateHasAnchorProp (R-D4)", () => {
+  // The domain half of the boundary refusal: whether any text layer carries
+  // an `anchor` prop, axis presence left entirely to the caller.
+  test("false when no text layer carries an anchor prop", () => {
+    expect(templateHasAnchorProp([])).toBe(false);
+    expect(templateHasAnchorProp([{ id: "shade", kind: "shade" }])).toBe(false);
+    expect(
+      templateHasAnchorProp([{ id: "text", kind: "static-text", props: {} }]),
+    ).toBe(false);
+    expect(
+      templateHasAnchorProp([
+        { id: "text", kind: "static-text", props: { typeFloor: 0.4 } },
+      ]),
+    ).toBe(false);
+  });
+
+  test("true when a static-text or animated-text layer carries an anchor prop", () => {
+    expect(
+      templateHasAnchorProp([
+        { id: "text", kind: "static-text", props: { anchor: "top" } },
+      ]),
+    ).toBe(true);
+    expect(
+      templateHasAnchorProp([
+        { id: "motion", kind: "animated-text", props: { anchor: "middle" } },
+      ]),
+    ).toBe(true);
+    // One matching layer among several is enough.
+    expect(
+      templateHasAnchorProp([
+        { id: "image", kind: "image", props: { alt: "x" } },
+        { id: "text", kind: "static-text", props: { anchor: "bottom" } },
+      ]),
+    ).toBe(true);
+  });
+
+  test("a non-text layer's own prop named the same is never mistaken for the axis-shadowing one", () => {
+    // No other kind's vocabulary carries `anchor` (LAYER_PROPS), so this is a
+    // kind-check regression guard, not a live case `layerPropsProblem` would ever admit.
+    expect(
+      templateHasAnchorProp([
+        { id: "logo", kind: "logo", props: { width: 0.1 } },
+      ]),
+    ).toBe(false);
   });
 });
 

@@ -1159,14 +1159,14 @@ describe("per-layer props survive the editor (L3b, D134)", () => {
     };
   };
 
-  test("fromBrief → toBrief round-trips a shade layer's props verbatim", () => {
-    const template = withProps("social-post", "shade", { alpha: 0.5 });
+  test("fromBrief → toBrief round-trips a logo layer's props verbatim", () => {
+    const template = withProps("social-post", "logo", { width: 0.2 });
     const state = fromBrief(savedBrief({ template }), { file: "camp.yaml" });
     const emitted = toBrief(state);
     expect(emitted.template).toEqual(template);
     expect(
-      emitted.template.layers.find((layer) => layer.kind === "shade")?.props,
-    ).toEqual({ alpha: 0.5 });
+      emitted.template.layers.find((layer) => layer.kind === "logo")?.props,
+    ).toEqual({ width: 0.2 });
     // The held layer is the same data the brief carried — never re-derived.
     expect(
       emitted.template.layers.find((layer) => layer.kind === "image")?.props,
@@ -1195,7 +1195,7 @@ describe("per-layer props survive the editor (L3b, D134)", () => {
       ...base(),
       briefId: "camp",
       type: "short-video",
-      template: withProps("short-video", "shade", { alpha: 1.4 }),
+      template: withProps("short-video", "logo", { width: 1.4 }),
     };
     saveDraftToStorage(state);
     expect(() => loadDraftFromStorage(state)).not.toThrow();
