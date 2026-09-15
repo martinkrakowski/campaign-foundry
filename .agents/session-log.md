@@ -5043,4 +5043,4 @@ X19 manifest (2 mutations, both caught). Full gate green, 100 % coverage.
 
 ## 2026-09-14 X22 — duplicate symlink 400
 
-- Gap: `POST /campaigns/briefs/:id/duplicate` re-threw `SYMLINK_WRITE_ERROR` from `createBrief` into a 500 while `briefs.post.ts` / `briefs/[id].put.ts` answer 400. Fix: same errorMessage branch in the duplicate catch; plan §25; test plants `briefs/copy.yaml` → outside symlink, asserts 400 + siblings body + outside file unchanged. Gate 0, 100% x4, 2/2 mutations caught.
+- Gap: `POST /campaigns/briefs/:id/duplicate` re-threw `SYMLINK_WRITE_ERROR` from `createBrief` into a 500 while `briefs.post.ts` / `briefs/[id].put.ts` answer 400. Fix: same errorMessage branch in the duplicate catch; recorded as §25 (X22) of docs/planning/2026-09-10_the-unowned-gaps.md; test plants `briefs/copy.yaml` → outside symlink, asserts 400 + siblings body + outside file unchanged. Gate 0, 100% x4, 2/2 mutations caught.
