@@ -1,35 +1,42 @@
 import { describe, expect, test } from "vitest";
-import { parseManifest } from "../manifest.js";
+import type { Manifest as HexManifest } from "@hexagen-monaco/sync";
+import { fromHexagen } from "../manifest.js";
 import { PACKAGE_ROOT, checkInventory, type Tree } from "../inventory.js";
 
-const MANIFEST = parseManifest(`
-generator:
-  sync:
-    layers:
-      domain: { folder: src/domain, subfolders: [entities, value-objects] }
-      application: { folder: src/application, subfolders: [use-cases, ports/in, ports/out] }
-      infrastructure: { folder: src/infrastructure, subfolders: [adapters] }
-    stubs:
-      enabled: true
-      naming:
-        inPort: "{name}.ts"
-        outPort: "{name}.ts"
-        adapter: "{name}.ts"
-bounded_contexts:
-  - name: Demo
-    layers:
-      domain:
-        entities: [Widget]
-        value_objects: [Money]
-        domain_services: []
-      application:
-        use_cases: [DoThingUseCase]
-        ports:
-          in: [DemoPipelinePort]
-          out: [StorePort]
-      infrastructure:
-        adapters: []
-`);
+const HEX: HexManifest = {
+  generator: {
+    sync: {
+      layers: {
+        domain: { folder: "src/domain" },
+        application: { folder: "src/application" },
+        infrastructure: { folder: "src/infrastructure" },
+      },
+      stubs: {
+        enabled: true,
+        naming: { inPort: "{name}.ts", outPort: "{name}.ts", adapter: "{name}.ts" },
+      },
+    },
+  },
+  bounded_contexts: [
+    {
+      name: "Demo",
+      layers: {
+        domain: {
+          entities: ["Widget"],
+          value_objects: ["Money"],
+          domain_services: [],
+        },
+        application: {
+          use_cases: ["DoThingUseCase"],
+          ports: { in: ["DemoPipelinePort"], out: ["StorePort"] },
+        },
+        infrastructure: { adapters: [] },
+      },
+    },
+  ],
+};
+
+const MANIFEST = fromHexagen(HEX);
 
 const tree = (t: Tree) => t;
 
@@ -58,7 +65,7 @@ const listDirOf =
     return entries;
   };
 
-const check = async (t: Tree) => checkInventory(MANIFEST, { listDir: listDirOf(t) });
+const check = async (t: Tree, manifest = MANIFEST) => checkInventory(manifest, { listDir: listDirOf(t) });
 
 describe("checkInventory", () => {
   test("a matching manifest and tree produce no findings", async () => {
@@ -70,7 +77,7 @@ describe("checkInventory", () => {
     t["packages/Demo/src/domain/entities"] = ["index.ts"];
     const findings = await check(t);
     expect(findings).toEqual([
-      { context: "Demo", list: "entities", missing: [], stale: ["Widget"] },
+      { context: "Demo", list: "entities", missing: [], stale: ["Widget"], duplicates: [] },
     ]);
   });
 
@@ -79,7 +86,7 @@ describe("checkInventory", () => {
     t["packages/Demo/src/application/ports/out"] = ["StorePort.ts", "ExporterPort.ts", "index.ts"];
     const findings = await check(t);
     expect(findings).toEqual([
-      { context: "Demo", list: "ports.out", missing: ["ExporterPort"], stale: [] },
+      { context: "Demo", list: "ports.out", missing: ["ExporterPort"], stale: [], duplicates: [] },
     ]);
   });
 
@@ -88,7 +95,7 @@ describe("checkInventory", () => {
     t["packages/Demo/src/application/ports/in"] = ["DemoPipelinePort.ts", "QueryPort.ts"];
     const findings = await check(t);
     expect(findings).toEqual([
-      { context: "Demo", list: "ports.in", missing: ["QueryPort"], stale: [] },
+      { context: "Demo", list: "ports.in", missing: ["QueryPort"], stale: [], duplicates: [] },
     ]);
   });
 
@@ -137,18 +144,69 @@ describe("checkInventory", () => {
     ];
     const findings = await check(t);
     expect(findings).toEqual([
-      { context: "Demo", list: "value_objects", missing: [], stale: ["Money"] },
-      { context: "Demo", list: "use_cases", missing: ["ExtraUseCase"], stale: [] },
+      { context: "Demo", list: "value_objects", missing: [], stale: ["Money"], duplicates: [] },
+      { context: "Demo", list: "use_cases", missing: ["ExtraUseCase"], stale: [], duplicates: [] },
     ]);
   });
 
   test("a declared entry naming a file the generator would not produce is stale", async () => {
-    const m = parseManifest("bounded_contexts:\n  - name: Demo\n    layers:\n      domain:\n        value_objects: [Currency]\n");
+    const m = fromHexagen({
+      bounded_contexts: [{ name: "Demo", layers: { domain: { value_objects: ["Currency"] } } }],
+    });
     const t = tree({ "packages/Demo/src/domain/value-objects": ["money.vo.ts"] });
     const findings = await checkInventory(m, { listDir: listDirOf(t) });
     expect(findings).toEqual([
-      { context: "Demo", list: "value_objects", missing: [], stale: ["Currency"] },
+      { context: "Demo", list: "value_objects", missing: [], stale: ["Currency"], duplicates: [] },
     ]);
+  });
+
+  test("a kebab-case declared entry is normalised to match its PascalCase file", async () => {
+    const m = fromHexagen({
+      bounded_contexts: [{ name: "Demo", layers: { domain: { value_objects: ["user-repo"] } } }],
+    });
+    const t = tree({ "packages/Demo/src/domain/value-objects": ["UserRepo.vo.ts"] });
+    expect(await checkInventory(m, { listDir: listDirOf(t) })).toEqual([]);
+  });
+
+  test("two declared entries that resolve to the same file are duplicates", async () => {
+    const m = fromHexagen({
+      bounded_contexts: [{ name: "Demo", layers: { domain: { value_objects: ["Money", "money"] } } }],
+    });
+    const t = tree({ "packages/Demo/src/domain/value-objects": ["Money.vo.ts"] });
+    const findings = await checkInventory(m, { listDir: listDirOf(t) });
+    expect(findings).toEqual([
+      { context: "Demo", list: "value_objects", missing: [], stale: [], duplicates: ["Money", "money"] },
+    ]);
+  });
+
+  test("a literal repeat in the same list is a duplicate", async () => {
+    const m = fromHexagen({
+      generator: { sync: { stubs: { naming: { adapter: "{name}.ts" } } } },
+      bounded_contexts: [{ name: "Demo", layers: { infrastructure: { adapters: ["NodeThingAdapter", "NodeThingAdapter"] } } }],
+    });
+    const t = tree({ "packages/Demo/src/infrastructure/adapters": ["NodeThingAdapter.ts"] });
+    const findings = await checkInventory(m, { listDir: listDirOf(t) });
+    expect(findings).toEqual([
+      { context: "Demo", list: "adapters", missing: [], stale: [], duplicates: ["NodeThingAdapter"] },
+    ]);
+  });
+
+  test("a bare {name} naming template does not collapse every entry into one file", async () => {
+    const m = fromHexagen({
+      generator: { sync: { stubs: { naming: { valueObject: "{name}" } } } },
+      bounded_contexts: [{ name: "Demo", layers: { domain: { value_objects: ["Widget", "Money"] } } }],
+    });
+    const t = tree({ "packages/Demo/src/domain/value-objects": ["Widget", "Money"] });
+    expect(await checkInventory(m, { listDir: listDirOf(t) })).toEqual([]);
+  });
+
+  test("a naming template with a directory component is read from that offset, not the list's own folder", async () => {
+    const m = fromHexagen({
+      generator: { sync: { stubs: { naming: { adapter: "sub/{name}.ts" } } } },
+      bounded_contexts: [{ name: "Demo", layers: { infrastructure: { adapters: ["Foo"] } } }],
+    });
+    const t = tree({ "packages/Demo/src/infrastructure/adapters/sub": ["Foo.ts"] });
+    expect(await checkInventory(m, { listDir: listDirOf(t) })).toEqual([]);
   });
 
   test("PACKAGE_ROOT is the workspaces prefix the manifest declares", () => {

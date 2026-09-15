@@ -14,9 +14,15 @@ import which, package boundaries, cross-layer relative imports, node builtins in
 whitelist conformance, subpath conventions, and file placement by layer.
 
 `yarn arch:inventory` (`tools/arch-inventory`) gates the complement the linter cannot see: the
-per-context inventories in `.architecture/manifest.yaml` against the module files on disk. Scaffold
-new ports with `hexagen arch port`, which adds the manifest entry as the port is created, so the
-inventories never drift behind the code again.
+per-context inventories in `.architecture/manifest.yaml` against the module files on disk. Declare a
+new port or module **by hand**, editing `.architecture/manifest.yaml` directly, then run
+`yarn arch:inventory` (must report no drift) and `yarn sync:dry` (must report `Total ops : 0`) before
+committing. **Never run `hexagen arch port` or `hexagen arch context`** to do this: both save the
+manifest through a code path (`generateManifestYaml` / `generateManifestYaml2` -> `saveManifest` in
+`@hexagen-monaco/sync`'s `dist/cli.js`) that keeps only `system, scope, architecture, bounded_contexts,
+monorepo, apps` — it silently drops the top-level `generator:` block, which is where this repo's
+`naming` overrides live (see the comment above `generator:` in the manifest). Losing that block makes
+the next `sync` scaffold duplicate stub files beside every real port/adapter.
 
 `.github/workflows/pr-agent-arch.yml` is an **advisory** LLM reviewer scoped to the
 complement — what the import graph cannot express: whether a port is an abstraction or a

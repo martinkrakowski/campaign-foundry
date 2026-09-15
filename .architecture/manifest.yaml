@@ -69,6 +69,13 @@ monorepo:
       typecheck:
         outputs: []
         cache: true
+# WARNING: `hexagen arch port` and `hexagen arch context` rewrite this whole file through a
+# save path (`generateManifestYaml`/`generateManifestYaml2` -> `saveManifest` in
+# @hexagen-monaco/sync's dist/cli.js) that keeps only `system, scope, architecture,
+# bounded_contexts, monorepo, apps` — this `generator:` block, including the `naming`
+# overrides below, is NOT on that list and would be silently dropped. Declare new ports and
+# modules by hand instead (see .agents/architecture.md), then `yarn arch:inventory` and
+# `yarn sync:dry` (expect `Total ops : 0`).
 generator:
   version: 0.2.0
   sync:

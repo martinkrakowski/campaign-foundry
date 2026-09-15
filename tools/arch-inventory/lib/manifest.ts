@@ -1,73 +1,13 @@
-import { parse } from "yaml";
-import { NamingError, splitTemplate } from "./naming.js";
+import { portName } from "@hexagen-monaco/sync";
+import type { BoundedContext, LegacyOrNewPort, Manifest as HexManifest } from "@hexagen-monaco/sync";
+import { DEFAULT_NAMING, NamingError, resolveScope, resolveTemplate } from "./naming.js";
 import type { ContextDecl, ContextLists, LayerName, Manifest, StubKind } from "./types.js";
-
-export class ManifestError extends Error {}
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
-/** One section of the manifest tree: absent means empty, wrong shape is an error. */
-function section(value: unknown, owner: string, key: string): Record<string, unknown> {
-  if (value === undefined || value === null) return {};
-  if (!isRecord(value)) {
-    throw new ManifestError(`${owner}: ${key} must be a mapping`);
-  }
-  return value;
-}
-
-/** One inventory array: absent means empty, anything but strings is an error. */
-function strArray(value: unknown, owner: string, key: string): string[] {
-  if (value === undefined || value === null) return [];
-  if (!Array.isArray(value)) {
-    throw new ManifestError(`${owner}: ${key} must be a list of strings`);
-  }
-  for (const item of value) {
-    if (typeof item !== "string") {
-      throw new ManifestError(`${owner}: ${key} must be a list of strings`);
-    }
-  }
-  return [...value];
-}
-
-function parseContext(raw: unknown): ContextDecl {
-  if (!isRecord(raw) || typeof raw["name"] !== "string" || raw["name"].length === 0) {
-    throw new ManifestError("every bounded context needs a non-empty name");
-  }
-  const name = raw["name"];
-  const layers = section(raw["layers"], name, "layers");
-  const domain = section(layers["domain"], name, "layers.domain");
-  const application = section(layers["application"], name, "layers.application");
-  const ports = section(application["ports"], name, "application.ports");
-  const infrastructure = section(layers["infrastructure"], name, "layers.infrastructure");
-  const lists: ContextLists = {
-    entities: strArray(domain["entities"], name, "entities"),
-    value_objects: strArray(domain["value_objects"], name, "value_objects"),
-    domain_services: strArray(domain["domain_services"], name, "domain_services"),
-    use_cases: strArray(application["use_cases"], name, "use_cases"),
-    "ports.in": strArray(ports["in"], name, "ports.in"),
-    "ports.out": strArray(ports["out"], name, "ports.out"),
-    adapters: strArray(infrastructure["adapters"], name, "adapters"),
-  };
-  return { name, lists };
-}
 
 const LAYER_DEFAULTS: Record<LayerName, string> = {
   domain: "src/domain",
   application: "src/application",
   infrastructure: "src/infrastructure",
 };
-
-function layerFolders(generator: Record<string, unknown>): Record<LayerName, string> {
-  const sync = section(generator["sync"], "generator", "sync");
-  const layers = section(sync["layers"], "generator.sync", "layers");
-  const folders = {} as Record<LayerName, string>;
-  for (const layer of Object.keys(LAYER_DEFAULTS) as LayerName[]) {
-    const declared = section(layers[layer], `generator.sync.layers`, layer)["folder"];
-    folders[layer] = typeof declared === "string" ? declared : LAYER_DEFAULTS[layer];
-  }
-  return folders;
-}
 
 const STUB_KINDS: readonly StubKind[] = [
   "entity",
@@ -79,57 +19,88 @@ const STUB_KINDS: readonly StubKind[] = [
   "adapter",
 ];
 
-function stubNaming(generator: Record<string, unknown>): Partial<Record<StubKind, string>> {
-  const sync = section(generator["sync"], "generator", "sync");
-  const stubs = section(sync["stubs"], "generator.sync", "stubs");
-  const naming = section(stubs["naming"], "generator.sync.stubs", "naming");
-  const resolved: Partial<Record<StubKind, string>> = {};
-  for (const kind of STUB_KINDS) {
-    const value = naming[kind];
-    if (value === undefined) continue;
-    if (typeof value !== "string") {
-      throw new ManifestError(`stubs.naming.${kind} must be a string template`);
-    }
-    try {
-      splitTemplate(value);
-    } catch (error) {
-      /* istanbul ignore next -- splitTemplate throws only NamingError. The
-         guard exists so an unexpected failure surfaces as itself rather
-         than as a bad naming template. */
-      if (!(error instanceof NamingError)) throw error;
-      throw new ManifestError(`stubs.naming.${kind}: ${error.message}`);
-    }
-    resolved[kind] = value;
+function layerFolders(manifest: HexManifest): Record<LayerName, string> {
+  const layers = manifest.generator?.sync?.layers ?? {};
+  const folders = {} as Record<LayerName, string>;
+  for (const layer of Object.keys(LAYER_DEFAULTS) as LayerName[]) {
+    const configured = layers[layer]?.folder;
+    folders[layer] = typeof configured === "string" && configured.length > 0 ? configured : LAYER_DEFAULTS[layer];
   }
-  return resolved;
+  return folders;
 }
 
 /**
- * Read the architecture manifest far enough to compare inventories: the
- * per-context lists, the layer folders, and the stub-naming overrides.
- * Structural rules of the wider schema belong to `hexagen arch validate`;
- * this only refuses what would silently skew the comparison.
+ * Resolve one context's stub naming, kind by kind, in the same precedence as
+ * hexagen's own `resolveNaming` (`src/generators/stubs.ts`, `dist/index.js`):
+ * the context's own `generator.stubs.naming` override, else the manifest's
+ * global `generator.sync.stubs.naming`, else `DEFAULT_NAMING`. Resolving here
+ * (rather than per list-check) makes the result total — every kind always
+ * has a template, so nothing downstream needs an `??` fallback again.
+ *
+ * Also validates each resolved template eagerly (`resolveTemplate` throws a
+ * `NamingError` for a template with no `{name}`, or two): hexagen's own
+ * generator tolerates that at the cost of a broken filename, but this tool's
+ * comparison depends on `{name}` being invertible, so it refuses up front —
+ * here, where `fromHexagen`'s caller can catch it as one malformed manifest,
+ * rather than lazily inside `checkInventory` where nothing is watching.
  */
-export function parseManifest(text: string): Manifest {
-  let doc: unknown;
-  try {
-    doc = parse(text);
-  } catch (error: unknown) {
-    // The yaml parser throws YAMLException and nothing else, so there is no
-    // non-Error arm to guard here — adding one would be an unreachable branch.
-    throw new ManifestError(`invalid YAML: ${(error as SyntaxError).message}`);
+function resolveNaming(
+  manifest: HexManifest,
+  context: BoundedContext,
+  scope: string,
+): Readonly<Record<StubKind, string>> {
+  const manifestNaming = manifest.generator?.sync?.stubs?.naming ?? {};
+  const contextNaming = context.generator?.stubs?.naming ?? {};
+  const naming = {} as Record<StubKind, string>;
+  for (const kind of STUB_KINDS) {
+    const template = contextNaming[kind] ?? manifestNaming[kind] ?? DEFAULT_NAMING[kind];
+    try {
+      resolveTemplate(template, scope);
+    } catch (error) {
+      /* istanbul ignore next -- resolveTemplate throws only NamingError. The
+         guard exists so an unexpected failure surfaces as itself rather than
+         as a bad naming template. */
+      if (!(error instanceof NamingError)) throw error;
+      throw new NamingError(`${context.name}: stubs.naming.${kind}: ${error.message}`);
+    }
+    naming[kind] = template;
   }
-  if (!isRecord(doc) || doc["bounded_contexts"] === undefined) {
-    throw new ManifestError("manifest is not a mapping with a bounded_contexts list");
-  }
-  const contexts = doc["bounded_contexts"];
-  if (!Array.isArray(contexts)) {
-    throw new ManifestError("bounded_contexts must be a list");
-  }
-  const generator = section(doc["generator"], "manifest", "generator");
+  return naming;
+}
+
+/** Ports may be a bare name or an owned-port object `{ name, owner? }`
+ *  (`LegacyOrNewPort`) — `portName` extracts the name either way, the same
+ *  as hexagen's own `buildEmissionPlan`. */
+function portNames(ports: readonly LegacyOrNewPort[] | undefined): readonly string[] {
+  return (ports ?? []).map(portName);
+}
+
+function contextLists(context: BoundedContext): ContextLists {
+  const domain = context.layers?.domain ?? {};
+  const application = context.layers?.application ?? {};
+  const infrastructure = context.layers?.infrastructure ?? {};
   return {
-    contexts: contexts.map(parseContext),
-    naming: stubNaming(generator),
-    folders: layerFolders(generator),
+    entities: domain.entities ?? [],
+    value_objects: domain.value_objects ?? [],
+    domain_services: domain.domain_services ?? [],
+    use_cases: application.use_cases ?? [],
+    "ports.in": portNames(application.ports?.in),
+    "ports.out": portNames(application.ports?.out),
+    adapters: infrastructure.adapters ?? [],
   };
+}
+
+/**
+ * Adapt hexagen's own loaded manifest (anchors resolved, split manifests
+ * merged, owned-port objects intact — all `loadManifest`'s job, not this
+ * tool's) into the shape `checkInventory` compares against the tree.
+ */
+export function fromHexagen(manifest: HexManifest): Manifest {
+  const scope = resolveScope(manifest);
+  const contexts: ContextDecl[] = (manifest.bounded_contexts ?? []).map((context) => ({
+    name: context.name,
+    lists: contextLists(context),
+    naming: resolveNaming(manifest, context, scope),
+  }));
+  return { contexts, folders: layerFolders(manifest), scope };
 }
