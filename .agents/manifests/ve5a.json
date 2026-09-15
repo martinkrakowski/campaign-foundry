@@ -19,9 +19,39 @@
     },
     {
       "file": "apps/web/src/components/campaign/editor-state.ts",
-      "before": "          beats: state.timeline.beats.map((beat) => ({\n            text: beat.text,\n            weight: beat.weight,\n            // VE5a: written back only when the beat names one — a draft that never\n            // had a scene must serialise exactly as it did without the field (D3).\n            ...(beat.background !== undefined ? { background: beat.background } : {}),\n          })),",
+      "before": "          beats: state.timeline.beats.map((beat) => ({\n            text: beat.text,\n            weight: beat.weight,\n            // VE5a: written back only when the beat names a real scene — a draft that\n            // never had one, or one repaired to `\"\"`/a non-string, must serialise exactly\n            // as it did without the field, and never a value the boundary refuses (D3).\n            ...(isNamedBackground(beat.background) ? { background: beat.background } : {}),\n          })),",
       "after": "          beats: state.timeline.beats.map((beat) => ({\n            text: beat.text,\n            weight: beat.weight,\n          })),",
       "because": "Dropping background from toBrief's beat rebuild strips a loaded brief's scenes on save, so the fromBrief → toBrief round-trip test must fail.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/editor-state.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/editor-state.ts",
+      "before": "  if (dwellProblem(withOneMore, durations) === undefined) return undefined;",
+      "after": "  if (\n    dwellProblem(withOneMore, durations) === undefined &&\n    new Set(withOneMore.beats.flatMap((b) => (b.background !== undefined ? [b.background] : []))).size <= MAX_SCENES\n  )\n    return undefined;",
+      "because": "Reading the floor block off any timelineProblem failure (here, the scene cap too) re-blocks Add beat on a pre-existing over-cap draft, so the 4-scene test must fail.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/editor-state.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/editor-state.ts",
+      "before": "          // A restored `savedSnapshot` reaches here unvalidated (discard): repair the\n          // scene to the parser's spelling on the way in, exactly as the draft\n          // normaliser does, so a `\"\"` or a non-string never survives to a save.\n          ...(isNamedBackground(beat.background) ? { background: beat.background } : {}),",
+      "after": "          ...(beat.background !== undefined ? { background: beat.background } : {}),",
+      "because": "Letting fromBrief keep any defined background restores a snapshot's empty or non-string scene into the draft, so the recovered-snapshot repair test must fail.",
       "command": [
         "yarn",
         "vitest",

@@ -6,6 +6,7 @@ import {
   MAX_WEIGHT,
   MIN_DWELL_SEC,
   resolveTimeline,
+  scenesProblem,
   timelineProblem,
   type CopyTimeline,
   type CopyBeat,
@@ -233,6 +234,21 @@ describe("timelineProblem — per-beat backgrounds (VE-D10)", () => {
       Array.from({ length: 8 }, (_, i) => beat(`B${i}`, bg((i % 3) + 1))),
     );
     expect(timelineProblem(t, [30])).toBeUndefined();
+  });
+
+  test("scenesProblem isolates the cap from the rest of the rule", () => {
+    // A timeline that breaches ONLY the cap: weights well clear of the floor,
+    // keyBeat in range, structural checks fine — the dedicated check fires where
+    // timelineProblem does, and returns undefined for a legal count.
+    const overCap = timeline([
+      beat(A, bg(1)),
+      beat(B, bg(2)),
+      beat(C, bg(3)),
+      beat(A, bg(4)),
+    ]);
+    expect(scenesProblem(overCap)).toMatch(/more than 3 distinct backgrounds/);
+    const atCap = timeline([beat(A, bg(1)), beat(B, bg(2)), beat(C, bg(3)), beat(B, bg(1))]);
+    expect(scenesProblem(atCap)).toBeUndefined();
   });
 
   test("a timeline naming no backgrounds is valid exactly as before (VE-D3)", () => {

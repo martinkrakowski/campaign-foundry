@@ -47,11 +47,11 @@ import {
 } from "@campaignfoundry/CampaignOrchestration/variation-defaults";
 import { MOTION_KINDS } from "@campaignfoundry/CampaignOrchestration/motion-kinds";
 import {
+  dwellProblem,
   MAX_BEATS,
   MAX_SCENES,
   MAX_WEIGHT,
   MIN_DWELL_SEC,
-  timelineProblem,
   type CopyTimeline,
 } from "@campaignfoundry/CampaignOrchestration/copy-timeline";
 import {
@@ -828,6 +828,11 @@ export function asCopyTimeline(timeline: TimelineDraft): CopyTimeline {
  * produce and ask the domain. That is the only way the editor and the parser cannot drift,
  * and because it re-derives on every render, narrowing the duration axis re-answers it with
  * no extra wiring — the case the plan names as the one a click-time check misses.
+ *
+ * The dwell block is decided by the FLOOR condition alone, not by `timelineProblem`. The
+ * simulated beat carries no background, so adding one can never change the scene count: an
+ * existing scene-cap violation (a restored draft that already names more than MAX_SCENES)
+ * must not masquerade as a dwell block — validation reports it where it belongs.
  */
 export type AddBeatBlock =
   | { readonly kind: "max"; readonly max: number }
@@ -846,7 +851,7 @@ export function addBeatBlockedBy(state: EditorState): AddBeatBlock | undefined {
     transition: state.timeline.transition,
     keyBeat: state.timeline.keyBeat,
   };
-  if (timelineProblem(withOneMore, durations) === undefined) return undefined;
+  if (dwellProblem(withOneMore, durations) === undefined) return undefined;
   return {
     kind: "floor",
     shortestSec: Math.min(...durations),
@@ -2096,6 +2101,20 @@ export function parsePolicyInteger(value: string): number | undefined {
   return Number.isSafeInteger(num) ? num : undefined;
 }
 
+/**
+ * A beat names a scene of its own only when its `background` is a non-empty string;
+ * `""`, a number, a stray field off an unvalidated snapshot — all are the parser's
+ * spelling of "no background", and the API refuses anything else on save. The one
+ * predicate `fromBrief`, `toBrief` and `normalizeTimelineDraft` share, so the three can
+ * never disagree about what a scene is: a bad value repaired on the way in is not written
+ * back on the way out, and a value that reaches `toBrief` from a snapshot that skipped
+ * repair (`discard` hands `savedSnapshot` straight to `fromBrief`) is dropped rather than
+ * serialised into a payload the boundary rejects.
+ */
+function isNamedBackground(background: unknown): background is string {
+  return typeof background === "string" && background !== "";
+}
+
 export function toBrief(state: EditorState): CampaignBrief {
   // D99: a classic brief cannot request the motion format — the run paths
   // refuse the combination every time, because the classic product × ratio ×
@@ -2173,9 +2192,10 @@ export function toBrief(state: EditorState): CampaignBrief {
           beats: state.timeline.beats.map((beat) => ({
             text: beat.text,
             weight: beat.weight,
-            // VE5a: written back only when the beat names one — a draft that never
-            // had a scene must serialise exactly as it did without the field (D3).
-            ...(beat.background !== undefined ? { background: beat.background } : {}),
+            // VE5a: written back only when the beat names a real scene — a draft that
+            // never had one, or one repaired to `""`/a non-string, must serialise exactly
+            // as it did without the field, and never a value the boundary refuses (D3).
+            ...(isNamedBackground(beat.background) ? { background: beat.background } : {}),
           })),
           transition: state.timeline.transition,
           keyBeat: state.timeline.keyBeat,
@@ -2364,7 +2384,10 @@ export function fromBrief(
           key: index + 1,
           text: beat.text,
           weight: beat.weight,
-          ...(beat.background !== undefined ? { background: beat.background } : {}),
+          // A restored `savedSnapshot` reaches here unvalidated (discard): repair the
+          // scene to the parser's spelling on the way in, exactly as the draft
+          // normaliser does, so a `""` or a non-string never survives to a save.
+          ...(isNamedBackground(beat.background) ? { background: beat.background } : {}),
         })),
         transition: copyTimeline.transition,
         keyBeat: copyTimeline.keyBeat,
@@ -2650,10 +2673,9 @@ function normalizeTimelineDraft(value: unknown): TimelineDraft {
       text: typeof beat.text === "string" ? beat.text : "",
       weight,
       // A restored draft keeps its scenes (D11); anything that is not a non-empty
-      // string is repaired to "no scene of its own", the parser's spelling.
-      ...(typeof beat.background === "string" && beat.background !== ""
-        ? { background: beat.background }
-        : {}),
+      // string is repaired to "no scene of its own", the parser's spelling — the same
+      // predicate `fromBrief` and `toBrief` use, so the three can never disagree.
+      ...(isNamedBackground(beat.background) ? { background: beat.background } : {}),
     };
   });
   const transition =

@@ -189,6 +189,50 @@ export function beatAt(
 }
 
 /**
+ * The scene-cap violation (VE-D10), or `undefined` when the timeline names at most
+ * `MAX_SCENES` distinct backgrounds. Its own export, mirroring how the floor is a
+ * separate question below, so a caller that must reason about one rule alone — the
+ * editor's Add-beat gate, which cannot change the scene count by adding a
+ * background-free beat — asks just this. `timelineProblem` is the single place the
+ * whole rule is told; nothing outside should re-count the set.
+ */
+export function scenesProblem(t: CopyTimeline): string | undefined {
+  const scenes = new Set(
+    t.beats.flatMap((beat) => (beat.background !== undefined ? [beat.background] : [])),
+  );
+  if (scenes.size > MAX_SCENES) {
+    return `copy.timeline.beats name more than ${MAX_SCENES} distinct backgrounds (max ${MAX_SCENES}).`;
+  }
+  return undefined;
+}
+
+/**
+ * The readability-floor violation (D3), or `undefined` when every beat's dwell clears
+ * the floor at the shortest duration. Split from `timelineProblem` for the same reason
+ * as `scenesProblem`: a caller that must know whether *this* rule bites — the editor's
+ * Add-beat gate, which reports a floor block and nothing else — asks just this, rather
+ * than reading one condition's answer off another's failure. `timelineProblem` composes
+ * them; the composition is the full authoring rule.
+ */
+export function dwellProblem(
+  t: CopyTimeline,
+  durations: readonly number[],
+): string | undefined {
+  const total = t.beats.reduce((sum, beat) => sum + beat.weight, 0);
+  const d = durations.length > 0 ? Math.min(...durations) : DEFAULT_DURATION_SEC;
+  for (let i = 0; i < t.beats.length; i += 1) {
+    const dwellSec = (d * t.beats[i].weight) / total;
+    if (dwellSec < MIN_DWELL_SEC - DWELL_TOLERANCE) {
+      return (
+        `copy.timeline.beats[${i}] (${t.beats[i].text}) stays ${dwellSec.toFixed(2)}s below the ` +
+        `${MIN_DWELL_SEC}s readability floor at the shortest duration (${d}s).`
+      );
+    }
+  }
+  return undefined;
+}
+
+/**
  * Authoring rule (D3), the single source of truth for what makes a timeline invalid —
  * structural violations first (the editor and the running parser both mirror this),
  * then the readability floor, per beat:
@@ -220,23 +264,8 @@ export function timelineProblem(t: CopyTimeline, durations: readonly number[]): 
   if (!Number.isInteger(t.keyBeat) || t.keyBeat < 1 || t.keyBeat > t.beats.length) {
     return `copy.timeline.keyBeat must be an integer in [1, ${t.beats.length}].`;
   }
-  const scenes = new Set(
-    t.beats.flatMap((beat) => (beat.background !== undefined ? [beat.background] : [])),
-  );
-  if (scenes.size > MAX_SCENES) {
-    return `copy.timeline.beats name more than ${MAX_SCENES} distinct backgrounds (max ${MAX_SCENES}).`;
-  }
+  const scene = scenesProblem(t);
+  if (scene !== undefined) return scene;
 
-  const total = t.beats.reduce((sum, beat) => sum + beat.weight, 0);
-  const d = durations.length > 0 ? Math.min(...durations) : DEFAULT_DURATION_SEC;
-  for (let i = 0; i < t.beats.length; i += 1) {
-    const dwellSec = (d * t.beats[i].weight) / total;
-    if (dwellSec < MIN_DWELL_SEC - DWELL_TOLERANCE) {
-      return (
-        `copy.timeline.beats[${i}] (${t.beats[i].text}) stays ${dwellSec.toFixed(2)}s below the ` +
-        `${MIN_DWELL_SEC}s readability floor at the shortest duration (${d}s).`
-      );
-    }
-  }
-  return undefined;
+  return dwellProblem(t, durations);
 }
