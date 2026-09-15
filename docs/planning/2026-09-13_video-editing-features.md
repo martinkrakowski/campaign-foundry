@@ -1,7 +1,7 @@
 # Video Editing Features — Architecture & Development Plan
 
 **Date:** 2026-09-13
-**Status:** Phase A shipped (VE1, VE2). VE-Q1, VE-Q3 and VE-Q4 answered by the owner on 2026-09-15 (VE-D8–VE-D11, recommended defaults); VE3a, VE3b, VE5a and VE5b are dispatchable. VE4 waits on the speech vendor (VE-Q5). VE6 is deferred (VE-D11).
+**Status:** Phase A shipped (VE1, VE2). VE-Q1–VE-Q4 answered by the owner on 2026-09-15 (VE-D8–VE-D11, recommended defaults, refined by plan review); VE5a then VE3a are dispatchable, serially (both edit `load-brief.ts`); VE3b and VE5b follow their predecessors. VE4 waits on the speech vendor (VE-Q5). VE6 is deferred (VE-D11).
 **Scope:** Which ideas from a reference video editor fit Campaign Foundry, and how each is built on
 the existing server-side compositor instead of beside it.
 **Related:** `2026-09-10_keyframing.md` (K1–K5), `2026-09-10_finishing-video.md`,
@@ -26,9 +26,9 @@ at `1f85d04`.
 | **VE-D5** | **Scrubbing is a new control, user-driven, never autoplaying, and it leaves `ScrubBar` alone.** The preview cell gains `motion`, `durationSec` and `atSec` **together**; the control is absent when the brief renders no motion. The scrub position is local component state and **never an editor action**. | `ScrubBar` is a decorative option icon in the create dialog, frozen by D88 — "nothing here animates, ever" (`packages/ui/src/scrub-bar.tsx`). It is not a player (M3). A dragged control is not a looping animation, so D88 holds. `atSec` alone determines nothing: `prepare` resolves beats from `durationSec` and the timeline, and `draw` needs the motion kind, while a variation brief can list several of each (R1). Keeping the position out of `EditorState` keeps it out of undo history and out of VE1's file (R7). |
 | **VE-D6** | **A scrub frame is the encoded frame, exactly — and it is a *motion* frame, not today's still.** | Encoded frame `i` is `NodeCanvasCompositor.draw(ctx, prepared, i / (frames − 1), request.motion)` with the copy and effect clocks **omitted** (`CanvasFfmpegVideoCompositor.ts:316`), where `frames = round(durationSec × fps)` (`:93`). The poster and the editor's still both pass `effectT = 1` and are **not** comparable (R3). For `atSec`, `i = round(atSec / durationSec × (frames − 1))`. Fidelity is a byte comparison against the raw RGBA the encoder receives, not a visual judgement. |
 | **VE-D7** | **Keyframes are the keyframing plan's.** | K1–K5 already specify tracks on the layer (K-D1–K-D6). This plan points at them and adds no fourth motion system. |
-| **VE-D8** | **Music rights are a record on the brief, checked in two tiers.** `audio: { path, rights: { licenceId, source, expiresOn?, territories? } }`. A missing `licenceId` or `source` **refuses the brief at load**. An `expiresOn` in the past, or `territories` that do not cover the brief's `targetRegion`, **halts the run in the legal gate** exactly as prohibited copy does. Expiry is **re-checked at packaging**. Nothing is warned-and-rendered. | Owner, 2026-09-15 (VE-Q1). The code has three tiers — legal copy halts the run (`GenerateCampaignUseCase.use-case.ts` `runLegalGate`), brand density flags, occlusion advises — and a missing licence is a legal fact. The asset store carries no metadata channel, so the record lives on the brief. Packaging never re-renders (D11) and may run after expiry, hence the re-check. |
+| **VE-D8** | **Music rights are a record on the brief, checked in two tiers.** `audio: { path, rights: { licenceId, source, expiresOn?, territories? } }`. A missing `licenceId` or `source` **refuses the brief at load**. An `expiresOn` in the past **halts the run in the legal gate** exactly as prohibited copy does. **Territories** (refined by plan review — `targetRegion` is free text, `CampaignBrief.ts:24`, so coverage cannot be matched against prose): `territories` absent means worldwide; present, it is a non-empty array of ISO 3166-1 alpha-2 codes (`^[A-Z]{2}$`); load **refuses** a brief whose `targetRegion` (trimmed, upper-cased) is not itself an alpha-2 code while `territories` is present; the legal gate **halts** when that code is not in the set. Expiry is **re-checked at packaging**. Nothing is warned-and-rendered. | Owner, 2026-09-15 (VE-Q1). The code has three tiers — legal copy halts the run (`GenerateCampaignUseCase.use-case.ts` `runLegalGate`), brand density flags, occlusion advises — and a missing licence is a legal fact. The asset store carries no metadata channel, so the record lives on the brief. Packaging never re-renders (D11) and may run after expiry, hence the re-check — against the use case's injected `packagedAt`, never `new Date()`. |
 | **VE-D9** | **Voiceover is generated speech from a separate `voiceover.script` field**, swept by the legal gate with copy and beats, its audio cached by provider, model id and seed so a golden can pin it. **The vendor is VE-Q5.** | Owner, 2026-09-15 (VE-Q2). No speech code exists, so either answer is a new dependency; generated speech is one adapter and yields word timings for captions, where an upload needs a decoder and an aligner. A separate script keeps captions from repeating burned-in copy (VE-D4, M2). |
-| **VE-D10** | **At most 3 distinct generated backgrounds per creative**, enforced as a timeline authoring rule in `CopyTimeline.vo.ts` beside `MAX_BEATS`, so the parser and the editor refuse the same thing (D3). Procedural scenes do not count. The estimate shows the multiplied spend. | Owner, 2026-09-15 (VE-Q3). No credit budget exists today, and variation mode multiplies scene cost by `count × ratios`; 3 covers open, middle and close. |
+| **VE-D10** | **At most 3 distinct per-beat backgrounds per timeline**, enforced as a timeline authoring rule in `CopyTimeline.vo.ts` beside `MAX_BEATS`, so the parser and the editor refuse the same thing (D3). (Refined by plan review: generated-vs-procedural is the *variant's* background source, `variant.backgroundSource`, invisible to the timeline validator — so the cap counts distinct values regardless of source, and "a procedural scene spends nothing" is a statement the **estimate** makes, in VE5b.) | Owner, 2026-09-15 (VE-Q3). No credit budget exists today, and variation mode multiplies scene cost by `count × ratios`; 3 covers open, middle and close. |
 | **VE-D11** | **"Does not add video decoding" stands.** VE6 is deferred, not scheduled; revisit only after VE3b's AAC golden proves audio determinism. | Owner, 2026-09-15 (VE-Q4). Decode is unpinned (the compositor pins encode and scale only), uploads are base64 JSON capped at 2 MiB, and goldens would need committed video fixtures. A poster-only slice (one still extracted at upload) is the recorded middle ground if footage becomes a requirement. |
 
 ---
@@ -132,22 +132,24 @@ VE2 must not edit `editor-state.ts` or `BriefEditor.tsx`; those are VE1's.
 
 ## 4. Phase B — each lane waits on one open question
 
-### VE3a — Music rights record · VE-D8 · dispatchable
+### VE3a — Music rights record · VE-D8 · after VE5a (both edit `load-brief.ts`)
 
 | # | Task | File(s) |
 |---|---|---|
-| 1 | `audio?: { path, rights: { licenceId, source, expiresOn?, territories? } }` on the brief; absent means no audio, as today. | `CampaignBrief.ts`, `load-brief.ts` |
-| 2 | Refuse at load a brief whose `audio` lacks `licenceId` or `source`, or carries a malformed `expiresOn` / `territories`. | `load-brief.ts` |
-| 3 | Halt the run in the legal gate when `expiresOn` is past or `territories` does not cover `targetRegion`. | `GenerateCampaignUseCase.use-case.ts` (`runLegalGate`) |
-| 4 | Stamp the rights record on the generated asset and re-check expiry in packaging. | `GeneratedAsset.ts`, `PackageForPlatformUseCase.use-case.ts` |
+| 1 | `readonly audio?: { path, rights }` on `CampaignBrief` (the rights shape may be its own value object); absent means no audio, as today. | `CampaignBrief.ts`, new `AudioRights` value object if used, `load-brief.ts` |
+| 2 | Refuse at load: `audio` without `rights.licenceId` or `rights.source`; malformed `expiresOn`; `territories` present but not a non-empty alpha-2 array, or present while `targetRegion` is not itself alpha-2 (VE-D8). | `load-brief.ts` |
+| 3 | Halt the run in the legal gate when `expiresOn` is before the run's clock, or `targetRegion` is not in `territories`. | `GenerateCampaignUseCase.use-case.ts` (`runLegalGate`) |
+| 4 | Carry the rights record on the generated asset through the report to packaging, following `clickDestination`'s chain, and refuse packaging when `expiresOn` is before the use case's injected `packagedAt`. | `GeneratedAsset.ts`, `apps/api/server/lib/report.ts` (`PersistedAsset` + its guard), `PackageForPlatformUseCase.use-case.ts` (`PackageableAsset`) |
+| 5 | A duplicated brief rewrites `audio.path` like `logoPath` / `inputAsset`. | `apps/api/server/lib/asset-files.ts` (`rewriteAssetPaths`, `extractSourceAssetBriefIds` only) |
+| 6 | **Interim state:** until VE3b renders audio, a run whose brief declares `audio` is refused with a message saying audio is not rendered yet (the `enforceCapabilities` pattern), so no silent MP4 ships as if it carried music. VE3b removes the refusal. | `load-brief.ts` |
 
-**Acceptance.** No ffmpeg change. A brief without `audio` loads, generates and packages exactly as today (VE-D3); each refusal and halt has a test naming its field; an expired licence refuses packaging.
+**Acceptance.** No ffmpeg change. A brief without `audio` loads, generates, duplicates and packages exactly as today (VE-D3); each refusal and halt has a test naming its field; an expired licence refuses packaging against `packagedAt`; a run with `audio` is refused with the interim message.
 
 ### VE3b — Music bed in the encoder · after VE3a
 
 | # | Task | File(s) |
 |---|---|---|
-| 1 | Accept audio uploads (format list decided in the lane; the 2 MiB upload cap is the binding limit — say what it admits). | `apps/api/server/lib/asset-files.ts`, `routes/campaigns/assets.post.ts` |
+| 1 | Accept audio uploads (format list decided in the lane; the 2 MiB upload cap is the binding limit — say what it admits). Remove VE3a's interim run refusal. | `apps/api/server/lib/asset-files.ts` (upload patterns and magic checks), `routes/campaigns/assets.post.ts`, `load-brief.ts` |
 | 2 | Second ffmpeg input; encode AAC; cut to `durationSec`; short fade-out; keep bit-exact flags. | `CanvasFfmpegVideoCompositor.ts`, `VideoCompositorPort.ts` |
 | 3 | A second golden for the audio case; the silent golden must not move. | adapter golden tests |
 
@@ -158,29 +160,30 @@ VE2 must not edit `editor-state.ts` or `BriefEditor.tsx`; those are VE1's.
 | # | Task | File(s) |
 |---|---|---|
 | 1 | Voiceover as a second audio source mixed under/over the music bed. | `CanvasFfmpegVideoCompositor.ts` |
-| 2 | Caption cues timed to the **speech**, not to beat weights — the timing source is what VE-Q2 decides. | new value object beside `CopyTimeline.vo.ts` |
+| 2 | Caption cues timed to the **speech**, not to beat weights — timed from the generated speech's word timings (VE-D9). | new value object beside `CopyTimeline.vo.ts` |
 | 3 | Write a WebVTT sidecar at **generation** (packaging never re-renders, D11) and package it beside the mp4. | `GenerateCampaignUseCase.use-case.ts`, `PackageForPlatformUseCase.use-case.ts` |
 | 4 | Spoken and captioned text pass the same legal gate as copy. | compliance checker |
 
 **Acceptance.** Captions exist only when speech does; every cue's text passed the legal gate; the
 sidecar is packaged for motion platforms and absent otherwise.
 
-### VE5a — Scenes in the timeline · VE-D10 · dispatchable
+### VE5a — Scenes in the timeline · VE-D10 · dispatchable first
 
 | # | Task | File(s) |
 |---|---|---|
-| 1 | A beat may name its own background; absent means the creative's background, as today. | `CopyTimeline.vo.ts` |
-| 2 | At most 3 distinct generated backgrounds per timeline (procedural scenes do not count), refused by the timeline validator so the API and the editor agree. | `CopyTimeline.vo.ts`, `load-brief.ts`, `apps/web/src/components/campaign/validate.ts` |
+| 1 | A beat may name its own background as `background?: string` — an asset path, the same kind of reference a product's `inputAsset` holds; absent means the creative's background, as today. | `CopyTimeline.vo.ts` |
+| 2 | At most 3 distinct `background` values per timeline, refused by the timeline validator so the API and the editor agree. | `CopyTimeline.vo.ts`, `load-brief.ts`, `apps/web/src/components/campaign/validate.ts` |
+| 3 | The editor must not strip the field: `TimelineBeatDraft` carries `background`, and every site that rebuilds beats as `{ text, weight }` preserves it (the D11 round-trip rule). No editor control is required in this lane. | `apps/web/src/components/campaign/editor-state.ts` |
 
-**Acceptance.** No compositor change. A timeline naming no backgrounds parses and serialises byte-identically; a fourth distinct generated background is refused with the same message at both boundaries.
+**Acceptance.** No compositor change (the renderer reads `text` and `weight` only). A timeline naming no backgrounds parses and serialises byte-identically; a fourth distinct background is refused with the same message at both boundaries; a loaded brief with per-beat backgrounds survives an editor load → save round trip.
 
 ### VE5b — Scenes in the renderer · after VE5a
 
 | # | Task | File(s) |
 |---|---|---|
-| 1 | Prepare one ground per distinct background; `cut`/`fade` apply between scenes as they apply between beats. | `CanvasFfmpegVideoCompositor.ts`, `NodeCanvasCompositor.ts`, `VideoCompositorPort.ts` |
+| 1 | Prepare one ground per distinct background (the request field is `backgrounds` on `VideoCompositeRequest`, or `scenes` on `CompositeRequest` if the poster needs it too — name it in the lane); `cut`/`fade` apply between scenes as they apply between beats. | `CanvasFfmpegVideoCompositor.ts`, `NodeCanvasCompositor.ts`, `VideoCompositorPort.ts`, `CompositorPort.ts` |
 | 2 | The poster shows the key beat's scene (D7). | poster block |
-| 3 | Resolve one background per distinct scene at generation; the estimate counts them. | `GenerateCampaignUseCase.use-case.ts`, estimate |
+| 3 | Resolve one background per distinct scene at generation; the estimate counts generated scenes and states that a procedural scene spends nothing. | `GenerateCampaignUseCase.use-case.ts`, estimate |
 
 **Acceptance.** A timeline naming no backgrounds is byte-identical (VE-D3); a two-scene timeline switches ground exactly at the resolved beat boundary; the poster matches the key beat's scene.
 
@@ -204,26 +207,26 @@ without footage is byte-identical (VE-D3); trim bounds are validated at the boun
 ## 6. Dependency graph
 
 ```
-Phase A (independent)          Phase B                          Phase C
-  VE1 undo/redo                  VE3 music ── VE4 voiceover+captions
-  VE2 scrub preview              VE5 scenes                       VE6 footage (VE-Q4)
-                                 (VE-Q1)      (VE-Q2)   (VE-Q3)
+Phase A (shipped)              Phase B                                          Phase C
+  VE1 undo/redo                  VE5a scenes in timeline ── VE5b scenes in renderer   VE6 footage — deferred (VE-D11)
+  VE2 scrub preview              VE3a music rights ── VE3b music in encoder ── VE4 voiceover+captions (VE-Q5)
+                                 (VE5a before VE3a: both edit load-brief.ts)
 Keyframes: see 2026-09-10_keyframing.md (K1 blocked on its own questions)
 ```
 
 VE1 and VE2 run in parallel **only** because VE2 keeps the scrub position out of `EditorState` and edits neither
 `editor-state.ts` nor `BriefEditor.tsx`. VE2, VE3b and VE5b all edit `CanvasFfmpegVideoCompositor.ts` and must not
-run concurrently with each other; VE3a and VE5a touch no renderer file and may run beside them.
+run concurrently with each other; VE3a and VE5a touch no renderer file and may run beside those, but **not beside each other** — both edit `load-brief.ts` (imports, the `parseBrief` chain) and its tests.
 
 ---
 
 ## 7. Cross-cutting concerns
 
 - **Credits.** Previews and scrubbing stay on the procedural generator (D52). Scenes multiply real
-  generation calls per creative; that is VE-Q3's budget, not an implementation detail.
+  generation calls per creative; that is VE-D10's budget, not an implementation detail.
 - **Determinism.** Every lane proves byte identity for briefs that do not use it (VE-D3). Goldens are
   never re-recorded to make a lane green.
-- **Compliance.** Audio rights (VE3) and spoken or captioned text (VE4) enter the same gate copy
+- **Compliance.** Audio rights (VE3a) and spoken or captioned text (VE4) enter the same gate copy
   already passes; nothing reaches an ad around it.
 - **Byte and duration budgets.** Audio adds bytes against `maxBytes` (100 MiB motion) and every track
   is cut to the brief's duration — the domain's `MAX_DURATION_SEC` (`variation-defaults.ts`, 30 s; the
@@ -247,7 +250,7 @@ run concurrently with each other; VE3a and VE5a touch no renderer file and may r
 ## 9. Risks & notes
 
 - **Audio determinism is unproven here.** The native AAC encoder with bit-exact flags is expected to be
-  reproducible, but VE3 must demonstrate it with a golden before relying on it.
+  reproducible, but VE3b must demonstrate it with a golden before relying on it.
 - **Scrub request volume.** Dragging can issue many requests; superseding in-flight requests and the
   existing frame cache keep it bounded, and VE2's acceptance includes the cache fingerprint.
 - **Undo and server state.** `EditorState` carries server answers — the saved revision, the copy pool, the
@@ -282,12 +285,12 @@ still open**. `yarn plan:verify` runs them.
 **VE2 — shipped in this PR.**
 
 ```premise VE3a
-# The brief carries no music rights record.
-! grep -qE 'licenceId' packages/CampaignOrchestration/src/domain/entities/CampaignBrief.ts
+# Either gap keeps the lane open: no audio field on the brief, or no licence check at load.
+! grep -qE 'readonly audio\??:' packages/CampaignOrchestration/src/domain/entities/CampaignBrief.ts || ! grep -q 'licenceId' apps/api/server/lib/load-brief.ts
 ```
 
 ```premise VE3b
-# No audio codec in the encoder, or no audio extension accepted for upload — either keeps the lane open.
+# Either gap keeps the lane open (||): no audio codec argument in the encoder, or no audio extension accepted for upload.
 ! grep -qE -- '"-c:a"|"-acodec"' packages/CreativeGeneration/src/infrastructure/adapters/CanvasFfmpegVideoCompositor.ts || ! grep -qE '\b(mp3|m4a|wav|aac)\b' apps/api/server/lib/asset-files.ts
 ```
 
@@ -298,12 +301,12 @@ still open**. `yarn plan:verify` runs them.
 
 ```premise VE5a
 # A copy beat carries text and weight only — no per-beat background field.
-! grep -qE 'background\??:' packages/CampaignOrchestration/src/domain/value-objects/CopyTimeline.vo.ts
+! grep -qE '(background|scene)\??:' packages/CampaignOrchestration/src/domain/value-objects/CopyTimeline.vo.ts
 ```
 
 ```premise VE5b
-# The video compositor request carries exactly one background — no per-scene grounds.
-! grep -qE 'backgrounds\??:' packages/CampaignOrchestration/src/application/ports/out/VideoCompositorPort.ts
+# No compositor request carries per-scene grounds (video request, or the base request the poster shares).
+! grep -qE 'readonly (backgrounds|scenes|grounds)\??:' packages/CampaignOrchestration/src/application/ports/out/VideoCompositorPort.ts packages/CampaignOrchestration/src/application/ports/out/CompositorPort.ts
 ```
 
 **VE6 — deferred (VE-D11); its premise is retired until the owner schedules it.**
