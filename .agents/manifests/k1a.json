@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "lane": "K1a",
+  "mutations": [
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/tracks.ts",
+      "before": "    if (prevT !== undefined && stop.t <= prevT) {",
+      "after": "    if (prevT !== undefined && stop.t < prevT) {",
+      "because": "K-D9's only refusal is a duplicate t on one track's same clock. Weakening the strict inequality from `<=` to `<` still catches a stop out of order (descending), but lets two stops at the exact same t through — the composition question K-D9 answers (two tracks may share a property) would then be silently true within one track too.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/tracks.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/shared/src/infrastructure/brief-yaml.ts",
+      "before": "const LAYER_KEY_ORDER = [\"id\", \"kind\", \"enabled\", \"props\", \"elements\", \"tracks\"] as const;",
+      "after": "const LAYER_KEY_ORDER = [\"id\", \"kind\", \"enabled\", \"props\", \"elements\"] as const;",
+      "because": "orderedKeys appends unnamed keys at the end, so dropping tracks from LAYER_KEY_ORDER does not make it disappear — it falls into the same tail bucket as any other unrecognised key, which a plain 'tracks appears in the output' assertion cannot tell apart from tracks sitting at its declared sixth position. Only a fixture with an unnamed key written before tracks in source order proves the position.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/shared/src/infrastructure/__tests__/brief-yaml.test.ts"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
