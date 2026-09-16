@@ -5780,3 +5780,28 @@ green (that mutation only touches one of the three sites). Neither mutation move
 empirically by running all four golden suites alongside each mutation, stated plainly in the manifest
 rather than implied.
 Cite: K4 in docs/planning/2026-09-10_keyframing.md.
+## 2026-09-16 — TL1 (lane: the template library gets its first consumer)
+
+L7 never shipped a route: the port, the filesystem adapter and the three canonical seeds existed
+with no consumer. This lane adds two: `GET /campaigns/templates` (every record, one per version)
+and `GET /campaigns/templates/:ref`, where `:ref` is `id` or `id@version` — chosen over a
+`:id/:version` pair or a `?version=` query as the most direct rendering of L7's own wording
+(`GET /templates/:id@:version`); an `@` in one path segment is legal, and verified rather than
+assumed — h3 1.15.11's router param decodes a percent-encoded `%40` to a literal `@` before the
+handler sees it (one throwaway `getRouterParam` probe, then locked in as a test case). No version
+returns the highest version present; an exact version the store does not have is a 404 whose body is
+asserted to not contain either version's payload, never a fallback (D123's immutability promise
+reaching the wire — the port already refuses the fallback, the route must not reintroduce it); a
+version that fails to parse as a positive integer is a 400 naming the field; a store failure is a
+500 with an `{ error }` message, never an empty list. Red first two ways: `Cannot find module
+'../templates.get.js'` before the handlers existed (suite-level), then each of the 11 tests re-run
+one more time against a null two-line stub of both handlers to see all 11 fail for their own
+stated reason (per-test) before the real implementation went back in. Two mutations in
+`.agents/manifests/tl1.json` — falling back to the highest version on a missing exact match, and
+returning `{ templates: [] }` on a store throw — both reproduce under `yarn mutate:verify` and are
+caught; the fallback mutation fails on the leaked-payload assertion, not merely the status code.
+`yarn typecheck`, `yarn lint` and `yarn plan:verify` clean (scoped to `@campaignfoundry/api`);
+`packages/*/src` untouched, so `lint:arch` does not apply. Thumbnails, the library page and any
+write path remain out of scope — two of the three seeds need `html`/`video` drawers that do not
+exist. `campaigns/*` routes untouched.
+Cite: L7 in docs/planning/2026-09-08_creative-templates-and-units.md.
