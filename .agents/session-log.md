@@ -5280,3 +5280,10 @@ element editor; undoable, round-trip byte-clean. Gate green (100% x4), plan:veri
 2/2 mutations caught (`.agents/manifests/hl5e.json`). HL5e in
 docs/planning/2026-09-10_the-html-layer.md (§2 shipped, §5 premise retired, typeface
 residual stated). PR #432.
+
+- 2026-09-15 HL5e fix round (Qodo x2): htmlWeightKey now weighs each element's
+  style (absent and empty blocks key identically), and validateBrief applies
+  layerElementsProblem to every template layer's elements — the styleProblem
+  defence-in-depth, extended. §31 (X28) and §32 (X29) of
+  docs/planning/2026-09-10_the-unowned-gaps.md ship in this PR;
+  4/4 mutations caught (.agents/manifests/hl5e.json).

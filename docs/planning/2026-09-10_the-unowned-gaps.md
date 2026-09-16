@@ -882,3 +882,53 @@ pointed contributors at a command that discards the fix. Both are corrected:
   ports lists, treating a stale entry as fine, and dropping the duplicate check — all replay
   as caught (3/3). `yarn arch:inventory` and `yarn sync:dry` were re-run against the real
   repo after the rewrite: still no drift, still `Total ops : 0`.
+
+---
+
+## 31. A style-only element edit left the weight meter reading a stale byte count (X28)
+
+**Evidence.** `htmlWeightKey` (`apps/web/src/components/campaign/derive.ts`) serialised each
+gathered element as `[el.kind, el.text ?? "", el.frame]`. HL5e made `assembleHtml` write the
+element's `style` into the inline CSS — so the assembled `byteLength` became a function of a
+field the single-entry memo key did not contain. Changing one element's font family or weight
+and nothing else hit the cache and returned the previous reading.
+
+**Consequence.** The meter and the over-budget warning disagreed with the unit generation
+would actually produce, silently, behind the memo — the exact figure HL-D6 exists to make
+trustworthy.
+
+**X28 — shipped in this PR.** The key now carries each element's `fontWeight`/`fontFamily`,
+flattened in `ELEMENT_STYLE_FIELDS` declaration order, with absent / `{}` / all-undefined
+blocks keying identically — because `htmlElementFont` and `elementStyleProblem` resolve them
+identically, so the key stays no stricter than the domain's own vocabulary. Red-first tests
+prime the reading and change only `fontWeight`, then only `fontFamily`, asserting the new
+figure equals `assembleHtml(...).byteLength` computed independently (each with a sanity that
+the override moves the byte count at all), plus a spy-counted test pinning the `{}` key-equals-
+absent no-reweigh. Mutation manifest `.agents/manifests/hl5e.json`: dropping the two style
+slots from the key kills the re-weigh tests (caught).
+
+---
+
+## 32. The generation path trusted an element's style that no boundary had checked (X29)
+
+**Evidence.** `assembleHtml` interpolates `htmlElementFont(...)`'s `fontWeight`/`fontFamily`
+straight into a quoted `style="…"` attribute. The API boundary's `layerElementsProblem`
+allowlists both values, so a *parsed* brief is safe — but
+`GenerateCampaignUseCase.validateBrief`, the repo's declared defence-in-depth for
+programmatic callers that bypass parsing, checked the brief-level `style` (`styleProblem`,
+the T5 precedent) and the click destination while forwarding the template's html elements to
+the assembler unchecked.
+
+**Consequence.** A programmatic `CampaignBrief` carrying
+`style: { fontFamily: '"><script…' }` on an element reached the shipped markup — a value no
+boundary had ever refused.
+
+**X29 — shipped in this PR.** `validateBrief` now applies the same `layerElementsProblem`
+the API parse and the stored-draft guard read to every template layer's elements, refusing
+in the use case's existing `Campaign brief field "…" must …; got …` shape, mirroring the
+`styleProblem` call above it. The font values are deliberately *not* escaped in the assembler
+instead: the vocabulary allowlist stays the single source of truth, and escaping would hide an
+invalid value rather than refuse it. Red-first tests: a forged quote-bearing `fontFamily` and
+an off-vocabulary `fontWeight` are refused before any port is touched and no `index.html` is
+exported, while a valid override still generates. Mutation manifest `.agents/manifests/hl5e.json`:
+removing the refusal kills the forged-family test (caught).
