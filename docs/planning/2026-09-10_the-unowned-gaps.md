@@ -1630,11 +1630,33 @@ counted, both ways of the boundary; a past-wave `failed` and a past-wave `runnin
 needing a human; an unparseable `ts` with no log is not past-wave — silence is counted, never aged
 out) and extended in `__tests__/page.test.ts`, where the existing rollup-parity and hide-inactive
 tests now carry two past-wave fixture lanes and assert the module's `laneNeedsHuman` and the page's
-rendered attention count agree on them. Two mutations in `.agents/manifests/x38.json`: dropping the
-guard from `laneNeedsHuman` fails the past-wave tests; making `laneEvidenceMs` read an unparseable
-`ts` as `0` fails the silence test — the mutation that proves the honesty rule, not just the
-feature, since a bad timestamp reading as the epoch would clear the threshold for any evidence-free
-lane.
+rendered attention count agree on them.
+
+**Fix-round correction (Qodo, High, on #452's review — "active PR work becomes hidden").** The guard
+above suppressed a past-wave lane unconditionally, and `laneEvidenceMs` dates a lane from only its
+log mtime and its reported event `ts` — a narrower set of facts than the state is derived from.
+`alive` comes from a live `pgrep` every collection, and an open PR's `checks`/`unresolvedThreads`
+come from a live `gh api` sweep every collection (`collect.ts`), so those two facts can be strictly
+*fresher* than the lane's own dated evidence. Unconditionally, the guard dropped exactly the lanes an
+operator most needs to see: a process alive right now whose log has gone quiet for over a day (the
+`stalled` case), an open PR that just failed CI on a rebase two days after the lane itself went
+quiet, or an open PR carrying an unresolved review thread right now. `laneNeedsHuman` (library and
+page) now yields the guard whenever `hasFreshActionableSignal` is true — alive, or an open PR with
+`checks: "fail"`, or an open PR with a counted `unresolvedThreads > 0` — before falling back to the
+past-wave suppression. Decision taken: `checks: "unknown"` does **not** count as actionable, since
+`collect.ts` earns it separately from `none` to mean "could not ask"; treating a failed API read as a
+verdict would revive every past-wave lane the moment one sweep came back empty. Pinned by three
+rescue tests (alive outranks a day-old log; a failing open PR outranks one; an open PR with an
+unresolved thread outranks one) plus the negative that keeps the feature real (not alive, PR merged,
+no threads — still suppressed) and a test pinning the `unknown`-is-not-actionable decision, all in
+`lib/__tests__/lane-state.test.ts`, mirrored in the `__tests__/page.test.ts` fixture and its
+rollup/hide-inactive parity assertions.
+
+Three mutations in `.agents/manifests/x38.json`: dropping the whole guard fails the past-wave tests;
+making `laneEvidenceMs` read an unparseable `ts` as `0` fails the silence test — the mutation that
+proves the honesty rule, not just the feature, since a bad timestamp reading as the epoch would clear
+the threshold for any evidence-free lane; and restoring the unconditional guard (dropping just the
+`hasFreshActionableSignal` carve-out) fails the alive-rescue test.
 
 **Second, separable defect — fixed alongside it.** `~/.waves/wave-WTest1789233482035` was a test
 fixture written into the operator's real default log root, which is why `l1` appeared at all. The
