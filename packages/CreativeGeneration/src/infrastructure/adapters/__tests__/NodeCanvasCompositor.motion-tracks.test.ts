@@ -73,3 +73,31 @@ describe("K2: a resolved pose reaches the canvas, not just the resolver", () => 
     expect(Buffer.compare(first, second)).toBe(0);
   });
 });
+
+/**
+ * K3's drawn-output proof, mirroring K2's own: `textEffectTracks`'s resolved
+ * pose actually reaches the canvas — not just that the domain module computes
+ * the right numbers in isolation (`motion-tracks.test.ts`, the domain lane).
+ * Two frames of the SAME still request at two different points inside the
+ * entrance window must differ, exactly as `textEffectPose`'s switch produced
+ * before it moved into `textEffectTracks`.
+ */
+describe("K3: a resolved text-effect pose reaches the canvas, not just the resolver", () => {
+  async function styledFrameAt(effectT: number, textEffect: NonNullable<CompositeRequest["style"]>["textEffect"]) {
+    const prepared = await NodeCanvasCompositor.prepare({ ...request(), style: { textEffect } });
+    const canvas = createCanvas(prepared.width, prepared.height);
+    const ctx = canvas.getContext("2d");
+    // t = 1, no motion: only the effect clock moves between the two frames.
+    NodeCanvasCompositor.draw(ctx, prepared, 1, undefined, undefined, effectT);
+    return canvas.toBuffer("image/png");
+  }
+
+  test.each(["fade-in", "rise-in", "slide-in", "scale-in"] as const)(
+    "%s's resolved pose actually moves the headline between two frames inside the entrance window",
+    async (kind) => {
+      const early = await styledFrameAt(0.05, kind);
+      const late = await styledFrameAt(0.2, kind);
+      expect(Buffer.compare(early, late)).not.toBe(0);
+    },
+  );
+});

@@ -5641,3 +5641,28 @@ in `load-brief.ts`; the flipped test now asserts a brief declaring `audio` loads
 request drops `audio`, the mp3 magic check accepts anything — both reproduce under `mutate:verify`.
 `premise VE3b` retired, VE4 now waits only on VE-Q5.
 Cite: VE3b2 in docs/planning/2026-09-13_video-editing-features.md.
+
+## 2026-09-16 — K3 text effects as tracks (AI session)
+
+`motion-tracks.ts` gains `textEffectTracks(effect, spec, width, height)`, K2's sibling for the four
+`TEXT_EFFECT_VALUES`: each kind becomes a single-property, two-stop `effect`-clock track (`fade-in` →
+`opacity`, `rise-in` → `dy`, `slide-in` → `dx`, `scale-in` → `scale`), stops at `t = 0` and
+`t = CREATIVE_GEOMETRY.textEffect.entranceFraction` — the entrance window expressed as stop positions,
+holding past the last stop reproducing the old settled pose with no extra branch. The fraction stays
+read from `CREATIVE_GEOMETRY.textEffect` (the leaf the web preview also reads), not copied into a local
+literal. `NodeCanvasCompositor.ts`'s `textEffectPose` switch, `TextEffectPose` and `TEXT_EFFECT_REST`
+are deleted; `drawSequencedCopy`/`drawStaticText` append the effect's tracks to the SAME layer entry as
+`copyMotionTracks`'s own tracks, one `resolveTracks` call per draw path, folding in the old composition
+order (K-D9). `drawBeat` now just paints the resolved `Pose` — no more per-call text-effect pose.
+
+Floating-point finding, same shape as K2's: `fade-in`'s opacity fold (`0 + (1 - 0) * eased`) is exact
+everywhere; `rise-in`/`slide-in`/`scale-in` reassociate into `a + (b - a) * eased` and can differ from
+the old formula in the last bit of a double at an interior `t`, exact at the two stops. Proven not to
+move a pixel: 48 motion-golden cells, the mp4 byte golden, and the HL3 raster suite (layer-order.test.ts)
+are byte-identical; the pre-existing drawn-output suite (`NodeCanvasCompositor.text-effect.test.ts`,
+exact `toBe` pose assertions) is unchanged too. Red tests shown first (`textEffectTracks is not a
+function`, 26 failures) before the implementation. `mutate:verify .agents/manifests/k3.json`: 2/2
+mutations reproduced (swapping fade-in/rise-in's expansion; dropping scale-in's entrance stop) — both
+caught by the domain equivalence test and the drawn-output suites, neither moves a golden (none of the
+three named golden suites ever sets `prepared.textEffect`), stated in the manifest and the PR body.
+Cite: K3 in docs/planning/2026-09-10_keyframing.md.

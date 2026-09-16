@@ -24,7 +24,22 @@
  * `accent-wipe` is the one kind that does NOT become a track — see
  * {@link accentWipeFraction}'s own doc comment for why, and the PR body for
  * the fuller reasoning.
+ *
+ * K3: {@link textEffectTracks} expands the four `TEXT_EFFECT_VALUES` the same
+ * way, replacing `NodeCanvasCompositor.ts`'s own `textEffectPose` switch.
+ * Every kind becomes a single-property, two-stop `effect`-clock track on the
+ * text layer — the clock K1b defined as `clocks.effectT ?? local` for exactly
+ * this lane — with stops at `t = 0` and `t = entranceFraction`, so holding
+ * past the last stop (`resolveTracks`'s own `sampleStops` contract) reproduces
+ * the old settled pose with no separate "past the window" branch needed here.
+ * The four canvas fractions stay `CREATIVE_GEOMETRY.textEffect`'s own — read
+ * here, in the expansion, not re-read inside `resolve-tracks.ts` — the same
+ * leaf the web's preview reads, so render and preview cannot drift
+ * (`creative-geometry.ts`'s own doc comment).
  */
+import { scaleBasis, type CanvasSpec } from "./aspect-ratios.js";
+import { CREATIVE_GEOMETRY } from "./creative-geometry.js";
+import type { TextEffectKind } from "./creative-style.js";
 import type { MotionKind } from "./MotionKind.vo.js";
 import type { Track } from "./tracks.js";
 
@@ -141,4 +156,94 @@ export function copyMotionTracks(motion: MotionKind | undefined, height: number)
  */
 export function accentWipeFraction(motion: MotionKind | undefined, eased: number): number {
   return motion === "accent-wipe" ? eased : 1;
+}
+
+/**
+ * The four text effects (T6/K3) as `effect`-clock tracks on the text layer,
+ * resolved through `resolveTracks`'s `copy` bucket alongside
+ * {@link copyMotionTracks}'s own tracks — one `resolveTracks` call, one fold,
+ * in the SAME declaration order the old code composed in (`opacity =
+ * (riseAlpha * fx.alpha) * layerAlpha`, K-D9): `copyMotionTracks`'s tracks
+ * first, this module's second, so a headline-rise `opacity` term (when
+ * present) always multiplies BEFORE a `fade-in` term, matching the byte gate.
+ *
+ * Each kind touches exactly one `TRACK_PROPERTY` (`textEffectPose`'s own
+ * `TEXT_EFFECT_REST` spread — every kind changed exactly one field), with two
+ * stops: the entrance's start (`t = 0`) and its end (`t = entranceFraction`).
+ * `resolveTracks`'s `sampleStops` returns a boundary stop's own value with no
+ * arithmetic at all, so both ends are bit-identical to the old formula
+ * evaluated at `local = 0` and `local = entranceFraction` — the same "exact at
+ * the stops" property K2 proved for ken-burns/headline-rise. Holding the last
+ * stop's value past `t = entranceFraction` (`sampleStops`'s own contract) is
+ * exactly `textEffectPose`'s settled pose — no separate branch needed here.
+ *
+ * `fade-in`'s `opacity` stops (`0 → 1`) fold to exactly
+ * `easeOutCubic(local / entranceFraction)` with no reassociation at all — `0 +
+ * (1 - 0) * ease(progress)` is exact in IEEE-754, and `progress` here IS
+ * `local / entranceFraction` (the same division the old `settled` computed,
+ * `clamp01` a no-op in range) — bit-identical everywhere, not just the stops.
+ * `rise-in`'s `dy` and `slide-in`'s `dx` stops (`C → 0`) reassociate the old
+ * `(1 - eased) * C` into `C + (0 - C) * eased`, within a double's last bit at
+ * an interior `t` — the same finding K2 recorded for `headline-rise`'s `dy`.
+ * `scale-in`'s `scale` stops (`1 - scaleAmplitude → 1`) reassociate the old
+ * `1 - (1 - eased) * A` the same way. Every reassociation is proven not to
+ * move a rendered pixel by the compositor's goldens (48 motion cells, the mp4
+ * byte golden, the HL3 raster suite), the real proof for a byte-identity
+ * gate — two mathematically-identical, differently-associated floating-point
+ * expressions, not a similarity judgement.
+ *
+ * An undefined effect returns no track, folding to the identity pose —
+ * exactly `textEffectPose`'s own `kind === undefined` early return.
+ */
+export function textEffectTracks(
+  effect: TextEffectKind | undefined,
+  spec: CanvasSpec,
+  width: number,
+  height: number,
+): readonly Track[] {
+  if (effect === undefined) return [];
+  const { entranceFraction, riseOffsetFraction, slideOffsetFraction, scaleAmplitude } =
+    CREATIVE_GEOMETRY.textEffect;
+  switch (effect) {
+    case "fade-in":
+      return [
+        {
+          property: "opacity",
+          stops: [
+            { t: 0, value: 0, clock: "effect" },
+            { t: entranceFraction, value: 1, clock: "effect" },
+          ],
+        },
+      ];
+    case "rise-in":
+      return [
+        {
+          property: "dy",
+          stops: [
+            { t: 0, value: riseOffsetFraction * height, clock: "effect" },
+            { t: entranceFraction, value: 0, clock: "effect" },
+          ],
+        },
+      ];
+    case "slide-in":
+      return [
+        {
+          property: "dx",
+          stops: [
+            { t: 0, value: slideOffsetFraction * scaleBasis(spec, width, height), clock: "effect" },
+            { t: entranceFraction, value: 0, clock: "effect" },
+          ],
+        },
+      ];
+    case "scale-in":
+      return [
+        {
+          property: "scale",
+          stops: [
+            { t: 0, value: 1 - scaleAmplitude, clock: "effect" },
+            { t: entranceFraction, value: 1, clock: "effect" },
+          ],
+        },
+      ];
+  }
 }

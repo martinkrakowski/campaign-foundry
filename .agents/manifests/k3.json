@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "lane": "K3",
+  "mutations": [
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/motion-tracks.ts",
+      "before": "    case \"fade-in\":",
+      "after": "    case \"rise-in\":",
+      "because": "K3's per-effect equivalence proof: renaming fade-in's own case label to rise-in's leaves the switch with two \"rise-in\" labels (the first, unreachable-for-fade-in one now returning fade-in's opacity track) and none for \"fade-in\" at all, so textEffectTracks(\"fade-in\", ...) falls through with no matching case and returns undefined instead of a Track[]. Caught by motion-tracks.test.ts's per-effect equivalence assertions for both fade-in (opacity now stuck at the identity 1, computed independently from the old easeOutCubic(clamp01(local / entranceFraction)) formula) and rise-in (dy now stuck at 0, since it receives fade-in's opacity-track body instead of its own dy-track body). Also caught, empirically, by the compositor's own drawn-output suites (NodeCanvasCompositor.text-effect.test.ts, NodeCanvasCompositor.motion-tracks.test.ts's K3 describe block): both throw a TypeError, because drawStaticText/drawSequencedCopy spread textEffectTracks(...)'s return value directly and undefined is not iterable. No golden moves: verified empirically that NodeCanvasCompositor.motion-goldens.test.ts (48 cells), CanvasFfmpegVideoCompositor.byte-golden.test.ts (the mp4 byte golden) and NodeCanvasCompositor.layer-order.test.ts (the HL3 raster suite) all stay green under this mutation — none of the three sets prepared.textEffect at all, so the mutated branch is never reached by the byte-identity gate itself. Worth stating precisely because it did NOT have to be this way (K2's own mutations found a case the goldens DID catch just as hard as the domain test); here the domain test and the drawn-output tests are the only proof, not the byte-identity goldens.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/motion-tracks.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/motion-tracks.ts",
+      "before": "            { t: 0, value: 1 - scaleAmplitude, clock: \"effect\" },\n            { t: entranceFraction, value: 1, clock: \"effect\" },",
+      "after": "            { t: 0, value: 1 - scaleAmplitude, clock: \"effect\" },",
+      "because": "Mutation (b) from the K3 brief: dropping scale-in's entrance-window stop leaves a single-stop track, which resolveTracks's sampleStops holds at that one stop's value for every t >= 0 -- the effect never settles, staying scaled down at 1 - scaleAmplitude (0.88) forever instead of easing back to 1 by t = entranceFraction. Caught by motion-tracks.test.ts's per-effect equivalence assertions at t = entranceFraction and t = 1 (both now 0.88 instead of 1) and explicitly by the dedicated settled-pose assertions (\"scale-in at local=... has settled to scale = 1\"), which is exactly the property this mutation breaks. Also caught, empirically, by NodeCanvasCompositor.text-effect.test.ts's rest-pose byte-identity suite (the restT(ken-burns-out) poster's hash moves, and the mid-entrance scale assertion observes 0.88 where 0.985 -- easeOutCubic's mid-window value -- was expected) -- the entrance never completing is visible on the drawn frame, not just the resolved number. No golden moves: verified empirically that NodeCanvasCompositor.motion-goldens.test.ts (48 cells), CanvasFfmpegVideoCompositor.byte-golden.test.ts (the mp4 byte golden) and NodeCanvasCompositor.layer-order.test.ts (the HL3 raster suite) all stay green under this mutation too, for the same reason as mutation (a): none of the three ever sets prepared.textEffect, so the byte-identity gate itself never reaches the mutated branch. Worth stating for the same reason as (a) -- the domain test and the drawn-output suites are the ones doing the catching here, not the byte-identity goldens.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/motion-tracks.test.ts"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
