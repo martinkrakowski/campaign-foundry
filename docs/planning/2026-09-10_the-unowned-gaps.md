@@ -1384,3 +1384,23 @@ the `beforeAll`'s one-time typed-path cost (~600ms locally) sits comfortably ins
 mutations were re-verified against the restructured test (`yarn mutate:verify`) and still reproduce
 unchanged — the mutations target `fillValidDraft`/`setField`, not the test's internal shape, so moving
 where the typed reference is built did not change what any of them pin.
+
+**A `beforeAll` loose in the parent describe has its own blast radius, caught by model review (Qodo)
+before it shipped.** A `beforeAll` attached to "BriefPage — capabilities and motion" fails or skips
+*every* test in that describe if it throws or exceeds `hookTimeout` — a broken equivalence fixture
+would have silently taken out the unrelated capability tests around it, exactly the kind of coupling
+that makes a red suite hard to read correctly. Separately, `view.unmount()`, `vi.restoreAllMocks()`,
+and `localStorage.clear()` all ran only on the hook's success path; a mid-hook failure had nothing
+(there is no `afterEach` for a `beforeAll`) to unmount a stray editor or restore a live `fetch` spy
+before the next test ran. Fixed by moving the `beforeAll` and its test into their own nested
+`describe("fillValidDraft equivalence (X34)")`, and wrapping both `observeFillValidDraft`'s render and
+the `beforeAll`'s reference build in `try`/`finally` so cleanup runs regardless of where inside either
+one a failure lands. Proved, not merely asserted: temporarily forced `typeFillValidDraftByHand` to
+throw and ran the full file — exactly one test (this lane's own) showed as skipped, all 181 others
+passed, including the four tests X30/X32/X34 exist to rescue and every test that runs immediately
+after the failing describe in file order (the first place a leaked spy or a stray mounted editor would
+have shown up). Restored afterward; the mutation manifest and the rest of the suite were re-verified
+clean. No mutation is recorded for the isolation fix itself: `.agents/manifests/x34.json`'s `note`
+states plainly why — this tool checks one command's exit code per mutation, and "a sibling test would
+have been skipped" is a fact about how many tests a run affects, not something a single command's exit
+code (caught vs. survived) can express.

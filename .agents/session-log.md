@@ -5547,3 +5547,19 @@ per test. Measured: the test's own body ~247ms (three-run median), in line with 
 even at the ≈2.3× loaded-runner multiplier. `yarn mutate:verify .agents/manifests/x34.json` re-run
 against the restructured test — all 3 mutations still reproduce unchanged. §36 (X34) of
 docs/planning/2026-09-10_the-unowned-gaps.md updated with the CI outcome and the treatment applied.
+
+X34 isolation fix (model review, #441): Qodo caught that the `beforeAll` sat loose in the parent
+"BriefPage — capabilities and motion" describe — a reference-build failure there would fail/skip every
+sibling test in that describe, and `view.unmount()`/`vi.restoreAllMocks()`/`localStorage.clear()` ran
+only on the success path (no `afterEach` covers a `beforeAll`), so a mid-hook throw could leave a
+mounted editor and a live `fetch` spy for later tests. Fixed: moved the `beforeAll` and its test into
+their own nested `describe("fillValidDraft equivalence (X34)")`, and wrapped both
+`observeFillValidDraft`'s render and the `beforeAll`'s reference build in `try`/`finally`. Proved, not
+asserted: temporarily made `typeFillValidDraftByHand` throw and ran the full file — exactly one test
+(this lane's own) skipped, all 181 others passed including the four X30/X32/X34-rescued tests and every
+test running immediately after the failing describe (the first place a leak would show). Restored;
+`yarn mutate:verify .agents/manifests/x34.json` re-run clean (3/3 reproduced). No mutation recorded for
+the isolation fix itself — the manifest's `note` states why: this tool checks one command's exit code
+per mutation, and "a sibling test would have been skipped" is a fact about how many tests a run
+affects, not something a single exit code can express. §36 (X34) of
+docs/planning/2026-09-10_the-unowned-gaps.md updated with this fix.
