@@ -1,9 +1,15 @@
 import { describe, test, expect } from "vitest";
+import {
+  FONT_FAMILY_VALUES,
+  FONT_WEIGHT_VALUES,
+} from "../creative-style.js";
 import type { LayerKind } from "../layer-kinds.js";
 import {
   HTML_ELEMENT_KINDS,
+  htmlElementFont,
   layerElementsProblem,
   type Frame,
+  type HtmlElement,
 } from "../html-element.js";
 
 /** The valid frame fixture every accept case starts from. */
@@ -108,11 +114,13 @@ describe("layerElementsProblem (HL1)", () => {
       value: "buy",
     });
     expect(
-      layerElementsProblem("html", [{ kind: "text", text: "x", style: {}, frame }]),
+      layerElementsProblem("html", [
+        { kind: "text", text: "x", color: "red", frame },
+      ]),
     ).toEqual({
-      path: "[0].style",
-      must: 'be one of "kind", "text", "frame" for element kind "text"',
-      value: {},
+      path: "[0].color",
+      must: 'be one of "kind", "text", "style", "frame" for element kind "text"',
+      value: "red",
     });
   });
 
@@ -210,5 +218,118 @@ describe("layerElementsProblem (HL1)", () => {
       must: "be a string",
       value: 5,
     });
+  });
+});
+
+describe("element style overrides (HL5e, HL-D4, HL-D8)", () => {
+  test("accepts a weight and a family override on the kinds that carry copy", () => {
+    for (const kind of ["text", "button"] as const) {
+      expect(
+        layerElementsProblem("html", [
+          { kind, text: "x", frame, style: { fontWeight: 400 } },
+        ]),
+      ).toBeUndefined();
+      expect(
+        layerElementsProblem("html", [
+          { kind, text: "x", frame, style: { fontFamily: "Lora" } },
+        ]),
+      ).toBeUndefined();
+      expect(
+        layerElementsProblem("html", [
+          { kind, text: "x", frame, style: { fontWeight: 700, fontFamily: "Inter" } },
+        ]),
+      ).toBeUndefined();
+    }
+  });
+
+  // `style: {}` is ACCEPTED, deliberately (mirrors the brief-level precedent
+  // `load-brief` pins: `style: {}` parses): every field of the block is
+  // optional, so an empty block asserts no override — the same meaning the
+  // absent key carries, resolved identically by `htmlElementFont`. Refusing it
+  // would make an element's style block stricter than the brief's own, with
+  // no rendering consequence to show for it. The editor still never WRITES it
+  // (the reducer drops an all-absent style, X16's canonical form).
+  test("accepts an empty style block — every field is optional, as at the brief level", () => {
+    expect(
+      layerElementsProblem("html", [{ kind: "text", text: "x", frame, style: {} }]),
+    ).toBeUndefined();
+  });
+
+  test("refuses style on an image — the field table, not a branch", () => {
+    expect(
+      layerElementsProblem("html", [{ kind: "image", frame, style: { fontWeight: 700 } }]),
+    ).toEqual({
+      path: "[0].style",
+      must: 'be one of "kind", "frame" for element kind "image"',
+      value: { fontWeight: 700 },
+    });
+  });
+
+  test("refuses a style that is not an object", () => {
+    for (const style of ["bold", 700, null, [], true]) {
+      expect(
+        layerElementsProblem("html", [{ kind: "text", text: "x", frame, style }]),
+      ).toEqual({ path: "[0].style", must: "be an object", value: style });
+    }
+  });
+
+  test("refuses a key the override shape does not carry", () => {
+    expect(
+      layerElementsProblem("html", [
+        { kind: "text", text: "x", frame, style: { color: "#fff" } },
+      ]),
+    ).toEqual({
+      path: "[0].style.color",
+      must: 'be one of "fontWeight", "fontFamily"',
+      value: "#fff",
+    });
+  });
+
+  test("refuses a weight outside the vocabulary, naming the path", () => {
+    for (const fontWeight of [500, "700", null, 400.5]) {
+      expect(
+        layerElementsProblem("html", [
+          { kind: "button", text: "x", frame, style: { fontWeight } },
+        ]),
+      ).toEqual({
+        path: "[0].style.fontWeight",
+        must: `be one of ${FONT_WEIGHT_VALUES.join(", ")}`,
+        value: fontWeight,
+      });
+    }
+  });
+
+  test("refuses a family outside the vocabulary, naming the path", () => {
+    for (const fontFamily of ["Comic Sans", 400, null]) {
+      expect(
+        layerElementsProblem("html", [
+          { kind: "text", text: "x", frame, style: { fontFamily } },
+        ]),
+      ).toEqual({
+        path: "[0].style.fontFamily",
+        must: `be one of ${FONT_FAMILY_VALUES.map((v) => `"${v}"`).join(", ")}`,
+        value: fontFamily,
+      });
+    }
+  });
+});
+
+describe("htmlElementFont (HL5e — the one resolution both renderers share)", () => {
+  const briefFont = { fontWeight: "bold", fontFamily: "Inter" };
+
+  test("an element with no style — and one with an empty one — takes the brief's font verbatim", () => {
+    const plain: HtmlElement = { kind: "text", text: "x", frame };
+    const empty: HtmlElement = { kind: "text", text: "x", frame, style: {} };
+    expect(htmlElementFont(plain, briefFont)).toEqual(briefFont);
+    expect(htmlElementFont(empty, briefFont)).toEqual(briefFont);
+  });
+
+  test("each present field replaces only itself", () => {
+    const weight: HtmlElement = { kind: "text", text: "x", frame, style: { fontWeight: 400 } };
+    expect(htmlElementFont(weight, briefFont)).toEqual({ fontWeight: "400", fontFamily: "Inter" });
+    const family: HtmlElement = { kind: "button", text: "x", frame, style: { fontFamily: "Lora" } };
+    expect(htmlElementFont(family, briefFont)).toEqual({ fontWeight: "bold", fontFamily: "Lora" });
+    const both: HtmlElement = { kind: "text", text: "x", frame, style: { fontWeight: 700, fontFamily: "Lora" } };
+    expect(htmlElementFont(both, briefFont)).toEqual({ fontWeight: "700", fontFamily: "Lora" });
   });
 });

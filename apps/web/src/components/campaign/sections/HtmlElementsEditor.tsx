@@ -1,6 +1,12 @@
 "use client";
 
 import { useId, useState, type Dispatch } from "react";
+import {
+  FONT_FAMILY_VALUES,
+  FONT_WEIGHT_VALUES,
+  type FontFamilyKind,
+  type FontWeightKind,
+} from "@campaignfoundry/CampaignOrchestration/creative-style";
 import { Button, IconButton, Input } from "@/components/ui";
 import type { HtmlWeightReading } from "@/components/campaign/derive";
 import type {
@@ -13,7 +19,10 @@ import {
   ANCHOR_OPTIONS,
   HTML_ELEMENT_KINDS,
 } from "@/components/campaign/editor-state";
-import { anchorDisplayName } from "@/components/campaign/display-names";
+import {
+  anchorDisplayName,
+  weightDisplayName,
+} from "@/components/campaign/display-names";
 import * as messages from "@/components/campaign/messages";
 import { Field } from "./IdentitySection";
 
@@ -116,6 +125,59 @@ function FrameNumberInput({
         }}
         onBlur={() => setDraft(null)}
       />
+    </Field>
+  );
+}
+
+/** The one style patch a select can write — never a stringly-typed key. */
+type ElementStyleField = "fontWeight" | "fontFamily";
+
+function stylePatch(
+  field: ElementStyleField,
+  value: string,
+): Partial<{ fontWeight: FontWeightKind; fontFamily: FontFamilyKind }> {
+  // The "brief default" face is the empty value: it writes the ABSENT key
+  // (HL5e) — the reducer drops the field, and drops the whole block when the
+  // last one goes, so the round trip returns the element to its loaded shape.
+  if (value === "") return { [field]: undefined };
+  if (field === "fontWeight")
+    return { fontWeight: Number(value) as FontWeightKind };
+  return { fontFamily: value as FontFamilyKind };
+}
+
+/**
+ * One style select (HL5e): the brief's own resolved value stands behind the
+ * "brief default" face, and the vocabulary faces come from the domain's lists
+ * — never restated here, the way every other option list in this panel is.
+ */
+function StyleSelect({
+  label,
+  value,
+  options,
+  onCommit,
+}: {
+  label: string;
+  value: string;
+  options: readonly { value: string; label: string }[];
+  onCommit: (value: string) => void;
+}) {
+  return (
+    <Field label={label}>
+      <select
+        value={value}
+        // The value the DOM can hand back is one of the options rendered
+        // below, and the reducer checks it against the domain's own
+        // vocabularies before it writes.
+        onChange={(e) => onCommit(e.target.value)}
+        className="rounded border border-border-control bg-surface px-3 py-2 text-sm text-text-emphasis"
+      >
+        <option value="">{messages.htmlElementStyleDefault}</option>
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
     </Field>
   );
 }
@@ -224,6 +286,50 @@ export function HtmlElementsEditor({
                       ))}
                     </select>
                   </Field>
+                  {/* The font overrides (HL5e), beside the copy they restate:
+                      the `text` and `button` rows only — the domain's field
+                      table refuses `style` on an `image`, so the row offers no
+                      control for it (DESIGN.md §1.5). */}
+                  {element.kind === "image" ? null : (
+                    <>
+                      <StyleSelect
+                        label={messages.htmlElementWeightLabel(position)}
+                        value={
+                          element.style?.fontWeight !== undefined
+                            ? String(element.style.fontWeight)
+                            : ""
+                        }
+                        options={FONT_WEIGHT_VALUES.map((weight) => ({
+                          value: String(weight),
+                          label: weightDisplayName(weight),
+                        }))}
+                        onCommit={(value) =>
+                          dispatch({
+                            type: "setHtmlElementStyle",
+                            layerId,
+                            index,
+                            patch: stylePatch("fontWeight", value),
+                          })
+                        }
+                      />
+                      <StyleSelect
+                        label={messages.htmlElementFamilyLabel(position)}
+                        value={element.style?.fontFamily ?? ""}
+                        options={FONT_FAMILY_VALUES.map((family) => ({
+                          value: family,
+                          label: family,
+                        }))}
+                        onCommit={(value) =>
+                          dispatch({
+                            type: "setHtmlElementStyle",
+                            layerId,
+                            index,
+                            patch: stylePatch("fontFamily", value),
+                          })
+                        }
+                      />
+                    </>
+                  )}
                 </div>
                 <div className="flex items-center gap-1">
                   {index > 0 ? (

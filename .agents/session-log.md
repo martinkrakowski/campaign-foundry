@@ -5271,3 +5271,19 @@ the API boundary-refusal call site). Goldens untouched.
 **Gate:** full gate rerun in the foreground — 274 test files, 5403 passed / 4 skipped, 100% coverage on all four counters, exit 0. `plan:verify`: 9 premises hold. `arch:inventory`: clean. `sync:dry`: Total ops 0.
 
 **Left open:** K2 is dispatchable next, behind this PR. No compositor file was touched.
+
+## 2026-09-15 — HL5e (AI session)
+
+Shipped per-element `style` overrides (`fontWeight`/`fontFamily`, text/button only) across the element
+vocabulary, both renderers (one `htmlElementFont` resolution), YAML order, and the HL5a
+element editor; undoable, round-trip byte-clean. Gate green (100% x4), plan:verify clean,
+2/2 mutations caught (`.agents/manifests/hl5e.json`). HL5e in
+docs/planning/2026-09-10_the-html-layer.md (§2 shipped, §5 premise retired, typeface
+residual stated). PR #432.
+
+- 2026-09-15 HL5e fix round (Qodo x2): htmlWeightKey now weighs each element's
+  style (absent and empty blocks key identically), and validateBrief applies
+  layerElementsProblem to every template layer's elements — the styleProblem
+  defence-in-depth, extended. §31 (X28) and §32 (X29) of
+  docs/planning/2026-09-10_the-unowned-gaps.md ship in this PR;
+  4/4 mutations caught (.agents/manifests/hl5e.json).

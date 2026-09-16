@@ -1,0 +1,60 @@
+{
+  "version": 1,
+  "lane": "HL5e",
+  "mutations": [
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/markup-assembler.ts",
+      "before": "        const font = htmlElementFont(element, resolvedStyle);\n        const textStyle =",
+      "after": "        const font = resolvedStyle;\n        const textStyle =",
+      "because": "The whole lane is the element's override reaching BOTH renderers identically (HL-D5, HL-D8). Reverting the text case to the brief-level font reopens exactly the gap HL5f closed for tone: an element asking for 400/Lora would ship markup that lies about its own raster fallback — the canvas would draw the override and the ad would not — and nothing else in the pipeline compares the two, because the markup is never rasterised (D122).",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "packages/CreativeGeneration/src/infrastructure/adapters/__tests__/NodeCanvasCompositor.html-fidelity.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/html-element.ts",
+      "before": "  image: { allowed: [\"kind\", \"frame\"], required: [] },",
+      "after": "  image: { allowed: [\"kind\", \"style\", \"frame\"], required: [] },",
+      "because": "HL-D8 admits the override to exactly the two kinds whose rendering reads it, and the field table — not a branch — is what refuses it elsewhere (the HL1 mechanism). Add style to image's allowed row and an image element starts carrying a font no renderer reads: a field accepted at both boundaries and honoured by neither, the D134 unread-field shape this table exists to prevent.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/html-element.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/derive.ts",
+      "before": "      el.style?.fontWeight ?? \"\",\n      el.style?.fontFamily ?? \"\",\n      el.frame,",
+      "after": "      el.frame,",
+      "because": "The HL5e element style reaches the assembled bytes through htmlElementFont, so the memo key must weigh it (Qodo finding, fix round). Drop the two style slots and a style-only edit is a cache hit on the previous reading: the meter and the over-budget warning report bytes the generation path will never produce, and the whole lane's promise — the figure the editor shows is the unit's real weight — silently breaks behind the single-entry cache.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "apps/web/src/components/campaign/__tests__/derive.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/application/use-cases/GenerateCampaignUseCase.use-case.ts",
+      "before": "    for (const [i, layer] of brief.template.layers.entries()) {\n      const elementsProblem = layerElementsProblem(layer.kind, layer.elements);\n      if (elementsProblem !== undefined) {\n        return err(\n          new Error(\n            `Campaign brief field \"template.layers[${i}].elements${elementsProblem.path}\" must ${elementsProblem.must}; got ${JSON.stringify(elementsProblem.value)}.`,\n          ),\n        );\n      }\n    }",
+      "after": "    // (mutant: element styles unchecked — the use case trusts its callers)",
+      "because": "assembleHtml interpolates the element's resolved font into a quoted style attribute with no escaping; the vocabulary allowlist is the only defence, and the use case is the declared defence-in-depth for programmatic callers that bypass parsing (the T5 styleProblem precedent — Qodo finding, fix round). Remove the loop and a forged style.fontFamily carrying \\\"><script reaches the shipped markup from a caller no boundary saw.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "packages/CampaignOrchestration/src/application/use-cases/__tests__/GenerateCampaignUseCase.use-case.test.ts"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

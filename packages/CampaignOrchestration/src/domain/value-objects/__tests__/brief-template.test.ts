@@ -569,6 +569,21 @@ describe("isBriefTemplate layer elements (HL1)", () => {
     ).toBe(true);
   });
 
+  // HL5e: the guard reads the SAME `layerElementsProblem` the API does, so a
+  // stored draft's element style faces the identical contract — the draft that
+  // survives the guard is one both renderers can honour.
+  test("accepts an element style override and refuses a malformed one (HL5e)", () => {
+    expect(
+      withElements([
+        { kind: "text", text: "x", frame, style: { fontWeight: 400, fontFamily: "Lora" } },
+        { kind: "button", text: "y", frame, style: {} },
+      ]),
+    ).toBe(true);
+    expect(withElements([{ kind: "text", text: "x", frame, style: { fontWeight: 500 } }])).toBe(false);
+    expect(withElements([{ kind: "text", text: "x", frame, style: { color: "#fff" } }])).toBe(false);
+    expect(withElements([{ kind: "image", frame, style: { fontWeight: 700 } }])).toBe(false);
+  });
+
   test("refuses elements on a layer that is not html", () => {
     expect(
       isBriefTemplate({

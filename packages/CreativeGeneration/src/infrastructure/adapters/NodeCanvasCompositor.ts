@@ -31,6 +31,7 @@ import {
   htmlTextGeometry,
   htmlButtonFontSize,
   htmlTextFirstLineOffset,
+  htmlElementFont,
 } from "@campaignfoundry/CampaignOrchestration";
 import { CREATIVE_GEOMETRY } from "@campaignfoundry/CampaignOrchestration/creative-geometry";
 import { hexToRgb, wrapText } from "./canvas-util.js";
@@ -1253,7 +1254,11 @@ function drawHtml(c: LayerDrawContext): void {
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
         const fontSize = htmlButtonFontSize(boxH, scaleBasis(prepared.canvas, width, height));
-        ctx.font = `${prepared.fontWeight} ${fontSize}px ${prepared.fontFamily}, sans-serif`;
+        // HL5e: the element's own font, resolved by the one function
+        // `assembleHtml` also calls — the button's override if it names one,
+        // the brief's resolved weight/family otherwise.
+        const font = htmlElementFont(element, prepared);
+        ctx.font = `${font.fontWeight} ${fontSize}px ${font.fontFamily}, sans-serif`;
         ctx.fillText(element.text!, boxX + boxW / 2, boxY + boxH / 2);
         ctx.restore();
         break;
@@ -1276,15 +1281,20 @@ function drawHtml(c: LayerDrawContext): void {
           letterSpacing: prepared.style.letterSpacing,
         });
         const { fontSize, lineHeight, letterSpacing } = geometry;
-        ctx.font = `${prepared.fontWeight} ${fontSize}px ${prepared.fontFamily}, sans-serif`;
+        // HL5e: the element's own font, resolved by the one function
+        // `assembleHtml` also calls — stated BEFORE the wrap below, which
+        // measures with it, exactly as the browser lays out wrapped markup at
+        // the same font the markup's inline style declares.
+        const font = htmlElementFont(element, prepared);
+        ctx.font = `${font.fontWeight} ${fontSize}px ${font.fontFamily}, sans-serif`;
         ctx.letterSpacing = `${letterSpacing}px`;
 
         const lines = wrapText(ctx, element.text!, boxW);
-        // HL5f: the per-anchor baseline offset comes from the same function
-        // `assembleHtml` derives its `padding-top` from — see
-        // `htmlTextFirstLineOffset`. The canvas passes the REAL wrapped line
-        // count; the markup, with no browser to wrap in, always passes 1 (the
-        // stated HL5f residual for wrapped `middle`/`bottom` text).
+        // HL5f: the per-anchor baseline offset comes from the one function
+        // `htmlTextFirstLineOffset` — see its comment: the MARKUP does not
+        // consume that offset (it positions with CSS flex `justify-content`,
+        // which the browser resolves against the real line count); this
+        // canvas pass uses the REAL post-wrap line count.
         const startY = boxY + htmlTextFirstLineOffset(element.frame.anchor, boxH, fontSize, lineHeight, lines.length);
 
         let lineX: number;

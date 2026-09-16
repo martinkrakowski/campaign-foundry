@@ -35,8 +35,15 @@ export const BRIEF_KEY_ORDER = [
  */
 const LAYER_KEY_ORDER = ["id", "kind", "enabled", "props", "elements", "tracks"] as const;
 
-/** One html element's canonical key order (HL1): kind, its copy, then its frame. */
-const ELEMENT_KEY_ORDER = ["kind", "text", "frame"] as const;
+/**
+ * One html element's canonical key order (HL1, HL5e): kind, its copy, the
+ * style override of that copy (what it says about the copy sits beside the
+ * copy), then its frame.
+ */
+const ELEMENT_KEY_ORDER = ["kind", "text", "style", "frame"] as const;
+
+/** An element style block's canonical key order (HL5e), matching the VO's. */
+const ELEMENT_STYLE_KEY_ORDER = ["fontWeight", "fontFamily"] as const;
 
 /** A frame's canonical key order (D130): the fractions, then the anchor. */
 const FRAME_KEY_ORDER = ["x", "y", "w", "h", "anchor"] as const;
@@ -76,10 +83,13 @@ function orderedKeys(source: Record<string, unknown>, order: readonly string[]):
   return out;
 }
 
-/** Reorder one html element's keys (kind, text, frame) and, when it carries a frame, the frame's keys. */
+/** Reorder one html element's keys (kind, text, style, frame) and, when it carries a frame or a style block, those keys in their own order. */
 function orderedElement(element: unknown): unknown {
   if (!isPlainRecord(element)) return element;
   const ordered = orderedKeys(element, ELEMENT_KEY_ORDER);
+  if (isPlainRecord(ordered.style)) {
+    ordered.style = orderedKeys(ordered.style, ELEMENT_STYLE_KEY_ORDER);
+  }
   if (isPlainRecord(ordered.frame)) {
     ordered.frame = orderedKeys(ordered.frame, FRAME_KEY_ORDER);
   }
@@ -139,8 +149,9 @@ function orderedTemplate(template: unknown): unknown {
  * Keys whose value is `undefined` are omitted, matching the previous js-yaml
  * dump byte for byte on the briefs this project writes. A template's layers
  * dump with the layer's own canonical order — `id`, `kind`, `enabled`,
- * `props` and `elements`, with the props keys in the union's order (L3b,
- * D134) and each element's keys and frame keys in order (HL1) — so a save
+   * `props` and `elements`, with the props keys in the union's order (L3b,
+   * D134) and each element's keys, style keys and frame keys in order (HL1,
+   * HL5e) — so a save
  * serialises a hand-written layer deterministically too. `tracks`, when
  * present, sits last (K1) with each track's own keys (`property`, `stops`)
  * and each stop's (`t`, `value`, `easing`, `clock`) in their own order.

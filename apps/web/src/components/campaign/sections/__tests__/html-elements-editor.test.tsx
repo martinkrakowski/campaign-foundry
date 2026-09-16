@@ -741,3 +741,111 @@ describe("HtmlWeightMeter — the live weight of the html unit (HL5c, HL-D6)", (
     expect(offenders).toEqual([]);
   });
 });
+
+/* ── HL5e — per-element style selects ─────────────────────────────────────── */
+
+describe("HtmlElementsEditor — style overrides (HL5e)", () => {
+  /** The element row for position `n`, scoped like every other row query:
+   *  the list's order IS the elements' order, the panel's own contract. */
+  const row = (n: number) => within(screen.getAllByRole("listitem")[n - 1]!);
+
+  function StyleHarness({ initial }: { initial: EditorState }) {
+    const [state, dispatch] = useReducer(editorReducer, initial);
+    const elements =
+      state.template.layers.find((layer) => layer.id === "html")?.elements ?? [];
+    return (
+      <>
+        <HtmlElementsEditor layerId="html" elements={elements} dispatch={dispatch} />
+        <span data-testid="stored-style">
+          {JSON.stringify(elements[0]?.style ?? null)}
+        </span>
+      </>
+    );
+  }
+
+  test("text and button rows carry a weight and a family select; an image row carries neither", () => {
+    render(<StyleHarness initial={three()} />);
+    for (const position of [1, 2]) {
+      const r = row(position);
+      r.getByRole("combobox", { name: messages.htmlElementWeightLabel(position) });
+      r.getByRole("combobox", { name: messages.htmlElementFamilyLabel(position) });
+    }
+    const imageRow = row(3);
+    expect(
+      imageRow.queryByRole("combobox", {
+        name: messages.htmlElementWeightLabel(3),
+      }),
+    ).toBeNull();
+    expect(
+      imageRow.queryByRole("combobox", {
+        name: messages.htmlElementFamilyLabel(3),
+      }),
+    ).toBeNull();
+  });
+
+  test("the selects read 'brief default' while the element carries no override", () => {
+    render(<StyleHarness initial={three()} />);
+    const r = row(1);
+    const weight = r.getByRole("combobox", {
+      name: messages.htmlElementWeightLabel(1),
+    }) as HTMLSelectElement;
+    const family = r.getByRole("combobox", {
+      name: messages.htmlElementFamilyLabel(1),
+    }) as HTMLSelectElement;
+    expect(weight.value).toBe("");
+    expect(family.value).toBe("");
+    expect(
+      within(weight).getByRole("option", { name: messages.htmlElementStyleDefault }),
+    ).toBeTruthy();
+    expect(within(family).getByRole("option", { name: "Lora" })).toBeTruthy();
+  });
+
+  test("choosing an override dispatches it and the draft carries the key", async () => {
+    const user = userEvent.setup();
+    render(<StyleHarness initial={three()} />);
+    const r = row(1);
+    await user.selectOptions(
+      r.getByRole("combobox", { name: messages.htmlElementWeightLabel(1) }),
+      "400",
+    );
+    expect(screen.getByTestId("stored-style").textContent).toBe(
+      JSON.stringify({ fontWeight: 400 }),
+    );
+    await user.selectOptions(
+      r.getByRole("combobox", { name: messages.htmlElementFamilyLabel(1) }),
+      "Lora",
+    );
+    expect(screen.getByTestId("stored-style").textContent).toBe(
+      JSON.stringify({ fontWeight: 400, fontFamily: "Lora" }),
+    );
+  });
+
+  test("choosing 'brief default' removes the field — and an all-absent style removes the key", async () => {
+    const user = userEvent.setup();
+    const styled: HtmlElement = {
+      kind: "text",
+      text: "Stay wild",
+      frame,
+      style: { fontWeight: 400, fontFamily: "Lora" },
+    };
+    render(<StyleHarness initial={withElements(styled)} />);
+    const r = row(1);
+    expect(
+      (
+        r.getByRole("combobox", { name: messages.htmlElementWeightLabel(1) }) as HTMLSelectElement
+      ).value,
+    ).toBe("400");
+    await user.selectOptions(
+      r.getByRole("combobox", { name: messages.htmlElementFamilyLabel(1) }),
+      "",
+    );
+    expect(screen.getByTestId("stored-style").textContent).toBe(
+      JSON.stringify({ fontWeight: 400 }),
+    );
+    await user.selectOptions(
+      r.getByRole("combobox", { name: messages.htmlElementWeightLabel(1) }),
+      "",
+    );
+    expect(screen.getByTestId("stored-style").textContent).toBe("null");
+  });
+});

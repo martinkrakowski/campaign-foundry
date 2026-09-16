@@ -26,6 +26,7 @@ import {
   type Frame,
   type HtmlElement,
   type HtmlElementKind,
+  type HtmlElementStyle,
 } from "@campaignfoundry/CampaignOrchestration/html-element";
 // The layer's shape, from the same module the canonical templates are declared
 // in: the toggle writes the field, so it writes that module's type.
@@ -67,6 +68,8 @@ import {
   styleDiverges,
   styleProblem,
   TEXT_EFFECT_VALUES,
+  type FontFamilyKind,
+  type FontWeightKind,
   type Style,
 } from "@campaignfoundry/CampaignOrchestration/creative-style";
 
@@ -84,7 +87,7 @@ export {
   MAX_WEIGHT,
   MIN_DWELL_SEC,
 };
-export type { Frame, HtmlElement, HtmlElementKind };
+export type { Frame, HtmlElement, HtmlElementKind, HtmlElementStyle };
 import { RATIO_VALUES } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import {
   DISPLAY_SIZE_VALUES,
@@ -507,6 +510,16 @@ export type EditorAction =
       layerId: string;
       index: number;
       patch: Partial<Frame>;
+    }
+  // The element's own font override (HL5e, HL-D8): a patch field set to
+  // `undefined` is the "brief default" choice — it REMOVES the key, so an
+  // element whose last override is cleared carries no `style` at all, the X16
+  // canonical form that keeps a set-then-clear round trip byte-identical.
+  | {
+      type: "setHtmlElementStyle";
+      layerId: string;
+      index: number;
+      patch: Partial<HtmlElementStyle>;
     }
   | { type: "addBeat"; text?: string }
   | { type: "removeBeat"; index: number }
@@ -1019,21 +1032,49 @@ function withHtmlElements(
 }
 
 /**
+ * The one canonical form an element's defaults take (X16, HL5e): a `style`
+ * block naming no override restates what the absent key already means — every
+ * field of an optional-override block is optional — so it is dropped the way
+ * `enabled: true` and `elements: []` are. Same object when there is nothing to
+ * drop.
+ */
+function canonicalElement(element: HtmlElement): HtmlElement {
+  if (
+    element.style === undefined ||
+    element.style.fontWeight !== undefined ||
+    element.style.fontFamily !== undefined
+  )
+    return element;
+  const next: Record<string, unknown> = { ...element };
+  delete next.style;
+  return next as unknown as HtmlElement;
+}
+
+/**
  * The one canonical form a template layer's defaults take (X16, D129, HL5a):
- * `enabled: true` restates what absence already means, and `elements: []` is
- * the same as no list. Mapping both to absent is what `withEnabled` /
- * `withElements` already write, so a hand-authored brief that spelled the
- * defaults out compares equal to the draft after an off→on (or add→remove)
- * round trip. Same object when nothing needs rewriting.
+ * `enabled: true` restates what absence already means, `elements: []` is
+ * the same as no list, and an element's empty `style` block is the same as no
+ * block. Mapping these to absent is what `withEnabled` / `withElements` /
+ * `setHtmlElementStyle` already write, so a hand-authored brief that spelled
+ * the defaults out compares equal to the draft after an off→on (or add→remove,
+ * or set→clear) round trip. Same object when nothing needs rewriting.
  */
 function canonicalLayer(layer: CreativeTemplateLayer): CreativeTemplateLayer {
   const dropEnabled = layer.enabled === true;
   const dropElements =
     Array.isArray(layer.elements) && layer.elements.length === 0;
-  if (!dropEnabled && !dropElements) return layer;
+  const canonicalElements = dropElements
+    ? undefined
+    : layer.elements?.map(canonicalElement);
+  const restyledElements =
+    canonicalElements !== undefined &&
+    layer.elements !== undefined &&
+    canonicalElements.some((element, index) => element !== layer.elements![index]);
+  if (!dropEnabled && !dropElements && !restyledElements) return layer;
   const next: Record<string, unknown> = { ...layer };
   if (dropEnabled) delete next.enabled;
   if (dropElements) delete next.elements;
+  else if (restyledElements) next.elements = canonicalElements;
   return next as unknown as CreativeTemplateLayer;
 }
 
@@ -1491,6 +1532,63 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
         edit.elements.map((existing, index) =>
           index === action.index ? { ...existing, frame } : existing,
         ),
+      );
+    }
+    case "setHtmlElementStyle": {
+      const edit = htmlElementEdit(state, action.layerId, action.index);
+      if (edit === undefined) return state;
+      const element = edit.elements[action.index]!;
+      // An `image` element carries no style — the domain's field table refuses
+      // it — so there is nothing to override and nothing to write.
+      if (element.kind === "image") return state;
+      const style: { fontWeight?: FontWeightKind; fontFamily?: FontFamilyKind } =
+        { ...element.style };
+      // A field the patch names is written or removed; a field it does not
+      // name keeps what the element had — the per-field composition of
+      // `setStyle`'s patch, the `setHtmlElementFrame` patch's shape.
+      if ("fontWeight" in action.patch) {
+        const value = action.patch.fontWeight;
+        if (value === undefined) delete style.fontWeight;
+        else {
+          // The reducer is the contract, the way `setBeatWeight`'s bounds are:
+          // a value outside the domain's own vocabulary refuses the whole
+          // dispatch, so a hand-restored draft cannot smuggle one in.
+          if (!(FONT_WEIGHT_VALUES as readonly number[]).includes(value))
+            return state;
+          style.fontWeight = value;
+        }
+      }
+      if ("fontFamily" in action.patch) {
+        const value = action.patch.fontFamily;
+        if (value === undefined) delete style.fontFamily;
+        else {
+          if (!(FONT_FAMILY_VALUES as readonly string[]).includes(value))
+            return state;
+          style.fontFamily = value;
+        }
+      }
+      const overridden = Object.keys(style).length > 0;
+      // Already the style asked for — the absent block included: no edit, so
+      // no history entry either, the `setHtmlElementFrame` rule.
+      if (
+        overridden === (element.style !== undefined) &&
+        element.style?.fontWeight === style.fontWeight &&
+        element.style?.fontFamily === style.fontFamily
+      )
+        return state;
+      return withHtmlElements(
+        state,
+        edit,
+        edit.elements.map((existing, index) => {
+          if (index !== action.index) return existing;
+          if (overridden) return { ...existing, style };
+          // The all-absent block IS the absent key (X16's rule, the same one
+          // `withElements` gives an empty list): set-then-clear leaves the
+          // element exactly as it loaded, so the round trip is byte-clean.
+          const next: Record<string, unknown> = { ...existing };
+          delete next.style;
+          return next as unknown as HtmlElement;
+        }),
       );
     }
     case "addBeat":

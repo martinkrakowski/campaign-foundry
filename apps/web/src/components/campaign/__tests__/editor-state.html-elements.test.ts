@@ -10,6 +10,7 @@ import {
 } from "@campaignfoundry/CampaignOrchestration/html-element";
 import type { BriefTemplate } from "@campaignfoundry/CampaignOrchestration/brief-template";
 import {
+  canonicalTemplate,
   editorReducer,
   initialEditorState,
   valuesEqual,
@@ -537,5 +538,165 @@ describe("the invariant (HL5a)", () => {
     }
     // The script ends where it began: an html layer with no elements at all.
     expect(valuesEqual(state.template, htmlState().template)).toBe(true);
+  });
+});
+
+describe("setHtmlElementStyle (HL5e)", () => {
+  test("writes an override onto a text and a button element, touching nothing else", () => {
+    const base = withThree();
+    const next = editorReducer(base, {
+      type: "setHtmlElementStyle",
+      layerId: "html",
+      index: 0,
+      patch: { fontWeight: 400 },
+    });
+    const elements = elementsOf(next);
+    expect(elements[0]!.style).toEqual({ fontWeight: 400 });
+    // The other elements are the SAME objects, not rewrites.
+    expect(elements[1]).toBe(elementsOf(base)[1]);
+    expect(elements[2]!.style).toBeUndefined();
+    expect(layerElementsProblem("html", elements)).toBeUndefined();
+    const button = reduce(withThree(), {
+      type: "setHtmlElementStyle",
+      layerId: "html",
+      index: 1,
+      patch: { fontFamily: "Lora" },
+    });
+    expect(elementsOf(button)[1]!.style).toEqual({ fontFamily: "Lora" });
+  });
+
+  test("an image element carries no style — the domain's field table refuses it", () => {
+    const base = withThree();
+    expect(
+      editorReducer(base, {
+        type: "setHtmlElementStyle",
+        layerId: "html",
+        index: 2,
+        patch: { fontWeight: 700 },
+      }),
+    ).toBe(base);
+  });
+
+  test("a value outside the vocabulary is a no-op — the reducer is the contract", () => {
+    const base = withThree();
+    for (const patch of [
+      { fontWeight: 500 },
+      { fontWeight: "700" },
+      { fontFamily: "Times" },
+      { fontWeight: 700, fontFamily: "Times" },
+    ]) {
+      expect(
+        editorReducer(base, {
+          type: "setHtmlElementStyle",
+          layerId: "html",
+          index: 0,
+          // Hand-restored drafts reach the reducer unvalidated, the way
+          // `setBeatWeight`'s bounds and `setStyle`'s styleProblem do.
+          patch: patch as never,
+        }),
+      ).toBe(base);
+    }
+  });
+
+  test("brief default removes the field, and an all-absent style removes the key", () => {
+    const styled = reduce(withThree(), {
+      type: "setHtmlElementStyle",
+      layerId: "html",
+      index: 0,
+      patch: { fontWeight: 400, fontFamily: "Lora" },
+    });
+    expect(elementsOf(styled)[0]!.style).toEqual({ fontWeight: 400, fontFamily: "Lora" });
+    const oneGone = editorReducer(styled, {
+      type: "setHtmlElementStyle",
+      layerId: "html",
+      index: 0,
+      patch: { fontFamily: undefined },
+    });
+    expect(elementsOf(oneGone)[0]!.style).toEqual({ fontWeight: 400 });
+    const allGone = editorReducer(oneGone, {
+      type: "setHtmlElementStyle",
+      layerId: "html",
+      index: 0,
+      patch: { fontWeight: undefined },
+    });
+    const element = elementsOf(allGone)[0]!;
+    // The absent key, not an empty block: X16's canonical form.
+    expect("style" in element).toBe(false);
+    // Set-then-unset is `valuesEqual` to the state before the set.
+    expect(valuesEqual(allGone.template, withThree().template)).toBe(true);
+  });
+
+  test("a patch the element already carries is a no-op — no new state, no history entry", () => {
+    const base = withThree();
+    const styled = editorReducer(base, {
+      type: "setHtmlElementStyle",
+      layerId: "html",
+      index: 0,
+      patch: { fontWeight: 400 },
+    });
+    expect(
+      editorReducer(styled, {
+        type: "setHtmlElementStyle",
+        layerId: "html",
+        index: 0,
+        patch: { fontWeight: 400 },
+      }),
+    ).toBe(styled);
+    // Clearing an already-absent field says nothing either.
+    expect(
+      editorReducer(base, {
+        type: "setHtmlElementStyle",
+        layerId: "html",
+        index: 0,
+        patch: { fontWeight: undefined },
+      }),
+    ).toBe(base);
+  });
+
+  test("an out-of-range index and a foreign layer are no-ops", () => {
+    const base = withThree();
+    const foreign = withThree();
+    expect(
+      editorReducer(base, {
+        type: "setHtmlElementStyle",
+        layerId: "html",
+        index: 9,
+        patch: { fontWeight: 700 },
+      }),
+    ).toBe(base);
+    expect(
+      editorReducer(foreign, {
+        type: "setHtmlElementStyle",
+        layerId: "image",
+        index: 0,
+        patch: { fontWeight: 700 },
+      }),
+    ).toBe(foreign);
+  });
+
+  test("canonicalTemplate drops an element's empty style block — it restates absence (X16)", () => {
+    const state = withThree();
+    const withEmptyStyle = {
+      ...state.template,
+      layers: state.template.layers.map((layer) =>
+        layer.id === "html"
+          ? {
+              ...layer,
+              elements: (layer.elements ?? []).map((element) =>
+                element.kind === "image" ? element : { ...element, style: {} },
+              ),
+            }
+          : layer,
+      ),
+    };
+    const canonical = canonicalTemplate(withEmptyStyle as unknown as BriefTemplate);
+    for (const element of canonical.layers.find((layer) => layer.id === "html")!
+      .elements ?? []) {
+      expect("style" in element).toBe(false);
+    }
+    // Already-canonical: the SAME object back.
+    expect(canonicalTemplate(canonical)).toBe(canonical);
+    // And the canonicalised draft compares equal to one the reducer wrote.
+    expect(valuesEqual(canonical, state.template)).toBe(true);
   });
 });
