@@ -3,6 +3,7 @@ import { err, ok } from "@campaignfoundry/shared";
 import type { Variant } from "../../../domain/entities/Variant.js";
 import type { VariationPlan } from "../../../domain/value-objects/VariationPlan.vo.js";
 import type {
+  AudioAssetPort,
   BackgroundSource,
   CompliancePort,
   CompositorPort,
@@ -33,6 +34,20 @@ export const fakeImageGenerator = (source: BackgroundSource = "procedural"): Ima
 export const fakeSceneAssets = (unreadable: readonly string[] = []): SceneAssetPort => ({
   resolveScene: vi.fn(async (path: string) => {
     if (unreadable.includes(path)) throw new Error(`fake scene resolver: "${path}" is unreadable`);
+    return new Uint8Array(Buffer.from(path, "utf8"));
+  }),
+});
+
+/**
+ * Audio resolver fake (VE3b2): resolves the given path to bytes derived from
+ * the path itself, so a test can assert the SAME resolved bytes (by value, or
+ * by identity of the array reference when the use case reuses one resolution)
+ * land on every motion request. `unreadable` names a path that rejects
+ * instead, the way an unsafe or missing music bed would.
+ */
+export const fakeAudioAssets = (unreadable: readonly string[] = []): AudioAssetPort => ({
+  resolveAudio: vi.fn(async (path: string) => {
+    if (unreadable.includes(path)) throw new Error(`fake audio resolver: "${path}" is unreadable`);
     return new Uint8Array(Buffer.from(path, "utf8"));
   }),
 });

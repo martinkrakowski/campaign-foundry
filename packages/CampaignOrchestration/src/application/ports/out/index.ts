@@ -1,3 +1,4 @@
+export * from "./AudioAssetPort.js";
 export * from "./BackgroundCachePort.js";
 export * from "./CompliancePort.js";
 export * from "./CompositorPort.js";

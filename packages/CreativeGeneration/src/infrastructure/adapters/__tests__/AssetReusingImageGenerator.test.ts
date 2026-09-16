@@ -1,4 +1,7 @@
-import { describe, test, expect, vi } from "vitest";
+import { describe, test, expect, vi, beforeAll, afterAll } from "vitest";
+import { mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { resolve } from "node:path";
+import { projectRoot } from "@campaignfoundry/shared";
 import { AspectRatio, type ImageGeneratorPort } from "@campaignfoundry/CampaignOrchestration";
 import { AssetReusingImageGenerator } from "../AssetReusingImageGenerator.js";
 
@@ -55,4 +58,44 @@ describe("AssetReusingImageGenerator (decorator)", () => {
     expect(out.source).toBe("procedural");
     expect(inner.resolveBackground).toHaveBeenCalledTimes(1);
   });
+});
+
+/**
+ * VE3b2: `inputAsset` is an image-only field — proving that a genuinely valid
+ * MP3/M4A upload (real magic bytes, not junk, which already fails today)
+ * still cannot be reused as a background. It fails `loadImage` exactly like
+ * any other undecodable file, so the existing catch-and-delegate path already
+ * covers it; no new code needed, only proof.
+ */
+describe("AssetReusingImageGenerator — image-only enforcement against real audio magic (VE3b2)", () => {
+  // Gitignored per-brief scratch dir (`/assets/inputs/*/`), so a crashed test
+  // leaves nothing for git to see.
+  const dir = resolve(projectRoot(), "assets", "inputs", "ve3b2-image-only-proof");
+  const mp3 = Buffer.from([0x49, 0x44, 0x33, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x22]);
+  const m4a = Buffer.from([
+    0x00, 0x00, 0x00, 0x1c, 0x66, 0x74, 0x79, 0x70, 0x4d, 0x34, 0x41, 0x20, 0x00, 0x00, 0x02, 0x00,
+  ]);
+
+  beforeAll(() => {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(resolve(dir, "bed.mp3"), mp3);
+    writeFileSync(resolve(dir, "bed.m4a"), m4a);
+  });
+  afterAll(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  test.each(["bed.mp3", "bed.m4a"])(
+    "a real, valid %s upload named as inputAsset falls through to generation, never 'reused'",
+    async (name) => {
+      const inner = delegate();
+      const out = await new AssetReusingImageGenerator(inner).resolveBackground(
+        { ...baseProduct, inputAsset: `assets/inputs/ve3b2-image-only-proof/${name}` },
+        ratio(),
+        ctx,
+      );
+      expect(out.source).toBe("procedural");
+      expect(inner.resolveBackground).toHaveBeenCalledTimes(1);
+    },
+  );
 });

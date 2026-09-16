@@ -5619,3 +5619,25 @@ the full gate is clean with 100% on all four counters, and four mutations in
 silence-accuses-again — all reproduce under `mutate:verify`. §38 restated and §39 added in
 docs/planning/2026-09-10_the-unowned-gaps.md. Two PR-Agent notes on the (now deleted) blacklist
 regex are moot rather than patched.
+## 2026-09-16 — VE3b2 (lane: music bed uploads + generation wiring)
+
+Closed `premise VE3b`: uploads now accept mp3 (ID3 tag or bare MPEG frame sync) and m4a (`ftyp` box with
+an audio-only major brand — `M4A `/`M4B `/`M4P `, verified against the pinned `ffmpeg-static` binary's own
+output — never the generic `isom`/`mp42` brands a video mp4 shares), a renamed PNG/JPEG refused naming the
+accepted formats. At 128 kbps CBR (16,000 B/s) the 2 MiB cap admits ≈131 s (2 min 11 s) of mp3/m4a; wav
+(CD quality, 176,400 B/s) would admit only ≈11.9 s, so wav stays unaccepted. `GenerateCampaignUseCase`
+resolves `audio.path` once per run (never per cell, never per ratio — a music bed has no canvas to
+cover-fit against) through a new, narrower `AudioAssetPort` + `FileSystemAudioAssetResolver`: reuses
+VE5b2's `resolveAssetPath` confinement and reject-never-fall-back contract, but not `SceneAssetPort`
+itself, whose `resolveScene` decodes-and-re-encodes as PNG — the opposite of the byte-for-byte pass-through
+VE3b1's encoder needs. Proved (not re-implemented) that image-only callers already refuse real audio magic:
+`AssetReusingImageGenerator` falls through to generation and `FileSystemSceneAssetResolver` rejects, both
+via the pre-existing `loadImage` decode failure — `logoPath` (NodeCanvasCompositor, K3's file) shares the
+identical `resolveAssetPath` + `loadImage` pattern, not touched here. Removed VE3a's interim run refusal
+in `load-brief.ts`; the flipped test now asserts a brief declaring `audio` loads under
+`enforceCapabilities: true`. Red first throughout; `yarn typecheck`/`lint`/`lint:arch` clean;
+`arch:inventory` + `sync:dry --allow-dirty` report 0 ops after hand-editing `.architecture/manifest.yaml`
+(AudioAssetPort, FileSystemAudioAssetResolver). Two mutations in `.agents/manifests/ve3b2.json` — the
+request drops `audio`, the mp3 magic check accepts anything — both reproduce under `mutate:verify`.
+`premise VE3b` retired, VE4 now waits only on VE-Q5.
+Cite: VE3b2 in docs/planning/2026-09-13_video-editing-features.md.

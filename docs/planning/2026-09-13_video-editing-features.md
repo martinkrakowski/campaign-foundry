@@ -1,7 +1,7 @@
 # Video Editing Features — Architecture & Development Plan
 
 **Date:** 2026-09-13
-**Status:** Phase A shipped (VE1, VE2). VE-Q1–VE-Q4 answered by the owner on 2026-09-15 (VE-D8–VE-D11, recommended defaults, refined by plan review); VE5a shipped, then VE5b1 and VE5b2 shipped — VE5b is complete — and VE3b1 shipped (this PR — the encoder's codec half; VE-D11 updated). VE3a is dispatchable; VE3b2 (uploads, generation wiring, removes the interim refusal) follows it. VE4 waits on the speech vendor (VE-Q5 — the owner is evaluating ElevenLabs as of 2026-09-16; no decision recorded). VE6 is deferred (VE-D11).
+**Status:** Phase A shipped (VE1, VE2). VE-Q1–VE-Q4 answered by the owner on 2026-09-15 (VE-D8–VE-D11, recommended defaults, refined by plan review); VE5a shipped, then VE5b1 and VE5b2 shipped — VE5b is complete — and VE3a, VE3b1 and now VE3b2 shipped (this PR — uploads, generation wiring, the interim refusal removed; `premise VE3b` retired). VE4 now waits only on the speech vendor (VE-Q5 — the owner is evaluating ElevenLabs as of 2026-09-16; no decision recorded). VE6 is deferred (VE-D11).
 **Scope:** Which ideas from a reference video editor fit Campaign Foundry, and how each is built on
 the existing server-side compositor instead of beside it.
 **Related:** `2026-09-10_keyframing.md` (K1–K5), `2026-09-10_finishing-video.md`,
@@ -172,7 +172,16 @@ removing the interim refusal.
 
 **Acceptance.** A brief declaring `audio` renders (no more interim refusal); the uploaded bytes reach the encoder unchanged; `premise VE3b` closes.
 
-### VE4 — Voiceover and captions · VE-D9 · waits on VE-Q5 (vendor) and VE3b
+**VE3b2 — shipped in this PR.** Uploads accept mp3 (ID3 tag or a bare MPEG frame sync) and m4a
+(`ftyp` box with an audio-only major brand — `M4A `/`M4B `/`M4P `, never the generic `isom`/`mp42`
+brands video mp4 shares); a renamed PNG is refused naming the accepted formats. `GenerateCampaignUseCase`
+resolves `audio.path` once per run (never per cell, and never per ratio — a music bed has no canvas to
+cover-fit against) through a new, narrower `AudioAssetPort` — reusing VE5b2's `resolveAssetPath`
+confinement and reject-never-fall-back contract, but not `SceneAssetPort.resolveScene` itself: that
+decodes-and-re-encodes as PNG, which would corrupt a music bed instead of handing the encoder the exact
+uploaded bytes VE3b1 needs. The interim refusal in `load-brief.ts` is removed; `premise VE3b` retired.
+
+### VE4 — Voiceover and captions · VE-D9 · waits on VE-Q5 (vendor)
 
 | # | Task | File(s) |
 |---|---|---|
@@ -318,14 +327,12 @@ still open**. `yarn plan:verify` runs them.
 
 **VE3a — shipped in this PR.** (`CampaignBrief.audio`, `AudioRights.vo.ts`, checked at load and in the legal gate, carried to packaging's `packagedAt` re-check; a run declaring `audio` is refused with an interim message until VE3b.)
 
-**VE3b1 — shipped in this PR.** Closed the codec half of `premise VE3b` below (the encoder now takes a
-`-c:a` argument when `audio` is present). The premise ORs the codec gap with the upload gap, so it stays
-open — VE3b2 has not shipped yet, and no upload path exists to feed the encoder's new field.
+**VE3b1 — shipped in this PR.** Closed the codec half of `premise VE3b` (the encoder now takes a `-c:a`
+argument when `audio` is present). The premise ORed the codec gap with the upload gap, so it stayed open
+until VE3b2 shipped the upload half.
 
-```premise VE3b
-# Either gap keeps the lane open (||): no audio codec argument in the encoder, or no audio extension accepted for upload.
-! grep -qE -- '"-c:a"|"-acodec"' packages/CreativeGeneration/src/infrastructure/adapters/CanvasFfmpegVideoCompositor.ts || ! grep -qE '\b(mp3|m4a|wav|aac)\b' apps/api/server/lib/asset-files.ts
-```
+**VE3b2 — shipped in this PR.** Closed the upload half of `premise VE3b` (`asset-files.ts` accepts
+mp3/m4a) and wired `audio.path` through to every motion request. `premise VE3b` retired below.
 
 ```premise VE4
 # No caption sidecar is written or packaged anywhere.

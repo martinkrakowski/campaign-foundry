@@ -1,18 +1,43 @@
+import { extname } from "node:path";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { projectRoot } from "@campaignfoundry/shared";
 import { resolveConfined } from "./confined-path.js";
 /**
- * Asset basename: a SAFE_ID_PATTERN stem plus a png/jpg/jpeg extension.
+ * Asset basename: a SAFE_ID_PATTERN stem plus a png/jpg/jpeg/mp3/m4a extension.
  * Dots, slashes, and `..` are rejected so the join `assets/inputs/<briefId>/<name>`
  * cannot escape the brief's input directory or overwrite demo logos at
  * `assets/inputs/*.png`.
+ *
+ * VE3b2 adds mp3/m4a for a brief's music bed (`audio.path`, VE-D8). The 2 MiB
+ * cap (`MAX_ASSET_BYTES`) is the binding limit, so format choice is a duration
+ * budget: at a typical 128 kbps CBR (16,000 B/s) mp3/m4a admit
+ * 2,097,152 / 16,000 ≈ 131 s (2 min 11 s) — comfortably past a single motion
+ * clip's duration. Uncompressed wav (CD quality: 44.1 kHz × 16-bit × 2 ch =
+ * 176,400 B/s) would admit only 2,097,152 / 176,400 ≈ 11.9 s, too short to be
+ * useful as a bed under the same cap — wav is deliberately not accepted.
  */
-export const ASSET_NAME_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}\.(png|jpg|jpeg)$/;
+export const ASSET_NAME_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}\.(png|jpg|jpeg|mp3|m4a)$/;
+
+/** The audio subset of ASSET_NAME_PATTERN — selects the magic check and error message. */
+export const AUDIO_ASSET_NAME_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}\.(mp3|m4a)$/;
 
 export const MAX_ASSET_BYTES = 2 * 1024 * 1024;
 
 const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
 const JPEG_MAGIC = Buffer.from([0xff, 0xd8, 0xff]);
+
+/** ID3v2 tag, present at the start of most tagged mp3 files. */
+const MP3_ID3_MAGIC = Buffer.from([0x49, 0x44, 0x33]);
+/** ISO-BMFF "ftyp" box tag, at byte offset 4 in every mp4-family container (incl. m4a). */
+const M4A_FTYP_MAGIC = Buffer.from("ftyp", "ascii");
+/**
+ * ISO-BMFF major brands that name an AUDIO-ONLY file — never the generic
+ * `isom`/`mp42` brands shared with video mp4, so a video file renamed `.m4a`
+ * is still refused. `M4A ` is exactly what the pinned `ffmpeg-static` binary
+ * writes for `-c:a aac out.m4a` (verified against the vendored binary);
+ * `M4B `/`M4P ` (audiobook / protected) are the same registry family.
+ */
+const M4A_AUDIO_BRANDS = new Set(["M4A ", "M4B ", "M4P "]);
 
 /** Decode standard base64; undefined on empty, non-string, or invalid alphabet. */
 export function decodeBase64(value: unknown): Buffer | undefined {
@@ -26,6 +51,40 @@ export function hasAllowedImageMagic(bytes: Buffer): boolean {
     (bytes.length >= PNG_MAGIC.length && bytes.subarray(0, PNG_MAGIC.length).equals(PNG_MAGIC)) ||
     (bytes.length >= JPEG_MAGIC.length && bytes.subarray(0, JPEG_MAGIC.length).equals(JPEG_MAGIC))
   );
+}
+
+/** ID3v2 tag, or a bare MPEG frame sync (11 leading set bits: 0xff then top 3 bits of the next byte). */
+function hasMp3Magic(bytes: Buffer): boolean {
+  if (bytes.length >= MP3_ID3_MAGIC.length && bytes.subarray(0, MP3_ID3_MAGIC.length).equals(MP3_ID3_MAGIC)) {
+    return true;
+  }
+  return bytes.length >= 2 && bytes[0] === 0xff && (bytes[1] & 0xe0) === 0xe0;
+}
+
+/** `ftyp` box at byte offset 4, with a major brand from the audio-only allowlist. */
+function hasM4aMagic(bytes: Buffer): boolean {
+  if (bytes.length < 12) return false;
+  if (!bytes.subarray(4, 8).equals(M4A_FTYP_MAGIC)) return false;
+  return M4A_AUDIO_BRANDS.has(bytes.subarray(8, 12).toString("ascii"));
+}
+
+export function hasAllowedAudioMagic(bytes: Buffer): boolean {
+  return hasMp3Magic(bytes) || hasM4aMagic(bytes);
+}
+
+/** Content type for an asset basename matching ASSET_NAME_PATTERN. */
+export function assetContentType(name: string): string {
+  switch (extname(name).toLowerCase()) {
+    case ".jpg":
+    case ".jpeg":
+      return "image/jpeg";
+    case ".mp3":
+      return "audio/mpeg";
+    case ".m4a":
+      return "audio/mp4";
+    default:
+      return "image/png";
+  }
 }
 
 /** Repo-relative path a brief can put in `logoPath` / `inputAsset`. */

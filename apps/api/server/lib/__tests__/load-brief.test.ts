@@ -1469,15 +1469,9 @@ describe("parseBrief", () => {
       ).toThrow('Campaign brief field "audio.rights.licenceId" must be a non-empty string.');
     });
 
-    test("enforceCapabilities: true refuses any brief declaring audio with a product-facing message, naming no internal milestone (VE-D8 fix2 #7)", () => {
-      expect(() => parseBrief({ ...valid, audio: audio() }, { enforceCapabilities: true })).toThrow(
-        "Music tracks are not rendered yet — remove the audio block to run this campaign.",
-      );
-      try {
-        parseBrief({ ...valid, audio: audio() }, { enforceCapabilities: true });
-      } catch (error) {
-        expect((error as Error).message).not.toMatch(/VE3b/);
-      }
+    test("enforceCapabilities: true now loads and round-trips a well-formed audio block (VE3b2 — the interim refusal is removed)", () => {
+      const parsed = parseBrief({ ...valid, audio: audio() }, { enforceCapabilities: true });
+      expect(parsed.audio).toEqual(audio());
     });
 
     test("enforceCapabilities: false (authoring) still accepts and round-trips a well-formed audio block", () => {
@@ -1485,8 +1479,9 @@ describe("parseBrief", () => {
       expect(parsed.audio).toEqual(audio());
     });
 
-    test("a brief without audio is unaffected by the interim refusal (enforceCapabilities: true)", () => {
+    test("a brief without audio is unaffected either way", () => {
       expect(() => parseBrief({ ...valid }, { enforceCapabilities: true })).not.toThrow();
+      expect(() => parseBrief({ ...valid }, { enforceCapabilities: false })).not.toThrow();
     });
   });
 
