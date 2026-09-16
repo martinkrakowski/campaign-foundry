@@ -12,6 +12,31 @@ import { useEffect, useState, type RefObject } from "react";
 export const PREVIEW_RAIL_MIN_INLINE_PX = 896;
 
 /**
+ * The hook's initial seed, exported so the server path can be tested
+ * directly. A `"use client"` component (`BriefEditor.tsx`) is still
+ * PRERENDERED ON THE SERVER at build time (Next's static generation of
+ * `/brief/new`), and a `useState` initializer runs during that server
+ * render — where there is no `window` at all. `readPresentation`
+ * (`BriefEditor.tsx:99`) reads `window.localStorage` from a `useState`
+ * initializer too and looks like a precedent for skipping a guard here, but
+ * it only survives because its body is wrapped in `try { … } catch { return
+ * "guided"; }` — the `ReferenceError` is thrown on the server and SWALLOWED
+ * by that catch. That is safe by accident of exception handling, not
+ * because the server never runs the code; a first attempt at this hook
+ * copied the conclusion without the mechanism and broke the production
+ * build (`ReferenceError: window is not defined` prerendering `/brief/new`).
+ *
+ * `false` is the safe direction when there is no viewport to read: no
+ * `brief` is fed to the dock, nothing fetches, and the first real
+ * `ResizeObserver` measurement (client-side only) corrects it once the page
+ * hydrates.
+ */
+export function initialMinInlineSizeSeed(minPx: number): boolean {
+  if (typeof window === "undefined") return false;
+  return window.innerWidth >= minPx;
+}
+
+/**
  * The JS-side mirror of a CSS `@container(min-width: …)` query (CC1/CC2).
  * The rail's container query is CSS-only visibility: the element stays
  * mounted and anything it does — a network fetch, most of all — keeps
@@ -21,24 +46,21 @@ export const PREVIEW_RAIL_MIN_INLINE_PX = 896;
  *
  * `ResizeObserver` never reports synchronously, and does not fire at all
  * under happy-dom (no real layout engine, so a border/content box is never
- * produced) — so the initial verdict is seeded from `window.innerWidth`.
- * The observed element can only be NARROWER than the viewport (it shares the
- * row with the shell's own sidebar), so the seed never under-reports
- * "narrow"; at most it reports "wide enough" one beat early, self-correcting
- * on the element's first real measurement. This also lets a test drive the
- * seed deterministically by setting `window.innerWidth` before mount,
- * without a `ResizeObserver` stub happy-dom cannot honour.
+ * produced) — so the initial verdict is seeded from `window.innerWidth`
+ * (`initialMinInlineSizeSeed`, above — read its comment for the server-side
+ * half of this). The observed element can only be NARROWER than the
+ * viewport (it shares the row with the shell's own sidebar), so a real,
+ * client-side seed never under-reports "narrow"; at most it reports "wide
+ * enough" one beat early, self-correcting on the element's first real
+ * measurement. This also lets a test drive the seed deterministically by
+ * setting `window.innerWidth` before mount, without a `ResizeObserver` stub
+ * happy-dom cannot honour.
  *
  * A zero measurement is treated as "not laid out yet", never as a real
  * collapse to nothing, and keeps whatever verdict already stands.
  */
 export function useMinInlineSize(ref: RefObject<HTMLElement | null>, minPx: number): boolean {
-  // No `typeof window` SSR guard: this hook is only ever called from
-  // `"use client"` editor chrome (`BriefEditor.tsx`), which the rest of that
-  // file already assumes has `window` (`readPresentation`/`readRailView`
-  // read `window.localStorage` directly, guarding only against the STORAGE
-  // API being unavailable, never against `window` itself being absent).
-  const [atLeast, setAtLeast] = useState(() => window.innerWidth >= minPx);
+  const [atLeast, setAtLeast] = useState(() => initialMinInlineSizeSeed(minPx));
 
   useEffect(() => {
     const el = ref.current;

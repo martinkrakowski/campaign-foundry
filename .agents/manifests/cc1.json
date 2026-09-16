@@ -61,6 +61,21 @@
         "apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/lib/use-min-inline-size.ts",
+      "before": "export function initialMinInlineSizeSeed(minPx: number): boolean {\n  if (typeof window === \"undefined\") return false;\n  return window.innerWidth >= minPx;\n}",
+      "after": "export function initialMinInlineSizeSeed(minPx: number): boolean {\n  return window.innerWidth >= minPx;\n}",
+      "because": "A `\"use client\"` component (BriefEditor.tsx) is still prerendered on the server at Next build time, and a useState initializer runs during that server render, where there is no `window`. A first version of this seed had no guard here and reasoned (wrongly) that only client chrome calls it; it broke `yarn build` with `ReferenceError: window is not defined` prerendering /brief/new -- a failure only CI's build step could see, since happy-dom always provides a `window`. Removing the guard here reproduces exactly that: `initialMinInlineSizeSeed` throws instead of seeding `false` once `window` is genuinely absent. Caught HERE by a unit test that stubs `window` to `undefined` for one assertion (`vi.stubGlobal`) and expects `false`, not a throw -- so the suite itself catches it, not only CI's build.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/lib/__tests__/use-min-inline-size.test.tsx"
+      ],
+      "verdict": "caught"
     }
   ]
 }

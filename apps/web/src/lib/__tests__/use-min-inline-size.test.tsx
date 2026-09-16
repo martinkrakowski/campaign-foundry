@@ -1,7 +1,7 @@
 import { describe, test, expect, afterEach, vi } from "vitest";
 import { useRef } from "react";
 import { render, act } from "@testing-library/react";
-import { useMinInlineSize, PREVIEW_RAIL_MIN_INLINE_PX } from "../use-min-inline-size";
+import { useMinInlineSize, initialMinInlineSizeSeed, PREVIEW_RAIL_MIN_INLINE_PX } from "../use-min-inline-size";
 
 /**
  * happy-dom's `ResizeObserver` never invokes its callback (no real layout
@@ -51,6 +51,32 @@ afterEach(() => {
   FakeResizeObserver.instances = [];
   vi.unstubAllGlobals();
   Object.defineProperty(window, "innerWidth", { value: originalInnerWidth, configurable: true });
+});
+
+describe("initialMinInlineSizeSeed — the server path", () => {
+  /**
+   * The regression this pins: a `"use client"` component is still
+   * PRERENDERED ON THE SERVER at Next build time, and a `useState`
+   * initializer runs during that server render — where `window` does not
+   * exist. A first version of this hook read `window.innerWidth` directly
+   * from the initializer with no guard, reasoning (wrongly) that "only
+   * client chrome calls this" was enough; it broke `yarn build`
+   * (`ReferenceError: window is not defined` prerendering `/brief/new`).
+   * `vi.stubGlobal` removes `window` for exactly this one assertion, rather
+   * than deleting it out from under the whole DOM test environment.
+   */
+  test("with no window at all, seeds false rather than throwing", () => {
+    vi.stubGlobal("window", undefined);
+    expect(initialMinInlineSizeSeed(PREVIEW_RAIL_MIN_INLINE_PX)).toBe(false);
+  });
+
+  test("with a window, reads window.innerWidth exactly as the hook does", () => {
+    Object.defineProperty(window, "innerWidth", { value: 500, configurable: true });
+    expect(initialMinInlineSizeSeed(PREVIEW_RAIL_MIN_INLINE_PX)).toBe(false);
+
+    Object.defineProperty(window, "innerWidth", { value: 1024, configurable: true });
+    expect(initialMinInlineSizeSeed(PREVIEW_RAIL_MIN_INLINE_PX)).toBe(true);
+  });
 });
 
 describe("useMinInlineSize", () => {
