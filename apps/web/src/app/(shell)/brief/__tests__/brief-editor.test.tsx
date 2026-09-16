@@ -2135,13 +2135,16 @@ describe("BriefPage — capabilities and motion", () => {
      * (the regime X30/X32 measured and this lane fixed for the other four
      * historically slow tests) it timed out at 5000ms even though those four
      * now pass — see §36 (X34) in docs/planning/2026-09-10_the-unowned-gaps.md.
-     * `beforeAll` below builds that reference exactly once instead: hooks are
-     * gated by `hookTimeout` (10000ms by default, double `testTimeout`),
-     * which is where a one-time, doubled-up setup cost belongs — not inside
-     * the 5000ms budget every individual test shares. The typed path is
-     * still what produces the reference (never a hand-written expectation),
-     * and the actual `test()` below now pays only the fast path's cost, the
-     * same as every other test that calls `fillValidDraft`.
+     * `beforeAll` below builds that reference exactly once instead. Web tests
+     * now get `testTimeout: 15000` (X36, §40 of
+     * docs/planning/2026-09-10_the-unowned-gaps.md); `hookTimeout` is
+     * unchanged at Vitest's 10000ms default, so the hook has the smaller
+     * budget, not double the test's. `beforeAll` is still the right place for
+     * the one-time typed reference: it runs once for the whole describe
+     * rather than inside every test's own budget. The typed path is still
+     * what produces the reference (never a hand-written expectation), and
+     * the actual `test()` below now pays only the fast path's cost, the same
+     * as every other test that calls `fillValidDraft`.
      */
     const typeFillValidDraftByHand = async (user: ReturnType<typeof userEvent.setup>, id: string) => {
       await user.type(screen.getByLabelText("Campaign Name"), id);

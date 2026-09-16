@@ -10,12 +10,12 @@ import { mockPipelineApi } from "@/__tests__/helpers";
 // raising it costs nothing when async updates resolve quickly. Do not "tidy" this away
 // as an arbitrary number.
 //
-// 3000, not 5000: it must stay safely below Vitest's 5000ms testTimeout, because
-// grid.test.tsx's `await screen.findByText("IMAGEN").catch(() => undefined)` grace wait
-// intentionally burns the full asyncUtilTimeout when the pill never renders. At 5000
-// that wait collides with the runner's own 5s test budget and the test is killed with
-// "Test timed out in 5000ms"; 3000 leaves ~2s of headroom for the rest of that test
-// under full-suite parallel load.
+// 3000, not 5000: it must stay safely below the web project's testTimeout
+// (15000ms in vitest.config.ts). grid.test.tsx's
+// `await screen.findByText("IMAGEN").catch(() => undefined)` grace wait
+// intentionally burns the full asyncUtilTimeout when the pill never renders;
+// at 5000 that wait used to collide with Vitest's uncalibrated 5s default and
+// kill the test. 3000 is kept (X36 does not spend the new margin on waiting).
 configure({ asyncUtilTimeout: 3000 });
 
 // happy-dom v20 refuses to initialize localStorage without a file path, so swap in a
