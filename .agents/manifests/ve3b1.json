@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "lane": "VE3b1",
+  "mutations": [
+    {
+      "file": "packages/CreativeGeneration/src/infrastructure/adapters/CanvasFfmpegVideoCompositor.ts",
+      "before": "      `apad,atrim=end=${audio.durationSec},afade=t=out:st=${fadeStartSec}:d=${fadeDurationSec}`,",
+      "after": "      `apad,afade=t=out:st=${fadeStartSec}:d=${fadeDurationSec}`,",
+      "because": "Dropping atrim leaves a bed longer than durationSec uncut, so the audio stream keeps running past the video and the long-bed duration assertion (within one AAC frame of durationSec) fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CreativeGeneration/src/infrastructure/adapters/__tests__/CanvasFfmpegVideoCompositor.audio.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CreativeGeneration/src/infrastructure/adapters/CanvasFfmpegVideoCompositor.ts",
+      "before": "  if (audio) {\n    args.push(\"-i\", audio.path);\n  }",
+      "after": "  args.push(\"-i\", audio?.path ?? \"/dev/null\");",
+      "because": "Always adding the second input (even without `audio`) breaks VE-D3: a brief that uses none of the new inputs must produce exactly today's argv, and the pinned no-audio args test fails once an extra -i appears.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CreativeGeneration/src/infrastructure/adapters/__tests__/CanvasFfmpegVideoCompositor.audio.test.ts"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
