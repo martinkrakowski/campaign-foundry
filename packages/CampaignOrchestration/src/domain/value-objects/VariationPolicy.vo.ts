@@ -452,12 +452,20 @@ function hashPolicy(
 
 /**
  * Hash of the brief's copy surface — `campaignMessage`, `localizedMessage`, and
- * `copy.timeline` in full (each beat's `text` and `background`, plus beat order
- * and count, since array order is preserved by `canonicalJson`) — independent
- * of `hashPolicy` (§35, `docs/planning/2026-09-10_the-unowned-gaps.md`).
+ * `copy.timeline` in full: each beat's `text`, `weight`, and optional
+ * `background`, plus the timeline's own `transition` and `keyBeat` (beat order
+ * and count are covered for free — array order is preserved by
+ * `canonicalJson`) — independent of `hashPolicy` (§35,
+ * `docs/planning/2026-09-10_the-unowned-gaps.md`).
+ *
+ * Every one of those fields changes what gets rendered: `weight` is a beat's
+ * share of the clip's duration, `transition` picks the cut/fade between
+ * beats, and `keyBeat` decides which frame becomes the poster (D7,
+ * `CopyTimeline.vo.ts`) — so all three belong beside `text`/`background` in
+ * this hash for the same reason those two do.
  *
  * A selective re-roll pins BOTH hashes: `hashPolicy` alone lets a re-roll of
- * one cell pass while the brief's message or a beat's text/background moved
+ * one cell pass while the brief's message or any part of its timeline moved
  * underneath it, silently merging the new copy into a report whose other
  * cells were rendered under the old copy. This is deliberately a SECOND,
  * disjoint hash rather than a widening of `hashPolicy`'s own payload —
@@ -472,10 +480,15 @@ export function hashCopy(brief: CampaignBrief, hasher: PolicyHasher): string {
       ...(brief.localizedMessage !== undefined ? { localizedMessage: brief.localizedMessage } : {}),
       ...(timeline !== undefined
         ? {
-            timeline: timeline.beats.map((beat) => ({
-              text: beat.text,
-              ...(beat.background !== undefined ? { background: beat.background } : {}),
-            })),
+            timeline: {
+              transition: timeline.transition,
+              keyBeat: timeline.keyBeat,
+              beats: timeline.beats.map((beat) => ({
+                text: beat.text,
+                weight: beat.weight,
+                ...(beat.background !== undefined ? { background: beat.background } : {}),
+              })),
+            },
           }
         : {}),
     }),

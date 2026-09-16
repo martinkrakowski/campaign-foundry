@@ -4,9 +4,9 @@
   "mutations": [
     {
       "file": "packages/CampaignOrchestration/src/domain/value-objects/VariationPolicy.vo.ts",
-      "before": "      ...(timeline !== undefined\n        ? {\n            timeline: timeline.beats.map((beat) => ({\n              text: beat.text,\n              ...(beat.background !== undefined ? { background: beat.background } : {}),\n            })),\n          }\n        : {}),",
+      "before": "      ...(timeline !== undefined\n        ? {\n            timeline: {\n              transition: timeline.transition,\n              keyBeat: timeline.keyBeat,\n              beats: timeline.beats.map((beat) => ({\n                text: beat.text,\n                weight: beat.weight,\n                ...(beat.background !== undefined ? { background: beat.background } : {}),\n              })),\n            },\n          }\n        : {}),",
       "after": "      // mutated: copy.timeline dropped from the hashed payload",
-      "because": "hashCopy's payload must cover copy.timeline in full — a beat's text and its background — not just campaignMessage/localizedMessage. Dropping the timeline spread means two briefs that differ only in a beat's text, or only in a beat's background, hash identically: the beat-text and beat-background tests in VariationPolicy.vo.test.ts (\"hashCopy — the brief's copy surface, independent of hashPolicy\") assert the two hashes differ, so both fail once the timeline never reaches the hasher.",
+      "because": "hashCopy's payload must cover copy.timeline in full — every beat's text, weight and optional background, plus the timeline's own transition and keyBeat — not just campaignMessage/localizedMessage. Dropping the timeline spread means two briefs that differ only in a beat's text, weight, or background hash identically: the beat-text, beat-background and beat-weight tests in VariationPolicy.vo.test.ts (\"hashCopy — the brief's copy surface, independent of hashPolicy\") assert the two hashes differ, so all three fail once the timeline never reaches the hasher.",
       "command": [
         "yarn",
         "vitest",
@@ -16,6 +16,23 @@
         "packages/CampaignOrchestration/src/domain/value-objects/__tests__/VariationPolicy.vo.test.ts",
         "-t",
         "differing only in a beat's"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/VariationPolicy.vo.ts",
+      "before": "              beats: timeline.beats.map((beat) => ({\n                text: beat.text,\n                weight: beat.weight,\n                ...(beat.background !== undefined ? { background: beat.background } : {}),\n              })),",
+      "after": "              beats: timeline.beats.map((beat) => ({\n                text: beat.text,\n                ...(beat.background !== undefined ? { background: beat.background } : {}),\n              })),",
+      "because": "This is the Qodo-found gap this fix round closes: `weight` is a beat's share of the clip's duration (CopyTimeline.vo.ts:40-57) and changes what gets rendered, so it belongs in hashCopy's payload beside `text`/`background`. Dropping only the `weight` field from the mapped beat leaves `text` and `background` still covered (so those two tests are unaffected) but makes two briefs differing only in a beat's weight hash identically — the new \"two briefs differing only in a beat's weight hash differently\" test fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/VariationPolicy.vo.test.ts",
+        "-t",
+        "differing only in a beat's weight"
       ],
       "verdict": "caught"
     },

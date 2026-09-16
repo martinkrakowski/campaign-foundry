@@ -5828,3 +5828,22 @@ touched files, 759 CampaignOrchestration, 1009 api), `typecheck`/`lint`/`lint:ar
 the hashed payload, treat a missing persisted copy hash as a mismatch — both reproduce under
 `mutate:verify`.
 Plan: §35 in docs/planning/2026-09-10_the-unowned-gaps.md.
+
+## 2026-09-16 — X33 fix round (Qodo: timeline edits bypass reroll guard)
+
+Qodo's High finding on #447: `hashCopy` said "`copy.timeline` in full" and then hashed only each
+beat's `text` and optional `background`, omitting `beat.weight`, `timeline.transition`, and
+`timeline.keyBeat` — all three change what gets rendered (duration share, the cut/fade between beats,
+which frame becomes the poster, D7) so a re-roll passed the copy pin while any of them had moved, the
+same mixing defect §35 describes. The brief enumerated only two of the five fields; the gap was the
+brief's, not the implementation's. Fixed: `hashCopy`'s timeline payload now nests `transition` and
+`keyBeat` beside a `beats` array carrying `text`, `weight`, and optional `background`; doc comment
+corrected to name all five fields. Red first: reverted the implementation with the three new tests in
+place (`weight`/`transition`/`keyBeat` each proven to move `copyHash` in isolation) and confirmed all
+three failed on identical-hash equality — `expected '<hash>' not to be '<hash>'` — before restoring.
+The existing literal-`policyHash` table test was extended (not duplicated) with weight/transition/
+keyBeat variants, still pinned to the same golden hash. Rebased onto origin/main first
+(`73ce5411`/`14852d85`); the only conflict was this file's append point, resolved as main's content
+plus the appended entry, no markers left. Third mutation added to `.agents/manifests/x33.json` —
+drop only `weight` from the mapped beat, leaving `text`/`background` covered — proving the new
+coverage; all three mutations reproduce under `mutate:verify`.

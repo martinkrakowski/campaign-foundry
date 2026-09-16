@@ -728,6 +728,50 @@ describe("hashCopy — the brief's copy surface, independent of hashPolicy (X33,
     expect(a).not.toBe(b);
   });
 
+  test("two briefs differing only in a beat's weight hash differently", () => {
+    const a = hashCopy(
+      brief({ copy: { timeline: timeline([{ text: "Beat one", weight: 1 }]) } }),
+      nodeCryptoPolicyHasher,
+    );
+    const b = hashCopy(
+      brief({ copy: { timeline: timeline([{ text: "Beat one", weight: 2 }]) } }),
+      nodeCryptoPolicyHasher,
+    );
+    expect(a).not.toBe(b);
+  });
+
+  test("two briefs differing only in the timeline's transition hash differently", () => {
+    const beats = [
+      { text: "Beat one", weight: 1 },
+      { text: "Beat two", weight: 1 },
+    ];
+    const a = hashCopy(
+      brief({ copy: { timeline: { beats, transition: "cut", keyBeat: 1 } } }),
+      nodeCryptoPolicyHasher,
+    );
+    const b = hashCopy(
+      brief({ copy: { timeline: { beats, transition: "fade", keyBeat: 1 } } }),
+      nodeCryptoPolicyHasher,
+    );
+    expect(a).not.toBe(b);
+  });
+
+  test("two briefs differing only in the timeline's keyBeat hash differently", () => {
+    const beats = [
+      { text: "Beat one", weight: 1 },
+      { text: "Beat two", weight: 1 },
+    ];
+    const a = hashCopy(
+      brief({ copy: { timeline: { beats, transition: "cut", keyBeat: 1 } } }),
+      nodeCryptoPolicyHasher,
+    );
+    const b = hashCopy(
+      brief({ copy: { timeline: { beats, transition: "cut", keyBeat: 2 } } }),
+      nodeCryptoPolicyHasher,
+    );
+    expect(a).not.toBe(b);
+  });
+
   test("two briefs differing only in beat order hash differently", () => {
     const a = hashCopy(
       brief({
@@ -830,7 +874,7 @@ describe("policyHash is unmoved by the copyHash addition (X33, §35)", () => {
     if (result.success) expect(result.value.policyHash).toBe(expected);
   });
 
-  test("changing campaignMessage or adding a copy.timeline does not move policyHash", () => {
+  test("changing campaignMessage or any part of copy.timeline does not move policyHash", () => {
     const GOLDEN_HASH = "7181107a6ce42df96357800416bf26bf89007fd3dbd2b9792aab83323adefcf9";
     const base = brief({ variation: { count: 12, seed: 7, minDistance: 1 } });
     const differentMessage = { ...base, campaignMessage: "A completely different message" };
@@ -847,7 +891,29 @@ describe("policyHash is unmoved by the copyHash addition (X33, §35)", () => {
         },
       },
     };
-    for (const candidate of [base, differentMessage, withTimeline]) {
+    // Same timeline, only weight changed — hashCopy's newly covered field.
+    const differentWeight = {
+      ...base,
+      copy: { timeline: { ...withTimeline.copy.timeline, beats: [{ text: "Beat one", weight: 5 }] } },
+    };
+    // Same timeline, only transition changed.
+    const differentTransition = {
+      ...base,
+      copy: { timeline: { ...withTimeline.copy.timeline, transition: "cut" as const } },
+    };
+    // Same timeline, only keyBeat changed.
+    const differentKeyBeat = {
+      ...base,
+      copy: { timeline: { ...withTimeline.copy.timeline, keyBeat: 2 } },
+    };
+    for (const candidate of [
+      base,
+      differentMessage,
+      withTimeline,
+      differentWeight,
+      differentTransition,
+      differentKeyBeat,
+    ]) {
       const result = fromBrief(candidate);
       expect(result.success).toBe(true);
       if (result.success) expect(result.value.policyHash).toBe(GOLDEN_HASH);
