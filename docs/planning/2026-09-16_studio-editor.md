@@ -222,7 +222,13 @@ test "$(grep -rl 'HtmlElementsEditor' apps/web/src/components/campaign | grep -v
 # NOT extend it would dirty a loaded brief, so this flips for any correct SE2. The
 # action union is not probed: its entries are multiline, so a same-line grep would
 # hold forever whatever the implementer writes.
-! tr '\n' ' ' < apps/web/src/components/campaign/editor-state.ts | grep -qE 'function canonicalLayer.{0,700}props'
+#
+# The probe reads canonicalLayer's OWN body, cut out by its declaration and the closing
+# brace in column 0. The first cut of this fence flattened the whole file with `tr` and
+# then ran `.{0,700}` against that single 100 kB line, which backtracked until the 10 s
+# budget killed it -- plan:verify reported TIMED-OUT, "not stale, make the premise decide
+# quickly", and it was right. Bounded to the function, it answers in about 7 ms.
+! sed -n '/^function canonicalLayer/,/^}/p' apps/web/src/components/campaign/editor-state.ts | grep -q props
 ```
 
 ```premise TL1
