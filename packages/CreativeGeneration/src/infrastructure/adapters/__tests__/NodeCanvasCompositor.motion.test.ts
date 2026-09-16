@@ -122,8 +122,18 @@ describe("NodeCanvasCompositor.draw motion", () => {
       expect(alphas).toEqual([]);
       expect(translates.filter((p) => p[0] === 0)).toEqual([]);
     } else {
+      // opacity is a 0 -> 1 track (K2): resolveTracks folds it as
+      // `0 + (1 - 0) * eased`, exactly `eased` with no rounding at all.
       expect(alphas).toEqual([eased]);
-      expect(translates).toContainEqual([0, dy]);
+      // dy is a C -> 0 track (K2): resolveTracks folds it as
+      // `C + (0 - C) * eased`, reassociating the old `(1 - eased) * C` —
+      // within a double's last bit at an interior t (exact at the t = 0/1
+      // stops, which this fixture's [0, 1] cases already exercise via the
+      // dy === 0 branch above and the t = 0 case below). Not something the
+      // rasterizer resolves — see NodeCanvasCompositor.motion-goldens.test.ts.
+      const match = translates.find((p) => p[0] === 0);
+      expect(match).toBeDefined();
+      expect(match![1]).toBeCloseTo(dy, 9);
     }
   });
 

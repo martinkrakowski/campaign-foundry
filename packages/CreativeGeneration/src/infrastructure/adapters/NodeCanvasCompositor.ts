@@ -2,11 +2,16 @@ import { readFile } from "node:fs/promises";
 import { createCanvas, loadImage, type Image, type SKRSContext2D } from "@napi-rs/canvas";
 import {
   CANONICAL_TEMPLATES,
+  accentWipeFraction,
   beatAt,
+  copyMotionTracks,
   easeOutCubic,
+  groundMotionTracks,
+  poseOf,
   resolveCanvas,
   resolveTimeline,
   resolveStyle,
+  resolveTracks,
   scaleBasis,
   widthTermBasis,
   type CanvasSpec,
@@ -15,6 +20,7 @@ import {
   type CompositorPort,
   type CopyTimeline,
   type MotionKind,
+  type Pose,
   type ResolvedBeat,
   type ResolvedStyle,
   type SafeInsets,
@@ -228,6 +234,14 @@ interface LayerDrawContext {
   readonly prepared: PreparedCreative;
   readonly layer: CreativeTemplateLayer;
   readonly motion: MotionKind | undefined;
+  /**
+   * The raw pose clock (K2): the `t` `draw()` was called with, independent of
+   * `eased`, `easeOutCubic(t)`'s pre-applied form `eased` already carries.
+   * `resolveTracks` applies its OWN (per-stop) easing internally, so a
+   * ground-layer motion track (`groundMotionTracks`, `paintBackground`) reads
+   * this, never `eased`.
+   */
+  readonly t: number;
   readonly eased: number;
   readonly effectT: number;
   /**
@@ -248,7 +262,8 @@ interface LayerDrawContext {
  * pose — exactly what drawStaticText paints; the moving path is L6/L11's.
  * `video` maps to the same drawer as `image` (VD): video is the output frame
  * sequence rather than an input asset, and on any single frame the background
- * is a still image blit (with kenBurnsScale applied in motion).
+ * is a still image blit (with a `groundMotionTracks`-resolved zoom applied in
+ * motion, K2).
  * Kinds this compositor cannot draw (`fill`) are absent, and
  * hitting one throws ({@link drawLayer}) instead of skipping.
  * `drawTimeline` (C5) uses this same table for every kind except
@@ -402,6 +417,7 @@ export class NodeCanvasCompositor implements CompositorPort {
       ctx,
       prepared,
       motion,
+      t,
       eased: motion === undefined ? 1 : easeOutCubic(t),
       effectT,
     };
@@ -642,8 +658,6 @@ export class NodeCanvasCompositor implements CompositorPort {
 const ZERO_INSETS: SafeInsets = { top: 0, right: 0, bottom: 0, left: 0 };
 const SIDES = ["top", "right", "bottom", "left"] as const;
 const ELLIPSIS = "…";
-/** Zoom amount applied away from the ken-burns rest pose so scale(restT) === 1. */
-const KEN_BURNS_ZOOM = 0.08;
 
 /** The copy layer's whole-block pose at a moment: the text effect's output (T6). */
 interface TextEffectPose {
@@ -707,13 +721,6 @@ function openTextPose(ctx: SKRSContext2D, alpha: number, dx: number, dy: number,
     ctx.translate(-cx, -cy);
   }
   return true;
-}
-
-/** Identity at restT: in eases 1.08 → 1.00, out eases 1.00 → 1.08. */
-function kenBurnsScale(motion: MotionKind | undefined, eased: number): number {
-  if (motion === "ken-burns-in") return 1 + KEN_BURNS_ZOOM * (1 - eased);
-  if (motion === "ken-burns-out") return 1 + KEN_BURNS_ZOOM * eased;
-  return 1;
 }
 
 function normalizeSafeInsets(
@@ -1054,7 +1061,7 @@ function drawTimeline(
   effectT?: number,
 ): void {
   const eased = motion === undefined ? 1 : easeOutCubic(t);
-  const c: Omit<LayerDrawContext, "layer"> = { ctx, prepared, motion, eased, effectT: effectT ?? t, copyT };
+  const c: Omit<LayerDrawContext, "layer"> = { ctx, prepared, motion, t, eased, effectT: effectT ?? t, copyT };
   let copyDrawn = false;
   for (const layer of prepared.layers) {
     // A layer the brief disabled does not draw (X9), and the check runs BEFORE
@@ -1065,7 +1072,7 @@ function drawTimeline(
       // A creative type's shared budget caps text-kind layers at one (D124);
       // this guard is defensive, not load-bearing — never draws the beat twice.
       if (copyDrawn) continue;
-      drawSequencedCopy(ctx, prepared, scenes, copyT, t, motion, effectT);
+      drawSequencedCopy(ctx, prepared, scenes, layer, copyT, t, motion, effectT);
       copyDrawn = true;
       continue;
     }
@@ -1078,23 +1085,33 @@ function drawTimeline(
  * any incoming beat, and (for headline-rise) eased on its own local progress.
  * Extracted verbatim from `drawTimeline`'s former fixed post-loop call (C5) —
  * only WHEN this runs changed (at the copy layer's list position), never HOW.
+ *
+ * **K2**: the per-kind `motion` comparison for headline-rise no longer lives here — `resolveTracks`
+ * is called ONCE, with the real `scenes.resolved` beats and the same
+ * `{ t, copyT, effectT }` clocks `beatAt(scenes.resolved, copyT)` already
+ * used below, so its internal beat pairing is the exact same pairing this
+ * function used to compute by hand; `resolved.copy` then carries one
+ * `{ beat, mix, pose }` entry per live beat (one, or two during a
+ * crossfade — K-D6), in the same `(current, incoming)` order the old
+ * `if (pair.mix > 0 ...)` branch drew them in.
  */
 function drawSequencedCopy(
   ctx: SKRSContext2D,
   prepared: PreparedCreative,
   scenes: BeatScenes,
+  layer: CreativeTemplateLayer,
   copyT: number,
   t: number,
   motion: MotionKind | undefined,
   effectT: number | undefined,
 ): void {
-  const pair = beatAt(scenes.resolved, copyT);
-  const rise = motion === "headline-rise";
-  if (pair.mix > 0 && pair.incoming !== undefined) {
-    drawBeat(ctx, prepared, scenes, pair.current, 1 - pair.mix, t, rise, effectT);
-    drawBeat(ctx, prepared, scenes, pair.incoming, pair.mix, t, rise, effectT);
-  } else {
-    drawBeat(ctx, prepared, scenes, pair.current, 1, t, rise, effectT);
+  const resolved = resolveTracks(
+    [{ id: layer.id, kind: layer.kind, tracks: copyMotionTracks(motion, prepared.height) }],
+    scenes.resolved,
+    { t, copyT, effectT },
+  );
+  for (const entry of resolved.copy) {
+    drawBeat(ctx, prepared, scenes, entry.beat, entry.mix, t, entry.pose, effectT);
   }
 }
 
@@ -1106,27 +1123,25 @@ function drawBeat(
   beat: ResolvedBeat,
   layerAlpha: number,
   t: number,
-  rise: boolean,
+  pose: Pose,
   effectT?: number,
 ): void {
   const layout = scenes.beats.get(beat.text);
   if (layout === undefined) {
     throw new Error(`NodeCanvasCompositor: no fitted layout for beat "${beat.text}".`);
   }
-  // Local progress inside the beat's own window, so headline-rise resets with
-  // each beat (Q1) while the global pose clock keeps the ground layers continuous.
+  // Local progress inside the beat's own window — still needed for the text
+  // effect's fallback clock below (K3's territory); headline-rise's own dy/
+  // opacity now arrive already resolved, in `pose` (K2).
   const local = clamp01((t - beat.startT) / (beat.endT - beat.startT));
-  const eased = rise ? easeOutCubic(local) : 1;
-  const riseDy = rise ? (1 - eased) * 0.12 * prepared.height : 0;
-  const riseAlpha = rise ? eased : 1;
   // The text effect (T6) plays on each beat's OWN local progress — the same
   // clock the rise rides — unless the caller passed a settled effect clock
   // (the poster: 1, H4). Clip frames omit it, so the beat-local entrance
   // still plays. The beat's exit mix (`layerAlpha`) keeps its behaviour.
   // Undefined effect → the identity pose → the pre-effect bytes (D54).
   const fx = textEffectPose(prepared.textEffect, effectT ?? local, prepared.canvas, prepared.width, prepared.height);
-  const dy = riseDy + fx.dy;
-  const alpha = riseAlpha * fx.alpha;
+  const dy = pose.dy + fx.dy;
+  const alpha = pose.opacity * fx.alpha;
   const opacity = alpha * layerAlpha;
   ctx.fillStyle = "#ffffff";
   // F5a: this path measures on a throwaway 1×1 context and re-sets ctx.font
@@ -1217,11 +1232,23 @@ function drawGroundImage(
  * incoming scenes with the exact `mix` the copy layer crossfades at — the
  * poster gets this for free, since it reaches here through the same `copyT`
  * the copy layer already uses (no poster-specific branch).
+ *
+ * **K2**: the zoom is a resolved `scale` pose, not a `motion === "ken-burns-*"`
+ * branch — `groundMotionTracks` expands the kind into a `pose`-clock `scale`
+ * track (or none), `resolveTracks` folds it against the raw pose clock
+ * (`c.t`, not `eased` — the resolver applies its own per-stop easing), and
+ * `poseOf` defaults a trackless layer to the identity scale (1), exactly
+ * `kenBurnsScale`'s old `else 1`.
  */
 function paintBackground(c: LayerDrawContext): void {
-  const { ctx, prepared, motion, eased, copyT } = c;
+  const { ctx, prepared, motion, t, copyT, layer } = c;
   const { width, height } = prepared;
-  const zoom = kenBurnsScale(motion, eased);
+  const resolved = resolveTracks(
+    [{ id: layer.id, kind: layer.kind, tracks: groundMotionTracks(motion) }],
+    [],
+    { t },
+  );
+  const zoom = poseOf(resolved, layer.id).scale;
   const ground = selectGround(prepared, copyT);
   drawGroundImage(ctx, ground.current, width, height, zoom, 1);
   if (ground.incoming !== undefined && ground.mix > 0) {
@@ -1253,6 +1280,11 @@ function paintShade(c: LayerDrawContext): void {
  * template can carry — so reading its `props` here needs no list-hunting the
  * way `logo`/`typeFloor` do in `prepare`. Absent → the constant → the
  * pre-merge bytes (the goldens pin them).
+ *
+ * **K2**: the wipe is the one `MOTION_KINDS` member that stayed a
+ * drawer-local animation rather than becoming a track (`accentWipeFraction`'s
+ * own doc comment says why) — only the per-kind `motion` comparison for accent-wipe
+ * itself moved into the domain.
  */
 function paintAccent(c: LayerDrawContext): void {
   const { ctx, prepared, motion, eased, layer } = c;
@@ -1263,7 +1295,7 @@ function paintAccent(c: LayerDrawContext): void {
     height * mergeGeometry(CREATIVE_GEOMETRY.accentSolidHeightFraction, accentProps.solidHeight);
   const fadeH =
     height * mergeGeometry(CREATIVE_GEOMETRY.accentFadeHeightFraction, accentProps.fadeHeight);
-  const wipe = motion === "accent-wipe" ? eased : 1;
+  const wipe = accentWipeFraction(motion, eased);
   ctx.fillStyle = `rgb(${ar}, ${ag}, ${ab})`;
   if (top) {
     ctx.fillRect(0, 0, width, solidH);
@@ -1291,25 +1323,34 @@ function paintAccent(c: LayerDrawContext): void {
  * layout was resolved once in `prepare` (`prepared.logoAnchorLayout`, C5) and
  * shared with `drawLogo`, so this drawer's only job is painting — text fitting
  * is never repeated on the blit context. `ctx.font` is (re-)stated here per F5a.
+ *
+ * **K2**: the per-kind `motion` comparison for headline-rise no longer lives here — this is the
+ * LEGACY (timeline-less) path, so there is no beat to resolve tracks against;
+ * `resolveTracks`'s own legacy shortcut (`beats: []`) is exactly this
+ * contract, one implicit beat with `local = t` (K-D8), which is what this
+ * drawer's own `t` already is.
  */
 function drawStaticText(c: LayerDrawContext): void {
-  const { ctx, prepared, motion, eased, effectT } = c;
+  const { ctx, prepared, motion, t, effectT, layer } = c;
   const { width, height } = prepared;
   // Layer 4 — campaign copy, wrapped to the inset-reduced width and placed
   // in the inset rectangle per the prepared style's alignment (D10 amendment,
   // T5). Reads the layout `prepare` already resolved (C5).
   const headline = prepared.logoAnchorLayout!;
-  const rise = motion === "headline-rise";
-  const riseDy = rise ? (1 - eased) * 0.12 * height : 0;
-  const riseAlpha = rise ? eased : 1;
+  const resolved = resolveTracks(
+    [{ id: layer.id, kind: layer.kind, tracks: copyMotionTracks(motion, height) }],
+    [],
+    { t },
+  );
+  const pose = resolved.copy[0]!.pose;
   // The text effect (T6) rides the effect clock, not the motion pose clock,
   // and COMPOSES with the motion kind: translations add, alphas multiply.
   // Still/poster callers pass 1 (H4) so a ken-burns-out rest (t = 0) never
   // samples the entrance; clip frames omit it and `t` is used. Undefined
   // effect → the identity pose → exactly the pre-effect bytes (D54).
   const fx = textEffectPose(prepared.textEffect, effectT, prepared.canvas, width, height);
-  const dy = riseDy + fx.dy;
-  const alpha = riseAlpha * fx.alpha;
+  const dy = pose.dy + fx.dy;
+  const alpha = pose.opacity * fx.alpha;
   ctx.fillStyle = "#ffffff";
   ctx.textAlign = prepared.style.align;
   ctx.textBaseline = "alphabetic";

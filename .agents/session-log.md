@@ -5424,3 +5424,65 @@ editing either and re-rolling one other cell silently merges old and new content
 Pre-dates VE5b2 (a copy edit already had this hole); VE5b2 gives it a second, visible symptom via
 scene edits without creating the hole. `VariationPolicy.vo.ts`, `pipeline.ts`, `generate.post.ts`
 untouched — that's lane X33's, not VE5b2's.
+
+## 2026-09-16 — K2: the four motion kinds become tracks (AI session)
+
+K2 in docs/planning/2026-09-10_keyframing.md. Read tracks.ts/easing.ts/resolve-tracks.ts (K1a/K1b,
+merged) first, per the brief. New domain module
+`packages/CampaignOrchestration/src/domain/value-objects/motion-tracks.ts`: `groundMotionTracks`
+expands `ken-burns-in`/`ken-burns-out` into a `pose`-clock `scale` track on the ground layer;
+`copyMotionTracks` expands `headline-rise` into `beat`-clock `opacity`/`dy` tracks on the text layer
+(resolved through `resolveTracks`'s `copy` bucket); `accentWipeFraction` is the fourth kind's own
+decision — the wipe's motion is a clip extent no `TRACK_PROPERTIES` member represents and `accent`
+is not in `TRACKABLE_LAYER_KINDS`, so it stayed `paintAccent`'s own drawer-local animation and only
+its `motion === "accent-wipe"` comparison moved out of the compositor. Wired into
+`NodeCanvasCompositor.ts`: `paintBackground` now resolves a pose instead of calling the removed
+`kenBurnsScale`; `drawStaticText` (legacy path) and `drawSequencedCopy`/`drawBeat` (timeline path)
+read a resolved `Pose` instead of a `rise: boolean`, the latter via one `resolveTracks` call per
+`drawSequencedCopy` invocation against the real `scenes.resolved` beats (same beat pairing
+`beatAt` already computed there). `LayerDrawContext` gained a `t` field (the raw pose clock,
+distinct from the pre-eased `eased` the wipe still reads) so a track-driven drawer can feed
+`resolveTracks`'s own per-stop easing the right clock value.
+
+`premise K2`'s grep now exits 1 (closed) — confirmed after finding my own doc comments briefly
+re-tripped it verbatim (`motion === "headline-rise"`/`"accent-wipe"` in prose), reworded to describe
+without matching the literal pattern.
+
+Floating-point finding, stated rather than hidden: `resolveTracks`'s fixed fold
+(`a + (b - a) * eased`) reassociates the old per-kind formulas (`1 + Z * (1 - eased)`,
+`(1 - eased) * C`) into a different op order — bit-identical at the two stops (t = 0, t = 1, one of
+which is every kind's `restT`) and within a double's last bit at an interior `t` otherwise (empirically
+confirmed with @napi-rs/canvas before committing to the design: 1-ULP-different scale/translate values
+produced byte-identical PNGs in isolation). Proven against the real suites, not assumed: all 48
+motion-golden cells (`NodeCanvasCompositor.motion-goldens.test.ts`), the mp4 byte golden
+(`CanvasFfmpegVideoCompositor.byte-golden.test.ts`, read-only — X31's file), and the HL3 raster suite
+(`NodeCanvasCompositor.layer-order.test.ts`) are unchanged. One pre-existing unit test
+(`NodeCanvasCompositor.motion.test.ts`'s headline-rise `t=0.5` case) asserted the old formula's exact
+bit pattern via `toContainEqual`; changed to `toBeCloseTo` with a comment, since it's a spec I own, not
+a golden — verified red first (the reassociated dy failed the old exact assertion), then fixed.
+
+Tests first (red, shown then restored): the domain module didn't exist, then a deliberately broken
+`groundMotionTracks` failed the per-kind equivalence assertions; the drawn-output test's first attempt
+used a flat-colour background and couldn't show a zoom at all — caught by the test itself, fixed with
+a gradient fixture. New: `motion-tracks.test.ts` (per-kind equivalence, independently computed from
+the old formulas, `toBe` at the stops and `toBeCloseTo` at interior samples, plus `accentWipeFraction`
+coverage), `NodeCanvasCompositor.motion-tracks.test.ts` (drawn-output: two frames per kind, pixels
+differ, plus a no-motion control that doesn't).
+
+`.agents/manifests/k2.json`: 2 mutations, both caught — (a) swap the ken-burns in/out expansion,
+(b) drop the accent wipe's progress to a constant 1. Both ALSO move a motion-golden cell, verified
+empirically before writing the manifest (opposite of K1b's mutations, which found cases the goldens
+couldn't see) — `yarn mutate:verify .agents/manifests/k2.json` reproduces both.
+
+Plan doc: §2's K2 row and §3's DoD bullet marked shipped; `premise K2` retired into prose naming
+`motion-tracks.ts` and the accent-wipe decision; stale header line updated (K3 dispatchable next).
+`yarn plan:verify`: 7 premises hold, no lane stale.
+
+Scoped verification only (house rules — parallel lanes, tight memory): typecheck, lint, lint:arch,
+arch:inventory all clean; `yarn sync:dry` deferred to a clean tree (barrel edit — one export line —
+done by hand, in the existing alphabetical slot). No `yarn test:cov`, no full build. Files touched:
+`motion-tracks.ts` (new), `motion-tracks.test.ts` (new, domain), `NodeCanvasCompositor.motion-tracks.test.ts`
+(new, drawn-output), `NodeCanvasCompositor.ts`, `NodeCanvasCompositor.motion.test.ts` (one assertion),
+`tracks.ts` (one comment), `value-objects/index.ts` (one export line), `docs/planning/2026-09-10_keyframing.md`,
+`.agents/manifests/k2.json`. Did not touch `apps/web/**` (X34), `CanvasFfmpegVideoCompositor.byte-golden.test.ts`
+(X31, read-only), or `tools/wave-status/**` (X35).
