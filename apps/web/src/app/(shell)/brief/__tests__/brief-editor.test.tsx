@@ -150,12 +150,24 @@ const routes = (handlers: {
  * runner while passing locally. That is a real flake, seen once on #99's CI and green on
  * rerun.
  *
+ * The preview rail's own POST to /campaigns/preview-frame (CC1/D141) is the same class
+ * of call for the same reason: it renders a preview frame and persists nothing. Once the
+ * rail widened to every presentation and (almost) every step, it now paints — and fetches
+ * — in scenarios these refusal tests exercise (a Randomized draft whose first product has
+ * an id), so excluding it here is not a special case for one test; every test in this file
+ * that means "nothing was written" needs the same correction.
+ *
  * So these tests assert what they mean — nothing was written — rather than the stricter
  * statement that no request of any kind was issued. Any other non-GET, including a stray
  * /campaigns/generate, still fails.
  */
 const writes = (calls: readonly { url: string; method: string }[]) =>
-  calls.filter((c) => c.method !== "GET" && !c.url.includes("/campaigns/plan"));
+  calls.filter(
+    (c) =>
+      c.method !== "GET" &&
+      !c.url.includes("/campaigns/plan") &&
+      !c.url.includes("/campaigns/preview-frame"),
+  );
 
 const waitForEditorReady = async () =>
   waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).not.toBe(""));
