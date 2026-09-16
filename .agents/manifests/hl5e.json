@@ -29,6 +29,32 @@
         "packages/CampaignOrchestration/src/domain/value-objects/__tests__/html-element.test.ts"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/derive.ts",
+      "before": "      el.style?.fontWeight ?? \"\",\n      el.style?.fontFamily ?? \"\",\n      el.frame,",
+      "after": "      el.frame,",
+      "because": "The HL5e element style reaches the assembled bytes through htmlElementFont, so the memo key must weigh it (Qodo finding, fix round). Drop the two style slots and a style-only edit is a cache hit on the previous reading: the meter and the over-budget warning report bytes the generation path will never produce, and the whole lane's promise — the figure the editor shows is the unit's real weight — silently breaks behind the single-entry cache.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "apps/web/src/components/campaign/__tests__/derive.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/application/use-cases/GenerateCampaignUseCase.use-case.ts",
+      "before": "    for (const [i, layer] of brief.template.layers.entries()) {\n      const elementsProblem = layerElementsProblem(layer.kind, layer.elements);\n      if (elementsProblem !== undefined) {\n        return err(\n          new Error(\n            `Campaign brief field \"template.layers[${i}].elements${elementsProblem.path}\" must ${elementsProblem.must}; got ${JSON.stringify(elementsProblem.value)}.`,\n          ),\n        );\n      }\n    }",
+      "after": "    // (mutant: element styles unchecked — the use case trusts its callers)",
+      "because": "assembleHtml interpolates the element's resolved font into a quoted style attribute with no escaping; the vocabulary allowlist is the only defence, and the use case is the declared defence-in-depth for programmatic callers that bypass parsing (the T5 styleProblem precedent — Qodo finding, fix round). Remove the loop and a forged style.fontFamily carrying \\\"><script reaches the shipped markup from a caller no boundary saw.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "packages/CampaignOrchestration/src/application/use-cases/__tests__/GenerateCampaignUseCase.use-case.test.ts"
+      ],
+      "verdict": "caught"
     }
   ]
 }
