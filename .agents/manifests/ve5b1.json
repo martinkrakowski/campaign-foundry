@@ -46,6 +46,21 @@
         "packages/CreativeGeneration/src/infrastructure/adapters/__tests__/NodeCanvasCompositor.scene-grounds.test.ts"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "packages/CreativeGeneration/src/infrastructure/adapters/NodeCanvasCompositor.ts",
+      "before": "        ? Object.entries(request.backgrounds).filter(([path]) => referencedBackgrounds.has(path))",
+      "after": "        ? Object.entries(request.backgrounds).filter(() => true)",
+      "because": "prepare must decode only the backgrounds an actual beat references, never the whole map (Qodo review: an unreferenced corrupt entry must not abort a render nothing needed it for, and decoding every supplied entry wastes concurrency and memory on bytes nothing draws). Dropping the referenced-set filter decodes every entry unconditionally, caught by the fixture pairing a valid referenced scene with an unreferenced, undecodable one -- @napi-rs/canvas's loadImage throws on the garbage bytes.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CreativeGeneration/src/infrastructure/adapters/__tests__/NodeCanvasCompositor.scene-grounds.test.ts"
+      ],
+      "verdict": "caught"
     }
   ]
 }

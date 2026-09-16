@@ -362,6 +362,21 @@ describe("PreviewCreativeFrameUseCase — the frame and its cache key", () => {
     expect(compositeRequestFingerprint(a, sha256)).not.toBe(compositeRequestFingerprint(request, sha256));
   });
 
+  test("backgrounds (VE5b1 review): an empty map hashes exactly as absent does (VE-D3 renders them identically)", async () => {
+    const d = deps();
+    const result = await new PreviewCreativeFrameUseCase(d).execute(baseBrief(), cell());
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    const request = vi.mocked(d.compositor.compositeAsset).mock.calls[0][0];
+    const empty = { ...request, backgrounds: {} };
+    // Absent and `{}` render the same bytes (VE-D3); a needless cache miss
+    // between them would be its own defect.
+    expect(compositeRequestFingerprint(empty, sha256)).toBe(compositeRequestFingerprint(request, sha256));
+    // Still content-addressed once a scene is actually present.
+    const withScene = { ...request, backgrounds: { "scene.png": new Uint8Array([1, 2, 3]) } };
+    expect(compositeRequestFingerprint(withScene, sha256)).not.toBe(compositeRequestFingerprint(empty, sha256));
+  });
+
   test("two requests that differ only in pixelSize never share a key; omitting it leaves the golden hash put", async () => {
     const d = deps();
     const result = await new PreviewCreativeFrameUseCase(d).execute(baseBrief(), cell());

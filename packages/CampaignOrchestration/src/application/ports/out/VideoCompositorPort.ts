@@ -16,8 +16,10 @@ export interface VideoCompositeRequest extends CompositeRequest {
   /**
    * Per-scene grounds (VE5b1), keyed by the beat's own {@link CopyBeat.background}
    * asset path — a `Record` rather than an index so the adapter maps beat →
-   * bytes with no bookkeeping of its own; decoded once per distinct key in
-   * `prepare`. Absent, or a beat whose `background` has no entry here, means
+   * bytes with no bookkeeping of its own; `prepare` decodes once per distinct
+   * key an actual beat references, never the whole map — an entry no beat
+   * names is neither decoded nor a reason to fail. Absent, or a beat whose
+   * `background` has no entry here, means
    * the creative's own `background` (VE-D3) — the same fallback a `timeline`
    * with no per-beat backgrounds already renders today.
    *

@@ -138,8 +138,13 @@ export function compositeRequestFingerprint(
       // Per-scene grounds (VE5b1): only `VideoCompositeRequest` ever carries
       // this, and only once VE5b2 wires generation — every existing pinned
       // fingerprint predates it and must stay put (mutation: drop this block
-      // and two requests differing only in scene bytes collide).
-      ...(request.backgrounds !== undefined
+      // and two requests differing only in scene bytes collide). Keyed on
+      // "at least one entry", not merely "defined": an empty `backgrounds: {}`
+      // renders byte-identically to an absent one (VE-D3), and joining the
+      // hash on definedness alone would give it a different key from a
+      // request that never carries the field — a needless cache miss for two
+      // requests that draw the same bytes.
+      ...(request.backgrounds !== undefined && Object.keys(request.backgrounds).length > 0
         ? {
             backgrounds: Object.keys(request.backgrounds)
               .sort()

@@ -77,16 +77,22 @@ const DURATION_SEC = 10;
 const BACKGROUNDS = { "scene-a.png": SCENE_A, "scene-b.png": SCENE_B };
 
 describe("NodeCanvasCompositor scene grounds (VE5b1)", () => {
-  test("cut: the ground switches exactly at the resolved beat boundary", async () => {
+  test("cut: the ground switches exactly at the resolved beat boundary, the boundary instant itself belonging to the incoming beat (beatAt's half-open window)", async () => {
     const timeline = twoBeatTimeline("cut");
     const resolved = resolveTimeline(timeline, DURATION_SEC);
     const boundary = resolved[0].endT;
     const req = request({ durationSec: DURATION_SEC, timeline, backgrounds: BACKGROUNDS });
 
     const before = await drawAt(req, boundary - 1e-6, undefined, boundary - 1e-6);
+    // `beatAt` selects a beat by `t < endT`, so beat 0's window is half-open on
+    // the right: `t === boundary` is already past it and lands on beat 1 —
+    // asserted here directly, not just just-before/just-after, so an
+    // implementation that keeps beat 0 exactly at the boundary cannot pass.
+    const atBoundary = await drawAt(req, boundary, undefined, boundary);
     const after = await drawAt(req, boundary + 1e-6, undefined, boundary + 1e-6);
 
     expect(cornerPixel(before)).toEqual([0xff, 0, 0, 0xff]);
+    expect(cornerPixel(atBoundary)).toEqual([0, 0, 0xff, 0xff]);
     expect(cornerPixel(after)).toEqual([0, 0, 0xff, 0xff]);
   });
 
@@ -135,6 +141,27 @@ describe("NodeCanvasCompositor scene grounds (VE5b1)", () => {
 
     const canvas = await drawAt(req, 0.5, undefined, 0.5);
     expect(cornerPixel(canvas)).toEqual([0x33, 0x33, 0x33, 0xff]);
+  });
+
+  test("prepare decodes only the backgrounds a beat actually references — an unreferenced, undecodable entry never aborts the render (review finding)", async () => {
+    const timeline: CopyTimeline = {
+      beats: [{ text: "Scene A", weight: 1, background: "scene-a.png" }],
+      transition: "cut",
+      keyBeat: 1,
+    };
+    // Not a PNG at all — @napi-rs/canvas's loadImage rejects on it. No beat
+    // names "unreferenced.png", so it must never reach loadImage: if prepare()
+    // decoded the whole map instead of only the referenced entries, this
+    // request would reject instead of rendering.
+    const GARBAGE = new Uint8Array([0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07]);
+    const req = request({
+      durationSec: DURATION_SEC,
+      timeline,
+      backgrounds: { "scene-a.png": SCENE_A, "unreferenced.png": GARBAGE },
+    });
+
+    const canvas = await drawAt(req, 0.5, undefined, 0.5);
+    expect(cornerPixel(canvas)).toEqual([0xff, 0, 0, 0xff]);
   });
 
   test("a mixed timeline: the sceneless beat paints the creative's own ground while its neighbour paints its scene", async () => {

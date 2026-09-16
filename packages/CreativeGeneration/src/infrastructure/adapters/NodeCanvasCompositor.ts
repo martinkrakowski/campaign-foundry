@@ -132,11 +132,13 @@ interface PreparedCreative {
   readonly background: Image;
   /**
    * Decoded per-scene grounds (VE5b1), keyed by the same asset path a beat's
-   * `background` names — one decode per distinct key the request supplied,
-   * done here (not per frame/beat) the same way `background` above is decoded
-   * once. `undefined` when the request carried no `backgrounds` at all, which
-   * keeps every timeline-free or scene-free request on exactly today's path:
-   * `paintBackground` never looks here unless both this and `timeline` are set.
+   * `background` names — one decode per distinct key an actual beat
+   * references (never the whole `backgrounds` map: an unreferenced entry is
+   * neither decoded nor a reason to fail), done here (not per frame/beat) the
+   * same way `background` above is decoded once. `undefined` when no beat
+   * references any supplied key, which keeps every timeline-free or
+   * scene-free request on exactly today's path: `paintBackground` never
+   * looks here unless both this and `timeline` are set.
    */
   readonly scenes?: ReadonlyMap<string, Image>;
   readonly logo:
@@ -481,11 +483,23 @@ export class NodeCanvasCompositor implements CompositorPort {
     const insets = normalizeSafeInsets(request.safeInsets, width, height);
 
     const background = await loadImage(Buffer.from(request.background));
-    // Per-scene grounds (VE5b1): decode each distinct supplied ground once, the
-    // same decode `background` above just used — `paintBackground` looks these
-    // up by the active beat's own `background` path (VE-D3's fallback is simply
-    // a key this map does not have).
-    const backgroundEntries = request.backgrounds !== undefined ? Object.entries(request.backgrounds) : [];
+    // Per-scene grounds (VE5b1): decode each distinct ground an actual beat
+    // references, the same decode `background` above just used — never the
+    // whole `backgrounds` map. `request.timeline` (not the not-yet-resolved
+    // beats) already carries every beat's own `background` verbatim, so the
+    // referenced set is known before `resolveBeatLayouts` runs. Decoding an
+    // unreferenced entry would spend concurrency and memory on bytes nothing
+    // draws, and let one corrupt unreferenced entry abort a render nothing
+    // needed it for (review finding). `paintBackground` looks scenes up by the
+    // active beat's own `background` path — VE-D3's fallback is simply a key
+    // this map does not have.
+    const referencedBackgrounds = new Set(
+      (request.timeline?.beats ?? []).flatMap((beat) => (beat.background !== undefined ? [beat.background] : [])),
+    );
+    const backgroundEntries =
+      request.backgrounds !== undefined
+        ? Object.entries(request.backgrounds).filter(([path]) => referencedBackgrounds.has(path))
+        : [];
     const scenes: ReadonlyMap<string, Image> | undefined =
       backgroundEntries.length > 0
         ? new Map(
