@@ -1,7 +1,7 @@
 import { describe, test, expect } from "vitest";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -151,6 +151,70 @@ describe("CanvasFfmpegVideoCompositor byte golden (VG2)", () => {
         };
 
         finishGolden(key, observed, run);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  test.runIf(!process.env.COMPOSITOR_BYTE_GOLDEN_SUBPROCESS && ffmpegOk)(
+    "the compositor under test encodes with COMPOSITOR_FFMPEG_PATH, not the ffmpeg-static default (X31)",
+    { timeout: 90_000 },
+    () => {
+      if (!ffmpegPath) throw new Error("ffmpeg-static binary is not available");
+      const dir = mkdtempSync(join(tmpdir(), "cf-x31-ffmpeg-path-"));
+      try {
+        const marker = join(dir, "encode-invoked");
+        const wrapper = join(dir, "ffmpeg-wrapper");
+        writeFileSync(
+          wrapper,
+          [
+            "#!/bin/sh",
+            'for arg in "$@"; do',
+            '  if [ "$arg" = "libx264" ]; then',
+            '    : > "$COMPOSITOR_X31_ENCODE_MARKER"',
+            "    break",
+            "  fi",
+            "done",
+            'exec "$COMPOSITOR_X31_REAL_FFMPEG" "$@"',
+            "",
+          ].join("\n"),
+          { mode: 0o755 },
+        );
+        chmodSync(wrapper, 0o755);
+
+        const vitestBin = fileURLToPath(
+          new URL("../../../../../../node_modules/vitest/vitest.mjs", import.meta.url),
+        );
+        const target = fileURLToPath(import.meta.url);
+        const result = spawnSync(
+          process.execPath,
+          [
+            vitestBin,
+            "run",
+            "--maxWorkers=2",
+            target,
+            "-t",
+            "canonical timeline's encoded MP4 matches the committed byte golden",
+          ],
+          {
+            env: {
+              ...process.env,
+              COMPOSITOR_FFMPEG_PATH: wrapper,
+              COMPOSITOR_X31_ENCODE_MARKER: marker,
+              COMPOSITOR_X31_REAL_FFMPEG: ffmpegPath,
+              COMPOSITOR_BYTE_GOLDEN_SUBPROCESS: "1",
+              RECORD_COMPOSITOR_GOLDENS: "0",
+            },
+            encoding: "utf8",
+            timeout: 75_000,
+          },
+        );
+        expect(result.status, result.stdout + (result.stderr ?? "")).toBe(0);
+        expect(
+          existsSync(marker),
+          "encode must spawn COMPOSITOR_FFMPEG_PATH (the wrapper), not the adapter default",
+        ).toBe(true);
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }
