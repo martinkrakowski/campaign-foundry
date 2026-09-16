@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, vi } from "vitest";
+import { describe, test, expect, beforeAll, beforeEach, vi } from "vitest";
 import { Profiler } from "react";
 import * as messages from "@/components/campaign/messages";
 import { screen, waitFor, within, fireEvent, act } from "@testing-library/react";
@@ -2089,7 +2089,7 @@ describe("BriefPage — capabilities and motion", () => {
    * value). Three things could differ if that shape were wrong, none of them
    * visible in the saved draft alone: the draft itself, which sections read as
    * "touched" (gates whether an error shows before Save is attempted), and
-   * which field is left focused. This test pins all three:
+   * which field is left focused. The test below pins all three:
    *
    * (a) the saved brief — `toBrief` never sees intermediate frames or key
    *     order, only the value each field settles on, so the POST body is the
@@ -2108,79 +2108,105 @@ describe("BriefPage — capabilities and motion", () => {
    *     since the two paths render separate trees), must be the last field
    *     typing leaves focused: the second product's Logo Path.
    *
-   * `typeItByHand` below is the original, unconverted character-by-character
-   * sequence, kept here only as the reference this test pins the fast path
-   * against — not reused anywhere else in this file. Mutating the fast path to
-   * skip a field, write a different value, or drop the click/focus transition
-   * must fail this test (`.agents/manifests/x34.json`).
+   * The typed path — `typeFillValidDraftByHand`, the original, unconverted
+   * character-by-character sequence — is the reference these three are pinned
+   * against, and nothing else in this file reuses it. It used to run a second
+   * time, live, inside the same test as the fast path, which made this the
+   * single most expensive test in the file: on a loaded CI runner (the regime
+   * X30/X32 measured and this lane fixed for the other four historically slow
+   * tests) it timed out at 5000ms even though those four now pass — see §36
+   * (X34) in docs/planning/2026-09-10_the-unowned-gaps.md. `beforeAll` below
+   * builds that reference exactly once instead: hooks are gated by
+   * `hookTimeout` (10000ms by default, double `testTimeout`), which is where a
+   * one-time, doubled-up setup cost belongs — not inside the 5000ms budget
+   * every individual test shares. The typed path is still what produces the
+   * reference (never a hand-written expectation), and the actual `test()`
+   * below now pays only the fast path's cost, the same as every other test
+   * that calls `fillValidDraft`.
    */
+  const typeFillValidDraftByHand = async (user: ReturnType<typeof userEvent.setup>, id: string) => {
+    await user.type(screen.getByLabelText("Campaign Name"), id);
+    await user.type(screen.getByLabelText("Target Region"), "DE");
+    await user.type(screen.getByLabelText("Target Audience"), "a");
+    await user.type(screen.getByLabelText("Headline"), "Hi");
+    let names = screen.getAllByLabelText("Name");
+    if (names.length < 2) {
+      await user.click(screen.getByRole("button", { name: "Add product" }));
+      names = screen.getAllByLabelText("Name");
+    }
+    await user.type(names[0], "A");
+    await user.type(names[1], "B");
+    const logos = screen
+      .getAllByLabelText("Logo Path")
+      .filter((el) => el.tagName === "INPUT" && el.getAttribute("type") !== "file");
+    await user.type(logos[0], "a.png");
+    await user.type(logos[1], "b.png");
+  };
+
+  const observeFillValidDraft = async (
+    fill: (user: ReturnType<typeof userEvent.setup>) => Promise<void>,
+  ) => {
+    // Isolation this render needs, whether it runs from `beforeAll` (before
+    // the suite's own `beforeEach` has ever fired) or from the `test()` below
+    // (after it has) — explicit here rather than relied on from either side.
+    localStorage.clear();
+    localStorage.setItem("cf:brief-picked", "1");
+    localStorage.setItem("cf:presentation", "everything");
+    const user = userEvent.setup();
+    const calls = routes({});
+    const view = renderWithRun(<NewEditor />);
+    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""));
+    await fill(user);
+
+    // (c) — captured before anything else moves focus (Save's own click included).
+    const focusedFieldKey =
+      (document.activeElement as HTMLElement | null)?.closest("[data-field-key]")?.getAttribute("data-field-key") ??
+      null;
+
+    // (a)
+    await saveVia(user, "Save");
+    const post = await waitFor(() => {
+      const call = calls.find((c) => c.method === "POST");
+      expect(call).toBeTruthy();
+      return call!;
+    });
+
+    // (b) — the hex text input, not the swatch buttons or the sr-only colour
+    // picker: a plain `fireEvent.change` on it clicks and blurs nothing, so
+    // this cannot mark `touched` or `touchedSections` itself. Whatever makes
+    // the resulting error visible was already true beforehand.
+    const colorInputs = screen.getAllByLabelText(messages.productColorLabel);
+    fireEvent.change(colorInputs[0], { target: { value: "not-a-color" } });
+    const productsSectionWasTouched = screen.queryByText(messages.productColor) !== null;
+
+    view.unmount();
+    return { body: post.body, focusedFieldKey, productsSectionWasTouched };
+  };
+
+  let typedReference: Awaited<ReturnType<typeof observeFillValidDraft>>;
+
+  beforeAll(async () => {
+    // The suite's own `beforeEach` (this describe) and the global one
+    // (`vitest.setup.ts`, which spies `fetch` and seeds a benign default
+    // implementation) have not run yet — `beforeAll` fires once, before the
+    // first test's `beforeEach` chain — so `fetch` is not a spy yet here.
+    // `routes()` inside `observeFillValidDraft` calls `.mockImplementation()`
+    // on it and needs it to already be one.
+    vi.spyOn(globalThis, "fetch");
+    typedReference = await observeFillValidDraft((user) => typeFillValidDraftByHand(user, "fresh"));
+    // Put back what the global `afterEach` would have: nothing here should
+    // leak into the first real test's own `beforeEach`/`routes()` setup.
+    vi.restoreAllMocks();
+    localStorage.clear();
+  });
+
   test("fillValidDraft's fast path produces the same draft, touched sections, and focus the typed path produces (X34)", async () => {
-    const typeItByHand = async (user: ReturnType<typeof userEvent.setup>, id: string) => {
-      await user.type(screen.getByLabelText("Campaign Name"), id);
-      await user.type(screen.getByLabelText("Target Region"), "DE");
-      await user.type(screen.getByLabelText("Target Audience"), "a");
-      await user.type(screen.getByLabelText("Headline"), "Hi");
-      let names = screen.getAllByLabelText("Name");
-      if (names.length < 2) {
-        await user.click(screen.getByRole("button", { name: "Add product" }));
-        names = screen.getAllByLabelText("Name");
-      }
-      await user.type(names[0], "A");
-      await user.type(names[1], "B");
-      const logos = screen
-        .getAllByLabelText("Logo Path")
-        .filter((el) => el.tagName === "INPUT" && el.getAttribute("type") !== "file");
-      await user.type(logos[0], "a.png");
-      await user.type(logos[1], "b.png");
-    };
+    const fast = await observeFillValidDraft((user) => fillValidDraft(user, "fresh"));
 
-    const observe = async (fill: (user: ReturnType<typeof userEvent.setup>) => Promise<void>) => {
-      // Two renders share this one test — cleanup only runs between separate
-      // `test()`s, not mid-test — so make the isolation the suite's beforeEach
-      // already gives every other test explicit here too, rather than relying
-      // on the first render's autosave/localStorage state happening not to
-      // collide with the second's.
-      localStorage.clear();
-      localStorage.setItem("cf:brief-picked", "1");
-      localStorage.setItem("cf:presentation", "everything");
-      const user = userEvent.setup();
-      const calls = routes({});
-      const view = renderWithRun(<NewEditor />);
-      await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""));
-      await fill(user);
-
-      // (c) — captured before anything else moves focus (Save's own click included).
-      const focusedFieldKey =
-        (document.activeElement as HTMLElement | null)?.closest("[data-field-key]")?.getAttribute("data-field-key") ??
-        null;
-
-      // (a)
-      await saveVia(user, "Save");
-      const post = await waitFor(() => {
-        const call = calls.find((c) => c.method === "POST");
-        expect(call).toBeTruthy();
-        return call!;
-      });
-
-      // (b) — the hex text input, not the swatch buttons or the sr-only colour
-      // picker: a plain `fireEvent.change` on it clicks and blurs nothing, so
-      // this cannot mark `touched` or `touchedSections` itself. Whatever makes
-      // the resulting error visible was already true beforehand.
-      const colorInputs = screen.getAllByLabelText(messages.productColorLabel);
-      fireEvent.change(colorInputs[0], { target: { value: "not-a-color" } });
-      const productsSectionWasTouched = screen.queryByText(messages.productColor) !== null;
-
-      view.unmount();
-      return { body: post.body, focusedFieldKey, productsSectionWasTouched };
-    };
-
-    const typed = await observe((user) => typeItByHand(user, "fresh"));
-    const fast = await observe((user) => fillValidDraft(user, "fresh"));
-
-    expect(fast.body).toEqual(typed.body);
-    expect(fast.focusedFieldKey).toBe(typed.focusedFieldKey);
+    expect(fast.body).toEqual(typedReference.body);
+    expect(fast.focusedFieldKey).toBe(typedReference.focusedFieldKey);
     expect(fast.focusedFieldKey).toBe("product-1-logo");
-    expect(fast.productsSectionWasTouched).toBe(typed.productsSectionWasTouched);
+    expect(fast.productsSectionWasTouched).toBe(typedReference.productsSectionWasTouched);
     expect(fast.productsSectionWasTouched).toBe(true);
   });
 

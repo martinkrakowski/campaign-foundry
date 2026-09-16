@@ -1344,13 +1344,43 @@ async-wait-bound and not CPU-bound) is the wrong tool for predicting a synchrono
 test's slowdown under real CPU contention from concurrent test-file workers — the thing that
 actually starves these specific tests scales however many CPU-bound workers happen to be scheduled
 alongside this file, not by a fixed ratio applied to this file's own local time. X30 and X32 both
-recorded the same limitation before shipping real, measured fixes anyway; this lane does the same.
-**So: not confirmed cleared.** This PR ships a real, measured reduction in the editor's own rendering
-cost (X30, X32) and in the tests' own setup cost (X34) — 57% fewer commits per `fillValidDraft` call,
-21–28% less wall-clock on the three tests that call it — but whether that reduction is *enough*
-margin against a loaded CI runner is a question only a CI round-trip on this branch can answer, the
-same honest limit X30 and X32 both hit. If CI still times these tests out after this PR merges, the
-remaining unowned cost is likely the "one gesture, one commit is not achievable for a keyboard
-gesture into a controlled text field" floor X32 already named (§34) — at that point the next lane's
-option is `testTimeout` itself or splitting the file, neither of which this brief's rules permit this
-lane to reach for.
+recorded the same limitation before shipping real, measured fixes anyway; this lane does the same. At
+the time this PR merged, whether the reduction was *enough* margin against a loaded CI runner was a
+question only a CI round-trip could answer — the same honest limit X30 and X32 both hit.
+
+**The CI round-trip, and what it found.** X34 merged (`8bbca3e9`). The next lane to touch this file
+(VE3b1) rebased onto it and its CI ran on the same loaded regime that failed every previous attempt —
+an 11-minute pull-request run. Result: **the four tests X30, X32, and X34 were all written to
+rescue — "a motion brief authored from scratch saves with its motion policy," "motion without a kind
+or a duration blocks Save," "a motion brief on a host without motion stays read-only," and "Save
+refuses a click destination the API would refuse" — all passed.** Three lanes' worth of measured,
+sequential fixes (X30's `useMemo` derivation, X32's `handleMainBlur` guard, X34's setup-typing
+conversion) together closed a CI-only margin problem that no single one of them closed alone, and
+that local timing could never confirm in advance — exactly the limitation each lane recorded honestly
+rather than papering over.
+
+**One test failed on that same run, and it was this lane's own.** `"fillValidDraft's fast path
+produces the same draft, touched sections, and focus the typed path produces (X34)"` timed out at
+5000ms. Not a product regression: this test deliberately drives *both* paths — the original
+character-by-character typed sequence as the reference, then the fast path to compare against it — so
+it pays the typed path's full cost (comparable to what the four rescued tests used to cost before this
+lane) **plus** the fast path's cost, in the same 5000ms budget every other test gets one of those for.
+That made it the single most expensive test in the file, and on a loaded runner it was the only one
+left without margin — the equivalence test needed its own treatment, separate from the product fix it
+was written to pin.
+
+**Treatment applied: split the cost across `testTimeout` and `hookTimeout`, not inside one `test()`.**
+The typed path moved into a `beforeAll` (`typeFillValidDraftByHand` run once via a new
+`observeFillValidDraft` helper, both hoisted out of the test body), which is gated by Vitest's
+`hookTimeout` (10000ms by default — double `testTimeout` — and this repo overrides neither). The
+`test()` itself now runs only the fast path and compares its three observations (saved draft, touched
+sections, focus) against the `beforeAll`-built reference — the same three assertions, the same typed
+path as the source of truth (never a hand-written expectation), just paid for once per file instead of
+twice per test. This was chosen over option 2 (a per-test `testTimeout` override) because it got the
+test under budget without touching any timeout at all: measured locally, the test's own body dropped
+to ~247ms (three-run median), in line with every other `fillValidDraft`-based test in the file, while
+the `beforeAll`'s one-time typed-path cost (~600ms locally) sits comfortably inside `hookTimeout`'s
+10000ms even under the ≈2.3× loaded-runner multiplier (§33). `.agents/manifests/x34.json`'s three
+mutations were re-verified against the restructured test (`yarn mutate:verify`) and still reproduce
+unchanged — the mutations target `fillValidDraft`/`setField`, not the test's internal shape, so moving
+where the typed reference is built did not change what any of them pin.
