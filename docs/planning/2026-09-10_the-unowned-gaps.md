@@ -1496,3 +1496,54 @@ spawn the encode ran on, without assuming a POSIX shell. Mutation manifest
 `.agents/manifests/x31.json`: reverting the constructor argument at that construction drops the
 encode back onto `ffmpeg-static`, the recorder captures the default path, and the identity test
 fails.
+recorded the same limitation before shipping real, measured fixes anyway; this lane does the same.
+**So: not confirmed cleared.** This PR ships a real, measured reduction in the editor's own rendering
+cost (X30, X32) and in the tests' own setup cost (X34) — 57% fewer commits per `fillValidDraft` call,
+21–28% less wall-clock on the three tests that call it — but whether that reduction is *enough*
+margin against a loaded CI runner is a question only a CI round-trip on this branch can answer, the
+same honest limit X30 and X32 both hit. If CI still times these tests out after this PR merges, the
+remaining unowned cost is likely the "one gesture, one commit is not achievable for a keyboard
+gesture into a controlled text field" floor X32 already named (§34) — at that point the next lane's
+option is `testTimeout` itself or splitting the file, neither of which this brief's rules permit this
+lane to reach for.
+---
+
+## 38. The wave status page invented lanes from stray logs and accused silence (X35)
+
+**Evidence.** An owner opened the page during a session with eight lanes run and eight PRs merged. It rendered
+**113 lanes, 0 alive, 102 vanished, "— PRs open", "— PRs merged"** — every number wrong about the work and right about
+its inputs. The wave log root (`/tmp/wave1`) held 442 files, most of them the orchestrator's repeated gate logs
+(seven files per gate run: `gate-x30-0143.log`, `gate-ve5b1c-build.log`, `gate-c4-lint:arch.log`, ...) plus fix-runner
+transcripts (`s2fix.log`, `q-x14-1.log`, `hl5e-runner.log`, `x16-tc.log`), and the collector turned any `.log` it
+listed into a lane. The events file held 15 events, newest three days old: 12 `started`, 3 `failed`, no
+completions — only `dispatch-lane.sh` emits, and lanes launched by a subagent or an operator's own runner emit
+nothing. With no PR to join, `laneState`'s `derived.pr === undefined` arm called all of it `vanished`.
+
+**Consequence.** A status page that cries wolf trains its reader to ignore it — which is worse than no page,
+because it converts the one honest signal (a lane genuinely stuck) into background noise in a list of hundreds
+of rows that were never lanes. `vanished` had become the default for silence: an accusation the inputs cannot
+pay for.
+
+**Fix — shipped.** Three changes, all inside `tools/wave-status`, none of which touches the emitter (teaching
+every runner to emit is a separate operator change). (1) `collect.ts` requires evidence before a row exists:
+a lane is named by an event, or its log's name follows the lane/branch convention — the name
+`dispatch-lane.sh` writes and the branch tail the PR join reads; a log whose name marks it as a derived run
+(a pipeline-family prefix, an appended run kind, or characters no git branch can contain) is an artefact
+about a lane, not a lane, and the rule is stated in the source so a future artefact family is ignored by it
+rather than blacklisted after another lie. (2) `lane-state.ts` (mirrored by the page)
+splits silence from disappearance: a lane whose last words were `started`, with no EXIT and no PR, is
+`unknown` — the word the vocabulary already owns for "no verdict"; `vanished` keeps its bad meaning (a run
+that ended, or a terminal claim with no PR to show). No state word was added, so no page copy or rollup had
+to grow one. (3) Age became visible: `laneEvidenceMs` is the lane's newest dated fact (log write or event),
+a day older than `pastWaveThresholdMs` and the row says "past wave" and the header's age fades out of the
+live register; waves that only ever emitted events now date themselves from those events instead of claiming
+"no dated activity" forever.
+
+Two findings from shipping it. First, the page tests that pinned the rollup word for a just-dispatched,
+not-yet-alive lane ("1 lane · 1 vanished") encoded the old silence-default; their invariant — the header
+counts what the rows say — is preserved with the new word, and the tests were updated to assert it. Second,
+the remaining half: until every runner emits, a directly-launched lane whose log name matches no branch and
+whose events nobody wrote stays invisible to the page. Invisible is honest where a phantom row was not, but
+it is still a gap, and closing it is the other change.
+
+**X35 — shipped in this PR.**
