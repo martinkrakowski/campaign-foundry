@@ -1,7 +1,7 @@
 import { describe, test, expect, afterEach } from "vitest";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { formatEvent, appendEvent } from "../emit.js";
@@ -286,12 +286,21 @@ describe("scripts/wave-event.sh agrees with formatEvent byte-for-byte", () => {
     );
   });
 
+  // X38 (plan §41, second finding): this test proves the script's *default*
+  // derivation — no LOGDIR, no WAVE_LOG_ROOT — which the script reads as
+  // `${HOME:-/tmp}/.waves`. Exercising that path used to mean the real
+  // `~/.waves`, the operator's own monitor, and left a `wave-WTest…`
+  // directory there whenever the test crashed or the platform reordered
+  // cleanup ahead of the read. `HOME` is itself the input under test, so
+  // pointing it at a temp directory keeps the default-fallback behaviour
+  // honest while giving the write nowhere but a directory `tempDir()` already
+  // registers for teardown.
   test("standalone invocation with default logdir derived from wave name", () => {
+    const fakeHome = tempDir();
     const waveName = `WTest${Date.now()}`;
-    const expectedDir = join(homedir(), ".waves", `wave-${waveName}`);
-    dirs.push(expectedDir);
+    const expectedDir = join(fakeHome, ".waves", `wave-${waveName}`);
     execFileSync("sh", [waveEventSh, waveName, "l1", "dispatch", "started"], {
-      env: { ...process.env, LOGDIR: "" },
+      env: { ...process.env, LOGDIR: "", WAVE_LOG_ROOT: "", HOME: fakeHome },
     });
     expect(existsSync(join(expectedDir, "events.jsonl"))).toBe(true);
     const written = readFileSync(join(expectedDir, "events.jsonl"), "utf8");
