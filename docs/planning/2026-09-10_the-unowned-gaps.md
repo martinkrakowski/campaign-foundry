@@ -992,3 +992,33 @@ test catches it (caught, reproduced by `yarn mutate:verify`). No second mutation
 brief's suggested "drop a slot from the html weight key" mutation presumes the fix touches
 `htmlWeightKey`, and X30 never does — manufacturing one to fill the slot would be dishonest about
 what this PR actually changed.
+
+**A coverage drop this fix surfaced, not caused.** The full gate flagged `LogoField.tsx` losing
+branch coverage on `invalid ? "border-error" : "border-border"` inside the filled-tile block.
+Grepped every writer of the `product-N-logo` error key across `apps/web/src`: exactly one —
+`validateProducts` (`validate.ts:265`), gated strictly by `product.logoPath.trim() === ""`, message
+text "No logo yet — upload one with the Logo button." `BriefEditor.tsx` adopts no server/API
+refusal into `errors` (no `setErrors` call exists anywhere in the file post-X30; `errors` is the one
+`useMemo` over `validateState`), and no other render site of `ProductsSection` passes a different
+`errors` object. So `hasLogo` (a non-empty path) and `invalid` (an empty path) **cannot coexist in
+any settled state** — old code or new. Reproduced empirically by instrumenting `LogoField` and typing
+into an initially-empty, already-touched logo field on both refs: `origin/main` (the old
+`useState`+effect mirror) hit `{value: "a", invalid: true}` every time — a real, reproducible
+combination — while this branch never does. Mechanism: with `errors` one commit stale relative to
+`state`, typing the first character into an empty field produced one render where `state.logoPath`
+was already non-empty but `errors` still carried the just-stale "required" error — a false red
+border flashing on a value the user had just typed correctly, for exactly one paint, on every such
+keystroke throughout the suite (this is what fed the branch's coverage on `main`). X30's synchronous
+`useMemo` derivation removes that stale frame, which removes the flicker, which removes the only
+thing that ever executed this branch.
+
+This is not a lost refusal — the "logo required" error still shows, and is still fully tested,
+whenever the path really is empty. The branch was unreachable through genuine application behaviour,
+covered only by the accident this lane fixes. Rather than carry a documented exception (a coverage
+gate that quietly excuses a branch nobody can reach is the same defect this repo calls out
+elsewhere), the branch is removed: `LogoField.tsx`'s filled-tile border is now unconditionally
+`border-border`, with a comment at the site naming the invariant (the sole logo rule is "path is
+empty") and stating that if a future rule can flag a non-empty path — a missing asset, a bad
+extension, a server refusal — the conditional returns **with a test that reaches it through real
+application behaviour**, not a hand-constructed prop. `invalid` stays live everywhere else it is
+still reachable: the empty-tile block and the hidden mirror input's `aria-invalid`.

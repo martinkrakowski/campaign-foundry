@@ -115,7 +115,20 @@ export function LogoField({
         <div
           className={cn(
             "flex items-center justify-between rounded-lg border bg-surface p-3 transition-colors",
-            invalid ? "border-error" : "border-border",
+            // X30: `invalid` cannot be true here. The only logo rule
+            // (validateProducts, validate.ts) is "logoPath is empty" — the sole
+            // writer of `product-N-logo` in the whole editor — so a non-empty
+            // `value` (hasLogo) and `invalid` never coexist in any settled state.
+            // They used to appear to coexist for one commit while typing the
+            // first character into an empty field, because `errors` lagged one
+            // render behind `state`; X30 made validation synchronous with state,
+            // which removed that stale-error flash (a false red border on a
+            // value the user had just typed correctly) along with the branch
+            // that rendered it. If a future rule can flag a non-empty path (a
+            // missing asset, a bad extension, a server refusal), restore the
+            // conditional here — with a test that reaches it through real
+            // application behaviour, not a hand-constructed prop.
+            "border-border",
           )}
         >
           <div className="flex items-center gap-3 min-w-0">

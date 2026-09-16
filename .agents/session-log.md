@@ -5309,3 +5309,19 @@ pre-fix effect code, green at ≤2 after). §33 (X30) of
 docs/planning/2026-09-10_the-unowned-gaps.md ships in this PR; 1/1 mutation caught
 (.agents/manifests/x30.json) — no second mutation recorded, since the fix never
 touches `htmlWeightKey`.
+
+- 2026-09-15 X30 fix round (coordinator review): full gate flagged a branch-coverage
+  drop on LogoField.tsx (`invalid ? "border-error" : "border-border"` in the
+  filled-tile block). Grepped every writer of `product-N-logo` in apps/web/src:
+  exactly one (validateProducts, gated on an empty logoPath), and BriefEditor.tsx
+  adopts no server error into `errors` post-X30 — so `hasLogo && invalid` cannot
+  occur in any settled state. Reproduced empirically on both refs: origin/main hit
+  it every time (a one-commit-stale `errors` producing a false invalid-border flash
+  on a logo path the user had just typed correctly); this branch never does, because
+  X30 made `errors` synchronous with `state`. Removed the unreachable ternary in
+  LogoField.tsx (border is now unconditional there), with a comment naming the
+  invariant and how it would need to change. `invalid` stays live at the empty-tile
+  block and the hidden input's aria-invalid. §33 (X30) of
+  docs/planning/2026-09-10_the-unowned-gaps.md records the grep, the reproduction,
+  and why this is the removal of a dead branch rather than a documented exception.
+  195/195 touched tests green, typecheck/lint clean.
