@@ -945,6 +945,70 @@ describe("derive.ts", () => {
         expect(assembleSpy.mock.calls.length).toBeGreaterThan(0);
       });
 
+      // HL5e fix round (Qodo): the element's style override reaches the
+      // assembled bytes through `htmlElementFont`, but the memo key did not
+      // weigh it — a style-only edit returned the previous reading from the
+      // single-entry cache, so the meter disagreed with what generation would
+      // produce. Both fields get their own test; each is a byte-count change
+      // the unstyled primed reading cannot coincide with.
+
+      const draftWith = (elements: readonly HtmlElement[]): EditorState =>
+        meterState({
+          template: htmlTemplate([{ id: "html", kind: "html", elements }]),
+        });
+
+      test("changing only an element's fontWeight re-weighs", () => {
+        const plain = text("memo-element-weight");
+        const styled: HtmlElement = { ...plain, style: { fontWeight: 400 } };
+        const primed = htmlWeightReading(draftWith([plain]));
+        const expected = assembleHtml({
+          elements: [styled],
+          canvas: { size: "300x250" },
+          brandColor: "#1473E6",
+          style: {},
+        }).byteLength;
+        // Sanity: the override must actually move the byte count (400 vs the
+        // default tone's "bold"), or a stale reading would pass by coincidence.
+        expect(primed?.bytes).not.toBe(expected);
+        expect(htmlWeightReading(draftWith([styled]))?.bytes).toBe(expected);
+      });
+
+      test("changing only an element's fontFamily re-weighs", () => {
+        const plain = text("memo-element-family");
+        const styled: HtmlElement = { ...plain, style: { fontFamily: "Lora" } };
+        const primed = htmlWeightReading(draftWith([plain]));
+        const expected = assembleHtml({
+          elements: [styled],
+          canvas: { size: "300x250" },
+          brandColor: "#1473E6",
+          style: {},
+        }).byteLength;
+        // Sanity: "Lora" vs the default "Inter" must differ in length, or this
+        // test cannot see the stale reading.
+        expect(primed?.bytes).not.toBe(expected);
+        expect(htmlWeightReading(draftWith([styled]))?.bytes).toBe(expected);
+      });
+
+      test("an empty style block keys the same as an absent one", () => {
+        // The assembler resolves `style: {}` exactly like no block at all
+        // (`htmlElementFont` reads `style?.fontWeight !== undefined` / `??`),
+        // so re-assembling for the no-op edit would be pure churn — and the
+        // key must not become a SECOND, stricter vocabulary than the domain's.
+        const plain = text("memo-empty-style");
+        htmlWeightReading(draftWith([plain]));
+        assembleSpy.mockClear();
+        const reading = htmlWeightReading(draftWith([{ ...plain, style: {} }]));
+        expect(assembleSpy).not.toHaveBeenCalled();
+        expect(reading?.bytes).toBe(
+          assembleHtml({
+            elements: [plain],
+            canvas: { size: "300x250" },
+            brandColor: "#1473E6",
+            style: {},
+          }).byteLength,
+        );
+      });
+
       test("a missing or non-hex brand color yields no reading and never calls the assembler", () => {
         // The one failure this derivation expects is checked up front, so the
         // assembler is never asked to throw it — no reading, no swallow.

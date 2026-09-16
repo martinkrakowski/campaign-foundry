@@ -613,6 +613,80 @@ describe("GenerateCampaignUseCase — display sizes (A4b)", () => {
     expect(d.imageGenerator.resolveBackground).not.toHaveBeenCalled();
     expect(d.compositor.compositeAsset).not.toHaveBeenCalled();
   });
+
+  // HL5e fix round (Qodo): `assembleHtml` interpolates an element's resolved
+  // font straight into a quoted style attribute. The API boundary allowlists
+  // it via `layerElementsProblem`; the use case must too, for the same
+  // programmatic callers `styleProblem` above already covers.
+  const htmlTemplateWith = (
+    elementStyle: Record<string, unknown>,
+  ): BriefTemplate =>
+    ({
+      ...CANONICAL_TEMPLATES["image-html"],
+      id: "canonical-image-html",
+      layers: [
+        { id: "image", kind: "image" },
+        {
+          id: "html",
+          kind: "html",
+          elements: [
+            {
+              kind: "text",
+              text: "Hello",
+              style: elementStyle,
+              frame: { x: 0.1, y: 0.2, w: 0.5, h: 0.3, anchor: "middle" },
+            },
+          ],
+        },
+        { id: "logo", kind: "logo" },
+      ],
+    }) as BriefTemplate;
+
+  test("refuses a programmatic html element whose style.fontFamily carries markup, before touching any port", async () => {
+    const d = deps();
+    // A programmatic brief that bypassed parsing — the exact caller this
+    // defense-in-depth check exists for — so the style is deliberately forged.
+    const result = await new GenerateCampaignUseCase(d).execute(
+      baseBrief({
+        template: htmlTemplateWith({ fontFamily: '"><script>alert(1)</script>' }),
+        clickDestination: "https://example.com/landing",
+      }),
+    );
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.message).toMatch(
+        /Campaign brief field "template\.layers\[1\]\.elements\[0\]\.style\.fontFamily" must be one of "Inter", "Lora"/,
+      );
+    }
+    expect(d.imageGenerator.resolveBackground).not.toHaveBeenCalled();
+    expect(d.compositor.compositeAsset).not.toHaveBeenCalled();
+    // Nothing reached the assembler: no html markup was ever exported.
+    const exporter = d.exporter as RecordingExporter;
+    expect(exporter.saved.some((s) => s.path.endsWith("index.html"))).toBe(false);
+  });
+
+  test("refuses a programmatic html element whose style.fontWeight is off-vocabulary", async () => {
+    const d = deps();
+    const result = await new GenerateCampaignUseCase(d).execute(
+      baseBrief({ template: htmlTemplateWith({ fontWeight: 900 }) }),
+    );
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.message).toMatch(
+        /template\.layers\[1\]\.elements\[0\]\.style\.fontWeight" must be one of 400, 700; got 900/,
+      );
+    }
+    expect(d.compositor.compositeAsset).not.toHaveBeenCalled();
+  });
+
+  test("a valid element style override still generates", async () => {
+    const d = deps();
+    const result = await new GenerateCampaignUseCase(d).execute(
+      baseBrief({ template: htmlTemplateWith({ fontFamily: "Lora", fontWeight: 400 }) }),
+    );
+    expect(result.success).toBe(true);
+    expect(d.compositor.compositeAsset).toHaveBeenCalled();
+  });
 });
 
 describe("GenerateCampaignUseCase — selective regeneration", () => {
