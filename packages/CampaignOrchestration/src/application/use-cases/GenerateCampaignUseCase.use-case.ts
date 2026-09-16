@@ -571,22 +571,31 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
       });
     }
 
-    // VE5b2: resolve every distinct scene the timeline's beats name ONCE,
-    // before any cell renders — never per cell, since every motion cell in a
-    // run shares this SAME brief-level timeline (`CopyTimeline` lives on the
-    // brief, not the variant). Every motion-capable platform packages exactly
-    // one canvas ratio (`PlatformProfile.vo.ts`), so the first motion cell's
-    // ratio cover-fits every scene correctly for the whole run. With no
+    // VE5b2: resolve every distinct scene the timeline's beats name ONCE PER
+    // DISTINCT MOTION RATIO, before any cell renders — never per cell, since
+    // every motion cell in a run shares this SAME brief-level timeline
+    // (`CopyTimeline` lives on the brief, not the variant), but the cover-fit
+    // depends on the canvas a cell draws at. No assumption that every motion
+    // cell shares one ratio: every motion-capable platform packages exactly
+    // one canvas ratio today (`PlatformProfile.vo.ts`), but nothing pins that
+    // — a future portrait placement beside today's square one would silently
+    // cover-fit every scene to the wrong ratio if this only ever resolved
+    // once. Cells that share a ratio still resolve it exactly once. With no
     // motion cell in this plan nothing would ever draw a scene, so resolution
     // is skipped entirely — and a re-roll that targets only static cells
     // never touches a scene its own targets don't reach either, since `cells`
     // is already narrowed to the targeted set above.
-    const motionRatio = cells.find((cell) => cell.variant.motion !== undefined)?.ratio;
-    let backgrounds: Readonly<Record<string, Uint8Array>> | undefined;
-    if (motionRatio !== undefined) {
-      const resolved = await resolveTimelineBackgrounds(timeline, motionRatio, this.deps.sceneAssets);
+    const motionRatios = new Map<string, AspectRatio>();
+    for (const cell of cells) {
+      if (cell.variant.motion !== undefined && !motionRatios.has(cell.ratio.value)) {
+        motionRatios.set(cell.ratio.value, cell.ratio);
+      }
+    }
+    const backgroundsByRatio = new Map<string, Readonly<Record<string, Uint8Array>> | undefined>();
+    for (const ratio of motionRatios.values()) {
+      const resolved = await resolveTimelineBackgrounds(timeline, ratio, this.deps.sceneAssets);
       if (!resolved.success) return resolved;
-      backgrounds = resolved.value;
+      backgroundsByRatio.set(ratio.value, resolved.value);
     }
 
     const cellResults = await mapWithConcurrency(cells, MAX_CONCURRENT_BACKGROUNDS, (cell) =>
@@ -605,7 +614,7 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
         brief.template,
         brief.clickDestination,
         brief.audio?.rights,
-        backgrounds,
+        backgroundsByRatio.get(cell.ratio.value),
       ),
     );
 

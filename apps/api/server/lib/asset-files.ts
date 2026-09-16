@@ -139,7 +139,6 @@ export function rewriteAssetPaths(
  * and every `copy.timeline.beats[].background` (VE5b2).
  */
 export function extractSourceAssetBriefIds(brief: CampaignBrief, targetBriefId: string): string[] {
-  if (!brief.products || !Array.isArray(brief.products)) return [];
   const fromIds = new Set<string>();
   const addSource = (p: string): void => {
     const match = /^assets\/inputs\/([^/]+)\/.+$/.exec(p);
@@ -147,9 +146,15 @@ export function extractSourceAssetBriefIds(brief: CampaignBrief, targetBriefId: 
       fromIds.add(match[1]);
     }
   };
-  for (const product of brief.products) {
-    for (const p of [product.logoPath, product.inputAsset]) {
-      if (typeof p === "string") addSource(p);
+  // Malformed/missing products is its own guard, scoped to the products walk
+  // only — audio.path and beat backgrounds must still be scanned even when a
+  // brief has no products, or a duplicate silently keeps their source paths
+  // (the exact bug this function exists to prevent).
+  if (brief.products && Array.isArray(brief.products)) {
+    for (const product of brief.products) {
+      for (const p of [product.logoPath, product.inputAsset]) {
+        if (typeof p === "string") addSource(p);
+      }
     }
   }
   if (brief.audio !== undefined) {

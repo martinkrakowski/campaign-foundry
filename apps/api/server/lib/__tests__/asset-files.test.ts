@@ -379,6 +379,45 @@ describe("rewriteAssetPath and rewriteAssetPaths", () => {
     expect(extractSourceAssetBriefIds(brief, "target-camp")).toEqual(["scene-source"]);
   });
 
+  test("extractSourceAssetBriefIds still scans audio.path and beats[].background when a brief has no products", async () => {
+    const { extractSourceAssetBriefIds } = await import("../asset-files.js");
+    const noProducts = {
+      schemaVersion: BRIEF_SCHEMA_VERSION,
+      template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+      id: "target-camp",
+      targetRegion: "US",
+      targetAudience: "all",
+      campaignMessage: "msg",
+      products: [],
+      audio: {
+        path: "assets/inputs/audio-source/bed.mp3",
+        rights: { licenceId: "lic-1", source: "acme" },
+      },
+      copy: {
+        timeline: {
+          transition: "cut" as const,
+          keyBeat: 1,
+          beats: [{ text: "Alpha", weight: 1, background: "assets/inputs/scene-source/a.png" }],
+        },
+      },
+    } as unknown as import("@campaignfoundry/CampaignOrchestration").CampaignBrief;
+
+    expect(extractSourceAssetBriefIds(noProducts, "target-camp").sort()).toEqual([
+      "audio-source",
+      "scene-source",
+    ]);
+
+    // Missing/malformed products (not merely empty) must also not block the scan.
+    const malformedProducts = {
+      ...noProducts,
+      products: undefined,
+    } as unknown as import("@campaignfoundry/CampaignOrchestration").CampaignBrief;
+    expect(extractSourceAssetBriefIds(malformedProducts, "target-camp").sort()).toEqual([
+      "audio-source",
+      "scene-source",
+    ]);
+  });
+
   test("rewriteAssetPaths and extractSourceAssetBriefIds handle missing or malformed products gracefully", async () => {
     const { rewriteAssetPaths, extractSourceAssetBriefIds } = await import("../asset-files.js");
     const invalidBrief = { id: "test" } as unknown as import("@campaignfoundry/CampaignOrchestration").CampaignBrief;

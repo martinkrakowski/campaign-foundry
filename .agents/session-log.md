@@ -5383,3 +5383,22 @@ parameter to render this; that edit is X32's (`apps/web/**`), reported to the or
 All red-first (use case, preview, asset-files, plan estimate, new adapter), 2/2 mutations caught
 (`.agents/manifests/ve5b2.json`). VE5b2 in docs/planning/2026-09-13_video-editing-features.md (`premise VE5b2`
 retired, VE5b marked complete, VE-D10 clarification added).
+
+## 2026-09-16 — VE5b2 fix round (#435, AI session)
+
+Two PR-Agent findings from the orchestrator gate on 16ab5736, both real: (1)
+`extractSourceAssetBriefIds`'s `if (!brief.products...) return [];` ran before the
+`audio.path`/`beats[].background` scans, so a brief with no products silently
+contributed no source ids for either — moved the products guard to scope only the
+products walk, audio and beat backgrounds are now always scanned. (2) `executeVariation`
+picked the FIRST motion cell's ratio and cover-fitted every scene to it — true today
+(`PlatformProfile.vo.ts` has exactly one motion-capable ratio) but silently wrong the
+day a second one exists. Replaced with a `Map<ratioValue, AspectRatio>` grouping every
+motion cell by its own ratio and resolving the timeline's scenes once per DISTINCT
+ratio (still once per ratio, never per cell) — no refusal added, a second ratio is a
+legitimate future configuration. Both red-first (stashed the implementation file,
+confirmed the new tests fail, restored). Added a third mutation to
+`.agents/manifests/ve5b2.json` (collapse the ratio-grouping guard back to "only the
+first ratio ever seen"); `yarn mutate:verify` reproduces all 3. Full
+CampaignOrchestration + apps/api/server/lib suite green, typecheck/lint/lint:arch
+clean, arch:inventory/sync:dry Total ops 0.

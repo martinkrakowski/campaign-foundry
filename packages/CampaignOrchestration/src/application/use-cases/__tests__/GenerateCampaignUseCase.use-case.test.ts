@@ -4,6 +4,7 @@ import type { GenerateCampaignDeps } from "../GenerateCampaignUseCase.use-case.j
 import type { PlatformSafeZone, PlatformSafeZoneResolver } from "../../ports/out/PlatformProfilePort.js";
 import type { CompositeRequest } from "../../ports/out/CompositorPort.js";
 import { resolveCanvas } from "../../../domain/value-objects/aspect-ratios.js";
+import type { AspectRatio } from "../../../domain/value-objects/AspectRatio.vo.js";
 import { BRIEF_SCHEMA_VERSION } from "../../../domain/value-objects/brief-schema-version.js";
 import { DEFAULT_CAMPAIGN_TYPE } from "../../../domain/value-objects/campaign-types.js";
 import { templateFromCanonical, type BriefTemplate } from "../../../domain/value-objects/brief-template.js";
@@ -1370,6 +1371,45 @@ describe("GenerateCampaignUseCase — VE5b2 scene backgrounds", () => {
     for (const request of requests) {
       expect(request.backgrounds).toEqual(expectedBackgrounds);
     }
+  });
+
+  test("two motion cells at different ratios each get scenes cover-fitted to their own ratio, resolved once per distinct ratio (not once for the whole run)", async () => {
+    const timeline: CopyTimeline = {
+      transition: "cut",
+      keyBeat: 1,
+      beats: [{ text: "Alpha", weight: 1, background: SCENE_A }],
+    };
+    const sceneAssets = {
+      resolveScene: vi.fn(async (path: string, ratio: AspectRatio) =>
+        new Uint8Array(Buffer.from(`${path}::${ratio.value}`, "utf8")),
+      ),
+    };
+    const d = deps({
+      sceneAssets,
+      planner: fakePlanner(
+        fakePlan([motionVariant(), motionVariant({ index: 1, aspectRatio: "9:16" })]),
+      ),
+    });
+    const result = await new GenerateCampaignUseCase(d).execute(variationBrief({ copy: { timeline } }));
+    expect(result.success).toBe(true);
+
+    // Once per DISTINCT RATIO, never once for the whole run and never per cell.
+    expect(sceneAssets.resolveScene).toHaveBeenCalledTimes(2);
+    expect(sceneAssets.resolveScene).toHaveBeenCalledWith(SCENE_A, expect.objectContaining({ value: "1:1" }));
+    expect(sceneAssets.resolveScene).toHaveBeenCalledWith(SCENE_A, expect.objectContaining({ value: "9:16" }));
+
+    const requests = vi.mocked(d.videoCompositor.compositeVideo).mock.calls.map((call) => call[0]);
+    const squareRequest = requests.find((r) => (r.canvas as { ratio?: string }).ratio === "1:1");
+    const portraitRequest = requests.find((r) => (r.canvas as { ratio?: string }).ratio === "9:16");
+    expect(squareRequest?.backgrounds).toEqual({
+      [SCENE_A]: new Uint8Array(Buffer.from(`${SCENE_A}::1:1`, "utf8")),
+    });
+    expect(portraitRequest?.backgrounds).toEqual({
+      [SCENE_A]: new Uint8Array(Buffer.from(`${SCENE_A}::9:16`, "utf8")),
+    });
+    // The two ratios' scene bytes must actually differ — a shared resolution
+    // would give both cells the same (wrongly cover-fitted) bytes.
+    expect(squareRequest?.backgrounds?.[SCENE_A]).not.toEqual(portraitRequest?.backgrounds?.[SCENE_A]);
   });
 
   test("a timeline naming no backgrounds leaves the request without a backgrounds key, and never touches the scene port", async () => {

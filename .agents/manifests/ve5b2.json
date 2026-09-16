@@ -18,6 +18,21 @@
       "verdict": "caught"
     },
     {
+      "file": "packages/CampaignOrchestration/src/application/use-cases/GenerateCampaignUseCase.use-case.ts",
+      "before": "      if (cell.variant.motion !== undefined && !motionRatios.has(cell.ratio.value)) {",
+      "after": "      if (cell.variant.motion !== undefined && motionRatios.size === 0) {",
+      "because": "executeVariation must resolve the timeline's scenes once per DISTINCT motion ratio, not once for the whole run — a fixed single ratio would silently cover-fit every scene to the wrong canvas the day a second motion-capable ratio exists (PlatformProfile.vo.ts has exactly one today, but nothing pins that). Forcing the ratio-collection guard to stop after the first ratio ever seen reproduces exactly that bug, caught by the fixture asserting two motion cells at different ratios each receive scene bytes fitted to their own canvas.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/application/use-cases/__tests__/GenerateCampaignUseCase.use-case.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
       "file": "apps/api/server/lib/asset-files.ts",
       "before": "      if (typeof beat.background !== \"string\") return beat;",
       "after": "      if (true) return beat;",
