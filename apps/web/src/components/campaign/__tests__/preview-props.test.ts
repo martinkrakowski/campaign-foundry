@@ -1,5 +1,5 @@
 import { describe, test, expect } from "vitest";
-import { previewDockProps } from "../preview-props";
+import { previewDockProps, previewIdentityKey } from "../preview-props";
 import { initialEditorState, emptyProduct, STATIC_PLATFORMS, toBrief } from "../editor-state";
 
 /** A product the preview can actually draw — emptyProduct's id is the blank draft's placeholder. */
@@ -125,6 +125,27 @@ describe("previewDockProps", () => {
     expect(previewDockProps(state, 0, 6)).toBeNull();
     state.products = [namedProduct()];
     expect(previewDockProps(state, 0, 6)).not.toBeNull();
+  });
+
+  test("a new draft keys the frame on tempId; a loaded brief leaves identity to brief.id", () => {
+    const draft = initialEditorState("variation");
+    draft.products = [namedProduct()];
+    expect(draft.source.kind).toBe("new");
+    expect(previewIdentityKey(draft)).toBe("new");
+    expect(previewDockProps(draft, 0, 6)!.identityKey).toBe("new");
+
+    const loaded = {
+      ...draft,
+      source: {
+        kind: "file" as const,
+        file: "camp.yaml",
+        loadedId: "camp",
+        savedSnapshot: null,
+        revision: undefined,
+      },
+    };
+    expect(previewIdentityKey(loaded)).toBeUndefined();
+    expect(previewDockProps(loaded, 0, 6)!.identityKey).toBeUndefined();
   });
 
   test("the style is carried exactly as toBrief will emit it (T5/D45)", () => {

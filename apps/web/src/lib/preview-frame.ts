@@ -74,6 +74,13 @@ export interface PreviewFrameResult {
 export function usePreviewFrame(
   brief: CampaignBrief | undefined,
   cell: PreviewCellSelection | undefined,
+  /**
+   * Stable identity for a not-yet-saved draft (the editor's `tempId`). A re-slug
+   * of `brief.id` is not a switch of creative — the brief has no saved identity
+   * yet. Omitted → identity is `brief.id`, so a loaded brief whose id changes
+   * still clears.
+   */
+  identityKey?: string,
 ): PreviewFrameResult {
   const [frame, setFrame] = useState<PreviewFrameState | null>(null);
   const [failed, setFailed] = useState(false);
@@ -130,11 +137,13 @@ export function usePreviewFrame(
   // never survive a change of WHICH creative is being previewed. Identity is the brief
   // and the cell; a switch clears to the SVG placeholder immediately, while copy and
   // style edits keep the last frame until the fresh one lands (no flicker per keystroke).
+  // A new draft's live slug is not that brief: callers pass `identityKey` (tempId)
+  // so renaming does not clear. A saved brief still keys on `brief.id`.
   const identity =
     request === null
       ? null
       : [
-          request.brief.id,
+          identityKey ?? request.brief.id,
           request.cell.productId,
           // The canvas identity is whichever family the spec carries (join
           // renders an absent key as the empty string, as `anchor ?? ""` did).

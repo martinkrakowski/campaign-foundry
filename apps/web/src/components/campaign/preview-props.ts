@@ -95,6 +95,15 @@ export function previewLook(state: EditorState): PreviewLook | null {
 }
 
 /**
+ * Stable frame identity for a not-yet-saved draft: `source.tempId`, never the
+ * live slug of the campaign name. A loaded brief returns `undefined` so the
+ * hook keys on `brief.id` and a changed id still clears.
+ */
+export function previewIdentityKey(state: EditorState): string | undefined {
+  return state.source.kind === "new" ? state.source.tempId : undefined;
+}
+
+/**
  * The state→dock mapping (D45): the one place that answers how the host wires
  * `PreviewDock`, in product code, so no test fixture is the only definition of it.
  * The look itself is `previewLook`, shared with the Layout step's frame.
@@ -109,6 +118,7 @@ export function previewDockProps(
   return {
     campaignName: state.campaignName,
     ...look,
+    identityKey: previewIdentityKey(state),
     // The wizard readout (M2): where the walk stands, not a position in the creative set.
     step: stepIndex + 1,
     stepCount,

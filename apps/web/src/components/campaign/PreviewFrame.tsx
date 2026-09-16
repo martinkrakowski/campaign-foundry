@@ -34,6 +34,7 @@ export function PreviewFrame({
   atSec,
   spec,
   ratio,
+  identityKey,
   className,
 }: {
   readonly brief?: CampaignBrief;
@@ -52,6 +53,11 @@ export function PreviewFrame({
    * `{ ratio }` call sites type-check.
    */
   readonly ratio?: AspectRatioValue;
+  /**
+   * Stable identity for a not-yet-saved draft. Forwarded to `usePreviewFrame`
+   * so a re-slug of `brief.id` does not clear the painted frame.
+   */
+  readonly identityKey?: string;
   readonly className: string;
 }): ReactNode {
   const canvas = canvasSpecOf(spec, ratio);
@@ -78,7 +84,7 @@ export function PreviewFrame({
       ...(hasMotion ? { motion, durationSec, atSec } : {}),
     };
   }, [brief, layout, tone, anchor, canvas, motion, durationSec, atSec]);
-  const { frame } = usePreviewFrame(brief, cell);
+  const { frame } = usePreviewFrame(brief, cell, identityKey);
 
   if (frame !== null) {
     return (
