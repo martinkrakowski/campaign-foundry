@@ -112,7 +112,7 @@ const TREE: FakeTree = {
   dirs: {
     [ROOT]: ["waveT", "waveU", "waveV", "waveW", "waveBroken", "notwave"],
     [`${ROOT}/waveT`]: ["t1.log", "gate-t1.log", "install-t1.log", "events.jsonl"],
-    [`${ROOT}/waveU`]: ["u2.log", "gate-u2.log", "gate-u2-2.log"],
+    [`${ROOT}/waveU`]: ["u2.log", "gate-u2.log", "gate-u2-2.log", "events.jsonl"],
     [`${ROOT}/waveV`]: ["v3.log", "gate-v3.log", "events.jsonl"],
     [`${ROOT}/waveW`]: ["install-w.log"],
   },
@@ -123,11 +123,15 @@ const TREE: FakeTree = {
     [`${ROOT}/waveT/install-t1.log`]: "installing\n",
     [`${ROOT}/waveT/events.jsonl`]:
       '{"ts":"2026-09-07T16:55:43Z","wave":"T","lane":"t1","stage":"implement","event":"started"}\n',
+    [`${ROOT}/waveU/events.jsonl`]:
+      '{"ts":"2026-09-07T16:00:00Z","wave":"U","lane":"u2","stage":"implement","event":"started"}\n',
     [`${ROOT}/waveU/u2.log`]: "working silently\n",
     [`${ROOT}/waveU/gate-u2.log`]: "GATE EXIT 1\n",
     [`${ROOT}/waveU/gate-u2-2.log`]: "GATE EXIT 0\n",
+    [`${ROOT}/waveV/events.jsonl`]:
+      '{"ts":"2026-09-07T16:30:00Z","wave":"V","lane":"v3","stage":"implement","event":"started"}\n',
     [`${ROOT}/waveV/v3.log`]: "running\n",
-    // gate-v3.log is listed but unreadable; waveV/events.jsonl likewise.
+    // gate-v3.log is listed but unreadable: the row stands on its event, minus the gate.
   },
   pgrep: async (pattern) => {
     if (pattern === "cf-t1(/|$| )") return 0;
@@ -216,7 +220,7 @@ describe("collect", () => {
 
     const u2 = status.waves[1]?.lanes[0];
     expect(u2?.lane).toBe("u2");
-    expect(u2?.reported).toBeUndefined();
+    expect(u2?.reported).toMatchObject({ stage: "implement", event: "started" });
     expect(u2?.derived.alive).toBe(true);
     // Round 2 (gate-u2-2.log, EXIT 0) beats round 0 (gate-u2.log, EXIT 1).
     expect(u2?.derived.gate).toEqual({ exit: 0 });
@@ -234,7 +238,128 @@ describe("collect", () => {
       checks: "unknown",
       unresolvedThreads: 0,
     });
-    expect(v3?.reported).toBeUndefined();
+    expect(v3?.reported).toMatchObject({ stage: "implement", event: "started" });
+  });
+
+  test("a root of pipeline artefacts and no events yields no lanes — the 113-lanes regression", async () => {
+    // The wave log root an orchestrator actually left behind (`/tmp/wave1`):
+    // 442 files — gate rounds per stage, fix-runner transcripts, probe logs —
+    // and no events for most of them. The page rendered 113 lanes, 102
+    // vanished, because *any* `.log` was counted as one. The rule that
+    // replaces the filename test: evidence creates a lane — an event naming
+    // it — and a log only ever attaches to a lane the evidence already
+    // names. Nothing on this list has an event, so none of it is a lane:
+    // not the gate rounds, not the install transcripts, and not even logs
+    // named after lanes that genuinely ran (`x16-fix2` and friends) — a
+    // lane that emitted nothing is invisible, and invisible beats invented.
+    const artifactNames = [
+      "gate-x30-0143.log",
+      "gate-ve5b1c-build.log",
+      "gate-c4-lint:arch.log",
+      "install-foo.log",
+      "install-x30.log",
+      "c4b-install.log",
+      "q-x14-1.log",
+      "q-x35.log",
+      "q-hl5c-fix-1.log",
+      "x15-fix.log",
+      "x13-fix.log",
+      "x16-fix2.log",
+      "x26-fix.log",
+      "hl5c-fix2.log",
+      "s2fix.log",
+      "s3fix2.log",
+      "hl5e-runner.log",
+      "hl5e-fix-runner.log",
+      "oc-probe.log",
+      "x16-tc.log",
+      "weird name.log",
+    ];
+    const status = await collect(
+      fakeDeps({
+        dirs: {
+          [ROOT]: ["waveD"],
+          [`${ROOT}/waveD`]: [...artifactNames, "dispatch.out", "grok-metrics.tsv"],
+        },
+        files: Object.fromEntries(artifactNames.map((n) => [`${ROOT}/waveD/${n}`, "x\n"])),
+      }),
+      ROOT,
+      "now",
+    );
+    // The wave is still listed — an absence of lanes is not an absence of a
+    // wave — but no artefact bought a row.
+    expect(status.waves.map((wave) => wave.id)).toEqual(["D"]);
+    expect(status.waves[0]?.lanes).toEqual([]);
+  });
+
+  test("an event naming `x16-fix2` plus `x16-fix2.log` yields one lane with the log's liveness attached", async () => {
+    // The case a name-based filter cannot get right: this repository has
+    // genuinely run lanes named `x13-fix`, `x16-fix2`, `hl5c-fix2` — a
+    // suffix rule drops them from the page while they run. Evidence, not
+    // the filename, decides: the event makes the lane, the identically
+    // named log attaches its bytes, tail and mtime to it.
+    const status = await collect(
+      fakeDeps({
+        dirs: {
+          [ROOT]: ["waveL"],
+          [`${ROOT}/waveL`]: ["events.jsonl", "x16-fix2.log"],
+        },
+        files: {
+          [`${ROOT}/waveL/events.jsonl`]:
+            '{"ts":"2026-09-12T10:00:00Z","wave":"L","lane":"x16-fix2","stage":"implement","event":"started"}\n',
+          [`${ROOT}/waveL/x16-fix2.log`]: "rerunning gate\n",
+        },
+        pgrep: async (pattern) => (pattern === "cf-x16-fix2(/|$| )" ? 1 : 0),
+      }),
+      ROOT,
+      "now",
+    );
+    const lanes = status.waves[0]?.lanes ?? [];
+    expect(lanes.map((lane) => lane.lane)).toEqual(["x16-fix2"]);
+    expect(lanes[0]?.derived.alive).toBe(true);
+    expect(lanes[0]?.derived.log).toEqual({
+      bytes: 15,
+      mtimeMs: 1_000,
+      tail: "rerunning gate\n",
+    });
+  });
+
+  test("an orphan log with no event is not a lane, not an error, and not on the page", async () => {
+    // A runner that never emits leaves its log behind. It is not a lane —
+    // nothing says it is — and its absence is not an error the collector
+    // reports: the page simply says nothing about it.
+    const status = await collect(
+      fakeDeps({
+        dirs: { [ROOT]: ["waveM"], [`${ROOT}/waveM`]: ["somelane.log"] },
+        files: { [`${ROOT}/waveM/somelane.log`]: "quiet run\nEXIT 0\n" },
+      }),
+      ROOT,
+      "now",
+    );
+    expect(status.waves.map((wave) => wave.id)).toEqual(["M"]);
+    expect(status.waves[0]?.lanes).toEqual([]);
+  });
+
+  test("logs beside a reported lane are ignored unless the lane's own; the event still buys the row", async () => {
+    // The same root, honestly: everything that is not the lane's own log is
+    // skipped, and the one lane an event names gets exactly one row.
+    // `l1-fix.log` is not `l1.log` — an attach is an exact-name join, never
+    // a prefix or a pattern.
+    const status = await collect(
+      fakeDeps({
+        dirs: {
+          [ROOT]: ["waveD"],
+          [`${ROOT}/waveD`]: ["events.jsonl", "gate-l1-build.log", "l1-fix.log", "q-l1-1.log"],
+        },
+        files: {
+          [`${ROOT}/waveD/events.jsonl`]:
+            '{"ts":"2026-09-12T10:00:00Z","wave":"D","lane":"l1","stage":"implement","event":"started"}\n',
+        },
+      }),
+      ROOT,
+      "now",
+    );
+    expect(status.waves[0]?.lanes.map((lane) => lane.lane)).toEqual(["l1"]);
   });
 
   test("three gate rounds pick the highest n, not the lexicographic last", async () => {
@@ -244,9 +369,11 @@ describe("collect", () => {
           [ROOT]: ["waveR"],
           // Highest round listed first so a lexicographic pick still prefers
           // gate-r1.log (because "-" < ".") and the assertion cannot pass by luck.
-          [`${ROOT}/waveR`]: ["r1.log", "gate-r1-3.log", "gate-r1-2.log", "gate-r1.log"],
+          [`${ROOT}/waveR`]: ["r1.log", "gate-r1-3.log", "gate-r1-2.log", "gate-r1.log", "events.jsonl"],
         },
         files: {
+          [`${ROOT}/waveR/events.jsonl`]:
+            '{"ts":"2026-09-12T10:00:00Z","wave":"R","lane":"r1","stage":"gate","event":"started"}\n',
           [`${ROOT}/waveR/r1.log`]: "x\n",
           [`${ROOT}/waveR/gate-r1.log`]: "GATE EXIT 1\n",
           [`${ROOT}/waveR/gate-r1-2.log`]: "GATE EXIT 0\n",
@@ -264,9 +391,12 @@ describe("collect", () => {
       fakeDeps({
         dirs: {
           [ROOT]: ["waveS"],
-          [`${ROOT}/waveS`]: ["s2.log", "s2i.log", "gate-s2.log", "gate-s2i.log"],
+          [`${ROOT}/waveS`]: ["s2.log", "s2i.log", "gate-s2.log", "gate-s2i.log", "events.jsonl"],
         },
         files: {
+          [`${ROOT}/waveS/events.jsonl`]:
+            '{"ts":"2026-09-12T10:00:00Z","wave":"S","lane":"s2","stage":"implement","event":"started"}\n' +
+            '{"ts":"2026-09-12T10:00:00Z","wave":"S","lane":"s2i","stage":"implement","event":"started"}\n',
           [`${ROOT}/waveS/s2.log`]: "s2\n",
           [`${ROOT}/waveS/s2i.log`]: "s2i\n",
           [`${ROOT}/waveS/gate-s2.log`]: "GATE EXIT 0\n",
@@ -287,8 +417,12 @@ describe("collect", () => {
     const seen: string[] = [];
     await collect(
       fakeDeps({
-        dirs: { [ROOT]: ["waveS"], [`${ROOT}/waveS`]: ["s2.log"] },
-        files: { [`${ROOT}/waveS/s2.log`]: "x\n" },
+        dirs: { [ROOT]: ["waveS"], [`${ROOT}/waveS`]: ["s2.log", "events.jsonl"] },
+        files: {
+          [`${ROOT}/waveS/events.jsonl`]:
+            '{"ts":"2026-09-12T10:00:00Z","wave":"S","lane":"s2","stage":"implement","event":"started"}\n',
+          [`${ROOT}/waveS/s2.log`]: "x\n",
+        },
         pgrep: async (pattern) => {
           seen.push(pattern);
           return 0;
@@ -400,13 +534,26 @@ describe("collect", () => {
     const files: Record<string, string> = Object.fromEntries(
       Object.keys(mtimes).map((path) => [path, "x\n"]),
     );
+    for (const [dir, laneNames] of [
+      ["wave-9", ["a", "b"]],
+      ["wave-10", ["c", "d"]],
+      ["wave-8", ["e"]],
+      ["wave-7", ["f"]],
+    ] as const) {
+      files[`${ROOT}/${dir}/events.jsonl`] = laneNames
+        .map(
+          (lane) =>
+            `{"ts":"2026-09-07T16:00:00Z","wave":"${dir.slice(5)}","lane":"${lane}","stage":"implement","event":"started"}\n`,
+        )
+        .join("");
+    }
     const base = fakeDeps({
       dirs: {
         [ROOT]: ["wave-9", "wave-10", "wave-8", "wave-7"],
-        [`${ROOT}/wave-9`]: ["a.log", "b.log"],
-        [`${ROOT}/wave-10`]: ["c.log", "d.log"],
-        [`${ROOT}/wave-8`]: ["e.log"],
-        [`${ROOT}/wave-7`]: ["f.log"],
+        [`${ROOT}/wave-9`]: ["a.log", "b.log", "events.jsonl"],
+        [`${ROOT}/wave-10`]: ["c.log", "d.log", "events.jsonl"],
+        [`${ROOT}/wave-8`]: ["e.log", "events.jsonl"],
+        [`${ROOT}/wave-7`]: ["f.log", "events.jsonl"],
       },
       files,
     });
@@ -423,13 +570,12 @@ describe("collect", () => {
     expect(status.waves[0]?.lanes.map((lane) => lane.lane)).toEqual(["a", "b"]);
   });
 
-  test("a newer wave with observations and no events still leads an older wave that has events", async () => {
-    // The shape today's lanes are actually in: dispatched directly, writing a
-    // lane log, emitting no events at all. mergeStatus used to create every
-    // evented wave's group before any observation-only wave's, so wave 8 —
-    // which reported — led wave 9 — which was live — whatever the collector
-    // said about recency. Ordering may not depend on which feed a wave
-    // happens to appear in.
+  test("a newer wave whose lanes barely report still leads an older wave with full events", async () => {
+    // The live-vs-reported split that used to decide wave order by feed:
+    // mergeStatus created every evented wave's group before any
+    // observation-only wave's, so wave 8 — which reported a merge — led wave
+    // 9 — which was live — whatever the collector said about recency.
+    // Ordering may not depend on how much a wave happens to have said.
     const mtimes: Record<string, number> = {
       [`${ROOT}/wave-8/a.log`]: 1_000,
       [`${ROOT}/wave-9/b.log`]: 5_000,
@@ -439,12 +585,14 @@ describe("collect", () => {
       [`${ROOT}/wave-8/events.jsonl`]:
         '{"ts":"2026-09-07T16:55:43Z","wave":"8","lane":"a","stage":"merge","event":"settled","pr":301}\n',
       [`${ROOT}/wave-9/b.log`]: "building right now\n",
+      [`${ROOT}/wave-9/events.jsonl`]:
+        '{"ts":"2026-09-08T10:00:00Z","wave":"9","lane":"b","stage":"implement","event":"started"}\n',
     };
     const base = fakeDeps({
       dirs: {
         [ROOT]: ["wave-8", "wave-9"],
         [`${ROOT}/wave-8`]: ["a.log", "events.jsonl"],
-        [`${ROOT}/wave-9`]: ["b.log"],
+        [`${ROOT}/wave-9`]: ["b.log", "events.jsonl"],
       },
       files,
     });
@@ -476,9 +624,13 @@ describe("collect", () => {
         dirs: {
           [ROOT]: ["wave-10", "wave-9"],
           [`${ROOT}/wave-10`]: [],
-          [`${ROOT}/wave-9`]: ["a.log"],
+          [`${ROOT}/wave-9`]: ["a.log", "events.jsonl"],
         },
-        files: { [`${ROOT}/wave-9/a.log`]: "x\n" },
+        files: {
+          [`${ROOT}/wave-9/a.log`]: "x\n",
+          [`${ROOT}/wave-9/events.jsonl`]:
+            '{"ts":"2026-09-07T16:00:00Z","wave":"9","lane":"a","stage":"implement","event":"started"}\n',
+        },
       }),
       ROOT,
       "now",
@@ -544,8 +696,12 @@ describe("collect", () => {
     const big = `${"x".repeat(2 * 1024 * 1024)}EXIT 0\n`;
     const logPath = `${ROOT}/waveB/b1.log`;
     const inner = fakeDeps({
-      dirs: { [ROOT]: ["waveB"], [`${ROOT}/waveB`]: ["b1.log"] },
-      files: { [logPath]: big },
+      dirs: { [ROOT]: ["waveB"], [`${ROOT}/waveB`]: ["b1.log", "events.jsonl"] },
+      files: {
+        [logPath]: big,
+        [`${ROOT}/waveB/events.jsonl`]:
+          '{"ts":"2026-09-12T10:00:00Z","wave":"B","lane":"b1","stage":"implement","event":"started"}\n',
+      },
     });
     let bytesRead = 0;
     const deps: CollectDeps = {
@@ -586,10 +742,14 @@ describe("collect", () => {
   });
 
   test("a lane log that vanishes between listing and reading drops the log, keeps the row", async () => {
+    // The row stands on the event; the log was only ever an attachment.
     const status = await collect(
       fakeDeps({
-        dirs: { [ROOT]: ["waveX"], [`${ROOT}/waveX`]: ["x1.log"] },
-        files: {},
+        dirs: { [ROOT]: ["waveX"], [`${ROOT}/waveX`]: ["x1.log", "events.jsonl"] },
+        files: {
+          [`${ROOT}/waveX/events.jsonl`]:
+            '{"ts":"2026-09-12T10:00:00Z","wave":"X","lane":"x1","stage":"implement","event":"started"}\n',
+        },
       }),
       ROOT,
       "now",
@@ -620,12 +780,16 @@ describe("collect", () => {
       fakeDeps({
         dirs: {
           [WAVE_LOG_ROOT]: ["waveDurable"],
-          [`${WAVE_LOG_ROOT}/waveDurable`]: ["d1.log"],
+          [`${WAVE_LOG_ROOT}/waveDurable`]: ["d1.log", "events.jsonl"],
           [LEGACY_WAVE_LOG_ROOT]: ["waveLegacy"],
-          [`${LEGACY_WAVE_LOG_ROOT}/waveLegacy`]: ["l1.log"],
+          [`${LEGACY_WAVE_LOG_ROOT}/waveLegacy`]: ["l1.log", "events.jsonl"],
         },
         files: {
+          [`${WAVE_LOG_ROOT}/waveDurable/events.jsonl`]:
+            '{"ts":"2026-09-12T10:00:00Z","wave":"Durable","lane":"d1","stage":"implement","event":"started"}\n',
           [`${WAVE_LOG_ROOT}/waveDurable/d1.log`]: "durable\nEXIT 0\n",
+          [`${LEGACY_WAVE_LOG_ROOT}/waveLegacy/events.jsonl`]:
+            '{"ts":"2026-09-12T10:00:00Z","wave":"Legacy","lane":"l1","stage":"implement","event":"started"}\n',
           [`${LEGACY_WAVE_LOG_ROOT}/waveLegacy/l1.log`]: "legacy\nEXIT 0\n",
         },
       }),
@@ -640,12 +804,16 @@ describe("collect", () => {
       fakeDeps({
         dirs: {
           "/durable": ["waveDurable"],
-          "/durable/waveDurable": ["d1.log"],
+          "/durable/waveDurable": ["d1.log", "events.jsonl"],
           "/tmp": ["waveLegacy"],
-          "/tmp/waveLegacy": ["l1.log"],
+          "/tmp/waveLegacy": ["l1.log", "events.jsonl"],
         },
         files: {
+          "/durable/waveDurable/events.jsonl":
+            '{"ts":"2026-09-12T10:00:00Z","wave":"Durable","lane":"d1","stage":"implement","event":"started"}\n',
           "/durable/waveDurable/d1.log": "durable\nEXIT 0\n",
+          "/tmp/waveLegacy/events.jsonl":
+            '{"ts":"2026-09-12T10:00:00Z","wave":"Legacy","lane":"l1","stage":"implement","event":"started"}\n',
           "/tmp/waveLegacy/l1.log": "legacy\nEXIT 0\n",
         },
       }),
@@ -662,12 +830,16 @@ describe("collect", () => {
       fakeDeps({
         dirs: {
           "/durable": ["waveShared"],
-          "/durable/waveShared": ["lane1.log"],
+          "/durable/waveShared": ["lane1.log", "events.jsonl"],
           "/tmp": ["waveShared"],
-          "/tmp/waveShared": ["lane2.log"],
+          "/tmp/waveShared": ["lane2.log", "events.jsonl"],
         },
         files: {
+          "/durable/waveShared/events.jsonl":
+            '{"ts":"2026-09-12T10:00:00Z","wave":"Shared","lane":"lane1","stage":"implement","event":"started"}\n',
           "/durable/waveShared/lane1.log": "from durable\nEXIT 0\n",
+          "/tmp/waveShared/events.jsonl":
+            '{"ts":"2026-09-12T10:00:00Z","wave":"Shared","lane":"lane2","stage":"implement","event":"started"}\n',
           "/tmp/waveShared/lane2.log": "from legacy\nEXIT 0\n",
         },
       }),
@@ -685,9 +857,11 @@ describe("collect", () => {
       fakeDeps({
         dirs: {
           "/tmp": ["waveLegacyOnly"],
-          "/tmp/waveLegacyOnly": ["l1.log"],
+          "/tmp/waveLegacyOnly": ["l1.log", "events.jsonl"],
         },
         files: {
+          "/tmp/waveLegacyOnly/events.jsonl":
+            '{"ts":"2026-09-12T10:00:00Z","wave":"LegacyOnly","lane":"l1","stage":"implement","event":"started"}\n',
           "/tmp/waveLegacyOnly/l1.log": "legacy data\nEXIT 0\n",
         },
       }),
@@ -1323,11 +1497,15 @@ describe("collect — the PR-to-lane join", () => {
     expect(row?.derived.pr).toEqual({ number: 265, state: "merged", checks: "unknown" });
   });
 
-  test("a lane with no event joins by the normalised branch tail", async () => {
+  test("a lane whose event carries no pr joins by the normalised branch tail", async () => {
     const status = await collect(
       fakeDeps(
         joinTree(
-          { [`${ROOT}/waveJ/H1a-tokens-selector.log`]: "done\n" },
+          {
+            [`${ROOT}/waveJ/H1a-tokens-selector.log`]: "done\n",
+            [`${ROOT}/waveJ/events.jsonl`]:
+              '{"ts":"2026-09-08T22:07:15Z","wave":"J","lane":"H1a-tokens-selector","stage":"implement","event":"settled"}\n',
+          },
           [{ number: 280, state: "MERGED", headRefName: "fix/h1a-tokens-selector", headRefOid: "o" }],
         ),
       ),
@@ -1387,11 +1565,13 @@ describe("collect — the PR-to-lane join", () => {
       fakeDeps({
         dirs: {
           [ROOT]: ["waveJ", "waveK"],
-          [`${ROOT}/waveJ`]: ["L3b.log"],
+          [`${ROOT}/waveJ`]: ["L3b.log", "events.jsonl"],
           [`${ROOT}/waveK`]: ["events.jsonl"],
         },
         files: {
           [`${ROOT}/waveJ/L3b.log`]: "done\n",
+          [`${ROOT}/waveJ/events.jsonl`]:
+            '{"ts":"2026-09-08T22:07:15Z","wave":"J","lane":"L3b","stage":"implement","event":"settled"}\n',
           [`${ROOT}/waveK/events.jsonl`]:
             '{"ts":"2026-09-08T22:07:15Z","wave":"K","lane":"L3b","stage":"implement","event":"settled","pr":273}\n',
         },
@@ -1405,6 +1585,10 @@ describe("collect — the PR-to-lane join", () => {
     );
     const row = status.waves.find((wave) => wave.id === "J")?.lanes[0];
     expect(row?.derived.pr).toBeUndefined();
+    // The other directory's claim belongs to its own lane, not this one's row.
+    expect(
+      status.waves.find((wave) => wave.id === "K")?.lanes[0]?.derived.pr?.number,
+    ).toBe(273);
   });
 });
 

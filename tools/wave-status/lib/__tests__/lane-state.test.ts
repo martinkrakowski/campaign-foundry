@@ -2,7 +2,10 @@ import {
   laneState,
   laneNeedsHuman,
   laneStateCounts,
+  laneEvidenceMs,
+  isPastWaveLane,
   stallThresholdMs,
+  pastWaveThresholdMs,
   LANE_STATES,
   NEEDS_HUMAN_STATES,
   isNeedsHumanState,
@@ -85,6 +88,82 @@ it("vanished", () => {
 it("vanished when exit is zero and not alive (silent no-op)", () => {
   const s = makeStatus({ derived: { alive: false, exit: 0 } });
   expect(laneState(s, now)).toBe("vanished");
+});
+
+// X35: `vanished` must mean something bad — a lane that ended and left no PR
+// behind. A lane whose last words were `started`, with nothing since, is not
+// evidence of a disappearance; it is the absence of evidence, and the ranking
+// already owns the word for that: unknown. The live case from the owner's
+// session: twelve `started` events, no terminal event, no PR — all rendered
+// vanished, an accusation the inputs cannot pay for.
+it("a started event with nothing after it is unknown, not vanished", () => {
+  const s = makeStatus({
+    reported: {
+      stage: "implement",
+      event: "started",
+      ts: new Date(now - 60_000).toISOString(),
+    },
+    derived: { alive: false },
+  });
+  expect(laneState(s, now)).toBe("unknown");
+});
+
+it("unknown for a silent start does not undo vanished for a silent ending", () => {
+  // The EXIT 0 arm: the log says the run finished, and no PR exists — that is
+  // the bad thing `vanished` names, event or no event.
+  const withExit = makeStatus({
+    reported: { stage: "implement", event: "started", ts: new Date(now).toISOString() },
+    derived: { alive: false, exit: 0 },
+  });
+  expect(laneState(withExit, now)).toBe("vanished");
+  // A terminal `settled` with no PR is likewise the ending the page cannot
+  // substantiate — and it is the events-only shape no hang disagreement fires on.
+  const settled = makeStatus({
+    reported: { stage: "implement", event: "settled", ts: new Date(now).toISOString() },
+    derived: { alive: false },
+  });
+  expect(laneState(settled, now)).toBe("vanished");
+});
+
+it("laneEvidenceMs takes the newest dated artefact, and invents nothing", () => {
+  // No log, no event: nothing can be said about age.
+  expect(laneEvidenceMs(makeStatus({}))).toBeUndefined();
+  // An unparseable event ts is not a measurement either.
+  expect(
+    laneEvidenceMs(
+      makeStatus({ reported: { stage: "gate", event: "started", ts: "now" }, derived: { alive: false } }),
+    ),
+  ).toBeUndefined();
+  const logMs = now - 10 * 60_000;
+  expect(laneEvidenceMs(withLog(makeStatus({}), logMs))).toBe(logMs);
+  const eventMs = now - 2 * 60_000;
+  const both = withLog(
+    makeStatus({
+      reported: { stage: "implement", event: "started", ts: new Date(eventMs).toISOString() },
+    }),
+    logMs,
+  );
+  // The newest artefact answers "when was anything last true of this lane".
+  expect(laneEvidenceMs(both)).toBe(eventMs);
+});
+
+it("isPastWaveLane: silence older than the threshold belongs to a past wave, to the millisecond", () => {
+  const oldLog = withLog(makeStatus({}), now - pastWaveThresholdMs - 1);
+  expect(isPastWaveLane(oldLog, now)).toBe(true);
+  // Strictly greater: exactly at the threshold is still this wave.
+  expect(isPastWaveLane(withLog(makeStatus({}), now - pastWaveThresholdMs), now)).toBe(false);
+  // Undated is not old — absence of a date buys no accusation.
+  expect(isPastWaveLane(makeStatus({}), now)).toBe(false);
+  // Events alone date a lane too: the old wave with no logs still reads past.
+  const oldEvent = makeStatus({
+    reported: {
+      stage: "implement",
+      event: "started",
+      ts: new Date(now - pastWaveThresholdMs - 1).toISOString(),
+    },
+    derived: { alive: false },
+  });
+  expect(isPastWaveLane(oldEvent, now)).toBe(true);
 });
 
 it("blocked", () => {
