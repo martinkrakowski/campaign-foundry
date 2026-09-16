@@ -78,6 +78,8 @@ import { SECTION_TITLES, sectionOrder, LayoutSection, type SectionId } from "./s
 import { ReviewStep } from "./ReviewStep";
 import { PreviewDock } from "./PreviewDock";
 import { previewDockProps } from "./preview-props";
+import { previewFetchKey } from "@/lib/preview-frame";
+import { useMinInlineSize, PREVIEW_RAIL_MIN_INLINE_PX } from "@/lib/use-min-inline-size";
 import * as messages from "./messages";
 import type { CampaignMode } from "@/components/campaign/editor-state";
 
@@ -590,10 +592,36 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   // R7.2/D45 — the dock's props come from the one exported derivation, fed by the live
   // draft and the walk's cursor. Null (nothing to draw) means no rail at all: the
   // house rule is `hasProduct`, and the dock never invents a creative (D26).
-  const railProps = useMemo(
-    () => previewDockProps(state, stepIndex, steps.length),
-    [state, stepIndex, steps.length],
-  );
+  const rawRailProps = previewDockProps(state, stepIndex, steps.length);
+  // CC2 — value-keyed, not `[state]`: a keystroke that changes neither the
+  // look (`rawRailProps`) nor anything the frame's own fetch reads
+  // (`previewFetchKey`, e.g. `template`, `output.platforms`, `copy.timeline` —
+  // none of it carried by `rawRailProps`) returns the SAME cached object below,
+  // letting a `memo`-wrapped `PreviewDock` bail out of a re-render exactly as
+  // `usePreviewFrame`'s own key already bails out of a re-fetch. `toBrief(state)`
+  // above still runs every keystroke (for the YAML view, `draftDiffers`, Save,
+  // Review) — this key is a SECOND, narrower fingerprint over the same object,
+  // an accepted extra cost of the memo boundary, not a replacement for it.
+  const previewKey =
+    rawRailProps === null
+      ? null
+      : // `rawRailProps !== null` here means `previewLook` already found a
+        // product with a non-empty id — indexed directly, never `?.`, so this
+        // line has no branch a test could not reach.
+        `${JSON.stringify(rawRailProps)} ${previewFetchKey(draftBrief, state.products[0].id)}`;
+  const railProps = useMemo(() => rawRailProps, [previewKey]);
+  // The rail's own `brief` prop, stabilised on the SAME key — a look-preserving
+  // keystroke feeds `PreviewDock` (and the fetch inside it) the identical
+  // reference, never a fresh `toBrief` result the memo above could not see
+  // through. The YAML view below reads the live `draftBrief` instead, on
+  // purpose: memoising it here would go stale (D61).
+  const previewBrief = useMemo(() => draftBrief, [previewKey]);
+  // CC2 — the JS-side mirror of the row's own `@container(min-width:56rem)`
+  // query (§6 question 1): the CSS hides the rail below the breakpoint, but
+  // the element stays mounted and would keep fetching without this. Observes
+  // the SAME row the CSS container query reads.
+  const railContainerRef = useRef<HTMLDivElement | null>(null);
+  const isRailWideEnough = useMinInlineSize(railContainerRef, PREVIEW_RAIL_MIN_INLINE_PX);
   /**
    * D35 — whether Generate's default target (the shell's brief) and the screen
    * disagree. A pristine editor holds the blank template, not a draft anybody is
@@ -1488,7 +1516,7 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
     <div className="flex flex-col">
       {/* §6 question 1 — the row is the query container the rail's visibility reads,
           so the rail's own width can never lie to a viewport breakpoint. */}
-      <div className="flex items-start [container-type:inline-size]">
+      <div ref={railContainerRef} className="flex items-start [container-type:inline-size]">
        <SectionModeContext.Provider value={state.mode}>
            {/* Main content */}
             <div
@@ -1652,8 +1680,11 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
             self-start` resolves against the shell's own scrollport; never `fixed`.
             Guided only, and suppressed on Review and on the Layout step — the figure
             owns Review and the Layout step carries its own frame (D63), so exactly
-            one composed preview is on screen (D43). Visibility is the row's container
-            query (§6 question 1): the rail shows when the row has room for it. */}
+            one composed preview is on screen (D43). Visibility is the row's CSS
+            container query (§6 question 1); `isRailWideEnough` (CC2) is its JS-side
+            mirror, gating the FETCH — the rail still mounts below the breakpoint (so a
+            resize above it does not pay a fresh debounce), it just does not feed the
+            frame a `brief` while hidden. */}
           {presentation === "guided" &&
           steps[stepIndex] !== "review" &&
           steps[stepIndex] !== "layout" &&
@@ -1718,12 +1749,19 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
               </button>
             </div>
             {railView === "preview" ? (
-              <PreviewDock {...railProps} brief={draftBrief} />
+              // CC2 — below the breakpoint, `brief` is withheld: `usePreviewFrame`
+              // (inside `PreviewDock` → `PreviewFrame`) treats an undefined brief
+              // exactly like an unspecified look and never builds a request, so a
+              // rail nobody can see never reaches the network.
+              <PreviewDock {...railProps} brief={isRailWideEnough ? previewBrief : undefined} />
             ) : (
               <pre className="overflow-auto text-[11px] text-text-primary">
                 {/* Real YAML, because that is what the label promises and what the
                     save path writes — a JSON body under a `</>`-YAML name showed a
-                    format the pipeline never reads (CodeRabbit, PR #174). */}
+                    format the pipeline never reads (CodeRabbit, PR #174). Always the
+                    LIVE `draftBrief`, never the memoised `previewBrief`: this is the
+                    rail's read-only SECOND view (D61) and must never lag the preview's
+                    own memo boundary. */}
                 {dump(draftBrief)}
               </pre>
             )}

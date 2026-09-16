@@ -3337,6 +3337,26 @@ describe("BriefPage — the preview rail (R7)", () => {
     revision: "r1",
     brief: { ...brief("ok"), output: { formats: ["static"], platforms: ["linkedin"] } },
   };
+  /**
+   * `okEntry` carries no `treatments` (classic mode with none): `previewLook`
+   * then answers `layout`/`tone` as `undefined` (pinned by
+   * `preview-props.test.ts`'s "a classic draft with no treatment draws the
+   * renderer's default"), and `PreviewFrame`'s own `cell` requires both — so
+   * `okEntry` NEVER fetches a frame at all, in ANY of these tests, mutation
+   * or not. The network-call proofs below need a brief whose look IS fully
+   * specified, or "zero calls before" and "zero calls after" would agree
+   * for a reason that has nothing to do with CC2's fix (a vacuous proof, the
+   * same trap a green suite pinning a defect sets).
+   */
+  const fetchableEntry = {
+    file: "fetch.yaml",
+    revision: "r1",
+    brief: {
+      ...brief("fetch"),
+      output: { formats: ["static"], platforms: ["linkedin"] },
+      treatments: [{ id: "t1", layout: "headline-bottom" as const, tone: "bold" as const }],
+    },
+  };
 
   test("the rail mounts beside the column on a guided step, found by its landmark (R7.3)", async () => {
     const user = userEvent.setup();
@@ -3425,6 +3445,125 @@ describe("BriefPage — the preview rail (R7)", () => {
     await user.click(eye());
     expect(within(rail).getByText(messages.previewLegend)).toBeTruthy();
     expect(within(rail).queryByText(/targetRegion: /)).toBeNull();
+  });
+
+  /**
+   * CC1 mutation (c): a memo boundary that (wrongly) covered the YAML view
+   * along with the preview would leave this reading the brief's ORIGINAL
+   * `targetAudience`, not the edit — this is the assertion that catches it.
+   */
+  test("the YAML view is never memoised with the preview — a look-preserving edit still shows there", async () => {
+    const user = userEvent.setup();
+    routes({ list: () => json({ briefs: [okEntry] }) });
+    renderWithRun(<Editor id="ok" />);
+    await adopt(user, "ok");
+
+    // `targetAudience` is deliberately outside the preview's own memo key
+    // (CC2: it changes nothing the compositor reads) — exactly the field a
+    // wrongly-shared memo would fail to reflect.
+    await user.type(screen.getByLabelText(messages.targetAudienceLabel), " plus more");
+
+    const rail = preview();
+    await user.click(within(rail).getByRole("button", { name: messages.previewRailYamlView }));
+    expect(within(rail).getByText(/targetAudience: a plus more/)).toBeTruthy();
+  });
+
+  /** POST calls to the preview-frame route specifically — never conflated with
+   *  the plan-debounce's own POST or any other traffic `routes()` records. */
+  const previewFetchCalls = (calls: readonly { url: string; method: string }[]) =>
+    calls.filter((c) => c.url.includes("/campaigns/preview-frame"));
+
+  /** Comfortably past `PREVIEW_FRAME_DEBOUNCE_MS` (300 ms). */
+  const outlastDebounce = () => new Promise((r) => setTimeout(r, 400));
+
+  test("a look-preserving keystroke — typing in Target Audience — issues zero /preview-frame calls (CC2)", async () => {
+    const user = userEvent.setup();
+    const calls = routes({ list: () => json({ briefs: [fetchableEntry] }) });
+    renderWithRun(<Editor id="fetch" />);
+    await adopt(user, "fetch");
+    // Let the mount's own (legitimate) fetch settle first — the assertion
+    // below is about the EDIT, never the initial paint. Asserted (not just
+    // assumed): a brief whose look is unspecified (`okEntry`, elsewhere in
+    // this file) never fetches at all, which would make "zero before, zero
+    // after" agree for a reason that has nothing to do with the fix.
+    await outlastDebounce();
+    const before = previewFetchCalls(calls).length;
+    expect(before).toBeGreaterThan(0);
+
+    // `toBrief(state)` builds a new `brief` object on every keystroke
+    // (object identity always changes), but `targetAudience` touches
+    // nothing the compositor reads — the fetch key (CC2) must see through
+    // that and issue NOTHING MORE, not merely "fewer" requests.
+    await user.type(screen.getByLabelText(messages.targetAudienceLabel), " who hike on weekends");
+    await outlastDebounce();
+
+    expect(previewFetchCalls(calls).length).toBe(before);
+  });
+
+  test("zero /preview-frame calls while the YAML view is showing, even for an edit that would otherwise refetch", async () => {
+    const user = userEvent.setup();
+    const calls = routes({ list: () => json({ briefs: [fetchableEntry] }) });
+    renderWithRun(<Editor id="fetch" />);
+    await adopt(user, "fetch");
+    await outlastDebounce();
+    expect(previewFetchCalls(calls).length).toBeGreaterThan(0); // the mount's own fetch actually happened
+
+    await user.click(within(preview()).getByRole("button", { name: messages.previewRailYamlView }));
+    const before = previewFetchCalls(calls).length;
+
+    // The headline (`campaignMessage`) rides the compositor's `message` field
+    // (`PreviewCreativeFrameUseCase.buildCompositeRequest`) — an edit that
+    // WOULD refetch in the preview view (proved by the sibling test below,
+    // which makes the same edit there). While the rail's mounted body is the
+    // YAML `<pre>`, `PreviewDock` (and the `usePreviewFrame` inside it) is not
+    // mounted at all, so nothing can fetch regardless of what changes.
+    await user.click(segments()[1]);
+    await waitFor(() => expect(screen.getByLabelText(messages.headlineLabel)).toBeTruthy());
+    await user.type(screen.getByLabelText(messages.headlineLabel), "!");
+    await outlastDebounce();
+
+    expect(previewFetchCalls(calls).length).toBe(before);
+  });
+
+  test("editing the headline in the PREVIEW view does refetch — the sibling proof that the YAML test above is not vacuous", async () => {
+    const user = userEvent.setup();
+    const calls = routes({ list: () => json({ briefs: [fetchableEntry] }) });
+    renderWithRun(<Editor id="fetch" />);
+    await adopt(user, "fetch");
+    await outlastDebounce();
+    const before = previewFetchCalls(calls).length;
+    expect(before).toBeGreaterThan(0);
+
+    await user.click(segments()[1]);
+    await waitFor(() => expect(screen.getByLabelText(messages.headlineLabel)).toBeTruthy());
+    await user.type(screen.getByLabelText(messages.headlineLabel), "!");
+    await outlastDebounce();
+
+    // The message rides the compositor's request (CC2's fetch key includes
+    // it) — unlike targetAudience, this DOES fire another request.
+    expect(previewFetchCalls(calls).length).toBeGreaterThan(before);
+  });
+
+  test("nothing fetches below the breakpoint, though the rail still mounts (CC2)", async () => {
+    const originalInnerWidth = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", { value: 500, configurable: true });
+    try {
+      const user = userEvent.setup();
+      const calls = routes({ list: () => json({ briefs: [fetchableEntry] }) });
+      renderWithRun(<Editor id="fetch" />);
+      await adopt(user, "fetch");
+      await outlastDebounce();
+
+      // D43/D141's count invariant is about MOUNTING, not CSS visibility —
+      // the rail (and its landmark) stays mounted below the breakpoint so a
+      // resize back above it does not pay a fresh debounce. Only the fetch
+      // stops: `useMinInlineSize` seeds `false` from this narrow
+      // `window.innerWidth`, and the rail withholds `brief` from the dock.
+      expect(preview()).toBeTruthy();
+      expect(previewFetchCalls(calls).length).toBe(0);
+    } finally {
+      Object.defineProperty(window, "innerWidth", { value: originalInnerWidth, configurable: true });
+    }
   });
 
   test("the rail remembers its last view across a remount", async () => {

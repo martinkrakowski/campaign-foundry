@@ -1,4 +1,4 @@
-import { useState, type CSSProperties, type ReactNode, type SyntheticEvent } from "react";
+import { memo, useState, type CSSProperties, type ReactNode, type SyntheticEvent } from "react";
 import type { AspectRatioValue, CanvasSpec } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import { RATIO_VALUES } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import { DISPLAY_SIZE_VALUES } from "@campaignfoundry/CampaignOrchestration/display-sizes";
@@ -176,8 +176,12 @@ export function PreviewPicture(props: {
  * exported derivation (`previewDockProps`, D45); the complementary landmark, the
  * sticky positioning and the container-query visibility belong to the host rail
  * that mounts this body (D44/D61) — exactly one slot, whatever view it holds.
+ *
+ * Wrapped in `memo` (CC2): a `useMemo`-value-keyed `brief`/props pair from
+ * `BriefEditor` lets this bail on a re-render for a keystroke the look does
+ * not change, exactly as it already skips a network fetch for one.
  */
-export function PreviewDock(props: PreviewShowcaseProps): ReactNode {
+function PreviewDockImpl(props: PreviewShowcaseProps): ReactNode {
   const spec = props.spec ?? derivePreviewSpec(props.platformId, props.ratio, props.brief?.output?.sizes);
   const durationSec = props.brief?.variation?.axes?.duration?.[0] ?? DEFAULT_DURATION_SEC;
   const [scrubSec, setScrubSec] = useState(0);
@@ -241,3 +245,5 @@ export function PreviewDock(props: PreviewShowcaseProps): ReactNode {
     </div>
   );
 }
+
+export const PreviewDock = memo(PreviewDockImpl);
