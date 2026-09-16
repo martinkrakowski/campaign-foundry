@@ -183,7 +183,25 @@ describe("CanvasFfmpegVideoCompositor — audio args (VE3b1)", () => {
     expect(swsIndex).toBeGreaterThan(iIndices[1]);
 
     expect(args).toEqual(
-      expect.arrayContaining(["-map", "0:v", "-map", "1:a:0", "-c:a", "aac", "-b:a", "128k"]),
+      expect.arrayContaining([
+        "-map",
+        "0:v",
+        "-map",
+        "1:a:0",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "128k",
+        // Pinned so the encoder cannot silently stop forcing a fixed sample
+        // rate / channel count: if it did, this assertion would still pass
+        // (arrayContaining doesn't notice an absence), the recorded golden
+        // would drift on the next machine whose ffmpeg build defaults
+        // differently, and nothing here would have said why.
+        "-ar",
+        String(AUDIO_SAMPLE_RATE),
+        "-ac",
+        String(AUDIO_CHANNELS),
+      ]),
     );
     // `1:a:0`, never a bare `1:a` — a bare form maps EVERY audio stream in the
     // bed's container (alternate languages, a commentary track), breaking the

@@ -46,6 +46,21 @@
         "packages/CreativeGeneration/src/infrastructure/adapters/__tests__/CanvasFfmpegVideoCompositor.audio.test.ts"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "packages/CreativeGeneration/src/infrastructure/adapters/CanvasFfmpegVideoCompositor.ts",
+      "before": "      \"-c:a\",\n      \"aac\",\n      \"-b:a\",\n      AUDIO_BITRATE,\n      \"-ar\",\n      String(AUDIO_SAMPLE_RATE),\n      \"-ac\",\n      String(AUDIO_CHANNELS),\n      \"-af\",",
+      "after": "      \"-c:a\",\n      \"aac\",\n      \"-b:a\",\n      AUDIO_BITRATE,\n      \"-af\",",
+      "because": "Dropping -ar/-ac stops forcing a fixed sample rate and channel count, so the encoded stream's shape depends on the bed's own format and on this ffmpeg build's defaults instead of being pinned — the recorded golden could drift on a machine whose ffmpeg defaults differently. The with-audio args test did not previously assert either flag's presence, so this mutation would have gone uncaught before the assertion was strengthened.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CreativeGeneration/src/infrastructure/adapters/__tests__/CanvasFfmpegVideoCompositor.audio.test.ts"
+      ],
+      "verdict": "caught"
     }
   ]
 }

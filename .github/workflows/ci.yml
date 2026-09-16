@@ -22,9 +22,16 @@ on:
   workflow_dispatch:
     inputs:
       record_goldens:
-        description: "Record compositor PNG goldens (linux-x64 artifact). The CI job still runs."
+        description: "Record compositor goldens (linux-x64 artifact). The CI job still runs."
         type: boolean
         default: false
+      record_goldens_suite:
+        description: "Which golden suite(s) record_goldens records. 'all' (default) re-records every family's fixture map for this platform key; 'audio' records ONLY compositor-goldens-mp4-audio.json and leaves every other fixture file untouched."
+        type: choice
+        options:
+          - all
+          - audio
+        default: all
 
 # Concurrency is per-job, not per-workflow. A workflow_dispatch that records
 # goldens used to share `ci-${{ github.ref }}` with the push Build, and the two
@@ -198,4 +205,6 @@ jobs:
     permissions:
       contents: read
     uses: ./.github/workflows/record-goldens.yml
+    with:
+      suite: ${{ github.event.inputs.record_goldens_suite }}
     secrets: inherit
