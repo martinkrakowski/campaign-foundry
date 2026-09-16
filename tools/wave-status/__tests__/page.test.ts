@@ -2248,6 +2248,14 @@ describe("the status page", () => {
     mkdirSync(join(root, "wave-10"));
     writeFileSync(join(root, "wave-9", "a.log"), "building\n");
     writeFileSync(join(root, "wave-10", "b.log"), "settled long ago\n");
+    writeFileSync(
+      join(root, "wave-9", "events.jsonl"),
+      '{"ts":"2026-09-07T16:55:43Z","wave":"9","lane":"a","stage":"implement","event":"started"}\n',
+    );
+    writeFileSync(
+      join(root, "wave-10", "events.jsonl"),
+      '{"ts":"2026-09-04T16:55:43Z","wave":"10","lane":"b","stage":"merge","event":"settled"}\n',
+    );
     const base = Date.now();
     const mtime9 = new Date(base - 30 * 60_000);
     const mtime10 = new Date(base - 3 * 24 * 60 * 60_000);
@@ -2289,9 +2297,10 @@ describe("the status page", () => {
 
   test("a collapsed page puts a silent newer wave ahead of an older wave that reported events", async () => {
     // The one-feed shape: wave-8 reported its merge and went quiet; wave-9 is
-    // the live wave and emits nothing at all. With the client's own sort off,
-    // the list order is purely what the collector sent — which is where the
-    // event-feed-first ordering used to surface, as an old wave on top.
+    // the live wave and has said nothing but its own start. With the client's
+    // own sort off, the list order is purely what the collector sent — which
+    // is where the event-feed-first ordering used to surface, as an old wave
+    // on top.
     const root = mkdtempSync(join(tmpdir(), "wave-quiet-order-"));
     dirs.push(root);
     mkdirSync(join(root, "wave-8"));
@@ -2302,6 +2311,10 @@ describe("the status page", () => {
     );
     writeFileSync(join(root, "wave-8", "a.log"), "settled long ago\n");
     writeFileSync(join(root, "wave-9", "b.log"), "building right now\n");
+    writeFileSync(
+      join(root, "wave-9", "events.jsonl"),
+      '{"ts":"2026-09-08T10:00:00Z","wave":"9","lane":"b","stage":"implement","event":"started"}\n',
+    );
     const base = Date.now();
     const mtime8 = new Date(base - 60 * 60_000);
     const mtime9 = new Date(base - 2 * 60_000);

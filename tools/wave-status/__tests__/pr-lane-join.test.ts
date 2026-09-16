@@ -75,28 +75,82 @@ const RECORDED_JOIN: Readonly<Record<string, number>> = {
   "L6-html-output-family": 277,
   "L7a1-template-store": 274,
   "L8a-reorder": 284,
-  L8m: 297,
-  L8o: 298,
-  M2: 214,
-  R1: 318,
-  T4: 234,
-  VD: 322,
-  "W1a-status-cli": 282,
   "W1c-cli-hardening": 287,
   "W2a-status-layout": 286,
   "W2b1-log-toolbar": 291,
-  W2b2: 293,
-  WS1: 299,
 };
 
+/**
+ * The lanes the recording's events name — all 24, sorted. The join resolves
+ * 18 of them; the rest are the near-misses the last test pins.
+ */
+const RECORDED_EVENT_LANES: readonly string[] = [
+  "H1-tokens-route",
+  "H1a-tokens-selector",
+  "H2-hit-testing",
+  "L12-schema-version",
+  "L1a-creative-vocabulary",
+  "L1b-brief-template",
+  "L2a-compositor-layer-list",
+  "L2b-preview-layer-order",
+  "L3a-template-required",
+  "L3b-layer-props",
+  "L4-compatibility-rules",
+  "L5-template-editor",
+  "L6-html-output-family",
+  "L7a-template-library",
+  "L7a1-template-store",
+  "L8-reorder-occlusion",
+  "L8a-reorder",
+  "W1-status-cli",
+  "W1c-cli-hardening",
+  "W2a-status-layout",
+  "W2b-log-viewer",
+  "W2b1-log-toolbar",
+  "W2b1r",
+  "WS1b",
+];
+
+/**
+ * Real lanes the recording ran but never reported: a log and a PR carry their
+ * name, no event does. Under the evidence rule they are invisible to the
+ * page — the honest cost of "a log never buys a row", asserted so the cost
+ * cannot quietly turn back into a phantom-lane revival. Closing the gap means
+ * making the runners emit, not making the page guess from filenames again.
+ */
+const NEVER_REPORTED: readonly string[] = [
+  "L8m",
+  "L8o",
+  "M2",
+  "R1",
+  "T4",
+  "VD",
+  "W1a-status-cli",
+  "W2b2",
+  "WS1",
+];
+
 describe("the PR-to-lane join against a recording of real data", () => {
-  test("the join is non-empty: 27 of the recorded lanes resolve to their PR", async () => {
+  test("the join is non-empty: 18 of the 24 recorded lanes the events name resolve to their PR", async () => {
     const { lanes } = await recordedFixture();
+    expect(lanes.map((lane) => lane.lane).sort()).toEqual([...RECORDED_EVENT_LANES].sort());
     const joined: Record<string, number> = {};
     for (const lane of lanes) {
       if (lane.derived.pr !== undefined) joined[lane.lane] = lane.derived.pr.number;
     }
     expect(joined).toEqual(RECORDED_JOIN);
+  });
+
+  test("a log and a PR name a lane, but only an event creates one: the silent nine are absent", async () => {
+    // Every one of these ran for real — dispatched without `wave-event.sh`.
+    // The old collector showed them by counting their logs; the new one shows
+    // nothing, and the nine are pinned here so the trade stays a decision,
+    // not a drift.
+    const { lanes } = await recordedFixture();
+    const names = new Set(lanes.map((lane) => lane.lane));
+    for (const silent of NEVER_REPORTED) {
+      expect(names.has(silent)).toBe(false);
+    }
   });
 
   test("the C1 defect is present in the fixture itself: the old exact `feat/<lane>` rule joined nothing", async () => {
@@ -121,8 +175,12 @@ describe("the PR-to-lane join against a recording of real data", () => {
   test("the fallback normalises case and prefix family without being pinned to either", async () => {
     const { lanes } = await recordedFixture();
     const rows = Object.fromEntries(lanes.map((lane) => [lane.lane, lane.derived.pr?.number]));
-    expect(rows["M2"]).toBe(214);
+    // `H1a-tokens-selector`/`H2-hit-testing` reach lowercase `fix/` tails;
+    // `L8a-reorder` reaches a `feat/` one. Case-folded and prefix-agnostic,
+    // and pinned to no single family.
     expect(rows["H1a-tokens-selector"]).toBe(280);
+    expect(rows["H2-hit-testing"]).toBe(285);
+    expect(rows["L8a-reorder"]).toBe(284);
   });
 
   test("near-miss lanes join nothing: `W1` does not collect `W1a`'s PR", async () => {
