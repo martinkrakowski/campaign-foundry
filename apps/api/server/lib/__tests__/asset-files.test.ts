@@ -297,6 +297,88 @@ describe("rewriteAssetPath and rewriteAssetPaths", () => {
     expect(sourceIds.sort()).toEqual(["source-a", "source-b"]);
   });
 
+  test("rewriteAssetPaths rewrites copy.timeline.beats[].background paths (VE5b2)", async () => {
+    const { rewriteAssetPaths } = await import("../asset-files.js");
+    const brief = {
+      schemaVersion: BRIEF_SCHEMA_VERSION,
+      template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+      id: "new-camp",
+      targetRegion: "US",
+      targetAudience: "all",
+      campaignMessage: "msg",
+      products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/p1.png" }],
+      copy: {
+        timeline: {
+          transition: "fade" as const,
+          keyBeat: 1,
+          beats: [
+            { text: "Alpha", weight: 1, background: "assets/inputs/old-camp/scene-a.png" },
+            { text: "Beta", weight: 1 },
+            { text: "Gamma", weight: 1, background: "assets/inputs/hydra-logo.png" },
+          ],
+        },
+      },
+    };
+
+    const rewritten = rewriteAssetPaths(brief, "old-camp", "new-camp");
+    expect(rewritten.copy?.timeline?.beats[0]).toEqual({
+      text: "Alpha",
+      weight: 1,
+      background: "assets/inputs/new-camp/scene-a.png",
+    });
+    // A beat naming no background stays exactly as it was — never gains a `background: undefined` key.
+    expect(rewritten.copy?.timeline?.beats[1]).toEqual({ text: "Beta", weight: 1 });
+    expect("background" in (rewritten.copy?.timeline?.beats[1] ?? {})).toBe(false);
+    // Root-level assets (no brief-id prefix) are untouched.
+    expect(rewritten.copy?.timeline?.beats[2]?.background).toBe("assets/inputs/hydra-logo.png");
+  });
+
+  test("rewriteAssetPaths leaves an absent copy/timeline untouched — never fabricates the key (VE-D3)", async () => {
+    const { rewriteAssetPaths } = await import("../asset-files.js");
+    const withoutCopy = {
+      schemaVersion: BRIEF_SCHEMA_VERSION,
+      template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+      id: "new-camp",
+      targetRegion: "US",
+      targetAudience: "all",
+      campaignMessage: "msg",
+      products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/p1.png" }],
+    };
+    expect("copy" in rewriteAssetPaths(withoutCopy, "old-camp", "new-camp")).toBe(false);
+
+    const withTimelineNoBackgrounds = {
+      ...withoutCopy,
+      copy: { timeline: { transition: "cut" as const, keyBeat: 1, beats: [{ text: "Alpha", weight: 1 }] } },
+    };
+    const rewritten = rewriteAssetPaths(withTimelineNoBackgrounds, "old-camp", "new-camp");
+    expect(rewritten.copy).toBe(withTimelineNoBackgrounds.copy);
+  });
+
+  test("extractSourceAssetBriefIds finds distinct source brief IDs from copy.timeline.beats[].background (VE5b2)", async () => {
+    const { extractSourceAssetBriefIds } = await import("../asset-files.js");
+    const brief = {
+      schemaVersion: BRIEF_SCHEMA_VERSION,
+      template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+      id: "target-camp",
+      targetRegion: "US",
+      targetAudience: "all",
+      campaignMessage: "msg",
+      products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/p1.png" }],
+      copy: {
+        timeline: {
+          transition: "cut" as const,
+          keyBeat: 1,
+          beats: [
+            { text: "Alpha", weight: 1, background: "assets/inputs/scene-source/a.png" },
+            { text: "Beta", weight: 1 },
+            { text: "Gamma", weight: 1, background: "assets/inputs/target-camp/b.png" },
+          ],
+        },
+      },
+    };
+    expect(extractSourceAssetBriefIds(brief, "target-camp")).toEqual(["scene-source"]);
+  });
+
   test("rewriteAssetPaths and extractSourceAssetBriefIds handle missing or malformed products gracefully", async () => {
     const { rewriteAssetPaths, extractSourceAssetBriefIds } = await import("../asset-files.js");
     const invalidBrief = { id: "test" } as unknown as import("@campaignfoundry/CampaignOrchestration").CampaignBrief;
