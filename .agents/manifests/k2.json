@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "lane": "K2",
+  "mutations": [
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/motion-tracks.ts",
+      "before": "if (motion === \"ken-burns-in\") {",
+      "after": "if (motion === \"ken-burns-out\") {",
+      "because": "K2's per-kind equivalence proof: swapping ken-burns-in's own condition for ken-burns-out's makes ken-burns-in fall through to the identity track (no scale applied at all) and makes ken-burns-out match the FIRST branch instead of the second, returning the \"in\" shape (1.08 at t=0, 1 at t=1) rather than its own \"out\" shape (1 at t=0, 1.08 at t=1). Caught by motion-tracks.test.ts's per-kind equivalence assertions for both kinds (computed independently from the old kenBurnsScale formula, not by calling this module a second time). A golden ALSO moves here — verified empirically before writing this manifest: NodeCanvasCompositor.motion-goldens.test.ts's ken-burns-out cells (both layouts, every clip sample and the poster) all fail, because the swapped expansion renders a visibly different zoom direction. Worth stating precisely because it did NOT have to be this way (K1a/K1b's own mutations found cases the goldens can't see; this one the goldens catch just as hard as the domain test does).",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/motion-tracks.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/motion-tracks.ts",
+      "before": "  return motion === \"accent-wipe\" ? eased : 1;",
+      "after": "  return 1;",
+      "because": "Mutation (b) from the K2 brief: dropping the accent wipe's progress (a constant 1 instead of the real ternary) must fail its own test — motion-tracks.test.ts asserts accentWipeFraction(\"accent-wipe\", eased) equals eased at five samples and explicitly asserts it is NOT always 1. A golden ALSO moves here — verified empirically: NodeCanvasCompositor.motion-goldens.test.ts's accent-wipe cells (headline-top, every clip sample before t = 1 and the poster) collapse to the fully-revealed frame's hash instead of progressing, because the wipe never appears anything but complete. This is the accent-wipe decision's own regression proof: K2 kept the wipe drawer-local (option b, not a track), and this mutation shows the relocated comparison in `accentWipeFraction` is still load-bearing, not dead code the move left behind.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/motion-tracks.test.ts"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

@@ -1,8 +1,7 @@
 # Keyframing — Architecture & Development Plan
 
-**Date:** 2026-09-10 · **Status:** in progress. **Stale as of 2026-09-15: "Nothing dispatched" —
-K1a and K1b have both shipped; K2 (express the four `MOTION_KINDS` as tracks and render from the
-resolver) is dispatchable next**, behind them.
+**Date:** 2026-09-10 · **Status:** in progress. **Stale as of 2026-09-16: K1a, K1b and K2 have all
+shipped; K3 (the four text effects, the same way) is dispatchable next**, behind them.
 **Verified against:** `main` at `ed5e2dc`.
 **Replaces** the keyframe half of the retired `2026-09-08_motion-composition-implementation-plan.md`.
 
@@ -72,7 +71,7 @@ stays as it is, and text-effect tracks play on beat-local progress exactly as th
 |---|---|---|
 | **K1a** | **Shipped.** **The track model, no resolver.** Easing moves to the domain (K-D7); `Track`/`Stop` value objects (K-D8) and `layerTracksProblem`, validated at both brief boundaries (K-D9's one refusal: a duplicate `t` on one track's same clock). **No compositor *behaviour* change (one import), no rendering, no resolver.** | Round-trips through YAML in declared key order (positional); an invalid track is refused at both boundaries; the compositor's goldens are unchanged. |
 | **K1b** | **Shipped.** **The resolver.** `resolveTracks(layers, beats, clocks) → { byLayer, copy }` (K-D8), pure, beside `beatAt`, in `resolve-tracks.ts`. Composition per property (K-D9), folded in declaration order. **No caller in the compositor yet** — K2 wires it. | Interpolation at the default easing per clock; the legacy single-beat path; a crossfade instant's two complementary `copy` mixes; `dy` tracks add and `opacity` tracks multiply in a fixture that proves fold order matters. |
-| **K2** | **Express the four `MOTION_KINDS` as tracks and render from the resolver.** The vocabulary the user writes does not change. **`MOTION_KINDS` tracks are `image`/`video` layer tracks, so K-D8's fix-round-2 refusal applies: only `pose`-clock stops** (`ken-burns-in`'s scale, `accent-wipe`'s eventual representation) **— a beat- or effect-clock ground-layer track is not this lane's to add.** If a later motion kind ever needs a ground layer's pose to vary with which beat is current, that is a new decision (what a live crossfade should show, not merely "whichever beat is outgoing") to make *before* widening the boundary rule, not a byproduct of adding the track. | **Per-frame byte-identity** for every motion kind across the canonical templates. Any drift stops the lane. |
+| **K2** | **Shipped.** **Three of the four `MOTION_KINDS` are tracks, rendered from the resolver; the fourth (`accent-wipe`) stayed drawer-local, decided, not deferred.** `ken-burns-in`/`ken-burns-out` are a `pose`-clock `scale` track on the ground (`image`/`video`) layer (K-D8 fix-round-2's refusal of a `beat`/`effect`-clock ground track was never tested against, since neither kind needs one). `headline-rise` is `opacity` + `dy` `beat`-clock tracks on the text layer, resolved through `resolveTracks`'s `copy` bucket. `accent-wipe`'s motion is a clip extent no `TRACK_PROPERTIES` member represents and the accent layer is not in `TRACKABLE_LAYER_KINDS` at all — reusing an existing property as a stand-in would be a fifth property in disguise (K4's future hand-authored tracks would then read it two different ways depending on layer kind), so `motion-tracks.ts`'s `accentWipeFraction` keeps the wipe as `paintAccent`'s own drawer-local animation and only relocates the `motion === "accent-wipe"` comparison itself, out of the compositor. The vocabulary the user writes does not change. | **Per-frame byte-identity** for every motion kind across the canonical templates. Any drift stops the lane. **Met:** all 48 motion-golden cells, the mp4 byte golden, and the HL3 raster suite are unchanged. |
 | **K3** | **Express the four text effects the same way.** | Per-frame byte-identity, including the beat-local windows and the settled-pose behaviour. |
 | **K4** | **Author tracks directly in a brief**, alongside presets; a hand-authored track and a preset's expansion on one layer and property **compose per K-D9** (no precedence rule) — preset expansions fold **before** hand-authored tracks, K3's existing order, and that is the only order. `html` refuses tracks (K1a), so K4 (and K5) never offer tracks on an `html` layer. | A hand-authored track renders; a track on an absent or disabled layer renders nothing and says nothing; `canonicalLayer` (K5/X16) drops `tracks: []` exactly as it drops `elements: []`. |
 | **K5** | **The editor surface** — whatever minimum lets a user see and adjust a track. Scope deferred until K1–K4 land. | Out of scope for this document beyond naming it. |
@@ -89,15 +88,20 @@ stops rather than shipping a second system beside the presets.
   refuses malformed ones at both boundaries. No resolver, no compositor caller.
 - **K1b**: `resolveTracks` is pure, beside `beatAt`, and returns the identity pose for a layer with no
   tracks. Still no compositor caller — K2 wires it.
-- **K2/K3**: every preset renders byte-identically through the resolver, per frame, proven through
-  `NodeCanvasCompositor.draw`. `restT` and the poster frame are unchanged.
+- **K2 (shipped)**: `ken-burns-in`/`ken-burns-out`/`headline-rise` render byte-identically through the
+  resolver, per frame, proven through `NodeCanvasCompositor.draw` (48 motion-golden cells, the mp4
+  byte golden, the HL3 raster suite). `accent-wipe` stayed drawer-local (decided, not deferred — see
+  its lane row); `restT` and the poster frame are unchanged for all four kinds.
+- **K3**: the four text effects render byte-identically the same way, including the beat-local
+  windows and the settled-pose behaviour.
 - **K4**: presets and hand-authored tracks coexist, composing per K-D9.
 - **Throughout**: `MOTION_KINDS` and `TEXT_EFFECT_VALUES` remain the brief vocabulary. A user who
   never writes a track sees no change, ever.
-- **Interim contract (from K1a's merge until K2/K4 ship):** a brief that carries `tracks` validates
+- **Interim contract (from K1a's merge until K3/K4 ship):** a brief that carries `tracks` validates
   and renders **exactly as it would without them** — accepted at both boundaries, inert everywhere
-  else, because nothing calls `resolveTracks` yet and nothing in the compositor reads a layer's
-  `tracks` field.
+  else, because nothing calls `resolveTracks` with a layer's OWN `tracks` field yet (K2's tracks are
+  synthesized from the motion kind, never read off a layer's stored `tracks`) and nothing in the
+  text-effect path reads it either.
 
 ## 4. What this plan refuses
 
@@ -187,15 +191,52 @@ boundaries with fixtures using distinct `t` values per clock so a coincidental d
 cannot pass the assertion for the wrong reason; the beat/effect-needs-a-text-layer refusal, likewise
 at all three boundaries).
 
-```premise K2
-# K2 moves preset application out of the compositor: the draw paths read a
-# resolved pose instead of branching on the motion kind, because the
-# preset→track expansion is a pure function beside beatAt (K-D2). These
-# per-kind pose branches are the mechanism K2 replaces — not a name the
-# vocabulary keeps (the names stay in the brief, but never in a `motion ===`
-# comparison inside the compositor).
-grep -qE 'motion === "(ken-burns-in|ken-burns-out|headline-rise|accent-wipe)"' packages/CreativeGeneration/src/infrastructure/adapters/NodeCanvasCompositor.ts
-```
+**K2 — shipped in this PR.** `packages/CampaignOrchestration/src/domain/value-objects/motion-tracks.ts`
+is the preset→track expansion, a pure function beside `beatAt` (K-D2): `groundMotionTracks(motion)`
+expands `ken-burns-in`/`ken-burns-out` into a `pose`-clock `scale` track on the ground layer,
+`copyMotionTracks(motion, height)` expands `headline-rise` into `beat`-clock `opacity`/`dy` tracks
+on the text layer (resolved through `resolveTracks`'s `copy` bucket, K-D6), and `accentWipeFraction`
+is the fourth kind's own decision (below) — not a track. Both expansion functions build SYNTHESIZED
+tracks fresh from the motion kind on every draw, never reading a layer's own stored `tracks` field
+(that stays K4's), so `paintBackground` and `drawStaticText`/`drawSequencedCopy` feed them straight
+into `resolveTracks`/`poseOf` and read back `dx`/`dy`/`opacity`/`scale` — no `motion === "<kind>"`
+comparison remains in `NodeCanvasCompositor.ts`, closing this premise (`grep -qE 'motion === "(ken-burns-in|ken-burns-out|headline-rise|accent-wipe)"' packages/CreativeGeneration/src/infrastructure/adapters/NodeCanvasCompositor.ts`
+now exits 1). `LayerDrawContext` gained one field, `t` (the raw pose clock) — `resolveTracks` applies
+its own per-stop easing internally, so a track-driven drawer must read the clock `draw()` was called
+with, not the pre-eased `eased` the wipe still uses. `drawBeat`'s signature changed from a `rise:
+boolean` to a resolved `pose: Pose`, sourced from ONE `resolveTracks` call per `drawSequencedCopy`
+invocation against the real `scenes.resolved` beats — its internal beat pairing (`beatAt(scenes.resolved,
+copyT)`) is the exact same pairing `drawSequencedCopy` already computed by hand, so `resolved.copy`
+carries the same `(current, incoming)` order the old crossfade branch drew in. The legacy
+(timeline-less) path (`drawStaticText`) uses `resolveTracks`'s own `beats: []` shortcut — one implicit
+beat with `local = t` (K-D8) — which is exactly that path's contract, not a workaround.
+
+**The accent-wipe decision (option b, not a): the wipe did NOT become a track.** Its motion is a clip
+extent (`fillRect(..., fadeH * wipe)`) that none of `TRACK_PROPERTIES` represents, and the accent
+layer is not in `TRACKABLE_LAYER_KINDS` at all (`tracks.ts`, deliberately, for the same reason).
+Reusing an existing property — say, `opacity` — as a stand-in for a clip fraction would be a fifth
+property in disguise: a hand-authored `opacity` track on an accent layer (K4, later) would then mean
+something different from an `opacity` track on every other trackable kind, an ambiguity this lane
+declines to introduce for one kind. So `paintAccent` keeps computing the wipe itself; only the
+`motion === "accent-wipe"` comparison moved, into `accentWipeFraction`, closing the premise for this
+kind the same way the other three close it by becoming tracks.
+
+**Floating-point note, because the gate is byte-identity, not similarity (K-D3):** `resolveTracks`'s
+fixed fold (`a.value + (b.value - a.value) * ease(progress)`) reassociates the old per-kind formulas
+(`1 + Z * (1 - eased)` for ken-burns, `(1 - eased) * C` for the rise's `dy`) into a different order of
+floating-point operations — bit-identical at the two stops themselves (`t = 0`, `t = 1`, one of which
+is every kind's `restT`, where `resolveTracks` returns a stop's own value with no arithmetic at all)
+and within the last bit of a double at an interior `t` otherwise (the rise's `opacity` track is the one
+exception: `0 + (1 - 0) * eased` has no rounding at all, bit-identical everywhere). Proven, not assumed,
+not to move a pixel: all 48 motion-golden cells, the mp4 byte golden, and the HL3 raster suite are
+unchanged (`NodeCanvasCompositor.motion-goldens.test.ts`, `CanvasFfmpegVideoCompositor.byte-golden.test.ts`,
+`NodeCanvasCompositor.layer-order.test.ts`). Red tests shown before the implementation (the domain
+equivalence tests against a nonexistent module, then against a deliberately broken one; the
+flat-background drawn-output test's own false negative, fixed before it proved anything);
+`mutate:verify .agents/manifests/k2.json`: 2 mutations re-run, both caught (swapping the ken-burns
+in/out expansion; dropping the accent wipe's progress to a constant 1) — both ALSO move a motion
+golden, verified empirically before writing the manifest, worth stating because K1b's own mutations
+found the opposite case (an equivalence bug the goldens could not see).
 
 ```premise K3
 # K3 is the same lane for copy: the four text effects become entrance tracks,

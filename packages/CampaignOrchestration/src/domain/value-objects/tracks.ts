@@ -31,8 +31,12 @@ import type { LayerKind } from "./layer-kinds.js";
  * A track's four initial pose properties (the keyframing plan's §1 "The
  * model"), not exactly what the compositor moves today: `accent-wipe`
  * animates the extent of a fixed-gradient clip rect, which none of these
- * four represents. K2 owns that as its own representation problem — nothing
- * wider until something needs it (an unread property is the D134 mistake).
+ * four represents. **K2 decided this, not just deferred it**
+ * (`motion-tracks.ts`'s `accentWipeFraction`): the wipe stays the one
+ * drawer-local animation `paintAccent` computes directly, because reusing an
+ * existing property as a stand-in for a clip fraction would be a fifth
+ * property in disguise. Nothing wider until something needs it (an unread
+ * property is the D134 mistake).
  */
 export const TRACK_PROPERTIES = ["opacity", "scale", "dx", "dy"] as const;
 
