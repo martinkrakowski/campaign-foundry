@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "lane": "VE5b1",
+  "mutations": [
+    {
+      "file": "packages/CreativeGeneration/src/infrastructure/adapters/NodeCanvasCompositor.ts",
+      "before": "  if (prepared.timeline === undefined || prepared.scenes === undefined || copyT === undefined) {",
+      "after": "  if (true) {",
+      "because": "paintBackground must paint the scene of the beat active at copyT, not always the creative's own background. Forcing selectGround's fallback guard to always fire makes it ignore every supplied scene and paint prepared.background regardless of the timeline, which the two-scene cut fixture (a pixel sampled just before/after the resolved beat boundary must be ground A, then ground B) is built to catch.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CreativeGeneration/src/infrastructure/adapters/__tests__/NodeCanvasCompositor.scene-grounds.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/application/use-cases/PreviewCreativeFrameUseCase.use-case.ts",
+      "before": "      ...(request.backgrounds !== undefined",
+      "after": "      ...(false",
+      "because": "compositeRequestFingerprint must hash the request's backgrounds map (content hash per key) whenever it is present, or two requests differing only in scene bytes silently share a cache key and the preview serves a stale frame. Forcing the conditional spread's guard to false drops the backgrounds block from the hashed payload unconditionally, caught by the fixture asserting a changed scene byte moves the fingerprint.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/application/use-cases/__tests__/PreviewCreativeFrameUseCase.use-case.test.ts"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

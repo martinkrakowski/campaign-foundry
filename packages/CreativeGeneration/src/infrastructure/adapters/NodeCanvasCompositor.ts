@@ -130,6 +130,15 @@ interface PreparedCreative {
   readonly message: string;
   readonly brandColor: string;
   readonly background: Image;
+  /**
+   * Decoded per-scene grounds (VE5b1), keyed by the same asset path a beat's
+   * `background` names — one decode per distinct key the request supplied,
+   * done here (not per frame/beat) the same way `background` above is decoded
+   * once. `undefined` when the request carried no `backgrounds` at all, which
+   * keeps every timeline-free or scene-free request on exactly today's path:
+   * `paintBackground` never looks here unless both this and `timeline` are set.
+   */
+  readonly scenes?: ReadonlyMap<string, Image>;
   readonly logo:
     | {
         readonly image: Image;
@@ -219,6 +228,14 @@ interface LayerDrawContext {
   readonly motion: MotionKind | undefined;
   readonly eased: number;
   readonly effectT: number;
+  /**
+   * The copy clock (VE5b1): which beat's scene `paintBackground` paints, the
+   * same `copyT ?? t` that selects the beat's copy. Only `drawTimeline` sets
+   * it — `drawLegacy` never carries a timeline, so `paintBackground` there
+   * always draws `prepared.background`, byte-identical to before this field
+   * existed.
+   */
+  readonly copyT?: number;
 }
 
 /**
@@ -415,6 +432,12 @@ export class NodeCanvasCompositor implements CompositorPort {
       readonly durationSec?: number;
       readonly timeline?: CopyTimeline;
       /**
+       * Per-scene grounds (VE5b1) — see `VideoCompositeRequest.backgrounds`.
+       * Absent (every still, and a timeline-free or scene-free video request)
+       * means every ground layer paints `request.background`, as before.
+       */
+      readonly backgrounds?: Readonly<Record<string, Uint8Array>>;
+      /**
        * Direct-caller escape hatch: with no `template`, the canonical layers
        * for this creative type. Production never passes it — `request.template`
        * (D120/D123, C3) is what every real caller carries, via `parseBrief`.
@@ -458,6 +481,21 @@ export class NodeCanvasCompositor implements CompositorPort {
     const insets = normalizeSafeInsets(request.safeInsets, width, height);
 
     const background = await loadImage(Buffer.from(request.background));
+    // Per-scene grounds (VE5b1): decode each distinct supplied ground once, the
+    // same decode `background` above just used — `paintBackground` looks these
+    // up by the active beat's own `background` path (VE-D3's fallback is simply
+    // a key this map does not have).
+    const backgroundEntries = request.backgrounds !== undefined ? Object.entries(request.backgrounds) : [];
+    const scenes: ReadonlyMap<string, Image> | undefined =
+      backgroundEntries.length > 0
+        ? new Map(
+            await Promise.all(
+              backgroundEntries.map(
+                async ([path, bytes]) => [path, await loadImage(Buffer.from(bytes))] as const,
+              ),
+            ),
+          )
+        : undefined;
 
     // The autofit floor merge (C4, R-D3): the enabled text layer's `typeFloor`
     // prop over the `CREATIVE_GEOMETRY` default, resolved once because the
@@ -540,6 +578,7 @@ export class NodeCanvasCompositor implements CompositorPort {
       message: request.message,
       brandColor: request.brandColor,
       background,
+      scenes,
       logo,
       logoApplied,
       insets,
@@ -1001,7 +1040,7 @@ function drawTimeline(
   effectT?: number,
 ): void {
   const eased = motion === undefined ? 1 : easeOutCubic(t);
-  const c: Omit<LayerDrawContext, "layer"> = { ctx, prepared, motion, eased, effectT: effectT ?? t };
+  const c: Omit<LayerDrawContext, "layer"> = { ctx, prepared, motion, eased, effectT: effectT ?? t, copyT };
   let copyDrawn = false;
   for (const layer of prepared.layers) {
     // A layer the brief disabled does not draw (X9), and the check runs BEFORE
@@ -1098,20 +1137,81 @@ function clamp01(x: number): number {
   return x < 0 ? 0 : x > 1 ? 1 : x;
 }
 
-/** The image layer — the background buffer; ken-burns zooms this layer only (D121). */
-function paintBackground(c: LayerDrawContext): void {
-  const { ctx, prepared, motion, eased } = c;
-  const { width, height } = prepared;
-  const zoom = kenBurnsScale(motion, eased);
+/** Which decoded ground(s) `paintBackground` should draw, and at what mix. */
+interface GroundPose {
+  readonly current: Image;
+  readonly incoming?: Image;
+  readonly mix: number;
+}
+
+/**
+ * The ground active at `copyT` (VE5b1): the same beat-selection and crossfade
+ * that already drives the copy layer (`beatAt`), applied to the paired scene
+ * instead of the paired text. `cut` never carries a fade (`mix` stays 0), so
+ * only `fade` timelines ever return an `incoming` ground.
+ *
+ * Falls back to `prepared.background` — the creative's own ground — whenever
+ * there is nothing to select over (no timeline, no supplied scenes, no copy
+ * clock) or a beat names a background absent from what the request supplied
+ * (VE-D3): both are the same "no entry for this key" case, never a special
+ * branch.
+ */
+function selectGround(prepared: PreparedCreative, copyT: number | undefined): GroundPose {
+  if (prepared.timeline === undefined || prepared.scenes === undefined || copyT === undefined) {
+    return { current: prepared.background, mix: 0 };
+  }
+  const scenes = prepared.scenes;
+  const groundFor = (beat: ResolvedBeat): Image =>
+    (beat.background !== undefined ? scenes.get(beat.background) : undefined) ?? prepared.background;
+  const pair = beatAt(prepared.timeline, copyT);
+  const current = groundFor(pair.current);
+  if (pair.incoming === undefined || pair.mix === 0) {
+    return { current, mix: 0 };
+  }
+  return { current, incoming: groundFor(pair.incoming), mix: pair.mix };
+}
+
+/** Blit one ground image under the shared ken-burns zoom, at an optional layer alpha. */
+function drawGroundImage(
+  ctx: SKRSContext2D,
+  image: Image,
+  width: number,
+  height: number,
+  zoom: number,
+  alpha: number,
+): void {
+  // `alpha === 1` never touches globalAlpha, so the no-scene path is exactly
+  // the pre-VE5b1 call sequence — byte-identical (VE-D3).
+  if (alpha !== 1) ctx.globalAlpha = alpha;
   if (zoom === 1) {
-    ctx.drawImage(prepared.background, 0, 0, width, height);
+    ctx.drawImage(image, 0, 0, width, height);
   } else {
     ctx.save();
     ctx.translate(width / 2, height / 2);
     ctx.scale(zoom, zoom);
     ctx.translate(-width / 2, -height / 2);
-    ctx.drawImage(prepared.background, 0, 0, width, height);
+    ctx.drawImage(image, 0, 0, width, height);
     ctx.restore();
+  }
+  if (alpha !== 1) ctx.globalAlpha = 1;
+}
+
+/**
+ * The image layer — the background buffer; ken-burns zooms this layer only
+ * (D121). VE5b1: at a `copyT`, paints whichever scene the active beat names
+ * (falling back to the creative's own ground), crossfading the outgoing and
+ * incoming scenes with the exact `mix` the copy layer crossfades at — the
+ * poster gets this for free, since it reaches here through the same `copyT`
+ * the copy layer already uses (no poster-specific branch).
+ */
+function paintBackground(c: LayerDrawContext): void {
+  const { ctx, prepared, motion, eased, copyT } = c;
+  const { width, height } = prepared;
+  const zoom = kenBurnsScale(motion, eased);
+  const ground = selectGround(prepared, copyT);
+  drawGroundImage(ctx, ground.current, width, height, zoom, 1);
+  if (ground.incoming !== undefined && ground.mix > 0) {
+    drawGroundImage(ctx, ground.incoming, width, height, zoom, ground.mix);
   }
 }
 

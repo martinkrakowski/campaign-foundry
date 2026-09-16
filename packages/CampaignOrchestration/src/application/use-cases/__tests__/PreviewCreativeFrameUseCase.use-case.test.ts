@@ -333,6 +333,35 @@ describe("PreviewCreativeFrameUseCase — the frame and its cache key", () => {
     );
   });
 
+  test("backgrounds (VE5b1): absent leaves the pinned golden hash unmoved", async () => {
+    const d = deps();
+    const result = await new PreviewCreativeFrameUseCase(d).execute(baseBrief(), cell());
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    const request = vi.mocked(d.compositor.compositeAsset).mock.calls[0][0];
+    expect(compositeRequestFingerprint(request, sha256)).toBe(
+      "63733c642db1292c77c99c457463369452d49cd23fe3d2347d08651641e719ab",
+    );
+  });
+
+  test("backgrounds (VE5b1): a changed scene byte moves the key; an unchanged one does not", async () => {
+    const d = deps();
+    const result = await new PreviewCreativeFrameUseCase(d).execute(baseBrief(), cell());
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    const request = vi.mocked(d.compositor.compositeAsset).mock.calls[0][0];
+    const a = { ...request, backgrounds: { "scene.png": new Uint8Array([1, 2, 3]) } };
+    const b = { ...request, backgrounds: { "scene.png": new Uint8Array([1, 2, 3]) } };
+    const c = { ...request, backgrounds: { "scene.png": new Uint8Array([9, 9, 9]) } };
+    // Same content, rebuilt object → same key (content-addressed, not identity).
+    expect(compositeRequestFingerprint(a, sha256)).toBe(compositeRequestFingerprint(b, sha256));
+    // A single changed scene byte moves the key (mutation b: an omitted
+    // `backgrounds` block would make this collide with `a`/`b`).
+    expect(compositeRequestFingerprint(c, sha256)).not.toBe(compositeRequestFingerprint(a, sha256));
+    // Present vs absent never collide either.
+    expect(compositeRequestFingerprint(a, sha256)).not.toBe(compositeRequestFingerprint(request, sha256));
+  });
+
   test("two requests that differ only in pixelSize never share a key; omitting it leaves the golden hash put", async () => {
     const d = deps();
     const result = await new PreviewCreativeFrameUseCase(d).execute(baseBrief(), cell());
