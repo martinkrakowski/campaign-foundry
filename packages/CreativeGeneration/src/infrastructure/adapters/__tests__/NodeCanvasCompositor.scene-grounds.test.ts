@@ -137,6 +137,62 @@ describe("NodeCanvasCompositor scene grounds (VE5b1)", () => {
     expect(cornerPixel(canvas)).toEqual([0x33, 0x33, 0x33, 0xff]);
   });
 
+  test("a mixed timeline: the sceneless beat paints the creative's own ground while its neighbour paints its scene", async () => {
+    // Beat 1 names a scene; beat 2 names none at all — distinct from "names one
+    // absent from the map" above (that beat's `background` is always defined).
+    const timeline: CopyTimeline = {
+      beats: [
+        { text: "Scene A", weight: 1, background: "scene-a.png" },
+        { text: "No Scene", weight: 1 },
+      ],
+      transition: "cut",
+      keyBeat: 1,
+    };
+    const resolved = resolveTimeline(timeline, DURATION_SEC);
+    const req = request({
+      durationSec: DURATION_SEC,
+      timeline,
+      backgrounds: { "scene-a.png": SCENE_A },
+    });
+
+    const inSceneBeat = await drawAt(req, resolved[0].startT + 0.01, undefined, resolved[0].startT + 0.01);
+    const inScenelessBeat = await drawAt(req, resolved[1].startT + 0.01, undefined, resolved[1].startT + 0.01);
+
+    expect(cornerPixel(inSceneBeat)).toEqual([0xff, 0, 0, 0xff]);
+    expect(cornerPixel(inScenelessBeat)).toEqual([0x33, 0x33, 0x33, 0xff]);
+  });
+
+  test("a fade between a scene beat and a sceneless beat crossfades the scene with the creative's own ground", async () => {
+    const timeline: CopyTimeline = {
+      beats: [
+        { text: "Scene A", weight: 1, background: "scene-a.png" },
+        { text: "No Scene", weight: 1 },
+      ],
+      transition: "fade",
+      keyBeat: 1,
+    };
+    const resolved = resolveTimeline(timeline, DURATION_SEC);
+    expect(resolved[1].fadeInT).toBeGreaterThan(0);
+    const mid = resolved[1].startT + resolved[1].fadeInT / 2;
+    const req = request({
+      durationSec: DURATION_SEC,
+      timeline,
+      backgrounds: { "scene-a.png": SCENE_A },
+    });
+
+    const canvas = await drawAt(req, mid, undefined, mid);
+    const [r, g, b, a] = cornerPixel(canvas);
+    // mix ≈ 0.5: Scene A (255,0,0) outgoing, the creative's own ground
+    // (0x33,0x33,0x33) incoming ⇒ ≈(153, 25.5, 25.5).
+    expect(r).toBeGreaterThanOrEqual(150);
+    expect(r).toBeLessThanOrEqual(157);
+    expect(g).toBeGreaterThanOrEqual(22);
+    expect(g).toBeLessThanOrEqual(29);
+    expect(b).toBeGreaterThanOrEqual(22);
+    expect(b).toBeLessThanOrEqual(29);
+    expect(a).toBe(0xff);
+  });
+
   test("VE-D3: a timeline naming no backgrounds renders identically with `backgrounds` absent and `backgrounds: {}`", async () => {
     const timeline: CopyTimeline = {
       beats: [

@@ -31,6 +31,21 @@
         "packages/CampaignOrchestration/src/application/use-cases/__tests__/PreviewCreativeFrameUseCase.use-case.test.ts"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "packages/CreativeGeneration/src/infrastructure/adapters/NodeCanvasCompositor.ts",
+      "before": "    (beat.background !== undefined ? scenes.get(beat.background) : undefined) ?? prepared.background;",
+      "after": "    (beat.background !== undefined ? scenes.get(beat.background) : undefined)!;",
+      "because": "A beat that names NO background at all (distinct from one naming a path absent from the map) must still fall back to the creative's own ground -- the branch coverage gap the orchestrator's full gate caught (NodeCanvasCompositor.ts:1165, the ternary's alternate arm never exercised). Dropping the `?? prepared.background` fallback makes groundFor return undefined for such a beat, which @napi-rs/canvas's drawImage throws on -- caught by the mixed-timeline fixture (a scene beat beside a sceneless one, both in `cut` and across a `fade`).",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CreativeGeneration/src/infrastructure/adapters/__tests__/NodeCanvasCompositor.scene-grounds.test.ts"
+      ],
+      "verdict": "caught"
     }
   ]
 }
