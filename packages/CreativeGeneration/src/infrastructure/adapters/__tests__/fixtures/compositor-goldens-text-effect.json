@@ -18,22 +18,22 @@
     "scale-in/timeline/settled": "8732af237bbd82d57b3d73d16f58e9149442ef6701e17cae76c9a5946ae524e6"
   },
   "linux-x64": {
-    "fade-in/legacy/entrance": "4d974032d0dc4803a1b6f983d96d6d5275cb08ffc0f9a68f0d328af3821c1663",
-    "fade-in/legacy/settled": "ef29f4fbc450241ff816c4d9a4c4d5076bb3366deba636c6302331147ce7f14e",
-    "fade-in/timeline/entrance": "99bc60880e834294bd841aa317efce266ca350800ed0c96582c643c30b165033",
-    "fade-in/timeline/settled": "d4a5a957647f98929f777c2c37c8595aca1439b0ff2fb9d187e9b34d8f678d80",
-    "rise-in/legacy/entrance": "93686f1b034d4cc88e6f72b27fc1f118ffc92e9d7c800761861b5563b2a8d443",
-    "rise-in/legacy/settled": "ef29f4fbc450241ff816c4d9a4c4d5076bb3366deba636c6302331147ce7f14e",
-    "rise-in/timeline/entrance": "28235b47fe03372e7430f498c56026e338d9fcb15c826008f5fac28bd4147e1d",
-    "rise-in/timeline/settled": "d4a5a957647f98929f777c2c37c8595aca1439b0ff2fb9d187e9b34d8f678d80",
-    "slide-in/legacy/entrance": "8a1a71c69108bcf3cf14d7cf3fc39bc5304c947fae0c10600b0d57ceaafc2d6d",
-    "slide-in/legacy/settled": "ef29f4fbc450241ff816c4d9a4c4d5076bb3366deba636c6302331147ce7f14e",
-    "slide-in/timeline/entrance": "2f84e9839f120883328aed2b1a6bcd9eb6c6932b2be8262f7c9704439aa54f80",
-    "slide-in/timeline/settled": "d4a5a957647f98929f777c2c37c8595aca1439b0ff2fb9d187e9b34d8f678d80",
-    "scale-in/legacy/entrance": "8a48f27f39365dc09b6ff5fa942fa0d4fbaaf8f9435e6c03a0e838bb46ad74ca",
-    "scale-in/legacy/settled": "ef29f4fbc450241ff816c4d9a4c4d5076bb3366deba636c6302331147ce7f14e",
-    "scale-in/timeline/entrance": "0dc5768d638ba5e4447403a083a2599f65afa908105351cd6d556bfc284244fd",
-    "scale-in/timeline/settled": "d4a5a957647f98929f777c2c37c8595aca1439b0ff2fb9d187e9b34d8f678d80"
+    "fade-in/legacy/entrance": "0aa51e026916323a37a8e6c6cd40ccf6cdc84673a242465618f018f822c84fad",
+    "fade-in/legacy/settled": "11b03fe43b54181a9451aadbdbf73c42345a36e0df2674e185ae4727ba7236aa",
+    "fade-in/timeline/entrance": "ebca2a6a7f887b610b065a7c698d77d4d1a5f2ed4e028fb14621e57e16e9f9bc",
+    "fade-in/timeline/settled": "30a4bbd1a4942d049f081e50494d961282a671614c5ecb53613a9f0f18784b3f",
+    "rise-in/legacy/entrance": "a9e84cc12c77b71c2d87eae1870c4ad696b6ba79a2ed2b35e8a2241e4d2352c6",
+    "rise-in/legacy/settled": "11b03fe43b54181a9451aadbdbf73c42345a36e0df2674e185ae4727ba7236aa",
+    "rise-in/timeline/entrance": "b639efe1b141b0ce1303dcf68f020dbf8f646a3cd417c6e0bd4fca9b522ef089",
+    "rise-in/timeline/settled": "30a4bbd1a4942d049f081e50494d961282a671614c5ecb53613a9f0f18784b3f",
+    "slide-in/legacy/entrance": "4f9ef24be29432ea1c440984156ece9849452eeb61561dfee1421d53f700e8d7",
+    "slide-in/legacy/settled": "11b03fe43b54181a9451aadbdbf73c42345a36e0df2674e185ae4727ba7236aa",
+    "slide-in/timeline/entrance": "0b1de6559b059f3f0bd3339717a1018a06f1cd85460af1fa1521a5bd2a8aa2d5",
+    "slide-in/timeline/settled": "30a4bbd1a4942d049f081e50494d961282a671614c5ecb53613a9f0f18784b3f",
+    "scale-in/legacy/entrance": "ffb26c96c4b92a19f3790be7c42bbe8e91f934a1904c3d399d32e8fdfafa2c19",
+    "scale-in/legacy/settled": "11b03fe43b54181a9451aadbdbf73c42345a36e0df2674e185ae4727ba7236aa",
+    "scale-in/timeline/entrance": "b048d94a2ecbb97194227f8ca8d8ca5604d1e0c89dbd68909199339d5a40a2da",
+    "scale-in/timeline/settled": "30a4bbd1a4942d049f081e50494d961282a671614c5ecb53613a9f0f18784b3f"
   },
   "platformProvenance": {
     "darwin-arm64": {
@@ -41,8 +41,8 @@
       "note": "Recorded once, on one machine (macOS, Apple silicon), from origin/main at 5aef4155 (pre-K3, textEffectPose's own switch) as the baseline, then reproduced byte-for-byte on the K3 branch before being committed. No runner re-proves these cells: CI is ubuntu-latest, so this key is asserted by nothing and a drift here fails no build."
     },
     "linux-x64": {
-      "reprovedBy": "ci",
-      "note": "Recorded in a linux/amd64 container (node:22-bookworm) from origin/main at 5aef4155 (pre-K3) as the baseline, then reproduced byte-for-byte on the K3 branch in the same container before being committed. Re-proved by CI on every run: the test job is ubuntu-latest, so these cells are asserted, not merely recorded, and a drift here fails the build. Recorded in node:22-bookworm rather than by the actual ubuntu-latest runner (record-goldens.yml can do that re-recording); a first-CI-run mismatch here is a recording-environment discrepancy to re-record, not evidence of a K3 regression -- the pre-K3/K3 comparison above ran in the identical container both times."
+      "note": "Recorded by the platform's own runner (ubuntu-latest, via record-goldens.yml), twice. Baseline: branch tmp/k3-text-effect-golden-baseline, commit 7fa830de -- main at c2ceb87b plus this suite's harness and nothing else, so textEffectPose's own switch was still drawing -- recorded by Actions run 35134704264. Then the K3 branch itself, recorded by run 35134078561. All sixteen cells came back identical between the two runs, and that is this lane's byte-identity proof: the tracks rewrite draws what the switch drew. Re-proved by CI on every run, since the test job is ubuntu-latest, so a drift here fails the build. An earlier recording made in a linux/amd64 container (node:22-bookworm) differed from the runner's in all sixteen cells and was discarded: a container sharing the base image is not the platform, and only the runner's own bytes are asserted by anything.",
+      "reprovedBy": "ci"
     }
   }
 }
