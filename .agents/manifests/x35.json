@@ -61,6 +61,21 @@
         "a started event with nothing after it is unknown"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/public/index.html",
+      "before": "          note = `<span class=\"quiet\">stale evidence</span>`;",
+      "after": "          note = `<span class=\"quiet\">past wave</span>`;",
+      "because": "A lane's note measures the lane; only the wave header's newest-evidence clock may call a wave past. Restoring the row's old 'past wave' wording resurrects the contradiction the reword removed: in a mixed-age wave — one recent lane, one days-old — the header honestly says live and minutes-fresh while the stale row still prints 'past wave', two statements about the same wave disagreeing on screen. The mixed-age fixture fails the moment the row speaks as the wave again.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "tools/wave-status/__tests__/page.test.ts",
+        "-t",
+        "mixed-age wave"
+      ],
+      "verdict": "caught"
     }
   ]
 }
