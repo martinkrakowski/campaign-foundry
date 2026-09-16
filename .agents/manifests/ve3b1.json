@@ -6,7 +6,22 @@
       "file": "packages/CreativeGeneration/src/infrastructure/adapters/CanvasFfmpegVideoCompositor.ts",
       "before": "      `apad,atrim=end=${audio.durationSec},afade=t=out:st=${fadeStartSec}:d=${fadeDurationSec}`,",
       "after": "      `apad,afade=t=out:st=${fadeStartSec}:d=${fadeDurationSec}`,",
-      "because": "Dropping atrim leaves a bed longer than durationSec uncut, so the audio stream keeps running past the video and the long-bed duration assertion (within one AAC frame of durationSec) fails.",
+      "because": "Dropping atrim leaves apad's silence padding unbounded (nothing tells it when to stop), so the muxer waits forever for the audio stream to reach EOF and the encode times out — verified by hand (encodeTimeoutMs: 5000) to reject with 'ffmpeg encode timed out after 5000ms' after ~5s; under the real 120s default this shows up as the whole audio.test.ts run taking ~90s longer, not as a clean assertion failure, but it still exits non-zero.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CreativeGeneration/src/infrastructure/adapters/__tests__/CanvasFfmpegVideoCompositor.audio.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CreativeGeneration/src/infrastructure/adapters/CanvasFfmpegVideoCompositor.ts",
+      "before": "      `apad,atrim=end=${audio.durationSec},afade=t=out:st=${fadeStartSec}:d=${fadeDurationSec}`,",
+      "after": "      `atrim=end=${audio.durationSec},afade=t=out:st=${fadeStartSec}:d=${fadeDurationSec}`,",
+      "because": "Dropping apad leaves a bed shorter than durationSec unpadded (atrim only cuts, never pads), so the audio stream's own decoded length stays at the bed's short natural length instead of durationSec. The container-level Duration line (this lane's earlier, wrong measurement) could not have caught this — the video track is still the full durationSec long and dominates it — only measuring the audio stream itself (probeAudioStreamDurationSec) does.",
       "command": [
         "yarn",
         "vitest",

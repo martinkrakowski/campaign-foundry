@@ -2,7 +2,7 @@ import { describe, test, expect } from "vitest";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -11,6 +11,7 @@ import { createCanvas } from "@napi-rs/canvas";
 import type { VideoCompositeRequest } from "@campaignfoundry/CampaignOrchestration";
 import {
   AAC_FRAME_TOLERANCE_SEC,
+  AUDIO_CHANNELS,
   AUDIO_SAMPLE_RATE,
   CanvasFfmpegVideoCompositor,
   type FfmpegSpawn,
@@ -26,10 +27,14 @@ import {
  * `-c:a aac` appear, and `<outPath>` stays last.
  *
  * "Real ffmpeg" below runs the actual pinned binary: one AAC + one h264
- * stream, audio duration within the AAC frame-quantisation tolerance for a
- * bed shorter and a bed longer than the video, and determinism across two
- * runs (manifest mutation (a) — dropping the duration cut — must break the
- * long-bed duration assertion here).
+ * stream, and determinism across two runs. Duration is measured by decoding
+ * the AUDIO STREAM ITSELF to raw PCM and dividing by its byte rate
+ * (`probeAudioStreamDurationSec`) — never the container-level `Duration:`
+ * line `ffmpeg -i` prints, which reflects the *longest* track (the video,
+ * always `frames / fps`) and would read back the requested length even if
+ * the audio track were short or silent. Manifest mutation (a) — dropping the
+ * duration cut — and (c) — dropping the pad — must each break their own
+ * audio-stream duration assertion here.
  */
 
 const require = createRequire(import.meta.url);
@@ -288,12 +293,53 @@ function generateTwoStreamBed(ffmpeg: string, durationSec: number): Uint8Array {
   }
 }
 
-function probeDurationSec(ffmpeg: string, filePath: string): number {
-  const result = spawnSync(ffmpeg, ["-i", filePath], { encoding: "utf8", timeout: 10_000 });
-  const match = /Duration: (\d+):(\d+):(\d+\.\d+)/.exec(result.stderr ?? "");
-  if (!match) throw new Error(`could not parse duration from: ${(result.stderr ?? "").slice(0, 500)}`);
-  const [, h, m, s] = match;
-  return Number(h) * 3600 + Number(m) * 60 + Number(s);
+const PCM_BYTES_PER_SAMPLE = 2; // s16le
+
+/**
+ * The AUDIO STREAM's own decoded duration — never the container-level
+ * `Duration:` line `ffmpeg -i` prints. That line reflects the *longest*
+ * track (mp4's own top-level duration), and the video track is always
+ * `frames / fps` regardless of what the audio track actually contains: a
+ * short/silent/missing audio stream would still read back the video's full
+ * length, so a container-duration assertion cannot tell "the encoder padded
+ * the bed" from "the encoder dropped `apad` and left a short track" — the
+ * finding this rewrite fixes. Decoding to raw PCM and dividing by the byte
+ * rate is exact (no periodic-progress-line rounding), the same "measure with
+ * the pinned binary itself, no ffprobe" precedent the byte golden already
+ * uses for its own stream.
+ */
+function probeAudioStreamDurationSec(ffmpeg: string, filePath: string): number {
+  const dir = mkdtempSync(join(tmpdir(), "cf-audio-probe-"));
+  try {
+    const pcmPath = join(dir, "audio.pcm");
+    const result = spawnSync(
+      ffmpeg,
+      [
+        "-y",
+        "-i",
+        filePath,
+        "-map",
+        "0:a:0",
+        "-f",
+        "s16le",
+        "-acodec",
+        "pcm_s16le",
+        "-ar",
+        String(AUDIO_SAMPLE_RATE),
+        "-ac",
+        String(AUDIO_CHANNELS),
+        pcmPath,
+      ],
+      { timeout: 10_000 },
+    );
+    if (result.status !== 0) {
+      throw new Error(`audio stream decode failed (exit ${String(result.status)}): ${result.stderr?.toString().slice(-2000)}`);
+    }
+    const bytes = statSync(pcmPath).size;
+    return bytes / (AUDIO_SAMPLE_RATE * AUDIO_CHANNELS * PCM_BYTES_PER_SAMPLE);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 function countStreams(ffmpeg: string, filePath: string): { readonly video: number; readonly audio: number } {
@@ -331,7 +377,8 @@ describe("CanvasFfmpegVideoCompositor — audio, real ffmpeg (VE3b1)", () => {
   );
 
   test.skipIf(!ffmpegOk)(
-    skipReason ?? "a bed shorter than the video is padded to durationSec within the AAC frame tolerance",
+    skipReason ??
+      "a bed shorter than the video: the AUDIO STREAM ITSELF is padded to durationSec within the AAC frame tolerance",
     { timeout: 30_000 },
     async () => {
       if (!ffmpegPath) throw new Error("ffmpeg-static binary is not available");
@@ -344,7 +391,7 @@ describe("CanvasFfmpegVideoCompositor — audio, real ffmpeg (VE3b1)", () => {
       try {
         const outPath = join(dir, "out.mp4");
         writeFileSync(outPath, Buffer.from(video));
-        const duration = probeDurationSec(ffmpegPath, outPath);
+        const duration = probeAudioStreamDurationSec(ffmpegPath, outPath);
         expect(Math.abs(duration - durationSec)).toBeLessThanOrEqual(AAC_FRAME_TOLERANCE_SEC);
       } finally {
         rmSync(dir, { recursive: true, force: true });
@@ -353,7 +400,8 @@ describe("CanvasFfmpegVideoCompositor — audio, real ffmpeg (VE3b1)", () => {
   );
 
   test.skipIf(!ffmpegOk)(
-    skipReason ?? "a bed longer than the video is cut to durationSec within the AAC frame tolerance",
+    skipReason ??
+      "a bed longer than the video: the AUDIO STREAM ITSELF is cut to durationSec within the AAC frame tolerance",
     { timeout: 30_000 },
     async () => {
       if (!ffmpegPath) throw new Error("ffmpeg-static binary is not available");
@@ -366,7 +414,7 @@ describe("CanvasFfmpegVideoCompositor — audio, real ffmpeg (VE3b1)", () => {
       try {
         const outPath = join(dir, "out.mp4");
         writeFileSync(outPath, Buffer.from(video));
-        const duration = probeDurationSec(ffmpegPath, outPath);
+        const duration = probeAudioStreamDurationSec(ffmpegPath, outPath);
         expect(Math.abs(duration - durationSec)).toBeLessThanOrEqual(AAC_FRAME_TOLERANCE_SEC);
       } finally {
         rmSync(dir, { recursive: true, force: true });
@@ -411,7 +459,7 @@ describe("CanvasFfmpegVideoCompositor — audio, real ffmpeg (VE3b1)", () => {
 
   test.skipIf(!ffmpegOk)(
     skipReason ??
-      "when durationSec * fps rounds unevenly, the audio matches the encoded video's actual duration",
+      "when durationSec * fps rounds unevenly, the AUDIO STREAM ITSELF matches the encoded video's actual duration",
     { timeout: 30_000 },
     async () => {
       if (!ffmpegPath) throw new Error("ffmpeg-static binary is not available");
@@ -427,7 +475,7 @@ describe("CanvasFfmpegVideoCompositor — audio, real ffmpeg (VE3b1)", () => {
       try {
         const outPath = join(dir, "out.mp4");
         writeFileSync(outPath, Buffer.from(video));
-        const duration = probeDurationSec(ffmpegPath, outPath);
+        const duration = probeAudioStreamDurationSec(ffmpegPath, outPath);
         expect(Math.abs(duration - encodedDurationSec)).toBeLessThanOrEqual(AAC_FRAME_TOLERANCE_SEC);
         // Confirms the assertion is actually discriminating: the unrounded
         // durationSec is a full frame-tolerance away from what was measured.
