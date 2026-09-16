@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "lane": "X32",
+  "mutations": [
+    {
+      "file": "apps/web/src/components/campaign/BriefEditor.tsx",
+      "before": "      setTouched((prev) => (prev.has(key) ? prev : new Set(prev).add(key)));",
+      "after": "      setTouched((prev) => new Set(prev).add(key));",
+      "because": "handleMainBlur used to build a fresh `touched` Set on every blur, even when the field's key was already in it — an ordinary gesture (correcting an earlier field after filling the rest of a draft, e.g. re-visiting Target Region after fillValidDraft already blurred it once) re-blurs an already-touched field constantly. `visibleErrors` depends on `touched` by reference, so the fresh (but content-identical) Set republishes the top panels for zero observable change — one extra commit of the shell's Profiler-measured subtree per redundant re-blur. `touchSectionFromEvent`, declared three lines above this handler, already carried the `prev.has(x) ? prev : ...` guard; this brings `handleMainBlur` in line with it. Reverting the guard alone (this mutation) turns the keystroke work-count test's measured gesture — re-blur Target Region, then type into Campaign Name — from 3 commits to 5.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx",
+        "-t",
+        "a single keystroke into a text field commits the shell at most three times"
+      ],
+      "verdict": "caught"
+    }
+  ],
+  "note": "The brief's two suggested mutations — (a) restore the dirty effect's `[state, setDirty]` shape (drop the ref guard and the separate unmount effect), (b) republish `setTopPanels`/`setPanels` unconditionally (put the `return () => setPanels(null)` cleanup back in the main effect) — were tried individually against every test in this file, including the keystroke work-count test above. Neither moves any commit count this suite measures: applied alone, each still leaves the keystroke test's gesture at 3 commits and the X30 click test's gesture at 2. Instrumented directly (a temporary spy on every setState call BriefEditor's effects make, on this branch, before this fix was written) to find out why: the old dirty effect's cleanup (`setDirty(false)`) and body (`setDirty(next)`) run back-to-back inside the same passive-effect flush with no `await` between them, and React's automatic batching folds that pair into ONE commit regardless of whether the two calls carry the same value or different ones — the same is true of the old panels effects' null-then-JSX pair. The commit X30 attributed to \"the dirty-flag effect\" in the pre-X30 baseline was real (3 commits per interaction, verified on `4540ce0b`'s parent), but it came from the validate-on-change mirror's OWN separate effect (a whole extra `useEffect` with its own setState calls, which X30 removed) being scheduled in a DIFFERENT pass than the dirty effect, not from the dirty effect's internal round trip needing two commits by itself. Both fixes are kept in this PR anyway: they real reduce the number of writes into two contexts that have subscribers this Profiler-scoped suite does not include (Header, Sidebar both consume `EditorDirtyContext`; `EditorPanelsOutlet` consumes `EditorPanelsContext`), so a keystroke no longer forces those other consumers to re-render for a value or JSX tree that never actually changed — a real cost, just not one this repo's test infrastructure can observe from inside `BriefEditor`'s own Profiler boundary. Manufacturing a manifest entry that claims either is \"caught\" by a test that does not, in fact, fail without it would be exactly the dishonesty X30's own manifest declined to commit for its second slot."
+}

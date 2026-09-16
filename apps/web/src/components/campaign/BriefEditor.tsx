@@ -479,16 +479,39 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
     );
   }, [state, existingIds]);
 
-  // Update dirty state. The provider outlives this route, so clear the flag on unmount —
-  // otherwise every later navigation in the shell keeps prompting.
+  // Publish dirty state (X32). `isPristine`/`isDirtySinceSave` are pure functions of
+  // `state`, so most renders recompute the exact same boolean this effect already
+  // published — but the effect's deps are `[state, setDirty]`, and `state` is a new
+  // object on every keystroke, so without a guard it would call `setDirty` on every
+  // single render regardless of whether the boolean actually changed. Worse: a bare
+  // `return () => setDirty(false)` cleanup ran on every dep change too (not only
+  // unmount), so an unrelated keystroke paid a real false→true round trip through the
+  // sibling `EditorDirtyContext` even when the flag was already `true` on both sides —
+  // two full commits of that context's subscribers for zero observable change. The ref
+  // remembers the last value actually pushed, so an unchanged boolean is a no-op here;
+  // the unmount-only clear moved to its own effect below (see .agents/manifests/x32.json
+  // and the work-count test in brief-editor.test.tsx that pins the commit count this
+  // removes). Cannot be a bare `useMemo`: the value lands in a sibling context's state,
+  // and writing another component's state during render is not allowed.
+  const lastPublishedDirtyRef = useRef<boolean | null>(null);
   useEffect(() => {
     // The flag answers "is there unsaved work?". `isDirtySinceSave` alone would count
     // every unnamed draft as dirty by definition — which would make the guard prompt
     // "unsaved changes" on a pristine form, e.g. when the user picks a brief from the
     // blank route. A pristine editor has nothing to lose, so it never prompts.
-    setDirty(!isPristine(state) && isDirtySinceSave(state));
-    return () => setDirty(false);
+    const next = !isPristine(state) && isDirtySinceSave(state);
+    if (lastPublishedDirtyRef.current !== next) {
+      lastPublishedDirtyRef.current = next;
+      setDirty(next);
+    }
   }, [state, setDirty]);
+
+  // The provider outlives this route, so clear the flag on unmount — otherwise every
+  // later navigation in the shell keeps prompting about a route that is long gone.
+  // Split from the effect above (X32): that effect's deps include `state`, so a bare
+  // `return () => setDirty(false)` there ran this clear on every keystroke too, not
+  // only when the route actually unmounts.
+  useEffect(() => () => setDirty(false), []);
 
   // Auto-save, but only for a draft that has actually diverged from a pristine editor.
   // Writing unconditionally would recreate the key that Save and Discard just purged.
@@ -646,9 +669,17 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
       // coverage test proves that set matches what validateState emits — so a key
       // found here is known by construction.
       // The element matched `[data-field-key]`, so the attribute is present by
-      // construction. A Set add is idempotent, so there is nothing to branch on.
+      // construction. X32: re-blurring an already-touched field (correcting an
+      // earlier field after filling the rest of the draft, e.g.) used to call
+      // `new Set(prev).add(key)` unconditionally — a Set add is idempotent in
+      // *content*, but that line built a new object every time regardless, so an
+      // already-touched key still produced a fresh `touched` reference. That
+      // changes `visibleErrors` (below) to a fresh reference too, which republishes
+      // the top panels for zero observable difference. `touchSectionFromEvent`
+      // right below already had this exact guard; this brings the blur handler
+      // in line with it.
       const key = field.getAttribute("data-field-key") as string;
-      setTouched((prev) => new Set(prev).add(key));
+      setTouched((prev) => (prev.has(key) ? prev : new Set(prev).add(key)));
     }
   }, []);
 
@@ -780,6 +811,16 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   // dispatch, the bar only places it — which also gives the mobile menu the chooser.
   // The Sections outline (D25) sits directly below the pair: below the mode, but
   // before the read-only brief, so mode stays the first decision (GB-D4).
+  //
+  // X32: this used to `return () => setTopPanels(null)` unconditionally, so every
+  // dep change (which is every render — `visibleErrors` is a fresh object every time,
+  // see its own comment) nulled the published panels and then immediately republished
+  // them. JSX has no stable identity to bail out on, so both the null and the new JSX
+  // were genuine transitions through `EditorPanelsContext` — a real two-commit round
+  // trip nobody ever saw on screen, since the new content replaced the null within the
+  // same effect flush. The M3/D83 gate already nulls explicitly when there is nothing
+  // to publish; the only case that ever needed the cleanup was the route actually
+  // unmounting, which is now its own effect below.
   useEffect(() => {
     // M3: while the route's id names no brief there is no editor to publish for —
     // the shell's panels would be controls mutating a draft nobody can see.
@@ -800,8 +841,8 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
         <SectionOutline mode={state.mode} visibleErrors={visibleErrors} onActivate={outlineActivate} />
       </>,
     );
-    return () => setTopPanels(null);
   }, [state.mode, state.formats, visibleErrors, setTopPanels, outlineActivate, unknownId, failedRouteId]);
+  useEffect(() => () => setTopPanels(null), []);
 
   // Publish the sections that live in the left bar while this editor is mounted. The
   // page keeps the state, dispatch and validation and republishes on every change; the
@@ -809,6 +850,13 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   // PolicySection alone, so a Classic draft had no deliverables readout at all — now it
   // is published for both modes, randomized through the planner and classic derived.
   const policyErrors = Object.keys(sectionErrorsVisible("policy")).length;
+  // X32: same fix as the topPanels effect above — the unconditional
+  // `return () => setPanels(null)` forced a null round trip through
+  // `EditorPanelsContext` on every state change (this effect's `state` dependency is
+  // the whole editor state, so that was every keystroke and every click), even though
+  // the new content overwrote the null in the same effect flush. The M3/D83 gate
+  // still nulls explicitly when there is nothing to publish; only unmount needs the
+  // cleanup now, and that moved to its own effect below.
   useEffect(() => {
     // The M3 gate, plus the failed-listing silence (D83/F-A): no editor, nothing
     // published.
@@ -843,9 +891,9 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
         </Accordion>
       </>,
     );
-    return () => setPanels(null);
     // sectionErrors only reads what `errors` already covers.
   }, [state, errors, policyErrors, setPanels, touchSectionFromEvent, presentation, unknownId, failedRouteId]);
+  useEffect(() => () => setPanels(null), []);
 
   /**
    * Every path that replaces the draft goes through the same D14 confirmation — now

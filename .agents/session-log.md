@@ -5339,3 +5339,24 @@ poster-specific branch), since `CanvasFfmpegVideoCompositor.ts` needed no edit a
 unchanged. Motion goldens, mp4 byte golden and HL3 raster tests pass untouched; 2/2 mutations caught
 (`.agents/manifests/ve5b1.json`). VE5b1 in docs/planning/2026-09-13_video-editing-features.md (VE5b split into
 VE5b1/VE5b2, `premise VE5b` retired, `premise VE5b2` added for the generation gap).
+
+## 2026-09-16 — X32 (AI session)
+
+Re-measured X30's two unverified candidates for the remaining CI-only "Test timed out in 5000ms"
+margin problem in brief-editor.test.tsx. Both the dirty-flag effect's false→true round trip and the
+panel-publishing effects' null→JSX round trip are real (verified via instrumentation) but do **not**
+cost an extra commit in this React version: automatic batching folds a same-effect cleanup-then-body
+pair into one commit regardless. Fixed both anyway (ref-guarded dirty effect + unmount-only clear;
+panel effects stop nulling on every dep change) since they halve writes into two contexts with
+subscribers outside this suite's Profiler reach (Header, Sidebar, EditorPanelsOutlet) — a real cost
+this repo's tests cannot observe from inside BriefEditor's own boundary, so recorded honestly as not
+caught by any test rather than manufacturing a mutation claim. The actual "keystroke costs one more
+commit than a click" gap (X32's own brief, bullet 3) was a genuine bug: `handleMainBlur`'s
+`setTouched` built a fresh Set on every blur even when the field's key was already touched —
+`touchSectionFromEvent` three lines above it already had the correct guard. Fixed to match; verified
+directly (re-blur an already-touched field then type: 5 commits with the bug, 3 with the guard).
+Measured but did not change `fillValidDraft`'s own per-character typing cost (~70% reducible via
+`fireEvent.change`, out of scope for this lane's blast radius). Four previously-timing-out tests pass
+unchanged. 1/1 mutation caught (`.agents/manifests/x32.json`; the brief's other two suggested
+mutations recorded in a `note`, not as false "caught" entries). §34 (X32) of
+docs/planning/2026-09-10_the-unowned-gaps.md.

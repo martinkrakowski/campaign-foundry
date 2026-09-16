@@ -5,6 +5,7 @@ import { screen, waitFor, within, fireEvent, act } from "@testing-library/react"
 import userEvent from "@testing-library/user-event";
 import { renderWithRun as renderWithShell, json, nextMock, ShellProviders } from "@/__tests__/helpers";
 import { API, useRun } from "@/lib/run-context";
+import { useEditorDirty } from "@/lib/editor-dirty-context";
 import { CreateCampaignProvider } from "@/lib/create-campaign-context";
 import { CREATE_SEED_KEY, createCampaign, takeSeed } from "@/lib/create-campaign";
 import { stashStep } from "@/lib/use-step-navigation";
@@ -1918,6 +1919,136 @@ describe("BriefPage — capabilities and motion", () => {
     commits = 0;
     await user.click(screen.getByRole("button", { name: "ken-burns-out" }));
     expect(commits).toBeLessThanOrEqual(2);
+  });
+
+  /**
+   * X32 — X30 closed one of the shell's three commits per interaction (the
+   * validate-on-change mirror) but explicitly left the dirty-flag effect's own
+   * commit standing, and it never measured a keystroke that revisits an
+   * already-touched field, only a fresh motion-kind click (above). Re-measured
+   * directly with a `React.Profiler`, isolating each candidate in turn:
+   *
+   * - The dirty-flag round trip X30 flagged (`setDirty`'s cleanup running on every
+   *   dep change, not only unmount, so an unrelated keystroke paid a false→true
+   *   round trip through `EditorDirtyContext` even when the flag was already
+   *   `true` on both sides) turned out not to cost an extra commit by itself:
+   *   React's automatic batching already folds a cleanup-then-body pair from the
+   *   SAME effect into one commit. Reverting the ref guard alone does not move
+   *   this test. The fix is kept anyway — it halves the number of writes into a
+   *   context with other subscribers (Header, Sidebar), which matters outside
+   *   this Profiler's subtree even though it does not move this number — but it
+   *   is not what this test pins.
+   * - Same story for the panel-publishing effects' unconditional
+   *   `return () => setPanels(null)` / `setTopPanels(null)`: a real null → JSX
+   *   round trip on every state change, batched into one commit either way.
+   *   Reverting it alone does not move this test either.
+   * - The one BriefEditor inefficiency that DOES move this test:
+   *   `handleMainBlur` called `setTouched((prev) => new Set(prev).add(key))`
+   *   unconditionally, so re-blurring a field the user had already visited once
+   *   (correcting an earlier field after filling the rest of the draft — a
+   *   completely ordinary gesture, exercised below) built a fresh `touched`
+   *   reference for zero semantic change. `visibleErrors` depends on `touched`,
+   *   so that fresh reference republishes the top panels for nothing —
+   *   `touchSectionFromEvent`, three lines above it, already had this exact
+   *   guard. Verified directly: reverting just this guard turns this test's
+   *   measured gesture from 3 commits to 5.
+   *
+   * N=3 is what remains, and it is not a BriefEditor effect at all: instrumented
+   * every setState call BriefEditor's effects make (setDirty, setTopPanels,
+   * setPanels, the D35 setDraftRun handoff, setTouched, setTouchedSections) and
+   * confirmed each already bails out correctly on the measured gesture — the
+   * third commit lands before this component's own `dispatch` runs, and before
+   * any of them. A control confirms it is click-side, not keyboard-side: passing
+   * `{ skipClick: true }` (so `userEvent.type` only fires keyboard events, no
+   * pointer events, on an already-focused field) drops it straight to 2, matching
+   * a click. `userEvent.type` always precedes typing with a click sequence
+   * (mousedown/mouseup/click) to establish focus and caret position — modelling a
+   * real user clicking into a field before typing — and that click is on a
+   * controlled `<input>`, which pays a React-internal commit a button's click
+   * never does. Not fixable without decontrolling the field, which would be a
+   * correctness regression (D3's typed value would stop round-tripping through
+   * validation) — out of scope for this lane. N=3 is the honest floor for
+   * "click into a field, then type" — the shape every keystroke in this suite's
+   * `fillValidDraft` actually takes.
+   */
+  test("a single keystroke into a text field commits the shell at most three times (X32)", async () => {
+    const user = userEvent.setup();
+    routes({});
+    let commits = 0;
+    renderWithRun(
+      <Profiler id="x32-keystroke-commits" onRender={() => { commits += 1; }}>
+        <NewEditor />
+      </Profiler>,
+    );
+    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""));
+    await fillValidDraft(user);
+    // Revisit a field fillValidDraft already touched once (Target Region, blurred
+    // when fillValidDraft moved on to Target Audience) — the ordinary "go back and
+    // fix an earlier field" gesture, and the one this test's fix is about.
+    await user.type(screen.getByLabelText("Target Region"), "z");
+
+    commits = 0;
+    // Leaving Target Region again is the re-blur of an already-touched field this
+    // fix targets; typing into Campaign Name is the keystroke being measured.
+    await user.type(screen.getByLabelText("Campaign Name"), "q");
+    expect(commits).toBeLessThanOrEqual(3);
+  });
+
+  /**
+   * X32 — the dirty flag's ref-guarded effect must not change what the flag means,
+   * only how often it republishes. Each assertion below would fail on a plausible
+   * "optimization" the mutation manifest doesn't already cover: dropping the
+   * unmount effect entirely (unmount would never clear it), initializing the ref to
+   * `true` instead of `null` (the first real edit would be swallowed as a no-op),
+   * or guarding on `state` identity instead of the derived boolean (a no-op edit,
+   * which always produces a new `state` object, would incorrectly toggle it).
+   */
+  test("the dirty flag sets on a real edit, ignores a no-op edit, clears on save, and clears on unmount (X32)", async () => {
+    const DirtyProbe = () => {
+      const { isDirty } = useEditorDirty();
+      return <span data-testid="dirty-probe">{isDirty ? "dirty" : "clean"}</span>;
+    };
+    const user = userEvent.setup();
+    const calls = routes({});
+    const view = renderWithRun(
+      <>
+        <DirtyProbe />
+        <NewEditor />
+      </>,
+    );
+    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""));
+    expect(screen.getByTestId("dirty-probe").textContent).toBe("clean");
+
+    // A first real edit sets it.
+    await fillValidDraft(user);
+    expect(screen.getByTestId("dirty-probe").textContent).toBe("dirty");
+
+    // An edit that changes nothing does not toggle it: replaying the value a field
+    // already holds still dispatches a `patch` (a new `state` object), but
+    // `isPristine`/`isDirtySinceSave` recompute to the same booleans as before, so
+    // the flag must not flip off and back on.
+    fireEvent.change(screen.getByLabelText("Campaign Name"), { target: { value: "fresh" } });
+    expect(screen.getByTestId("dirty-probe").textContent).toBe("dirty");
+
+    // A save clears it: the saved snapshot now matches the draft.
+    await waitFor(() =>
+      expect((screen.getByRole("button", { name: /^Save$/ }) as HTMLButtonElement).disabled).toBe(false),
+    );
+    await saveVia(user, "Save");
+    await waitFor(() => expect(calls.some((c) => c.method === "POST")).toBe(true));
+    await waitFor(() => expect(screen.getByTestId("dirty-probe").textContent).toBe("clean"));
+
+    // Dirty again — an edit against the now-saved snapshot — then the route
+    // unmounts (e.g. navigating away). The provider outlives the route, so the
+    // flag must not keep a stale editor's answer prompting every later navigation.
+    await user.type(screen.getByLabelText("Target Audience"), "!");
+    expect(screen.getByTestId("dirty-probe").textContent).toBe("dirty");
+    view.rerender(
+      <ShellProviders>
+        <DirtyProbe />
+      </ShellProviders>,
+    );
+    expect(screen.getByTestId("dirty-probe").textContent).toBe("clean");
   });
 
   test("a motion brief on a host without motion stays read-only, saves verbatim, and applies with the refusal (D12)", async () => {

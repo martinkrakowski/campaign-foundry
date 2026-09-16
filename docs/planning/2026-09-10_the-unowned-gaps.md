@@ -1022,3 +1022,141 @@ empty") and stating that if a future rule can flag a non-empty path — a missin
 extension, a server refusal — the conditional returns **with a test that reaches it through real
 application behaviour**, not a hand-constructed prop. `invalid` stays live everywhere else it is
 still reachable: the empty-tile block and the hidden mirror input's `aria-invalid`.
+
+## 34. X30 closed one commit per gesture; the dirty-flag and panel-publishing effects still cost a second, and a real product bug costs a third on some keystrokes (X32)
+
+**Evidence.** X30 (merged, `4540ce0b`) folded the validate-on-change mirror into a `useMemo`,
+dropping a motion-kind click from 3 commits to 2. On the branch CI run after X30 merged,
+`brief-editor.test.tsx` still failed with `Test timed out in 5000ms` on the same three tests plus
+X30's own commit-count test — same SHA, 4m20s pass on the push run and 9m51s fail on the PR run.
+X30 named two remaining candidates without verifying them: the dirty-flag effect's own commit
+(`setDirty`'s cleanup running on every `state` change, not only unmount, so an unrelated keystroke
+paid a false→true round trip through `EditorDirtyContext` even when the flag was already `true` on
+both sides), and an unexplained gap where a keystroke cost one commit more than a click even after
+X30 (3 vs 2).
+
+Re-measured directly with `React.Profiler`, isolating each candidate:
+
+- The dirty-flag round trip is real (two distinct `setDirty` calls, `false` then the real value,
+  every time `state` changes) but does **not** cost an extra commit by itself: React's automatic
+  batching folds a same-effect cleanup-then-body pair into one commit regardless of whether the two
+  calls carry the same value or different ones. Reverting the fix below alone does not fail any test
+  in the suite.
+- The panel-publishing effects (`setTopPanels`/`setPanels`, ~L800/~L850) had the identical shape — an
+  unconditional `return () => setPanels(null)` forced a real null→JSX round trip through
+  `EditorPanelsContext` on every state change, even though the fresh content overwrote the null in
+  the same effect flush. Same finding: batching absorbs it, and reverting this fix alone does not
+  fail any test either.
+- The commit X30 attributed to "the dirty-flag effect" in its pre-fix baseline was real (3 commits
+  per interaction), but it came from the validate-on-change mirror's own separate `useEffect`
+  (independently scheduled, with its own `setState` calls) being folded away by X30's fix — not from
+  the dirty effect's internal round trip needing two commits on its own. X30's diagnosis of *what*
+  was costing the third commit pre-fix was right; its prediction of what fixing the dirty effect's
+  round trip would do post-fix does not hold under this React version's batching.
+- The actual, unexplained "keystroke costs one more than click" gap (bullet 3, X32's own brief) is a
+  genuine BriefEditor bug: `handleMainBlur` called `setTouched((prev) => new Set(prev).add(key))`
+  unconditionally. Re-blurring a field the user had already visited once — correcting an earlier
+  field after filling the rest of the draft, an entirely ordinary gesture — built a fresh `touched`
+  reference for zero semantic change every time. `visibleErrors` depends on `touched` by reference,
+  so that fresh reference republishes the top panels for nothing. `touchSectionFromEvent`, declared
+  three lines above the same handler, already carried the correct `prev.has(x) ? prev : new Set(...)`
+  guard — `handleMainBlur` simply never got it. Measured directly: re-blurring an already-touched
+  field (Target Region, touched once by `fillValidDraft`'s own progression) and then typing into a
+  different field costs **5 commits** with the bug, **3** with the guard.
+
+**Consequence.** The suite's slowest tests carry many corrections and toggles (motion-kind switches,
+going back to fix an earlier field after validation reveals it), each of which re-blurs
+already-touched fields repeatedly. Each redundant re-blur republished the panels for nothing, adding
+real, avoidable commits — and therefore real, avoidable render time — on exactly the interaction
+pattern those tests exercise most.
+
+**X32 — shipped in this PR.** Three changes to `BriefEditor.tsx`:
+
+1. The dirty-flag effect now guards on a ref holding the last value actually published, so an
+   unchanged boolean is a no-op; the unmount-only clear moved to its own `useEffect(() => () =>
+   setDirty(false), [])`. Kept even though it does not move this suite's commit counts: it halves the
+   number of writes into a context with subscribers outside this Profiler's reach (Header, Sidebar
+   both consume `EditorDirtyContext`), which is a real cost this repo's test infrastructure cannot
+   observe from inside `BriefEditor`'s own boundary.
+2. The panel-publishing effects (`setTopPanels`, `setPanels`) no longer null their content on every
+   dep change — only the M3/D83 "nothing to publish" gate nulls explicitly now, and unmount is its
+   own effect. Kept for the same reason as (1): fewer writes into `EditorPanelsContext`, whose
+   `EditorPanelsOutlet` consumer sits outside this suite's Profiler-measured tree.
+3. `handleMainBlur`'s `setTouched` call now guards exactly like `touchSectionFromEvent` already did:
+   `(prev) => (prev.has(key) ? prev : new Set(prev).add(key))`. This is the fix that actually moves a
+   test.
+
+**Commit counts, before → after:**
+
+| Gesture | Before X32 | After X32 |
+| --- | --- | --- |
+| Click (motion-kind toggle, already dirty) — X30's own test | ≤ 2 (unchanged) | ≤ 2 (unchanged) |
+| Keystroke, continuing to type in an already-focused field (steady state) | 3 | 3 (unchanged — see below) |
+| Keystroke that re-blurs an already-touched field (the ordinary "go back and fix a field" gesture) | 5 | 3 |
+
+The "3" that does **not** move (steady-state typing in an already-focused field) is not a
+BriefEditor effect: instrumented every `setState` call BriefEditor's effects make (`setDirty`,
+`setTopPanels`, `setPanels`, the D35 `setDraftRun` handoff, `setTouched`, `setTouchedSections`) and
+confirmed each bails out correctly on that gesture — the third commit lands before this component's
+own `dispatch` runs, before any of them. A control isolates it precisely: passing `{ skipClick: true
+}` to `userEvent.type` (keyboard events only, no pointer events, on an already-focused field) drops
+it to 2, matching a click. `userEvent.type` always precedes typing with a click sequence
+(mousedown/mouseup/click) to establish focus and caret position, modelling a real user clicking into
+a field before typing; that click lands on a controlled `<input>`, which pays a React-internal commit
+a button's click never does. Not fixable without decontrolling the field — a correctness regression
+(the typed value would stop round-tripping through validation) this lane will not make. This is the
+honest floor "one gesture, one commit" hits for a keyboard gesture into a controlled text field:
+3, not 1, and not fixable further from this layer.
+
+**Test-first (red before, green after, work-count not wall-clock).** Extended X30's `React.Profiler`
+approach with two new tests in `brief-editor.test.tsx`:
+
+- `"a single keystroke into a text field commits the shell at most three times (X32)"` — fills a
+  valid draft, revisits an already-touched field (the `handleMainBlur` guard's target), then types
+  one character into a different field. Failed pre-fix with "expected 5 to be less than or equal to
+  3"; passes at 3 post-fix.
+- `"the dirty flag sets on a real edit, ignores a no-op edit, clears on save, and clears on unmount
+  (X32)"` — a `DirtyProbe` component reading `useEditorDirty().isDirty` directly, pinning the
+  semantics the ref-guard must preserve: unmount still clears it, a first real edit still sets it, a
+  save still clears it, and replaying an unchanged value through the same `onChange` path does not
+  toggle it. This test is unaffected by either mutation below (it pins correctness, not the
+  ref-guard's performance claim) and passes unchanged throughout.
+
+The four previously CI-timing-out tests ("a motion brief authored from scratch...", "motion without a
+kind or a duration...", "a motion brief on a host without motion...", "Save refuses a click
+destination...") pass unchanged — no test edit was needed for them, which is itself a finding: this
+lane's fixes reduce real commit volume on the repeated-correction interaction pattern those tests
+exercise, but the CI-only margin problem (idle-runner timing cannot reproduce it locally, matching
+X30's own finding) is not something a single local verification pass can confirm as closed by
+wall-clock alone.
+
+**Mutation manifest (`.agents/manifests/x32.json`).** One mutation recorded and verified caught:
+reverting the `handleMainBlur` guard turns the keystroke work-count test's measured gesture from 3
+commits to 5. The brief's two suggested mutations — reverting the dirty effect's ref guard, and
+reverting the panel effects' unconditional null-republish — were tried individually against every
+test in this file and neither fails anything: applied alone, each still leaves every measured gesture
+at its post-X32 commit count, because React's automatic batching folds the reintroduced
+cleanup-then-body round trip into one commit regardless. Both fixes are kept for the reason given
+above (fewer writes into contexts with subscribers outside this suite's Profiler reach), but
+recording either as "caught" by a test that does not, in fact, fail without it would be exactly the
+dishonesty X30's own manifest declined to commit for its second slot — so the manifest carries a
+`note` explaining this instead of a second, false, mutation entry.
+
+**The test's own cost, measured but not changed.** `fillValidDraft` types every field character by
+character through `userEvent`, so its cost compounds: a first character into a newly-focused field
+costs 3 commits (the click-driven React-internal commit plus dispatch plus the panels republish),
+every subsequent character in the same field costs 2 (dispatch plus panels republish, verified
+directly: typing 3 characters in one `.type()` call after the field is already focused costs exactly
+7 = 1 + 2×3). `fillValidDraft`'s own sequence — 8 field entries, 22 characters total — costs
+approximately 8×1 + 22×2 = 52 commits by this accounting. Replacing each `user.type(field, text)`
+with a single `fireEvent.change(field, { target: { value: text } })` would cut this to roughly
+8×2 = 16 commits (no click-driven cost at all, confirmed: `fireEvent.change` alone costs exactly 2,
+matching a click), a ~70% reduction — a legitimate, assertion-preserving remedy this brief explicitly
+allows for setup-only typing. **Not applied in this PR**: `fillValidDraft` is called by effectively
+every test in this 180-test file, not only the four historically slow ones, so changing it is a
+broader-blast-radius change than a single narrowly-scoped performance lane should take on without its
+own dedicated verification pass across the whole file; and local timing cannot reproduce the CI-only
+margin problem in the first place (matching X30's own finding), so there is no local feedback loop to
+confirm a wall-clock win from this change without a CI round-trip, which is out of scope for one
+lane's verification pass. Recorded here as a finding for whichever lane next touches this suite's
+setup cost.
