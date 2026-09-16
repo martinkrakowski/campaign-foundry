@@ -13,6 +13,21 @@ export interface VideoCompositeRequest extends CompositeRequest {
    * samples the key beat (D7).
    */
   readonly timeline?: CopyTimeline;
+  /**
+   * Per-scene grounds (VE5b1), keyed by the beat's own {@link CopyBeat.background}
+   * asset path — a `Record` rather than an index so the adapter maps beat →
+   * bytes with no bookkeeping of its own; `prepare` decodes once per distinct
+   * key an actual beat references, never the whole map — an entry no beat
+   * names is neither decoded nor a reason to fail. Absent, or a beat whose
+   * `background` has no entry here, means
+   * the creative's own `background` (VE-D3) — the same fallback a `timeline`
+   * with no per-beat backgrounds already renders today.
+   *
+   * `GenerateCampaignUseCase` fills this at generation (VE5b2); this lane only
+   * teaches the renderer to draw it. Stills (`CompositeRequest`) never carry
+   * it — there is no timeline, so no beat to key it by.
+   */
+  readonly backgrounds?: Readonly<Record<string, Uint8Array>>;
 }
 
 export interface VideoCompositeResult {

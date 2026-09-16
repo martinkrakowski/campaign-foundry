@@ -5325,3 +5325,17 @@ touches `htmlWeightKey`.
   docs/planning/2026-09-10_the-unowned-gaps.md records the grep, the reproduction,
   and why this is the removal of a dead branch rather than a documented exception.
   195/195 touched tests green, typecheck/lint clean.
+## 2026-09-15 — VE5b1 (AI session)
+
+Renderer half of scenes-in-the-renderer (no generation wiring): `VideoCompositeRequest.backgrounds?:
+Readonly<Record<string, Uint8Array>>` keyed by a beat's own `background` path; `ResolvedBeat.background?:
+string` copied through `resolveTimeline` (byte-neutral — nothing hashes a `ResolvedBeat`). `prepare` decodes
+each distinct supplied ground once; `paintBackground` selects the active beat's scene at `copyT ?? t` via
+`beatAt`, crossfading on `fade` with the same `mix` the copy layer uses, ken-burns applied to whichever ground
+is drawn; absent/unmatched falls back to `prepared.background` (VE-D3) — the poster gets this for free (no
+poster-specific branch), since `CanvasFfmpegVideoCompositor.ts` needed no edit at all (the widened
+`prepare`/port request types were enough to carry `backgrounds` through). `compositeRequestFingerprint` hashes
+`backgrounds` (per-key content hash, sorted keys) only when present — every existing pinned fingerprint
+unchanged. Motion goldens, mp4 byte golden and HL3 raster tests pass untouched; 2/2 mutations caught
+(`.agents/manifests/ve5b1.json`). VE5b1 in docs/planning/2026-09-13_video-editing-features.md (VE5b split into
+VE5b1/VE5b2, `premise VE5b` retired, `premise VE5b2` added for the generation gap).
