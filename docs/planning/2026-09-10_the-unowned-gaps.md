@@ -1445,3 +1445,12 @@ project's timeout back to the default (5000); the pin test catches it.
 The rule against raising a timeout over a slowdown stands. This is a calibration of a default that
 was never chosen, applied only after the cost was found and cut, and it does not license the next
 timeout raise.
+
+**X36 — remediation (this PR).** Follow-up review (Qodo) found the X34 `beforeAll` comment in
+`brief-editor.test.tsx` still claimed hooks are gated by `hookTimeout` (10000ms default, untouched,
+double `testTimeout`). After this PR's web-only `testTimeout: 15000` that is false and backwards: the
+hook has the smaller budget. The comment is corrected; `hookTimeout` is still untouched. `beforeAll`
+remains the right place because the typed reference runs once for the whole describe rather than
+inside every test's own budget. No timeout value changed. Grep of `hookTimeout` across `apps/web`
+found one other mention (the nested-describe blast-radius comment); it does not repeat the "double"
+claim. §36's "this repo overrides neither" was true when X34 shipped and is not rewritten here.
