@@ -133,7 +133,11 @@ describe("CanvasFfmpegVideoCompositor byte golden (VG2)", () => {
       if (!ffmpegPath) throw new Error("ffmpeg-static binary is not available");
       const run = goldenRun(goldens, recording, missingMessage);
 
-      const { video } = await new CanvasFfmpegVideoCompositor().compositeVideo(canonicalMp4Request());
+      // Same binary that encodes must be the same binary this file probes and
+      // extracts streams with (`ffmpegPath`, honouring COMPOSITOR_FFMPEG_PATH) —
+      // otherwise a hash mismatch could mean "two different ffmpeg builds",
+      // not "the encoder changed". VE3b1's audio golden already had this shape.
+      const { video } = await new CanvasFfmpegVideoCompositor({ ffmpegPath }).compositeVideo(canonicalMp4Request());
       const banner = parseX264Banner(video);
 
       const dir = mkdtempSync(join(tmpdir(), "cf-mp4-golden-"));
