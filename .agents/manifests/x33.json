@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "lane": "X33",
+  "mutations": [
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/VariationPolicy.vo.ts",
+      "before": "      ...(timeline !== undefined\n        ? {\n            timeline: timeline.beats.map((beat) => ({\n              text: beat.text,\n              ...(beat.background !== undefined ? { background: beat.background } : {}),\n            })),\n          }\n        : {}),",
+      "after": "      // mutated: copy.timeline dropped from the hashed payload",
+      "because": "hashCopy's payload must cover copy.timeline in full — a beat's text and its background — not just campaignMessage/localizedMessage. Dropping the timeline spread means two briefs that differ only in a beat's text, or only in a beat's background, hash identically: the beat-text and beat-background tests in VariationPolicy.vo.test.ts (\"hashCopy — the brief's copy surface, independent of hashPolicy\") assert the two hashes differ, so both fail once the timeline never reaches the hasher.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/VariationPolicy.vo.test.ts",
+        "-t",
+        "differing only in a beat's"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/pipeline.ts",
+      "before": "    if (expectedCopyHash !== undefined && planned.value.copyHash !== expectedCopyHash) {",
+      "after": "    if (planned.value.copyHash !== expectedCopyHash) {",
+      "because": "An absent expectedCopyHash means the persisted report predates this field and must take the no-pin path (§35's documented decision), the same way an absent expectedPolicyHash already does. Removing the `!== undefined` guard makes `planned.value.copyHash !== expectedCopyHash` compare a real hash string against `undefined`, which is always true — every re-roll of a pre-existing report is now wrongly refused. The pipeline.test.ts case that runs with expectedCopyHash left undefined (\"runCampaign pins a re-roll to expectedCopyHash …\", the noPin assertion) expects success and gets a refusal instead.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/pipeline.test.ts",
+        "-t",
+        "pins a re-roll to expectedCopyHash"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

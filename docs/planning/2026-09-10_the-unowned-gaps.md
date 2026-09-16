@@ -1189,13 +1189,31 @@ since VE5b2, their `background`.
    this hole and VE5b2 (wiring scene bytes into generation) does not either; it only gives the
    pre-existing gap a second, visible way to bite.
 
-**Fix sketch — not shipped — lane X33.** Widen `hashPolicy`'s input (or add a second hash
+**Fix sketch — lane X33.** Widen `hashPolicy`'s input (or add a second hash
 alongside `policyHash`) to cover the brief's copy surface — `campaignMessage`, `localizedMessage`,
 and `copy.timeline` in full (beat text and `background` together, since both are the same class of
 "content the re-roll must not silently mix") — and refuse a re-roll whose copy hash has moved,
 the same way a moved `policyHash` is refused today. This is cross-cutting (it touches
 `VariationPolicy.vo.ts`, `pipeline.ts`, and `generate.post.ts`, none of which VE5b2 owns) and
 belongs to its own lane rather than either lane that exposed a symptom of it.
+
+**X33 — shipped in this PR.** Took the fix sketch's own first alternative: a SECOND hash beside
+`policyHash`, never a widening of it — `hashPolicy`'s payload (`VariationPolicy.vo.ts` ~265-288) is
+untouched, so every existing `policyHash` (and golden) is unchanged. The new `hashCopy` (same file)
+covers `campaignMessage`, `localizedMessage`, and `copy.timeline` in full — each beat's `text` and
+`background`, plus beat order and count, all preserved by `canonicalJson`'s array-order-preserving
+serialisation — hashed through the same injected `PolicyHasher` seam `hashPolicy` already uses, so
+`node:crypto` still never reaches the domain. `copyHash` is carried beside `policyHash` on
+`VariationPlan` and `PipelineResult`, persisted in the report, read back by `generate.post.ts`
+(`persistedCopyHash`, mirroring `persistedPolicyHash`), and checked in `runCampaign`
+(`apps/api/server/lib/pipeline.ts`) right beside the existing `policyHash` check — refused with a
+message naming copy, not plan, in the same voice as the existing one. Both symptoms §35 named are
+closed: editing `campaignMessage` (or a beat's `text`) and editing a beat's `background` both move
+`copyHash` and are refused on the same re-roll path. By the same rule an absent `policyHash` already
+follows, an absent `copyHash` is no pin, not a refusal — every report persisted before this field
+existed has none, so **the first re-roll of a pre-existing report stays unguarded on copy**, by
+choice, documented here and in the PR rather than fixed by refusing those reports outright (which
+would make every existing campaign un-re-rollable on its very next re-roll).
 ---
 
 ## 36. `fillValidDraft`'s own typing was the last unowned cost in the editor's CI margin (X34)

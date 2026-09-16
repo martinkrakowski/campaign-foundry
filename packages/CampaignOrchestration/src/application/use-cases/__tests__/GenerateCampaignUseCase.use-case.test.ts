@@ -939,6 +939,7 @@ describe("GenerateCampaignUseCase — variation", () => {
     if (!result.success) return;
     expect(result.value).toMatchObject({ halted: true, assets: [] });
     expect(result.value.policyHash).toBeUndefined();
+    expect(result.value.copyHash).toBeUndefined();
     // Campaign copy first, then each distinct pooled headline once.
     expect(compliance.validateLegalCopy.mock.calls.map((call) => call[0])).toEqual([
       "Hello",
@@ -989,6 +990,7 @@ describe("GenerateCampaignUseCase — variation", () => {
       },
     });
     expect(result.value.policyHash).toBe("hash");
+    expect(result.value.copyHash).toBe("copy-hash");
     expect(result.value.seed).toBe(42);
     expect(result.value.log.totalOperations).toBe(3);
     expect((d.exporter as RecordingExporter).proofs).toEqual(["proofs/alpha.pdf"]);

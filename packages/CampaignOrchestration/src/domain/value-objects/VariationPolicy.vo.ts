@@ -450,6 +450,38 @@ function hashPolicy(
   return hasher(canonicalJson(payload));
 }
 
+/**
+ * Hash of the brief's copy surface — `campaignMessage`, `localizedMessage`, and
+ * `copy.timeline` in full (each beat's `text` and `background`, plus beat order
+ * and count, since array order is preserved by `canonicalJson`) — independent
+ * of `hashPolicy` (§35, `docs/planning/2026-09-10_the-unowned-gaps.md`).
+ *
+ * A selective re-roll pins BOTH hashes: `hashPolicy` alone lets a re-roll of
+ * one cell pass while the brief's message or a beat's text/background moved
+ * underneath it, silently merging the new copy into a report whose other
+ * cells were rendered under the old copy. This is deliberately a SECOND,
+ * disjoint hash rather than a widening of `hashPolicy`'s own payload —
+ * `hashPolicy` is golden-stable (see the comments in `fromBrief` above), and
+ * no axis ever reaches this hash, no copy field ever reaches `hashPolicy`.
+ */
+export function hashCopy(brief: CampaignBrief, hasher: PolicyHasher): string {
+  const timeline = brief.copy?.timeline;
+  return hasher(
+    canonicalJson({
+      campaignMessage: brief.campaignMessage,
+      ...(brief.localizedMessage !== undefined ? { localizedMessage: brief.localizedMessage } : {}),
+      ...(timeline !== undefined
+        ? {
+            timeline: timeline.beats.map((beat) => ({
+              text: beat.text,
+              ...(beat.background !== undefined ? { background: beat.background } : {}),
+            })),
+          }
+        : {}),
+    }),
+  );
+}
+
 /** JSON with object keys sorted recursively; array order is preserved. */
 function canonicalJson(value: unknown): string {
   return JSON.stringify(sortKeys(value));

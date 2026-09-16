@@ -30,6 +30,21 @@ async function persistedPolicyHash(brief: CampaignBrief, reroll: boolean): Promi
   const hash = typeof report === "object" && report !== null ? (report as { policyHash?: unknown }).policyHash : undefined;
   return typeof hash === "string" ? hash : undefined;
 }
+
+/**
+ * The persisted report's copy hash (§35) for a variation re-roll, else undefined
+ * (no pin) — same shape as `persistedPolicyHash`, read from the same report. A
+ * report persisted before this field existed has no `copyHash` key, so this
+ * returns `undefined` for it too: the first re-roll of such a report is not
+ * pinned on copy, by the same "absent hash is no pin" rule `persistedPolicyHash`
+ * already follows.
+ */
+async function persistedCopyHash(brief: CampaignBrief, reroll: boolean): Promise<string | undefined> {
+  if (!reroll || brief.mode !== "variation") return undefined;
+  const report = await readReport(outputRoot(), brief.id);
+  const hash = typeof report === "object" && report !== null ? (report as { copyHash?: unknown }).copyHash : undefined;
+  return typeof hash === "string" ? hash : undefined;
+}
 export default defineEventHandler(async (event) => {
   const capabilities = await waitForCapabilities();
   if (capabilities.reason === NOT_PROBED_REASON) {
@@ -111,7 +126,8 @@ export default defineEventHandler(async (event) => {
   const jobId = claim.jobId;
   runJob(jobId, async () => {
     const expectedPolicyHash = await persistedPolicyHash(brief, reroll);
-    const result = await runCampaign(brief, imageModel, regenerateOnly, expectedPolicyHash);
+    const expectedCopyHash = await persistedCopyHash(brief, reroll);
+    const result = await runCampaign(brief, imageModel, regenerateOnly, expectedPolicyHash, expectedCopyHash);
     if (!result.success) {
       await failJob(jobId, result.error.message);
       return;

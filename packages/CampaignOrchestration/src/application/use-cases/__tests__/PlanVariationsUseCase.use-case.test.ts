@@ -8,7 +8,7 @@ import type { Product } from "../../../domain/entities/Product.js";
 import type { Variant } from "../../../domain/entities/Variant.js";
 import type { VariationPlan } from "../../../domain/value-objects/VariationPlan.vo.js";
 import { MOTION_KINDS } from "../../../domain/value-objects/MotionKind.vo.js";
-import { VariationPolicy } from "../../../domain/value-objects/VariationPolicy.vo.js";
+import { hashCopy, VariationPolicy } from "../../../domain/value-objects/VariationPolicy.vo.js";
 import { nodeCryptoPolicyHasher } from "../../../infrastructure/index.js";
 import { PlanVariationsUseCase } from "../PlanVariationsUseCase.use-case.js";
 
@@ -93,6 +93,30 @@ describe("PlanVariationsUseCase.plan", () => {
         paletteShift: 0,
       },
     ]);
+  });
+
+  test("carries a copyHash equal to hashCopy(brief, hasher), independent of policyHash (X33, §35)", () => {
+    const input = brief({ campaignMessage: "Stay wild" });
+    const result = planner().plan(input);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.copyHash).toBe(hashCopy(input, nodeCryptoPolicyHasher));
+
+    // An axis-only change moves policyHash but not copyHash.
+    const differentAxis = planner().plan({ ...input, variation: { ...input.variation, minDistance: 0 } });
+    expect(differentAxis.success).toBe(true);
+    if (differentAxis.success) {
+      expect(differentAxis.value.copyHash).toBe(result.value.copyHash);
+      expect(differentAxis.value.policyHash).not.toBe(result.value.policyHash);
+    }
+
+    // A copy-only change moves copyHash but not policyHash.
+    const differentCopy = planner().plan({ ...input, campaignMessage: "Stay tame" });
+    expect(differentCopy.success).toBe(true);
+    if (differentCopy.success) {
+      expect(differentCopy.value.copyHash).not.toBe(result.value.copyHash);
+      expect(differentCopy.value.policyHash).toBe(result.value.policyHash);
+    }
   });
 
   test("the same brief twice yields deep-equal plans", () => {
@@ -366,6 +390,7 @@ describe("PlanVariationsUseCase.replan", () => {
     expect(result.success).toBe(true);
     if (!result.success) return;
     expect(result.value.policyHash).toBe(planned.value.policyHash);
+    expect(result.value.copyHash).toBe(planned.value.copyHash);
     expect(result.value.seed).toBe(planned.value.seed);
     expect(result.value.policy).toBe(planned.value.policy);
     expect(result.value.variants).toHaveLength(planned.value.variants.length);
@@ -450,6 +475,7 @@ describe("PlanVariationsUseCase.replan", () => {
     };
     const plan: VariationPlan = {
       policyHash: policyResult.value.policyHash,
+      copyHash: "copy-hash",
       seed: policyResult.value.seed,
       variants: [
         { ...occupant, index: 0, seed: 0 },
@@ -502,6 +528,7 @@ describe("PlanVariationsUseCase.replan", () => {
     };
     const plan: VariationPlan = {
       policyHash: policyResult.value.policyHash,
+      copyHash: "copy-hash",
       seed: policyResult.value.seed,
       variants: [alpha, beta],
       estimate: {
@@ -545,6 +572,7 @@ describe("PlanVariationsUseCase.replan", () => {
     });
     const plan: VariationPlan = {
       policyHash: policyResult.value.policyHash,
+      copyHash: "copy-hash",
       seed: policyResult.value.seed,
       variants: [onlyAlpha(0), onlyAlpha(1)],
       estimate: {

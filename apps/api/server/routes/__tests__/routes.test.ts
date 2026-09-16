@@ -348,6 +348,79 @@ describe("POST /campaigns/generate", () => {
     expect(body.result?.assets).toHaveLength(1);
   });
 
+  test("variation re-roll fails when the brief's copy changed since the persisted run (X33, §35)", async () => {
+    const policy = {
+      count: 4,
+      seed: 42,
+      minDistance: 1,
+      axes: {
+        layout: ["headline-top", "headline-bottom"],
+        tone: ["bold", "subtle"],
+        background: { source: ["procedural"] },
+        paletteShift: [0, 0.1],
+      },
+    };
+    const seed = await call(brief({ mode: "variation", variation: policy }));
+    const { body: first } = await awaitJob(((await seed.json()) as { jobId: string }).jobId);
+    expect(first.status).toBe("completed");
+    const slot = first.result?.assets[0];
+    // Only the campaignMessage moved — the axes (and so policyHash) are unchanged,
+    // so a policyHash-only pin would wave this through and merge new copy into a
+    // report whose other cells were rendered under the old message.
+    const reroll = await call({
+      brief: brief({ mode: "variation", variation: policy, campaignMessage: "A totally different message" }),
+      regenerateOnly: [{ productId: slot!.productId, variantIndex: slot!.variantIndex }],
+    });
+    expect(reroll.status).toBe(202);
+    const { body } = await awaitJob(((await reroll.json()) as { jobId: string }).jobId);
+    expect(body.status).toBe("failed");
+    expect(body.error).toMatch(
+      /^The brief's copy changed since the last run \(copyHash [0-9a-f]{64} ≠ [0-9a-f]{64}\); run the full campaign\.$/,
+    );
+    const report = await web("get", "/campaigns/result", resultHandler)(
+      new Request("http://x/campaigns/result?campaignId=camp"),
+    );
+    expect(((await report.json()) as { assets: unknown[] }).assets).toHaveLength(4);
+  });
+
+  test("variation re-roll proceeds when the persisted report carries no copy hash — a pre-existing report (X33, §35 decision)", async () => {
+    const policy = {
+      count: 4,
+      seed: 42,
+      minDistance: 1,
+      axes: {
+        layout: ["headline-top", "headline-bottom"],
+        tone: ["bold", "subtle"],
+        background: { source: ["procedural"] },
+        paletteShift: [0, 0.1],
+      },
+    };
+    const seed = await call(brief({ mode: "variation", variation: policy }));
+    const { body: first } = await awaitJob(((await seed.json()) as { jobId: string }).jobId);
+    expect(first.status).toBe("completed");
+    const slot = first.result?.assets[0];
+
+    // Simulate a report persisted before this field existed: strip copyHash from
+    // the stored report, the same shape `writeReport` produced before this PR.
+    const reportPath = resolve(dir, "reports", "camp.json");
+    const stored = JSON.parse(readFileSync(reportPath, "utf8")) as Record<string, unknown>;
+    expect(stored.copyHash).toEqual(expect.any(String)); // sanity: this PR does persist it
+    delete stored.copyHash;
+    writeFileSync(reportPath, JSON.stringify(stored));
+
+    // The copy really did move, but the persisted report has no copy hash to pin
+    // against — the documented decision (§35): the first re-roll of a pre-existing
+    // report is not refused on copy, unlike the policyHash-pinned path above.
+    const reroll = await call({
+      brief: brief({ mode: "variation", variation: policy, campaignMessage: "Yet another message" }),
+      regenerateOnly: [{ productId: slot!.productId, variantIndex: slot!.variantIndex }],
+    });
+    expect(reroll.status).toBe(202);
+    const { body } = await awaitJob(((await reroll.json()) as { jobId: string }).jobId);
+    expect(body.status).toBe("completed");
+    expect(body.result?.assets).toHaveLength(1);
+  });
+
   test("variation target productId mismatch fails the job", async () => {
     const vbrief = brief({
       mode: "variation",

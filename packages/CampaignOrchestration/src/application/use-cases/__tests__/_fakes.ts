@@ -116,6 +116,7 @@ export const fakeVariant = (over: Partial<Variant> = {}): Variant => ({
 
 export const fakePlan = (variants: Variant[], over: Partial<VariationPlan> = {}): VariationPlan => ({
   policyHash: "hash",
+  copyHash: "copy-hash",
   seed: 42,
   variants,
   estimate: { creatives: variants.length, axisProductSize: 24, feasible: true, genaiCalls: 0 },

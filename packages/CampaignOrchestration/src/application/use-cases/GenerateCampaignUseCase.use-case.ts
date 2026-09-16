@@ -682,6 +682,7 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
       log,
       halted: false,
       policyHash: plan.policyHash,
+      copyHash: plan.copyHash,
       seed: plan.seed,
     });
   }

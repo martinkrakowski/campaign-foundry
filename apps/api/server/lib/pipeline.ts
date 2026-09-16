@@ -168,23 +168,37 @@ export function buildPipeline(imageModel?: string, planInput: PlanInput = {}): G
  * persisted report's hash, passed with a variation re-roll) refuses the run
  * when the freshly planned hash differs — the pool or policy changed since the
  * last run, so a single re-rolled slot would be overlaid onto a different base
- * plan; the caller must run the full campaign instead.
+ * plan; the caller must run the full campaign instead. `expectedCopyHash` is
+ * the same pin over the brief's copy surface (§35) — a disjoint hash, checked
+ * independently, so editing the message or a timeline beat and re-rolling one
+ * *other* cell is refused too, not just an axis change. Either pin is skipped
+ * (no refusal) when its expected value is `undefined`: every report persisted
+ * before this hash existed carries no copy hash at all, and refusing those
+ * would make every pre-existing campaign un-re-rollable.
  */
 export async function runCampaign(
   brief: CampaignBrief,
   imageModel?: string,
   regenerateOnly?: ReadonlyArray<RegenerationTarget>,
   expectedPolicyHash?: string,
+  expectedCopyHash?: string,
 ): Promise<Result<PipelineResult, Error>> {
   const planInput = await planInputFor(brief);
   if (!planInput.success) return planInput;
-  if (expectedPolicyHash !== undefined) {
+  if (expectedPolicyHash !== undefined || expectedCopyHash !== undefined) {
     const planned = pooledPlanner(planInput.value).plan(brief);
     if (!planned.success) return planned;
-    if (planned.value.policyHash !== expectedPolicyHash) {
+    if (expectedPolicyHash !== undefined && planned.value.policyHash !== expectedPolicyHash) {
       return err(
         new Error(
           `Plan changed since the last run (policyHash ${expectedPolicyHash} ≠ ${planned.value.policyHash}); run the full campaign.`,
+        ),
+      );
+    }
+    if (expectedCopyHash !== undefined && planned.value.copyHash !== expectedCopyHash) {
+      return err(
+        new Error(
+          `The brief's copy changed since the last run (copyHash ${expectedCopyHash} ≠ ${planned.value.copyHash}); run the full campaign.`,
         ),
       );
     }

@@ -5805,3 +5805,26 @@ caught; the fallback mutation fails on the leaked-payload assertion, not merely 
 write path remain out of scope — two of the three seeds need `html`/`video` drawers that do not
 exist. `campaigns/*` routes untouched.
 Cite: L7 in docs/planning/2026-09-08_creative-templates-and-units.md.
+
+## 2026-09-16 — X33 (lane: a selective re-roll pins the brief's copy too)
+
+Closed §35: `hashPolicy` covered only the variation axes, so editing `campaignMessage`, a beat's
+`text`, or (since VE5b2) a beat's `background`, then re-rolling one *other* cell passed the
+`policyHash` pin and merged the new copy into a report whose other cells still rendered the old
+brief. Added a SECOND hash, `hashCopy` (`VariationPolicy.vo.ts`), never a widening of `hashPolicy`'s
+own golden-stable payload — covers `campaignMessage`, `localizedMessage`, and `copy.timeline` in
+full (beat text and background, plus order and count via `canonicalJson`'s array-order-preserving
+serialisation), through the same injected `PolicyHasher` seam; `canonicalJson` stayed module-private
+and `hashCopy` was added to the same file rather than exported across the layer boundary. Carried as
+`copyHash` beside `policyHash` on `VariationPlan` and `PipelineResult`, persisted in the report, read
+back by `generate.post.ts` (`persistedCopyHash`), and checked in `runCampaign` next to the existing
+policyHash check, refused in the same voice naming copy, not plan. Decision recorded in the PR and
+the plan: an absent persisted copy hash is no pin, not a refusal — every report on disk predates this
+field, so the first re-roll of a pre-existing report stays unguarded on copy, by choice. Red first
+throughout (`hashCopy is not a function`, `undefined` copyHash fields, an un-refused re-roll, a
+missing persisted field — each its own reason); full targeted suites green (345 across the five
+touched files, 759 CampaignOrchestration, 1009 api), `typecheck`/`lint`/`lint:arch`/`plan:verify`/
+`arch:inventory` all clean. Two mutations in `.agents/manifests/x33.json` — drop `copy.timeline` from
+the hashed payload, treat a missing persisted copy hash as a mismatch — both reproduce under
+`mutate:verify`.
+Plan: §35 in docs/planning/2026-09-10_the-unowned-gaps.md.
