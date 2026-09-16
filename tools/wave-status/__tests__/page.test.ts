@@ -14,6 +14,7 @@ import {
   laneStateCounts,
   laneNeedsHuman,
   stallThresholdMs,
+  pastWaveThresholdMs,
   LANE_STATES,
 } from "../lib/lane-state.js";
 import { readEvents } from "../lib/events.js";
@@ -4255,6 +4256,130 @@ describe("the status page", () => {
       const cell = doc.querySelector(`tr.lane[data-lane="${laneId}"] td.c-state`) as unknown as HTMLElement;
       expect(cell.textContent, `lane ${laneId}`).not.toContain("quiet");
     }
+  });
+
+  // X35: a page that cries wolf trains its reader to ignore it. These three
+  // tests pin the page's own faces of the truthfulness rule: silence after a
+  // start is a question (unknown), not an accusation (vanished); the row says
+  // why; and days-old evidence reads as a past wave, not as a broken current
+  // one — in the row's note and in the header's register.
+  test("a started lane with nothing after it renders unknown, not vanished, and the row says why", async () => {
+    const now = Date.now();
+    const silentStatus = {
+      generatedAt: new Date(now).toISOString(),
+      waves: [
+        {
+          id: "S1",
+          lanes: [
+            {
+              wave: "S1",
+              lane: "quiet-start",
+              reported: {
+                stage: "implement",
+                event: "started",
+                ts: new Date(now - 60_000).toISOString(),
+              },
+              derived: { alive: false },
+              disagreements: [],
+            },
+            {
+              wave: "S1",
+              lane: "ended-nothing",
+              derived: { alive: false, exit: 0 },
+              disagreements: [],
+            },
+          ],
+        },
+      ],
+    } as unknown as WaveStatus;
+    const page = await loadPage(silentStatus);
+    const doc = page.window.document;
+    const pillOf = (lane: string) =>
+      doc.querySelector(`tr.lane[data-lane="${lane}"] td.c-state .pill`)?.textContent?.trim();
+    expect(pillOf("quiet-start")).toBe("unknown");
+    // The module answers the same word for the same lane — the seam holds.
+    const lanes = silentStatus.waves[0].lanes as unknown as LaneStatus[];
+    expect(laneState(lanes[0], now)).toBe("unknown");
+    // The ended run that produced no PR keeps the bad word: `vanished` must
+    // still mean something vanished, not merely that nobody reported.
+    expect(pillOf("ended-nothing")).toBe("vanished");
+    // The reason travels in the row, beside the state word.
+    const cell = doc.querySelector('tr.lane[data-lane="quiet-start"] td.c-state');
+    expect(cell?.textContent).toContain("nothing since");
+  });
+
+  test("days-old evidence reads as a past wave in the row and in the header's register", async () => {
+    const now = Date.now();
+    const oldMs = now - 3 * 86_400_000;
+    const pastStatus = {
+      generatedAt: new Date(now).toISOString(),
+      waves: [
+        {
+          id: "LIVE",
+          lanes: [
+            {
+              wave: "LIVE",
+              lane: "t1",
+              derived: { alive: false, log: { bytes: 8, mtimeMs: now - 30_000, tail: "" } },
+              disagreements: [],
+            },
+          ],
+        },
+        {
+          id: "OLD",
+          lanes: [
+            {
+              wave: "OLD",
+              lane: "o1",
+              derived: { alive: false, log: { bytes: 8, mtimeMs: oldMs, tail: "" } },
+              disagreements: [],
+            },
+            {
+              // Event-only: no log anywhere, yet the wave is datable — from
+              // the last thing anyone said about it.
+              wave: "OLD",
+              lane: "o2",
+              reported: {
+                stage: "implement",
+                event: "started",
+                ts: new Date(oldMs).toISOString(),
+              },
+              derived: { alive: false },
+              disagreements: [],
+            },
+          ],
+        },
+      ],
+    } as unknown as WaveStatus;
+    const page = await loadPage(pastStatus);
+    const doc = page.window.document;
+
+    const oldAge = doc.querySelector('tr.wave[data-wave="OLD"] .wave-age') as unknown as HTMLElement;
+    expect(oldAge.textContent).toBe("3d ago");
+    expect(oldAge.classList.contains("past")).toBe(true);
+    const liveAge = doc.querySelector(
+      'tr.wave[data-wave="LIVE"] .wave-age',
+    ) as unknown as HTMLElement;
+    expect(liveAge.textContent).toBe("now");
+    expect(liveAge.classList.contains("past")).toBe(false);
+
+    for (const lane of ["o1", "o2"]) {
+      const cell = doc.querySelector(`tr.lane[data-lane="${lane}"] td.c-state`) as unknown as HTMLElement;
+      expect(cell.textContent, `lane ${lane}`).toContain("past wave");
+    }
+    const liveCell = doc.querySelector('tr.lane[data-lane="t1"] td.c-state') as unknown as HTMLElement;
+    expect(liveCell.textContent).not.toContain("past wave");
+  });
+
+  test("the page mirrors the exported past-wave threshold, to the millisecond", async () => {
+    // Same seam as the stall-threshold pin: the inline script carries its own
+    // copy of the constant because it cannot import the module, and this is
+    // what stops the two from drifting.
+    const html = await readFile(PAGE_PATH, "utf8");
+    const script = /<script>([\s\S]*?)<\/script>/.exec(html)?.[1] ?? "";
+    const literal = /const PAST_WAVE_THRESHOLD_MS = (\d+);/.exec(script);
+    expect(literal, "the page no longer states its past-wave threshold").not.toBeNull();
+    expect(Number(literal![1])).toBe(pastWaveThresholdMs);
   });
 
   test("the state cell keeps the lane's own identity in the next cell, so a verdict never replaces a name", async () => {

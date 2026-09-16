@@ -237,6 +237,68 @@ describe("collect", () => {
     expect(v3?.reported).toBeUndefined();
   });
 
+  test("a root of pipeline artefacts and no events yields no lanes — the 113-lanes regression", async () => {
+    // The wave log root an orchestrator actually left behind (`/tmp/wave1`):
+    // 442 files — gate rounds per stage, fix-runner transcripts, probe logs —
+    // and 15 events, 12 of them bare `started`. The page rendered 113 lanes,
+    // 102 vanished, because *any* `.log` was counted as one. A lane must be
+    // something the page has evidence for: an event naming it, or a log named
+    // after it (the lane/branch convention `dispatch-lane.sh` writes). None of
+    // these names is a lane; the artefacts describe lanes that ran elsewhere.
+    const artifactNames = [
+      "gate-x30-0143.log",
+      "gate-ve5b1c-build.log",
+      "gate-c4-lint:arch.log",
+      "install-foo.log",
+      "c4b-install.log",
+      "q-x14-1.log",
+      "q-hl5c-fix-1.log",
+      "x15-fix.log",
+      "s2fix.log",
+      "s3fix2.log",
+      "hl5e-runner.log",
+      "hl5e-fix-runner.log",
+      "oc-probe.log",
+      "x16-tc.log",
+      "weird name.log",
+    ];
+    const status = await collect(
+      fakeDeps({
+        dirs: {
+          [ROOT]: ["waveD"],
+          [`${ROOT}/waveD`]: [...artifactNames, "dispatch.out", "grok-metrics.tsv"],
+        },
+        files: Object.fromEntries(artifactNames.map((n) => [`${ROOT}/waveD/${n}`, "x\n"])),
+      }),
+      ROOT,
+      "now",
+    );
+    // The wave is still listed — an absence of lanes is not an absence of a
+    // wave — but no artefact bought a row.
+    expect(status.waves.map((wave) => wave.id)).toEqual(["D"]);
+    expect(status.waves[0]?.lanes).toEqual([]);
+  });
+
+  test("artefact logs beside a reported lane are ignored; the event still buys the row", async () => {
+    // The same root, honestly: everything that is not evidence of a lane is
+    // skipped, and the one lane an event names gets exactly one row.
+    const status = await collect(
+      fakeDeps({
+        dirs: {
+          [ROOT]: ["waveD"],
+          [`${ROOT}/waveD`]: ["events.jsonl", "gate-l1-build.log", "l1-fix.log", "q-l1-1.log"],
+        },
+        files: {
+          [`${ROOT}/waveD/events.jsonl`]:
+            '{"ts":"2026-09-12T10:00:00Z","wave":"D","lane":"l1","stage":"implement","event":"started"}\n',
+        },
+      }),
+      ROOT,
+      "now",
+    );
+    expect(status.waves[0]?.lanes.map((lane) => lane.lane)).toEqual(["l1"]);
+  });
+
   test("three gate rounds pick the highest n, not the lexicographic last", async () => {
     const status = await collect(
       fakeDeps({
