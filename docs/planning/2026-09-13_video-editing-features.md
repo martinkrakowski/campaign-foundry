@@ -1,7 +1,7 @@
 # Video Editing Features — Architecture & Development Plan
 
 **Date:** 2026-09-13
-**Status:** Phase A shipped (VE1, VE2). VE-Q1–VE-Q4 answered by the owner on 2026-09-15 (VE-D8–VE-D11, recommended defaults, refined by plan review); VE5a shipped, then VE5b1 shipped (this PR). VE3a is dispatchable; VE3b and VE5b2 follow their predecessors. VE4 waits on the speech vendor (VE-Q5). VE6 is deferred (VE-D11).
+**Status:** Phase A shipped (VE1, VE2). VE-Q1–VE-Q4 answered by the owner on 2026-09-15 (VE-D8–VE-D11, recommended defaults, refined by plan review); VE5a shipped, then VE5b1 shipped, then VE5b2 shipped (this PR) — VE5b is complete. VE3a is dispatchable; VE3b follows its predecessor. VE4 waits on the speech vendor (VE-Q5). VE6 is deferred (VE-D11).
 **Scope:** Which ideas from a reference video editor fit Campaign Foundry, and how each is built on
 the existing server-side compositor instead of beside it.
 **Related:** `2026-09-10_keyframing.md` (K1–K5), `2026-09-10_finishing-video.md`,
@@ -28,7 +28,7 @@ at `1f85d04`.
 | **VE-D7** | **Keyframes are the keyframing plan's.** | K1–K5 already specify tracks on the layer (K-D1–K-D6). This plan points at them and adds no fourth motion system. |
 | **VE-D8** | **Music rights are a record on the brief, checked in two tiers.** `audio: { path, rights: { licenceId, source, expiresOn?, territories? } }`. A missing `licenceId` or `source` **refuses the brief at load**. An `expiresOn` in the past **halts the run in the legal gate** exactly as prohibited copy does. **Territories** (refined by plan review — `targetRegion` is free text, `CampaignBrief.ts:24`, so coverage cannot be matched against prose): `territories` absent means worldwide; present, it is a non-empty array of ISO 3166-1 alpha-2 codes (`^[A-Z]{2}$`), and **shape-checked further**: the ISO 3166-1 user-assigned codes (`AA`, `QM`-`QZ`, `XA`-`XZ`, `ZZ`) are refused as a small pattern rule — real *assignment* to a country is not verified; load **refuses** a brief whose `targetRegion` (trimmed, upper-cased) is not itself an alpha-2 code while `territories` is present; the legal gate **halts** when that code is not in the set. Expiry is **re-checked at packaging**. Nothing is warned-and-rendered. | Owner, 2026-09-15 (VE-Q1). The code has three tiers — legal copy halts the run (`GenerateCampaignUseCase.use-case.ts` `runLegalGate`), brand density flags, occlusion advises — and a missing licence is a legal fact. The asset store carries no metadata channel, so the record lives on the brief. Packaging never re-renders (D11) and may run after expiry, hence the re-check — against the use case's injected `packagedAt`, never `new Date()`. |
 | **VE-D9** | **Voiceover is generated speech from a separate `voiceover.script` field**, swept by the legal gate with copy and beats, its audio cached by provider, model id and seed so a golden can pin it. **The vendor is VE-Q5.** | Owner, 2026-09-15 (VE-Q2). No speech code exists, so either answer is a new dependency; generated speech is one adapter and yields word timings for captions, where an upload needs a decoder and an aligner. A separate script keeps captions from repeating burned-in copy (VE-D4, M2). |
-| **VE-D10** | **At most 3 distinct per-beat backgrounds per timeline**, enforced as a timeline authoring rule in `CopyTimeline.vo.ts` beside `MAX_BEATS`, so the parser and the editor refuse the same thing (D3). (Refined by plan review: generated-vs-procedural is the *variant's* background source, `variant.backgroundSource`, invisible to the timeline validator — so the cap counts distinct values regardless of source, and "a procedural scene spends nothing" is a statement the **estimate** makes, in VE5b2.) | Owner, 2026-09-15 (VE-Q3). No credit budget exists today, and variation mode multiplies scene cost by `count × ratios`; 3 covers open, middle and close. |
+| **VE-D10** | **At most 3 distinct per-beat backgrounds per timeline**, enforced as a timeline authoring rule in `CopyTimeline.vo.ts` beside `MAX_BEATS`, so the parser and the editor refuse the same thing (D3). (Refined by plan review: generated-vs-procedural is the *variant's* background source, `variant.backgroundSource`, invisible to the timeline validator — so the cap counts distinct values regardless of source, and "a procedural scene spends nothing" is a statement the **estimate** makes, in VE5b2.) **VE5b2 — scenes are uploaded assets, so they spend nothing:** since VE5a a scene is an uploaded asset path, never a generated one, so no scene ever adds an AI image call; the estimate sentence states this, only when the plan's timeline names a background. | Owner, 2026-09-15 (VE-Q3). No credit budget exists today, and variation mode multiplies scene cost by `count × ratios`; 3 covers open, middle and close. |
 | **VE-D11** | **"Does not add video decoding" stands.** VE6 is deferred, not scheduled; revisit only after VE3b's AAC golden proves audio determinism. | Owner, 2026-09-15 (VE-Q4). Decode is unpinned (the compositor pins encode and scale only), uploads are base64 JSON capped at 2 MiB, and goldens would need committed video fixtures. A poster-only slice (one still extracted at upload) is the recorded middle ground if footage becomes a requirement. |
 
 ---
@@ -187,15 +187,15 @@ sidecar is packaged for motion platforms and absent otherwise.
 
 **Acceptance.** A timeline naming no backgrounds is byte-identical (VE-D3) — including with `backgrounds: {}` — and the motion goldens, mp4 byte golden and HL3 raster tests pass untouched; a two-scene timeline switches ground exactly at the resolved beat boundary; a fade timeline crossfades the two grounds at the same mix the copy crossfades at; the poster matches the key beat's scene; a request differing only in scene bytes never shares a fingerprint, absent stays at the pinned value.
 
-### VE5b2 — Resolve scenes at generation and preview, duplicate, estimate · after VE5b1
+### VE5b2 — Resolve scenes at generation and preview, duplicate, estimate · after VE5b1 · shipped in this PR
 
 | # | Task | File(s) |
 |---|---|---|
-| 1 | Resolve one background per distinct scene at generation and wire it onto the video request's `backgrounds`; the estimate counts generated scenes and states that a procedural scene spends nothing. | `GenerateCampaignUseCase.use-case.ts`, estimate |
+| 1 | Resolve one background per distinct scene at generation, through a port (`SceneAssetPort`/`FileSystemSceneAssetResolver`), and wire it onto the video request's `backgrounds`; the estimate (`VariationEstimate.sceneBackgrounds`, present only when true) records whether the plan's timeline names a background — per VE-D10's resolution, no scene ever adds an AI image call. | `GenerateCampaignUseCase.use-case.ts`, `PlanVariationsUseCase.use-case.ts`, `VariationPlan.vo.ts` |
 | 2 | The preview builds the same `backgrounds` map the run would, so a scrubbed or previewed frame matches generation. | `PreviewCreativeFrameUseCase.use-case.ts` |
-| 3 | Duplicating a creative rewrites its resolved scenes rather than reusing stale bytes. | duplicate path |
+| 3 | Duplicating a creative rewrites `copy.timeline.beats[].background` the same way it rewrites `logoPath`/`inputAsset`/`audio.path`, rather than reusing stale bytes. | `apps/api/server/lib/asset-files.ts` |
 
-**Acceptance.** A brief with per-beat backgrounds generates, previews and duplicates with the scene the timeline names; a brief naming no backgrounds is unaffected (VE-D3); the estimate names generated-scene cost and states a procedural scene is free.
+**Acceptance.** A brief with per-beat backgrounds generates, previews and duplicates with the scene the timeline names; a brief naming no backgrounds is unaffected (VE-D3); an unreadable scene path fails the run naming the beat and the path; the estimate carries `sceneBackgrounds: true` only when the plan's timeline names a background, and never adds to `genaiCalls`. The web-side estimate sentence (`apps/web/src/components/campaign/messages.ts` `estimateSentence`, `EstimatePanel.tsx`) still needs to render this — owned by X32 (`apps/web/**`), sequenced separately.
 
 ---
 
@@ -227,7 +227,9 @@ Keyframes: see 2026-09-10_keyframing.md (K1 blocked on its own questions)
 VE1 and VE2 run in parallel **only** because VE2 keeps the scrub position out of `EditorState` and edits neither
 `editor-state.ts` nor `BriefEditor.tsx`. VE2 and VE3b both edit `CanvasFfmpegVideoCompositor.ts` and must not run
 concurrently with each other; VE5b1 shipped with no edit to that file (the widened `VideoCompositeRequest`/`prepare`
-request types were enough), but VE5b2's generation wiring may still touch it and should not run beside VE2/VE3b either.
+request types were enough), and VE5b2 shipped the same way — its scene resolution lives in
+`GenerateCampaignUseCase.use-case.ts`/`PreviewCreativeFrameUseCase.use-case.ts` and a new `SceneAssetPort` adapter,
+with no edit to `CanvasFfmpegVideoCompositor.ts` either.
 VE3a and VE5a touch no renderer file and may run beside those, but **not beside each other** — both edit `load-brief.ts`
 (imports, the `parseBrief` chain) and its tests.
 
@@ -315,9 +317,9 @@ still open**. `yarn plan:verify` runs them.
 copyT-driven scene selection and crossfade in `NodeCanvasCompositor.ts`, `compositeRequestFingerprint`'s per-key scene
 hash. No generation wiring — that is VE5b2.)
 
-```premise VE5b2
-# GenerateCampaignUseCase sets no `backgrounds` field on any compositor request yet.
-! grep -qE '\bbackgrounds\s*:' packages/CampaignOrchestration/src/application/use-cases/GenerateCampaignUseCase.use-case.ts
-```
+**VE5b2 — shipped in this PR.** (`SceneAssetPort`/`FileSystemSceneAssetResolver` resolve a beat's own
+background at generation and preview onto `backgrounds`; `rewriteAssetPaths`/`extractSourceAssetBriefIds`
+carry `copy.timeline.beats[].background` through a duplicate; `VariationEstimate.sceneBackgrounds`
+records whether the plan's timeline names a background. VE5b is now complete.)
 
 **VE6 — deferred (VE-D11); its premise is retired until the owner schedules it.**

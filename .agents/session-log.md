@@ -5360,3 +5360,26 @@ Measured but did not change `fillValidDraft`'s own per-character typing cost (~7
 unchanged. 1/1 mutation caught (`.agents/manifests/x32.json`; the brief's other two suggested
 mutations recorded in a `note`, not as false "caught" entries). §34 (X32) of
 docs/planning/2026-09-10_the-unowned-gaps.md.
+## 2026-09-16 — VE5b2 (AI session)
+
+Generation wiring for scenes: a new out-port `SceneAssetPort` (`resolveScene(path, ratio): Promise<Uint8Array>`,
+declared by hand in `.architecture/manifest.yaml`, `arch:inventory`/`sync:dry` at Total ops 0) plus its
+`FileSystemSceneAssetResolver` adapter — cover-fits a beat's own background the same way
+`AssetReusingImageGenerator.tryReuseAsset` fits a product's `inputAsset`, but REJECTS on an unsafe/unreadable
+path instead of falling through to generation (a beat's scene has no generated fallback; VE-D3's "absent
+background" path covers a beat naming nothing, never one naming a path nothing can read). `GenerateCampaignUseCase`
+resolves every distinct scene the brief's timeline names ONCE, upfront in `executeVariation` (before any cell
+renders, using the one ratio every motion-capable platform packages — `PlatformProfile.vo.ts`), and fails the
+whole run naming the beat (1-based) and the path on an unreadable scene — no orphaned mp4/png from cells that
+would have rendered after the failure. `PreviewCreativeFrameUseCase` calls the same exported
+`resolveTimelineBackgrounds` helper with the same timeline/ratio, and feeds the resolved map into
+`compositeRequestFingerprint` so a changed scene at the same path never serves a stale cached frame.
+`rewriteAssetPaths`/`extractSourceAssetBriefIds` (`apps/api/server/lib/asset-files.ts`) now carry
+`copy.timeline.beats[].background` through a brief duplicate, with the same absent-key discipline `audio.path`
+already uses. `PlanVariationsUseCase`'s `VariationEstimate` gained `sceneBackgrounds?: true` (present only when
+the timeline names a background, per VE-D10's plan-review resolution: a scene is always an uploaded asset since
+VE5a, so it never adds to `genaiCalls`) — the web-side `estimateSentence`/`EstimatePanel.tsx` still needs a
+parameter to render this; that edit is X32's (`apps/web/**`), reported to the orchestrator rather than made here.
+All red-first (use case, preview, asset-files, plan estimate, new adapter), 2/2 mutations caught
+(`.agents/manifests/ve5b2.json`). VE5b2 in docs/planning/2026-09-13_video-editing-features.md (`premise VE5b2`
+retired, VE5b marked complete, VE-D10 clarification added).

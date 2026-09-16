@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "lane": "VE5b2",
+  "mutations": [
+    {
+      "file": "packages/CampaignOrchestration/src/application/use-cases/GenerateCampaignUseCase.use-case.ts",
+      "before": "      ...(backgrounds !== undefined ? { backgrounds } : {}),",
+      "after": "      ...(false ? { backgrounds } : {}),",
+      "because": "renderMotionVariant must spread the run's resolved scene backgrounds onto the compositor's request whenever any were resolved, or a timeline naming per-beat scenes silently renders with none. Forcing the conditional spread's guard to false drops the `backgrounds` key from every compositeVideo request unconditionally, caught by the fixture asserting a two-scene timeline's request carries both resolved keys.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/application/use-cases/__tests__/GenerateCampaignUseCase.use-case.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/asset-files.ts",
+      "before": "      if (typeof beat.background !== \"string\") return beat;",
+      "after": "      if (true) return beat;",
+      "because": "rewriteAssetPaths must rewrite copy.timeline.beats[].background exactly like logoPath/inputAsset/audio.path, or a duplicated brief keeps the source brief's scene paths. Forcing the per-beat guard to always short-circuit returns every beat unchanged regardless of whether it names a background, caught by the fixture asserting a duplicated brief's beat background is rewritten to the new brief id.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/asset-files.test.ts"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
