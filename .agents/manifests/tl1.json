@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "lane": "TL1",
+  "mutations": [
+    {
+      "file": "apps/api/server/routes/campaigns/templates/[ref].get.ts",
+      "before": "    template = await getTemplateStore().findTemplate(id, version);",
+      "after": "    template = (await getTemplateStore().findTemplate(id, version)) ?? (await getTemplateStore().findTemplate(id));",
+      "because": "An exact version the store does not have must be a 404, never a different version of the same id — D123's immutability promise reaching the wire. Falling back to the highest version silently serves the wrong record instead.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/templates.test.ts",
+        "-t",
+        "a version the store does not have"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/templates.get.ts",
+      "before": "    setResponseStatus(event, 500);\n    return { error: `Could not read templates: ${errorMessage(error)}` };",
+      "after": "    setResponseStatus(event, 500);\n    return { templates: [] };",
+      "because": "A store read failure must be a 500 with an { error } message, never an empty list — an empty templates array reads as \"no templates yet\" to every consumer, exactly the ambiguity the list route exists to avoid.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/templates.test.ts",
+        "-t",
+        "never an empty list"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/templates/[ref].get.ts",
+      "before": "    if (!VERSION_PATTERN.test(versionRaw)) {\n      setResponseStatus(event, 400);\n      return {\n        error: `Invalid \"version\": \"${versionRaw}\" must be a positive integer with no leading zeros.`,\n      };\n    }\n    if (BigInt(versionRaw) > BigInt(Number.MAX_SAFE_INTEGER)) {\n      setResponseStatus(event, 400);\n      return {\n        error: `Invalid \"version\": \"${versionRaw}\" exceeds the largest exactly representable version (${Number.MAX_SAFE_INTEGER}).`,\n      };\n    }\n    version = Number(versionRaw);",
+      "after": "    if (!VERSION_PATTERN.test(versionRaw)) {\n      setResponseStatus(event, 400);\n      return {\n        error: `Invalid \"version\": \"${versionRaw}\" must be a positive integer with no leading zeros.`,\n      };\n    }\n    version = Number(versionRaw);",
+      "because": "A version string that parses but exceeds Number.MAX_SAFE_INTEGER silently loses precision (Number(\"9007199254740993\") === 9007199254740992), so a request pinning one version could resolve to a different stored version than the one pinned — D123's immutability promise broken a different way. Removing the BigInt range guard restores that silent coercion.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "apps/api/server/routes/campaigns/__tests__/templates.test.ts",
+        "-t",
+        "unsafe version \\(9007199254740993\\)"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
