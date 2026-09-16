@@ -18,6 +18,7 @@ import { templateFromCanonical } from "@campaignfoundry/CampaignOrchestration/br
 import { fromBrief, initialEditorState, saveDraftToStorage } from "@/components/campaign/editor-state";
 import { sectionOrder, SECTION_TITLES } from "@/components/campaign/sections";
 import { BriefEditor } from "@/components/campaign/BriefEditor";
+import { PREVIEW_RAIL_MIN_INLINE_PX } from "@/lib/use-min-inline-size";
 import NewBriefPage from "../new/page";
 import { Header } from "@/components/shell/Header";
 
@@ -3678,6 +3679,31 @@ describe("BriefPage — the preview rail (R7)", () => {
     // browser matrix in the R7 plan §4 records the layout half the suite cannot.
     expect(root.querySelector('[class*="container-type"]')).not.toBeNull();
     expect(rail.className).toContain("[@container(min-width:56rem)]:flex");
+  });
+
+  /**
+   * CC2's own gap, closed on review: the CSS breakpoint (this class) and its
+   * JS mirror (`PREVIEW_RAIL_MIN_INLINE_PX`, `use-min-inline-size.ts`) were
+   * asserted independently — this test and the hook's own unit test each
+   * checked their own side, so changing 56rem to 64rem, or 896 to 1024,
+   * left every test green while the rail's visibility and its fetch gate
+   * quietly disagreed. This DERIVES one from the other instead of
+   * restating both, so either drifting alone fails exactly this test.
+   */
+  test("the CSS breakpoint and its JS mirror cannot drift apart silently", async () => {
+    const user = userEvent.setup();
+    routes({ list: () => json({ briefs: [okEntry] }) });
+    renderWithRun(<Editor id="ok" />);
+    await adopt(user, "ok");
+
+    const rail = preview();
+    const match = rail.className.match(/@container\(min-width:(\d+)rem\)/);
+    expect(match).not.toBeNull();
+    const rem = Number(match![1]);
+    // 16px root — the same assumption `PREVIEW_RAIL_MIN_INLINE_PX`'s own
+    // comment names, so this multiplication is not a second, independent
+    // guess at the root size.
+    expect(rem * 16).toBe(PREVIEW_RAIL_MIN_INLINE_PX);
   });
 });
 

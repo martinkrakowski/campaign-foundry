@@ -46,6 +46,21 @@
         "apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/lib/use-min-inline-size.ts",
+      "before": "export const PREVIEW_RAIL_MIN_INLINE_PX = 896;",
+      "after": "export const PREVIEW_RAIL_MIN_INLINE_PX = 1024;",
+      "because": "The JS-side breakpoint and the CSS container query (`[@container(min-width:56rem)]:flex`, BriefEditor.tsx) are two independent literals with nothing enforcing agreement between them -- mutating the constant alone (never touching the CSS) reproduces exactly the silent-drift gap a reviewer found: every OTHER test stays green because each side was previously asserted against itself, not against the other. Caught by a parity assertion that derives one value from the other (parses the rem out of the rail's own className, multiplies by the 16px root, compares to the constant) -- not a call count, not a mount count, and not a plain literal-equality check on either side alone.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx"
+      ],
+      "verdict": "caught"
     }
   ]
 }
