@@ -221,10 +221,17 @@ output for a cell, the cell is *unknown* — a valid answer. A confident wrong o
 4. **Red-team each lane brief against the code before dispatching it.** Every path, symbol and line
    number a brief cites must exist; every acceptance criterion must be able to fail. This step has
    caught false premises that would have stalled a lane at its mandatory mutation check.
-5. **Check the plan's premises first.** `yarn plan:verify` fails when a lane's stated gap has already
+5. **Check each lane id against every plan, not just this one.** `grep -rn '\*\*<ID>\*\*'
+   docs/planning/` — one command. Ids are the join key for the session-log citation, the plan's
+   shipped note, `.agents/manifests/<lane>.json`, the status-page row and the premise fence's own
+   name, so a collision silently merges two lanes' histories. It has happened twice: `L10`/`L11`
+   between two plans (studio plan's C2) and `TL1` for both the template routes and the timeline
+   playhead (gap ledger §42). Arc-prefixed ids (`L7a2`, `CC5`, `SE3`) have never collided; bare
+   sequential ones have.
+6. **Check the plan's premises first.** `yarn plan:verify` fails when a lane's stated gap has already
    been closed. Four lanes in one week were dispatched, or nearly dispatched, to re-implement shipped
    behaviour. A lane whose premise no longer holds is not a lane.
-6. **Send the plan to the plan reviewer** (`Agent` · `subagent_type: "Plan"` · `model: "fable"`)
+7. **Send the plan to the plan reviewer** (`Agent` · `subagent_type: "Plan"` · `model: "fable"`)
    **before dispatching any lane from it**, whenever the plan *introduces or rewrites lanes* or
    *changes a premise*. It is read-only by construction, so it returns a review and cannot patch
    around what it finds. On its first use it caught a rule in an **already-dispatched** brief that
