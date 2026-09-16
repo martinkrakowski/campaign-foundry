@@ -146,6 +146,7 @@ function VariationEstimate({ state }: { state: EditorState }) {
             ratios: ratioSplit(plan.variants),
             products: state.products.length,
             genaiCalls: plan.estimate.genaiCalls,
+            ...(plan.estimate.sceneBackgrounds === true ? { sceneBackgrounds: true as const } : {}),
           })}
         </p>
       ) : plan.kind === "infeasible" ? (

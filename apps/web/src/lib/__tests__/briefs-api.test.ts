@@ -278,6 +278,36 @@ describe("planCampaign", () => {
       error: "Plan failed (HTTP 400)",
     });
   });
+
+  // VE5b2: PlanVariationsUseCase.use-case.ts:307 sets `sceneBackgrounds` only when
+  // true (a conditional spread), mirroring VariationPlan.vo.ts:19 — this is the web
+  // side of that same "present only when true" contract.
+  test("VE5b2: isEstimate accepts a plan estimate with the flag, and still accepts one without it", async () => {
+    mockFetch(() => json({ policyHash: "abc", seed: 1, estimate: { ...estimate, sceneBackgrounds: true } }));
+    await expect(planCampaign(brief)).resolves.toMatchObject({
+      kind: "ok",
+      estimate: { ...estimate, sceneBackgrounds: true },
+    });
+    // every static plan predates VE5b2, so an estimate with no such key must keep working
+    mockFetch(() => json(okBody));
+    await expect(planCampaign(brief)).resolves.toMatchObject({ kind: "ok", estimate });
+  });
+
+  test("VE5b2: a malformed flag (false, or a non-boolean) is accepted but never coerced to true", async () => {
+    // isEstimate does not validate this field at all — same as the pre-existing
+    // `frames` field — so `rec.estimate` passes through raw; the strict `=== true`
+    // gate that keeps this from being misread lives in `estimateSentence`, not here.
+    mockFetch(() => json({ policyHash: "abc", seed: 1, estimate: { ...estimate, sceneBackgrounds: false } }));
+    await expect(planCampaign(brief)).resolves.toMatchObject({
+      kind: "ok",
+      estimate: { ...estimate, sceneBackgrounds: false },
+    });
+    mockFetch(() => json({ policyHash: "abc", seed: 1, estimate: { ...estimate, sceneBackgrounds: "true" } }));
+    await expect(planCampaign(brief)).resolves.toMatchObject({
+      kind: "ok",
+      estimate: { ...estimate, sceneBackgrounds: "true" },
+    });
+  });
 });
 
 describe("packageCampaign / listPackages", () => {

@@ -198,6 +198,25 @@ describe("EstimatePanel", () => {
     await waitFor(() => expect(vi.mocked(globalThis.fetch).mock.calls.length).toBeGreaterThan(before));
     expect(String(vi.mocked(globalThis.fetch).mock.calls[0][0])).toContain(`${API}/campaigns/plan`);
   });
+
+  // VE5b2: the API sets `estimate.sceneBackgrounds` only when the plan's timeline
+  // names a background (PlanVariationsUseCase.use-case.ts:307); the Randomized
+  // branch is the one that reads a planner estimate at all, so it is the one that
+  // must pass the flag through to the sentence.
+  test("VE5b2: renders the background clause when the plan's estimate carries the flag", async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      json({ ...OK_PLAN, estimate: { ...OK_PLAN.estimate, sceneBackgrounds: true } }),
+    );
+    render(<EstimatePanel state={planReady()} />);
+    expect(await screen.findByText(/Backgrounds come from your uploaded images/)).toBeTruthy();
+  });
+
+  test("VE5b2: says nothing about backgrounds when the plan's estimate omits the flag", async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValue(json(OK_PLAN));
+    render(<EstimatePanel state={planReady()} />);
+    expect(await screen.findByText(/You will get 12 ads/)).toBeTruthy();
+    expect(screen.queryByText(/Backgrounds come from your uploaded images/)).toBeNull();
+  });
 });
 
 describe("EstimatePanel — the classic draft (W4.3)", () => {
@@ -280,6 +299,37 @@ describe("estimateSentence", () => {
 
   test("reads as the plan's own sentence", () => {
     expect(messages.estimateSentence(parts)).toBe(
+      "You will get 12 ads — 6 square, 6 tall — for 2 products. No AI image calls.",
+    );
+  });
+
+  // VE5b2: without the flag, today's sentence must not move a single character —
+  // a reformat of the clauses around it would pass a `.toContain` check unnoticed,
+  // so this asserts the literal (the mutation manifest's catcher for "render the
+  // clause unconditionally").
+  test("VE5b2: without the flag, the sentence is character-identical to today's", () => {
+    expect(messages.estimateSentence(parts)).toBe(
+      "You will get 12 ads — 6 square, 6 tall — for 2 products. No AI image calls.",
+    );
+  });
+
+  test("VE5b2: the flag adds one clause, in the voice of the sentence around it", () => {
+    expect(messages.estimateSentence({ ...parts, sceneBackgrounds: true })).toBe(
+      "You will get 12 ads — 6 square, 6 tall — for 2 products. No AI image calls. Backgrounds come from your uploaded images, so they add nothing.",
+    );
+  });
+
+  test("VE5b2: only a literal true renders the clause — false or a non-boolean does not become true", () => {
+    // isEstimate (briefs-api.ts) does not validate this field at all — it passes
+    // `rec.estimate` through raw, exactly like the pre-existing `frames` field — so
+    // a malformed payload's value survives untouched into PlanEstimate. The strict
+    // `=== true` gate lives here, in the one place the flag is read for display.
+    const asFalse = { ...parts, sceneBackgrounds: false as unknown as true };
+    const asNonBoolean = { ...parts, sceneBackgrounds: "true" as unknown as true };
+    expect(messages.estimateSentence(asFalse)).toBe(
+      "You will get 12 ads — 6 square, 6 tall — for 2 products. No AI image calls.",
+    );
+    expect(messages.estimateSentence(asNonBoolean)).toBe(
       "You will get 12 ads — 6 square, 6 tall — for 2 products. No AI image calls.",
     );
   });

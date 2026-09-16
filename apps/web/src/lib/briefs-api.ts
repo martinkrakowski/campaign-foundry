@@ -86,6 +86,17 @@ export interface PlanEstimate {
   genaiCalls: number;
   /** Frames to encode — motion plans only. */
   frames?: number;
+  /**
+   * VE5b2 — mirrors `VariationEstimate.sceneBackgrounds` (VariationPlan.vo.ts:19):
+   * present, and `true`, only when the plan's timeline names at least one per-beat
+   * background — PlanVariationsUseCase.use-case.ts:307 sets it with a conditional
+   * spread that never writes `false`, so a scene-free plan's JSON stays
+   * byte-identical. `isEstimate` below does not validate this field — same as the
+   * pre-existing `frames` — so it is not normalised here either; a payload that
+   * disagrees with the contract passes through unchanged, and `estimateSentence`
+   * reads it with `=== true`, never truthiness.
+   */
+  sceneBackgrounds?: true;
 }
 
 /**

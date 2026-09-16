@@ -43,12 +43,15 @@ const forbidden = [
  * join-the-ids regression is invisible to the gate.
  */
 const SAMPLE_ARGS = {
+  // sceneBackgrounds: true so the VE5b2 clause's own string is scanned too — the
+  // no-flag case is already covered by every other estimateSentence caller.
   estimateSentence: [
     {
       creatives: 1,
       ratios: [{ label: "Square", count: 1 }],
       products: 1,
       genaiCalls: 0,
+      sceneBackgrounds: true,
     },
   ],
   formatsUnsupported: ["Video", ["Instagram Story"]],
