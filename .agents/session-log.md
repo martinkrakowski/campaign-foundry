@@ -5253,3 +5253,21 @@ the API boundary-refusal call site). Goldens untouched.
 **Gate:** full gate rerun in the foreground — 274 test files, 5394 passed / 4 skipped, 100% coverage on all four counters, exit 0. `plan:verify`: 9 premises hold. `arch:inventory`: clean. `sync:dry`: Total ops 0.
 
 **Left open:** K2 is dispatchable next, behind this PR. No compositor file was touched — the K4 premise cites `NodeCanvasCompositor.ts` but does not modify it.
+
+### 2026-09-15 — K1b fix round 2 (PR #430)
+
+**Mode:** Implementer, fix round. Branch `feat/k1b-track-resolver`, worktree `cf-k1b`. Plan: K1b in docs/planning/2026-09-10_keyframing.md.
+
+**Changes (two CodeRabbit findings, both verified by the orchestrator, and by me a second time):**
+1. **Mixed-clock refusal tests were vacuous at two of three boundaries.** Every fixture used `t: 0.5` on both stops; with the clock-mismatch check disabled, the duplicate-`t` rule fired instead and still refused — `brief-template.test.ts` (boolean check) stayed fully green under the mutation, and `load-brief.test.ts`'s exact-string check happened to still fail but for the wrong reason. Verified empirically both ways (mutated `tracks.ts` by hand, ran each of the three boundary test files, read every failure). Fixed by giving every mixed-clock fixture distinct `t` values (0.5 / 0.75) across `tracks.test.ts`, `brief-template.test.ts` (new `withTextTracks` helper) and `load-brief.test.ts`, so disabling the check makes the track fully VALID rather than refused for a coincidental reason. Re-verified by hand: all three files now fail their own dedicated assertion under the mutation.
+2. **A `beat`/`effect`-clock stop on `image`/`video` had no defined crossfade behaviour** — `byLayer` folded at the outgoing beat's local, a discontinuity no decision names. Fixed at the boundary: `layerTracksProblem` now takes `kind` down to the per-stop check and refuses `beat`/`effect` on any kind but `static-text`/`animated-text` (`be "pose" for layer kind "<kind>" (a beat- or effect-clock track needs a beat, which only a text layer has)`). `TEXT_LAYER_KINDS` exported from `tracks.ts`, reused by `resolve-tracks.ts` instead of a second copy. `byLayer` now folds at `clocks.t` directly, no longer needs `pairs[0].local`. New resolver test: a ground layer's pose is identical regardless of which beat `copyT` selects during a crossfade.
+
+**Tests:** boundary tests added/fixed at all three points (`tracks.test.ts`, `brief-template.test.ts`, `load-brief.test.ts`) plus a resolver test for finding 2; the legacy-path resolver test's beat-clock fixture moved from an `image` to a `static-text` layer (no longer a shape the boundary accepts on `image`). 100% coverage maintained throughout.
+
+**Mutations:** `.agents/manifests/k1b.json` now carries 4. Mutation (c) (one-clock-per-track) extended to run all three boundary test files in one command; mutation (d) added (disabling the beat/effect-needs-text-layer check). Both re-verified by hand before being written to the manifest — mutated the file, ran each test file separately, confirmed every assertion actually flips (not assumed) — then `mutate:verify`: 4 mutation(s) re-run, every verdict reproduced, working tree clean after each replay.
+
+**Plan doc:** K-D8 (where the stop vocabulary lives) gains an amendment recording both refusals and the crossfade-discontinuity reason for the second. K1b's shipped paragraph corrected (was stale — still described the mixed-clock case as silently ignored rather than refused). K2's row now flags that `MOTION_KINDS` tracks land on `image`/`video`, so only `pose`-clock stops are available; a ground layer needing a beat-dependent pose is a new decision to make before widening the boundary, not a byproduct of adding a track.
+
+**Gate:** full gate rerun in the foreground — 274 test files, 5403 passed / 4 skipped, 100% coverage on all four counters, exit 0. `plan:verify`: 9 premises hold. `arch:inventory`: clean. `sync:dry`: Total ops 0.
+
+**Left open:** K2 is dispatchable next, behind this PR. No compositor file was touched.
