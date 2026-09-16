@@ -72,7 +72,7 @@ stays as it is, and text-effect tracks play on beat-local progress exactly as th
 |---|---|---|
 | **K1a** | **Shipped.** **The track model, no resolver.** Easing moves to the domain (K-D7); `Track`/`Stop` value objects (K-D8) and `layerTracksProblem`, validated at both brief boundaries (K-D9's one refusal: a duplicate `t` on one track's same clock). **No compositor *behaviour* change (one import), no rendering, no resolver.** | Round-trips through YAML in declared key order (positional); an invalid track is refused at both boundaries; the compositor's goldens are unchanged. |
 | **K1b** | **Shipped.** **The resolver.** `resolveTracks(layers, beats, clocks) → { byLayer, copy }` (K-D8), pure, beside `beatAt`, in `resolve-tracks.ts`. Composition per property (K-D9), folded in declaration order. **No caller in the compositor yet** — K2 wires it. | Interpolation at the default easing per clock; the legacy single-beat path; a crossfade instant's two complementary `copy` mixes; `dy` tracks add and `opacity` tracks multiply in a fixture that proves fold order matters. |
-| **K2** | **Express the four `MOTION_KINDS` as tracks and render from the resolver.** The vocabulary the user writes does not change. | **Per-frame byte-identity** for every motion kind across the canonical templates. Any drift stops the lane. |
+| **K2** | **Express the four `MOTION_KINDS` as tracks and render from the resolver.** The vocabulary the user writes does not change. **`MOTION_KINDS` tracks are `image`/`video` layer tracks, so K-D8's fix-round-2 refusal applies: only `pose`-clock stops** (`ken-burns-in`'s scale, `accent-wipe`'s eventual representation) **— a beat- or effect-clock ground-layer track is not this lane's to add.** If a later motion kind ever needs a ground layer's pose to vary with which beat is current, that is a new decision (what a live crossfade should show, not merely "whichever beat is outgoing") to make *before* widening the boundary rule, not a byproduct of adding the track. | **Per-frame byte-identity** for every motion kind across the canonical templates. Any drift stops the lane. |
 | **K3** | **Express the four text effects the same way.** | Per-frame byte-identity, including the beat-local windows and the settled-pose behaviour. |
 | **K4** | **Author tracks directly in a brief**, alongside presets; a hand-authored track and a preset's expansion on one layer and property **compose per K-D9** (no precedence rule) — preset expansions fold **before** hand-authored tracks, K3's existing order, and that is the only order. `html` refuses tracks (K1a), so K4 (and K5) never offer tracks on an `html` layer. | A hand-authored track renders; a track on an absent or disabled layer renders nothing and says nothing; `canonicalLayer` (K5/X16) drops `tracks: []` exactly as it drops `elements: []`. |
 | **K5** | **The editor surface** — whatever minimum lets a user see and adjust a track. Scope deferred until K1–K4 land. | Out of scope for this document beyond naming it. |
@@ -163,17 +163,29 @@ entry per `(beat, mix)` — folded across every enabled, tracked text-kind layer
 never one entry per layer. A stop's `t` reads one of three clocks (K-D8) — `pose` is `clocks.t`
 directly, `beat` is the beat-local progress `NodeCanvasCompositor.drawBeat` already computes, `effect`
 is `effectT ?? local` (unifying the compositor's `effectT ?? local` / `effectT ?? t`, since the legacy
-path's `local` IS `t`). A track's stops are assumed to share one clock, the one its first stop names
-— the validator (K1a) does not forbid a mixed-clock track, but nothing gives one a meaning, so stops
-on any other clock are silently ignored, the same "resolves to nothing" shape K-D4 already uses. Two
-tracks on one (layer, property) fold in **declaration order** (`dx`/`dy` add, `opacity`/`scale`
-multiply); a fixture proves the order matters, but needs **three** tracks, not two, to do it — IEEE-754
-multiplication is exactly commutative for a single pair (`a * b === b * a`, bit for bit), so a
-two-operand product can never distinguish a fold from its reverse. `easing.ts` gains the
-`EasingKind → (t) => number` table (`EASINGS`) K1b reads instead of switching on the string. Red
-tests (15 cases) shown before the implementation; `mutate:verify .agents/manifests/k1b.json`: 2
-mutations re-run, both caught (the ending stop's easing leaking into the segment before it; the fold
-folding in reverse declaration order, caught only by the three-track fixture above).
+path's `local` IS `t`). **A track's stops all share one clock** — the one its first stop names —
+**and `beat`/`effect` clocks are refused on any kind but `static-text`/`animated-text`** (both fix
+round 2, review found after the first merge): `layerTracksProblem` originally let a track mix clocks
+across its stops and let `image`/`video` carry a `beat`/`effect`-clock track, and the resolver
+silently ignored what neither rule could give a defined meaning to — a mixed-clock track's off-clock
+stops (data loss with no message, the exact defect this domain refuses everywhere else), and, for a
+`beat`/`effect`-clock track on a ground layer, WHICH of the (at most two) live beats during a
+crossfade its local progress would even read (nothing decides that; `byLayer` folds a non-text kind
+at `clocks.t` alone now, never needing a beat at all). Both are refused at the boundary instead,
+`layerTracksProblem` now taking `kind` down to the per-stop check that used to only see the stops
+themselves. Two tracks on one (layer, property) fold in **declaration order** (`dx`/`dy` add,
+`opacity`/`scale` multiply); a fixture proves the order matters, but needs **three** tracks, not two,
+to do it — IEEE-754 multiplication is exactly commutative for a single pair (`a * b === b * a`, bit
+for bit), so a two-operand product can never distinguish a fold from its reverse. `easing.ts` gains
+the `EasingKind → (t) => number` table (`EASINGS`) K1b reads instead of switching on the string. Red
+tests shown before each implementation, at all three points (the resolver, the domain boundary,
+`isBriefTemplate`/`validateTemplate` — the last two share `layerTracksProblem`, so one function fix
+closes both); `mutate:verify .agents/manifests/k1b.json`: 4 mutations re-run, all caught (the ending
+stop's easing leaking into the segment before it; the fold folding in reverse declaration order,
+caught only by the three-track fixture above; the one-clock-per-track refusal, caught at all three
+boundaries with fixtures using distinct `t` values per clock so a coincidental duplicate-`t` refusal
+cannot pass the assertion for the wrong reason; the beat/effect-needs-a-text-layer refusal, likewise
+at all three boundaries).
 
 ```premise K2
 # K2 moves preset application out of the compositor: the draw paths read a
@@ -300,7 +312,7 @@ the poster clock sampling and the crossfade `drawBeat` calls have shifted) — *
 | id | Decision |
 |---|---|
 | **K-D7** | **`easeOutCubic` moves to the domain** (`CampaignOrchestration` `domain/value-objects/easing.ts`, exported from the barrel); the compositor imports it back. K1's "no compositor change" means "no compositor **behaviour** change" — one import, byte-neutral. |
-| **K-D8** | **A stop names its clock**: `clock: "pose" \| "beat" \| "effect"`. `pose` reads `clocks.t` directly. `beat` is beat-local progress — **corrected 2026-09-15 (mechanism, not the decision):** *which* beat is current comes from `clocks.copyT`, via `beatAt(scenes.resolved, copyT)` inside `drawSequencedCopy` (`NodeCanvasCompositor.ts` ~1037), but the progress *within* that beat runs on the **pose clock**: `local = clamp01((t - beat.startT) / (beat.endT - beat.startT))` (~1064) — `copyT` selects the beat, `t` is the axis the progress itself reads. `effect` reads `clocks.effectT`, falling back to the beat-local clock (`local`) on the timeline path and to `t` on the legacy path — unifying `effectT ?? local` with `effectT ?? t`. The poster samples all three independently: `t = restT(request.motion)`, `copyT = posterCopyTAt(...)` (`CanvasFfmpegVideoCompositor.ts` ~122, ~124), `effectT = 1`. The resolver is `resolveTracks(layers, beats, clocks: { t, copyT?, effectT? }) → { byLayer: Map<layerId, Pose>; copy: ReadonlyArray<{ beat, mix, pose }> }` — `layers`, not bare `tracks`, per K-D4 (shipped in K1b). The legacy (timeline-less) path is one implicit beat spanning [0, 1] with `local = t`. The copy pose is per **(beat, mix)** because `drawBeat` runs twice at one instant during a crossfade. |
+| **K-D8** | **A stop names its clock**: `clock: "pose" \| "beat" \| "effect"`. `pose` reads `clocks.t` directly. `beat` is beat-local progress — **corrected 2026-09-15 (mechanism, not the decision):** *which* beat is current comes from `clocks.copyT`, via `beatAt(scenes.resolved, copyT)` inside `drawSequencedCopy` (`NodeCanvasCompositor.ts` ~1037), but the progress *within* that beat runs on the **pose clock**: `local = clamp01((t - beat.startT) / (beat.endT - beat.startT))` (~1064) — `copyT` selects the beat, `t` is the axis the progress itself reads. `effect` reads `clocks.effectT`, falling back to the beat-local clock (`local`) on the timeline path and to `t` on the legacy path — unifying `effectT ?? local` with `effectT ?? t`. The poster samples all three independently: `t = restT(request.motion)`, `copyT = posterCopyTAt(...)` (`CanvasFfmpegVideoCompositor.ts` ~122, ~124), `effectT = 1`. The resolver is `resolveTracks(layers, beats, clocks: { t, copyT?, effectT? }) → { byLayer: Map<layerId, Pose>; copy: ReadonlyArray<{ beat, mix, pose }> }` — `layers`, not bare `tracks`, per K-D4 (shipped in K1b). The legacy (timeline-less) path is one implicit beat spanning [0, 1] with `local = t`. The copy pose is per **(beat, mix)** because `drawBeat` runs twice at one instant during a crossfade. **Amended K1b review, fix round 2:** a track's stops all share ONE clock — the one its first stop names; two clocks on one property is two single-clock tracks, composing per K-D9, not one track mixing clocks (the resolver has no meaning for that and previously dropped the off-clock stops silently). And `beat`/`effect` clocks are refused on any kind but `static-text`/`animated-text`: both clocks need a *beat* to be local against, and only a text layer's pose is resolved per beat (`resolveTracks`'s `copy`, K-D6) — `image`/`video` resolve into `byLayer`, one pose per layer with no per-beat multiplicity, so during a crossfade there is no defined answer for which of the (at most two) live beats' local progress such a track would read; refused rather than resolved to an arbitrary, discontinuous one. Both refusals live in `layerTracksProblem` (`tracks.ts`), read at both brief boundaries. |
 | **K-D9** | **Two tracks on one (layer, property) compose; they are never refused.** Operators are fixed per property: `dx`/`dy` **add**, `opacity`/`scale` **multiply**. K1's validator refuses only a stop set with duplicate `t` on one track (per clock, K-D8; declaration order of stops is free). K3 folds in today's order — `opacity = (riseAlpha * fx.alpha) * layerAlpha` — because float multiplication is not associative and the byte gate would move otherwise. K4's "precedence" framing is superseded: composition is fixed in K1. |
 
 Risk carried: the `(beat, mix)` shape brings `CopyTimeline` into the resolver's signature; the alternative (per-layer pose only,
