@@ -99,6 +99,35 @@ describe("resolveTracks — interpolation per clock (K-D8)", () => {
     expect(inA.copy[0]!.pose.scale).not.toBe(inB.copy[0]!.pose.scale);
   });
 
+  test("a ground layer's pose is unaffected by which beat is current (K1b review fix round 2)", () => {
+    // image/video may only carry pose-clock tracks (the boundary refuses
+    // beat/effect on them) -- so byLayer folds at clocks.t alone, and a
+    // crossfade rotating the current beat must change nothing about it.
+    const timeline: CopyTimeline = {
+      beats: [
+        { text: "A", weight: 1 },
+        { text: "B", weight: 1 },
+      ],
+      transition: "cut",
+      keyBeat: 1,
+    };
+    const resolved = resolveTimeline(timeline, 10);
+    const track: Track = {
+      property: "scale",
+      stops: [
+        { t: 0, value: 1, clock: "pose" },
+        { t: 1, value: 2, clock: "pose" },
+      ],
+    };
+    const layers: TrackedLayer[] = [{ id: "img", kind: "image", tracks: [track] }];
+
+    // Same global t (0.5); copyT selects a different current beat each time.
+    const duringA = resolveTracks(layers, resolved, { t: 0.5, copyT: 0.2 });
+    const duringB = resolveTracks(layers, resolved, { t: 0.5, copyT: 0.8 });
+    expect(duringA.byLayer.get("img")).toEqual(duringB.byLayer.get("img"));
+    expect(duringA.byLayer.get("img")!.scale).toBe(1 + (2 - 1) * easeOutCubic(0.5));
+  });
+
   test("copyT defaults to t when absent, matching draw()'s own copyT ?? t", () => {
     const timeline: CopyTimeline = {
       beats: [
@@ -147,6 +176,9 @@ describe("resolveTracks — interpolation per clock (K-D8)", () => {
 
 describe("resolveTracks — the legacy (timeline-less) path", () => {
   test("local = t exactly, and beatAt is never called (an empty resolved list throws if it is)", () => {
+    // A beat-clock track needs a text-kind layer (K1b review fix round 2) --
+    // beat/effect on image/video is refused at the boundary, since a ground
+    // layer has no per-beat multiplicity of its own.
     const track: Track = {
       property: "dy",
       stops: [
@@ -154,13 +186,13 @@ describe("resolveTracks — the legacy (timeline-less) path", () => {
         { t: 1, value: 100, clock: "beat" },
       ],
     };
-    const layers: TrackedLayer[] = [{ id: "img", kind: "image", tracks: [track] }];
+    const layers: TrackedLayer[] = [{ id: "txt", kind: "static-text", tracks: [track] }];
 
     // beatAt throws on an empty list -- if resolveTracks called it here, this
     // would throw instead of returning.
     expect(() => resolveTracks(layers, [], { t: 0.4 })).not.toThrow();
     const result = resolveTracks(layers, [], { t: 0.4 });
-    expect(result.byLayer.get("img")!.dy).toBe(0 + (100 - 0) * easeOutCubic(0.4));
+    expect(result.copy[0]!.pose.dy).toBe(0 + (100 - 0) * easeOutCubic(0.4));
   });
 });
 

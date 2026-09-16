@@ -49,7 +49,13 @@
  * `drawBeat` call — `copy`'s length is the number of live beats at this
  * instant (1, or 2 during a crossfade), never the number of text layers.
  * Every other trackable kind (`image`, `video`) resolves independently, one
- * entry per layer, into `byLayer`. A returned pose excludes the crossfade
+ * entry per layer, into `byLayer`, folded at `clocks.t` (the `pose` clock)
+ * — a `beat`/`effect`-clock stop is refused on these kinds at the boundary
+ * (`layerTracksProblem`, K1b review fix round 2), because a ground layer has
+ * no per-beat multiplicity of its own: during a crossfade there are up to
+ * two live beats, and nothing decides which one's local progress a ground
+ * layer's track would read, so the discontinuity is refused rather than
+ * resolved to an arbitrary answer. A returned pose excludes the crossfade
  * `mix` weight — the caller applies it last, exactly where
  * `opacity = (riseAlpha * fx.alpha) * layerAlpha` does today, so `copy[i].pose`
  * composed with `copy[i].mix` reproduces that expression byte for byte.
@@ -57,6 +63,7 @@
 import { beatAt, type ResolvedBeat } from "./CopyTimeline.vo.js";
 import { DEFAULT_EASING, EASINGS } from "./easing.js";
 import type { LayerKind } from "./layer-kinds.js";
+import { TEXT_LAYER_KINDS as TEXT_LAYER_KIND_LIST } from "./tracks.js";
 import type { Stop, Track } from "./tracks.js";
 
 /** A layer's resolved motion state (K-D8): the resolver's whole output shape. */
@@ -104,8 +111,15 @@ export interface ResolvedTracks {
   readonly copy: readonly CopyPose[];
 }
 
-/** The layer kinds whose pose is sequenced copy, not an independent layer (K-D6). */
-const TEXT_LAYER_KINDS: ReadonlySet<LayerKind> = new Set(["static-text", "animated-text"]);
+/**
+ * The layer kinds whose pose is sequenced copy, not an independent layer
+ * (K-D6). Re-exported from `tracks.ts` as a `Set` for the `.has` lookups
+ * below, rather than kept as this module's own literal — the boundary
+ * validator (`layerTracksProblem`) reads the same list to decide which
+ * kinds may carry a `beat`/`effect`-clock stop at all (K1b review fix round
+ * 2), and a second copy here could drift from what the boundary allows.
+ */
+const TEXT_LAYER_KINDS: ReadonlySet<LayerKind> = new Set(TEXT_LAYER_KIND_LIST);
 
 /**
  * The legacy path's one implicit beat, `[0, 1]` (K-D8). Exported so a test
@@ -136,11 +150,18 @@ export function resolveTracks(
       textTracks.push(...tracks);
       continue;
     }
-    // pairs[0] is the outgoing (or only) beat's local -- non-text layers have
-    // no per-beat multiplicity of their own, and no compositor path today
-    // reads a `beat`- or `effect`-clock track on a ground layer (`image`,
-    // `video`); this is the one local value there is to give one.
-    byLayer.set(layer.id, foldPose(tracks, clocks, pairs[0].local));
+    // Non-text layers (image, video) have no per-beat multiplicity of their
+    // own, so a `beat`/`effect`-clock stop on one would have no defined
+    // value during a crossfade -- which of the (at most two) live beats'
+    // local progress would it read? Nothing decides that, so the boundary
+    // validator (`layerTracksProblem`, K1b review fix round 2) refuses a
+    // `beat`/`effect`-clock stop on any kind but `static-text`/
+    // `animated-text`. Every stop `foldPose` reads here is therefore on the
+    // `pose` clock, which reads `clocks.t` directly and never `local` at
+    // all (`clockSample`'s `"pose"` branch) -- `clocks.t` is passed only
+    // because `foldPose` needs a `number`, not because any stop here reads
+    // it.
+    byLayer.set(layer.id, foldPose(tracks, clocks, clocks.t));
   }
 
   const copy: CopyPose[] = pairs.map(({ beat, mix, local }) => ({
