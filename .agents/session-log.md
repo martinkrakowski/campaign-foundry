@@ -5529,3 +5529,37 @@ commits 70 → 30 (−57%, not −51%); whole file 30.54s → 27.42s; the three 
 `yarn mutate:verify` (3 mutations, all reproduced). §36 (X34) of
 docs/planning/2026-09-10_the-unowned-gaps.md updated with the corrected numbers and the honest
 touched-sections limitation.
+
+X34 CI-round-trip fix (branch fix/x34-equivalence-test-cost, off origin/main 8bbca3e9): X34 merged and
+CI confirmed the four tests it targeted with X30/X32 ("a motion brief authored from scratch saves with
+its motion policy", "motion without a kind or a duration blocks Save", "a motion brief on a host
+without motion stays read-only", "Save refuses a click destination the API would refuse") all pass on
+the same loaded runner regime (11-minute PR run) that failed every previous attempt. One test failed:
+this lane's own equivalence test, "Test timed out in 5000ms" — it deliberately runs the typed reference
+path AND the fast path in one test, making it the file's single most expensive test, with no margin
+left on a loaded runner. Fixed per the coordinator's first-choice option: moved the typed-path build
+into a `beforeAll` (`hookTimeout`, 10000ms by default, double `testTimeout`, untouched) via a new
+`observeFillValidDraft`/`typeFillValidDraftByHand` pair hoisted out of the test body; the `test()` now
+runs only the fast path against the `beforeAll`-built reference. Same three assertions (saved draft,
+touched sections, focus), same typed path as the source of truth — paid once per file instead of twice
+per test. Measured: the test's own body ~247ms (three-run median), in line with every other
+`fillValidDraft`-based test; `beforeAll`'s one-time typed cost ~600ms, comfortably inside `hookTimeout`
+even at the ≈2.3× loaded-runner multiplier. `yarn mutate:verify .agents/manifests/x34.json` re-run
+against the restructured test — all 3 mutations still reproduce unchanged. §36 (X34) of
+docs/planning/2026-09-10_the-unowned-gaps.md updated with the CI outcome and the treatment applied.
+
+X34 isolation fix (model review, #441): Qodo caught that the `beforeAll` sat loose in the parent
+"BriefPage — capabilities and motion" describe — a reference-build failure there would fail/skip every
+sibling test in that describe, and `view.unmount()`/`vi.restoreAllMocks()`/`localStorage.clear()` ran
+only on the success path (no `afterEach` covers a `beforeAll`), so a mid-hook throw could leave a
+mounted editor and a live `fetch` spy for later tests. Fixed: moved the `beforeAll` and its test into
+their own nested `describe("fillValidDraft equivalence (X34)")`, and wrapped both
+`observeFillValidDraft`'s render and the `beforeAll`'s reference build in `try`/`finally`. Proved, not
+asserted: temporarily made `typeFillValidDraftByHand` throw and ran the full file — exactly one test
+(this lane's own) skipped, all 181 others passed including the four X30/X32/X34-rescued tests and every
+test running immediately after the failing describe (the first place a leak would show). Restored;
+`yarn mutate:verify .agents/manifests/x34.json` re-run clean (3/3 reproduced). No mutation recorded for
+the isolation fix itself — the manifest's `note` states why: this tool checks one command's exit code
+per mutation, and "a sibling test would have been skipped" is a fact about how many tests a run
+affects, not something a single exit code can express. §36 (X34) of
+docs/planning/2026-09-10_the-unowned-gaps.md updated with this fix.
