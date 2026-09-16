@@ -1850,13 +1850,27 @@
         return counts;
       }
 
+      // X38 fix round, mirrored from the module: `alive` and a PR's
+      // `checks`/`unresolvedThreads` are live probes re-read every
+      // collection, fresher than the dated evidence `isPastWaveLane` reads,
+      // so the guard yields to any of the three. `checks: "unknown"` stays
+      // excluded — "could not ask" is never a verdict.
+      function hasFreshActionableSignal(lane) {
+        if (lane.derived.alive) return true;
+        const pr = lane.derived.pr;
+        if (pr === undefined || pr.state !== "open") return false;
+        if (pr.checks === "fail") return true;
+        return typeof pr.unresolvedThreads === "number" && pr.unresolvedThreads > 0;
+      }
+
       // X38 (plan §41), mirrored from the module: a past wave stops counting
       // toward "needs a human" — `laneStateOf` above is untouched, so the row
       // still names `conflict`/`failed`/whatever it earned; only the count a
       // person is meant to act on, and the *hide inactive* set built from it,
-      // let a day-old lane go.
+      // let a day-old lane go — unless `hasFreshActionableSignal` says
+      // something about it is true right now, in which case the guard yields.
       function laneNeedsHuman(lane, nowMs) {
-        if (isPastWaveLane(lane, nowMs)) return false;
+        if (isPastWaveLane(lane, nowMs) && !hasFreshActionableSignal(lane)) return false;
         const state = laneStateOf(lane, nowMs);
         if (NEEDS_HUMAN.includes(state)) return true;
         if (state === "blocked") {

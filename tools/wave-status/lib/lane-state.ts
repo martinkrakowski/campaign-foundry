@@ -148,14 +148,45 @@ export function laneState(status: LaneStatus, nowMs: number): LaneState {
   return "unknown";
 }
 
+// X38 fix round: `alive` and a PR's `checks`/`unresolvedThreads` are each
+// re-read from a live probe on every collection — `pgrep` for the first, a
+// `gh api` sweep for the second (collect.ts) — so they can be fresher than
+// `laneEvidenceMs`'s dated facts (a log's mtime, an event's `ts`) by
+// construction. The past-wave guard must yield to any of the three: a
+// process running right now, an open PR whose checks are *currently*
+// failing, or an open PR with a *currently* counted unresolved thread. Each
+// is a fact this instant, not history, whatever the lane's own log last
+// said. `checks: "unknown"` is deliberately excluded — collect.ts earns it
+// separately from `none` to mean "could not ask", and treating a failed API
+// read as a verdict would revive every past-wave lane the moment one sweep
+// came back empty.
+export function hasFreshActionableSignal(status: LaneStatus): boolean {
+  if (status.derived.alive) {
+    return true;
+  }
+  const pr = status.derived.pr;
+  if (pr === undefined || pr.state !== "open") {
+    return false;
+  }
+  if (pr.checks === "fail") {
+    return true;
+  }
+  return typeof pr.unresolvedThreads === "number" && pr.unresolvedThreads > 0;
+}
+
 // X38 (plan §41): a past wave is not a current emergency. `isPastWaveLane`
 // gets its consumer here, on the classification only — `laneState` above is
 // untouched, so a lane that really contradicted itself still says `conflict`
 // in its row. What changes is the promise the header makes: a day-old
 // disagreement no longer counts toward "needs a human", though it keeps its
-// own stale-evidence voice in the table.
+// own stale-evidence voice in the table — UNLESS `hasFreshActionableSignal`
+// says something about it is true right now, in which case the guard yields:
+// a lane stuck alive for a day, or one whose PR just failed a rebase, or one
+// with a review thread sitting open, is exactly what an operator needs to
+// see, and the two fact sets (dated evidence vs. live probes) are not the
+// same age.
 export function laneNeedsHuman(status: LaneStatus, nowMs: number): boolean {
-  if (isPastWaveLane(status, nowMs)) {
+  if (isPastWaveLane(status, nowMs) && !hasFreshActionableSignal(status)) {
     return false;
   }
   const state = laneState(status, nowMs);

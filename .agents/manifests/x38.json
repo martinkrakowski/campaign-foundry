@@ -4,16 +4,16 @@
   "mutations": [
     {
       "file": "tools/wave-status/lib/lane-state.ts",
-      "before": "export function laneNeedsHuman(status: LaneStatus, nowMs: number): boolean {\n  if (isPastWaveLane(status, nowMs)) {\n    return false;\n  }\n  const state = laneState(status, nowMs);",
+      "before": "export function laneNeedsHuman(status: LaneStatus, nowMs: number): boolean {\n  if (isPastWaveLane(status, nowMs) && !hasFreshActionableSignal(status)) {\n    return false;\n  }\n  const state = laneState(status, nowMs);",
       "after": "export function laneNeedsHuman(status: LaneStatus, nowMs: number): boolean {\n  const state = laneState(status, nowMs);",
-      "because": "isPastWaveLane's whole point is to stop a day-old conflict or failure from counting toward the header's needs-a-human lead. Dropping the guard restores the bug plan §41 named: a lane whose PR merged days ago, or whose process died mid-record, accuses the operator forever. The past-wave tests assert `laneNeedsHuman` false on evidence older than the threshold — with the guard gone they see the old `true` and fail.",
+      "because": "isPastWaveLane's whole point is to stop a day-old conflict or failure from counting toward the header's needs-a-human lead. Dropping the guard entirely restores the bug plan §41 named: a lane whose PR merged days ago, or whose process died mid-record, accuses the operator forever. The past-wave tests assert `laneNeedsHuman` false on evidence older than the threshold with nothing fresh to rescue it — with the guard gone they see the old `true` and fail.",
       "command": [
         "yarn",
         "vitest",
         "run",
         "tools/wave-status/lib/__tests__/lane-state.test.ts",
         "-t",
-        "stop needing a human"
+        "stops needing a human"
       ],
       "verdict": "caught"
     },
@@ -29,6 +29,21 @@
         "tools/wave-status/lib/__tests__/lane-state.test.ts",
         "-t",
         "silence is counted, not aged out"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/lib/lane-state.ts",
+      "before": "if (isPastWaveLane(status, nowMs) && !hasFreshActionableSignal(status)) {",
+      "after": "if (isPastWaveLane(status, nowMs)) {",
+      "because": "Fix round on #452 (Qodo, High): `alive` and a PR's `checks`/`unresolvedThreads` are live probes re-read every collection, fresher than the dated evidence `isPastWaveLane` reads. Restoring the unconditional past-wave guard drops exactly the lane an operator most needs to see: one whose process is alive right now but whose log has gone quiet for over a day (the `stalled` case). The alive-rescue test feeds `laneNeedsHuman` such a lane and asserts it still true; this mutation flips it back to false.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "tools/wave-status/lib/__tests__/lane-state.test.ts",
+        "-t",
+        "stalled case a past wave must not hide"
       ],
       "verdict": "caught"
     }

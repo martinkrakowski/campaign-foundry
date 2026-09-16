@@ -4,6 +4,7 @@ import {
   laneStateCounts,
   laneEvidenceMs,
   isPastWaveLane,
+  hasFreshActionableSignal,
   stallThresholdMs,
   pastWaveThresholdMs,
   LANE_STATES,
@@ -497,27 +498,138 @@ it("laneNeedsHuman: the same disagreement with evidence inside the threshold is 
   expect(laneNeedsHuman(recent, now)).toBe(true);
 });
 
-// Both a failed and a running lane, past-wave, per the chosen rule: neither
-// needs a human once every dated fact about it is a day old, whatever state
-// word it renders.
-it("laneNeedsHuman: a past-wave failed lane and a past-wave running lane both stop needing a human", () => {
+// A day-old failed lane with no other fresh fact stops needing a human,
+// exactly as the disagreement case above.
+it("laneNeedsHuman: a past-wave failed lane with no fresh signal stops needing a human", () => {
   const pastFailed = withLog(
     makeStatus({ derived: { alive: false, exit: 1 } }),
     now - pastWaveThresholdMs - 1,
   );
   expect(laneState(pastFailed, now)).toBe("failed");
+  expect(hasFreshActionableSignal(pastFailed)).toBe(false);
   expect(laneNeedsHuman(pastFailed, now)).toBe(false);
+});
 
-  const pastRunning = makeStatus({
-    reported: {
-      stage: "implement",
-      event: "started",
-      ts: new Date(now - pastWaveThresholdMs - 1).toISOString(),
-    },
-    derived: { alive: true },
-  });
-  expect(laneState(pastRunning, now)).toBe("running");
-  expect(laneNeedsHuman(pastRunning, now)).toBe(false);
+// X38 fix round: `alive` and a PR's `checks`/`unresolvedThreads` are live
+// probes re-read every collection (collect.ts) — a different, and often
+// fresher, set of facts than the dated evidence `laneEvidenceMs` reads. The
+// past-wave guard must yield to any of the three, or it drops exactly the
+// lanes an operator most needs to see.
+it("hasFreshActionableSignal: alive, a failing open PR, or a counted unresolved thread are fresh; a merged PR and 'could not ask' are not", () => {
+  expect(hasFreshActionableSignal(makeStatus({ derived: { alive: true } }))).toBe(true);
+  expect(
+    hasFreshActionableSignal(
+      makeStatus({ derived: { alive: false, pr: { number: 1, state: "open", checks: "fail" } } }),
+    ),
+  ).toBe(true);
+  expect(
+    hasFreshActionableSignal(
+      makeStatus({
+        derived: {
+          alive: false,
+          pr: { number: 1, state: "open", checks: "pass", unresolvedThreads: 3 },
+        },
+      }),
+    ),
+  ).toBe(true);
+  expect(
+    hasFreshActionableSignal(
+      makeStatus({ derived: { alive: false, pr: { number: 1, state: "merged", checks: "pass" } } }),
+    ),
+  ).toBe(false);
+  expect(
+    hasFreshActionableSignal(
+      makeStatus({
+        derived: {
+          alive: false,
+          pr: { number: 1, state: "open", checks: "unknown", unresolvedThreads: "unknown" },
+        },
+      }),
+    ),
+  ).toBe(false);
+  expect(hasFreshActionableSignal(makeStatus({ derived: { alive: false } }))).toBe(false);
+});
+
+// Rescue path 1: a live process outranks a day-old log — the `stalled` case
+// an operator most needs to see, which the unconditional guard used to hide.
+it("laneNeedsHuman: a live process outranks a day-old log — the stalled case a past wave must not hide", () => {
+  const staleButAlive = withLog(
+    makeStatus({ derived: { alive: true } }),
+    now - pastWaveThresholdMs - 1,
+  );
+  expect(isPastWaveLane(staleButAlive, now)).toBe(true);
+  expect(laneState(staleButAlive, now)).toBe("stalled");
+  expect(laneNeedsHuman(staleButAlive, now)).toBe(true);
+});
+
+// Rescue path 2: an open PR that just failed its checks outranks a day-old
+// lane — a rebase can break a PR long after the lane itself went quiet.
+it("laneNeedsHuman: an open PR that just failed its checks outranks a day-old lane", () => {
+  const s = withLog(
+    makeStatus({
+      derived: { alive: false, pr: { number: 1, state: "open", checks: "fail" } },
+    }),
+    now - pastWaveThresholdMs - 1,
+  );
+  expect(isPastWaveLane(s, now)).toBe(true);
+  expect(laneState(s, now)).toBe("failed");
+  expect(laneNeedsHuman(s, now)).toBe(true);
+});
+
+// Rescue path 3: an open PR with an unresolved thread right now outranks a
+// day-old lane — a reviewer's comment does not age with the lane's log.
+it("laneNeedsHuman: an open PR with an unresolved thread right now outranks a day-old lane", () => {
+  const s = withLog(
+    makeStatus({
+      derived: {
+        alive: false,
+        pr: { number: 1, state: "open", checks: "pass", unresolvedThreads: 2 },
+      },
+    }),
+    now - pastWaveThresholdMs - 1,
+  );
+  expect(isPastWaveLane(s, now)).toBe(true);
+  expect(laneState(s, now)).toBe("blocked");
+  expect(laneNeedsHuman(s, now)).toBe(true);
+});
+
+// The negative that keeps the feature real: nothing is fresh — not alive,
+// and the PR is merged, so its checks and threads are no longer live
+// questions — so a day-old lane is still suppressed, whatever its state.
+it("laneNeedsHuman: with nothing fresh to report, a day-old lane stays suppressed past a merged PR", () => {
+  const s = withLog(
+    makeStatus({
+      derived: {
+        alive: false,
+        exit: 1,
+        pr: { number: 1, state: "merged", checks: "pass" },
+      },
+    }),
+    now - pastWaveThresholdMs - 1,
+  );
+  expect(isPastWaveLane(s, now)).toBe(true);
+  expect(laneState(s, now)).toBe("failed");
+  expect(hasFreshActionableSignal(s)).toBe(false);
+  expect(laneNeedsHuman(s, now)).toBe(false);
+});
+
+// The decision, pinned: `checks: "unknown"` is "could not ask", not a
+// verdict. Treating it as actionable would revive every past-wave lane the
+// moment one API read failed — this stays suppressed, unlike the identical
+// shape with `checks: "fail"` above.
+it("laneNeedsHuman: an open PR whose checks could not be asked does not rescue a day-old lane", () => {
+  const s = withLog(
+    makeStatus({
+      derived: {
+        alive: false,
+        pr: { number: 1, state: "open", checks: "unknown", unresolvedThreads: 0 },
+      },
+    }),
+    now - pastWaveThresholdMs - 1,
+  );
+  expect(isPastWaveLane(s, now)).toBe(true);
+  expect(hasFreshActionableSignal(s)).toBe(false);
+  expect(laneNeedsHuman(s, now)).toBe(false);
 });
 
 // Silence must not be read as age: an unparseable `ts` and no log leave

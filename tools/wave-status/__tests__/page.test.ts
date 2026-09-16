@@ -242,22 +242,33 @@ const stateFixture = (now: number): WaveStatus => {
             pr: { number: 10, state: "open", checks: "pass", unresolvedThreads: "unknown" },
           }),
           // X38: a past wave keeps its row's own verdict — the state word is
-          // unchanged — but stops counting toward "needs a human". One lane
-          // dated from its log, one from an event alone with no log at all,
-          // so both of `laneEvidenceMs`'s sources are exercised at this seam.
+          // unchanged — but stops counting toward "needs a human", UNLESS a
+          // fresh, live-probed fact (alive, a currently-failing open PR, or a
+          // currently-counted unresolved thread) says otherwise: those are
+          // re-read every collection and can be fresher than the lane's own
+          // dated evidence. "past-failed" has none of the three and stays
+          // suppressed even past a merged PR; the other three each carry
+          // exactly one and are rescued despite evidence a day stale.
           lane("past-failed", {
             alive: false,
             exit: 1,
             log: logQuietFor(pastWaveThresholdMs + 60_000),
+            pr: { number: 12, state: "merged", checks: "pass" },
           }),
-          {
-            ...lane("past-running", { alive: true }),
-            reported: {
-              stage: "implement",
-              event: "started",
-              ts: new Date(now - pastWaveThresholdMs - 60_000).toISOString(),
-            },
-          },
+          lane("past-alive", {
+            alive: true,
+            log: logQuietFor(pastWaveThresholdMs + 60_000),
+          }),
+          lane("past-pr-failing", {
+            alive: false,
+            log: logQuietFor(pastWaveThresholdMs + 60_000),
+            pr: { number: 13, state: "open", checks: "fail" },
+          }),
+          lane("past-pr-blocked", {
+            alive: false,
+            log: logQuietFor(pastWaveThresholdMs + 60_000),
+            pr: { number: 14, state: "open", checks: "pass", unresolvedThreads: 2 },
+          }),
         ],
       },
     ],
@@ -287,7 +298,9 @@ const EXPECTED_STATE_PILLS: ReadonlyArray<readonly [string, string, string]> = [
   // X38: past-wave lanes still lead with their earned state word — only the
   // needs-a-human count and the hide-inactive set change underneath them.
   ["past-failed", "failed", "bad"],
-  ["past-running", "running", "info"],
+  ["past-alive", "stalled", "warn"],
+  ["past-pr-failing", "failed", "bad"],
+  ["past-pr-blocked", "blocked", "warn"],
 ];
 
 // name, label, value — counts for mixedStatus above.
@@ -3992,30 +4005,32 @@ describe("the status page", () => {
       present.map(([s, n]) => `${n} ${s}`).sort(),
     );
 
-    // X38 (plan §41), explicitly: the two past-wave lanes in the fixture keep
-    // naming their earned state in the row — the rollup above already counted
-    // them there — but the module says neither needs a human, and the page's
-    // attention lead (already asserted equal to `wantsHuman` above) must be
-    // reached by agreeing with it, not by a coincidence of totals.
-    const pastFailedPill = doc.querySelector(
-      'tr.lane[data-lane="past-failed"] td.c-state .pill',
-    );
-    const pastRunningPill = doc.querySelector(
-      'tr.lane[data-lane="past-running"] td.c-state .pill',
-    );
-    expect(pastFailedPill?.textContent?.trim()).toBe("failed");
-    expect(pastRunningPill?.textContent?.trim()).toBe("running");
-    // The row keeps its own stale-evidence voice — this lane hides nothing.
-    expect(
-      doc.querySelector('tr.lane[data-lane="past-failed"] td.c-state')?.textContent,
-    ).toContain("stale evidence");
-    expect(
-      doc.querySelector('tr.lane[data-lane="past-running"] td.c-state')?.textContent,
-    ).toContain("stale evidence");
-    const pastFailedLane = lanes.find((l) => l.lane === "past-failed")!;
-    const pastRunningLane = lanes.find((l) => l.lane === "past-running")!;
-    expect(laneNeedsHuman(pastFailedLane, now)).toBe(false);
-    expect(laneNeedsHuman(pastRunningLane, now)).toBe(false);
+    // X38 (plan §41 + fix round), explicitly: every past-wave lane in the
+    // fixture keeps naming its earned state in the row — the rollup above
+    // already counted them there, and each still carries its own
+    // stale-evidence voice — but the module's `laneNeedsHuman` and the page's
+    // attention lead (already asserted equal to `wantsHuman` above) must
+    // agree on which of them still needs a human: the three carrying a fresh,
+    // live-probed fact (alive, a currently-failing open PR, a currently
+    // unresolved thread) do; the one with none, past a merged PR, does not.
+    const pastLaneStates: ReadonlyArray<readonly [string, string, boolean]> = [
+      ["past-failed", "failed", false],
+      ["past-alive", "stalled", true],
+      ["past-pr-failing", "failed", true],
+      ["past-pr-blocked", "blocked", true],
+    ];
+    for (const [laneId, state, needsHuman] of pastLaneStates) {
+      const pill = doc.querySelector(`tr.lane[data-lane="${laneId}"] td.c-state .pill`);
+      expect(pill?.textContent?.trim(), laneId).toBe(state);
+      // The row keeps its own stale-evidence voice regardless — this lane
+      // hides nothing, whether or not it still needs a human.
+      expect(
+        doc.querySelector(`tr.lane[data-lane="${laneId}"] td.c-state`)?.textContent,
+        laneId,
+      ).toContain("stale evidence");
+      const lane = lanes.find((l) => l.lane === laneId)!;
+      expect(laneNeedsHuman(lane, now), laneId).toBe(needsHuman);
+    }
   });
 
   test("hide inactive leaves exactly the lanes that need a human, and survives a reload", async () => {
@@ -4035,12 +4050,17 @@ describe("the status page", () => {
       .filter((id) => !activeIds.includes(id));
     expect(activeIds.length).toBeGreaterThan(0);
     expect(inactiveIds.length).toBeGreaterThan(0);
-    // X38, explicitly: the past-wave lanes fall into the inactive set even
-    // though their state ("failed", "running") would otherwise need a human.
+    // X38, explicitly: a past-wave lane with no fresh, live-probed fact falls
+    // into the inactive set even though its state ("failed") would otherwise
+    // need a human — but the three carrying one (alive, a currently-failing
+    // open PR, a currently unresolved thread) stay active despite equally
+    // stale evidence.
     expect(activeIds).not.toContain("past-failed");
-    expect(activeIds).not.toContain("past-running");
     expect(inactiveIds).toContain("past-failed");
-    expect(inactiveIds).toContain("past-running");
+    for (const laneId of ["past-alive", "past-pr-failing", "past-pr-blocked"]) {
+      expect(activeIds, laneId).toContain(laneId);
+      expect(inactiveIds, laneId).not.toContain(laneId);
+    }
 
     const page = await loadPage(status);
     const doc = page.window.document;
@@ -4257,8 +4277,8 @@ describe("the status page", () => {
     expect(toggle.getAttribute("aria-checked")).toBe("false");
     // One lane per state the derivation can name, plus the three S3 lanes
     // (a measured thread blocker, a checks read that could not be taken, and
-    // an unreadable thread state) and the two X38 past-wave lanes.
-    expect(page.window.document.querySelectorAll("tr.lane").length).toBe(16);
+    // an unreadable thread state) and the four X38 past-wave lanes.
+    expect(page.window.document.querySelectorAll("tr.lane").length).toBe(18);
   });
 
   test("a lane whose PR state the derivation cannot name renders as unknown, not as a guess", async () => {
@@ -4301,9 +4321,9 @@ describe("the status page", () => {
     // The module answers in the same word — and nothing about the row's
     // oddity takes the rest of the table down.
     expect(
-      laneState(closedStatus.waves[0].lanes[16], now),
+      laneState(closedStatus.waves[0].lanes[18], now),
     ).toBe("unknown");
-    expect(doc.querySelectorAll("tr.lane").length).toBe(17);
+    expect(doc.querySelectorAll("tr.lane").length).toBe(19);
   });
 
 
