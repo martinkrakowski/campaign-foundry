@@ -19,6 +19,7 @@ import {
 import { errorMessage } from "@campaignfoundry/shared";
 import {
   CanvasFfmpegVideoCompositor,
+  FileSystemSceneAssetResolver,
   NodeCanvasCompositor,
   ProceduralBackgroundGenerator,
 } from "@campaignfoundry/CreativeGeneration";
@@ -57,6 +58,9 @@ export const PREVIEW_FRAME_CACHE_ENTRIES = 32;
 export const previewBackgroundGenerator = new ProceduralBackgroundGenerator();
 export const previewCompositor = new NodeCanvasCompositor(process.env.MESSAGE_FONT);
 export const previewVideoCompositor = new CanvasFfmpegVideoCompositor({ fontFamily: process.env.MESSAGE_FONT });
+// VE5b2: a beat's own scene is a reused uploaded asset, never a GenAI call, so
+// wiring the real resolver here carries none of D52's credit-safety concern.
+export const previewSceneAssets = new FileSystemSceneAssetResolver();
 export const previewFrameCache = new LruCache<PreviewFrameCacheEntry>(PREVIEW_FRAME_CACHE_ENTRIES);
 
 const sha256 = (input: string | Uint8Array): string =>
@@ -66,6 +70,7 @@ const previewUseCase = new PreviewCreativeFrameUseCase({
   imageGenerator: previewBackgroundGenerator,
   compositor: previewCompositor,
   videoCompositor: previewVideoCompositor,
+  sceneAssets: previewSceneAssets,
   hash: sha256,
   platformSafeZones: platformZones,
   frameCache: previewFrameCache,

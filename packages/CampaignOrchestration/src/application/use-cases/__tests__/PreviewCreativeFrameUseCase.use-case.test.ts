@@ -15,7 +15,7 @@ import { DEFAULT_CAMPAIGN_TYPE } from "../../../domain/value-objects/campaign-ty
 import { templateFromCanonical } from "../../../domain/value-objects/brief-template.js";
 import type { CampaignBrief } from "../../../domain/entities/CampaignBrief.js";
 import type { Product } from "../../../domain/entities/Product.js";
-import { fakeCompositor, fakeImageGenerator, fakeVideoCompositor } from "./_fakes.js";
+import { fakeCompositor, fakeImageGenerator, fakeSceneAssets, fakeVideoCompositor } from "./_fakes.js";
 import { MOTION_FPS } from "../../../domain/value-objects/MotionKind.vo.js";
 import type { CopyTimeline } from "../../../domain/value-objects/CopyTimeline.vo.js";
 
@@ -567,6 +567,95 @@ describe("PreviewCreativeFrameUseCase — the scrub cell (VE-D5/VE-D6)", () => {
     expect(result.success).toBe(true);
     expect(d.compositor.compositeAsset).toHaveBeenCalledTimes(1);
     expect(videoCompositor.compositeFrame).not.toHaveBeenCalled();
+  });
+});
+
+describe("PreviewCreativeFrameUseCase — VE5b2 scene backgrounds", () => {
+  const SCENE_A = "assets/inputs/camp/scene-a.png";
+
+  const timelineWithScene: CopyTimeline = {
+    beats: [
+      { text: "Alpha", weight: 1, background: SCENE_A },
+      { text: "Beta", weight: 1 },
+    ],
+    transition: "fade",
+    keyBeat: 1,
+  };
+
+  test("the video request carries the same backgrounds the run would resolve", async () => {
+    const sceneAssets = fakeSceneAssets();
+    const videoCompositor = fakeVideoCompositor();
+    const d = deps({ videoCompositor, sceneAssets });
+    const result = await new PreviewCreativeFrameUseCase(d).execute(
+      baseBrief({ copy: { timeline: timelineWithScene } }),
+      motionCell(),
+    );
+    expect(result.success).toBe(true);
+    expect(sceneAssets.resolveScene).toHaveBeenCalledTimes(1);
+    expect(sceneAssets.resolveScene).toHaveBeenCalledWith(SCENE_A, expect.objectContaining({ value: "9:16" }));
+    const request = vi.mocked(videoCompositor.compositeFrame).mock.calls[0][0];
+    expect(request.backgrounds).toEqual({ [SCENE_A]: new Uint8Array(Buffer.from(SCENE_A, "utf8")) });
+  });
+
+  test("a timeline naming no backgrounds carries no backgrounds key and never touches the scene port", async () => {
+    const sceneAssets = fakeSceneAssets();
+    const videoCompositor = fakeVideoCompositor();
+    const d = deps({ videoCompositor, sceneAssets });
+    const result = await new PreviewCreativeFrameUseCase(d).execute(
+      baseBrief({ copy: { timeline: scrubTimeline } }),
+      motionCell(),
+    );
+    expect(result.success).toBe(true);
+    expect(sceneAssets.resolveScene).not.toHaveBeenCalled();
+    const request = vi.mocked(videoCompositor.compositeFrame).mock.calls[0][0];
+    expect("backgrounds" in request).toBe(false);
+  });
+
+  test("a motion cell whose timeline names a scene, with no scene resolver wired, is rejected before any port is called", async () => {
+    const videoCompositor = fakeVideoCompositor();
+    const d = deps({ videoCompositor });
+    const result = await new PreviewCreativeFrameUseCase(d).execute(
+      baseBrief({ copy: { timeline: timelineWithScene } }),
+      motionCell(),
+    );
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.error.message).toMatch(/no scene asset resolver is wired/);
+    expect(videoCompositor.compositeFrame).not.toHaveBeenCalled();
+  });
+
+  test("an unreadable scene path fails the preview before any composite or cache lookup, naming the beat and the path", async () => {
+    const sceneAssets = fakeSceneAssets([SCENE_A]);
+    const videoCompositor = fakeVideoCompositor();
+    const cache = memoryCache();
+    const d = deps({ videoCompositor, sceneAssets, frameCache: cache });
+    const result = await new PreviewCreativeFrameUseCase(d).execute(
+      baseBrief({ copy: { timeline: timelineWithScene } }),
+      motionCell(),
+    );
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.message).toContain("Beat 1");
+      expect(result.error.message).toContain(SCENE_A);
+    }
+    expect(videoCompositor.compositeFrame).not.toHaveBeenCalled();
+    expect(cache.store.size).toBe(0);
+  });
+
+  test("a changed scene at the same path moves the frame fingerprint (no stale cache serve)", async () => {
+    const cache = memoryCache();
+    const sceneAssetsA = { resolveScene: vi.fn(async () => new Uint8Array([1, 2, 3])) };
+    const first = await new PreviewCreativeFrameUseCase(
+      deps({ videoCompositor: fakeVideoCompositor(), sceneAssets: sceneAssetsA, frameCache: cache }),
+    ).execute(baseBrief({ copy: { timeline: timelineWithScene } }), motionCell());
+
+    const sceneAssetsB = { resolveScene: vi.fn(async () => new Uint8Array([9, 9, 9])) };
+    const second = await new PreviewCreativeFrameUseCase(
+      deps({ videoCompositor: fakeVideoCompositor(), sceneAssets: sceneAssetsB, frameCache: cache }),
+    ).execute(baseBrief({ copy: { timeline: timelineWithScene } }), motionCell());
+
+    expect(first.success && second.success).toBe(true);
+    if (!first.success || !second.success) return;
+    expect(first.value.cacheKey).not.toBe(second.value.cacheKey);
   });
 });
 

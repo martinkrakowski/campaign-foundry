@@ -23,9 +23,10 @@ import {
 import type { CompositeRequest, CompositorPort } from "../ports/out/CompositorPort.js";
 import type { BackgroundContext, ImageGeneratorPort } from "../ports/out/ImageGeneratorPort.js";
 import type { PlatformSafeZoneResolver } from "../ports/out/PlatformProfilePort.js";
+import type { SceneAssetPort } from "../ports/out/SceneAssetPort.js";
 import type { VideoCompositeRequest, VideoCompositorPort } from "../ports/out/VideoCompositorPort.js";
 import type { CopyTimeline } from "../../domain/value-objects/CopyTimeline.vo.js";
-import { unionSafeInsets } from "./GenerateCampaignUseCase.use-case.js";
+import { resolveTimelineBackgrounds, unionSafeInsets } from "./GenerateCampaignUseCase.use-case.js";
 
 /**
  * One cell of the campaign, picked by the editor: the same look a planned
@@ -89,6 +90,13 @@ export interface PreviewCreativeFrameDeps {
   readonly platformSafeZones?: PlatformSafeZoneResolver;
   readonly frameCache?: PreviewFrameCache;
   readonly videoCompositor?: VideoCompositorPort;
+  /**
+   * Resolves a timeline beat's own background (VE5b2), the same port
+   * `GenerateCampaignUseCase` calls — so a scrubbed frame matches generation
+   * exactly (VE-D2). Absent only refuses a motion cell whose timeline
+   * actually names a scene; every other cell is unaffected.
+   */
+  readonly sceneAssets?: SceneAssetPort;
 }
 
 /** Social fingerprints keep the `ratio` key so style-less hashes stay put. */
@@ -248,6 +256,24 @@ export class PreviewCreativeFrameUseCase {
       backgroundRatio.value,
     );
 
+    // VE5b2: resolve the SAME per-beat scenes the run would, so a scrubbed
+    // frame matches generation exactly (VE-D2). Stills never carry a
+    // timeline (VE5b1), so this only ever runs for a motion cell whose
+    // timeline actually names a background.
+    let backgrounds: Readonly<Record<string, Uint8Array>> | undefined;
+    if (hasMotion) {
+      const timeline = brief.copy?.timeline;
+      const namesScenes = timeline?.beats.some((beat) => beat.background !== undefined) ?? false;
+      if (namesScenes) {
+        if (!this.deps.sceneAssets) {
+          return err(new Error("Cannot render motion preview: no scene asset resolver is wired."));
+        }
+        const resolved = await resolveTimelineBackgrounds(timeline, backgroundRatio.value, this.deps.sceneAssets);
+        if (!resolved.success) return resolved;
+        backgrounds = resolved.value;
+      }
+    }
+
     let scrub: ScrubFingerprint | undefined;
     if (hasMotion) {
       const frames = Math.round(durationSec! * MOTION_FPS);
@@ -260,7 +286,11 @@ export class PreviewCreativeFrameUseCase {
       };
     }
 
-    const cacheKey = compositeRequestFingerprint(request, this.deps.hash, scrub);
+    const cacheKey = compositeRequestFingerprint(
+      backgrounds !== undefined ? { ...request, backgrounds } : request,
+      this.deps.hash,
+      scrub,
+    );
     const cached = this.deps.frameCache?.get(cacheKey);
     if (cached !== undefined) {
       return ok({
@@ -282,6 +312,7 @@ export class PreviewCreativeFrameUseCase {
         motion: motion!,
         sampleAt: [],
         ...(brief.copy?.timeline !== undefined ? { timeline: brief.copy.timeline } : {}),
+        ...(backgrounds !== undefined ? { backgrounds } : {}),
       };
       const composite = await this.deps.videoCompositor!.compositeFrame(videoRequest, atSec!);
       image = composite.image;

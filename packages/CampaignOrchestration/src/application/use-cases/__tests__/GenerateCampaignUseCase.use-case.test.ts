@@ -21,6 +21,7 @@ import {
   fakeImageGenerator,
   fakePlan,
   fakePlanner,
+  fakeSceneAssets,
   fakeVariant,
   fakeVideoCompositor,
   recordingExporter,
@@ -57,6 +58,7 @@ const deps = (over: Partial<GenerateCampaignDeps> = {}): GenerateCampaignDeps =>
   planner: fakePlanner(),
   compositor: fakeCompositor(),
   videoCompositor: fakeVideoCompositor(),
+  sceneAssets: fakeSceneAssets(),
   compliance: fakeCompliance(),
   exporter: recordingExporter(),
   now: () => new Date("2026-01-01T00:00:00.000Z"),
@@ -1334,6 +1336,90 @@ const motionVariant = (over: Partial<Variant> = {}): Variant =>
 
 const firstCompositeCall = (d: GenerateCampaignDeps): Record<string, unknown> =>
   vi.mocked(d.compositor.compositeAsset).mock.calls[0][0] as unknown as Record<string, unknown>;
+
+describe("GenerateCampaignUseCase — VE5b2 scene backgrounds", () => {
+  const SCENE_A = "assets/inputs/camp/scene-a.png";
+  const SCENE_B = "assets/inputs/camp/scene-b.png";
+
+  test("compositeVideo receives backgrounds for every distinct scene the timeline names, resolved once even when two cells share it", async () => {
+    const timeline: CopyTimeline = {
+      transition: "fade",
+      keyBeat: 1,
+      beats: [
+        { text: "Alpha", weight: 1, background: SCENE_A },
+        { text: "Beta", weight: 1, background: SCENE_B },
+      ],
+    };
+    const sceneAssets = fakeSceneAssets();
+    const d = deps({
+      sceneAssets,
+      planner: fakePlanner(fakePlan([motionVariant(), motionVariant({ index: 1 })])),
+    });
+    const result = await new GenerateCampaignUseCase(d).execute(variationBrief({ copy: { timeline } }));
+    expect(result.success).toBe(true);
+
+    // Once per DISTINCT path, not once per cell — two motion cells share the same two scenes.
+    expect(sceneAssets.resolveScene).toHaveBeenCalledTimes(2);
+
+    const expectedBackgrounds = {
+      [SCENE_A]: new Uint8Array(Buffer.from(SCENE_A, "utf8")),
+      [SCENE_B]: new Uint8Array(Buffer.from(SCENE_B, "utf8")),
+    };
+    const requests = vi.mocked(d.videoCompositor.compositeVideo).mock.calls.map((call) => call[0]);
+    expect(requests).toHaveLength(2);
+    for (const request of requests) {
+      expect(request.backgrounds).toEqual(expectedBackgrounds);
+    }
+  });
+
+  test("a timeline naming no backgrounds leaves the request without a backgrounds key, and never touches the scene port", async () => {
+    const timeline: CopyTimeline = {
+      transition: "cut",
+      keyBeat: 1,
+      beats: [
+        { text: "Alpha", weight: 1 },
+        { text: "Beta", weight: 1 },
+      ],
+    };
+    const sceneAssets = fakeSceneAssets();
+    const d = deps({ sceneAssets, planner: fakePlanner(fakePlan([motionVariant()])) });
+    const result = await new GenerateCampaignUseCase(d).execute(variationBrief({ copy: { timeline } }));
+    expect(result.success).toBe(true);
+    const request = vi.mocked(d.videoCompositor.compositeVideo).mock.calls[0][0];
+    expect("backgrounds" in request).toBe(false);
+    expect(sceneAssets.resolveScene).not.toHaveBeenCalled();
+  });
+
+  test("no timeline at all never touches the scene port", async () => {
+    const sceneAssets = fakeSceneAssets();
+    const d = deps({ sceneAssets, planner: fakePlanner(fakePlan([motionVariant()])) });
+    const result = await new GenerateCampaignUseCase(d).execute(variationBrief());
+    expect(result.success).toBe(true);
+    expect(sceneAssets.resolveScene).not.toHaveBeenCalled();
+  });
+
+  test("an unreadable scene path fails the run before any cell renders, naming the beat and the path", async () => {
+    const timeline: CopyTimeline = {
+      transition: "cut",
+      keyBeat: 1,
+      beats: [
+        { text: "Alpha", weight: 1 },
+        { text: "Beta", weight: 1, background: SCENE_A },
+      ],
+    };
+    const sceneAssets = fakeSceneAssets([SCENE_A]);
+    const d = deps({ sceneAssets, planner: fakePlanner(fakePlan([motionVariant()])) });
+    const result = await new GenerateCampaignUseCase(d).execute(variationBrief({ copy: { timeline } }));
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.message).toContain("Beat 2");
+      expect(result.error.message).toContain(SCENE_A);
+    }
+    // Resolved upfront, before any cell renders — nothing was drawn or written.
+    expect(d.videoCompositor.compositeVideo).not.toHaveBeenCalled();
+    expect(d.exporter.saveToDirectory).not.toHaveBeenCalled();
+  });
+});
 
 describe("GenerateCampaignUseCase — motion variants", () => {
   test("encodes a motion variant through the video port and saves mp4 + poster", async () => {

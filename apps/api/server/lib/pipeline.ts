@@ -14,6 +14,7 @@ import {
   AssetReusingImageGenerator,
   CanvasFfmpegVideoCompositor,
   FileSystemBackgroundCache,
+  FileSystemSceneAssetResolver,
   FireflyImageGenerator,
   GeminiImageGenerator,
   NodeCanvasCompositor,
@@ -146,6 +147,8 @@ export function buildPipeline(imageModel?: string, planInput: PlanInput = {}): G
     compositor: new NodeCanvasCompositor(messageFont()),
     // Motion variants only; the parser has already gated them on the ffmpeg probe.
     videoCompositor: new CanvasFfmpegVideoCompositor({ fontFamily: messageFont() }),
+    // VE5b2: resolves a timeline beat's own background — motion variants only.
+    sceneAssets: new FileSystemSceneAssetResolver(),
     compliance: new BrandComplianceChecker(),
     exporter: new FileSystemExporter(outputRoot()),
     now: () => new Date(),
