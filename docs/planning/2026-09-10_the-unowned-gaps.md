@@ -1485,3 +1485,14 @@ remains the right place because the typed reference runs once for the whole desc
 inside every test's own budget. No timeout value changed. Grep of `hookTimeout` across `apps/web`
 found one other mention (the nested-describe blast-radius comment); it does not repeat the "double"
 claim. §36's "this repo overrides neither" was true when X34 shipped and is not rewritten here.
+and with no override set the encode path is the same bytes as before). Red-first: an identity
+test passes the resolved binary to the compositor under a second name (a hard link — same inode,
+different path) together with the adapter's injectable `spawn` option, a recorder that captures
+the command and delegates to Node's real `spawn`; it asserts the recorded executable is that
+alias — never the `ffmpeg-static` default the adapter falls back to without the constructor
+argument — and that the recorded invocation is the `libx264` encode. Chosen over the earlier
+shell-wrapper-plus-subprocess design because it proves the same identity by observing the exact
+spawn the encode ran on, without assuming a POSIX shell. Mutation manifest
+`.agents/manifests/x31.json`: reverting the constructor argument at that construction drops the
+encode back onto `ffmpeg-static`, the recorder captures the default path, and the identity test
+fails.
