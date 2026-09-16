@@ -5,7 +5,7 @@
     {
       "file": "tools/wave-status/lib/collect.ts",
       "before": "      for (const lane of [...eventLanes].sort()) {",
-      "after": "      for (const lane of new Set([...eventLanes, ...entries.filter((e) => e.endsWith(\".log\")).map((e) => e.slice(0, -\".log\".length))]).sort()) {",
+      "after": "      for (const lane of [...new Set([...eventLanes, ...entries.filter((e) => e.endsWith(\".log\")).map((e) => e.slice(0, -\".log\".length))])].sort()) {",
       "because": "The collector used to treat any `.log` in a wave directory as a lane, and one session's 442-file root of gate rounds, fix-runner transcripts and probe logs rendered as 113 lanes. Letting a log create a lane again — with no name filter, since the name filter is what hid real lanes — resurrects exactly that behaviour: the fixture that reproduces the owner's root must then yield one phantom lane per file, and the zero-lanes assertion fails.",
       "command": [
         "yarn",
