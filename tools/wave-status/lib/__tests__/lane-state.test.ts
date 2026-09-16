@@ -476,6 +476,64 @@ it("laneNeedsHuman: blocked by CI alone does not need a human", () => {
   expect(laneNeedsHuman(threadsUnknown, now)).toBe(false);
 });
 
+// X38: give `isPastWaveLane` its consumer. A wave whose newest evidence is
+// a day old is history, not a current emergency — the header must stop
+// promising a human is wanted over it. The decision (plan §41): suppress
+// only the *classification*, never the state itself — a lane that really
+// disagreed with itself still says `conflict` in its row; only the count a
+// person acts on lets it go.
+it("laneNeedsHuman: a disagreement past its wave still says conflict in its row, but stops needing a human", () => {
+  const old = withLog(makeStatus({ disagreements: ["a"] }), now - pastWaveThresholdMs - 1);
+  expect(isPastWaveLane(old, now)).toBe(true);
+  expect(laneState(old, now)).toBe("conflict");
+  expect(laneNeedsHuman(old, now)).toBe(false);
+});
+
+// The boundary the other way: the same shape, evidence inside the threshold,
+// is still counted — this cannot pass by disabling the feature outright.
+it("laneNeedsHuman: the same disagreement with evidence inside the threshold is still counted", () => {
+  const recent = withLog(makeStatus({ disagreements: ["a"] }), now - pastWaveThresholdMs + 1);
+  expect(isPastWaveLane(recent, now)).toBe(false);
+  expect(laneNeedsHuman(recent, now)).toBe(true);
+});
+
+// Both a failed and a running lane, past-wave, per the chosen rule: neither
+// needs a human once every dated fact about it is a day old, whatever state
+// word it renders.
+it("laneNeedsHuman: a past-wave failed lane and a past-wave running lane both stop needing a human", () => {
+  const pastFailed = withLog(
+    makeStatus({ derived: { alive: false, exit: 1 } }),
+    now - pastWaveThresholdMs - 1,
+  );
+  expect(laneState(pastFailed, now)).toBe("failed");
+  expect(laneNeedsHuman(pastFailed, now)).toBe(false);
+
+  const pastRunning = makeStatus({
+    reported: {
+      stage: "implement",
+      event: "started",
+      ts: new Date(now - pastWaveThresholdMs - 1).toISOString(),
+    },
+    derived: { alive: true },
+  });
+  expect(laneState(pastRunning, now)).toBe("running");
+  expect(laneNeedsHuman(pastRunning, now)).toBe(false);
+});
+
+// Silence must not be read as age: an unparseable `ts` and no log leave
+// `laneEvidenceMs` undefined, so the lane is not past-wave and a live-looking
+// failure keeps needing a human.
+it("laneNeedsHuman: an unparseable ts with no log is not past-wave — silence is counted, not aged out", () => {
+  const silent = makeStatus({
+    reported: { stage: "gate", event: "started", ts: "not-a-date" },
+    derived: { alive: false, exit: 1 },
+  });
+  expect(laneEvidenceMs(silent)).toBeUndefined();
+  expect(isPastWaveLane(silent, now)).toBe(false);
+  expect(laneState(silent, now)).toBe("failed");
+  expect(laneNeedsHuman(silent, now)).toBe(true);
+});
+
 it("laneNeedsHuman: the quiet states never need a human, gap or no gap", () => {
   const ready = makeStatus({
     derived: {

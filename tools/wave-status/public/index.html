@@ -1850,7 +1850,13 @@
         return counts;
       }
 
+      // X38 (plan §41), mirrored from the module: a past wave stops counting
+      // toward "needs a human" — `laneStateOf` above is untouched, so the row
+      // still names `conflict`/`failed`/whatever it earned; only the count a
+      // person is meant to act on, and the *hide inactive* set built from it,
+      // let a day-old lane go.
       function laneNeedsHuman(lane, nowMs) {
+        if (isPastWaveLane(lane, nowMs)) return false;
         const state = laneStateOf(lane, nowMs);
         if (NEEDS_HUMAN.includes(state)) return true;
         if (state === "blocked") {

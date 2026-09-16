@@ -148,7 +148,16 @@ export function laneState(status: LaneStatus, nowMs: number): LaneState {
   return "unknown";
 }
 
+// X38 (plan §41): a past wave is not a current emergency. `isPastWaveLane`
+// gets its consumer here, on the classification only — `laneState` above is
+// untouched, so a lane that really contradicted itself still says `conflict`
+// in its row. What changes is the promise the header makes: a day-old
+// disagreement no longer counts toward "needs a human", though it keeps its
+// own stale-evidence voice in the table.
 export function laneNeedsHuman(status: LaneStatus, nowMs: number): boolean {
+  if (isPastWaveLane(status, nowMs)) {
+    return false;
+  }
   const state = laneState(status, nowMs);
   if (isNeedsHumanState(state)) {
     return true;
