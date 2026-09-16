@@ -700,6 +700,18 @@ describe("hashCopy — the brief's copy surface, independent of hashPolicy (X33,
     expect(a).not.toBe(b);
   });
 
+  test("two briefs differing only in localizedMessage hash differently", () => {
+    const a = hashCopy(brief({ localizedMessage: "Reste sauvage" }), nodeCryptoPolicyHasher);
+    const b = hashCopy(brief({ localizedMessage: "Reste calme" }), nodeCryptoPolicyHasher);
+    expect(a).not.toBe(b);
+  });
+
+  test("a brief with a localizedMessage hashes differently from the same brief without one", () => {
+    const withLocalized = hashCopy(brief({ localizedMessage: "Reste sauvage" }), nodeCryptoPolicyHasher);
+    const withoutLocalized = hashCopy(brief(), nodeCryptoPolicyHasher);
+    expect(withLocalized).not.toBe(withoutLocalized);
+  });
+
   test("two briefs differing only in a beat's text hash differently", () => {
     const a = hashCopy(
       brief({ copy: { timeline: timeline([{ text: "Beat one", weight: 1 }]) } }),
@@ -874,10 +886,11 @@ describe("policyHash is unmoved by the copyHash addition (X33, §35)", () => {
     if (result.success) expect(result.value.policyHash).toBe(expected);
   });
 
-  test("changing campaignMessage or any part of copy.timeline does not move policyHash", () => {
+  test("changing campaignMessage, localizedMessage, or any part of copy.timeline does not move policyHash", () => {
     const GOLDEN_HASH = "7181107a6ce42df96357800416bf26bf89007fd3dbd2b9792aab83323adefcf9";
     const base = brief({ variation: { count: 12, seed: 7, minDistance: 1 } });
     const differentMessage = { ...base, campaignMessage: "A completely different message" };
+    const withLocalizedMessage = { ...base, localizedMessage: "Reste sauvage" };
     const withTimeline = {
       ...base,
       copy: {
@@ -909,6 +922,7 @@ describe("policyHash is unmoved by the copyHash addition (X33, §35)", () => {
     for (const candidate of [
       base,
       differentMessage,
+      withLocalizedMessage,
       withTimeline,
       differentWeight,
       differentTransition,

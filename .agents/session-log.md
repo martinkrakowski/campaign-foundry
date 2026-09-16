@@ -5847,3 +5847,17 @@ keyBeat variants, still pinned to the same golden hash. Rebased onto origin/main
 plus the appended entry, no markers left. Third mutation added to `.agents/manifests/x33.json` —
 drop only `weight` from the mapped beat, leaving `text`/`background` covered — proving the new
 coverage; all three mutations reproduce under `mutate:verify`.
+
+## 2026-09-16 — X33 fix round 2 (CI coverage gate: localizedMessage untested)
+
+CI's `test:cov` caught a real gap traced to the same source as the last one: `VariationPolicy.vo.ts`
+branches at 99.22%, uncovered line 480 — the `...(brief.localizedMessage !== undefined ? {...} : {})`
+arm in `hashCopy`. No test ever constructed a brief carrying a `localizedMessage`, so the field's
+inclusion in the copy hash (part of §35's named copy surface) was asserted nowhere. Added two tests
+alongside the existing campaignMessage/beat ones: two briefs differing only in `localizedMessage`
+hash differently, and a brief with one hashes differently from the same brief without one (the
+absent-arm side of the same ternary). Extended the existing literal-`policyHash` table (not a new
+one) with a `localizedMessage`-only candidate, still pinned to the golden hash. Red first: dropped
+the conditional spread locally and confirmed both new tests failed on identical-hash equality before
+restoring. Fourth mutation added to `.agents/manifests/x33.json` — drop the `localizedMessage` spread
+— proving the new coverage; all four mutations reproduce under `mutate:verify`.

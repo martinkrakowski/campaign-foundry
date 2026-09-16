@@ -37,6 +37,23 @@
       "verdict": "caught"
     },
     {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/VariationPolicy.vo.ts",
+      "before": "      ...(brief.localizedMessage !== undefined ? { localizedMessage: brief.localizedMessage } : {}),",
+      "after": "      // mutated: localizedMessage dropped from the hashed payload",
+      "because": "localizedMessage is part of the copy surface §35 names and is meant to be in hashCopy's payload, but until this fix round no test constructed a brief carrying one — a CI coverage gap (VariationPolicy.vo.ts branches 99.22%, this ternary's true arm never taken) that traced back to the brief's own test list never naming the field. Dropping the conditional spread means two briefs differing only in localizedMessage hash identically, and a brief with one hashes the same as the same brief without it — both new tests (\"two briefs differing only in localizedMessage hash differently\" and \"a brief with a localizedMessage hashes differently from the same brief without one\") fail.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/VariationPolicy.vo.test.ts",
+        "-t",
+        "localizedMessage"
+      ],
+      "verdict": "caught"
+    },
+    {
       "file": "apps/api/server/lib/pipeline.ts",
       "before": "    if (expectedCopyHash !== undefined && planned.value.copyHash !== expectedCopyHash) {",
       "after": "    if (planned.value.copyHash !== expectedCopyHash) {",
