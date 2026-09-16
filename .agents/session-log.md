@@ -5287,3 +5287,25 @@ residual stated). PR #432.
   defence-in-depth, extended. §31 (X28) and §32 (X29) of
   docs/planning/2026-09-10_the-unowned-gaps.md ship in this PR;
   4/4 mutations caught (.agents/manifests/hl5e.json).
+
+## 2026-09-15 — X30 (AI session)
+
+Investigated the CI-only `Test timed out in 5000ms` on brief-editor.test.tsx's four
+slowest tests. The html weight meter (HL5c/HL5f/HL5e) was the lead suspect and is
+disproven: 0 `assembleHtml` calls measured across all four tests (none select a
+platform whose `formats` include `html`), and the same four tests time the same
+at `origin/main~6` (before the meter existed) as at HEAD — no code regression to
+bisect. Real, measured cause: a `React.Profiler`-wrapped render showed one user
+gesture committing the "everything"-presentation tree three times — the dispatch's
+own, plus a redundant commit from a validate-on-change effect mirroring `state`
+into `useState` (`errors`/`warnings`/`blockedAt`), plus the dirty-flag effect. These
+four tests carry the suite's highest interaction counts, so they pay that tax the
+most, leaving the least margin against the fixed timeout on a loaded runner. Fix:
+derive `errors`/`warnings`/`blockedAt` with `useMemo` in `BriefEditor.tsx` instead
+of the effect+setState mirror — commits per interaction measured 3 → 2. Meter's
+cache/key/figure untouched; HL5c/HL5f/HL5e tests pass unchanged. Test-first,
+work-count not wall-clock: a Profiler-based render-count assertion (red on the
+pre-fix effect code, green at ≤2 after). §33 (X30) of
+docs/planning/2026-09-10_the-unowned-gaps.md ships in this PR; 1/1 mutation caught
+(.agents/manifests/x30.json) — no second mutation recorded, since the fix never
+touches `htmlWeightKey`.

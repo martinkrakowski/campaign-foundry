@@ -1,4 +1,5 @@
 import { describe, test, expect, beforeEach, vi } from "vitest";
+import { Profiler } from "react";
 import * as messages from "@/components/campaign/messages";
 import { screen, waitFor, within, fireEvent, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -1870,6 +1871,53 @@ describe("BriefPage — capabilities and motion", () => {
     // the refusal removed entirely, because opening a menu never writes.
     await saveVia(user, "Save");
     expect(writes(calls)).toEqual([]);
+  });
+
+  /**
+   * X30: the CI-only "Test timed out in 5000ms" on this suite's four slowest tests
+   * (this one, "a motion brief authored from scratch...", "Save refuses a click
+   * destination...", "a motion brief on a host without motion...") is duration, not
+   * flakiness — same SHA, 4m20s on the push run and 9m51s on the PR run. The html
+   * weight meter (HL5c/HL5f/HL5e) was the first suspect; it is innocent here (none of
+   * these four select a platform whose `formats` include `html`, so
+   * `htmlWeightReading` returns before ever calling `assembleHtml` — measured 0 calls
+   * across all four, and the timing is identical on `origin/main~6`, before the meter
+   * existed at all). The real cost: every dispatch in the "everything" presentation
+   * re-renders the whole large tree, and `BriefEditor` used to pay THREE full commits
+   * per interaction — the dispatch's own, plus a second because the validate-on-change
+   * effect (errors/warnings/blockedAt) mirrored `state` into `useState` with `setState`
+   * calls of its own, plus a third from the dirty-flag effect. The second commit is
+   * pure waste: `errors`/`warnings`/`blockedAt` are pure functions of `state` (and the
+   * brief id list) with no other writer, so deriving them with `useMemo` folds that
+   * commit into the render `dispatch` already scheduled. This is a work-count
+   * assertion, not a wall-clock one — the runner that produced the CI regression is
+   * exactly the one a wall-clock assertion would be flaky on.
+   */
+  test("a single motion-kind toggle commits the editor at most twice, not three times (X30)", async () => {
+    const user = userEvent.setup();
+    routes({});
+    let commits = 0;
+    renderWithRun(
+      <Profiler id="x30-commits" onRender={() => { commits += 1; }}>
+        <NewEditor />
+      </Profiler>,
+    );
+    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""));
+    await fillValidDraft(user);
+    await user.click(screen.getByText("Randomized"));
+    await user.click(screen.getByRole("button", { name: "motion" }));
+
+    commits = 0;
+    await user.click(screen.getByRole("button", { name: "ken-burns-in" }));
+    // One user gesture is one state change (D3-style): the dispatch's own commit,
+    // plus at most one more for the dirty-flag effect (`setDirty` in a context that
+    // outlives the route) — never a third for a validation mirror that has no reason
+    // to exist as its own commit.
+    expect(commits).toBeLessThanOrEqual(2);
+
+    commits = 0;
+    await user.click(screen.getByRole("button", { name: "ken-burns-out" }));
+    expect(commits).toBeLessThanOrEqual(2);
   });
 
   test("a motion brief on a host without motion stays read-only, saves verbatim, and applies with the refusal (D12)", async () => {
