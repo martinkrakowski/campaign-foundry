@@ -1,7 +1,7 @@
 # Keyframing — Architecture & Development Plan
 
 **Date:** 2026-09-10 · **Status:** in progress. **Stale as of 2026-09-16: K1a, K1b, K2 and K3 have all
-shipped**; K4 (hand-authored tracks alongside presets) is dispatchable next.
+shipped.**
 **Verified against:** `main` at `ed5e2dc`.
 **Replaces** the keyframe half of the retired `2026-09-08_motion-composition-implementation-plan.md`.
 
