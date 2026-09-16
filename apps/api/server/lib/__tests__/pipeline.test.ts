@@ -255,6 +255,41 @@ describe("pipeline composition root", () => {
     if (!unplannable.success) expect(unplannable.error.message).toMatch(/exceeds axisProductSize/);
   });
 
+  test("runCampaign pins a re-roll to expectedCopyHash, independent of expectedPolicyHash (X33, §35)", async () => {
+    const vbrief: CampaignBrief = { ...brief, mode: "variation", variation: { count: 4, seed: 42 } };
+    const first = await runCampaign(vbrief, "procedural");
+    expect(first.success).toBe(true);
+    if (!first.success) return;
+    const policyHash = first.value.policyHash as string;
+    const copyHash = first.value.copyHash as string;
+    expect(copyHash).toEqual(expect.any(String));
+    const target = [{ productId: first.value.assets[0].productId, variantIndex: 0 }];
+
+    // Copy unchanged, axes unchanged: proceeds pinned on both.
+    const same = await runCampaign(vbrief, "procedural", target, policyHash, copyHash);
+    expect(same.success).toBe(true);
+    if (same.success) expect(same.value.assets).toHaveLength(1);
+
+    // Only the brief's copy moved (the axes — and so policyHash — are untouched):
+    // a naive policyHash-only pin would let this pass and merge new copy into a
+    // report whose other cells still show the old campaignMessage. Refused.
+    const copyMoved = { ...vbrief, campaignMessage: "A totally different message" };
+    const refused = await runCampaign(copyMoved, "procedural", target, policyHash, copyHash);
+    expect(refused.success).toBe(false);
+    if (!refused.success) {
+      expect(refused.error.message).toMatch(
+        /^The brief's copy changed since the last run \(copyHash [0-9a-f]{64} ≠ [0-9a-f]{64}\); run the full campaign\.$/,
+      );
+      expect(refused.error.message).toContain(copyHash);
+    }
+
+    // No expectedCopyHash (a report persisted before this field existed): not pinned,
+    // even though the copy actually moved — the documented decision (§35): the first
+    // re-roll of a pre-existing report stays unguarded on copy.
+    const noPin = await runCampaign(copyMoved, "procedural", target, policyHash, undefined);
+    expect(noPin.success).toBe(true);
+  });
+
   test("runCampaign forwards regenerateOnly targets", async () => {
     const r = await runCampaign(brief, "procedural", [{ productId: "alpha", aspectRatio: "1:1", treatment: "default" }]);
     expect(r.success).toBe(true);

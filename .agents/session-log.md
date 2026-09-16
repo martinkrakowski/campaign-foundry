@@ -5805,3 +5805,59 @@ caught; the fallback mutation fails on the leaked-payload assertion, not merely 
 write path remain out of scope — two of the three seeds need `html`/`video` drawers that do not
 exist. `campaigns/*` routes untouched.
 Cite: L7 in docs/planning/2026-09-08_creative-templates-and-units.md.
+
+## 2026-09-16 — X33 (lane: a selective re-roll pins the brief's copy too)
+
+Closed §35: `hashPolicy` covered only the variation axes, so editing `campaignMessage`, a beat's
+`text`, or (since VE5b2) a beat's `background`, then re-rolling one *other* cell passed the
+`policyHash` pin and merged the new copy into a report whose other cells still rendered the old
+brief. Added a SECOND hash, `hashCopy` (`VariationPolicy.vo.ts`), never a widening of `hashPolicy`'s
+own golden-stable payload — covers `campaignMessage`, `localizedMessage`, and `copy.timeline` in
+full (beat text and background, plus order and count via `canonicalJson`'s array-order-preserving
+serialisation), through the same injected `PolicyHasher` seam; `canonicalJson` stayed module-private
+and `hashCopy` was added to the same file rather than exported across the layer boundary. Carried as
+`copyHash` beside `policyHash` on `VariationPlan` and `PipelineResult`, persisted in the report, read
+back by `generate.post.ts` (`persistedCopyHash`), and checked in `runCampaign` next to the existing
+policyHash check, refused in the same voice naming copy, not plan. Decision recorded in the PR and
+the plan: an absent persisted copy hash is no pin, not a refusal — every report on disk predates this
+field, so the first re-roll of a pre-existing report stays unguarded on copy, by choice. Red first
+throughout (`hashCopy is not a function`, `undefined` copyHash fields, an un-refused re-roll, a
+missing persisted field — each its own reason); full targeted suites green (345 across the five
+touched files, 759 CampaignOrchestration, 1009 api), `typecheck`/`lint`/`lint:arch`/`plan:verify`/
+`arch:inventory` all clean. Two mutations in `.agents/manifests/x33.json` — drop `copy.timeline` from
+the hashed payload, treat a missing persisted copy hash as a mismatch — both reproduce under
+`mutate:verify`.
+Plan: §35 in docs/planning/2026-09-10_the-unowned-gaps.md.
+
+## 2026-09-16 — X33 fix round (Qodo: timeline edits bypass reroll guard)
+
+Qodo's High finding on #447: `hashCopy` said "`copy.timeline` in full" and then hashed only each
+beat's `text` and optional `background`, omitting `beat.weight`, `timeline.transition`, and
+`timeline.keyBeat` — all three change what gets rendered (duration share, the cut/fade between beats,
+which frame becomes the poster, D7) so a re-roll passed the copy pin while any of them had moved, the
+same mixing defect §35 describes. The brief enumerated only two of the five fields; the gap was the
+brief's, not the implementation's. Fixed: `hashCopy`'s timeline payload now nests `transition` and
+`keyBeat` beside a `beats` array carrying `text`, `weight`, and optional `background`; doc comment
+corrected to name all five fields. Red first: reverted the implementation with the three new tests in
+place (`weight`/`transition`/`keyBeat` each proven to move `copyHash` in isolation) and confirmed all
+three failed on identical-hash equality — `expected '<hash>' not to be '<hash>'` — before restoring.
+The existing literal-`policyHash` table test was extended (not duplicated) with weight/transition/
+keyBeat variants, still pinned to the same golden hash. Rebased onto origin/main first
+(`73ce5411`/`14852d85`); the only conflict was this file's append point, resolved as main's content
+plus the appended entry, no markers left. Third mutation added to `.agents/manifests/x33.json` —
+drop only `weight` from the mapped beat, leaving `text`/`background` covered — proving the new
+coverage; all three mutations reproduce under `mutate:verify`.
+
+## 2026-09-16 — X33 fix round 2 (CI coverage gate: localizedMessage untested)
+
+CI's `test:cov` caught a real gap traced to the same source as the last one: `VariationPolicy.vo.ts`
+branches at 99.22%, uncovered line 480 — the `...(brief.localizedMessage !== undefined ? {...} : {})`
+arm in `hashCopy`. No test ever constructed a brief carrying a `localizedMessage`, so the field's
+inclusion in the copy hash (part of §35's named copy surface) was asserted nowhere. Added two tests
+alongside the existing campaignMessage/beat ones: two briefs differing only in `localizedMessage`
+hash differently, and a brief with one hashes differently from the same brief without one (the
+absent-arm side of the same ternary). Extended the existing literal-`policyHash` table (not a new
+one) with a `localizedMessage`-only candidate, still pinned to the golden hash. Red first: dropped
+the conditional spread locally and confirmed both new tests failed on identical-hash equality before
+restoring. Fourth mutation added to `.agents/manifests/x33.json` — drop the `localizedMessage` spread
+— proving the new coverage; all four mutations reproduce under `mutate:verify`.

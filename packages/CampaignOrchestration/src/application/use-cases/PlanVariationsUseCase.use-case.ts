@@ -4,7 +4,7 @@ import type { Variant } from "../../domain/entities/Variant.js";
 import type { AspectRatioValue } from "../../domain/value-objects/aspect-ratios.js";
 import { MOTION_FPS, type MotionKind } from "../../domain/value-objects/MotionKind.vo.js";
 import type { VariationPlan } from "../../domain/value-objects/VariationPlan.vo.js";
-import { DISTANCE_AXES, VariationPolicy, type PlanInput, type PolicyHasher } from "../../domain/value-objects/VariationPolicy.vo.js";
+import { DISTANCE_AXES, hashCopy, VariationPolicy, type PlanInput, type PolicyHasher } from "../../domain/value-objects/VariationPolicy.vo.js";
 
 /** Re-roll bound: 64 draws from `seedFrom(briefId, index, attempt)`. */
 import { EXHAUSTIVE_MAX_SPACE, enumerateAxes, exhaustiveAccept, shortfallMessage } from "./PlanCapacity.js";
@@ -111,7 +111,8 @@ export class PlanVariationsUseCase {
       return err(new Error(`Variation plan coverage unmet: ${unmet}.`));
     }
 
-    return ok(toPlan(brief.id, policy, accepted, hasSceneBackgrounds(brief)));
+    const copyHash = hashCopy(brief, this.hasher);
+    return ok(toPlan(brief.id, policy, accepted, hasSceneBackgrounds(brief), copyHash));
   }
 
   replan(plan: VariationPlan, index: number, attempt: number): Result<VariationPlan, Error> {
@@ -291,9 +292,11 @@ function toPlan(
   policy: VariationPolicy,
   variants: readonly Variant[],
   sceneBackgrounds: boolean,
+  copyHash: string,
 ): VariationPlan {
   return {
     policyHash: policy.policyHash,
+    copyHash,
     seed: policy.seed,
     variants,
     estimate: {

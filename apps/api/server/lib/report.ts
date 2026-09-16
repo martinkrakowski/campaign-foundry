@@ -296,6 +296,7 @@ export async function writeReport(
       assets,
       log: result.log,
       ...(result.policyHash !== undefined ? { policyHash: result.policyHash } : {}),
+      ...(result.copyHash !== undefined ? { copyHash: result.copyHash } : {}),
       ...(result.seed !== undefined ? { seed: result.seed } : {}),
     },
     null,

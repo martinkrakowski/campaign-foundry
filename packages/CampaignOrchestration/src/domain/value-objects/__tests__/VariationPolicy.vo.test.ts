@@ -12,11 +12,13 @@ import {
   BACKGROUND_AXIS_SOURCES,
   canonicalHeadlines,
   DISTANCE_AXES,
+  hashCopy,
   HEADLINE_POOL_REF,
   VariationPolicy,
   type PlanInput,
   type PolicyHasher,
 } from "../VariationPolicy.vo.js";
+import type { CopyTimeline } from "../CopyTimeline.vo.js";
 import { nodeCryptoPolicyHasher } from "../../../infrastructure/index.js";
 
 const fromBrief = (
@@ -683,4 +685,252 @@ describe("motion-only briefs draw only at ratios a motion platform packages", ()
   });
 });
 
+});
+
+describe("hashCopy — the brief's copy surface, independent of hashPolicy (X33, §35)", () => {
+  const timeline = (beats: CopyTimeline["beats"]): CopyTimeline => ({
+    beats,
+    transition: "cut",
+    keyBeat: 1,
+  });
+
+  test("two briefs differing only in campaignMessage hash differently", () => {
+    const a = hashCopy(brief({ campaignMessage: "Stay wild" }), nodeCryptoPolicyHasher);
+    const b = hashCopy(brief({ campaignMessage: "Stay tame" }), nodeCryptoPolicyHasher);
+    expect(a).not.toBe(b);
+  });
+
+  test("two briefs differing only in localizedMessage hash differently", () => {
+    const a = hashCopy(brief({ localizedMessage: "Reste sauvage" }), nodeCryptoPolicyHasher);
+    const b = hashCopy(brief({ localizedMessage: "Reste calme" }), nodeCryptoPolicyHasher);
+    expect(a).not.toBe(b);
+  });
+
+  test("a brief with a localizedMessage hashes differently from the same brief without one", () => {
+    const withLocalized = hashCopy(brief({ localizedMessage: "Reste sauvage" }), nodeCryptoPolicyHasher);
+    const withoutLocalized = hashCopy(brief(), nodeCryptoPolicyHasher);
+    expect(withLocalized).not.toBe(withoutLocalized);
+  });
+
+  test("two briefs differing only in a beat's text hash differently", () => {
+    const a = hashCopy(
+      brief({ copy: { timeline: timeline([{ text: "Beat one", weight: 1 }]) } }),
+      nodeCryptoPolicyHasher,
+    );
+    const b = hashCopy(
+      brief({ copy: { timeline: timeline([{ text: "Beat uno", weight: 1 }]) } }),
+      nodeCryptoPolicyHasher,
+    );
+    expect(a).not.toBe(b);
+  });
+
+  test("two briefs differing only in a beat's background hash differently", () => {
+    const a = hashCopy(
+      brief({
+        copy: { timeline: timeline([{ text: "Beat one", weight: 1, background: "scenes/a.png" }]) },
+      }),
+      nodeCryptoPolicyHasher,
+    );
+    const b = hashCopy(
+      brief({
+        copy: { timeline: timeline([{ text: "Beat one", weight: 1, background: "scenes/b.png" }]) },
+      }),
+      nodeCryptoPolicyHasher,
+    );
+    expect(a).not.toBe(b);
+  });
+
+  test("two briefs differing only in a beat's weight hash differently", () => {
+    const a = hashCopy(
+      brief({ copy: { timeline: timeline([{ text: "Beat one", weight: 1 }]) } }),
+      nodeCryptoPolicyHasher,
+    );
+    const b = hashCopy(
+      brief({ copy: { timeline: timeline([{ text: "Beat one", weight: 2 }]) } }),
+      nodeCryptoPolicyHasher,
+    );
+    expect(a).not.toBe(b);
+  });
+
+  test("two briefs differing only in the timeline's transition hash differently", () => {
+    const beats = [
+      { text: "Beat one", weight: 1 },
+      { text: "Beat two", weight: 1 },
+    ];
+    const a = hashCopy(
+      brief({ copy: { timeline: { beats, transition: "cut", keyBeat: 1 } } }),
+      nodeCryptoPolicyHasher,
+    );
+    const b = hashCopy(
+      brief({ copy: { timeline: { beats, transition: "fade", keyBeat: 1 } } }),
+      nodeCryptoPolicyHasher,
+    );
+    expect(a).not.toBe(b);
+  });
+
+  test("two briefs differing only in the timeline's keyBeat hash differently", () => {
+    const beats = [
+      { text: "Beat one", weight: 1 },
+      { text: "Beat two", weight: 1 },
+    ];
+    const a = hashCopy(
+      brief({ copy: { timeline: { beats, transition: "cut", keyBeat: 1 } } }),
+      nodeCryptoPolicyHasher,
+    );
+    const b = hashCopy(
+      brief({ copy: { timeline: { beats, transition: "cut", keyBeat: 2 } } }),
+      nodeCryptoPolicyHasher,
+    );
+    expect(a).not.toBe(b);
+  });
+
+  test("two briefs differing only in beat order hash differently", () => {
+    const a = hashCopy(
+      brief({
+        copy: {
+          timeline: timeline([
+            { text: "Beat one", weight: 1 },
+            { text: "Beat two", weight: 1 },
+          ]),
+        },
+      }),
+      nodeCryptoPolicyHasher,
+    );
+    const b = hashCopy(
+      brief({
+        copy: {
+          timeline: timeline([
+            { text: "Beat two", weight: 1 },
+            { text: "Beat one", weight: 1 },
+          ]),
+        },
+      }),
+      nodeCryptoPolicyHasher,
+    );
+    expect(a).not.toBe(b);
+  });
+
+  test("two briefs differing only in beat count hash differently", () => {
+    const a = hashCopy(
+      brief({ copy: { timeline: timeline([{ text: "Beat one", weight: 1 }]) } }),
+      nodeCryptoPolicyHasher,
+    );
+    const b = hashCopy(
+      brief({
+        copy: {
+          timeline: timeline([
+            { text: "Beat one", weight: 1 },
+            { text: "Beat two", weight: 1 },
+          ]),
+        },
+      }),
+      nodeCryptoPolicyHasher,
+    );
+    expect(a).not.toBe(b);
+  });
+
+  test("two briefs differing only in a variation axis have the same copy hash — the two hashes are independent", () => {
+    const layoutA = brief({ variation: { count: 4, axes: { layout: ["headline-top"] } } });
+    const layoutB = brief({ variation: { count: 4, axes: { layout: ["headline-bottom"] } } });
+    const policyA = VariationPolicy.fromBrief(layoutA, {}, nodeCryptoPolicyHasher);
+    const policyB = VariationPolicy.fromBrief(layoutB, {}, nodeCryptoPolicyHasher);
+    expect(policyA.success && policyB.success).toBe(true);
+    if (policyA.success && policyB.success) {
+      // The axes differ, so policyHash differs...
+      expect(policyA.value.policyHash).not.toBe(policyB.value.policyHash);
+    }
+    // ...but copyHash, which never reads an axis, does not.
+    expect(hashCopy(layoutA, nodeCryptoPolicyHasher)).toBe(hashCopy(layoutB, nodeCryptoPolicyHasher));
+  });
+
+  test("the same brief yields the same copyHash twice", () => {
+    const b = brief({ campaignMessage: "Stay wild" });
+    expect(hashCopy(b, nodeCryptoPolicyHasher)).toBe(hashCopy(b, nodeCryptoPolicyHasher));
+  });
+
+  test("delegates hashing to the supplied PolicyHasher", () => {
+    const customHasher = vi.fn((_payloadJson: string) => "custom-copy-digest-98765");
+    const hash = hashCopy(brief({ campaignMessage: "Stay wild" }), customHasher);
+    expect(customHasher).toHaveBeenCalledTimes(1);
+    const passedJson = customHasher.mock.calls[0]?.[0];
+    expect(typeof passedJson).toBe("string");
+    if (passedJson !== undefined) {
+      expect(JSON.parse(passedJson)).toMatchObject({ campaignMessage: "Stay wild" });
+    }
+    expect(hash).toBe("custom-copy-digest-98765");
+  });
+});
+
+describe("policyHash is unmoved by the copyHash addition (X33, §35)", () => {
+  // hashPolicy's own payload (VariationPolicy.vo.ts ~265-288) is untouched by this
+  // lane — copyHash is a second, disjoint hash, never a widening of hashPolicy's
+  // input. This table pins policyHash literally for briefs already exercised
+  // elsewhere in this file, so a regression that widened hashPolicy (or made it
+  // read a copy field) fails here even if every other test happened to miss it.
+  test.each([
+    [
+      "the base golden brief (count 12, seed 7, minDistance 1)",
+      brief({ variation: { count: 12, seed: 7, minDistance: 1 } }),
+      "7181107a6ce42df96357800416bf26bf89007fd3dbd2b9792aab83323adefcf9",
+    ],
+    [
+      "a brief with explicit seed, minDistance and coverage",
+      brief({
+        variation: { count: 4, seed: 7, minDistance: 2, coverage: { perProduct: 1, perRatio: 1 } },
+      }),
+      "5e1a652991c8b745d05e78721c1215ae1935d3c5bcc7861b3d815260a023eb18",
+    ],
+  ] as const)("%s keeps its literal policyHash", (_label, input, expected) => {
+    const result = fromBrief(input);
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.value.policyHash).toBe(expected);
+  });
+
+  test("changing campaignMessage, localizedMessage, or any part of copy.timeline does not move policyHash", () => {
+    const GOLDEN_HASH = "7181107a6ce42df96357800416bf26bf89007fd3dbd2b9792aab83323adefcf9";
+    const base = brief({ variation: { count: 12, seed: 7, minDistance: 1 } });
+    const differentMessage = { ...base, campaignMessage: "A completely different message" };
+    const withLocalizedMessage = { ...base, localizedMessage: "Reste sauvage" };
+    const withTimeline = {
+      ...base,
+      copy: {
+        timeline: {
+          beats: [
+            { text: "Beat one", weight: 1 },
+            { text: "Beat two", weight: 1, background: "scenes/a.png" },
+          ],
+          transition: "fade" as const,
+          keyBeat: 1,
+        },
+      },
+    };
+    // Same timeline, only weight changed — hashCopy's newly covered field.
+    const differentWeight = {
+      ...base,
+      copy: { timeline: { ...withTimeline.copy.timeline, beats: [{ text: "Beat one", weight: 5 }] } },
+    };
+    // Same timeline, only transition changed.
+    const differentTransition = {
+      ...base,
+      copy: { timeline: { ...withTimeline.copy.timeline, transition: "cut" as const } },
+    };
+    // Same timeline, only keyBeat changed.
+    const differentKeyBeat = {
+      ...base,
+      copy: { timeline: { ...withTimeline.copy.timeline, keyBeat: 2 } },
+    };
+    for (const candidate of [
+      base,
+      differentMessage,
+      withLocalizedMessage,
+      withTimeline,
+      differentWeight,
+      differentTransition,
+      differentKeyBeat,
+    ]) {
+      const result = fromBrief(candidate);
+      expect(result.success).toBe(true);
+      if (result.success) expect(result.value.policyHash).toBe(GOLDEN_HASH);
+    }
+  });
 });

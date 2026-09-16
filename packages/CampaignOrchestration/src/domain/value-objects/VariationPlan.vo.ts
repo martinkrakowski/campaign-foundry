@@ -27,6 +27,13 @@ export interface VariationEstimate {
  */
 export interface VariationPlan {
   readonly policyHash: string;
+  /**
+   * Hash of the brief's copy surface (§35) — independent of `policyHash`,
+   * carried beside it so a re-roll can pin both. `replan` never recomputes
+   * this: it re-draws one slot's axes, never the brief's copy, so the hash a
+   * plan was built with stays valid across every `replan` of it.
+   */
+  readonly copyHash: string;
   readonly seed: number;
   readonly variants: readonly Variant[];
   readonly estimate: VariationEstimate;

@@ -450,6 +450,51 @@ function hashPolicy(
   return hasher(canonicalJson(payload));
 }
 
+/**
+ * Hash of the brief's copy surface — `campaignMessage`, `localizedMessage`, and
+ * `copy.timeline` in full: each beat's `text`, `weight`, and optional
+ * `background`, plus the timeline's own `transition` and `keyBeat` (beat order
+ * and count are covered for free — array order is preserved by
+ * `canonicalJson`) — independent of `hashPolicy` (§35,
+ * `docs/planning/2026-09-10_the-unowned-gaps.md`).
+ *
+ * Every one of those fields changes what gets rendered: `weight` is a beat's
+ * share of the clip's duration, `transition` picks the cut/fade between
+ * beats, and `keyBeat` decides which frame becomes the poster (D7,
+ * `CopyTimeline.vo.ts`) — so all three belong beside `text`/`background` in
+ * this hash for the same reason those two do.
+ *
+ * A selective re-roll pins BOTH hashes: `hashPolicy` alone lets a re-roll of
+ * one cell pass while the brief's message or any part of its timeline moved
+ * underneath it, silently merging the new copy into a report whose other
+ * cells were rendered under the old copy. This is deliberately a SECOND,
+ * disjoint hash rather than a widening of `hashPolicy`'s own payload —
+ * `hashPolicy` is golden-stable (see the comments in `fromBrief` above), and
+ * no axis ever reaches this hash, no copy field ever reaches `hashPolicy`.
+ */
+export function hashCopy(brief: CampaignBrief, hasher: PolicyHasher): string {
+  const timeline = brief.copy?.timeline;
+  return hasher(
+    canonicalJson({
+      campaignMessage: brief.campaignMessage,
+      ...(brief.localizedMessage !== undefined ? { localizedMessage: brief.localizedMessage } : {}),
+      ...(timeline !== undefined
+        ? {
+            timeline: {
+              transition: timeline.transition,
+              keyBeat: timeline.keyBeat,
+              beats: timeline.beats.map((beat) => ({
+                text: beat.text,
+                weight: beat.weight,
+                ...(beat.background !== undefined ? { background: beat.background } : {}),
+              })),
+            },
+          }
+        : {}),
+    }),
+  );
+}
+
 /** JSON with object keys sorted recursively; array order is preserved. */
 function canonicalJson(value: unknown): string {
   return JSON.stringify(sortKeys(value));

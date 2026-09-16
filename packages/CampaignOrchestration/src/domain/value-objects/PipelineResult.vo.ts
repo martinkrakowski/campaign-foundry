@@ -9,6 +9,11 @@ export interface PipelineResult {
   readonly halted: boolean;
   /** Variation-plan hash. Omitted on classic runs so persisted reports stay byte-identical. */
   readonly policyHash?: string;
+  /**
+   * Variation-plan copy hash (§35) — the brief's copy surface, independent of
+   * `policyHash`. Omitted on classic runs, same as `policyHash`.
+   */
+  readonly copyHash?: string;
   /** Variation-plan seed. Omitted on classic runs. */
   readonly seed?: number;
 }
