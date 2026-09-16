@@ -1654,11 +1654,14 @@
         return `${Math.floor(elapsed / 86400000)}d ago`;
       }
 
-      // Wave-level age, for the register the header wears: the same threshold
-      // the row's note reads from, so a "3d ago" header and its "past wave"
-      // rows can never disagree. The age tick rebuilds the whole table, so a
-      // wave crossing the line re-ages on the page's own clock, with no new
-      // status arriving.
+      // Wave-level age, for the register the header wears: the header is the
+      // only place the wave's own verdict is stated — a wave is past when its
+      // *newest* evidence has aged out. A row reads the same threshold against
+      // its *own* evidence and says "stale evidence" (see stateCell), never
+      // "past wave": in a mixed-age wave the two subjects genuinely differ,
+      // and one voice on screen must not contradict the other. The age tick
+      // rebuilds the whole table, so a wave crossing the line re-ages on the
+      // page's own clock, with no new status arriving.
       function isPastWave(wave, nowMs) {
         const newest = waveMtime(wave);
         return newest !== undefined && nowMs - newest > PAST_WAVE_THRESHOLD_MS;
@@ -1732,10 +1735,11 @@
       const STALL_THRESHOLD_MS = 900000;
 
       // X35's other clock, mirrored the same way and pinned by its own test:
-      // a wave whose newest artefact — log write or event — is older than this
-      // belongs to a past wave. The row says so, and the header ages out of
-      // the live register: a session three days old must not read in the same
-      // voice as one in progress.
+      // artefacts older than this — log write or event — are stale, and a
+      // lane whose every dated fact is one says so in its row, while only a
+      // wave whose *newest* fact is one ages out of the header's live
+      // register: a session three days old must not read in the same voice
+      // as one in progress.
       const PAST_WAVE_THRESHOLD_MS = 86400000;
 
       function isPastWaveLane(lane, nowMs) {
@@ -1878,8 +1882,8 @@
       function stateCell(lane, nowMs) {
         const state = laneStateOf(lane, nowMs);
         // One note beside the pill, chosen so a reader who cannot see the
-        // word still learns *why* from the row's own text. A past wave is
-        // named first, whatever state its silence lands on — days-old
+        // word still learns *why* from the row's own text. Stale evidence is
+        // named first, whatever state the lane's silence lands on — days-old
         // artefacts belong to an earlier session, and no state word should
         // make them look like today's breakage. The quiet time stays the
         // living state's measurement, read from the log like it always was.
@@ -1887,7 +1891,10 @@
         // been reported since the start.
         let note = "";
         if (isPastWaveLane(lane, nowMs)) {
-          note = `<span class="quiet">past wave</span>`;
+          // The row owns only its lane's evidence clock, so it names that:
+          // calling a stale lane a "past wave" would state a wave verdict the
+          // header itself refuses when the wave holds fresher lanes too.
+          note = `<span class="quiet">stale evidence</span>`;
         } else if (state === "running" && lane.derived.log !== undefined) {
           note = `<span class="quiet">${esc(quietSpan(nowMs - lane.derived.log.mtimeMs))}</span>`;
         } else if (
