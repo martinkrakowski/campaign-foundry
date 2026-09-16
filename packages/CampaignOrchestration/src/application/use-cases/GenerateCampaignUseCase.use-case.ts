@@ -16,6 +16,7 @@ import {
   type AudioRights,
 } from "../../domain/value-objects/AudioRights.vo.js";
 import { styleProblem } from "../../domain/value-objects/creative-style.js";
+import { layerElementsProblem } from "../../domain/value-objects/html-element.js";
 import { assembleHtml } from "../../domain/value-objects/markup-assembler.js";
 import { PipelineExecutionLog } from "../../domain/value-objects/PipelineExecutionLog.vo.js";
 import type { PipelineResult } from "../../domain/value-objects/PipelineResult.vo.js";
@@ -863,6 +864,28 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     // Defense-in-depth, exactly the SAFE_ID reasoning above.
     const styleProblemText = styleProblem(brief.style);
     if (styleProblemText !== undefined) return err(new Error(styleProblemText));
+    // An `html` layer's elements (HL1, HL5e) ride the SAME defence-in-depth as
+    // the styleProblem call above it: `assembleHtml` interpolates
+    // `htmlElementFont`'s resolved weight/family straight into a quoted
+    // `style="…"` attribute, so a programmatic caller that bypasses parsing
+    // could otherwise hand the assembler a quote-bearing fontFamily the API
+    // boundary's allowlist never saw. The decision is the domain's one
+    // elements validator — the same `layerElementsProblem` the API parse and
+    // the stored-draft guard read, so no boundary can drift — and the font
+    // values are deliberately NOT escaped in the assembler instead: the
+    // vocabulary allowlist stays the single source of truth, and escaping
+    // would hide an invalid value rather than refuse it. Only the message
+    // shape is local to this use case, mirroring the destination check below.
+    for (const [i, layer] of brief.template.layers.entries()) {
+      const elementsProblem = layerElementsProblem(layer.kind, layer.elements);
+      if (elementsProblem !== undefined) {
+        return err(
+          new Error(
+            `Campaign brief field "template.layers[${i}].elements${elementsProblem.path}" must ${elementsProblem.must}; got ${JSON.stringify(elementsProblem.value)}.`,
+          ),
+        );
+      }
+    }
     // The brief's clickDestination (HL2, HL-D3) is parse-validated at the brief
     // boundary; enforce it here too through the SAME validator the parser calls —
     // one function, so the two boundaries cannot drift — because a programmatic

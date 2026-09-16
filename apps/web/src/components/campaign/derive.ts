@@ -416,7 +416,23 @@ function htmlWeightKey(
     tones: [...tones].sort(),
     maxBytes: budget.maxBytes,
     profileLabel: budget.label,
-    elements: elements.map((el) => [el.kind, el.text ?? "", el.frame]),
+    elements: elements.map((el) => [
+      el.kind,
+      el.text ?? "",
+      // HL5e fix round: the element's style reaches the assembled bytes
+      // through `htmlElementFont`, so it weighs here too. Flattened to the
+      // two fields in `ELEMENT_STYLE_FIELDS` declaration order (stable): the
+      // assembler resolves an absent block, an empty `{}`, and a block of
+      // undefined fields IDENTICALLY (`style?.fontWeight !== undefined` /
+      // `??` in `htmlElementFont` — `elementStyleProblem` deliberately admits
+      // `{}` for exactly that reason), so all three key the same string and
+      // the no-op edit costs no reweigh. Serialising the block whole would
+      // have keyed `{}` apart from absent — a stricter vocabulary than the
+      // domain's own.
+      el.style?.fontWeight ?? "",
+      el.style?.fontFamily ?? "",
+      el.frame,
+    ]),
   });
 }
 
