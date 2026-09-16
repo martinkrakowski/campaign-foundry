@@ -8,6 +8,15 @@ export interface VariationEstimate {
   readonly genaiCalls: number;
   /** Total frames to encode (Σ durationSec × fps over motion variants). Motion plans only. */
   readonly frames?: number;
+  /**
+   * Present (and `true`) only when the brief's timeline names at least one
+   * per-beat scene (VE5b2). Since VE5a a scene is an uploaded asset path, never
+   * a generated one, so it never adds to `genaiCalls` — this tells the
+   * estimate sentence whether to say scenes reuse uploaded images and add no
+   * AI calls. Absent (never `false`) for a brief with no timeline or one
+   * naming no backgrounds, so a scene-free plan's JSON stays byte-identical.
+   */
+  readonly sceneBackgrounds?: true;
 }
 
 /**

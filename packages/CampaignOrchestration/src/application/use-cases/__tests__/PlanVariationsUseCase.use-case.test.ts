@@ -274,6 +274,50 @@ describe("PlanVariationsUseCase.plan", () => {
     expect(result.value.briefId).toBe("golden");
   });
 
+  test("estimate.sceneBackgrounds is present (true) only when the brief's timeline names a background (VE5b2)", () => {
+    const withScene = planner().plan(
+      brief({
+        copy: {
+          timeline: {
+            transition: "cut",
+            keyBeat: 1,
+            beats: [
+              { text: "Alpha", weight: 1, background: "assets/inputs/golden/scene.png" },
+              { text: "Beta", weight: 1 },
+            ],
+          },
+        },
+      }),
+    );
+    expect(withScene.success).toBe(true);
+    if (withScene.success) expect(withScene.value.estimate.sceneBackgrounds).toBe(true);
+
+    // A brief with no timeline at all, and one whose timeline names no
+    // background, both leave the key absent — never `false` — so a
+    // scene-free plan's JSON stays byte-identical (VE-D3).
+    const noTimeline = planner().plan(brief());
+    expect(noTimeline.success).toBe(true);
+    if (noTimeline.success) {
+      expect("sceneBackgrounds" in noTimeline.value.estimate).toBe(false);
+    }
+
+    const timelineNoScenes = planner().plan(
+      brief({
+        copy: {
+          timeline: { transition: "cut", keyBeat: 1, beats: [{ text: "Alpha", weight: 1 }] },
+        },
+      }),
+    );
+    expect(timelineNoScenes.success).toBe(true);
+    if (timelineNoScenes.success) {
+      expect("sceneBackgrounds" in timelineNoScenes.value.estimate).toBe(false);
+    }
+
+    // A scene never counts as a genai call (VE5b2/VE-D10): since VE5a a scene
+    // is an uploaded asset path, never a generated one.
+    if (withScene.success) expect(withScene.value.estimate.genaiCalls).toBe(0);
+  });
+
   test("each accepted variant seed is seedFrom(briefId, index, 0)", () => {
     const result = planner().plan(brief({ variation: { count: 3, seed: 7 } }));
     expect(result.success).toBe(true);
