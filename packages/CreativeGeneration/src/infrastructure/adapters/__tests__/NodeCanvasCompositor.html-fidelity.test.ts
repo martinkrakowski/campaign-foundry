@@ -212,11 +212,16 @@ describe("HL5e — per-element style overrides reach both renderers identically"
     font: string;
   }
 
-  async function paintedFonts(
+  interface Paint {
+    ops: FontOp[];
+    raster: Buffer;
+  }
+
+  async function paintElements(
     elements: readonly HtmlElement[],
     tone: "bold" | "subtle",
     style?: { fontWeight?: 400 | 700; fontFamily?: "Inter" | "Lora" },
-  ): Promise<FontOp[]> {
+  ): Promise<Paint> {
     const req: CompositeRequest & { template: BriefTemplate } = {
       background: background(),
       message: "m",
@@ -237,13 +242,8 @@ describe("HL5e — per-element style overrides reach both renderers identically"
       ops.push({ text, font: ctx.font });
       return origFill(text, x, y, maxWidth);
     }) as typeof ctx.fillText;
-    const raster = (() => {
-      NodeCanvasCompositor.draw(ctx, prepared, 1);
-      return canvas.toBuffer("image/png");
-    })();
-    // Attach the raster for the byte-identity assertions without a second draw.
-    (ops as FontOp[] & { raster: Buffer }).raster = raster;
-    return ops as FontOp[] & { raster: Buffer };
+    NodeCanvasCompositor.draw(ctx, prepared, 1);
+    return { ops, raster: canvas.toBuffer("image/png") };
   }
 
   /** `"<weight> <size>px <family>, sans-serif"` → the weight and family tokens. */
@@ -286,7 +286,7 @@ describe("HL5e — per-element style overrides reach both renderers identically"
     };
     // `subtle` gives the brief-level weight "500" and Inter — the values the
     // two elements WITHOUT a family override must keep rendering.
-    const ops = await paintedFonts([plain, overridden, button], "subtle");
+    const { ops } = await paintElements([plain, overridden, button], "subtle");
     const assembled = assembleHtml({
       elements: [plain, overridden, button],
       canvas: { ratio: "1:1" },
@@ -318,7 +318,7 @@ describe("HL5e — per-element style overrides reach both renderers identically"
       frame,
       style: { fontFamily: "Lora" },
     };
-    const ops = await paintedFonts([element], "bold", { fontWeight: 400 });
+    const { ops } = await paintElements([element], "bold", { fontWeight: 400 });
     const assembled = assembleHtml({
       elements: [element],
       canvas: { ratio: "1:1" },
@@ -334,12 +334,10 @@ describe("HL5e — per-element style overrides reach both renderers identically"
   test("no element carries an override: the rasters and the markup are byte-identical to a style-less list", async () => {
     const plain: HtmlElement = { kind: "text", text: "Same", frame };
     const explicitEmpty: HtmlElement = { kind: "text", text: "Same", frame, style: {} };
-    const withOps = await paintedFonts([plain], "subtle");
-    const emptyOps = await paintedFonts([explicitEmpty], "subtle");
+    const withRender = await paintElements([plain], "subtle");
+    const emptyRender = await paintElements([explicitEmpty], "subtle");
     const sha = (b: Buffer) => createHash("sha256").update(b).digest("hex");
-    expect(sha((emptyOps as { raster: Buffer }).raster)).toBe(
-      sha((withOps as { raster: Buffer }).raster),
-    );
+    expect(sha(emptyRender.raster)).toBe(sha(withRender.raster));
     const a = assembleHtml({ elements: [plain], canvas: { ratio: "1:1" }, brandColor: "#1473E6", tone: "subtle" });
     const b = assembleHtml({ elements: [explicitEmpty], canvas: { ratio: "1:1" }, brandColor: "#1473E6", tone: "subtle" });
     expect(b.html).toBe(a.html);

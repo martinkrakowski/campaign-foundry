@@ -125,7 +125,7 @@ beyond the brief's family, and any third-party script. Each breaks either the fa
 | **HL5c** | The live weight meter reading `profile.maxBytes` (HL-D6). | **Shipped.** The meter reads the selected html profiles' own `maxBytes` (tightest wins) and weighs the assembled markup through `assembleHtml`. |
 | **HL5d** | Editor preview of the `html` layer through the canvas rendition, satisfying HL-D7 without putting user content in the app DOM. | **Shipped.** The existing preview path already drew the layer; four tests now pin it. |
 | **HL5f** | **Renderer fidelity first.** Thread `tone` into `AssembleHtmlOptions` so the markup's font weight matches the canvas's tone-derived weight (today `assembleHtml` falls back to a hard-coded `"bold"`), and pin a canvas-vs-markup geometry fixture for element placement (baseline offsets vs flex alignment are not proven equal). | **Shipped.** |
-| **HL5e** | Per-element style overrides: `style?: { fontWeight?, fontFamily? }` on `text` and `button` elements only, absent = the brief's `creative-style` value (HL-D4's override shape), honoured identically by `drawHtml` and `assembleHtml`, editable in the HL5a element editor. | **Dispatchable — after HL5f** (HL-D8). |
+| **HL5e** | Per-element style overrides: `style?: { fontWeight?, fontFamily? }` on `text` and `button` elements only, absent = the brief's `creative-style` value (HL-D4's override shape), honoured identically by `drawHtml` and `assembleHtml`, editable in the HL5a element editor. | **Shipped.** |
 
 **Order.** HL1 → HL2 → **HL3 → HL4** → HL5. **HL3 before HL4 is the load-bearing choice**: build the
 fallback first and the markup is written to match a rendering that already exists, rather than the
@@ -242,11 +242,38 @@ tone grid, alongside the correct `justify-content` per anchor. Two mutations
 (`.agents/manifests/hl5f.json`) confirm the tone default and the
 per-anchor `justify-content` are load-bearing, not incidental.
 
-```premise HL5e
-# HL5e is the per-element `style` override (HL-D8). While the gap is open the
-# element field table — the ONE place that answers "which keys may this kind
-# carry" — names no `style`, so no element can carry one at any boundary. The
-# quoted string is the table entry, not prose: the file's comments already
-# mention a future `style` and the header names it unquoted.
-! grep -qE '"style"' packages/CampaignOrchestration/src/domain/value-objects/html-element.ts
-```
+**HL5e — shipped in this PR.** (Premise retired — its probe, "the element field
+table names no `style`", now falsifies.) An `HtmlElement` may carry
+`style?: { fontWeight?, fontFamily? }` — the two fields HL-D8 admits, drawn from
+`creative-style`'s vocabularies, never restated. The field table admits `style`
+for `text` and `button` and not for `image`, so the image refusal is table data
+at both boundaries (mutation 2 of `.agents/manifests/hl5e.json` pins it); a
+present block must be an object of at most those two vocabulary keys. An empty
+`style: {}` is ACCEPTED — every field of an optional-override block is optional,
+it resolves to exactly what the absent key resolves to, and the brief's own
+`style: {}` parses today (D54); the editor still never writes one, its reducer
+drops the key when the last override is cleared (X16's canonical form, which
+`canonicalTemplate` now applies to hand-authored empty blocks too). The
+resolution is ONE pure function, `htmlElementFont` (`html-element.ts`): the
+element's own field when present, the brief-level resolved font otherwise — and
+the brief-level pair arrives already tone-resolved from HL5f, so neither
+renderer spells a fallback of its own. `assembleHtml` and `drawHtml` both call
+it for both text kinds, and the HL5f fidelity suite now pins the markup's
+`font-weight`/`font-family` against the canvas's real `ctx.font` at the
+`fillText` of the same element, with an override on one element leaving its
+neighbours, the brief defaults, and the no-override render byte-identical (the
+goldens and HL3 rasters passed untouched). Editor: a weight and a typeface
+select on the text and button rows only, both opening at "brief default" — the
+face that writes the absent key — and the edit is undoable, one coalesced run
+per field (VE1). YAML: `style` sits between `text` and `frame` in the element's
+declared order, its own keys as `fontWeight`, `fontFamily`, both asserted
+positionally.
+
+**Residual, stated plainly (not narrowed here):** the markup NAMES the family
+(`font-family: Lora, sans-serif`) but the unit embeds no webfont — `@font-face`
+is deliberately out of scope (HL-D6's budget, and "custom fonts beyond the
+brief's family" is refused in §1). The canvas registers the bundled faces
+locally, so the fallback always renders Lora; a placement browser that lacks the
+family falls back to its `sans-serif`, and the ad and its backup image can
+therefore differ in TYPEFACE on such a browser. Font embedding is its own
+decision, not this lane's.
