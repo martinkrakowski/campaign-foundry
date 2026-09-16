@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "lane": "X36",
+  "mutations": [
+    {
+      "file": "vitest.config.ts",
+      "before": "          testTimeout: 15000,",
+      "after": "          testTimeout: 5000,",
+      "because": "X36 calibrates the web project's testTimeout to 15000ms after X30/X32/X34 made the tests faster; the pin test exists so that setting the value back to Vitest's 5000ms default — the uncalibrated number that was the last blocker for VE3b1 — fails, rather than silently restoring the threshold nobody chose. node/api/tools are asserted unset, so this mutation is the web-only setting, not a root-level inherit.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--maxWorkers=2",
+        "--project",
+        "web",
+        "apps/web/src/__tests__/vitest-web-timeout.test.ts"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

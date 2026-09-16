@@ -5563,3 +5563,5 @@ the isolation fix itself — the manifest's `note` states why: this tool checks 
 per mutation, and "a sibling test would have been skipped" is a fact about how many tests a run
 affects, not something a single exit code can express. §36 (X34) of
 docs/planning/2026-09-10_the-unowned-gaps.md updated with this fix.
+
+X36 (branch feat/x36-web-test-timeout): calibrated the web project's testTimeout to 15000ms after three lanes made the tests faster first — §33 (X30, click 3→2 / keystroke 4→3), §34 (X32, re-blur 5→3), §36 (X34, setup commits 70→30 −57%, file 30.5s→27.4s, four historically failing tests passed on a loaded runner). Vitest's 5000ms default was never chosen for this suite; what remained on VE3b1's head a2981a77 was same-SHA pass/fail (PR 9m23s vs push 9m37s), per-moment variance on a shared runner. Owner approved the calibration on 2026-09-16. The rule against raising a timeout over a slowdown stands — this is not that. Pin test reads the config object (web = 15000, root/node/api/tools unset). Mutation: web timeout back to 5000, caught. §40 (X36) of docs/planning/2026-09-10_the-unowned-gaps.md.
