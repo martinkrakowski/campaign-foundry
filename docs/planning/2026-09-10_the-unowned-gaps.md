@@ -1407,6 +1407,7 @@ code (caught vs. survived) can express.
 
 ---
 
+<<<<<<< HEAD
 ## 37. The mp4 byte golden can encode with one ffmpeg and record another's version (X31)
 
 **Evidence.** Re-checked on `main` (`84f271e4`) before this lane touched anything.
@@ -1508,6 +1509,8 @@ option is `testTimeout` itself or splitting the file, neither of which this brie
 lane to reach for.
 ---
 
+=======
+>>>>>>> 45a80f50 (docs(x35): keep the gap ledger ascending — §38/§39 before X36's §40)
 ## 38. The wave status page invented lanes from stray logs and accused silence (X35)
 
 **Evidence.** An owner opened the page during a session with eight lanes run and eight PRs merged. It rendered
@@ -1582,3 +1585,64 @@ events, and two mutations in `.agents/manifests/x35.json` — let a log create a
 fails; reinstate any name-based rejection and the second does.
 
 **X35 — shipped in this PR.**
+
+---
+
+## 40. The 5s per-test budget was never calibrated for the editor's integration tests (X36)
+
+**Evidence.** `vitest.config.ts` sets no `testTimeout` at all, so every project inherits Vitest's
+5000ms default — a number nobody chose for a 182-test React integration suite that renders a whole
+editor shell per test. The standing rule is **never raise `testTimeout` to make a lane green**,
+because a timeout raised over a slowdown hides the slowdown. That rule is intact. This lane is not
+that: the owner approved the calibration on 2026-09-16, after three lanes first made the tests
+measurably faster.
+
+- **§33 (X30, merged `4540ce0b`).** Validation was mirrored into state by an effect; removing it cut
+  a full commit per gesture (click 3→2, keystroke 4→3). CI still timed out.
+- **§34 (X32, merged `deb6e5a9`).** Disproved the dirty-flag and panel-publishing theories (React
+  batching absorbs a cleanup/body pair) and fixed a real bug: re-blurring an already-touched field
+  cost 5 commits instead of 3. CI still timed out.
+- **§36 (X34, merged `8bbca3e9` + `218b2d3d`).** `fillValidDraft` stopped typing character by
+  character; setup commits 70 → 30 (**−57%**), the whole file 30.5s → 27.4s, and the four
+  historically failing tests **passed** on a loaded runner.
+- **What remains.** On VE3b1's head `a2981a77`, the pull-request run **passed** and the push run
+  **failed** — same commit, job durations 9m23s vs 9m37s, a single test (`motion without a kind or a
+  duration blocks Save`) exceeding 5000ms in one and not the other. Nearly identical job times means
+  this is per-moment variance on a shared runner, not a slower machine and not a regression.
+
+**Consequence.** A threshold nobody calibrated became the last blocker for an unrelated lane —
+VE3b1 sat ready for hours behind it.
+
+**X36 — shipped in this PR.** An explicit `testTimeout: 15000` on the **web project only** in
+`vitest.config.ts`; `node`, `api` and `tools` keep Vitest's default. `hookTimeout` is untouched; no
+per-test timeout was added; no test was weakened, skipped or deleted. A comment at the setting
+records the sequence above and states that a **slowdown** is still never answered by raising this
+number — the next person who finds a test near the limit should look for the cost, as X30/X32/X34
+did. The pin test reads the config object (web = 15000ms; root / node / api / tools unset) so a
+later edit that moves the number onto the root `test` block — which every project would then inherit
+via `extends: true` — fails here. Mutation manifest `.agents/manifests/x36.json`: set the web
+project's timeout back to the default (5000); the pin test catches it.
+
+The rule against raising a timeout over a slowdown stands. This is a calibration of a default that
+was never chosen, applied only after the cost was found and cut, and it does not license the next
+timeout raise.
+
+**X36 — remediation (this PR).** Follow-up review (Qodo) found the X34 `beforeAll` comment in
+`brief-editor.test.tsx` still claimed hooks are gated by `hookTimeout` (10000ms default, untouched,
+double `testTimeout`). After this PR's web-only `testTimeout: 15000` that is false and backwards: the
+hook has the smaller budget. The comment is corrected; `hookTimeout` is still untouched. `beforeAll`
+remains the right place because the typed reference runs once for the whole describe rather than
+inside every test's own budget. No timeout value changed. Grep of `hookTimeout` across `apps/web`
+found one other mention (the nested-describe blast-radius comment); it does not repeat the "double"
+claim. §36's "this repo overrides neither" was true when X34 shipped and is not rewritten here.
+recorded the same limitation before shipping real, measured fixes anyway; this lane does the same.
+**So: not confirmed cleared.** This PR ships a real, measured reduction in the editor's own rendering
+cost (X30, X32) and in the tests' own setup cost (X34) — 57% fewer commits per `fillValidDraft` call,
+21–28% less wall-clock on the three tests that call it — but whether that reduction is *enough*
+margin against a loaded CI runner is a question only a CI round-trip on this branch can answer, the
+same honest limit X30 and X32 both hit. If CI still times these tests out after this PR merges, the
+remaining unowned cost is likely the "one gesture, one commit is not achievable for a keyboard
+gesture into a controlled text field" floor X32 already named (§34) — at that point the next lane's
+option is `testTimeout` itself or splitting the file, neither of which this brief's rules permit this
+lane to reach for.
+---
