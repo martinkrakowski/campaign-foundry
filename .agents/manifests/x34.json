@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "lane": "X34",
+  "mutations": [
+    {
+      "file": "apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx",
+      "before": "  setField(logos[1], \"b.png\");",
+      "after": "  // setField(logos[1], \"b.png\"); // mutated: field skipped",
+      "because": "fillValidDraft's fast path must set every field the typed path sets, not merely most of them. Dropping the second product's logo write leaves that field at whatever default the editor started with, instead of \"b.png\" — the equivalence test compares the fast path's saved brief against the typed path's byte for byte, so a skipped field must fail it, not pass silently through a partial draft that happens to still be structurally valid.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx",
+        "-t",
+        "fillValidDraft's fast path produces the byte-identical draft the typed path produces"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx",
+      "before": "  setField(screen.getByLabelText(\"Target Audience\"), \"a\");",
+      "after": "  setField(screen.getByLabelText(\"Target Audience\"), \"z\");",
+      "because": "fillValidDraft's fast path must write the same value into every field the typed path writes, not merely a value that keeps the draft valid. Writing \"z\" instead of \"a\" into Target Audience still produces a structurally valid draft (any non-empty string satisfies validation), so nothing but a byte-for-byte comparison against the typed path would ever catch it — a weaker assertion (e.g. \"the draft is still valid\") would let this mutation through.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx",
+        "-t",
+        "fillValidDraft's fast path produces the byte-identical draft the typed path produces"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

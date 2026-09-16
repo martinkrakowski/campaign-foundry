@@ -5486,3 +5486,22 @@ done by hand, in the existing alphabetical slot). No `yarn test:cov`, no full bu
 `tracks.ts` (one comment), `value-objects/index.ts` (one export line), `docs/planning/2026-09-10_keyframing.md`,
 `.agents/manifests/k2.json`. Did not touch `apps/web/**` (X34), `CanvasFfmpegVideoCompositor.byte-golden.test.ts`
 (X31, read-only), or `tools/wave-status/**` (X35).
+X34 — the tests' own setup cost, following X30 (§33) and X32 (§34): `fillValidDraft` in
+`apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx` drove `userEvent.type` character by
+character to reach a valid draft, so every one of the file's 180-plus tests paid the full per-keystroke
+commit cost for setup no assertion in most of them cares about. Converted its eight field writes to
+`fireEvent.change` + `fireEvent.blur` (the blur reproduces the same touched-field side effect typing
+left behind, which the X32 keystroke-commit test depends on); the one click (`Add product`) and every
+`user.type` call inside individual tests' own bodies (behaviour under test) are unchanged — grepped for
+a sibling helper and found none. Proved equivalence rather than asserting it: a new test drives the
+original typed sequence and the converted helper in separate renders and compares the two Save POST
+bodies byte for byte; it passes, and the X30/X32 commit-count tests plus the four originally
+CI-timing-out tests all pass unchanged. Measured (three runs, median): `fillValidDraft`'s own commit
+count 70 → 34 (−51%, React.Profiler); whole file wall-clock 30.54s → 28.17s; the three affected tests
+579→436ms, 905→722ms, 1038→829ms (the fourth, which never calls `fillValidDraft`, ~165→159ms as
+expected). Mutation manifest `.agents/manifests/x34.json`: skip-a-field and wrong-value mutations
+against the equivalence test, both caught, reproduced by `yarn mutate:verify`. Recorded as §36 (X34) of
+docs/planning/2026-09-10_the-unowned-gaps.md, including the honest arithmetic that a whole-job 2.3×
+multiplier (§33) does not actually predict either the pre- or post-fix CI timeout on these specific
+tests — so the CI margin is not confirmed cleared by this PR; only a CI round-trip can answer that,
+the same limit X30 and X32 both recorded before it.

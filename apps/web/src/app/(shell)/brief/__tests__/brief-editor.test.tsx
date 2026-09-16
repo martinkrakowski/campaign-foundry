@@ -159,23 +159,43 @@ const writes = (calls: readonly { url: string; method: string }[]) =>
 const waitForEditorReady = async () =>
   waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).not.toBe(""));
 
+/**
+ * X34: this helper exists to get the draft into a valid state so a test's real
+ * assertion can run — none of these eight values is itself under test anywhere
+ * in this file (every test that cares what a keystroke does — validation,
+ * touched, dirty, coalescing — drives `userEvent` directly in its own body, not
+ * through here). So setup pays the cheapest form that reaches the same state:
+ * `fireEvent.change` sets the final value in one dispatch instead of one per
+ * character, and `fireEvent.blur` reproduces the same touched-field side effect
+ * `userEvent.type` leaves behind when focus moves to the next field (proven
+ * equal by "fillValidDraft's fast path produces the byte-identical draft..."
+ * below, and relied on unchanged by the X32 keystroke-commit test, which still
+ * revisits Target Region as an already-touched field afterwards). `toBrief`
+ * cannot see either path's key order or intermediate frames — only the final
+ * value each field settles on — which is exactly what stays identical here.
+ */
+const setField = (el: HTMLElement, value: string) => {
+  fireEvent.change(el, { target: { value } });
+  fireEvent.blur(el);
+};
+
 const fillValidDraft = async (user: ReturnType<typeof userEvent.setup>, id = "fresh") => {
-  await user.type(screen.getByLabelText("Campaign Name"), id);
-  await user.type(screen.getByLabelText("Target Region"), "DE");
-  await user.type(screen.getByLabelText("Target Audience"), "a");
-  await user.type(screen.getByLabelText("Headline"), "Hi");
+  setField(screen.getByLabelText("Campaign Name"), id);
+  setField(screen.getByLabelText("Target Region"), "DE");
+  setField(screen.getByLabelText("Target Audience"), "a");
+  setField(screen.getByLabelText("Headline"), "Hi");
   let names = screen.getAllByLabelText("Name");
   if (names.length < 2) {
     await user.click(screen.getByRole("button", { name: "Add product" }));
     names = screen.getAllByLabelText("Name");
   }
-  await user.type(names[0], "A");
-  await user.type(names[1], "B");
+  setField(names[0], "A");
+  setField(names[1], "B");
   const logos = screen
     .getAllByLabelText("Logo Path")
     .filter((el) => el.tagName === "INPUT" && el.getAttribute("type") !== "file");
-  await user.type(logos[0], "a.png");
-  await user.type(logos[1], "b.png");
+  setField(logos[0], "a.png");
+  setField(logos[1], "b.png");
 };
 
 describe("BriefPage — data flow", () => {
@@ -2049,6 +2069,69 @@ describe("BriefPage — capabilities and motion", () => {
       </ShellProviders>,
     );
     expect(screen.getByTestId("dirty-probe").textContent).toBe("clean");
+  });
+
+  /**
+   * X34 — `fillValidDraft` above no longer drives `userEvent.type` character by
+   * character; it sets each field's final value in one `fireEvent.change` and
+   * fires the same `fireEvent.blur` the original typed path left behind when
+   * focus moved to the next field. `toBrief` never sees intermediate frames or
+   * key order, only the value each field settles on — so the saved payload
+   * (what the real Save POST sends) is the honest thing to compare between the
+   * two paths. `typeItByHand` below is the original, unconverted
+   * character-by-character sequence, kept here only as the reference this test
+   * pins the fast path against — not reused anywhere else in this file.
+   * Mutating the fast path to skip a field, or to write a different value into
+   * one, must fail this test (`.agents/manifests/x34.json`).
+   */
+  test("fillValidDraft's fast path produces the byte-identical draft the typed path produces (X34)", async () => {
+    const typeItByHand = async (user: ReturnType<typeof userEvent.setup>, id: string) => {
+      await user.type(screen.getByLabelText("Campaign Name"), id);
+      await user.type(screen.getByLabelText("Target Region"), "DE");
+      await user.type(screen.getByLabelText("Target Audience"), "a");
+      await user.type(screen.getByLabelText("Headline"), "Hi");
+      let names = screen.getAllByLabelText("Name");
+      if (names.length < 2) {
+        await user.click(screen.getByRole("button", { name: "Add product" }));
+        names = screen.getAllByLabelText("Name");
+      }
+      await user.type(names[0], "A");
+      await user.type(names[1], "B");
+      const logos = screen
+        .getAllByLabelText("Logo Path")
+        .filter((el) => el.tagName === "INPUT" && el.getAttribute("type") !== "file");
+      await user.type(logos[0], "a.png");
+      await user.type(logos[1], "b.png");
+    };
+
+    const savedBriefFrom = async (fill: (user: ReturnType<typeof userEvent.setup>) => Promise<void>) => {
+      // Two renders share this one test — cleanup only runs between separate
+      // `test()`s, not mid-test — so make the isolation the suite's beforeEach
+      // already gives every other test explicit here too, rather than relying
+      // on the first render's autosave/localStorage state happening not to
+      // collide with the second's.
+      localStorage.clear();
+      localStorage.setItem("cf:brief-picked", "1");
+      localStorage.setItem("cf:presentation", "everything");
+      const user = userEvent.setup();
+      const calls = routes({});
+      const view = renderWithRun(<NewEditor />);
+      await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""));
+      await fill(user);
+      await saveVia(user, "Save");
+      const post = await waitFor(() => {
+        const call = calls.find((c) => c.method === "POST");
+        expect(call).toBeTruthy();
+        return call!;
+      });
+      view.unmount();
+      return post.body;
+    };
+
+    const typed = await savedBriefFrom((user) => typeItByHand(user, "fresh"));
+    const fast = await savedBriefFrom((user) => fillValidDraft(user, "fresh"));
+
+    expect(fast).toEqual(typed);
   });
 
   test("a motion brief on a host without motion stays read-only, saves verbatim, and applies with the refusal (D12)", async () => {
