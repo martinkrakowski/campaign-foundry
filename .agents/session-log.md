@@ -5587,4 +5587,17 @@ header register. Red first (artefacts-only root yielded 15 phantom lanes), green
 counters, both manifest mutations caught (`mutate:verify` reproduced). Two page tests that pinned the old
 silence-default word were updated in their assertion, not their invariant; recorded as a finding. Remaining
 gap, honestly: runners that do not emit keep their lanes invisible until the separate operator change.
-Plan: §38 (X35) of docs/planning/2026-09-10_the-unowned-gaps.md. PR #438.
+Plan: §38 (X35) of docs/planning/2026-09-10_the-unowned-gaps.md.
+## 2026-09-16 — X35 (revision: a lane is what an event says it is)
+
+Qodo caught the first cut's remaining lie: `namesALaneLog` still judged lanes by filename, and its
+blacklist would have hidden real lanes this repo ran (`x16-fix2`, `x13-fix`, `hl5c-fix2` — ten of
+them). The blacklist is deleted; the rule is now "evidence creates a lane; a log only ever attaches
+to one": events name lanes, an identically named log adds liveness/mtime, orphan logs buy nothing,
+and the recorded join fixture prices the trade — nine real silent lanes are invisible, asserted so.
+Red first (the x16-fix2 fixture failed the old attach), then green: the wave-status suite passes,
+the full gate is clean with 100% on all four counters, and four mutations in
+`.agents/manifests/x35.json` — log-creates-lane, name-rejection-return, attach-dropped,
+silence-accuses-again — all reproduce under `mutate:verify`. §38 restated and §39 added in
+docs/planning/2026-09-10_the-unowned-gaps.md. Two PR-Agent notes on the (now deleted) blacklist
+regex are moot rather than patched.
