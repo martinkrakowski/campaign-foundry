@@ -81,6 +81,13 @@ export interface ResolvedBeat {
    * seconds, so it occupies more of `t` in a short clip than a long one.
    */
   readonly fadeInT: number;
+  /**
+   * The beat's own background (VE5b1), copied verbatim from {@link CopyBeat.background}.
+   * Absent means the creative's background, exactly as the beat itself means (VE-D3).
+   * Plain data copied through — nothing here hashes a `ResolvedBeat` (the fingerprint
+   * hashes the request's `backgrounds` map instead), so this field is byte-neutral.
+   */
+  readonly background?: string;
 }
 
 /** Fade width is whichever is smaller: 0.4 s, or 25 % of the shorter adjacent beat (D9). */
@@ -116,6 +123,7 @@ export function resolveTimeline(t: CopyTimeline, durationSec: number): readonly 
       startT,
       endT,
       fadeInT: fadeInWidth(t, i, weights, total, durationSec),
+      ...(beat.background !== undefined ? { background: beat.background } : {}),
     });
   }
   return resolved;

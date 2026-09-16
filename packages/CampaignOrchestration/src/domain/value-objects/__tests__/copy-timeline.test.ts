@@ -68,6 +68,21 @@ describe("resolveTimeline", () => {
     const expected = Math.min(0.4, 0.25 * shorterSec) / 10;
     expect(resolved[1].fadeInT).toBeCloseTo(expected, 12);
   });
+
+  test("carries each beat's background into its resolved window, absent stays absent (VE5b1)", () => {
+    const resolved = resolveTimeline(
+      timeline(
+        [
+          { text: A, weight: 1, background: "assets/scenes/a.png" },
+          { text: B, weight: 1 },
+        ],
+        "cut",
+      ),
+      5,
+    );
+    expect(resolved[0].background).toBe("assets/scenes/a.png");
+    expect(resolved[1].background).toBeUndefined();
+  });
 });
 
 describe("beatAt", () => {

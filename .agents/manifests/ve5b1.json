@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "lane": "VE5b1",
+  "mutations": [
+    {
+      "file": "packages/CreativeGeneration/src/infrastructure/adapters/NodeCanvasCompositor.ts",
+      "before": "  if (prepared.timeline === undefined || prepared.scenes === undefined || copyT === undefined) {",
+      "after": "  if (true) {",
+      "because": "paintBackground must paint the scene of the beat active at copyT, not always the creative's own background. Forcing selectGround's fallback guard to always fire makes it ignore every supplied scene and paint prepared.background regardless of the timeline, which the two-scene cut fixture (a pixel sampled just before/after the resolved beat boundary must be ground A, then ground B) is built to catch.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CreativeGeneration/src/infrastructure/adapters/__tests__/NodeCanvasCompositor.scene-grounds.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/application/use-cases/PreviewCreativeFrameUseCase.use-case.ts",
+      "before": "      ...(request.backgrounds !== undefined",
+      "after": "      ...(false",
+      "because": "compositeRequestFingerprint must hash the request's backgrounds map (content hash per key) whenever it is present, or two requests differing only in scene bytes silently share a cache key and the preview serves a stale frame. Forcing the conditional spread's guard to false drops the backgrounds block from the hashed payload unconditionally, caught by the fixture asserting a changed scene byte moves the fingerprint.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/application/use-cases/__tests__/PreviewCreativeFrameUseCase.use-case.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CreativeGeneration/src/infrastructure/adapters/NodeCanvasCompositor.ts",
+      "before": "    (beat.background !== undefined ? scenes.get(beat.background) : undefined) ?? prepared.background;",
+      "after": "    (beat.background !== undefined ? scenes.get(beat.background) : undefined)!;",
+      "because": "A beat that names NO background at all (distinct from one naming a path absent from the map) must still fall back to the creative's own ground -- the branch coverage gap the orchestrator's full gate caught (NodeCanvasCompositor.ts:1165, the ternary's alternate arm never exercised). Dropping the `?? prepared.background` fallback makes groundFor return undefined for such a beat, which @napi-rs/canvas's drawImage throws on -- caught by the mixed-timeline fixture (a scene beat beside a sceneless one, both in `cut` and across a `fade`).",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CreativeGeneration/src/infrastructure/adapters/__tests__/NodeCanvasCompositor.scene-grounds.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CreativeGeneration/src/infrastructure/adapters/NodeCanvasCompositor.ts",
+      "before": "        ? Object.entries(request.backgrounds).filter(([path]) => referencedBackgrounds.has(path))",
+      "after": "        ? Object.entries(request.backgrounds).filter(() => true)",
+      "because": "prepare must decode only the backgrounds an actual beat references, never the whole map (Qodo review: an unreferenced corrupt entry must not abort a render nothing needed it for, and decoding every supplied entry wastes concurrency and memory on bytes nothing draws). Dropping the referenced-set filter decodes every entry unconditionally, caught by the fixture pairing a valid referenced scene with an unreferenced, undecodable one -- @napi-rs/canvas's loadImage throws on the garbage bytes.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CreativeGeneration/src/infrastructure/adapters/__tests__/NodeCanvasCompositor.scene-grounds.test.ts"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
