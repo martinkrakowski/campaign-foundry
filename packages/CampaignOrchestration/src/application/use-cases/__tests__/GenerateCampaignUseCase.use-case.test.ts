@@ -17,6 +17,7 @@ import { resolveTimeline } from "../../../domain/value-objects/CopyTimeline.vo.j
 import type { CopyTimeline } from "../../../domain/value-objects/CopyTimeline.vo.js";
 import { DEFAULT_DURATION_SEC } from "../../../domain/value-objects/variation-defaults.js";
 import {
+  fakeAudioAssets,
   fakeCompliance,
   fakeCompositor,
   fakeImageGenerator,
@@ -60,6 +61,7 @@ const deps = (over: Partial<GenerateCampaignDeps> = {}): GenerateCampaignDeps =>
   compositor: fakeCompositor(),
   videoCompositor: fakeVideoCompositor(),
   sceneAssets: fakeSceneAssets(),
+  audioAssets: fakeAudioAssets(),
   compliance: fakeCompliance(),
   exporter: recordingExporter(),
   now: () => new Date("2026-01-01T00:00:00.000Z"),
@@ -1456,6 +1458,74 @@ describe("GenerateCampaignUseCase — VE5b2 scene backgrounds", () => {
       expect(result.error.message).toContain(SCENE_A);
     }
     // Resolved upfront, before any cell renders — nothing was drawn or written.
+    expect(d.videoCompositor.compositeVideo).not.toHaveBeenCalled();
+    expect(d.exporter.saveToDirectory).not.toHaveBeenCalled();
+  });
+});
+
+describe("GenerateCampaignUseCase — VE3b2 music bed wiring", () => {
+  const AUDIO_PATH = "assets/inputs/camp/bed.mp3";
+  const audioBrief = (over: Partial<CampaignBrief> = {}) =>
+    variationBrief({
+      audio: { path: AUDIO_PATH, rights: { licenceId: "lic-1", source: "acme" } },
+      ...over,
+    });
+
+  test("resolves audio.path once and sets the SAME bytes on every motion request", async () => {
+    const audioAssets = fakeAudioAssets();
+    const variants = [motionVariant(), motionVariant({ index: 1, aspectRatio: "9:16" })];
+    const d = deps({ audioAssets, planner: fakePlanner(fakePlan(variants)) });
+    const result = await new GenerateCampaignUseCase(d).execute(audioBrief());
+    expect(result.success).toBe(true);
+
+    // Resolved exactly once, never once per cell.
+    expect(audioAssets.resolveAudio).toHaveBeenCalledTimes(1);
+    expect(audioAssets.resolveAudio).toHaveBeenCalledWith(AUDIO_PATH);
+
+    const requests = vi.mocked(d.videoCompositor.compositeVideo).mock.calls.map((call) => call[0]);
+    expect(requests).toHaveLength(2);
+    expect(requests[0].audio).toEqual(new Uint8Array(Buffer.from(AUDIO_PATH, "utf8")));
+    // Same reference on both requests — proof it was resolved once, not re-read per cell.
+    expect(requests[0].audio).toBe(requests[1].audio);
+  });
+
+  test("a still (non-motion) sibling's request never carries audio", async () => {
+    const audioAssets = fakeAudioAssets();
+    const variants = [motionVariant(), fakeVariant({ index: 1, aspectRatio: "9:16" })];
+    const d = deps({ audioAssets, planner: fakePlanner(fakePlan(variants)) });
+    const result = await new GenerateCampaignUseCase(d).execute(audioBrief());
+    expect(result.success).toBe(true);
+    // The still slot renders through compositeAsset, never compositeVideo — no audio key possible.
+    expect(d.compositor.compositeAsset).toHaveBeenCalledTimes(1);
+    expect(d.videoCompositor.compositeVideo).toHaveBeenCalledTimes(1);
+  });
+
+  test("no audio on the brief: the request carries no audio key, and the port is never touched", async () => {
+    const audioAssets = fakeAudioAssets();
+    const d = deps({ audioAssets, planner: fakePlanner(fakePlan([motionVariant()])) });
+    const result = await new GenerateCampaignUseCase(d).execute(variationBrief());
+    expect(result.success).toBe(true);
+    const request = vi.mocked(d.videoCompositor.compositeVideo).mock.calls[0][0];
+    expect("audio" in request).toBe(false);
+    expect(audioAssets.resolveAudio).not.toHaveBeenCalled();
+  });
+
+  test("a brief with audio but no motion cell never touches the audio port", async () => {
+    const audioAssets = fakeAudioAssets();
+    const d = deps({ audioAssets, planner: fakePlanner(fakePlan([fakeVariant()])) });
+    const result = await new GenerateCampaignUseCase(d).execute(audioBrief());
+    expect(result.success).toBe(true);
+    expect(audioAssets.resolveAudio).not.toHaveBeenCalled();
+  });
+
+  test("an unreadable audio path fails the run before any cell renders, naming the path", async () => {
+    const audioAssets = fakeAudioAssets([AUDIO_PATH]);
+    const d = deps({ audioAssets, planner: fakePlanner(fakePlan([motionVariant()])) });
+    const result = await new GenerateCampaignUseCase(d).execute(audioBrief());
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.message).toContain(AUDIO_PATH);
+    }
     expect(d.videoCompositor.compositeVideo).not.toHaveBeenCalled();
     expect(d.exporter.saveToDirectory).not.toHaveBeenCalled();
   });

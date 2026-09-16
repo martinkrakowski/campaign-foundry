@@ -2,7 +2,7 @@ import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, resolve } from "node:path";
 import { projectRoot } from "@campaignfoundry/shared";
 import { resolveConfined } from "../confined-path.js";
-import { ASSET_NAME_PATTERN } from "../asset-files.js";
+import { ASSET_NAME_PATTERN, assetContentType } from "../asset-files.js";
 import type { AssetEntry, AssetStorePort } from "./asset-store.port.js";
 
 /**
@@ -72,8 +72,7 @@ export class FsAssetStore implements AssetStorePort {
       if (!entry.isFile() || !ASSET_NAME_PATTERN.test(entry.name)) continue;
       const filePath = resolveConfined(dir, entry.name);
       const fileStat = await stat(filePath);
-      const ext = extname(entry.name).toLowerCase();
-      const type = ext === ".jpg" || ext === ".jpeg" ? "image/jpeg" : "image/png";
+      const type = assetContentType(entry.name);
       const thumbnailUrl = `/api/pipeline/campaigns/assets?briefId=${encodeURIComponent(briefId)}&name=${encodeURIComponent(entry.name)}`;
       assets.push({
         name: entry.name,

@@ -4,8 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   ASSET_NAME_PATTERN,
+  AUDIO_ASSET_NAME_PATTERN,
   decodeBase64,
   hasAllowedImageMagic,
+  hasAllowedAudioMagic,
+  assetContentType,
   assetRelPath,
 } from "../asset-files.js";
 import {
@@ -19,23 +22,46 @@ const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0x00]);
 
 describe("ASSET_NAME_PATTERN", () => {
-  test("accepts a SAFE_ID_PATTERN stem with a png/jpg/jpeg extension", () => {
-    for (const name of ["a.png", "logo.jpg", "hydra-logo.jpeg", `${"a".repeat(64)}.png`]) {
+  test("accepts a SAFE_ID_PATTERN stem with a png/jpg/jpeg/mp3/m4a extension", () => {
+    for (const name of [
+      "a.png",
+      "logo.jpg",
+      "hydra-logo.jpeg",
+      `${"a".repeat(64)}.png`,
+      "bed.mp3",
+      "bed.m4a",
+    ]) {
       expect(ASSET_NAME_PATTERN.test(name), name).toBe(true);
     }
   });
 
-  test("rejects names that would escape or are not a basename image", () => {
+  test("rejects names that would escape or are not a basename image/audio asset", () => {
     for (const name of [
       "../hydra-logo.png",
       "foo/bar.png",
       "/tmp/x.png",
       "hydra-logo.PNG",
       "a.gif",
+      "bed.MP3",
+      "bed.wav",
       "",
       "a".repeat(65) + ".png",
     ]) {
       expect(ASSET_NAME_PATTERN.test(name), name).toBe(false);
+    }
+  });
+});
+
+describe("AUDIO_ASSET_NAME_PATTERN", () => {
+  test("accepts mp3/m4a basenames only", () => {
+    for (const name of ["bed.mp3", "bed.m4a"]) {
+      expect(AUDIO_ASSET_NAME_PATTERN.test(name), name).toBe(true);
+    }
+  });
+
+  test("rejects image basenames and anything ASSET_NAME_PATTERN would reject", () => {
+    for (const name of ["logo.png", "photo.jpg", "photo.jpeg", "bed.wav", "../bed.mp3"]) {
+      expect(AUDIO_ASSET_NAME_PATTERN.test(name), name).toBe(false);
     }
   });
 });
@@ -66,6 +92,65 @@ describe("hasAllowedImageMagic", () => {
     expect(hasAllowedImageMagic(Buffer.from([0xff, 0xd8]))).toBe(false);
     expect(hasAllowedImageMagic(Buffer.from([0x00, 0x00, 0x00, 0x00]))).toBe(false);
     expect(hasAllowedImageMagic(Buffer.from([0x89, 0x50, 0x4e]))).toBe(false);
+  });
+});
+
+// ID3v2 header: "ID3" + version(2) + flags(1) + syncsafe size(4) — the tag
+// libmp3lame (ffmpeg-static's mp3 muxer) writes at the start of every file.
+const mp3Id3 = Buffer.from([0x49, 0x44, 0x33, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x22]);
+// A bare MPEG frame sync (no ID3 tag): 11 set leading bits — 0xff, then the
+// next byte's top 3 bits set (0xfb = 1111_1011).
+const mp3FrameSync = Buffer.from([0xff, 0xfb, 0x90, 0x64, 0x00, 0x00, 0x00, 0x00]);
+// ISO-BMFF "ftyp" box: size(4, unchecked) + "ftyp" + major brand "M4A " — the
+// exact bytes the pinned ffmpeg-static binary writes for `-c:a aac out.m4a`
+// (verified against the vendored binary: `ffmpeg -f lavfi -i sine=440 -t 1
+// -c:a aac x.m4a` → `00000000: 0000 001c 6674 7970 4d34 4120 ...` = size,
+// "ftyp", "M4A ").
+const m4aFtyp = Buffer.from([
+  0x00, 0x00, 0x00, 0x1c, 0x66, 0x74, 0x79, 0x70, 0x4d, 0x34, 0x41, 0x20, 0x00, 0x00, 0x02, 0x00,
+]);
+
+describe("hasAllowedAudioMagic", () => {
+  test("accepts an ID3-tagged mp3", () => {
+    expect(hasAllowedAudioMagic(mp3Id3)).toBe(true);
+  });
+
+  test("accepts a bare MPEG frame-sync mp3 (no ID3 tag)", () => {
+    expect(hasAllowedAudioMagic(mp3FrameSync)).toBe(true);
+  });
+
+  test("accepts an m4a ftyp box with an audio major brand", () => {
+    expect(hasAllowedAudioMagic(m4aFtyp)).toBe(true);
+  });
+
+  test("rejects an ftyp box whose major brand is not an audio brand (e.g. a generic/video mp4)", () => {
+    const genericMp4 = Buffer.from([
+      0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d, 0x00, 0x00, 0x02, 0x00,
+    ]);
+    expect(hasAllowedAudioMagic(genericMp4)).toBe(false);
+  });
+
+  test("rejects PNG/JPEG magic — a renamed image is refused", () => {
+    expect(hasAllowedAudioMagic(png)).toBe(false);
+    expect(hasAllowedAudioMagic(jpeg)).toBe(false);
+  });
+
+  test("rejects too-short or arbitrary buffers", () => {
+    expect(hasAllowedAudioMagic(Buffer.from([0xff]))).toBe(false);
+    expect(hasAllowedAudioMagic(Buffer.from([0x00, 0x00, 0x00, 0x00]))).toBe(false);
+    expect(hasAllowedAudioMagic(Buffer.alloc(0))).toBe(false);
+  });
+});
+
+describe("assetContentType", () => {
+  test.each([
+    ["logo.png", "image/png"],
+    ["photo.jpg", "image/jpeg"],
+    ["photo.jpeg", "image/jpeg"],
+    ["bed.mp3", "audio/mpeg"],
+    ["bed.m4a", "audio/mp4"],
+  ])("%s -> %s", (name, expected) => {
+    expect(assetContentType(name)).toBe(expected);
   });
 });
 

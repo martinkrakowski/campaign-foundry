@@ -191,6 +191,7 @@ bounded_contexts:
           in:
             - CampaignPipelinePort
           out:
+            - AudioAssetPort
             - BackgroundCachePort
             - CompliancePort
             - CompositorPort
@@ -251,6 +252,7 @@ bounded_contexts:
         adapters:
           - AssetReusingImageGenerator
           - CanvasFfmpegVideoCompositor
+          - FileSystemAudioAssetResolver
           - FileSystemBackgroundCache
           - FileSystemSceneAssetResolver
           - FireflyImageGenerator

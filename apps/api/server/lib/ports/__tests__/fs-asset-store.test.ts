@@ -6,6 +6,10 @@ import { FsAssetStore } from "../fs-asset-store.js";
 
 const pngBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x01]);
 const jpegBytes = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46]);
+const mp3Bytes = Buffer.from([0x49, 0x44, 0x33, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x22]);
+const m4aBytes = Buffer.from([
+  0x00, 0x00, 0x00, 0x1c, 0x66, 0x74, 0x79, 0x70, 0x4d, 0x34, 0x41, 0x20, 0x00, 0x00, 0x02, 0x00,
+]);
 
 describe("FsAssetStore", () => {
   let dir: string;
@@ -71,6 +75,17 @@ describe("FsAssetStore", () => {
     expect(list[1].type).toBe("image/png");
     expect(list[1].size).toBe(pngBytes.length);
     expect(list[1].thumbnailUrl).toBe("/api/pipeline/campaigns/assets?briefId=camp-1&name=logo-b.png");
+  });
+
+  test("listAssets formats audio content types (VE3b2)", async () => {
+    await store.writeAsset("camp-1", "bed.mp3", mp3Bytes);
+    await store.writeAsset("camp-1", "bed.m4a", m4aBytes);
+
+    const list = await store.listAssets("camp-1");
+    expect(list).toHaveLength(2);
+    const byName = Object.fromEntries(list.map((a) => [a.name, a.type]));
+    expect(byName["bed.m4a"]).toBe("audio/mp4");
+    expect(byName["bed.mp3"]).toBe("audio/mpeg");
   });
 
 

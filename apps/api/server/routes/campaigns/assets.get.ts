@@ -1,7 +1,6 @@
-import { extname } from "node:path";
 import { errorMessage } from "@campaignfoundry/shared";
 import { assertSafeId } from "../../lib/load-brief.js";
-import { ASSET_NAME_PATTERN } from "../../lib/asset-files.js";
+import { ASSET_NAME_PATTERN, assetContentType } from "../../lib/asset-files.js";
 import { getAssetStore } from "../../lib/ports/index.js";
 
 /**
@@ -13,7 +12,8 @@ import { getAssetStore } from "../../lib/ports/index.js";
  * - Missing/unreadable directory returns `{ assets: [] }` (200 OK).
  *
  * When `name` is supplied:
- * - Returns raw image binary with matching `content-type` (image/png or image/jpeg).
+ * - Returns raw binary with matching `content-type` (image/png, image/jpeg, audio/mpeg,
+ *   or audio/mp4 — VE3b2).
  * - Missing asset returns 404.
  * - Invalid briefId or name returns 400.
  */
@@ -42,9 +42,7 @@ export default defineEventHandler(async (event) => {
       setResponseStatus(event, 404);
       return { error: `Asset "${name}" not found.` };
     }
-    const ext = extname(name).toLowerCase();
-    const contentType = ext === ".jpg" || ext === ".jpeg" ? "image/jpeg" : "image/png";
-    setHeader(event, "content-type", contentType);
+    setHeader(event, "content-type", assetContentType(name));
     setHeader(event, "cache-control", "no-store");
     setHeader(event, "content-length", bytes.length);
     return bytes;

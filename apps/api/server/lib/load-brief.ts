@@ -1245,17 +1245,6 @@ export function parseBrief(
       );
     }
   }
-  // VE3a interim state: until VE3b renders the bed into the encoder, a run
-  // (plan or generate) declaring `audio` is refused rather than silently
-  // shipping an MP4 with no music, as if the licence had been honoured.
-  // Authoring mode (`enforceCapabilities: false`) still accepts it so the
-  // brief stays listed and editable. Structural validation above already
-  // ran, so this only ever fires on an otherwise-valid `audio` block.
-  if (enforceCapabilities && record.audio !== undefined) {
-    throw new Error(
-      "Music tracks are not rendered yet — remove the audio block to run this campaign.",
-    );
-  }
   // A randomized campaign has no meaning without a total: `count` is the planner's
   // one required input (plan D13), so demand it up front rather than at run time.
   if (record.mode === "variation") {

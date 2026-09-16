@@ -23,6 +23,10 @@ const png = Buffer.from(
   "base64",
 );
 const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xdb, 0x00]);
+const mp3 = Buffer.from([0x49, 0x44, 0x33, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x22]);
+const m4a = Buffer.from([
+  0x00, 0x00, 0x00, 0x1c, 0x66, 0x74, 0x79, 0x70, 0x4d, 0x34, 0x41, 0x20, 0x00, 0x00, 0x02, 0x00,
+]);
 
 describe("GET /campaigns/assets", () => {
   let dir: string;
@@ -120,6 +124,37 @@ describe("GET /campaigns/assets", () => {
     // Invalid asset name -> 400
     const resInvalid = await get(handler, "?briefId=camp&name=../invalid.png");
     expect(resInvalid.status).toBe(400);
+  });
+
+  test("serves audio content types for mp3 and m4a (VE3b2)", async () => {
+    const briefDir = join(dir, "assets", "inputs", "camp");
+    mkdirSync(briefDir, { recursive: true });
+    writeFileSync(join(briefDir, "bed.mp3"), mp3);
+    writeFileSync(join(briefDir, "bed.m4a"), m4a);
+
+    const handler = await web(dir);
+
+    const resMp3 = await get(handler, "?briefId=camp&name=bed.mp3");
+    expect(resMp3.status).toBe(200);
+    expect(resMp3.headers.get("content-type")).toBe("audio/mpeg");
+    expect(Buffer.from(await resMp3.arrayBuffer())).toEqual(mp3);
+
+    const resM4a = await get(handler, "?briefId=camp&name=bed.m4a");
+    expect(resM4a.status).toBe(200);
+    expect(resM4a.headers.get("content-type")).toBe("audio/mp4");
+    expect(Buffer.from(await resM4a.arrayBuffer())).toEqual(m4a);
+  });
+
+  test("lists an audio asset with its content type (VE3b2)", async () => {
+    const briefDir = join(dir, "assets", "inputs", "camp");
+    mkdirSync(briefDir, { recursive: true });
+    writeFileSync(join(briefDir, "bed.mp3"), mp3);
+
+    const handler = await web(dir);
+    const res = await get(handler, "?briefId=camp");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { assets: Array<{ name: string; type: string }> };
+    expect(body.assets).toEqual([expect.objectContaining({ name: "bed.mp3", type: "audio/mpeg" })]);
   });
 
   test("returns empty list on store list failure", async () => {

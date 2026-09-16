@@ -21,6 +21,13 @@ const png = Buffer.from(
   "base64",
 );
 const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xdb, 0x00]);
+// ID3v2-tagged mp3 (real magic; the rest of the header content is irrelevant to the check).
+const mp3 = Buffer.from([0x49, 0x44, 0x33, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x22]);
+// ISO-BMFF ftyp box, major brand "M4A " — exactly what the pinned ffmpeg-static
+// binary writes for `-c:a aac out.m4a`.
+const m4a = Buffer.from([
+  0x00, 0x00, 0x00, 0x1c, 0x66, 0x74, 0x79, 0x70, 0x4d, 0x34, 0x41, 0x20, 0x00, 0x00, 0x02, 0x00,
+]);
 
 const post = (handler: (req: Request) => Promise<Response>, body: unknown) =>
   handler(
@@ -170,6 +177,64 @@ describe("POST /campaigns/assets", () => {
     expect(res.status).toBe(500);
     expect(existsSync(join(dir, "assets", "inputs", "camp", "logo.png"))).toBe(false);
     spy.mockRestore();
+  });
+
+  test("stores an mp3 (ID3-tagged) under assets/inputs/<briefId>/", async () => {
+    const res = await post(
+      await web(dir),
+      upload({ name: "bed.mp3", contentBase64: mp3.toString("base64") }),
+    );
+    expect(res.status).toBe(201);
+    expect(await res.json()).toEqual({ path: "assets/inputs/camp/bed.mp3" });
+    expect(readFileSync(join(dir, "assets", "inputs", "camp", "bed.mp3"))).toEqual(mp3);
+  });
+
+  test("stores an m4a (ftyp/M4A box)", async () => {
+    const res = await post(
+      await web(dir),
+      upload({ name: "bed.m4a", contentBase64: m4a.toString("base64") }),
+    );
+    expect(res.status).toBe(201);
+    expect(await res.json()).toEqual({ path: "assets/inputs/camp/bed.m4a" });
+  });
+
+  test("returns 400 naming the accepted audio formats when a PNG is renamed .mp3", async () => {
+    const res = await post(
+      await web(dir),
+      upload({ name: "bed.mp3", contentBase64: png.toString("base64") }),
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "Asset must be an MP3 or M4A audio file." });
+    expect(existsSync(join(dir, "assets", "inputs", "camp", "bed.mp3"))).toBe(false);
+  });
+
+  test("returns 400 naming the accepted audio formats when arbitrary bytes are named .m4a", async () => {
+    const res = await post(
+      await web(dir),
+      upload({ name: "bed.m4a", contentBase64: Buffer.from("not audio").toString("base64") }),
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "Asset must be an MP3 or M4A audio file." });
+  });
+
+  test("image magic refusal message is unchanged for image extensions", async () => {
+    const res = await post(
+      await web(dir),
+      upload({ contentBase64: Buffer.from("hello").toString("base64") }),
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "Asset must be a PNG or JPEG image." });
+  });
+
+  test("returns 413 when an audio payload exceeds 2 MiB", async () => {
+    const oversized = Buffer.alloc(MAX_ASSET_BYTES + 1, 0);
+    mp3.copy(oversized);
+    const res = await post(
+      await web(dir),
+      upload({ name: "bed.mp3", contentBase64: oversized.toString("base64") }),
+    );
+    expect(res.status).toBe(413);
+    expect(existsSync(join(dir, "assets", "inputs", "camp", "bed.mp3"))).toBe(false);
   });
 
   test("returns 400 with a default message when body parsing throws a non-Error", async () => {

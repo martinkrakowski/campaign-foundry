@@ -34,6 +34,7 @@ export const RE_ROLL_MODE_MISMATCH = {
   randomizedTargetsOnClassic:
     "The rejected creatives came from a randomized run, but the brief is now a classic campaign — the mode changed since that run, so they cannot be re-rolled; run the full campaign.",
 } as const;
+import type { AudioAssetPort } from "../ports/out/AudioAssetPort.js";
 import type { CompliancePort } from "../ports/out/CompliancePort.js";
 import type { CompositeRequest, CompositorPort, SafeInsets } from "../ports/out/CompositorPort.js";
 import type { ExportPort } from "../ports/out/ExportPort.js";
@@ -127,6 +128,35 @@ export async function resolveTimelineBackgrounds(
   return ok(backgrounds);
 }
 
+/**
+ * Resolve the brief's music bed (VE-D8 `audio.path`) to bytes exactly ONCE
+ * for the whole run — never per cell, and never per ratio (unlike
+ * {@link resolveTimelineBackgrounds}, a music bed has no canvas to cover-fit
+ * against; the exact bytes feed every motion cell's `compositeVideo` request
+ * unchanged, VE3b1's encoder mixing them in as ffmpeg's second input). `hasMotionCell`
+ * skips the read entirely for a still-only run — the same "never touch the
+ * port when nothing needs it" discipline `resolveTimelineBackgrounds` applies
+ * to scenes. `undefined` (never resolved) when the brief carries no `audio` or
+ * no cell in this run is motion, so `VideoCompositeRequest.audio` stays a
+ * conditional spread and an audio-free/still-only run renders byte-identically
+ * (VE-D3).
+ *
+ * A path that cannot be read fails loudly, naming the path: a music bed the
+ * user uploaded and licensed must not silently render without it.
+ */
+export async function resolveBriefAudio(
+  brief: CampaignBrief,
+  hasMotionCell: boolean,
+  audioAssets: AudioAssetPort,
+): Promise<Result<Uint8Array | undefined, Error>> {
+  if (brief.audio === undefined || !hasMotionCell) return ok(undefined);
+  try {
+    return ok(await audioAssets.resolveAudio(brief.audio.path));
+  } catch (cause) {
+    return err(new Error(`Campaign audio ("${brief.audio.path}") could not be read.`, { cause }));
+  }
+}
+
 /** Row identity + paths: the leading keys of every persisted asset row. */
 type VariationAssetIdentity = Pick<GeneratedAsset, "productId" | "aspectRatio" | "outputPath" | "proofPath">;
 /** Variation lineage: the keys that follow the compliance verdict in a persisted row. */
@@ -186,6 +216,12 @@ export interface GenerateCampaignDeps {
    * naming a background never touches it.
    */
   readonly sceneAssets: SceneAssetPort;
+  /**
+   * Resolves the brief's music bed (`audio.path`, VE-D8) to bytes — never a
+   * filesystem call in this layer. Motion variants only; a brief with no
+   * `audio`, or a run with no motion cell, never touches it.
+   */
+  readonly audioAssets: AudioAssetPort;
   readonly compliance: CompliancePort;
   readonly exporter: ExportPort;
   readonly now: () => Date;
@@ -598,6 +634,13 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
       backgroundsByRatio.set(ratio.value, resolved.value);
     }
 
+    // VE3b2: resolve the brief's music bed ONCE for the whole run (no ratio to
+    // key by — see resolveBriefAudio's own doc comment) and hand the SAME
+    // bytes to every motion cell's compositeVideo request.
+    const audioResolved = await resolveBriefAudio(brief, motionRatios.size > 0, this.deps.audioAssets);
+    if (!audioResolved.success) return audioResolved;
+    const audio = audioResolved.value;
+
     const cellResults = await mapWithConcurrency(cells, MAX_CONCURRENT_BACKGROUNDS, (cell) =>
       this.renderVariant(
         cell.variant,
@@ -615,6 +658,7 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
         brief.clickDestination,
         brief.audio?.rights,
         backgroundsByRatio.get(cell.ratio.value),
+        audio,
       ),
     );
 
@@ -658,6 +702,7 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     clickDestination?: string,
     audioRights?: AudioRights,
     backgrounds?: Readonly<Record<string, Uint8Array>>,
+    audio?: Uint8Array,
   ): Promise<{ asset: GeneratedAsset; heroImage?: Uint8Array }> {
     const cellContext: BackgroundContext = {
       ...context,
@@ -736,6 +781,7 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
         timeline,
         audioRights,
         backgrounds,
+        audio,
       );
     }
 
@@ -820,6 +866,7 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     timeline: CopyTimeline | undefined,
     audioRights: AudioRights | undefined,
     backgrounds: Readonly<Record<string, Uint8Array>> | undefined,
+    audio: Uint8Array | undefined,
   ): Promise<{ asset: GeneratedAsset; heroImage?: Uint8Array }> {
     const durationSec = variant.durationSec ?? DEFAULT_DURATION_SEC;
     const video = await this.deps.videoCompositor.compositeVideo({
@@ -834,6 +881,9 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
       // omitted, so a timeline naming no backgrounds renders byte-identically
       // (VE-D3) — the same conditional-spread discipline `timeline` above uses.
       ...(backgrounds !== undefined ? { backgrounds } : {}),
+      // The resolved music bed (VE3b2): absent → omitted, so an audio-free
+      // brief's motion request stays byte-identical to today's (VE-D3).
+      ...(audio !== undefined ? { audio } : {}),
     });
 
     // No sampled frame is no evidence: an adapter that returns none fails the check.

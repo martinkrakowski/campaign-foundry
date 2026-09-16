@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "lane": "VE3b2",
+  "mutations": [
+    {
+      "file": "packages/CampaignOrchestration/src/application/use-cases/GenerateCampaignUseCase.use-case.ts",
+      "before": "      ...(audio !== undefined ? { audio } : {}),",
+      "after": "      ...(false ? { audio } : {}),",
+      "because": "renderMotionVariant must spread the run's resolved music-bed bytes onto the compositor's request whenever audio was resolved, or a brief declaring `audio` would silently render with no music even though the interim refusal is gone. Forcing the conditional spread's guard to false drops the `audio` key from every compositeVideo request unconditionally, caught by the fixture asserting a brief with `audio` gets the resolved bytes on its motion request.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/application/use-cases/__tests__/GenerateCampaignUseCase.use-case.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/asset-files.ts",
+      "before": "  return hasMp3Magic(bytes) || hasM4aMagic(bytes);",
+      "after": "  return true;",
+      "because": "hasAllowedAudioMagic must actually check the mp3 (ID3/frame-sync) or m4a (ftyp/audio-brand) magic before an upload named .mp3/.m4a is accepted, or a renamed PNG/JPEG (or any arbitrary bytes) would be stored and later fed to ffmpeg as if it were a real music bed. Forcing the check to always pass reproduces exactly that hole, caught by the fixture asserting a PNG renamed `bed.mp3` is refused with 400 naming the accepted audio formats.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/assets.test.ts"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

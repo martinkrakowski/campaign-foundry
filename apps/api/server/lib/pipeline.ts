@@ -13,6 +13,7 @@ import {
   ALLOWED_FONT_FAMILIES,
   AssetReusingImageGenerator,
   CanvasFfmpegVideoCompositor,
+  FileSystemAudioAssetResolver,
   FileSystemBackgroundCache,
   FileSystemSceneAssetResolver,
   FireflyImageGenerator,
@@ -149,6 +150,8 @@ export function buildPipeline(imageModel?: string, planInput: PlanInput = {}): G
     videoCompositor: new CanvasFfmpegVideoCompositor({ fontFamily: messageFont() }),
     // VE5b2: resolves a timeline beat's own background — motion variants only.
     sceneAssets: new FileSystemSceneAssetResolver(),
+    // VE3b2: resolves the brief's music bed (audio.path) — motion variants only.
+    audioAssets: new FileSystemAudioAssetResolver(),
     compliance: new BrandComplianceChecker(),
     exporter: new FileSystemExporter(outputRoot()),
     now: () => new Date(),
