@@ -1,0 +1,81 @@
+{
+  "version": 1,
+  "lane": "X35",
+  "mutations": [
+    {
+      "file": "tools/wave-status/lib/collect.ts",
+      "before": "      for (const lane of [...eventLanes].sort()) {",
+      "after": "      for (const lane of [...new Set([...eventLanes, ...entries.filter((e) => e.endsWith(\".log\")).map((e) => e.slice(0, -\".log\".length))])].sort()) {",
+      "because": "The collector used to treat any `.log` in a wave directory as a lane, and one session's 442-file root of gate rounds, fix-runner transcripts and probe logs rendered as 113 lanes. Letting a log create a lane again — with no name filter, since the name filter is what hid real lanes — resurrects exactly that behaviour: the fixture that reproduces the owner's root must then yield one phantom lane per file, and the zero-lanes assertion fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "tools/wave-status/__tests__/collect.test.ts",
+        "-t",
+        "113-lanes regression"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/lib/collect.ts",
+      "before": "      for (const lane of [...eventLanes].sort()) {",
+      "after": "      for (const lane of [...eventLanes].filter((lane) => !/fix\\d*$/.test(lane)).sort()) {",
+      "because": "Any name-based rejection, even one applied to event-named lanes, hides real work: this repository ran genuine lanes named `x13-fix`, `x16-fix2` and `hl5c-fix2`, and a page that drops `x16-fix2` while it runs cannot be asked about it. The fixture that pins the lane's row and attached log fails the moment a suffix rule returns.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "tools/wave-status/__tests__/collect.test.ts",
+        "-t",
+        "log's liveness attached"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/lib/collect.ts",
+      "before": "        if (entries.includes(logName)) {",
+      "after": "        if (false) {",
+      "because": "Evidence names the lane; the log's whole job is to attach — liveness tail, byte count, mtime — to the lane the evidence already created. An event loop that never looks up `<lane>.log` renders the running lane as silence it cannot date, which is the other half of the rule and fails the same `x16-fix2` fixture from the attach side.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "tools/wave-status/__tests__/collect.test.ts",
+        "-t",
+        "log's liveness attached"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/lib/lane-state.ts",
+      "before": "    if (status.reported?.event === \"started\" && derived.exit === undefined) {\n      return \"unknown\";\n    }\n    return \"vanished\";",
+      "after": "    return \"vanished\";",
+      "because": "`vanished` must mean something bad — a run that ended or a terminal claim with no PR. A lane whose last words were `started`, with no EXIT and no PR, is a missing measurement, and collapsing this arm back into the old silence-default accuses it of vanishing — the lie that put 102 rows on the page at once.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "tools/wave-status/lib/__tests__/lane-state.test.ts",
+        "-t",
+        "a started event with nothing after it is unknown"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/public/index.html",
+      "before": "          note = `<span class=\"quiet\">stale evidence</span>`;",
+      "after": "          note = `<span class=\"quiet\">past wave</span>`;",
+      "because": "A lane's note measures the lane; only the wave header's newest-evidence clock may call a wave past. Restoring the row's old 'past wave' wording resurrects the contradiction the reword removed: in a mixed-age wave — one recent lane, one days-old — the header honestly says live and minutes-fresh while the stale row still prints 'past wave', two statements about the same wave disagreeing on screen. The mixed-age fixture fails the moment the row speaks as the wave again.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "tools/wave-status/__tests__/page.test.ts",
+        "-t",
+        "mixed-age wave"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

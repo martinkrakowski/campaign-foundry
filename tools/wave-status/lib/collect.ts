@@ -50,8 +50,25 @@ export const LOG_TAIL_BYTES = 16 * 1024;
 /** Public `?tail=` is in KB; anything above this is 400, not an unbounded read. */
 export const MAX_TAIL_KB = 1024;
 
-/** Prefixed families are pipeline artefacts, not lane logs. */
-const LANE_LOG_EXCLUDED = /^(install|gate|review|fix)-/;
+/**
+ * The evidence rule for a lane, stated once because everything downstream
+ * rests on it: **evidence creates a lane; a log only ever attaches to one.**
+ * A lane exists because something *says* it does — an event in that
+ * directory's `events.jsonl` naming it. `dispatch-lane.sh` emits as part of
+ * dispatching, so a lane launched through it is named by its own first event;
+ * a runner that emits nothing keeps its log, its process and its silence to
+ * itself, and the page says nothing about it — invisible is honest where a
+ * phantom row is not.
+ *
+ * A `.log` file never buys a row. Its name is a caller's free-form token —
+ * this repository has genuinely run lanes named `x13-fix`, `x16-fix2` and
+ * `hl5c-fix2` — so no name-based acceptance *or* rejection lives on this
+ * path: acceptance is an event, and an attach is the event lane's own name
+ * found in the directory listing, exact. An orphan log is not a lane and not
+ * an error. Counting a directory's logs as lanes is how one session's 442
+ * files of gate rounds and fix transcripts rendered as "113 lanes, 102
+ * vanished".
+ */
 
 /**
  * One PR as the collector sees it: the observation's facts plus the
@@ -200,12 +217,13 @@ export async function collect(
       // most wants to see. Absent is the one answer that is never useful.
       discovered.add(wave);
 
-      // Events are read before the lane logs because a lane's own event `pr`
-      // is the preferred join key: the directory that holds a log also holds
-      // the events reporting that log's PR, whatever its wave field says.
-      // Every lane an event names is also a lane of this directory — dispatch
-      // through the Agent tool writes events and no lane log at all, and a
-      // lane that reaches no row gets neither the probe nor the PR join.
+      // Events are read before anything else because they are the lane
+      // evidence itself: every lane an event names gets exactly one row, and
+      // only then does an identically named `<lane>.log` attach to it. A log
+      // no event names is the orchestrator's working litter — a gate round, a
+      // fix transcript, a probe — and the page says nothing about it. The
+      // directory that holds a log also holds the events reporting that log's
+      // PR, whatever the events' own wave field says.
       const reportedPrByLane = new Map<string, number>();
       const eventLanes = new Set<string>();
       if (entries.includes("events.jsonl")) {
@@ -221,43 +239,33 @@ export async function collect(
         }
       }
 
-      const laneLogs = entries
-        .filter((entry) => entry.endsWith(".log") && !LANE_LOG_EXCLUDED.test(entry))
-        .sort();
-      for (const fileName of laneLogs) {
-        const lane = fileName.slice(0, -".log".length);
-        const logPath = join(dir, fileName);
-
+      for (const lane of [...eventLanes].sort()) {
+        const logName = `${lane}.log`;
+        // An exact-name join, never a pattern: `l1-fix.log` attaches nothing
+        // to lane `l1`. Membership in the directory listing is also the
+        // path guard — a listing entry never contains a separator, so a
+        // crafted event lane cannot climb out of the wave root.
         let log: LaneObservation["log"];
-        try {
-          const part = await readTail(deps.open, logPath, LOG_TAIL_BYTES);
-          log = { bytes: part.size, mtimeMs: part.mtimeMs, tail: part.tail.toString("utf8") };
-          const prior = newestByWave.get(wave);
-          if (prior === undefined || part.mtimeMs > prior) newestByWave.set(wave, part.mtimeMs);
-        } catch {
-          log = undefined;
+        if (entries.includes(logName)) {
+          const logPath = join(dir, logName);
+          try {
+            const part = await readTail(deps.open, logPath, LOG_TAIL_BYTES);
+            log = { bytes: part.size, mtimeMs: part.mtimeMs, tail: part.tail.toString("utf8") };
+            const prior = newestByWave.get(wave);
+            if (prior === undefined || part.mtimeMs > prior) newestByWave.set(wave, part.mtimeMs);
+          } catch {
+            log = undefined;
+          }
         }
 
+        // The row a lane gets is built the same way whether or not a log
+        // attached — the same shared build, probe, gate and all, and the same
+        // PR join every row goes through. An event-only lane with no probe
+        // behind it is a default wearing the mask of a measurement.
         const reportedPr = reportedPrByLane.get(lane);
         lanes.add(lane);
         if (reportedPr !== undefined) reportedPrs.add(reportedPr);
         const obs = await buildObservation(deps, dir, entries, lane, worktrees, log);
-        rows.push({ wave, lane, reportedPr, obs });
-      }
-
-      // The second source: lanes an event named that wrote no log. They are
-      // lanes, so they get the row's observations — the same shared build the
-      // log loop uses, probe, gate and all, and the same PR join every row
-      // goes through. Without this push an event-only lane is merged as
-      // `{ alive: false }` with no probe behind it: a default wearing the
-      // mask of a measurement.
-      const loggedLanes = new Set(laneLogs.map((f) => f.slice(0, -".log".length)));
-      for (const lane of [...eventLanes].sort()) {
-        if (loggedLanes.has(lane)) continue;
-        const obs = await buildObservation(deps, dir, entries, lane, worktrees);
-        const reportedPr = reportedPrByLane.get(lane);
-        lanes.add(lane);
-        if (reportedPr !== undefined) reportedPrs.add(reportedPr);
         rows.push({ wave, lane, reportedPr, obs });
       }
     }
@@ -297,11 +305,11 @@ export async function collect(
 }
 
 /**
- * The observation both row sources build: one probe, one gate lookup, one
- * assembly — so a field one source carries cannot be missing from the other.
- * Two copies of this block are how an event-only lane lost its gate exit and
- * its coverage while `gate-<lane>.log` sat beside its events: the loop that
- * found the lane forgot the lookup the other loop had.
+ * The observation every row is built with, log attached or not: one probe,
+ * one gate lookup, one assembly — so a field one lane carries cannot be
+ * missing from another. Two copies of this block are how an event-only lane
+ * lost its gate exit and its coverage while `gate-<lane>.log` sat beside its
+ * events: the loop that found the lane forgot the lookup the other loop had.
  */
 async function buildObservation(
   deps: CollectDeps,

@@ -1,12 +1,12 @@
 import { describe, test, expect } from "vitest";
-import { spawnSync } from "node:child_process";
+import { spawn as realSpawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { linkSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { CanvasFfmpegVideoCompositor } from "../CanvasFfmpegVideoCompositor.js";
+import { CanvasFfmpegVideoCompositor, type FfmpegSpawn } from "../CanvasFfmpegVideoCompositor.js";
 import { canonicalMp4Request } from "./canonical-mp4-request.js";
 import {
   compositorGoldenKey,
@@ -133,7 +133,11 @@ describe("CanvasFfmpegVideoCompositor byte golden (VG2)", () => {
       if (!ffmpegPath) throw new Error("ffmpeg-static binary is not available");
       const run = goldenRun(goldens, recording, missingMessage);
 
-      const { video } = await new CanvasFfmpegVideoCompositor().compositeVideo(canonicalMp4Request());
+      // Same binary that encodes must be the same binary this file probes and
+      // extracts streams with (`ffmpegPath`, honouring COMPOSITOR_FFMPEG_PATH) —
+      // otherwise a hash mismatch could mean "two different ffmpeg builds",
+      // not "the encoder changed". VE3b1's audio golden already had this shape.
+      const { video } = await new CanvasFfmpegVideoCompositor({ ffmpegPath }).compositeVideo(canonicalMp4Request());
       const banner = parseX264Banner(video);
 
       const dir = mkdtempSync(join(tmpdir(), "cf-mp4-golden-"));
@@ -151,6 +155,42 @@ describe("CanvasFfmpegVideoCompositor byte golden (VG2)", () => {
         };
 
         finishGolden(key, observed, run);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  test.skipIf(!ffmpegOk)(
+    skipReason ??
+      "the encode spawns the resolved COMPOSITOR_FFMPEG_PATH binary, not the adapter's ffmpeg-static default (X31)",
+    { timeout: 60_000 },
+    async () => {
+      if (!ffmpegPath) throw new Error("ffmpeg-static binary is not available");
+      // The adapter injects every encode through its `spawn` option, so the
+      // command it was invoked with is directly observable — no shell wrapper,
+      // no marker file, no subprocess re-entry, and no POSIX-shell assumption.
+      // Delegate to the real spawn afterwards so the recorded invocation is
+      // the one that actually produced the bytes.
+      const invocations: Array<{ readonly command: string; readonly args: readonly string[] }> = [];
+      const spawn: FfmpegSpawn = (command, args, options) => {
+        invocations.push({ command, args });
+        return realSpawn(command, [...args], options);
+      };
+      // The alias (a hard link to the resolved binary: same inode, different
+      // path) makes the assertion bite with or without the override set. The
+      // adapter's own default is `ffmpeg-static`'s path; dropping the
+      // constructor argument silently falls back to it, and a recorded
+      // command of the default path can never equal this alias.
+      const dir = mkdtempSync(join(tmpdir(), "cf-x31-ffmpeg-path-"));
+      try {
+        const alias = join(dir, "ffmpeg-resolved");
+        linkSync(ffmpegPath, alias);
+
+        await new CanvasFfmpegVideoCompositor({ ffmpegPath: alias, spawn }).compositeVideo(canonicalMp4Request());
+
+        expect(invocations.map((call) => call.command)).toEqual([alias]);
+        expect(invocations[0].args).toContain("libx264");
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }

@@ -5585,3 +5585,37 @@ X36 follow-up (branch feat/x36-web-test-timeout): Qodo found the X34 `beforeAll`
 **Plan doc:** VE3b split into VE3b1 (this PR) and VE3b2 (uploads, generation wiring, removes the interim refusal) in §4. `premise VE3b` left as-is (still ORs the codec and upload gaps) with a note that VE3b1 closed the codec half. VE-D11's consequence records the determinism result and the platforms it was proven on.
 
 **Left open:** VE3b2 (uploads + generation wiring + refusal removal) is dispatchable next, behind this PR. HL5e's files (`NodeCanvasCompositor.ts`, `markup-assembler.ts`, `html-element.ts`, `creative-style.ts`, `brief-yaml.ts`, the web editor) were not touched.
+## 2026-09-16 — X31 mp4 byte golden ffmpeg path (AI session)
+
+Confirmed on main (`84f271e4`) before the fix: the VG2 byte golden probed and
+extracted with `COMPOSITOR_FFMPEG_PATH` but constructed
+`new CanvasFfmpegVideoCompositor()` so the encode ran on `ffmpeg-static`.
+VE3b1's audio golden already passed `{ ffmpegPath }`; this closes the older
+sibling. Red: a wrapper on the override recorded `libx264` invocations and the
+marker was absent. Green: same constructor shape as the audio golden; hashes
+unchanged. Mutation: reverting the argument is caught.
+Cite: §37 (X31) of docs/planning/2026-09-10_the-unowned-gaps.md.
+- X31 fix round: replaced the §37 identity test's shell wrapper + subprocess re-entry with the adapter's injectable spawn — a recorder (delegating to real spawn) captures the command of a real encode of the resolved binary's hard-link alias, asserting it is never the ffmpeg-static default; same claim, no POSIX-shell assumption. Red: reverting the constructor argument records the default path. Mutation re-pointed at that construction and re-verified caught; gate green at 100% on all four counters; no golden moved. Cite: §37 (X31) of docs/planning/2026-09-10_the-unowned-gaps.md.
+## 2026-09-16 — X35 (lane: wave-status truthfulness)
+
+Made the wave status page truthful without touching the emitter: a row needs evidence (an event naming the
+lane or a convention-named log), silence after a `started` event is `unknown` rather than the `vanished`
+accusation, and days-old artefacts (log writes *or* events) read as "past wave" in the row and in the
+header register. Red first (artefacts-only root yielded 15 phantom lanes), green with 100 % on all four
+counters, both manifest mutations caught (`mutate:verify` reproduced). Two page tests that pinned the old
+silence-default word were updated in their assertion, not their invariant; recorded as a finding. Remaining
+gap, honestly: runners that do not emit keep their lanes invisible until the separate operator change.
+Plan: §38 (X35) of docs/planning/2026-09-10_the-unowned-gaps.md.
+## 2026-09-16 — X35 (revision: a lane is what an event says it is)
+
+Qodo caught the first cut's remaining lie: `namesALaneLog` still judged lanes by filename, and its
+blacklist would have hidden real lanes this repo ran (`x16-fix2`, `x13-fix`, `hl5c-fix2` — ten of
+them). The blacklist is deleted; the rule is now "evidence creates a lane; a log only ever attaches
+to one": events name lanes, an identically named log adds liveness/mtime, orphan logs buy nothing,
+and the recorded join fixture prices the trade — nine real silent lanes are invisible, asserted so.
+Red first (the x16-fix2 fixture failed the old attach), then green: the wave-status suite passes,
+the full gate is clean with 100% on all four counters, and four mutations in
+`.agents/manifests/x35.json` — log-creates-lane, name-rejection-return, attach-dropped,
+silence-accuses-again — all reproduce under `mutate:verify`. §38 restated and §39 added in
+docs/planning/2026-09-10_the-unowned-gaps.md. Two PR-Agent notes on the (now deleted) blacklist
+regex are moot rather than patched.

@@ -14,6 +14,7 @@ import {
   laneStateCounts,
   laneNeedsHuman,
   stallThresholdMs,
+  pastWaveThresholdMs,
   LANE_STATES,
 } from "../lib/lane-state.js";
 import { readEvents } from "../lib/events.js";
@@ -2247,6 +2248,14 @@ describe("the status page", () => {
     mkdirSync(join(root, "wave-10"));
     writeFileSync(join(root, "wave-9", "a.log"), "building\n");
     writeFileSync(join(root, "wave-10", "b.log"), "settled long ago\n");
+    writeFileSync(
+      join(root, "wave-9", "events.jsonl"),
+      '{"ts":"2026-09-07T16:55:43Z","wave":"9","lane":"a","stage":"implement","event":"started"}\n',
+    );
+    writeFileSync(
+      join(root, "wave-10", "events.jsonl"),
+      '{"ts":"2026-09-04T16:55:43Z","wave":"10","lane":"b","stage":"merge","event":"settled"}\n',
+    );
     const base = Date.now();
     const mtime9 = new Date(base - 30 * 60_000);
     const mtime10 = new Date(base - 3 * 24 * 60 * 60_000);
@@ -2288,9 +2297,10 @@ describe("the status page", () => {
 
   test("a collapsed page puts a silent newer wave ahead of an older wave that reported events", async () => {
     // The one-feed shape: wave-8 reported its merge and went quiet; wave-9 is
-    // the live wave and emits nothing at all. With the client's own sort off,
-    // the list order is purely what the collector sent — which is where the
-    // event-feed-first ordering used to surface, as an old wave on top.
+    // the live wave and has said nothing but its own start. With the client's
+    // own sort off, the list order is purely what the collector sent — which
+    // is where the event-feed-first ordering used to surface, as an old wave
+    // on top.
     const root = mkdtempSync(join(tmpdir(), "wave-quiet-order-"));
     dirs.push(root);
     mkdirSync(join(root, "wave-8"));
@@ -2301,6 +2311,10 @@ describe("the status page", () => {
     );
     writeFileSync(join(root, "wave-8", "a.log"), "settled long ago\n");
     writeFileSync(join(root, "wave-9", "b.log"), "building right now\n");
+    writeFileSync(
+      join(root, "wave-9", "events.jsonl"),
+      '{"ts":"2026-09-08T10:00:00Z","wave":"9","lane":"b","stage":"implement","event":"started"}\n',
+    );
     const base = Date.now();
     const mtime8 = new Date(base - 60 * 60_000);
     const mtime9 = new Date(base - 2 * 60_000);
@@ -3774,14 +3788,32 @@ describe("the status page", () => {
     const lanes: Record<string, unknown>[] = [
       ...stateFixture(now).waves[0].lanes,
     ] as unknown as Record<string, unknown>[];
-    const noPrCases: ReadonlyArray<readonly [string, Record<string, unknown>]> = [
+    const noPrCases: ReadonlyArray<
+      readonly [string, Record<string, unknown>, Record<string, unknown>?]
+    > = [
       ["no-pr", { alive: false }],
       ["no-pr-exit0", { alive: false, exit: 0 }],
       ["no-pr-fail", { alive: false, exit: 1 }],
       ["no-pr-alive", { alive: true }],
+      // X35's arms of the no-PR branch: a start with nothing after it (the
+      // module's `unknown`) and a start whose log ended without a PR (the
+      // module's `vanished`). The no-report silence above pins the second
+      // copy of the vanished default; these pin the split.
+      ["no-pr-started", { alive: false }, { stage: "implement", event: "started", ts: new Date(now).toISOString() }],
+      [
+        "no-pr-started-exit0",
+        { alive: false, exit: 0 },
+        { stage: "gate", event: "started", ts: new Date(now).toISOString() },
+      ],
     ];
-    for (const [id, derived] of noPrCases) {
-      lanes.push({ wave: "S", lane: id, derived, disagreements: [] });
+    for (const [id, derived, reported] of noPrCases) {
+      lanes.push({
+        wave: "S",
+        lane: id,
+        derived,
+        disagreements: [],
+        ...(reported === undefined ? {} : { reported }),
+      });
     }
     // Derived from the declared union, not copied from it: a state or check
     // value added to `LaneObservation["pr"]` without being listed here fails to
@@ -4257,6 +4289,187 @@ describe("the status page", () => {
     }
   });
 
+  // X35: a page that cries wolf trains its reader to ignore it. These tests
+  // pin the page's own faces of the truthfulness rule: silence after a
+  // start is a question (unknown), not an accusation (vanished); the row
+  // says why; days-old evidence ages the row and the header out of the live
+  // register — the header's age even when the wave holds no log at all; and
+  // a lane's own age never speaks as the wave's verdict.
+  test("a started lane with nothing after it renders unknown, not vanished, and the row says why", async () => {
+    const now = Date.now();
+    const silentStatus = {
+      generatedAt: new Date(now).toISOString(),
+      waves: [
+        {
+          id: "S1",
+          lanes: [
+            {
+              wave: "S1",
+              lane: "quiet-start",
+              reported: {
+                stage: "implement",
+                event: "started",
+                ts: new Date(now - 60_000).toISOString(),
+              },
+              derived: { alive: false },
+              disagreements: [],
+            },
+            {
+              wave: "S1",
+              lane: "ended-nothing",
+              derived: { alive: false, exit: 0 },
+              disagreements: [],
+            },
+          ],
+        },
+      ],
+    } as unknown as WaveStatus;
+    const page = await loadPage(silentStatus);
+    const doc = page.window.document;
+    const pillOf = (lane: string) =>
+      doc.querySelector(`tr.lane[data-lane="${lane}"] td.c-state .pill`)?.textContent?.trim();
+    expect(pillOf("quiet-start")).toBe("unknown");
+    // The module answers the same word for the same lane — the seam holds.
+    const lanes = silentStatus.waves[0].lanes as unknown as LaneStatus[];
+    expect(laneState(lanes[0], now)).toBe("unknown");
+    // The ended run that produced no PR keeps the bad word: `vanished` must
+    // still mean something vanished, not merely that nobody reported.
+    expect(pillOf("ended-nothing")).toBe("vanished");
+    // The reason travels in the row, beside the state word.
+    const cell = doc.querySelector('tr.lane[data-lane="quiet-start"] td.c-state');
+    expect(cell?.textContent).toContain("nothing since");
+  });
+
+  test("days-old evidence reads as stale in the row and past in the header, from an event alone where no log exists", async () => {
+    const now = Date.now();
+    const oldMs = now - 3 * 86_400_000;
+    const pastStatus = {
+      generatedAt: new Date(now).toISOString(),
+      waves: [
+        {
+          id: "LIVE",
+          lanes: [
+            {
+              wave: "LIVE",
+              lane: "t1",
+              derived: { alive: false, log: { bytes: 8, mtimeMs: now - 30_000, tail: "" } },
+              disagreements: [],
+            },
+          ],
+        },
+        {
+          id: "OLD",
+          lanes: [
+            {
+              wave: "OLD",
+              lane: "o1",
+              derived: { alive: false, log: { bytes: 8, mtimeMs: oldMs, tail: "" } },
+              disagreements: [],
+            },
+          ],
+        },
+        {
+          // Event-only: this wave holds no log files at all, so its header
+          // age can only ever come from an event timestamp. Sharing a wave
+          // with a logged lane — as an earlier cut of this fixture did —
+          // let the other lane's log date the header and made the event
+          // assertion here undetectable.
+          id: "EV",
+          lanes: [
+            {
+              wave: "EV",
+              lane: "o2",
+              reported: {
+                stage: "implement",
+                event: "started",
+                ts: new Date(oldMs).toISOString(),
+              },
+              derived: { alive: false },
+              disagreements: [],
+            },
+          ],
+        },
+      ],
+    } as unknown as WaveStatus;
+    const page = await loadPage(pastStatus);
+    const doc = page.window.document;
+
+    for (const waveId of ["OLD", "EV"]) {
+      const age = doc.querySelector(`tr.wave[data-wave="${waveId}"] .wave-age`) as unknown as HTMLElement;
+      expect(age.textContent, `wave ${waveId}`).toBe("3d ago");
+      expect(age.classList.contains("past"), `wave ${waveId}`).toBe(true);
+    }
+    const liveAge = doc.querySelector(
+      'tr.wave[data-wave="LIVE"] .wave-age',
+    ) as unknown as HTMLElement;
+    expect(liveAge.textContent).toBe("now");
+    expect(liveAge.classList.contains("past")).toBe(false);
+
+    for (const lane of ["o1", "o2"]) {
+      const cell = doc.querySelector(`tr.lane[data-lane="${lane}"] td.c-state`) as unknown as HTMLElement;
+      expect(cell.textContent, `lane ${lane}`).toContain("stale evidence");
+    }
+    const liveCell = doc.querySelector('tr.lane[data-lane="t1"] td.c-state') as unknown as HTMLElement;
+    expect(liveCell.textContent).not.toContain("stale evidence");
+  });
+
+  test("a mixed-age wave stays live in the header while its stale row names itself stale, never a past wave", async () => {
+    // The contradiction this pins: a wave holding one recent lane and one
+    // lane older than the threshold classifies as *not* past at the wave
+    // level (its newest evidence is minutes old) while the old lane's own
+    // evidence is days past. A row that printed "past wave" there made two
+    // statements about the same wave, disagreeing on screen. The row's note
+    // describes the lane's stale evidence; the header alone owns the words
+    // "past wave".
+    const now = Date.now();
+    const mixedStatus = {
+      generatedAt: new Date(now).toISOString(),
+      waves: [
+        {
+          id: "MIX",
+          lanes: [
+            {
+              wave: "MIX",
+              lane: "m1",
+              derived: { alive: true, log: { bytes: 8, mtimeMs: now - 30_000, tail: "" } },
+              disagreements: [],
+            },
+            {
+              wave: "MIX",
+              lane: "m2",
+              derived: { alive: false, log: { bytes: 8, mtimeMs: now - 2 * 86_400_000, tail: "" } },
+              disagreements: [],
+            },
+          ],
+        },
+      ],
+    } as unknown as WaveStatus;
+    const page = await loadPage(mixedStatus);
+    const doc = page.window.document;
+
+    const age = doc.querySelector('tr.wave[data-wave="MIX"] .wave-age') as unknown as HTMLElement;
+    expect(age.textContent).toBe("now");
+    expect(age.classList.contains("past")).toBe(false);
+
+    const staleRow = doc.querySelector('tr.lane[data-lane="m2"] td.c-state') as unknown as HTMLElement;
+    expect(staleRow.textContent).toContain("stale evidence");
+    expect(staleRow.textContent).not.toContain("past wave");
+    const freshRow = doc.querySelector('tr.lane[data-lane="m1"] td.c-state') as unknown as HTMLElement;
+    expect(freshRow.textContent).not.toContain("stale evidence");
+    expect(freshRow.textContent).not.toContain("past wave");
+  });
+
+  test("the page mirrors the exported past-wave threshold, to the millisecond", async () => {
+    // Same seam as the stall-threshold pin: the inline script carries its own
+    // copy of the constant because it cannot import the module, and this is
+    // what stops the two from drifting.
+    const html = await readFile(PAGE_PATH, "utf8");
+    const script = /<script>([\s\S]*?)<\/script>/.exec(html)?.[1] ?? "";
+    const literal = /const PAST_WAVE_THRESHOLD_MS = (\d+);/.exec(script);
+    expect(literal, "the page no longer states its past-wave threshold").not.toBeNull();
+    expect(Number(literal![1])).toBe(pastWaveThresholdMs);
+  });
+
   test("the state cell keeps the lane's own identity in the next cell, so a verdict never replaces a name", async () => {
     const page = await loadPage(stateFixture(Date.now()));
     const doc = page.window.document;
@@ -4424,12 +4637,15 @@ describe("the status page", () => {
 
     // The wave band now rolls up the *derived state* the leading cell renders,
     // not the reported event the stage cell shows. This lane is `alive: false`
-    // with no PR and no exit, so its state is `vanished`; the stage column still
-    // says `stalled` (its own reported-vs-grace logic). A header that counted
-    // reported events would read "1 stalled" over a row that says "vanished" —
-    // the disagreement this lane exists to remove.
+    // with no PR and no exit — and its last words were `started`, so X35 says
+    // `unknown`, not `vanished`: silence after a start is a missing
+    // measurement, not an accusation. The stage column still says `stalled`
+    // (its own reported-vs-grace logic). A header that counted reported
+    // events would read "1 stalled" over a row that says "unknown" — the
+    // disagreement this lane exists to remove. What the test owns is the
+    // agreement between header and row; the word is the module's.
     const meta = doc.querySelector(".wave-meta")?.textContent ?? "";
-    expect(meta).toBe("1 lane · 1 vanished");
+    expect(meta).toBe("1 lane · 1 unknown");
     expect(meta).not.toContain("running");
   });
 
@@ -4467,11 +4683,11 @@ describe("the status page", () => {
 
     // The stage column reads `started` (within the launch grace), which is the
     // point of this lane. The band rolls up the derived state, and this lane is
-    // `alive: false` with nothing else to say for it — `vanished` — so the
-    // header says `vanished`, agreeing with the row it sits over rather than
-    // with the reported event the stage cell shows.
+    // `alive: false` with nothing else to say for it — X35's unknown, a start
+    // with no verdict after it — so the header agrees with the row it sits
+    // over rather than with the reported event the stage cell shows.
     const meta = doc.querySelector(".wave-meta")?.textContent ?? "";
-    expect(meta).toBe("1 lane · 1 vanished");
+    expect(meta).toBe("1 lane · 1 unknown");
     expect(meta).not.toContain("stalled");
   });
 

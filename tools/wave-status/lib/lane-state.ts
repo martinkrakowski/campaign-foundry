@@ -50,7 +50,38 @@ export type LaneStateCounts = Record<LaneState, number>;
 // Decision: lanes go quiet during a build.
 export const stallThresholdMs = 15 * 60 * 1000;
 
+// Decision (X35): a wave whose newest artefact — log write or event — is older
+// than this belongs to a past wave, not to a broken current one. A day, not a
+// number read off the data: no wave a human is watching goes a day without a
+// keystroke, and a session three days old is history whatever state its rows
+// happen to land on. The page carries its own copy of this constant (it cannot
+// import) and a test pins the two together, exactly as for `stallThresholdMs`.
+export const pastWaveThresholdMs = 24 * 60 * 60 * 1000;
+
 import { LaneStatus } from "./types.js";
+
+/**
+ * The newest *dated* fact about a lane — its log's last write, or the event
+ * that last spoke about it — or `undefined` when neither carries a date an
+ * implementation may stand on. Age is only ever computed from this, so an
+ * unparseable ts is silence, never a zero that reads as "seconds ago".
+ */
+export function laneEvidenceMs(status: LaneStatus): number | undefined {
+  const times: number[] = [];
+  const logMs = status.derived.log?.mtimeMs;
+  if (typeof logMs === "number") times.push(logMs);
+  if (status.reported !== undefined) {
+    const ts = Date.parse(status.reported.ts);
+    if (!Number.isNaN(ts)) times.push(ts);
+  }
+  return times.length === 0 ? undefined : Math.max(...times);
+}
+
+/** Is every dated fact about this lane older than the past-wave threshold? */
+export function isPastWaveLane(status: LaneStatus, nowMs: number): boolean {
+  const evidence = laneEvidenceMs(status);
+  return evidence !== undefined && nowMs - evidence > pastWaveThresholdMs;
+}
 
 export function laneState(status: LaneStatus, nowMs: number): LaneState {
   const { derived } = status;
@@ -71,6 +102,15 @@ export function laneState(status: LaneStatus, nowMs: number): LaneState {
     return "running";
   }
   if (derived.pr === undefined) {
+    // X35: `vanished` must mean something bad — a run that ended, or a
+    // terminal claim with no PR to show. A lane whose last words were
+    // `started`, with no EXIT in its log and nothing said since, has not been
+    // seen vanishing; it has not been seen at all, and that is a missing
+    // measurement, which is what `unknown` exists to say. Collapsing this arm
+    // back into `vanished` is the mutation this lane's test refuses.
+    if (status.reported?.event === "started" && derived.exit === undefined) {
+      return "unknown";
+    }
     return "vanished";
   }
   // S3's precedence decision for an open PR, stated once here and mirrored by

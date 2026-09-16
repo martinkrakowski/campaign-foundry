@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "lane": "X31",
+  "mutations": [
+    {
+      "file": "packages/CreativeGeneration/src/infrastructure/adapters/__tests__/CanvasFfmpegVideoCompositor.byte-golden.test.ts",
+      "before": "        await new CanvasFfmpegVideoCompositor({ ffmpegPath: alias, spawn }).compositeVideo(canonicalMp4Request());",
+      "after": "        await new CanvasFfmpegVideoCompositor({ spawn }).compositeVideo(canonicalMp4Request());",
+      "because": "The byte golden used to construct CanvasFfmpegVideoCompositor without ffmpegPath, so an override honoured by the probe and stream extraction did not reach the encode under test. Reverting the constructor argument restores that split at the construction the identity test observes: the adapter falls back to its ffmpeg-static default, and the spawn recorder captures that path instead of the resolved binary's alias.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--maxWorkers=2",
+        "--project",
+        "node",
+        "packages/CreativeGeneration/src/infrastructure/adapters/__tests__/CanvasFfmpegVideoCompositor.byte-golden.test.ts",
+        "-t",
+        "the encode spawns the resolved COMPOSITOR_FFMPEG_PATH binary"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
