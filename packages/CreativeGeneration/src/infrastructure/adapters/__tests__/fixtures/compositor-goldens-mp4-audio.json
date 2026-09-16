@@ -1,0 +1,20 @@
+{
+  "darwin-arm64": {
+    "fileHash": "e40a2ee6939048fd437d1bbec83ba067ef3ff9a0545e25b8d269286b9d161799",
+    "audioStreamHash": "42163c066a8ba060a54bf0fc71df0fe393c9b7845497e09a481881036e34edf2",
+    "ffmpegVersion": "6.0",
+    "x264Version": "core 164 r3075 66a5bc1",
+    "threads": "1"
+  },
+  "linux-x64": {},
+  "platformProvenance": {
+    "darwin-arm64": {
+      "reprovedBy": "nothing",
+      "note": "Recorded once, on one machine (macOS, Apple silicon). No runner re-proves these cells: CI is ubuntu-latest, so this key is asserted by nothing and a drift here fails no build."
+    },
+    "linux-x64": {
+      "reprovedBy": "ci",
+      "note": "Re-proved by CI on every run: the test job is ubuntu-latest, so these cells are asserted, not merely recorded, and a drift here fails the build."
+    }
+  }
+}

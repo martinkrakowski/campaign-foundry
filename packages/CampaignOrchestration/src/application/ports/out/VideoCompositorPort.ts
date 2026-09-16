@@ -13,6 +13,14 @@ export interface VideoCompositeRequest extends CompositeRequest {
    * samples the key beat (D7).
    */
   readonly timeline?: CopyTimeline;
+  /**
+   * The music bed's encoded bytes (any container/codec ffmpeg can decode —
+   * e.g. mp3/wav/m4a), muxed as a second input and re-encoded to AAC. Absent
+   * (the only value VE3a's interim refusal lets through today) leaves the
+   * args array and the output bytes exactly what they are without this field
+   * (VE-D3). VE3b2 fills this in from an upload; nothing populates it yet.
+   */
+  readonly audio?: Uint8Array;
 }
 
 export interface VideoCompositeResult {
