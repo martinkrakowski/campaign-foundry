@@ -1,6 +1,6 @@
 # Keyframing — Architecture & Development Plan
 
-**Date:** 2026-09-10 · **Status:** in progress. **Stale as of 2026-09-16: K1a, K1b, K2 and K3 have all
+**Date:** 2026-09-10 · **Status:** in progress. **Stale as of 2026-09-16: K1a, K1b, K2, K3 and K4 have all
 shipped.**
 **Verified against:** `main` at `ed5e2dc`.
 **Replaces** the keyframe half of the retired `2026-09-08_motion-composition-implementation-plan.md`.
@@ -73,7 +73,7 @@ stays as it is, and text-effect tracks play on beat-local progress exactly as th
 | **K1b** | **Shipped.** **The resolver.** `resolveTracks(layers, beats, clocks) → { byLayer, copy }` (K-D8), pure, beside `beatAt`, in `resolve-tracks.ts`. Composition per property (K-D9), folded in declaration order. **No caller in the compositor yet** — K2 wires it. | Interpolation at the default easing per clock; the legacy single-beat path; a crossfade instant's two complementary `copy` mixes; `dy` tracks add and `opacity` tracks multiply in a fixture that proves fold order matters. |
 | **K2** | **Shipped.** **Three of the four `MOTION_KINDS` are tracks, rendered from the resolver; the fourth (`accent-wipe`) stayed drawer-local, decided, not deferred.** `ken-burns-in`/`ken-burns-out` are a `pose`-clock `scale` track on the ground (`image`/`video`) layer (K-D8 fix-round-2's refusal of a `beat`/`effect`-clock ground track was never tested against, since neither kind needs one). `headline-rise` is `opacity` + `dy` `beat`-clock tracks on the text layer, resolved through `resolveTracks`'s `copy` bucket. `accent-wipe`'s motion is a clip extent no `TRACK_PROPERTIES` member represents and the accent layer is not in `TRACKABLE_LAYER_KINDS` at all — reusing an existing property as a stand-in would be a fifth property in disguise (K4's future hand-authored tracks would then read it two different ways depending on layer kind), so `motion-tracks.ts`'s `accentWipeFraction` keeps the wipe as `paintAccent`'s own drawer-local animation and only relocates the `motion === "accent-wipe"` comparison itself, out of the compositor. The vocabulary the user writes does not change. | **Per-frame byte-identity** for every motion kind across the canonical templates. Any drift stops the lane. **Met:** all 48 motion-golden cells, the mp4 byte golden, and the HL3 raster suite are unchanged. |
 | **K3** | **Shipped.** **The four `TEXT_EFFECT_VALUES` are tracks, rendered from the resolver, the same way K2 did the four `MOTION_KINDS`.** `motion-tracks.ts`'s `textEffectTracks(effect, spec, width, height)` expands each kind into a single-property, two-stop `effect`-clock track on the text layer — `fade-in` → `opacity`, `rise-in` → `dy`, `slide-in` → `dx`, `scale-in` → `scale` — with stops at `t = 0` and `t = CREATIVE_GEOMETRY.textEffect.entranceFraction`; holding past the last stop (`resolveTracks`'s own contract) reproduces the settled pose with no separate branch. The tracks join `copyMotionTracks`'s own tracks in the SAME layer entry, so one `resolveTracks` call folds both in the old composition order (K-D9) — `NodeCanvasCompositor.ts`'s `textEffectPose` switch is gone, and `drawBeat`/`drawStaticText` now just paint the resolved `Pose` directly. | **Per-frame byte-identity** for every text effect across the canonical templates, including the beat-local windows and the settled-pose behaviour. **Met, corrected 2026-09-16:** the K3 PR's first cut claimed this was proven by the 48 motion-golden cells, the mp4 byte golden and the HL3 raster suite — a reviewer (Qodo) and the K3 lane's own mutation manifest both found that none of those three ever sets `prepared.textEffect`, so they proved nothing about text effects specifically. `NodeCanvasCompositor.text-effect-goldens.test.ts` (added same-day) closes the gap: 16 committed cells (four effects × legacy/timeline path × an entrance and a settled frame — the timeline cells sample the second beat's own window with `effectT` left undefined, so the beat-local fallback clock is what is pinned, not a caller-supplied one), on two platforms, recorded from `origin/main`'s pre-K3 `textEffectPose` and reproduced byte-for-byte on the K3 branch before being committed — this is the suite K3's own mutations now fail (one by a genuine 4-cell hash move, one by a crash before any hash is computed — see §5's premise retirement for which is which). The original three suites still stay unchanged (a real, if narrower, proof that K3 did not disturb the motion/HL3/mp4 paths), and the pre-existing exact-`toBe` drawn-output suite (`NodeCanvasCompositor.text-effect.test.ts`) is unchanged too — but the per-frame byte-identity claim for text effects specifically now rests on the new golden family, not on those three. |
-| **K4** | **Author tracks directly in a brief**, alongside presets; a hand-authored track and a preset's expansion on one layer and property **compose per K-D9** (no precedence rule) — preset expansions fold **before** hand-authored tracks, K3's existing order, and that is the only order. `html` refuses tracks (K1a), so K4 (and K5) never offer tracks on an `html` layer. | A hand-authored track renders; a track on an absent or disabled layer renders nothing and says nothing; `canonicalLayer` (K5/X16) drops `tracks: []` exactly as it drops `elements: []`. |
+| **K4** | **Shipped.** **A layer's own hand-authored `tracks` (K1a) now reach the renderer.** All three `resolveTracks` call sites in `NodeCanvasCompositor.ts` (`drawSequencedCopy`, `paintBackground`, `drawStaticText`) spread `...(layer.tracks ?? [])` as the LAST element of the tracks array they build — after both synthesized sources (K2's motion tracks, K3's text-effect tracks) — so a hand-authored track and a preset's expansion on one (layer, property) **compose per K-D9** (no precedence rule): preset expansions fold **before** hand-authored tracks, K3's existing order, and that is the only order. `html` refuses tracks (K1a), so K4 (and K5) never offer tracks on an `html` layer. | **Met.** A hand-authored track renders (proven on all three call sites); a track on a disabled layer renders nothing and says nothing (K-D4, via the existing `isDisabledLayer` skip and `resolveTracks`'s own `enabledTracks`); a fold-order fixture (preset, then two authored opacity tracks) proves the declared order is the only one that reproduces the pinned float. `canonicalLayer` (K5/X16 territory) is out of scope for this lane. |
 | **K5** | **The editor surface** — whatever minimum lets a user see and adjust a track. Scope deferred until K1–K4 land. | Out of scope for this document beyond naming it. |
 
 **Order.** The video plan first — **VF2** (an MP4 byte golden) then **VF1** (the full order) — then K1 → K2 → K3 → K4. VF2 matters to K2 specifically: without a byte golden the "byte-identical preset expansion" gate can only compare frames, which is weaker than what D10 claims. **K2 is the gate**: if the four
@@ -100,7 +100,15 @@ stops rather than shipping a second system beside the presets.
   motion-golden cells, the mp4 byte golden and the HL3 raster suite proved this; none of those three
   ever sets a text effect, so they proved only that K3 left the motion/HL3/mp4 paths undisturbed, not
   that the text effects themselves are byte-identical. Those three remain unchanged as well.
-- **K4**: presets and hand-authored tracks coexist, composing per K-D9.
+- **K4 (shipped)**: presets and hand-authored tracks coexist, composing per K-D9 — proven at all three
+  `resolveTracks` call sites in `NodeCanvasCompositor.ts` (`drawSequencedCopy`/`paintBackground`/
+  `drawStaticText`) by `NodeCanvasCompositor.authored-tracks.test.ts`: an authored track changes the
+  drawn frame and removing it restores the pre-change bytes, a disabled layer's authored track resolves
+  to nothing (K-D4), and a three-track fold-order fixture (preset, then two authored opacity tracks)
+  shows the declared order is the only one that reproduces the pinned float. Every existing golden
+  family — the 48 motion-golden cells, the 16 text-effect-golden cells, the mp4 byte golden, and the
+  HL3 raster suite — is unchanged, because no canonical template's layers carry `tracks`, so
+  `layer.tracks ?? []` spreads empty everywhere those suites render.
 - **Throughout**: `MOTION_KINDS` and `TEXT_EFFECT_VALUES` remain the brief vocabulary. A user who
   never writes a track sees no change, ever.
 - **Interim contract (from K1a's merge until K3/K4 ship):** a brief that carries `tracks` validates
@@ -373,34 +381,21 @@ brief's layer) and pass those to `resolveTracks`; the interim contract (§3) is 
 the compositor reads a layer's `tracks` field until a lane makes it do so, and expanding a preset needs
 no such read. K4 is that lane.
 
-```premise K4
-# K4 authors tracks directly in a brief, alongside presets. K-D9 already fixed
-# how a hand-authored track and a preset's expansion on one (layer, property)
-# compose (declaration order, never a precedence rule), so K4's own
-# contribution is the missing READ: a hand-authored layer.tracks reaching the
-# renderer at all. (Two earlier framings failed first: two name-probes with
-# no fixed decision name to find, then a canonicalLayer probe that could fail
-# safe forever and also flipped K5's own fence in the same commit K4's PR
-# would retire this one -- see the prose above.)
-#
-# By the time K4 ships, K2/K3 have already wired resolveTracks into
-# NodeCanvasCompositor.ts, expanding MOTION_KINDS/text-effect presets into
-# SYNTHESIZED tracks -- built from the motion/effect kind, never read off a
-# layer's own `tracks` field (the interim contract, S3, is explicit that
-# nothing in the compositor reads it until a lane makes it do so). Today
-# this file contains no `.tracks` property access at all (verified). K4 is
-# the lane that adds one -- reading a brief's hand-authored layer.tracks so
-# it can fold alongside (or feed) the preset expansion.
-#
-# How this can still fail: if K2/K3's wiring passes the WHOLE layer object
-# through to resolveTracks (rather than a synthesized-tracks-only view) for
-# an unrelated reason, some ".tracks" access could appear before K4 for
-# reasons that have nothing to do with hand-authored tracks, flipping this
-# fence early on a K2/K3 PR. Re-anchor by symbol at that point rather than
-# trusting the flip; `plan:verify` only fails on STALE, so nothing else will
-# say which lane actually caused it.
-! grep -q '\.tracks' packages/CreativeGeneration/src/infrastructure/adapters/NodeCanvasCompositor.ts
-```
+**K4 — shipped in this PR.** The read site is `NodeCanvasCompositor.ts`: all three `resolveTracks` call
+sites (`drawSequencedCopy`, `paintBackground`, `drawStaticText`) now spread `...(layer.tracks ?? [])` as
+the last element of the tracks array they build for that layer, after both synthesized sources (K2's
+`copyMotionTracks`/`groundMotionTracks`, K3's `textEffectTracks`) — so a hand-authored track and a
+preset's expansion on one (layer, property) compose per K-D9 (declaration order, never a precedence
+rule): preset first, authored last, and that is the only order a fold-order fixture
+(`NodeCanvasCompositor.authored-tracks.test.ts`) proves reproduces the pinned float. An absent
+`layer.tracks` spreads an empty array, so every existing golden family — the 48 motion-golden cells, the
+16 text-effect-golden cells, the mp4 byte golden, the HL3 raster suite — renders byte-identically,
+because no canonical template's layers carry `tracks`. This fence (`! grep -q '\.tracks' …
+NodeCanvasCompositor.ts`) now exits 1 — the file contains `.tracks` property accesses — so it is
+retired here rather than left to flip `plan:verify` to STALE.
+
+**K5 is now unblocked.** K1–K4 have all shipped; K5 (the editor surface) can start. Its own premise
+fence (below) stays live — nothing in `apps/web/src/components/campaign` reads or writes a track yet.
 
 ---
 

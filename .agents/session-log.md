@@ -5755,3 +5755,28 @@ Cite: VE5b2 in docs/planning/2026-09-13_video-editing-features.md.
   - Layout and Review `PreviewFrame` hosts omit `identityKey` (those steps do not mount while Campaign Name is typed). First save still clears once, as `source.kind` becomes `file` and identity moves from tempId to the slug.
 
 Cite: §5a in docs/planning/2026-09-16_creative-first-chrome.md
+
+## 2026-09-16 — K4: a layer's own authored tracks reach the renderer (AI session)
+
+The gap K1a–K3 left open: `layerTracksProblem` validated a layer's `tracks` field at both brief
+boundaries, but nothing in `NodeCanvasCompositor.ts` ever read it — all three `resolveTracks` call sites
+(`drawSequencedCopy`, `paintBackground`, `drawStaticText`) built their tracks array entirely from
+synthesized sources (K2's motion tracks, K3's text-effect tracks). K4 closes that read: each site now
+appends `...(layer.tracks ?? [])` as the LAST element of the array it already builds, after both
+synthesized sources — K-D9's declaration-order fold (preset first, authored last) was already fixed by
+K1b/K3; K4 invents no new precedence rule. An absent `layer.tracks` spreads an empty array, so every
+existing golden family (48 motion-golden cells, 16 text-effect-golden cells, the mp4 byte golden, the
+HL3 raster suite) renders byte-identically — none of the canonical templates carries an authored track.
+
+Red tests shown first (`NodeCanvasCompositor.authored-tracks.test.ts`, 5/5 failing against the pre-K4
+source, each for its own reason: an authored track and a trackless layer rendered byte-identical on all
+three call sites, since nothing read the field; the fold-order fixture pinned the bare preset value
+0.784 instead of the composed 0.047040000000000005; the disabled-layer test's "enabling changes the
+frame" half failed the same way as the first). `mutate:verify .agents/manifests/k4.json`: 2/2 mutations
+reproduced — (a) folding authored before preset at the `drawStaticText` site fails only the fold-order
+fixture (a different float in the last bits, `0.04704` vs `0.047040000000000005`); (b) dropping the read
+at that same site fails the three legacy-path tests, leaving the timeline-path and ground-layer tests
+green (that mutation only touches one of the three sites). Neither mutation moves a golden — verified
+empirically by running all four golden suites alongside each mutation, stated plainly in the manifest
+rather than implied.
+Cite: K4 in docs/planning/2026-09-10_keyframing.md.

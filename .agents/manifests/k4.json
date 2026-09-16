@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "lane": "K4",
+  "mutations": [
+    {
+      "file": "packages/CreativeGeneration/src/infrastructure/adapters/NodeCanvasCompositor.ts",
+      "before": "        tracks: [\n          ...copyMotionTracks(motion, height),\n          ...textEffectTracks(prepared.textEffect, prepared.canvas, width, height),\n          ...(layer.tracks ?? []),\n        ],",
+      "after": "        tracks: [\n          ...(layer.tracks ?? []),\n          ...copyMotionTracks(motion, height),\n          ...textEffectTracks(prepared.textEffect, prepared.canvas, width, height),\n        ],",
+      "because": "Mutation (a) from the K4 brief: fold the layer's authored tracks BEFORE the preset expansion instead of after, in drawStaticText (the legacy-path call site). K-D9's fold is declaration order, so this changes which pairwise products IEEE-754 rounds first. Caught by NodeCanvasCompositor.authored-tracks.test.ts's fold-order fixture: preset (headline-rise's opacity track, exactly easeOutCubic(0.4) with no reassociation) then two authored opacity constants (0.2, 0.3) must fold to 1 * preset * 0.2 * 0.3 = 0.047040000000000005; this mutation instead produces 1 * 0.2 * 0.3 * preset = 0.04704 -- a different float in the last bits, caught by an exact toBe, not an approximation. No golden moves: verified empirically by running NodeCanvasCompositor.motion-goldens.test.ts (48 cells), NodeCanvasCompositor.text-effect-goldens.test.ts (16 cells), NodeCanvasCompositor.layer-order.test.ts (the HL3 raster suite) and CanvasFfmpegVideoCompositor.byte-golden.test.ts (the mp4 byte golden) alongside this mutation -- all four stay green, because no canonical template's layers carry an authored `tracks` field, so `layer.tracks ?? []` spreads an empty array regardless of where in the declaration order it sits. The other four authored-tracks.test.ts cases also stay green: this mutation only touches drawStaticText, not drawSequencedCopy or paintBackground, so the timeline-path and ground-layer tests are unaffected by it.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CreativeGeneration/src/infrastructure/adapters/__tests__/NodeCanvasCompositor.authored-tracks.test.ts",
+        "packages/CreativeGeneration/src/infrastructure/adapters/__tests__/NodeCanvasCompositor.motion-goldens.test.ts",
+        "packages/CreativeGeneration/src/infrastructure/adapters/__tests__/NodeCanvasCompositor.text-effect-goldens.test.ts",
+        "packages/CreativeGeneration/src/infrastructure/adapters/__tests__/NodeCanvasCompositor.layer-order.test.ts",
+        "packages/CreativeGeneration/src/infrastructure/adapters/__tests__/CanvasFfmpegVideoCompositor.byte-golden.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CreativeGeneration/src/infrastructure/adapters/NodeCanvasCompositor.ts",
+      "before": "        tracks: [\n          ...copyMotionTracks(motion, height),\n          ...textEffectTracks(prepared.textEffect, prepared.canvas, width, height),\n          ...(layer.tracks ?? []),\n        ],",
+      "after": "        tracks: [\n          ...copyMotionTracks(motion, height),\n          ...textEffectTracks(prepared.textEffect, prepared.canvas, width, height),\n        ],",
+      "because": "Mutation (b) from the K4 brief: ignore the layer's own `tracks` field entirely at this call site (drawStaticText) -- exactly the pre-K4 gap the brief describes, reintroduced at one of the three read sites. Caught by three of NodeCanvasCompositor.authored-tracks.test.ts's five tests, all of which exercise the legacy path (drawStaticText): the authored-opacity-changes-the-frame test (an authored track and a trackless layer now render byte-identically, since the track is never read), the fold-order fixture (the resolved alpha is stuck at the bare preset value 0.784, since the two authored opacity tracks never fold in at all), and the disabled-layer test (its 'enabled with a track differs from baseline' half fails for the same reason as the first test -- the authored track has no effect whether the layer is enabled or not). The other two tests -- the drawSequencedCopy (timeline-path) and paintBackground (ground-layer) authored-track tests -- stay green, because this mutation touches only drawStaticText's own spread, not the other two call sites; stated precisely rather than implied, this mutation is scoped to one of the three sites K4 changed, and the manifest's own command shows exactly which tests that scoping does and does not reach. No golden moves: NodeCanvasCompositor.motion-goldens.test.ts, NodeCanvasCompositor.text-effect-goldens.test.ts, NodeCanvasCompositor.layer-order.test.ts and CanvasFfmpegVideoCompositor.byte-golden.test.ts all stay green under this mutation too, for the same reason as mutation (a): none of the canonical templates carries an authored `tracks` field, so no golden's rendering path is reachable by this mutation at all.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CreativeGeneration/src/infrastructure/adapters/__tests__/NodeCanvasCompositor.authored-tracks.test.ts",
+        "packages/CreativeGeneration/src/infrastructure/adapters/__tests__/NodeCanvasCompositor.motion-goldens.test.ts",
+        "packages/CreativeGeneration/src/infrastructure/adapters/__tests__/NodeCanvasCompositor.text-effect-goldens.test.ts",
+        "packages/CreativeGeneration/src/infrastructure/adapters/__tests__/NodeCanvasCompositor.layer-order.test.ts",
+        "packages/CreativeGeneration/src/infrastructure/adapters/__tests__/CanvasFfmpegVideoCompositor.byte-golden.test.ts"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
