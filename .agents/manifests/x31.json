@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "lane": "X31",
+  "mutations": [
+    {
+      "file": "packages/CreativeGeneration/src/infrastructure/adapters/__tests__/CanvasFfmpegVideoCompositor.byte-golden.test.ts",
+      "before": "      const { video } = await new CanvasFfmpegVideoCompositor({ ffmpegPath }).compositeVideo(canonicalMp4Request());",
+      "after": "      const { video } = await new CanvasFfmpegVideoCompositor().compositeVideo(canonicalMp4Request());",
+      "because": "The byte golden used to construct CanvasFfmpegVideoCompositor without ffmpegPath, so an override honoured by the probe and stream extraction did not reach the encode under test. Reverting the constructor argument restores that split: COMPOSITOR_FFMPEG_PATH is a wrapper that records libx264 invocations, the encode runs on ffmpeg-static instead, and the identity test's marker is absent.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--maxWorkers=2",
+        "--project",
+        "node",
+        "packages/CreativeGeneration/src/infrastructure/adapters/__tests__/CanvasFfmpegVideoCompositor.byte-golden.test.ts",
+        "-t",
+        "the compositor under test encodes with COMPOSITOR_FFMPEG_PATH"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

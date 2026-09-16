@@ -1407,6 +1407,37 @@ code (caught vs. survived) can express.
 
 ---
 
+## 37. The mp4 byte golden can encode with one ffmpeg and record another's version (X31)
+
+**Evidence.** Re-checked on `main` (`84f271e4`) before this lane touched anything.
+`packages/CreativeGeneration/src/infrastructure/adapters/__tests__/CanvasFfmpegVideoCompositor.byte-golden.test.ts`
+resolves `ffmpegPath` from `COMPOSITOR_FFMPEG_PATH` (else `ffmpeg-static`) and uses that path to
+probe `ffmpegVersion` and to extract the H.264 stream whose `streamHash` is asserted — but it
+constructed `new CanvasFfmpegVideoCompositor()` with no `ffmpegPath`, so the encode under test
+always ran on the adapter's own default (`ffmpeg-static`). VE3b1 found this outside its scope
+and had already passed `{ ffmpegPath }` in its new `CanvasFfmpegVideoCompositor.audio-golden.test.ts`;
+the older sibling still carried the latent split. Confirmed still true: the constructor on main
+took no options. The override is not read inside the adapter, so the defect was reachable
+whenever `COMPOSITOR_FFMPEG_PATH` pointed at a different binary than `ffmpeg-static`.
+
+**Consequence.** With the override set, the hash compared (or recorded) can come from one binary
+while the `ffmpegVersion` / `x264Version` stored beside it describe another. A mismatch then
+reads as "the encoder changed" or "the fixture is stale" when the real bug is that the suite
+never encoded with the binary it claimed to be pinning.
+
+**X31 — shipped in this PR.** The byte golden now constructs
+`new CanvasFfmpegVideoCompositor({ ffmpegPath })`, the same shape VE3b1's audio golden already
+used — one resolved binary for probe, encode, extract, and recorded versions. The adapter is
+untouched; no golden was re-recorded (the committed hashes were produced by the default binary,
+and with no override set the encode path is the same bytes as before). Red-first: a subprocess
+points `COMPOSITOR_FFMPEG_PATH` at a wrapper that execs the real binary and records `libx264`
+invocations; before the constructor argument that marker was absent (probe and extract hit the
+wrapper, encode did not); after, it is present. Mutation manifest `.agents/manifests/x31.json`:
+reverting the constructor argument drops the encode back onto `ffmpeg-static` and the identity
+test fails.
+
+---
+
 ## 40. The 5s per-test budget was never calibrated for the editor's integration tests (X36)
 
 **Evidence.** `vitest.config.ts` sets no `testTimeout` at all, so every project inherits Vitest's
