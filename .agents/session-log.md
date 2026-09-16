@@ -5505,3 +5505,27 @@ docs/planning/2026-09-10_the-unowned-gaps.md, including the honest arithmetic th
 multiplier (§33) does not actually predict either the pre- or post-fix CI timeout on these specific
 tests — so the CI margin is not confirmed cleared by this PR; only a CI round-trip can answer that,
 the same limit X30 and X32 both recorded before it.
+
+X34 fix round (model review, #439): Qodo caught a real gap the first equivalence test's POST-body-only
+comparison could not see — `setField` (change+blur only) never fired a click, so `touchedSections`
+never gained "identity"/"copy"/"products" the way a real click-before-typing does, and its explicit
+`fireEvent.blur` on the last field left it blurred where the typed path leaves it *focused*. Fixed:
+`setField` is now `fireEvent.click` (marks the section touched) + `el.focus()` (moves real focus,
+which blurs whatever was focused before — one blur per transition, not one per field) +
+`fireEvent.change` (the value) — no explicit trailing blur, so the last field stays focused exactly as
+typing leaves it. Extended the equivalence test to a three-way pin: (a) the saved draft as before, (b)
+which sections read as touched, observed by making product 0's colour invalid through a plain
+`fireEvent.change` (no click/blur of its own) and checking whether the error renders, (c)
+`document.activeElement` identified by its `data-field-key`, pinned to the concrete expected value
+("product-1-logo"). All three pass and agree between the typed and fast paths. Honestly reported, not
+hidden: the touched-sections check cannot isolate the per-field click's own contribution for Products,
+because `fillValidDraft`'s pre-existing `Add product` button click already marks that section touched
+regardless — and Identity/Copy have no candidate field at all, since every field either section
+contains is also directly field-touched by its own blur. Recorded as a manifest `note` rather than a
+manufactured mutation. Re-measured after the fix (better than the first version): `fillValidDraft`
+commits 70 → 30 (−57%, not −51%); whole file 30.54s → 27.42s; the three affected tests
+579→415ms/905→681ms/1038→821ms. Added a third mutation to `.agents/manifests/x34.json` — drop
+`el.focus()` — caught (the draft stays byte-identical; only the focus assertion fails), reproduced by
+`yarn mutate:verify` (3 mutations, all reproduced). §36 (X34) of
+docs/planning/2026-09-10_the-unowned-gaps.md updated with the corrected numbers and the honest
+touched-sections limitation.
