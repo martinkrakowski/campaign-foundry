@@ -5861,3 +5861,78 @@ one) with a `localizedMessage`-only candidate, still pinned to the golden hash. 
 the conditional spread locally and confirmed both new tests failed on identical-hash equality before
 restoring. Fourth mutation added to `.agents/manifests/x33.json` — drop the `localizedMessage` spread
 — proving the new coverage; all four mutations reproduce under `mutate:verify`.
+
+## 2026-09-16 — wave record: CI-as-gate, and the fourteen merges of this session
+
+The measurement that changed how this session ran: **`.github/workflows/ci.yml` runs every step the
+local gate runs** — `sync:check`, `lint:arch`, `plan:verify`, `arch:inventory`, the changed-manifest
+replay, `build`, `typecheck`, `lint`, `test:cov` at 100%. So the local full gate was never the thing
+that made a lane trustworthy; it was the thing that made lanes *serial*, because two coverage runs on
+this host collide on `coverage/.tmp` and two heavy runs exhaust its memory. With CI as the gate, the
+briefs tell each lane to run only its own targeted suites and push. Five lanes then ran at once
+without a single memory kill, against a measured ceiling of one for opencode.
+
+**Lanes merged in the final wave.** K4 (#449) — a layer's own `tracks` finally reach the renderer,
+appended last at all three `resolveTracks` sites, so an absent field spreads an empty array and every
+golden family is byte-identical; K5 is unblocked. TL1 (#445) — the template port gets its first
+consumer, two read-only routes, after a fix round. FI1 (#448) — a fresh draft's preview no longer
+blanks on every keystroke of Campaign Name, keyed on the pre-existing `source.tempId` rather than the
+live slug. ES1 (#446) — the estimate sentence states that an uploaded scene spends nothing, closing
+VE5b2's trailing web half. X33 (#447) — a selective re-roll is now pinned to the brief's copy, not
+only its axes.
+
+**Every lane arrived green on its own gate and still had at least one real defect found in review.**
+That held for all five, as it has all session. Two are worth recording because the fault was the
+orchestrator's brief, not the implementer's work:
+
+- **X33's copy hash covered two of the timeline's five fields.** The brief said "`copy.timeline` in
+  full" and then enumerated only `text` and `background`, omitting `beat.weight`,
+  `timeline.transition` and `timeline.keyBeat` — each of which changes what renders (duration share,
+  cut-vs-fade, and which frame becomes the poster, D7). The lane implemented exactly what was
+  written. Qodo found it as a High; the fix covers all five and the doc comment now names them.
+- **TL1's version parsing could serve a version the caller did not pin.** `Number("9007199254740993")`
+  is `9007199254740992`, so a pinned reference could resolve to a *different stored version* — D123's
+  immutability promise broken on the wire by silent precision loss. `007` was the same class. Now a
+  canonical `/^[1-9][0-9]*$/` plus a `BigInt` bound, and the `@`-splitting moved to `lastIndexOf` since
+  `CreativeTemplate.id` is an unconstrained `string`. The case that stays broken (an id containing `@`
+  with no version) is written into the code comment rather than hidden.
+
+**Refuted, with mechanisms, not silence.** Qodo's "bypasses shared logging" and "bypasses the message
+catalog" against TL1: neither facility exists anywhere in `apps/api/server` — `console.warn` with an
+inline string is what `briefs.get.ts` and `assets.get.ts` both do. Three PR-Agent notes on ES1: the
+"cast to `any`" suggestion misread a plain fetch payload as a typed `PlanEstimate` (and typecheck
+passed on that exact tree), the `SAMPLE_ARGS` note inverted what a forbidden-substring scan does, and
+the leading-space note was conditioned on a change nobody made, already pinned by a literal assertion.
+
+**K3's goldens, and a rule worth keeping.** The text-effect family was first recorded in a
+`node:22-bookworm` container and differed from what `ubuntu-latest` draws in **all sixteen cells** —
+the suite was red on CI from its first run, reported as a RED BASELINE, which reads like a manifest
+fault and is really a recording-environment fault. A container sharing the base image is not the
+platform. Re-recorded by the runner itself twice: from `tmp/k3-text-effect-golden-baseline` at
+`7fa830de` (main at `c2ceb87b` plus the harness alone, pre-K3) in run `35134704264`, and from the K3
+branch in run `35134078561`. All sixteen cells identical — that, not one recording, is the
+equivalence proof. The container bytes were discarded rather than reconciled, and nothing was
+re-recorded to make a lane green.
+
+**Seats.** Four concurrent Sonnet subagents ran clean. grok delivered FI1 on one pass, reusing a real
+editor concept instead of inventing a key. opencode failed twice in one wave: `qwen3-coder` answers a
+one-word probe with `Unexpected server error`, and a `big-pickle` dispatch launched a minute after
+that model probed clean wrote **0 bytes with no process** — so ES1 moved to Sonnet rather than being
+debugged. An opencode failure is per-model *and* the seat is flaky beyond that.
+
+**Deferred, and why.** X1 (Prettier) runs alone — it touches every file and would conflict with any
+sibling. VE4 waits on the owner's speech vendor (ElevenLabs under evaluation). The chrome lanes
+CC1–CC7 are planned and owner-adopted but unscheduled; CC7 additionally wants a library *page*, not
+just the API this wave shipped. K5 is now unblocked by K4.
+
+**The wave-status page showed none of it, and that was the orchestrator's omission.** Only
+`dispatch-lane.sh` emits wave events; four of the five lanes ran as `Agent` subagents or a direct
+grok invocation, so they emitted nothing and the page — correctly, under X35's "evidence creates a
+lane" rule — had one event for the whole wave. `scripts/wave-event.sh` exists for exactly this case
+and the skill already says "emitting is part of the stage, not a courtesy"; the rule was not
+followed. Backfilled afterwards, each event carrying a `backfilled` detail saying the `ts` is the
+recording time rather than the event time, so the record does not misrepresent its own timeline.
+Two smaller lessons from the backfill: events must be emitted **in order**, because the page reads
+a lane's stage from the newest `ts` and a late-arriving earlier stage silently understates it; and
+`${4:+--pr $4}` does not word-split in zsh, so a helper that works standalone can fail for every
+call in a loop.

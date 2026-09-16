@@ -1592,3 +1592,43 @@ spawn the encode ran on, without assuming a POSIX shell. Mutation manifest
 `.agents/manifests/x31.json`: reverting the constructor argument at that construction drops the
 encode back onto `ffmpeg-static`, the recorder captures the default path, and the identity test
 fails.
+
+---
+
+## 41. The status page's "needs a human" count never ages out a past wave (X38)
+
+**Evidence.** `tools/wave-status/lib/lane-state.ts` records X35's decision as a named constant and a
+helper: `pastWaveThresholdMs` (24 h) and `isPastWaveLane`, whose own comment says *"a wave whose
+newest artefact — log write or event — is older than this belongs to a past wave, not to a broken
+current one."* But `isPastWaveLane` has **no consumer in the library** — `grep -rn isPastWaveLane
+tools/wave-status --include=*.ts` outside `__tests__` returns only its own definition. The page
+carries a copy and spends it on *presentation* only (the "stale evidence" wording and ageing the
+header's live register, `public/index.html:1665,1746`), while the rollup that produces the
+headline count, `laneNeedsHuman` (`public/index.html:1854`), consults the lane's state and nothing
+else.
+
+**Consequence, observed 2026-09-16.** With every PR of the day merged and no lane alive, the page's
+header read **"2 need a human"**. Both were history: `x9` in wave 1, whose event stream stops at
+`dispatch started` on **2026-09-13** while its PR #374 merged days earlier, and `l1` in wave
+`WTest1789233482035`. Each derives as `conflict` — `disagreements.length > 0`, the honest reading of
+"lane says dispatch started; the process is not alive and the log has no EXIT marker" — and
+`conflict` is in `NEEDS_HUMAN_STATES`, which is checked before any question of age. So a lane
+abandoned mid-record accuses the operator forever, and the count a person is meant to act on is
+indistinguishable from one describing live work. X35 closed "the page invents lanes" and "silence is
+not vanishing"; this is the same family's third member: **a past wave is not a current emergency.**
+
+**Fix sketch — not shipped — lane X38.** Either spend the decision the codebase already made (give
+`isPastWaveLane` its consumer: exclude past-wave lanes from `laneNeedsHuman` and from the
+page-level rollup, keeping them visible in the table with their own stale-evidence voice), or delete
+the helper as dead code and say plainly that the count is age-blind. The first is almost certainly
+right — the constant, the comment and the helper are all already there, and only the wiring is
+missing — but it is a decision about what the header *promises*, so it wants the owner's word and a
+test pinning the header to the same set the rows show, exactly as the existing parity test does.
+
+**Second, separable defect found alongside it.** `~/.waves/wave-WTest1789233482035` is a **test
+fixture written into the operator's real default log root** (`WAVE_LOG_ROOT`), which is why `l1`
+appears at all and why the server reports nine waves where a `--root /tmp` run reports eight (the
+server also reads `/tmp` as a legacy root). A test that writes a wave directory into the default
+root leaves permanent debris in a human's monitor. The fix belongs with X38 or beside it: tests
+write to a temporary root, never the default one. The stray directory is the owner's data and has
+not been deleted.
