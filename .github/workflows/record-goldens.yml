@@ -62,16 +62,34 @@ jobs:
       # 'audio' records ONLY compositor-goldens-mp4-audio.json — the other
       # three fixture files are never opened by this run, so they cannot move.
       # 'all' (default) keeps the original behaviour: every suite records.
+      #
+      # SUITE arrives via `env:`, never interpolated into the script: `${{ }}`
+      # is substituted into the run block's TEXT before bash ever sees it, so
+      # a `${{ inputs.suite }}` here would let anyone who can call this
+      # workflow_call inject shell (the workflow_dispatch choice list and the
+      # ci.yml caller both restrict the UI value, but workflow_call's own
+      # `type: string` input does not — the restriction has to hold at the
+      # point of use). Binding it to an env var makes it arrive as data; the
+      # `case` below is the actual enforcement, refusing anything but the two
+      # known values instead of building a file list by string concatenation.
       - name: Record compositor goldens
-        run: |
-          if [ "${{ inputs.suite }}" = "audio" ]; then
-            yarn vitest run packages/CreativeGeneration/src/infrastructure/adapters/__tests__/CanvasFfmpegVideoCompositor.audio-golden.test.ts
-          else
-            yarn vitest run packages/CreativeGeneration/src/infrastructure/adapters/__tests__/NodeCanvasCompositor.goldens.test.ts packages/CreativeGeneration/src/infrastructure/adapters/__tests__/NodeCanvasCompositor.motion-goldens.test.ts packages/CreativeGeneration/src/infrastructure/adapters/__tests__/CanvasFfmpegVideoCompositor.byte-golden.test.ts packages/CreativeGeneration/src/infrastructure/adapters/__tests__/CanvasFfmpegVideoCompositor.audio-golden.test.ts
-          fi
         env:
           NODE_ENV: test
           RECORD_COMPOSITOR_GOLDENS: "1"
+          SUITE: ${{ inputs.suite }}
+        run: |
+          case "$SUITE" in
+            audio)
+              yarn vitest run packages/CreativeGeneration/src/infrastructure/adapters/__tests__/CanvasFfmpegVideoCompositor.audio-golden.test.ts
+              ;;
+            all)
+              yarn vitest run packages/CreativeGeneration/src/infrastructure/adapters/__tests__/NodeCanvasCompositor.goldens.test.ts packages/CreativeGeneration/src/infrastructure/adapters/__tests__/NodeCanvasCompositor.motion-goldens.test.ts packages/CreativeGeneration/src/infrastructure/adapters/__tests__/CanvasFfmpegVideoCompositor.byte-golden.test.ts packages/CreativeGeneration/src/infrastructure/adapters/__tests__/CanvasFfmpegVideoCompositor.audio-golden.test.ts
+              ;;
+            *)
+              echo "::error::suite must be 'all' or 'audio', got: $SUITE"
+              exit 1
+              ;;
+          esac
 
       - name: Upload golden fixtures
         uses: actions/upload-artifact@v4
