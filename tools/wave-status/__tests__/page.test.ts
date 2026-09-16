@@ -4289,11 +4289,12 @@ describe("the status page", () => {
     }
   });
 
-  // X35: a page that cries wolf trains its reader to ignore it. These three
-  // tests pin the page's own faces of the truthfulness rule: silence after a
-  // start is a question (unknown), not an accusation (vanished); the row says
-  // why; and days-old evidence reads as a past wave, not as a broken current
-  // one — in the row's note and in the header's register.
+  // X35: a page that cries wolf trains its reader to ignore it. These tests
+  // pin the page's own faces of the truthfulness rule: silence after a
+  // start is a question (unknown), not an accusation (vanished); the row
+  // says why; days-old evidence ages the row and the header out of the live
+  // register — the header's age even when the wave holds no log at all; and
+  // a lane's own age never speaks as the wave's verdict.
   test("a started lane with nothing after it renders unknown, not vanished, and the row says why", async () => {
     const now = Date.now();
     const silentStatus = {
@@ -4339,7 +4340,7 @@ describe("the status page", () => {
     expect(cell?.textContent).toContain("nothing since");
   });
 
-  test("days-old evidence reads as a past wave in the row and in the header's register", async () => {
+  test("days-old evidence reads as stale in the row and past in the header, from an event alone where no log exists", async () => {
     const now = Date.now();
     const oldMs = now - 3 * 86_400_000;
     const pastStatus = {
@@ -4365,10 +4366,18 @@ describe("the status page", () => {
               derived: { alive: false, log: { bytes: 8, mtimeMs: oldMs, tail: "" } },
               disagreements: [],
             },
+          ],
+        },
+        {
+          // Event-only: this wave holds no log files at all, so its header
+          // age can only ever come from an event timestamp. Sharing a wave
+          // with a logged lane — as an earlier cut of this fixture did —
+          // let the other lane's log date the header and made the event
+          // assertion here undetectable.
+          id: "EV",
+          lanes: [
             {
-              // Event-only: no log anywhere, yet the wave is datable — from
-              // the last thing anyone said about it.
-              wave: "OLD",
+              wave: "EV",
               lane: "o2",
               reported: {
                 stage: "implement",
@@ -4385,9 +4394,11 @@ describe("the status page", () => {
     const page = await loadPage(pastStatus);
     const doc = page.window.document;
 
-    const oldAge = doc.querySelector('tr.wave[data-wave="OLD"] .wave-age') as unknown as HTMLElement;
-    expect(oldAge.textContent).toBe("3d ago");
-    expect(oldAge.classList.contains("past")).toBe(true);
+    for (const waveId of ["OLD", "EV"]) {
+      const age = doc.querySelector(`tr.wave[data-wave="${waveId}"] .wave-age`) as unknown as HTMLElement;
+      expect(age.textContent, `wave ${waveId}`).toBe("3d ago");
+      expect(age.classList.contains("past"), `wave ${waveId}`).toBe(true);
+    }
     const liveAge = doc.querySelector(
       'tr.wave[data-wave="LIVE"] .wave-age',
     ) as unknown as HTMLElement;
@@ -4396,10 +4407,56 @@ describe("the status page", () => {
 
     for (const lane of ["o1", "o2"]) {
       const cell = doc.querySelector(`tr.lane[data-lane="${lane}"] td.c-state`) as unknown as HTMLElement;
-      expect(cell.textContent, `lane ${lane}`).toContain("past wave");
+      expect(cell.textContent, `lane ${lane}`).toContain("stale evidence");
     }
     const liveCell = doc.querySelector('tr.lane[data-lane="t1"] td.c-state') as unknown as HTMLElement;
-    expect(liveCell.textContent).not.toContain("past wave");
+    expect(liveCell.textContent).not.toContain("stale evidence");
+  });
+
+  test("a mixed-age wave stays live in the header while its stale row names itself stale, never a past wave", async () => {
+    // The contradiction this pins: a wave holding one recent lane and one
+    // lane older than the threshold classifies as *not* past at the wave
+    // level (its newest evidence is minutes old) while the old lane's own
+    // evidence is days past. A row that printed "past wave" there made two
+    // statements about the same wave, disagreeing on screen. The row's note
+    // describes the lane's stale evidence; the header alone owns the words
+    // "past wave".
+    const now = Date.now();
+    const mixedStatus = {
+      generatedAt: new Date(now).toISOString(),
+      waves: [
+        {
+          id: "MIX",
+          lanes: [
+            {
+              wave: "MIX",
+              lane: "m1",
+              derived: { alive: true, log: { bytes: 8, mtimeMs: now - 30_000, tail: "" } },
+              disagreements: [],
+            },
+            {
+              wave: "MIX",
+              lane: "m2",
+              derived: { alive: false, log: { bytes: 8, mtimeMs: now - 2 * 86_400_000, tail: "" } },
+              disagreements: [],
+            },
+          ],
+        },
+      ],
+    } as unknown as WaveStatus;
+    const page = await loadPage(mixedStatus);
+    const doc = page.window.document;
+
+    const age = doc.querySelector('tr.wave[data-wave="MIX"] .wave-age') as unknown as HTMLElement;
+    expect(age.textContent).toBe("now");
+    expect(age.classList.contains("past")).toBe(false);
+
+    const staleRow = doc.querySelector('tr.lane[data-lane="m2"] td.c-state') as unknown as HTMLElement;
+    expect(staleRow.textContent).toContain("stale evidence");
+    expect(staleRow.textContent).not.toContain("past wave");
+    const freshRow = doc.querySelector('tr.lane[data-lane="m1"] td.c-state') as unknown as HTMLElement;
+    expect(freshRow.textContent).not.toContain("stale evidence");
+    expect(freshRow.textContent).not.toContain("past wave");
   });
 
   test("the page mirrors the exported past-wave threshold, to the millisecond", async () => {
