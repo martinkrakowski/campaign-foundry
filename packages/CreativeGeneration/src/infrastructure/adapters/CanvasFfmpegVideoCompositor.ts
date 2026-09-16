@@ -204,9 +204,19 @@ export class CanvasFfmpegVideoCompositor implements VideoCompositorPort {
       if (request.audio) {
         // No extension: ffmpeg probes the second input by content (RIFF/WAVE,
         // ID3, etc.), exactly as it would an uploaded file of unknown type.
+        //
+        // Empty (`request.audio.length === 0`) is not guarded: nothing populates
+        // this field until VE3b2 resolves an uploaded asset's real bytes, so a
+        // zero-length payload has no reachable caller and a guard for it could
+        // never be covered under this repo's 100% gate.
         const audioPath = join(workDir, "bed");
         await writeFile(audioPath, request.audio);
-        audio = { path: audioPath, durationSec: request.durationSec };
+        // Trim/fade to the video's ACTUAL encoded length (`frames`, already
+        // rounded above), not the request's unrounded `durationSec` — they can
+        // disagree (durationSec: 1.5, fps: 1 rounds to 2 frames = 2s of video),
+        // and computing the rounding a second time here would risk it drifting
+        // out of step with the one `compositeVideo` already did.
+        audio = { path: audioPath, durationSec: frames / request.fps };
       }
       const child = this.spawn(
         ffmpegPath,
@@ -371,7 +381,11 @@ function ffmpegArgs(
   if (audio) {
     // Explicit maps: without them, a bed whose container also carries e.g.
     // cover-art-as-a-video-stream could be picked over the piped frames.
-    args.push("-map", "0:v", "-map", "1:a");
+    // `1:a:0` (not `1:a`): a bare `1:a` maps EVERY audio stream in the bed's
+    // container (alternate languages, a commentary track), muxing several
+    // tracks and breaking this lane's "exactly one AAC track" acceptance
+    // criterion. `:0` pins it to the first.
+    args.push("-map", "0:v", "-map", "1:a:0");
   }
   args.push(
     "-c:v",

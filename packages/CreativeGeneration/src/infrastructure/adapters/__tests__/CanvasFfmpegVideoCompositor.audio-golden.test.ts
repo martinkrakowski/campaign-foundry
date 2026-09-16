@@ -186,7 +186,14 @@ describe("CanvasFfmpegVideoCompositor audio byte golden (VE3b1)", () => {
 
       const request = canonicalMp4Request();
       const audio = generateSineBedWav(ffmpegPath, CANONICAL_BED_DURATION_SEC, 48_000);
-      const { video } = await new CanvasFfmpegVideoCompositor().compositeVideo({ ...request, audio });
+      // Same binary that encodes must be the same binary this file probes and
+      // extracts streams with (`ffmpegPath`, honouring COMPOSITOR_FFMPEG_PATH) —
+      // otherwise a hash mismatch could mean "two different ffmpeg builds",
+      // not "the encoder changed".
+      const { video } = await new CanvasFfmpegVideoCompositor({ ffmpegPath }).compositeVideo({
+        ...request,
+        audio,
+      });
       const banner = parseX264Banner(video);
 
       const dir = mkdtempSync(join(tmpdir(), "cf-audio-golden-"));
