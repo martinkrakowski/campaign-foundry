@@ -1,12 +1,12 @@
 import { describe, test, expect } from "vitest";
-import { spawnSync } from "node:child_process";
+import { spawn as realSpawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { linkSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { CanvasFfmpegVideoCompositor } from "../CanvasFfmpegVideoCompositor.js";
+import { CanvasFfmpegVideoCompositor, type FfmpegSpawn } from "../CanvasFfmpegVideoCompositor.js";
 import { canonicalMp4Request } from "./canonical-mp4-request.js";
 import {
   compositorGoldenKey,
@@ -161,64 +161,36 @@ describe("CanvasFfmpegVideoCompositor byte golden (VG2)", () => {
     },
   );
 
-  test.runIf(!process.env.COMPOSITOR_BYTE_GOLDEN_SUBPROCESS && ffmpegOk)(
-    "the compositor under test encodes with COMPOSITOR_FFMPEG_PATH, not the ffmpeg-static default (X31)",
-    { timeout: 90_000 },
-    () => {
+  test.skipIf(!ffmpegOk)(
+    skipReason ??
+      "the encode spawns the resolved COMPOSITOR_FFMPEG_PATH binary, not the adapter's ffmpeg-static default (X31)",
+    { timeout: 60_000 },
+    async () => {
       if (!ffmpegPath) throw new Error("ffmpeg-static binary is not available");
+      // The adapter injects every encode through its `spawn` option, so the
+      // command it was invoked with is directly observable — no shell wrapper,
+      // no marker file, no subprocess re-entry, and no POSIX-shell assumption.
+      // Delegate to the real spawn afterwards so the recorded invocation is
+      // the one that actually produced the bytes.
+      const invocations: Array<{ readonly command: string; readonly args: readonly string[] }> = [];
+      const spawn: FfmpegSpawn = (command, args, options) => {
+        invocations.push({ command, args });
+        return realSpawn(command, [...args], options);
+      };
+      // The alias (a hard link to the resolved binary: same inode, different
+      // path) makes the assertion bite with or without the override set. The
+      // adapter's own default is `ffmpeg-static`'s path; dropping the
+      // constructor argument silently falls back to it, and a recorded
+      // command of the default path can never equal this alias.
       const dir = mkdtempSync(join(tmpdir(), "cf-x31-ffmpeg-path-"));
       try {
-        const marker = join(dir, "encode-invoked");
-        const wrapper = join(dir, "ffmpeg-wrapper");
-        writeFileSync(
-          wrapper,
-          [
-            "#!/bin/sh",
-            'for arg in "$@"; do',
-            '  if [ "$arg" = "libx264" ]; then',
-            '    : > "$COMPOSITOR_X31_ENCODE_MARKER"',
-            "    break",
-            "  fi",
-            "done",
-            'exec "$COMPOSITOR_X31_REAL_FFMPEG" "$@"',
-            "",
-          ].join("\n"),
-          { mode: 0o755 },
-        );
-        chmodSync(wrapper, 0o755);
+        const alias = join(dir, "ffmpeg-resolved");
+        linkSync(ffmpegPath, alias);
 
-        const vitestBin = fileURLToPath(
-          new URL("../../../../../../node_modules/vitest/vitest.mjs", import.meta.url),
-        );
-        const target = fileURLToPath(import.meta.url);
-        const result = spawnSync(
-          process.execPath,
-          [
-            vitestBin,
-            "run",
-            "--maxWorkers=2",
-            target,
-            "-t",
-            "canonical timeline's encoded MP4 matches the committed byte golden",
-          ],
-          {
-            env: {
-              ...process.env,
-              COMPOSITOR_FFMPEG_PATH: wrapper,
-              COMPOSITOR_X31_ENCODE_MARKER: marker,
-              COMPOSITOR_X31_REAL_FFMPEG: ffmpegPath,
-              COMPOSITOR_BYTE_GOLDEN_SUBPROCESS: "1",
-              RECORD_COMPOSITOR_GOLDENS: "0",
-            },
-            encoding: "utf8",
-            timeout: 75_000,
-          },
-        );
-        expect(result.status, result.stdout + (result.stderr ?? "")).toBe(0);
-        expect(
-          existsSync(marker),
-          "encode must spawn COMPOSITOR_FFMPEG_PATH (the wrapper), not the adapter default",
-        ).toBe(true);
+        await new CanvasFfmpegVideoCompositor({ ffmpegPath: alias, spawn }).compositeVideo(canonicalMp4Request());
+
+        expect(invocations.map((call) => call.command)).toEqual([alias]);
+        expect(invocations[0].args).toContain("libx264");
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }
