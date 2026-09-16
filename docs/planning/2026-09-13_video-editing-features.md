@@ -1,7 +1,7 @@
 # Video Editing Features — Architecture & Development Plan
 
 **Date:** 2026-09-13
-**Status:** Phase A shipped (VE1, VE2). VE-Q1–VE-Q4 answered by the owner on 2026-09-15 (VE-D8–VE-D11, recommended defaults, refined by plan review); VE5a then VE3a are dispatchable, serially (both edit `load-brief.ts`); VE3b and VE5b follow their predecessors. VE4 waits on the speech vendor (VE-Q5). VE6 is deferred (VE-D11).
+**Status:** Phase A shipped (VE1, VE2). VE-Q1–VE-Q4 answered by the owner on 2026-09-15 (VE-D8–VE-D11, recommended defaults, refined by plan review); VE5a then VE3a are dispatchable, serially (both edit `load-brief.ts`); VE3b1 shipped (the encoder's codec half — VE-D11 updated); VE3b2 (uploads, generation wiring, removes the interim refusal) and VE5b follow their predecessors. VE4 waits on the speech vendor (VE-Q5). VE6 is deferred (VE-D11).
 **Scope:** Which ideas from a reference video editor fit Campaign Foundry, and how each is built on
 the existing server-side compositor instead of beside it.
 **Related:** `2026-09-10_keyframing.md` (K1–K5), `2026-09-10_finishing-video.md`,
@@ -29,7 +29,7 @@ at `1f85d04`.
 | **VE-D8** | **Music rights are a record on the brief, checked in two tiers.** `audio: { path, rights: { licenceId, source, expiresOn?, territories? } }`. A missing `licenceId` or `source` **refuses the brief at load**. An `expiresOn` in the past **halts the run in the legal gate** exactly as prohibited copy does. **Territories** (refined by plan review — `targetRegion` is free text, `CampaignBrief.ts:24`, so coverage cannot be matched against prose): `territories` absent means worldwide; present, it is a non-empty array of ISO 3166-1 alpha-2 codes (`^[A-Z]{2}$`), and **shape-checked further**: the ISO 3166-1 user-assigned codes (`AA`, `QM`-`QZ`, `XA`-`XZ`, `ZZ`) are refused as a small pattern rule — real *assignment* to a country is not verified; load **refuses** a brief whose `targetRegion` (trimmed, upper-cased) is not itself an alpha-2 code while `territories` is present; the legal gate **halts** when that code is not in the set. Expiry is **re-checked at packaging**. Nothing is warned-and-rendered. | Owner, 2026-09-15 (VE-Q1). The code has three tiers — legal copy halts the run (`GenerateCampaignUseCase.use-case.ts` `runLegalGate`), brand density flags, occlusion advises — and a missing licence is a legal fact. The asset store carries no metadata channel, so the record lives on the brief. Packaging never re-renders (D11) and may run after expiry, hence the re-check — against the use case's injected `packagedAt`, never `new Date()`. |
 | **VE-D9** | **Voiceover is generated speech from a separate `voiceover.script` field**, swept by the legal gate with copy and beats, its audio cached by provider, model id and seed so a golden can pin it. **The vendor is VE-Q5.** | Owner, 2026-09-15 (VE-Q2). No speech code exists, so either answer is a new dependency; generated speech is one adapter and yields word timings for captions, where an upload needs a decoder and an aligner. A separate script keeps captions from repeating burned-in copy (VE-D4, M2). |
 | **VE-D10** | **At most 3 distinct per-beat backgrounds per timeline**, enforced as a timeline authoring rule in `CopyTimeline.vo.ts` beside `MAX_BEATS`, so the parser and the editor refuse the same thing (D3). (Refined by plan review: generated-vs-procedural is the *variant's* background source, `variant.backgroundSource`, invisible to the timeline validator — so the cap counts distinct values regardless of source, and "a procedural scene spends nothing" is a statement the **estimate** makes, in VE5b.) | Owner, 2026-09-15 (VE-Q3). No credit budget exists today, and variation mode multiplies scene cost by `count × ratios`; 3 covers open, middle and close. |
-| **VE-D11** | **"Does not add video decoding" stands.** VE6 is deferred, not scheduled; revisit only after VE3b's AAC golden proves audio determinism. | Owner, 2026-09-15 (VE-Q4). Decode is unpinned (the compositor pins encode and scale only), uploads are base64 JSON capped at 2 MiB, and goldens would need committed video fixtures. A poster-only slice (one still extracted at upload) is the recorded middle ground if footage becomes a requirement. |
+| **VE-D11** | **"Does not add video decoding" stands.** VE6 is deferred, not scheduled; revisit only after VE3b's AAC golden proves audio determinism. **VE3b1 proved it**: the pinned `ffmpeg-static` binary decodes the music bed's arbitrary input bytes deterministically — one process, two runs, byte-identical MP4 output (`CanvasFfmpegVideoCompositor.audio.test.ts`, darwin-arm64) — and the audio byte golden (`CanvasFfmpegVideoCompositor.audio-golden.test.ts`) pins that result across processes on darwin-arm64, with linux-x64 re-proved by CI's record-goldens workflow. This is audio decode, not video decode — VE6's gap (a pinned *video* decoder) is unaffected and still deferred. | Owner, 2026-09-15 (VE-Q4). Decode is unpinned (the compositor pins encode and scale only), uploads are base64 JSON capped at 2 MiB, and goldens would need committed video fixtures. A poster-only slice (one still extracted at upload) is the recorded middle ground if footage becomes a requirement. |
 
 ---
 
@@ -147,13 +147,30 @@ VE2 must not edit `editor-state.ts` or `BriefEditor.tsx`; those are VE1's.
 
 ### VE3b — Music bed in the encoder · after VE3a
 
+Split into two PRs for review size. **VE3b1 — shipped in this PR**: the port field, the encoder, and the
+audio golden. VE3a's interim run refusal stays in force through VE3b1, so no run can reach the new path
+from the product yet. **VE3b2 — after VE3b1**: audio uploads, passing the brief's audio at generation, and
+removing the interim refusal.
+
+#### VE3b1 — the port field, the encoder, the audio golden
+
 | # | Task | File(s) |
 |---|---|---|
-| 1 | Accept audio uploads (format list decided in the lane; the 2 MiB upload cap is the binding limit — say what it admits). Remove VE3a's interim run refusal. | `apps/api/server/lib/asset-files.ts` (upload patterns and magic checks), `routes/campaigns/assets.post.ts`, `load-brief.ts` |
-| 2 | Second ffmpeg input; encode AAC; cut to `durationSec`; short fade-out; keep bit-exact flags. | `CanvasFfmpegVideoCompositor.ts`, `VideoCompositorPort.ts` |
-| 3 | A second golden for the audio case; the silent golden must not move. | adapter golden tests |
+| 1 | `VideoCompositeRequest.audio?: Uint8Array` — the bed's bytes. Absent leaves the args array and the output bytes exactly today's (VE-D3). | `VideoCompositorPort.ts` |
+| 2 | Second ffmpeg input; encode AAC (native `aac`, fixed bitrate); pad a short bed with silence and cut a long one to `durationSec`; short fade-out; keep every bit-exact flag. | `CanvasFfmpegVideoCompositor.ts` |
+| 3 | A new audio golden cell, input generated deterministically in the test by the pinned ffmpeg; the silent golden must not move. | `CanvasFfmpegVideoCompositor.audio-golden.test.ts`, `fixtures/compositor-goldens-mp4-audio.json` |
 
-**Acceptance.** A brief without audio produces the existing MP4 bytes (VE-D3); a brief with audio produces a stream with one AAC track exactly `durationSec` long, reproducible across two runs on the pinned binary.
+**Acceptance.** A brief without audio produces the existing MP4 bytes (VE-D3); a brief with audio produces a stream with one AAC track exactly `durationSec` long (within one AAC frame, 1024 samples at 48kHz ≈ 21.3ms), reproducible across two runs on the pinned binary. **Shipped in this PR** — see VE-D11's updated consequence.
+
+#### VE3b2 — uploads and generation wiring · after VE3b1
+
+| # | Task | File(s) |
+|---|---|---|
+| 1 | Accept audio uploads (format list decided in the lane; the 2 MiB upload cap is the binding limit — say what it admits). | `apps/api/server/lib/asset-files.ts` (upload patterns and magic checks), `routes/campaigns/assets.post.ts` |
+| 2 | Pass the brief's audio bytes into `VideoCompositeRequest.audio` at generation. | `GenerateCampaignUseCase.use-case.ts`, `load-brief.ts` |
+| 3 | Remove VE3a's interim run refusal now that audio actually renders. | `load-brief.ts` |
+
+**Acceptance.** A brief declaring `audio` renders (no more interim refusal); the uploaded bytes reach the encoder unchanged; `premise VE3b` closes.
 
 ### VE4 — Voiceover and captions · VE-D9 · waits on VE-Q5 (vendor) and VE3b
 
@@ -285,6 +302,10 @@ still open**. `yarn plan:verify` runs them.
 **VE2 — shipped in this PR.**
 
 **VE3a — shipped in this PR.** (`CampaignBrief.audio`, `AudioRights.vo.ts`, checked at load and in the legal gate, carried to packaging's `packagedAt` re-check; a run declaring `audio` is refused with an interim message until VE3b.)
+
+**VE3b1 — shipped in this PR.** Closed the codec half of `premise VE3b` below (the encoder now takes a
+`-c:a` argument when `audio` is present). The premise ORs the codec gap with the upload gap, so it stays
+open — VE3b2 has not shipped yet, and no upload path exists to feed the encoder's new field.
 
 ```premise VE3b
 # Either gap keeps the lane open (||): no audio codec argument in the encoder, or no audio extension accepted for upload.

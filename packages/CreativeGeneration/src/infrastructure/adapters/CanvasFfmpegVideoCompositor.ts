@@ -1,6 +1,6 @@
 import { spawn as defaultSpawn, type ChildProcess, type SpawnOptions } from "node:child_process";
 import { once } from "node:events";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Writable } from "node:stream";
@@ -26,6 +26,29 @@ export const MAX_CONCURRENT_ENCODES = 2;
 export const DEFAULT_ENCODE_TIMEOUT_MS = 120_000;
 /** Grace after SIGTERM before escalating to SIGKILL. */
 export const DEFAULT_KILL_GRACE_MS = 2_000;
+
+/**
+ * The music bed's output sample rate (VE3b1). Matches the byte golden's
+ * lavfi-generated sine fixture, so recording that golden never exercises
+ * swresample's resampling path — only its (deterministic, no-op) format
+ * conversion from the source's sample format to the `aac` encoder's `fltp`.
+ */
+export const AUDIO_SAMPLE_RATE = 48_000;
+/** Fixed AAC bitrate: a CBR encode from the native `aac` encoder, never `-q:a` (VBR), so identical input bytes on the pinned build yield identical output bytes. */
+export const AUDIO_BITRATE = "128k";
+/** Output channel count, independent of the bed's own channel layout, so the encoded stream shape never depends on the upload. */
+export const AUDIO_CHANNELS = 2;
+/** Length of the fade-out applied right before the bed is cut to `durationSec`. */
+export const AUDIO_FADE_OUT_SEC = 0.25;
+/**
+ * The native `aac` encoder's frame size (samples per encoded frame, verified
+ * via `-v debug`: "Stream ... delay 1024"). A cut or pad boundary can land up
+ * to one frame short of exact, so a duration assertion must allow this many
+ * samples at {@link AUDIO_SAMPLE_RATE} — see {@link AAC_FRAME_TOLERANCE_SEC}.
+ */
+export const AAC_FRAME_SAMPLES = 1024;
+/** {@link AAC_FRAME_SAMPLES} at {@link AUDIO_SAMPLE_RATE}, in seconds (~21.3ms). */
+export const AAC_FRAME_TOLERANCE_SEC = AAC_FRAME_SAMPLES / AUDIO_SAMPLE_RATE;
 
 export type FfmpegSpawn = (
   command: string,
@@ -177,10 +200,32 @@ export class CanvasFfmpegVideoCompositor implements VideoCompositorPort {
     const workDir = await mkdtemp(join(tmpdir(), "cf-encode-"));
     const outPath = join(workDir, "out.mp4");
     try {
-      const child = this.spawn(ffmpegPath, ffmpegArgs(prepared.width, prepared.height, request.fps, outPath), {
-        stdio: ["pipe", "pipe", "pipe"],
-        windowsHide: true,
-      });
+      let audio: { readonly path: string; readonly durationSec: number } | undefined;
+      if (request.audio) {
+        // No extension: ffmpeg probes the second input by content (RIFF/WAVE,
+        // ID3, etc.), exactly as it would an uploaded file of unknown type.
+        //
+        // Empty (`request.audio.length === 0`) is not guarded: nothing populates
+        // this field until VE3b2 resolves an uploaded asset's real bytes, so a
+        // zero-length payload has no reachable caller and a guard for it could
+        // never be covered under this repo's 100% gate.
+        const audioPath = join(workDir, "bed");
+        await writeFile(audioPath, request.audio);
+        // Trim/fade to the video's ACTUAL encoded length (`frames`, already
+        // rounded above), not the request's unrounded `durationSec` — they can
+        // disagree (durationSec: 1.5, fps: 1 rounds to 2 frames = 2s of video),
+        // and computing the rounding a second time here would risk it drifting
+        // out of step with the one `compositeVideo` already did.
+        audio = { path: audioPath, durationSec: frames / request.fps };
+      }
+      const child = this.spawn(
+        ffmpegPath,
+        ffmpegArgs(prepared.width, prepared.height, request.fps, outPath, audio),
+        {
+          stdio: ["pipe", "pipe", "pipe"],
+          windowsHide: true,
+        },
+      );
       if (!child.stdin || !child.stdout || !child.stderr) {
         child.kill();
         throw new Error("ffmpeg stdio pipes were not created");
@@ -291,9 +336,30 @@ function posterCopyTAt(
  *    already codec-bitexact; it was not. Empirically a no-op against this
  *    exact arg set on the pinned ffmpeg-static build, but it is free and is
  *    the documented pairing for reproducible libx264 output, so it stays.
+ *    Given without a stream specifier, it lands in every output codec
+ *    context — verified with `-v debug`: it is read once as a global
+ *    AVOption, not re-read per output stream, so the audio (`aac`) context
+ *    below gets it too without a `-flags:a` twin.
+ *
+ * VE3b1 (music bed): the same placement pitfall bit a second time. With a
+ * second `-i` for the bed, `-sws_flags` must come after **both** inputs, not
+ * between them — placed between the two `-i`s (empirically, with `-v debug`)
+ * it is silently absorbed as an option for the *second* input's group and
+ * never reaches the scaler; placed after both, the scaler's debug line shows
+ * it. `-threads 1` needs no audio twin: the native `aac` encoder is
+ * single-threaded already. The input bytes for the second input (the music
+ * bed, arbitrary container/codec) are decoded by the pinned `ffmpeg-static`
+ * binary before re-encoding — audio decode was never the thing VE-D11 pinned
+ * (that decision is about *video* decode, still absent from this adapter).
  */
-function ffmpegArgs(width: number, height: number, fps: number, outPath: string): string[] {
-  return [
+function ffmpegArgs(
+  width: number,
+  height: number,
+  fps: number,
+  outPath: string,
+  audio?: { readonly path: string; readonly durationSec: number },
+): string[] {
+  const args: string[] = [
     "-f",
     "rawvideo",
     "-pix_fmt",
@@ -304,10 +370,24 @@ function ffmpegArgs(width: number, height: number, fps: number, outPath: string)
     String(fps),
     "-i",
     "-",
-    // Output-context option: must follow -i to reach the auto-inserted
-    // rgba->yuv420p scaler (see the doc comment above — before -i is inert).
-    "-sws_flags",
-    "+accurate_rnd+bitexact",
+  ];
+  if (audio) {
+    args.push("-i", audio.path);
+  }
+  // Output-context option: must follow every -i to reach the auto-inserted
+  // rgba->yuv420p scaler (see the doc comment above — before -i, or between
+  // two -i's, is inert).
+  args.push("-sws_flags", "+accurate_rnd+bitexact");
+  if (audio) {
+    // Explicit maps: without them, a bed whose container also carries e.g.
+    // cover-art-as-a-video-stream could be picked over the piped frames.
+    // `1:a:0` (not `1:a`): a bare `1:a` maps EVERY audio stream in the bed's
+    // container (alternate languages, a commentary track), muxing several
+    // tracks and breaking this lane's "exactly one AAC track" acceptance
+    // criterion. `:0` pins it to the first.
+    args.push("-map", "0:v", "-map", "1:a:0");
+  }
+  args.push(
     "-c:v",
     "libx264",
     "-pix_fmt",
@@ -318,6 +398,28 @@ function ffmpegArgs(width: number, height: number, fps: number, outPath: string)
     "20",
     "-threads",
     "1",
+  );
+  if (audio) {
+    // apad pads a short bed with trailing silence; atrim then cuts to exactly
+    // durationSec regardless of whether the bed was padded or already long
+    // (VE-D3's guarantee: none of this runs when `audio` is absent). The
+    // fade-out is measured back from that same cut point.
+    const fadeDurationSec = Math.min(AUDIO_FADE_OUT_SEC, audio.durationSec);
+    const fadeStartSec = audio.durationSec - fadeDurationSec;
+    args.push(
+      "-c:a",
+      "aac",
+      "-b:a",
+      AUDIO_BITRATE,
+      "-ar",
+      String(AUDIO_SAMPLE_RATE),
+      "-ac",
+      String(AUDIO_CHANNELS),
+      "-af",
+      `apad,atrim=end=${audio.durationSec},afade=t=out:st=${fadeStartSec}:d=${fadeDurationSec}`,
+    );
+  }
+  args.push(
     // faststart moves the finalized moov ahead of mdat (progressive playback);
     // -flags/-fflags +bitexact strip codec- and format-level encoder tags so
     // identical frames yield identical bytes (VG1).
@@ -333,7 +435,8 @@ function ffmpegArgs(width: number, height: number, fps: number, outPath: string)
     "mp4",
     "-y",
     outPath,
-  ];
+  );
+  return args;
 }
 
 function drawEncodedFrame(
