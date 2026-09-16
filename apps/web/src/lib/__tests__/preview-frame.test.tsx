@@ -215,7 +215,7 @@ describe("briefBackgroundIsStandIn (D52)", () => {
 });
 
 describe("identity-scoped frame retention (the stale-frame finding on PR #177)", () => {
-  test("a brief switch clears the old frame to the placeholder immediately", async () => {
+  test("loading a different brief id clears the old frame to the placeholder immediately", async () => {
     vi.useFakeTimers();
     vi.mocked(globalThis.fetch).mockResolvedValue(pngResponse());
     const { result, rerender } = renderHook(({ id }) => usePreviewFrame(brief({ id }), cell()), {
@@ -224,9 +224,61 @@ describe("identity-scoped frame retention (the stale-frame finding on PR #177)",
     await act(async () => { await vi.advanceTimersByTimeAsync(PREVIEW_FRAME_DEBOUNCE_MS + 10); });
     expect(result.current.frame).not.toBeNull();
 
-    // Which creative is previewed changed: the previous brief's frame must not
-    // survive even for the debounce window.
+    // A saved brief whose id changes is a different creative: the previous
+    // brief's frame must not survive even for the debounce window.
     rerender({ id: "camp-b" });
+    expect(result.current.frame).toBeNull();
+    expect(result.current.failed).toBe(false);
+  });
+
+  test.each([
+    ["product", { productId: "beta" }],
+    ["ratio", { canvas: { ratio: "1:1" } }],
+    ["layout", { layout: "headline-top" }],
+  ] as const)(
+    "switching the previewed cell (%s) clears to the placeholder immediately",
+    async (_axis, over) => {
+      vi.useFakeTimers();
+      vi.mocked(globalThis.fetch).mockResolvedValue(pngResponse());
+      const { result, rerender } = renderHook(
+        ({ next }) => usePreviewFrame(brief(), cell(next)),
+        { initialProps: { next: {} as Record<string, unknown> } },
+      );
+      await act(async () => { await vi.advanceTimersByTimeAsync(PREVIEW_FRAME_DEBOUNCE_MS + 10); });
+      expect(result.current.frame).not.toBeNull();
+
+      rerender({ next: over });
+      expect(result.current.frame).toBeNull();
+      expect(result.current.failed).toBe(false);
+    },
+  );
+
+  test("a re-slug of a not-yet-saved draft keeps the last frame when keyed by the draft identity", async () => {
+    vi.useFakeTimers();
+    vi.mocked(globalThis.fetch).mockResolvedValue(pngResponse());
+    const { result, rerender } = renderHook(
+      ({ id }) => usePreviewFrame(brief({ id }), cell(), "new"),
+      { initialProps: { id: "s" } },
+    );
+    await act(async () => { await vi.advanceTimersByTimeAsync(PREVIEW_FRAME_DEBOUNCE_MS + 10); });
+    const first = result.current.frame;
+    expect(first).not.toBeNull();
+
+    rerender({ id: "summer" });
+    expect(result.current.frame).toBe(first);
+  });
+
+  test("a stable draft key still clears when the previewed cell changes", async () => {
+    vi.useFakeTimers();
+    vi.mocked(globalThis.fetch).mockResolvedValue(pngResponse());
+    const { result, rerender } = renderHook(
+      ({ layout }) => usePreviewFrame(brief(), cell({ layout }), "new"),
+      { initialProps: { layout: "headline-bottom" } },
+    );
+    await act(async () => { await vi.advanceTimersByTimeAsync(PREVIEW_FRAME_DEBOUNCE_MS + 10); });
+    expect(result.current.frame).not.toBeNull();
+
+    rerender({ layout: "headline-top" });
     expect(result.current.frame).toBeNull();
     expect(result.current.failed).toBe(false);
   });

@@ -4,6 +4,9 @@ import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { DEFAULT_CAMPAIGN_TYPE } from "@campaignfoundry/CampaignOrchestration/campaign-types";
 import { templateFromCanonical } from "@campaignfoundry/CampaignOrchestration/brief-template";
 import { PreviewFrame } from "../PreviewFrame";
+import { PreviewDock } from "../PreviewDock";
+import { previewDockProps } from "../preview-props";
+import { editorReducer, initialEditorState, toBrief } from "../editor-state";
 import { PREVIEW_FRAME_DEBOUNCE_MS } from "@/lib/preview-frame";
 
 const brief = (over: Partial<CampaignBrief> = {}): CampaignBrief => ({
@@ -167,6 +170,55 @@ describe("PreviewFrame (D52)", () => {
     expect(body.cell.motion).toBe("ken-burns-in");
     expect(body.cell.durationSec).toBe(6);
     expect(body.cell.atSec).toBe(2);
+  });
+});
+
+describe("renaming a fresh draft must not blank the preview frame", () => {
+  /**
+   * The two halves of the defect: `patch` re-slugs `briefId` on a new draft,
+   * and frame identity includes `brief.id`. Typing Campaign Name therefore
+   * moves identity per keystroke and the painted `<img>` is replaced by the
+   * SVG placeholder — the flicker identity exists to prevent.
+   */
+  test("on a new draft with a product, typing Campaign Name keeps the last painted frame", async () => {
+    vi.useFakeTimers();
+    vi.mocked(globalThis.fetch).mockResolvedValue(pngResponse());
+
+    let state = initialEditorState("variation");
+    state = editorReducer(state, {
+      type: "setProduct",
+      key: 1,
+      patch: { id: "alpha", name: "Alpha" },
+    });
+    state = editorReducer(state, { type: "patch", patch: { campaignName: "S" } });
+    expect(state.source.kind).toBe("new");
+    expect(state.briefId).toBe("s");
+
+    const dock = (next: typeof state) => {
+      const props = previewDockProps(next, 0, 6)!;
+      return <PreviewDock {...props} brief={toBrief(next)} />;
+    };
+
+    const view = render(dock(state));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(PREVIEW_FRAME_DEBOUNCE_MS + 10);
+    });
+    const painted = view.container.querySelector("img");
+    expect(painted).not.toBeNull();
+    expect(view.container.querySelector("svg")).toBeNull();
+    const src = painted!.getAttribute("src");
+
+    for (const name of ["Su", "Sum", "Summer"]) {
+      state = editorReducer(state, { type: "patch", patch: { campaignName: name } });
+      view.rerender(dock(state));
+      expect(state.briefId).toBe(name.toLowerCase());
+      expect(
+        view.container.querySelector("img"),
+        `the painted frame must survive typing ${JSON.stringify(name)} (slug ${state.briefId})`,
+      ).not.toBeNull();
+      expect(view.container.querySelector("svg")).toBeNull();
+      expect(view.container.querySelector("img")!.getAttribute("src")).toBe(src);
+    }
   });
 });
 

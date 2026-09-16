@@ -66,6 +66,11 @@ export interface PreviewShowcaseProps extends Omit<CreativePreviewProps, "classN
    * background axis (D52). Absent → the SVG placeholder only.
    */
   readonly brief?: CampaignBrief;
+  /**
+   * Stable identity for a not-yet-saved draft (`source.tempId`). Forwarded to
+   * the frame so a re-slug of `brief.id` is not a switch of creative.
+   */
+  readonly identityKey?: string;
   /** The wizard's current step, 1-based (`stepIndex + 1`) — where the walk stands, never a position in the creative set (M2). */
   readonly step: number;
   readonly stepCount: number;
@@ -200,6 +205,7 @@ export function PreviewDock(props: PreviewShowcaseProps): ReactNode {
         durationSec={hasMotion ? durationSec : undefined}
         atSec={hasMotion ? clampedCommittedSec : undefined}
         spec={spec}
+        identityKey={props.identityKey}
         className="block h-auto w-full"
       />
       {hasMotion ? (

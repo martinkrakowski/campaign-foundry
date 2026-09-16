@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "lane": "FI1",
+  "mutations": [
+    {
+      "file": "apps/web/src/lib/preview-frame.ts",
+      "before": "          identityKey ?? request.brief.id,",
+      "after": "          request.brief.id,",
+      "because": "If identity keys on the live slug again, typing Campaign Name on a new draft blanks the painted frame. The regression asserts the img survives those keystrokes; the cell-switch and saved-brief guards still pass because they do not depend on identityKey.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/lib/__tests__/preview-frame.test.tsx",
+        "apps/web/src/components/campaign/__tests__/preview-frame.test.tsx"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

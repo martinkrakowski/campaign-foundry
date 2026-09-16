@@ -5737,3 +5737,21 @@ rendering the clause unconditionally is caught by the pre-existing literal asser
 "reads as the plan's own sentence"; no golden moves (web copy only, no compositor
 bytes touched).
 Cite: VE5b2 in docs/planning/2026-09-13_video-editing-features.md.
+
+## 2026-09-16 — FI1: renaming a fresh draft must not blank the preview frame
+
+- **Mode:** Debugger then Implementer
+- **Changes:**
+  - `usePreviewFrame` takes optional `identityKey`; identity uses it in place of `brief.id` for a not-yet-saved draft
+  - `previewIdentityKey` / `previewDockProps` pass `source.tempId` for new drafts; a loaded brief omits it so `brief.id` still clears
+  - Regression: typing Campaign Name on a new draft with a product keeps the painted `<img>`; guards: cell switch (product/ratio/layout) and a saved brief-id switch still clear immediately
+  - Mutation `.agents/manifests/fi1.json`: revert `identityKey ?? request.brief.id` → `request.brief.id` (caught; the two guard tests still pass)
+  - §5a in `docs/planning/2026-09-16_creative-first-chrome.md` recorded as fixed in this PR; CC1/CC2 no longer inherit it
+- **Decisions:**
+  - Keyed on the stable draft key (`tempId`) rather than `source.kind` as a boolean skip of `brief.id`, and rather than dropping `brief.id` from identity
+  - Did not stop re-slugging `briefId` on name edits (the Brief ID readout, save filename, and the existing slugify test stay)
+  - Did not touch the debounce or the identity tuple's cell axes; did not start the CC1/CC2 chrome work
+- **Left open:**
+  - Layout and Review `PreviewFrame` hosts omit `identityKey` (those steps do not mount while Campaign Name is typed). First save still clears once, as `source.kind` becomes `file` and identity moves from tempId to the slug.
+
+Cite: §5a in docs/planning/2026-09-16_creative-first-chrome.md
