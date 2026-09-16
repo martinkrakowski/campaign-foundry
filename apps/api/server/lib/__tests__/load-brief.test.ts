@@ -1007,21 +1007,27 @@ describe("parseBrief", () => {
     });
 
     test("a track whose stops do not all share one clock is refused (K1b review)", () => {
+      // On the TEXT layer (index 3 in withTracks's array): beat needs a
+      // text-kind layer (K1b review fix round 2), so "image" can no longer
+      // be used for a fixture about mixed clocks specifically. Distinct t
+      // (0.5 / 0.75): with a duplicate t and the clock check disabled, the
+      // duplicate-t rule fires instead and this would still throw -- for
+      // the wrong reason (mutation review).
       expect(() =>
         parseBrief({
           ...valid,
-          template: withTracks("image", [
+          template: withTracks("static-text", [
             {
               property: "opacity",
               stops: [
                 { t: 0.5, value: 0, clock: "pose" },
-                { t: 0.5, value: 1, clock: "beat" },
+                { t: 0.75, value: 1, clock: "beat" },
               ],
             },
           ]),
         }),
       ).toThrow(
-        'Campaign brief field "template.layers[0].tracks[0].stops[1].clock" must be "pose", the clock this track\'s first stop names (a track\'s stops share one clock); got "beat".',
+        'Campaign brief field "template.layers[3].tracks[0].stops[1].clock" must be "pose", the clock this track\'s first stop names (a track\'s stops share one clock); got "beat".',
       );
     });
 
@@ -1029,9 +1035,33 @@ describe("parseBrief", () => {
       expect(() =>
         parseBrief({
           ...valid,
-          template: withTracks("image", [
+          template: withTracks("static-text", [
             { property: "opacity", stops: [{ t: 0.5, value: 0, clock: "pose" }] },
             { property: "opacity", stops: [{ t: 0.5, value: 1, clock: "beat" }] },
+          ]),
+        }),
+      ).not.toThrow();
+    });
+
+    test("refuses a beat-clock stop on the image layer — a ground layer has no beat to be local against (K1b review fix round 2)", () => {
+      expect(() =>
+        parseBrief({
+          ...valid,
+          template: withTracks("image", [
+            { property: "opacity", stops: [{ t: 0, value: 0, clock: "beat" }] },
+          ]),
+        }),
+      ).toThrow(
+        'Campaign brief field "template.layers[0].tracks[0].stops[0].clock" must be "pose" for layer kind "image" (a beat- or effect-clock track needs a beat, which only a text layer has); got "beat".',
+      );
+    });
+
+    test("accepts a beat-clock stop on the text layer instead", () => {
+      expect(() =>
+        parseBrief({
+          ...valid,
+          template: withTracks("static-text", [
+            { property: "opacity", stops: [{ t: 0, value: 0, clock: "beat" }] },
           ]),
         }),
       ).not.toThrow();

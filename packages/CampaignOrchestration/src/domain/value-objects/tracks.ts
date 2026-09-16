@@ -91,6 +91,22 @@ const TRACKABLE_LAYER_KINDS: readonly LayerKind[] = [
   "animated-text",
 ];
 
+/**
+ * The trackable kinds whose pose is sequenced copy (K1b review, resolver
+ * fix round 2): `beat` and `effect` clocks both need a *beat* to be
+ * beat-local against (K-D8) — `beat` reads the beat-local progress a copy
+ * timeline derives, `effect` falls back to it with no timeline — and only a
+ * text layer's pose is resolved per beat (`resolveTracks`'s `copy`, K-D6).
+ * `image`/`video` resolve into `byLayer`, one pose per layer with no
+ * per-beat multiplicity, so a `beat`/`effect`-clock track on one has no
+ * defined value during a crossfade: which of the (at most two) live beats'
+ * local progress would it read? Nothing decides that, so it is refused here
+ * instead of resolved to an arbitrary, discontinuous answer. Exported so
+ * `resolve-tracks.ts` reads this same list rather than keeping its own copy
+ * that could drift from what the boundary actually allows.
+ */
+export const TEXT_LAYER_KINDS: readonly LayerKind[] = ["static-text", "animated-text"];
+
 /** Why a layer's `tracks` is not a shape the brief may carry; undefined when it is. */
 export interface LayerTracksProblem {
   /** The tracks subpath the problem names — `[i]` for a track, `[i].stops[j]` for a stop, `.field` for one value. */
@@ -125,7 +141,7 @@ export function layerTracksProblem(
     return { path: "", must: "be an array of tracks", value: tracks };
   }
   for (let i = 0; i < tracks.length; i += 1) {
-    const problem = trackProblem(tracks[i]);
+    const problem = trackProblem(kind, tracks[i]);
     if (problem !== undefined) {
       return { path: `[${i}]${problem.path}`, must: problem.must, value: problem.value };
     }
@@ -136,10 +152,12 @@ export function layerTracksProblem(
 /**
  * One track's contract: a non-null, non-array object naming a vocabulary
  * `property`, carrying only `property` and `stops`, a non-empty array of
- * well-formed stops that all share one clock (K1b review), and no duplicate
- * `t` within that clock (K-D9) — declaration order is otherwise free.
+ * well-formed stops that all share one clock (K1b review), each stop's
+ * clock legal for `kind` (`beat`/`effect` need a text layer, K1b review fix
+ * round 2), and no duplicate `t` within that clock (K-D9) — declaration
+ * order is otherwise free.
  */
-function trackProblem(track: unknown): LayerTracksProblem | undefined {
+function trackProblem(kind: LayerKind, track: unknown): LayerTracksProblem | undefined {
   if (typeof track !== "object" || track === null || Array.isArray(track)) {
     return { path: "", must: "be an object", value: track };
   }
@@ -181,6 +199,13 @@ function trackProblem(track: unknown): LayerTracksProblem | undefined {
       return { path: `.stops[${i}]${problem.path}`, must: problem.must, value: problem.value };
     }
     const stop = stops[i] as { readonly t: number; readonly clock: StopClock };
+    if (stop.clock !== "pose" && !TEXT_LAYER_KINDS.includes(kind)) {
+      return {
+        path: `.stops[${i}].clock`,
+        must: `be "pose" for layer kind "${kind}" (a beat- or effect-clock track needs a beat, which only a text layer has)`,
+        value: stop.clock,
+      };
+    }
     if (trackClock === undefined) {
       trackClock = stop.clock;
     } else if (stop.clock !== trackClock) {
