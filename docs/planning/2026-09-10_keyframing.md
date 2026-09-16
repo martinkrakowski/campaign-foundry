@@ -1,7 +1,7 @@
 # Keyframing — Architecture & Development Plan
 
-**Date:** 2026-09-10 · **Status:** in progress. **Stale as of 2026-09-16: K1a, K1b and K2 have all
-shipped; K3 (the four text effects, the same way) is dispatchable next**, behind them.
+**Date:** 2026-09-10 · **Status:** in progress. **Stale as of 2026-09-16: K1a, K1b, K2 and K3 have all
+shipped.**
 **Verified against:** `main` at `ed5e2dc`.
 **Replaces** the keyframe half of the retired `2026-09-08_motion-composition-implementation-plan.md`.
 
@@ -72,7 +72,7 @@ stays as it is, and text-effect tracks play on beat-local progress exactly as th
 | **K1a** | **Shipped.** **The track model, no resolver.** Easing moves to the domain (K-D7); `Track`/`Stop` value objects (K-D8) and `layerTracksProblem`, validated at both brief boundaries (K-D9's one refusal: a duplicate `t` on one track's same clock). **No compositor *behaviour* change (one import), no rendering, no resolver.** | Round-trips through YAML in declared key order (positional); an invalid track is refused at both boundaries; the compositor's goldens are unchanged. |
 | **K1b** | **Shipped.** **The resolver.** `resolveTracks(layers, beats, clocks) → { byLayer, copy }` (K-D8), pure, beside `beatAt`, in `resolve-tracks.ts`. Composition per property (K-D9), folded in declaration order. **No caller in the compositor yet** — K2 wires it. | Interpolation at the default easing per clock; the legacy single-beat path; a crossfade instant's two complementary `copy` mixes; `dy` tracks add and `opacity` tracks multiply in a fixture that proves fold order matters. |
 | **K2** | **Shipped.** **Three of the four `MOTION_KINDS` are tracks, rendered from the resolver; the fourth (`accent-wipe`) stayed drawer-local, decided, not deferred.** `ken-burns-in`/`ken-burns-out` are a `pose`-clock `scale` track on the ground (`image`/`video`) layer (K-D8 fix-round-2's refusal of a `beat`/`effect`-clock ground track was never tested against, since neither kind needs one). `headline-rise` is `opacity` + `dy` `beat`-clock tracks on the text layer, resolved through `resolveTracks`'s `copy` bucket. `accent-wipe`'s motion is a clip extent no `TRACK_PROPERTIES` member represents and the accent layer is not in `TRACKABLE_LAYER_KINDS` at all — reusing an existing property as a stand-in would be a fifth property in disguise (K4's future hand-authored tracks would then read it two different ways depending on layer kind), so `motion-tracks.ts`'s `accentWipeFraction` keeps the wipe as `paintAccent`'s own drawer-local animation and only relocates the `motion === "accent-wipe"` comparison itself, out of the compositor. The vocabulary the user writes does not change. | **Per-frame byte-identity** for every motion kind across the canonical templates. Any drift stops the lane. **Met:** all 48 motion-golden cells, the mp4 byte golden, and the HL3 raster suite are unchanged. |
-| **K3** | **Express the four text effects the same way.** | Per-frame byte-identity, including the beat-local windows and the settled-pose behaviour. |
+| **K3** | **Shipped.** **The four `TEXT_EFFECT_VALUES` are tracks, rendered from the resolver, the same way K2 did the four `MOTION_KINDS`.** `motion-tracks.ts`'s `textEffectTracks(effect, spec, width, height)` expands each kind into a single-property, two-stop `effect`-clock track on the text layer — `fade-in` → `opacity`, `rise-in` → `dy`, `slide-in` → `dx`, `scale-in` → `scale` — with stops at `t = 0` and `t = CREATIVE_GEOMETRY.textEffect.entranceFraction`; holding past the last stop (`resolveTracks`'s own contract) reproduces the settled pose with no separate branch. The tracks join `copyMotionTracks`'s own tracks in the SAME layer entry, so one `resolveTracks` call folds both in the old composition order (K-D9) — `NodeCanvasCompositor.ts`'s `textEffectPose` switch is gone, and `drawBeat`/`drawStaticText` now just paint the resolved `Pose` directly. | **Per-frame byte-identity** for every text effect across the canonical templates, including the beat-local windows and the settled-pose behaviour. **Met, corrected 2026-09-16:** the K3 PR's first cut claimed this was proven by the 48 motion-golden cells, the mp4 byte golden and the HL3 raster suite — a reviewer (Qodo) and the K3 lane's own mutation manifest both found that none of those three ever sets `prepared.textEffect`, so they proved nothing about text effects specifically. `NodeCanvasCompositor.text-effect-goldens.test.ts` (added same-day) closes the gap: 16 committed cells (four effects × legacy/timeline path × an entrance and a settled frame — the timeline cells sample the second beat's own window with `effectT` left undefined, so the beat-local fallback clock is what is pinned, not a caller-supplied one), on two platforms, recorded from `origin/main`'s pre-K3 `textEffectPose` and reproduced byte-for-byte on the K3 branch before being committed — this is the suite K3's own mutations now fail (one by a genuine 4-cell hash move, one by a crash before any hash is computed — see §5's premise retirement for which is which). The original three suites still stay unchanged (a real, if narrower, proof that K3 did not disturb the motion/HL3/mp4 paths), and the pre-existing exact-`toBe` drawn-output suite (`NodeCanvasCompositor.text-effect.test.ts`) is unchanged too — but the per-frame byte-identity claim for text effects specifically now rests on the new golden family, not on those three. |
 | **K4** | **Author tracks directly in a brief**, alongside presets; a hand-authored track and a preset's expansion on one layer and property **compose per K-D9** (no precedence rule) — preset expansions fold **before** hand-authored tracks, K3's existing order, and that is the only order. `html` refuses tracks (K1a), so K4 (and K5) never offer tracks on an `html` layer. | A hand-authored track renders; a track on an absent or disabled layer renders nothing and says nothing; `canonicalLayer` (K5/X16) drops `tracks: []` exactly as it drops `elements: []`. |
 | **K5** | **The editor surface** — whatever minimum lets a user see and adjust a track. Scope deferred until K1–K4 land. | Out of scope for this document beyond naming it. |
 
@@ -92,8 +92,14 @@ stops rather than shipping a second system beside the presets.
   resolver, per frame, proven through `NodeCanvasCompositor.draw` (48 motion-golden cells, the mp4
   byte golden, the HL3 raster suite). `accent-wipe` stayed drawer-local (decided, not deferred — see
   its lane row); `restT` and the poster frame are unchanged for all four kinds.
-- **K3**: the four text effects render byte-identically the same way, including the beat-local
-  windows and the settled-pose behaviour.
+- **K3 (shipped)**: the four text effects render byte-identically through the resolver, per frame,
+  including the beat-local windows and the settled-pose behaviour, proven through
+  `NodeCanvasCompositor.text-effect-goldens.test.ts` (16 committed cells: four effects × legacy/timeline
+  path × entrance/settled frame, on two platforms, recorded from pre-K3 `main` and reproduced
+  byte-for-byte on the K3 branch) — corrected 2026-09-16 from an earlier claim that the 48
+  motion-golden cells, the mp4 byte golden and the HL3 raster suite proved this; none of those three
+  ever sets a text effect, so they proved only that K3 left the motion/HL3/mp4 paths undisturbed, not
+  that the text effects themselves are byte-identical. Those three remain unchanged as well.
 - **K4**: presets and hand-authored tracks coexist, composing per K-D9.
 - **Throughout**: `MOTION_KINDS` and `TEXT_EFFECT_VALUES` remain the brief vocabulary. A user who
   never writes a track sees no change, ever.
@@ -238,14 +244,68 @@ in/out expansion; dropping the accent wipe's progress to a constant 1) — both 
 golden, verified empirically before writing the manifest, worth stating because K1b's own mutations
 found the opposite case (an equivalence bug the goldens could not see).
 
-```premise K3
-# K3 is the same lane for copy: the four text effects become entrance tracks,
-# so the per-effect switch that decides the pose today (`textEffectPose`'s
-# body) is resolved through the track model instead. The switch *is* the
-# mechanism, and it sits inside the compositor, so it cannot outlive the lane
-# the way W4's `.sort()` did.
-grep -qE 'case "(fade-in|rise-in|slide-in|scale-in)"' packages/CreativeGeneration/src/infrastructure/adapters/NodeCanvasCompositor.ts
-```
+**K3 — shipped in this PR.** `motion-tracks.ts`'s `textEffectTracks(effect, spec, width, height)`
+expands each of the four `TEXT_EFFECT_VALUES` into a single-property, two-stop `effect`-clock track
+on the text layer — `fade-in` → `opacity` (`0 → 1`), `rise-in` → `dy`
+(`riseOffsetFraction * height → 0`), `slide-in` → `dx` (`slideOffsetFraction * scaleBasis(spec, width,
+height) → 0`), `scale-in` → `scale` (`1 - scaleAmplitude → 1`), stops at `t = 0` and
+`t = CREATIVE_GEOMETRY.textEffect.entranceFraction` — reproducing `NodeCanvasCompositor.ts`'s old
+`textEffectPose` switch, which is now gone: `grep -qE 'case "(fade-in|rise-in|slide-in|scale-in)"'
+packages/CreativeGeneration/src/infrastructure/adapters/NodeCanvasCompositor.ts` no longer matches.
+Holding a track's value past its last stop (`resolveTracks`'s own `sampleStops` contract) reproduces
+the old settled pose with no separate "past the window" branch needed in the expansion. The entrance
+window is expressed as stop positions, not re-read as a fraction inside the resolver path — the
+constant stays in the expansion, exactly as K2 put `KEN_BURNS_ZOOM` there, and it is read from
+`CREATIVE_GEOMETRY.textEffect` (the same leaf the web's preview reads) rather than copied into a
+local literal.
+
+The effect's tracks join `copyMotionTracks`'s own tracks in the SAME layer entry — one `resolveTracks`
+call per draw path (`drawSequencedCopy` for the timeline path, `drawStaticText` for the legacy path),
+folding both in the OLD composition order (K-D9: motion tracks first, effect tracks second, matching
+`opacity = (riseAlpha * fx.alpha) * layerAlpha`). `drawBeat` no longer computes a text-effect pose of
+its own — it paints the already-composed `Pose` `resolveTracks` returns.
+
+`fade-in`'s `opacity` fold (`0 + (1 - 0) * eased`) has no rounding at all, bit-identical everywhere,
+exactly like `headline-rise`'s own opacity track (K2). `rise-in`/`slide-in`/`scale-in` reassociate the
+old per-kind formula into the fixed `a.value + (b.value - a.value) * ease(progress)` fold — bit-identical
+at the two stops themselves and within the last bit of a double at an interior `t` otherwise, the same
+finding K2 recorded. Red tests shown before the implementation (the per-effect equivalence tests against
+a nonexistent `textEffectTracks`, computed independently from the old formula).
+
+**Correction, 2026-09-16 (reviewer + K3's own mutation manifest found a gap the first cut of this PR
+missed):** the first cut of this section claimed the reassociation was "proven, not assumed, not to move
+a pixel" by the 48 motion-golden cells, the mp4 byte golden and the HL3 raster suite. Those three suites
+ARE unchanged (`NodeCanvasCompositor.motion-goldens.test.ts`, `CanvasFfmpegVideoCompositor.byte-golden.test.ts`,
+`NodeCanvasCompositor.layer-order.test.ts`), and the pre-existing `NodeCanvasCompositor.text-effect.test.ts`
+drawn-output suite (byte-for-byte pose assertions on the live blit) is unchanged too — but none of the
+three named golden suites ever sets `prepared.textEffect`, so none of them is evidence about text effects
+specifically, only that K3 left the motion/HL3/mp4 paths it did not touch alone. `mutate:verify
+.agents/manifests/k3.json`'s first run (2 mutations: swapping the fade-in/rise-in expansion; dropping
+scale-in's entrance-window stop) proved this empirically — neither mutation moved any of the three named
+goldens, only the domain equivalence test and the drawn-output suites caught them.
+
+`NodeCanvasCompositor.text-effect-goldens.test.ts` closes the gap: 16 committed cells (four
+`TEXT_EFFECT_VALUES` × two draw paths × an entrance frame and a settled frame), on one canonical
+template, on both `darwin-arm64` and `linux-x64`. The `legacy` path is the clip shape with no timeline
+at all (`effectT` falls back to `t`); the `timeline` path is the clip shape too, but with a real
+two-beat `cut` timeline and `effectT` left undefined, sampled inside the SECOND beat's own window, so
+the effect clock exercises the beat-local fallback (`effectT ?? local`) K1b/K3 actually added, not a
+caller-supplied settled clock — and the two paths paint different beat text, so a passing suite is
+evidence the timeline path was actually taken, not merely that some hash was computed. The baseline was
+recorded from `origin/main` at `5aef4155` (pre-K3, `textEffectPose`'s own switch) — a scratch worktree
+for `darwin-arm64`, a `linux/amd64` Docker container (`node:22-bookworm`) for `linux-x64` — then
+reproduced byte-for-byte on the K3 branch (in the same two environments) before being committed; the
+main-produced bytes are what shipped. All 32 cells (16 × 2 platforms) matched exactly — no divergence
+to report. Re-running `mutate:verify .agents/manifests/k3.json` with the new suite added to each
+mutation's command: (a), the fade-in/rise-in swap, now FAILS this suite too, but via a `TypeError`
+(`textEffectTracks` returns `undefined` for the now-unmatched `"fade-in"` case, spread into the tracks
+array) thrown before any hash is computed — it does not move a golden cell, it errors out; stated
+precisely rather than folded into "moves a golden". (b), dropping scale-in's entrance stop, IS a
+genuine hash mismatch: exactly the four scale-in cells (legacy/timeline × entrance/settled) move, all
+landing on the same stuck-at-0.88 hash per platform, while the other twelve cells stay exactly as
+committed. The three ORIGINAL named goldens still do not move under either mutation, for the same
+reason as before (they never set `prepared.textEffect`) — that fact stands, it is simply no longer
+being cited as proof of the text-effect claim.
 
 **K4's premise is restated in the amendments below**, because the original would have been
 retired by K1's own merge.

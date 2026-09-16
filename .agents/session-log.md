@@ -5641,3 +5641,65 @@ in `load-brief.ts`; the flipped test now asserts a brief declaring `audio` loads
 request drops `audio`, the mp3 magic check accepts anything — both reproduce under `mutate:verify`.
 `premise VE3b` retired, VE4 now waits only on VE-Q5.
 Cite: VE3b2 in docs/planning/2026-09-13_video-editing-features.md.
+
+## 2026-09-16 — K3 text effects as tracks (AI session)
+
+`motion-tracks.ts` gains `textEffectTracks(effect, spec, width, height)`, K2's sibling for the four
+`TEXT_EFFECT_VALUES`: each kind becomes a single-property, two-stop `effect`-clock track (`fade-in` →
+`opacity`, `rise-in` → `dy`, `slide-in` → `dx`, `scale-in` → `scale`), stops at `t = 0` and
+`t = CREATIVE_GEOMETRY.textEffect.entranceFraction` — the entrance window expressed as stop positions,
+holding past the last stop reproducing the old settled pose with no extra branch. The fraction stays
+read from `CREATIVE_GEOMETRY.textEffect` (the leaf the web preview also reads), not copied into a local
+literal. `NodeCanvasCompositor.ts`'s `textEffectPose` switch, `TextEffectPose` and `TEXT_EFFECT_REST`
+are deleted; `drawSequencedCopy`/`drawStaticText` append the effect's tracks to the SAME layer entry as
+`copyMotionTracks`'s own tracks, one `resolveTracks` call per draw path, folding in the old composition
+order (K-D9). `drawBeat` now just paints the resolved `Pose` — no more per-call text-effect pose.
+
+Floating-point finding, same shape as K2's: `fade-in`'s opacity fold (`0 + (1 - 0) * eased`) is exact
+everywhere; `rise-in`/`slide-in`/`scale-in` reassociate into `a + (b - a) * eased` and can differ from
+the old formula in the last bit of a double at an interior `t`, exact at the two stops. Proven not to
+move a pixel: 48 motion-golden cells, the mp4 byte golden, and the HL3 raster suite (layer-order.test.ts)
+are byte-identical; the pre-existing drawn-output suite (`NodeCanvasCompositor.text-effect.test.ts`,
+exact `toBe` pose assertions) is unchanged too. Red tests shown first (`textEffectTracks is not a
+function`, 26 failures) before the implementation. `mutate:verify .agents/manifests/k3.json`: 2/2
+mutations reproduced (swapping fade-in/rise-in's expansion; dropping scale-in's entrance stop) — both
+caught by the domain equivalence test and the drawn-output suites, neither moves a golden (none of the
+three named golden suites ever sets `prepared.textEffect`), stated in the manifest and the PR body.
+Cite: K3 in docs/planning/2026-09-10_keyframing.md.
+
+## 2026-09-16 — K3 gap: text-effect byte goldens added (AI session)
+
+Reviewer (Qodo) and the orchestrator both found that K3's own PR only proved "no golden moves under
+either mutation" against three suites (48 motion cells, the mp4 byte golden, the HL3 raster suite) that
+never set `prepared.textEffect` at all — the plan's "per-frame byte-identity for every text effect"
+claim had no golden backing it. Added `NodeCanvasCompositor.text-effect-goldens.test.ts` +
+`fixtures/compositor-goldens-text-effect.json`: 16 cells (four `TEXT_EFFECT_VALUES` × legacy/timeline
+path × entrance/settled frame), both platforms. Baseline recorded from `origin/main` at `5aef4155`
+(pre-K3): a scratch `git worktree` for `darwin-arm64`, a `linux/amd64` Docker container
+(`node:22-bookworm`, fresh `yarn install`) for `linux-x64` — never touching the shared main checkout's
+tracked files. Reproduced byte-for-byte on the K3 branch in both environments before committing the
+main-produced bytes; all 32 cells (16 × 2 platforms) matched, no divergence found. `record-goldens.yml`
+updated to include the new suite for future re-recordings.
+
+`mutate:verify .agents/manifests/k3.json` re-run with the new suite added to each mutation's command:
+both mutations now also move this golden (fade-in/rise-in swap crashes it; dropping scale-in's entrance
+stop is a clean 4-cell hash mismatch, all four scale-in cells landing on the same stuck-at-0.88 hash).
+The three original named suites still do not move under either mutation — that fact is unchanged, it is
+now stated as a scope note rather than as proof of the text-effect claim. §2/§3 of
+docs/planning/2026-09-10_keyframing.md and the premise-K3 retirement prose corrected to cite the new
+golden family, not the three that never exercised a text effect.
+Cite: K3 in docs/planning/2026-09-10_keyframing.md.
+
+K3 text-effect-goldens follow-up (same PR, advisor review before push): the first cut of the timeline
+cells passed an explicit `effectT`, so `effect ?? local` never read `local` — the timeline cells were
+the POSTER call shape, not the CLIP shape, and could not tell a passing run from one that took the
+legacy path (every timeline hash equalled its legacy twin). Rewrote `timelineFrame` to the clip shape
+(`draw(ctx, prepared, t, undefined)`, no `copyT`/`effectT`) against a real two-beat `cut` timeline
+(mirroring `motion-goldens.test.ts`'s own weighted `TIMELINE`), sampling the SECOND beat's own window —
+the beat-local fallback clock is what is pinned now, and the two paths paint different beat text (proof
+on the raster that the timeline path was taken). Re-ran the full main-vs-branch baseline procedure
+(scratch worktree + linux/amd64 container, both platforms): all 32 cells still matched exactly, no
+divergence. Also corrected the manifest's and plan doc's mutation-(a) wording: it fails the new suite
+via a `TypeError` thrown before any hash is computed, not a moved cell — stated plainly rather than
+folded into "moves a golden" (mutation (b) is the one that is a genuine 4-cell hash move). Committed
+fixture and doc wording reflect this corrected design; `mutate:verify` re-run clean against it.

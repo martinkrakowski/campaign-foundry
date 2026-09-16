@@ -13,6 +13,7 @@ import {
   resolveStyle,
   resolveTracks,
   scaleBasis,
+  textEffectTracks,
   widthTermBasis,
   type CanvasSpec,
   type CompositeRequest,
@@ -659,46 +660,6 @@ const ZERO_INSETS: SafeInsets = { top: 0, right: 0, bottom: 0, left: 0 };
 const SIDES = ["top", "right", "bottom", "left"] as const;
 const ELLIPSIS = "…";
 
-/** The copy layer's whole-block pose at a moment: the text effect's output (T6). */
-interface TextEffectPose {
-  readonly dx: number;
-  readonly dy: number;
-  readonly alpha: number;
-  readonly scale: number;
-}
-
-const TEXT_EFFECT_REST: TextEffectPose = { dx: 0, dy: 0, alpha: 1, scale: 1 };
-
-/**
- * The text effect's pose at a beat-local progress (T6): a whole-block
- * alpha/translate/scale on the COPY layer only, eased with the motion kinds'
- * own `easeOutCubic` over the leaf's entrance window (one source, both draw
- * paths read it). Rest pose (H4): at or past the window's end — in particular
- * at `t = 1` and on the still/poster path — every kind is the identity pose,
- * so the frame is byte-identical to the same brief with no effect (D54).
- */
-function textEffectPose(
-  kind: TextEffectKind | undefined,
-  local: number,
-  spec: CanvasSpec,
-  width: number,
-  height: number,
-): TextEffectPose {
-  if (kind === undefined) return TEXT_EFFECT_REST;
-  const settled = easeOutCubic(clamp01(local / CREATIVE_GEOMETRY.textEffect.entranceFraction));
-  const { riseOffsetFraction, slideOffsetFraction, scaleAmplitude } = CREATIVE_GEOMETRY.textEffect;
-  switch (kind) {
-    case "fade-in":
-      return { ...TEXT_EFFECT_REST, alpha: settled };
-    case "rise-in":
-      return { ...TEXT_EFFECT_REST, dy: (1 - settled) * riseOffsetFraction * height };
-    case "slide-in":
-      return { ...TEXT_EFFECT_REST, dx: (1 - settled) * slideOffsetFraction * scaleBasis(spec, width, height) };
-    case "scale-in":
-      return { ...TEXT_EFFECT_REST, scale: 1 - (1 - settled) * scaleAmplitude };
-  }
-}
-
 /**
  * Open the copy layer's save block for a composed pose, when one is needed.
  * The text effect COMPOSES with the motion kind's rise (T6): translations add,
@@ -1094,6 +1055,14 @@ function drawTimeline(
  * `{ beat, mix, pose }` entry per live beat (one, or two during a
  * crossfade — K-D6), in the same `(current, incoming)` order the old
  * `if (pair.mix > 0 ...)` branch drew them in.
+ *
+ * **K3**: the text effect's tracks (`textEffectTracks`) are appended to the
+ * SAME layer entry's `tracks`, after the motion tracks — one `resolveTracks`
+ * call, one fold, in the old composition order (`opacity = (riseAlpha *
+ * fx.alpha) * layerAlpha`, K-D9). Both track sources land on the `effect`/
+ * `beat` clocks `resolveTracks` already reads per live beat (`local`, one per
+ * `(beat, mix)` pair), so `entry.pose` arrives fully composed — `drawBeat` no
+ * longer computes a text-effect pose of its own.
  */
 function drawSequencedCopy(
   ctx: SKRSContext2D,
@@ -1106,12 +1075,21 @@ function drawSequencedCopy(
   effectT: number | undefined,
 ): void {
   const resolved = resolveTracks(
-    [{ id: layer.id, kind: layer.kind, tracks: copyMotionTracks(motion, prepared.height) }],
+    [
+      {
+        id: layer.id,
+        kind: layer.kind,
+        tracks: [
+          ...copyMotionTracks(motion, prepared.height),
+          ...textEffectTracks(prepared.textEffect, prepared.canvas, prepared.width, prepared.height),
+        ],
+      },
+    ],
     scenes.resolved,
     { t, copyT, effectT },
   );
   for (const entry of resolved.copy) {
-    drawBeat(ctx, prepared, scenes, entry.beat, entry.mix, t, entry.pose, effectT);
+    drawBeat(ctx, prepared, scenes, entry.beat, entry.mix, entry.pose);
   }
 }
 
@@ -1122,27 +1100,16 @@ function drawBeat(
   scenes: BeatScenes,
   beat: ResolvedBeat,
   layerAlpha: number,
-  t: number,
   pose: Pose,
-  effectT?: number,
 ): void {
   const layout = scenes.beats.get(beat.text);
   if (layout === undefined) {
     throw new Error(`NodeCanvasCompositor: no fitted layout for beat "${beat.text}".`);
   }
-  // Local progress inside the beat's own window — still needed for the text
-  // effect's fallback clock below (K3's territory); headline-rise's own dy/
-  // opacity now arrive already resolved, in `pose` (K2).
-  const local = clamp01((t - beat.startT) / (beat.endT - beat.startT));
-  // The text effect (T6) plays on each beat's OWN local progress — the same
-  // clock the rise rides — unless the caller passed a settled effect clock
-  // (the poster: 1, H4). Clip frames omit it, so the beat-local entrance
-  // still plays. The beat's exit mix (`layerAlpha`) keeps its behaviour.
-  // Undefined effect → the identity pose → the pre-effect bytes (D54).
-  const fx = textEffectPose(prepared.textEffect, effectT ?? local, prepared.canvas, prepared.width, prepared.height);
-  const dy = pose.dy + fx.dy;
-  const alpha = pose.opacity * fx.alpha;
-  const opacity = alpha * layerAlpha;
+  // `pose` already carries the motion kind's and the text effect's composed
+  // contribution (K2/K3) — the beat's exit mix (`layerAlpha`) is the only
+  // thing this drawer still applies on top.
+  const opacity = pose.opacity * layerAlpha;
   ctx.fillStyle = "#ffffff";
   // F5a: this path measures on a throwaway 1×1 context and re-sets ctx.font
   // below, so every ctx-state control is (re-)stated HERE, not inherited — a
@@ -1151,7 +1118,7 @@ function drawBeat(
   ctx.textBaseline = "alphabetic";
   ctx.letterSpacing = `${prepared.style.letterSpacing * layout.fontSize}px`;
   ctx.font = `${prepared.fontWeight} ${layout.fontSize}px ${prepared.fontFamily}, sans-serif`;
-  const posed = openTextPose(ctx, opacity, fx.dx, dy, fx.scale, layout);
+  const posed = openTextPose(ctx, opacity, pose.dx, pose.dy, pose.scale, layout);
   let y = layout.firstY;
   for (const line of layout.lines) {
     ctx.fillText(line, headlineTextX(prepared, layout.centerX), y);
@@ -1160,10 +1127,6 @@ function drawBeat(
   if (posed) {
     ctx.restore();
   }
-}
-
-function clamp01(x: number): number {
-  return x < 0 ? 0 : x > 1 ? 1 : x;
 }
 
 /** Which decoded ground(s) `paintBackground` should draw, and at what mix. */
@@ -1329,6 +1292,13 @@ function paintAccent(c: LayerDrawContext): void {
  * `resolveTracks`'s own legacy shortcut (`beats: []`) is exactly this
  * contract, one implicit beat with `local = t` (K-D8), which is what this
  * drawer's own `t` already is.
+ *
+ * **K3**: the text effect's tracks (`textEffectTracks`) join the motion
+ * tracks in the same layer entry, so one `resolveTracks` call folds both —
+ * `clocks.effectT` is this drawer's own `effectT` (always defined,
+ * `LayerDrawContext`'s own contract), matching the old `effectT ?? local`
+ * unification exactly. Composition order is preserved (motion tracks first,
+ * effect tracks second, K-D9) inside that one fold.
  */
 function drawStaticText(c: LayerDrawContext): void {
   const { ctx, prepared, motion, t, effectT, layer } = c;
@@ -1338,19 +1308,20 @@ function drawStaticText(c: LayerDrawContext): void {
   // T5). Reads the layout `prepare` already resolved (C5).
   const headline = prepared.logoAnchorLayout!;
   const resolved = resolveTracks(
-    [{ id: layer.id, kind: layer.kind, tracks: copyMotionTracks(motion, height) }],
+    [
+      {
+        id: layer.id,
+        kind: layer.kind,
+        tracks: [
+          ...copyMotionTracks(motion, height),
+          ...textEffectTracks(prepared.textEffect, prepared.canvas, width, height),
+        ],
+      },
+    ],
     [],
-    { t },
+    { t, effectT },
   );
   const pose = resolved.copy[0]!.pose;
-  // The text effect (T6) rides the effect clock, not the motion pose clock,
-  // and COMPOSES with the motion kind: translations add, alphas multiply.
-  // Still/poster callers pass 1 (H4) so a ken-burns-out rest (t = 0) never
-  // samples the entrance; clip frames omit it and `t` is used. Undefined
-  // effect → the identity pose → exactly the pre-effect bytes (D54).
-  const fx = textEffectPose(prepared.textEffect, effectT, prepared.canvas, width, height);
-  const dy = pose.dy + fx.dy;
-  const alpha = pose.opacity * fx.alpha;
   ctx.fillStyle = "#ffffff";
   ctx.textAlign = prepared.style.align;
   ctx.textBaseline = "alphabetic";
@@ -1358,7 +1329,7 @@ function drawStaticText(c: LayerDrawContext): void {
   // layout pass — the default 0px is a no-op, the goldens pin it.
   ctx.letterSpacing = `${prepared.style.letterSpacing * headline.fontSize}px`;
   ctx.font = `${prepared.fontWeight} ${headline.fontSize}px ${prepared.fontFamily}, sans-serif`;
-  const posed = openTextPose(ctx, alpha, fx.dx, dy, fx.scale, headline);
+  const posed = openTextPose(ctx, pose.opacity, pose.dx, pose.dy, pose.scale, headline);
   let y = headline.firstY;
   for (const line of headline.lines) {
     ctx.fillText(line, headlineTextX(prepared, headline.centerX), y);
