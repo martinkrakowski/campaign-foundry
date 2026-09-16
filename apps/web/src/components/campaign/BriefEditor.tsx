@@ -43,7 +43,6 @@ import {
   motionUnavailableReason,
   SAFE_ID_PATTERN,
   type FieldErrors,
-  type FieldWarnings,
 } from "@/components/campaign/validate";
 import { IdentitySection, CopySection, ProductsSection, TreatmentsSection, OutputSection, PolicySection, TemplateSection } from "@/components/campaign/sections";
 import { StatusChip } from "@/components/campaign/StatusChip";
@@ -184,11 +183,6 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   const history = useEditorHistory(initialEditorState());
   const { state, dispatch } = history;
   useHistoryKeys(history);
-  const [errors, setErrors] = useState<Record<string, FieldErrors>>({});
-  const [warnings, setWarnings] = useState<Record<string, FieldWarnings>>({});
-  // Not a boolean: the section that blocks is what the refusal needs to scroll to, and
-  // deriving it here keeps "is it blocked" and "where" from disagreeing. null = valid.
-  const [blockedAt, setBlockedAt] = useState<string | null>(null);
   const [briefs, setBriefs] = useState<BriefEntry[]>([]);
   const [briefsLoaded, setBriefsLoaded] = useState(false);
   // D83/F-A — a listing that failed is a different fact from one that came back
@@ -445,11 +439,26 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
     setRunBrief(blankBrief());
   }, [blank, setRunBrief]);
 
-  // Validate on state change
-  useEffect(() => {
-    const existingIds = briefs.map((b) => b.brief.id);
-    setErrors(validateState(state, existingIds));
-    setWarnings(validateWarnings(state));
+  // Derived from state on every render (X30): these three used to be
+  // useState mirrors written by a `[state, briefs]` effect, which meant every
+  // keystroke paid its own commit (dispatch's render) *plus* a second commit
+  // for this effect's setState calls, on top of a third for the dirty-flag
+  // effect below — three full re-renders of the whole "everything"-presentation
+  // tree per interaction where one suffices. `validateState`/`validateWarnings`
+  // are pure functions of `state` (and the id list), so deriving them with
+  // `useMemo` folds that second commit into the first: still recomputed on every
+  // state change, but during the render `dispatch` already scheduled, not after
+  // it as a chained update. See .agents/manifests/x30.json and the work-count
+  // test in brief-editor.test.tsx that pins the commit count this removes.
+  const existingIds = useMemo(() => briefs.map((b) => b.brief.id), [briefs]);
+  const errors = useMemo(
+    () => validateState(state, existingIds),
+    [state, existingIds],
+  );
+  const warnings = useMemo(() => validateWarnings(state), [state]);
+  // Not a boolean: the section that blocks is what the refusal needs to scroll to, and
+  // deriving it here keeps "is it blocked" and "where" from disagreeing. null = valid.
+  const blockedAt = useMemo(() => {
     // D7: Save is blocked by structural invalidity only. A capability being off
     // makes the draft unrunnable on this host, not unsavable — so the gating check
     // runs the same validation with the capability unknown. The API parses saves in
@@ -463,12 +472,12 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
     const walk = sectionOrder(state.mode);
     const walkIndex = (bucket: string) =>
       walk.indexOf((bucket === MOTION_ERROR_KEY ? MOTION_HOST_SECTION : bucket) as SectionId);
-    setBlockedAt(
+    return (
       Object.keys(structural)
         .filter((bucket) => getTotalErrorCount({ [bucket]: structural[bucket] }) > 0)
-        .sort((a, b) => walkIndex(a) - walkIndex(b))[0] ?? null,
+        .sort((a, b) => walkIndex(a) - walkIndex(b))[0] ?? null
     );
-  }, [state, briefs]);
+  }, [state, existingIds]);
 
   // Update dirty state. The provider outlives this route, so clear the flag on unmount —
   // otherwise every later navigation in the shell keeps prompting.

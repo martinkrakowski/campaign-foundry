@@ -932,3 +932,93 @@ invalid value rather than refuse it. Red-first tests: a forged quote-bearing `fo
 an off-vocabulary `fontWeight` are refused before any port is touched and no `index.html` is
 exported, while a valid override still generates. Mutation manifest `.agents/manifests/hl5e.json`:
 removing the refusal kills the forged-family test (caught).
+
+---
+
+## 33. The CI-only timeout on the brief editor's slowest tests is a margin problem, not the weight meter (X30)
+
+**Evidence.** `brief-editor.test.tsx` failed in CI with `Test timed out in 5000ms` on four tests
+("a motion brief authored from scratch saves with its motion policy", "motion without a kind or a
+duration blocks Save", "a motion brief on a host without motion stays read-only…", "Save refuses a
+click destination the API would refuse") — duration, not flakiness: on SHA `591ac73b`, the push run
+passed in 4m20s and the PR run failed in 9m51s, and a re-run of the failed job failed again.
+
+The lead hypothesis — HL5c/HL5f/HL5e's html weight meter doing real assembly work on every
+keystroke — is **disproven**. None of the four tests select a platform whose `formats` include
+`html` (`social-post`'s preset ships `instagram-feed`/`linkedin`/`x`, and the motion test adds
+`instagram-reel`; only the two `*-html` display profiles carry `html`), so `htmlByteBudget` returns
+`undefined` and `htmlWeightReading` returns before ever calling `assembleHtml`. Spying on
+`assembleHtml` across all four tests, run to completion, measured **`assembleHtml: 0`** in every
+one. `toBrief`/`validateState`/`validateWarnings` were also spied and timed directly: `validateState`
+is called ~30–40 times per test (once for the visible errors, once for the structural/motion-host
+check, per state change) but the cumulative time **inside** it across a whole test never exceeded 11ms
+— not the cost.
+
+Checked out `origin/main~6` (`a4476f3f`, before HL5c introduced the meter at all) and ran the same
+four tests, three times each: medians were statistically the same as at HEAD (`f443fe4d`) — e.g.
+"motion without a kind or a duration blocks Save" at ~1190ms pre-meter vs ~1190ms at HEAD, "Save
+refuses a click destination" at ~815ms vs ~837ms. **These four tests were already the slowest tests
+in the file before the meter existed.** There is no code-level regression from HL5c/HL5f/HL5e to
+bisect; the CI timeout is a margin problem a loaded runner exposed, not a regression these lanes
+introduced.
+
+The real, measured cost: a `React.Profiler`-wrapped render showed a single user gesture (one
+`dispatch`) committing the whole "everything"-presentation tree **three times**: the dispatch's own
+render, a second because the validate-on-change effect (`errors`/`warnings`/`blockedAt`) mirrored
+`state` into `useState` via `setState` calls of its own (a pure derivation with no other writer,
+paying its own commit for nothing), and a third from the dirty-flag effect (`setDirty`, a context
+setter whose provider outlives the route). Each of these four tests carries the highest interaction
+count in the suite (many typed characters plus several motion-kind toggles), so they pay this
+3-commits-per-interaction tax the most.
+
+**Consequence.** A pre-existing rendering inefficiency (extra full-tree commits per interaction)
+combined with the suite's most interaction-heavy tests to leave the smallest margin against the
+fixed 5000ms per-test timeout — invisible on an idle runner, and exactly the margin a loaded CI
+runner (concurrent test-file workers contending for CPU) spends first.
+
+**X30 — shipped in this PR.** `errors`, `warnings`, and `blockedAt` in `BriefEditor.tsx` are now
+derived with `useMemo` from `state` (and the brief id list) instead of mirrored into `useState` from
+a `[state, briefs]` effect — folding the effect's own commit into the render `dispatch` already
+scheduled. Verified directly: a `React.Profiler`-based render count for a single motion-kind click
+dropped from 3 commits to 2 (the dispatch's own, plus the still-present dirty-flag effect). The html
+weight meter's cache, key, and reported figure are **untouched** — HL5c/HL5f/HL5e's tests pass
+unchanged, and this section states plainly that the meter was innocent rather than "fixing" it
+without cause. Test-first (red before the fix, green after, work-count not wall-clock): a
+`React.Profiler`-wrapped render asserts a single motion-kind toggle commits the editor at most
+twice, never three times — failing with "expected 3 to be less than or equal to 2" on the pre-fix
+effect-based code and passing at 2 after. Mutation manifest `.agents/manifests/x30.json`: reverting
+the `useMemo` derivation back to the `useState`+effect mirror reopens the third commit and the new
+test catches it (caught, reproduced by `yarn mutate:verify`). No second mutation is recorded: the
+brief's suggested "drop a slot from the html weight key" mutation presumes the fix touches
+`htmlWeightKey`, and X30 never does — manufacturing one to fill the slot would be dishonest about
+what this PR actually changed.
+
+**A coverage drop this fix surfaced, not caused.** The full gate flagged `LogoField.tsx` losing
+branch coverage on `invalid ? "border-error" : "border-border"` inside the filled-tile block.
+Grepped every writer of the `product-N-logo` error key across `apps/web/src`: exactly one —
+`validateProducts` (`validate.ts:265`), gated strictly by `product.logoPath.trim() === ""`, message
+text "No logo yet — upload one with the Logo button." `BriefEditor.tsx` adopts no server/API
+refusal into `errors` (no `setErrors` call exists anywhere in the file post-X30; `errors` is the one
+`useMemo` over `validateState`), and no other render site of `ProductsSection` passes a different
+`errors` object. So `hasLogo` (a non-empty path) and `invalid` (an empty path) **cannot coexist in
+any settled state** — old code or new. Reproduced empirically by instrumenting `LogoField` and typing
+into an initially-empty, already-touched logo field on both refs: `origin/main` (the old
+`useState`+effect mirror) hit `{value: "a", invalid: true}` every time — a real, reproducible
+combination — while this branch never does. Mechanism: with `errors` one commit stale relative to
+`state`, typing the first character into an empty field produced one render where `state.logoPath`
+was already non-empty but `errors` still carried the just-stale "required" error — a false red
+border flashing on a value the user had just typed correctly, for exactly one paint, on every such
+keystroke throughout the suite (this is what fed the branch's coverage on `main`). X30's synchronous
+`useMemo` derivation removes that stale frame, which removes the flicker, which removes the only
+thing that ever executed this branch.
+
+This is not a lost refusal — the "logo required" error still shows, and is still fully tested,
+whenever the path really is empty. The branch was unreachable through genuine application behaviour,
+covered only by the accident this lane fixes. Rather than carry a documented exception (a coverage
+gate that quietly excuses a branch nobody can reach is the same defect this repo calls out
+elsewhere), the branch is removed: `LogoField.tsx`'s filled-tile border is now unconditionally
+`border-border`, with a comment at the site naming the invariant (the sole logo rule is "path is
+empty") and stating that if a future rule can flag a non-empty path — a missing asset, a bad
+extension, a server refusal — the conditional returns **with a test that reaches it through real
+application behaviour**, not a hand-constructed prop. `invalid` stays live everywhere else it is
+still reachable: the empty-tile block and the hidden mirror input's `aria-invalid`.

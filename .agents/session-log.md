@@ -5288,6 +5288,43 @@ residual stated). PR #432.
   docs/planning/2026-09-10_the-unowned-gaps.md ship in this PR;
   4/4 mutations caught (.agents/manifests/hl5e.json).
 
+## 2026-09-15 — X30 (AI session)
+
+Investigated the CI-only `Test timed out in 5000ms` on brief-editor.test.tsx's four
+slowest tests. The html weight meter (HL5c/HL5f/HL5e) was the lead suspect and is
+disproven: 0 `assembleHtml` calls measured across all four tests (none select a
+platform whose `formats` include `html`), and the same four tests time the same
+at `origin/main~6` (before the meter existed) as at HEAD — no code regression to
+bisect. Real, measured cause: a `React.Profiler`-wrapped render showed one user
+gesture committing the "everything"-presentation tree three times — the dispatch's
+own, plus a redundant commit from a validate-on-change effect mirroring `state`
+into `useState` (`errors`/`warnings`/`blockedAt`), plus the dirty-flag effect. These
+four tests carry the suite's highest interaction counts, so they pay that tax the
+most, leaving the least margin against the fixed timeout on a loaded runner. Fix:
+derive `errors`/`warnings`/`blockedAt` with `useMemo` in `BriefEditor.tsx` instead
+of the effect+setState mirror — commits per interaction measured 3 → 2. Meter's
+cache/key/figure untouched; HL5c/HL5f/HL5e tests pass unchanged. Test-first,
+work-count not wall-clock: a Profiler-based render-count assertion (red on the
+pre-fix effect code, green at ≤2 after). §33 (X30) of
+docs/planning/2026-09-10_the-unowned-gaps.md ships in this PR; 1/1 mutation caught
+(.agents/manifests/x30.json) — no second mutation recorded, since the fix never
+touches `htmlWeightKey`.
+
+- 2026-09-15 X30 fix round (coordinator review): full gate flagged a branch-coverage
+  drop on LogoField.tsx (`invalid ? "border-error" : "border-border"` in the
+  filled-tile block). Grepped every writer of `product-N-logo` in apps/web/src:
+  exactly one (validateProducts, gated on an empty logoPath), and BriefEditor.tsx
+  adopts no server error into `errors` post-X30 — so `hasLogo && invalid` cannot
+  occur in any settled state. Reproduced empirically on both refs: origin/main hit
+  it every time (a one-commit-stale `errors` producing a false invalid-border flash
+  on a logo path the user had just typed correctly); this branch never does, because
+  X30 made `errors` synchronous with `state`. Removed the unreachable ternary in
+  LogoField.tsx (border is now unconditional there), with a comment naming the
+  invariant and how it would need to change. `invalid` stays live at the empty-tile
+  block and the hidden input's aria-invalid. §33 (X30) of
+  docs/planning/2026-09-10_the-unowned-gaps.md records the grep, the reproduction,
+  and why this is the removal of a dead branch rather than a documented exception.
+  195/195 touched tests green, typecheck/lint clean.
 ## 2026-09-15 — VE5b1 (AI session)
 
 Renderer half of scenes-in-the-renderer (no generation wiring): `VideoCompositeRequest.backgrounds?:
