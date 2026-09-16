@@ -77,6 +77,11 @@ function coalesceKeyOf(action: EditorAction): string | null {
       return `setHtmlElementText:${action.layerId}:${action.index}`;
     case "setHtmlElementFrame":
       return `setHtmlElementFrame:${action.layerId}:${action.index}:${Object.keys(action.patch).sort().join(",")}`;
+    // The element's font override (HL5e): the frame patch's rule — the field
+    // set is the identity, so weight then family are two steps while
+    // consecutive changes to one field revert as one run.
+    case "setHtmlElementStyle":
+      return `setHtmlElementStyle:${action.layerId}:${action.index}:${Object.keys(action.patch).sort().join(",")}`;
     default:
       return null;
   }

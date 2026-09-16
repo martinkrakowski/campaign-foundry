@@ -1332,6 +1332,25 @@ export function htmlElementAnchorLabel(position: number): string {
   return `Element ${position} anchor`;
 }
 
+/* ── The element style override (HL5e, HL-D4, HL-D8) ─────────────────────── */
+
+/**
+ * The face of both style selects that writes the ABSENT key — the element
+ * follows the brief's own `creative-style`, which is what HL-D4 says style
+ * comes from; the override is the exception a row can state.
+ */
+export const htmlElementStyleDefault = "Brief default";
+
+/** The weight select's label (carried by the `text` and `button` rows only). */
+export function htmlElementWeightLabel(position: number): string {
+  return `Element ${position} weight`;
+}
+
+/** The typeface select's label — the brief-level control's word, per element. */
+export function htmlElementFamilyLabel(position: number): string {
+  return `Element ${position} typeface`;
+}
+
 /**
  * The copy a new element starts with (HL5a): something a person can see and
  * replace, never an empty field — an element with nothing to say is an element

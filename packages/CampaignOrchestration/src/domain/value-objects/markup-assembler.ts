@@ -23,7 +23,7 @@
 import { resolveCanvas, scaleBasis, type CanvasSpec } from "./aspect-ratios.js";
 import { CLICK_TAG_VARIABLE } from "./click-destination.js";
 import { DEFAULT_STYLE, resolveStyle, toneFontWeight, type Style } from "./creative-style.js";
-import { htmlTextGeometry, htmlButtonFontSize, type HtmlElement } from "./html-element.js";
+import { htmlTextGeometry, htmlButtonFontSize, htmlElementFont, type HtmlElement } from "./html-element.js";
 import { DEFAULT_TREATMENT, type ToneKind } from "./Treatment.vo.js";
 
 /** HTML-escape user-authored strings for the HTML text / quoted-attribute contexts (HL-D7). */
@@ -153,12 +153,16 @@ export function assembleHtml(options: AssembleHtmlOptions): AssembledHtml {
         const radius = Math.min(8, boxH / 2, boxW / 2);
         // HL5f: the same function the canvas drawer calls — `htmlButtonFontSize`.
         const fontSize = htmlButtonFontSize(boxH, scaleBasis(options.canvas, width, height));
+        // HL5e: the element's own font, resolved by the one function the canvas
+        // drawer also calls — an override here, or the brief's resolved
+        // (tone-derived) weight and family there.
+        const font = htmlElementFont(element, resolvedStyle);
         const navAttr =
           clickDestination !== undefined
             ? ` onclick="window.open(window.${CLICK_TAG_VARIABLE})"`
             : "";
         const cursor = clickDestination !== undefined ? "cursor: pointer;" : "";
-        const buttonStyle = `${baseStyle} background-color: ${brandColor}; border-radius: ${radius}px; color: #ffffff; font-family: ${resolvedStyle.fontFamily}, sans-serif; font-weight: ${resolvedStyle.fontWeight}; font-size: ${fontSize}px; text-align: center; display: flex; align-items: center; justify-content: center; border: none; padding: 0; overflow: hidden; ${cursor}`;
+        const buttonStyle = `${baseStyle} background-color: ${brandColor}; border-radius: ${radius}px; color: #ffffff; font-family: ${font.fontFamily}, sans-serif; font-weight: ${font.fontWeight}; font-size: ${fontSize}px; text-align: center; display: flex; align-items: center; justify-content: center; border: none; padding: 0; overflow: hidden; ${cursor}`;
         const text = escapeHtml(element.text ?? "");
         elementMarkup.push(
           `<button type="button" style="${buttonStyle}"${navAttr}>${text}</button>`,
@@ -195,7 +199,11 @@ export function assembleHtml(options: AssembleHtmlOptions): AssembledHtml {
         } else if (element.frame.anchor === "bottom") {
           justify = "flex-end";
         }
-        const textStyle = `${baseStyle} color: #ffffff; font-family: ${resolvedStyle.fontFamily}, sans-serif; font-weight: ${resolvedStyle.fontWeight}; font-size: ${fontSize}px; letter-spacing: ${letterSpacing}px; line-height: ${lineHeight}px; text-align: ${resolvedStyle.align}; display: flex; flex-direction: column; justify-content: ${justify}; overflow: hidden;`;
+        // HL5e: the element's own font, resolved by the one function the canvas
+        // drawer also calls — an override here, or the brief's resolved
+        // (tone-derived) weight and family there.
+        const font = htmlElementFont(element, resolvedStyle);
+        const textStyle = `${baseStyle} color: #ffffff; font-family: ${font.fontFamily}, sans-serif; font-weight: ${font.fontWeight}; font-size: ${fontSize}px; letter-spacing: ${letterSpacing}px; line-height: ${lineHeight}px; text-align: ${resolvedStyle.align}; display: flex; flex-direction: column; justify-content: ${justify}; overflow: hidden;`;
         const text = escapeHtml(element.text ?? "");
         elementMarkup.push(`<div style="${textStyle}">${text}</div>`);
         break;

@@ -627,7 +627,8 @@ describe("setHtmlElementStyle (HL5e)", () => {
   });
 
   test("a patch the element already carries is a no-op — no new state, no history entry", () => {
-    const styled = reduce(withThree(), {
+    const base = withThree();
+    const styled = editorReducer(base, {
       type: "setHtmlElementStyle",
       layerId: "html",
       index: 0,
@@ -643,17 +644,18 @@ describe("setHtmlElementStyle (HL5e)", () => {
     ).toBe(styled);
     // Clearing an already-absent field says nothing either.
     expect(
-      editorReducer(withThree(), {
+      editorReducer(base, {
         type: "setHtmlElementStyle",
         layerId: "html",
         index: 0,
         patch: { fontWeight: undefined },
       }),
-    ).toBe(withThree());
+    ).toBe(base);
   });
 
   test("an out-of-range index and a foreign layer are no-ops", () => {
     const base = withThree();
+    const foreign = withThree();
     expect(
       editorReducer(base, {
         type: "setHtmlElementStyle",
@@ -663,13 +665,13 @@ describe("setHtmlElementStyle (HL5e)", () => {
       }),
     ).toBe(base);
     expect(
-      editorReducer(base, {
+      editorReducer(foreign, {
         type: "setHtmlElementStyle",
         layerId: "image",
         index: 0,
         patch: { fontWeight: 700 },
       }),
-    ).toBe(base);
+    ).toBe(foreign);
   });
 
   test("canonicalTemplate drops an element's empty style block — it restates absence (X16)", () => {

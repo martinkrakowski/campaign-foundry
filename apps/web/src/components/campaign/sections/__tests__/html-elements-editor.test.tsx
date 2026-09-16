@@ -745,13 +745,9 @@ describe("HtmlWeightMeter — the live weight of the html unit (HL5c, HL-D6)", (
 /* ── HL5e — per-element style selects ─────────────────────────────────────── */
 
 describe("HtmlElementsEditor — style overrides (HL5e)", () => {
-  /** The element row for position `n`, scoped like every other row query. */
-  const row = (n: number) =>
-    within(
-      screen
-        .getAllByRole("listitem")
-        .find((r) => within(r).queryByText(messages.htmlElementName(n)))!,
-    );
+  /** The element row for position `n`, scoped like every other row query:
+   *  the list's order IS the elements' order, the panel's own contract. */
+  const row = (n: number) => within(screen.getAllByRole("listitem")[n - 1]!);
 
   function StyleHarness({ initial }: { initial: EditorState }) {
     const [state, dispatch] = useReducer(editorReducer, initial);
