@@ -46,6 +46,21 @@ export default defineConfig({
           environment: "happy-dom",
           include: ["apps/web/src/**/*.test.{ts,tsx}", "packages/ui/src/**/*.test.{ts,tsx}"],
           setupFiles: ["./apps/web/vitest.setup.ts"],
+          // 15000ms, web project only. Vitest's 5000ms default was never calibrated
+          // for this 182-test React integration suite (a full editor shell per test).
+          // The tests were made faster first: §33 (X30, 4540ce0b) cut a full commit
+          // per gesture (click 3→2, keystroke 4→3); §34 (X32, deb6e5a9) dropped a
+          // re-blur of an already-touched field from 5 commits to 3; §36 (X34,
+          // 8bbca3e9 + 218b2d3d) stopped fillValidDraft typing character by
+          // character (setup commits 70→30, −57%; file 30.5s→27.4s) and the four
+          // historically failing tests then passed on a loaded runner. What remained
+          // on VE3b1's head a2981a77 was same-SHA pass/fail (PR 9m23s vs push 9m37s)
+          // with one test over 5000ms in one run and not the other — per-moment
+          // variance on a shared runner, not a slower machine and not a regression.
+          // Owner approved this calibration on 2026-09-16. A slowdown is still
+          // never answered by raising this number: the next person who finds a test
+          // near the limit should look for the cost, as X30/X32/X34 did.
+          testTimeout: 15000,
         },
       },
       {
