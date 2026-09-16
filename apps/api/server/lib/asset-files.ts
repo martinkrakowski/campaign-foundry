@@ -73,8 +73,9 @@ export function rewriteAssetPath(
 
 /**
  * Rewrite all brief-scoped asset paths (`logoPath` and `inputAsset` across all products,
- * and the brief-level `audio.path`, VE-D8) on a brief from `fromBriefId` to `toBriefId`.
- * Shared root assets (`assets/inputs/*.png`) are left untouched.
+ * the brief-level `audio.path` (VE-D8), and every `copy.timeline.beats[].background`
+ * (VE5b2)) on a brief from `fromBriefId` to `toBriefId`. Shared root assets
+ * (`assets/inputs/*.png`) are left untouched.
  */
 export function rewriteAssetPaths(
   brief: CampaignBrief,
@@ -99,37 +100,68 @@ export function rewriteAssetPaths(
     }
     return updated;
   });
-  // Absent audio stays absent (VE-D3): spreading `{ ...brief.audio, path }` onto an
-  // undefined `audio` would fabricate a key a byte-identity comparison must never see.
-  if (brief.audio === undefined) return { ...brief, products };
-  const rewrittenAudioPath = rewriteAssetPath(brief.audio.path, fromBriefId, toBriefId, pathMap);
-  const audio =
-    rewrittenAudioPath === brief.audio.path ? brief.audio : { ...brief.audio, path: rewrittenAudioPath };
-  return { ...brief, products, audio };
+  let updated: CampaignBrief = { ...brief, products };
+
+  // Absent audio stays absent (VE-D3): only ever replace the key when it was
+  // already present, never fabricate one a byte-identity comparison ("key in
+  // object") must never see.
+  if (brief.audio !== undefined) {
+    const rewrittenAudioPath = rewriteAssetPath(brief.audio.path, fromBriefId, toBriefId, pathMap);
+    if (rewrittenAudioPath !== brief.audio.path) {
+      updated = { ...updated, audio: { ...brief.audio, path: rewrittenAudioPath } };
+    }
+  }
+
+  // Same discipline for copy.timeline.beats[].background (VE5b2): absent copy,
+  // absent timeline, or a beat naming no background is untouched — a beat
+  // without `background` must never gain a `background: undefined` key.
+  const timeline = brief.copy?.timeline;
+  if (timeline !== undefined) {
+    let beatsChanged = false;
+    const beats = timeline.beats.map((beat) => {
+      if (typeof beat.background !== "string") return beat;
+      const rewritten = rewriteAssetPath(beat.background, fromBriefId, toBriefId, pathMap);
+      if (rewritten === beat.background) return beat;
+      beatsChanged = true;
+      return { ...beat, background: rewritten };
+    });
+    if (beatsChanged) {
+      updated = { ...updated, copy: { ...brief.copy, timeline: { ...timeline, beats } } };
+    }
+  }
+
+  return updated;
 }
 
 /**
  * Extract distinct source brief IDs referenced by any brief-scoped asset paths
- * (`assets/inputs/<fromId>/...`) in a brief's products, and its `audio.path` (VE-D8).
+ * (`assets/inputs/<fromId>/...`) in a brief's products, its `audio.path` (VE-D8),
+ * and every `copy.timeline.beats[].background` (VE5b2).
  */
 export function extractSourceAssetBriefIds(brief: CampaignBrief, targetBriefId: string): string[] {
-  if (!brief.products || !Array.isArray(brief.products)) return [];
   const fromIds = new Set<string>();
-  for (const product of brief.products) {
-    for (const p of [product.logoPath, product.inputAsset]) {
-      if (typeof p === "string") {
-        const match = /^assets\/inputs\/([^/]+)\/.+$/.exec(p);
-        if (match && match[1] !== targetBriefId) {
-          fromIds.add(match[1]);
-        }
+  const addSource = (p: string): void => {
+    const match = /^assets\/inputs\/([^/]+)\/.+$/.exec(p);
+    if (match && match[1] !== targetBriefId) {
+      fromIds.add(match[1]);
+    }
+  };
+  // Malformed/missing products is its own guard, scoped to the products walk
+  // only — audio.path and beat backgrounds must still be scanned even when a
+  // brief has no products, or a duplicate silently keeps their source paths
+  // (the exact bug this function exists to prevent).
+  if (brief.products && Array.isArray(brief.products)) {
+    for (const product of brief.products) {
+      for (const p of [product.logoPath, product.inputAsset]) {
+        if (typeof p === "string") addSource(p);
       }
     }
   }
   if (brief.audio !== undefined) {
-    const match = /^assets\/inputs\/([^/]+)\/.+$/.exec(brief.audio.path);
-    if (match && match[1] !== targetBriefId) {
-      fromIds.add(match[1]);
-    }
+    addSource(brief.audio.path);
+  }
+  for (const beat of brief.copy?.timeline?.beats ?? []) {
+    if (typeof beat.background === "string") addSource(beat.background);
   }
   return Array.from(fromIds);
 }

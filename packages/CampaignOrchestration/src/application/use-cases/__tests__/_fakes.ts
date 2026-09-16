@@ -8,6 +8,7 @@ import type {
   CompositorPort,
   ExportPort,
   ImageGeneratorPort,
+  SceneAssetPort,
   VideoCompositorPort,
 } from "../../../index.js";
 import type { VariationPlanner } from "../GenerateCampaignUseCase.use-case.js";
@@ -20,6 +21,20 @@ import type { VariationPlanner } from "../GenerateCampaignUseCase.use-case.js";
 
 export const fakeImageGenerator = (source: BackgroundSource = "procedural"): ImageGeneratorPort => ({
   resolveBackground: vi.fn(async () => ({ image: new Uint8Array([1, 2, 3]), source })),
+});
+
+/**
+ * Scene resolver fake (VE5b2): resolves each distinct path to bytes derived
+ * from the path itself, so two distinct paths never share a result — a test
+ * asserting the resolved `backgrounds` map actually pins which bytes landed
+ * under which key, not merely that something did. `unreadable` names paths
+ * that reject instead, the way an unsafe or missing scene asset would.
+ */
+export const fakeSceneAssets = (unreadable: readonly string[] = []): SceneAssetPort => ({
+  resolveScene: vi.fn(async (path: string) => {
+    if (unreadable.includes(path)) throw new Error(`fake scene resolver: "${path}" is unreadable`);
+    return new Uint8Array(Buffer.from(path, "utf8"));
+  }),
 });
 
 export const fakeCompositor = (logoApplied = true): CompositorPort => ({

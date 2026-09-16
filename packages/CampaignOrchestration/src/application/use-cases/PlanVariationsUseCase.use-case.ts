@@ -111,7 +111,7 @@ export class PlanVariationsUseCase {
       return err(new Error(`Variation plan coverage unmet: ${unmet}.`));
     }
 
-    return ok(toPlan(brief.id, policy, accepted));
+    return ok(toPlan(brief.id, policy, accepted, hasSceneBackgrounds(brief)));
   }
 
   replan(plan: VariationPlan, index: number, attempt: number): Result<VariationPlan, Error> {
@@ -275,7 +275,23 @@ function framesEstimate(variants: readonly Variant[], policy: VariationPolicy): 
   return { frames };
 }
 
-function toPlan(briefId: string, policy: VariationPolicy, variants: readonly Variant[]): VariationPlan {
+/**
+ * Whether the brief's timeline names any per-beat scene at all (VE5b2). Since
+ * VE5a a scene is an uploaded asset path, never a generated one — so this
+ * never adds to `genaiCalls` — but the estimate sentence still needs to know
+ * whether to say so. `false` (never present as `false`, see `toPlan`) for a
+ * brief with no timeline or one naming no backgrounds.
+ */
+function hasSceneBackgrounds(brief: CampaignBrief): boolean {
+  return brief.copy?.timeline?.beats.some((beat) => beat.background !== undefined) ?? false;
+}
+
+function toPlan(
+  briefId: string,
+  policy: VariationPolicy,
+  variants: readonly Variant[],
+  sceneBackgrounds: boolean,
+): VariationPlan {
   return {
     policyHash: policy.policyHash,
     seed: policy.seed,
@@ -286,6 +302,9 @@ function toPlan(briefId: string, policy: VariationPolicy, variants: readonly Var
       feasible: true,
       genaiCalls: genaiCalls(variants),
       ...framesEstimate(variants, policy),
+      // Present only when true (VE5b2): a brief with no scene ever moves this
+      // key into existence, so every plan JSON predating VE5b2 stays byte-identical.
+      ...(sceneBackgrounds ? { sceneBackgrounds: true } : {}),
     },
     policy,
     briefId,

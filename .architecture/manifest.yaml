@@ -198,6 +198,7 @@ bounded_contexts:
             - ExportPort
             - ImageGeneratorPort
             - PlatformProfilePort
+            - SceneAssetPort
             - VideoCompositorPort
       infrastructure:
         adapters:
@@ -251,6 +252,7 @@ bounded_contexts:
           - AssetReusingImageGenerator
           - CanvasFfmpegVideoCompositor
           - FileSystemBackgroundCache
+          - FileSystemSceneAssetResolver
           - FireflyImageGenerator
           - GeminiImageGenerator
           - NodeCanvasCompositor

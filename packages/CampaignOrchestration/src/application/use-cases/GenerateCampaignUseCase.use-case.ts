@@ -39,6 +39,7 @@ import type { CompositeRequest, CompositorPort, SafeInsets } from "../ports/out/
 import type { ExportPort } from "../ports/out/ExportPort.js";
 import type { BackgroundContext, ImageGeneratorPort } from "../ports/out/ImageGeneratorPort.js";
 import type { PlatformSafeZoneResolver } from "../ports/out/PlatformProfilePort.js";
+import type { SceneAssetPort } from "../ports/out/SceneAssetPort.js";
 import type { VideoCompositorPort } from "../ports/out/VideoCompositorPort.js";
 import { MOTION_FPS } from "../../domain/value-objects/MotionKind.vo.js";
 import { resolveTimeline, timelineProblem, type CopyTimeline } from "../../domain/value-objects/CopyTimeline.vo.js";
@@ -82,6 +83,48 @@ function motionSampleAt(timeline: CopyTimeline | undefined, durationSec: number)
   if (timeline === undefined) return MOTION_SAMPLE_AT;
   const midpoints = resolveTimeline(timeline, durationSec).map((beat) => (beat.startT + beat.endT) / 2);
   return [...new Set([...MOTION_SAMPLE_AT, ...midpoints])].sort((a, b) => a - b);
+}
+
+/**
+ * Resolve every distinct scene a timeline's beats name (VE5b2), cover-fit to
+ * `ratio` through {@link SceneAssetPort} — never a filesystem call in this
+ * layer, and never more than the distinct values (the timeline validator caps
+ * at MAX_SCENES regardless of repeats). `undefined` (never `{}`) when the
+ * timeline is absent or names no background at all, so
+ * `VideoCompositeRequest.backgrounds` stays a conditional spread and a
+ * scene-free brief renders byte-identically (VE-D3).
+ *
+ * A path that cannot be read fails loudly, naming the offending beat
+ * (1-based, matching `keyBeat`'s own convention) and the path: a scene the
+ * user named and paid to upload must not silently fall back to the
+ * creative's own ground — that fallback is VE-D3's answer for a beat naming
+ * NO background, never for one naming an unreadable one.
+ *
+ * `GenerateCampaignUseCase` and `PreviewCreativeFrameUseCase` both call this
+ * with the SAME timeline and ratio, so a scrubbed or previewed frame matches
+ * exactly what the run would draw (VE-D2).
+ */
+export async function resolveTimelineBackgrounds(
+  timeline: CopyTimeline | undefined,
+  ratio: AspectRatio,
+  sceneAssets: SceneAssetPort,
+): Promise<Result<Readonly<Record<string, Uint8Array>> | undefined, Error>> {
+  const distinctPaths = [
+    ...new Set(
+      (timeline?.beats ?? []).flatMap((beat) => (beat.background !== undefined ? [beat.background] : [])),
+    ),
+  ];
+  if (distinctPaths.length === 0) return ok(undefined);
+  const backgrounds: Record<string, Uint8Array> = {};
+  for (const path of distinctPaths) {
+    try {
+      backgrounds[path] = await sceneAssets.resolveScene(path, ratio);
+    } catch (cause) {
+      const beatIndex = timeline!.beats.findIndex((beat) => beat.background === path);
+      return err(new Error(`Beat ${beatIndex + 1} names a scene ("${path}") that could not be read.`, { cause }));
+    }
+  }
+  return ok(backgrounds);
 }
 
 /** Row identity + paths: the leading keys of every persisted asset row. */
@@ -137,6 +180,12 @@ export interface GenerateCampaignDeps {
   readonly compositor: CompositorPort;
   /** Motion variants only; static and classic paths never touch it. */
   readonly videoCompositor: VideoCompositorPort;
+  /**
+   * Resolves a timeline beat's own background (VE5b2) — never a filesystem
+   * call in this layer. Motion variants only; a brief with no `copy.timeline`
+   * naming a background never touches it.
+   */
+  readonly sceneAssets: SceneAssetPort;
   readonly compliance: CompliancePort;
   readonly exporter: ExportPort;
   readonly now: () => Date;
@@ -522,6 +571,33 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
       });
     }
 
+    // VE5b2: resolve every distinct scene the timeline's beats name ONCE PER
+    // DISTINCT MOTION RATIO, before any cell renders — never per cell, since
+    // every motion cell in a run shares this SAME brief-level timeline
+    // (`CopyTimeline` lives on the brief, not the variant), but the cover-fit
+    // depends on the canvas a cell draws at. No assumption that every motion
+    // cell shares one ratio: every motion-capable platform packages exactly
+    // one canvas ratio today (`PlatformProfile.vo.ts`), but nothing pins that
+    // — a future portrait placement beside today's square one would silently
+    // cover-fit every scene to the wrong ratio if this only ever resolved
+    // once. Cells that share a ratio still resolve it exactly once. With no
+    // motion cell in this plan nothing would ever draw a scene, so resolution
+    // is skipped entirely — and a re-roll that targets only static cells
+    // never touches a scene its own targets don't reach either, since `cells`
+    // is already narrowed to the targeted set above.
+    const motionRatios = new Map<string, AspectRatio>();
+    for (const cell of cells) {
+      if (cell.variant.motion !== undefined && !motionRatios.has(cell.ratio.value)) {
+        motionRatios.set(cell.ratio.value, cell.ratio);
+      }
+    }
+    const backgroundsByRatio = new Map<string, Readonly<Record<string, Uint8Array>> | undefined>();
+    for (const ratio of motionRatios.values()) {
+      const resolved = await resolveTimelineBackgrounds(timeline, ratio, this.deps.sceneAssets);
+      if (!resolved.success) return resolved;
+      backgroundsByRatio.set(ratio.value, resolved.value);
+    }
+
     const cellResults = await mapWithConcurrency(cells, MAX_CONCURRENT_BACKGROUNDS, (cell) =>
       this.renderVariant(
         cell.variant,
@@ -538,6 +614,7 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
         brief.template,
         brief.clickDestination,
         brief.audio?.rights,
+        backgroundsByRatio.get(cell.ratio.value),
       ),
     );
 
@@ -580,6 +657,7 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     template: CampaignBrief["template"],
     clickDestination?: string,
     audioRights?: AudioRights,
+    backgrounds?: Readonly<Record<string, Uint8Array>>,
   ): Promise<{ asset: GeneratedAsset; heroImage?: Uint8Array }> {
     const cellContext: BackgroundContext = {
       ...context,
@@ -657,6 +735,7 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
         writeProof,
         timeline,
         audioRights,
+        backgrounds,
       );
     }
 
@@ -740,6 +819,7 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     writeProof: boolean,
     timeline: CopyTimeline | undefined,
     audioRights: AudioRights | undefined,
+    backgrounds: Readonly<Record<string, Uint8Array>> | undefined,
   ): Promise<{ asset: GeneratedAsset; heroImage?: Uint8Array }> {
     const durationSec = variant.durationSec ?? DEFAULT_DURATION_SEC;
     const video = await this.deps.videoCompositor.compositeVideo({
@@ -750,6 +830,10 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
       sampleAt: motionSampleAt(timeline, durationSec),
       // Absent → omitted, keeping the legacy single-message path byte-identical (D10).
       ...(timeline !== undefined ? { timeline } : {}),
+      // Per-scene grounds (VE5b1 renderer, VE5b2 generation wiring): absent →
+      // omitted, so a timeline naming no backgrounds renders byte-identically
+      // (VE-D3) — the same conditional-spread discipline `timeline` above uses.
+      ...(backgrounds !== undefined ? { backgrounds } : {}),
     });
 
     // No sampled frame is no evidence: an adapter that returns none fails the check.

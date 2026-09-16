@@ -1160,3 +1160,39 @@ margin problem in the first place (matching X30's own finding), so there is no l
 confirm a wall-clock win from this change without a CI round-trip, which is out of scope for one
 lane's verification pass. Recorded here as a finding for whichever lane next touches this suite's
 setup cost.
+---
+
+## 35. A selective re-roll's guard covers the variation axes, not the brief's copy or scenes (X33)
+
+**Evidence.** A selective re-roll (`regenerateOnly`, the HITL re-roll of one or a few cells) is
+pinned to the persisted report's `policyHash` so a re-roll cannot overlay one slot onto a plan that
+has since changed underneath it (`apps/api/server/routes/campaigns/generate.post.ts`'s
+`persistedPolicyHash`, checked in `runCampaign`, `pipeline.ts` ~181: `if (planned.value.policyHash
+!== expectedPolicyHash) return err(...)`). That hash — `hashPolicy` in `VariationPolicy.vo.ts`
+~265 — covers exactly the variation **axes**: `axisProductSize`, `backgroundSource`, `count`,
+`coverage`, `layout`, `minDistance`, `paletteShift`, `productIds`, `ratios`, `seed`, `tone`, and
+(conditionally, only when in use) the motion axes (`duration`/`mixStatic`/`motion`/`motionRatios`)
+and the `headline`/`anchor` axes. It hashes nothing about the brief's free-text copy
+(`campaignMessage`, `localizedMessage`) or its `copy.timeline` — neither the beats' `text` nor,
+since VE5b2, their `background`.
+
+**Consequence.** Two symptoms of the same hole, one pre-dating this lane and one it extends:
+
+1. **Copy.** Editing the brief's message or a timeline beat's text and then re-rolling one
+   *other* cell passes the `policyHash` check (the axes are unchanged) and merges the new copy
+   into a campaign report that still carries other cells rendered under the old copy — one
+   persisted report mixing two versions of the brief's message, silently.
+2. **Scenes (VE5b2).** The identical mechanism now applies to a beat's `background`: editing
+   which scene a beat names and re-rolling one cell merges that cell's new-scene output into a
+   report whose other motion cells still show the old scene — because `hashPolicy` never covered
+   `copy.timeline` at all, adding `background` to a `CopyBeat` (VE5a) could not have introduced
+   this hole and VE5b2 (wiring scene bytes into generation) does not either; it only gives the
+   pre-existing gap a second, visible way to bite.
+
+**Fix sketch — not shipped — lane X33.** Widen `hashPolicy`'s input (or add a second hash
+alongside `policyHash`) to cover the brief's copy surface — `campaignMessage`, `localizedMessage`,
+and `copy.timeline` in full (beat text and `background` together, since both are the same class of
+"content the re-roll must not silently mix") — and refuse a re-roll whose copy hash has moved,
+the same way a moved `policyHash` is refused today. This is cross-cutting (it touches
+`VariationPolicy.vo.ts`, `pipeline.ts`, and `generate.post.ts`, none of which VE5b2 owns) and
+belongs to its own lane rather than either lane that exposed a symptom of it.

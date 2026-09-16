@@ -5360,3 +5360,67 @@ Measured but did not change `fillValidDraft`'s own per-character typing cost (~7
 unchanged. 1/1 mutation caught (`.agents/manifests/x32.json`; the brief's other two suggested
 mutations recorded in a `note`, not as false "caught" entries). §34 (X32) of
 docs/planning/2026-09-10_the-unowned-gaps.md.
+## 2026-09-16 — VE5b2 (AI session)
+
+Generation wiring for scenes: a new out-port `SceneAssetPort` (`resolveScene(path, ratio): Promise<Uint8Array>`,
+declared by hand in `.architecture/manifest.yaml`, `arch:inventory`/`sync:dry` at Total ops 0) plus its
+`FileSystemSceneAssetResolver` adapter — cover-fits a beat's own background the same way
+`AssetReusingImageGenerator.tryReuseAsset` fits a product's `inputAsset`, but REJECTS on an unsafe/unreadable
+path instead of falling through to generation (a beat's scene has no generated fallback; VE-D3's "absent
+background" path covers a beat naming nothing, never one naming a path nothing can read). `GenerateCampaignUseCase`
+resolves every distinct scene the brief's timeline names ONCE, upfront in `executeVariation` (before any cell
+renders, using the one ratio every motion-capable platform packages — `PlatformProfile.vo.ts`), and fails the
+whole run naming the beat (1-based) and the path on an unreadable scene — no orphaned mp4/png from cells that
+would have rendered after the failure. `PreviewCreativeFrameUseCase` calls the same exported
+`resolveTimelineBackgrounds` helper with the same timeline/ratio, and feeds the resolved map into
+`compositeRequestFingerprint` so a changed scene at the same path never serves a stale cached frame.
+`rewriteAssetPaths`/`extractSourceAssetBriefIds` (`apps/api/server/lib/asset-files.ts`) now carry
+`copy.timeline.beats[].background` through a brief duplicate, with the same absent-key discipline `audio.path`
+already uses. `PlanVariationsUseCase`'s `VariationEstimate` gained `sceneBackgrounds?: true` (present only when
+the timeline names a background, per VE-D10's plan-review resolution: a scene is always an uploaded asset since
+VE5a, so it never adds to `genaiCalls`) — the web-side `estimateSentence`/`EstimatePanel.tsx` still needs a
+parameter to render this; that edit is X32's (`apps/web/**`), reported to the orchestrator rather than made here.
+All red-first (use case, preview, asset-files, plan estimate, new adapter), 2/2 mutations caught
+(`.agents/manifests/ve5b2.json`). VE5b2 in docs/planning/2026-09-13_video-editing-features.md (`premise VE5b2`
+retired, VE5b marked complete, VE-D10 clarification added).
+
+## 2026-09-16 — VE5b2 fix round (#435, AI session)
+
+Two PR-Agent findings from the orchestrator gate on 16ab5736, both real: (1)
+`extractSourceAssetBriefIds`'s `if (!brief.products...) return [];` ran before the
+`audio.path`/`beats[].background` scans, so a brief with no products silently
+contributed no source ids for either — moved the products guard to scope only the
+products walk, audio and beat backgrounds are now always scanned. (2) `executeVariation`
+picked the FIRST motion cell's ratio and cover-fitted every scene to it — true today
+(`PlatformProfile.vo.ts` has exactly one motion-capable ratio) but silently wrong the
+day a second one exists. Replaced with a `Map<ratioValue, AspectRatio>` grouping every
+motion cell by its own ratio and resolving the timeline's scenes once per DISTINCT
+ratio (still once per ratio, never per cell) — no refusal added, a second ratio is a
+legitimate future configuration. Both red-first (stashed the implementation file,
+confirmed the new tests fail, restored). Added a third mutation to
+`.agents/manifests/ve5b2.json` (collapse the ratio-grouping guard back to "only the
+first ratio ever seen"); `yarn mutate:verify` reproduces all 3. Full
+CampaignOrchestration + apps/api/server/lib suite green, typecheck/lint/lint:arch
+clean, arch:inventory/sync:dry Total ops 0.
+
+## 2026-09-16 — VE5b2 fix round 3 (#435, AI session)
+
+Two more real findings from the orchestrator gate on a8dbb2e6: (1) CodeRabbit — the preview
+resolved a scene AFTER calling `imageGenerator.resolveBackground` inside `buildCompositeRequest`,
+so a doomed preview (no scene resolver wired, or an unreadable scene) still paid a background
+generation call first; moved the whole scene-resolution block above `buildCompositeRequest`, and
+added `resolveBackground` not-called assertions (previously the tests only checked the video
+compositor, so they never actually proved "before any port"). (2) CodeRabbit — the cover-fit test
+only asserted a non-empty PNG, which would pass even if `resolveScene` ignored `ratio` entirely;
+now decodes the result with `@napi-rs/canvas`'s `loadImage` (already a dependency) and asserts both
+width and height match the requested ratio, at two different ratios. Added a 4th mutation to
+`.agents/manifests/ve5b2.json` (cover-fit canvas sized from the source image instead of the
+requested ratio) — `yarn mutate:verify` reproduces all 4.
+
+Recorded, not fixed (Qodo, correctly scoped out of this lane): §35 (X33) in
+docs/planning/2026-09-10_the-unowned-gaps.md — a selective re-roll's `policyHash` guard covers only
+the variation axes, never the brief's copy or `copy.timeline` (beat text or `background`), so
+editing either and re-rolling one other cell silently merges old and new content into one report.
+Pre-dates VE5b2 (a copy edit already had this hole); VE5b2 gives it a second, visible symptom via
+scene edits without creating the hole. `VariationPolicy.vo.ts`, `pipeline.ts`, `generate.post.ts`
+untouched — that's lane X33's, not VE5b2's.
