@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "lane": "HL5e",
+  "mutations": [
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/markup-assembler.ts",
+      "before": "        const font = htmlElementFont(element, resolvedStyle);\n        const textStyle =",
+      "after": "        const font = resolvedStyle;\n        const textStyle =",
+      "because": "The whole lane is the element's override reaching BOTH renderers identically (HL-D5, HL-D8). Reverting the text case to the brief-level font reopens exactly the gap HL5f closed for tone: an element asking for 400/Lora would ship markup that lies about its own raster fallback — the canvas would draw the override and the ad would not — and nothing else in the pipeline compares the two, because the markup is never rasterised (D122).",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "packages/CreativeGeneration/src/infrastructure/adapters/__tests__/NodeCanvasCompositor.html-fidelity.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/html-element.ts",
+      "before": "  image: { allowed: [\"kind\", \"frame\"], required: [] },",
+      "after": "  image: { allowed: [\"kind\", \"style\", \"frame\"], required: [] },",
+      "because": "HL-D8 admits the override to exactly the two kinds whose rendering reads it, and the field table — not a branch — is what refuses it elsewhere (the HL1 mechanism). Add style to image's allowed row and an image element starts carrying a font no renderer reads: a field accepted at both boundaries and honoured by neither, the D134 unread-field shape this table exists to prevent.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/html-element.test.ts"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
