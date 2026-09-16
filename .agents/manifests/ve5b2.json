@@ -33,6 +33,21 @@
       "verdict": "caught"
     },
     {
+      "file": "packages/CreativeGeneration/src/infrastructure/adapters/FileSystemSceneAssetResolver.ts",
+      "before": "    const canvas = createCanvas(ratio.width, ratio.height);",
+      "after": "    const canvas = createCanvas(image.width, image.height);",
+      "because": "resolveScene must cover-fit the decoded scene onto the REQUESTED ratio's canvas, not the source image's own size, or a scene drawn into a video request would be stretched/positioned wrong by the compositor (which trusts backgrounds to already be sized to the cell's canvas). Sizing the output canvas from the source image instead of the requested ratio reproduces exactly the 'ignores ratio' bug, caught by the fixture decoding the result and asserting both width and height match the requested ratio's pixel dimensions (assets/inputs/reuse-bg.png is a fixed 1920x1920 source, distinct from every social ratio's own dimensions).",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CreativeGeneration/src/infrastructure/adapters/__tests__/FileSystemSceneAssetResolver.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
       "file": "apps/api/server/lib/asset-files.ts",
       "before": "      if (typeof beat.background !== \"string\") return beat;",
       "after": "      if (true) return beat;",

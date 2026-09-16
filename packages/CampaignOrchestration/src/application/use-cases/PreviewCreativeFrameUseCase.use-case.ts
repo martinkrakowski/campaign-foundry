@@ -249,17 +249,12 @@ export class PreviewCreativeFrameUseCase {
         : AspectRatio.create(nearestSocialRatio(selection.canvas));
     if (!backgroundRatio.success) return backgroundRatio;
 
-    const { request, backgroundSource } = await this.buildCompositeRequest(
-      brief,
-      selection,
-      product,
-      backgroundRatio.value,
-    );
-
-    // VE5b2: resolve the SAME per-beat scenes the run would, so a scrubbed
-    // frame matches generation exactly (VE-D2). Stills never carry a
-    // timeline (VE5b1), so this only ever runs for a motion cell whose
-    // timeline actually names a background.
+    // VE5b2: resolve the SAME per-beat scenes the run would (VE-D2), and do
+    // it BEFORE background generation below — image generation can spend the
+    // owner's GenAI credits, so a doomed preview (no scene resolver wired, an
+    // unreadable scene) must fail before paying for a background nothing
+    // will ever use. Stills never carry a timeline (VE5b1), so this only
+    // ever runs for a motion cell whose timeline actually names a background.
     let backgrounds: Readonly<Record<string, Uint8Array>> | undefined;
     if (hasMotion) {
       const timeline = brief.copy?.timeline;
@@ -273,6 +268,13 @@ export class PreviewCreativeFrameUseCase {
         backgrounds = resolved.value;
       }
     }
+
+    const { request, backgroundSource } = await this.buildCompositeRequest(
+      brief,
+      selection,
+      product,
+      backgroundRatio.value,
+    );
 
     let scrub: ScrubFingerprint | undefined;
     if (hasMotion) {

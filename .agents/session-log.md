@@ -5402,3 +5402,25 @@ confirmed the new tests fail, restored). Added a third mutation to
 first ratio ever seen"); `yarn mutate:verify` reproduces all 3. Full
 CampaignOrchestration + apps/api/server/lib suite green, typecheck/lint/lint:arch
 clean, arch:inventory/sync:dry Total ops 0.
+
+## 2026-09-16 — VE5b2 fix round 3 (#435, AI session)
+
+Two more real findings from the orchestrator gate on a8dbb2e6: (1) CodeRabbit — the preview
+resolved a scene AFTER calling `imageGenerator.resolveBackground` inside `buildCompositeRequest`,
+so a doomed preview (no scene resolver wired, or an unreadable scene) still paid a background
+generation call first; moved the whole scene-resolution block above `buildCompositeRequest`, and
+added `resolveBackground` not-called assertions (previously the tests only checked the video
+compositor, so they never actually proved "before any port"). (2) CodeRabbit — the cover-fit test
+only asserted a non-empty PNG, which would pass even if `resolveScene` ignored `ratio` entirely;
+now decodes the result with `@napi-rs/canvas`'s `loadImage` (already a dependency) and asserts both
+width and height match the requested ratio, at two different ratios. Added a 4th mutation to
+`.agents/manifests/ve5b2.json` (cover-fit canvas sized from the source image instead of the
+requested ratio) — `yarn mutate:verify` reproduces all 4.
+
+Recorded, not fixed (Qodo, correctly scoped out of this lane): §35 (X33) in
+docs/planning/2026-09-10_the-unowned-gaps.md — a selective re-roll's `policyHash` guard covers only
+the variation axes, never the brief's copy or `copy.timeline` (beat text or `background`), so
+editing either and re-rolling one other cell silently merges old and new content into one report.
+Pre-dates VE5b2 (a copy edit already had this hole); VE5b2 gives it a second, visible symptom via
+scene edits without creating the hole. `VariationPolicy.vo.ts`, `pipeline.ts`, `generate.post.ts`
+untouched — that's lane X33's, not VE5b2's.

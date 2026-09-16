@@ -611,7 +611,7 @@ describe("PreviewCreativeFrameUseCase — VE5b2 scene backgrounds", () => {
     expect("backgrounds" in request).toBe(false);
   });
 
-  test("a motion cell whose timeline names a scene, with no scene resolver wired, is rejected before any port is called", async () => {
+  test("a motion cell whose timeline names a scene, with no scene resolver wired, is rejected before background generation or any composite", async () => {
     const videoCompositor = fakeVideoCompositor();
     const d = deps({ videoCompositor });
     const result = await new PreviewCreativeFrameUseCase(d).execute(
@@ -620,10 +620,13 @@ describe("PreviewCreativeFrameUseCase — VE5b2 scene backgrounds", () => {
     );
     expect(result.success).toBe(false);
     if (!result.success) expect(result.error.message).toMatch(/no scene asset resolver is wired/);
+    // Scene resolution runs before background generation (D52 credit safety):
+    // a doomed preview must not spend a GenAI call nothing will ever use.
+    expect(d.imageGenerator.resolveBackground).not.toHaveBeenCalled();
     expect(videoCompositor.compositeFrame).not.toHaveBeenCalled();
   });
 
-  test("an unreadable scene path fails the preview before any composite or cache lookup, naming the beat and the path", async () => {
+  test("an unreadable scene path fails the preview before background generation, any composite, or any cache lookup, naming the beat and the path", async () => {
     const sceneAssets = fakeSceneAssets([SCENE_A]);
     const videoCompositor = fakeVideoCompositor();
     const cache = memoryCache();
@@ -637,6 +640,10 @@ describe("PreviewCreativeFrameUseCase — VE5b2 scene backgrounds", () => {
       expect(result.error.message).toContain("Beat 1");
       expect(result.error.message).toContain(SCENE_A);
     }
+    // Scene resolution runs before background generation (D52 credit safety):
+    // an unreadable scene must fail before a background is generated for a
+    // frame that will never render.
+    expect(d.imageGenerator.resolveBackground).not.toHaveBeenCalled();
     expect(videoCompositor.compositeFrame).not.toHaveBeenCalled();
     expect(cache.store.size).toBe(0);
   });
