@@ -36,14 +36,29 @@
       "file": "packages/CampaignOrchestration/src/domain/value-objects/tracks.ts",
       "before": "    } else if (stop.clock !== trackClock) {",
       "after": "    } else if (false) {",
-      "because": "K1b review: a track's stops must all share one clock, or the resolver silently drops the off-clock stops it was never given a fold-across-clocks meaning for -- data loss with no message. Disabling the mismatch check lets a mixed-clock track back in, which the new 'refuses a track whose stops do not all share one clock' fixture (and its longer-list sibling) is built to catch.",
+      "because": "K1b review: a track's stops must all share one clock, or the resolver silently drops the off-clock stops it was never given a fold-across-clocks meaning for -- data loss with no message. Disabling the mismatch check lets a mixed-clock track back in. Fix round 2 (CodeRabbit): every mixed-clock fixture now uses distinct t values, so this is caught at all three boundaries for the stated reason (a track silently accepted, not the duplicate-t rule firing by coincidence) -- verified individually, file by file, before this command was written to run all three together: tracks.test.ts (2 assertions: the exact refusal object becomes undefined), brief-template.test.ts (isBriefTemplate flips from false to true), load-brief.test.ts (parseBrief stops throwing).",
       "command": [
         "yarn",
         "vitest",
         "run",
-        "--project",
-        "node",
-        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/tracks.test.ts"
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/tracks.test.ts",
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/brief-template.test.ts",
+        "apps/api/server/lib/__tests__/load-brief.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/tracks.ts",
+      "before": "    if (stop.clock !== \"pose\" && !TEXT_LAYER_KINDS.includes(kind)) {",
+      "after": "    if (false) {",
+      "because": "K1b review fix round 2: a beat/effect-clock stop needs a beat to be beat-local against, and only a text layer's pose is resolved per beat (K-D6) -- image/video have no per-beat multiplicity, so such a track has no defined value during a crossfade. Disabling the kind check lets a beat/effect-clock track back onto image/video, caught by the new 'refuses a beat-clock stop on image' / 'refuses an effect-clock stop on video' fixtures.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/tracks.test.ts",
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/brief-template.test.ts",
+        "apps/api/server/lib/__tests__/load-brief.test.ts"
       ],
       "verdict": "caught"
     }
