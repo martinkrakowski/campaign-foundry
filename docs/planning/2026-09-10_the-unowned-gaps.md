@@ -1525,12 +1525,14 @@ of rows that were never lanes. `vanished` had become the default for silence: an
 pay for.
 
 **Fix — shipped.** Three changes, all inside `tools/wave-status`, none of which touches the emitter (teaching
-every runner to emit is a separate operator change). (1) `collect.ts` requires evidence before a row exists:
-a lane is named by an event, or its log's name follows the lane/branch convention — the name
-`dispatch-lane.sh` writes and the branch tail the PR join reads; a log whose name marks it as a derived run
-(a pipeline-family prefix, an appended run kind, or characters no git branch can contain) is an artefact
-about a lane, not a lane, and the rule is stated in the source so a future artefact family is ignored by it
-rather than blacklisted after another lie. (2) `lane-state.ts` (mirrored by the page)
+every runner to emit is a separate operator change). (1) `collect.ts`: **evidence creates a lane; a log only
+ever attaches to one.** A lane exists because something *says* it does — an event in the wave directory's
+`events.jsonl` naming it, which is what `dispatch-lane.sh` records as part of dispatching. An identically
+named `<lane>.log` then attaches its liveness, tail and mtime to that lane; an orphan log is not a lane and
+not an error, and the page says nothing about it. No filename rule gates a row in either direction: the
+first cut of this lane tried one — a blacklist of pipeline-family prefixes and run-kind suffixes — and it
+rejected lanes this repository genuinely ran (`x13-fix`, `x16-fix2`, `hl5c-fix2`), which is the finding
+`§39` records. (2) `lane-state.ts` (mirrored by the page)
 splits silence from disappearance: a lane whose last words were `started`, with no EXIT and no PR, is
 `unknown` — the word the vocabulary already owns for "no verdict"; `vanished` keeps its bad meaning (a run
 that ended, or a terminal claim with no PR to show). No state word was added, so no page copy or rollup had
@@ -1542,8 +1544,41 @@ live register; waves that only ever emitted events now date themselves from thos
 Two findings from shipping it. First, the page tests that pinned the rollup word for a just-dispatched,
 not-yet-alive lane ("1 lane · 1 vanished") encoded the old silence-default; their invariant — the header
 counts what the rows say — is preserved with the new word, and the tests were updated to assert it. Second,
-the remaining half: until every runner emits, a directly-launched lane whose log name matches no branch and
-whose events nobody wrote stays invisible to the page. Invisible is honest where a phantom row was not, but
-it is still a gap, and closing it is the other change.
+the honest consequence of evidence-not-filenames, stated so the reader can act on it: **until every runner
+emits events, a lane launched outside `dispatch-lane.sh` is invisible to this page.** The recorded fixture
+in `tools/wave-status/__tests__/fixtures/` prices it concretely — nine real lanes ran beside the twenty-
+four that reported, with logs and merged PRs to their names, and none of the nine is on the page. Invisible
+is something an operator who knows what they launched can check; a phantom "vanished" row is not, and
+closing the gap by guessing from filenames again is the trade this lane refused. Teaching the runners to
+emit is the separate change.
+
+**X35 — shipped in this PR.**
+---
+
+## 39. The evidence rule's first cut judged lanes by filename and hid real ones (X35 revision)
+
+**Evidence.** Model review (Qodo) on the wave-status fix read `namesALaneLog` and asked what it does to a
+lane named `x16-fix2`. The answer, verified against this repository's own history: nothing good. The
+function decided lanehood by pattern — prefixes `gate-`/`install-`/`review-`/`fix-`/`q-`, suffixes
+`-review`/`-brief`/`-fix`/`-runner`, a `fix\d*` family — and this project has genuinely run lanes named
+`x10-fix`, `x13-fix`, `x15-fix`, `x16-fix`, `x16-fix2`, `x17-fix`, `x26-fix`, `x27-fix`, `hl5c-fix2`,
+`ve3a-fix2`. `dispatch-lane.sh` writes `<lane>.log` from the caller's own token, so every one of those
+ten real lanes would have been silently dropped from the status page the moment its fix-round ran. The
+recorded join fixture carries the same shape: `M2.log`, `R1.log`, `L8o.log` and friends, logs of lanes
+that ran for real.
+
+**Consequence.** Trading "113 phantom lanes" for "real lanes disappear" is not an improvement — it is the
+same failure pointed the wrong way. A page that invents a row can be questioned; a page that hides a live
+lane offers the reader nothing to question, and the lane's operator steers by a dashboard that is not
+watching them. Any suffix rule is a guess about what names mean, and names mean what their callers chose.
+
+**Fix — shipped.** The blacklist is deleted, and the rule underneath it replaced: evidence creates a lane,
+a log only ever attaches to a lane the evidence already names (§38 states the rule as implemented). A
+hidden lane becomes an invisible-with-a-reason lane only when it *reported nothing* — which is the emitter
+gap, a separate change — never because of how its name reads. Pinned where the old bug lived: the
+`x16-fix2` fixture (event plus identically named log yields exactly one lane with the log's liveness
+attached), the 113-lanes fixture extended with the real lane names still yielding no lanes without
+events, and two mutations in `.agents/manifests/x35.json` — let a log create a lane again and the first
+fails; reinstate any name-based rejection and the second does.
 
 **X35 — shipped in this PR.**
