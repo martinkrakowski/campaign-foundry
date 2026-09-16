@@ -1935,6 +1935,25 @@ describe("BriefPage — capabilities and motion", () => {
    * assertion, not a wall-clock one — the runner that produced the CI regression is
    * exactly the one a wall-clock assertion would be flaky on.
    */
+  /**
+   * CI split on this SHA (push run failed, PR run on the same commit passed):
+   * once Randomized + motion + a named product make the draft's look fully
+   * specified, the rail now paints here too (D141 — Everything is no longer
+   * excluded), and `usePreviewFrame`'s debounced fetch resolves and commits
+   * once, ~`PREVIEW_FRAME_DEBOUNCE_MS` after whichever click most recently
+   * changed the look. That commit is the one-time cost of painting a
+   * creative at all — inherent, and already covered by CC2's own
+   * acceptance criteria — not a per-toggle cost. Left unsettled, its landing
+   * inside a measured window is a race: instrumented locally (20 runs, this
+   * test's own Profiler plus a `/campaigns/preview-frame` call counter),
+   * every run showed exactly one extra commit arriving ~300-500ms after the
+   * setup clicks, always AFTER this file's fast local click resolves — which
+   * is exactly why it passed here every time and only failed on a loaded CI
+   * runner where a click's own processing can take long enough for the
+   * timer to fire first. Settling past the debounce before each reset — not
+   * raising the budget — makes the toggle's own two commits (D3-style: the
+   * dispatch, plus the dirty-flag effect) the only thing left to count.
+   */
   test("a single motion-kind toggle commits the editor at most twice, not three times (X30)", async () => {
     const user = userEvent.setup();
     routes({});
@@ -1948,6 +1967,10 @@ describe("BriefPage — capabilities and motion", () => {
     await fillValidDraft(user);
     await user.click(screen.getByText("Randomized"));
     await user.click(screen.getByRole("button", { name: "motion" }));
+    // Let the rail's own preview-frame fetch (triggered by the look becoming
+    // fully specified above) resolve and commit before it can be counted
+    // against a toggle it has nothing to do with.
+    await new Promise((r) => setTimeout(r, 400));
 
     commits = 0;
     await user.click(screen.getByRole("button", { name: "ken-burns-in" }));
@@ -1956,6 +1979,10 @@ describe("BriefPage — capabilities and motion", () => {
     // outlives the route) — never a third for a validation mirror that has no reason
     // to exist as its own commit.
     expect(commits).toBeLessThanOrEqual(2);
+    // This click also changed the previewed motion kind, re-keying the fetch
+    // (CC2) and scheduling another debounced request — settle it too before
+    // the next measurement, for the same reason as above.
+    await new Promise((r) => setTimeout(r, 400));
 
     commits = 0;
     await user.click(screen.getByRole("button", { name: "ken-burns-out" }));
