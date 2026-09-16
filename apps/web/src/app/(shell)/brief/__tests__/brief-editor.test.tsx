@@ -159,23 +159,51 @@ const writes = (calls: readonly { url: string; method: string }[]) =>
 const waitForEditorReady = async () =>
   waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).not.toBe(""));
 
+/**
+ * X34: this helper exists to get the draft into a valid state so a test's real
+ * assertion can run — none of these eight values is itself under test anywhere
+ * in this file (every test that cares what a keystroke does — validation,
+ * touched, dirty, coalescing — drives `userEvent` directly in its own body, not
+ * through here). So setup pays the cheapest form that reaches the same state,
+ * while keeping the same *interaction shape* `userEvent.type` produces, not
+ * only the same final value: `fireEvent.click` marks the field's section
+ * touched exactly as the click `userEvent.type` fires before every keystroke
+ * does (`touchSectionFromEvent`'s `onClickCapture`); `el.focus()` moves real
+ * DOM focus, which blurs whatever was focused before (marking that field
+ * touched, `handleMainBlur`'s `onBlurCapture`) the same way focus moving to
+ * the next field does mid-typing; `fireEvent.change` sets the final value in
+ * one dispatch instead of one per character. The last field's `.focus()` is
+ * never followed by another, so it stays focused exactly as `userEvent.type`
+ * leaves it — nothing here blurs it. Proven equal, not assumed: see
+ * "fillValidDraft's fast path produces the same draft, touched sections, and
+ * focus the typed path produces" below, which compares the saved brief, which
+ * sections show their validation, and `document.activeElement` between the
+ * two paths, and is relied on unchanged by the X32 keystroke-commit test
+ * (which revisits Target Region as an already-touched field afterwards).
+ */
+const setField = (el: HTMLElement, value: string) => {
+  fireEvent.click(el);
+  el.focus();
+  fireEvent.change(el, { target: { value } });
+};
+
 const fillValidDraft = async (user: ReturnType<typeof userEvent.setup>, id = "fresh") => {
-  await user.type(screen.getByLabelText("Campaign Name"), id);
-  await user.type(screen.getByLabelText("Target Region"), "DE");
-  await user.type(screen.getByLabelText("Target Audience"), "a");
-  await user.type(screen.getByLabelText("Headline"), "Hi");
+  setField(screen.getByLabelText("Campaign Name"), id);
+  setField(screen.getByLabelText("Target Region"), "DE");
+  setField(screen.getByLabelText("Target Audience"), "a");
+  setField(screen.getByLabelText("Headline"), "Hi");
   let names = screen.getAllByLabelText("Name");
   if (names.length < 2) {
     await user.click(screen.getByRole("button", { name: "Add product" }));
     names = screen.getAllByLabelText("Name");
   }
-  await user.type(names[0], "A");
-  await user.type(names[1], "B");
+  setField(names[0], "A");
+  setField(names[1], "B");
   const logos = screen
     .getAllByLabelText("Logo Path")
     .filter((el) => el.tagName === "INPUT" && el.getAttribute("type") !== "file");
-  await user.type(logos[0], "a.png");
-  await user.type(logos[1], "b.png");
+  setField(logos[0], "a.png");
+  setField(logos[1], "b.png");
 };
 
 describe("BriefPage — data flow", () => {
@@ -2049,6 +2077,111 @@ describe("BriefPage — capabilities and motion", () => {
       </ShellProviders>,
     );
     expect(screen.getByTestId("dirty-probe").textContent).toBe("clean");
+  });
+
+  /**
+   * X34 — `fillValidDraft` above no longer drives `userEvent.type` character by
+   * character; each field gets one `fireEvent.click` (marks its section
+   * touched, matching the click `userEvent.type` fires before every keystroke),
+   * one `el.focus()` (moves real focus, which blurs whatever was focused
+   * before — matching `touched`'s per-field mark and leaving the last field
+   * focused exactly as typing does), and one `fireEvent.change` (the final
+   * value). Three things could differ if that shape were wrong, none of them
+   * visible in the saved draft alone: the draft itself, which sections read as
+   * "touched" (gates whether an error shows before Save is attempted), and
+   * which field is left focused. This test pins all three:
+   *
+   * (a) the saved brief — `toBrief` never sees intermediate frames or key
+   *     order, only the value each field settles on, so the POST body is the
+   *     honest comparison, as before.
+   * (b) touched sections — there is no direct accessor, so this observes the
+   *     one thing touching a section actually gates: after filling, make
+   *     product 0's colour invalid through its plain hex `<Input>`
+   *     (`fireEvent.change` only — no click, no blur, so `touched` itself
+   *     never gains `product-0-color`) and check whether the error renders.
+   *     It should, in both paths, purely because `fillValidDraft` already
+   *     clicked *something* inside the Products section (Name, Logo Path) —
+   *     if the fast path stopped clicking, this would go dark while (a) stayed
+   *     green.
+   * (c) focus — `document.activeElement` right after `fillValidDraft` returns,
+   *     identified by its field key (`Field`'s `data-field-key`, not the node,
+   *     since the two paths render separate trees), must be the last field
+   *     typing leaves focused: the second product's Logo Path.
+   *
+   * `typeItByHand` below is the original, unconverted character-by-character
+   * sequence, kept here only as the reference this test pins the fast path
+   * against — not reused anywhere else in this file. Mutating the fast path to
+   * skip a field, write a different value, or drop the click/focus transition
+   * must fail this test (`.agents/manifests/x34.json`).
+   */
+  test("fillValidDraft's fast path produces the same draft, touched sections, and focus the typed path produces (X34)", async () => {
+    const typeItByHand = async (user: ReturnType<typeof userEvent.setup>, id: string) => {
+      await user.type(screen.getByLabelText("Campaign Name"), id);
+      await user.type(screen.getByLabelText("Target Region"), "DE");
+      await user.type(screen.getByLabelText("Target Audience"), "a");
+      await user.type(screen.getByLabelText("Headline"), "Hi");
+      let names = screen.getAllByLabelText("Name");
+      if (names.length < 2) {
+        await user.click(screen.getByRole("button", { name: "Add product" }));
+        names = screen.getAllByLabelText("Name");
+      }
+      await user.type(names[0], "A");
+      await user.type(names[1], "B");
+      const logos = screen
+        .getAllByLabelText("Logo Path")
+        .filter((el) => el.tagName === "INPUT" && el.getAttribute("type") !== "file");
+      await user.type(logos[0], "a.png");
+      await user.type(logos[1], "b.png");
+    };
+
+    const observe = async (fill: (user: ReturnType<typeof userEvent.setup>) => Promise<void>) => {
+      // Two renders share this one test — cleanup only runs between separate
+      // `test()`s, not mid-test — so make the isolation the suite's beforeEach
+      // already gives every other test explicit here too, rather than relying
+      // on the first render's autosave/localStorage state happening not to
+      // collide with the second's.
+      localStorage.clear();
+      localStorage.setItem("cf:brief-picked", "1");
+      localStorage.setItem("cf:presentation", "everything");
+      const user = userEvent.setup();
+      const calls = routes({});
+      const view = renderWithRun(<NewEditor />);
+      await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""));
+      await fill(user);
+
+      // (c) — captured before anything else moves focus (Save's own click included).
+      const focusedFieldKey =
+        (document.activeElement as HTMLElement | null)?.closest("[data-field-key]")?.getAttribute("data-field-key") ??
+        null;
+
+      // (a)
+      await saveVia(user, "Save");
+      const post = await waitFor(() => {
+        const call = calls.find((c) => c.method === "POST");
+        expect(call).toBeTruthy();
+        return call!;
+      });
+
+      // (b) — the hex text input, not the swatch buttons or the sr-only colour
+      // picker: a plain `fireEvent.change` on it clicks and blurs nothing, so
+      // this cannot mark `touched` or `touchedSections` itself. Whatever makes
+      // the resulting error visible was already true beforehand.
+      const colorInputs = screen.getAllByLabelText(messages.productColorLabel);
+      fireEvent.change(colorInputs[0], { target: { value: "not-a-color" } });
+      const productsSectionWasTouched = screen.queryByText(messages.productColor) !== null;
+
+      view.unmount();
+      return { body: post.body, focusedFieldKey, productsSectionWasTouched };
+    };
+
+    const typed = await observe((user) => typeItByHand(user, "fresh"));
+    const fast = await observe((user) => fillValidDraft(user, "fresh"));
+
+    expect(fast.body).toEqual(typed.body);
+    expect(fast.focusedFieldKey).toBe(typed.focusedFieldKey);
+    expect(fast.focusedFieldKey).toBe("product-1-logo");
+    expect(fast.productsSectionWasTouched).toBe(typed.productsSectionWasTouched);
+    expect(fast.productsSectionWasTouched).toBe(true);
   });
 
   test("a motion brief on a host without motion stays read-only, saves verbatim, and applies with the refusal (D12)", async () => {

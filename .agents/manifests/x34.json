@@ -1,0 +1,58 @@
+{
+  "version": 1,
+  "lane": "X34",
+  "mutations": [
+    {
+      "file": "apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx",
+      "before": "  setField(logos[1], \"b.png\");",
+      "after": "  // setField(logos[1], \"b.png\"); // mutated: field skipped",
+      "because": "fillValidDraft's fast path must set every field the typed path sets, not merely most of them. Dropping the second product's logo write leaves that field at whatever default the editor started with, instead of \"b.png\" — the equivalence test compares the fast path's saved brief against the typed path's byte for byte, so a skipped field must fail it, not pass silently through a partial draft that happens to still be structurally valid.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx",
+        "-t",
+        "fillValidDraft's fast path produces the same draft, touched sections, and focus the typed path produces"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx",
+      "before": "  setField(screen.getByLabelText(\"Target Audience\"), \"a\");",
+      "after": "  setField(screen.getByLabelText(\"Target Audience\"), \"z\");",
+      "because": "fillValidDraft's fast path must write the same value into every field the typed path writes, not merely a value that keeps the draft valid. Writing \"z\" instead of \"a\" into Target Audience still produces a structurally valid draft (any non-empty string satisfies validation), so nothing but a byte-for-byte comparison against the typed path would ever catch it — a weaker assertion (e.g. \"the draft is still valid\") would let this mutation through.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx",
+        "-t",
+        "fillValidDraft's fast path produces the same draft, touched sections, and focus the typed path produces"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx",
+      "before": "const setField = (el: HTMLElement, value: string) => {\n  fireEvent.click(el);\n  el.focus();\n  fireEvent.change(el, { target: { value } });\n};",
+      "after": "const setField = (el: HTMLElement, value: string) => {\n  fireEvent.click(el);\n  fireEvent.change(el, { target: { value } });\n};",
+      "because": "Qodo's finding on this PR: setField's job is not only to reach the same draft, it must also leave the same interaction state the typed path leaves — in particular, the last field focused. Dropping el.focus() (the only thing in setField that ever moves document.activeElement — fireEvent.click and fireEvent.change do not) leaves nothing focused after fillValidDraft returns, instead of the second product's Logo Path the typed path leaves focused. The draft itself is unaffected (this mutation cannot fail the byte-for-byte body comparison), so only the focus-equivalence assertion catches it — proving that assertion pins something the draft comparison alone cannot see.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx",
+        "-t",
+        "fillValidDraft's fast path produces the same draft, touched sections, and focus the typed path produces"
+      ],
+      "verdict": "caught"
+    }
+  ],
+  "note": "A fourth candidate mutation — drop `fireEvent.click(el)` (leave `.focus()` and `fireEvent.change`) — was tried and does NOT fail the touched-sections assertion in this test: `fillValidDraft` always clicks the real 'Add product' button (an unconverted `user.click`, unchanged by this lane) before either path fills the second product's fields, and that click alone already marks the Products section touched regardless of whether the individual field writes click first. So this specific assertion cannot isolate the per-field click's own contribution for the Products section — and Identity and Copy have no available candidate at all, since every field they contain is also directly field-touched by its own blur, which already satisfies visibleErrors' gate on its own. Recorded honestly rather than manufacturing a mutation this test does not, in fact, catch (the same discipline X30's and X32's manifests already applied to their own declined slots). The click is kept in setField anyway, on structural grounds: it is what the real typed path does before every keystroke, and it is what actually changes `touchedSections` for a differently-shaped fillValidDraft call in the future, even where this file's current fields cannot expose the difference today."
+}

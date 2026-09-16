@@ -1196,3 +1196,161 @@ and `copy.timeline` in full (beat text and `background` together, since both are
 the same way a moved `policyHash` is refused today. This is cross-cutting (it touches
 `VariationPolicy.vo.ts`, `pipeline.ts`, and `generate.post.ts`, none of which VE5b2 owns) and
 belongs to its own lane rather than either lane that exposed a symptom of it.
+---
+
+## 36. `fillValidDraft`'s own typing was the last unowned cost in the editor's CI margin (X34)
+
+**Evidence.** X30 (`§33`) and X32 (`§34`) each measured and fixed a real rendering inefficiency in
+`BriefEditor.tsx` — three commits per gesture down to two, and a re-blur bug down from five commits
+to three — and each time `brief-editor.test.tsx` still timed out in CI at the fixed 5000ms
+`testTimeout` on the same handful of tests. X32 named what was left without touching it:
+`fillValidDraft` (and the individual per-field `user.type` calls three of the four historically
+slow tests make right after calling it) drives `userEvent` character by character to reach a valid
+draft, so every one of the file's 180-plus tests pays the full per-keystroke commit cost — three
+commits for the first character in a newly-focused field, two for every character after — purely to
+get eight fields into a state no assertion in most of those tests cares about the *keystrokes* for.
+X32 measured the shape of this cost (`fillValidDraft`'s own sequence: 8 field entries, 22 characters,
+≈ 8×1 + 22×2 = 52 commits by its accounting) and explicitly declined to touch it inside a product
+lane, both because the helper is shared by the whole file and because local timing cannot reproduce
+the CI-only loaded-runner regime that actually times these tests out — matching X30's own finding.
+
+**The rule that decided every case here.** Typing that is the behaviour a test asserts on — that a
+keystroke validates, that touched/dirty state flips, that history coalesces — must keep driving
+`userEvent` exactly as it did. Only typing whose sole purpose is to get the draft into a valid state
+so the real assertion can run is setup, and setup may take the cheapest form that produces the same
+editor state. Grepped every top-level and describe-scoped helper in the file for a second
+`fillValidDraft`-shaped sibling: none exists for the editor's own draft. Two do exist for a different
+dialog — `fillDialog` (declared once in "the create seed (W1)" and again, identically, in "the
+abandoned-draft two-way (W3 / F19)"), which types one field ("Summer Spark") into the Create Campaign
+dialog's name input before confirming. Left unconverted: at least one of its eight call sites asserts
+the exact typed string round-tripped through the seed-application handoff
+(`expect(...).toBe("Summer Spark")`), so whether the *typed value itself* is the thing under test
+there is ambiguous — this brief's own rule says ambiguous is behaviour, and `fillDialog` sits outside
+the CI-margin investigation X30/X32/X34 have been tracking (it costs one field across eight tests, not
+eight fields across 180). Reported here rather than converted. Every other `user.type` call in the
+file sits inside an individual test's own body, driving the specific field that test's assertion is
+about (e.g. typing the click destination whose validity `Save` must refuse, or re-typing a headline to
+assert a debounce or an undo step) — those are behaviour under test and are unconverted.
+
+**Coverage check (no `test:cov` run, per this lane's memory budget — checked by inspection instead).**
+`fillValidDraft` typing produced a range of intermediate field values on every keystroke; the fast
+path produces only the final value. Two sites looked like they might depend on that range for branch
+coverage, X30's own coverage-drop pattern (`§33`) exactly:
+- `LogoField.tsx`'s `fileExt = extMatch ? extMatch[1].toUpperCase() : "IMG"` computes on every render,
+  gated behind nothing — so the `"IMG"` arm fires on the empty `value=""` every field starts at (both
+  before and after this change, on every mount), and is exercised directly and repeatedly by
+  `LogoField.test.tsx`'s own `value=""` fixtures. Not a coverage-only branch; unaffected.
+- `chip-group.tsx`'s custom-input-open path (`isCustomValue`/`showCustomInput`, `packages/ui`): typing
+  `"D"` then `"DE"` into Target Region used to open and close the "Other…" input transiently, since
+  `"DE"` is a known `REGION_OPTIONS` value but `"D"` alone is not. The fast path never passes through
+  `"D"`. But `packages/ui/src/__tests__/chip-group.test.tsx` drives this exact open/close flow
+  directly (clicking "Other…", a known value arriving from outside closing it again) — this file's
+  typing was never the only place that branch ran, and `packages/ui` is not this lane's area regardless.
+No gap found at either site; both stay covered by their own component-level tests independent of this
+conversion.
+
+**X34 — shipped in this PR.** `fillValidDraft`'s eight `user.type` calls became one `fireEvent.click`
+(marks the field's section touched — `touchSectionFromEvent`'s `onClickCapture` — exactly as the
+click `userEvent.type` fires before every keystroke does), one `el.focus()` (moves real DOM focus,
+which blurs whatever was focused before — `handleMainBlur`'s `onBlurCapture` — the same way focus
+moving to the next field does mid-typing), and one `fireEvent.change` (the field's final value in one
+dispatch instead of one per character). The one non-typing step (`Add product`, a button click) is
+unchanged.
+
+A first version of this fix used `fireEvent.change` + `fireEvent.blur` only, and an equivalence test
+that compared only the saved draft. Model review (Qodo) on the PR caught what that version and that
+test both missed: `fireEvent.change` + `fireEvent.blur` never fires a click, so `touchedSections`
+stayed empty instead of gaining "identity"/"copy"/"products" the way real clicks-before-typing
+populate it, and the sequence left the *last* field blurred (via the explicit `fireEvent.blur`)
+instead of focused, where the typed path leaves it. Both are real, observable differences in
+interaction state that a POST-body-only comparison cannot see, and the fact that all 182 tests passed
+either way was evidence no test depended on it *yet* — not evidence the setup was equivalent. Fixed as
+described above, and re-measured (numbers below already reflect the fix).
+
+Proved equivalent, not asserted: the equivalence test now pins three things, not one —
+`"fillValidDraft's fast path produces the same draft, touched sections, and focus the typed path
+produces (X34)"` drives the *original* character-by-character sequence in one render and the
+converted helper in a second, and compares (a) the two Save POST bodies (`toBrief(state)`'s wire
+shape — no key order or intermediate frame visible either way, only the value each field settles on),
+(b) which sections read as touched, observed through rendered state since there is no direct accessor
+— after filling, product 0's colour is set to an invalid hex through its plain `<Input>`
+(`fireEvent.change` only, no click or blur, so this cannot mark anything itself) and the test checks
+whether the resulting error renders, which only happens if the Products section already reads as
+touched, and (c) `document.activeElement`, identified by `Field`'s `data-field-key` (not the node,
+since the two paths render separate trees) rather than the raw element. All three pass, and are equal
+between the two paths; (c) is pinned to the concrete expected value ("product-1-logo", the second
+product's Logo Path) rather than only to "the two paths agree." The X30 and X32 commit-count tests and
+the four originally slow tests all pass unchanged — no test besides the new one was touched.
+
+**The touched-sections check has an honest limit, reported rather than hidden.** (b) above proves the
+Products section reads as touched in both paths, but it cannot isolate *why* — `fillValidDraft` always
+clicks the real `Add product` button (unconverted, unchanged by this lane) once, before either path
+ever writes the second product's fields, and that click alone already marks Products touched
+regardless of what `setField` does per field. Manually reverting only the `fireEvent.click(el)` inside
+`setField` (keeping `.focus()` and `fireEvent.change`) leaves this specific assertion passing — it does
+not, and cannot, isolate the per-field click's own contribution for Products. Identity and Copy have
+no candidate at all: every field either section contains is also directly field-touched by its own
+blur, which already satisfies `visibleErrors`' gate on its own, so section-level touch produces no
+additional externally observable difference there regardless of clicks. The click is kept in
+`setField` anyway — it is what the real typed path does before every keystroke, and it is what would
+actually change `touchedSections` for a differently-shaped `fillValidDraft` call in the future, even
+where this file's current fields cannot expose the difference today. Recorded in
+`.agents/manifests/x34.json`'s `note` rather than manufacturing a mutation this test does not, in
+fact, catch — the same discipline X30's and X32's manifests already applied to their own declined
+slots.
+
+**Measured, three runs each, median stated (this machine, not CI; numbers below are for the
+click+focus+change version, after the model-review fix):**
+
+| Measurement | Before | After | Change |
+| --- | --- | --- | --- |
+| Commits for one `fillValidDraft` call (`React.Profiler`) | 70 | 30 | −57% |
+| Whole file, wall-clock | 30.54s | 27.42s | −10% |
+| "Save refuses a click destination…" | 579ms | 415ms | −28% |
+| "a motion brief authored from scratch saves…" | 905ms | 681ms | −25% |
+| "motion without a kind or a duration blocks Save…" | 1038ms | 821ms | −21% |
+| "a motion brief on a host without motion…" (no `fillValidDraft` call) | 165ms | 149ms | ~0% (expected — unaffected; within run-to-run noise) |
+
+The commit-count drop (57%) lands close to X32's own rough estimate of "≈70% reduction" for
+converting this typing — closer than the first (change+blur-only) version's 51% did, because a click
+event costs less than the blur this version no longer fires explicitly (blur now happens implicitly,
+once, when the *next* field's `.focus()` runs — one blur total across the sequence's internal
+transitions instead of one per field). That is the honest number for the equivalence this lane
+actually ships, not the number either a less careful or a more literal-minded conversion would hit.
+
+Mutation manifest (`.agents/manifests/x34.json`): three mutations against the equivalence test — (a)
+skip the second product's logo field entirely, (b) write a different value ("z" instead of "a") into
+Target Audience, (c) drop `el.focus()` from `setField` (added after the model-review fix, per the
+brief that raised it: prove the new focus assertion actually pins something the draft comparison
+cannot see). (a) and (b) leave the draft structurally valid, so only the byte-for-byte body comparison
+catches either; (c) leaves the draft byte-identical (focus never touches `state`), so only the focus
+assertion catches it. All three caught, reproduced by `yarn mutate:verify`. A fourth candidate — drop
+`fireEvent.click(el)` — was tried and does not fail any current assertion, for the reason given above;
+not recorded as a mutation, per the same rule X30 and X32 both followed for a slot they could not
+honestly fill.
+
+**Whether the four tests now have enough margin — the honest arithmetic.** The CI runner that
+originally timed these tests out ran the whole job ≈2.3× slower than the runner that passed on the
+same SHA (§33). Applying that multiplier to this lane's local numbers:
+
+- Before this fix, ×2.3: "Save refuses…" ≈ 1332ms, "motion authored from scratch" ≈ 2082ms, "motion
+  without a kind or a duration" ≈ 2387ms — all comfortably under the 5000ms `testTimeout`.
+- After this fix, ×2.3: ≈ 955ms, ≈ 1566ms, ≈ 1888ms — also comfortably under 5000ms.
+
+Both computations clear 5000ms, yet CI's loaded runner **did** time these tests out, both before this
+lane and after X30 and X32's fixes (§33, §34). That is not a contradiction to paper over: it is proof
+that a single whole-job multiplier (2.3×, an average across the entire suite, most of which is
+async-wait-bound and not CPU-bound) is the wrong tool for predicting a synchronous, dispatch-heavy
+test's slowdown under real CPU contention from concurrent test-file workers — the thing that
+actually starves these specific tests scales however many CPU-bound workers happen to be scheduled
+alongside this file, not by a fixed ratio applied to this file's own local time. X30 and X32 both
+recorded the same limitation before shipping real, measured fixes anyway; this lane does the same.
+**So: not confirmed cleared.** This PR ships a real, measured reduction in the editor's own rendering
+cost (X30, X32) and in the tests' own setup cost (X34) — 57% fewer commits per `fillValidDraft` call,
+21–28% less wall-clock on the three tests that call it — but whether that reduction is *enough*
+margin against a loaded CI runner is a question only a CI round-trip on this branch can answer, the
+same honest limit X30 and X32 both hit. If CI still times these tests out after this PR merges, the
+remaining unowned cost is likely the "one gesture, one commit is not achievable for a keyboard
+gesture into a controlled text field" floor X32 already named (§34) — at that point the next lane's
+option is `testTimeout` itself or splitting the file, neither of which this brief's rules permit this
+lane to reach for.

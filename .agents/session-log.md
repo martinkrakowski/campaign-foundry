@@ -5486,3 +5486,46 @@ done by hand, in the existing alphabetical slot). No `yarn test:cov`, no full bu
 `tracks.ts` (one comment), `value-objects/index.ts` (one export line), `docs/planning/2026-09-10_keyframing.md`,
 `.agents/manifests/k2.json`. Did not touch `apps/web/**` (X34), `CanvasFfmpegVideoCompositor.byte-golden.test.ts`
 (X31, read-only), or `tools/wave-status/**` (X35).
+X34 — the tests' own setup cost, following X30 (§33) and X32 (§34): `fillValidDraft` in
+`apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx` drove `userEvent.type` character by
+character to reach a valid draft, so every one of the file's 180-plus tests paid the full per-keystroke
+commit cost for setup no assertion in most of them cares about. Converted its eight field writes to
+`fireEvent.change` + `fireEvent.blur` (the blur reproduces the same touched-field side effect typing
+left behind, which the X32 keystroke-commit test depends on); the one click (`Add product`) and every
+`user.type` call inside individual tests' own bodies (behaviour under test) are unchanged — grepped for
+a sibling helper and found none. Proved equivalence rather than asserting it: a new test drives the
+original typed sequence and the converted helper in separate renders and compares the two Save POST
+bodies byte for byte; it passes, and the X30/X32 commit-count tests plus the four originally
+CI-timing-out tests all pass unchanged. Measured (three runs, median): `fillValidDraft`'s own commit
+count 70 → 34 (−51%, React.Profiler); whole file wall-clock 30.54s → 28.17s; the three affected tests
+579→436ms, 905→722ms, 1038→829ms (the fourth, which never calls `fillValidDraft`, ~165→159ms as
+expected). Mutation manifest `.agents/manifests/x34.json`: skip-a-field and wrong-value mutations
+against the equivalence test, both caught, reproduced by `yarn mutate:verify`. Recorded as §36 (X34) of
+docs/planning/2026-09-10_the-unowned-gaps.md, including the honest arithmetic that a whole-job 2.3×
+multiplier (§33) does not actually predict either the pre- or post-fix CI timeout on these specific
+tests — so the CI margin is not confirmed cleared by this PR; only a CI round-trip can answer that,
+the same limit X30 and X32 both recorded before it.
+
+X34 fix round (model review, #439): Qodo caught a real gap the first equivalence test's POST-body-only
+comparison could not see — `setField` (change+blur only) never fired a click, so `touchedSections`
+never gained "identity"/"copy"/"products" the way a real click-before-typing does, and its explicit
+`fireEvent.blur` on the last field left it blurred where the typed path leaves it *focused*. Fixed:
+`setField` is now `fireEvent.click` (marks the section touched) + `el.focus()` (moves real focus,
+which blurs whatever was focused before — one blur per transition, not one per field) +
+`fireEvent.change` (the value) — no explicit trailing blur, so the last field stays focused exactly as
+typing leaves it. Extended the equivalence test to a three-way pin: (a) the saved draft as before, (b)
+which sections read as touched, observed by making product 0's colour invalid through a plain
+`fireEvent.change` (no click/blur of its own) and checking whether the error renders, (c)
+`document.activeElement` identified by its `data-field-key`, pinned to the concrete expected value
+("product-1-logo"). All three pass and agree between the typed and fast paths. Honestly reported, not
+hidden: the touched-sections check cannot isolate the per-field click's own contribution for Products,
+because `fillValidDraft`'s pre-existing `Add product` button click already marks that section touched
+regardless — and Identity/Copy have no candidate field at all, since every field either section
+contains is also directly field-touched by its own blur. Recorded as a manifest `note` rather than a
+manufactured mutation. Re-measured after the fix (better than the first version): `fillValidDraft`
+commits 70 → 30 (−57%, not −51%); whole file 30.54s → 27.42s; the three affected tests
+579→415ms/905→681ms/1038→821ms. Added a third mutation to `.agents/manifests/x34.json` — drop
+`el.focus()` — caught (the draft stays byte-identical; only the focus assertion fails), reproduced by
+`yarn mutate:verify` (3 mutations, all reproduced). §36 (X34) of
+docs/planning/2026-09-10_the-unowned-gaps.md updated with the corrected numbers and the honest
+touched-sections limitation.
