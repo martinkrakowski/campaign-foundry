@@ -13,8 +13,8 @@
       "note": "Recorded once, on one machine (macOS, Apple silicon). No runner re-proves these cells: CI is ubuntu-latest, so this key is asserted by nothing and a drift here fails no build."
     },
     "linux-x64": {
-      "reprovedBy": "ci",
-      "note": "Re-proved by CI on every run: the test job is ubuntu-latest, so these cells are asserted, not merely recorded, and a drift here fails the build."
+      "reprovedBy": "nothing",
+      "note": "PENDING (VE3b1): no cell recorded yet. The test skips on this platform rather than asserting or recording. Record it after this PR merges (`gh workflow run record-goldens.yml --ref main`), commit the resulting cell, then flip this to \"ci\" — CI is ubuntu-latest, so once the cell exists it will be asserted on every run like every other family's linux-x64 key."
     }
   }
 }
