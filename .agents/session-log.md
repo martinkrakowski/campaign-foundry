@@ -5703,3 +5703,37 @@ divergence. Also corrected the manifest's and plan doc's mutation-(a) wording: i
 via a `TypeError` thrown before any hash is computed, not a moved cell — stated plainly rather than
 folded into "moves a golden" (mutation (b) is the one that is a genuine 4-cell hash move). Committed
 fixture and doc wording reflect this corrected design; `mutate:verify` re-run clean against it.
+
+## 2026-09-16 — ES1 web-side scene-estimate sentence (AI session)
+
+Closed the gap VE5b2's acceptance paragraph left open: the API already carried
+`VariationEstimate.sceneBackgrounds`/`PlanEstimate` companion
+(`VariationPlan.vo.ts:19`, set by a conditional spread in
+`PlanVariationsUseCase.use-case.ts:307` — present, and `true`, only when the plan's
+timeline names a background), but the web side never declared the field
+(`PlanEstimate` in `apps/web/src/lib/briefs-api.ts:82-89`) or read it, so the flag
+reached the browser in the plan JSON and was dropped. `PlanEstimate` now mirrors the
+API's `sceneBackgrounds?: true` exactly (optional, `true`-only, never normalised to
+`false`); `isEstimate` does not validate it, same as the pre-existing `frames` field,
+so a malformed payload's value passes through raw — the strict `=== true` gate lives
+in `estimateSentence` (`messages.ts`), never truthiness, so `sceneBackgrounds: false`
+or a non-boolean never reads as "on". `estimateSentence` gains one trailing clause,
+rendered only when the flag is `true`: "Backgrounds come from your uploaded images,
+so they add nothing." Without the flag the sentence is asserted character-identical
+to today's (literal `toBe`, not `.toContain`). `EstimatePanel.tsx`'s Randomized
+branch passes `plan.estimate.sceneBackgrounds` through; the Classic branch has no
+plan (`genaiCalls: 0` is hardcoded there already) and is untouched.
+
+Red shown before green: the two new EstimatePanel-level tests failed for their own
+stated reason (missing clause text) before `messages.ts` changed; the interface gap
+was proven with `yarn typecheck` — `EstimatePanel.tsx(149,31): error TS2339: Property
+'sceneBackgrounds' does not exist on type 'PlanEstimate'` — before `PlanEstimate`
+gained the field. The briefs-api pass-through tests are green on main already (the
+predicate never validated `frames` either), so no vitest red was faked for them.
+Self-mutation-checked the `=== true` gate by flipping it to truthiness locally: the
+"false/non-boolean" test went red as expected, then reverted (not in the manifest —
+one mutation per PR). `mutate:verify .agents/manifests/es1.json`: 1/1 reproduced —
+rendering the clause unconditionally is caught by the pre-existing literal assertion
+"reads as the plan's own sentence"; no golden moves (web copy only, no compositor
+bytes touched).
+Cite: VE5b2 in docs/planning/2026-09-13_video-editing-features.md.

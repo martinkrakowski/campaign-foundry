@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "lane": "ES1",
+  "mutations": [
+    {
+      "file": "apps/web/src/components/campaign/messages.ts",
+      "before": "  const scene =\n    parts.sceneBackgrounds === true\n      ? \" Backgrounds come from your uploaded images, so they add nothing.\"\n      : \"\";\n  return `You will get ${ads}${split} for ${products}. ${ai}${scene}`;",
+      "after": "  const scene = \" Backgrounds come from your uploaded images, so they add nothing.\";\n  return `You will get ${ads}${split} for ${products}. ${ai}${scene}`;",
+      "because": "Rendering the clause unconditionally is the sharp edge VE5b2 warns about: every plan predating the flag — every classic estimate, every randomized plan whose timeline names no background — must read byte-identical to today (VE-D3's own promise, restated for the web sentence). Unconditional rendering breaks that for every caller, not just the flagged one.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "apps/web/src/components/campaign/__tests__/estimate-panel.test.tsx",
+        "-t",
+        "reads as the plan's own sentence"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

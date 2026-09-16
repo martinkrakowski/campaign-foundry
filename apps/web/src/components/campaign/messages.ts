@@ -375,6 +375,15 @@ export function estimateSentence(parts: {
   readonly ratios: readonly { readonly label: string; readonly count: number }[];
   readonly products: number;
   readonly genaiCalls: number;
+  /**
+   * VE5b2 — present only when the plan's timeline names a background
+   * (`VariationEstimate.sceneBackgrounds`, set by a conditional spread that never
+   * writes `false`). Read with `=== true`, not truthiness: the API never sends
+   * anything else, but a malformed payload's value survives `isEstimate`
+   * unvalidated (`briefs-api.ts`, same as the pre-existing `frames` field), so a
+   * stray `false` or non-boolean must not read as "on".
+   */
+  readonly sceneBackgrounds?: true;
 }): string {
   const ads = `${parts.creatives} ad${parts.creatives === 1 ? "" : "s"}`;
   const split =
@@ -386,7 +395,11 @@ export function estimateSentence(parts: {
     parts.genaiCalls === 0
       ? "No AI image calls."
       : `${parts.genaiCalls} AI image call${parts.genaiCalls === 1 ? "" : "s"}.`;
-  return `You will get ${ads}${split} for ${products}. ${ai}`;
+  const scene =
+    parts.sceneBackgrounds === true
+      ? " Backgrounds come from your uploaded images, so they add nothing."
+      : "";
+  return `You will get ${ads}${split} for ${products}. ${ai}${scene}`;
 }
 
 /** The estimate cannot be drawn yet, because the brief is not far enough along. */

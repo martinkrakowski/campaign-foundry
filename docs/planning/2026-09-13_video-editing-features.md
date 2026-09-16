@@ -221,7 +221,7 @@ sidecar is packaged for motion platforms and absent otherwise.
 | 2 | The preview builds the same `backgrounds` map the run would, so a scrubbed or previewed frame matches generation. | `PreviewCreativeFrameUseCase.use-case.ts` |
 | 3 | Duplicating a creative rewrites `copy.timeline.beats[].background` the same way it rewrites `logoPath`/`inputAsset`/`audio.path`, rather than reusing stale bytes. | `apps/api/server/lib/asset-files.ts` |
 
-**Acceptance.** A brief with per-beat backgrounds generates, previews and duplicates with the scene the timeline names; a brief naming no backgrounds is unaffected (VE-D3); an unreadable scene path fails the run naming the beat and the path; the estimate carries `sceneBackgrounds: true` only when the plan's timeline names a background, and never adds to `genaiCalls`. The web-side estimate sentence (`apps/web/src/components/campaign/messages.ts` `estimateSentence`, `EstimatePanel.tsx`) still needs to render this — owned by X32 (`apps/web/**`), sequenced separately.
+**Acceptance.** A brief with per-beat backgrounds generates, previews and duplicates with the scene the timeline names; a brief naming no backgrounds is unaffected (VE-D3); an unreadable scene path fails the run naming the beat and the path; the estimate carries `sceneBackgrounds: true` only when the plan's timeline names a background, and never adds to `genaiCalls`. The web-side estimate sentence (`apps/web/src/components/campaign/messages.ts` `estimateSentence`) now renders this too (ES1) — VE5b2 is complete end to end.
 
 ---
 
