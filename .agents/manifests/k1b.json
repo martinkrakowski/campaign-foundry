@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "lane": "K1b",
+  "mutations": [
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/resolve-tracks.ts",
+      "before": "  const ease = EASINGS[a.easing ?? DEFAULT_EASING];",
+      "after": "  const ease = EASINGS[b.easing ?? DEFAULT_EASING];",
+      "because": "K1b's rule is that a segment eases with its STARTING stop's easing (a); an ending stop's own override (b) never applies to the segment before it. Reading b's easing instead makes the segment ease with the wrong stop's override, which the linear-override-on-the-starting-stop fixture's first segment (still ease-out-cubic, despite the ending stop declaring \"linear\") is built to catch.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/resolve-tracks.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/resolve-tracks.ts",
+      "before": "  for (const track of tracks) {",
+      "after": "  for (const track of [...tracks].reverse()) {",
+      "because": "K-D9 folds two-or-more tracks on one (layer, property) in DECLARATION order. Folding in reverse is invisible for exactly two operands (IEEE-754 multiplication is exactly commutative for a single pair, and the two-dy-track add fixture is likewise order-blind), which is why the float-order fixture uses three opacity tracks (0.1, 0.2, 0.3): folding them in declaration order gives 1*0.1*0.2*0.3 = 0.006000000000000001, and in reverse gives 1*0.3*0.2*0.1 = 0.006 -- a different double in the last bit, which the fixture asserts exactly.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/resolve-tracks.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/tracks.ts",
+      "before": "    } else if (stop.clock !== trackClock) {",
+      "after": "    } else if (false) {",
+      "because": "K1b review: a track's stops must all share one clock, or the resolver silently drops the off-clock stops it was never given a fold-across-clocks meaning for -- data loss with no message. Disabling the mismatch check lets a mixed-clock track back in. Fix round 2 (CodeRabbit): every mixed-clock fixture now uses distinct t values, so this is caught at all three boundaries for the stated reason (a track silently accepted, not the duplicate-t rule firing by coincidence) -- verified individually, file by file, before this command was written to run all three together: tracks.test.ts (2 assertions: the exact refusal object becomes undefined), brief-template.test.ts (isBriefTemplate flips from false to true), load-brief.test.ts (parseBrief stops throwing).",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/tracks.test.ts",
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/brief-template.test.ts",
+        "apps/api/server/lib/__tests__/load-brief.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/tracks.ts",
+      "before": "    if (stop.clock !== \"pose\" && !TEXT_LAYER_KINDS.includes(kind)) {",
+      "after": "    if (false) {",
+      "because": "K1b review fix round 2: a beat/effect-clock stop needs a beat to be beat-local against, and only a text layer's pose is resolved per beat (K-D6) -- image/video have no per-beat multiplicity, so such a track has no defined value during a crossfade. Disabling the kind check lets a beat/effect-clock track back onto image/video, caught by the new 'refuses a beat-clock stop on image' / 'refuses an effect-clock stop on video' fixtures.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/tracks.test.ts",
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/brief-template.test.ts",
+        "apps/api/server/lib/__tests__/load-brief.test.ts"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

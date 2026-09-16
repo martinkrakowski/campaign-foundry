@@ -76,6 +76,58 @@ describe("layerTracksProblem — which kinds accept tracks", () => {
   });
 });
 
+describe("layerTracksProblem — beat/effect clocks need a text-kind layer (K1b review fix round 2)", () => {
+  // A beat/effect-clock stop needs a *beat* to be beat-local against, and
+  // only a text layer's pose is resolved per beat (resolveTracks's `copy`,
+  // K-D6) -- image/video resolve into `byLayer`, one pose per layer with no
+  // per-beat multiplicity, so during a crossfade there is no defined answer
+  // for which of the (at most two) live beats' local progress such a track
+  // would read. Refused here instead of resolved to an arbitrary one.
+
+  test("refuses a beat-clock stop on image", () => {
+    expect(
+      layerTracksProblem("image", [
+        { property: "opacity", stops: [{ t: 0, value: 0, clock: "beat" }] },
+      ]),
+    ).toEqual({
+      path: "[0].stops[0].clock",
+      must: 'be "pose" for layer kind "image" (a beat- or effect-clock track needs a beat, which only a text layer has)',
+      value: "beat",
+    });
+  });
+
+  test("refuses an effect-clock stop on video", () => {
+    expect(
+      layerTracksProblem("video", [
+        { property: "opacity", stops: [{ t: 0, value: 0, clock: "effect" }] },
+      ]),
+    ).toEqual({
+      path: "[0].stops[0].clock",
+      must: 'be "pose" for layer kind "video" (a beat- or effect-clock track needs a beat, which only a text layer has)',
+      value: "effect",
+    });
+  });
+
+  test("accepts a beat-clock stop on static-text and an effect-clock stop on animated-text", () => {
+    expect(
+      layerTracksProblem("static-text", [
+        { property: "dy", stops: [{ t: 0, value: 0, clock: "beat" }] },
+      ]),
+    ).toBeUndefined();
+    expect(
+      layerTracksProblem("animated-text", [
+        { property: "opacity", stops: [{ t: 0, value: 0, clock: "effect" }] },
+      ]),
+    ).toBeUndefined();
+  });
+
+  test("a pose-clock stop is fine on every trackable kind, image and video included", () => {
+    for (const kind of ["image", "video", "static-text", "animated-text"] as const) {
+      expect(layerTracksProblem(kind, [opacityTrack])).toBeUndefined();
+    }
+  });
+});
+
 describe("layerTracksProblem — structural refusals", () => {
   test("refuses tracks that are not an array", () => {
     for (const value of ["nope", 5, {}, null]) {
@@ -228,7 +280,7 @@ describe("layerTracksProblem — structural refusals", () => {
   });
 });
 
-describe("layerTracksProblem — duplicate t, per clock (K-D9's only refusal)", () => {
+describe("layerTracksProblem — one clock per track (K1b review), and duplicate t within it (K-D9)", () => {
   test("accepts stops declared t-ascending within one clock", () => {
     expect(
       layerTracksProblem("image", [
@@ -294,18 +346,66 @@ describe("layerTracksProblem — duplicate t, per clock (K-D9's only refusal)", 
     });
   });
 
-  test("the same numeric t on two DIFFERENT clocks in one track is legal — they are independent axes", () => {
+  // beat/effect clocks need a text-kind layer (K1b review fix round 2:
+  // layerTracksProblem now also refuses beat/effect on a non-text kind), so
+  // every fixture below that mixes clocks other than pose uses
+  // "static-text" rather than the suite's usual "image".
+
+  test("the same numeric t on two different clocks needs two tracks — one track's stops share one clock (K1b review)", () => {
+    // What the retired test below called "independent axes in one track" is
+    // now expressed as two separate, single-clock tracks composing on the
+    // same property per K-D9 — never refused.
     expect(
-      layerTracksProblem("image", [
+      layerTracksProblem("static-text", [
+        { property: "opacity", stops: [{ t: 0.5, value: 0, clock: "pose" }] },
+        { property: "opacity", stops: [{ t: 0.5, value: 1, clock: "beat" }] },
+      ]),
+    ).toBeUndefined();
+  });
+
+  test("refuses a track whose stops do not all share one clock (K1b review)", () => {
+    // Previously legal (the "independent axes" framing above); closed
+    // because the resolver silently ignored the off-clock stop instead of
+    // ever reading it — data loss with no message. Distinct `t` values
+    // (0.5 / 0.75) so this fails for the clock mismatch alone: with the same
+    // `t` on both stops, disabling the clock check alone still leaves a
+    // refusal (the duplicate-`t` rule fires instead), which would pass this
+    // very assertion for the wrong reason if it used `toBe(false)` rather
+    // than the exact object below.
+    expect(
+      layerTracksProblem("static-text", [
         {
           property: "opacity",
           stops: [
             { t: 0.5, value: 0, clock: "pose" },
-            { t: 0.5, value: 1, clock: "beat" },
+            { t: 0.75, value: 1, clock: "beat" },
           ],
         },
       ]),
-    ).toBeUndefined();
+    ).toEqual({
+      path: "[0].stops[1].clock",
+      must: 'be "pose", the clock this track\'s first stop names (a track\'s stops share one clock)',
+      value: "beat",
+    });
+  });
+
+  test("refuses a mixed-clock track even when the differing stop comes first in a longer list", () => {
+    expect(
+      layerTracksProblem("static-text", [
+        {
+          property: "opacity",
+          stops: [
+            { t: 0, value: 0, clock: "effect" },
+            { t: 0.5, value: 1, clock: "pose" },
+            { t: 1, value: 2, clock: "pose" },
+          ],
+        },
+      ]),
+    ).toEqual({
+      path: "[0].stops[1].clock",
+      must: 'be "effect", the clock this track\'s first stop names (a track\'s stops share one clock)',
+      value: "pose",
+    });
   });
 
   test("two tracks composing on one property is legal — never refused (K-D9)", () => {

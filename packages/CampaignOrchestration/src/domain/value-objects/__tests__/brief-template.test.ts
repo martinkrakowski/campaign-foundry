@@ -617,6 +617,27 @@ describe("isBriefTemplate layer tracks (K1)", () => {
       ],
     });
 
+  /**
+   * The same template with `tracks` on its TEXT layer instead — needed for
+   * a beat/effect-clock fixture (K1b review fix round 2: those clocks are
+   * refused on `image`, so a fixture meant to test something else about the
+   * track can't use it and must use the text layer instead).
+   */
+  const withTextTracks = (tracks: unknown): boolean =>
+    isBriefTemplate({
+      id: "canonical-image-text",
+      version: 1,
+      creativeType: "image-text",
+      unit: "standard-web",
+      layers: [
+        { id: "image", kind: "image" },
+        { id: "shade", kind: "shade" },
+        { id: "accent", kind: "accent" },
+        { id: "static-text", kind: "static-text", tracks },
+        { id: "logo", kind: "logo" },
+      ],
+    });
+
   test("accepts a drawing layer carrying tracks, and absent or empty tracks", () => {
     expect(withTracks(undefined)).toBe(true);
     expect(withTracks([])).toBe(true);
@@ -692,6 +713,45 @@ describe("isBriefTemplate layer tracks (K1)", () => {
         },
       ]),
     ).toBe(false);
+  });
+
+  test("refuses a track whose stops do not all share one clock (K1b review)", () => {
+    // On the TEXT layer (beat needs a text-kind layer, see the describe
+    // block below). Distinct t (0.5 / 0.75): a duplicate t on matching stops
+    // would also be refused with the clock check disabled, making this
+    // assertion pass for the wrong reason (mutation review).
+    expect(
+      withTextTracks([
+        {
+          property: "opacity",
+          stops: [
+            { t: 0.5, value: 0, clock: "pose" },
+            { t: 0.75, value: 1, clock: "beat" },
+          ],
+        },
+      ]),
+    ).toBe(false);
+  });
+
+  test("accepts two single-clock tracks on the same property instead — the mixed-clock case above expressed as two tracks", () => {
+    expect(
+      withTextTracks([
+        { property: "opacity", stops: [{ t: 0.5, value: 0, clock: "pose" }] },
+        { property: "opacity", stops: [{ t: 0.5, value: 1, clock: "beat" }] },
+      ]),
+    ).toBe(true);
+  });
+
+  test("refuses a beat-clock stop on the image layer — a ground layer has no beat to be local against (K1b review fix round 2)", () => {
+    expect(
+      withTracks([{ property: "opacity", stops: [{ t: 0, value: 0, clock: "beat" }] }]),
+    ).toBe(false);
+  });
+
+  test("accepts a beat-clock stop on the text layer instead", () => {
+    expect(
+      withTextTracks([{ property: "opacity", stops: [{ t: 0, value: 0, clock: "beat" }] }]),
+    ).toBe(true);
   });
 
   test("refuses every remaining layerTracksProblem rule at this boundary too", () => {
