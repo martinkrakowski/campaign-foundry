@@ -1,0 +1,48 @@
+{
+  "darwin-arm64": {
+    "fade-in/legacy/entrance": "a992ced1afe392bcc97c48a732448ecf55b1616ed7b0d6675a369dd8c99c4a23",
+    "fade-in/legacy/settled": "a61ac8c30a7ac4caecb05a3ec2cd03bd8ffe42afc76eafcc90b699949cce8add",
+    "fade-in/timeline/entrance": "4ef7a23ae4f57602f93478ecf25cf8f635ebbda72ef37140531e23534c10f74d",
+    "fade-in/timeline/settled": "8732af237bbd82d57b3d73d16f58e9149442ef6701e17cae76c9a5946ae524e6",
+    "rise-in/legacy/entrance": "1b6e21941c665986aac8f9db5188b5c6e8c99e84eac30340b433d7d040073817",
+    "rise-in/legacy/settled": "a61ac8c30a7ac4caecb05a3ec2cd03bd8ffe42afc76eafcc90b699949cce8add",
+    "rise-in/timeline/entrance": "2c0d545a01c8267dc7d51a343dd94e0d9a8ee4fe80c311cf1772b900fb33ecda",
+    "rise-in/timeline/settled": "8732af237bbd82d57b3d73d16f58e9149442ef6701e17cae76c9a5946ae524e6",
+    "slide-in/legacy/entrance": "24f055f62667c8c15eaf9363db2653ead8fdfbe3f30b00bf61c01c98ecf6ec01",
+    "slide-in/legacy/settled": "a61ac8c30a7ac4caecb05a3ec2cd03bd8ffe42afc76eafcc90b699949cce8add",
+    "slide-in/timeline/entrance": "18539ae35d4d25d89b6213f93f9570d060ce58a8a00fec3b12c348fc4fddcc80",
+    "slide-in/timeline/settled": "8732af237bbd82d57b3d73d16f58e9149442ef6701e17cae76c9a5946ae524e6",
+    "scale-in/legacy/entrance": "0d1c1a01e367bab7d9f6bb60f6a4108a134fb7b703ae118ddc4ad6663f9bf9fc",
+    "scale-in/legacy/settled": "a61ac8c30a7ac4caecb05a3ec2cd03bd8ffe42afc76eafcc90b699949cce8add",
+    "scale-in/timeline/entrance": "a8fcb01ae4c898f106c61f890c2037b198605db52554cecd54deabd3f5961e48",
+    "scale-in/timeline/settled": "8732af237bbd82d57b3d73d16f58e9149442ef6701e17cae76c9a5946ae524e6"
+  },
+  "linux-x64": {
+    "fade-in/legacy/entrance": "4d974032d0dc4803a1b6f983d96d6d5275cb08ffc0f9a68f0d328af3821c1663",
+    "fade-in/legacy/settled": "ef29f4fbc450241ff816c4d9a4c4d5076bb3366deba636c6302331147ce7f14e",
+    "fade-in/timeline/entrance": "99bc60880e834294bd841aa317efce266ca350800ed0c96582c643c30b165033",
+    "fade-in/timeline/settled": "d4a5a957647f98929f777c2c37c8595aca1439b0ff2fb9d187e9b34d8f678d80",
+    "rise-in/legacy/entrance": "93686f1b034d4cc88e6f72b27fc1f118ffc92e9d7c800761861b5563b2a8d443",
+    "rise-in/legacy/settled": "ef29f4fbc450241ff816c4d9a4c4d5076bb3366deba636c6302331147ce7f14e",
+    "rise-in/timeline/entrance": "28235b47fe03372e7430f498c56026e338d9fcb15c826008f5fac28bd4147e1d",
+    "rise-in/timeline/settled": "d4a5a957647f98929f777c2c37c8595aca1439b0ff2fb9d187e9b34d8f678d80",
+    "slide-in/legacy/entrance": "8a1a71c69108bcf3cf14d7cf3fc39bc5304c947fae0c10600b0d57ceaafc2d6d",
+    "slide-in/legacy/settled": "ef29f4fbc450241ff816c4d9a4c4d5076bb3366deba636c6302331147ce7f14e",
+    "slide-in/timeline/entrance": "2f84e9839f120883328aed2b1a6bcd9eb6c6932b2be8262f7c9704439aa54f80",
+    "slide-in/timeline/settled": "d4a5a957647f98929f777c2c37c8595aca1439b0ff2fb9d187e9b34d8f678d80",
+    "scale-in/legacy/entrance": "8a48f27f39365dc09b6ff5fa942fa0d4fbaaf8f9435e6c03a0e838bb46ad74ca",
+    "scale-in/legacy/settled": "ef29f4fbc450241ff816c4d9a4c4d5076bb3366deba636c6302331147ce7f14e",
+    "scale-in/timeline/entrance": "0dc5768d638ba5e4447403a083a2599f65afa908105351cd6d556bfc284244fd",
+    "scale-in/timeline/settled": "d4a5a957647f98929f777c2c37c8595aca1439b0ff2fb9d187e9b34d8f678d80"
+  },
+  "platformProvenance": {
+    "darwin-arm64": {
+      "reprovedBy": "nothing",
+      "note": "Recorded once, on one machine (macOS, Apple silicon), from origin/main at 5aef4155 (pre-K3, textEffectPose's own switch) as the baseline, then reproduced byte-for-byte on the K3 branch before being committed. No runner re-proves these cells: CI is ubuntu-latest, so this key is asserted by nothing and a drift here fails no build."
+    },
+    "linux-x64": {
+      "reprovedBy": "ci",
+      "note": "Recorded in a linux/amd64 container (node:22-bookworm) from origin/main at 5aef4155 (pre-K3) as the baseline, then reproduced byte-for-byte on the K3 branch in the same container before being committed. Re-proved by CI on every run: the test job is ubuntu-latest, so these cells are asserted, not merely recorded, and a drift here fails the build. Recorded in node:22-bookworm rather than by the actual ubuntu-latest runner (record-goldens.yml can do that re-recording); a first-CI-run mismatch here is a recording-environment discrepancy to re-record, not evidence of a K3 regression -- the pre-K3/K3 comparison above ran in the identical container both times."
+    }
+  }
+}

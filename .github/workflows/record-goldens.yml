@@ -83,7 +83,7 @@ jobs:
               yarn vitest run packages/CreativeGeneration/src/infrastructure/adapters/__tests__/CanvasFfmpegVideoCompositor.audio-golden.test.ts
               ;;
             all)
-              yarn vitest run packages/CreativeGeneration/src/infrastructure/adapters/__tests__/NodeCanvasCompositor.goldens.test.ts packages/CreativeGeneration/src/infrastructure/adapters/__tests__/NodeCanvasCompositor.motion-goldens.test.ts packages/CreativeGeneration/src/infrastructure/adapters/__tests__/CanvasFfmpegVideoCompositor.byte-golden.test.ts packages/CreativeGeneration/src/infrastructure/adapters/__tests__/CanvasFfmpegVideoCompositor.audio-golden.test.ts
+              yarn vitest run packages/CreativeGeneration/src/infrastructure/adapters/__tests__/NodeCanvasCompositor.goldens.test.ts packages/CreativeGeneration/src/infrastructure/adapters/__tests__/NodeCanvasCompositor.motion-goldens.test.ts packages/CreativeGeneration/src/infrastructure/adapters/__tests__/NodeCanvasCompositor.text-effect-goldens.test.ts packages/CreativeGeneration/src/infrastructure/adapters/__tests__/CanvasFfmpegVideoCompositor.byte-golden.test.ts packages/CreativeGeneration/src/infrastructure/adapters/__tests__/CanvasFfmpegVideoCompositor.audio-golden.test.ts
               ;;
             *)
               echo "::error::suite must be 'all' or 'audio', got: $SUITE"
