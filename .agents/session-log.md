@@ -5567,3 +5567,14 @@ docs/planning/2026-09-10_the-unowned-gaps.md updated with this fix.
 X36 (branch feat/x36-web-test-timeout): calibrated the web project's testTimeout to 15000ms after three lanes made the tests faster first — §33 (X30, click 3→2 / keystroke 4→3), §34 (X32, re-blur 5→3), §36 (X34, setup commits 70→30 −57%, file 30.5s→27.4s, four historically failing tests passed on a loaded runner). Vitest's 5000ms default was never chosen for this suite; what remained on VE3b1's head a2981a77 was same-SHA pass/fail (PR 9m23s vs push 9m37s), per-moment variance on a shared runner. Owner approved the calibration on 2026-09-16. The rule against raising a timeout over a slowdown stands — this is not that. Pin test reads the config object (web = 15000, root/node/api/tools unset). Mutation: web timeout back to 5000, caught. §40 (X36) of docs/planning/2026-09-10_the-unowned-gaps.md.
 
 X36 follow-up (branch feat/x36-web-test-timeout): Qodo found the X34 `beforeAll` comment in brief-editor.test.tsx still claimed hookTimeout is 10000ms, double testTimeout. After this PR's web-only testTimeout: 15000 that is false and backwards — the hook now has the smaller budget. Comment corrected; hookTimeout untouched; beforeAll remains the right place because the typed reference runs once for the whole describe rather than inside every test's own budget. No other hookTimeout "double" claim in apps/web (the other mention is the nested-describe blast-radius comment). §40 (X36) of docs/planning/2026-09-10_the-unowned-gaps.md.
+## 2026-09-16 — X31 mp4 byte golden ffmpeg path (AI session)
+
+Confirmed on main (`84f271e4`) before the fix: the VG2 byte golden probed and
+extracted with `COMPOSITOR_FFMPEG_PATH` but constructed
+`new CanvasFfmpegVideoCompositor()` so the encode ran on `ffmpeg-static`.
+VE3b1's audio golden already passed `{ ffmpegPath }`; this closes the older
+sibling. Red: a wrapper on the override recorded `libx264` invocations and the
+marker was absent. Green: same constructor shape as the audio golden; hashes
+unchanged. Mutation: reverting the argument is caught.
+Cite: §37 (X31) of docs/planning/2026-09-10_the-unowned-gaps.md.
+- X31 fix round: replaced the §37 identity test's shell wrapper + subprocess re-entry with the adapter's injectable spawn — a recorder (delegating to real spawn) captures the command of a real encode of the resolved binary's hard-link alias, asserting it is never the ffmpeg-static default; same claim, no POSIX-shell assumption. Red: reverting the constructor argument records the default path. Mutation re-pointed at that construction and re-verified caught; gate green at 100% on all four counters; no golden moved. Cite: §37 (X31) of docs/planning/2026-09-10_the-unowned-gaps.md.
