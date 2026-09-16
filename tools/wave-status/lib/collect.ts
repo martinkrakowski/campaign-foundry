@@ -51,7 +51,43 @@ export const LOG_TAIL_BYTES = 16 * 1024;
 export const MAX_TAIL_KB = 1024;
 
 /** Prefixed families are pipeline artefacts, not lane logs. */
-const LANE_LOG_EXCLUDED = /^(install|gate|review|fix)-/;
+const LANE_LOG_EXCLUDED = /^(install|gate|review|fix|q)-/;
+
+/**
+ * A lane's log is named `<lane>.log` after the lane itself — the name
+ * `dispatch-lane.sh` writes and the branch tail the PR join reads. A log whose
+ * name *appends* the kind of run it holds — `c4b-install.log`, `x15-fix.log`,
+ * `s2fix.log`, `hl5e-runner.log`, `oc-probe.log`, `x16-tc.log` — describes a
+ * lane that ran elsewhere. The lookbehind keeps a lane whose own name ends in
+ * those letters (`prefix`, `uninstall`) out of the net.
+ */
+const LANE_LOG_ARTIFACT = /(?<![a-zA-Z])(gate|install|review|probe|runner|brief|metrics|tc|fix\d*)$/;
+
+/**
+ * Characters a git branch tail can never contain. A log named with one of
+ * these (`gate-c4-lint:arch.log`, `weird name.log`) cannot name a lane either.
+ */
+const NOT_A_BRANCH_TAIL = /[\s:~^*?[\]\\]/;
+
+/**
+ * The evidence rule for a log-derived lane, stated once because everything
+ * downstream rests on it: a row exists for a lane the page has evidence for —
+ * an event that names it, or a `.log` named by the lane/branch convention and
+ * not marked as an artefact of some run. A wave directory's other files are
+ * the orchestrator's working litter (gate rounds, fix transcripts, probe
+ * output), and counting them as lanes is how one session's log spam rendered
+ * as "113 lanes, 102 vanished". A future artefact family must be ignored by
+ * this rule, never blacklisted by name after the page lied again.
+ */
+export function namesALaneLog(entry: string): boolean {
+  if (!entry.endsWith(".log")) return false;
+  const name = entry.slice(0, -".log".length);
+  return (
+    !LANE_LOG_EXCLUDED.test(name) &&
+    !LANE_LOG_ARTIFACT.test(name) &&
+    !NOT_A_BRANCH_TAIL.test(name)
+  );
+}
 
 /**
  * One PR as the collector sees it: the observation's facts plus the
@@ -221,9 +257,7 @@ export async function collect(
         }
       }
 
-      const laneLogs = entries
-        .filter((entry) => entry.endsWith(".log") && !LANE_LOG_EXCLUDED.test(entry))
-        .sort();
+      const laneLogs = entries.filter(namesALaneLog).sort();
       for (const fileName of laneLogs) {
         const lane = fileName.slice(0, -".log".length);
         const logPath = join(dir, fileName);
