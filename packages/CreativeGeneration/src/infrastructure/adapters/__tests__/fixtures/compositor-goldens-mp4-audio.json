@@ -6,15 +6,21 @@
     "x264Version": "core 164 r3075 66a5bc1",
     "threads": "1"
   },
-  "linux-x64": {},
+  "linux-x64": {
+    "fileHash": "56346bd5b6f95284a99b17f626dc08bf5f0e429653d0e6ca757e94f22fc3d77a",
+    "audioStreamHash": "83bcca9595c4499a07e6ab348ad13c9bc450be670af2982acbe2d8c34e869eb9",
+    "ffmpegVersion": "7.0.2-static",
+    "x264Version": "core 164 r3191 4613ac3",
+    "threads": "1"
+  },
   "platformProvenance": {
     "darwin-arm64": {
       "reprovedBy": "nothing",
       "note": "Recorded once, on one machine (macOS, Apple silicon). No runner re-proves these cells: CI is ubuntu-latest, so this key is asserted by nothing and a drift here fails no build."
     },
     "linux-x64": {
-      "reprovedBy": "nothing",
-      "note": "PENDING (VE3b1): no cell recorded yet. The test skips on this platform rather than asserting or recording. Record it after this PR merges (`gh workflow run record-goldens.yml --ref main`), commit the resulting cell, then flip this to \"ci\" — CI is ubuntu-latest, so once the cell exists it will be asserted on every run like every other family's linux-x64 key."
+      "reprovedBy": "ci",
+      "note": "Re-proved by CI on every run: the test job is ubuntu-latest, so these cells are asserted, not merely recorded, and a drift here fails the build."
     }
   }
 }

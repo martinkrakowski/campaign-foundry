@@ -138,29 +138,6 @@ const finishGolden = (key: string, observed: GoldenMap, run: GoldenRun): void =>
   expect(observed).toEqual(run.map);
 };
 
-/**
- * VE3b1 shipped with `linux-x64` unrecorded (see the fixture's provenance
- * note): `workflow_dispatch` resolves the workflow file — and this repo's
- * record-goldens convention — from a ref, and no ref exists yet where this
- * new audio golden's recorder has run (it needs `record-goldens.yml` on
- * `main`, only true after this PR merges). Everywhere else in this repo a
- * missing golden map is a hard failure, never a skip (`goldenRun`'s own
- * doctrine: a golden nobody's CI runs is a vacuous tripwire). This ONE cell
- * is the deliberate, temporary exception: it SKIPS with an explicit reason
- * naming the exact command to record it, rather than throwing (which would
- * make every CI run red until someone notices and records it) or silently
- * passing (which would prove nothing). Once the cell is recorded and
- * committed, delete this exception and let `goldenRun`'s normal throw-on-
- * missing behaviour apply here like it does everywhere else.
- */
-function pendingCellReason(k: string): string {
-  return (
-    `${k} audio golden not recorded yet — dispatch record-goldens on main after this PR merges ` +
-    `(\`gh workflow run record-goldens.yml --ref main\`), download the "compositor-goldens-Linux-X64" ` +
-    `artifact, and commit its "${k}" cell into fixtures/compositor-goldens-mp4-audio.json.`
-  );
-}
-
 describe("CanvasFfmpegVideoCompositor audio byte golden (VE3b1)", () => {
   const key = compositorGoldenKey();
   const recording = isRecordingGoldens();
@@ -169,14 +146,13 @@ describe("CanvasFfmpegVideoCompositor audio byte golden (VE3b1)", () => {
     fixtureFile: "compositor-goldens-mp4-audio.json",
     cellsHint: "5 fields (fileHash, audioStreamHash, ffmpegVersion, x264Version, threads) for the one canonical timeline + bed",
   });
-  const pending = !recording && goldens === undefined;
 
   test.runIf(process.env.CI)("the ffmpeg-static binary executes on CI", () => {
     expect(ffmpegOk, skipReason).toBe(true);
   });
 
-  test.skipIf(!recording && (!ffmpegOk || pending))(
-    (!recording ? (pending ? pendingCellReason(key) : skipReason) : undefined) ??
+  test.skipIf(!recording && !ffmpegOk)(
+    (!recording ? skipReason : undefined) ??
       "the canonical timeline with a music bed matches the committed audio byte golden for this platform",
     { timeout: 60_000 },
     async () => {
