@@ -1617,22 +1617,36 @@ abandoned mid-record accuses the operator forever, and the count a person is mea
 indistinguishable from one describing live work. X35 closed "the page invents lanes" and "silence is
 not vanishing"; this is the same family's third member: **a past wave is not a current emergency.**
 
-**Fix sketch — not shipped — lane X38.** Either spend the decision the codebase already made (give
-`isPastWaveLane` its consumer: exclude past-wave lanes from `laneNeedsHuman` and from the
-page-level rollup, keeping them visible in the table with their own stale-evidence voice), or delete
-the helper as dead code and say plainly that the count is age-blind. The first is almost certainly
-right — the constant, the comment and the helper are all already there, and only the wiring is
-missing — but it is a decision about what the header *promises*, so it wants the owner's word and a
-test pinning the header to the same set the rows show, exactly as the existing parity test does.
+**Fix — shipped in this PR.** `isPastWaveLane` gets its consumer: `laneNeedsHuman` in
+`tools/wave-status/lib/lane-state.ts`, and its mirror in `public/index.html`, now return `false`
+whenever the lane is past-wave, checked before any state is consulted. The decision taken (the
+plan's own recommendation): a past wave suppresses only the **classification**, never the **state**
+— `laneState`/`laneStateOf` are untouched, so a lane that really disagreed with itself still renders
+`conflict` in its row, with its existing "stale evidence" note; only the header's count and the
+*hide inactive* set built from it let a day-old lane go. Pinned by five tests in
+`lib/__tests__/lane-state.test.ts` (a disagreement whose evidence is older than the threshold stops
+needing a human while keeping its state; the same shape with evidence inside the threshold is still
+counted, both ways of the boundary; a past-wave `failed` and a past-wave `running` lane both stop
+needing a human; an unparseable `ts` with no log is not past-wave — silence is counted, never aged
+out) and extended in `__tests__/page.test.ts`, where the existing rollup-parity and hide-inactive
+tests now carry two past-wave fixture lanes and assert the module's `laneNeedsHuman` and the page's
+rendered attention count agree on them. Two mutations in `.agents/manifests/x38.json`: dropping the
+guard from `laneNeedsHuman` fails the past-wave tests; making `laneEvidenceMs` read an unparseable
+`ts` as `0` fails the silence test — the mutation that proves the honesty rule, not just the
+feature, since a bad timestamp reading as the epoch would clear the threshold for any evidence-free
+lane.
 
-**Second, separable defect found alongside it.** `~/.waves/wave-WTest1789233482035` is a **test
-fixture written into the operator's real default log root** (`WAVE_LOG_ROOT`), which is why `l1`
-appears at all and why the server reports nine waves where a `--root /tmp` run reports eight (the
-server also reads `/tmp` as a legacy root). A test that writes a wave directory into the default
-root leaves permanent debris in a human's monitor. The fix belongs with X38 or beside it: tests
-write to a temporary root, never the default one. The stray directory is the owner's data and has
-not been deleted.
+**Second, separable defect — fixed alongside it.** `~/.waves/wave-WTest1789233482035` was a test
+fixture written into the operator's real default log root, which is why `l1` appeared at all. The
+culprit: `lib/__tests__/emit.test.ts`'s "standalone invocation with default logdir derived from wave
+name" test invoked `wave-event.sh` with no `LOGDIR` and no `WAVE_LOG_ROOT`, so the script fell back
+to its own default, `${HOME:-/tmp}/.waves` — the operator's real home. The fix keeps the test
+honestly exercising that fallback path while giving it nowhere but a temp directory to land in:
+`HOME` is itself pointed at a fresh `tempDir()` for the one invocation, so `${HOME}/.waves` resolves
+inside the test's own teardown rather than the real one. The stray directory was the owner's data
+and was not deleted by this change; it had already been removed by hand before this lane started.
 
+**X38 — shipped in this PR.**
 ---
 
 ## 42. Lane ids are assigned per plan, so two plans can name the same lane (bookkeeping)
