@@ -35,6 +35,21 @@
         "never an empty list"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/templates/[ref].get.ts",
+      "before": "    if (!VERSION_PATTERN.test(versionRaw)) {\n      setResponseStatus(event, 400);\n      return {\n        error: `Invalid \"version\": \"${versionRaw}\" must be a positive integer with no leading zeros.`,\n      };\n    }\n    if (BigInt(versionRaw) > BigInt(Number.MAX_SAFE_INTEGER)) {\n      setResponseStatus(event, 400);\n      return {\n        error: `Invalid \"version\": \"${versionRaw}\" exceeds the largest exactly representable version (${Number.MAX_SAFE_INTEGER}).`,\n      };\n    }\n    version = Number(versionRaw);",
+      "after": "    if (!VERSION_PATTERN.test(versionRaw)) {\n      setResponseStatus(event, 400);\n      return {\n        error: `Invalid \"version\": \"${versionRaw}\" must be a positive integer with no leading zeros.`,\n      };\n    }\n    version = Number(versionRaw);",
+      "because": "A version string that parses but exceeds Number.MAX_SAFE_INTEGER silently loses precision (Number(\"9007199254740993\") === 9007199254740992), so a request pinning one version could resolve to a different stored version than the one pinned — D123's immutability promise broken a different way. Removing the BigInt range guard restores that silent coercion.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "apps/api/server/routes/campaigns/__tests__/templates.test.ts",
+        "-t",
+        "unsafe version \\(9007199254740993\\)"
+      ],
+      "verdict": "caught"
     }
   ]
 }
