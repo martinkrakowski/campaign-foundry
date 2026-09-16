@@ -1063,6 +1063,12 @@ function drawTimeline(
  * `beat` clocks `resolveTracks` already reads per live beat (`local`, one per
  * `(beat, mix)` pair), so `entry.pose` arrives fully composed — `drawBeat` no
  * longer computes a text-effect pose of its own.
+ *
+ * **K4**: the layer's own hand-authored `tracks` (K1a) are appended LAST, after
+ * both synthesized sources — never invented, K-D9's declaration-order fold
+ * already decides this: preset expansions fold before the authored tracks, so
+ * a brief that authors no tracks (`layer.tracks` undefined) spreads an empty
+ * array and folds exactly as before (byte-identical).
  */
 function drawSequencedCopy(
   ctx: SKRSContext2D,
@@ -1082,6 +1088,7 @@ function drawSequencedCopy(
         tracks: [
           ...copyMotionTracks(motion, prepared.height),
           ...textEffectTracks(prepared.textEffect, prepared.canvas, prepared.width, prepared.height),
+          ...(layer.tracks ?? []),
         ],
       },
     ],
@@ -1202,12 +1209,22 @@ function drawGroundImage(
  * (`c.t`, not `eased` — the resolver applies its own per-stop easing), and
  * `poseOf` defaults a trackless layer to the identity scale (1), exactly
  * `kenBurnsScale`'s old `else 1`.
+ *
+ * **K4**: the layer's own hand-authored `tracks` fold in LAST, after the
+ * synthesized ken-burns expansion — an absent `layer.tracks` spreads an
+ * empty array, byte-identical to before.
  */
 function paintBackground(c: LayerDrawContext): void {
   const { ctx, prepared, motion, t, copyT, layer } = c;
   const { width, height } = prepared;
   const resolved = resolveTracks(
-    [{ id: layer.id, kind: layer.kind, tracks: groundMotionTracks(motion) }],
+    [
+      {
+        id: layer.id,
+        kind: layer.kind,
+        tracks: [...groundMotionTracks(motion), ...(layer.tracks ?? [])],
+      },
+    ],
     [],
     { t },
   );
@@ -1299,6 +1316,9 @@ function paintAccent(c: LayerDrawContext): void {
  * `LayerDrawContext`'s own contract), matching the old `effectT ?? local`
  * unification exactly. Composition order is preserved (motion tracks first,
  * effect tracks second, K-D9) inside that one fold.
+ *
+ * **K4**: the layer's own hand-authored `tracks` join the same entry, LAST —
+ * an absent `layer.tracks` spreads an empty array, byte-identical to before.
  */
 function drawStaticText(c: LayerDrawContext): void {
   const { ctx, prepared, motion, t, effectT, layer } = c;
@@ -1315,6 +1335,7 @@ function drawStaticText(c: LayerDrawContext): void {
         tracks: [
           ...copyMotionTracks(motion, height),
           ...textEffectTracks(prepared.textEffect, prepared.canvas, width, height),
+          ...(layer.tracks ?? []),
         ],
       },
     ],
