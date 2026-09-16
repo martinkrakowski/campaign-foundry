@@ -868,6 +868,66 @@ describe("parseBrief", () => {
         ),
       ).toThrow(/template.layers\[0\]\.elements/);
     });
+
+    // HL5e — the element `style` override rides the SAME shared decision, so
+    // the boundary test pins the assembled message, path included.
+    test("a valid element style override parses and survives verbatim", () => {
+      const elements = [
+        { kind: "text", text: "Buy now", frame, style: { fontWeight: 400 } },
+        { kind: "button", text: "Shop", frame, style: { fontFamily: "Lora", fontWeight: 700 } },
+        { kind: "image", frame },
+      ];
+      const parsed = parseBrief({
+        ...htmlBrief,
+        template: withElements("html", elements),
+      });
+      expect(
+        parsed.template.layers.find((layer) => layer.kind === "html")?.elements,
+      ).toEqual(elements);
+    });
+
+    test("an unknown weight or family, an extra key, and style on an image are refused with the path", () => {
+      expect(() =>
+        parseBrief({
+          ...htmlBrief,
+          template: withElements("html", [
+            { kind: "text", text: "x", frame, style: { fontWeight: 500 } },
+          ]),
+        }),
+      ).toThrow(
+        'Campaign brief field "template.layers[1].elements[0].style.fontWeight" must be one of 400, 700; got 500.',
+      );
+      expect(() =>
+        parseBrief({
+          ...htmlBrief,
+          template: withElements("html", [
+            { kind: "text", text: "x", frame, style: { fontFamily: "Comic Sans" } },
+          ]),
+        }),
+      ).toThrow(
+        'Campaign brief field "template.layers[1].elements[0].style.fontFamily" must be one of "Inter", "Lora"; got "Comic Sans".',
+      );
+      expect(() =>
+        parseBrief({
+          ...htmlBrief,
+          template: withElements("html", [
+            { kind: "button", text: "x", frame, style: { color: "#fff" } },
+          ]),
+        }),
+      ).toThrow(
+        'Campaign brief field "template.layers[1].elements[0].style.color" must be one of "fontWeight", "fontFamily"; got "#fff".',
+      );
+      expect(() =>
+        parseBrief({
+          ...htmlBrief,
+          template: withElements("html", [
+            { kind: "image", frame, style: { fontWeight: 700 } },
+          ]),
+        }),
+      ).toThrow(
+        'Campaign brief field "template.layers[1].elements[0].style" must be one of "kind", "frame" for element kind "image"; got {"fontWeight":700}.',
+      );
+    });
   });
 
   describe("layer tracks (K1)", () => {

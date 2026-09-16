@@ -627,3 +627,39 @@ describe("useHistoryKeys", () => {
     expect(history.undo).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("setHtmlElementStyle is undoable (HL5e, VE1)", () => {
+  const styled = (hook: ReturnType<typeof renderHtml>) =>
+    htmlElements(hook.result.current.state)[0]!.style;
+
+  test("each style change is an undo step, and removing an override reverts to the absent key", () => {
+    const hook = renderHtml();
+    send(hook, { type: "addHtmlElement", layerId: "html", kind: "text" });
+    send(
+      hook,
+      { type: "setHtmlElementStyle", layerId: "html", index: 0, patch: { fontWeight: 400 } },
+      { type: "setHtmlElementStyle", layerId: "html", index: 0, patch: { fontFamily: "Lora" } },
+    );
+    expect(styled(hook)).toEqual({ fontWeight: 400, fontFamily: "Lora" });
+    act(() => hook.result.current.undo());
+    expect(styled(hook)).toEqual({ fontWeight: 400 });
+    act(() => hook.result.current.undo());
+    // The absent key, not an empty block — the undo returns the element to
+    // the exact shape it was loaded with.
+    expect("style" in htmlElements(hook.result.current.state)[0]!).toBe(false);
+  });
+
+  test("consecutive changes to one style field coalesce into a single entry", () => {
+    const hook = renderHtml();
+    send(hook, { type: "addHtmlElement", layerId: "html", kind: "text" });
+    send(
+      hook,
+      { type: "setHtmlElementStyle", layerId: "html", index: 0, patch: { fontWeight: 400 } },
+      { type: "setHtmlElementStyle", layerId: "html", index: 0, patch: { fontWeight: 700 } },
+    );
+    expect(styled(hook)).toEqual({ fontWeight: 700 });
+    act(() => hook.result.current.undo());
+    // One step, not two: the whole run reverts, as a typed run does.
+    expect("style" in htmlElements(hook.result.current.state)[0]!).toBe(false);
+  });
+});

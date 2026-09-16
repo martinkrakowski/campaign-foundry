@@ -241,3 +241,12 @@ verbatim) and font weight ARE identical for any line count — those are what
 tone grid, alongside the correct `justify-content` per anchor. Two mutations
 (`.agents/manifests/hl5f.json`) confirm the tone default and the
 per-anchor `justify-content` are load-bearing, not incidental.
+
+```premise HL5e
+# HL5e is the per-element `style` override (HL-D8). While the gap is open the
+# element field table — the ONE place that answers "which keys may this kind
+# carry" — names no `style`, so no element can carry one at any boundary. The
+# quoted string is the table entry, not prose: the file's comments already
+# mention a future `style` and the header names it unquoted.
+! grep -qE '"style"' packages/CampaignOrchestration/src/domain/value-objects/html-element.ts
+```
