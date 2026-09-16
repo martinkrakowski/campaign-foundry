@@ -178,24 +178,45 @@ describe("CanvasFfmpegVideoCompositor — audio args (VE3b1)", () => {
     expect(swsIndex).toBeGreaterThan(iIndices[1]);
 
     expect(args).toEqual(
-      expect.arrayContaining(["-map", "0:v", "-map", "1:a", "-c:a", "aac", "-b:a", "128k"]),
+      expect.arrayContaining(["-map", "0:v", "-map", "1:a:0", "-c:a", "aac", "-b:a", "128k"]),
     );
+    // `1:a:0`, never a bare `1:a` — a bare form maps EVERY audio stream in the
+    // bed's container (alternate languages, a commentary track), breaking the
+    // lane's "exactly one AAC track" acceptance criterion (see the real-ffmpeg
+    // two-audio-stream test below).
+    expect(args).not.toContain("1:a");
     // The map pair for video precedes the one for audio.
     const mapVIndex = args.indexOf("0:v");
-    const mapAIndex = args.indexOf("1:a");
+    const mapAIndex = args.indexOf("1:a:0");
     expect(mapVIndex).toBeGreaterThan(-1);
     expect(mapAIndex).toBeGreaterThan(mapVIndex);
   });
 
-  test("a bed exactly at durationSec still cuts and fades (no negative fade start)", async () => {
+  test("a bed exactly at the encoded video's duration still cuts and fades (no negative fade start)", async () => {
     const captured: string[][] = [];
     const compositor = new CanvasFfmpegVideoCompositor({
       spawn: argCapturingFfmpeg(captured),
       ffmpegPath: "/opt/ffmpeg",
     });
-    await compositor.compositeVideo(videoRequest({ audio: new Uint8Array([9]), durationSec: 0.2 }));
+    // fps 10 * durationSec 0.2 = 2 frames exactly, so frames / fps = 0.2 exactly
+    // (no floating-point noise) and the fade is clamped to the full 0.2s.
+    await compositor.compositeVideo(videoRequest({ audio: new Uint8Array([9]), durationSec: 0.2, fps: 10 }));
     const af = captured[0][captured[0].indexOf("-af") + 1];
-    expect(af).toMatch(/^apad,atrim=end=0\.2,afade=t=out:st=0(\.\d+)?:d=0\.2$/);
+    expect(af).toBe("apad,atrim=end=0.2,afade=t=out:st=0:d=0.2");
+  });
+
+  test("trims and fades to the encoded video's rounded duration, not the unrounded durationSec", async () => {
+    const captured: string[][] = [];
+    const compositor = new CanvasFfmpegVideoCompositor({
+      spawn: argCapturingFfmpeg(captured),
+      ffmpegPath: "/opt/ffmpeg",
+    });
+    // durationSec 1.5 * fps 1 = 1.5, which rounds UP to 2 frames — so the
+    // encoded video is 2s long, not 1.5s, and the audio must match the 2s it
+    // is actually muxed against, not the request's unrounded field.
+    await compositor.compositeVideo(videoRequest({ audio: new Uint8Array([9]), durationSec: 1.5, fps: 1 }));
+    const af = captured[0][captured[0].indexOf("-af") + 1];
+    expect(af).toBe("apad,atrim=end=2,afade=t=out:st=1.75:d=0.25");
   });
 });
 
@@ -222,6 +243,44 @@ function generateSineBedWav(ffmpeg: string, durationSec: number): Uint8Array {
     );
     if (result.status !== 0) {
       throw new Error(`sine bed generation failed (exit ${String(result.status)}): ${result.stderr?.toString()}`);
+    }
+    return new Uint8Array(readFileSync(outPath));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/** A container with TWO audio streams (two different sine tones), matroska — self-describing, so ffmpeg still probes it by content alone. */
+function generateTwoStreamBed(ffmpeg: string, durationSec: number): Uint8Array {
+  const dir = mkdtempSync(join(tmpdir(), "cf-audio-fixture-"));
+  try {
+    const outPath = join(dir, "bed.mkv");
+    const result = spawnSync(
+      ffmpeg,
+      [
+        "-y",
+        "-f",
+        "lavfi",
+        "-i",
+        `sine=frequency=440:sample_rate=${AUDIO_SAMPLE_RATE}:duration=${durationSec}`,
+        "-f",
+        "lavfi",
+        "-i",
+        `sine=frequency=880:sample_rate=${AUDIO_SAMPLE_RATE}:duration=${durationSec}`,
+        "-map",
+        "0:a",
+        "-map",
+        "1:a",
+        "-c:a",
+        "pcm_s16le",
+        "-f",
+        "matroska",
+        outPath,
+      ],
+      { timeout: 10_000 },
+    );
+    if (result.status !== 0) {
+      throw new Error(`two-stream bed generation failed (exit ${String(result.status)}): ${result.stderr?.toString()}`);
     }
     return new Uint8Array(readFileSync(outPath));
   } finally {
@@ -326,6 +385,56 @@ describe("CanvasFfmpegVideoCompositor — audio, real ffmpeg (VE3b1)", () => {
       const second = await compositor.compositeVideo(videoRequest({ audio }));
       expect(sha256(second.video)).toBe(sha256(first.video));
       expect(Buffer.from(second.video).equals(Buffer.from(first.video))).toBe(true);
+    },
+  );
+
+  test.skipIf(!ffmpegOk)(
+    skipReason ?? "a bed with two audio streams still yields exactly one audio stream in the output",
+    { timeout: 30_000 },
+    async () => {
+      if (!ffmpegPath) throw new Error("ffmpeg-static binary is not available");
+      const audio = generateTwoStreamBed(ffmpegPath, 2);
+      const compositor = new CanvasFfmpegVideoCompositor();
+      const { video } = await compositor.compositeVideo(videoRequest({ audio }));
+
+      const dir = mkdtempSync(join(tmpdir(), "cf-audio-out-"));
+      try {
+        const outPath = join(dir, "out.mp4");
+        writeFileSync(outPath, Buffer.from(video));
+        const counts = countStreams(ffmpegPath, outPath);
+        expect(counts).toEqual({ video: 1, audio: 1 });
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  test.skipIf(!ffmpegOk)(
+    skipReason ??
+      "when durationSec * fps rounds unevenly, the audio matches the encoded video's actual duration",
+    { timeout: 30_000 },
+    async () => {
+      if (!ffmpegPath) throw new Error("ffmpeg-static binary is not available");
+      // fps 1 * durationSec 1.5 rounds to 2 frames = 2s of encoded video.
+      const durationSec = 1.5;
+      const fps = 1;
+      const encodedDurationSec = 2;
+      const audio = generateSineBedWav(ffmpegPath, 1); // shorter than either duration — exercises padding too
+      const compositor = new CanvasFfmpegVideoCompositor();
+      const { video } = await compositor.compositeVideo(videoRequest({ audio, durationSec, fps }));
+
+      const dir = mkdtempSync(join(tmpdir(), "cf-audio-out-"));
+      try {
+        const outPath = join(dir, "out.mp4");
+        writeFileSync(outPath, Buffer.from(video));
+        const duration = probeDurationSec(ffmpegPath, outPath);
+        expect(Math.abs(duration - encodedDurationSec)).toBeLessThanOrEqual(AAC_FRAME_TOLERANCE_SEC);
+        // Confirms the assertion is actually discriminating: the unrounded
+        // durationSec is a full frame-tolerance away from what was measured.
+        expect(Math.abs(duration - durationSec)).toBeGreaterThan(AAC_FRAME_TOLERANCE_SEC);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
     },
   );
 });
