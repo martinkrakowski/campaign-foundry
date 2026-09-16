@@ -1632,3 +1632,38 @@ server also reads `/tmp` as a legacy root). A test that writes a wave directory 
 root leaves permanent debris in a human's monitor. The fix belongs with X38 or beside it: tests
 write to a temporary root, never the default one. The stray directory is the owner's data and has
 not been deleted.
+
+---
+
+## 42. Lane ids are assigned per plan, so two plans can name the same lane (bookkeeping)
+
+**Evidence.** On 2026-09-16 the template-library routes lane was dispatched as **TL1**, while
+`docs/planning/2026-09-16_studio-editor.md` already defines **TL1** as "one playhead, two positions
+preserved" — and `2026-09-16_creative-first-chrome.md`'s **CC5** row says it "closes TL1", meaning
+the timeline lane. Two different pieces of work, one id, in plans written the same day. The
+mistake reached committed text: the L7 row credited "TL1" for the routes, which now reads as the
+timeline lane having shipped an API route.
+
+This is the **second** instance of the same failure mode in this repository, and the first is
+already recorded: `2026-09-16_studio-editor.md`'s own finding **C2** states "**`L10` and `L11` are
+colliding ids**" between the templates plan and `2026-09-04_run-exclusion-and-the-second-surface`.
+A pattern with two instances and no rule is a rule waiting to be written.
+
+**Consequence.** Lane ids are the join key for everything downstream — the session-log citation,
+the plan's "shipped in this PR" note, the mutation manifest filename (`.agents/manifests/<lane>.json`),
+the wave-status row, and the premise fence's own name. A collision silently merges two lanes'
+histories: a reader of `git log` or the status page cannot tell which TL1 a record belongs to, and
+`plan:verify` would evaluate one plan's fence against the other's shipped claim.
+
+**Resolution applied here, not deferred.** The routes lane is renamed **L7a2** in the L7 row (the
+`L7a` prefix is already the templates plan's own convention for L7's parts, `L7a1` being the port
+and adapter that shipped earlier), with the dispatched id noted so the session-log entries written
+under "TL1" remain findable. The session log itself is append-only history and is **not** rewritten:
+it says what happened, and what happened is that the lane ran under the wrong id.
+
+**Fix sketch — not shipped — bookkeeping, no lane.** Before an id is dispatched, check it against
+every plan, not only the one being worked: `grep -rn '\*\*<ID>\*\*' docs/planning/` costs one
+command and is the whole check. The orchestration skill's pre-dispatch list is where that belongs,
+beside "red-team each lane brief against the code". Prefixing an id with its plan's arc (`L7a2`,
+`CC5`, `SE3`) is what has kept the other arcs collision-free; the ids that collided were the bare
+sequential ones.
