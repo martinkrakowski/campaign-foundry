@@ -5577,3 +5577,4 @@ sibling. Red: a wrapper on the override recorded `libx264` invocations and the
 marker was absent. Green: same constructor shape as the audio golden; hashes
 unchanged. Mutation: reverting the argument is caught.
 Cite: §37 (X31) of docs/planning/2026-09-10_the-unowned-gaps.md.
+- X31 fix round: replaced the §37 identity test's shell wrapper + subprocess re-entry with the adapter's injectable spawn — a recorder (delegating to real spawn) captures the command of a real encode of the resolved binary's hard-link alias, asserting it is never the ffmpeg-static default; same claim, no POSIX-shell assumption. Red: reverting the constructor argument records the default path. Mutation re-pointed at that construction and re-verified caught; gate green at 100% on all four counters; no golden moved. Cite: §37 (X31) of docs/planning/2026-09-10_the-unowned-gaps.md.
