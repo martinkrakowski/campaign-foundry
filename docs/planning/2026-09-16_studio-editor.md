@@ -321,4 +321,14 @@ Each of these is a rule the UI would otherwise restate — the failure this plan
 
 - **The L10 split's ids and the preview-footprint lane's id.** H2 shipped (C1); what this plan needs are **L10a** / **L10b** and a preview-footprint API lane, all of which belong to `2026-09-08_creative-templates-and-units.md`. This plan does not mint ids in another plan's space; SE3 and SE5 stay blocked until that plan records them.
 - **Whether the studio chrome replaces the Layout step or sits beside it.** D137 settles that `studio` is a third, operator-chosen presentation; it does not settle what happens to the Layout step inside it. **SE0 must state that in its PR.**
+  **Settled by CC1 (`2026-09-16_creative-first-chrome.md`, shipped) for the rail's own half of this question:** the
+  Layout step (or its studio equivalent) keeps its own composed frame, in every presentation, the same way it
+  already does in Guided (`LayoutSection`'s `preview` prop) and by omission in Everything. CC1's rail gate is
+  `presentation === "guided" ? (review/layout step exclusion) : true` — presentation-agnostic outside Guided, so a
+  future `studio` inherits "no step-based exclusion" automatically. **This is a requirement on SE0, not a default
+  it can rely on going unaddressed:** if `studio`'s own Layout arrangement renders `<LayoutSection preview />` (its
+  own frame) while ALSO leaving the rail unexcluded there, two composed frames land on screen at once — SE0 must
+  extend CC1's guard to `presentation === "guided" || presentation === "studio"` (mirroring the Everything
+  precedent: `LayoutSection` renders there today with `preview` omitted) as part of its own PR, or D43's
+  one-composed-frame invariant breaks in `studio`. SE0 is not superseded.
 - **Detach** (baking a preset expansion into `layer.tracks`) — named in D140 and deliberately unscoped, because a preset expansion is per-canvas and per-cell, so it may not be expressible as one document write at all.

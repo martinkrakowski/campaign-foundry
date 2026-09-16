@@ -88,7 +88,7 @@ export function PreviewFrame({
 
   if (frame !== null) {
     return (
-      <div className="overflow-hidden rounded-lg border border-border bg-text-muted">
+      <div data-testid="preview-frame" className="overflow-hidden rounded-lg border border-border bg-text-muted">
         {/* The frame IS the creative — decorative to the reader, named by the caption. */}
         <img src={frame.dataUrl} alt="" className={className} />
       </div>

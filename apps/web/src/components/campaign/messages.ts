@@ -585,6 +585,12 @@ export function previewCaptionTextEffect(ratioLabel: string, platformLabel: stri
 export function previewStep(step: number, total: number): string {
   return `${step} / ${total}`;
 }
+/**
+ * D142 — the rail's empty state before the first product has an id: names
+ * the missing field, never "add a product" (the Products step already shows
+ * one stub) and never a fabricated placeholder creative (D26).
+ */
+export const previewNeedsProductId = "The first product has no ID yet — name it on the Products step to see its preview.";
 
 // --- The preview rail (R7) ---
 

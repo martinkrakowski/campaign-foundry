@@ -148,6 +148,22 @@ describe("previewDockProps", () => {
     expect(previewDockProps(loaded, 0, 6)!.identityKey).toBeUndefined();
   });
 
+  /**
+   * D141 — "In `everything` there is no step cursor: `stepIndex` is stale
+   * outside guided … `previewDockProps`' step readout must not show a guided
+   * cursor in that presentation." The caller (BriefEditor) now omits the
+   * cursor entirely when it is not guided, rather than passing a stale one.
+   */
+  test("omitting the cursor omits the step readout — Everything has no step (D141)", () => {
+    const state = initialEditorState("brief");
+    state.products = [namedProduct()];
+    const props = previewDockProps(state)!;
+    expect(props.step).toBeUndefined();
+    expect(props.stepCount).toBeUndefined();
+    // Everything about the rest of the look is unaffected by omitting the cursor.
+    expect(props.campaignName).toBe(state.campaignName);
+  });
+
   test("the style is carried exactly as toBrief will emit it (T5/D45)", () => {
     const state = initialEditorState("variation");
     state.products = [namedProduct()];

@@ -2,7 +2,7 @@ import { describe, test, expect, vi } from "vitest";
 import { render, fireEvent, act } from "@testing-library/react";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { PREVIEW_FRAME_DEBOUNCE_MS } from "@/lib/preview-frame";
-import { PreviewDock, PreviewPicture, derivePreviewRatio, derivePreviewSpec } from "../PreviewDock";
+import { PreviewDock, PreviewPicture, PreviewRailEmptyState, derivePreviewRatio, derivePreviewSpec } from "../PreviewDock";
 import * as messages from "../messages";
 
 const showcase = {
@@ -167,6 +167,37 @@ describe("PreviewDock", () => {
     const { container } = render(<PreviewDock {...showcase} headline={undefined} />);
     expect(container.textContent).toContain("Summer Launch");
     expect(container.textContent).not.toContain("Stay wild");
+  });
+
+  /**
+   * D141 — Everything (and any future presentation with no step concept) has
+   * no cursor to show. The caller omits `step`/`stepCount` rather than
+   * passing a stale position, and the readout must disappear, never render
+   * `previewStep(undefined, undefined)`.
+   */
+  test("omits the step readout when the caller has no cursor to give it (D141)", () => {
+    const { container } = render(<PreviewDock {...showcase} step={undefined} stepCount={undefined} />);
+    expect(container.textContent).toContain("Summer Launch");
+    expect(container.textContent).toContain("Stay wild. Stay hydrated.");
+    expect(container.textContent).not.toMatch(/\d+ \/ \d+/);
+  });
+});
+
+describe("PreviewRailEmptyState (D142)", () => {
+  test("names the missing product id, shows the campaign name and (when given) the step readout", () => {
+    const { container } = render(
+      <PreviewRailEmptyState campaignName="Summer Launch" step={2} stepCount={6} />,
+    );
+    expect(container.textContent).toContain(messages.previewNeedsProductId);
+    expect(container.textContent).toContain("Summer Launch");
+    expect(container.textContent).toContain(messages.previewStep(2, 6));
+    // D142/D26: never invents a creative — no composed-frame marker at all.
+    expect(container.querySelector('[data-testid="preview-frame"]')).toBeNull();
+  });
+
+  test("omits the step readout when no cursor is given (Everything, D141)", () => {
+    const { container } = render(<PreviewRailEmptyState campaignName="Summer Launch" />);
+    expect(container.textContent).not.toMatch(/\d+ \/ \d+/);
   });
 });
 

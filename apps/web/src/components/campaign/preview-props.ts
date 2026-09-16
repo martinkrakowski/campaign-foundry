@@ -110,8 +110,15 @@ export function previewIdentityKey(state: EditorState): string | undefined {
  */
 export function previewDockProps(
   state: EditorState,
-  stepIndex: number,
-  stepCount: number,
+  /**
+   * The guided walk's cursor. D141: `everything` (and any future
+   * presentation with no step concept) has no cursor to show —
+   * `stepIndex` is stale outside guided — so the CALLER omits both
+   * arguments there rather than passing a stale position; a bare step
+   * readout is never guessed from a number that no longer means anything.
+   */
+  stepIndex?: number,
+  stepCount?: number,
 ): PreviewShowcaseProps | null {
   const look = previewLook(state);
   if (look === null) return null;
@@ -120,7 +127,6 @@ export function previewDockProps(
     ...look,
     identityKey: previewIdentityKey(state),
     // The wizard readout (M2): where the walk stands, not a position in the creative set.
-    step: stepIndex + 1,
-    stepCount,
+    ...(stepIndex !== undefined && stepCount !== undefined ? { step: stepIndex + 1, stepCount } : {}),
   };
 }

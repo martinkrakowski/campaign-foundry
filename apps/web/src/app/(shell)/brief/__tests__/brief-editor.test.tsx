@@ -3375,7 +3375,15 @@ describe("BriefPage — the preview rail (R7)", () => {
     expect(screen.getByTestId("step-card").contains(rail)).toBe(false);
   });
 
-  test("the rail is suppressed on Review — exactly one composed preview is on screen (D43)", async () => {
+  /** A mount count, not a visible-SVG count (R7/CC1): the container query hides
+   *  the rail without unmounting it, so only a stable marker present in both
+   *  the SVG-placeholder and real-frame branches (`PreviewFrame`'s wrapper,
+   *  `data-testid="preview-frame"`) can tell "exactly one is MOUNTED" from
+   *  "exactly one is VISIBLE". happy-dom applies no CSS at all, so it cannot
+   *  distinguish the two by rendering either — a marker is the only honest way. */
+  const mountedFrameCount = () => document.querySelectorAll('[data-testid="preview-frame"]').length;
+
+  test("the rail is suppressed on Review — exactly one composed preview is on screen (D43/D141)", async () => {
     const user = userEvent.setup();
     routes({ list: () => json({ briefs: [okEntry] }) });
     renderWithRun(<Editor id="ok" />);
@@ -3383,15 +3391,14 @@ describe("BriefPage — the preview rail (R7)", () => {
     await user.click(segments()[reviewIndex]);
     await waitFor(() => expect(stepHeading().textContent).toBe("Review"));
 
+    // D141 amends D43's "Guided only" clause away, but Review's own exclusion
+    // is untouched: the step still carries its own frame (`ReviewStep`), so
+    // the rail must not ALSO mount one — the COUNT invariant D43 protects.
     expect(screen.queryByRole("complementary", { name: messages.previewLegend })).toBeNull();
-    // The figure owns Review: the brief's headline is drawn by exactly one creative.
-    const headlineCreatives = Array.from(document.querySelectorAll("svg")).filter((el) =>
-      el.textContent?.includes("Hi"),
-    );
-    expect(headlineCreatives).toHaveLength(1);
+    expect(mountedFrameCount()).toBe(1);
   });
 
-  test("the rail is absent in Everything — Guided only (D43)", async () => {
+  test("the rail now appears in Everything too — the Guided-only clause D141 drops (D43/D141)", async () => {
     const user = userEvent.setup();
     routes({ list: () => json({ briefs: [okEntry] }) });
     renderWithRun(<Editor id="ok" />);
@@ -3399,10 +3406,21 @@ describe("BriefPage — the preview rail (R7)", () => {
 
     await user.click(screen.getByRole("button", { name: messages.presentationEverything }));
     await waitFor(() => expect(document.getElementById("products")).toBeTruthy());
-    expect(screen.queryByRole("complementary", { name: messages.previewLegend })).toBeNull();
+
+    // The clause this test used to pin ("absent in Everything") is exactly the
+    // one D141 drops: the rail now mounts here too. The COUNT invariant still
+    // holds — `LayoutSection` also renders inline in Everything, but with its
+    // own `preview` prop omitted (defaults false), so this rail's frame is the
+    // only composed preview on screen.
+    const rail = screen.getByRole("complementary", { name: messages.previewLegend });
+    expect(rail).toBeTruthy();
+    expect(mountedFrameCount()).toBe(1);
+    // Everything has no step cursor — `stepIndex` is stale outside Guided — so
+    // the rail's own step readout must not show a guided cursor here (D141).
+    expect(within(rail).queryByText(/^\d+ \/ \d+$/)).toBeNull();
   });
 
-  test("a brief with nothing to draw renders no rail (D26, M3)", async () => {
+  test("a brief with nothing to draw shows the rail's empty state, not no rail (D142)", async () => {
     const user = userEvent.setup();
     routes({ list: () => json({ briefs: [okEntry] }) });
     renderWithRun(<Editor id="ok" />);
@@ -3417,10 +3435,37 @@ describe("BriefPage — the preview rail (R7)", () => {
     await user.click(screen.getAllByRole("button", { name: messages.productRemove })[0]);
     await user.click(screen.getAllByRole("button", { name: messages.productRemove })[0]);
 
-    // No product, no preview — the dock never invents a creative to fill the slot.
-    await waitFor(() =>
-      expect(screen.queryByRole("complementary", { name: messages.previewLegend })).toBeNull(),
-    );
+    // D142 — the pre-D142 behaviour this test used to pin was "no rail at
+    // all"; now the landmark STAYS and names the missing PRODUCT ID, never
+    // "add a product" (the Products step already shows a stub — the removal
+    // above leaves exactly one, freshly blank) and never a fabricated
+    // placeholder creative (D26).
+    await waitFor(() => {
+      const rail = screen.getByRole("complementary", { name: messages.previewLegend });
+      expect(within(rail).getByText(messages.previewNeedsProductId)).toBeTruthy();
+    });
+    expect(mountedFrameCount()).toBe(0);
+  });
+
+  test("the empty state in Everything also names the missing id, and still has no step cursor (D142/D141)", async () => {
+    const user = userEvent.setup();
+    routes({ list: () => json({ briefs: [okEntry] }) });
+    renderWithRun(<Editor id="ok" />);
+    await adopt(user, "ok");
+
+    await user.click(screen.getByRole("button", { name: messages.presentationEverything }));
+    await waitFor(() => expect(document.getElementById("products")).toBeTruthy());
+    await user.click(screen.getAllByRole("button", { name: messages.productRemove })[0]);
+    await user.click(screen.getAllByRole("button", { name: messages.productRemove })[0]);
+
+    await waitFor(() => {
+      const rail = screen.getByRole("complementary", { name: messages.previewLegend });
+      expect(within(rail).getByText(messages.previewNeedsProductId)).toBeTruthy();
+      // D141 — no step cursor outside Guided, whether the rail shows the
+      // dock or (D142) the empty state.
+      expect(within(rail).queryByText(/^\d+ \/ \d+$/)).toBeNull();
+    });
+    expect(mountedFrameCount()).toBe(0);
   });
 
   test("the two views are exclusive: the eye shows the preview, the code glyph shows the YAML (D61)", async () => {
@@ -3717,7 +3762,13 @@ describe("BriefPage — the Layout step (T7)", () => {
     await waitFor(() => expect(stepHeading().textContent).toBe("Layout"));
   });
 
-  test("the rail is suppressed on the Layout step — exactly one composed preview is on screen (D43/D63)", async () => {
+  // D141 amends D43's "Guided only" clause away, but the Layout exclusion is
+  // untouched: it is the one exclusion that survives in EVERY presentation
+  // (Everything already renders `LayoutSection` with `preview` omitted, and a
+  // future `studio` must follow the same pattern — see `BriefEditor.tsx`'s
+  // rail comment beside `railCursorIndex`), because the step always carries
+  // its own frame — one slot is still the whole rule (D43's count invariant).
+  test("the rail is suppressed on the Layout step — exactly one composed preview is on screen (D43/D63/D141)", async () => {
     const user = userEvent.setup();
     routes({ list: () => json({ briefs: [okEntry] }) });
     renderWithRun(<Editor id="ok" />);
