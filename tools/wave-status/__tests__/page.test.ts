@@ -3775,14 +3775,32 @@ describe("the status page", () => {
     const lanes: Record<string, unknown>[] = [
       ...stateFixture(now).waves[0].lanes,
     ] as unknown as Record<string, unknown>[];
-    const noPrCases: ReadonlyArray<readonly [string, Record<string, unknown>]> = [
+    const noPrCases: ReadonlyArray<
+      readonly [string, Record<string, unknown>, Record<string, unknown>?]
+    > = [
       ["no-pr", { alive: false }],
       ["no-pr-exit0", { alive: false, exit: 0 }],
       ["no-pr-fail", { alive: false, exit: 1 }],
       ["no-pr-alive", { alive: true }],
+      // X35's arms of the no-PR branch: a start with nothing after it (the
+      // module's `unknown`) and a start whose log ended without a PR (the
+      // module's `vanished`). The no-report silence above pins the second
+      // copy of the vanished default; these pin the split.
+      ["no-pr-started", { alive: false }, { stage: "implement", event: "started", ts: new Date(now).toISOString() }],
+      [
+        "no-pr-started-exit0",
+        { alive: false, exit: 0 },
+        { stage: "gate", event: "started", ts: new Date(now).toISOString() },
+      ],
     ];
-    for (const [id, derived] of noPrCases) {
-      lanes.push({ wave: "S", lane: id, derived, disagreements: [] });
+    for (const [id, derived, reported] of noPrCases) {
+      lanes.push({
+        wave: "S",
+        lane: id,
+        derived,
+        disagreements: [],
+        ...(reported === undefined ? {} : { reported }),
+      });
     }
     // Derived from the declared union, not copied from it: a state or check
     // value added to `LaneObservation["pr"]` without being listed here fails to
@@ -4549,12 +4567,15 @@ describe("the status page", () => {
 
     // The wave band now rolls up the *derived state* the leading cell renders,
     // not the reported event the stage cell shows. This lane is `alive: false`
-    // with no PR and no exit, so its state is `vanished`; the stage column still
-    // says `stalled` (its own reported-vs-grace logic). A header that counted
-    // reported events would read "1 stalled" over a row that says "vanished" —
-    // the disagreement this lane exists to remove.
+    // with no PR and no exit — and its last words were `started`, so X35 says
+    // `unknown`, not `vanished`: silence after a start is a missing
+    // measurement, not an accusation. The stage column still says `stalled`
+    // (its own reported-vs-grace logic). A header that counted reported
+    // events would read "1 stalled" over a row that says "unknown" — the
+    // disagreement this lane exists to remove. What the test owns is the
+    // agreement between header and row; the word is the module's.
     const meta = doc.querySelector(".wave-meta")?.textContent ?? "";
-    expect(meta).toBe("1 lane · 1 vanished");
+    expect(meta).toBe("1 lane · 1 unknown");
     expect(meta).not.toContain("running");
   });
 
@@ -4592,11 +4613,11 @@ describe("the status page", () => {
 
     // The stage column reads `started` (within the launch grace), which is the
     // point of this lane. The band rolls up the derived state, and this lane is
-    // `alive: false` with nothing else to say for it — `vanished` — so the
-    // header says `vanished`, agreeing with the row it sits over rather than
-    // with the reported event the stage cell shows.
+    // `alive: false` with nothing else to say for it — X35's unknown, a start
+    // with no verdict after it — so the header agrees with the row it sits
+    // over rather than with the reported event the stage cell shows.
     const meta = doc.querySelector(".wave-meta")?.textContent ?? "";
-    expect(meta).toBe("1 lane · 1 vanished");
+    expect(meta).toBe("1 lane · 1 unknown");
     expect(meta).not.toContain("stalled");
   });
 

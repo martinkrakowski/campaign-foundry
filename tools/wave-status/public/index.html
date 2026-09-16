@@ -453,6 +453,15 @@
         font-size: 11px;
         color: var(--color-text-muted);
       }
+      /* X35: a wave whose newest artefact is days old belongs to a past
+       * wave, and must not sit in the same visual register as a live one.
+       * The word never changes — "3d ago" was always printed — so this is
+       * never colour or styling alone carrying the meaning; it only fades
+       * what the text has already said. */
+      .wave-age.past {
+        font-style: italic;
+        opacity: 0.55;
+      }
       /* Lanes open the log on a click anywhere on the row; hover, focus and
      the open state all say so, because a clickable row that looks like
      text is not discoverable. The row itself can never be the focus
@@ -1598,13 +1607,28 @@
       }
 
       function compareLanes(a, b) {
-        return compareMtimes(laneMtime(a), laneMtime(b));
+        return compareMtimes(laneEvidenceMs(a), laneEvidenceMs(b));
+      }
+
+      // X35: an event is dated evidence too. A wave whose lanes emitted events
+      // and wrote no log used to age as "no dated activity" forever — silence
+      // wearing the same face as a stopped clock — while its last truth was
+      // days old. Newest of the log's write and the last event's stamp; no
+      // invented date when neither carries one.
+      function laneEvidenceMs(lane) {
+        const logMs = laneMtime(lane);
+        const reportedMs =
+          lane.reported === undefined ? NaN : Date.parse(lane.reported.ts);
+        const eventMs = isNaN(reportedMs) ? undefined : reportedMs;
+        if (logMs === undefined) return eventMs;
+        if (eventMs === undefined) return logMs;
+        return Math.max(logMs, eventMs);
       }
 
       function waveMtime(wave) {
         let max;
         for (const lane of wave.lanes) {
-          const time = laneMtime(lane);
+          const time = laneEvidenceMs(lane);
           if (time !== undefined && (max === undefined || time > max)) {
             max = time;
           }
@@ -1628,6 +1652,16 @@
         if (elapsed < 3600000) return `${Math.floor(elapsed / 60000)}m ago`;
         if (elapsed < 86400000) return `${Math.floor(elapsed / 3600000)}h ago`;
         return `${Math.floor(elapsed / 86400000)}d ago`;
+      }
+
+      // Wave-level age, for the register the header wears: the same threshold
+      // the row's note reads from, so a "3d ago" header and its "past wave"
+      // rows can never disagree. The age tick rebuilds the whole table, so a
+      // wave crossing the line re-ages on the page's own clock, with no new
+      // status arriving.
+      function isPastWave(wave, nowMs) {
+        const newest = waveMtime(wave);
+        return newest !== undefined && nowMs - newest > PAST_WAVE_THRESHOLD_MS;
       }
 
       function toggleWave(waveId) {
@@ -1697,6 +1731,18 @@
      lane legitimately goes quiet through a build. */
       const STALL_THRESHOLD_MS = 900000;
 
+      // X35's other clock, mirrored the same way and pinned by its own test:
+      // a wave whose newest artefact — log write or event — is older than this
+      // belongs to a past wave. The row says so, and the header ages out of
+      // the live register: a session three days old must not read in the same
+      // voice as one in progress.
+      const PAST_WAVE_THRESHOLD_MS = 86400000;
+
+      function isPastWaveLane(lane, nowMs) {
+        const evidence = laneEvidenceMs(lane);
+        return evidence !== undefined && nowMs - evidence > PAST_WAVE_THRESHOLD_MS;
+      }
+
       const STATE_TONE = {
         conflict: "bad",
         failed: "bad",
@@ -1731,7 +1777,20 @@
           return "stalled";
         }
         if (derived.alive) return "running";
-        if (derived.pr === undefined) return "vanished";
+        if (derived.pr === undefined) {
+          // X35, mirrored from the module: `vanished` accuses; a lane whose
+          // last words were `started`, with no EXIT and no PR, has not been
+          // seen vanishing — it has not been seen. That is no verdict, which
+          // is the one thing `unknown` is for.
+          if (
+            lane.reported !== undefined &&
+            lane.reported.event === "started" &&
+            derived.exit === undefined
+          ) {
+            return "unknown";
+          }
+          return "vanished";
+        }
         // S3's precedence, mirrored from lib/lane-state.ts: a measured
         // unresolved thread blocks; a checks read that could not be taken is
         // the word for "no verdict" (unknown), never blocked — blocked asserts
@@ -1818,11 +1877,28 @@
       // threshold. The quiet time beside the state reads from that same clock.
       function stateCell(lane, nowMs) {
         const state = laneStateOf(lane, nowMs);
-        const quiet =
-          state === "running" && lane.derived.log !== undefined
-            ? `<span class="quiet">${esc(quietSpan(nowMs - lane.derived.log.mtimeMs))}</span>`
-            : "";
-        return pill(STATE_TONE[state], state, true) + quiet;
+        // One note beside the pill, chosen so a reader who cannot see the
+        // word still learns *why* from the row's own text. A past wave is
+        // named first, whatever state its silence lands on — days-old
+        // artefacts belong to an earlier session, and no state word should
+        // make them look like today's breakage. The quiet time stays the
+        // living state's measurement, read from the log like it always was.
+        // And a silence that is merely recent says what it is: nothing has
+        // been reported since the start.
+        let note = "";
+        if (isPastWaveLane(lane, nowMs)) {
+          note = `<span class="quiet">past wave</span>`;
+        } else if (state === "running" && lane.derived.log !== undefined) {
+          note = `<span class="quiet">${esc(quietSpan(nowMs - lane.derived.log.mtimeMs))}</span>`;
+        } else if (
+          state === "unknown" &&
+          lane.reported !== undefined &&
+          lane.reported.event === "started" &&
+          lane.derived.exit === undefined
+        ) {
+          note = `<span class="quiet">nothing since ${esc(lane.reported.stage)} started</span>`;
+        }
+        return pill(STATE_TONE[state], state, true) + note;
       }
 
       function isLaneStalled(lane) {
@@ -2215,7 +2291,7 @@
           const rowHtml = [
             `<tr class="wave" data-wave="${esc(wave.id)}"><td colspan="9">` +
               `<button type="button" class="wave-band" tabindex="0" aria-expanded="${isExpanded ? "true" : "false"}" aria-controls="waves-${esc(wave.id)}">` +
-              `<span class="wave-eyebrow">wave</span> <span class="wave-id">${esc(wave.id)}</span><span class="sep"> · </span><span class="wave-age">${esc(waveAge(wave))}</span><span class="wave-meta">${waveMeta(filteredLanes, nowMs)}</span>` +
+              `<span class="wave-eyebrow">wave</span> <span class="wave-id">${esc(wave.id)}</span><span class="sep"> · </span><span class="wave-age${isPastWave(wave, nowMs) ? " past" : ""}">${esc(waveAge(wave))}</span><span class="wave-meta">${waveMeta(filteredLanes, nowMs)}</span>` +
               `</button></td></tr>`,
           ];
           if (filteredLanes.length === 0) {
