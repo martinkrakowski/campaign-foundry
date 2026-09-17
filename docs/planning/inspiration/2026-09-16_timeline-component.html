@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
+  <title>Lumen Timeline</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #07080b;
+      --sheet: rgba(22, 24, 31, 0.86);
+      --sheet-border: rgba(255, 255, 255, 0.08);
+      --ink: #f4f5f7;
+      --muted: rgba(244, 245, 247, 0.48);
+      --cyan: #6ee7ff;
+      --amber: #e8a04a;
+      --teal: #2f8f8a;
+      --violet: #7b5cff;
+      --playhead: #f7fbff;
+      --px: 80;
+      --duration: 18;
+    }
+
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body {
+      margin: 0; height: 100%; background: var(--bg); color: var(--ink);
+      font-family: Inter, system-ui, sans-serif;
+    }
+
+    .app {
+      min-height: 100%;
+      display: flex;
+      flex-direction: column;
+      max-width: 430px;
+      margin: 0 auto;
+      background:
+        radial-gradient(120% 60% at 50% -10%, rgba(110, 231, 255, 0.08), transparent 50%),
+        #07080b;
+    }
+
+    .preview {
+      position: relative;
+      aspect-ratio: 16 / 10;
+      overflow: hidden;
+      background: #101218;
+    }
+    .preview img {
+      width: 100%; height: 100%; object-fit: cover;
+      filter: saturate(1.05) contrast(1.04);
+      transform: scale(1.02);
+    }
+    .preview::after {
+      content: "";
+      position: absolute; inset: 0;
+      background: linear-gradient(to bottom, transparent 55%, rgba(7,8,11,.55));
+      pointer-events: none;
+    }
+    .timecode {
+      position: absolute; left: 14px; bottom: 12px;
+      font-variant-numeric: tabular-nums;
+      font-size: 12px; letter-spacing: 0.04em;
+      padding: 5px 9px; border-radius: 999px;
+      background: rgba(0,0,0,.45); backdrop-filter: blur(10px);
+      border: 1px solid rgba(255,255,255,.08);
+    }
+
+    .sheet {
+      flex: 1;
+      margin-top: -18px;
+      border-radius: 28px 28px 0 0;
+      background: var(--sheet);
+      backdrop-filter: blur(24px);
+      border: 1px solid var(--sheet-border);
+      padding: 10px 0 18px;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+
+    .ruler-wrap {
+      position: relative;
+      height: 28px;
+      overflow: hidden;
+    }
+    .ruler {
+      position: absolute; inset: 0 auto 0 56px;
+      display: flex;
+      width: calc(var(--duration) * var(--px) * 1px);
+      pointer-events: none;
+    }
+    .tick {
+      width: calc(var(--px) * 1px);
+      font-size: 10px; color: var(--muted);
+      border-left: 1px solid rgba(255,255,255,.12);
+      padding-left: 6px; line-height: 18px;
+    }
+    .tick::after {
+      content: "";
+      display: block; width: 1px; height: 5px;
+      background: rgba(255,255,255,.18);
+      margin-left: calc(var(--px) / 2 * 1px - 6px);
+    }
+
+    .tracks {
+      position: relative;
+      overflow-x: auto;
+      overflow-y: hidden;
+      -webkit-overflow-scrolling: touch;
+      padding: 6px 0 8px;
+      scrollbar-width: none;
+    }
+    .tracks::-webkit-scrollbar { display: none; }
+
+    .lane {
+      display: grid;
+      grid-template-columns: 56px 1fr;
+      height: 52px;
+      margin-bottom: 8px;
+      align-items: center;
+    }
+    .lane.audio { height: 44px; }
+    .lane.overlay { height: 36px; }
+
+    .lane-label {
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 2px; color: var(--muted); font-size: 9px; letter-spacing: .04em;
+      text-transform: uppercase;
+    }
+    .lane-label svg { width: 14px; height: 14px; opacity: .7; }
+
+    .lane-body {
+      position: relative;
+      height: 100%;
+      width: calc(var(--duration) * var(--px) * 1px + 24px);
+    }
+
+    .clip {
+      position: absolute;
+      top: 2px; bottom: 2px;
+      border-radius: 12px;
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,.08);
+      box-shadow: 0 8px 20px rgba(0,0,0,.25);
+      user-select: none;
+      touch-action: none;
+    }
+    .clip.selected {
+      outline: 1.5px solid var(--cyan);
+      outline-offset: 0;
+      box-shadow: 0 0 0 3px rgba(110,231,255,.12), 0 8px 20px rgba(0,0,0,.3);
+    }
+    .clip .film {
+      display: flex; height: 100%;
+    }
+    .clip .film span {
+      flex: 1; background-size: cover; background-position: center;
+      border-right: 1px solid rgba(0,0,0,.25);
+    }
+    .clip .meta {
+      position: absolute; left: 8px; top: 50%; transform: translateY(-50%);
+      font-size: 11px; font-weight: 600; pointer-events: none;
+      text-shadow: 0 1px 6px rgba(0,0,0,.45);
+    }
+    .handle {
+      position: absolute; top: 6px; bottom: 6px; width: 8px;
+      border-radius: 99px; background: #fff;
+      box-shadow: 0 0 0 3px rgba(110,231,255,.25);
+      opacity: 0; pointer-events: none;
+    }
+    .clip.selected .handle { opacity: 1; }
+    .handle.l { left: 4px; }
+    .handle.r { right: 4px; }
+
+    .clip.title { background: linear-gradient(90deg, #8a5a22, #c9893a); }
+    .clip.broll { background: linear-gradient(90deg, #1e5f5c, #3aa8a1); }
+    .clip.audio {
+      background: linear-gradient(90deg, #4a34b5, #7b5cff 60%, #5b3fd4);
+      display: flex; align-items: center; padding: 0 10px; gap: 8px;
+    }
+    .wave { flex: 1; height: 22px; }
+    .wave path { fill: none; stroke: rgba(255,255,255,.85); stroke-width: 1.4; }
+
+    .playhead {
+      position: absolute; top: 0; bottom: 0;
+      width: 18px; margin-left: -9px;
+      z-index: 8; touch-action: none; cursor: ew-resize;
+    }
+    .playhead .line {
+      position: absolute; left: 50%; top: 0; bottom: 0;
+      width: 1.5px; background: var(--playhead);
+      box-shadow: 0 0 10px rgba(255,255,255,.35);
+      transform: translateX(-50%);
+    }
+    .playhead .knob {
+      position: absolute; left: 50%; top: -1px;
+      width: 14px; height: 14px; border-radius: 5px;
+      background: #fff; transform: translateX(-50%) rotate(45deg);
+      box-shadow: 0 2px 8px rgba(0,0,0,.35);
+    }
+    .playhead .bubble {
+      position: absolute; left: 50%; top: 16px;
+      transform: translateX(-50%);
+      font-size: 10px; font-variant-numeric: tabular-nums;
+      background: rgba(0,0,0,.55); padding: 2px 6px; border-radius: 999px;
+      border: 1px solid rgba(255,255,255,.1);
+      white-space: nowrap; pointer-events: none;
+    }
+
+    .dock {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 18px 4px; gap: 12px;
+    }
+    .icon-btn {
+      width: 44px; height: 44px; border: 0; border-radius: 50%;
+      background: rgba(255,255,255,.06);
+      color: var(--ink); display: grid; place-items: center;
+    }
+    .icon-btn.play {
+      width: 52px; height: 52px;
+      background: #fff; color: #111;
+    }
+    .zoom {
+      display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 11px;
+    }
+    .zoom input { width: 88px; accent-color: var(--cyan); }
+
+    .hint {
+      text-align: center; color: var(--muted); font-size: 11px; padding: 4px 16px 8px;
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="preview">
+      <img id="frame" alt="Preview" src="https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=1600&q=80" />
+      <div class="timecode" id="tc">00:00.00</div>
+    </div>
+
+    <section class="sheet">
+      <div class="ruler-wrap">
+        <div class="ruler" id="ruler"></div>
+      </div>
+
+      <div class="tracks" id="scroller">
+        <div class="lane overlay">
+          <div class="lane-label">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="4" y="6" width="16" height="12" rx="2"/><path d="M8 10h8M8 14h5"/></svg>
+            Title
+          </div>
+          <div class="lane-body">
+            <div class="clip title" data-start="5.2" data-dur="3.6" style="left:calc(5.2 * var(--px) * 1px);width:calc(3.6 * var(--px) * 1px)">
+              <div class="meta">Title</div>
+              <i class="handle l"></i><i class="handle r"></i>
+            </div>
+          </div>
+        </div>
+
+        <div class="lane">
+          <div class="lane-label">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M8 5v14M16 5v14"/></svg>
+            Video
+          </div>
+          <div class="lane-body">
+            <div class="clip video selected" id="mainClip" data-start="1.2" data-dur="12.4" style="left:calc(1.2 * var(--px) * 1px);width:calc(12.4 * var(--px) * 1px)">
+              <div class="film" id="film"></div>
+              <i class="handle l"></i><i class="handle r"></i>
+            </div>
+          </div>
+        </div>
+
+        <div class="lane overlay">
+          <div class="lane-label">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="4" y="5" width="16" height="14" rx="2"/><circle cx="9" cy="10" r="1.4"/><path d="M4 16l5-4 4 3 7-6"/></svg>
+            B-roll
+          </div>
+          <div class="lane-body">
+            <div class="clip broll" data-start="7.4" data-dur="4.2" style="left:calc(7.4 * var(--px) * 1px);width:calc(4.2 * var(--px) * 1px)">
+              <div class="meta">B-roll</div>
+              <i class="handle l"></i><i class="handle r"></i>
+            </div>
+          </div>
+        </div>
+
+        <div class="lane audio">
+          <div class="lane-label">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 10v4M8 7v10M12 4v16M16 8v8M20 11v2"/></svg>
+            Audio
+          </div>
+          <div class="lane-body">
+            <div class="clip audio" data-start="0.6" data-dur="16.2" style="left:calc(0.6 * var(--px) * 1px);width:calc(16.2 * var(--px) * 1px)">
+              <span class="meta" style="position:static;transform:none;flex:0 0 auto">Score</span>
+              <svg class="wave" viewBox="0 0 320 24" preserveAspectRatio="none" aria-hidden="true">
+                <path d="M0 12 L2 8 4 16 6 6 8 18 10 9 12 15 14 4 16 20 18 10 20 14 22 7 24 17 26 11 28 13 30 5 32 19 34 8 36 16 38 6 40 18 42 10 44 14 46 3 48 21 50 9 52 15 54 7 56 17 58 11 60 13 62 6 64 18 66 8 68 16 70 5 72 19 74 10 76 14 78 7 80 17 82 12 84 12 86 8 88 16 90 6 92 18 94 9 96 15 98 4 100 20 102 10 104 14 106 7 108 17 110 11 112 13 114 5 116 19 118 8 120 16 122 6 124 18 126 10 128 14 130 3 132 21 134 9 136 15 138 7 140 17 142 11 144 13 146 6 148 18 150 8 152 16 154 5 156 19 158 10 160 14 162 7 164 17 166 12 168 12 170 8 172 16 174 6 176 18 178 9 180 15 182 4 184 20 186 10 188 14 190 7 192 17 194 11 196 13 198 5 200 19 202 8 204 16 206 6 208 18 210 10 212 14 214 3 216 21 218 9 220 15 222 7 224 17 226 11 228 13 230 6 232 18 234 8 236 16 238 5 240 19 242 10 244 14 246 7 248 17 250 12 252 12 254 9 256 15 258 7 260 17 262 10 264 14 266 6 268 18 270 11 272 13 274 8 276 16 278 5 280 19 282 10 284 14 286 7 288 17 290 12 292 12 294 8 296 16 298 10 300 14 302 11 304 13 306 9 308 15 310 12 312 12 314 11 316 13 318 12 320 12" />
+              </svg>
+              <i class="handle l"></i><i class="handle r"></i>
+            </div>
+          </div>
+        </div>
+
+        <div class="playhead" id="playhead" style="left: calc(56px + 7.12 * var(--px) * 1px)">
+          <div class="knob"></div>
+          <div class="line"></div>
+          <div class="bubble" id="phTime">00:07.12</div>
+        </div>
+      </div>
+
+      <div class="dock">
+        <button class="icon-btn" id="back" aria-label="Back 1s">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M11 12 20 6v12L11 12Zm-7 6V6h2v12H4Z"/></svg>
+        </button>
+        <button class="icon-btn play" id="play" aria-label="Play">
+          <svg id="playIcon" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7Z"/></svg>
+        </button>
+        <button class="icon-btn" id="fwd" aria-label="Forward 1s">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M13 12 4 6v12l9-6Zm7-6v12h-2V6h2Z"/></svg>
+        </button>
+        <div class="zoom">
+          <span>1x</span>
+          <input id="zoom" type="range" min="48" max="140" value="80" />
+          <span>4x</span>
+        </div>
+      </div>
+      <p class="hint">Drag the playhead to scrub · pinch the timeline to zoom · tap a clip to select</p>
+    </section>
+  </div>
+
+  <script>
+    const DURATION = 18;
+    const frames = [
+      "https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=400&q=70",
+      "https://images.unsplash.com/photo-1469474968028-56623f02e42e?auto=format&fit=crop&w=400&q=70",
+      "https://images.unsplash.com/photo-1501785888041-af3ef285b470?auto=format&fit=crop&w=400&q=70",
+      "https://images.unsplash.com/photo-1470770841072-f971796c9c19?auto=format&fit=crop&w=400&q=70",
+      "https://images.unsplash.com/photo-1441974231531-c6227db76b6e?auto=format&fit=crop&w=400&q=70"
+    ];
+
+    const root = document.documentElement;
+    const scroller = document.getElementById("scroller");
+    const playhead = document.getElementById("playhead");
+    const tc = document.getElementById("tc");
+    const phTime = document.getElementById("phTime");
+    const frame = document.getElementById("frame");
+    const playBtn = document.getElementById("play");
+    const playIcon = document.getElementById("playIcon");
+    const film = document.getElementById("film");
+    const ruler = document.getElementById("ruler");
+
+    let px = 80;
+    let t = 7.12;
+    let playing = false;
+    let last = 0;
+
+    frames.forEach(src => {
+      const s = document.createElement("span");
+      s.style.backgroundImage = `url(${src})`;
+      film.appendChild(s);
+    });
+
+    for (let i = 0; i <= DURATION; i++) {
+      const tick = document.createElement("div");
+      tick.className = "tick";
+      tick.textContent = `0:${String(i).padStart(2,"0")}`;
+      ruler.appendChild(tick);
+    }
+
+    const fmt = sec => {
+      const m = Math.floor(sec / 60);
+      const s = Math.floor(sec % 60);
+      const cs = Math.floor((sec % 1) * 100);
+      return `${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}.${String(cs).padStart(2,"0")}`;
+    };
+
+    function setTime(next, scroll = false) {
+      t = Math.min(DURATION, Math.max(0, next));
+      playhead.style.left = `calc(56px + ${t} * var(--px) * 1px)`;
+      tc.textContent = fmt(t);
+      phTime.textContent = fmt(t);
+      const idx = Math.min(frames.length - 1, Math.floor((t / DURATION) * frames.length));
+      frame.src = frames[idx].replace("w=400", "w=1600");
+      if (scroll) {
+        const x = 56 + t * px - scroller.clientWidth * 0.42;
+        scroller.scrollLeft = Math.max(0, x);
+      }
+    }
+
+    function bindScrub(el, onMove) {
+      const start = e => {
+        e.preventDefault();
+        const move = ev => {
+          const pt = ev.touches ? ev.touches[0] : ev;
+          onMove(pt.clientX);
+        };
+        const up = () => {
+          window.removeEventListener("pointermove", move);
+          window.removeEventListener("pointerup", up);
+          window.removeEventListener("touchmove", move);
+          window.removeEventListener("touchend", up);
+        };
+        window.addEventListener("pointermove", move);
+        window.addEventListener("pointerup", up);
+        window.addEventListener("touchmove", move, { passive: false });
+        window.addEventListener("touchend", up);
+      };
+      el.addEventListener("pointerdown", start);
+    }
+
+    bindScrub(playhead, x => {
+      const rect = scroller.getBoundingClientRect();
+      const local = x - rect.left + scroller.scrollLeft - 56;
+      setTime(local / px);
+    });
+
+    scroller.addEventListener("pointerdown", e => {
+      if (e.target.closest(".clip") || e.target.closest(".playhead")) return;
+      const rect = scroller.getBoundingClientRect();
+      const local = e.clientX - rect.left + scroller.scrollLeft - 56;
+      setTime(local / px);
+    });
+
+    document.querySelectorAll(".clip").forEach(clip => {
+      clip.addEventListener("pointerdown", e => {
+        document.querySelectorAll(".clip").forEach(c => c.classList.remove("selected"));
+        clip.classList.add("selected");
+        const start = parseFloat(clip.dataset.start);
+        const dur = parseFloat(clip.dataset.dur);
+        const rect = clip.getBoundingClientRect();
+        const edge = 18;
+        const isLeft = e.clientX - rect.left < edge;
+        const isRight = rect.right - e.clientX < edge;
+        const originX = e.clientX;
+        const originStart = start;
+        const originDur = dur;
+
+        const move = ev => {
+          const dx = (ev.clientX - originX) / px;
+          if (isLeft) {
+            const ns = Math.max(0, originStart + dx);
+            const nd = originDur - (ns - originStart);
+            if (nd > 0.6) {
+              clip.dataset.start = ns.toFixed(2);
+              clip.dataset.dur = nd.toFixed(2);
+              clip.style.left = `calc(${ns} * var(--px) * 1px)`;
+              clip.style.width = `calc(${nd} * var(--px) * 1px)`;
+            }
+          } else if (isRight) {
+            const nd = Math.max(0.6, originDur + dx);
+            clip.dataset.dur = nd.toFixed(2);
+            clip.style.width = `calc(${nd} * var(--px) * 1px)`;
+          } else {
+            const ns = Math.max(0, originStart + dx);
+            clip.dataset.start = ns.toFixed(2);
+            clip.style.left = `calc(${ns} * var(--px) * 1px)`;
+          }
+        };
+        const up = () => {
+          window.removeEventListener("pointermove", move);
+          window.removeEventListener("pointerup", up);
+        };
+        window.addEventListener("pointermove", move);
+        window.addEventListener("pointerup", up);
+      });
+    });
+
+    playBtn.addEventListener("click", () => {
+      playing = !playing;
+      playIcon.innerHTML = playing
+        ? '<path d="M7 5h3v14H7zm7 0h3v14h-3z"/>'
+        : '<path d="M8 5v14l11-7Z"/>';
+      last = performance.now();
+    });
+    document.getElementById("back").onclick = () => setTime(t - 1, true);
+    document.getElementById("fwd").onclick = () => setTime(t + 1, true);
+    document.getElementById("zoom").addEventListener("input", e => {
+      px = Number(e.target.value);
+      root.style.setProperty("--px", px);
+      setTime(t);
+    });
+
+    function loop(now) {
+      if (playing) {
+        const dt = (now - last) / 1000;
+        last = now;
+        if (t >= DURATION) { playing = false; playIcon.innerHTML = '<path d="M8 5v14l11-7Z"/>'; }
+        else setTime(t + dt, true);
+      }
+      requestAnimationFrame(loop);
+    }
+    requestAnimationFrame(loop);
+    setTime(t);
+  </script>
+</body>
+</html>
