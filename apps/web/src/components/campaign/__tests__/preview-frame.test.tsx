@@ -222,7 +222,7 @@ describe("renaming a fresh draft must not blank the preview frame", () => {
     expect(state.briefId).toBe("s");
 
     const dock = (next: typeof state) => {
-      const props = previewDockProps(next, 0, 6)!;
+      const props = previewDockProps(next)!;
       return (
         <PreviewDock {...props} brief={toBrief(next)} playhead={restingPlayhead} host="section" />
       );
@@ -300,7 +300,7 @@ describe("the rail's memo must not hide a switch of creative from usePreviewFram
   };
 
   const dock = (state: EditorState) => {
-    const rawRailProps = previewDockProps(state, 0, 6);
+    const rawRailProps = previewDockProps(state);
     const brief = toBrief(state);
     const previewKey = previewRailKey(rawRailProps, brief, state.products[0]?.id ?? "");
     return <MemoDock rawRailProps={rawRailProps} brief={brief} previewKey={previewKey} />;

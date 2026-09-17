@@ -236,7 +236,6 @@ describe("the playhead's cost (CC5, plan §4 acceptance (b))", () => {
   beforeEach(() => {
     localStorage.clear();
     localStorage.setItem("cf:brief-picked", "1");
-    localStorage.setItem("cf:presentation", "guided");
     formRenders.count = 0;
     tapeRenders.count = 0;
     dockRenders.count = 0;
@@ -322,7 +321,6 @@ describe("TS1 — the tape in the rail (plan §4 acceptance (e), §5)", () => {
   beforeEach(() => {
     localStorage.clear();
     localStorage.setItem("cf:brief-picked", "1");
-    localStorage.setItem("cf:presentation", "guided");
     tapeRenders.count = 0;
     dockRenders.count = 0;
   });
@@ -452,7 +450,6 @@ describe("the other half of CC1/CC2's contract — the dock must BAIL, not merel
   beforeEach(() => {
     localStorage.clear();
     localStorage.setItem("cf:brief-picked", "1");
-    localStorage.setItem("cf:presentation", "guided");
     dockRenders.count = 0;
   });
 
@@ -489,7 +486,6 @@ describe("the ephemeral beat selection (D139)", () => {
   beforeEach(() => {
     localStorage.clear();
     localStorage.setItem("cf:brief-picked", "1");
-    localStorage.setItem("cf:presentation", "everything");
   });
 
   test("an edit to the sequence retires the selection rather than re-pointing it", async () => {

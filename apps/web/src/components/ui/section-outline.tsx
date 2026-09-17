@@ -17,7 +17,7 @@ import * as messages from "@/components/campaign/messages";
  * and it is published through EditorPanelsProvider so the mobile menu shares it.
  *
  * In Everything mode the current row is a scroll-spy. W6 will steer it from the
- * guided step index too, and the row's activation becomes `revealSection` — that
+ * step index too, and the row's activation becomes `revealSection` — that
  * works because the editor owns `onActivate` as the one place an outline navigates.
  */
 export function SectionOutline({

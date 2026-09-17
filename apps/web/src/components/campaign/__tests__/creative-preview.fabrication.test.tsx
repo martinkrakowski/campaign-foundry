@@ -70,7 +70,7 @@ const withMotion = (): EditorState => {
  * prints is a violation on sight.
  */
 function corpusTokensFor(state: EditorState): Set<string> {
-  const props = previewDockProps(state, 0, 6);
+  const props = previewDockProps(state);
   if (props === null) throw new Error("the fabrication fixtures always have a product to draw");
   const ratio = derivePreviewRatio(props.platformId, undefined);
   const platformLabel =
@@ -93,10 +93,6 @@ function corpusTokensFor(state: EditorState): Set<string> {
     props.campaignName,
     props.headline,
     messages.previewLegend,
-    // The cursor is always passed above (`previewDockProps(state, 0, 6)`), so
-    // it is always defined here — D141 only makes it optional for a caller
-    // (Everything) that omits it, which this fixture never does.
-    messages.previewStep(props.step!, props.stepCount!),
     caption,
     fallbackCaption,
   ].join(" ");
@@ -159,7 +155,7 @@ describe("the preview only ever speaks the brief and the sanctioned labels", () 
   ] as const)(
     "%s renders text that is all exact members of the brief-derived corpus token set",
     (_name, state) => {
-      const props = previewDockProps(state, 0, 6);
+      const props = previewDockProps(state);
       expect(props).not.toBeNull();
       const view = render(<PreviewDock {...props!} playhead={restingPlayhead} host="section" />);
       const tokens = previewTokens(view);
@@ -179,13 +175,13 @@ describe("the preview only ever speaks the brief and the sanctioned labels", () 
     // axes this classic draft carries are leftovers of a Randomized visit, and the
     // dock must agree with the Review figure (which reads the projection, where they
     // no longer exist) rather than with them.
-    const props = previewDockProps(classicState, 0, 6)!;
+    const props = previewDockProps(classicState)!;
     expect(props.layout).toBe("headline-bottom");
     expect(props.tone).toBe("subtle");
   });
 
   test("the moving creative names its style, and the style is display-label vocabulary", () => {
-    const props = previewDockProps(motionState, 0, 6)!;
+    const props = previewDockProps(motionState)!;
     const motion = props.motion;
     expect(motion).toBe("ken-burns-in");
     expect(MOTION_KIND_META[motion as MotionKind]).toBe("slow zoom in");
@@ -198,7 +194,7 @@ describe("the preview only ever speaks the brief and the sanctioned labels", () 
     // fail for different reasons and cannot both be defeated by one mistake.
     const { container } = render(
       <PreviewDock
-        {...previewDockProps(variationState, 0, 6)!}
+        {...previewDockProps(variationState)!}
         playhead={restingPlayhead}
         host="section"
       />,
@@ -214,7 +210,7 @@ describe("the preview only ever speaks the brief and the sanctioned labels", () 
     // answer is explicit: nothing to draw, nothing rendered — never an invented colour.
     const empty = niche();
     empty.products = [];
-    expect(previewDockProps(empty, 0, 6)).toBeNull();
+    expect(previewDockProps(empty)).toBeNull();
   });
 
   test("the corpus itself stays clean of the chrome it must never show", () => {

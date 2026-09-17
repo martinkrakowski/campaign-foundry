@@ -94,14 +94,17 @@ function Readout({ children }: { children: ReactNode }): ReactNode {
  * It renders in BOTH modes — the template is brief-level — and reuses the
  * existing panels where they exist rather than duplicating them: in Randomized
  * the lock-or-vary axis cards stay on Variation Policy (one surface per job,
- * D63), and in Classic the layout/tone treatment choice keeps its own step,
- * whose look this step's frame previews.
+ * D63), and in Classic the layout/tone treatment choice keeps its own section,
+ * whose look `preview` previews.
  *
- * The frame is step-scoped (D63): the guided walk mounts it, and because the
- * step carries its own preview the rail is suppressed here exactly as on
- * Review — exactly one composed preview on screen (D43). The Everything stack
- * mounts the controls only (`preview` absent), where no composed preview
- * surface exists by design.
+ * `preview` HAS NO CALLER TODAY (SG1). The frame was step-scoped (D63): the
+ * guided walk mounted it, and the rail was suppressed on that step so that
+ * exactly one composed preview was on screen (D43). The wizard is retired, the
+ * rail is unconditional, and the one column renders this section WITHOUT
+ * `preview` — so passing it here is now the way to break D43's count, not the
+ * way to satisfy it. The prop and its branch stay because the frame is this
+ * section's own capability and its tests cover it; the decision about where a
+ * second surface may draw a creative belongs to whoever adds one.
  */
 export function LayoutSection({
   state,

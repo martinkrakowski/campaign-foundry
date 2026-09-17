@@ -161,12 +161,14 @@ export function ProductsSection({
   dispatch: Dispatch<EditorAction>;
   errors: FieldErrors;
   /**
-   * M7 — the Asset Bin drawer is not rendered here. The guided step card carries a
-   * permanent transform (the walk's animation), which makes it the CONTAINING BLOCK
-   * for `fixed` descendants: a drawer mounted inside it would be trapped in the card
-   * instead of covering the viewport. The drawer lives at `BriefEditor`'s root (the
-   * same hoist `HeadlinePoolDrawer` has), so this section publishes only the request
-   * — the product key whose logo the bin would fill.
+   * M7 — the Asset Bin drawer is not rendered here. The original culprit was the
+   * guided step card's permanent transform (the walk's animation), which made it
+   * the CONTAINING BLOCK for `fixed` descendants, so a drawer mounted inside it
+   * was trapped in the card instead of covering the viewport. The card is gone
+   * (SG1) but the rule is not: any ancestor that acquires a transform would do
+   * the same. The drawer lives at `BriefEditor`'s root (the same hoist
+   * `HeadlinePoolDrawer` has), so this section publishes only the request — the
+   * product key whose logo the bin would fill.
    */
   onChooseFromBin: (key: number) => void;
 }) {

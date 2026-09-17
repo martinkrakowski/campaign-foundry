@@ -598,10 +598,6 @@ export function previewCaptionTextEffect(
 ): string {
   return `${ratioLabel} · ${platformLabel} · ${effectLabel}`;
 }
-/** The preview's step readout, e.g. "2 / 6". */
-export function previewStep(step: number, total: number): string {
-  return `${step} / ${total}`;
-}
 /**
  * D142 — the rail's empty state before the first product has an id: names
  * the missing field, never "add a product" (the Products step already shows
@@ -717,32 +713,7 @@ export function modelChanged(modelLabel: string): string {
   return `${modelLabel} will make the next set of creatives.`;
 }
 
-/* ── Guided presentation (W6) ─────────────────────────────────────────────── */
-
-/** The presentation toggle's group label. */
-export const presentationLabel = "Presentation";
-/** The guided presentation's button: one section at a time, in steps. */
-export const presentationGuided = "Guided";
-/** The everything presentation's button: today's scroll, all sections at once. */
-export const presentationEverything = "Everything";
-
-/** The step eyebrow, e.g. "STEP 1 OF 6" — the one place the step count is read. */
-export function stepEyebrow(step: number, total: number): string {
-  return `STEP ${step} OF ${total}`;
-}
-
-/** A step's subtitle — the one line under each step heading. */
-export const stepSubtitleIdentity = "Name the campaign and say who it is for.";
-export const stepSubtitleCopy = "Write the one line you want people to remember.";
-export const stepSubtitleProducts = "Add what you are advertising, with its colour and logo.";
-export const stepSubtitleTreatments = "Choose the looks each product gets.";
-export const stepSubtitleLayout =
-  "Set the type every creative inherits — the preview shows the result.";
-export const stepSubtitlePolicy = "Say how many ads you want, and how much they should differ.";
-export const stepSubtitleOutput = "Pick where the ads run, and whether they move.";
-export const stepSubtitleReview = "Last look, then send it to the pipeline.";
-
-/* ── The Layout step (T7) ─────────────────────────────────────────────────── */
+/* ── The Layout section (T7) ─────────────────────────────────────────────── */
 
 /**
  * The Effect row's no-effect chip face (T6): the absent field, which names
@@ -759,26 +730,6 @@ export const styleEffectNone = "None";
 export function styleSizeReadout(pixels: number, ratioLabel: string): string {
   return `~${pixels} px at ${ratioLabel}`;
 }
-
-/** The step footer's status sentence when the step has nothing to fix. */
-export const statusStepReady = "Looking good.";
-/**
- * The review step's footer status sentence. It states readiness rather than naming a
- * control: Review supplies no Next, and the run verb (Generate) lives in the top bar.
- */
-export const statusStepReview = "Everything checks out — this is the last look.";
-/** The review step's body: the brief has met every step, so this is the last look. */
-export const stepReviewIntro =
-  "The brief is in shape. This is the last look — Generate in the top bar runs it.";
-/** Step footer verbs. */
-export const stepBack = "Back";
-export const stepNext = "Next";
-/**
- * The last section step's Next, before the review step. D35: "Review & launch"
- * promised a launch the review step does not carry — the run verb is Generate in
- * the top bar, so the label only names where the walk goes next.
- */
-export const stepNextReview = "Review & finish";
 
 /* ── The step segbar and the step gestures (W7) ───────────────────────────── */
 
@@ -810,33 +761,6 @@ export function segBarSegment(
 }
 
 /**
- * The footer's swipe hint (WIZ-30). It is painted on coarse pointers only, so it
- * promises the gesture a finger can actually make, and says nothing about a
- * keyboard the device may not have.
- */
-export const stepSwipeHint = "Swipe left or right to move between steps.";
-
-/**
- * Display labels for the review step's generated summary rows.
- * Kept free of domain jargon (axes, pool, floor, package).
- */
-export const reviewRowId = "Campaign Name";
-export const reviewRowTargetRegion = "Target Region";
-export const reviewRowTargetAudience = "Target Audience";
-export const reviewRowCampaignMessage = "Campaign Message";
-export const reviewRowLocalizedMessage = "Localized Message";
-/** The summary row's edit verb. */
-export const reviewEdit = "Edit";
-/**
- * The edit control's accessible name. A bare "Edit" would name every row alike, so
- * the control names the section it opens — the section title comes from the one
- * vocabulary (`SECTION_TITLES`) and is passed here as a display label.
- */
-export function reviewEditLabel(section: string): string {
-  return `Edit ${section}`;
-}
-/** The variation policy row's value: what the count will make. */
-/**
  * T2 (template plan, F6): the lock-or-vary semantics of a variation axis, spoken.
  * The min-one guard means a single selected value IS the lock — the planner draws
  * only that value for every variant — but nothing on the cards said so.
@@ -846,29 +770,6 @@ export function axisLocked(value: string): string {
 }
 export function axisVaries(count: number): string {
   return `Varies — each creative gets one of the ${count} selected.`;
-}
-
-/* ── The Review step's template row (T7) ─────────────────────────────────────── */
-
-/** The authored type, in display labels (D18); the size line is `styleSizeReadout`. */
-export function reviewStyleFamily(family: string): string {
-  return `Typeface: ${family}`;
-}
-export function reviewStyleWeight(weight: string): string {
-  return `Weight: ${weight}`;
-}
-export function reviewStyleLineHeight(value: string): string {
-  return `${value} line height`;
-}
-export function reviewStyleLetterSpacing(value: string): string {
-  return `${value} em letter spacing`;
-}
-export function reviewStyleAlign(label: string): string {
-  return `${label} aligned`;
-}
-
-export function reviewPolicyValue(count: number): string {
-  return `${count} ad${count === 1 ? "" : "s"}`;
 }
 
 /* ── The orchestrator bar's Execute answer (H2) ──────────────────────────────── */
@@ -1281,14 +1182,6 @@ export function templateOcclusionNote(
     effect === "hide" ? "hide it" : effect === "mute" ? "mute it" : "overlap where it sits";
   return `the ${aboveName.toLowerCase()} layer now sits above ${below} and will ${verb}`;
 }
-
-/** The review step's template row: how many layers the brief will carry. */
-export function reviewTemplateLayers(count: number): string {
-  return `${count} ${count === 1 ? "layer" : "layers"}`;
-}
-
-/** The Template step's subtitle. */
-export const stepSubtitleTemplate = "Choose what every creative is made of — add or remove layers.";
 
 /** Accessible name for the video preview's scrub range control (VE-D5). */
 export const previewScrubLabel = "Scrub preview";
