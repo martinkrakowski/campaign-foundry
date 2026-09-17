@@ -231,7 +231,31 @@ output for a cell, the cell is *unknown* — a valid answer. A confident wrong o
 6. **Check the plan's premises first.** `yarn plan:verify` fails when a lane's stated gap has already
    been closed. Four lanes in one week were dispatched, or nearly dispatched, to re-implement shipped
    behaviour. A lane whose premise no longer holds is not a lane.
-7. **Send the plan to the plan reviewer** (`Agent` · `subagent_type: "Plan"` · `model: "fable"`)
+7. **Every fence you write must be TIMED and shown to decide, before it lands.** `plan:verify`
+   kills a premise at **10 seconds** and reports `TIMED-OUT — not stale, make the premise decide
+   quickly`. A premise with no verdict protects nothing: it neither holds nor flips, it just turns
+   the gate red for a reason unrelated to the lane. So for each fence, run it, record the wall time
+   in a comment beside it, and keep it in **milliseconds** — a fence is a probe, not a scan.
+   Verify three things, not one: that it **holds today** (the gap is open), that it **can flip**
+   (construct the closed state and watch it change), and that it **answers fast**.
+
+   Three fences failed this way on 2026-09-16, each differently, and the pattern is worth knowing:
+   - **Too slow.** SE2 flattened a 100 kB file with `tr` and ran `.{0,700}` against the single
+     resulting line — catastrophic backtracking, killed at 10s. Bounded to the function body with
+     `sed -n '/^function name/,/^}/p'`, it answered in ~7 ms.
+   - **Too narrow.** X1 asked whether a Prettier config existed — half of its own section's title,
+     and the half that closes first. It went STALE on the config-only commit while 400 files were
+     still unformatted, which would have forced a 400-file single commit.
+   - **Too slow again, from the opposite direction.** X1's replacement ran `prettier --check` over
+     679 files: 4.8s locally, TIMED-OUT on the runner. Local timing is not the test; the runner is
+     slower and contended.
+
+   Prefer a probe over a scan: grep one file for the marker that means the lane is done, rather
+   than recomputing the lane's whole subject. If the honest completion marker is a gate step, grep
+   the workflow for it — a lane that wires a gate cannot land without satisfying that gate, so the
+   marker cannot be forged.
+
+8. **Send the plan to the plan reviewer** (`Agent` · `subagent_type: "Plan"` · `model: "fable"`)
    **before dispatching any lane from it**, whenever the plan *introduces or rewrites lanes* or
    *changes a premise*. It is read-only by construction, so it returns a review and cannot patch
    around what it finds. On its first use it caught a rule in an **already-dispatched** brief that
