@@ -79,13 +79,13 @@ lane names the fault that must turn it **red**:
 
 ## 5. Premises
 
-```premise W1
-# The retired launcher is still on disk. It flips when W1 deletes it. Measured: ~4 ms.
-# The path is NOT `scripts/dispatch-lane.sh` -- the first draft of this fence said so and
-# failed on its own first run, which is the cheapest possible instance of the rule it was
-# written under: run the fence before trusting it.
-test -f .claude/skills/orchestrate-wave/scripts/dispatch-lane.sh
-```
+**W1 — shipped in this PR.** Its premise (`test -f
+.claude/skills/orchestrate-wave/scripts/dispatch-lane.sh`) was retired when it landed; `plan:verify`
+no longer tracks it. The fence is gone rather than inverted: **no test can prove a deleted file stays
+deleted**, and a fence asserting absence would pass forever without checking anything. The standing
+check is the grep in §4, which fails on an executable reference rather than on the file's existence.
+The first draft of that fence pointed at `scripts/dispatch-lane.sh` and failed on its own first run —
+the cheapest possible instance of the rule it was written under: run the fence before trusting it.
 
 **W2 — shipped.** `apps/api/nitro.config.ts` now sets `esbuild: { options: { target: "es2022" } }`,
 matching `tsconfig.base.json`'s `ES2022` instead of inheriting Nitro's `es2019` default (W-D3). The

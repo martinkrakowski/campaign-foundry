@@ -71,8 +71,8 @@ unfunded, hangs (0-byte log at five minutes), or dies on arrival twice. **grok n
 | Seat | Command (every id probed live on 2026-09-08) |
 |---|---|
 | **implementer 1** | `agy --print "$(cat BRIEF.md)" --dangerously-skip-permissions --effort high --model gemini-3.8-flash-high --print-timeout 90m --output-format json` (detached; the effort flag must match the id's suffix — `-high` with `--effort low` is refused) |
-| **implementer 2** | `MODEL=opencode/big-pickle dispatch-lane.sh …` — the script's default. |
-| **implementer 3** | `MODEL=opencode-go/glm-5.3-flash dispatch-lane.sh …`. Note the provider: `opencode-go/`, which is funded; `opencode/glm-5.3-flash` answers *Insufficient balance* on the same account. |
+| **implementer 2** | `opencode run --format json --auto --model opencode/big-pickle --variant high "$(cat /abs/brief.md)"`, launched with the detached template below. (Recorded as `MODEL=opencode/big-pickle dispatch-lane.sh …` while that launcher existed; it was deleted on 2026-09-17.) |
+| **implementer 3** | the same invocation with `--model opencode-go/glm-5.3-flash`. Note the provider: `opencode-go/`, which is funded; `opencode/glm-5.3-flash` answers *Insufficient balance* on the same account. |
 | **PR reviewer** | `opencode run --format json --model opencode-go/hy4-preview "$(cat REVIEW.md)"` in a **throwaway worktree** of the branch (so nothing it writes can matter). It answers a one-word probe with a paragraph of planning: give it a schema for the verdict and read past the preamble. |
 | **remediator** | the lane's own implementer, at **medium** effort on a narrow brief (see Spending rules 3–4), then the next in the rotation. (Proposed, not yet the owner's rule: grok returns as remediator only — its 4/4 record — after its quota resets **2026-09-14 16:28**, and still never implements.) |
 | **plan reviewer** | ~~`agy … --model gemini-3.1-pro-high`~~ — **superseded**; the seat is `Agent` · `Plan` · `fable`, in the 2026-09-12 table below. This row is kept because the external record is evidence, not a menu. |
@@ -108,7 +108,9 @@ the problem. These rules are, in order of what they save:
 7. **Measure every run.** `agy` reports its own cost when given `--output-format json`: the result
    is one JSON object with `usage` (`input_tokens`, `output_tokens`, `thinking_tokens`,
    `cache_read_tokens`, `total_tokens`), plus `duration_seconds`, `num_turns` and `status`. `opencode
-   run --format json` emits raw JSON events. **The flag is in the seat commands above and `dispatch-lane.sh` passes `--format json` to opencode by default** (`USAGE_FLAGS`, opt out with `USAGE_FLAGS=""`). Record the numbers in the wave record;
+   run --format json` emits raw JSON events. **The flag is in the seat commands above and you must type
+   it** — a deleted launcher used to add it for you (`USAGE_FLAGS`), and nothing does now, so an
+   opencode launch without `--format json` is a run that cannot be costed. Record the numbers in the wave record;
    there is no retroactive accounting — nothing on disk keeps a per-conversation token record, so a
    run launched without it can never be costed. With the flag, an agy reply (and its PR URL) is the
    `.response` field — `jq -r .response` — and the `EXIT n` marker the wrapper appends is written by
@@ -173,14 +175,25 @@ claim under test and a file list, and never ask a reviewer to run the full gate 
 run — the orchestrator does those. Every wave record counts runs per seat so a burn shows before
 a quota does.
 
-Launch every lane detached so a harness timeout cannot kill it, and wait on the marker:
+Launch every lane detached, in a tool call that **returns immediately** — and wait in a *later*,
+separate call:
 
 ```bash
+# call 1 — launches and returns at once
 nohup zsh -c 'CLI … > ~/.waves/wave-<id>/<lane>.log 2>&1; echo "EXIT $?" >> ~/.waves/wave-<id>/<lane>.log' >/dev/null 2>&1 & disown
-while ! grep -qE '^EXIT [0-9]+$' ~/.waves/wave-<id>/<lane>.log 2>/dev/null; do sleep 30; done
 ```
 
-`scripts/dispatch-lane.sh` does both, with the stagger below.
+```bash
+# call 2, later — poll once and return; never a loop that outlives the call's timeout
+grep -qE '^EXIT [0-9]+$' ~/.waves/wave-<id>/<lane>.log 2>/dev/null && echo done
+```
+
+**The two must not share a call.** `nohup` only ignores `SIGHUP` and `disown` only drops the job-table
+entry; neither calls `setpgid`, so the lane stays in the **caller's process group**. Blocking in the
+same call until the marker appears keeps that call alive past its timeout, and the harness then
+signals the whole group — the lane dies with the waiter, log at 0 bytes and no marker. That is what
+`scripts/dispatch-lane.sh` did (launch, then `wait` up to 5400 s in one call) and why it was deleted
+on 2026-09-17. Stagger the launches by hand, per the trap below.
 
 ## Traps that have each cost a cycle
 
@@ -266,7 +279,8 @@ the measurement rule**, so it has no cost figures at all. Three seats, no compar
 >
 > **What that changes about dispatch.** No detached `nohup`, no `EXIT` marker, no log file to poll,
 > no `--print-timeout`. The Agent tool returns when the agent is done and notifies on completion.
-> `dispatch-lane.sh` is now only for the retired seats; **the V5 rule still applies unchanged** —
+> `dispatch-lane.sh` was still in use for the retired seats when this was written and has since been
+> deleted; **the V5 rule still applies unchanged** —
 > record the worktree tip before dispatch and compare after, because an agent that reports success
 > having committed nothing looks identical either way.
 
@@ -304,7 +318,8 @@ complying.
 
 **And the dispatcher itself failed silently once**: `dispatch-lane.sh` launched nothing — no output,
 no process, no `EXIT` marker — while reporting that it was waiting. The lane looked in-flight for
-twenty minutes. Whatever seat is in use, **derive the status; never believe the wrapper.**
+twenty minutes. That script is gone (deleted 2026-09-17), but the rule it earned outlives it: whatever
+seat is in use, **derive the status; never believe the wrapper.**
 
 **The one defect worth carrying forward into every brief.** The assertion-weakening above is the
 failure mode that rots a suite silently, and it is cheap to counter: every brief ends with *if a
@@ -312,27 +327,29 @@ finding is wrong, say so with the mechanism rather than changing code to match i
 
 ### Dispatching the agy seat (retired)
 
-`dispatch-lane.sh` runs `opencode run` unless you give it `LANE_CMD`, so **a `MODEL=agy/...` is
-silently wrong** — the string is handed to opencode as a model id. Implementer 1 goes through the
-escape hatch:
+Every seat is launched the same way now — the detached template above, one tool call that returns at
+once — because the wrapper that used to special-case them is gone. Emit `dispatch started` in the
+call immediately before, and append the `EXIT` marker yourself; the template already does:
 
 ```sh
-BRIEF=/abs/path/to/brief.md
-LANE_CMD='agy --print "$(cat '"$BRIEF"')" --dangerously-skip-permissions --effort high \
-  --model gemini-3.8-flash-high --print-timeout 90m --output-format json' \
-  dispatch-lane.sh "$LOGDIR" "<lane>:<worktree>:<brief>"
+BRIEF=/abs/path/to/brief.md   # absolute: the deferred `cat` runs in the lane's shell, not yours
+LOG=~/.waves/wave-<id>/<lane>.log
+nohup zsh -c "cd <worktree> && agy --print \"\$(cat $BRIEF)\" --dangerously-skip-permissions \
+  --effort high --model gemini-3.8-flash-high --print-timeout 90m --output-format json \
+  > $LOG 2>&1; echo \"EXIT \$?\" >> $LOG" >/dev/null 2>&1 & disown
 ```
 
-`LANE_CMD` runs inside the worktree and the wrapper still appends the `EXIT` marker, so the wait
-loop and the wave events work unchanged.
+**The escaping around `$(cat …)` is deliberate and must stay.** It stops the substitution running in
+the orchestrator's shell, where the working directory is wrong; the inner `zsh -c` performs it after
+the `cd`, inside the worktree. Two reviewers have independently called the equivalent line in the
+deleted wrapper a bug on the grounds that the quoting prevents the expansion. **Measured, with the
+real line and a stub command: the brief's contents arrive.** The expansion is deferred, not lost. Use
+an absolute path for the brief regardless, so the deferred `cat` cannot depend on where the lane's
+shell starts.
 
-**The single quotes are deliberate and must stay.** They stop `$(cat …)` running in the
-orchestrator's shell, where the working directory is wrong; the wrapper interpolates `LANE_CMD`
-into the string it hands to `zsh -c`, and that shell performs the substitution inside the worktree.
-Two reviewers have independently called this a bug on the grounds that single quotes prevent the
-expansion. **Measured, with the real wrapper line and a stub command: the brief's contents arrive.**
-The expansion is deferred, not lost. Use an absolute path for the brief regardless, so the deferred
-`cat` cannot depend on where the lane's shell starts.
+The wrapper's own trap is worth remembering: it ran `opencode run` unless you gave it `LANE_CMD`, so
+**a `MODEL=agy/...` was silently wrong** — the string went to opencode as a model id. Naming the CLI
+in the launch, as above, makes that unrepresentable.
 
 ### Trial results so far
 
@@ -398,7 +415,8 @@ the other had approved it.
   same shape as the ones it completed within a minute. Every healthy run wrote within ~60 s. Rule:
   a 0-byte log at five minutes is a hang — kill and re-dispatch; a second silent start on the same
   brief → move the lane to grok-4.6 (T3/T4 both wrote within a minute of the switch). The
-  `dispatch-lane.sh` wait does not kill; the kill's `EXIT 143` is a marker it accepts.
+  poll does not kill for you — you kill the hung lane; the kill's `EXIT 143` is a marker the wait
+  accepts (as the deleted `dispatch-lane.sh` wait did before it).
 - **agy model ids (2026-09-07).** `gemini-3.7-flash-high` and `gemini-3.1-pro-high` stopped
   resolving the day gemini-3.8-flash shipped; launches died in seconds with *timeout waiting for
   response*. Current reviewer-B / plan-reviewer id: `gemini-3.8-flash-high`. Re-probe with
@@ -434,16 +452,16 @@ nohup zsh -c "cd ${WT} && <seat command above> > ${LOG} 2>&1; echo \"EXIT \$?\" 
 
 `cd "$WT"` is not optional. A seat started from the repository root edits the main checkout, beside
 the owner's running dev server, and its commits land on whatever branch is checked out there. An
-**absolute** `$BRIEF` matters for the same reason: `dispatch-lane.sh` defers the `cat` to the lane's
+**absolute** `$BRIEF` matters for the same reason: the template defers the `cat` to the lane's own
 shell, so a relative path resolves against the worktree, not against where you typed it.
 
 **And the brief itself must carry what no invocation can.** A lane agent inherits no conversation,
 so the brief states the absolute worktree path, the branch, **whether a PR is already open**, and
 the house rules — never `git add -A`, never touch the owner's dev servers, never open
 `.agents/session-log.md`, no attribution trailer. Omitting them is the in-house equivalent of an
-unfunded seat: a full cycle spent, nothing to show. `dispatch-lane.sh` handles the stagger, the
-marker and the wave events for the opencode seats; the other two use the `LANE_CMD` escape hatch
-documented above.
+unfunded seat: a full cycle spent, nothing to show. The stagger, the `EXIT` marker and the wave
+events are **yours** for every seat — `dispatch-lane.sh` did them for the opencode seats until it was
+deleted on 2026-09-17, and nothing replaced it.
 
 `big-pickle` is out on its own record (two silent no-ops). `glm-5.3-flash` is not in the in-house
 cast. Both stay in the record below because the record is evidence, not a menu.

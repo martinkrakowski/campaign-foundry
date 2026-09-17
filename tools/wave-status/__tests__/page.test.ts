@@ -4510,7 +4510,7 @@ describe("the status page", () => {
     expect(meta).not.toContain("stalled");
   });
 
-  test("an event emitted outside dispatch-lane.sh is read back correctly by the page", async () => {
+  test("an event emitted standalone by the orchestrator is read back correctly by the page", async () => {
     const root = mkdtempSync(join(tmpdir(), "wave-page-standalone-"));
     dirs.push(root);
 

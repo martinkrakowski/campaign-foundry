@@ -6,7 +6,8 @@
 #
 # When <logdir> is omitted, it defaults to $LOGDIR, or $WAVE_LOG_ROOT/wave-<wave>
 # (~/.waves/wave-<wave>, or existing /tmp/wave-<wave>).
-# May be called standalone around direct lane dispatches without dispatch-lane.sh.
+# Called standalone around direct lane dispatches — the only way events are
+# emitted, since the launcher that used to call this was deleted on 2026-09-17.
 #
 # Output is byte-identical to formatEvent in tools/wave-status/lib/emit.ts for
 # the same input, so the two writers cannot drift apart. Two consequences for

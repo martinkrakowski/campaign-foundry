@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "lane": "W1",
+  "mutations": [
+    {
+      "file": "scripts/wave-event.sh",
+      "before": "[ -z \"$detail\" ] || line=\"${line},\\\"detail\\\":$detail\"",
+      "after": "[ -z \"$detail\" ] || line=\"${line},\\\"details\\\":$detail\"",
+      "because": "W1 deleted the launcher that owned event emission, so scripts/wave-event.sh is now the ONLY writer and its agreement with formatEvent is the whole of the format's coverage. Misname one field and every --detail payload the orchestrator emits by hand — the seat on dispatch started, the reason on a failed implement — reaches the page as an unknown key and reads as absent. This is the mutation that answers the lane's decision: the format stays under test with the script gone.",
+      "command": ["yarn", "vitest", "run", "tools/wave-status/lib/__tests__/emit.test.ts"],
+      "verdict": "caught"
+    },
+    {
+      "file": "scripts/wave-event.sh",
+      "before": "  if ! python3 -c 'import json,sys; d=json.loads(sys.argv[1]); sys.exit(0 if isinstance(d, dict) else 1)' \"$detail\" 2>/dev/null; then",
+      "after": "  if false; then",
+      "because": "The emitter validates before it appends, because a rejected event must never reach the log — not even as garbage a reader would have to reject later. With the launcher gone the operator types --detail by hand, so a malformed payload is likelier, not less likely; accepting it writes a line readEvents must discard and the wave record silently loses the event.",
+      "command": ["yarn", "vitest", "run", "tools/wave-status/lib/__tests__/emit.test.ts"],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/lib/emit.ts",
+      "before": "    ts: input.ts ?? clock(),",
+      "after": "    ts: clock(),",
+      "because": "wave-event.sh stamps its own ts and the byte-for-byte comparison feeds that stamp back through formatEvent, so a formatter that re-stamps unconditionally would make the two writers agree only by coincidence of timing — and would silently rewrite the one field a backfilled event depends on. With the launcher gone every event is emitted by hand, so keeping a supplied ts verbatim is what lets a genuinely late event say when it happened.",
+      "command": ["yarn", "vitest", "run", "tools/wave-status/lib/__tests__/emit.test.ts"],
+      "verdict": "caught"
+    }
+  ]
+}
