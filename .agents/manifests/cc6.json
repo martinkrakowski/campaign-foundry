@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "lane": "CC6",
+  "mutations": [
+    {
+      "file": "apps/web/src/components/shell/CreateCampaignDialog.tsx",
+      "before": "  {\n    label: formatDisplayName(\"static\"),\n    types: [\"social-post\", \"paid-social\", \"display-ad\"],\n  },\n  {\n    label: formatDisplayName(\"motion\"),\n    types: [\"short-video\"],\n  },",
+      "after": "  {\n    label: formatDisplayName(\"static\"),\n    types: [\"social-post\", \"paid-social\"],\n  },\n  {\n    label: formatDisplayName(\"motion\"),\n    types: [\"short-video\", \"display-ad\"],\n  },",
+      "because": "Moving display-ad into the motion group violates D144 format grouping where display-ad belongs to the Still images (static) group; caught by the assertion that each tile appears under the correct format group heading.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "apps/web/src/components/shell/__tests__/CreateCampaignDialog.test.tsx"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

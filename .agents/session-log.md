@@ -5989,3 +5989,20 @@ precedent. Recorded in `2026-09-16_studio-editor.md` §10 and in this plan's §3
 
 `premise CC1` retired (the conjunction it anchored to no longer exists); `plan:verify` and
 `mutate:verify .agents/manifests/cc1.json` both green.
+
+## 2026-09-16 — CC6 (lane: create dialog tiles group by format)
+
+Regrouped the create dialog's four campaign type tiles under two format headings according to D144:
+Static (`social-post`, `paid-social`, `display-ad`) and Video/motion (`short-video`). Kept all four types
+reachable and selectable with no domain changes, no preset changes, and selection behaviour byte-for-byte
+preserved. Format headings live in `apps/web/src/components/campaign/messages.ts` (`createFormatGroupStatic`
+and `createFormatGroupMotion`). For accessibility, kept `role="group"` with `aria-label` matching each
+visible heading inside the named `createTypeLabel` group rather than `<fieldset>`/`<legend>`, avoiding
+browser-inconsistent flex/grid and legend layout quirks while guaranteeing every group has an explicit
+accessible name matching what screen-reader users hear. Tests first: verified red failure where the
+Static format group was absent, then green once implemented. All four types remain reachable and
+selectable (one assertion per type), preset modes (`mode: variation` for `short-video`, preset mode for
+static types) are asserted on resulting editor state, and `applyPreset` runs exactly once per selection.
+Mutation in `.agents/manifests/cc6.json` (moving `display-ad` into motion group) caught by the group
+membership assertion under `yarn mutate:verify`. `yarn typecheck`, `yarn lint`, and `yarn plan:verify` pass cleanly.
+Cite: CC6 in docs/planning/2026-09-16_creative-first-chrome.md.
