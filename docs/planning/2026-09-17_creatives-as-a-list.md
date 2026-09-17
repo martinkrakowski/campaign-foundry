@@ -1,7 +1,7 @@
 # Creatives as a list — from two volume mechanisms to one addressable one
 
 **Date:** 2026-09-17 · **Revised:** 2026-09-17 after an adversarial review that blocked the first draft.
-**Status:** **decision document. Not dispatchable. Eleven decisions open.** Nothing dispatched.
+**Status:** **decision document. Not dispatchable. Twelve decisions open (CL-D1…CL-D12).** Nothing dispatched.
 **Verified against:** `origin/main` at `78dc964a`.
 **Source:** the owner's flow of 2026-09-17 — *"if user elects to generate a campaign with 2 variations (i.e. creatives), then 2 items appear in the left sidebar … User should be able to add and delete the creatives."*
 
@@ -69,13 +69,15 @@ So *"click creative 2 and edit it"* has **no referent in either model.** That �
 
 ## 2. The marketing case, corrected
 
-The first draft argued one-creative motions are badly served. **They are not**: a classic brief with one product, one ratio and no treatments already yields exactly one creative. The honest case is different and narrower.
+The first draft argued one-creative motions are badly served. **They are not** — but not for the reason a previous revision of this section gave. The honest case is different and narrower.
 
 ### 2.1 Why one creative
 
 Organic social posts one thing; a brand or launch asset is singular and gets art direction and sign-off; `short-video` costs real compute per unit; client approval presents three routes, not forty draws.
 
-**The gap is addressability, not expression.** You can already *produce* one creative. You cannot *point at it*, name it, or hand-edit it without changing others — because the thing you edit is a treatment or an axis set.
+**The gap is addressability, not expression.** You can already produce a **small cartesian**; you cannot *point at a cell*, name it, or hand-edit it without changing others — because the thing you edit is a treatment or an axis set.
+
+*(Retracted from this section: the claim that a classic brief with "one product, one ratio and no treatments yields exactly one creative." **Classic never takes one ratio:** `GenerateCampaignUseCase.use-case.ts:284` walks `AspectRatio.all()`, and `derive.ts:75-78` states it outright — "Classic draws one set per canvas (W1: it never narrows to the selected platforms)." One product with no treatments yields **three** social-ratio cells plus any `output.sizes`. The addressability thesis never needed that sentence.)*
 
 ### 2.2 Why a hundred — and there are **two** engines, both of which must survive
 
@@ -145,7 +147,7 @@ The first draft said *"a function of the document alone."* **It is not.** Today 
 
 ---
 
-## 4. Decisions — eleven, none defaulted
+## 4. Decisions — twelve, none defaulted
 
 | ID | Question | Recommendation |
 |---|---|---|
@@ -187,9 +189,26 @@ The first draft said *"a function of the document alone."* **It is not.** Today 
 | Option | Shape | Trade |
 |---|---|---|
 | **(1) Schema-first** | Domain schema → run-from-list → editor selection → **fan + draw in the same wave** | What the first draft implied. **Not scoped**, and the largest thing on the table |
-| **(2) View-first** *(recommended)* | Sidebar lists the **current plan's** variants; select and preview; **persistence is a second PR** | Delivers the owner's screenshot without freezing a draw, and gives click-to-edit a place to write **before** changing the document. The document change then lands with real usage behind it |
+| **(2) View-first** *(recommended)* | Sidebar lists the cells; select drives the rail; **no add, no delete, no edit** | Delivers the owner's screenshot without freezing a draw. It gives click-to-edit **a place to look, not a place to write** — writing still needs the list, or an override map that *becomes* the list. Scoped as inspection only; otherwise a lane invents a write path in `editor-state` and ships a shadow document |
 
 **(2) is recommended and was not offered in the first draft.** It is also the only option that does not require CL-D7–D12 answered up front.
+
+### 6.1 What view-first may and may not do
+
+| Owner's sentence | View-first | Needs persistence |
+|---|---|---|
+| *"two variations → two sidebar rows"* | **Yes.** Variation rows from `/campaigns/plan` (`briefs-api.ts:362` already calls it). **Classic rows must be derived locally** — see §6.2 | — |
+| *"clicking the creative loads the creative"* | **Yes.** The selected index joins `previewLook` and `previewFetchKey` | — |
+| *"add and delete the creatives"* | **No.** A delete from a view returns on the next plan; an add is either `count++` (still a space) or a list write | **durable add/delete** |
+| *"hand-edit creative 2"* | **No.** Writing `layout` on a selection either changes the axis set (every creative) or needs an override map — **and an override map *is* the list** | **edit-one** |
+
+**Scope the slice as list + select + preview.** Nothing else. Without that boundary a lane will invent a write path in `editor-state` and ship a shadow document — a second place the truth lives, which is worse than no list at all.
+
+### 6.2 Classic must be in the first slice
+
+`/campaigns/plan` **400s on a classic brief** — `plan.post.ts:36`: `if (brief.mode !== "variation") { setResponseStatus(event, 400) }`. So a sidebar fed only by `plan.variants` is **blank for `social-post` and `display-ad`**, the two types that already use the cartesian and the two the owner is most likely to open.
+
+Derive those rows locally the way `classicAdCount` already does — `products × AspectRatio.all() × treatments`, plus `output.sizes` — and list those cells. **A sidebar that only understands variation would demo well on `short-video` and be invisible on a display campaign.**
 
 ---
 
@@ -200,6 +219,8 @@ The first draft said *"a function of the document alone."* **It is not.** Today 
 - **It does not decide per-creative templates** (CL-D5 defers, explicitly).
 - **It does not delete the planner.** Demoted, twice: as a draw *and* as a fan.
 - **It is not dispatchable.** It has decisions and no lanes. An implementation plan follows whichever of §6's options the owner picks.
+- **It does not sequence the view against the chrome.** View-first is a `BriefEditor.tsx` lane and is **not** independent of **#474** (CC3 — rail / `TemplateSection`, nine unresolved comments) or of SG3's column. **This document may merge as docs-only in parallel; the view may not start until #474's occupancy of `BriefEditor.tsx` is settled.**
+- **It does not require CL-D7–D12 before the view.** The fan (CL-D7) blocks **persistence**, not the screenshot. CL-D8/D9 are run-path decisions that come after a list exists. **CL-D5 and CL-D11 should be learned from building select+preview** — what actually changes when you click row 2 — rather than stamped in the abstract.
 
 ---
 
