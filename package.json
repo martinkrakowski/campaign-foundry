@@ -29,10 +29,11 @@
     "arch:inventory": "tsx tools/arch-inventory/cli.ts",
     "templates:add": "hexagen add",
     "templates:validate": "hexagen validate-templates",
-    "format": "prettier --write \"**/*.{ts,tsx,md}\"",
+    "format": "prettier --write \"**/*.{ts,tsx}\"",
     "plan:verify": "tsx tools/plan-verify/cli.ts",
     "mutate:verify": "tsx tools/mutate-manifest/cli.ts",
-    "handoff:check": "tsx tools/handoff-check/cli.ts"
+    "handoff:check": "tsx tools/handoff-check/cli.ts",
+    "format:check": "prettier --check \"**/*.{ts,tsx}\""
   },
   "devDependencies": {
     "@hexagen-monaco/arch-linter": "^0.12.1",

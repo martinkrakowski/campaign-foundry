@@ -115,9 +115,24 @@ still open**. `yarn plan:verify` runs them. This section exists because three la
 its siblings were dispatched — or nearly dispatched — against gaps that had already been closed.
 
 ```premise X1
-# Ask Prettier itself: an rc file, a prettier.config.*, or a package.json
-# "prettier" key all close the gap — three literal filenames do not.
-! npx --no-install prettier --find-config-path package.json
+# Ask Prettier itself whether the repository is formatted. This probes the GAP,
+# not a proxy for it.
+#
+# The first cut asked only whether a config existed
+# (`! npx --no-install prettier --find-config-path package.json`). That is half
+# of this section's own title — "Prettier has no configuration, AND the repo has
+# never been formatted" — and the half that closes first. It went STALE the
+# moment a config-only commit landed, while 400 files were still unformatted,
+# which would have forced the whole lane into one 400-file commit and made a
+# staged landing impossible. A premise that cannot survive its own lane being
+# split is describing the wrong thing.
+#
+# `--check` exits non-zero while any file is unformatted, so `!` holds the fence
+# open through the config commit and through each partial reformat, and flips
+# only when the last file is clean — which is exactly when X1 is done. It needs
+# the config to exist to know what "formatted" means; before then it fails for
+# the other reason, and the fence holds either way.
+! npx --no-install prettier --check "**/*.{ts,tsx}"
 ```
 
 **X2 — shipped in #370.** `alt` is in the props vocabulary for the `image` kind alone — the one kind
