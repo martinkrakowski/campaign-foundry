@@ -1,0 +1,91 @@
+{
+  "version": 1,
+  "lane": "SG1",
+  "mutations": [
+    {
+      "file": "apps/web/src/components/campaign/BriefEditor.tsx",
+      "before": "                <LayoutSection\n                  state={state}\n                  dispatch={dispatch}\n                  errors={sectionErrorsVisible(\"layout\")}\n                />",
+      "after": "                <LayoutSection\n                  state={state}\n                  dispatch={dispatch}\n                  errors={sectionErrorsVisible(\"layout\")}\n                  preview\n                />",
+      "because": "D43's one-composed-frame invariant, broken the way this lane makes it easy to break. The guard that used to hold it (`presentation !== \"guided\" || the step is not review/layout`) existed because two other surfaces carried a frame of their own -- Review's figure and the Layout STEP's `preview`. SG1 deletes Review and the steps, so the guard goes, and what keeps the count at one is now a single omitted prop on ONE line of the column. Adding it back is the most plausible thing a later lane does: `preview` is LayoutSection's own documented capability (T7/D63), it reads as restoring something the wizard had, and D141's comment used to say the exclusion survived \"in every presentation\". Nothing looks wrong: two real creatives, both correct, both fed the same projection, every `getByRole`/`getByText` in the suite satisfied -- a SECOND frame passes every query that looks for one. It is caught only by a count of MOUNTS (`data-testid=\"preview-frame\"`, CC1's marker, present in both branches PreviewFrame can render), because the rail's container query hides without unmounting and happy-dom applies no CSS at all, so a visible-node count would be the wrong question.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx",
+        "-t",
+        "exactly one composed frame is mounted"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/BriefEditor.tsx",
+      "before": "      revealSection(section);\n      if (focus) focusSection(section === MOTION_ERROR_KEY ? MOTION_HOST_SECTION : section);",
+      "after": "      const target = section === MOTION_ERROR_KEY ? MOTION_HOST_SECTION : section;\n      revealSection(target);\n      if (focus) focusSection(target);",
+      "because": "`reveal`'s two halves deliberately point at DIFFERENT things for motion, and this collapses them into one. Motion is a bucket with no section of its own: the scroll must reach `#motion` (the panel inside Output, where the field the user has to fix actually is), while focus goes to the HOST section, because a `<section>` is what the handoff can make focusable. Unifying them looks like removing a duplicated ternary -- the two lines even read as though one of them forgot to map -- and for every non-motion bucket the two are identical, so the whole suite stays green except the one test that drives a Motion chip. The cost is silent and specific: the operator presses \"Motion\" on a refusal and lands on the top of Output instead of on the motion controls, with nothing to say it moved at all.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx",
+        "-t",
+        "the Motion chip scrolls to the motion controls"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/BriefEditor.tsx",
+      "before": "      revealSection(section);\n      if (focus) focusSection(section === MOTION_ERROR_KEY ? MOTION_HOST_SECTION : section);",
+      "after": "      if (focus) focusSection(section === MOTION_ERROR_KEY ? MOTION_HOST_SECTION : section);",
+      "because": "SG1's whole reveal contract: with no steps left to change, `reveal` IS the scroll -- and this drops it, keeping only the focus handoff. It is the plausible simplification, not a random deletion: `focusSection` calls `focus({ preventScroll: true })` and its own comment says \"the scroll above already placed it\", so a reader who removes the scroll believes focus will do the placing. In a real browser a focus without `preventScroll` very nearly would, which is exactly why this survives a visual check. It leaves every reveal from a CHIP silently inert (chips are scroll-only, `focus` defaults false), so a refusal names a section the page never moves to. Caught by the chip test, which asserts the scroll ran ONCE and on the section element itself -- not merely that something scrolled.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx",
+        "-t",
+        "an ErrorStrip chip scrolls its section in the column"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/BriefEditor.tsx",
+      "before": "  const railSlot = (playhead: PlayheadState): ReactNode => (\n    <aside",
+      "after": "  const railSlot = (playhead: PlayheadState): ReactNode =>\n    !isRailWideEnough ? null : (\n    <aside",
+      "because": "The other half of D43's count, reintroduced as a plausible tidy-up. With the step gate gone the `<aside>` is unconditional, and `isRailWideEnough` sits right there looking like the condition that belongs on it -- the rail is CSS-hidden below the breakpoint anyway, so gating the mount too reads as saving a render. It is wrong for the reason CC2 wrote that flag: the rail must stay MOUNTED below the breakpoint so a resize back above it does not pay a fresh debounce, and `isRailWideEnough` gates only the `brief` prop (the FETCH). Every fetch-count proof stays green under this -- withholding the brief and unmounting the dock both produce zero calls -- and so does every test that looks at the rail at a normal width. Caught only by the test that narrows `window.innerWidth` and then requires the landmark to still be there.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx",
+        "-t",
+        "nothing fetches below the breakpoint, though the rail still mounts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/BriefEditor.tsx",
+      "before": "        {state.mode === \"variation\" ? (",
+      "after": "        {state.mode === \"variation\" || state.mode === \"brief\" ? (",
+      "because": "The gate SG1 narrowed, widened the other way. It used to read `mode === \"variation\" && presentation === \"everything\"`, and the `presentation` term was what kept the sidebar accordion from doubling the Guided policy STEP; this lane drops that term and leaves the mode alone. Making it unconditional is the tempting next step -- \"why hide a panel?\" -- and it is wrong because `sectionOrder(\"brief\")` has no `policy` at all: a Classic brief has no variation policy to set, so the panel would offer axis controls for a block `toBrief` never emits, and every press would edit state the projection drops. Nothing throws and nothing looks broken: the accordion renders, its controls work, and a `getByRole` for it succeeds in both modes. Caught by the half of the policy test that asserts an ABSENCE after a flip to Classic -- the presence half alone would pass.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx",
+        "-t",
+        "the policy sidebar renders for a variation brief"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

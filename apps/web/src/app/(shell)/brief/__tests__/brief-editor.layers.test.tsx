@@ -48,7 +48,17 @@ vi.mock("@/components/campaign/LayerStack", async (importOriginal) => {
   return { ...actual, LayerStack: Counting };
 });
 
-/** Renders of the editor's form sections, so "the form woke up" is a number too. */
+/**
+ * Commits of the editor's form, so "the form woke up" is a number too.
+ *
+ * SG1 — this counts ONE section (`IdentitySection`), deliberately. It used to
+ * count every section, which was the same thing while `guided` mounted exactly
+ * one of them at a time: one commit, one render. The column mounts all of them,
+ * so the aggregate would be "one commit" × "however many sections this mode
+ * renders" and the exact-count assertion below would read 6 or 7 and mean 1.
+ * Counting a single always-mounted section keeps the number a COMMIT count,
+ * which is what the cost contract is about.
+ */
 const formRenders = vi.hoisted(() => ({ count: 0 }));
 
 vi.mock("@/components/campaign/sections", async (importOriginal) => {
@@ -61,13 +71,6 @@ vi.mock("@/components/campaign/sections", async (importOriginal) => {
   return {
     ...actual,
     IdentitySection: counted(actual.IdentitySection),
-    CopySection: counted(actual.CopySection),
-    ProductsSection: counted(actual.ProductsSection),
-    TreatmentsSection: counted(actual.TreatmentsSection),
-    TemplateSection: counted(actual.TemplateSection),
-    LayoutSection: counted(actual.LayoutSection),
-    OutputSection: counted(actual.OutputSection),
-    PolicySection: counted(actual.PolicySection),
   };
 });
 
