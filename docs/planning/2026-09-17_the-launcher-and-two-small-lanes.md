@@ -22,7 +22,7 @@ it goes wrong. None of them is a feature; all three are the kind of thing that c
 | # | Severity | Finding |
 |---|---|---|
 | **L1** | **Critical** | **`.claude/skills/orchestrate-wave/scripts/dispatch-lane.sh` kills the lanes it launches, and it is still the only path that emits wave events.** The skill retires it in prose (`SKILL.md`, the Implement stage: *"never through `scripts/dispatch-lane.sh`, whose detached launch killed every lane it started on 2026-09-13"*) while the same file names it as the path that emits for you. On 2026-09-16 **both** lanes dispatched through it (ES1 on `opencode/big-pickle`, CC6 on `openrouter/qwen/qwen3.8-flash`) wrote **0 bytes with no process**, while **all eight** lanes launched directly or through the `Agent` tool delivered — gemini via `agy`, grok via `nohup`, six Sonnet lanes. A retired script that still owns a required side effect is a trap with a documented history and an active foothold. |
-| **L2** | High | **The API bundles for a target older than the syntax it contains.** `tsconfig.base.json:3` sets `"target": "ES2022"`, but Nitro's esbuild default is **es2019** and nothing overrides it — there is no `esbuild` block in `apps/api/nitro.config.ts`. `packages/CampaignOrchestration/src/application/use-cases/PlanCapacity.ts` uses BigInt **literals** (`0n`, `1n`), which are ES2020 syntax, so every `yarn dev` prints seven warnings ending *"may crash at run-time"*. It does not crash, because Node evaluates BigInt regardless of a declared target — the declaration is wrong, not the runtime. Seven warnings on every dev start is how a real warning gets missed. |
+| **L2** | High | **The API bundles for a target older than the syntax it contains.** `tsconfig.base.json:3` sets `"target": "ES2022"`, but Nitro's esbuild default is **es2019** and nothing overrides it — there is no `esbuild` block in `apps/api/nitro.config.ts`. `packages/CampaignOrchestration/src/application/use-cases/PlanCapacity.ts` uses BigInt **literals** (`0n`, `1n`), which are ES2020 syntax, so the API **build** prints seven warnings ending *"may crash at run-time"* (measured: `yarn workspace @campaignfoundry/api build` → 7). They appear on a `yarn dev` start too — that is where the owner first saw them — but the build is the reproduction this plan uses, because a lane may not start a dev server. It does not crash, because Node evaluates BigInt regardless of a declared target — the declaration is wrong, not the runtime. Seven warnings on every dev start is how a real warning gets missed. |
 | **L3** | ~~Medium~~ → **refuted** | **A `revision` type that makes "no guard" unrepresentable was proposed and is not needed.** The suspicion was `editor-state.ts:1944`, `revision: entry?.revision`, sixteen lines below a comment forbidding exactly that. Reading the branch refutes it: `:1924-1932` is the **already-saved** path, where the guard exists and is correctly protected by `if (entry.revision !== undefined)`; `:1936-1947` is the **first save**, creating `source` for a draft that has no prior revision to wipe. `undefined` there honestly means *"no revision known yet"*, and the comment's other half — *"a fabricated one would satisfy a write that should fail"* — forbids inventing one. The code is correct. A type change would be prophylactic, and this plan does not dispatch prophylaxis. |
 | **L4** | Medium | **Two hand-rolled copies of the staleness token, in two different shapes.** `BriefEditor.tsx:343-346` uses a closure variable (`let generation = 0`; `round !== generation`); `HeadlinePoolDrawer.tsx:133-175` uses a ref (`loadGeneration.current += 1`; `loadGeneration.current !== generation`) and returns a boolean from the guarded branch. Both are correct. There is no shared definition, so the invariant they encode — *the newest answer wins, a stale one is never admitted* — exists only as a pattern two authors happened to reproduce. |
 
@@ -43,8 +43,8 @@ it goes wrong. None of them is a feature; all three are the kind of thing that c
 
 | Lane | Task | Owns | Buys |
 |---|---|---|---|
-| **W1** | **Delete `.claude/skills/orchestrate-wave/scripts/dispatch-lane.sh`** and remove every reference that presents it as a live path. The skill's Implement stage keeps the *history* — a retired script's failure is worth remembering — but stops naming it as the emitting path. | `.claude/skills/orchestrate-wave/scripts/dispatch-lane.sh`, `SKILL.md`, `references/cast.md` | A trap with a documented history and an active foothold, removed |
-| **W2** | **Set the esbuild target** in `apps/api/nitro.config.ts` to match `tsconfig.base.json`'s ES2022, with a comment naming the BigInt literals that made the mismatch visible. | `apps/api/nitro.config.ts` | Seven warnings per dev start, gone; a bundle that declares what it contains |
+| **W1** | **Delete `.claude/skills/orchestrate-wave/scripts/dispatch-lane.sh`** and remove every reference that presents it as a live path. **A test suite depends on it** — `emit.test.ts:362` resolves and executes the script — so W1 must delete that suite too, or keep the script's event *format* under test without the script. The lane decides which and says why; deleting a suite is a claim about what stops being true. The skill's Implement stage keeps the *history* — a retired script's failure is worth remembering — but stops naming it as the emitting path. | `.claude/skills/orchestrate-wave/scripts/dispatch-lane.sh`, `SKILL.md`, `references/cast.md`, **`tools/wave-status/lib/__tests__/emit.test.ts`** (a whole `describe("scripts/dispatch-lane.sh emits its events")` at `:362`, resolving the script by path at `:14`), **`tools/wave-status/lib/collect.ts:57`** and **`tools/wave-status/__tests__/page.test.ts:4513`** (prose references) | A trap with a documented history and an active foothold, removed |
+| **W2** | **Set the esbuild target** in `apps/api/nitro.config.ts` to match `tsconfig.base.json`'s ES2022, with a comment naming the BigInt literals that made the mismatch visible. | `apps/api/nitro.config.ts` | Seven warnings per build, gone; a bundle that declares what it contains |
 | **W3** | **`useLatestOnly` (name to be chosen by the lane)** — one helper encoding the token, adopted by both existing sites, with its own tests. The two call shapes differ (closure vs ref, one returns a boolean); the helper must serve both without forcing either to contort, or the lane should report that they are genuinely different mechanisms and stop. | `apps/web/src/lib/`, `BriefEditor.tsx:343-346`, `HeadlinePoolDrawer.tsx:133-175` | One definition of the invariant the app is built on |
 
 **Order.** **W1 ‖ W2 ‖ W3** — disjoint files, no shared ownership. W1 touches orchestration only; W2 touches one config; W3 touches `apps/web`.
@@ -59,9 +59,11 @@ Shared gate: CI, which runs every step (`sync:check`, `lint:arch`, `plan:verify`
 mutation replay, `format:check`, build, typecheck, lint, `test:cov` at 100%). Per the repo's own rule, each
 lane names the fault that must turn it **red**:
 
-- **W1** — `grep -rn "dispatch-lane" .claude/` returns only the historical note in `SKILL.md`, and that
-  note no longer presents the script as a path to use. No test can prove a deleted file stays deleted; the
-  check is the grep, and the lane states it.
+- **W1** — `grep -rn "dispatch-lane" .claude/ tools/` returns only historical prose, no executable reference:
+  no test resolves the path, and `SKILL.md` no longer presents it as a path to use. **The grep must span
+  `tools/`, not just `.claude/`** — the first draft of this lane scoped it to `.claude/` and would have left a
+  green suite executing a deleted file. No test can prove a deleted file stays deleted; the check is the grep,
+  and the lane states that limit.
 - **W2** — **`yarn workspace @campaignfoundry/api build` prints zero** "Big integer literals are not
   available" warnings, where it prints them today; the lane quotes both counts. **Deliberately the build and
   not `yarn dev`** — the house rules forbid a lane starting a dev server, so a DoD that required one could
@@ -94,10 +96,12 @@ test -f .claude/skills/orchestrate-wave/scripts/dispatch-lane.sh
 ```
 
 ```premise W3
-# The staleness token has no shared definition: its two sites each declare their own.
-# Counting the declarations is the mechanism, so the fence flips however the helper is
-# named. Measured: ~7 ms.
-test "$(grep -rln 'generation' apps/web/src/components/campaign/BriefEditor.tsx apps/web/src/components/campaign/HeadlinePoolDrawer.tsx | wc -l | tr -d ' ')" -eq 2
+# The staleness token has no shared definition. The mechanism, not the identifier: both
+# sites compare a captured round against a live counter, so the probe counts SITES THAT
+# DECLARE THEIR OWN comparison. An earlier draft counted files containing the substring
+# `generation`, which a rename in one component would have flipped without the work being
+# done -- a fence satisfiable by renaming is not a fence. Measured: ~52 ms.
+test "$(grep -rlE '(let generation = 0|loadGeneration = useRef)' apps/web/src --include='*.tsx' | grep -vc __tests__)" -eq 2
 ```
 
 ---
