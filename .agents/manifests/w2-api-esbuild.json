@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "lane": "W2",
+  "mutations": [
+    {
+      "file": "apps/api/nitro.config.ts",
+      "before": "  esbuild: { options: { target: \"es2022\" } },",
+      "after": "  // esbuild target not set — Nitro's es2019 default applies",
+      "because": "This lane's whole deliverable is one declaration, so the mutation is its removal. Take the block out and Nitro falls back to es2019 against a tsconfig that says ES2022, and the seven \"Big integer literals are not available\" warnings from PlanCapacity.ts's `0n`/`1n` come straight back — which is the state this lane was opened to end. No unit test can hold this: the fact lives in the bundler's output, not in a module's return value, so the check is the build itself and the manifest is the only thing replaying it.",
+      "command": [
+        "sh",
+        "-c",
+        "# A build failure must NOT exit non-zero here. tools/mutate/lib/mutate.ts:237\n# reads ANY non-zero exit as \"caught\", so a distinct code like 2 is legible to a\n# human reading the log and invisible to the runner — a transient build failure\n# on the mutated run would certify this mutation without one BigInt warning ever\n# appearing. Exiting 0 reports \"survived\" against a declared \"caught\", which\n# replayManifest renders as a loud mismatch: an investigable failure rather than\n# a silent false pass. \"The build did not run\" and \"the mutation was caught\"\n# must not be the same signal.\nout=$(yarn workspace @campaignfoundry/api build 2>&1)\nstatus=$?\nif [ \"$status\" -ne 0 ]; then\n  printf '%s\\n' \"$out\"\n  echo \"build exited $status -- no verdict about warnings; reporting survived so this reads as a mismatch, never as a catch\"\n  exit 0\nfi\nn=$(printf '%s\\n' \"$out\" | grep -c 'Big integer literals are not available')\necho \"big-integer warnings: $n\"\n[ \"$n\" -eq 0 ]"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/nitro.config.ts",
+      "before": "target: \"es2022\"",
+      "after": "target: \"es2019\"",
+      "because": "The retired premise fence was `! grep -q \"esbuild\" apps/api/nitro.config.ts` — it flips on the word appearing in the file, so it would call this mutation done while the build printed all seven warnings again. That is precisely the gap this manifest exists to cover: what must hold is the target's VALUE agreeing with tsconfig.base.json, not the presence of an esbuild key. Pinning it means a future edit that lowers the target has to explain itself against a failing check rather than a passing grep.",
+      "command": [
+        "sh",
+        "-c",
+        "# A build failure must NOT exit non-zero here. tools/mutate/lib/mutate.ts:237\n# reads ANY non-zero exit as \"caught\", so a distinct code like 2 is legible to a\n# human reading the log and invisible to the runner — a transient build failure\n# on the mutated run would certify this mutation without one BigInt warning ever\n# appearing. Exiting 0 reports \"survived\" against a declared \"caught\", which\n# replayManifest renders as a loud mismatch: an investigable failure rather than\n# a silent false pass. \"The build did not run\" and \"the mutation was caught\"\n# must not be the same signal.\nout=$(yarn workspace @campaignfoundry/api build 2>&1)\nstatus=$?\nif [ \"$status\" -ne 0 ]; then\n  printf '%s\\n' \"$out\"\n  echo \"build exited $status -- no verdict about warnings; reporting survived so this reads as a mismatch, never as a catch\"\n  exit 0\nfi\nn=$(printf '%s\\n' \"$out\" | grep -c 'Big integer literals are not available')\necho \"big-integer warnings: $n\"\n[ \"$n\" -eq 0 ]"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
