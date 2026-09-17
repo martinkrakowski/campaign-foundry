@@ -1,42 +1,45 @@
-name: "PR-Agent React Effects Review"
+name: "PR-Agent State Freshness Review"
 
-# An LLM reviewer for React effect discipline in `apps/web` — the fourth PR-Agent reviewer.
-# It applies the "War on useEffect" position: `useEffect` is a primitive for synchronising
-# with systems OUTSIDE React, never a general-purpose reaction mechanism. Effects that mirror
-# state, fire business logic when a value changes, or chain into one another make data flow
-# untraceable for a human reviewer and for the next agent editing the file.
+# An LLM reviewer for STATE FRESHNESS in `apps/web` — the fourth PR-Agent reviewer.
 #
-# WHY IT EXISTS, AND WHAT WOULD MAKE IT WORTHLESS. Nothing in this repository checks this
-# today: `lint` has no rule against raw `useEffect`, the UI reviewer (pr-agent.yml) is pointed
-# at DESIGN.md contracts, and CodeRabbit is generic. The failure mode to guard against is the
-# one pr-agent-arch.yml names: a bot that reports what a deterministic tool already catches
-# trains people to skim it, and a bot people skim is how a real finding gets missed. So this
-# reviewer must earn every comment by naming a traceability or correctness consequence, not
-# by counting effects.
+# WHAT THIS REVIEWER IS FOR. This app has no state library. It shares a **monotonic token** and
+# enforces one invariant by hand at every site: the newest answer wins, and a stale one must never
+# be admitted. Two mechanisms carry it, and there is **no shared helper for either**:
 #
-# CALIBRATED TO THIS REPOSITORY, DELIBERATELY, AND THIS IS THE PART TO RE-READ BEFORE TUNING:
+#   * the in-memory stamp — `BriefEditor.tsx:312-315` (`let generation = 0`, each round returns
+#     early unless `round === generation`) and `HeadlinePoolDrawer.tsx:160`, which does the same
+#     thing with a ref (`loadGeneration.current !== generation`). Two sites, two shapes already.
+#   * the server token — `state.source.revision`, guarding conditional saves, with the rule stated
+#     at `editor-state.ts:2044-2049`: an absent revision downgrades the next save to
+#     last-write-wins; a fabricated one satisfies a write that should fail.
 #
-#   * `apps/web` carries ~83 `useEffect`/`useLayoutEffect` call sites today (measured
-#     2026-09-16). This reviewer sees ONLY the PR diff, and is instructed to judge what the
-#     diff adds or changes. A reviewer that opened by demanding 83 rewrites would be noise on
-#     its first run and ignored by its third.
-#   * NONE of TanStack Query, SWR, Zustand, Jotai, Redux Toolkit, React Hook Form or Zod is
-#     installed. The canonical "War on useEffect" answers name those libraries; here they are
-#     unactionable, and adding a dependency is the owner's decision, never a reviewer's. The
-#     instructions therefore require fixes expressible with what is already here — derive
-#     during render, `useMemo`, move the work into the event handler that caused it, lift
-#     state — and allow a library to be NAMED AT MOST ONCE, as an explicitly flagged
-#     suggestion, never as the fix.
-#   * This app is a client-heavy editor. Genuine external synchronisation exists and is
-#     CORRECT: `AbortController` fetches, a `ResizeObserver` width probe, `localStorage`
-#     reads, focus and scroll management. Flagging those is the quickest way to make this
-#     reviewer useless.
+# The reviewer's four classes are A (a stale answer is admitted), B (a write guard is silently
+# downgraded), C (a cache sits upstream of a guard), D (the per-keystroke commit budget). They are
+# in the instructions below, with the citations above.
 #
-# An ESLint `no-restricted-syntax` ban on raw `useEffect` is the deterministic version of
-# this check and would be strictly better. It is NOT proposed here because it would fail on
-# ~83 existing sites the moment it landed; it becomes possible after the effect count in
-# `apps/web` comes down, and that is its own lane, not a reviewer setting.
+# WHY IT REPLACED AN EFFECT-DISCIPLINE PROMPT, recorded so it is not re-litigated. The first
+# version of this file applied the "War on useEffect" position — useEffect as a primitive for
+# external synchronisation only. It was calibrated but aimed at the wrong invariant for this
+# codebase: `apps/web` has ~83 effect call sites and most are correct, so the bot's best case was
+# arguing about a style the repository has already chosen. The owner named the real architecture
+# (a shared monotonic token) and it reframed the whole reviewer. Effects remain in scope, but only
+# as the PLACE where a stale answer is admitted — class A — never as a count.
 #
+# THE EVIDENCE FOR CLASS C, which is why it is ranked highest. A cache keyed on content, sitting
+# upstream of a guard keyed on identity, makes the guard unreachable while every test still passes.
+# It shipped three times on 2026-09-16 alone: a draft re-slug blanking the preview every keystroke
+# (#448), then a rail memo omitting the brief id, then the same memo omitting the product id. No
+# existing bot rule names this class.
+#
+# WHAT WOULD MAKE THIS REVIEWER WORTHLESS is unchanged from `pr-agent-arch.yml`'s warning: a bot
+# that reports what a deterministic tool already catches trains people to skim it, and a bot people
+# skim is how a real finding gets missed. Every comment must name a failure scenario — an
+# interleaving, a lost write, a stale frame — not a smell.
+#
+# A named helper for the `generation` pattern, and a `revision` type where "no guard" cannot happen
+# by accident, would each remove a class from this reviewer's remit by construction. Both are lanes,
+# not reviewer settings, and neither is proposed here.
+
 # OPERATIONAL SCAFFOLDING IS IDENTICAL TO pr-agent.yml AND pr-agent-api.yml BY CONSTRUCTION —
 # the digest pin, the concurrency key, the did-it-actually-run guard. Every one of those
 # blocks records a failure that was actually hit; a change to one is a change to all four
@@ -81,7 +84,7 @@ permissions:
   issues: write
 
 # Prefixed `pr-agent-react-` so this reviewer has its OWN group. D1: a rate-limited or failing
-# React review must not cancel the UI, API or architecture one. The keying by what the run produces and by sender
+# freshness review must not cancel the UI, API or architecture one. The keying by what the run produces and by sender
 # type is carried from pr-agent.yml; with no issue_comment trigger only the 'improve' arm is
 # reachable here, and it is kept in full so the three files stay diffable against each other.
 concurrency:
@@ -99,7 +102,7 @@ concurrency:
 
 jobs:
   pr_agent_react:
-    name: "PR-Agent React discipline review"
+    name: "PR-Agent state freshness review"
     if: >-
       github.event.sender.type != 'Bot'
       && github.event.pull_request.draft == false
@@ -135,82 +138,89 @@ jobs:
           github_action_config.auto_improve: "true"
           github_action_config.pr_actions: '["opened", "reopened", "ready_for_review"]'
           pr_code_suggestions.extra_instructions: |
-            You are the React effect-discipline reviewer for campaign-foundry's `apps/web`.
-            Your subject is data flow: can a human, or the next agent to edit this file, trace
-            what causes what? Find defects; do not summarise the PR, and do not count effects.
+            You are the state-freshness reviewer for campaign-foundry's `apps/web`. This app does
+            not use a state library. It shares a **monotonic token** and enforces one invariant by
+            hand at every site: **the newest answer wins, and a stale one must never be admitted.**
+            Your subject is that invariant. Find defects; do not summarise the PR, and do not count
+            effects.
 
-            THE POSITION YOU ENFORCE. `useEffect` synchronises React with something OUTSIDE
-            React. It is not a reaction mechanism. An effect that exists to keep one piece of
-            React state agreeing with another piece of React state is a bug in the shape of a
-            feature: it adds a render, it can tear (the two disagree for one commit), and it
-            hides the cause of a change from anyone reading the handler that actually caused
-            it.
+            There is no shared helper for any of this. Each site is written out longhand, which is
+            why a reviewer earns its cost here: the fourth hand-rolled copy is where the mistake
+            goes in.
 
-            THE FOUR SMELLS, IN THE ORDER THEY MATTER HERE:
+            THE FOUR CLASSES, IN THE ORDER THEY MATTER HERE.
 
-            1. MIRROR STATE. An effect whose body is `setX(...)` in response to a prop or
-               another state value. The value is derived, so derive it during render, or with
-               `useMemo` when it is genuinely expensive. Failure scenario to state: name the
-               commit in which the mirror and its source disagree, and what the user sees in
-               that frame.
-            2. TRIGGER EFFECTS. An effect that runs business logic — a request, a save, a
-               navigation, analytics, a toast — because a value changed. The cause is the
-               event that set that value, so the work belongs in that handler. Failure
-               scenario to state: the path that sets the value WITHOUT the user action (a
-               load, a reset, a round-trip from the server) and therefore fires the logic
-               nobody asked for.
-            3. EFFECT CHAINS. Two or more effects where one's write is another's dependency.
-               State the ordering that breaks, or the extra render pass it costs.
-            4. LIFECYCLE GUESSWORK. `useEffect` with a dependency array shaped to approximate
-               "on mount", "when X becomes true", or "only the first time". Say what happens
-               on the second occurrence, or under StrictMode's double-invoke.
+            **A. A STALE ANSWER IS ADMITTED.** The in-memory stamp: `BriefEditor.tsx:312-315`
+            declares `let generation = 0` and each round returns early unless `round === generation`
+            — its own comment says why: "Mount and focus requests overlap, and responses can land
+            out of order. Stamp each round so a slow older answer cannot replace a newer verdict."
+            `HeadlinePoolDrawer.tsx:160` does the same thing with a **ref**
+            (`loadGeneration.current !== generation`), so the shape already varies between sites.
+            Look for: a round that captures the stamp and never compares it; a comparison after the
+            FIRST await but not after the last, when every await is a re-entry point; an entry path
+            that bumps the counter while another (a retry, a focus refetch, a remount) does not; a
+            `setTimeout` or retry that re-enters carrying a stale round; a cancel flag set in
+            cleanup while a timer still fires. **Failure scenario to state: which two rounds
+            overlap, which resolves second, and what wrong value lands on screen.**
 
-            WHAT IS NOT A FINDING, AND THIS LIST IS BINDING:
+            **B. A WRITE GUARD IS SILENTLY DOWNGRADED.** The server token: `state.source.revision`
+            guards conditional saves, and `editor-state.ts:2044-2049` states the rule exactly — "An
+            entry that carries no revision never wipes the guard the editor already holds — an
+            absent revision would downgrade the next save to last-write-wins, a fabricated one would
+            satisfy a write that should fail." Look for: a path that rebuilds `source` and drops
+            `revision`; `revision: entry?.revision` where the entry may not carry one; 409 handling
+            that retries without adopting the fresh token; a truthiness test where `undefined` means
+            "no guard" and `""` would mean something else. **Failure scenario to state: two editors,
+            which write lands, and whose work is overwritten with no error.**
 
-            * An effect that synchronises with a real external system: a fetch with
-              `AbortController`, a `ResizeObserver` or `IntersectionObserver`, an event
-              listener, `localStorage`, focus or scroll management, a timer. These are the
-              legitimate use, and this repository has several that are correct.
-            * An existing effect the diff merely moves, renames or reformats. Judge what the
-              diff ADDS or CHANGES in behaviour.
-            * The number of effects in a file.
-            * `useMemo`/`useCallback` that is not obviously wrong. Do not police memoisation
-              on taste; this repository has a measured per-keystroke commit budget (see the
-              X30/X32 lanes) and a suggestion that costs a commit is a regression, not a fix.
+            **C. A CACHE SITS UPSTREAM OF A GUARD.** The highest-yield class in this codebase: any
+            memo, cache or early-return keyed on **content** must include every **identity** term its
+            consumer keys on, or the consumer's guard can never fire — the cache hides the change
+            before it arrives. `usePreviewFrame` (`preview-frame.ts:83,140-146`) keys its
+            clear-on-switch guard on `identityKey ?? request.brief.id` plus the cell's own axes; a
+            memo feeding it that omits any of those makes the guard unreachable while every test
+            still passes. This shipped three times in one day: the draft re-slug (#448), then a rail
+            memo omitting the brief id, then the same memo omitting the product id. **Ask of every
+            new memo: what does its consumer compare, and is every one of those terms in this key?**
 
-            THE FIX MUST BE EXPRESSIBLE WITH WHAT IS ALREADY INSTALLED. There is no TanStack
-            Query, SWR, Zustand, Jotai, Redux Toolkit, React Hook Form or Zod in this
-            repository. Propose: compute during render; `useMemo`; move the call into the
-            event handler; lift the state to the one owner; or a named semantic wrapper hook
-            (`useMountEffect`, `useResizeObserver`) that declares its intent when external
-            sync is genuinely required. You MAY name a library at most once per review, marked
-            plainly as a dependency suggestion for a human to decide, and never as the fix
-            itself — adding a dependency is the owner's call.
+            **D. THE COMMIT BUDGET.** Per-keystroke render commits are a measured number here, with
+            two lanes behind it (X30, X32) and tests asserting `toBeLessThanOrEqual` on it. A change
+            or a suggestion that adds a commit per keystroke is a regression, not a fix. Do not
+            police memoisation on taste — flag only an added commit you can name.
 
-            HOUSE RULES THAT OUTRANK THE POSITION ABOVE.
+            WHAT IS NOT A FINDING, AND THIS LIST IS BINDING.
 
-            * Every finding carries a concrete failure scenario: specific state or interaction,
-              and the wrong render, extra request, stale value or lost edit that results. "This
-              could be simplified" is not a finding. "Loading a brief sets `draft`, whose effect
-              sets `dirty`, so a freshly loaded brief is dirty and the unsaved-changes prompt
-              fires on a page the user never edited" is a finding.
-            * State what your fix does to inputs the current code already handles, and whether
-              it turns a loud failure into a quiet one. A fix that trades a visible bug for a
-              silent wrong value is worse than the bug.
-            * This app is prerendered by Next at build time. A `"use client"` component still
-              runs its render and its `useState` initialiser ON THE SERVER, where there is no
-              `window`. A suggestion that moves work from an effect into render must say
-              whether it is safe under that render, because moving a `window` read into the
-              render phase breaks `yarn build` and not the test suite.
-            * User-facing strings live in `apps/web/src/components/campaign/messages.ts` (D2).
-              A suggestion that inlines copy is wrong even when its logic is right.
-            * Cite D-numbers from docs/planning/ where a rule has one; never paraphrase a rule
-              that already has a number.
+            * The number of `useEffect` calls in a file. `apps/web` has ~83 and most are correct.
+              Effects are in scope only as the PLACE where a stale answer is admitted (class A) —
+              never as a style matter.
+            * An effect that genuinely synchronises with an external system: an `AbortController`
+              fetch, a `ResizeObserver`, an event listener, `localStorage`, focus or scroll
+              management, a timer.
+            * A library recommendation. There is no TanStack Query, SWR, Zustand, Jotai, Redux
+              Toolkit, React Hook Form or Zod here, and adding a dependency is the owner's decision.
+              Propose fixes in terms of what exists: compare the stamp, carry the token, widen the
+              key, move the work into the handler.
+            * An existing pattern the diff merely moves or reformats. Judge what the diff CHANGES.
 
-            Do not re-raise what CodeRabbit, the UI reviewer or the architecture reviewer owns.
-            Do not comment to acknowledge, praise or summarise. Prefer silence to a speculative
-            finding: one real traceability defect is worth more than five style opinions, and a
-            wrong finding costs a human more time than it saves.
+            HOUSE RULES THAT OUTRANK EVERYTHING ABOVE.
+
+            * Every finding carries a concrete failure scenario — specific interleaving or state, and
+              the wrong value, lost edit or stale frame that results. "This could race" is not a
+              finding. "The focus refetch bumps `generation` but the retry timer captured the old
+              round, so a retry that resolves after a refocus overwrites the newer verdict" is.
+            * Say what your fix does to inputs the code already handles, and whether it turns a loud
+              failure into a quiet one. Trading a visible bug for a silent wrong value is worse.
+            * This app is prerendered by Next. A `"use client"` component still runs its render and
+              its `useState` initialiser ON THE SERVER, where there is no `window`. Any suggestion
+              moving work into render must say whether it survives that — it broke the build once.
+            * User-facing strings live in `messages.ts` (D2), and raw domain values go through
+              `display-names.ts` before a person sees them (D18). A suggestion that inlines copy or a
+              raw format value is wrong even when its logic is right.
+            * Cite D-numbers from docs/planning/ where a rule has one.
+
+            Do not re-raise what CodeRabbit, the UI reviewer or the architecture reviewer owns. Do
+            not comment to acknowledge, praise or summarise. Prefer silence to a speculative finding:
+            one real staleness defect is worth more than five style opinions.
           pr_code_suggestions.commitable_code_suggestions: "true"
           pr_code_suggestions.publish_output_no_suggestions: "false"
           pr_code_suggestions.focus_only_on_problems: "true"
