@@ -19,8 +19,8 @@
     },
     {
       "file": "apps/web/src/components/campaign/BriefEditor.tsx",
-      "before": "                <PreviewDock\n                  {...railProps}\n                  brief={isRailWideEnough ? previewBrief : undefined}\n                  playhead={playhead}\n                />",
-      "after": "                <PreviewDock {...railProps} brief={previewBrief} playhead={playhead} />",
+      "before": "                <PreviewDock\n                  {...railProps}\n                  brief={isRailWideEnough ? previewBrief : undefined}\n                  playhead={playhead}\n                  host=\"rail\"\n                />",
+      "after": "                <PreviewDock {...railProps} brief={previewBrief} playhead={playhead} host=\"rail\" />",
       "because": "isRailWideEnough is the JS-side mirror of the row's own CSS container query (CC2): below 56rem the rail is CSS-hidden but stays mounted, and withholding `brief` is the only thing that stops usePreviewFrame from building a request there. Feeding the dock `previewBrief` unconditionally lets a rail nobody can see keep fetching. Caught by a CALL COUNT (\"nothing fetches below the breakpoint\"), not a mount count — the rail's own mount is unaffected by this mutation.",
       "command": [
         "yarn",
