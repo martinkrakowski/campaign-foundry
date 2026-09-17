@@ -77,8 +77,7 @@ import { StepFooter } from "@/components/campaign/StepFooter";
 import { SECTION_TITLES, sectionOrder, LayoutSection, type SectionId } from "./sections";
 import { ReviewStep } from "./ReviewStep";
 import { PreviewDock, PreviewRailEmptyState } from "./PreviewDock";
-import { previewDockProps } from "./preview-props";
-import { previewFetchKey } from "@/lib/preview-frame";
+import { previewDockProps, previewRailKey } from "./preview-props";
 import { useMinInlineSize, PREVIEW_RAIL_MIN_INLINE_PX } from "@/lib/use-min-inline-size";
 import * as messages from "./messages";
 import type { CampaignMode } from "@/components/campaign/editor-state";
@@ -599,21 +598,16 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   // invented creative (D26/D142) — the house rule is `hasProduct`.
   const rawRailProps = previewDockProps(state, railCursorIndex, railCursorCount);
   // CC1/CC2 — value-keyed, not `[state]`: a keystroke that changes neither the
-  // look (`rawRailProps`) nor anything the frame's own fetch reads
-  // (`previewFetchKey`, e.g. `template`, `output.platforms`, `copy.timeline` —
-  // none of it carried by `rawRailProps`) returns the SAME cached object below,
-  // letting the `memo`-wrapped `PreviewDock` bail out of a re-render exactly as
-  // `usePreviewFrame`'s own key already bails out of a re-fetch. `toBrief(state)`
-  // above still runs every keystroke (for the YAML view, `draftDiffers`, Save,
-  // Review) — this key is a SECOND, narrower fingerprint over the same object,
-  // an accepted extra cost of the memo boundary, not a replacement for it.
-  const previewKey =
-    rawRailProps === null
-      ? null
-      : // `rawRailProps !== null` here means `previewLook` already found a
-        // product with a non-empty id (D142's own gate) — indexed directly,
-        // never `?.`, so this line has no branch a test could not reach.
-        `${JSON.stringify(rawRailProps)} ${previewFetchKey(draftBrief, state.products[0].id)}`;
+  // look, anything the frame's own fetch reads, nor the previewed creative's
+  // OWN identity (`previewRailKey`, `preview-props.ts` — that file's comment
+  // has the full reasoning, including the identity term Qodo's review added)
+  // returns the SAME cached object below, letting the `memo`-wrapped
+  // `PreviewDock` bail out of a re-render exactly as `usePreviewFrame`'s own
+  // key already bails out of a re-fetch. `toBrief(state)` above still runs
+  // every keystroke (for the YAML view, `draftDiffers`, Save, Review) — this
+  // key is a SECOND, narrower fingerprint over the same object, an accepted
+  // extra cost of the memo boundary, not a replacement for it.
+  const previewKey = previewRailKey(rawRailProps, draftBrief, state.products[0]?.id ?? "");
   const railProps = useMemo(() => rawRailProps, [previewKey]);
   // The rail's own `brief` prop, stabilised on the SAME key — a look-preserving
   // keystroke feeds `PreviewDock` (and the fetch inside it) the identical

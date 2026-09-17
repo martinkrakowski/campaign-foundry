@@ -1,12 +1,13 @@
 import { describe, test, expect, afterEach, vi } from "vitest";
+import { useMemo } from "react";
 import { render, act } from "@testing-library/react";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { DEFAULT_CAMPAIGN_TYPE } from "@campaignfoundry/CampaignOrchestration/campaign-types";
 import { templateFromCanonical } from "@campaignfoundry/CampaignOrchestration/brief-template";
 import { PreviewFrame } from "../PreviewFrame";
 import { PreviewDock } from "../PreviewDock";
-import { previewDockProps } from "../preview-props";
-import { editorReducer, initialEditorState, toBrief } from "../editor-state";
+import { previewDockProps, previewRailKey } from "../preview-props";
+import { editorReducer, initialEditorState, toBrief, type EditorState } from "../editor-state";
 import { PREVIEW_FRAME_DEBOUNCE_MS } from "@/lib/preview-frame";
 
 const brief = (over: Partial<CampaignBrief> = {}): CampaignBrief => ({
@@ -219,6 +220,74 @@ describe("renaming a fresh draft must not blank the preview frame", () => {
       expect(view.container.querySelector("svg")).toBeNull();
       expect(view.container.querySelector("img")!.getAttribute("src")).toBe(src);
     }
+  });
+});
+
+/**
+ * `BriefEditor`'s real memo boundary: `railProps`/`previewBrief` are each
+ * `useMemo(() => value, [previewKey])`, exactly this shape, so this wrapper
+ * is not a stand-in for the bug — it IS the bug's mechanism, feeding a real
+ * `PreviewDock` (hence a real `usePreviewFrame`).
+ */
+function MemoDock({
+  rawRailProps,
+  brief,
+  previewKey,
+}: {
+  rawRailProps: ReturnType<typeof previewDockProps>;
+  brief: CampaignBrief;
+  previewKey: string | null;
+}) {
+  const railProps = useMemo(() => rawRailProps, [previewKey]);
+  const previewBrief = useMemo(() => brief, [previewKey]);
+  if (railProps === null) return null;
+  return <PreviewDock {...railProps} brief={previewBrief} />;
+}
+
+describe("the rail's memo must not hide a switch of creative from usePreviewFrame (Qodo, caught in review)", () => {
+  /**
+   * Two SAVED briefs (`source.kind: "file"`, so `identityKey` is `undefined`
+   * for both) whose displayed name and every visual/fetch field are
+   * identical — built directly (not through `fromBrief`, which always
+   * derives `campaignName` from `id` and so could never produce this
+   * precondition) to isolate exactly what `previewRailKey`'s identity term
+   * exists for: `rawRailProps` carries the name, never the id, and
+   * `previewFetchKey` is a pure content fingerprint with no id in it either.
+   */
+  const twinState = (loadedId: string): EditorState => {
+    let state = initialEditorState("variation");
+    state = editorReducer(state, { type: "setProduct", key: 1, patch: { id: "p1", name: "A" } });
+    state.campaignName = "twin";
+    state.briefId = loadedId;
+    state.source = { kind: "file", file: `${loadedId}.yaml`, loadedId, savedSnapshot: null, revision: undefined };
+    return state;
+  };
+
+  const dock = (state: EditorState) => {
+    const rawRailProps = previewDockProps(state, 0, 6);
+    const brief = toBrief(state);
+    const previewKey = previewRailKey(rawRailProps, brief, state.products[0]?.id ?? "");
+    return <MemoDock rawRailProps={rawRailProps} brief={brief} previewKey={previewKey} />;
+  };
+
+  test("switching to a saved brief with identical content but a different id clears the stale frame", async () => {
+    vi.useFakeTimers();
+    vi.mocked(globalThis.fetch).mockResolvedValue(pngResponse());
+
+    const view = render(dock(twinState("twin-a")));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(PREVIEW_FRAME_DEBOUNCE_MS + 10);
+    });
+    expect(view.container.querySelector("img")).not.toBeNull();
+
+    // Same name, same product colour/logo, same everything previewFetchKey
+    // reads — only the id differs. usePreviewFrame's own identity guard
+    // promises an immediate, synchronous clear on exactly this switch; a
+    // memo upstream that never hands it the new brief defeats that promise
+    // without ever touching the guard itself.
+    view.rerender(dock(twinState("twin-b")));
+    expect(view.container.querySelector("img")).toBeNull();
+    expect(view.container.querySelector("svg")).not.toBeNull();
   });
 });
 

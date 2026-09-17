@@ -76,6 +76,22 @@
         "apps/web/src/lib/__tests__/use-min-inline-size.test.tsx"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/preview-props.ts",
+      "before": "  return `${JSON.stringify(rawRailProps)} ${previewFetchKey(brief, productId)} ${rawRailProps.identityKey ?? brief.id}`;",
+      "after": "  return `${JSON.stringify(rawRailProps)} ${previewFetchKey(brief, productId)}`;",
+      "because": "previewFetchKey is a pure CONTENT fingerprint (product colour/logo, message, style, template, platforms, sizes, timeline, background source, duration) and rawRailProps carries the campaign name, never the id -- neither term names WHICH creative is previewed. Without the identity axis, two saved briefs sharing every visual input but a different id produce the SAME key, so BriefEditor's memo keeps handing PreviewDock the OLD brief and usePreviewFrame's own identity guard (identityAxis = identityKey ?? brief.id) never sees the switch it exists to catch (FI1's defect, #448, reintroduced narrower). Caught by an ASSERTION that the stale frame clears when the previewed brief's id changes -- not a call count, not a mount count.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/preview-frame.test.tsx",
+        "apps/web/src/components/campaign/__tests__/preview-props.test.ts"
+      ],
+      "verdict": "caught"
     }
   ]
 }

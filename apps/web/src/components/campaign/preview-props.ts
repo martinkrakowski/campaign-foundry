@@ -1,7 +1,9 @@
+import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import type { MotionKind } from "@campaignfoundry/CampaignOrchestration/motion-kinds";
 import type { AnchorOption, CreativePreviewProps, LayoutOption, ToneOption } from "./CreativePreview";
 import type { PreviewShowcaseProps } from "./PreviewDock";
 import { anchorAxisActive, briefStyle, isDefaultOutput, type EditorState } from "./editor-state";
+import { previewFetchKey } from "@/lib/preview-frame";
 
 /** The first entry of an optional list — undefined with the list, never a crash. */
 function firstOf<T>(list: readonly T[] | undefined): T | undefined {
@@ -129,4 +131,32 @@ export function previewDockProps(
     // The wizard readout (M2): where the walk stands, not a position in the creative set.
     ...(stepIndex !== undefined && stepCount !== undefined ? { step: stepIndex + 1, stepCount } : {}),
   };
+}
+
+/**
+ * `BriefEditor`'s own rail memo key (CC1/CC2): stable across a keystroke
+ * that changes neither the look (`rawRailProps`) nor anything the frame's
+ * fetch reads (`previewFetchKey`), so a `useMemo(…, [previewRailKey(…)])`
+ * boundary can bail out on it — but it must ALWAYS move when the previewed
+ * creative's own identity changes, even when every hashed visual input
+ * happens to coincide (Qodo, caught in review). `rawRailProps` carries the
+ * campaign name, never the id, and `previewFetchKey` is a pure CONTENT
+ * fingerprint with no id in it either — so two SAVED briefs sharing every
+ * visual input but a different id would never move this key without the
+ * identity term below, and the memo would keep handing `PreviewDock` the
+ * OLD brief. `usePreviewFrame`'s own identity guard (`identityAxis =
+ * identityKey ?? brief.id`, `preview-frame.ts`) can only clear on a switch
+ * it actually SEES — a memo upstream that hides the switch defeats it
+ * (FI1's defect, #448, reintroduced narrower). `rawRailProps.identityKey ??
+ * brief.id` is exactly that same expression, over the same two values this
+ * function is handed, so the memo and the hook's guard can never disagree
+ * about when the creative has changed.
+ */
+export function previewRailKey(
+  rawRailProps: PreviewShowcaseProps | null,
+  brief: CampaignBrief,
+  productId: string,
+): string | null {
+  if (rawRailProps === null) return null;
+  return `${JSON.stringify(rawRailProps)} ${previewFetchKey(brief, productId)} ${rawRailProps.identityKey ?? brief.id}`;
 }

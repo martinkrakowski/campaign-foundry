@@ -1,5 +1,8 @@
 import { describe, test, expect } from "vitest";
-import { previewDockProps, previewIdentityKey } from "../preview-props";
+import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
+import { DEFAULT_CAMPAIGN_TYPE } from "@campaignfoundry/CampaignOrchestration/campaign-types";
+import { templateFromCanonical } from "@campaignfoundry/CampaignOrchestration/brief-template";
+import { previewDockProps, previewIdentityKey, previewRailKey } from "../preview-props";
 import { initialEditorState, emptyProduct, STATIC_PLATFORMS, toBrief } from "../editor-state";
 
 /** A product the preview can actually draw — emptyProduct's id is the blank draft's placeholder. */
@@ -178,5 +181,68 @@ describe("previewDockProps", () => {
     // flag is emitted here too.
     state.styleExplicit = false;
     expect(previewDockProps(state, 0, 6)!.style).toEqual({ fontFamily: "Lora", align: "left" });
+  });
+});
+
+describe("previewRailKey — the memo boundary's identity axis (Qodo, caught in review)", () => {
+  /** Two SAVED briefs (no `identityKey` involved) whose every visual/content
+   *  field previewFetchKey and rawRailProps can see is identical — the only
+   *  thing that differs is `id`. This is deliberately the worst case: the
+   *  bug is that the OLD key formula could not tell these apart at all. */
+  const twinBrief = (id: string): CampaignBrief => ({
+    schemaVersion: 1,
+    template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+    id,
+    targetRegion: "DE",
+    targetAudience: "a",
+    campaignMessage: "Hi",
+    products: [{ id: "p1", name: "A", primaryColor: "#1473E6", logoPath: "a.png" }],
+  });
+
+  const sharedRawRailProps = () => {
+    const state = initialEditorState("variation");
+    state.products = [namedProduct(1)];
+    state.products[0].id = "p1";
+    state.campaignName = "twin"; // the SAME displayed name for both briefs below
+    // A SAVED brief — `previewIdentityKey` must answer `undefined` here (as
+    // it does for any `source.kind === "file"`), or this fixture would test
+    // the identityKey branch instead of the brief.id fallback the bug is
+    // about. `initialEditorState` defaults to a fresh, unsaved draft
+    // (`source.kind === "new"`), which is the wrong shape for this fixture.
+    state.source = { kind: "file", file: "twin.yaml", loadedId: "twin", savedSnapshot: null, revision: undefined };
+    return previewDockProps(state, 0, 6)!;
+  };
+
+  test("moves when two saved briefs share every look/content field but differ by id", () => {
+    const rawRailProps = sharedRawRailProps();
+    const keyA = previewRailKey(rawRailProps, twinBrief("twin-a"), "p1");
+    const keyB = previewRailKey(rawRailProps, twinBrief("twin-b"), "p1");
+    // Both inputs to previewFetchKey and every field of rawRailProps are
+    // identical between A and B — the identity term is the ONLY thing that
+    // can distinguish them, and it must.
+    expect(keyA).not.toBe(keyB);
+  });
+
+  test("still stable across a look-preserving change with the SAME id (CC2 is not weakened)", () => {
+    const rawRailProps = sharedRawRailProps();
+    const brief = twinBrief("twin-a");
+    const keyBefore = previewRailKey(rawRailProps, brief, "p1");
+    // A brand-new brief object, `targetAudience` changed — never read by
+    // previewFetchKey or carried in rawRailProps.
+    const keyAfter = previewRailKey(rawRailProps, { ...brief, targetAudience: "different" }, "p1");
+    expect(keyAfter).toBe(keyBefore);
+  });
+
+  test("a not-yet-saved draft's identityKey (not brief.id) is the axis, matching usePreviewFrame", () => {
+    const rawRailProps = { ...sharedRawRailProps(), identityKey: "temp-1" };
+    const briefA = twinBrief(""); // a fresh draft's brief.id is the live, changing slug
+    const briefB = { ...briefA, id: "renamed-live-slug" };
+    // identityKey is present, so it — not the live slug — is the axis: a
+    // rename must not move this key (FI1's contract, preserved through CC1).
+    expect(previewRailKey(rawRailProps, briefA, "p1")).toBe(previewRailKey(rawRailProps, briefB, "p1"));
+  });
+
+  test("null rawRailProps (nothing to draw) never computes a key", () => {
+    expect(previewRailKey(null, twinBrief("x"), "p1")).toBeNull();
   });
 });
