@@ -165,6 +165,14 @@ jobs:
       - name: Typecheck
         run: "yarn typecheck"
 
+      # X1: the formatter is a gate, not a suggestion. It runs BEFORE lint so a
+      # formatting failure reads as "run yarn format", not as a lint error whose
+      # message points somewhere else. The glob matches `yarn format`'s exactly —
+      # the writer and the checker must not be able to disagree about scope, which
+      # is why `.md` was dropped from both together rather than from one.
+      - name: Format check (yarn format:check)
+        run: "yarn format:check"
+
       - name: Lint
         run: "yarn lint"
 

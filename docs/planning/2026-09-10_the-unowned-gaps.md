@@ -114,31 +114,22 @@ Each gap states the claim that makes its lane necessary, as a script that exits 
 still open**. `yarn plan:verify` runs them. This section exists because three lanes in this plan and
 its siblings were dispatched — or nearly dispatched — against gaps that had already been closed.
 
-```premise X1
-# X1 is done when the GATE enforces formatting. §1's definition of done is three
-# things — adopt a config, format the repo once, and add `format:check` to the
-# gate — and the gate wiring is necessarily LAST, because wired any earlier every
-# intermediate reformat PR fails its own gate. So the wiring is the completion
-# marker, and grepping for it is a millisecond probe that cannot time out.
-#
-# It cannot be gamed by wiring the gate without formatting: that PR's own CI would
-# fail on the unformatted files, so it cannot land. The gate enforces the other two
-# conditions; this fence only has to detect that the gate exists.
-#
-# TWO EARLIER PROBES FAILED, both recorded because each failure is a different
-# lesson:
-#
-#   1. `! npx --no-install prettier --find-config-path package.json` — asked only
-#      whether a config existed. That is half of this section's title and the half
-#      that closes first: it went STALE on the config-only commit while 400 files
-#      were still unformatted, which would have forced the lane into one 400-file
-#      change and made a staged landing impossible.
-#   2. `! npx --no-install prettier --check "**/*.{ts,tsx}"` — probed the real gap
-#      but scanned 679 files: 4.8s locally, TIMED-OUT against plan:verify's 10s
-#      budget on the CI runner. A premise with no verdict protects nothing, which
-#      is the same failure the SE2 fence hit on 2026-09-16.
-! grep -q "format:check" .github/workflows/ci.yml
-```
+**X1 — shipped.** Width 100 in `.prettierrc.json`; `yarn format` and `yarn format:check` share one
+glob (`**/*.{ts,tsx}`) so the writer and the checker cannot disagree about scope; `format:check` runs
+in CI before `lint`. **400 files** were reformatted, landed as three disjoint slices plus a straggler:
+`packages` (157), `apps/web` (134), `apps/api`+`tools` (108) and `scripts` (1). `.md` is deliberately
+out of scope — it was in `yarn format`'s original glob and would have rewrapped 97 hand-wrapped
+planning documents, making every future plan diff unreadable.
+
+The fence is retired. It took three attempts, and the failures are the lesson: asking only whether a
+config existed went **STALE on the config-only commit** while 400 files were still unformatted;
+`prettier --check` over 679 files probed the right thing but **timed out on the runner** (4.8s
+locally, past plan:verify's 10s budget); the version that worked grepped `ci.yml` for the gate step,
+because a PR that wires a gate cannot land without satisfying it, so the marker cannot be forged.
+
+**The rule §1 promised is now live: the "do not run Prettier" line comes out of every future brief.**
+It existed as a workaround for a missing config, and the config exists.
+
 
 **X2 — shipped in #370.** `alt` is in the props vocabulary for the `image` kind alone — the one kind
 whose whole content is a picture a reader may not see, and therefore the only kind that can *mean* a
