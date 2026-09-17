@@ -1,7 +1,7 @@
 # The wireframe gap — what the owner drew, and what the editor actually is
 
 **Date:** 2026-09-17 · **Revised:** 2026-09-17 (owner stamped SG-D1, SG-D2, SG-D4, SG-D5; SG-D6 dissolved; SG-D8 raised)
-**Status:** **one decision open — SG-D7.** SG-D8 stamped; SG-D9 raised and answered. CC3 dispatched; TS1 merged as `#469`.
+**Status:** **two open — SG-D7, and the staleness question in §8.4.** SG-D8 stamped; SG-D9 answered then partly superseded; SG-D10–SG-D14 recorded from the owner's run-gate correction (§8). CC3 dispatched; TS1 merged as `#469`.
 **Verified against:** `origin/main` at `4876aa31`.
 **Source:** the owner's annotated wireframe of the campaign editor (two images, 2026-09-17), read against the shipped DOM of `/brief/new` captured from the owner's own browser the same day.
 **Related:** `2026-09-16_studio-editor.md` (D137–D140, SE0–SE5, TL1–TL7 — **drafted, never dispatched**), `2026-09-16_creative-first-chrome.md` (D141–D145, CC1 shipped), `2026-09-16_rail-timeline-surface.md` (TS1, in PR #469, **unmerged**), `DESIGN.md` §3 shell anatomy.
@@ -152,3 +152,71 @@ Shared gate: CI, which runs every step. Per the repo's rule, each lane names the
 # fence permanently red for a reason unrelated to the lane. Measured: ~30 ms.
 test "$(grep -rl 'aria-label="Seed"' apps/web/src --include='*.tsx' | grep -vc __tests__)" -eq 1
 ```
+
+---
+
+## 8. The run gate (owner's correction, 2026-09-17)
+
+**The owner records that putting Generate in the top header was a decision made in error.** This section supersedes parts of SG-D4, SG-D8 and SG-D9.
+
+### 8.1 What is decided
+
+| ID | Decision |
+|---|---|
+| **SG-D10** | **Generate leaves the top header.** It moves into the editor's own toolbar, following the **grid toolbar pattern** (`CommandBar`). |
+| **SG-D11** | **The verb is `Validate` until the brief has been validated, then `Generate`.** One slot, two verbs — never a disabled Generate. |
+| **SG-D12** | **`Validate` runs the validation and reveals the validation view.** |
+| **SG-D13** | **The segmented control grows to three: `editor │ yaml │ validate`.** This **revises SG-D4**, which had two positions. |
+| **SG-D14** | **The validation view carries a refresh icon** to re-run the validation. |
+
+### 8.2 Why this fits the existing principle rather than breaking it
+
+Both surfaces already refuse to disable their verb, and say so:
+
+- `Header.tsx:197` — *"D3 / DESIGN.md §5: Generate is never disabled, so with nothing committed it answers out loud instead of sitting dead."*
+- `CommandBar.tsx:136` — *"The verb is never disabled for being invalid (GB-D3) — the press is how a user asks what is wrong, so every state answers."*
+
+**Swapping `Generate` for `Validate` is not disabling the verb — it is always offering a meaningful one.** The owner's design is the same principle carried one step further: instead of pressing a verb to be told what is wrong, you press the verb *whose job is to tell you*.
+
+### 8.3 What moving Generate costs, and what it simplifies
+
+`handleGenerate` (`Header.tsx:235`) carries three behaviours that must move rather than vanish:
+
+| Behaviour | Fate in the editor's toolbar |
+|---|---|
+| **D35 three-way** — editor mounted and its draft differs from the shell brief ⇒ *"which brief do you want to run?"* | **Collapses.** In the editor's own toolbar there is no ambiguity: the brief on screen is the brief. One question disappears. |
+| **D3 fallback** — nothing committed ⇒ say what is missing and route to `/brief` | **Simplifies.** The header could not scroll a section it does not render, so it routed. The editor's toolbar *can* scroll it — `refuseInvalid`'s third act (attempted → reveal → scroll) becomes reachable without a route change. |
+| **`guardedAction` over the whole gesture** — *"Leave is consent to Generate; Stay cancels both"* | **Must be preserved.** This exists so a user answering *Leave* does not land on the grid with nothing running. It is the subtlest of the three and the easiest to drop by accident. |
+
+So two of the three get simpler by moving. **The third is a regression risk and the lane must pin it with a test.**
+
+### 8.4 The one thing this introduces: validation becomes stateful
+
+Today validation is **derived** — `validate.ts` recomputes from `state` on every render, so it is never stale by construction. *"Has not been validated"* and a **refresh** button both imply the opposite: a result that exists, can be re-run, and **can therefore go out of date**.
+
+**The question that must be answered before SG9 is dispatched: after validating, then editing the brief, does the verb revert to `Validate`?** It must — otherwise `Generate` runs against a validation that no longer describes the document, which is precisely the class of defect Review existed to catch.
+
+**Recommended mechanism, because the codebase already has it.** `BriefEditor.tsx:772` computes `previewKey = previewRailKey(...)` — a **content fingerprint** the rail already uses to decide whether anything it draws has changed. A validation result that stores the fingerprint it was computed against makes staleness **derived, not tracked**:
+
+```
+current fingerprint === stored fingerprint  →  validated   →  show Generate
+current fingerprint !== stored fingerprint  →  stale       →  show Validate
+no stored result                            →  unvalidated →  show Validate
+```
+
+No invalidation bookkeeping, no state machine to get wrong, and it is the same monotonic-token discipline used for the scrub position and the headline pool. **Do not add a boolean `isValidated`** — a flag has to be cleared by every writer that can invalidate it, and the writer that forgets is the bug.
+
+### 8.5 Consequences for lanes already recorded
+
+- **SG7 is retired.** The validation view is a middle-column view reached by the segmented control, so the `Problems` tab in the telemetry drawer is redundant. **SG-D9's analysis still stands and is worth keeping**: the drawer's log is `LogEntry[]` of the last run's events and was never the right data model for validation — that reasoning is why validation gets its own view rather than borrowing one. The drawer stays telemetry-only.
+- **SG4 is revised** — the segmented control it builds has three positions, not two (SG-D13).
+- **SG8 is revised** — the Generate pre-flight now lives behind the toolbar's `Generate`, not the header's.
+
+### 8.6 New lanes
+
+| Lane | Owns | Depends on | Ships |
+|---|---|---|---|
+| **SG9** | `Header.tsx`, the editor toolbar | SG-D10–SG-D12, **§8.4 answered** | **Generate leaves the header; the toolbar gains the `Validate` → `Generate` slot.** Must preserve `guardedAction`'s whole-gesture contract and pin it with a test. |
+| **SG10** | the validation view | SG-D12–SG-D14, SG5 | **The validation view** — every error including the ones shown inline, each row a control that reveals its field, plus the refresh. Reached by `validate` on the segmented control **and** by pressing `Validate`. |
+
+**Order.** §8.4 answered → **SG9 ‖ SG10** (disjoint: one is the toolbar, one is a new view), both after **SG1** retires `guided`.
