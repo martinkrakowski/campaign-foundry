@@ -215,23 +215,66 @@ output for a cell, the cell is *unknown* — a valid answer. A confident wrong o
    prompt must carry the **absolute worktree path**, the branch, whether a PR already exists, and
    the house rules below. A brief that assumes context the agent does not have is the
    equivalent of an unfunded seat: a whole cycle, nothing to show.
-3. **Confirm the cast, the lanes and their file ownership** with the owner, and wait for the
+3. **Prove each seat with a trivial DISPATCH, not a chat probe — and give a failing seat one
+   attempt per wave.** A one-word probe measures the wrong thing. On 2026-09-16 `opencode`'s
+   `big-pickle` and `qwen3.8-flash` both answered `ready` and then wrote **0 bytes with no process**
+   on a real lane; `qwen3-coder` errored outright. Three failures, three model ids, one broken run
+   path — while `agy` (a different binary) ran first time, which is what located the fault. A probe
+   that passes and a dispatch that dies look identical until you spend a cycle.
+
+   So: prove a seat by asking it to edit a scratch file in the lane worktree and exit, then check
+   the file changed. And when a seat fails a real dispatch, **switch rather than debug** — one
+   attempt per wave. Two extra cycles were spent on 2026-09-16 rediscovering a rule written after
+   the first failure.
+
+4. **Confirm the cast, the lanes and their file ownership** with the owner, and wait for the
    go-ahead. If the plan does not assign file ownership per lane, say so — that is a plan defect
    and the lanes will collide.
-4. **Red-team each lane brief against the code before dispatching it.** Every path, symbol and line
+5. **Red-team each lane brief against the code before dispatching it.** Every path, symbol and line
    number a brief cites must exist; every acceptance criterion must be able to fail. This step has
    caught false premises that would have stalled a lane at its mandatory mutation check.
-5. **Check each lane id against every plan, not just this one.** `grep -rn '\*\*<ID>\*\*'
+6. **Red-team each brief against ITSELF for completeness.** Step 4 checks that what a brief cites
+   exists. This step checks that what it *omits* was a decision. **A lane implements the brief's
+   enumeration, not its adjective** — "in full", "the whole surface", "all the relevant fields"
+   carry no information the implementer can act on, and they actively suppress the question,
+   because a lane that sees a list assumes the list was checked.
+
+   Before dispatch, for every brief:
+   - **If it names a type or a document surface, open that type and paste its fields in.** A brief
+     covering `CopyTimeline` names five things, because `CopyBeat` is `{text, weight, background?}`
+     and `CopyTimeline` is `{beats, transition, keyBeat}`.
+   - **Write one test requirement per field**, so a missed field fails a test instead of shipping.
+   - **If a value is parsed from a string, name the hazards**: leading zeros, values past
+     `Number.MAX_SAFE_INTEGER`, delimiters that can appear in the data.
+   - **If the lane compares or gates on state, list the inputs and their refresh cadence.** Two
+     sides collected at different times need a carve-out, not a threshold.
+
+   Four defects on 2026-09-16 came from briefs that failed exactly this, and in every case the lane
+   implemented what was written:
+   - X33's copy hash was told to cover "`copy.timeline` **in full**" against a list naming two of
+     its five fields — `beat.weight`, `transition` and `keyBeat` were omitted, each of which
+     changes what renders. Found by a bot as a High.
+   - X33's test list omitted `localizedMessage`, so the 100%-branch gate failed on the untaken arm
+     of a conditional spread — a field the hash *did* cover but nothing proved reached it.
+   - The template-routes brief named no precision hazard, so a version past the safe-integer range
+     could resolve to a **different stored version than the caller pinned**.
+   - X38 was briefed as "a past-wave lane is not counted as needing a human" — true as a sentence,
+     wrong as a rule, because age came only from log and event timestamps while liveness and PR
+     checks were live-probed. Two fact sets, different ages, no carve-out.
+
+   The tell is an adjective standing where a list belongs. When you write one, stop and enumerate.
+
+7. **Check each lane id against every plan, not just this one.** `grep -rn '\*\*<ID>\*\*'
    docs/planning/` — one command. Ids are the join key for the session-log citation, the plan's
    shipped note, `.agents/manifests/<lane>.json`, the status-page row and the premise fence's own
    name, so a collision silently merges two lanes' histories. It has happened twice: `L10`/`L11`
    between two plans (studio plan's C2) and `TL1` for both the template routes and the timeline
    playhead (gap ledger §42). Arc-prefixed ids (`L7a2`, `CC5`, `SE3`) have never collided; bare
    sequential ones have.
-6. **Check the plan's premises first.** `yarn plan:verify` fails when a lane's stated gap has already
+8. **Check the plan's premises first.** `yarn plan:verify` fails when a lane's stated gap has already
    been closed. Four lanes in one week were dispatched, or nearly dispatched, to re-implement shipped
    behaviour. A lane whose premise no longer holds is not a lane.
-7. **Every fence you write must be TIMED and shown to decide, before it lands.** `plan:verify`
+9. **Every fence you write must be TIMED and shown to decide, before it lands.** `plan:verify`
    kills a premise at **10 seconds** and reports `TIMED-OUT — not stale, make the premise decide
    quickly`. A premise with no verdict protects nothing: it neither holds nor flips, it just turns
    the gate red for a reason unrelated to the lane. So for each fence, run it, record the wall time
@@ -255,7 +298,7 @@ output for a cell, the cell is *unknown* — a valid answer. A confident wrong o
    the workflow for it — a lane that wires a gate cannot land without satisfying that gate, so the
    marker cannot be forged.
 
-8. **Send the plan to the plan reviewer** (`Agent` · `subagent_type: "Plan"` · `model: "fable"`)
+10. **Send the plan to the plan reviewer** (`Agent` · `subagent_type: "Plan"` · `model: "fable"`)
    **before dispatching any lane from it**, whenever the plan *introduces or rewrites lanes* or
    *changes a premise*. It is read-only by construction, so it returns a review and cannot patch
    around what it finds. On its first use it caught a rule in an **already-dispatched** brief that
@@ -274,6 +317,21 @@ that did not happen.
    yourself. Write each brief from Template A, then dispatch it as an `Agent`. **Record the
    worktree tip first** — an agent that reports success having committed nothing looks identical to
    one that did the work. Never let two lanes own the same file at the same time.
+
+   **A lane is not done until the PR exists, and lanes routinely stop one step short.** On
+   2026-09-16, CC1 and CC6 each committed clean, verified work and never pushed or opened a PR, and
+   CC1 paused four separate times mid-`mutate:verify` waiting on its own background job. Write
+   "commit, push, and open the PR with `gh pr create`" as the explicit final instruction in every
+   brief — and when a lane stops anyway, **finish it mechanically yourself** after verifying the
+   diff. That is a legitimate orchestrator action, not a fix the lane owes you; what is not
+   legitimate is reporting the lane done because it said so.
+   Emit the event **in the same tool call that launches the lane**, not afterwards — "as you go"
+   is what an orchestrator reads and skips. On 2026-09-16 four of five lanes ran through the `Agent`
+   tool or a direct CLI rather than `dispatch-lane.sh`, which is the only path that emits for you,
+   so the wave-status page showed **one event for the whole wave** and 30+ events had to be
+   backfilled afterwards with a note that their timestamps were recording times, not event times.
+   A stage with no event did not happen, and a backfilled one cannot be trusted for timing.
+
    Emit as you go (`scripts/wave-event.sh`): `dispatch started` per lane just before its launch,
    carrying the seat that runs it in `--detail` — `--detail '{"seat":"<implementer model>"}'` — because
    the status page names the seat that ran each lane, and a lane whose record never names one reads
@@ -310,7 +368,14 @@ that did not happen.
    When the review of a PR is dispositioned, emit `review settled` (`scripts/wave-event.sh`)
    with the counts of BUG / SUGGESTION / NIT findings in `--detail`.
 3. **Remediate.** Merge verified findings into a fix brief (Template C), listing refuted items with
-   reasons. Run the remediator in that worktree, then **verify it yourself**: full gate, re-read the
+   reasons. **After any interrupted or killed `mutate:verify`, scan for a stranded mutation before
+   anything commits**: a mutation applies a change to the source and restores it at the end, so a
+   run that dies in the middle leaves the source mutated and the next commit ships it. The check is
+   five lines — for each manifest entry, assert its `before` text is present and its `after` text is
+   not. It ran four times on 2026-09-16 (0 stranded each time) and is cheap enough to be
+   unconditional; a killed verification is the one moment the working tree can be silently wrong.
+
+   Run the remediator in that worktree, then **verify it yourself**: full gate, re-read the
    diff. Never merge on a remediator's self-report.
    After each round you verify, emit `remediate settled` per round (`scripts/wave-event.sh`)
    with the fixed/refuted counts in `--detail`.
