@@ -84,7 +84,10 @@ function corpusTokensFor(state: EditorState): Set<string> {
     props.campaignName,
     props.headline,
     messages.previewLegend,
-    messages.previewStep(props.step, props.stepCount),
+    // The cursor is always passed above (`previewDockProps(state, 0, 6)`), so
+    // it is always defined here — D141 only makes it optional for a caller
+    // (Everything) that omits it, which this fixture never does.
+    messages.previewStep(props.step!, props.stepCount!),
     caption,
     fallbackCaption,
   ].join(" ");

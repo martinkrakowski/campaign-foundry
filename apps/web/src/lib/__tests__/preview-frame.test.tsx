@@ -3,7 +3,7 @@ import { renderHook, act } from "@testing-library/react";
 import type { CampaignBrief, PreviewCellSelection } from "@campaignfoundry/CampaignOrchestration";
 import { DEFAULT_CAMPAIGN_TYPE } from "@campaignfoundry/CampaignOrchestration/campaign-types";
 import { templateFromCanonical } from "@campaignfoundry/CampaignOrchestration/brief-template";
-import { PREVIEW_FRAME_DEBOUNCE_MS, usePreviewFrame, briefBackgroundIsStandIn } from "../preview-frame";
+import { PREVIEW_FRAME_DEBOUNCE_MS, usePreviewFrame, briefBackgroundIsStandIn, previewFetchKey } from "../preview-frame";
 
 const brief = (over: Partial<CampaignBrief> = {}): CampaignBrief => ({
   schemaVersion: 1,
@@ -296,6 +296,154 @@ describe("identity-scoped frame retention (the stale-frame finding on PR #177)",
     // Same brief, same cell — a plain rerender (a keystroke elsewhere) keeps the frame.
     rerender({ id: "camp" });
     expect(result.current.frame).toBe(first);
+  });
+});
+
+describe("previewFetchKey (CC2)", () => {
+  test("is stable across two equal-content briefs that are different object references", () => {
+    expect(previewFetchKey(brief(), "alpha")).toBe(previewFetchKey(brief(), "alpha"));
+  });
+
+  test("ignores fields the compositor never reads", () => {
+    const a = previewFetchKey(brief(), "alpha");
+    const b = previewFetchKey(brief({ targetAudience: "different", targetRegion: "FR", id: "other" }), "alpha");
+    expect(a).toBe(b);
+  });
+
+  test("changes when the previewed product's colour or logo changes", () => {
+    const base = previewFetchKey(brief(), "alpha");
+    const recoloured = previewFetchKey(
+      { ...brief(), products: [{ ...brief().products[0], primaryColor: "#000000" }] },
+      "alpha",
+    );
+    expect(recoloured).not.toBe(base);
+  });
+
+  test("an unmatched product id (not yet the previewed one, or removed) carries no product fields", () => {
+    expect(previewFetchKey(brief(), "not-a-product")).toBe(previewFetchKey(brief(), undefined));
+  });
+
+  test("prefers localizedMessage over campaignMessage — the same fallback the compositor applies", () => {
+    const withoutLocalized = previewFetchKey(brief({ campaignMessage: "Hello" }), "alpha");
+    const withLocalized = previewFetchKey(brief({ campaignMessage: "Hello", localizedMessage: "Bonjour" }), "alpha");
+    expect(withLocalized).not.toBe(withoutLocalized);
+    // Two briefs agreeing only on the localized copy must agree on the key,
+    // whatever their (unread) campaignMessage says.
+    expect(previewFetchKey(brief({ campaignMessage: "Hello", localizedMessage: "Bonjour" }), "alpha")).toBe(
+      previewFetchKey(brief({ campaignMessage: "Different", localizedMessage: "Bonjour" }), "alpha"),
+    );
+  });
+
+  test("changes when message, style, template, output.platforms/sizes, copy.timeline or the background/duration axes change", () => {
+    const base = previewFetchKey(brief(), "alpha");
+    expect(previewFetchKey(brief({ campaignMessage: "New" }), "alpha")).not.toBe(base);
+    expect(previewFetchKey(brief({ style: { fontFamily: "Lora" } }), "alpha")).not.toBe(base);
+    expect(
+      previewFetchKey({ ...brief(), template: { ...brief().template, layers: [] } }, "alpha"),
+    ).not.toBe(base);
+    expect(previewFetchKey({ ...brief(), output: { formats: ["static"], platforms: ["linkedin"] } }, "alpha")).not.toBe(base);
+    expect(previewFetchKey({ ...brief(), output: { formats: ["static"], platforms: [], sizes: ["728x90"] } }, "alpha")).not.toBe(base);
+    expect(
+      previewFetchKey(
+        {
+          ...brief(),
+          copy: { timeline: { beats: [{ text: "hi", weight: 1 }], transition: "cut", keyBeat: 1 } },
+        } as CampaignBrief,
+        "alpha",
+      ),
+    ).not.toBe(base);
+    expect(
+      previewFetchKey(
+        { ...brief(), variation: { count: 2, axes: { background: { source: ["genai"] } } } as CampaignBrief["variation"] },
+        "alpha",
+      ),
+    ).not.toBe(base);
+    expect(
+      previewFetchKey({ ...brief(), variation: { count: 2, axes: { duration: [6] } } as CampaignBrief["variation"] }, "alpha"),
+    ).not.toBe(base);
+  });
+});
+
+describe("usePreviewFrame — the fetch keys on what the frame depends on, not brief identity (CC2)", () => {
+  /**
+   * The defect CC2 closes: `request` used to depend on `brief` by object
+   * IDENTITY (`preview-frame.ts:83`, verified at `origin/main` `64d715b8`).
+   * `toBrief(state)` builds a brand-new brief object on every keystroke
+   * (`BriefEditor.tsx:589`), so a field the compositor never reads —
+   * `targetAudience`/`targetRegion` ride the brief only as
+   * `BackgroundContext` metadata the wired `ProceduralBackgroundGenerator`
+   * ignores entirely (`ProceduralBackgroundGenerator.ts:22-26`: only
+   * `product.primaryColor`, the ratio and a `paletteShift` this route never
+   * sets) — still fired a fresh fetch. A brief that is a NEW OBJECT but
+   * unchanged in every field the frame actually reads must not refetch.
+   */
+  test("a new brief reference with only targetAudience/targetRegion changed does not refetch", async () => {
+    vi.useFakeTimers();
+    vi.mocked(globalThis.fetch).mockResolvedValue(pngResponse());
+    const { rerender } = renderHook(({ b }) => usePreviewFrame(b, cell()), {
+      initialProps: { b: brief() },
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(PREVIEW_FRAME_DEBOUNCE_MS);
+    });
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+
+    // A brand-new object (never `===` the first) with only metadata fields touched.
+    rerender({ b: brief({ targetAudience: "a whole new paragraph", targetRegion: "FR" }) });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(PREVIEW_FRAME_DEBOUNCE_MS * 2);
+    });
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1); // still one — no wasted request
+  });
+
+  test.each([
+    ["the previewed product's colour", (b: CampaignBrief) => ({ ...b, products: [{ ...b.products[0], primaryColor: "#000000" }] })],
+    ["the previewed product's logo", (b: CampaignBrief) => ({ ...b, products: [{ ...b.products[0], logoPath: "new.png" }] })],
+    ["the campaign message (the compositor's `message`)", (b: CampaignBrief) => ({ ...b, campaignMessage: "New headline" })],
+    ["the template", (b: CampaignBrief) => ({ ...b, template: { ...b.template, layers: [] } })],
+  ] as const)(
+    "a new brief reference that changes %s DOES refetch",
+    async (_label, change) => {
+      vi.useFakeTimers();
+      vi.mocked(globalThis.fetch).mockResolvedValue(pngResponse());
+      const { rerender } = renderHook(({ b }) => usePreviewFrame(b, cell()), {
+        initialProps: { b: brief() },
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(PREVIEW_FRAME_DEBOUNCE_MS);
+      });
+      expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+
+      rerender({ b: change(brief()) });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(PREVIEW_FRAME_DEBOUNCE_MS * 2);
+      });
+      expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  test("a request actually sent still carries the CURRENT full brief, not a stale projection", async () => {
+    vi.useFakeTimers();
+    vi.mocked(globalThis.fetch).mockResolvedValue(pngResponse());
+    const { rerender } = renderHook(({ b }) => usePreviewFrame(b, cell()), {
+      initialProps: { b: brief() },
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(PREVIEW_FRAME_DEBOUNCE_MS);
+    });
+
+    // A look-preserving change (ignored by the fetch key) rides along on the
+    // NEXT real fetch — the key skips wasted requests, it does not truncate
+    // what a request that DOES fire actually sends.
+    const withAudience = brief({ targetAudience: "new", campaignMessage: "Changed" });
+    rerender({ b: withAudience });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(PREVIEW_FRAME_DEBOUNCE_MS * 2);
+    });
+    const bodies = vi.mocked(globalThis.fetch).mock.calls.map(
+      ([, init]) => JSON.parse((init as RequestInit).body as string) as { brief: CampaignBrief },
+    );
+    expect(bodies[1].brief).toEqual(withAudience);
   });
 });
 

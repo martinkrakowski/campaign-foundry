@@ -67,12 +67,37 @@ Each lane changes the rail that exists. None builds a second one.
 
 | Lane | Depends on | Ships | Proof |
 |---|---|---|---|
-| **CC2 → CC1**<br>*(cost first, then scope)* | D141, D142 | **Rail scope and its cost together.** Scope: all three presentations, every non-Review/Layout step, an explicit empty state while the first product's `id` is `""`. Cost, in the same PR: (a) the aside is **mounted and fetching below `56rem` today** — the container query is CSS visibility (`hidden … [@container(min-width:56rem)]:flex`), so a rail nobody can see must stop fetching; (b) the fetch keys on `brief` **identity** (`preview-frame.ts:83`) while `draftBrief` is a new object per state change (`BriefEditor.tsx:589`), so typing an unrelated field fetches a frame — key on what the frame depends on; (c) the rail subtree is memoised on a preview/layer slice, not `EditorState` — and that requires **changing how the rail is fed**: `draftBrief` and `railProps` are `useMemo(…, [state])` and `previewDockProps` returns a fresh object every call, so a child `memo` cannot bail out today. Memoise the preview and layers, **not** the YAML view, or the YAML goes stale. `toBrief(state)` still runs per keystroke; if that stays, say so as an accepted cost. | **A look-preserving keystroke issues zero `/preview-frame` calls** (the gate is network calls, not re-renders — a keystroke that changes nothing visible must not reach the server); zero calls while the YAML view is showing; exactly one **mounted** composed frame per presentation × step — the proof must count mounts, not visible SVGs, because the container query hides without unmounting and today's tests (`brief-editor.test.tsx:3368,3594`) cannot tell the difference. Typing in `targetAudience` issues **no** frame request. Nothing fetches below the breakpoint. |
+| **CC2 → CC1 — shipped in this PR**<br>*(cost first, then scope)* | D141, D142 | **Rail scope and its cost together.** Scope: all three presentations, every non-Review/Layout step, an explicit empty state while the first product's `id` is `""`. Cost, in the same PR: (a) the aside is **mounted and fetching below `56rem` today** — the container query is CSS visibility (`hidden … [@container(min-width:56rem)]:flex`), so a rail nobody can see must stop fetching; (b) the fetch keys on `brief` **identity** (`preview-frame.ts:83`) while `draftBrief` is a new object per state change (`BriefEditor.tsx:589`), so typing an unrelated field fetches a frame — key on what the frame depends on; (c) the rail subtree is memoised on a preview/layer slice, not `EditorState` — and that requires **changing how the rail is fed**: `draftBrief` and `railProps` are `useMemo(…, [state])` and `previewDockProps` returns a fresh object every call, so a child `memo` cannot bail out today. Memoise the preview and layers, **not** the YAML view, or the YAML goes stale. `toBrief(state)` still runs per keystroke; if that stays, say so as an accepted cost. | **A look-preserving keystroke issues zero `/preview-frame` calls** (the gate is network calls, not re-renders — a keystroke that changes nothing visible must not reach the server); zero calls while the YAML view is showing; exactly one **mounted** composed frame per presentation × step — the proof must count mounts, not visible SVGs, because the container query hides without unmounting and today's tests (`brief-editor.test.tsx:3368,3594`) cannot tell the difference. Typing in `targetAudience` issues **no** frame request. Nothing fetches below the breakpoint. |
 | **CC3**<br>**closes SE1** | CC1+CC2 | **Layers in the rail**: select / toggle / reorder / add / remove from the existing derivations. **Disposition is fixed, not a choice: `TemplateSection` stops rendering the stack** and the rail becomes the only one. | One stack in the tree, asserted; offers come from `addableKinds` / `removableLayerIds`; selection is ephemeral (D139). Retires the studio plan's SE1 fence. |
 | **CC4**<br>**closes SE2** | CC3, D143 | **The layer sheet**: live geometry props and the html element editor in a **non-modal** sheet — **a new container, because every existing shell sets `aria-modal="true"` and traps focus** (`dialog-shell.tsx:271,279,320,328`), which disables `⌘Z` (`editor-history.ts:226-233`). Its keyboard contract, stated here because neither plan covers it: no focus trap, Tab reaches the rail, Escape dismisses (nothing to roll back), and arrow keys inside the sheet do not change step. Mounted mounted as a **sibling of the step card and never inside `renderStepCard`** (D44 — the card renders two live copies during a step change and its `transform` traps overlays). Ships `setLayerProps` with the coalesce key and `canonicalLayer` duty from `studio-editor.md` §9.1. | Creative stays visible with the sheet open; `⌘Z` still undoes; set-then-clear leaves the brief byte-identical. Retires the SE2 fence. |
 | **CC5**<br>**closes TL1** | CC1+CC2, D145 | **The timeline in the rail** for motion drafts, one playhead shared with the preview, **keeping the live/committed split** (`PreviewDock.tsx:178-219`). | **Assert pointermove vs pointerup on the ruler**: a drag issues no `/preview-frame` call until release, and the live position is never passed as `atSec` (`preview-frame.ts:95` refetches on any `atSec` change and cannot see a pointer). "Equals the encoded frame" is already a compositor test and is not restated here. Retires the TL1 fence. |
 | **CC6** | D144 | **Regroup the dialog's existing four tiles** under Static / Video-motion headings. No tile is added or removed; no preset changes. | All four types remain reachable; `applyPreset` still runs exactly once; the motion group's `mode: variation` still comes from the preset, not the dialog. |
 | **CC7** | **the template library (D123)** | **Browse** over a real library. | Not scheduled here; the library is its own plan. |
+
+**CC2 → CC1 — shipped in this PR.** `premise CC1` is retired (§5). The fetch key: `previewFetchKey(brief,
+productId)` (`apps/web/src/lib/preview-frame.ts`) — a content fingerprint, never `brief`'s object identity —
+covering the previewed product's colour/logo (matched by `productId`, not the whole `products` array),
+`localizedMessage ?? campaignMessage`, `style`, `template`, `output.platforms`/`sizes`, `copy.timeline`, and the
+`variation.axes` background-source/duration the dock itself reads. `usePreviewFrame`'s `request` memo depends on
+this key plus an `identityAxis` (`identityKey ?? brief.id`) instead of `brief` by reference, so a keystroke in a
+field the frame does not read (`targetAudience`) fires nothing, while FI1's identity-clearing contract (a
+not-yet-saved draft keys on `tempId`, a saved brief still clears on a real id change) is preserved by construction
+— `identityAxis` is that same value. The memo boundary: `BriefEditor` computes `previewKey =
+JSON.stringify(rawRailProps) + previewFetchKey(draftBrief, product.id)` and uses it (not `[state]`) to memoise
+both `railProps` and `previewBrief`, which feed the now-`memo`-wrapped `PreviewDock`; the YAML view keeps reading
+the live `draftBrief` (D61 — it must never go stale). The breakpoint: `useMinInlineSize` (a new hook,
+`apps/web/src/lib/use-min-inline-size.ts`) mirrors the row's `@container(min-width:56rem)` query in JS via
+`ResizeObserver` on the same container, seeded from `window.innerWidth` (ResizeObserver reports asynchronously and
+never fires under happy-dom); below it the rail still MOUNTS (D43's count invariant is about mounting, not CSS
+visibility) but is not fed a `brief`, so nothing fetches. **Accepted cost:** `toBrief(state)` still runs on every
+keystroke (YAML view, `draftDiffers`, Save, Review all need the live projection), and the memo key adds one
+`JSON.stringify` of the look per render on top of it — bounded, not eliminated. **Studio decision (§10 of
+`2026-09-16_studio-editor.md`, recorded there too):** the rail's step exclusion is `presentation === "guided" ?
+(review/layout gate) : true` — presentation-agnostic outside Guided by construction — so when SE0 lands `studio`,
+that presentation inherits "no step-based exclusion" automatically UNLESS SE0's own Layout arrangement renders
+`<LayoutSection preview />` (its own frame), in which case **SE0 must extend the guard to `presentation ===
+"guided" || presentation === "studio"` itself**, or D43's one-composed-frame invariant breaks there. SE0 is not
+superseded; this is a requirement on it, not a hope.
 
 **Order.** **CC2 lands the feed/memo/fetch contract on the rail that exists, then CC1 widens it** — cost before scope, because CC1 is the cost-increasing change. Then CC3 → CC4 ‖ CC5 → CC6. CC7 is gated on the library.
 **Why one PR:** CC1 alone widens a *fetching* rail into Everything — going from zero frames to one there — so shipping scope before cost would knowingly regress the margin three lanes (X30, X32, X34) were just spent recovering.
@@ -93,13 +118,11 @@ Each lane changes the rail that exists. None builds a second one.
 
 ## 5. Premises
 
-```premise CC1
-# The rail is still gated on the guided presentation. Anchored to the rail's own
-# conjunction, because a bare `presentation === "guided" &&` also matches a
-# navigation guard at BriefEditor.tsx:731 that this lane never touches -- a fence
-# that the lane cannot flip is a wish, not a fence.
-tr '\n' ' ' < apps/web/src/components/campaign/BriefEditor.tsx | grep -qE 'presentation === "guided" && *steps\[stepIndex\] !== "review"'
-```
+`premise CC1` retired: CC1/CC2 shipped (§3), and the conjunction it anchored to
+(`presentation === "guided" && steps[stepIndex] !== "review"`) no longer exists —
+the rail's gate is now `presentation !== "guided" || (steps[stepIndex] !== "review" &&
+steps[stepIndex] !== "layout")` (`BriefEditor.tsx`), which is presentation-agnostic
+outside Guided by design (D141).
 
 ```premise CC3
 # The layer stack is still rendered by the template section. CC3's disposition is

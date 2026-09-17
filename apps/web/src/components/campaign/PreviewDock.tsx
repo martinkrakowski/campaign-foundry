@@ -1,4 +1,4 @@
-import { useState, type CSSProperties, type ReactNode, type SyntheticEvent } from "react";
+import { memo, useState, type CSSProperties, type ReactNode, type SyntheticEvent } from "react";
 import type { AspectRatioValue, CanvasSpec } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import { RATIO_VALUES } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import { DISPLAY_SIZE_VALUES } from "@campaignfoundry/CampaignOrchestration/display-sizes";
@@ -71,9 +71,15 @@ export interface PreviewShowcaseProps extends Omit<CreativePreviewProps, "classN
    * the frame so a re-slug of `brief.id` is not a switch of creative.
    */
   readonly identityKey?: string;
-  /** The wizard's current step, 1-based (`stepIndex + 1`) — where the walk stands, never a position in the creative set (M2). */
-  readonly step: number;
-  readonly stepCount: number;
+  /**
+   * The wizard's current step, 1-based (`stepIndex + 1`) — where the walk
+   * stands, never a position in the creative set (M2). Optional: D141 —
+   * `everything` (and any future presentation with no step concept) has no
+   * cursor to show, and the caller omits both fields rather than passing a
+   * stale one.
+   */
+  readonly step?: number;
+  readonly stepCount?: number;
 }
 
 /** The product colour the preview was drawn in, as a chip. Token rule aside: `--c`. */
@@ -119,15 +125,30 @@ function PreviewCaption({
   );
 }
 
-/** The brief's own words: campaign name, headline, and the step readout. */
-function PreviewIdentity(props: PreviewShowcaseProps): ReactNode {
+export interface PreviewIdentityProps {
+  readonly campaignName: string;
+  readonly headline?: string;
+  readonly step?: number;
+  readonly stepCount?: number;
+}
+
+/**
+ * The brief's own words: campaign name, headline, and the step readout. The
+ * step readout is itself optional (D141): `everything` has no step cursor to
+ * show (`stepIndex` is stale outside guided), so a caller that omits `step`/
+ * `stepCount` gets no readout rather than a guessed or stale one — never
+ * `previewStep(undefined, undefined)`.
+ */
+export function PreviewIdentity(props: PreviewIdentityProps): ReactNode {
   return (
     <div className="flex min-w-0 flex-col gap-1">
       <p className="truncate font-semibold text-[13px] text-text-primary">{props.campaignName}</p>
       {props.headline !== undefined && props.headline.length > 0 ? (
         <p className="truncate text-[12px] text-text-muted">{props.headline}</p>
       ) : null}
-      <p className="font-mono text-[11px] text-text-muted">{messages.previewStep(props.step, props.stepCount)}</p>
+      {props.step !== undefined && props.stepCount !== undefined ? (
+        <p className="font-mono text-[11px] text-text-muted">{messages.previewStep(props.step, props.stepCount)}</p>
+      ) : null}
     </div>
   );
 }
@@ -152,7 +173,12 @@ export function PreviewPicture(props: {
   readonly className: string;
 }): ReactNode {
   return (
-    <div className="overflow-hidden rounded-lg border border-border bg-text-muted">
+    // CC1 — a stable mount marker (D43): counted by tests that must tell
+    // "exactly one composed frame is MOUNTED" from "one is visible" — the
+    // rail's container query hides without unmounting, and this marker is
+    // present in both branches `PreviewFrame` can render (this placeholder,
+    // and the real `<img>` frame below).
+    <div data-testid="preview-frame" className="overflow-hidden rounded-lg border border-border bg-text-muted">
       <CreativePreview
         layout={props.layout}
         tone={props.tone}
@@ -170,14 +196,36 @@ export function PreviewPicture(props: {
 }
 
 /**
+ * D142 — the rail's content before the first product has an id: names the
+ * missing field, invents nothing (D26). Shares `PreviewIdentity`'s shape
+ * with `PreviewDock` so the two never visually disagree about the campaign
+ * name or the walk's cursor when one replaces the other.
+ */
+export function PreviewRailEmptyState(props: PreviewIdentityProps): ReactNode {
+  return (
+    <div className="flex min-w-0 flex-col gap-3">
+      <Eyebrow as="p">{messages.previewLegend}</Eyebrow>
+      <p className="text-[12px] text-text-muted">{messages.previewNeedsProductId}</p>
+      <PreviewIdentity {...props} />
+    </div>
+  );
+}
+
+/**
  * The preview itself (D26): the creative at its own ratio, the caption under it,
  * and the brief's name, headline and step beside it — the outgoing creative stays
  * in the corner of the eye while the brief is edited. Props come from the one
  * exported derivation (`previewDockProps`, D45); the complementary landmark, the
  * sticky positioning and the container-query visibility belong to the host rail
  * that mounts this body (D44/D61) — exactly one slot, whatever view it holds.
+ *
+ * Wrapped in `memo` (CC2/CC1): the rail widens to every presentation and step
+ * (D141), and will host a layer list and a timeline of its own soon (CC3/CC5,
+ * C3) — a `useMemo`-value-keyed `brief`/props pair from `BriefEditor` lets
+ * this bail on a re-render for a keystroke the look does not change, exactly
+ * as it already skips a network fetch for one.
  */
-export function PreviewDock(props: PreviewShowcaseProps): ReactNode {
+function PreviewDockImpl(props: PreviewShowcaseProps): ReactNode {
   const spec = props.spec ?? derivePreviewSpec(props.platformId, props.ratio, props.brief?.output?.sizes);
   const durationSec = props.brief?.variation?.axes?.duration?.[0] ?? DEFAULT_DURATION_SEC;
   const [scrubSec, setScrubSec] = useState(0);
@@ -241,3 +289,5 @@ export function PreviewDock(props: PreviewShowcaseProps): ReactNode {
     </div>
   );
 }
+
+export const PreviewDock = memo(PreviewDockImpl);

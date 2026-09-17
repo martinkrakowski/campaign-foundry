@@ -1,7 +1,9 @@
+import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import type { MotionKind } from "@campaignfoundry/CampaignOrchestration/motion-kinds";
 import type { AnchorOption, CreativePreviewProps, LayoutOption, ToneOption } from "./CreativePreview";
 import type { PreviewShowcaseProps } from "./PreviewDock";
 import { anchorAxisActive, briefStyle, isDefaultOutput, type EditorState } from "./editor-state";
+import { previewFetchKey } from "@/lib/preview-frame";
 
 /** The first entry of an optional list — undefined with the list, never a crash. */
 function firstOf<T>(list: readonly T[] | undefined): T | undefined {
@@ -110,8 +112,15 @@ export function previewIdentityKey(state: EditorState): string | undefined {
  */
 export function previewDockProps(
   state: EditorState,
-  stepIndex: number,
-  stepCount: number,
+  /**
+   * The guided walk's cursor. D141: `everything` (and any future
+   * presentation with no step concept) has no cursor to show —
+   * `stepIndex` is stale outside guided — so the CALLER omits both
+   * arguments there rather than passing a stale position; a bare step
+   * readout is never guessed from a number that no longer means anything.
+   */
+  stepIndex?: number,
+  stepCount?: number,
 ): PreviewShowcaseProps | null {
   const look = previewLook(state);
   if (look === null) return null;
@@ -120,7 +129,46 @@ export function previewDockProps(
     ...look,
     identityKey: previewIdentityKey(state),
     // The wizard readout (M2): where the walk stands, not a position in the creative set.
-    step: stepIndex + 1,
-    stepCount,
+    ...(stepIndex !== undefined && stepCount !== undefined ? { step: stepIndex + 1, stepCount } : {}),
   };
+}
+
+/**
+ * `BriefEditor`'s own rail memo key (CC1/CC2): stable across a keystroke
+ * that changes neither the look (`rawRailProps`) nor anything the frame's
+ * fetch reads (`previewFetchKey`), so a `useMemo(…, [previewRailKey(…)])`
+ * boundary can bail out on it — but it must ALWAYS move when the previewed
+ * creative's own identity changes, even when every hashed visual input
+ * happens to coincide (Qodo, caught in review). `rawRailProps` carries the
+ * campaign name, never the id, and `previewFetchKey` is a pure CONTENT
+ * fingerprint with no id in it either — so two SAVED briefs sharing every
+ * visual input but a different id would never move this key without the
+ * `rawRailProps.identityKey ?? brief.id` term, and the memo would keep
+ * handing `PreviewDock` the OLD brief. `usePreviewFrame`'s own identity
+ * guard (`identityAxis = identityKey ?? brief.id`, `preview-frame.ts`) can
+ * only clear on a switch it actually SEES — a memo upstream that hides the
+ * switch defeats it (FI1's defect, #448, reintroduced narrower). That term
+ * is exactly the same expression, over the same two values this function
+ * is handed, so the memo and the hook's guard can never disagree about
+ * when the CREATIVE has changed.
+ *
+ * The PRODUCT is the other half of what the hook keys on (CodeRabbit,
+ * caught in review): `usePreviewFrame`'s own identity tuple includes
+ * `cell.productId` directly, but `productId` here is only ever used to
+ * LOOK UP a product inside `previewFetchKey` (its colour/logo) — neither
+ * `rawRailProps` (no product id in the look) nor that lookup's result
+ * carries the id itself. So the first product's id changing while its
+ * colour and logo stay put — a real, editable-in-the-editor case, unlike
+ * the brief-id coincidence above — would not move this key either, even
+ * though the actual `/preview-frame` request (keyed on `cell.productId`)
+ * asks the server for a different product entirely. `productId` is
+ * therefore folded into the key directly, not only through the lookup.
+ */
+export function previewRailKey(
+  rawRailProps: PreviewShowcaseProps | null,
+  brief: CampaignBrief,
+  productId: string,
+): string | null {
+  if (rawRailProps === null) return null;
+  return `${JSON.stringify(rawRailProps)} ${previewFetchKey(brief, productId)} ${rawRailProps.identityKey ?? brief.id} ${productId}`;
 }

@@ -28,6 +28,47 @@ export function briefBackgroundIsStandIn(brief: CampaignBrief): boolean {
   return Array.isArray(sources) && sources.some((source) => source === "genai" || source === "asset-pool");
 }
 
+/**
+ * The fetch key (CC2): a stable string built from exactly the parts of `brief`
+ * a preview fetch can ever answer differently for — never the object's
+ * identity. `toBrief(state)` (`BriefEditor.tsx:589`) builds a new object on
+ * every keystroke, so keying on identity fired a request for every field,
+ * including ones the server-side compositor never reads
+ * (`targetAudience`/`targetRegion` ride the request only as
+ * `BackgroundContext`, and the preview route wires `ProceduralBackgroundGenerator`
+ * DIRECTLY (D52 credit safety) — it reads only `product.primaryColor`, the
+ * ratio and a `paletteShift` this route never sets, so those two fields
+ * cannot move a single pixel of the composited frame).
+ *
+ * Covers both what `PreviewCreativeFrameUseCase.buildCompositeRequest` reads
+ * (`PreviewCreativeFrameUseCase.use-case.ts:340-373`) — the previewed
+ * product's colour/logo, the message, `style`, `output.platforms` (safe
+ * insets) and `template` — and what the DOCK itself reads straight off
+ * `brief` beyond the cell (`briefBackgroundIsStandIn`'s axis, for the
+ * caption; `output.sizes` and `variation.axes.duration`, for the canvas and
+ * scrub range; `copy.timeline`, for a motion cell's per-beat scenes). The
+ * cell's own axes (canvas, layout, tone, anchor, motion, durationSec, atSec)
+ * are already destructured as separate `useMemo` deps below — this key takes
+ * only the previewed PRODUCT's id, not the whole `products` array or the
+ * rest of the cell, so a caller that already knows which product (but has no
+ * full `PreviewCellSelection` to hand, e.g. `BriefEditor`'s own rail memo)
+ * can call it too.
+ */
+export function previewFetchKey(brief: CampaignBrief, productId: string | undefined): string {
+  const product = brief.products.find((candidate) => candidate.id === productId);
+  return JSON.stringify({
+    product: product === undefined ? undefined : { primaryColor: product.primaryColor, logoPath: product.logoPath },
+    message: brief.localizedMessage ?? brief.campaignMessage,
+    style: brief.style,
+    template: brief.template,
+    platforms: brief.output?.platforms,
+    sizes: brief.output?.sizes,
+    timeline: brief.copy?.timeline,
+    backgroundSource: brief.variation?.axes?.background?.source,
+    duration: brief.variation?.axes?.duration,
+  });
+}
+
 function toDataUrl(bytes: Uint8Array): string {
   let binary = "";
   const chunk = 0x8000; // keep each `String.fromCharCode` call under the argument limit
@@ -85,12 +126,27 @@ export function usePreviewFrame(
   const [frame, setFrame] = useState<PreviewFrameState | null>(null);
   const [failed, setFailed] = useState(false);
 
-  // The request object is stabilized on the cell's VALUES (not object identity),
-  // so a parent re-render cannot re-fire the effect for an unchanged look.
+  // CC2 — the request is stabilized on the cell's VALUES and on the brief's
+  // FETCH KEY (`previewFetchKey`, content, never object identity), so neither
+  // a parent re-render nor a keystroke in a field the frame does not read
+  // (`targetAudience`, campaign name, …) can re-fire the fetching effect for
+  // an unchanged look. `request.brief` below is still whichever `brief`
+  // reference is CURRENT when a fetch actually does fire — the key only
+  // decides whether to fire, never what a firing request sends.
+  const briefFetchKey = brief === undefined || cell === undefined ? undefined : previewFetchKey(brief, cell.productId);
+  // FI1's identity axis, same value the identity fingerprint below reads:
+  // a not-yet-saved draft's live slug (`brief.id`) is NOT a switch of
+  // creative (`identityKey`, the stable `tempId`, covers it) — but a real
+  // identity change (a different `identityKey`, or a saved brief's `id`
+  // changing because a different file loaded) must rebuild `request` even
+  // when the fetch key is unchanged, or the synchronous clear below would
+  // keep reading the OLD brief's id off a memo that never refreshed.
+  const identityAxis = identityKey ?? brief?.id;
   const request = useMemo(
     () => (brief !== undefined && cell !== undefined ? { brief, cell } : null),
     [
-      brief,
+      briefFetchKey,
+      identityAxis,
       cell?.productId,
       cell?.canvas.ratio,
       cell?.canvas.size,
@@ -100,6 +156,8 @@ export function usePreviewFrame(
       cell?.motion,
       cell?.durationSec,
       cell?.atSec,
+      // `brief` itself is deliberately not a dep: `briefFetchKey` and
+      // `identityAxis` together are its value-equality proxy.
     ],
   );
 

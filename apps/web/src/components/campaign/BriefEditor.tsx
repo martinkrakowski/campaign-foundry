@@ -76,8 +76,9 @@ import { StepHeader } from "@/components/campaign/StepHeader";
 import { StepFooter } from "@/components/campaign/StepFooter";
 import { SECTION_TITLES, sectionOrder, LayoutSection, type SectionId } from "./sections";
 import { ReviewStep } from "./ReviewStep";
-import { PreviewDock } from "./PreviewDock";
-import { previewDockProps } from "./preview-props";
+import { PreviewDock, PreviewRailEmptyState } from "./PreviewDock";
+import { previewDockProps, previewRailKey } from "./preview-props";
+import { useMinInlineSize, PREVIEW_RAIL_MIN_INLINE_PX } from "@/lib/use-min-inline-size";
 import * as messages from "./messages";
 import type { CampaignMode } from "@/components/campaign/editor-state";
 
@@ -587,13 +588,39 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   // about what the brief contains. Declared here (not beside the review step) because
   // the D35 handoff below reads it on every render.
   const draftBrief = useMemo(() => toBrief(state), [state]);
+  // D141 — the walk's cursor exists only in Guided: `stepIndex` is stale in
+  // any other presentation (nothing moves it there), so the rail's step
+  // readout must not show it as if it still tracked a position.
+  const railCursorIndex = presentation === "guided" ? stepIndex : undefined;
+  const railCursorCount = presentation === "guided" ? steps.length : undefined;
   // R7.2/D45 — the dock's props come from the one exported derivation, fed by the live
-  // draft and the walk's cursor. Null (nothing to draw) means no rail at all: the
-  // house rule is `hasProduct`, and the dock never invents a creative (D26).
-  const railProps = useMemo(
-    () => previewDockProps(state, stepIndex, steps.length),
-    [state, stepIndex, steps.length],
-  );
+  // draft and the walk's cursor. Null (nothing to draw) means an empty state, never an
+  // invented creative (D26/D142) — the house rule is `hasProduct`.
+  const rawRailProps = previewDockProps(state, railCursorIndex, railCursorCount);
+  // CC1/CC2 — value-keyed, not `[state]`: a keystroke that changes neither the
+  // look, anything the frame's own fetch reads, nor the previewed creative's
+  // OWN identity (`previewRailKey`, `preview-props.ts` — that file's comment
+  // has the full reasoning, including the identity term Qodo's review added)
+  // returns the SAME cached object below, letting the `memo`-wrapped
+  // `PreviewDock` bail out of a re-render exactly as `usePreviewFrame`'s own
+  // key already bails out of a re-fetch. `toBrief(state)` above still runs
+  // every keystroke (for the YAML view, `draftDiffers`, Save, Review) — this
+  // key is a SECOND, narrower fingerprint over the same object, an accepted
+  // extra cost of the memo boundary, not a replacement for it.
+  const previewKey = previewRailKey(rawRailProps, draftBrief, state.products[0]?.id ?? "");
+  const railProps = useMemo(() => rawRailProps, [previewKey]);
+  // The rail's own `brief` prop, stabilised on the SAME key — a look-preserving
+  // keystroke feeds `PreviewDock` (and the fetch inside it) the identical
+  // reference, never a fresh `toBrief` result the memo above could not see
+  // through. The YAML view below reads the live `draftBrief` instead, on
+  // purpose: memoising it here would go stale (D61).
+  const previewBrief = useMemo(() => draftBrief, [previewKey]);
+  // CC2 — the JS-side mirror of the row's own `@container(min-width:56rem)`
+  // query (§6 question 1): the CSS hides the rail below the breakpoint, but
+  // the element stays mounted and would keep fetching without this. Observes
+  // the SAME row the CSS container query reads.
+  const railContainerRef = useRef<HTMLDivElement | null>(null);
+  const isRailWideEnough = useMinInlineSize(railContainerRef, PREVIEW_RAIL_MIN_INLINE_PX);
   /**
    * D35 — whether Generate's default target (the shell's brief) and the screen
    * disagree. A pristine editor holds the blank template, not a draft anybody is
@@ -1488,7 +1515,7 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
     <div className="flex flex-col">
       {/* §6 question 1 — the row is the query container the rail's visibility reads,
           so the rail's own width can never lie to a viewport breakpoint. */}
-      <div className="flex items-start [container-type:inline-size]">
+      <div ref={railContainerRef} className="flex items-start [container-type:inline-size]">
        <SectionModeContext.Provider value={state.mode}>
            {/* Main content */}
             <div
@@ -1646,18 +1673,28 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
 
         </div>
 
-        {/* D43/D44/D61 — the preview rail: one right-hand slot, a sibling of the main
-            column — never inside `renderStepCard`, which renders two live copies during
-            a step change and whose `transform` traps overlays (M7). `sticky top-0
-            self-start` resolves against the shell's own scrollport; never `fixed`.
-            Guided only, and suppressed on Review and on the Layout step — the figure
-            owns Review and the Layout step carries its own frame (D63), so exactly
-            one composed preview is on screen (D43). Visibility is the row's container
-            query (§6 question 1): the rail shows when the row has room for it. */}
-          {presentation === "guided" &&
-          steps[stepIndex] !== "review" &&
-          steps[stepIndex] !== "layout" &&
-          railProps !== null ? (
+        {/* D43/D44/D61/D141 — the preview rail: one right-hand slot, a sibling of the
+            main column — never inside `renderStepCard`, which renders two live copies
+            during a step change and whose `transform` traps overlays (M7). `sticky
+            top-0 self-start` resolves against the shell's own scrollport; never
+            `fixed`. D141 amends D43 ("the dock mounts in Guided only and is suppressed
+            on the Review step", `r7-preview-panel.md:39`): the COUNT invariant survives
+            — exactly one composed preview on screen — but the Guided-only clause is
+            DROPPED. The rail now appears in every presentation (Guided, Everything,
+            and a future `studio`, D137/D141) and on every step except Review and
+            Layout. Review and Layout still exclude it because each carries its own
+            frame (`ReviewStep`, `LayoutSection` with `preview`, D63) — but that
+            exclusion is only a STEP concept, and only Guided has a step cursor
+            (`stepIndex` is stale everywhere else, see `railCursorIndex` above); a
+            presentation with no steps (Everything today; `studio`'s own Layout
+            arrangement tomorrow, once SE0 exists — see the note beside
+            `railCursorIndex`) has nothing to exclude by step and always shows the
+            rail. Visibility is still the row's CSS container query (§6 question 1);
+            `isRailWideEnough` (CC2) is its JS-side mirror, gating the FETCH — the rail
+            still mounts below the breakpoint (so a resize above it does not pay a
+            fresh debounce), it just does not feed the frame a `brief` while hidden. */}
+          {presentation !== "guided" ||
+          (steps[stepIndex] !== "review" && steps[stepIndex] !== "layout") ? (
           <aside
             role="complementary"
             aria-label={messages.previewLegend}
@@ -1718,12 +1755,30 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
               </button>
             </div>
             {railView === "preview" ? (
-              <PreviewDock {...railProps} brief={draftBrief} />
+              railProps !== null ? (
+                // CC2 — below the breakpoint, `brief` is withheld: `usePreviewFrame`
+                // (inside `PreviewDock` → `PreviewFrame`) treats an undefined brief
+                // exactly like an unspecified look and never builds a request, so a
+                // rail nobody can see never reaches the network.
+                <PreviewDock {...railProps} brief={isRailWideEnough ? previewBrief : undefined} />
+              ) : (
+                // D142 — the empty state before the first product has an id: names
+                // the missing field, never "add a product" (the Products step
+                // already shows a stub) and never a fabricated placeholder creative.
+                <PreviewRailEmptyState
+                  campaignName={state.campaignName}
+                  step={railCursorIndex !== undefined ? railCursorIndex + 1 : undefined}
+                  stepCount={railCursorCount}
+                />
+              )
             ) : (
               <pre className="overflow-auto text-[11px] text-text-primary">
                 {/* Real YAML, because that is what the label promises and what the
                     save path writes — a JSON body under a `</>`-YAML name showed a
-                    format the pipeline never reads (CodeRabbit, PR #174). */}
+                    format the pipeline never reads (CodeRabbit, PR #174). Always the
+                    LIVE `draftBrief`, never the memoised `previewBrief`: this is the
+                    rail's read-only SECOND view (D61) and must never lag the preview's
+                    own memo boundary (CC1/CC2 mutation (c)). */}
                 {dump(draftBrief)}
               </pre>
             )}

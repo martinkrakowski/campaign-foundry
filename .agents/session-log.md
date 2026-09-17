@@ -5936,3 +5936,56 @@ Two smaller lessons from the backfill: events must be emitted **in order**, beca
 a lane's stage from the newest `ts` and a late-arriving earlier stage silently understates it; and
 `${4:+--pr $4}` does not word-split in zsh, so a helper that works standalone can fail for every
 call in a loop.
+
+## 2026-09-16 — CC1/CC2 (lane: rail scope and cost, chrome arc)
+
+Dispatched as one PR per the plan's own ordering: **cost (CC2) first, proved first, then scope
+(CC1)** — widening the rail before its per-keystroke cost is bounded would have multiplied that cost
+across every presentation and step.
+
+**Cost.** `usePreviewFrame`'s `request` used to depend on `brief` by object identity
+(`preview-frame.ts:83` at `64d715b8`); `toBrief(state)` builds a new brief on every keystroke, so a
+field the compositor never reads (`targetAudience`) still fired a fetch. Fixed with
+`previewFetchKey(brief, productId)` — a content fingerprint over exactly what
+`PreviewCreativeFrameUseCase.buildCompositeRequest` and the dock itself read (product colour/logo by
+id, `localizedMessage ?? campaignMessage`, `style`, `template`, `output.platforms/sizes`,
+`copy.timeline`, the background/duration axes) — plus an `identityAxis` (`identityKey ?? brief.id`)
+so FI1's identity-clearing contract (a fresh draft keys on `tempId`, a saved brief still clears on a
+real id change) survives unchanged; a regression during the fix (an id-only change stopped clearing
+because the memoised `request` never refreshed) was caught by FI1's own pinned tests and fixed by
+adding `identityAxis` as a *second*, independent axis on the `request` memo. Below the 56rem
+container-query breakpoint, a new hook (`useMinInlineSize`, `apps/web/src/lib/use-min-inline-size.ts`)
+mirrors the CSS query in JS via `ResizeObserver` (seeded from `window.innerWidth` — happy-dom's
+`ResizeObserver` never fires, confirmed directly against `happy-dom`'s `Window` before designing
+around it) and withholds `brief` from the dock while narrow, so a rail nobody can see stops fetching
+without unmounting (D43's count invariant is about mounting, not CSS visibility). `BriefEditor` now
+value-keys `railProps`/`previewBrief` on `previewKey` (the look plus `previewFetchKey`) instead of
+`[state]`, and `PreviewDock` is `memo`-wrapped; the YAML view keeps reading the live `draftBrief` on
+purpose (D61 — it must never go stale) — a mutation that memoised it too is in the manifest and is
+caught by a staleness assertion. `toBrief(state)` still runs every keystroke; accepted, stated in the
+PR.
+
+**Scope (D141/D142).** The rail's gate dropped `presentation === "guided" &&"` for everything except
+the actual step exclusion (Review/Layout, which only Guided's step cursor can even name); Everything
+and any future presentation inherit "no step-based exclusion" by construction, and
+`previewDockProps`'s `step`/`stepCount` became optional so Everything's stale `stepIndex` never leaks
+into the readout. D142's empty state (`PreviewRailEmptyState`, new) replaces "no rail at all" when the
+first product's id is blank — names the missing id, never "add a product", never a fabricated
+creative — while the YAML view stays available and correct even then.
+
+**A vacuous-test trap, caught by the mutation manifest, not review.** The describe block's existing
+fixture (`okEntry`) carries no `treatments`, so `previewLook` never resolves a `layout`/`tone` and
+`PreviewFrame` never builds a `cell` — it NEVER fetches, in any test, mutation or not. The first
+`yarn mutate:verify` run on the below-breakpoint mutation "survived" (should have been caught) because
+the test's `before`/`after` call counts were both silently zero for a reason that had nothing to do
+with the breakpoint gate. Fixed with a second fixture (`fetchableEntry`, an explicit treatment) and a
+`before > 0` sanity assertion in every call-count test, plus a sibling test proving the same edit
+*does* refetch in the preview view — so "zero calls" now means the fix, not an untriggered harness.
+
+**Studio (settled, not superseded).** `studio` does not exist in the tree yet (`Presentation =
+"guided" | "everything"`, SE0 unbuilt) — its own PR must extend CC1's guard to include it if its
+Layout arrangement keeps an inline frame (`LayoutSection preview`), mirroring the Everything
+precedent. Recorded in `2026-09-16_studio-editor.md` §10 and in this plan's §3.
+
+`premise CC1` retired (the conjunction it anchored to no longer exists); `plan:verify` and
+`mutate:verify .agents/manifests/cc1.json` both green.

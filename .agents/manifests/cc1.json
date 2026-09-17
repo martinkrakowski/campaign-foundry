@@ -1,0 +1,113 @@
+{
+  "version": 1,
+  "lane": "CC1",
+  "mutations": [
+    {
+      "file": "apps/web/src/lib/preview-frame.ts",
+      "before": "  const briefFetchKey = brief === undefined || cell === undefined ? undefined : previewFetchKey(brief, cell.productId);",
+      "after": "  const briefFetchKey = brief;",
+      "because": "CC2's fix is keying the fetch on the brief's CONTENT (previewFetchKey), not its object identity. Restoring identity as the key reintroduces the defect: toBrief(state) builds a new brief object on every keystroke, so a look-preserving edit (typing in targetAudience) fires a fresh /preview-frame request again. Caught by a CALL COUNT, not a mount count.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/lib/__tests__/preview-frame.test.tsx"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/BriefEditor.tsx",
+      "before": "              <PreviewDock {...railProps} brief={isRailWideEnough ? previewBrief : undefined} />",
+      "after": "              <PreviewDock {...railProps} brief={previewBrief} />",
+      "because": "isRailWideEnough is the JS-side mirror of the row's own CSS container query (CC2): below 56rem the rail is CSS-hidden but stays mounted, and withholding `brief` is the only thing that stops usePreviewFrame from building a request there. Feeding the dock `previewBrief` unconditionally lets a rail nobody can see keep fetching. Caught by a CALL COUNT (\"nothing fetches below the breakpoint\"), not a mount count — the rail's own mount is unaffected by this mutation.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/BriefEditor.tsx",
+      "before": "                {dump(draftBrief)}",
+      "after": "                {dump(previewBrief)}",
+      "because": "previewBrief is deliberately memoised on a narrower key than draftBrief (CC1/CC2's memo boundary) so the preview dock and its fetch can bail out on a look-preserving keystroke. The YAML view is the rail's read-only SECOND view (D61) and must stay live: feeding it the memoised previewBrief instead of the live draftBrief makes it go stale on exactly the fields the memo key ignores (e.g. targetAudience). Caught by a staleness ASSERTION on rendered content, not a call count or a mount count.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/lib/use-min-inline-size.ts",
+      "before": "export const PREVIEW_RAIL_MIN_INLINE_PX = 896;",
+      "after": "export const PREVIEW_RAIL_MIN_INLINE_PX = 1024;",
+      "because": "The JS-side breakpoint and the CSS container query (`[@container(min-width:56rem)]:flex`, BriefEditor.tsx) are two independent literals with nothing enforcing agreement between them -- mutating the constant alone (never touching the CSS) reproduces exactly the silent-drift gap a reviewer found: every OTHER test stays green because each side was previously asserted against itself, not against the other. Caught by a parity assertion that derives one value from the other (parses the rem out of the rail's own className, multiplies by the 16px root, compares to the constant) -- not a call count, not a mount count, and not a plain literal-equality check on either side alone.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/lib/use-min-inline-size.ts",
+      "before": "export function initialMinInlineSizeSeed(minPx: number): boolean {\n  if (typeof window === \"undefined\") return false;\n  return window.innerWidth >= minPx;\n}",
+      "after": "export function initialMinInlineSizeSeed(minPx: number): boolean {\n  return window.innerWidth >= minPx;\n}",
+      "because": "A `\"use client\"` component (BriefEditor.tsx) is still prerendered on the server at Next build time, and a useState initializer runs during that server render, where there is no `window`. A first version of this seed had no guard here and reasoned (wrongly) that only client chrome calls it; it broke `yarn build` with `ReferenceError: window is not defined` prerendering /brief/new -- a failure only CI's build step could see, since happy-dom always provides a `window`. Removing the guard here reproduces exactly that: `initialMinInlineSizeSeed` throws instead of seeding `false` once `window` is genuinely absent. Caught HERE by a unit test that stubs `window` to `undefined` for one assertion (`vi.stubGlobal`) and expects `false`, not a throw -- so the suite itself catches it, not only CI's build.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/lib/__tests__/use-min-inline-size.test.tsx"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/preview-props.ts",
+      "before": "  return `${JSON.stringify(rawRailProps)} ${previewFetchKey(brief, productId)} ${rawRailProps.identityKey ?? brief.id} ${productId}`;",
+      "after": "  return `${JSON.stringify(rawRailProps)} ${previewFetchKey(brief, productId)} ${productId}`;",
+      "because": "previewFetchKey is a pure CONTENT fingerprint (product colour/logo, message, style, template, platforms, sizes, timeline, background source, duration) and rawRailProps carries the campaign name, never the id -- neither term names WHICH creative is previewed. Without the identity axis, two saved briefs sharing every visual input but a different id produce the SAME key, so BriefEditor's memo keeps handing PreviewDock the OLD brief and usePreviewFrame's own identity guard (identityAxis = identityKey ?? brief.id) never sees the switch it exists to catch (FI1's defect, #448, reintroduced narrower). Caught by an ASSERTION that the stale frame clears when the previewed brief's id changes -- not a call count, not a mount count.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/preview-frame.test.tsx",
+        "apps/web/src/components/campaign/__tests__/preview-props.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/preview-props.ts",
+      "before": "  return `${JSON.stringify(rawRailProps)} ${previewFetchKey(brief, productId)} ${rawRailProps.identityKey ?? brief.id} ${productId}`;",
+      "after": "  return `${JSON.stringify(rawRailProps)} ${previewFetchKey(brief, productId)} ${rawRailProps.identityKey ?? brief.id}`;",
+      "because": "CodeRabbit, caught in review: the SAME defect the identity-axis fix above closes, one value short. usePreviewFrame's own identity tuple includes cell.productId directly, but productId here was previously used ONLY to look up a product inside previewFetchKey (its colour/logo) -- neither rawRailProps (no product id in the look) nor that lookup's result carries the id itself. So the first product's id changing while its colour and logo stay put -- an ordinary, editable-in-the-editor case, more reachable than the brief-id coincidence -- would not move this key, even though the real /preview-frame request (keyed on cell.productId) would ask the server for a different product than the one still painted. Caught by an ASSERTION that the stale frame clears when the previewed product's id changes -- not a call count, not a mount count.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/preview-frame.test.tsx",
+        "apps/web/src/components/campaign/__tests__/preview-props.test.ts"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

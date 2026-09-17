@@ -18,6 +18,7 @@ import { templateFromCanonical } from "@campaignfoundry/CampaignOrchestration/br
 import { fromBrief, initialEditorState, saveDraftToStorage } from "@/components/campaign/editor-state";
 import { sectionOrder, SECTION_TITLES } from "@/components/campaign/sections";
 import { BriefEditor } from "@/components/campaign/BriefEditor";
+import { PREVIEW_RAIL_MIN_INLINE_PX } from "@/lib/use-min-inline-size";
 import NewBriefPage from "../new/page";
 import { Header } from "@/components/shell/Header";
 
@@ -149,12 +150,24 @@ const routes = (handlers: {
  * runner while passing locally. That is a real flake, seen once on #99's CI and green on
  * rerun.
  *
+ * The preview rail's own POST to /campaigns/preview-frame (CC1/D141) is the same class
+ * of call for the same reason: it renders a preview frame and persists nothing. Once the
+ * rail widened to every presentation and (almost) every step, it now paints — and fetches
+ * — in scenarios these refusal tests exercise (a Randomized draft whose first product has
+ * an id), so excluding it here is not a special case for one test; every test in this file
+ * that means "nothing was written" needs the same correction.
+ *
  * So these tests assert what they mean — nothing was written — rather than the stricter
  * statement that no request of any kind was issued. Any other non-GET, including a stray
  * /campaigns/generate, still fails.
  */
 const writes = (calls: readonly { url: string; method: string }[]) =>
-  calls.filter((c) => c.method !== "GET" && !c.url.includes("/campaigns/plan"));
+  calls.filter(
+    (c) =>
+      c.method !== "GET" &&
+      !c.url.includes("/campaigns/plan") &&
+      !c.url.includes("/campaigns/preview-frame"),
+  );
 
 const waitForEditorReady = async () =>
   waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).not.toBe(""));
@@ -1922,6 +1935,25 @@ describe("BriefPage — capabilities and motion", () => {
    * assertion, not a wall-clock one — the runner that produced the CI regression is
    * exactly the one a wall-clock assertion would be flaky on.
    */
+  /**
+   * CI split on this SHA (push run failed, PR run on the same commit passed):
+   * once Randomized + motion + a named product make the draft's look fully
+   * specified, the rail now paints here too (D141 — Everything is no longer
+   * excluded), and `usePreviewFrame`'s debounced fetch resolves and commits
+   * once, ~`PREVIEW_FRAME_DEBOUNCE_MS` after whichever click most recently
+   * changed the look. That commit is the one-time cost of painting a
+   * creative at all — inherent, and already covered by CC2's own
+   * acceptance criteria — not a per-toggle cost. Left unsettled, its landing
+   * inside a measured window is a race: instrumented locally (20 runs, this
+   * test's own Profiler plus a `/campaigns/preview-frame` call counter),
+   * every run showed exactly one extra commit arriving ~300-500ms after the
+   * setup clicks, always AFTER this file's fast local click resolves — which
+   * is exactly why it passed here every time and only failed on a loaded CI
+   * runner where a click's own processing can take long enough for the
+   * timer to fire first. Settling past the debounce before each reset — not
+   * raising the budget — makes the toggle's own two commits (D3-style: the
+   * dispatch, plus the dirty-flag effect) the only thing left to count.
+   */
   test("a single motion-kind toggle commits the editor at most twice, not three times (X30)", async () => {
     const user = userEvent.setup();
     routes({});
@@ -1935,6 +1967,10 @@ describe("BriefPage — capabilities and motion", () => {
     await fillValidDraft(user);
     await user.click(screen.getByText("Randomized"));
     await user.click(screen.getByRole("button", { name: "motion" }));
+    // Let the rail's own preview-frame fetch (triggered by the look becoming
+    // fully specified above) resolve and commit before it can be counted
+    // against a toggle it has nothing to do with.
+    await new Promise((r) => setTimeout(r, 400));
 
     commits = 0;
     await user.click(screen.getByRole("button", { name: "ken-burns-in" }));
@@ -1943,6 +1979,10 @@ describe("BriefPage — capabilities and motion", () => {
     // outlives the route) — never a third for a validation mirror that has no reason
     // to exist as its own commit.
     expect(commits).toBeLessThanOrEqual(2);
+    // This click also changed the previewed motion kind, re-keying the fetch
+    // (CC2) and scheduling another debounced request — settle it too before
+    // the next measurement, for the same reason as above.
+    await new Promise((r) => setTimeout(r, 400));
 
     commits = 0;
     await user.click(screen.getByRole("button", { name: "ken-burns-out" }));
@@ -3337,6 +3377,26 @@ describe("BriefPage — the preview rail (R7)", () => {
     revision: "r1",
     brief: { ...brief("ok"), output: { formats: ["static"], platforms: ["linkedin"] } },
   };
+  /**
+   * `okEntry` carries no `treatments` (classic mode with none): `previewLook`
+   * then answers `layout`/`tone` as `undefined` (pinned by
+   * `preview-props.test.ts`'s "a classic draft with no treatment draws the
+   * renderer's default"), and `PreviewFrame`'s own `cell` requires both — so
+   * `okEntry` NEVER fetches a frame at all, in ANY of these tests, mutation
+   * or not. The network-call proofs below need a brief whose look IS fully
+   * specified, or "zero calls before" and "zero calls after" would agree
+   * for a reason that has nothing to do with CC2's fix (a vacuous proof, the
+   * same trap a green suite pinning a defect sets).
+   */
+  const fetchableEntry = {
+    file: "fetch.yaml",
+    revision: "r1",
+    brief: {
+      ...brief("fetch"),
+      output: { formats: ["static"], platforms: ["linkedin"] },
+      treatments: [{ id: "t1", layout: "headline-bottom" as const, tone: "bold" as const }],
+    },
+  };
 
   test("the rail mounts beside the column on a guided step, found by its landmark (R7.3)", async () => {
     const user = userEvent.setup();
@@ -3355,7 +3415,15 @@ describe("BriefPage — the preview rail (R7)", () => {
     expect(screen.getByTestId("step-card").contains(rail)).toBe(false);
   });
 
-  test("the rail is suppressed on Review — exactly one composed preview is on screen (D43)", async () => {
+  /** A mount count, not a visible-SVG count (R7/CC1): the container query hides
+   *  the rail without unmounting it, so only a stable marker present in both
+   *  the SVG-placeholder and real-frame branches (`PreviewFrame`'s wrapper,
+   *  `data-testid="preview-frame"`) can tell "exactly one is MOUNTED" from
+   *  "exactly one is VISIBLE". happy-dom applies no CSS at all, so it cannot
+   *  distinguish the two by rendering either — a marker is the only honest way. */
+  const mountedFrameCount = () => document.querySelectorAll('[data-testid="preview-frame"]').length;
+
+  test("the rail is suppressed on Review — exactly one composed preview is on screen (D43/D141)", async () => {
     const user = userEvent.setup();
     routes({ list: () => json({ briefs: [okEntry] }) });
     renderWithRun(<Editor id="ok" />);
@@ -3363,15 +3431,14 @@ describe("BriefPage — the preview rail (R7)", () => {
     await user.click(segments()[reviewIndex]);
     await waitFor(() => expect(stepHeading().textContent).toBe("Review"));
 
+    // D141 amends D43's "Guided only" clause away, but Review's own exclusion
+    // is untouched: the step still carries its own frame (`ReviewStep`), so
+    // the rail must not ALSO mount one — the COUNT invariant D43 protects.
     expect(screen.queryByRole("complementary", { name: messages.previewLegend })).toBeNull();
-    // The figure owns Review: the brief's headline is drawn by exactly one creative.
-    const headlineCreatives = Array.from(document.querySelectorAll("svg")).filter((el) =>
-      el.textContent?.includes("Hi"),
-    );
-    expect(headlineCreatives).toHaveLength(1);
+    expect(mountedFrameCount()).toBe(1);
   });
 
-  test("the rail is absent in Everything — Guided only (D43)", async () => {
+  test("the rail now appears in Everything too — the Guided-only clause D141 drops (D43/D141)", async () => {
     const user = userEvent.setup();
     routes({ list: () => json({ briefs: [okEntry] }) });
     renderWithRun(<Editor id="ok" />);
@@ -3379,10 +3446,21 @@ describe("BriefPage — the preview rail (R7)", () => {
 
     await user.click(screen.getByRole("button", { name: messages.presentationEverything }));
     await waitFor(() => expect(document.getElementById("products")).toBeTruthy());
-    expect(screen.queryByRole("complementary", { name: messages.previewLegend })).toBeNull();
+
+    // The clause this test used to pin ("absent in Everything") is exactly the
+    // one D141 drops: the rail now mounts here too. The COUNT invariant still
+    // holds — `LayoutSection` also renders inline in Everything, but with its
+    // own `preview` prop omitted (defaults false), so this rail's frame is the
+    // only composed preview on screen.
+    const rail = screen.getByRole("complementary", { name: messages.previewLegend });
+    expect(rail).toBeTruthy();
+    expect(mountedFrameCount()).toBe(1);
+    // Everything has no step cursor — `stepIndex` is stale outside Guided — so
+    // the rail's own step readout must not show a guided cursor here (D141).
+    expect(within(rail).queryByText(/ \/ /)).toBeNull();
   });
 
-  test("a brief with nothing to draw renders no rail (D26, M3)", async () => {
+  test("a brief with nothing to draw shows the rail's empty state, not no rail (D142)", async () => {
     const user = userEvent.setup();
     routes({ list: () => json({ briefs: [okEntry] }) });
     renderWithRun(<Editor id="ok" />);
@@ -3397,10 +3475,37 @@ describe("BriefPage — the preview rail (R7)", () => {
     await user.click(screen.getAllByRole("button", { name: messages.productRemove })[0]);
     await user.click(screen.getAllByRole("button", { name: messages.productRemove })[0]);
 
-    // No product, no preview — the dock never invents a creative to fill the slot.
-    await waitFor(() =>
-      expect(screen.queryByRole("complementary", { name: messages.previewLegend })).toBeNull(),
-    );
+    // D142 — the pre-D142 behaviour this test used to pin was "no rail at
+    // all"; now the landmark STAYS and names the missing PRODUCT ID, never
+    // "add a product" (the Products step already shows a stub — the removal
+    // above leaves exactly one, freshly blank) and never a fabricated
+    // placeholder creative (D26).
+    await waitFor(() => {
+      const rail = screen.getByRole("complementary", { name: messages.previewLegend });
+      expect(within(rail).getByText(messages.previewNeedsProductId)).toBeTruthy();
+    });
+    expect(mountedFrameCount()).toBe(0);
+  });
+
+  test("the empty state in Everything also names the missing id, and still has no step cursor (D142/D141)", async () => {
+    const user = userEvent.setup();
+    routes({ list: () => json({ briefs: [okEntry] }) });
+    renderWithRun(<Editor id="ok" />);
+    await adopt(user, "ok");
+
+    await user.click(screen.getByRole("button", { name: messages.presentationEverything }));
+    await waitFor(() => expect(document.getElementById("products")).toBeTruthy());
+    await user.click(screen.getAllByRole("button", { name: messages.productRemove })[0]);
+    await user.click(screen.getAllByRole("button", { name: messages.productRemove })[0]);
+
+    await waitFor(() => {
+      const rail = screen.getByRole("complementary", { name: messages.previewLegend });
+      expect(within(rail).getByText(messages.previewNeedsProductId)).toBeTruthy();
+      // D141 — no step cursor outside Guided, whether the rail shows the
+      // dock or (D142) the empty state.
+      expect(within(rail).queryByText(/ \/ /)).toBeNull();
+    });
+    expect(mountedFrameCount()).toBe(0);
   });
 
   test("the two views are exclusive: the eye shows the preview, the code glyph shows the YAML (D61)", async () => {
@@ -3425,6 +3530,125 @@ describe("BriefPage — the preview rail (R7)", () => {
     await user.click(eye());
     expect(within(rail).getByText(messages.previewLegend)).toBeTruthy();
     expect(within(rail).queryByText(/targetRegion: /)).toBeNull();
+  });
+
+  /**
+   * CC1 mutation (c): a memo boundary that (wrongly) covered the YAML view
+   * along with the preview would leave this reading the brief's ORIGINAL
+   * `targetAudience`, not the edit — this is the assertion that catches it.
+   */
+  test("the YAML view is never memoised with the preview — a look-preserving edit still shows there", async () => {
+    const user = userEvent.setup();
+    routes({ list: () => json({ briefs: [okEntry] }) });
+    renderWithRun(<Editor id="ok" />);
+    await adopt(user, "ok");
+
+    // `targetAudience` is deliberately outside the preview's own memo key
+    // (CC2: it changes nothing the compositor reads) — exactly the field a
+    // wrongly-shared memo would fail to reflect.
+    await user.type(screen.getByLabelText(messages.targetAudienceLabel), " plus more");
+
+    const rail = preview();
+    await user.click(within(rail).getByRole("button", { name: messages.previewRailYamlView }));
+    expect(within(rail).getByText(/targetAudience: a plus more/)).toBeTruthy();
+  });
+
+  /** POST calls to the preview-frame route specifically — never conflated with
+   *  the plan-debounce's own POST or any other traffic `routes()` records. */
+  const previewFetchCalls = (calls: readonly { url: string; method: string }[]) =>
+    calls.filter((c) => c.url.includes("/campaigns/preview-frame"));
+
+  /** Comfortably past `PREVIEW_FRAME_DEBOUNCE_MS` (300 ms). */
+  const outlastDebounce = () => new Promise((r) => setTimeout(r, 400));
+
+  test("a look-preserving keystroke — typing in Target Audience — issues zero /preview-frame calls (CC2)", async () => {
+    const user = userEvent.setup();
+    const calls = routes({ list: () => json({ briefs: [fetchableEntry] }) });
+    renderWithRun(<Editor id="fetch" />);
+    await adopt(user, "fetch");
+    // Let the mount's own (legitimate) fetch settle first — the assertion
+    // below is about the EDIT, never the initial paint. Asserted (not just
+    // assumed): a brief whose look is unspecified (`okEntry`, elsewhere in
+    // this file) never fetches at all, which would make "zero before, zero
+    // after" agree for a reason that has nothing to do with the fix.
+    await outlastDebounce();
+    const before = previewFetchCalls(calls).length;
+    expect(before).toBeGreaterThan(0);
+
+    // `toBrief(state)` builds a new `brief` object on every keystroke
+    // (object identity always changes), but `targetAudience` touches
+    // nothing the compositor reads — the fetch key (CC2) must see through
+    // that and issue NOTHING MORE, not merely "fewer" requests.
+    await user.type(screen.getByLabelText(messages.targetAudienceLabel), " who hike on weekends");
+    await outlastDebounce();
+
+    expect(previewFetchCalls(calls).length).toBe(before);
+  });
+
+  test("zero /preview-frame calls while the YAML view is showing, even for an edit that would otherwise refetch", async () => {
+    const user = userEvent.setup();
+    const calls = routes({ list: () => json({ briefs: [fetchableEntry] }) });
+    renderWithRun(<Editor id="fetch" />);
+    await adopt(user, "fetch");
+    await outlastDebounce();
+    expect(previewFetchCalls(calls).length).toBeGreaterThan(0); // the mount's own fetch actually happened
+
+    await user.click(within(preview()).getByRole("button", { name: messages.previewRailYamlView }));
+    const before = previewFetchCalls(calls).length;
+
+    // The headline (`campaignMessage`) rides the compositor's `message` field
+    // (`PreviewCreativeFrameUseCase.buildCompositeRequest`) — an edit that
+    // WOULD refetch in the preview view (proved by the sibling test below,
+    // which makes the same edit there). While the rail's mounted body is the
+    // YAML `<pre>`, `PreviewDock` (and the `usePreviewFrame` inside it) is not
+    // mounted at all, so nothing can fetch regardless of what changes.
+    await user.click(segments()[1]);
+    await waitFor(() => expect(screen.getByLabelText(messages.headlineLabel)).toBeTruthy());
+    await user.type(screen.getByLabelText(messages.headlineLabel), "!");
+    await outlastDebounce();
+
+    expect(previewFetchCalls(calls).length).toBe(before);
+  });
+
+  test("editing the headline in the PREVIEW view does refetch — the sibling proof that the YAML test above is not vacuous", async () => {
+    const user = userEvent.setup();
+    const calls = routes({ list: () => json({ briefs: [fetchableEntry] }) });
+    renderWithRun(<Editor id="fetch" />);
+    await adopt(user, "fetch");
+    await outlastDebounce();
+    const before = previewFetchCalls(calls).length;
+    expect(before).toBeGreaterThan(0);
+
+    await user.click(segments()[1]);
+    await waitFor(() => expect(screen.getByLabelText(messages.headlineLabel)).toBeTruthy());
+    await user.type(screen.getByLabelText(messages.headlineLabel), "!");
+    await outlastDebounce();
+
+    // The message rides the compositor's request (CC2's fetch key includes
+    // it) — unlike targetAudience, this DOES fire another request.
+    expect(previewFetchCalls(calls).length).toBeGreaterThan(before);
+  });
+
+  test("nothing fetches below the breakpoint, though the rail still mounts (CC2)", async () => {
+    const originalInnerWidth = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", { value: 500, configurable: true });
+    try {
+      const user = userEvent.setup();
+      const calls = routes({ list: () => json({ briefs: [fetchableEntry] }) });
+      renderWithRun(<Editor id="fetch" />);
+      await adopt(user, "fetch");
+      await outlastDebounce();
+
+      // D43/D141's count invariant is about MOUNTING, not CSS visibility —
+      // the rail (and its landmark) stays mounted below the breakpoint so a
+      // resize back above it does not pay a fresh debounce. Only the fetch
+      // stops: `useMinInlineSize` seeds `false` from this narrow
+      // `window.innerWidth`, and the rail withholds `brief` from the dock.
+      expect(preview()).toBeTruthy();
+      expect(previewFetchCalls(calls).length).toBe(0);
+    } finally {
+      Object.defineProperty(window, "innerWidth", { value: originalInnerWidth, configurable: true });
+    }
   });
 
   test("the rail remembers its last view across a remount", async () => {
@@ -3494,6 +3718,31 @@ describe("BriefPage — the preview rail (R7)", () => {
     // browser matrix in the R7 plan §4 records the layout half the suite cannot.
     expect(root.querySelector('[class*="container-type"]')).not.toBeNull();
     expect(rail.className).toContain("[@container(min-width:56rem)]:flex");
+  });
+
+  /**
+   * CC2's own gap, closed on review: the CSS breakpoint (this class) and its
+   * JS mirror (`PREVIEW_RAIL_MIN_INLINE_PX`, `use-min-inline-size.ts`) were
+   * asserted independently — this test and the hook's own unit test each
+   * checked their own side, so changing 56rem to 64rem, or 896 to 1024,
+   * left every test green while the rail's visibility and its fetch gate
+   * quietly disagreed. This DERIVES one from the other instead of
+   * restating both, so either drifting alone fails exactly this test.
+   */
+  test("the CSS breakpoint and its JS mirror cannot drift apart silently", async () => {
+    const user = userEvent.setup();
+    routes({ list: () => json({ briefs: [okEntry] }) });
+    renderWithRun(<Editor id="ok" />);
+    await adopt(user, "ok");
+
+    const rail = preview();
+    const match = rail.className.match(/@container\(min-width:(\d+)rem\)/);
+    expect(match).not.toBeNull();
+    const rem = Number(match![1]);
+    // 16px root — the same assumption `PREVIEW_RAIL_MIN_INLINE_PX`'s own
+    // comment names, so this multiplication is not a second, independent
+    // guess at the root size.
+    expect(rem * 16).toBe(PREVIEW_RAIL_MIN_INLINE_PX);
   });
 });
 
@@ -3578,7 +3827,13 @@ describe("BriefPage — the Layout step (T7)", () => {
     await waitFor(() => expect(stepHeading().textContent).toBe("Layout"));
   });
 
-  test("the rail is suppressed on the Layout step — exactly one composed preview is on screen (D43/D63)", async () => {
+  // D141 amends D43's "Guided only" clause away, but the Layout exclusion is
+  // untouched: it is the one exclusion that survives in EVERY presentation
+  // (Everything already renders `LayoutSection` with `preview` omitted, and a
+  // future `studio` must follow the same pattern — see `BriefEditor.tsx`'s
+  // rail comment beside `railCursorIndex`), because the step always carries
+  // its own frame — one slot is still the whole rule (D43's count invariant).
+  test("the rail is suppressed on the Layout step — exactly one composed preview is on screen (D43/D63/D141)", async () => {
     const user = userEvent.setup();
     routes({ list: () => json({ briefs: [okEntry] }) });
     renderWithRun(<Editor id="ok" />);
