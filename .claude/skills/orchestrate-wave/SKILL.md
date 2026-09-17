@@ -335,9 +335,14 @@ that did not happen.
    `scripts/wave-event.sh` are different tools by construction, so a rule demanding one call is
    unfollowable, and an unfollowable rule teaches that rules are optional. The property that matters
    is that **no lane is ever launched without its event already written**; the adjacency is how you
-   get there. (`dispatch-lane.sh` does emit in the same call, because it launches the CLI itself —
-   that path is the exception, not the model.) On 2026-09-16 four of five lanes ran through the `Agent`
-   tool or a direct CLI rather than `dispatch-lane.sh`, which is the only path that emits for you,
+   get there. **Do not reach for `dispatch-lane.sh` to get atomicity**: it emits and
+   launches in one call, but its detached launch is the script this skill already retires two
+   paragraphs below, and it killed every lane it started on 2026-09-13 — and again on 2026-09-16,
+   when both lanes dispatched through it wrote 0 bytes with no process while every directly-launched
+   lane that day worked. Adjacency from a direct launch is the supported shape; the script's
+   atomicity is not worth a dead lane. On 2026-09-16 four of five lanes ran through the `Agent`
+   tool or a direct CLI rather than `dispatch-lane.sh`, the only path that emits for you (and a path
+   this skill retires for other reasons),
    so the wave-status page showed **one event for the whole wave** and 30+ events had to be
    backfilled afterwards with a note that their timestamps were recording times, not event times.
    A stage with no event did not happen, and a backfilled one cannot be trusted for timing.
