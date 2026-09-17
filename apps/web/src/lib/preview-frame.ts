@@ -84,7 +84,16 @@ function toDataUrl(bytes: Uint8Array): string {
   return `data:image/png;base64,${btoa(binary)}`;
 }
 
-async function fetchPreviewFrame(
+/**
+ * One composite, one request. `usePreviewFrame` below is the debounced,
+ * always-on caller; this is the seam for a caller that must render **on
+ * explicit request only** — the template library's detail view (T-D4), where
+ * the fetch is triggered by *browsing*, so an automatic one would spend the
+ * owner's GenAI credits for a look nobody asked to see. The hook cannot serve
+ * that caller at all: it fires from a mount effect after the debounce, which
+ * is precisely the behaviour T-D4 forbids.
+ */
+export async function fetchPreviewFrame(
   brief: CampaignBrief,
   cell: PreviewCellSelection,
   signal: AbortSignal,

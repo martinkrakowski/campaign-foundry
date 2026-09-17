@@ -117,16 +117,66 @@ Shared gate: CI. Each lane names the fault that must turn it **red**:
 
 ## 7. Premises
 
-```premise TM1
-# Nothing in the web app talks to the template routes. Flips when TM1 lands a client.
-# Greps the WEB app only: the API routes and their tests reference the path and would
-# make a repo-wide probe pass on a tree with no client at all. Measured: ~40 ms.
-! grep -rqn 'campaigns/templates' apps/web/src
-```
+`premise TM1` and `premise TM2` retired: **TM1–TM4 shipped in one PR.** The
+client is `apps/web/src/lib/templates-api.ts` (`listTemplates` / `getTemplate`,
+plus the pure `latestPerId` / `versionsOf` / `pinnableTemplate` the modal reads),
+and the component is `apps/web/src/components/shell/TemplateLibrary.tsx`, mounted
+once in `(shell)/layout.tsx` beside `BriefPicker` and `CreateCampaignDialog`. Both
+fences probed exactly what left: the grep now hits the client, and the file exists.
 
-```premise TM2
-# There is no template library component. The probe is the FILE, not the word
-# "template", which appears in dozens of places (TemplateSection, brief-template,
-# CAMPAIGN_TYPE_PRESETS) and would never flip. Measured: ~5 ms.
-! test -f apps/web/src/components/shell/TemplateLibrary.tsx
-```
+Both premises were observed holding on `484fdf6b` before the lane started — the
+grep exited 1 with the API routes and their two test files as the only repo-wide
+hits, which is the state §0's table describes.
+
+**Five things this lane found, recorded here rather than folded into the code:**
+
+1. **A unit sort cannot reorder anything, so the listing sorts by version
+   instead.** T-D3 recommends "sorts by name and unit". `ADVERTISING_UNITS` has
+   exactly **one** member (`"standard-web"`, and `advertising-units.ts` states
+   that one member is correct today), and the client refuses any value outside
+   the vocabulary — so every record the library can serve carries the same unit
+   and a unit sort is a control with nothing to do. It would also make §5's own
+   DoD unsatisfiable: *"sort changes order … asserted on rendered order, not on
+   internal state"* has nothing to assert. Version took its place; the unit still
+   shows on every card. **T-D3's grouping half is unchanged** — `creativeType`
+   does discriminate, and the many-to-many through `CAMPAIGN_TYPE_PRESETS` is
+   named in the component rather than added to the record, as T-D3 asks.
+2. **Only a canonical record is pinnable, and that is a domain limit, not a
+   modal one.** `BriefTemplate.id` is `CanonicalTemplateId` and
+   `isBriefTemplate` additionally requires
+   `CANONICAL_TEMPLATES[creativeType].id === id`, so a library grown past the
+   canonical three would serve records **no brief can carry**. Today that is
+   invisible: `FsTemplateStore` is seeded from `CANONICAL_TEMPLATES` and nothing
+   else, so every live record passes. `pinnableTemplate` returns `null` for one
+   that does not, and *Use this template* refuses visibly with the reason rather
+   than casting a record through to fail at the editor's restore boundary. The
+   fix — a validated non-canonical template id — is a domain change with a
+   migration and belongs to D123's own arc, exactly where §6 puts `thumbnail`.
+3. **The pin lands on the shell's campaign, not on a mounted editor's draft.**
+   `Use this template` writes `template@version` through `setBrief`, which is the
+   campaign the left column this modal opens from displays. D35 is explicit that
+   a draft is `EditorState` and not that brief, so a pin made while the editor
+   holds unsaved edits reaches the shell and not the draft. Carrying it into the
+   draft means the create seed (`CreateCampaignInput`, `isStoredSeed`) plus a
+   reducer action on `applyPreset` — four files in the editor's lane, not this
+   one's — and it needs a coherence rule this plan has not settled (a `video`
+   template pinned into a static campaign type). Stated, not discovered later.
+4. **The detail view's render needs a brief, and borrows the open campaign's.**
+   T-D4 settles *when* the composite is requested and not *what is requested*:
+   `/preview-frame` takes `{ brief, cell }`, and a template is ownerless (D123)
+   so it can supply neither. The request is the open campaign's brief with its
+   template swapped for the record on screen, at one fixed representative look
+   (1:1, headline-top, bold) stated on screen beside the frame — a real brief,
+   where a brief invented for a library record would be the fabrication D26
+   forbids. `usePreviewFrame` could not serve this at all: it fetches from a
+   mount effect after the debounce, which is what T-D4 forbids, so
+   `fetchPreviewFrame` is now exported as the one-shot seam.
+5. **Provenance needs a third state, not two.** T-D5 says "nothing when no
+   campaign has pinned that template yet" — but the brief listing can also
+   *fail*, and reading that as "nothing has used it" is the same conflation the
+   list route refuses. The detail view distinguishes three: unknown (the listing
+   failed, said out loud), none (nothing rendered, per T-D5), and named. The
+   match is on **id and version**, because a campaign pinned one version and
+   another version of the same id is a different record. `listBriefs` validates
+   `file` and `products` and not `template`, so a stored brief with no template
+   is read as pinning nothing rather than dereferenced.

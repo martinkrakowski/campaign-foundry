@@ -18,6 +18,17 @@ interface CreateCampaignContextValue {
   openCreateDialog: () => void;
   closeCreateDialog: () => void;
   /**
+   * TM4 — the template library's open state, held here for the same reason the
+   * create dialog's is: the left column's entry point runs its own gesture and
+   * then asks for the overlay, so the state cannot live in the overlay. It sits
+   * beside `createDialogOpen` rather than in the run context because picking a
+   * template is part of the create moment the owner's flow describes
+   * (static/motion → pick a template), not part of a run.
+   */
+  templateLibraryOpen: boolean;
+  openTemplateLibrary: () => void;
+  closeTemplateLibrary: () => void;
+  /**
    * Bumped every time a seed is published. The editor reads this as the cue to spend
    * the baton with `takeSeed()` — the provider never consumes the key itself, because
    * a full page load on `/brief/new` must still find it.
@@ -35,20 +46,34 @@ const CreateCampaignContext = createContext<CreateCampaignContextValue>({
   createDialogOpen: false,
   openCreateDialog: () => {},
   closeCreateDialog: () => {},
+  templateLibraryOpen: false,
+  openTemplateLibrary: () => {},
+  closeTemplateLibrary: () => {},
   seedVersion: 0,
 });
 
 export function CreateCampaignProvider({ children }: { children: ReactNode }) {
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [templateLibraryOpen, setTemplateLibraryOpen] = useState(false);
   const [seedVersion, setSeedVersion] = useState(0);
   // The writer cannot hear a `storage` event for its own write, so the provider
   // learns of a seed through the module's subscriber set and republishes it here.
   useEffect(() => subscribeToSeed(() => setSeedVersion((version) => version + 1)), []);
   const openCreateDialog = useCallback(() => setCreateDialogOpen(true), []);
   const closeCreateDialog = useCallback(() => setCreateDialogOpen(false), []);
+  const openTemplateLibrary = useCallback(() => setTemplateLibraryOpen(true), []);
+  const closeTemplateLibrary = useCallback(() => setTemplateLibraryOpen(false), []);
   return (
     <CreateCampaignContext.Provider
-      value={{ createDialogOpen, openCreateDialog, closeCreateDialog, seedVersion }}
+      value={{
+        createDialogOpen,
+        openCreateDialog,
+        closeCreateDialog,
+        templateLibraryOpen,
+        openTemplateLibrary,
+        closeTemplateLibrary,
+        seedVersion,
+      }}
     >
       {children}
     </CreateCampaignContext.Provider>
