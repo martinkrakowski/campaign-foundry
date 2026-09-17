@@ -4,7 +4,7 @@
   "mutations": [
     {
       "file": "apps/web/src/lib/preview-frame.ts",
-      "before": "  const briefFetchKey = brief === undefined || cell === undefined ? undefined : previewFetchKey(brief, cell.productId);",
+      "before": "  const briefFetchKey =\n    brief === undefined || cell === undefined ? undefined : previewFetchKey(brief, cell.productId);",
       "after": "  const briefFetchKey = brief;",
       "because": "CC2's fix is keying the fetch on the brief's CONTENT (previewFetchKey), not its object identity. Restoring identity as the key reintroduces the defect: toBrief(state) builds a new brief object on every keystroke, so a look-preserving edit (typing in targetAudience) fires a fresh /preview-frame request again. Caught by a CALL COUNT, not a mount count.",
       "command": [
