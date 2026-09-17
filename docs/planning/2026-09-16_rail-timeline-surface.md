@@ -159,6 +159,27 @@ Every class below already exists on the Tailwind scale in `apps/web/tailwind.con
 
 Playhead readout text is `00:06.40` — seconds in the playback timecode rounded **down** (DESIGN.md does not state this for the tape; VE-D6 rounds the *frame index* with `round`. The tape's label is the operator-facing clock and follows the editor's existing `fmt` in PreviewDock if one exists; if PreviewDock shows a raw range value, the tape matches that, it does not invent a third format). Implementer checks PreviewDock's visible number and uses the same function, exported if needed.
 
+### 3.3a The range contract — taken from the shipped control, not invented
+
+**Corrected 2026-09-17 after review.** An earlier draft of this plan said the live value arrives on `input` and the
+commit on `change`. That is wrong in React, where `onChange` on a range fires continuously through the drag — so a
+"commit on change" tape would issue a `/preview-frame` request per pointermove and break the very criterion TS1 is
+measured against (§0 H3, CC2).
+
+The shipped control already solves this, twenty lines from where the tape will mount
+(`PreviewDock.tsx:270-283`), and TS1 copies it exactly rather than inventing a third convention:
+
+```tsx
+value={clampedScrubSec}          // the LIVE second, so the thumb tracks the finger
+onChange={(e) => setScrubSec(Number(e.target.value))}   // live — fires all through the drag
+onPointerUp={handleCommit}       // commit — pointer release
+onKeyUp={handleCommit}           // commit — keyboard, and NOT optional
+```
+
+`onKeyUp` is the half a reviewer usually misses: `onPointerUp` never fires for an arrow key, so a pointer-only
+commit leaves a keyboard user able to move the thumb and unable to move the frame. Both handlers read
+`e.currentTarget.value`; neither recomputes the second from a pointer coordinate.
+
 ### 3.4 Component seam
 
 New file: `apps/web/src/components/campaign/TimelineTape.tsx`. Not `packages/ui` — the tape knows beat windows, scenes and audio captions, which are campaign types. `packages/ui` keeps DurationStrip.
@@ -483,15 +504,25 @@ atSec={hasMotion ? clampedCommitted : undefined}
   scrubSec={clampedLive}
   committedSec={clampedCommitted}
   selectedBeatIndex={selectedBeat}  // D139 ephemeral
-  onScrubLive={setScrubSec}
-  onScrubCommit={(sec) => {
-    setScrubSec(sec);
-    setCommittedSec(sec);
-  }}
+  onScrubLive={setScrubSec}              // a setState function is already stable
+  onScrubCommit={handleScrubCommit}      // useCallback — see below
   onSelectBeat={setSelectedBeat}
   host={railVisible ? "rail" : "section"}
 />
 ```
+
+**Every callback must be referentially stable**, or the memo boundary CC1 built is defeated by this component:
+
+```ts
+const handleScrubCommit = useCallback((sec: number) => {
+  setScrubSec(sec);
+  setCommittedSec(sec);
+}, []);   // both setters are stable; no dependency is needed
+```
+
+An inline arrow here would allocate a new function on every keystroke, so a `memo`-wrapped tape would re-render on
+a keystroke it does not draw — re-opening CC2's cost defect through a new component. (An earlier draft of this
+section wrote the arrow inline; review caught it.)
 
 `resolvedBeats` is memoised on `state.timeline` + `durationSec` + `shortestDurationSec`. `underFloor` is `dwellSec < MIN_DWELL_SEC - DWELL_TOLERANCE` using the domain's own slack, the way ProportionBar already does — do not write `1.2` in the tape.
 
@@ -538,7 +569,7 @@ happy-dom does no layout (DESIGN.md §8). Pixel clearance of the end pad is a **
 
 - The tape is absent when `hasMotion` is false.
 - `resolveTimeline` windows become clip `style.width` / `style.left` strings that contain the computed seconds (string match on the `calc(...)`, not getBoundingClientRect).
-- `onScrubLive` fires on `input`; `onScrubCommit` fires on `change`. A test that mocks fetch asserts the live path does not call it.
+- `onScrubLive` fires on **`onChange`**; `onScrubCommit` fires on **`onPointerUp` and `onKeyUp`**. A test that mocks fetch asserts the live path does not call it, and a **keyboard** test asserts arrow-then-keyup commits — `onPointerUp` never fires for a key press, so a pointer-only commit would leave keyboard users unable to move the frame at all.
 - Selecting beat 2 sets `aria-pressed` on that button only.
 - An under-floor beat sets `aria-invalid` and points `aria-describedby` at the status node.
 - No `EditorAction` is dispatched from the tape module (import graph).
@@ -579,7 +610,7 @@ CC5's existing TL1 fence (`PreviewDock.tsx` still declaring `[xSec, setXSec] = u
 ## 10. Definition of done
 
 1. A `short-video` brief shows the tape. A still-only brief does not.
-2. Dragging the range moves the diamond on every `input` and fetches a frame only on `change`. The PNG is the encoded frame at that second (VE-D6, already tested).
+2. Dragging the range moves the diamond on every **`onChange`** (live) and fetches a frame only on **`onPointerUp` / `onKeyUp`** (commit) — see §3.3a; "commit on change" would fetch per pointermove. A keyboard test covers the `onKeyUp` half. The PNG is the encoded frame at that second (VE-D6, already tested).
 3. Scrolling the tape to the end shows the last tick, the video clip's right edge, and the playhead at `t = durationSec` — none of them cropped by the well's radius. Recorded as a screenshot in the PR on a 390-wide and a 1280-wide viewport.
 4. Fit mode shows the full duration without a horizontal scrollbar on a 390-wide section host (D146) and on the rail at `56rem`. Zoom in introduces a scrollbar; the page `body` still does not scroll sideways.
 5. Light and dark both keep a 3:1 playhead-readout edge (`border-border-control`) and a readable video clip (`brand-on-tint` on `brand-tint`).
@@ -605,8 +636,8 @@ Until (3) and (4) this is the HTML sketch with tokens. Until (2) it is a picture
 
 | ID | Question | Blocks | Notes |
 |---|---|---|---|
-| **D146** | Section host under `56rem`, or rail-only? | TS2 | Recommended: section host. If refused, the mobile brief is unanswered and should be refused explicitly, not left implicit. |
-| **D147** | Zoom persistence | TS1 (default is implementable either way) | Recommended: ephemeral, fit on load. |
+| **D146** | Section host under `56rem`, or rail-only? | TS2 | **Adopted 2026-09-17: section host.** The risk it retires: a tape living only in a CSS-hidden rail answers the mobile brief on paper and not on a phone. |
+| **D147** | Zoom persistence | TS1 | **Adopted 2026-09-17: ephemeral, fit on load.** Zoom is not a property of the campaign; persisting it would surprise a second operator on the same brief. |
 | **TS-Q1** | Does the video lane show the *key beat* as a tick on the filmstrip, or is the existing poster-frame toggle in the form enough? | none | Recommended: form only in TS1. A tick is decoration that would need a stable name if it became a control. |
 
 VE-Q5 (speech vendor) and VE-D11 (footage) stay in the video-editing plan. They do not grow lanes here.
