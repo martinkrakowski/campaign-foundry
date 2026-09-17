@@ -29,12 +29,34 @@ export interface OptionTileProps {
   /** The muted caption line (e.g. a count); decorative. */
   readonly meta?: string;
   /**
-   * Why this option is unavailable, or anything else assistive technology must
-   * hear. Exposed via `aria-describedby`, which — unlike content — never joins
-   * the accessible name, so the name stays exactly `value`. Warning-toned, like
-   * `AxisCard`'s: a gate's reason is never neutral prose.
+   * Why this option is unavailable. Exposed via `aria-describedby`, which —
+   * unlike content — never joins the accessible name, so the name stays exactly
+   * `value`. Rendered **visibly**, warning-toned, like `AxisCard`'s: a gate's
+   * reason is never neutral prose.
+   *
+   * It is not the slot for "anything else assistive technology must hear" —
+   * that is `srDescription` below. Text that is not a refusal, put here, is
+   * painted in the refusal colour on a tile where nothing is wrong.
    */
   readonly description?: string;
+  /**
+   * What assistive technology must hear that the screen already shows — a
+   * mirror, not a refusal. Rendered `sr-only` and joined into the same
+   * `aria-describedby`, after `description`'s id when both are set, so the
+   * announcement order is the DOM order is the visual order.
+   *
+   * It exists because the tile aria-hides every decorative slot (`children`,
+   * `preview`, `tag`, `blurb`, `meta`) and pins the accessible name to `value`:
+   * a caller whose facts live in those slots has no other way to reach the
+   * accessibility tree. `description` is not that way — it is the gate's
+   * reason, and it is painted in the refusal colour.
+   *
+   * `AxisCard`, `PlatformCard` and `PreviewCard` share this tile's name
+   * contract but deliberately not this slot: no caller of theirs puts
+   * substantive facts into an aria-hidden slot today, and an unused prop is
+   * surface without a defect behind it. Give them the same slot when one does.
+   */
+  readonly srDescription?: string;
   readonly disabled?: boolean;
 }
 
@@ -66,16 +88,28 @@ export function OptionTile({
   blurb,
   meta,
   description,
+  srDescription,
   disabled = false,
 }: OptionTileProps): ReactNode {
-  const descriptionId = `option-tile-description-${useId()}`;
+  const id = useId();
+  const descriptionId = `option-tile-description-${id}`;
+  const srDescriptionId = `option-tile-sr-description-${id}`;
+  // One slot still yields one bare id, not a one-element join: every caller of
+  // `aria-describedby` in this repo's tests and in the platform resolves it with
+  // `getElementById`, and a join is only correct when there really are two.
+  const describedBy = [
+    description === undefined ? null : descriptionId,
+    srDescription === undefined ? null : srDescriptionId,
+  ]
+    .filter((candidate) => candidate !== null)
+    .join(" ");
   const dim = selected ? "opacity-100 saturate-100" : "opacity-[0.55] saturate-[0.45]";
   return (
     <button
       type="button"
       aria-label={value}
       aria-pressed={selected}
-      {...(description === undefined ? {} : { "aria-describedby": descriptionId })}
+      {...(describedBy === "" ? {} : { "aria-describedby": describedBy })}
       disabled={disabled}
       onClick={() => onToggle(value)}
       className={cn(
@@ -155,6 +189,14 @@ export function OptionTile({
         {description === undefined ? null : (
           <span id={descriptionId} className="text-[11px] leading-snug text-warning">
             {description}
+          </span>
+        )}
+        {srDescription === undefined ? null : (
+          // `sr-only` is absolutely positioned, so it joins no flex row and
+          // costs the tile no gap — the house idiom (chip-group.tsx:97,
+          // swatch-picker.tsx:171, world-map.tsx:166).
+          <span id={srDescriptionId} className="sr-only">
+            {srDescription}
           </span>
         )}
       </span>
