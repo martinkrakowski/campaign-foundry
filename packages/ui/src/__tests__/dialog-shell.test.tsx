@@ -37,11 +37,7 @@ describe("DialogShell and DrawerShell anatomy", () => {
 
     render(
       <DialogShell open={true} onClose={onClose} ariaLabel="Test Dialog">
-        <DialogHead
-          title="Dialog Title"
-          description="Dialog Description"
-          onClose={onClose}
-        />
+        <DialogHead title="Dialog Title" description="Dialog Description" onClose={onClose} />
         <DialogBody>
           <button type="button">Inside Button</button>
         </DialogBody>

@@ -41,7 +41,10 @@ const request = (over: Partial<CompositeRequest> = {}): CompositeRequest => ({
   ...over,
 });
 
-type TimelineRequest = CompositeRequest & { readonly durationSec?: number; readonly timeline?: CopyTimeline };
+type TimelineRequest = CompositeRequest & {
+  readonly durationSec?: number;
+  readonly timeline?: CopyTimeline;
+};
 
 const timeline = (beats: string[], keyBeat = 1): CopyTimeline => ({
   beats: beats.map((text) => ({ text, weight: 1 })),
@@ -77,7 +80,12 @@ interface Blit {
  * raster bytes — the state controls (letterSpacing, align) are asserted on what
  * was actually drawn, never on configuration.
  */
-async function blit(req: CompositeRequest, t = 1, motion?: Parameters<typeof NodeCanvasCompositor.draw>[3], copyT?: number): Promise<Blit> {
+async function blit(
+  req: CompositeRequest,
+  t = 1,
+  motion?: Parameters<typeof NodeCanvasCompositor.draw>[3],
+  copyT?: number,
+): Promise<Blit> {
   const prepared = await NodeCanvasCompositor.prepare(req);
   const canvas = createCanvas(prepared.width, prepared.height);
   const ctx = canvas.getContext("2d");
@@ -100,7 +108,12 @@ async function blit(req: CompositeRequest, t = 1, motion?: Parameters<typeof Nod
     // The five-arg form (image, x, y, w, h) is the layer blit; the logo is the
     // last image drawn on every frame.
     if (args.length >= 5 && typeof args[1] === "number") {
-      drawImage.push({ x: args[1], y: args[2], width: args[3] as number, height: args[4] as number });
+      drawImage.push({
+        x: args[1],
+        y: args[2],
+        width: args[3] as number,
+        height: args[4] as number,
+      });
     }
     return origBlit(...args);
   }) as typeof ctx.drawImage;
@@ -158,11 +171,10 @@ describe("NodeCanvasCompositor style block (T5) — the still path", () => {
   });
 
   test("lineHeight spaces the drawn lines at fontSize × the styled multiple", async () => {
-    const message = "Stay wild, stay hydrated, and never stop exploring the trail ahead of you today";
+    const message =
+      "Stay wild, stay hydrated, and never stop exploring the trail ahead of you today";
     const insets = { top: 100, right: 0, bottom: 400, left: 0 };
-    const styled = await blit(
-      request({ message, safeInsets: insets, style: { lineHeight: 1.5 } }),
-    );
+    const styled = await blit(request({ message, safeInsets: insets, style: { lineHeight: 1.5 } }));
     expect(styled.fillText.length).toBeGreaterThanOrEqual(2);
     const fontSize = Math.round(ratio("1:1").width * CREATIVE_GEOMETRY.headlineTypeWidthFraction);
     expect((styled.fillText[1]?.y ?? 0) - (styled.fillText[0]?.y ?? 0)).toBe(fontSize * 1.5);
@@ -221,7 +233,12 @@ describe("NodeCanvasCompositor style block (T5) — the timeline path (F5a)", ()
     // The timeline path measures on a throwaway 1×1 context and drawBeat re-sets
     // ctx.font — a ctx-state control applied only on the still path would
     // silently drop here. Assert the ctx state at the blit AND the raster.
-    const spaced = await blit(timelineRequest({ style: { letterSpacing: 0.1 } }), 0.5, undefined, 0.5);
+    const spaced = await blit(
+      timelineRequest({ style: { letterSpacing: 0.1 } }),
+      0.5,
+      undefined,
+      0.5,
+    );
     const fontSize = Math.round(ratio("1:1").width * CREATIVE_GEOMETRY.headlineTypeWidthFraction);
     expect(spaced.fillText.length).toBeGreaterThan(0);
     for (const op of spaced.fillText) {
@@ -287,7 +304,9 @@ describe("the overlap-snap box is align-aware (T5 finding 1)", () => {
       insets: { top: 0, right: 60, bottom: 0, left: 40 },
     };
     const asLayout = (align: ResolvedStyle["align"]): Parameters<typeof headlineBoxX>[0] =>
-      ({ ...base, style: { ...DEFAULT_STYLE, align } }) as unknown as Parameters<typeof headlineBoxX>[0];
+      ({ ...base, style: { ...DEFAULT_STYLE, align } }) as unknown as Parameters<
+        typeof headlineBoxX
+      >[0];
     const centerX = 960;
     const boxWidth = 100;
     expect(headlineBoxX(asLayout("left"), centerX, boxWidth)).toBe(40);
@@ -297,7 +316,13 @@ describe("the overlap-snap box is align-aware (T5 finding 1)", () => {
 
   test("a left-aligned headline overlapping the logo's rest zone snaps (still)", async () => {
     const captured = await blit(
-      request({ layout: "headline-top", canvas: { ratio: r.value }, message: long, safeInsets: insets, style: { align: "left" } }),
+      request({
+        layout: "headline-top",
+        canvas: { ratio: r.value },
+        message: long,
+        safeInsets: insets,
+        style: { align: "left" },
+      }),
     );
     const logo = logoOf(captured);
     expect(captured.fillText[0]?.textAlign).toBe("left");
@@ -306,7 +331,13 @@ describe("the overlap-snap box is align-aware (T5 finding 1)", () => {
 
   test("the mirrored right-aligned headline snaps too (still)", async () => {
     const captured = await blit(
-      request({ layout: "headline-top", canvas: { ratio: r.value }, message: long, safeInsets: insets, style: { align: "right" } }),
+      request({
+        layout: "headline-top",
+        canvas: { ratio: r.value },
+        message: long,
+        safeInsets: insets,
+        style: { align: "right" },
+      }),
     );
     const logo = logoOf(captured);
     expect(logo.y).toBe(r.height - insets.bottom - logo.height);
@@ -332,7 +363,13 @@ describe("the overlap-snap box is align-aware (T5 finding 1)", () => {
 
   test("the aligned box reaches the snap on a drawn timeline frame too", async () => {
     const timelineRequest: TimelineRequest = {
-      ...request({ layout: "headline-top", canvas: { ratio: r.value }, message: long, safeInsets: insets, style: { align: "left" } }),
+      ...request({
+        layout: "headline-top",
+        canvas: { ratio: r.value },
+        message: long,
+        safeInsets: insets,
+        style: { align: "left" },
+      }),
       durationSec: 8,
       timeline: { beats: [{ text: long, weight: 1 }], transition: "cut", keyBeat: 1 },
     };

@@ -85,9 +85,7 @@ function drawImageCallCount(
 
 describe("the motion path draws the logo iff logoApplied reports it (D7/F2)", () => {
   test("a timeline template with no logo layer draws no logo pixels, and reports logoApplied: false", async () => {
-    const prepared = await NodeCanvasCompositor.prepare(
-      request(templateWithoutLogo),
-    );
+    const prepared = await NodeCanvasCompositor.prepare(request(templateWithoutLogo));
     // The file loaded fine; the resolved layer list simply omits `logo`.
     expect(prepared.logo).toBeDefined();
     expect(prepared.logoApplied).toBe(false);
@@ -100,9 +98,7 @@ describe("the motion path draws the logo iff logoApplied reports it (D7/F2)", ()
   });
 
   test("a timeline template with a logo layer draws the logo, and reports logoApplied: true", async () => {
-    const prepared = await NodeCanvasCompositor.prepare(
-      request(templateWithLogo),
-    );
+    const prepared = await NodeCanvasCompositor.prepare(request(templateWithLogo));
     expect(prepared.logo).toBeDefined();
     expect(prepared.logoApplied).toBe(true);
 

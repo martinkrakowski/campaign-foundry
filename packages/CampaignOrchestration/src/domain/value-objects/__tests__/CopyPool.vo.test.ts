@@ -1,12 +1,9 @@
 import { describe, test, expect } from "vitest";
-import {
-  approvedTexts,
-  mergePool,
-  type CopyPool,
-  type CopyPoolEntry,
-} from "../CopyPool.vo.js";
+import { approvedTexts, mergePool, type CopyPool, type CopyPoolEntry } from "../CopyPool.vo.js";
 
-const entry = (over: Partial<CopyPoolEntry> & Pick<CopyPoolEntry, "id" | "text">): CopyPoolEntry => ({
+const entry = (
+  over: Partial<CopyPoolEntry> & Pick<CopyPoolEntry, "id" | "text">,
+): CopyPoolEntry => ({
   status: "approved",
   ...over,
 });
@@ -26,7 +23,12 @@ describe("approvedTexts", () => {
         pool({
           entries: [
             entry({ id: "h1", text: "Stay wild", status: "approved" }),
-            entry({ id: "h2", text: "miracle hydration", status: "rejected", reason: "prohibited" }),
+            entry({
+              id: "h2",
+              text: "miracle hydration",
+              status: "rejected",
+              reason: "prohibited",
+            }),
             entry({ id: "h3", text: "Stay hydrated", status: "approved" }),
           ],
         }),

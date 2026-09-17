@@ -17,7 +17,13 @@ export interface CopyGeneratorInput {
  *   upstream     — any other non-2xx upstream reply (502)
  *   malformed    — 2xx but the body was not the agreed JSON shape (422)
  */
-export type CopyGeneratorErrorKind = "missing_key" | "auth" | "rate_limited" | "network" | "upstream" | "malformed";
+export type CopyGeneratorErrorKind =
+  | "missing_key"
+  | "auth"
+  | "rate_limited"
+  | "network"
+  | "upstream"
+  | "malformed";
 
 export class CopyGeneratorError extends Error {
   readonly kind: CopyGeneratorErrorKind;

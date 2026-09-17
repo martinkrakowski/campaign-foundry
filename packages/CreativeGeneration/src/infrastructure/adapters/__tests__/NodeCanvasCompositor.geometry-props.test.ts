@@ -98,7 +98,11 @@ function diffColumns(a: Frame, b: Frame): number {
   for (let x = 0; x < a.width; x++) {
     for (let y = 0; y < a.height; y++) {
       const i = at(a, x, y);
-      if (a.data[i] !== b.data[i] || a.data[i + 1] !== b.data[i + 1] || a.data[i + 2] !== b.data[i + 2]) {
+      if (
+        a.data[i] !== b.data[i] ||
+        a.data[i + 1] !== b.data[i + 1] ||
+        a.data[i + 2] !== b.data[i + 2]
+      ) {
         n++;
         break;
       }
@@ -113,7 +117,11 @@ function diffRows(a: Frame, b: Frame): number {
   for (let y = 0; y < a.height; y++) {
     for (let x = 0; x < a.width; x++) {
       const i = at(a, x, y);
-      if (a.data[i] !== b.data[i] || a.data[i + 1] !== b.data[i + 1] || a.data[i + 2] !== b.data[i + 2]) {
+      if (
+        a.data[i] !== b.data[i] ||
+        a.data[i + 1] !== b.data[i + 1] ||
+        a.data[i + 2] !== b.data[i + 2]
+      ) {
         n++;
         break;
       }
@@ -127,7 +135,11 @@ function solidBrandRowsFromBottom(f: Frame): number {
   let n = 0;
   for (let y = f.height - 1; y >= 0; y--) {
     const i = at(f, Math.floor(f.width / 2), y);
-    if (f.data[i] === BRAND_RGB[0] && f.data[i + 1] === BRAND_RGB[1] && f.data[i + 2] === BRAND_RGB[2]) {
+    if (
+      f.data[i] === BRAND_RGB[0] &&
+      f.data[i + 1] === BRAND_RGB[1] &&
+      f.data[i + 2] === BRAND_RGB[2]
+    ) {
       n++;
     } else {
       break;
@@ -162,8 +174,16 @@ async function pngEqual(a: Uint8Array, b: Uint8Array): Promise<boolean> {
   ca.getContext("2d").drawImage(ia, 0, 0);
   cb.getContext("2d").drawImage(ib, 0, 0);
   return sameBytes(
-    { data: ca.getContext("2d").getImageData(0, 0, ca.width, ca.height).data, width: ca.width, height: ca.height },
-    { data: cb.getContext("2d").getImageData(0, 0, cb.width, cb.height).data, width: cb.width, height: cb.height },
+    {
+      data: ca.getContext("2d").getImageData(0, 0, ca.width, ca.height).data,
+      width: ca.width,
+      height: ca.height,
+    },
+    {
+      data: cb.getContext("2d").getImageData(0, 0, cb.width, cb.height).data,
+      width: cb.width,
+      height: cb.height,
+    },
   );
 }
 
@@ -178,11 +198,7 @@ describe("logo.width is live (C4, R-D3)", () => {
     );
     const wide = await frame(
       request({
-        template: templateWith([
-          IMAGE,
-          COPY,
-          { id: "logo", kind: "logo", props: { width: 0.32 } },
-        ]),
+        template: templateWith([IMAGE, COPY, { id: "logo", kind: "logo", props: { width: 0.32 } }]),
       }),
     );
     const baseSpan = diffColumns(base, dflt);
@@ -202,7 +218,9 @@ describe("logo.width is live (C4, R-D3)", () => {
     const cb = createCanvas(b.width, b.height).getContext("2d");
     NodeCanvasCompositor.draw(ca, a, 1);
     NodeCanvasCompositor.draw(cb, b, 1);
-    expect(await pngEqual(ca.canvas.toBuffer("image/png"), cb.canvas.toBuffer("image/png"))).toBe(true);
+    expect(await pngEqual(ca.canvas.toBuffer("image/png"), cb.canvas.toBuffer("image/png"))).toBe(
+      true,
+    );
   });
 });
 
@@ -241,10 +259,20 @@ describe("logo.margin is live (C4, R-D3)", () => {
 describe("accent.solidHeight is live (C4, R-D3)", () => {
   test("a taller solid band covers more rows in the brand colour", async () => {
     const thin = await frame(
-      request({ template: templateWith([IMAGE, { id: "accent", kind: "accent", props: { solidHeight: 0.02 } }]) }),
+      request({
+        template: templateWith([
+          IMAGE,
+          { id: "accent", kind: "accent", props: { solidHeight: 0.02 } },
+        ]),
+      }),
     );
     const thick = await frame(
-      request({ template: templateWith([IMAGE, { id: "accent", kind: "accent", props: { solidHeight: 0.12 } }]) }),
+      request({
+        template: templateWith([
+          IMAGE,
+          { id: "accent", kind: "accent", props: { solidHeight: 0.12 } },
+        ]),
+      }),
     );
     const thinRows = solidBrandRowsFromBottom(thin);
     const thickRows = solidBrandRowsFromBottom(thick);
@@ -253,7 +281,9 @@ describe("accent.solidHeight is live (C4, R-D3)", () => {
   });
 
   test("an absent solidHeight renders byte-identical to the constant", async () => {
-    const a = await frame(request({ template: templateWith([IMAGE, { id: "accent", kind: "accent" }]) }));
+    const a = await frame(
+      request({ template: templateWith([IMAGE, { id: "accent", kind: "accent" }]) }),
+    );
     const b = await frame(
       request({ template: templateWith([IMAGE, { id: "accent", kind: "accent", props: {} }]) }),
     );
@@ -284,7 +314,9 @@ describe("accent.fadeHeight is live (C4, R-D3)", () => {
   });
 
   test("an absent fadeHeight renders byte-identical to the constant", async () => {
-    const a = await frame(request({ template: templateWith([IMAGE, { id: "accent", kind: "accent" }]) }));
+    const a = await frame(
+      request({ template: templateWith([IMAGE, { id: "accent", kind: "accent" }]) }),
+    );
     const b = await frame(
       request({ template: templateWith([IMAGE, { id: "accent", kind: "accent", props: {} }]) }),
     );
@@ -347,7 +379,10 @@ describe("text anchor prop is honoured only without the anchor axis (C4b, R-D4)"
     const req = request({
       // The bottom layout would derive "bottom" absent the prop (D54).
       layout: "headline-bottom",
-      template: templateWith([IMAGE, { id: "copy", kind: "static-text", props: { anchor: "top" } }]),
+      template: templateWith([
+        IMAGE,
+        { id: "copy", kind: "static-text", props: { anchor: "top" } },
+      ]),
     });
     const prepared = await NodeCanvasCompositor.prepare(req);
     expect(prepared.anchor).toBe("top");
@@ -366,14 +401,21 @@ describe("text anchor prop is honoured only without the anchor axis (C4b, R-D4)"
     const req = request({
       layout: "headline-bottom",
       anchor: "bottom", // the axis-selected anchor (T4)
-      template: templateWith([IMAGE, { id: "copy", kind: "static-text", props: { anchor: "top" } }]),
+      template: templateWith([
+        IMAGE,
+        { id: "copy", kind: "static-text", props: { anchor: "top" } },
+      ]),
     });
     const prepared = await NodeCanvasCompositor.prepare(req);
     expect(prepared.anchor).toBe("bottom");
 
     const withAxis = await frame(req);
     const axisAloneNoProp = await frame(
-      request({ layout: "headline-bottom", anchor: "bottom", template: templateWith([IMAGE, COPY]) }),
+      request({
+        layout: "headline-bottom",
+        anchor: "bottom",
+        template: templateWith([IMAGE, COPY]),
+      }),
     );
     expect(sameBytes(withAxis, axisAloneNoProp)).toBe(true);
   });

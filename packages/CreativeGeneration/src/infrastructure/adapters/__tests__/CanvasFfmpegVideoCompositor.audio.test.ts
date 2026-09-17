@@ -223,7 +223,9 @@ describe("CanvasFfmpegVideoCompositor — audio args (VE3b1)", () => {
     });
     // fps 10 * durationSec 0.2 = 2 frames exactly, so frames / fps = 0.2 exactly
     // (no floating-point noise) and the fade is clamped to the full 0.2s.
-    await compositor.compositeVideo(videoRequest({ audio: new Uint8Array([9]), durationSec: 0.2, fps: 10 }));
+    await compositor.compositeVideo(
+      videoRequest({ audio: new Uint8Array([9]), durationSec: 0.2, fps: 10 }),
+    );
     const af = captured[0][captured[0].indexOf("-af") + 1];
     expect(af).toBe("apad,atrim=end=0.2,afade=t=out:st=0:d=0.2");
   });
@@ -237,7 +239,9 @@ describe("CanvasFfmpegVideoCompositor — audio args (VE3b1)", () => {
     // durationSec 1.5 * fps 1 = 1.5, which rounds UP to 2 frames — so the
     // encoded video is 2s long, not 1.5s, and the audio must match the 2s it
     // is actually muxed against, not the request's unrounded field.
-    await compositor.compositeVideo(videoRequest({ audio: new Uint8Array([9]), durationSec: 1.5, fps: 1 }));
+    await compositor.compositeVideo(
+      videoRequest({ audio: new Uint8Array([9]), durationSec: 1.5, fps: 1 }),
+    );
     const af = captured[0][captured[0].indexOf("-af") + 1];
     expect(af).toBe("apad,atrim=end=2,afade=t=out:st=1.75:d=0.25");
   });
@@ -265,7 +269,9 @@ function generateSineBedWav(ffmpeg: string, durationSec: number): Uint8Array {
       { timeout: 10_000 },
     );
     if (result.status !== 0) {
-      throw new Error(`sine bed generation failed (exit ${String(result.status)}): ${result.stderr?.toString()}`);
+      throw new Error(
+        `sine bed generation failed (exit ${String(result.status)}): ${result.stderr?.toString()}`,
+      );
     }
     return new Uint8Array(readFileSync(outPath));
   } finally {
@@ -303,7 +309,9 @@ function generateTwoStreamBed(ffmpeg: string, durationSec: number): Uint8Array {
       { timeout: 10_000 },
     );
     if (result.status !== 0) {
-      throw new Error(`two-stream bed generation failed (exit ${String(result.status)}): ${result.stderr?.toString()}`);
+      throw new Error(
+        `two-stream bed generation failed (exit ${String(result.status)}): ${result.stderr?.toString()}`,
+      );
     }
     return new Uint8Array(readFileSync(outPath));
   } finally {
@@ -351,7 +359,9 @@ function probeAudioStreamDurationSec(ffmpeg: string, filePath: string): number {
       { timeout: 10_000 },
     );
     if (result.status !== 0) {
-      throw new Error(`audio stream decode failed (exit ${String(result.status)}): ${result.stderr?.toString().slice(-2000)}`);
+      throw new Error(
+        `audio stream decode failed (exit ${String(result.status)}): ${result.stderr?.toString().slice(-2000)}`,
+      );
     }
     const bytes = statSync(pcmPath).size;
     return bytes / (AUDIO_SAMPLE_RATE * AUDIO_CHANNELS * PCM_BYTES_PER_SAMPLE);
@@ -360,7 +370,10 @@ function probeAudioStreamDurationSec(ffmpeg: string, filePath: string): number {
   }
 }
 
-function countStreams(ffmpeg: string, filePath: string): { readonly video: number; readonly audio: number } {
+function countStreams(
+  ffmpeg: string,
+  filePath: string,
+): { readonly video: number; readonly audio: number } {
   const result = spawnSync(ffmpeg, ["-i", filePath], { encoding: "utf8", timeout: 10_000 });
   const stderr = result.stderr ?? "";
   const video = (stderr.match(/Stream #\d+:\d+.*: Video:/g) ?? []).length;
@@ -455,7 +468,8 @@ describe("CanvasFfmpegVideoCompositor — audio, real ffmpeg (VE3b1)", () => {
   );
 
   test.skipIf(!ffmpegOk)(
-    skipReason ?? "a bed with two audio streams still yields exactly one audio stream in the output",
+    skipReason ??
+      "a bed with two audio streams still yields exactly one audio stream in the output",
     { timeout: 30_000 },
     async () => {
       if (!ffmpegPath) throw new Error("ffmpeg-static binary is not available");
@@ -494,7 +508,9 @@ describe("CanvasFfmpegVideoCompositor — audio, real ffmpeg (VE3b1)", () => {
         const outPath = join(dir, "out.mp4");
         writeFileSync(outPath, Buffer.from(video));
         const duration = probeAudioStreamDurationSec(ffmpegPath, outPath);
-        expect(Math.abs(duration - encodedDurationSec)).toBeLessThanOrEqual(AAC_FRAME_TOLERANCE_SEC);
+        expect(Math.abs(duration - encodedDurationSec)).toBeLessThanOrEqual(
+          AAC_FRAME_TOLERANCE_SEC,
+        );
         // Confirms the assertion is actually discriminating: the unrounded
         // durationSec is a full frame-tolerance away from what was measured.
         expect(Math.abs(duration - durationSec)).toBeGreaterThan(AAC_FRAME_TOLERANCE_SEC);

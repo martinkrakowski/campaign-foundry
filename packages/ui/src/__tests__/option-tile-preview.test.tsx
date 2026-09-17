@@ -43,7 +43,8 @@ describe("OptionTile's preview slot (F3)", () => {
         <span />
       </OptionTile>,
     );
-    const unselected = container.querySelector("[data-testid='preview']")?.parentElement as HTMLElement;
+    const unselected = container.querySelector("[data-testid='preview']")
+      ?.parentElement as HTMLElement;
     expect(unselected.getAttribute("aria-hidden")).toBe("true");
     expect(unselected.className).toContain("opacity-[0.55]");
     expect(unselected.className).toContain("saturate-[0.45]");

@@ -10,7 +10,9 @@ describe("SectionBlock", () => {
       </SectionBlock>,
     );
     const section = document.querySelector("section") as HTMLElement;
-    const heading = document.getElementById(section.getAttribute("aria-labelledby") as string) as HTMLElement;
+    const heading = document.getElementById(
+      section.getAttribute("aria-labelledby") as string,
+    ) as HTMLElement;
     expect(heading).toBeTruthy();
     expect(heading.textContent).toContain("Targeting");
     // the numeral is the ordering, decorative — the title carries the meaning

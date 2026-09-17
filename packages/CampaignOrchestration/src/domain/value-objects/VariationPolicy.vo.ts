@@ -37,7 +37,6 @@ export {
 /** Digest function injected into policy hashing to keep domain free of platform crypto builtins. */
 export type PolicyHasher = (canonicalPayloadJson: string) => string;
 
-
 /** Hamming axes — a candidate must differ in at least `minDistance` of these. */
 export const DISTANCE_AXES = [
   "productId",
@@ -141,9 +140,17 @@ export class VariationPolicy {
     if (!seedResult.success) return seedResult;
     const seed = seedResult.value;
 
-    const perProductResult = requireInteger(variation.coverage?.perProduct ?? 0, "coverage.perProduct", 0);
+    const perProductResult = requireInteger(
+      variation.coverage?.perProduct ?? 0,
+      "coverage.perProduct",
+      0,
+    );
     if (!perProductResult.success) return perProductResult;
-    const perRatioResult = requireInteger(variation.coverage?.perRatio ?? 0, "coverage.perRatio", 0);
+    const perRatioResult = requireInteger(
+      variation.coverage?.perRatio ?? 0,
+      "coverage.perRatio",
+      0,
+    );
     if (!perRatioResult.success) return perRatioResult;
     const coverage: VariationCoverage = {
       perProduct: perProductResult.value,
@@ -165,7 +172,9 @@ export class VariationPolicy {
     );
     const motionResult = requireMotion(motion, wantsMotion);
     if (!motionResult.success) return motionResult;
-    const duration = unique(axes?.duration !== undefined ? [...axes.duration] : [...DEFAULT_DURATION]);
+    const duration = unique(
+      axes?.duration !== undefined ? [...axes.duration] : [...DEFAULT_DURATION],
+    );
     const durationResult = requireDuration(duration);
     if (!durationResult.success) return durationResult;
     const motionEnabled = wantsMotion && motion.length > 0;
@@ -191,7 +200,12 @@ export class VariationPolicy {
       if (axis === "motion" || axis === "durationSec") return motionEnabled;
       return true;
     }).length;
-    const minDistanceResult = requireInteger(variation.minDistance ?? 1, "minDistance", 0, activeAxes);
+    const minDistanceResult = requireInteger(
+      variation.minDistance ?? 1,
+      "minDistance",
+      0,
+      activeAxes,
+    );
     if (!minDistanceResult.success) return minDistanceResult;
     const minDistance = minDistanceResult.value;
 
@@ -223,7 +237,10 @@ export class VariationPolicy {
     // requested ratio, since its non-motion ratios are legitimately the stills
     // the static format requested.
     const requested = unique(ratiosResult.value ?? allRatios);
-    const ratios = motionEnabled && !mixStatic ? requested.filter((ratio) => motionRatios.includes(ratio)) : requested;
+    const ratios =
+      motionEnabled && !mixStatic
+        ? requested.filter((ratio) => motionRatios.includes(ratio))
+        : requested;
     if (ratios.length === 0) {
       // Absent input keeps today's message byte-for-byte: the only way an
       // unrestricted ratio axis empties is motionRatios being empty.
@@ -317,7 +334,12 @@ function unique<T>(values: readonly T[]): T[] {
   return [...new Set(values)];
 }
 
-function requireInteger(value: number, field: string, min: number, max?: number): Result<number, Error> {
+function requireInteger(
+  value: number,
+  field: string,
+  min: number,
+  max?: number,
+): Result<number, Error> {
   if (!Number.isInteger(value) || value < min || (max !== undefined && value > max)) {
     return err(new Error(`Invalid ${field}.`));
   }
@@ -337,9 +359,16 @@ function requirePaletteShift(values: readonly number[]): Result<readonly number[
   return ok(values);
 }
 
-function requireMotion(values: readonly MotionKind[], wantsMotion: boolean): Result<readonly MotionKind[], Error> {
+function requireMotion(
+  values: readonly MotionKind[],
+  wantsMotion: boolean,
+): Result<readonly MotionKind[], Error> {
   if (wantsMotion && values.length === 0) {
-    return err(new Error('Invalid motion: select at least one motion kind when output.formats includes "motion".'));
+    return err(
+      new Error(
+        'Invalid motion: select at least one motion kind when output.formats includes "motion".',
+      ),
+    );
   }
   for (const kind of values) {
     if (!(MOTION_KINDS as readonly string[]).includes(kind)) {
@@ -412,7 +441,11 @@ function resolveHeadline(
 ): Result<readonly string[], Error> {
   if (ref === undefined) return ok([]);
   if (ref !== HEADLINE_POOL_REF) {
-    return err(new Error(`Unsupported headline axis ${JSON.stringify(ref)} (expected "${HEADLINE_POOL_REF}").`));
+    return err(
+      new Error(
+        `Unsupported headline axis ${JSON.stringify(ref)} (expected "${HEADLINE_POOL_REF}").`,
+      ),
+    );
   }
   const texts = canonicalHeadlines(headlines ?? []);
   if (texts.length === 0) {

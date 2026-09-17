@@ -3,9 +3,7 @@
  * Result is the explicit success/failure type generated use-cases return.
  * Mirrors @hexagen/shared's Result. Created once, then preserved on re-sync.
  */
-export type Result<T, E = unknown> =
-  | { success: true; value: T }
-  | { success: false; error: E };
+export type Result<T, E = unknown> = { success: true; value: T } | { success: false; error: E };
 
 export const ok = <T>(value: T): Result<T, never> => ({ success: true, value });
 export const err = <E>(error: E): Result<never, E> => ({

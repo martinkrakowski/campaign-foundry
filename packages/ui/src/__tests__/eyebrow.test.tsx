@@ -39,9 +39,11 @@ describe("Eyebrow", () => {
   });
 
   test("a caller's className is merged over the pattern", () => {
-    render(<Eyebrow as="p" className="hidden lg:inline">
-      HITL Mode Active
-    </Eyebrow>);
+    render(
+      <Eyebrow as="p" className="hidden lg:inline">
+        HITL Mode Active
+      </Eyebrow>,
+    );
     const el = screen.getByText("HITL Mode Active");
     expect(el.tagName).toBe("P");
     expect(el.className).toContain("hidden");

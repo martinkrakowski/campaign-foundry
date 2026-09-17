@@ -1,9 +1,35 @@
 import type { Pt } from "./chaikin";
 import { pip } from "./pip";
 import {
-  AFR, ARA, ASIA, AUS, BOR, DE, EUR, GRL, HUB_APAC, HUB_EMEA, HUB_NA,
-  IRL, J1, J2, JAV, LAT, NA, NG, NZN, NZS, PHI, SCAN, SLK, SUL, SUM, TAS, TWN,
-  UK, US,
+  AFR,
+  ARA,
+  ASIA,
+  AUS,
+  BOR,
+  DE,
+  EUR,
+  GRL,
+  HUB_APAC,
+  HUB_EMEA,
+  HUB_NA,
+  IRL,
+  J1,
+  J2,
+  JAV,
+  LAT,
+  NA,
+  NG,
+  NZN,
+  NZS,
+  PHI,
+  SCAN,
+  SLK,
+  SUL,
+  SUM,
+  TAS,
+  TWN,
+  UK,
+  US,
 } from "./polygons";
 
 // The vocabulary of §2.3 (plan 2026-09-07_graphics-and-the-world-map, D94), mapped to
@@ -23,8 +49,30 @@ export interface Footprint {
 
 /** The mockup's landmass polygons — everything `GLOBAL` paints. */
 const LANDMASSES: readonly (readonly Pt[])[] = [
-  NA, GRL, LAT, EUR, SCAN, UK, IRL, AFR, ARA, ASIA,
-  J1, J2, TWN, PHI, SUM, JAV, BOR, SUL, NG, SLK, AUS, TAS, NZN, NZS,
+  NA,
+  GRL,
+  LAT,
+  EUR,
+  SCAN,
+  UK,
+  IRL,
+  AFR,
+  ARA,
+  ASIA,
+  J1,
+  J2,
+  TWN,
+  PHI,
+  SUM,
+  JAV,
+  BOR,
+  SUL,
+  NG,
+  SLK,
+  AUS,
+  TAS,
+  NZN,
+  NZS,
 ];
 
 /** Mean of the anchor points — the hub for a polygon the mockup gave no hub. */

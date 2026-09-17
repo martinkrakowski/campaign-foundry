@@ -4,10 +4,21 @@ import type { Variant } from "../../domain/entities/Variant.js";
 import type { AspectRatioValue } from "../../domain/value-objects/aspect-ratios.js";
 import { MOTION_FPS, type MotionKind } from "../../domain/value-objects/MotionKind.vo.js";
 import type { VariationPlan } from "../../domain/value-objects/VariationPlan.vo.js";
-import { DISTANCE_AXES, hashCopy, VariationPolicy, type PlanInput, type PolicyHasher } from "../../domain/value-objects/VariationPolicy.vo.js";
+import {
+  DISTANCE_AXES,
+  hashCopy,
+  VariationPolicy,
+  type PlanInput,
+  type PolicyHasher,
+} from "../../domain/value-objects/VariationPolicy.vo.js";
 
 /** Re-roll bound: 64 draws from `seedFrom(briefId, index, attempt)`. */
-import { EXHAUSTIVE_MAX_SPACE, enumerateAxes, exhaustiveAccept, shortfallMessage } from "./PlanCapacity.js";
+import {
+  EXHAUSTIVE_MAX_SPACE,
+  enumerateAxes,
+  exhaustiveAccept,
+  shortfallMessage,
+} from "./PlanCapacity.js";
 
 const REPLAN_MAX_DRAWS = 64;
 
@@ -99,9 +110,13 @@ export class PlanVariationsUseCase {
       // whole space instead, seeded, before deciding the brief really cannot fit.
       const space = enumerateAxes(policy);
       const exhaustive =
-        space.length <= EXHAUSTIVE_MAX_SPACE ? exhaustiveAccept(space, policy, brief.id, deficient) : accepted;
+        space.length <= EXHAUSTIVE_MAX_SPACE
+          ? exhaustiveAccept(space, policy, brief.id, deficient)
+          : accepted;
       if (exhaustive.length < policy.count) {
-        return err(new Error(shortfallMessage(policy, space, Math.max(accepted.length, exhaustive.length))));
+        return err(
+          new Error(shortfallMessage(policy, space, Math.max(accepted.length, exhaustive.length))),
+        );
       }
       accepted = exhaustive; // the coverage check below applies to either search
     }
@@ -140,7 +155,11 @@ export class PlanVariationsUseCase {
       return ok({
         ...plan,
         variants,
-        estimate: { ...plan.estimate, genaiCalls: genaiCalls(variants), ...framesEstimate(variants, plan.policy) },
+        estimate: {
+          ...plan.estimate,
+          genaiCalls: genaiCalls(variants),
+          ...framesEstimate(variants, plan.policy),
+        },
       });
     }
 
@@ -231,7 +250,9 @@ function countBy<T>(items: readonly T[], pred: (item: T) => boolean): number {
 function deficient(accepted: readonly Variant[], policy: VariationPolicy): AxisDraw[] {
   const needs: AxisDraw[] = [];
   for (const productId of policy.productIds) {
-    if (countBy(accepted, (variant) => variant.productId === productId) < policy.coverage.perProduct) {
+    if (
+      countBy(accepted, (variant) => variant.productId === productId) < policy.coverage.perProduct
+    ) {
       needs.push({ productId });
     }
   }
@@ -267,7 +288,10 @@ function genaiCalls(variants: readonly Variant[]): number {
 }
 
 /** `frames` only on motion plans, so static plan JSON stays byte-identical. */
-function framesEstimate(variants: readonly Variant[], policy: VariationPolicy): { frames?: number } {
+function framesEstimate(
+  variants: readonly Variant[],
+  policy: VariationPolicy,
+): { frames?: number } {
   if (!policy.motionEnabled) return {};
   let frames = 0;
   for (const variant of variants) {
@@ -313,4 +337,3 @@ function toPlan(
     briefId,
   };
 }
-

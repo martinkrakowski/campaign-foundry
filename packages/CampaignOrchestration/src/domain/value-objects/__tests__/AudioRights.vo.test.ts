@@ -62,7 +62,9 @@ describe("AudioRights (VE-D8)", () => {
     });
 
     test("parses an ISO date-time with an explicit numeric offset", () => {
-      expect(parseExpiresOnMs("2026-01-01T12:00:00+05:00")).toBe(Date.parse("2026-01-01T12:00:00+05:00"));
+      expect(parseExpiresOnMs("2026-01-01T12:00:00+05:00")).toBe(
+        Date.parse("2026-01-01T12:00:00+05:00"),
+      );
     });
 
     test("refuses a date-time with no Z/offset (VE-D8 fix2 #1) — no local-time fallback", () => {
@@ -166,17 +168,23 @@ describe("AudioRights (VE-D8)", () => {
     });
 
     test("refuses a malformed expiresOn", () => {
-      expect(isAudioRights({ licenceId: "lic-1", source: "acme", expiresOn: "not-a-date" })).toBe(false);
+      expect(isAudioRights({ licenceId: "lic-1", source: "acme", expiresOn: "not-a-date" })).toBe(
+        false,
+      );
     });
 
     test("refuses an empty or non-alpha-2 territories array", () => {
       expect(isAudioRights({ licenceId: "lic-1", source: "acme", territories: [] })).toBe(false);
-      expect(isAudioRights({ licenceId: "lic-1", source: "acme", territories: ["usa"] })).toBe(false);
+      expect(isAudioRights({ licenceId: "lic-1", source: "acme", territories: ["usa"] })).toBe(
+        false,
+      );
       expect(isAudioRights({ licenceId: "lic-1", source: "acme", territories: "US" })).toBe(false);
     });
 
     test("refuses a user-assigned territory code (VE-D8 fix2 #4)", () => {
-      expect(isAudioRights({ licenceId: "lic-1", source: "acme", territories: ["ZZ"] })).toBe(false);
+      expect(isAudioRights({ licenceId: "lic-1", source: "acme", territories: ["ZZ"] })).toBe(
+        false,
+      );
     });
   });
 
@@ -189,7 +197,12 @@ describe("AudioRights (VE-D8)", () => {
       expect(
         isAudio({
           path: "a.mp3",
-          rights: { licenceId: "lic-1", source: "acme", expiresOn: "2026-01-01", territories: ["US"] },
+          rights: {
+            licenceId: "lic-1",
+            source: "acme",
+            expiresOn: "2026-01-01",
+            territories: ["US"],
+          },
         }),
       ).toBe(true);
     });
@@ -220,7 +233,9 @@ describe("AudioRights (VE-D8)", () => {
     });
 
     test("refuses an unknown key on audio or on rights (VE3a fix3)", () => {
-      expect(isAudio({ path: "a.mp3", rights: { licenceId: "lic-1", source: "acme" }, track: "extra" })).toBe(false);
+      expect(
+        isAudio({ path: "a.mp3", rights: { licenceId: "lic-1", source: "acme" }, track: "extra" }),
+      ).toBe(false);
       expect(
         isAudio({ path: "a.mp3", rights: { licenceId: "lic-1", source: "acme", track: "extra" } }),
       ).toBe(false);
@@ -228,7 +243,10 @@ describe("AudioRights (VE-D8)", () => {
 
     test("refuses an impossible expiresOn (VE3a fix3)", () => {
       expect(
-        isAudio({ path: "a.mp3", rights: { licenceId: "lic-1", source: "acme", expiresOn: "2024-02-30" } }),
+        isAudio({
+          path: "a.mp3",
+          rights: { licenceId: "lic-1", source: "acme", expiresOn: "2024-02-30" },
+        }),
       ).toBe(false);
     });
   });

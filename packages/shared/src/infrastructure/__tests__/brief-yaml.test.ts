@@ -99,12 +99,8 @@ describe("dumpBrief", () => {
       extra: "custom",
       clickDestination: "https://example.com/landing",
     });
-    expect(yaml.indexOf("output:")).toBeLessThan(
-      yaml.indexOf("clickDestination:"),
-    );
-    expect(yaml.indexOf("clickDestination:")).toBeLessThan(
-      yaml.indexOf("extra:"),
-    );
+    expect(yaml.indexOf("output:")).toBeLessThan(yaml.indexOf("clickDestination:"));
+    expect(yaml.indexOf("clickDestination:")).toBeLessThan(yaml.indexOf("extra:"));
     expect(yaml).toContain("clickDestination: https://example.com/landing");
     expect(dumpBrief(parse(yaml) as object)).toBe(yaml);
   });

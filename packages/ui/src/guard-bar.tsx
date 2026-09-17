@@ -46,7 +46,9 @@ export function GuardBar({ title, detail, busy = false, actions }: GuardBarProps
         <p id={titleId} className="text-[13px] font-semibold text-text-emphasis">
           {title}
         </p>
-        {detail ? <p className="mt-0.5 text-[12px] leading-snug text-text-secondary">{detail}</p> : null}
+        {detail ? (
+          <p className="mt-0.5 text-[12px] leading-snug text-text-secondary">{detail}</p>
+        ) : null}
       </div>
       <div className="flex flex-wrap gap-2">
         {actions.map((action, index) => (

@@ -1,10 +1,5 @@
 import { describe, test, expect } from "vitest";
-import {
-  DEFAULT_TREATMENT,
-  LAYOUT_VALUES,
-  SAFE_ID_PATTERN,
-  TONE_VALUES,
-} from "../Treatment.vo.js";
+import { DEFAULT_TREATMENT, LAYOUT_VALUES, SAFE_ID_PATTERN, TONE_VALUES } from "../Treatment.vo.js";
 
 describe("Treatment value object", () => {
   test("SAFE_ID_PATTERN accepts lowercase-slug ids", () => {
@@ -14,7 +9,16 @@ describe("Treatment value object", () => {
   });
 
   test("SAFE_ID_PATTERN rejects unsafe ids", () => {
-    for (const id of ["", "Upper", "has space", "../escape", "a/b", "-leading", "a".repeat(65), "café"]) {
+    for (const id of [
+      "",
+      "Upper",
+      "has space",
+      "../escape",
+      "a/b",
+      "-leading",
+      "a".repeat(65),
+      "café",
+    ]) {
       expect(SAFE_ID_PATTERN.test(id), id).toBe(false);
     }
   });

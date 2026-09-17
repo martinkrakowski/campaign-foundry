@@ -1,9 +1,15 @@
 import { describe, test, expect, vi } from "vitest";
 import type { GeneratedAsset } from "@campaignfoundry/CampaignOrchestration";
 import type { DisplaySize } from "@campaignfoundry/CampaignOrchestration/display-sizes";
-import { PackageForPlatformUseCase, withoutAbsolutePaths } from "../PackageForPlatformUseCase.use-case.js";
+import {
+  PackageForPlatformUseCase,
+  withoutAbsolutePaths,
+} from "../PackageForPlatformUseCase.use-case.js";
 import type { PackageManifest, PackageStorePort } from "../../ports/out/PackageStorePort.js";
-import { platformProfile, type PlatformProfile } from "../../../domain/value-objects/PlatformProfile.vo.js";
+import {
+  platformProfile,
+  type PlatformProfile,
+} from "../../../domain/value-objects/PlatformProfile.vo.js";
 
 const PACKAGED_AT = "2026-08-25T12:00:00.000Z";
 
@@ -21,7 +27,9 @@ const asset = (over: Partial<GeneratedAsset> = {}): GeneratedAsset => ({
 
 const SMALL = new Uint8Array([1, 2, 3]);
 
-const fakeStore = (read: Uint8Array = SMALL): PackageStorePort & {
+const fakeStore = (
+  read: Uint8Array = SMALL,
+): PackageStorePort & {
   reads: string[];
   packaged: Array<{ platformId: string; relativePath: string; bytes: Uint8Array }>;
   manifests: Array<{ platformId: string; manifest: PackageManifest }>;
@@ -68,7 +76,10 @@ const exec = (
   }> = {},
 ) => {
   const { profiles, ...input } = over;
-  return new PackageForPlatformUseCase(store, (id) => profiles?.[id] ?? platformProfile(id)).execute({
+  return new PackageForPlatformUseCase(
+    store,
+    (id) => profiles?.[id] ?? platformProfile(id),
+  ).execute({
     campaignId: "camp",
     assets: [asset()],
     platforms: ["instagram-feed"],
@@ -79,9 +90,9 @@ const exec = (
 
 describe("withoutAbsolutePaths", () => {
   test("strips POSIX and Windows absolute paths, quoted or bare", () => {
-    expect(withoutAbsolutePaths("ENOENT: no such file or directory, open '/var/data/alpha/1x1.png'")).toBe(
-      "ENOENT: no such file or directory, open '<path>'",
-    );
+    expect(
+      withoutAbsolutePaths("ENOENT: no such file or directory, open '/var/data/alpha/1x1.png'"),
+    ).toBe("ENOENT: no such file or directory, open '<path>'");
     expect(withoutAbsolutePaths("open C:\\output\\alpha\\1x1.png")).toBe("open <path>");
     expect(withoutAbsolutePaths("relative/path.png stayed")).toBe("relative/path.png stayed");
     expect(withoutAbsolutePaths("/tmp/alone.png")).toBe("<path>");
@@ -145,8 +156,18 @@ describe("PackageForPlatformUseCase", () => {
     const assets = [
       asset({ productId: "alpha", outputPath: "alpha/1x1.png" }),
       asset({ productId: "beta", outputPath: "beta/1x1.png" }),
-      asset({ productId: "gamma", outputPath: "gamma/v2.png", variantIndex: 2, treatment: "headline-top-bold" }),
-      asset({ productId: "gamma", outputPath: "gamma/v3.png", variantIndex: 3, treatment: "headline-top-bold" }),
+      asset({
+        productId: "gamma",
+        outputPath: "gamma/v2.png",
+        variantIndex: 2,
+        treatment: "headline-top-bold",
+      }),
+      asset({
+        productId: "gamma",
+        outputPath: "gamma/v3.png",
+        variantIndex: 3,
+        treatment: "headline-top-bold",
+      }),
       asset({ productId: "alpha", aspectRatio: "16:9", outputPath: "alpha/16x9.png" }),
     ];
     const result = await exec(store, {
@@ -200,7 +221,9 @@ describe("PackageForPlatformUseCase", () => {
     expect(result.success).toBe(true);
     if (!result.success) return;
     expect(result.value.platforms[0].items).toEqual([]);
-    expect(result.value.platforms[0].manifestPath).toBe("packages/camp/instagram-feed/manifest.json");
+    expect(result.value.platforms[0].manifestPath).toBe(
+      "packages/camp/instagram-feed/manifest.json",
+    );
     expect(store.writeManifest).toHaveBeenCalledTimes(1);
     expect(store.manifests[0].manifest.profile.id).toBe("instagram-feed");
     expect(store.manifests[0].manifest.skipped).toBe(0);
@@ -225,7 +248,7 @@ describe("PackageForPlatformUseCase", () => {
     expect(result.success).toBe(false);
     if (!result.success) {
       expect(result.error.message).toBe(
-        'Platform "instagram-feed": ENOENT: no such file or directory, open \'<path>\'',
+        "Platform \"instagram-feed\": ENOENT: no such file or directory, open '<path>'",
       );
       expect(result.error.message).not.toMatch(/\/var\//);
     }
@@ -373,8 +396,20 @@ describe("PackageForPlatformUseCase — motion", () => {
 
   test("a motion profile packages the mp4 and its poster with format, duration, and checks", async () => {
     const store = fakeStore();
-    const assets = [motion(), asset({ aspectRatio: "9:16", outputPath: "alpha/9x16/v2.png", format: "static", variantIndex: 2 })];
-    const result = await exec(store, { assets, platforms: ["instagram-reel"], capabilities: MOTION });
+    const assets = [
+      motion(),
+      asset({
+        aspectRatio: "9:16",
+        outputPath: "alpha/9x16/v2.png",
+        format: "static",
+        variantIndex: 2,
+      }),
+    ];
+    const result = await exec(store, {
+      assets,
+      platforms: ["instagram-reel"],
+      capabilities: MOTION,
+    });
     expect(result.success).toBe(true);
     if (!result.success) return;
     const [reel] = result.value.platforms;
@@ -424,7 +459,15 @@ describe("PackageForPlatformUseCase — motion", () => {
   test("fails the duration check over the cap or when the row has no duration", async () => {
     const store = fakeStore();
     const result = await exec(store, {
-      assets: [motion({ durationSec: 61 }), motion({ variantIndex: 3, outputPath: "alpha/9x16/v3.png", videoPath: "alpha/9x16/v3.mp4", durationSec: undefined })],
+      assets: [
+        motion({ durationSec: 61 }),
+        motion({
+          variantIndex: 3,
+          outputPath: "alpha/9x16/v3.png",
+          videoPath: "alpha/9x16/v3.mp4",
+          durationSec: undefined,
+        }),
+      ],
       platforms: ["instagram-story"],
       capabilities: MOTION,
     });
@@ -438,15 +481,27 @@ describe("PackageForPlatformUseCase — motion", () => {
 
   test("records a size fail on an oversized mp4", async () => {
     const store = fakeStore(new Uint8Array(platformProfile("tiktok")!.maxBytes + 1));
-    const result = await exec(store, { assets: [motion()], platforms: ["tiktok"], capabilities: MOTION });
+    const result = await exec(store, {
+      assets: [motion()],
+      platforms: ["tiktok"],
+      capabilities: MOTION,
+    });
     expect(result.success).toBe(true);
-    if (result.success) expect(result.value.platforms[0].items[0].checks).toEqual({ size: "fail", duration: "pass" });
+    if (result.success)
+      expect(result.value.platforms[0].items[0].checks).toEqual({ size: "fail", duration: "pass" });
   });
 
   test("honours include for motion identities", async () => {
     const store = fakeStore();
     const result = await exec(store, {
-      assets: [motion(), motion({ variantIndex: 2, outputPath: "alpha/9x16/v2.png", videoPath: "alpha/9x16/v2.mp4" })],
+      assets: [
+        motion(),
+        motion({
+          variantIndex: 2,
+          outputPath: "alpha/9x16/v2.png",
+          videoPath: "alpha/9x16/v2.mp4",
+        }),
+      ],
       platforms: ["youtube-short"],
       include: ["alpha/v2"],
       capabilities: MOTION,
@@ -515,7 +570,9 @@ describe("PackageForPlatformUseCase — music rights (VE-D8)", () => {
   test("a licence expiring exactly at packagedAt is still valid (strict <)", async () => {
     const store = fakeStore();
     const result = await exec(store, {
-      assets: [asset({ audioRights: { licenceId: "lic-1", source: "acme", expiresOn: PACKAGED_AT } })],
+      assets: [
+        asset({ audioRights: { licenceId: "lic-1", source: "acme", expiresOn: PACKAGED_AT } }),
+      ],
     });
     expect(result.success).toBe(true);
   });
@@ -561,7 +618,9 @@ describe("PackageForPlatformUseCase — music rights (VE-D8)", () => {
   test("a malformed packagedAt fails closed with a clear error; nothing is written (fix2 #6)", async () => {
     const store = fakeStore();
     const result = await exec(store, {
-      assets: [asset({ audioRights: { licenceId: "lic-1", source: "acme", expiresOn: "2026-08-01" } })],
+      assets: [
+        asset({ audioRights: { licenceId: "lic-1", source: "acme", expiresOn: "2026-08-01" } }),
+      ],
       packagedAt: "not-a-timestamp",
     });
     expect(result.success).toBe(false);
@@ -688,7 +747,9 @@ describe("PackageForPlatformUseCase — html (D122)", () => {
       "alpha/1x1/index.html": bundle,
       "alpha/1x1/fallback.png": fallback,
     };
-    vi.mocked(store.readAsset).mockImplementation(async (relativePath: string) => bytesFor[relativePath]);
+    vi.mocked(store.readAsset).mockImplementation(
+      async (relativePath: string) => bytesFor[relativePath],
+    );
     const result = await exec(store, {
       assets: [html()],
       platforms: ["html-banner"],
@@ -713,7 +774,9 @@ describe("PackageForPlatformUseCase — html (D122)", () => {
       "alpha/1x1/index.html": new Uint8Array(maxBytes - 8),
       "alpha/1x1/fallback.png": new Uint8Array(8),
     };
-    vi.mocked(store.readAsset).mockImplementation(async (relativePath: string) => bytesFor[relativePath]);
+    vi.mocked(store.readAsset).mockImplementation(
+      async (relativePath: string) => bytesFor[relativePath],
+    );
     const result = await exec(store, {
       assets: [html()],
       platforms: ["html-banner"],
@@ -726,7 +789,9 @@ describe("PackageForPlatformUseCase — html (D122)", () => {
 
   test("refuses an html asset when clickDestination is set on brief/asset but bundle lacks clickTag variable (HL4)", async () => {
     // A bundle that contains no clickTag variable (e.g. bare html or an <a href>)
-    const bundleWithoutClickTag = new TextEncoder().encode("<!DOCTYPE html><html><body><a href=\"https://example.com\">Click</a></body></html>");
+    const bundleWithoutClickTag = new TextEncoder().encode(
+      '<!DOCTYPE html><html><body><a href="https://example.com">Click</a></body></html>',
+    );
     const store = fakeStore(bundleWithoutClickTag);
     const result = await exec(store, {
       assets: [html({ clickDestination: "https://example.com/landing" })],
@@ -743,7 +808,9 @@ describe("PackageForPlatformUseCase — html (D122)", () => {
   });
 
   test("refuses an html asset when clickDestination is set at input level but bundle lacks clickTag (HL4)", async () => {
-    const bundleWithoutClickTag = new TextEncoder().encode("<!DOCTYPE html><html><body>Hello</body></html>");
+    const bundleWithoutClickTag = new TextEncoder().encode(
+      "<!DOCTYPE html><html><body>Hello</body></html>",
+    );
     const store = fakeStore(bundleWithoutClickTag);
     const result = await exec(store, {
       assets: [html()],
@@ -759,7 +826,9 @@ describe("PackageForPlatformUseCase — html (D122)", () => {
   });
 
   test("packages an html asset when clickDestination is set and bundle declares var clickTag (HL4)", async () => {
-    const bundleWithClickTag = new TextEncoder().encode("<!DOCTYPE html><html><head><script>var clickTag = \"https://example.com/landing\";</script></head><body><button onclick=\"window.open(window.clickTag)\">Click</button></body></html>");
+    const bundleWithClickTag = new TextEncoder().encode(
+      '<!DOCTYPE html><html><head><script>var clickTag = "https://example.com/landing";</script></head><body><button onclick="window.open(window.clickTag)">Click</button></body></html>',
+    );
     const store = fakeStore(bundleWithClickTag);
     const result = await exec(store, {
       assets: [html({ clickDestination: "https://example.com/landing" })],
@@ -814,7 +883,12 @@ describe("PackageForPlatformUseCase — shipped html5 display profiles (X14)", (
     const result = await exec(store, {
       assets: [
         htmlDisplay("300x250"),
-        asset({ size: "300x250", aspectRatio: undefined, outputPath: "alpha/300x250.png", treatment: "image-html" }),
+        asset({
+          size: "300x250",
+          aspectRatio: undefined,
+          outputPath: "alpha/300x250.png",
+          treatment: "image-html",
+        }),
       ],
       platforms: ["google-display"],
     });
@@ -834,8 +908,10 @@ describe("PackageForPlatformUseCase — shipped html5 display profiles (X14)", (
     if (!result.success) return;
     const [platform] = result.value.platforms;
     expect(platform.included).toBe(2);
-    expect(platform.items.map((i) => i.source)).toEqual(["alpha/160x600/index.html", "alpha/300x250/index.html"]);
+    expect(platform.items.map((i) => i.source)).toEqual([
+      "alpha/160x600/index.html",
+      "alpha/300x250/index.html",
+    ]);
     expect(platform.items.every((i) => i.format === "html")).toBe(true);
   });
 });
-

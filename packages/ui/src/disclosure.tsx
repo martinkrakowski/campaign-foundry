@@ -34,7 +34,15 @@ function writeStoredOpen(id: string, open: boolean): void {
  * states its expansion via `aria-expanded`/`aria-controls`; the content is ordinary
  * flow, not a dialog — it never traps focus and needs no Escape handling.
  */
-export function Disclosure({ id, title, children }: { id: string; title: string; children: ReactNode }): ReactNode {
+export function Disclosure({
+  id,
+  title,
+  children,
+}: {
+  id: string;
+  title: string;
+  children: ReactNode;
+}): ReactNode {
   // Closed on the first render, always: the server has no storage, so reading it in the
   // initializer would render closed there and open here, and hydration would mismatch.
   // The remembered state is applied on mount instead.
@@ -66,7 +74,10 @@ export function Disclosure({ id, title, children }: { id: string; title: string;
           viewBox="0 0 24 24"
           focusable="false"
           aria-hidden="true"
-          className={cn("size-4 shrink-0 text-text-muted transition-transform", open ? "rotate-180" : "")}
+          className={cn(
+            "size-4 shrink-0 text-text-muted transition-transform",
+            open ? "rotate-180" : "",
+          )}
         >
           <path
             strokeLinecap="round"

@@ -1,5 +1,8 @@
 import { describe, test, expect, expectTypeOf } from "vitest";
-import type { DisplaySize as PortDisplaySize, SafeInsets as PortSafeInsets } from "@campaignfoundry/CampaignOrchestration";
+import type {
+  DisplaySize as PortDisplaySize,
+  SafeInsets as PortSafeInsets,
+} from "@campaignfoundry/CampaignOrchestration";
 import { CAMPAIGN_TYPE_PRESETS } from "@campaignfoundry/CampaignOrchestration";
 import {
   PLATFORM_PROFILES,
@@ -91,7 +94,11 @@ describe("PlatformProfile", () => {
     const htmlProfile = { ...feed, id: "html-banner", formats: ["html"] as const };
     expect(isPlatformVisible(htmlProfile, { motion: false })).toBe(true);
     // The same synthetic profile gated on motion (were it to carry it) still needs the probe.
-    const motionPlusHtml = { ...feed, id: "html-tier", formats: ["static", "html", "motion"] as const };
+    const motionPlusHtml = {
+      ...feed,
+      id: "html-tier",
+      formats: ["static", "html", "motion"] as const,
+    };
     expect(isPlatformVisible(motionPlusHtml, { motion: false })).toBe(false);
     expect(isPlatformVisible(motionPlusHtml, { motion: true })).toBe(true);
   });
@@ -100,7 +107,12 @@ describe("PlatformProfile", () => {
     expect(platformProfile("instagram-feed")?.ratio).toBe("1:1");
     expect(platformProfile("linkedin")?.ratio).toBe("1:1");
     expect(platformProfile("x")?.ratio).toBe("16:9");
-    expect(platformProfile("instagram-reel")?.safeInsets).toEqual({ top: 250, right: 0, bottom: 340, left: 0 });
+    expect(platformProfile("instagram-reel")?.safeInsets).toEqual({
+      top: 250,
+      right: 0,
+      bottom: 340,
+      left: 0,
+    });
     expect(platformProfile("nope")).toBeUndefined();
   });
 
@@ -122,7 +134,9 @@ describe("PlatformProfile", () => {
     expect(motionPackagedRatios(["instagram-feed", "linkedin", "x"])).toEqual(new Set());
     expect(motionPackagedRatios(["unknown-platform"])).toEqual(new Set());
     expect(motionPackagedRatios(["instagram-story"])).toEqual(new Set(["9:16"]));
-    expect(motionPackagedRatios(["instagram-feed", "tiktok", "youtube-short"])).toEqual(new Set(["9:16"]));
+    expect(motionPackagedRatios(["instagram-feed", "tiktok", "youtube-short"])).toEqual(
+      new Set(["9:16"]),
+    );
   });
 
   // The campaign-type presets (D108–D112) live in CampaignOrchestration as plain
@@ -176,7 +190,10 @@ describe("PlatformProfile", () => {
           // the still surfaces — read off the profile's own fields, not a
           // hard-coded id list.
           if (motionOnly) {
-            expect(profile.ratio, `${type} is motion-only but "${id}" is not a 9:16 motion profile`).toBe("9:16");
+            expect(
+              profile.ratio,
+              `${type} is motion-only but "${id}" is not a 9:16 motion profile`,
+            ).toBe("9:16");
           }
           if (staticOnly) {
             expect(
@@ -251,7 +268,12 @@ describe("PlatformProfile", () => {
           if (slot.size === "320x50" || slot.size === "728x90") {
             expect(slot.insets, `${id} ${slot.size}`).toEqual(ZERO);
           } else {
-            expect(slot.insets, `${id} ${slot.size}`).toEqual({ top: 8, right: 8, bottom: 8, left: 8 });
+            expect(slot.insets, `${id} ${slot.size}`).toEqual({
+              top: 8,
+              right: 8,
+              bottom: 8,
+              left: 8,
+            });
           }
         }
       }
@@ -281,7 +303,9 @@ describe("PlatformProfile", () => {
     });
 
     test("isRatioProfile is true only for the seven social profiles", () => {
-      const social = Object.values(PLATFORM_PROFILES).filter(isRatioProfile).map((profile) => profile.id);
+      const social = Object.values(PLATFORM_PROFILES)
+        .filter(isRatioProfile)
+        .map((profile) => profile.id);
       expect(social).toEqual([
         "instagram-feed",
         "linkedin",
@@ -296,4 +320,3 @@ describe("PlatformProfile", () => {
     });
   });
 });
-

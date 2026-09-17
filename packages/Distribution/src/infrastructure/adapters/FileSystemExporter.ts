@@ -57,8 +57,16 @@ export class FileSystemExporter implements ExportPort {
       [x + w, y + h],
     ];
     for (const [cx, cy] of corners) {
-      page.drawLine({ start: { x: cx - CROP_MARK_LEN, y: cy }, end: { x: cx + CROP_MARK_LEN, y: cy }, thickness: 0.5 });
-      page.drawLine({ start: { x: cx, y: cy - CROP_MARK_LEN }, end: { x: cx, y: cy + CROP_MARK_LEN }, thickness: 0.5 });
+      page.drawLine({
+        start: { x: cx - CROP_MARK_LEN, y: cy },
+        end: { x: cx + CROP_MARK_LEN, y: cy },
+        thickness: 0.5,
+      });
+      page.drawLine({
+        start: { x: cx, y: cy - CROP_MARK_LEN },
+        end: { x: cx, y: cy + CROP_MARK_LEN },
+        thickness: 0.5,
+      });
     }
   }
 }

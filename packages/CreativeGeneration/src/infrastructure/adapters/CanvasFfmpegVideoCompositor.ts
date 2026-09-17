@@ -159,16 +159,18 @@ export class CanvasFfmpegVideoCompositor implements VideoCompositorPort {
     return { video, poster, sampledFrames, logoApplied: prepared.logoApplied };
   }
 
-  async compositeFrame(
-    request: VideoCompositeRequest,
-    atSec: number,
-  ): Promise<CompositeResult> {
+  async compositeFrame(request: VideoCompositeRequest, atSec: number): Promise<CompositeResult> {
     validateRequest(request);
     const frames = Math.round(request.durationSec * request.fps);
     if (frames < 2) {
       throw new VideoCompositeValidationError("durationSec * fps must yield at least 2 frames");
     }
-    if (typeof atSec !== "number" || !Number.isFinite(atSec) || atSec < 0 || atSec > request.durationSec) {
+    if (
+      typeof atSec !== "number" ||
+      !Number.isFinite(atSec) ||
+      atSec < 0 ||
+      atSec > request.durationSec
+    ) {
       throw new VideoCompositeValidationError(
         `atSec must be a finite number in [0, ${request.durationSec}] (got ${String(atSec)})`,
       );
@@ -257,7 +259,10 @@ export class CanvasFfmpegVideoCompositor implements VideoCompositorPort {
 
       let writeError: unknown;
       try {
-        await Promise.race([writeFrames(child.stdin, canvas, ctx, prepared, request, frames), timeout.promise]);
+        await Promise.race([
+          writeFrames(child.stdin, canvas, ctx, prepared, request, frames),
+          timeout.promise,
+        ]);
       } catch (error) {
         writeError = error;
         if (!child.killed) child.kill();
@@ -267,7 +272,9 @@ export class CanvasFfmpegVideoCompositor implements VideoCompositorPort {
       try {
         code = await Promise.race([finished, timeout.promise]);
       } catch (error) {
-        throw new Error(formatFfmpegFailure(error instanceof Error ? error.message : String(error), ffmpegPath));
+        throw new Error(
+          formatFfmpegFailure(error instanceof Error ? error.message : String(error), ffmpegPath),
+        );
       } finally {
         timeout.clear();
         // SIGTERM → SIGKILL guarantees the child exits; wait for that exit (a
@@ -280,7 +287,10 @@ export class CanvasFfmpegVideoCompositor implements VideoCompositorPort {
       }
       if (writeError) {
         throw new Error(
-          formatFfmpegFailure(writeError instanceof Error ? writeError.message : String(writeError), ffmpegPath),
+          formatFfmpegFailure(
+            writeError instanceof Error ? writeError.message : String(writeError),
+            ffmpegPath,
+          ),
         );
       }
       return new Uint8Array(await readFile(outPath));
@@ -503,9 +513,16 @@ export const MAX_DURATION_SEC = 60;
 function validateRequest(request: VideoCompositeRequest): readonly number[] {
   const { fps, durationSec, sampleAt } = request;
   if (!Number.isInteger(fps) || fps < 1 || fps > MAX_FPS) {
-    throw new VideoCompositeValidationError(`fps must be an integer in [1, ${MAX_FPS}] (got ${String(fps)})`);
+    throw new VideoCompositeValidationError(
+      `fps must be an integer in [1, ${MAX_FPS}] (got ${String(fps)})`,
+    );
   }
-  if (typeof durationSec !== "number" || !Number.isFinite(durationSec) || durationSec <= 0 || durationSec > MAX_DURATION_SEC) {
+  if (
+    typeof durationSec !== "number" ||
+    !Number.isFinite(durationSec) ||
+    durationSec <= 0 ||
+    durationSec > MAX_DURATION_SEC
+  ) {
     throw new VideoCompositeValidationError(
       `durationSec must be a finite number in (0, ${MAX_DURATION_SEC}] (got ${String(durationSec)})`,
     );
@@ -515,7 +532,9 @@ function validateRequest(request: VideoCompositeRequest): readonly number[] {
   }
   for (const t of sampleAt) {
     if (typeof t !== "number" || !Number.isFinite(t) || t < 0 || t > 1) {
-      throw new VideoCompositeValidationError(`sampleAt values must be finite numbers in [0, 1] (got ${String(t)})`);
+      throw new VideoCompositeValidationError(
+        `sampleAt values must be finite numbers in [0, 1] (got ${String(t)})`,
+      );
     }
   }
   return [...new Set(sampleAt)].sort((a, b) => a - b);

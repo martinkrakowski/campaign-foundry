@@ -9,13 +9,21 @@ import type {
   PreviewFrameCache,
   PreviewFrameCacheEntry,
 } from "../PreviewCreativeFrameUseCase.use-case.js";
-import type { PlatformSafeZone, PlatformSafeZoneResolver } from "../../ports/out/PlatformProfilePort.js";
+import type {
+  PlatformSafeZone,
+  PlatformSafeZoneResolver,
+} from "../../ports/out/PlatformProfilePort.js";
 import { BRIEF_SCHEMA_VERSION } from "../../../domain/value-objects/brief-schema-version.js";
 import { DEFAULT_CAMPAIGN_TYPE } from "../../../domain/value-objects/campaign-types.js";
 import { templateFromCanonical } from "../../../domain/value-objects/brief-template.js";
 import type { CampaignBrief } from "../../../domain/entities/CampaignBrief.js";
 import type { Product } from "../../../domain/entities/Product.js";
-import { fakeCompositor, fakeImageGenerator, fakeSceneAssets, fakeVideoCompositor } from "./_fakes.js";
+import {
+  fakeCompositor,
+  fakeImageGenerator,
+  fakeSceneAssets,
+  fakeVideoCompositor,
+} from "./_fakes.js";
 import { MOTION_FPS } from "../../../domain/value-objects/MotionKind.vo.js";
 import type { CopyTimeline } from "../../../domain/value-objects/CopyTimeline.vo.js";
 
@@ -80,7 +88,10 @@ const oneZoneResolver = (): PlatformSafeZoneResolver => {
 describe("PreviewCreativeFrameUseCase — cell validation", () => {
   test("rejects a cell naming a product the brief does not carry, before any port is called", async () => {
     const d = deps();
-    const result = await new PreviewCreativeFrameUseCase(d).execute(baseBrief(), cell({ productId: "ghost" }));
+    const result = await new PreviewCreativeFrameUseCase(d).execute(
+      baseBrief(),
+      cell({ productId: "ghost" }),
+    );
     expect(result.success).toBe(false);
     if (!result.success) expect(result.error.message).toMatch(/unknown product "ghost"/);
     expect(d.imageGenerator.resolveBackground).not.toHaveBeenCalled();
@@ -113,7 +124,10 @@ describe("PreviewCreativeFrameUseCase — cell validation", () => {
 
   test("rejects a canvas carrying neither family, before any port is called", async () => {
     const d = deps();
-    const result = await new PreviewCreativeFrameUseCase(d).execute(baseBrief(), cell({ canvas: {} }));
+    const result = await new PreviewCreativeFrameUseCase(d).execute(
+      baseBrief(),
+      cell({ canvas: {} }),
+    );
     expect(result.success).toBe(false);
     if (!result.success) expect(result.error.message).toMatch(/exactly one of ratio\/size/);
     expect(d.imageGenerator.resolveBackground).not.toHaveBeenCalled();
@@ -168,14 +182,21 @@ describe("PreviewCreativeFrameUseCase — the request mirrors the run", () => {
 
   test("falls back to the campaign message when no localized message exists", async () => {
     const d = deps();
-    await new PreviewCreativeFrameUseCase(d).execute(baseBrief({ localizedMessage: undefined }), cell());
-    expect(d.compositor.compositeAsset).toHaveBeenCalledWith(expect.objectContaining({ message: "Hello" }));
+    await new PreviewCreativeFrameUseCase(d).execute(
+      baseBrief({ localizedMessage: undefined }),
+      cell(),
+    );
+    expect(d.compositor.compositeAsset).toHaveBeenCalledWith(
+      expect.objectContaining({ message: "Hello" }),
+    );
   });
 
   test("carries the anchor only when the cell names one — absent stays absent", async () => {
     const d = deps();
     await new PreviewCreativeFrameUseCase(d).execute(baseBrief(), cell({ anchor: "top" }));
-    expect(d.compositor.compositeAsset).toHaveBeenCalledWith(expect.objectContaining({ anchor: "top" }));
+    expect(d.compositor.compositeAsset).toHaveBeenCalledWith(
+      expect.objectContaining({ anchor: "top" }),
+    );
 
     const without = deps();
     await new PreviewCreativeFrameUseCase(without).execute(baseBrief(), cell());
@@ -255,7 +276,10 @@ describe("PreviewCreativeFrameUseCase — the frame and its cache key", () => {
       image: new Uint8Array([9, 9, 9]),
       source: "procedural" as const,
     }));
-    const shifted = await new PreviewCreativeFrameUseCase(otherBackground).execute(baseBrief(), cell());
+    const shifted = await new PreviewCreativeFrameUseCase(otherBackground).execute(
+      baseBrief(),
+      cell(),
+    );
     // The tripwire must not be able to pass vacuously: a failed execute here is a
     // broken fixture, not a pass (CodeRabbit, PR #177).
     expect(shifted.success).toBe(true);
@@ -359,7 +383,9 @@ describe("PreviewCreativeFrameUseCase — the frame and its cache key", () => {
     // `backgrounds` block would make this collide with `a`/`b`).
     expect(compositeRequestFingerprint(c, sha256)).not.toBe(compositeRequestFingerprint(a, sha256));
     // Present vs absent never collide either.
-    expect(compositeRequestFingerprint(a, sha256)).not.toBe(compositeRequestFingerprint(request, sha256));
+    expect(compositeRequestFingerprint(a, sha256)).not.toBe(
+      compositeRequestFingerprint(request, sha256),
+    );
   });
 
   test("backgrounds (VE5b1 review): an empty map hashes exactly as absent does (VE-D3 renders them identically)", async () => {
@@ -371,10 +397,14 @@ describe("PreviewCreativeFrameUseCase — the frame and its cache key", () => {
     const empty = { ...request, backgrounds: {} };
     // Absent and `{}` render the same bytes (VE-D3); a needless cache miss
     // between them would be its own defect.
-    expect(compositeRequestFingerprint(empty, sha256)).toBe(compositeRequestFingerprint(request, sha256));
+    expect(compositeRequestFingerprint(empty, sha256)).toBe(
+      compositeRequestFingerprint(request, sha256),
+    );
     // Still content-addressed once a scene is actually present.
     const withScene = { ...request, backgrounds: { "scene.png": new Uint8Array([1, 2, 3]) } };
-    expect(compositeRequestFingerprint(withScene, sha256)).not.toBe(compositeRequestFingerprint(empty, sha256));
+    expect(compositeRequestFingerprint(withScene, sha256)).not.toBe(
+      compositeRequestFingerprint(empty, sha256),
+    );
   });
 
   test("two requests that differ only in pixelSize never share a key; omitting it leaves the golden hash put", async () => {
@@ -464,16 +494,20 @@ describe("PreviewCreativeFrameUseCase — the scrub cell (VE-D5/VE-D6)", () => {
     ["motion and durationSec, no atSec", { motion: "ken-burns-in", durationSec: 6 }],
     ["motion and atSec, no durationSec", { motion: "ken-burns-in", atSec: 2 }],
     ["durationSec and atSec, no motion", { durationSec: 6, atSec: 2 }],
-  ])("rejects a cell carrying %s — the three fields travel together or not at all", async (_label, over) => {
-    const videoCompositor = fakeVideoCompositor();
-    const d = deps({ videoCompositor });
-    const result = await new PreviewCreativeFrameUseCase(d).execute(baseBrief(), cell(over));
-    expect(result.success).toBe(false);
-    if (!result.success) expect(result.error.message).toMatch(/motion, durationSec and atSec together/);
-    expect(d.imageGenerator.resolveBackground).not.toHaveBeenCalled();
-    expect(d.compositor.compositeAsset).not.toHaveBeenCalled();
-    expect(videoCompositor.compositeFrame).not.toHaveBeenCalled();
-  });
+  ])(
+    "rejects a cell carrying %s — the three fields travel together or not at all",
+    async (_label, over) => {
+      const videoCompositor = fakeVideoCompositor();
+      const d = deps({ videoCompositor });
+      const result = await new PreviewCreativeFrameUseCase(d).execute(baseBrief(), cell(over));
+      expect(result.success).toBe(false);
+      if (!result.success)
+        expect(result.error.message).toMatch(/motion, durationSec and atSec together/);
+      expect(d.imageGenerator.resolveBackground).not.toHaveBeenCalled();
+      expect(d.compositor.compositeAsset).not.toHaveBeenCalled();
+      expect(videoCompositor.compositeFrame).not.toHaveBeenCalled();
+    },
+  );
 
   test("rejects a motion kind outside the vocabulary, before any port is called", async () => {
     const d = deps({ videoCompositor: fakeVideoCompositor() });
@@ -592,9 +626,14 @@ describe("PreviewCreativeFrameUseCase — VE5b2 scene backgrounds", () => {
     );
     expect(result.success).toBe(true);
     expect(sceneAssets.resolveScene).toHaveBeenCalledTimes(1);
-    expect(sceneAssets.resolveScene).toHaveBeenCalledWith(SCENE_A, expect.objectContaining({ value: "9:16" }));
+    expect(sceneAssets.resolveScene).toHaveBeenCalledWith(
+      SCENE_A,
+      expect.objectContaining({ value: "9:16" }),
+    );
     const request = vi.mocked(videoCompositor.compositeFrame).mock.calls[0][0];
-    expect(request.backgrounds).toEqual({ [SCENE_A]: new Uint8Array(Buffer.from(SCENE_A, "utf8")) });
+    expect(request.backgrounds).toEqual({
+      [SCENE_A]: new Uint8Array(Buffer.from(SCENE_A, "utf8")),
+    });
   });
 
   test("a timeline naming no backgrounds carries no backgrounds key and never touches the scene port", async () => {
@@ -652,12 +691,20 @@ describe("PreviewCreativeFrameUseCase — VE5b2 scene backgrounds", () => {
     const cache = memoryCache();
     const sceneAssetsA = { resolveScene: vi.fn(async () => new Uint8Array([1, 2, 3])) };
     const first = await new PreviewCreativeFrameUseCase(
-      deps({ videoCompositor: fakeVideoCompositor(), sceneAssets: sceneAssetsA, frameCache: cache }),
+      deps({
+        videoCompositor: fakeVideoCompositor(),
+        sceneAssets: sceneAssetsA,
+        frameCache: cache,
+      }),
     ).execute(baseBrief({ copy: { timeline: timelineWithScene } }), motionCell());
 
     const sceneAssetsB = { resolveScene: vi.fn(async () => new Uint8Array([9, 9, 9])) };
     const second = await new PreviewCreativeFrameUseCase(
-      deps({ videoCompositor: fakeVideoCompositor(), sceneAssets: sceneAssetsB, frameCache: cache }),
+      deps({
+        videoCompositor: fakeVideoCompositor(),
+        sceneAssets: sceneAssetsB,
+        frameCache: cache,
+      }),
     ).execute(baseBrief({ copy: { timeline: timelineWithScene } }), motionCell());
 
     expect(first.success && second.success).toBe(true);
@@ -669,10 +716,9 @@ describe("PreviewCreativeFrameUseCase — VE5b2 scene backgrounds", () => {
 describe("PreviewCreativeFrameUseCase — the scrub frame fingerprint (R8)", () => {
   test("the frame fields move the key away from the same cell's still key", async () => {
     const still = await new PreviewCreativeFrameUseCase(deps()).execute(baseBrief(), cell());
-    const scrub = await new PreviewCreativeFrameUseCase(deps({ videoCompositor: fakeVideoCompositor() })).execute(
-      baseBrief(),
-      motionCell(),
-    );
+    const scrub = await new PreviewCreativeFrameUseCase(
+      deps({ videoCompositor: fakeVideoCompositor() }),
+    ).execute(baseBrief(), motionCell());
     expect(still.success && scrub.success).toBe(true);
     if (!still.success || !scrub.success) return;
     expect(scrub.value.cacheKey).not.toBe(still.value.cacheKey);
@@ -693,14 +739,12 @@ describe("PreviewCreativeFrameUseCase — the scrub frame fingerprint (R8)", () 
   });
 
   test("two scrub positions on different frame indices never share a key", async () => {
-    const a = await new PreviewCreativeFrameUseCase(deps({ videoCompositor: fakeVideoCompositor() })).execute(
-      baseBrief(),
-      motionCell({ atSec: 0.5 }),
-    );
-    const b = await new PreviewCreativeFrameUseCase(deps({ videoCompositor: fakeVideoCompositor() })).execute(
-      baseBrief(),
-      motionCell({ atSec: 5.5 }),
-    );
+    const a = await new PreviewCreativeFrameUseCase(
+      deps({ videoCompositor: fakeVideoCompositor() }),
+    ).execute(baseBrief(), motionCell({ atSec: 0.5 }));
+    const b = await new PreviewCreativeFrameUseCase(
+      deps({ videoCompositor: fakeVideoCompositor() }),
+    ).execute(baseBrief(), motionCell({ atSec: 5.5 }));
     expect(a.success && b.success).toBe(true);
     if (!a.success || !b.success) return;
     expect(a.value.cacheKey).not.toBe(b.value.cacheKey);

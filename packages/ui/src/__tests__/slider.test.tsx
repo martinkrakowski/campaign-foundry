@@ -4,7 +4,9 @@ import { Slider } from "../slider";
 
 const setup = (over: Partial<Parameters<typeof Slider>[0]> = {}) => {
   const onChange = vi.fn();
-  const view = render(<Slider aria-label="Count" value={4} min={1} max={10} onChange={onChange} {...over} />);
+  const view = render(
+    <Slider aria-label="Count" value={4} min={1} max={10} onChange={onChange} {...over} />,
+  );
   return { onChange, view, input: view.container.querySelector("input") as HTMLInputElement };
 };
 
@@ -28,7 +30,9 @@ describe("Slider", () => {
   });
 
   test("shows the value against the ceiling, with a suffix when given", () => {
-    const { unmount } = render(<Slider aria-label="Count" value={4} min={1} max={10} onChange={vi.fn()} />);
+    const { unmount } = render(
+      <Slider aria-label="Count" value={4} min={1} max={10} onChange={vi.fn()} />,
+    );
     expect(screen.getByText(/4/).textContent).toContain("/ 10");
     unmount();
     render(<Slider aria-label="Length" value={6} min={2} max={30} onChange={vi.fn()} suffix="s" />);
@@ -58,4 +62,3 @@ describe("Slider", () => {
     expect(input.getAttribute("aria-describedby")).toBe("slider-hint-id");
   });
 });
-

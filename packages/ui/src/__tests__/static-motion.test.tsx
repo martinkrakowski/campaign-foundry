@@ -27,7 +27,12 @@ describe("no preview component carries an animate- class (D88)", () => {
   for (const [name, element] of [
     ["PosterFrame", <PosterFrame key="pf" ratio="9:16" variant="pB" />],
     ["PosterStack", <PosterStack key="ps" />],
-    ["PreviewPanel", <PreviewPanel key="pv" dimmed caption="6 creatives"><span /></PreviewPanel>],
+    [
+      "PreviewPanel",
+      <PreviewPanel key="pv" dimmed caption="6 creatives">
+        <span />
+      </PreviewPanel>,
+    ],
     ["ScrubBar", <ScrubBar key="sb" />],
   ] as const) {
     test(`${name} renders no animate-* class, no infinite inline motion, no @keyframes`, () => {

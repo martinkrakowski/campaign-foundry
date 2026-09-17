@@ -50,7 +50,15 @@ describe("campaign types (D108–D112, A5/D117)", () => {
       unit: "standard-web",
       creativeType: "image-text",
       template: "canonical-image-text",
-      platforms: ["instagram-feed", "linkedin", "x", "instagram-story", "instagram-reel", "tiktok", "youtube-short"],
+      platforms: [
+        "instagram-feed",
+        "linkedin",
+        "x",
+        "instagram-story",
+        "instagram-reel",
+        "tiktok",
+        "youtube-short",
+      ],
       formats: ["static", "motion"],
       mode: "variation",
     });
@@ -112,7 +120,9 @@ describe("campaign types (D108–D112, A5/D117)", () => {
     }
 
     for (const [type, preset] of Object.entries(CAMPAIGN_TYPE_PRESETS)) {
-      const allowedFamilies = new Set<string>(CREATIVE_TYPE_RULES[preset.creativeType].outputFamilies);
+      const allowedFamilies = new Set<string>(
+        CREATIVE_TYPE_RULES[preset.creativeType].outputFamilies,
+      );
       for (const format of preset.formats) {
         expect(
           allowedFamilies.has(format),
@@ -121,10 +131,18 @@ describe("campaign types (D108–D112, A5/D117)", () => {
       }
     }
 
-    expect(CREATIVE_TYPE_RULES[CAMPAIGN_TYPE_PRESETS["short-video"].creativeType].outputFamilies).toEqual(["motion"]);
-    expect(CREATIVE_TYPE_RULES[CAMPAIGN_TYPE_PRESETS["social-post"].creativeType].outputFamilies).toEqual(["static", "motion"]);
-    expect(CREATIVE_TYPE_RULES[CAMPAIGN_TYPE_PRESETS["paid-social"].creativeType].outputFamilies).toEqual(["static", "motion"]);
-    expect(CREATIVE_TYPE_RULES[CAMPAIGN_TYPE_PRESETS["display-ad"].creativeType].outputFamilies).toEqual(["static", "motion"]);
+    expect(
+      CREATIVE_TYPE_RULES[CAMPAIGN_TYPE_PRESETS["short-video"].creativeType].outputFamilies,
+    ).toEqual(["motion"]);
+    expect(
+      CREATIVE_TYPE_RULES[CAMPAIGN_TYPE_PRESETS["social-post"].creativeType].outputFamilies,
+    ).toEqual(["static", "motion"]);
+    expect(
+      CREATIVE_TYPE_RULES[CAMPAIGN_TYPE_PRESETS["paid-social"].creativeType].outputFamilies,
+    ).toEqual(["static", "motion"]);
+    expect(
+      CREATIVE_TYPE_RULES[CAMPAIGN_TYPE_PRESETS["display-ad"].creativeType].outputFamilies,
+    ).toEqual(["static", "motion"]);
   });
 
   test("presets only ever request the two known formats and the two known modes", () => {
@@ -148,14 +166,24 @@ describe("campaign types (D108–D112, A5/D117)", () => {
       "paid social advertising across feeds, stories and reels",
     );
     expect(CAMPAIGN_TYPE_PROMPT_HINTS["short-video"]).toBe("short-form video for social feeds");
-    expect(CAMPAIGN_TYPE_PROMPT_HINTS["display-ad"]).toBe("static display advertising in IAB banner sizes");
-    expect(CAMPAIGN_TYPE_PROMPT_HINTS["short-video"]).not.toBe(CAMPAIGN_TYPE_PROMPT_HINTS["social-post"]);
-    expect(CAMPAIGN_TYPE_PROMPT_HINTS["paid-social"]).not.toBe(CAMPAIGN_TYPE_PROMPT_HINTS["social-post"]);
+    expect(CAMPAIGN_TYPE_PROMPT_HINTS["display-ad"]).toBe(
+      "static display advertising in IAB banner sizes",
+    );
+    expect(CAMPAIGN_TYPE_PROMPT_HINTS["short-video"]).not.toBe(
+      CAMPAIGN_TYPE_PROMPT_HINTS["social-post"],
+    );
+    expect(CAMPAIGN_TYPE_PROMPT_HINTS["paid-social"]).not.toBe(
+      CAMPAIGN_TYPE_PROMPT_HINTS["social-post"],
+    );
   });
 
   test("absent type uses the social-post prompt sentence", () => {
-    expect(campaignTypePromptSentence(undefined)).toBe(campaignTypePromptSentence(DEFAULT_CAMPAIGN_TYPE));
-    expect(campaignTypePromptSentence(undefined)).toBe("Campaign type: a social post for organic feeds.");
+    expect(campaignTypePromptSentence(undefined)).toBe(
+      campaignTypePromptSentence(DEFAULT_CAMPAIGN_TYPE),
+    );
+    expect(campaignTypePromptSentence(undefined)).toBe(
+      "Campaign type: a social post for organic feeds.",
+    );
     expect(campaignTypePromptSentence("paid-social")).toBe(
       "Campaign type: paid social advertising across feeds, stories and reels.",
     );

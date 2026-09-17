@@ -191,28 +191,64 @@ export function styleProblem(value: unknown): string | undefined {
       return `Unsupported style field "${key}" (allowed: ${STYLE_FIELDS.join(", ")}).`;
     }
   }
-  const finiteIn = (field: string, v: unknown, min: number, max: number, why: string): string | undefined =>
+  const finiteIn = (
+    field: string,
+    v: unknown,
+    min: number,
+    max: number,
+    why: string,
+  ): string | undefined =>
     v === undefined
       ? undefined
       : typeof v !== "number" || !Number.isFinite(v) || v < min || v > max
         ? `Campaign brief field "style.${field}" must be a finite number in [${min}, ${max}] (${why}).`
         : undefined;
-  if (record.fontFamily !== undefined && !(FONT_FAMILY_VALUES as readonly string[]).includes(record.fontFamily as string)) {
+  if (
+    record.fontFamily !== undefined &&
+    !(FONT_FAMILY_VALUES as readonly string[]).includes(record.fontFamily as string)
+  ) {
     return `Campaign brief field "style.fontFamily" must be one of ${FONT_FAMILY_VALUES.join(", ")}.`;
   }
-  if (record.fontWeight !== undefined && !(FONT_WEIGHT_VALUES as readonly number[]).includes(record.fontWeight as number)) {
+  if (
+    record.fontWeight !== undefined &&
+    !(FONT_WEIGHT_VALUES as readonly number[]).includes(record.fontWeight as number)
+  ) {
     return `Campaign brief field "style.fontWeight" must be one of ${FONT_WEIGHT_VALUES.join(", ")} (D60: only the weights that have faces).`;
   }
-  const size = finiteIn("sizeScale", record.sizeScale, MIN_SIZE_SCALE, MAX_SIZE_SCALE, "a fraction of the canvas width, D55");
+  const size = finiteIn(
+    "sizeScale",
+    record.sizeScale,
+    MIN_SIZE_SCALE,
+    MAX_SIZE_SCALE,
+    "a fraction of the canvas width, D55",
+  );
   if (size !== undefined) return size;
-  const line = finiteIn("lineHeight", record.lineHeight, MIN_LINE_HEIGHT, MAX_LINE_HEIGHT, "a multiple of the font size");
+  const line = finiteIn(
+    "lineHeight",
+    record.lineHeight,
+    MIN_LINE_HEIGHT,
+    MAX_LINE_HEIGHT,
+    "a multiple of the font size",
+  );
   if (line !== undefined) return line;
-  const spacing = finiteIn("letterSpacing", record.letterSpacing, MIN_LETTER_SPACING, MAX_LETTER_SPACING, "an em fraction");
+  const spacing = finiteIn(
+    "letterSpacing",
+    record.letterSpacing,
+    MIN_LETTER_SPACING,
+    MAX_LETTER_SPACING,
+    "an em fraction",
+  );
   if (spacing !== undefined) return spacing;
-  if (record.align !== undefined && !(ALIGN_VALUES as readonly string[]).includes(record.align as string)) {
+  if (
+    record.align !== undefined &&
+    !(ALIGN_VALUES as readonly string[]).includes(record.align as string)
+  ) {
     return `Campaign brief field "style.align" must be one of ${ALIGN_VALUES.join(", ")}.`;
   }
-  if (record.textEffect !== undefined && !(TEXT_EFFECT_VALUES as readonly string[]).includes(record.textEffect as string)) {
+  if (
+    record.textEffect !== undefined &&
+    !(TEXT_EFFECT_VALUES as readonly string[]).includes(record.textEffect as string)
+  ) {
     return `Campaign brief field "style.textEffect" must be one of ${TEXT_EFFECT_VALUES.join(", ")}.`;
   }
   return undefined;

@@ -1,8 +1,5 @@
 import { describe, test, expect } from "vitest";
-import {
-  BRIEF_SCHEMA_VERSION,
-  isSupportedBriefSchemaVersion,
-} from "../brief-schema-version.js";
+import { BRIEF_SCHEMA_VERSION, isSupportedBriefSchemaVersion } from "../brief-schema-version.js";
 
 describe("brief schema version (D133)", () => {
   test("BRIEF_SCHEMA_VERSION is 1", () => {

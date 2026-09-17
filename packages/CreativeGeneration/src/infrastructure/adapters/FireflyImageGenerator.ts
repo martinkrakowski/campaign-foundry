@@ -98,7 +98,9 @@ export class FireflyImageGenerator implements ImageGeneratorPort {
       if (this.fallback) {
         // Observable degradation — a bad credential or a Firefly outage drops to the
         // next generator (which reports its own source), so a run never aborts.
-        console.warn(`[FireflyImageGenerator] failed for ${product.id} @ ${ratio.value}; using fallback. ${message}`);
+        console.warn(
+          `[FireflyImageGenerator] failed for ${product.id} @ ${ratio.value}; using fallback. ${message}`,
+        );
         return this.fallback.resolveBackground(product, ratio, context);
       }
       throw new Error(message);
@@ -137,7 +139,10 @@ export class FireflyImageGenerator implements ImageGeneratorPort {
     const body = (await response.json()) as ImsTokenResponse;
     if (!body.access_token) throw new Error("Adobe IMS returned no access token");
     const ttlMs = (body.expires_in ?? DEFAULT_TOKEN_TTL_SECONDS) * 1000;
-    this.cachedToken = { token: body.access_token, expiresAt: Date.now() + ttlMs - TOKEN_EXPIRY_MARGIN_MS };
+    this.cachedToken = {
+      token: body.access_token,
+      expiresAt: Date.now() + ttlMs - TOKEN_EXPIRY_MARGIN_MS,
+    };
     return body.access_token;
   }
 

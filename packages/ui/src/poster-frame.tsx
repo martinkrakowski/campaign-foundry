@@ -76,7 +76,10 @@ const LAYOUTS: Record<PosterVariant, (w: number, h: number) => readonly Layer[]>
 const AVATAR_FRACTION = 0.055;
 
 /** Pixel box of a `PosterFrame` at `spec` (or a social-ratio shorthand) whose long side is `size`. */
-export function frameSize(specOrRatio: CanvasSpec | RatioOption, size: number): { width: number; height: number } {
+export function frameSize(
+  specOrRatio: CanvasSpec | RatioOption,
+  size: number,
+): { width: number; height: number } {
   const spec = typeof specOrRatio === "string" ? { ratio: specOrRatio } : specOrRatio;
   return frameBox(spec, size);
 }
@@ -87,7 +90,13 @@ export function frameSize(specOrRatio: CanvasSpec | RatioOption, size: number): 
  * decorative (`aria-hidden`): the tile's accessible name carries the meaning,
  * never the picture. Static by construction — no animation classes anywhere.
  */
-export function PosterFrame({ spec, ratio, variant, size = 96, blank = false }: PosterFrameProps): ReactNode {
+export function PosterFrame({
+  spec,
+  ratio,
+  variant,
+  size = 96,
+  blank = false,
+}: PosterFrameProps): ReactNode {
   const { width: w, height: h } = frameSize(canvasSpecOf(spec, ratio), size);
   const layers = blank ? [] : LAYOUTS[variant](w, h);
   return (

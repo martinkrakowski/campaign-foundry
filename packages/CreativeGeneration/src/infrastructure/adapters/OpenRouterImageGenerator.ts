@@ -98,7 +98,9 @@ export class OpenRouterImageGenerator implements ImageGeneratorPort {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (this.fallback) {
-        console.warn(`[OpenRouterImageGenerator] failed for ${product.id} @ ${ratio.value}; using fallback. ${message}`);
+        console.warn(
+          `[OpenRouterImageGenerator] failed for ${product.id} @ ${ratio.value}; using fallback. ${message}`,
+        );
         return this.fallback.resolveBackground(product, ratio, context);
       }
       throw new Error(message);
@@ -122,7 +124,9 @@ export class OpenRouterImageGenerator implements ImageGeneratorPort {
       }),
     });
     if (!response.ok) {
-      throw new Error(`OpenRouter HTTP ${response.status}: ${(await response.text()).slice(0, 200)}`);
+      throw new Error(
+        `OpenRouter HTTP ${response.status}: ${(await response.text()).slice(0, 200)}`,
+      );
     }
     return this.extractImageUrl((await response.json()) as OpenRouterResponse);
   }

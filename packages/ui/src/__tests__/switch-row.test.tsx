@@ -24,7 +24,9 @@ describe("SwitchRow", () => {
       </SwitchRow>,
     );
     expect(screen.getByText("2 approved headlines")).toBeTruthy();
-    expect(screen.getByRole("switch", { name: "Headlines" }).getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByRole("switch", { name: "Headlines" }).getAttribute("aria-checked")).toBe(
+      "true",
+    );
     unmount();
 
     render(<SwitchRow label="Headlines" checked={false} onToggle={vi.fn()} />);

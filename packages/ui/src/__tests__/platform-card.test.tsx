@@ -8,13 +8,7 @@ describe("PlatformCard", () => {
   const profile = platformProfile("instagram-feed")!;
 
   test("renders profile.label on screen, never the raw id (D7 / D18)", () => {
-    render(
-      <PlatformCard
-        profile={profile}
-        selected={false}
-        onToggle={vi.fn()}
-      />,
-    );
+    render(<PlatformCard profile={profile} selected={false} onToggle={vi.fn()} />);
 
     expect(screen.getByText("Instagram Feed")).toBeTruthy();
     expect(screen.queryByText("instagram-feed")).toBeNull();
@@ -24,11 +18,7 @@ describe("PlatformCard", () => {
     const user = userEvent.setup();
     const onToggle = vi.fn();
     const { rerender } = render(
-      <PlatformCard
-        profile={profile}
-        selected={false}
-        onToggle={onToggle}
-      />,
+      <PlatformCard profile={profile} selected={false} onToggle={onToggle} />,
     );
 
     const button = screen.getByRole("button", { name: "instagram-feed" });
@@ -43,13 +33,7 @@ describe("PlatformCard", () => {
     expect(tile?.className).toContain("bg-background");
     expect(tile?.className).toContain("text-text-secondary");
 
-    rerender(
-      <PlatformCard
-        profile={profile}
-        selected={true}
-        onToggle={onToggle}
-      />,
-    );
+    rerender(<PlatformCard profile={profile} selected={true} onToggle={onToggle} />);
 
     expect(button.getAttribute("aria-pressed")).toBe("true");
     expect(button.className).toContain("border-brand-primary");
@@ -84,16 +68,11 @@ describe("PlatformCard", () => {
   });
 
   test("respects disabled prop", () => {
-    render(
-      <PlatformCard
-        profile={profile}
-        selected={false}
-        onToggle={vi.fn()}
-        disabled={true}
-      />,
-    );
+    render(<PlatformCard profile={profile} selected={false} onToggle={vi.fn()} disabled={true} />);
 
-    expect((screen.getByRole("button", { name: "instagram-feed" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(
+      (screen.getByRole("button", { name: "instagram-feed" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
   });
 
   test("a display profile renders its label and a size glyph, never a social ratio frame", () => {

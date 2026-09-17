@@ -45,9 +45,7 @@ export const PROHIBITED_PATTERNS = PROHIBITED_TERMS.map(
 /** Find all prohibited terms matched in the given text. */
 export function matchProhibitedTerms(text: string): string[] {
   const lower = text.toLowerCase();
-  return PROHIBITED_PATTERNS.filter(([pattern]) => pattern.test(lower)).map(
-    ([, term]) => term,
-  );
+  return PROHIBITED_PATTERNS.filter(([pattern]) => pattern.test(lower)).map(([, term]) => term);
 }
 
 /** A brand-colour pixel density below this fails the visual check (MinimumBrandColorDensity). */
@@ -68,7 +66,13 @@ const CHANNEL_TOLERANCE = 10;
 
 function hexToRgb(hex: string): [number, number, number] {
   const h = hex.replace(/^#/, "");
-  const full = h.length === 3 ? h.split("").map((c) => c + c).join("") : h.padEnd(6, "0").slice(0, 6);
+  const full =
+    h.length === 3
+      ? h
+          .split("")
+          .map((c) => c + c)
+          .join("")
+      : h.padEnd(6, "0").slice(0, 6);
   const n = Number.parseInt(full, 16);
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }

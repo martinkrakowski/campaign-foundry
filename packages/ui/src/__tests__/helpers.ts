@@ -7,7 +7,9 @@ import type { ReactElement } from "react";
  */
 export const exerciseFocusTrap = (dialog: HTMLElement) => {
   const focusables = [
-    ...dialog.querySelectorAll<HTMLElement>('a[href], button, input, [tabindex]:not([tabindex="-1"])'),
+    ...dialog.querySelectorAll<HTMLElement>(
+      'a[href], button, input, [tabindex]:not([tabindex="-1"])',
+    ),
   ];
   // Focus every element and tab both ways, so the forward-wrap (at the last element)
   // and backward-wrap (at the first) both fire regardless of selector ordering.

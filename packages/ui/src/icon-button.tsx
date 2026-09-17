@@ -1,7 +1,10 @@
 import type { ButtonHTMLAttributes, ReactNode, Ref } from "react";
 import { cn } from "./cn";
 
-export interface IconButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, "aria-label"> {
+export interface IconButtonProps extends Omit<
+  ButtonHTMLAttributes<HTMLButtonElement>,
+  "aria-label"
+> {
   /**
    * The accessible name. Required rather than optional: an icon-only control has no
    * text to name it, so an omitted label is not a smaller button but a nameless one
@@ -31,7 +34,12 @@ export interface IconButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonEle
  * here: W2a.3 adds one global rule, so a control that forgets to style focus still
  * has a ring — and every control gets the same one.
  */
-export function IconButton({ label, className, type = "button", ...rest }: IconButtonProps): ReactNode {
+export function IconButton({
+  label,
+  className,
+  type = "button",
+  ...rest
+}: IconButtonProps): ReactNode {
   return (
     <button
       type={type}

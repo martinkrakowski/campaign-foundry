@@ -62,14 +62,25 @@ const STOP_KEY_ORDER = ["t", "value", "easing", "clock"] as const;
  * props object carries one kind's keys only, so one flat list orders them
  * all; keys the union does not name keep their written order at the end.
  */
-const PROPS_KEY_ORDER = ["solidHeight", "fadeHeight", "width", "margin", "anchor", "typeFloor", "alt"] as const;
+const PROPS_KEY_ORDER = [
+  "solidHeight",
+  "fadeHeight",
+  "width",
+  "margin",
+  "anchor",
+  "typeFloor",
+  "alt",
+] as const;
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /** Re-emit `source` with `order`'s keys first (present, in order), then any remaining keys. */
-function orderedKeys(source: Record<string, unknown>, order: readonly string[]): Record<string, unknown> {
+function orderedKeys(
+  source: Record<string, unknown>,
+  order: readonly string[],
+): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const key of order) {
     const value = source[key];
@@ -78,7 +89,8 @@ function orderedKeys(source: Record<string, unknown>, order: readonly string[]):
   for (const key of Object.keys(source)) {
     // Ownership, never `key in out`: an own key named `constructor`, `toString`
     // or `valueOf` is also an inherited member of `out`, and `in` would drop it.
-    if (!Object.prototype.hasOwnProperty.call(out, key) && source[key] !== undefined) out[key] = source[key];
+    if (!Object.prototype.hasOwnProperty.call(out, key) && source[key] !== undefined)
+      out[key] = source[key];
   }
   return out;
 }
@@ -149,9 +161,9 @@ function orderedTemplate(template: unknown): unknown {
  * Keys whose value is `undefined` are omitted, matching the previous js-yaml
  * dump byte for byte on the briefs this project writes. A template's layers
  * dump with the layer's own canonical order — `id`, `kind`, `enabled`,
-   * `props` and `elements`, with the props keys in the union's order (L3b,
-   * D134) and each element's keys, style keys and frame keys in order (HL1,
-   * HL5e) — so a save
+ * `props` and `elements`, with the props keys in the union's order (L3b,
+ * D134) and each element's keys, style keys and frame keys in order (HL1,
+ * HL5e) — so a save
  * serialises a hand-written layer deterministically too. `tracks`, when
  * present, sits last (K1) with each track's own keys (`property`, `stops`)
  * and each stop's (`t`, `value`, `easing`, `clock`) in their own order.

@@ -73,14 +73,19 @@ const skipReason = ffmpegOk
 
 function parseFfmpegVersion(versionStdout: string): string {
   const match = /ffmpeg version (\S+)/.exec(versionStdout);
-  if (!match) throw new Error(`could not parse ffmpeg version from: ${versionStdout.slice(0, 200)}`);
+  if (!match)
+    throw new Error(`could not parse ffmpeg version from: ${versionStdout.slice(0, 200)}`);
   return match[1];
 }
 
-function parseX264Banner(video: Uint8Array): { readonly version: string; readonly threads: string } {
+function parseX264Banner(video: Uint8Array): {
+  readonly version: string;
+  readonly threads: string;
+} {
   const text = Buffer.from(video).toString("latin1");
   const match = /x264 - (core \d+ \S+ \S+) - .*?threads=(\d+)/.exec(text);
-  if (!match) throw new Error("no x264 SEI banner found in the encoded MP4 (was -fflags +bitexact changed?)");
+  if (!match)
+    throw new Error("no x264 SEI banner found in the encoded MP4 (was -fflags +bitexact changed?)");
   return { version: match[1], threads: match[2] };
 }
 
@@ -106,7 +111,9 @@ function generateSineBedWav(ffmpeg: string, durationSec: number, sampleRate: num
       { timeout: 10_000 },
     );
     if (result.status !== 0) {
-      throw new Error(`sine bed generation failed (exit ${String(result.status)}): ${result.stderr?.toString()}`);
+      throw new Error(
+        `sine bed generation failed (exit ${String(result.status)}): ${result.stderr?.toString()}`,
+      );
     }
     return new Uint8Array(readFileSync(outPath));
   } finally {
@@ -116,17 +123,24 @@ function generateSineBedWav(ffmpeg: string, durationSec: number, sampleRate: num
 
 /** Extract the AAC elementary stream (ADTS framing synthesized from the mp4 esds), no re-encode. */
 function extractAudioStream(ffmpeg: string, mp4Path: string, outPath: string): Uint8Array {
-  const result = spawnSync(ffmpeg, ["-y", "-i", mp4Path, "-map", "0:a", "-c", "copy", "-f", "adts", outPath], {
-    timeout: 30_000,
-  });
+  const result = spawnSync(
+    ffmpeg,
+    ["-y", "-i", mp4Path, "-map", "0:a", "-c", "copy", "-f", "adts", outPath],
+    {
+      timeout: 30_000,
+    },
+  );
   if (result.status !== 0) {
-    throw new Error(`audio stream extraction failed (exit ${String(result.status)}): ${result.stderr?.toString().slice(-2000)}`);
+    throw new Error(
+      `audio stream extraction failed (exit ${String(result.status)}): ${result.stderr?.toString().slice(-2000)}`,
+    );
   }
   return readFileSync(outPath);
 }
 
 const fixturesDir =
-  process.env.COMPOSITOR_GOLDEN_FIXTURE_DIR ?? join(dirname(fileURLToPath(import.meta.url)), "fixtures");
+  process.env.COMPOSITOR_GOLDEN_FIXTURE_DIR ??
+  join(dirname(fileURLToPath(import.meta.url)), "fixtures");
 const goldensPath = join(fixturesDir, "compositor-goldens-mp4-audio.json");
 const fixture = JSON.parse(readFileSync(goldensPath, "utf8")) as GoldenFixture;
 
@@ -144,7 +158,8 @@ describe("CanvasFfmpegVideoCompositor audio byte golden (VE3b1)", () => {
   const goldens = resolveGoldenMap(fixture, key);
   const missingMessage = missingGoldenMapMessage(key, goldenPlatformKeys(fixture), {
     fixtureFile: "compositor-goldens-mp4-audio.json",
-    cellsHint: "5 fields (fileHash, audioStreamHash, ffmpegVersion, x264Version, threads) for the one canonical timeline + bed",
+    cellsHint:
+      "5 fields (fileHash, audioStreamHash, ffmpegVersion, x264Version, threads) for the one canonical timeline + bed",
   });
 
   test.runIf(process.env.CI)("the ffmpeg-static binary executes on CI", () => {

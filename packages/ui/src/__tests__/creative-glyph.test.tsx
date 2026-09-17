@@ -105,7 +105,9 @@ describe("CreativeGlyph", () => {
     expect(gradients[2].getAttribute("y1")).toBe("0.45");
     expect(gradients[3].getAttribute("y1")).toBe("1");
     // each contrast-shade rect references its own contrast-shade gradient
-    const shades = rects(container).filter((rect) => (rect.getAttribute("fill") ?? "").startsWith("url(#creative-glyph-shade-"));
+    const shades = rects(container).filter((rect) =>
+      (rect.getAttribute("fill") ?? "").startsWith("url(#creative-glyph-shade-"),
+    );
     expect(shades[0].getAttribute("fill")).toBe(`url(#${gradients[0].id})`);
     expect(shades[1].getAttribute("fill")).toBe(`url(#${gradients[2].id})`);
   });

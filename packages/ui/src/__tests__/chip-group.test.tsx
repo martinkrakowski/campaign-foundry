@@ -26,7 +26,15 @@ describe("ChipGroup", () => {
   });
 
   test("does not render Other button when allowOther is false or otherLabel is omitted", () => {
-    const { unmount } = render(<ChipGroup options={OPTIONS} value="DE" onChange={vi.fn()} allowOther={false} otherLabel="Other…" />);
+    const { unmount } = render(
+      <ChipGroup
+        options={OPTIONS}
+        value="DE"
+        onChange={vi.fn()}
+        allowOther={false}
+        otherLabel="Other…"
+      />,
+    );
     expect(screen.queryByRole("button", { name: "Other…" })).toBeNull();
     unmount();
 
@@ -260,14 +268,28 @@ describe("ChipGroup gating reaches the mirror input", () => {
   test("disabled and readOnly close the assistive-tech input too, not just the chips", async () => {
     const onChange = vi.fn();
     const { unmount } = render(
-      <ChipGroup label="Target Region" options={["DE", "FR"]} value="DE" onChange={onChange} disabled />,
+      <ChipGroup
+        label="Target Region"
+        options={["DE", "FR"]}
+        value="DE"
+        onChange={onChange}
+        disabled
+      />,
     );
     // the sr-only input is the control assistive tech actually operates; leaving it
     // writable hands exactly those users a value the group says is unavailable
     expect((screen.getByLabelText("Target Region") as HTMLInputElement).disabled).toBe(true);
     unmount();
 
-    render(<ChipGroup label="Target Region" options={["DE", "FR"]} value="DE" onChange={onChange} readOnly />);
+    render(
+      <ChipGroup
+        label="Target Region"
+        options={["DE", "FR"]}
+        value="DE"
+        onChange={onChange}
+        readOnly
+      />,
+    );
     expect((screen.getByLabelText("Target Region") as HTMLInputElement).readOnly).toBe(true);
   });
 });
@@ -305,4 +327,3 @@ describe("the custom value is a named, gated field", () => {
     expect(group.getAttribute("aria-describedby")).toBe("chip-hint-id");
   });
 });
-

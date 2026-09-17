@@ -11,7 +11,10 @@ const ratio = (v = "1:1") => {
 const ctx = { campaignMessage: "m", targetAudience: "Urban", targetRegion: "DE" };
 const product = { id: "hydra", name: "Hydra Bottle", primaryColor: "#1473E6", logoPath: "x.png" };
 const fallback = (): ImageGeneratorPort => ({
-  resolveBackground: vi.fn(async () => ({ image: new Uint8Array([7]), source: "procedural" as const })),
+  resolveBackground: vi.fn(async () => ({
+    image: new Uint8Array([7]),
+    source: "procedural" as const,
+  })),
 });
 
 /** A real 4×4 PNG (standalone buffer) so the cover-fit step's loadImage works. */
@@ -22,7 +25,13 @@ const pngBytes = (): Uint8Array => {
 };
 
 /** Minimal fetch Response stand-in. */
-const res = (opts: { ok?: boolean; status?: number; json?: unknown; text?: string; bytes?: Uint8Array }): Response =>
+const res = (opts: {
+  ok?: boolean;
+  status?: number;
+  json?: unknown;
+  text?: string;
+  bytes?: Uint8Array;
+}): Response =>
   ({
     ok: opts.ok ?? true,
     status: opts.status ?? 200,
@@ -42,9 +51,12 @@ afterEach(() => vi.restoreAllMocks());
 const wire = (opts: { ims?: Response; generate?: Response; image?: Response } = {}) =>
   fetchMock.mockImplementation((url: RequestInfo | URL) => {
     const u = String(url);
-    if (u.includes("adobelogin")) return Promise.resolve(opts.ims ?? res({ json: { access_token: "tok" } }));
+    if (u.includes("adobelogin"))
+      return Promise.resolve(opts.ims ?? res({ json: { access_token: "tok" } }));
     if (u.includes("firefly-api"))
-      return Promise.resolve(opts.generate ?? res({ json: { outputs: [{ image: { url: "https://img/x.png" } }] } }));
+      return Promise.resolve(
+        opts.generate ?? res({ json: { outputs: [{ image: { url: "https://img/x.png" } }] } }),
+      );
     return Promise.resolve(opts.image ?? res({ bytes: pngBytes() }));
   });
 
@@ -57,7 +69,11 @@ const imsCalls = () =>
 describe("FireflyImageGenerator", () => {
   test("authenticates, generates, and returns a firefly-sourced image", async () => {
     wire();
-    const out = await new FireflyImageGenerator(creds).resolveBackground(product, ratio("16:9"), ctx);
+    const out = await new FireflyImageGenerator(creds).resolveBackground(
+      product,
+      ratio("16:9"),
+      ctx,
+    );
 
     expect(out.source).toBe("firefly");
     expect(Array.from(out.image.slice(0, 4))).toEqual([0x89, 0x50, 0x4e, 0x47]); // PNG magic
@@ -79,50 +95,75 @@ describe("FireflyImageGenerator", () => {
 
   test("uses a custom IMS scope when provided", async () => {
     wire();
-    await new FireflyImageGenerator({ ...creds, scope: "custom_scope" }).resolveBackground(product, ratio(), ctx);
+    await new FireflyImageGenerator({ ...creds, scope: "custom_scope" }).resolveBackground(
+      product,
+      ratio(),
+      ctx,
+    );
     expect((fetchMock.mock.calls[0][1]?.body as URLSearchParams).get("scope")).toBe("custom_scope");
   });
 
   test("falls back when IMS auth fails", async () => {
     wire({ ims: res({ ok: false, status: 401 }) });
     const fb = fallback();
-    const out = await new FireflyImageGenerator({ ...creds, fallback: fb }).resolveBackground(product, ratio(), ctx);
+    const out = await new FireflyImageGenerator({ ...creds, fallback: fb }).resolveBackground(
+      product,
+      ratio(),
+      ctx,
+    );
     expect(out.source).toBe("procedural");
     expect(fb.resolveBackground).toHaveBeenCalledOnce();
   });
 
   test("falls back when IMS returns no access token", async () => {
     wire({ ims: res({ json: {} }) });
-    const out = await new FireflyImageGenerator({ ...creds, fallback: fallback() }).resolveBackground(product, ratio(), ctx);
+    const out = await new FireflyImageGenerator({
+      ...creds,
+      fallback: fallback(),
+    }).resolveBackground(product, ratio(), ctx);
     expect(out.source).toBe("procedural");
   });
 
   test("falls back on a non-OK Firefly generate response", async () => {
     wire({ generate: res({ ok: false, status: 500, text: "boom" }) });
-    const out = await new FireflyImageGenerator({ ...creds, fallback: fallback() }).resolveBackground(product, ratio(), ctx);
+    const out = await new FireflyImageGenerator({
+      ...creds,
+      fallback: fallback(),
+    }).resolveBackground(product, ratio(), ctx);
     expect(out.source).toBe("procedural");
   });
 
   test("falls back when Firefly returns no image URL", async () => {
     wire({ generate: res({ json: { outputs: [{}] } }) });
-    const out = await new FireflyImageGenerator({ ...creds, fallback: fallback() }).resolveBackground(product, ratio(), ctx);
+    const out = await new FireflyImageGenerator({
+      ...creds,
+      fallback: fallback(),
+    }).resolveBackground(product, ratio(), ctx);
     expect(out.source).toBe("procedural");
   });
 
   test("falls back when the presigned image fetch fails", async () => {
     wire({ image: res({ ok: false, status: 403 }) });
-    const out = await new FireflyImageGenerator({ ...creds, fallback: fallback() }).resolveBackground(product, ratio(), ctx);
+    const out = await new FireflyImageGenerator({
+      ...creds,
+      fallback: fallback(),
+    }).resolveBackground(product, ratio(), ctx);
     expect(out.source).toBe("procedural");
   });
 
   test("rethrows when there is no fallback", async () => {
     wire({ ims: res({ ok: false, status: 500 }) });
-    await expect(new FireflyImageGenerator(creds).resolveBackground(product, ratio(), ctx)).rejects.toThrow(/IMS auth failed/);
+    await expect(
+      new FireflyImageGenerator(creds).resolveBackground(product, ratio(), ctx),
+    ).rejects.toThrow(/IMS auth failed/);
   });
 
   test("falls back when fetch rejects with a non-Error reason", async () => {
     fetchMock.mockRejectedValueOnce("network kaput");
-    const out = await new FireflyImageGenerator({ ...creds, fallback: fallback() }).resolveBackground(product, ratio(), ctx);
+    const out = await new FireflyImageGenerator({
+      ...creds,
+      fallback: fallback(),
+    }).resolveBackground(product, ratio(), ctx);
     expect(out.source).toBe("procedural");
   });
 
@@ -164,7 +205,9 @@ describe("FireflyImageGenerator", () => {
   test("pins the prompt shape, including the campaign-type sentence", async () => {
     wire();
     const promptOf = (): string => {
-      const generateCall = fetchMock.mock.calls.find((call: unknown[]) => String(call[0]).includes("firefly-api"));
+      const generateCall = fetchMock.mock.calls.find((call: unknown[]) =>
+        String(call[0]).includes("firefly-api"),
+      );
       return JSON.parse((generateCall![1] as RequestInit).body as string).prompt as string;
     };
 

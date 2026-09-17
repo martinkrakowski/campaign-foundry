@@ -197,7 +197,13 @@ describe("NodeCanvasCompositor inset goldens", () => {
       safeInsets: { ...INSET_INSETS },
     };
     const out = await compositor.compositeAsset(request);
-    finishGolden(insetsPath, key, { [INSET_CELL]: sha256(out.image) }, run, INSET_GOLDEN_CELL_COUNT);
+    finishGolden(
+      insetsPath,
+      key,
+      { [INSET_CELL]: sha256(out.image) },
+      run,
+      INSET_GOLDEN_CELL_COUNT,
+    );
   });
 });
 
@@ -288,4 +294,3 @@ describe("NodeCanvasCompositor display inset goldens", () => {
     );
   });
 });
-

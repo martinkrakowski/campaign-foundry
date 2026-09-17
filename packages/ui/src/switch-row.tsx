@@ -18,12 +18,24 @@ export interface SwitchRowProps {
  * The switch is a real `role="switch"` button: `aria-checked` carries the state and
  * the knob is `aria-hidden` decoration, so the name stays exactly the label.
  */
-export function SwitchRow({ label, checked, onToggle, disabled = false, children }: SwitchRowProps): ReactNode {
+export function SwitchRow({
+  label,
+  checked,
+  onToggle,
+  disabled = false,
+  children,
+}: SwitchRowProps): ReactNode {
   return (
     <div className="flex items-start justify-between gap-3">
       <div className="min-w-0">
-        <span className={cn("block text-[13px]", checked ? "text-text-emphasis" : "text-text-primary")}>{label}</span>
-        {children ? <span className="mt-0.5 block text-[11px] text-text-muted">{children}</span> : null}
+        <span
+          className={cn("block text-[13px]", checked ? "text-text-emphasis" : "text-text-primary")}
+        >
+          {label}
+        </span>
+        {children ? (
+          <span className="mt-0.5 block text-[11px] text-text-muted">{children}</span>
+        ) : null}
       </div>
       <button
         type="button"

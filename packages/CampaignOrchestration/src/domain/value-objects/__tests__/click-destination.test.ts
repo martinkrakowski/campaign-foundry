@@ -75,7 +75,14 @@ describe("click-destination (HL2, HL-D3)", () => {
     });
 
     test("refuses invalid or relative URL strings, reporting the offending value", () => {
-      for (const value of ["", "not-a-url", "/landing", "example.com", "javascript:void(0)", "ftp://example.com"]) {
+      for (const value of [
+        "",
+        "not-a-url",
+        "/landing",
+        "example.com",
+        "javascript:void(0)",
+        "ftp://example.com",
+      ]) {
         expect(clickDestinationProblem(value)).toEqual({
           field: "clickDestination",
           must: "be an absolute URL",

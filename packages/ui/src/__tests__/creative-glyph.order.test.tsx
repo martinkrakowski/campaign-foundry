@@ -21,7 +21,8 @@ import type { LayerKind } from "@campaignfoundry/CampaignOrchestration";
  * two text bars are one static-text kind, so consecutive repeats are collapsed. */
 const rectKind = (rect: Element): LayerKind => {
   if (rect.classList.contains("fill-text-muted")) return "image";
-  if (rect.classList.contains("glyph-fade") || rect.classList.contains("fill-brand-primary")) return "accent";
+  if (rect.classList.contains("glyph-fade") || rect.classList.contains("fill-brand-primary"))
+    return "accent";
   if ((rect.getAttribute("fill") ?? "").startsWith("url(#creative-glyph-shade-")) return "shade";
   return "static-text";
 };

@@ -52,8 +52,7 @@ const packageFiles = listKitSources(packageKitDir, packageKitDir);
 const packageTestFiles = listKitSources(packageTestDir, packageTestDir);
 const webFiles = listKitSources(webKitDir, webKitDir);
 
-const IMPORT_SPEC =
-  /(?:^\s*import\s+["']([^"']+)["']|(?<!\/\/[^\n]*)\bfrom\s+["']([^"']+)["'])/gm;
+const IMPORT_SPEC = /(?:^\s*import\s+["']([^"']+)["']|(?<!\/\/[^\n]*)\bfrom\s+["']([^"']+)["'])/gm;
 
 function importSpecs(source: string): string[] {
   return [...source.matchAll(IMPORT_SPEC)].map((m) => m[1] ?? m[2] ?? "");
@@ -71,7 +70,9 @@ describe("the kit does not import the campaign feature (D87)", () => {
   test("every file in the package kit is free of the editor feature, the app alias, and the messages module", () => {
     const violations = packageFiles
       .map((file) => {
-        const specs = importSpecs(readFileSync(join(packageKitDir, file), "utf-8")).filter(hitsEditorFeature);
+        const specs = importSpecs(readFileSync(join(packageKitDir, file), "utf-8")).filter(
+          hitsEditorFeature,
+        );
         return { file, specs };
       })
       .filter((entry) => entry.specs.length > 0);
@@ -81,7 +82,9 @@ describe("the kit does not import the campaign feature (D87)", () => {
   test("every file under the package kit's __tests__ is free of apps/, the app alias, and the editor feature", () => {
     const violations = packageTestFiles
       .map((file) => {
-        const specs = importSpecs(readFileSync(join(packageTestDir, file), "utf-8")).filter(hitsAppWorkspace);
+        const specs = importSpecs(readFileSync(join(packageTestDir, file), "utf-8")).filter(
+          hitsAppWorkspace,
+        );
         return { file, specs };
       })
       .filter((entry) => entry.specs.length > 0);

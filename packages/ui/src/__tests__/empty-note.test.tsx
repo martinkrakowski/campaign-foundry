@@ -5,10 +5,7 @@ import { EmptyNote } from "../empty-note";
 describe("EmptyNote", () => {
   test("renders title, message, and children", () => {
     render(
-      <EmptyNote
-        title="Empty Heading"
-        message="Empty description details"
-      >
+      <EmptyNote title="Empty Heading" message="Empty description details">
         <button type="button">Action</button>
       </EmptyNote>,
     );

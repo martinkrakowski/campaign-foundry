@@ -1,6 +1,9 @@
 import { mkdir, mkdtemp, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, relative, resolve, sep } from "node:path";
-import type { PackageManifest, PackageStorePort } from "../../application/ports/out/PackageStorePort.js";
+import type {
+  PackageManifest,
+  PackageStorePort,
+} from "../../application/ports/out/PackageStorePort.js";
 import { resolveSafe } from "../safe-path.js";
 
 /**
@@ -39,7 +42,11 @@ export class FileSystemPackageStore implements PackageStorePort {
     return readFile(target);
   }
 
-  async writePackaged(platformId: string, relativePath: string, bytes: Uint8Array): Promise<string> {
+  async writePackaged(
+    platformId: string,
+    relativePath: string,
+    bytes: Uint8Array,
+  ): Promise<string> {
     const staging = await this.ensureStaging(platformId);
     const target = resolveSafe(staging, relativePath, "write");
     await mkdir(dirname(target), { recursive: true });
@@ -151,7 +158,11 @@ export class FileSystemPackageStore implements PackageStorePort {
     }
   }
 
-  private async isStagedUnder(staging: string, prefix: string, packagedPath: string): Promise<boolean> {
+  private async isStagedUnder(
+    staging: string,
+    prefix: string,
+    packagedPath: string,
+  ): Promise<boolean> {
     if (!packagedPath.startsWith(prefix)) return false;
     try {
       await stat(resolveSafe(staging, packagedPath.slice(prefix.length), "read"));

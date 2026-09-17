@@ -24,7 +24,10 @@ const background = (): Uint8Array => {
   return c.toBuffer("image/png");
 };
 
-type TimelineRequest = CompositeRequest & { readonly durationSec?: number; readonly timeline?: CopyTimeline };
+type TimelineRequest = CompositeRequest & {
+  readonly durationSec?: number;
+  readonly timeline?: CopyTimeline;
+};
 
 const request = (over: Partial<CompositeRequest> = {}): TimelineRequest => ({
   background: background(),
@@ -127,7 +130,11 @@ describe("NodeCanvasCompositor sequenced copy (copy.timeline)", () => {
   test("prepares one layout per distinct beat text, at a common type size (D6), with the key beat as the anchor", async () => {
     const insets = { top: 480, right: 0, bottom: 480, left: 0 };
     const base = request({ safeInsets: insets });
-    const pReq = { ...base, durationSec: 8, timeline: copyTimeline([{ text: SHORT }, { text: LONG }], { keyBeat: 2 }) };
+    const pReq = {
+      ...base,
+      durationSec: 8,
+      timeline: copyTimeline([{ text: SHORT }, { text: LONG }], { keyBeat: 2 }),
+    };
 
     const singleShort = await NodeCanvasCompositor.prepare({
       ...base,
@@ -175,19 +182,24 @@ describe("NodeCanvasCompositor sequenced copy (copy.timeline)", () => {
 
   test("memoizes layouts by text so a repeated beat shares its layout (D9)", async () => {
     const insets = { top: 480, right: 0, bottom: 480, left: 0 };
-    const timeline = copyTimeline([{ text: LONG }, { text: SHORT }, { text: LONG }], { keyBeat: 2 });
+    const timeline = copyTimeline([{ text: LONG }, { text: SHORT }, { text: LONG }], {
+      keyBeat: 2,
+    });
     const pReq = { ...request({ safeInsets: insets, message: LONG }), durationSec: 8, timeline };
     const prepared = await NodeCanvasCompositor.prepare(pReq);
     const layouts = must(prepared.beatLayouts, "beatLayouts");
     expect(layouts.size).toBe(2);
 
     // Every window renders its own memoized text; a repeated beat reuses one layout
-// (a wrapped beat paints one fillText per line — exactly the layout's lines).
+    // (a wrapped beat paints one fillText per line — exactly the layout's lines).
     const resolved = must(prepared.timeline, "timeline");
     for (const beat of resolved) {
       const mid = (beat.startT + beat.endT) / 2;
       const painted = await timelineSpy(pReq, mid, undefined, mid);
-      const layout = must(must(painted.prepared.beatLayouts, "beatLayouts").get(beat.text), `${beat.text} layout`);
+      const layout = must(
+        must(painted.prepared.beatLayouts, "beatLayouts").get(beat.text),
+        `${beat.text} layout`,
+      );
       expect(painted.texts.map((op) => op.text)).toEqual(layout.lines);
       for (const op of painted.texts) {
         expect(op.font).toContain(`${layout.fontSize}px`);
@@ -238,7 +250,11 @@ describe("NodeCanvasCompositor sequenced copy (copy.timeline)", () => {
   });
 
   test("falls back to the pose clock for copy when no copyT is given, frame by frame", async () => {
-    const timeline: CopyTimeline = copyTimeline([{ text: "Alpha" }, { text: "Beta" }, { text: "Gamma" }]);
+    const timeline: CopyTimeline = copyTimeline([
+      { text: "Alpha" },
+      { text: "Beta" },
+      { text: "Gamma" },
+    ]);
     const durationSec = 8;
     const req = { ...request(), durationSec, timeline };
     const resolved = resolveTimeline(timeline, durationSec);
@@ -250,7 +266,10 @@ describe("NodeCanvasCompositor sequenced copy (copy.timeline)", () => {
 
   test("crossfades between beats over a fade window: current at 1-mix, incoming at mix", async () => {
     const timeline: CopyTimeline = copyTimeline(
-      [{ text: "Alpha", weight: 2 }, { text: "Beta", weight: 3 }],
+      [
+        { text: "Alpha", weight: 2 },
+        { text: "Beta", weight: 3 },
+      ],
       { transition: "fade", keyBeat: 1 },
     );
     const durationSec = 5;
@@ -272,7 +291,10 @@ describe("NodeCanvasCompositor sequenced copy (copy.timeline)", () => {
     // beat at layerAlpha 1 with no rise — so the copy path skips its own translate entirely.
     // Whatever this reports is the transform the text was actually painted under.
     const timeline: CopyTimeline = copyTimeline(
-      [{ text: "Alpha", weight: 2 }, { text: "Beta", weight: 3 }],
+      [
+        { text: "Alpha", weight: 2 },
+        { text: "Beta", weight: 3 },
+      ],
       { transition: "cut", keyBeat: 1 },
     );
     const durationSec = 5;
@@ -286,7 +308,10 @@ describe("NodeCanvasCompositor sequenced copy (copy.timeline)", () => {
 
   test("a cut transition never crossfades, even mid-window", async () => {
     const timeline: CopyTimeline = copyTimeline(
-      [{ text: "Alpha", weight: 2 }, { text: "Beta", weight: 3 }],
+      [
+        { text: "Alpha", weight: 2 },
+        { text: "Beta", weight: 3 },
+      ],
       { keyBeat: 1 },
     );
     const durationSec = 5;
@@ -299,7 +324,11 @@ describe("NodeCanvasCompositor sequenced copy (copy.timeline)", () => {
   });
 
   test("headline-rise advances each beat on its own window, not the whole clip (Q1)", async () => {
-    const timeline: CopyTimeline = copyTimeline([{ text: "Alpha" }, { text: "Beta" }, { text: "Gamma" }]);
+    const timeline: CopyTimeline = copyTimeline([
+      { text: "Alpha" },
+      { text: "Beta" },
+      { text: "Gamma" },
+    ]);
     const durationSec = 6;
     const req = { ...request(), durationSec, timeline };
     const prepared = await NodeCanvasCompositor.prepare(req);
@@ -354,12 +383,19 @@ describe("NodeCanvasCompositor sequenced copy (copy.timeline)", () => {
     // With the SHORT beat as the key, its smaller box clears the logo band and the
     // legacy in-place geometry stands — same windows, different anchor (D7).
     const shortPrepared = must(shortKey.prepared.logo, "short-key prepared logo");
-    expect(shortKey.position).toEqual([shortPrepared.x, shortPrepared.y, shortPrepared.width, shortPrepared.height]);
+    expect(shortKey.position).toEqual([
+      shortPrepared.x,
+      shortPrepared.y,
+      shortPrepared.width,
+      shortPrepared.height,
+    ]);
     expect(shortKey.position[1]).not.toBe(r.height - insets.bottom - shortPrepared.height);
   });
 
   test("the draw throws when a beat has no fitted layout (an invariant break is loud)", async () => {
-    const timeline: CopyTimeline = copyTimeline([{ text: "Alpha" }, { text: "Beta" }], { keyBeat: 1 });
+    const timeline: CopyTimeline = copyTimeline([{ text: "Alpha" }, { text: "Beta" }], {
+      keyBeat: 1,
+    });
     const durationSec = 8;
     const req = { ...request(), durationSec, timeline };
     const prepared = await NodeCanvasCompositor.prepare(req);
@@ -374,7 +410,9 @@ describe("NodeCanvasCompositor sequenced copy (copy.timeline)", () => {
   });
 
   test("a beat renders without a brand logo (the logo layer is optional)", async () => {
-    const timeline: CopyTimeline = copyTimeline([{ text: "Alpha" }, { text: "Beta" }], { keyBeat: 1 });
+    const timeline: CopyTimeline = copyTimeline([{ text: "Alpha" }, { text: "Beta" }], {
+      keyBeat: 1,
+    });
     const durationSec = 8;
     const req = { ...request({ logoPath: undefined }), durationSec, timeline };
 
@@ -440,6 +478,8 @@ describe("a key beat outside the timeline fails by name", () => {
       timeline: copyTimeline([{ text: "one" }, { text: "two" }], { keyBeat: 5 }),
       durationSec: 6,
     };
-    await expect(NodeCanvasCompositor.prepare(bad)).rejects.toThrow(/keyBeat is 5, outside \[1, 2\]/);
+    await expect(NodeCanvasCompositor.prepare(bad)).rejects.toThrow(
+      /keyBeat is 5, outside \[1, 2\]/,
+    );
   });
 });

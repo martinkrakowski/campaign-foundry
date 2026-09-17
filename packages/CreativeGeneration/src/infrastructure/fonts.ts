@@ -38,7 +38,11 @@ let warned = false;
 export function registerBundledFonts(): void {
   if (registered) return;
 
-  for (const dir of [process.cwd(), resolve(process.cwd(), ".."), resolve(process.cwd(), "../..")]) {
+  for (const dir of [
+    process.cwd(),
+    resolve(process.cwd(), ".."),
+    resolve(process.cwd(), "../.."),
+  ]) {
     const fontsDir = resolve(dir, "assets/fonts");
     if (!existsSync(fontsDir)) continue;
     let registeredAny = false;

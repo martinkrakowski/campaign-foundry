@@ -93,9 +93,23 @@ describe("isBriefTemplate (L3a)", () => {
   });
 
   test("refuses a template whose id is not a canonical member", () => {
-    expect(isBriefTemplate({ id: 42, version: 1, creativeType: "video", unit: "standard-web", layers: [] })).toBe(false);
     expect(
-      isBriefTemplate({ id: "nope", version: 1, creativeType: "video", unit: "standard-web", layers: [] }),
+      isBriefTemplate({
+        id: 42,
+        version: 1,
+        creativeType: "video",
+        unit: "standard-web",
+        layers: [],
+      }),
+    ).toBe(false);
+    expect(
+      isBriefTemplate({
+        id: "nope",
+        version: 1,
+        creativeType: "video",
+        unit: "standard-web",
+        layers: [],
+      }),
     ).toBe(false);
   });
 
@@ -105,31 +119,70 @@ describe("isBriefTemplate (L3a)", () => {
     // refuse the brief it let through.
     expect(isBriefTemplate({ id: "canonical-image-text", layers: [] })).toBe(false);
     expect(
-      isBriefTemplate({ id: "canonical-video", version: 1.5, creativeType: "video", unit: "standard-web", layers: [] }),
+      isBriefTemplate({
+        id: "canonical-video",
+        version: 1.5,
+        creativeType: "video",
+        unit: "standard-web",
+        layers: [],
+      }),
     ).toBe(false);
     expect(
-      isBriefTemplate({ id: "canonical-video", version: 0, creativeType: "video", unit: "standard-web", layers: [] }),
+      isBriefTemplate({
+        id: "canonical-video",
+        version: 0,
+        creativeType: "video",
+        unit: "standard-web",
+        layers: [],
+      }),
     ).toBe(false);
   });
 
   test("refuses a template whose creativeType is not a member", () => {
     expect(isBriefTemplate({ id: "canonical-video", version: 1, layers: [] })).toBe(false);
     expect(
-      isBriefTemplate({ id: "canonical-video", version: 1, creativeType: "bogus", unit: "standard-web", layers: [] }),
+      isBriefTemplate({
+        id: "canonical-video",
+        version: 1,
+        creativeType: "bogus",
+        unit: "standard-web",
+        layers: [],
+      }),
     ).toBe(false);
   });
 
   test("refuses a template whose unit is not a member", () => {
-    expect(isBriefTemplate({ id: "canonical-video", version: 1, creativeType: "video", layers: [] })).toBe(false);
     expect(
-      isBriefTemplate({ id: "canonical-video", version: 1, creativeType: "video", unit: "bogus", layers: [] }),
+      isBriefTemplate({ id: "canonical-video", version: 1, creativeType: "video", layers: [] }),
+    ).toBe(false);
+    expect(
+      isBriefTemplate({
+        id: "canonical-video",
+        version: 1,
+        creativeType: "video",
+        unit: "bogus",
+        layers: [],
+      }),
     ).toBe(false);
   });
 
   test("refuses a template whose layers are not an array", () => {
-    expect(isBriefTemplate({ id: "canonical-video", version: 1, creativeType: "video", unit: "standard-web" })).toBe(false);
     expect(
-      isBriefTemplate({ id: "canonical-video", version: 1, creativeType: "video", unit: "standard-web", layers: "no" }),
+      isBriefTemplate({
+        id: "canonical-video",
+        version: 1,
+        creativeType: "video",
+        unit: "standard-web",
+      }),
+    ).toBe(false);
+    expect(
+      isBriefTemplate({
+        id: "canonical-video",
+        version: 1,
+        creativeType: "video",
+        unit: "standard-web",
+        layers: "no",
+      }),
     ).toBe(false);
   });
 
@@ -217,10 +270,7 @@ describe("isBriefTemplate layer props (L3b, D134)", () => {
    * the list when that canonical carries no such kind) — the props decision
    * under test stays the only thing that can refuse the template.
    */
-  const withLayer = (
-    layer: unknown,
-    creativeType: CreativeType = "image-text",
-  ): boolean => {
+  const withLayer = (layer: unknown, creativeType: CreativeType = "image-text"): boolean => {
     const kind = (layer as { kind?: unknown } | null)?.kind;
     const canonical = CANONICAL_TEMPLATES[creativeType].layers;
     return isBriefTemplate({
@@ -288,28 +338,34 @@ describe("isBriefTemplate layer props (L3b, D134)", () => {
         version: 1,
         creativeType: "image-text",
         unit: "standard-web",
-        layers: canonical.map((l) =>
-          l.kind === "accent" ? { id: "image", kind: "accent" } : l,
-        ),
+        layers: canonical.map((l) => (l.kind === "accent" ? { id: "image", kind: "accent" } : l)),
       }),
     ).toBe(false);
   });
 
   test("accepts each kind's own props, and 0 and 1 are legal fractions", () => {
-    expect(withLayer({ id: "accent", kind: "accent", props: { solidHeight: 0.05, fadeHeight: 0 } })).toBe(true);
+    expect(
+      withLayer({ id: "accent", kind: "accent", props: { solidHeight: 0.05, fadeHeight: 0 } }),
+    ).toBe(true);
     expect(withLayer({ id: "logo", kind: "logo", props: { width: 0, margin: 1 } })).toBe(true);
-    expect(withLayer({ id: "text", kind: "static-text", props: { anchor: "middle", typeFloor: 0.4 } })).toBe(true);
+    expect(
+      withLayer({ id: "text", kind: "static-text", props: { anchor: "middle", typeFloor: 0.4 } }),
+    ).toBe(true);
     // animated-text shares image-text's text budget with static-text (D124),
     // so the video type's canonical carries it: the kind's own props against
     // a template that may hold it.
-    expect(withLayer({ id: "motion", kind: "animated-text", props: { anchor: "top" } }, "video")).toBe(true);
+    expect(
+      withLayer({ id: "motion", kind: "animated-text", props: { anchor: "top" } }, "video"),
+    ).toBe(true);
   });
 
   test("an image layer carries alt (X2), and the empty string is not absence", () => {
     // The one kind whose whole content is a picture a reader may not see, and
     // therefore the one kind that can *mean* a text alternative. "" declares
     // the image decorative — a claim, not the absence of one — so it parses.
-    expect(withLayer({ id: "image", kind: "image", props: { alt: "Two hikers at dawn" } })).toBe(true);
+    expect(withLayer({ id: "image", kind: "image", props: { alt: "Two hikers at dawn" } })).toBe(
+      true,
+    );
     expect(withLayer({ id: "image", kind: "image", props: { alt: "" } })).toBe(true);
     expect(withLayer({ id: "image", kind: "image", props: {} })).toBe(true);
     expect(layerPropsProblem("image", { alt: "" })).toBeUndefined();
@@ -401,12 +457,18 @@ describe("isBriefTemplate layer props (L3b, D134)", () => {
 
   test("refuses a prop that is not a finite number", () => {
     expect(withLayer({ id: "accent", kind: "accent", props: { solidHeight: "0.5" } })).toBe(false);
-    expect(withLayer({ id: "accent", kind: "accent", props: { solidHeight: Number.NaN } })).toBe(false);
-    expect(withLayer({ id: "accent", kind: "accent", props: { solidHeight: Number.POSITIVE_INFINITY } })).toBe(false);
+    expect(withLayer({ id: "accent", kind: "accent", props: { solidHeight: Number.NaN } })).toBe(
+      false,
+    );
+    expect(
+      withLayer({ id: "accent", kind: "accent", props: { solidHeight: Number.POSITIVE_INFINITY } }),
+    ).toBe(false);
   });
 
   test("refuses an anchor outside the vocabulary", () => {
-    expect(withLayer({ id: "text", kind: "static-text", props: { anchor: "sideways" } })).toBe(false);
+    expect(withLayer({ id: "text", kind: "static-text", props: { anchor: "sideways" } })).toBe(
+      false,
+    );
     expect(withLayer({ id: "text", kind: "animated-text", props: { anchor: 5 } })).toBe(false);
   });
 
@@ -441,26 +503,18 @@ describe("templateHasAnchorProp (R-D4)", () => {
   test("false when no text layer carries an anchor prop", () => {
     expect(templateHasAnchorProp([])).toBe(false);
     expect(templateHasAnchorProp([{ id: "shade", kind: "shade" }])).toBe(false);
+    expect(templateHasAnchorProp([{ id: "text", kind: "static-text", props: {} }])).toBe(false);
     expect(
-      templateHasAnchorProp([{ id: "text", kind: "static-text", props: {} }]),
-    ).toBe(false);
-    expect(
-      templateHasAnchorProp([
-        { id: "text", kind: "static-text", props: { typeFloor: 0.4 } },
-      ]),
+      templateHasAnchorProp([{ id: "text", kind: "static-text", props: { typeFloor: 0.4 } }]),
     ).toBe(false);
   });
 
   test("true when a static-text or animated-text layer carries an anchor prop", () => {
     expect(
-      templateHasAnchorProp([
-        { id: "text", kind: "static-text", props: { anchor: "top" } },
-      ]),
+      templateHasAnchorProp([{ id: "text", kind: "static-text", props: { anchor: "top" } }]),
     ).toBe(true);
     expect(
-      templateHasAnchorProp([
-        { id: "motion", kind: "animated-text", props: { anchor: "middle" } },
-      ]),
+      templateHasAnchorProp([{ id: "motion", kind: "animated-text", props: { anchor: "middle" } }]),
     ).toBe(true);
     // One matching layer among several is enough.
     expect(
@@ -474,11 +528,9 @@ describe("templateHasAnchorProp (R-D4)", () => {
   test("a non-text layer's own prop named the same is never mistaken for the axis-shadowing one", () => {
     // No other kind's vocabulary carries `anchor` (LAYER_PROPS), so this is a
     // kind-check regression guard, not a live case `layerPropsProblem` would ever admit.
-    expect(
-      templateHasAnchorProp([
-        { id: "logo", kind: "logo", props: { width: 0.1 } },
-      ]),
-    ).toBe(false);
+    expect(templateHasAnchorProp([{ id: "logo", kind: "logo", props: { width: 0.1 } }])).toBe(
+      false,
+    );
   });
 });
 
@@ -579,8 +631,12 @@ describe("isBriefTemplate layer elements (HL1)", () => {
         { kind: "button", text: "y", frame, style: {} },
       ]),
     ).toBe(true);
-    expect(withElements([{ kind: "text", text: "x", frame, style: { fontWeight: 500 } }])).toBe(false);
-    expect(withElements([{ kind: "text", text: "x", frame, style: { color: "#fff" } }])).toBe(false);
+    expect(withElements([{ kind: "text", text: "x", frame, style: { fontWeight: 500 } }])).toBe(
+      false,
+    );
+    expect(withElements([{ kind: "text", text: "x", frame, style: { color: "#fff" } }])).toBe(
+      false,
+    );
     expect(withElements([{ kind: "image", frame, style: { fontWeight: 700 } }])).toBe(false);
   });
 
@@ -614,7 +670,10 @@ describe("isBriefTemplate layer elements (HL1)", () => {
 });
 
 describe("isBriefTemplate layer tracks (K1)", () => {
-  const track = { property: "opacity" as const, stops: [{ t: 0, value: 0, clock: "pose" as const }] };
+  const track = {
+    property: "opacity" as const,
+    stops: [{ t: 0, value: 0, clock: "pose" as const }],
+  };
 
   /** The canonical image-text template with `tracks` swapped onto its image layer. */
   const withTracks = (tracks: unknown): boolean =>
@@ -758,9 +817,9 @@ describe("isBriefTemplate layer tracks (K1)", () => {
   });
 
   test("refuses a beat-clock stop on the image layer — a ground layer has no beat to be local against (K1b review fix round 2)", () => {
-    expect(
-      withTracks([{ property: "opacity", stops: [{ t: 0, value: 0, clock: "beat" }] }]),
-    ).toBe(false);
+    expect(withTracks([{ property: "opacity", stops: [{ t: 0, value: 0, clock: "beat" }] }])).toBe(
+      false,
+    );
   });
 
   test("accepts a beat-clock stop on the text layer instead", () => {
@@ -783,9 +842,9 @@ describe("isBriefTemplate layer tracks (K1)", () => {
       ]),
     ).toBe(false);
     expect(withTracks([{ property: "opacity", stops: track.stops, layer: "image" }])).toBe(false);
-    expect(
-      withTracks([{ property: "opacity", stops: [{ ...track.stops[0], extra: 1 }] }]),
-    ).toBe(false);
+    expect(withTracks([{ property: "opacity", stops: [{ ...track.stops[0], extra: 1 }] }])).toBe(
+      false,
+    );
   });
 });
 
@@ -813,9 +872,7 @@ describe("isBriefTemplate mirrors the API's table rules (X11)", () => {
       isBriefTemplate(
         asTemplate(
           "image-text",
-          imageText.layers.map((l) =>
-            l.kind === "image" ? { ...l, enabled: false } : l,
-          ),
+          imageText.layers.map((l) => (l.kind === "image" ? { ...l, enabled: false } : l)),
         ),
       ),
     ).toBe(false);
@@ -824,9 +881,7 @@ describe("isBriefTemplate mirrors the API's table rules (X11)", () => {
       isBriefTemplate(
         asTemplate(
           "video",
-          video.layers.map((l) =>
-            l.kind === "animated-text" ? { ...l, enabled: false } : l,
-          ),
+          video.layers.map((l) => (l.kind === "animated-text" ? { ...l, enabled: false } : l)),
         ),
       ),
     ).toBe(false);
@@ -856,9 +911,7 @@ describe("isBriefTemplate mirrors the API's table rules (X11)", () => {
       isBriefTemplate(
         asTemplate(
           "image-html",
-          CANONICAL_TEMPLATES["image-html"].layers.filter(
-            (l) => l.kind !== "html",
-          ),
+          CANONICAL_TEMPLATES["image-html"].layers.filter((l) => l.kind !== "html"),
         ),
       ),
     ).toBe(false);
@@ -898,18 +951,13 @@ describe("isBriefTemplate mirrors the API's table rules (X11)", () => {
     // appended logo breaks no other rule (order: both images below it).
     expect(
       isBriefTemplate(
-        asTemplate("image-text", [
-          ...imageText.layers,
-          { id: "logo-2", kind: "logo" },
-        ]),
+        asTemplate("image-text", [...imageText.layers, { id: "logo-2", kind: "logo" }]),
       ),
     ).toBe(false);
     // Video caps `shade` at 1 and declares no order constraints, so the cap
     // alone is what refuses this draft.
     expect(
-      isBriefTemplate(
-        asTemplate("video", [...video.layers, { id: "shade-2", kind: "shade" }]),
-      ),
+      isBriefTemplate(asTemplate("video", [...video.layers, { id: "shade-2", kind: "shade" }])),
     ).toBe(false);
   });
 
@@ -947,10 +995,7 @@ describe("isBriefTemplate mirrors the API's table rules (X11)", () => {
     // kind image-text may hold — the API checks `accepts`, the guard must too.
     expect(
       isBriefTemplate(
-        asTemplate("image-text", [
-          { id: "vid", kind: "video" },
-          ...imageText.layers,
-        ]),
+        asTemplate("image-text", [{ id: "vid", kind: "video" }, ...imageText.layers]),
       ),
     ).toBe(false);
   });
@@ -978,12 +1023,9 @@ describe("isBriefTemplate mirrors the API's table rules (X11)", () => {
       isBriefTemplate(
         asTemplate(
           "image-text",
-          imageText.layers.map((l) =>
-            l.kind === "logo" ? { id: "", kind: "logo" } : l,
-          ),
+          imageText.layers.map((l) => (l.kind === "logo" ? { id: "", kind: "logo" } : l)),
         ),
       ),
     ).toBe(false);
   });
 });
-

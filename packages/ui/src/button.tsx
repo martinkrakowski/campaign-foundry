@@ -18,8 +18,7 @@ const VARIANT_CLASSES: Record<ButtonVariant, string> = {
   // the token named for hovering is the one that reads in both. The border is
   // `border-control`, not `border`: the secondary button's fill (`surface`) is 1.05:1
   // from the page ground, so its hairline is the control's whole edge (WCAG 1.4.11).
-  secondary:
-    "bg-surface text-text-primary border border-border-control hover:bg-border-hover",
+  secondary: "bg-surface text-text-primary border border-border-control hover:bg-border-hover",
   ghost: "bg-transparent text-text-primary hover:bg-surface",
   // `text-on-error`, not white: the dark error ground brightened for its tint job
   // (tokens.css), and white on it is 2.25:1 — the ink flips with the ground.
@@ -65,7 +64,9 @@ export function Button(props: ButtonProps): ReactNode {
       aria-busy={isLoading || undefined}
       {...rest}
     >
-      {isLoading ? <span className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent" /> : null}
+      {isLoading ? (
+        <span className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+      ) : null}
       {isLoading ? null : children}
     </button>
   );

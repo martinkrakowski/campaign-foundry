@@ -5,10 +5,13 @@ import { STOP_CLOCKS, TRACK_PROPERTIES, layerTracksProblem } from "../tracks.js"
 /** A minimal, valid single-stop track on `opacity`. */
 const opacityTrack = {
   property: "opacity" as const,
-  stops: [{ t: 0, value: 0, clock: "pose" as const }, { t: 1, value: 1, clock: "pose" as const }],
+  stops: [
+    { t: 0, value: 0, clock: "pose" as const },
+    { t: 1, value: 1, clock: "pose" as const },
+  ],
 };
 
-describe("track and stop vocabularies (keyframing plan §1 \"The model\", K-D8)", () => {
+describe('track and stop vocabularies (keyframing plan §1 "The model", K-D8)', () => {
   test("TRACK_PROPERTIES names the four initial pose properties, not every motion the compositor draws", () => {
     expect(TRACK_PROPERTIES).toEqual(["opacity", "scale", "dx", "dy"]);
   });
@@ -151,9 +154,7 @@ describe("layerTracksProblem — structural refusals", () => {
 
   test("refuses an unknown or missing property", () => {
     for (const property of ["rotation", "blendMode", undefined, 5]) {
-      expect(
-        layerTracksProblem("image", [{ property, stops: opacityTrack.stops }]),
-      ).toEqual({
+      expect(layerTracksProblem("image", [{ property, stops: opacityTrack.stops }])).toEqual({
         path: "[0].property",
         must: 'be one of "opacity", "scale", "dx", "dy"',
         value: property,
@@ -162,9 +163,7 @@ describe("layerTracksProblem — structural refusals", () => {
   });
 
   test("refuses a field the track shape does not carry — a `layer` field is the second addressing scheme K-D4 refuses", () => {
-    expect(
-      layerTracksProblem("image", [{ ...opacityTrack, layer: "image" }]),
-    ).toEqual({
+    expect(layerTracksProblem("image", [{ ...opacityTrack, layer: "image" }])).toEqual({
       path: "[0].layer",
       must: 'be one of "property", "stops"',
       value: "image",
@@ -183,9 +182,7 @@ describe("layerTracksProblem — structural refusals", () => {
 
   test("refuses a stop entry that is not an object", () => {
     for (const entry of ["nope", 5, null, []]) {
-      expect(
-        layerTracksProblem("image", [{ property: "opacity", stops: [entry] }]),
-      ).toEqual({
+      expect(layerTracksProblem("image", [{ property: "opacity", stops: [entry] }])).toEqual({
         path: "[0].stops[0]",
         must: "be an object",
         value: entry,
@@ -236,9 +233,7 @@ describe("layerTracksProblem — structural refusals", () => {
   test("refuses an unknown or missing clock", () => {
     for (const clock of ["global", undefined, 5]) {
       expect(
-        layerTracksProblem("image", [
-          { property: "opacity", stops: [{ t: 0, value: 0, clock }] },
-        ]),
+        layerTracksProblem("image", [{ property: "opacity", stops: [{ t: 0, value: 0, clock }] }]),
       ).toEqual({
         path: "[0].stops[0].clock",
         must: 'be one of "pose", "beat", "effect"',
@@ -270,7 +265,13 @@ describe("layerTracksProblem — structural refusals", () => {
     expect(
       layerTracksProblem("image", [
         opacityTrack,
-        { property: "scale", stops: [{ t: 0, value: 1, clock: "pose" }, { t: 2, value: 1, clock: "pose" }] },
+        {
+          property: "scale",
+          stops: [
+            { t: 0, value: 1, clock: "pose" },
+            { t: 2, value: 1, clock: "pose" },
+          ],
+        },
       ]),
     ).toEqual({
       path: "[1].stops[1].t",
@@ -384,7 +385,7 @@ describe("layerTracksProblem — one clock per track (K1b review), and duplicate
       ]),
     ).toEqual({
       path: "[0].stops[1].clock",
-      must: 'be "pose", the clock this track\'s first stop names (a track\'s stops share one clock)',
+      must: "be \"pose\", the clock this track's first stop names (a track's stops share one clock)",
       value: "beat",
     });
   });
@@ -403,7 +404,7 @@ describe("layerTracksProblem — one clock per track (K1b review), and duplicate
       ]),
     ).toEqual({
       path: "[0].stops[1].clock",
-      must: 'be "effect", the clock this track\'s first stop names (a track\'s stops share one clock)',
+      must: "be \"effect\", the clock this track's first stop names (a track's stops share one clock)",
       value: "pose",
     });
   });

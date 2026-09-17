@@ -126,10 +126,7 @@ const isPlainObject = (v: unknown): v is Record<string, unknown> =>
  * account for every top-level key, because a key this cannot classify is a
  * platform map it cannot hold to the caveat.
  */
-export function goldenProvenanceProblems(
-  fixture: Record<string, unknown>,
-  file: string,
-): string[] {
+export function goldenProvenanceProblems(fixture: Record<string, unknown>, file: string): string[] {
   const platformKeys = goldenPlatformKeys(fixture);
   if (platformKeys.length === 0) return [];
 
@@ -198,7 +195,9 @@ export function isRecordingGoldens(env: NodeJS.ProcessEnv = process.env): boolea
   return env.RECORD_COMPOSITOR_GOLDENS === "1";
 }
 
-export type GoldenRun = { readonly kind: "record" } | { readonly kind: "assert"; readonly map: GoldenMap };
+export type GoldenRun =
+  | { readonly kind: "record" }
+  | { readonly kind: "assert"; readonly map: GoldenMap };
 
 /**
  * Suite decision for a resolved map: record, assert, or throw.

@@ -180,8 +180,14 @@ describe("K4: authored tracks compose with a preset in the fixed fold order (K-D
     const authoredFirst = 1 * authored1 * authored2 * preset;
     expect(forward).not.toBe(authoredFirst); // the fixture actually distinguishes the two orders
 
-    const track1: Track = { property: "opacity", stops: [{ t: 0, value: authored1, clock: "pose" }] };
-    const track2: Track = { property: "opacity", stops: [{ t: 0, value: authored2, clock: "pose" }] };
+    const track1: Track = {
+      property: "opacity",
+      stops: [{ t: 0, value: authored1, clock: "pose" }],
+    };
+    const track2: Track = {
+      property: "opacity",
+      stops: [{ t: 0, value: authored2, clock: "pose" }],
+    };
     const template = videoTemplateWith([
       { id: "video", kind: "video" },
       { id: "copy", kind: "animated-text", tracks: [track1, track2] },
@@ -197,7 +203,8 @@ describe("K4: authored tracks compose with a preset in the fixed fold order (K-D
     let capturedAlpha: number | undefined;
     const proto = Object.getPrototypeOf(ctx) as object;
     const alphaDesc =
-      Object.getOwnPropertyDescriptor(proto, "globalAlpha") ?? Object.getOwnPropertyDescriptor(ctx, "globalAlpha");
+      Object.getOwnPropertyDescriptor(proto, "globalAlpha") ??
+      Object.getOwnPropertyDescriptor(ctx, "globalAlpha");
     Object.defineProperty(ctx, "globalAlpha", {
       configurable: true,
       get() {

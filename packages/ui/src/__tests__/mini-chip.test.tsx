@@ -15,7 +15,11 @@ describe("MiniChip", () => {
   test.each(["neutral", "success", "warning", "error", "info"] as MiniChipTone[])(
     "renders %s tone correctly",
     (tone) => {
-      render(<MiniChip tone={tone} title={`title-${tone}`}>{tone}</MiniChip>);
+      render(
+        <MiniChip tone={tone} title={`title-${tone}`}>
+          {tone}
+        </MiniChip>,
+      );
       const chip = screen.getByTitle(`title-${tone}`);
       expect(chip).toBeTruthy();
       expect(chip.textContent).toBe(tone);
