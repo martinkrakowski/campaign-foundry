@@ -46,10 +46,16 @@ export function TemplateSection({ state, dispatch }: SectionProps) {
         <div key={layer.id} className="space-y-2">
           {/* The editor no longer rides inside its layer's stack row, so it
               carries the layer's own id: a template may hold more than one
-              html layer, and "Elements" alone would not say whose. */}
-          <p className="text-[13px] text-text-primary">
+              html layer, and "Elements" alone would not say whose.
+
+              A HEADING, not a paragraph, for that same reason: it NAMES the
+              editor that follows it, and a template holding two html layers
+              gives a screen-reader user two of them to move between — which
+              heading navigation does and a styled `<p>` does not. `h3`
+              because `SectionShell` emits the step's own `h2`. */}
+          <h3 className="text-[13px] font-medium text-text-primary">
             {messages.templateHtmlLayerLabel(layer.id)}
-          </p>
+          </h3>
           <HtmlElementsEditor
             layerId={layer.id}
             elements={layer.elements ?? []}

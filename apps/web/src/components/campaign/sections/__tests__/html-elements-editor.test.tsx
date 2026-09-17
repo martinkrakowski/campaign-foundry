@@ -104,7 +104,13 @@ describe("HtmlElementsEditor — where it appears (HL5a)", () => {
     // html and logo; exactly one of them is an element host, so exactly one
     // editor mounts and it names `html`.
     expect(screen.getAllByRole("group", { name: messages.htmlElementAddLabel })).toHaveLength(1);
-    expect(screen.getByText(messages.templateHtmlLayerLabel("html"))).toBeTruthy();
+    // A HEADING, not styled text: it names the editor that follows it, and a
+    // heading is what a screen-reader user can move between. `h3` under the
+    // step's own `h2` from `SectionShell` — asserted by LEVEL, because a
+    // heading at the wrong level is a broken outline, not a fixed one.
+    expect(
+      screen.getByRole("heading", { level: 3, name: messages.templateHtmlLayerLabel("html") }),
+    ).toBeTruthy();
     expect(screen.queryByText(messages.templateHtmlLayerLabel("image"))).toBeNull();
     expect(screen.queryByText(messages.templateHtmlLayerLabel("logo"))).toBeNull();
     // And the stack itself is not here: the step points at the rail instead of
@@ -124,9 +130,12 @@ describe("HtmlElementsEditor — where it appears (HL5a)", () => {
     expect(ids).toHaveLength(2);
     render(<TemplateSection state={twoHtml} dispatch={vi.fn()} errors={{}} />);
     expect(screen.getAllByRole("group", { name: messages.htmlElementAddLabel })).toHaveLength(2);
-    for (const id of ids) {
-      expect(screen.getByText(messages.templateHtmlLayerLabel(id))).toBeTruthy();
-    }
+    // TWO headings — which is the whole point of them being headings: this is
+    // the case where a screen-reader user has somewhere to navigate to, and
+    // where two identical `<p>` labels would leave them scrolling.
+    expect(screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent)).toEqual(
+      ids.map((id) => messages.templateHtmlLayerLabel(id)),
+    );
   });
 
   test("a template with no html layer offers no element editing at all", () => {

@@ -85,9 +85,9 @@
     },
     {
       "file": "apps/web/src/components/campaign/BriefEditor.tsx",
-      "before": "  const [pickedLayerId, setPickedLayerId] = useState<string | null>(null);\n  /** Stable across every render: a fresh arrow would defeat the `memo` above. */\n  const pickLayer = useCallback((id: string) => setPickedLayerId(id), []);",
-      "after": "  const [pickedIndex, setPickedIndex] = useState<number | null>(null);\n  const pickedLayerId =\n    pickedIndex === null ? null : (rawLayerStackProps.rows[pickedIndex]?.id ?? null);\n  const pickLayer = useCallback(\n    (id: string) => setPickedIndex(rawLayerStackProps.rows.findIndex((row) => row.id === id)),\n    [rawLayerStackProps],\n  );",
-      "because": "The selection held as a SLOT rather than as the layer. It is the obvious thing to write -- the tape's beat selection next to it is an index, so the shape is already in this file -- and it is wrong here for the reason `CopyTimeline.vo.ts` states for the persisted key beat: the operator can reorder the list, so an index does not keep the selection on the layer it was on, it moves it to whichever layer now occupies that slot. Nothing looks broken: a row is still highlighted, exactly one row, and it is even a row adjacent to the one picked. A layer HAS an identity where a beat does not, which is why the fix is an id rather than the retirement the beat selection needs. Caught by an editor-level reorder that requires the pick to be on the moved layer AND not on the layer that took its slot -- the first assertion alone would pass if every row were pressed, the second alone if the selection had simply been dropped.",
+      "before": "  const [pickedLayerId, setPickedLayerId] = useState<string | null>(null);",
+      "after": "  const [pickedIndex, setPickedIndex] = useState<number | null>(null);\n  const pickedLayerId =\n    pickedIndex === null ? null : (rawLayerStackProps.rows[pickedIndex]?.id ?? null);\n  const setPickedLayerId = (next: string | null | ((prev: string | null) => string | null)) => {\n    const id = typeof next === \"function\" ? next(pickedLayerId) : next;\n    setPickedIndex(id === null ? null : rawLayerStackProps.rows.findIndex((row) => row.id === id));\n  };",
+      "because": "The selection held as a SLOT rather than as the layer. It is the obvious thing to write -- the tape's beat selection next to it is an index, so the shape is already in this file -- and it is wrong here for the reason `CopyTimeline.vo.ts` states for the persisted key beat: the operator can reorder the list, so an index does not keep the selection on the layer it was on, it moves it to whichever layer now occupies that slot. Nothing looks broken: a row is still highlighted, exactly one row, and it is even a row adjacent to the one picked. A layer HAS an identity where a beat does not, which is why the fix is an id rather than the retirement the beat selection needs. The `after` keeps a setter shim so the two retirement effects still compile and still pass -- this mutation isolates the FOLLOWS-THE-LAYER property and nothing else. Caught by an editor-level reorder that requires the pick to be on the moved layer AND not on the layer that took its slot -- the first assertion alone would pass if every row were pressed, the second alone if the selection had simply been dropped.",
       "command": [
         "yarn",
         "vitest",
@@ -97,6 +97,55 @@
         "apps/web/src/app/(shell)/brief/__tests__/brief-editor.layers.test.tsx",
         "-t",
         "follows the LAYER"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/BriefEditor.tsx",
+      "before": "  useEffect(() => {\n    setPickedLayerId((id) =>\n      id !== null && !state.template.layers.some((layer) => layer.id === id) ? null : id,\n    );\n  }, [state.template.layers]);",
+      "after": "  useEffect(() => {\n    setPickedLayerId((id) => id);\n  }, [state.template.layers]);",
+      "because": "Found in review on #474 (PR-Agent and Qodo, independently) and this is HALF of it: the pick was never cleared when its layer was removed, so the stored id dangled. It happens because D139 is working -- the selection is deliberately outside EditorState, so nothing in the reducer clears it -- which is why the reset belongs where the selection lives. No rendering assertion can see the dangling id on its own: the row is gone, so nothing is highlighted either way. The test ADDS the kind back, where `addLayer` derives the same id from the same kind, and the stale id resolves to a layer nobody picked -- which is invisible until exactly that sequence and is what CC4's sheet would read. The mutation is a same-value write rather than a deleted effect so that ONLY this reset moves: the brief-switch reset below stays in place, and its own test stays green, which is the point -- a fix that shipped one of the two would pass the other's test.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.layers.test.tsx",
+        "-t",
+        "stops naming anything"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/BriefEditor.tsx",
+      "before": "  useEffect(() => {\n    setPickedLayerId(null);\n  }, [openBriefKey]);",
+      "after": "  useEffect(() => {\n    setPickedLayerId((id) => id);\n  }, [openBriefKey]);",
+      "because": "The other half of the same review finding: loading another brief inherited its predecessor's pick. The layer-removal reset above CANNOT cover it, and that is the trap -- the canonical templates share their layer ids, so `accent` picked in one brief still RESOLVES in the next, the highlight survives the load and now names a layer of a document nobody is editing. So the clear is unconditional on the identity of the brief on screen (`loadedId` for a saved brief, `tempId` for a draft -- the pair `previewIdentityKey` already keys frame identity on). Caught by a test that changes the ROUTE id, which is how a brief is actually loaded (D37), over two briefs that deliberately share their layer ids: with a fixture whose ids differed, the removal reset would have cleared it and the assertion would have been vacuous. Same same-value-write shape as above, so only this reset moves.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.layers.test.tsx",
+        "-t",
+        "stops naming anything"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/sections/TemplateSection.tsx",
+      "before": "          <h3 className=\"text-[13px] font-medium text-text-primary\">\n            {messages.templateHtmlLayerLabel(layer.id)}\n          </h3>",
+      "after": "          <p className=\"text-[13px] font-medium text-text-primary\">\n            {messages.templateHtmlLayerLabel(layer.id)}\n          </p>",
+      "because": "Review on #474: the label that NAMES the html element editor was styled text. It looks identical on screen -- same size, same weight, same colour -- and every other assertion in the file finds it by TEXT, so a `getByText` proof would stay green through this. The cost is paid only by a screen-reader user, and only on the case the label exists for: a template holding two html layers, where headings are the thing you navigate between and two identical paragraphs leave you scrolling. Caught by queries on ROLE and LEVEL (`h3`, under the step's own `h2` from SectionShell) -- and by the two-layer test asserting both headings in order, so the level cannot be satisfied by one heading in the right place.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/sections/__tests__/html-elements-editor.test.tsx"
       ],
       "verdict": "caught"
     }

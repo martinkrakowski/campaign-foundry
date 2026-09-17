@@ -860,12 +860,47 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
    * whichever beat now occupies it and the honest answer is to retire it. A
    * layer HAS an identity: its id survives a reorder, so a selection keyed on
    * the id follows the layer the operator picked rather than the slot it was
-   * standing in, and needs no retiring effect at all. An id that names no
-   * layer any more (it was removed) matches no row, so the highlight clears by
-   * construction — `LayerStack` compares per row and there is no second place
-   * that decides what "picked" means.
+   * standing in, instead of being retired by every edit to the list.
+   *
+   * It is retired by the two things that make it stop naming anything, and the
+   * two are separate because they are different facts about the draft —
+   * neither reset implies the other, and a fix that ships one of them is half
+   * a fix that still hands CC4's sheet a layer nobody picked.
    */
   const [pickedLayerId, setPickedLayerId] = useState<string | null>(null);
+  /**
+   * (1) The layer is gone.
+   *
+   * Keyed on the layers array's identity, so any edit to the list re-checks —
+   * and the check is what keeps a REORDER (a new array, same ids) from
+   * clearing a pick that is still perfectly valid. A removal is the case that
+   * bites: the id then names no row.
+   *
+   * The updater returns the SAME id when it still resolves, so React bails out
+   * of the write and this costs nothing on a reorder or an unrelated edit.
+   */
+  useEffect(() => {
+    setPickedLayerId((id) =>
+      id !== null && !state.template.layers.some((layer) => layer.id === id) ? null : id,
+    );
+  }, [state.template.layers]);
+  /**
+   * (2) The document underneath changed.
+   *
+   * D139 puts the selection OUTSIDE `EditorState` on purpose, so it does not
+   * travel with the brief — which is exactly why nothing in the reducer clears
+   * it, and why loading another brief would otherwise inherit the previous
+   * one's pick. (1) cannot cover this: the canonical templates share their
+   * layer ids, so `accent` picked in one brief resolves in the next and the
+   * stale highlight survives while naming a different layer entirely. The
+   * clear is therefore unconditional on the identity of the brief on screen —
+   * `loadedId` for a saved brief, `tempId` for a draft, the same pair
+   * `previewIdentityKey` keys frame identity on.
+   */
+  const openBriefKey = state.source.kind === "file" ? state.source.loadedId : state.source.tempId;
+  useEffect(() => {
+    setPickedLayerId(null);
+  }, [openBriefKey]);
   /** Stable across every render: a fresh arrow would defeat the `memo` above. */
   const pickLayer = useCallback((id: string) => setPickedLayerId(id), []);
   // CC2 — the JS-side mirror of the row's own `@container(min-width:56rem)`

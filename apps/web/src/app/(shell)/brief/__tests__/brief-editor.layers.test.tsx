@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, vi } from "vitest";
-import { createElement, memo, type ComponentType } from "react";
+import { createElement, memo, useState, type ComponentType } from "react";
 import { screen, waitFor, within, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithRun as renderWithShell, json, nextMock } from "@/__tests__/helpers";
@@ -108,7 +108,17 @@ const layerBrief = {
   output: { formats: ["static"], platforms: ["linkedin"] },
 };
 
-const routes = (brief: unknown = layerBrief) => {
+/**
+ * A SECOND brief, and it deliberately shares the first one's layer ids.
+ *
+ * Both are seeded from the same canonical template, so `accent` resolves in
+ * either. That is what makes the brief-switch reset a separate fact from the
+ * layer-removal one: a pick carried across a load would still name a row, so
+ * the highlight would survive and be pointing at another brief's layer.
+ */
+const otherBrief = { ...layerBrief, id: "other", campaignName: "other" };
+
+const routes = (briefs: readonly unknown[] = [layerBrief]) => {
   vi.mocked(globalThis.fetch).mockImplementation((url, init) => {
     const u = String(url);
     const method = (init?.method ?? "GET").toUpperCase();
@@ -116,7 +126,15 @@ const routes = (brief: unknown = layerBrief) => {
       return Promise.resolve(json({ motion: true }));
     }
     if (method === "GET" && u.startsWith(`${API}/campaigns/briefs`)) {
-      return Promise.resolve(json({ briefs: [{ file: "layers.yaml", revision: "r1", brief }] }));
+      return Promise.resolve(
+        json({
+          briefs: briefs.map((brief) => ({
+            file: `${(brief as { id: string }).id}.yaml`,
+            revision: "r1",
+            brief,
+          })),
+        }),
+      );
     }
     if (u.includes("/campaigns/preview-frame")) {
       return Promise.resolve(
@@ -146,8 +164,8 @@ const mountedStackCount = () =>
 /** The same count through the component's own mount marker — the secondary read. */
 const markedStackCount = () => document.querySelectorAll('[data-testid="layer-stack"]').length;
 
-const mountEditor = async () => {
-  routes();
+const mountEditor = async (briefs?: readonly unknown[]) => {
+  routes(briefs);
   renderWithRun(<BriefEditor briefId="layers" />);
   await waitFor(() =>
     expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("layers"),
@@ -355,6 +373,88 @@ describe("picking a layer changes no document byte (CC3, D139)", () => {
     expect(await railYaml(user)).not.toBe(before);
     await user.click(screen.getByRole("button", { name: /Create new/ }));
     expect(await screen.findByRole("dialog", { name: messages.confirmDialogTitle })).toBeTruthy();
+  });
+});
+
+describe("the pick is retired when it stops naming anything (CC3, D139)", () => {
+  /**
+   * Two resets, two tests, because neither implies the other and a fix that
+   * ships one of them is half a fix. Both were found in review on #474: the
+   * stored id was never cleared, so a removed layer left it dangling and a
+   * loaded brief inherited its predecessor's pick. Today's visible symptom is
+   * a highlight that matches nothing; CC4's sheet READS this value to decide
+   * what it hosts, which is where a dangling id stops being cosmetic.
+   */
+
+  test("removing the picked layer clears the stored id — a re-added layer of the same id is not pre-picked", async () => {
+    const user = userEvent.setup();
+    await mountEditor();
+    await user.click(pick("shade", "Shade"));
+    expect(pick("shade", "Shade").getAttribute("aria-pressed")).toBe("true");
+
+    await user.click(
+      within(rail()).getByRole("button", {
+        name: "shade",
+        description: messages.templateRemoveDescription("Shade"),
+      }),
+    );
+    // The row is gone, so no rendering assertion can tell a cleared id from a
+    // dangling one. Adding the kind back can: freed from its cap it rejoins the
+    // offer, and `addLayer` derives the id from the kind deduplicated against
+    // the ids held — so the new layer is `shade` again. A stale stored id
+    // resolves to it and the fresh layer arrives pre-picked, which is the
+    // defect, and is invisible until exactly this sequence.
+    await user.click(
+      within(screen.getByRole("group", { name: messages.templateAddLabel })).getByRole("button", {
+        name: "shade",
+      }),
+    );
+    expect(pick("shade", "Shade").getAttribute("aria-pressed")).toBe("false");
+  });
+
+  test("loading another brief does not inherit its predecessor's pick", async () => {
+    /**
+     * The route is the single source of truth for which brief is open (D37), so
+     * a change of route id IS the load — the same path a reload or a shared link
+     * takes. The two briefs share their layer ids on purpose: a pick carried
+     * across the load would still resolve, so the highlight would survive while
+     * naming a layer of a brief nobody is editing any more.
+     */
+    function Switchable() {
+      const [id, setId] = useState("layers");
+      return (
+        <>
+          <button type="button" onClick={() => setId("other")}>
+            go to other
+          </button>
+          <BriefEditor briefId={id} />
+        </>
+      );
+    }
+    const user = userEvent.setup();
+    routes([layerBrief, otherBrief]);
+    renderWithRun(<Switchable />);
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("layers"),
+    );
+    await settle();
+
+    await user.click(pick("accent", "Accent"));
+    expect(pick("accent", "Accent").getAttribute("aria-pressed")).toBe("true");
+
+    await user.click(screen.getByRole("button", { name: "go to other" }));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("other"),
+    );
+    // The layer is still there — this is not "the row vanished", it is the same
+    // canonical `accent` in a different document — and it is not picked.
+    expect(pick("accent", "Accent").getAttribute("aria-pressed")).toBe("false");
+    expect(
+      within(within(rail()).getByRole("list", { name: messages.templateListLabel })).queryAllByRole(
+        "button",
+        { pressed: true },
+      ),
+    ).toEqual([]);
   });
 });
 
