@@ -1,16 +1,17 @@
 import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
-import {
-  mkdtempSync,
-  mkdirSync,
-  writeFileSync,
-  readFileSync,
-  symlinkSync,
-  rmSync,
-} from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, symlinkSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
-import { dumpBrief, hashFile, hashBytes, isErrno, isExistsError, serializeBrief, SYMLINK_WRITE_ERROR } from "../brief-files.js";
+import {
+  dumpBrief,
+  hashFile,
+  hashBytes,
+  isErrno,
+  isExistsError,
+  serializeBrief,
+  SYMLINK_WRITE_ERROR,
+} from "../brief-files.js";
 import { parseBriefText } from "../load-brief.js";
 import {
   BRIEF_SCHEMA_VERSION,
@@ -185,7 +186,9 @@ describe("brief file lookup and write", () => {
     const path = briefYamlPath("camp");
     await createBriefFile(path, minimal);
     const original = readFileSync(path);
-    await expect(createBriefFile(path, { ...minimal, campaignMessage: "Nope" })).rejects.toMatchObject({
+    await expect(
+      createBriefFile(path, { ...minimal, campaignMessage: "Nope" }),
+    ).rejects.toMatchObject({
       code: "EEXIST",
     });
     expect(readFileSync(path)).toEqual(original);
@@ -303,14 +306,16 @@ describe("hashBytes", () => {
 
 describe("parseBriefText", () => {
   test("parses yaml format based on .yaml extension", () => {
-    const yaml = "id: camp\ntargetRegion: DE\ntargetAudience: a\ncampaignMessage: Hi\nproducts:\n  - id: alpha\n  - id: beta\n";
+    const yaml =
+      "id: camp\ntargetRegion: DE\ntargetAudience: a\ncampaignMessage: Hi\nproducts:\n  - id: alpha\n  - id: beta\n";
     const brief = parseBriefText("camp.yaml", yaml);
     expect(brief.id).toBe("camp");
     expect(brief.campaignMessage).toBe("Hi");
   });
 
   test("parses yaml format based on .yml extension", () => {
-    const yaml = "id: camp\ntargetRegion: DE\ntargetAudience: a\ncampaignMessage: Hi\nproducts:\n  - id: alpha\n";
+    const yaml =
+      "id: camp\ntargetRegion: DE\ntargetAudience: a\ncampaignMessage: Hi\nproducts:\n  - id: alpha\n";
     const brief = parseBriefText("camp.yml", yaml);
     expect(brief.id).toBe("camp");
   });
@@ -322,7 +327,9 @@ describe("parseBriefText", () => {
   });
 
   test("rejects invalid yaml with a clear error", () => {
-    expect(() => parseBriefText("camp.yaml", "id: 1\nproducts: not-an-array\n")).toThrow(/campaign brief|required field/i);
+    expect(() => parseBriefText("camp.yaml", "id: 1\nproducts: not-an-array\n")).toThrow(
+      /campaign brief|required field/i,
+    );
   });
 
   test("rejects invalid JSON with a clear error", () => {
@@ -397,7 +404,8 @@ describe("concurrent write scenario", () => {
     try {
       vi.resetModules();
       process.env.PROJECT_ROOT = dir;
-      const { createBriefFile, withBriefLock, hashFile, rewriteBriefFile, briefYamlPath } = await import("../brief-files.js");
+      const { createBriefFile, withBriefLock, hashFile, rewriteBriefFile, briefYamlPath } =
+        await import("../brief-files.js");
       mkdirSync(join(dir, "briefs"), { recursive: true });
 
       const path = briefYamlPath("camp");

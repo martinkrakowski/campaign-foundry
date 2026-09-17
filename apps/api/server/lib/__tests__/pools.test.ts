@@ -1,6 +1,14 @@
 import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
 import { createHash } from "node:crypto";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, symlinkSync } from "node:fs";
+import {
+  mkdtempSync,
+  mkdirSync,
+  writeFileSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  symlinkSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -88,7 +96,9 @@ describe("copy pool persistence", () => {
     const { writePool } = await filesFor(dir);
     mkdirSync(join(dir, "briefs", "camp", "pools.json"), { recursive: true });
     await expect(writePool(pool())).rejects.toThrow();
-    expect(readdirSync(join(dir, "briefs", "camp")).some((name) => name.endsWith(".tmp"))).toBe(false);
+    expect(readdirSync(join(dir, "briefs", "camp")).some((name) => name.endsWith(".tmp"))).toBe(
+      false,
+    );
   });
 
   test("a write that fails before the tmp exists still rejects", async () => {
@@ -103,7 +113,9 @@ describe("copy pool persistence", () => {
     mkdirSync(join(dir, "briefs", "camp"), { recursive: true });
     writeFileSync(join(dir, "briefs", "camp", "pools.json"), "{not-json");
     await expect(readPool("camp")).rejects.toThrow(InvalidCopyPoolError);
-    await expect(readPool("camp")).rejects.toThrow(/^Copy pool briefs\/camp\/pools\.json is invalid: not JSON/);
+    await expect(readPool("camp")).rejects.toThrow(
+      /^Copy pool briefs\/camp\/pools\.json is invalid: not JSON/,
+    );
   });
 
   test("readPool rethrows a non-ENOENT filesystem error", async () => {
@@ -114,14 +126,39 @@ describe("copy pool persistence", () => {
 
   test.each([
     ["a non-object", "[]", "must be an object"],
-    ["a missing briefId", { generatedAt: "t", model: "m", entries: [] }, "briefId must be a string"],
-    ["a non-string generatedAt", { briefId: "camp", generatedAt: 1, model: "m", entries: [] }, "generatedAt must be a string"],
-    ["a non-string model", { briefId: "camp", generatedAt: "t", model: null, entries: [] }, "model must be a string"],
-    ["missing entries", { briefId: "camp", generatedAt: "t", model: "m" }, "entries must be an array"],
-    ["a non-object entry", { briefId: "camp", generatedAt: "t", model: "m", entries: ["x"] }, "entries[0] must be an object"],
+    [
+      "a missing briefId",
+      { generatedAt: "t", model: "m", entries: [] },
+      "briefId must be a string",
+    ],
+    [
+      "a non-string generatedAt",
+      { briefId: "camp", generatedAt: 1, model: "m", entries: [] },
+      "generatedAt must be a string",
+    ],
+    [
+      "a non-string model",
+      { briefId: "camp", generatedAt: "t", model: null, entries: [] },
+      "model must be a string",
+    ],
+    [
+      "missing entries",
+      { briefId: "camp", generatedAt: "t", model: "m" },
+      "entries must be an array",
+    ],
+    [
+      "a non-object entry",
+      { briefId: "camp", generatedAt: "t", model: "m", entries: ["x"] },
+      "entries[0] must be an object",
+    ],
     [
       "an entry without an id",
-      { briefId: "camp", generatedAt: "t", model: "m", entries: [{ id: "", text: "x", status: "approved" }] },
+      {
+        briefId: "camp",
+        generatedAt: "t",
+        model: "m",
+        entries: [{ id: "", text: "x", status: "approved" }],
+      },
       "entries[0].id must be a non-empty string",
     ],
     [
@@ -139,35 +176,57 @@ describe("copy pool persistence", () => {
     ],
     [
       "a non-string text",
-      { briefId: "camp", generatedAt: "t", model: "m", entries: [{ id: "h1", text: 42, status: "approved" }] },
+      {
+        briefId: "camp",
+        generatedAt: "t",
+        model: "m",
+        entries: [{ id: "h1", text: 42, status: "approved" }],
+      },
       "entries[0].text must be a string",
     ],
     [
       "an unknown status",
-      { briefId: "camp", generatedAt: "t", model: "m", entries: [{ id: "h1", text: "x", status: "maybe" }] },
+      {
+        briefId: "camp",
+        generatedAt: "t",
+        model: "m",
+        entries: [{ id: "h1", text: "x", status: "maybe" }],
+      },
       'entries[0].status must be "approved" or "rejected"',
     ],
     [
       "a non-string reason",
-      { briefId: "camp", generatedAt: "t", model: "m", entries: [{ id: "h1", text: "x", status: "rejected", reason: 1 }] },
+      {
+        briefId: "camp",
+        generatedAt: "t",
+        model: "m",
+        entries: [{ id: "h1", text: "x", status: "rejected", reason: 1 }],
+      },
       "entries[0].reason must be a string",
     ],
-  ])("readPool rejects a hand-edited pool with %s, naming the file and the problem", async (_label, content, problem) => {
-    const { readPool, isCopyPool, copyPoolProblem, InvalidCopyPoolError } = await filesFor(dir);
-    mkdirSync(join(dir, "briefs", "camp"), { recursive: true });
-    const raw = typeof content === "string" ? content : JSON.stringify(content);
-    writeFileSync(join(dir, "briefs", "camp", "pools.json"), raw);
-    expect(isCopyPool(JSON.parse(raw))).toBe(false);
-    expect(copyPoolProblem(JSON.parse(raw))).toBe(problem);
-    await expect(readPool("camp")).rejects.toThrow(InvalidCopyPoolError);
-    await expect(readPool("camp")).rejects.toThrow(`Copy pool briefs/camp/pools.json is invalid: ${problem}.`);
-  });
+  ])(
+    "readPool rejects a hand-edited pool with %s, naming the file and the problem",
+    async (_label, content, problem) => {
+      const { readPool, isCopyPool, copyPoolProblem, InvalidCopyPoolError } = await filesFor(dir);
+      mkdirSync(join(dir, "briefs", "camp"), { recursive: true });
+      const raw = typeof content === "string" ? content : JSON.stringify(content);
+      writeFileSync(join(dir, "briefs", "camp", "pools.json"), raw);
+      expect(isCopyPool(JSON.parse(raw))).toBe(false);
+      expect(copyPoolProblem(JSON.parse(raw))).toBe(problem);
+      await expect(readPool("camp")).rejects.toThrow(InvalidCopyPoolError);
+      await expect(readPool("camp")).rejects.toThrow(
+        `Copy pool briefs/camp/pools.json is invalid: ${problem}.`,
+      );
+    },
+  );
 
   test("isCopyPool accepts a well-formed pool with and without reasons", async () => {
     const { isCopyPool } = await filesFor(dir);
     expect(isCopyPool(pool())).toBe(true);
     expect(
-      isCopyPool(pool({ entries: [{ id: "h1", text: "A miracle", status: "rejected", reason: "legal" }] })),
+      isCopyPool(
+        pool({ entries: [{ id: "h1", text: "A miracle", status: "rejected", reason: "legal" }] }),
+      ),
     ).toBe(true);
   });
   test("concurrent writePool calls use distinct temp files and both settle", async () => {
@@ -224,7 +283,9 @@ describe("copy pool persistence", () => {
     expect(await isPoolDirSymlink("camp")).toBe(false);
     symlinkSync(join(dir, "briefs", "camp"), join(dir, "briefs", "linked"));
     expect(await isPoolDirSymlink("linked")).toBe(true);
-    await expect(isPoolDirSymlink("../escape")).rejects.toThrow(/Path escapes the allowed directory/);
+    await expect(isPoolDirSymlink("../escape")).rejects.toThrow(
+      /Path escapes the allowed directory/,
+    );
   });
 });
 
@@ -257,15 +318,24 @@ describe("planInputFor / pooledPlanner", () => {
     const plain = brief({ variation: { count: 2 } });
     expect(wantsHeadlinePool(plain)).toBe(false);
     expect(await planInputFor(plain)).toEqual({ success: true, value: {} });
-    expect(await planInputFor(brief({ variation: undefined }))).toEqual({ success: true, value: {} });
+    expect(await planInputFor(brief({ variation: undefined }))).toEqual({
+      success: true,
+      value: {},
+    });
   });
 
   test("carries the brief's ratio selection, and only when the brief has the axis", async () => {
     const { planInputFor } = await filesFor(dir);
     const selected = brief({ variation: { count: 2, axes: { ratio: ["1:1", "16:9"] } } });
-    expect(await planInputFor(selected)).toEqual({ success: true, value: { ratios: ["1:1", "16:9"] } });
+    expect(await planInputFor(selected)).toEqual({
+      success: true,
+      value: { ratios: ["1:1", "16:9"] },
+    });
     // absent → the key is absent, so the policy draws every ratio as before
-    expect(await planInputFor(brief({ variation: { count: 2, axes: {} } }))).toEqual({ success: true, value: {} });
+    expect(await planInputFor(brief({ variation: { count: 2, axes: {} } }))).toEqual({
+      success: true,
+      value: {},
+    });
     // and it composes with the headline pool input
     const pooled = await planInputFor(
       brief({ variation: { count: 2, axes: { headline: "pool://copy", ratio: ["9:16"] } } }),
@@ -286,7 +356,10 @@ describe("planInputFor / pooledPlanner", () => {
         ],
       }),
     );
-    expect(await planInputFor(brief())).toEqual({ success: true, value: { headlines: ["Stay wild", "Go far"] } });
+    expect(await planInputFor(brief())).toEqual({
+      success: true,
+      value: { headlines: ["Stay wild", "Go far"] },
+    });
   });
 
   test("returns an err carrying the invalid-pool message for a hand-edited pool, and rethrows other errors", async () => {
@@ -294,7 +367,12 @@ describe("planInputFor / pooledPlanner", () => {
     mkdirSync(join(dir, "briefs", "camp"), { recursive: true });
     writeFileSync(
       join(dir, "briefs", "camp", "pools.json"),
-      JSON.stringify({ briefId: "camp", generatedAt: "t", model: "m", entries: [{ id: "h1", text: 1, status: "approved" }] }),
+      JSON.stringify({
+        briefId: "camp",
+        generatedAt: "t",
+        model: "m",
+        entries: [{ id: "h1", text: 1, status: "approved" }],
+      }),
     );
     const result = await planInputFor(brief());
     expect(result.success).toBe(false);
@@ -336,7 +414,11 @@ describe("planInputFor / pooledPlanner", () => {
     const planned = planner.plan(brief());
     expect(planned.success).toBe(true);
     if (!planned.success) return;
-    expect(planned.value.variants.map((v) => v.headline).every((h) => h === "Stay wild" || h === "Go far")).toBe(true);
+    expect(
+      planned.value.variants
+        .map((v) => v.headline)
+        .every((h) => h === "Stay wild" || h === "Go far"),
+    ).toBe(true);
     const replanned = planner.replan(planned.value, 0, 1);
     expect(replanned.success).toBe(true);
     const bad = planner.replan(planned.value, 9, 1);

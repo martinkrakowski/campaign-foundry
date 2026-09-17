@@ -1,6 +1,15 @@
 import { describe, test, expect, beforeEach, afterEach } from "vitest";
 import { createHash } from "node:crypto";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, symlinkSync, existsSync } from "node:fs";
+import {
+  mkdtempSync,
+  mkdirSync,
+  writeFileSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  symlinkSync,
+  existsSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { CopyPool } from "@campaignfoundry/CampaignOrchestration";
@@ -56,7 +65,9 @@ describe("FsPoolStore", () => {
     const raw = JSON.stringify(pool({ entries: [{ id: "h1", text: "BAD", status: "approved" }] }));
     const stored = Buffer.from(raw.replace("BAD", "\xff\xfe"), "latin1");
     writeFileSync(join(dir, "camp", "pools.json"), stored);
-    expect((await store.readPool("camp"))?.revision).toBe(createHash("sha256").update(stored).digest("hex"));
+    expect((await store.readPool("camp"))?.revision).toBe(
+      createHash("sha256").update(stored).digest("hex"),
+    );
   });
 
   test("readPool returns undefined when the file is missing", async () => {
@@ -65,7 +76,9 @@ describe("FsPoolStore", () => {
 
   test("writePool overwrites atomically and does not leave a tmp sibling", async () => {
     await store.writePool(pool());
-    await store.writePool(pool({ entries: [{ id: "h2", text: "Stay hydrated", status: "approved" }] }));
+    await store.writePool(
+      pool({ entries: [{ id: "h2", text: "Stay hydrated", status: "approved" }] }),
+    );
     expect(await store.readPool("camp")).toMatchObject({ pool: { entries: [{ id: "h2" }] } });
     expect(readdirSync(join(dir, "camp"))).toEqual(["pools.json"]);
   });
@@ -86,7 +99,9 @@ describe("FsPoolStore", () => {
     mkdirSync(join(dir, "camp"), { recursive: true });
     writeFileSync(join(dir, "camp", "pools.json"), "{not-json");
     await expect(store.readPool("camp")).rejects.toThrow(InvalidCopyPoolError);
-    await expect(store.readPool("camp")).rejects.toThrow(/^Copy pool briefs\/camp\/pools\.json is invalid: not JSON/);
+    await expect(store.readPool("camp")).rejects.toThrow(
+      /^Copy pool briefs\/camp\/pools\.json is invalid: not JSON/,
+    );
   });
 
   test("readPool rethrows a non-ENOENT filesystem error", async () => {
@@ -96,14 +111,39 @@ describe("FsPoolStore", () => {
 
   test.each([
     ["a non-object", "[]", "must be an object"],
-    ["a missing briefId", { generatedAt: "t", model: "m", entries: [] }, "briefId must be a string"],
-    ["a non-string generatedAt", { briefId: "camp", generatedAt: 1, model: "m", entries: [] }, "generatedAt must be a string"],
-    ["a non-string model", { briefId: "camp", generatedAt: "t", model: null, entries: [] }, "model must be a string"],
-    ["missing entries", { briefId: "camp", generatedAt: "t", model: "m" }, "entries must be an array"],
-    ["a non-object entry", { briefId: "camp", generatedAt: "t", model: "m", entries: ["x"] }, "entries[0] must be an object"],
+    [
+      "a missing briefId",
+      { generatedAt: "t", model: "m", entries: [] },
+      "briefId must be a string",
+    ],
+    [
+      "a non-string generatedAt",
+      { briefId: "camp", generatedAt: 1, model: "m", entries: [] },
+      "generatedAt must be a string",
+    ],
+    [
+      "a non-string model",
+      { briefId: "camp", generatedAt: "t", model: null, entries: [] },
+      "model must be a string",
+    ],
+    [
+      "missing entries",
+      { briefId: "camp", generatedAt: "t", model: "m" },
+      "entries must be an array",
+    ],
+    [
+      "a non-object entry",
+      { briefId: "camp", generatedAt: "t", model: "m", entries: ["x"] },
+      "entries[0] must be an object",
+    ],
     [
       "an entry without an id",
-      { briefId: "camp", generatedAt: "t", model: "m", entries: [{ id: "", text: "x", status: "approved" }] },
+      {
+        briefId: "camp",
+        generatedAt: "t",
+        model: "m",
+        entries: [{ id: "", text: "x", status: "approved" }],
+      },
       "entries[0].id must be a non-empty string",
     ],
     [
@@ -121,26 +161,46 @@ describe("FsPoolStore", () => {
     ],
     [
       "a non-string text",
-      { briefId: "camp", generatedAt: "t", model: "m", entries: [{ id: "h1", text: 42, status: "approved" }] },
+      {
+        briefId: "camp",
+        generatedAt: "t",
+        model: "m",
+        entries: [{ id: "h1", text: 42, status: "approved" }],
+      },
       "entries[0].text must be a string",
     ],
     [
       "an unknown status",
-      { briefId: "camp", generatedAt: "t", model: "m", entries: [{ id: "h1", text: "x", status: "maybe" }] },
+      {
+        briefId: "camp",
+        generatedAt: "t",
+        model: "m",
+        entries: [{ id: "h1", text: "x", status: "maybe" }],
+      },
       'entries[0].status must be "approved" or "rejected"',
     ],
     [
       "a non-string reason",
-      { briefId: "camp", generatedAt: "t", model: "m", entries: [{ id: "h1", text: "x", status: "rejected", reason: 1 }] },
+      {
+        briefId: "camp",
+        generatedAt: "t",
+        model: "m",
+        entries: [{ id: "h1", text: "x", status: "rejected", reason: 1 }],
+      },
       "entries[0].reason must be a string",
     ],
-  ])("readPool rejects a hand-edited pool with %s, naming the file and the problem", async (_label, content, problem) => {
-    mkdirSync(join(dir, "camp"), { recursive: true });
-    const raw = typeof content === "string" ? content : JSON.stringify(content);
-    writeFileSync(join(dir, "camp", "pools.json"), raw);
-    await expect(store.readPool("camp")).rejects.toThrow(InvalidCopyPoolError);
-    await expect(store.readPool("camp")).rejects.toThrow(`Copy pool briefs/camp/pools.json is invalid: ${problem}.`);
-  });
+  ])(
+    "readPool rejects a hand-edited pool with %s, naming the file and the problem",
+    async (_label, content, problem) => {
+      mkdirSync(join(dir, "camp"), { recursive: true });
+      const raw = typeof content === "string" ? content : JSON.stringify(content);
+      writeFileSync(join(dir, "camp", "pools.json"), raw);
+      await expect(store.readPool("camp")).rejects.toThrow(InvalidCopyPoolError);
+      await expect(store.readPool("camp")).rejects.toThrow(
+        `Copy pool briefs/camp/pools.json is invalid: ${problem}.`,
+      );
+    },
+  );
 
   test("concurrent writePool calls use distinct temp files and both settle", async () => {
     await Promise.all([
@@ -152,11 +212,17 @@ describe("FsPoolStore", () => {
   });
 
   test("writePool refuses a stale expectedRevision with ECONFLICT carrying the fresh revision", async () => {
-    const first = await store.writePool(pool({ entries: [{ id: "h1", text: "Stay wild", status: "approved" }] }));
-    const second = await store.writePool(pool({ entries: [{ id: "h2", text: "Stay hydrated", status: "approved" }] }));
+    const first = await store.writePool(
+      pool({ entries: [{ id: "h1", text: "Stay wild", status: "approved" }] }),
+    );
+    const second = await store.writePool(
+      pool({ entries: [{ id: "h2", text: "Stay hydrated", status: "approved" }] }),
+    );
     expect(second.revision).not.toBe(first.revision);
 
-    await expect(store.writePool(pool({ entries: [] }), { expectedRevision: first.revision })).rejects.toMatchObject({
+    await expect(
+      store.writePool(pool({ entries: [] }), { expectedRevision: first.revision }),
+    ).rejects.toMatchObject({
       code: "ECONFLICT",
       revision: second.revision,
     });
@@ -169,7 +235,9 @@ describe("FsPoolStore", () => {
     const reread = await store.readPool("camp");
     expect(reread?.revision).toBe(stored.revision);
 
-    const next = await store.writePool(pool({ entries: [] }), { expectedRevision: reread?.revision });
+    const next = await store.writePool(pool({ entries: [] }), {
+      expectedRevision: reread?.revision,
+    });
     expect((await store.readPool("camp"))?.revision).toBe(next.revision);
     expect((await store.readPool("camp"))?.pool.entries).toEqual([]);
   });
@@ -178,7 +246,9 @@ describe("FsPoolStore", () => {
     const stored = await store.writePool(pool());
     const file = join(dir, "camp", "pools.json");
     rmSync(file);
-    await expect(store.writePool(pool(), { expectedRevision: stored.revision })).rejects.toMatchObject({
+    await expect(
+      store.writePool(pool(), { expectedRevision: stored.revision }),
+    ).rejects.toMatchObject({
       code: "ECONFLICT",
       revision: undefined,
     });
@@ -205,29 +275,42 @@ describe("FsPoolStore", () => {
     const theirs = await other.readPool("camp");
     const reject = (from: CopyPool, id: string): CopyPool => ({
       ...from,
-      entries: from.entries.map((entry) => (entry.id === id ? { ...entry, status: "rejected" as const } : entry)),
+      entries: from.entries.map((entry) =>
+        entry.id === id ? { ...entry, status: "rejected" as const } : entry,
+      ),
     });
 
     // Unconditional: the last writer wins and the first edit is gone, silently.
     await store.writePool(reject(mine!.pool, "h1"));
     await other.writePool(reject(theirs!.pool, "h2"));
-    expect((await store.readPool("camp"))?.pool.entries.map((e) => e.status)).toEqual(["approved", "rejected"]);
+    expect((await store.readPool("camp"))?.pool.entries.map((e) => e.status)).toEqual([
+      "approved",
+      "rejected",
+    ]);
 
     // Conditional: the second writer's stale read is refused instead, so the
     // first edit survives and the conflict names what is there now.
     const fresh = await store.readPool("camp");
-    const first = await store.writePool(reject(fresh!.pool, "h1"), { expectedRevision: fresh!.revision });
-    await expect(other.writePool(reject(theirs!.pool, "h2"), { expectedRevision: theirs!.revision })).rejects.toMatchObject(
-      { code: "ECONFLICT", revision: first.revision },
-    );
-    expect((await store.readPool("camp"))?.pool.entries.map((e) => e.status)).toEqual(["rejected", "rejected"]);
+    const first = await store.writePool(reject(fresh!.pool, "h1"), {
+      expectedRevision: fresh!.revision,
+    });
+    await expect(
+      other.writePool(reject(theirs!.pool, "h2"), { expectedRevision: theirs!.revision }),
+    ).rejects.toMatchObject({ code: "ECONFLICT", revision: first.revision });
+    expect((await store.readPool("camp"))?.pool.entries.map((e) => e.status)).toEqual([
+      "rejected",
+      "rejected",
+    ]);
     expect(seeded.revision).not.toBe(first.revision);
   });
 
   test("copyPool copies the pool and rewrites the pool's own briefId to the destination", async () => {
     await store.writePool(pool({ entries: [{ id: "h1", text: "Stay wild", status: "approved" }] }));
     const copied = await store.copyPool("camp", "copy");
-    expect(copied).toMatchObject({ briefId: "copy", entries: [{ id: "h1", text: "Stay wild", status: "approved" }] });
+    expect(copied).toMatchObject({
+      briefId: "copy",
+      entries: [{ id: "h1", text: "Stay wild", status: "approved" }],
+    });
     // the byte copy would have named the old brief — the stored pool must not
     expect(JSON.parse(readFileSync(join(dir, "copy", "pools.json"), "utf8")).briefId).toBe("copy");
     // the source pool is untouched
@@ -244,7 +327,9 @@ describe("FsPoolStore", () => {
     const elsewhere = join(dir, "outside");
     mkdirSync(elsewhere, { recursive: true });
     symlinkSync(elsewhere, join(dir, "copy"));
-    await expect(store.copyPool("camp", "copy")).rejects.toThrow("Refusing to write through a symlink.");
+    await expect(store.copyPool("camp", "copy")).rejects.toThrow(
+      "Refusing to write through a symlink.",
+    );
     expect(existsSync(join(elsewhere, "pools.json"))).toBe(false);
   });
 

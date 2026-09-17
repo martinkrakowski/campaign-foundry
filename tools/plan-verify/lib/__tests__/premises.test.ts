@@ -10,11 +10,9 @@ describe("parsePremises", () => {
   });
 
   test("reads every premise in a document, in order", () => {
-    const md = [
-      "```premise A", "one", "```",
-      "prose between",
-      "```premise B", "two", "```",
-    ].join("\n");
+    const md = ["```premise A", "one", "```", "prose between", "```premise B", "two", "```"].join(
+      "\n",
+    );
     expect(parsePremises("p.md", md).map((p) => p.lane)).toEqual(["A", "B"]);
   });
 
@@ -66,7 +64,9 @@ describe("parsePremises", () => {
       {
         plan: "p.md",
         lane: "A",
-        script: ["cat <<'EOF'", "```premise B", "quoted from another plan", "EOF", "true"].join("\n"),
+        script: ["cat <<'EOF'", "```premise B", "quoted from another plan", "EOF", "true"].join(
+          "\n",
+        ),
       },
     ]);
   });

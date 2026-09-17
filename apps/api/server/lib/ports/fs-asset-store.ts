@@ -161,7 +161,8 @@ export class FsAssetStore implements AssetStorePort {
       await writeFile(destPath, srcBytes);
 
       pathMap[relPath] = destRelPath;
-      pathMap[`assets/inputs/${fromBriefId}/${relPath}`] = `assets/inputs/${toBriefId}/${destRelPath}`;
+      pathMap[`assets/inputs/${fromBriefId}/${relPath}`] =
+        `assets/inputs/${toBriefId}/${destRelPath}`;
     }
 
     return pathMap;

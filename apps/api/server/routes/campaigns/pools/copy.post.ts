@@ -10,7 +10,13 @@ import { BrandComplianceChecker } from "@campaignfoundry/GovernanceAndCompliance
 import { findBriefById, isErrno, SYMLINK_WRITE_ERROR } from "../../../lib/brief-files.js";
 import { assertSafeId, parseBrief } from "../../../lib/load-brief.js";
 import { copyGenerator } from "../../../lib/pipeline.js";
-import { InvalidCopyPoolError, isPoolDirSymlink, readPool, withPoolLock, writePool } from "../../../lib/pools.js";
+import {
+  InvalidCopyPoolError,
+  isPoolDirSymlink,
+  readPool,
+  withPoolLock,
+  writePool,
+} from "../../../lib/pools.js";
 
 const DEFAULT_COUNT = 10;
 const MAX_COUNT = 25;
@@ -177,7 +183,8 @@ export default defineEventHandler(async (event) => {
     if (!(error instanceof CopyGeneratorError)) throw error;
     const failure = mapGeneratorError(error);
     setResponseStatus(event, failure.status);
-    if (failure.retryAfterSeconds !== undefined) setHeader(event, "retry-after", failure.retryAfterSeconds);
+    if (failure.retryAfterSeconds !== undefined)
+      setHeader(event, "retry-after", failure.retryAfterSeconds);
     return failure.body;
   }
   const usable = usableTexts(suggested);
@@ -209,7 +216,10 @@ export default defineEventHandler(async (event) => {
       briefId,
       generatedAt: new Date().toISOString(),
       model: generator.model,
-      entries: await gateEntries(headlines, new Set(existing?.entries.map((entry) => entry.id) ?? [])),
+      entries: await gateEntries(
+        headlines,
+        new Set(existing?.entries.map((entry) => entry.id) ?? []),
+      ),
     };
     const next = mergePool(existing ?? incoming, incoming);
     try {

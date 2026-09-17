@@ -3,7 +3,12 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createApp, createRouter, toWebHandler, type EventHandler } from "h3";
-import { getCapabilities, NOT_PROBED_REASON, probeWait, setCapabilities } from "../../../lib/capabilities.js";
+import {
+  getCapabilities,
+  NOT_PROBED_REASON,
+  probeWait,
+  setCapabilities,
+} from "../../../lib/capabilities.js";
 import { resetJobs } from "../../../lib/jobs.js";
 import planHandler from "../plan.post.js";
 import generateHandler from "../generate.post.js";
@@ -17,7 +22,10 @@ const web = (path: string, handler: EventHandler) => {
 };
 
 const callPlan = (body: unknown) =>
-  web("/campaigns/plan", planHandler)(
+  web(
+    "/campaigns/plan",
+    planHandler,
+  )(
     new Request("http://x/campaigns/plan", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -26,7 +34,10 @@ const callPlan = (body: unknown) =>
   );
 
 const callGenerate = (body: unknown) =>
-  web("/campaigns/generate", generateHandler)(
+  web(
+    "/campaigns/generate",
+    generateHandler,
+  )(
     new Request("http://x/campaigns/generate?model=procedural", {
       method: "POST",
       headers: { "content-type": "application/json" },

@@ -15,7 +15,16 @@ function makeIo(argv: readonly string[], overrides: Partial<CliIo> = {}) {
   const logError = vi.fn((_text: string): void => undefined);
   const collect = vi.fn(async (_root: string): Promise<WaveStatus> => status);
   const schedule = vi.fn((_fn: () => void, _ms: number): void => undefined);
-  const io: CliIo = { argv, isTTY: true, noColor: false, log, logError, collect, schedule, ...overrides };
+  const io: CliIo = {
+    argv,
+    isTTY: true,
+    noColor: false,
+    log,
+    logError,
+    collect,
+    schedule,
+    ...overrides,
+  };
   return { io, log, logError, collect, schedule };
 }
 

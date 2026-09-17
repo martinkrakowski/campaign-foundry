@@ -27,7 +27,9 @@ export async function main(env: MainEnv): Promise<ServerHandle> {
     root: resolveRoot(env),
     legacyRoots: resolveLegacyRoots(env),
   });
-  console.log(`  wave-status serving ${handle.url} — read-only: it starts, kills and merges nothing.`);
+  console.log(
+    `  wave-status serving ${handle.url} — read-only: it starts, kills and merges nothing.`,
+  );
   return handle;
 }
 

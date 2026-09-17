@@ -54,11 +54,13 @@ describe("POST /campaigns/generate — the report merge is a conditional write",
     const router = createRouter();
     router.post("/campaigns/generate", generateHandler);
     app.use(router);
-    return toWebHandler(app)(new Request("http://x/campaigns/generate?model=procedural", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-    }));
+    return toWebHandler(app)(
+      new Request("http://x/campaigns/generate?model=procedural", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      }),
+    );
   };
 
   const jobCall = (id: string) => {
@@ -134,7 +136,9 @@ describe("POST /campaigns/generate — the report merge is a conditional write",
     expect(body.error).toBe('Report for campaign "camp" was modified by another run.');
 
     // Refused means it wrote nothing: the report still holds the run that landed.
-    const stored = JSON.parse(readFileSync(reportPath, "utf8")) as { assets: { outputPath: string }[] };
+    const stored = JSON.parse(readFileSync(reportPath, "utf8")) as {
+      assets: { outputPath: string }[];
+    };
     expect(stored.assets[0].outputPath).toBe("other/1x1.png");
   });
 
@@ -176,7 +180,9 @@ describe("POST /campaigns/generate — the report merge is a conditional write",
     expect(body.status).toBe("failed");
     expect(body.error).toBe('Report for campaign "camp" was modified by another run.');
 
-    const stored = JSON.parse(readFileSync(reportPath, "utf8")) as { assets: { outputPath: string }[] };
+    const stored = JSON.parse(readFileSync(reportPath, "utf8")) as {
+      assets: { outputPath: string }[];
+    };
     expect(stored.assets[0].outputPath).toBe("other/1x1.png");
   });
 

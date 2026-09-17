@@ -1,7 +1,11 @@
 import { describe, expect, test } from "vitest";
 import { HandoffError, parseHandoff, testNames } from "../handoff.js";
 
-const rule = { id: "conflict", statement: "disagreements win", test: "conflict when disagreements" };
+const rule = {
+  id: "conflict",
+  statement: "disagreements win",
+  test: "conflict when disagreements",
+};
 const good = { version: 1, lane: "W1", files: ["a.test.ts"], rules: [rule] };
 const parse = (over: Record<string, unknown> = {}): unknown =>
   parseHandoff(JSON.stringify({ ...good, ...over }));

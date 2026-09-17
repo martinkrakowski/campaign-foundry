@@ -77,14 +77,17 @@ describe("readEvents (plan §2.1, D103)", () => {
     expect(rejected).toHaveLength(1);
   });
 
-  test.each(["ts", "wave", "lane", "stage", "event"])("an object missing %s is rejected", (field) => {
-    const raw = JSON.parse(eventLine()) as Record<string, unknown>;
-    delete raw[field];
-    const { events, truncated, rejected } = readEvents(`${JSON.stringify(raw)}\n`);
-    expect(events).toEqual([]);
-    expect(truncated).toBe(false);
-    expect(rejected).toHaveLength(1);
-  });
+  test.each(["ts", "wave", "lane", "stage", "event"])(
+    "an object missing %s is rejected",
+    (field) => {
+      const raw = JSON.parse(eventLine()) as Record<string, unknown>;
+      delete raw[field];
+      const { events, truncated, rejected } = readEvents(`${JSON.stringify(raw)}\n`);
+      expect(events).toEqual([]);
+      expect(truncated).toBe(false);
+      expect(rejected).toHaveLength(1);
+    },
+  );
 
   test("a line that parses but is not an object is rejected", () => {
     const { events, rejected, truncated } = readEvents('[1, 2]\n"wave"\n42\ntrue\nnull\n');

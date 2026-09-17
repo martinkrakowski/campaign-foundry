@@ -8,7 +8,17 @@ const ok = (over: Partial<SweepCliIo> = {}): { io: SweepCliIo; log: string[]; er
     log,
     err,
     io: {
-      argv: ["threads", "--pr", "361", "--thread", "PRRT_a", "--thread", "PRRT_b", "--body", "one class"],
+      argv: [
+        "threads",
+        "--pr",
+        "361",
+        "--thread",
+        "PRRT_a",
+        "--thread",
+        "PRRT_b",
+        "--body",
+        "one class",
+      ],
       log: (text) => log.push(text),
       logError: (text) => err.push(text),
       readFile: async () => "body from file",
@@ -43,7 +53,9 @@ const ok = (over: Partial<SweepCliIo> = {}): { io: SweepCliIo; log: string[]; er
 };
 
 /** `sweep gate`: the PR with no unresolved threads, on the head it was verified on. */
-const okGate = (over: Partial<SweepCliIo> = {}): { io: SweepCliIo; log: string[]; err: string[] } => {
+const okGate = (
+  over: Partial<SweepCliIo> = {},
+): { io: SweepCliIo; log: string[]; err: string[] } => {
   const log: string[] = [];
   const err: string[] = [];
   return {
@@ -100,7 +112,18 @@ describe("runCli", () => {
   test("--body-file is read and lands verbatim in the posted mutation", async () => {
     const calls: string[][] = [];
     const { io, log } = ok({
-      argv: ["threads", "--pr", "361", "--thread", "PRRT_a", "--thread", "PRRT_b", "--body-file", "d.md", "--post"],
+      argv: [
+        "threads",
+        "--pr",
+        "361",
+        "--thread",
+        "PRRT_a",
+        "--thread",
+        "PRRT_b",
+        "--body-file",
+        "d.md",
+        "--post",
+      ],
       readFile: async (p) => {
         expect(p).toBe("d.md");
         return "body from file on disk";
@@ -154,7 +177,18 @@ describe("runCli", () => {
 
   test("--post disposes the class and reports the comment url", async () => {
     const { io, log } = ok({
-      argv: ["threads", "--pr", "361", "--thread", "PRRT_a", "--thread", "PRRT_b", "--body", "x", "--post"],
+      argv: [
+        "threads",
+        "--pr",
+        "361",
+        "--thread",
+        "PRRT_a",
+        "--thread",
+        "PRRT_b",
+        "--body",
+        "x",
+        "--post",
+      ],
     });
     expect(await runCli(io)).toBe(0);
     expect(log.join("\n")).toContain("class disposed: https://gh/issuecomment-1");
@@ -162,7 +196,18 @@ describe("runCli", () => {
 
   test("a comment posted without a url is called out, not trusted", async () => {
     const { io, err } = ok({
-      argv: ["threads", "--pr", "361", "--thread", "PRRT_a", "--thread", "PRRT_b", "--body", "x", "--post"],
+      argv: [
+        "threads",
+        "--pr",
+        "361",
+        "--thread",
+        "PRRT_a",
+        "--thread",
+        "PRRT_b",
+        "--body",
+        "x",
+        "--post",
+      ],
       gh: async (args) =>
         args.some((a) => a.includes("mutation"))
           ? JSON.stringify({
@@ -203,7 +248,18 @@ describe("runCli", () => {
 
   test("a thread that did not come back resolved is a failed sweep", async () => {
     const { io, err, log } = ok({
-      argv: ["threads", "--pr", "361", "--thread", "PRRT_a", "--thread", "PRRT_b", "--body", "x", "--post"],
+      argv: [
+        "threads",
+        "--pr",
+        "361",
+        "--thread",
+        "PRRT_a",
+        "--thread",
+        "PRRT_b",
+        "--body",
+        "x",
+        "--post",
+      ],
       gh: async (args) =>
         args.some((a) => a.includes("mutation"))
           ? JSON.stringify({
@@ -237,7 +293,18 @@ describe("runCli", () => {
 
   test("a refusal exits 1 and lists every offending id", async () => {
     const { io, err } = ok({
-      argv: ["threads", "--pr", "361", "--thread", "PRRT_a", "--thread", "PRVT_x", "--body", "x", "--post"],
+      argv: [
+        "threads",
+        "--pr",
+        "361",
+        "--thread",
+        "PRRT_a",
+        "--thread",
+        "PRVT_x",
+        "--body",
+        "x",
+        "--post",
+      ],
     });
     expect(await runCli(io)).toBe(1);
     expect(err.join("\n")).toContain("PRVT_x: not a review-thread node");
@@ -329,4 +396,3 @@ describe("ghChildEnv", () => {
     expect(env.PATH).toBe("/bin");
   });
 });
-

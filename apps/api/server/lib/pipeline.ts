@@ -140,7 +140,10 @@ export function messageFont(): string {
  * `planInput` carries the brief's approved copy pool and the ratios its motion
  * platforms package (both resolved by `runCampaign` via `planInputFor`).
  */
-export function buildPipeline(imageModel?: string, planInput: PlanInput = {}): GenerateCampaignUseCase {
+export function buildPipeline(
+  imageModel?: string,
+  planInput: PlanInput = {},
+): GenerateCampaignUseCase {
   return new GenerateCampaignUseCase({
     imageGenerator: imageGenerator(imageModel),
     proceduralGenerator: new ProceduralBackgroundGenerator(),
@@ -203,7 +206,10 @@ export async function runCampaign(
       );
     }
   }
-  return buildPipeline(imageModel, planInput.value).execute(brief, regenerateOnly ? { regenerateOnly } : undefined);
+  return buildPipeline(imageModel, planInput.value).execute(
+    brief,
+    regenerateOnly ? { regenerateOnly } : undefined,
+  );
 }
 
 /**

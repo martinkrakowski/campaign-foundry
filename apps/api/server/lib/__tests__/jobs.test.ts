@@ -70,14 +70,23 @@ describe("jobs port facade", () => {
 
   test("completeJob uses 0/0 when the run halted", async () => {
     const id = await createJob("camp");
-    await completeJob(id, payload({ halted: true, assets: [{}] as unknown as JobResult["assets"] }));
+    await completeJob(
+      id,
+      payload({ halted: true, assets: [{}] as unknown as JobResult["assets"] }),
+    );
     expect(await getJob(id)).toMatchObject({ status: "completed", done: 0, total: 0 });
   });
 
   test("failJob records the error without a result", async () => {
     const id = await createJob("camp");
     await failJob(id, "need two products");
-    expect(await getJob(id)).toEqual({ status: "failed", done: 0, total: 0, log: null, error: "need two products" });
+    expect(await getJob(id)).toEqual({
+      status: "failed",
+      done: 0,
+      total: 0,
+      log: null,
+      error: "need two products",
+    });
   });
 
   test("a settled job expires after JOB_TTL_MS; a running one does not", async () => {

@@ -256,9 +256,7 @@ export function renderStatus(status: WaveStatus, opts?: RenderOptions): string {
           row(
             COLUMNS.map((column) => column.header),
             widths,
-            color
-              ? (text) => withCode(DIM, text)
-              : undefined,
+            color ? (text) => withCode(DIM, text) : undefined,
           ),
       );
       for (const r of wave.rows) {
@@ -317,7 +315,8 @@ function renderBacklog(backlog: NonNullable<WaveStatus["backlog"]>, color: boole
     lines.push(`${ROW_INDENT}(no premises)`);
   } else {
     for (const p of artifact.premises) {
-      const reasonText = p.reason !== undefined && p.reason !== "" ? ` — ${sanitize(p.reason)}` : "";
+      const reasonText =
+        p.reason !== undefined && p.reason !== "" ? ` — ${sanitize(p.reason)}` : "";
       const statusText = color
         ? p.status === "holds"
           ? withCode(CYAN, p.status)
@@ -325,7 +324,9 @@ function renderBacklog(backlog: NonNullable<WaveStatus["backlog"]>, color: boole
             ? withCode(RED, p.status)
             : withCode(YELLOW, p.status)
         : p.status;
-      lines.push(`${ROW_INDENT}${sanitize(p.lane)} (${sanitize(p.plan)}): ${statusText}${reasonText}`);
+      lines.push(
+        `${ROW_INDENT}${sanitize(p.lane)} (${sanitize(p.plan)}): ${statusText}${reasonText}`,
+      );
     }
   }
   return lines;

@@ -1,8 +1,16 @@
 import { randomBytes } from "node:crypto";
 import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { assetIdentity, SAFE_ID_PATTERN, isAudioRights } from "@campaignfoundry/CampaignOrchestration";
-import type { AudioRights, GeneratedAsset, PipelineResult } from "@campaignfoundry/CampaignOrchestration";
+import {
+  assetIdentity,
+  SAFE_ID_PATTERN,
+  isAudioRights,
+} from "@campaignfoundry/CampaignOrchestration";
+import type {
+  AudioRights,
+  GeneratedAsset,
+  PipelineResult,
+} from "@campaignfoundry/CampaignOrchestration";
 import { hashBytes, isErrno } from "./brief-files.js";
 import { outputRoot } from "./config.js";
 
@@ -83,7 +91,10 @@ async function revisionAt(path: string): Promise<string | undefined> {
  * unsafe or nothing is stored — the value a caller passes back as
  * `writeReport`'s `expectedRevision`. Mirrors `BriefStorePort.getRevision`.
  */
-export async function reportRevision(root: string, campaignId: string): Promise<string | undefined> {
+export async function reportRevision(
+  root: string,
+  campaignId: string,
+): Promise<string | undefined> {
   const path = campaignReportPath(root, campaignId);
   if (!path) return undefined;
   return revisionAt(path);
@@ -136,8 +147,8 @@ export type PersistedAsset = {
   descriptor?: unknown;
 };
 
-const isNonNegInt = (n: unknown): n is number => typeof n === "number" && Number.isInteger(n) && n >= 0;
-
+const isNonNegInt = (n: unknown): n is number =>
+  typeof n === "number" && Number.isInteger(n) && n >= 0;
 
 /**
  * Guard for a persisted report row — used by both the merge path and packaging.
@@ -171,7 +182,13 @@ export function isPersistedAsset(a: unknown): a is PersistedAsset {
   // skipped (and counted) rather than packaged as a still; a motion row without a
   // readable mp4 path or a finite clip length can't be packaged or duration-checked;
   // an html row without bundle and fallback paths can't be packaged (D122).
-  if (rec.format !== undefined && rec.format !== "static" && rec.format !== "motion" && rec.format !== "html") return false;
+  if (
+    rec.format !== undefined &&
+    rec.format !== "static" &&
+    rec.format !== "motion" &&
+    rec.format !== "html"
+  )
+    return false;
   if (rec.format === "motion") {
     if (typeof rec.videoPath !== "string") return false;
     if (typeof rec.durationSec !== "number" || !Number.isFinite(rec.durationSec)) return false;
@@ -242,7 +259,9 @@ export async function writeReport(
   const latest = latestReportPath(root);
   // The campaign id is the report's identity. Fall back to the latest-only pointer if a
   // run somehow lacks one (defensive — the use case always stamps the brief id).
-  const perCampaign = result.log?.campaignId ? campaignReportPath(root, result.log.campaignId) : null;
+  const perCampaign = result.log?.campaignId
+    ? campaignReportPath(root, result.log.campaignId)
+    : null;
   // The file a merge reads and the one its revision guards: this campaign's own report.
   const base = perCampaign ?? latest;
 
@@ -283,9 +302,7 @@ export async function writeReport(
     // Merge against this campaign's own prior report (not the global latest), so a
     // re-roll of one brief never folds in another brief's creatives. Map preserves
     // existing order; re-keying an existing entry updates it in place, new cells append.
-    const byKey = new Map(
-      (await readPersistedAssets(base)).map((a) => [keyOf(a), a] as const),
-    );
+    const byKey = new Map((await readPersistedAssets(base)).map((a) => [keyOf(a), a] as const));
     for (const a of fresh) byKey.set(keyOf(a), a);
     assets = [...byKey.values()];
   }

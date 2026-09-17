@@ -9,9 +9,7 @@ import { readEvents } from "../events.js";
 
 const clock = (): string => "2026-09-07T16:55:43Z";
 
-const waveEventSh = fileURLToPath(
-  new URL("../../../../scripts/wave-event.sh", import.meta.url),
-);
+const waveEventSh = fileURLToPath(new URL("../../../../scripts/wave-event.sh", import.meta.url));
 const dispatchLaneSh = fileURLToPath(
   new URL("../../../../.claude/skills/orchestrate-wave/scripts/dispatch-lane.sh", import.meta.url),
 );
@@ -70,10 +68,7 @@ describe("formatEvent (plan §2.1, D103)", () => {
   });
 
   test("omits the optional fields when absent — nothing is defaulted", () => {
-    const line = formatEvent(
-      { wave: "S", lane: "s4", stage: "dispatch", event: "started" },
-      clock,
-    );
+    const line = formatEvent({ wave: "S", lane: "s4", stage: "dispatch", event: "started" }, clock);
     expect(JSON.parse(line)).toEqual({
       ts: "2026-09-07T16:55:43Z",
       wave: "S",
@@ -92,7 +87,9 @@ describe("formatEvent (plan §2.1, D103)", () => {
 
   test("an unknown event kind throws with the vocabulary in the message", () => {
     const input = { wave: "S", lane: "s4", stage: "gate", event: "skipped" };
-    expect(() => formatEvent(input as never, clock)).toThrow(/event is one of: started\|settled\|failed/);
+    expect(() => formatEvent(input as never, clock)).toThrow(
+      /event is one of: started\|settled\|failed/,
+    );
   });
 });
 
@@ -115,11 +112,10 @@ describe("appendEvent (the thin impure edge)", () => {
   test("an invalid input throws before appendFile is called", async () => {
     let calls = 0;
     await expect(
-      appendEvent(
-        "/tmp/events.jsonl",
-        { wave: "S", lane: "s4", stage: "deploy" } as never,
-        { appendFile: async () => void calls++, clock },
-      ),
+      appendEvent("/tmp/events.jsonl", { wave: "S", lane: "s4", stage: "deploy" } as never, {
+        appendFile: async () => void calls++,
+        clock,
+      }),
     ).rejects.toThrow(/invalid wave event/);
     expect(calls).toBe(0);
   });
@@ -278,11 +274,24 @@ describe("scripts/wave-event.sh agrees with formatEvent byte-for-byte", () => {
 
   test("standalone invocation with --logdir flag", () => {
     const dir = tempDir();
-    execFileSync("sh", [waveEventSh, "--logdir", dir, "W3", "l1", "implement", "settled", "--pr", "99"]);
+    execFileSync("sh", [
+      waveEventSh,
+      "--logdir",
+      dir,
+      "W3",
+      "l1",
+      "implement",
+      "settled",
+      "--pr",
+      "99",
+    ]);
     const written = readFileSync(join(dir, "events.jsonl"), "utf8");
     const ts = JSON.parse(written).ts as string;
     expect(written).toBe(
-      formatEvent({ ts, wave: "W3", lane: "l1", stage: "implement", event: "settled", pr: 99 }, clock),
+      formatEvent(
+        { ts, wave: "W3", lane: "l1", stage: "implement", event: "settled", pr: 99 },
+        clock,
+      ),
     );
   });
 
@@ -405,18 +414,15 @@ describe("scripts/dispatch-lane.sh emits its events", () => {
     },
   );
 
-  test.skipIf(!hasZsh)(
-    zshSkip ?? "a lane whose CLI exits non-zero emits implement failed",
-    () => {
-      const logdir = join(tempDir(), "waveF");
-      runDispatch("false", logdir);
-      const { events } = readEvents(readFileSync(join(logdir, "events.jsonl"), "utf8"));
-      expect(events.map((event) => [event.stage, event.event])).toEqual([
-        ["dispatch", "started"],
-        ["implement", "failed"],
-      ]);
-    },
-  );
+  test.skipIf(!hasZsh)(zshSkip ?? "a lane whose CLI exits non-zero emits implement failed", () => {
+    const logdir = join(tempDir(), "waveF");
+    runDispatch("false", logdir);
+    const { events } = readEvents(readFileSync(join(logdir, "events.jsonl"), "utf8"));
+    expect(events.map((event) => [event.stage, event.event])).toEqual([
+      ["dispatch", "started"],
+      ["implement", "failed"],
+    ]);
+  });
 
   test.skipIf(!hasZsh)(
     zshSkip ?? "without WAVE set, the wave id defaults to the log dir's basename",
@@ -454,7 +460,8 @@ describe("scripts/dispatch-lane.sh emits its events", () => {
   );
 
   test.skipIf(!hasZsh)(
-    zshSkip ?? "dispatch-lane resolves existing wave1-shaped directory (no dash) rather than duplicating it",
+    zshSkip ??
+      "dispatch-lane resolves existing wave1-shaped directory (no dash) rather than duplicating it",
     () => {
       const id = `Num${Date.now()}`;
       const legacyDir = join("/tmp", `wave${id}`);
@@ -477,7 +484,8 @@ describe("scripts/dispatch-lane.sh emits its events", () => {
   );
 
   test.skipIf(!hasZsh)(
-    zshSkip ?? "dispatch-lane resolves existing wave1-shaped directory from WAVE env when logdir argument omitted",
+    zshSkip ??
+      "dispatch-lane resolves existing wave1-shaped directory from WAVE env when logdir argument omitted",
     () => {
       const id = `EnvNum${Date.now()}`;
       const legacyDir = join("/tmp", `wave${id}`);
@@ -490,7 +498,14 @@ describe("scripts/dispatch-lane.sh emits its events", () => {
       writeFileSync(brief, "x\n");
       execFileSync("zsh", [dispatchLaneSh, `l1:${wt}:${brief}`], {
         timeout: 20_000,
-        env: { ...process.env, WAVE: id, WAVE_LOG_ROOT: rootDir, STAGGER: "0", POLL: "1", LANE_CMD: "true" },
+        env: {
+          ...process.env,
+          WAVE: id,
+          WAVE_LOG_ROOT: rootDir,
+          STAGGER: "0",
+          POLL: "1",
+          LANE_CMD: "true",
+        },
       });
       const { events } = readEvents(readFileSync(join(legacyDir, "events.jsonl"), "utf8"));
       expect(events.length).toBeGreaterThan(0);
@@ -500,7 +515,8 @@ describe("scripts/dispatch-lane.sh emits its events", () => {
   );
 
   test.skipIf(!hasZsh)(
-    zshSkip ?? "documented launch example creates log directory from a fresh root and logs EXIT marker",
+    zshSkip ??
+      "documented launch example creates log directory from a fresh root and logs EXIT marker",
     () => {
       const freshRoot = join(tempDir(), "fresh-waves");
       expect(existsSync(freshRoot)).toBe(false);
@@ -658,7 +674,8 @@ describe("scripts/dispatch-lane.sh emits its events", () => {
     );
 
   test.skipIf(!hasZsh)(
-    zshSkip ?? "reports commits since recorded tip and plainly says none when a lane committed nothing",
+    zshSkip ??
+      "reports commits since recorded tip and plainly says none when a lane committed nothing",
     () => {
       const logdir = join(tempDir(), "waveTip");
       const wtCommitted = tempDir();
@@ -674,7 +691,9 @@ describe("scripts/dispatch-lane.sh emits its events", () => {
       writeFileSync(join(wtCommitted, "init.txt"), "initial\n");
       gitExplicit(["add", "."], wtCommitted);
       gitExplicit(["commit", "-m", "initial commit"], wtCommitted);
-      const tipCommitted = gitExplicit(["rev-parse", "HEAD"], wtCommitted, { stdio: "pipe" }).trim();
+      const tipCommitted = gitExplicit(["rev-parse", "HEAD"], wtCommitted, {
+        stdio: "pipe",
+      }).trim();
 
       // Setup git worktree for wtEmpty with earlier commits to verify it does not compare to origin/main
       gitExplicit(["init"], wtEmpty);
@@ -730,21 +749,17 @@ describe("scripts/dispatch-lane.sh emits its events", () => {
       const brief = join(tempDir(), "brief.md");
       writeFileSync(brief, "work\n");
 
-      const stdout = execFileSync(
-        "zsh",
-        [dispatchLaneSh, logdir, `notip:${wtNoTip}:${brief}`],
-        {
-          timeout: 20_000,
-          env: {
-            ...process.env,
-            STAGGER: "0",
-            POLL: "1",
-            WAVE: "W3T",
-            LANE_CMD: "true",
-          },
-          encoding: "utf8",
+      const stdout = execFileSync("zsh", [dispatchLaneSh, logdir, `notip:${wtNoTip}:${brief}`], {
+        timeout: 20_000,
+        env: {
+          ...process.env,
+          STAGGER: "0",
+          POLL: "1",
+          WAVE: "W3T",
+          LANE_CMD: "true",
         },
-      );
+        encoding: "utf8",
+      });
 
       expect(stdout).toContain("commits since tip: unknown (tip missing)");
     },

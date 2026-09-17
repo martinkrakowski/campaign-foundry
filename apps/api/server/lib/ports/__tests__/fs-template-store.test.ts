@@ -1,16 +1,9 @@
 import { describe, expect, test } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import {
-  CANONICAL_TEMPLATES,
-  type CreativeTemplate,
-} from "@campaignfoundry/CampaignOrchestration";
+import { CANONICAL_TEMPLATES, type CreativeTemplate } from "@campaignfoundry/CampaignOrchestration";
 import { FsTemplateStore } from "../fs-template-store.js";
-import {
-  getTemplateStore,
-  resetTemplateStore,
-  setTemplateStore,
-} from "../index.js";
+import { getTemplateStore, resetTemplateStore, setTemplateStore } from "../index.js";
 
 describe("FsTemplateStore", () => {
   test("listTemplates returns the three canonical seeds with layers in declared order", async () => {
@@ -157,8 +150,8 @@ describe("FsTemplateStore", () => {
     );
 
     expect(declared).toEqual(["listTemplates", "findTemplate", "exists"]);
-    expect(declared.filter((name) => /create|update|write|save|delete|put|patch/i.test(name))).toEqual(
-      [],
-    );
+    expect(
+      declared.filter((name) => /create|update|write|save|delete|put|patch/i.test(name)),
+    ).toEqual([]);
   });
 });

@@ -105,12 +105,10 @@ describe("mergeStatus — shape and ordering", () => {
   test("a declared wave order decides the list, not which feed a wave appears in", () => {
     // Wave 9 is the live one and emits nothing; wave 8 reported and is older.
     // Feed order puts 8 first — that is the defect this parameter exists for.
-    const status = mergeStatus(
-      [event({ wave: "8", lane: "a" })],
-      { "9/b": observation() },
-      "now",
-      ["9", "8"],
-    );
+    const status = mergeStatus([event({ wave: "8", lane: "a" })], { "9/b": observation() }, "now", [
+      "9",
+      "8",
+    ]);
     expect(status.waves.map((wave) => wave.id)).toEqual(["9", "8"]);
     // Each wave keeps its own rows: the order changes nothing about content.
     expect(status.waves[0]?.lanes.map((lane) => lane.lane)).toEqual(["b"]);
@@ -163,7 +161,11 @@ describe("mergeStatus — the seat that ran a lane", () => {
   test("a seat recorded on an earlier event survives later events that do not carry it", () => {
     const status = mergeStatus(
       [
-        event({ stage: "dispatch", event: "started", detail: { seat: "agy gemini-3.8-flash-high" } }),
+        event({
+          stage: "dispatch",
+          event: "started",
+          detail: { seat: "agy gemini-3.8-flash-high" },
+        }),
         event({ stage: "implement", event: "settled", ts: "2026-09-07T17:20:00Z", pr: 218 }),
         event({ stage: "merge", event: "settled", ts: "2026-09-07T18:00:00Z", pr: 218 }),
       ],
@@ -180,7 +182,11 @@ describe("mergeStatus — the seat that ran a lane", () => {
     const status = mergeStatus(
       [
         event({ stage: "dispatch", event: "started", detail: { seat: "opencode/big-pickle" } }),
-        event({ stage: "implement", event: "failed", detail: { seat: "opencode-go/glm-5.3-flash" } }),
+        event({
+          stage: "implement",
+          event: "failed",
+          detail: { seat: "opencode-go/glm-5.3-flash" },
+        }),
       ],
       {},
       "now",

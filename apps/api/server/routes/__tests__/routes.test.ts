@@ -1,5 +1,13 @@
 import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -123,7 +131,11 @@ describe("POST /campaigns/generate", () => {
   afterEach(() => setCapabilities({ motion: false, reason: "not probed" }));
 
   const call = (body: unknown, query = "?model=procedural") =>
-    web("post", "/campaigns/generate", generateHandler)(
+    web(
+      "post",
+      "/campaigns/generate",
+      generateHandler,
+    )(
       new Request(`http://x/campaigns/generate${query}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -142,9 +154,11 @@ describe("POST /campaigns/generate", () => {
     expect(body.result?.assets).toHaveLength(6);
     expect(body.done).toBe(6);
     expect(body.total).toBe(6);
-    const report = await web("get", "/campaigns/result", resultHandler)(
-      new Request("http://x/campaigns/result?campaignId=camp"),
-    );
+    const report = await web(
+      "get",
+      "/campaigns/result",
+      resultHandler,
+    )(new Request("http://x/campaigns/result?campaignId=camp"));
     expect(((await report.json()) as { assets: unknown[] }).assets).toHaveLength(6);
   });
 
@@ -163,7 +177,14 @@ describe("POST /campaigns/generate", () => {
     const res = await call(
       brief({
         type: "display-ad",
-        products: [{ id: "alpha", name: "A", primaryColor: "#1473E6", logoPath: "assets/inputs/hydra-logo.png" }],
+        products: [
+          {
+            id: "alpha",
+            name: "A",
+            primaryColor: "#1473E6",
+            logoPath: "assets/inputs/hydra-logo.png",
+          },
+        ],
         output: {
           formats: ["static"],
           platforms: ["google-display", "meta-audience-network", "display-web"],
@@ -188,7 +209,11 @@ describe("POST /campaigns/generate", () => {
     expect(ihdr("alpha/300x250.png")).toEqual({ width: 300, height: 250 });
     expect(ihdr("alpha/728x90.png")).toEqual({ width: 728, height: 90 });
     // A4b — packaging a display platform afterwards is not a dead end either.
-    const pack = await web("post", "/campaigns/package", packageHandler)(
+    const pack = await web(
+      "post",
+      "/campaigns/package",
+      packageHandler,
+    )(
       new Request("http://x/campaigns/package", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -205,7 +230,9 @@ describe("POST /campaigns/generate", () => {
   test("refuses a classic brief that requests motion — the reported bug: it rendered stills", async () => {
     setCapabilities({ motion: true });
     try {
-      const res = await call(brief({ output: { formats: ["motion"], platforms: ["instagram-reel"] } }));
+      const res = await call(
+        brief({ output: { formats: ["motion"], platforms: ["instagram-reel"] } }),
+      );
       expect(res.status).toBe(400);
       expect(((await res.json()) as { error: string }).error).toMatch(/requires mode "variation"/);
     } finally {
@@ -218,9 +245,13 @@ describe("POST /campaigns/generate", () => {
     // brief this host cannot produce must be refused here rather than deep in the pipeline.
     setCapabilities({ motion: false, reason: "ffmpeg-static binary is not available" });
     try {
-      const res = await call(brief({ output: { formats: ["motion"], platforms: ["instagram-reel"] } }));
+      const res = await call(
+        brief({ output: { formats: ["motion"], platforms: ["instagram-reel"] } }),
+      );
       expect(res.status).toBe(400);
-      expect(((await res.json()) as { error: string }).error).toMatch(/motion output is unavailable/);
+      expect(((await res.json()) as { error: string }).error).toMatch(
+        /motion output is unavailable/,
+      );
     } finally {
       setCapabilities({ motion: false, reason: "not probed" });
     }
@@ -233,7 +264,11 @@ describe("POST /campaigns/generate", () => {
       throw "non-error parse failure";
     };
     try {
-      const res = await web("post", "/campaigns/generate", generateHandler)(
+      const res = await web(
+        "post",
+        "/campaigns/generate",
+        generateHandler,
+      )(
         new Request("http://x/campaigns/generate", {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -302,9 +337,11 @@ describe("POST /campaigns/generate", () => {
     expect(second.status).toBe("completed");
     expect(second.result?.assets).toHaveLength(1);
     expect(second.result?.assets[0].outputPath).toBe(slot!.outputPath);
-    const report = await web("get", "/campaigns/result", resultHandler)(
-      new Request("http://x/campaigns/result?campaignId=camp"),
-    );
+    const report = await web(
+      "get",
+      "/campaigns/result",
+      resultHandler,
+    )(new Request("http://x/campaigns/result?campaignId=camp"));
     expect(((await report.json()) as { assets: unknown[] }).assets).toHaveLength(4);
   });
 
@@ -331,16 +368,24 @@ describe("POST /campaigns/generate", () => {
     expect(reroll.status).toBe(202);
     const { body } = await awaitJob(((await reroll.json()) as { jobId: string }).jobId);
     expect(body.status).toBe("failed");
-    expect(body.error).toMatch(/^Plan changed since the last run \(policyHash [0-9a-f]{64} ≠ [0-9a-f]{64}\); run the full campaign\.$/);
-    const report = await web("get", "/campaigns/result", resultHandler)(
-      new Request("http://x/campaigns/result?campaignId=camp"),
+    expect(body.error).toMatch(
+      /^Plan changed since the last run \(policyHash [0-9a-f]{64} ≠ [0-9a-f]{64}\); run the full campaign\.$/,
     );
+    const report = await web(
+      "get",
+      "/campaigns/result",
+      resultHandler,
+    )(new Request("http://x/campaigns/result?campaignId=camp"));
     expect(((await report.json()) as { assets: unknown[] }).assets).toHaveLength(4);
   });
 
   test("variation re-roll without a persisted report is not pinned", async () => {
     const res = await call({
-      brief: brief({ mode: "variation", products: [brief().products[0]], variation: { count: 2, seed: 42 } }),
+      brief: brief({
+        mode: "variation",
+        products: [brief().products[0]],
+        variation: { count: 2, seed: 42 },
+      }),
       regenerateOnly: [{ productId: "alpha", variantIndex: 0 }],
     });
     const { body } = await awaitJob(((await res.json()) as { jobId: string }).jobId);
@@ -368,7 +413,11 @@ describe("POST /campaigns/generate", () => {
     // so a policyHash-only pin would wave this through and merge new copy into a
     // report whose other cells were rendered under the old message.
     const reroll = await call({
-      brief: brief({ mode: "variation", variation: policy, campaignMessage: "A totally different message" }),
+      brief: brief({
+        mode: "variation",
+        variation: policy,
+        campaignMessage: "A totally different message",
+      }),
       regenerateOnly: [{ productId: slot!.productId, variantIndex: slot!.variantIndex }],
     });
     expect(reroll.status).toBe(202);
@@ -377,9 +426,11 @@ describe("POST /campaigns/generate", () => {
     expect(body.error).toMatch(
       /^The brief's copy changed since the last run \(copyHash [0-9a-f]{64} ≠ [0-9a-f]{64}\); run the full campaign\.$/,
     );
-    const report = await web("get", "/campaigns/result", resultHandler)(
-      new Request("http://x/campaigns/result?campaignId=camp"),
-    );
+    const report = await web(
+      "get",
+      "/campaigns/result",
+      resultHandler,
+    )(new Request("http://x/campaigns/result?campaignId=camp"));
     expect(((await report.json()) as { assets: unknown[] }).assets).toHaveLength(4);
   });
 
@@ -412,7 +463,11 @@ describe("POST /campaigns/generate", () => {
     // against — the documented decision (§35): the first re-roll of a pre-existing
     // report is not refused on copy, unlike the policyHash-pinned path above.
     const reroll = await call({
-      brief: brief({ mode: "variation", variation: policy, campaignMessage: "Yet another message" }),
+      brief: brief({
+        mode: "variation",
+        variation: policy,
+        campaignMessage: "Yet another message",
+      }),
       regenerateOnly: [{ productId: slot!.productId, variantIndex: slot!.variantIndex }],
     });
     expect(reroll.status).toBe(202);
@@ -510,17 +565,34 @@ describe("GET /campaigns/jobs/:id", () => {
     expect(res.status).toBe(404);
     expect(await res.json()).toEqual({ error: "Job not found" });
   });
-
 });
 
 describe("GET /campaigns/result", () => {
   const call = (query = "") =>
-    web("get", "/campaigns/result", resultHandler)(new Request(`http://x/campaigns/result${query}`));
+    web(
+      "get",
+      "/campaigns/result",
+      resultHandler,
+    )(new Request(`http://x/campaigns/result${query}`));
 
   const seed = () => {
     mkdirSync(resolve(dir, "reports"), { recursive: true });
-    writeFileSync(resolve(dir, "report.json"), JSON.stringify({ halted: false, assets: [{ productId: "z" }], log: { campaignId: "latest" } }));
-    writeFileSync(resolve(dir, "reports", "camp.json"), JSON.stringify({ halted: false, assets: [{ productId: "alpha" }], log: { campaignId: "camp" } }));
+    writeFileSync(
+      resolve(dir, "report.json"),
+      JSON.stringify({
+        halted: false,
+        assets: [{ productId: "z" }],
+        log: { campaignId: "latest" },
+      }),
+    );
+    writeFileSync(
+      resolve(dir, "reports", "camp.json"),
+      JSON.stringify({
+        halted: false,
+        assets: [{ productId: "alpha" }],
+        log: { campaignId: "camp" },
+      }),
+    );
   };
 
   test("returns the empty result when no latest report exists", async () => {
@@ -529,33 +601,53 @@ describe("GET /campaigns/result", () => {
 
   test("returns the latest report when no id is given", async () => {
     seed();
-    expect((await (await call()).json()) as { log: { campaignId: string } }).toMatchObject({ log: { campaignId: "latest" } });
+    expect((await (await call()).json()) as { log: { campaignId: string } }).toMatchObject({
+      log: { campaignId: "latest" },
+    });
   });
 
   test("returns a specific campaign's report by id", async () => {
     seed();
-    expect((await (await call("?campaignId=camp")).json()) as { log: { campaignId: string } }).toMatchObject({
+    expect(
+      (await (await call("?campaignId=camp")).json()) as { log: { campaignId: string } },
+    ).toMatchObject({
       log: { campaignId: "camp" },
     });
   });
 
   test("returns the empty result for an unknown id", async () => {
     seed();
-    expect(await (await call("?campaignId=missing")).json()).toEqual({ halted: false, assets: [], log: null });
+    expect(await (await call("?campaignId=missing")).json()).toEqual({
+      halted: false,
+      assets: [],
+      log: null,
+    });
   });
 
   test("returns the empty result for an unsafe id", async () => {
-    expect(await (await call("?campaignId=../evil")).json()).toEqual({ halted: false, assets: [], log: null });
+    expect(await (await call("?campaignId=../evil")).json()).toEqual({
+      halted: false,
+      assets: [],
+      log: null,
+    });
   });
 
   test("returns the empty result for a repeated (array) id param", async () => {
-    expect(await (await call("?campaignId=a&campaignId=b")).json()).toEqual({ halted: false, assets: [], log: null });
+    expect(await (await call("?campaignId=a&campaignId=b")).json()).toEqual({
+      halted: false,
+      assets: [],
+      log: null,
+    });
   });
 });
 
 describe("GET /output/**", () => {
   const call = (path: string, headers: Record<string, string> = {}) =>
-    web("get", "/output/**:path", outputHandler)(new Request(`http://x/output/${path}`, { headers }));
+    web(
+      "get",
+      "/output/**:path",
+      outputHandler,
+    )(new Request(`http://x/output/${path}`, { headers }));
 
   test("streams a generated file with the right content type, length and Accept-Ranges", async () => {
     const bytes = png();
@@ -594,7 +686,14 @@ describe("GET /output/**", () => {
 
   test("416s a malformed or unsatisfiable range", async () => {
     writeFileSync(resolve(dir, "clip.mp4"), "0123456789");
-    for (const range of ["bytes=10-", "bytes=5-2", "bytes=-", "bytes=-0", "items=0-1", "bytes=a-b"]) {
+    for (const range of [
+      "bytes=10-",
+      "bytes=5-2",
+      "bytes=-",
+      "bytes=-0",
+      "items=0-1",
+      "bytes=a-b",
+    ]) {
       const res = await call("clip.mp4", { range });
       expect(res.status, range).toBe(416);
       expect(res.headers.get("content-range"), range).toBe("bytes */10");
@@ -707,7 +806,9 @@ describe("GET /output/**", () => {
     fsHook.open = async (path, flags) => {
       const actual = await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
       const handle = await actual.open(path, flags);
-      vi.spyOn(handle, "stat").mockRejectedValue(Object.assign(new Error("EIO: i/o error"), { code: "EIO" }));
+      vi.spyOn(handle, "stat").mockRejectedValue(
+        Object.assign(new Error("EIO: i/o error"), { code: "EIO" }),
+      );
       return handle;
     };
     const res = await call("flaky.png");
@@ -743,7 +844,10 @@ describe("GET /output/**", () => {
   test("400s a path that escapes the output root", async () => {
     // A real HTTP path is normalized before routing, so drive the guard directly with
     // a router param that contains traversal — the case the in-handler check defends.
-    const event = { context: { params: { path: "../../etc/passwd" } }, node: { req: {}, res: { statusCode: 200 } } };
+    const event = {
+      context: { params: { path: "../../etc/passwd" } },
+      node: { req: {}, res: { statusCode: 200 } },
+    };
     const body = await (outputHandler as unknown as (e: unknown) => Promise<unknown>)(event);
     expect(event.node.res.statusCode).toBe(400);
     expect(body).toEqual({ error: "Invalid path" });
@@ -774,7 +878,11 @@ describe("POST /campaigns/package", () => {
   beforeEach(() => setCapabilities({ motion: false, reason: "not probed" }));
 
   const call = (body: unknown) =>
-    web("post", "/campaigns/package", packageHandler)(
+    web(
+      "post",
+      "/campaigns/package",
+      packageHandler,
+    )(
       new Request("http://x/campaigns/package", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -794,9 +902,17 @@ describe("POST /campaigns/package", () => {
     ...over,
   });
 
-  const seedReport = (assets: unknown[] = [reportAsset(), reportAsset({ productId: "beta", outputPath: "beta/1x1.png" })]) => {
+  const seedReport = (
+    assets: unknown[] = [
+      reportAsset(),
+      reportAsset({ productId: "beta", outputPath: "beta/1x1.png" }),
+    ],
+  ) => {
     mkdirSync(resolve(dir, "reports"), { recursive: true });
-    writeFileSync(resolve(dir, "reports", "camp.json"), JSON.stringify({ halted: false, assets, log: { campaignId: "camp" } }));
+    writeFileSync(
+      resolve(dir, "reports", "camp.json"),
+      JSON.stringify({ halted: false, assets, log: { campaignId: "camp" } }),
+    );
   };
 
   const seedPng = (relativePath: string) => {
@@ -819,7 +935,11 @@ describe("POST /campaigns/package", () => {
     const res = await call({ campaignId: "camp", platforms: ["instagram-feed", "x"] });
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
-      platforms: Array<{ platformId: string; manifestPath: string; items: Array<{ checks: { size: string }; aspectRatio: string }> }>;
+      platforms: Array<{
+        platformId: string;
+        manifestPath: string;
+        items: Array<{ checks: { size: string }; aspectRatio: string }>;
+      }>;
     };
     expect(body.platforms.map((p) => p.platformId)).toEqual(["instagram-feed", "x"]);
     expect(body.platforms[0].items.map((i) => i.aspectRatio)).toEqual(["1:1", "1:1"]);
@@ -829,7 +949,9 @@ describe("POST /campaigns/package", () => {
     const feedManifest = JSON.parse(
       readFileSync(resolve(dir, "packages/camp/instagram-feed/manifest.json"), "utf8"),
     ) as { items: Array<{ checks: { size: string } }>; packagedAt: string; skipped: number };
-    const xManifest = JSON.parse(readFileSync(resolve(dir, "packages/camp/x/manifest.json"), "utf8")) as {
+    const xManifest = JSON.parse(
+      readFileSync(resolve(dir, "packages/camp/x/manifest.json"), "utf8"),
+    ) as {
       items: Array<{ checks: { size: string } }>;
     };
     expect(feedManifest.items.every((i) => i.checks.size === "pass")).toBe(true);
@@ -844,7 +966,10 @@ describe("POST /campaigns/package", () => {
   test("packages mp4 + poster for a motion platform only while the capability is on", async () => {
     seedPng("alpha/9x16/v1.png");
     mkdirSync(resolve(dir, "alpha/9x16"), { recursive: true });
-    writeFileSync(resolve(dir, "alpha/9x16/v1.mp4"), new Uint8Array([0, 0, 0, 24, 102, 116, 121, 112]));
+    writeFileSync(
+      resolve(dir, "alpha/9x16/v1.mp4"),
+      new Uint8Array([0, 0, 0, 24, 102, 116, 121, 112]),
+    );
     seedReport([
       reportAsset({
         aspectRatio: "9:16",
@@ -866,7 +991,15 @@ describe("POST /campaigns/package", () => {
       const res = await call({ campaignId: "camp", platforms: ["instagram-reel"] });
       expect(res.status).toBe(200);
       const body = (await res.json()) as {
-        platforms: Array<{ items: Array<{ format: string; source: string; posterPath: string; durationSec: number; checks: { size: string; duration: string } }> }>;
+        platforms: Array<{
+          items: Array<{
+            format: string;
+            source: string;
+            posterPath: string;
+            durationSec: number;
+            checks: { size: string; duration: string };
+          }>;
+        }>;
       };
       expect(body.platforms[0].items).toHaveLength(1);
       expect(body.platforms[0].items[0]).toMatchObject({
@@ -911,7 +1044,11 @@ describe("POST /campaigns/package", () => {
   });
 
   test("returns 400 when include is not an array of strings", async () => {
-    let res = await call({ campaignId: "camp", platforms: ["instagram-feed"], include: "alpha/1:1/default" });
+    let res = await call({
+      campaignId: "camp",
+      platforms: ["instagram-feed"],
+      include: "alpha/1:1/default",
+    });
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error: "include must be an array of strings" });
     res = await call({ campaignId: "camp", platforms: ["instagram-feed"], include: ["ok", 1] });
@@ -978,7 +1115,11 @@ describe("POST /campaigns/package", () => {
       throw "non-error parse failure";
     };
     try {
-      const res = await web("post", "/campaigns/package", packageHandler)(
+      const res = await web(
+        "post",
+        "/campaigns/package",
+        packageHandler,
+      )(
         new Request("http://x/campaigns/package", {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -1008,7 +1149,7 @@ describe("POST /campaigns/package", () => {
     seedReport();
     const res = await call({ campaignId: "camp", platforms: ["tiktok"] });
     expect(res.status).toBe(422);
-    expect((await res.json() as { error: string }).error).toMatch(/tiktok/);
+    expect(((await res.json()) as { error: string }).error).toMatch(/tiktok/);
   });
 
   test("returns 422 for an unknown platform", async () => {
@@ -1057,10 +1198,7 @@ describe("POST /campaigns/package", () => {
 
   test("a failed later platform does not mix the earlier platform's directory", async () => {
     seedPng("alpha/1x1.png");
-    seedReport([
-      reportAsset(),
-      reportAsset({ aspectRatio: "16:9", outputPath: "alpha/16x9.png" }),
-    ]);
+    seedReport([reportAsset(), reportAsset({ aspectRatio: "16:9", outputPath: "alpha/16x9.png" })]);
     const res = await call({ campaignId: "camp", platforms: ["instagram-feed", "x"] });
     expect(res.status).toBe(422);
     const { error } = (await res.json()) as { error: string };
@@ -1073,7 +1211,10 @@ describe("POST /campaigns/package", () => {
 
   test("returns 422 when the report has no assets array", async () => {
     mkdirSync(resolve(dir, "reports"), { recursive: true });
-    writeFileSync(resolve(dir, "reports", "camp.json"), JSON.stringify({ halted: false, log: { campaignId: "camp" } }));
+    writeFileSync(
+      resolve(dir, "reports", "camp.json"),
+      JSON.stringify({ halted: false, log: { campaignId: "camp" } }),
+    );
     const res = await call({ campaignId: "camp", platforms: ["instagram-feed"] });
     expect(res.status).toBe(422);
     expect(await res.json()).toEqual({ error: "Campaign report assets must be an array" });

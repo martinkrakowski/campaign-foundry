@@ -33,7 +33,9 @@ export function resolvePort(env: { readonly PORT?: string }): number {
     throw new Error(`invalid PORT: ${JSON.stringify(raw)}`);
   }
   if (port === 3000 || port === 3001) {
-    throw new Error(`D105: refusing to bind port ${port} — reserved for the operator's dev servers`);
+    throw new Error(
+      `D105: refusing to bind port ${port} — reserved for the operator's dev servers`,
+    );
   }
   return port;
 }

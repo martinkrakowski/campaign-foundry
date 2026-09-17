@@ -72,7 +72,10 @@ describe("runCli", () => {
   test("exits 1 and names the missing module", async () => {
     const { io: i, log } = io({
       loadManifest: async () =>
-        ok({ ...HEX_MANIFEST, bounded_contexts: [{ name: "Demo", layers: { domain: { entities: [] } } }] }),
+        ok({
+          ...HEX_MANIFEST,
+          bounded_contexts: [{ name: "Demo", layers: { domain: { entities: [] } } }],
+        }),
       listDir: async () => ["Widget.ts"],
     });
     expect(await runCli(i)).toBe(EXIT_DRIFT);
@@ -151,8 +154,7 @@ describe("runCli against hexagen's real loadManifest", () => {
       );
       const log = vi.fn((_t: string): void => undefined);
       const logError = vi.fn((_t: string): void => undefined);
-      const listDir = async (dir: string) =>
-        dir.endsWith("entities") ? ["Widget.ts"] : [];
+      const listDir = async (dir: string) => (dir.endsWith("entities") ? ["Widget.ts"] : []);
       const exitCode = await runCli({
         argv: [root],
         log,

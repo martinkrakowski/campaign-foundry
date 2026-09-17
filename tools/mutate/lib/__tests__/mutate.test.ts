@@ -124,23 +124,29 @@ describe("parseArgs", () => {
       parseArgs(["--file", "a", "--before", "b", "--because", "d", "--", "test"]),
     ).toThrow(/missing required flag --after/);
 
-    expect(() =>
-      parseArgs(["--file", "a", "--before", "b", "--after", "c", "--", "test"]),
-    ).toThrow(/missing required flag --because/);
+    expect(() => parseArgs(["--file", "a", "--before", "b", "--after", "c", "--", "test"])).toThrow(
+      /missing required flag --because/,
+    );
   });
 
   test("refuses missing or invalid values for flags", () => {
-    expect(() => parseArgs(["--file", "--before", "b", "--", "test"])).toThrow(/--file requires a path/);
+    expect(() => parseArgs(["--file", "--before", "b", "--", "test"])).toThrow(
+      /--file requires a path/,
+    );
     expect(() => parseArgs(["--file", "", "--", "test"])).toThrow(/--file requires a path/);
     expect(() => parseArgs(["--file=", "--", "test"])).toThrow(/--file requires a path/);
     expect(() => parseArgs(["--file=-flag", "--", "test"])).toThrow(/--file requires a path/);
 
-    expect(() => parseArgs(["--before", "--after", "c", "--", "test"])).toThrow(/--before requires a path/);
+    expect(() => parseArgs(["--before", "--after", "c", "--", "test"])).toThrow(
+      /--before requires a path/,
+    );
     expect(() => parseArgs(["--before", "", "--", "test"])).toThrow(/--before requires a path/);
     expect(() => parseArgs(["--before=", "--", "test"])).toThrow(/--before requires a path/);
     expect(() => parseArgs(["--before=-flag", "--", "test"])).toThrow(/--before requires a path/);
 
-    expect(() => parseArgs(["--after", "--file", "f", "--", "test"])).toThrow(/--after requires a path/);
+    expect(() => parseArgs(["--after", "--file", "f", "--", "test"])).toThrow(
+      /--after requires a path/,
+    );
     expect(() => parseArgs(["--after", "", "--", "test"])).toThrow(/--after requires a path/);
     expect(() => parseArgs(["--after=", "--", "test"])).toThrow(/--after requires a path/);
     expect(() => parseArgs(["--after=-flag", "--", "test"])).toThrow(/--after requires a path/);
@@ -150,10 +156,32 @@ describe("parseArgs", () => {
 
   test("refuses a --because value starting with '-'", () => {
     expect(() =>
-      parseArgs(["--file", "a", "--before", "b", "--after", "c", "--because", "-flag", "--", "test"]),
+      parseArgs([
+        "--file",
+        "a",
+        "--before",
+        "b",
+        "--after",
+        "c",
+        "--because",
+        "-flag",
+        "--",
+        "test",
+      ]),
     ).toThrow(/--because value cannot start with '-'/);
     expect(() =>
-      parseArgs(["--file", "a", "--before", "b", "--after", "c", "--because", "--other-flag", "--", "test"]),
+      parseArgs([
+        "--file",
+        "a",
+        "--before",
+        "b",
+        "--after",
+        "c",
+        "--because",
+        "--other-flag",
+        "--",
+        "test",
+      ]),
     ).toThrow(/--because value cannot start with '-'/);
     expect(() =>
       parseArgs(["--file", "a", "--before", "b", "--after", "c", "--because=-flag", "--", "test"]),
@@ -208,7 +236,9 @@ describe("parseArgs", () => {
   });
 
   test("refuses unknown arguments", () => {
-    expect(() => parseArgs(["--unknown", "val", "--", "test"])).toThrow(/unknown argument: "--unknown"/);
+    expect(() => parseArgs(["--unknown", "val", "--", "test"])).toThrow(
+      /unknown argument: "--unknown"/,
+    );
   });
 });
 
@@ -258,9 +288,7 @@ describe("applyMutation", () => {
       /Refusal \(Rule 2\): before-text is ambiguous: found 2 occurrences in file\.ts \(must be exactly one\)/,
     );
 
-    expect(() =>
-      applyMutation("foo foo foo", "foo", "bar", "file.ts"),
-    ).toThrow(
+    expect(() => applyMutation("foo foo foo", "foo", "bar", "file.ts")).toThrow(
       /Refusal \(Rule 2\): before-text is ambiguous: found 3 occurrences in file\.ts \(must be exactly one\)/,
     );
   });
@@ -351,7 +379,9 @@ describe("runMutation", () => {
       },
     );
 
-    await expect(runMutation(baseArgs, deps)).rejects.toThrow("command process crashed unexpectedly");
+    await expect(runMutation(baseArgs, deps)).rejects.toThrow(
+      "command process crashed unexpectedly",
+    );
     expect(store.get("target.ts")?.equals(originalBytes)).toBe(true);
   });
 

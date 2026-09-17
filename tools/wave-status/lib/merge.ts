@@ -1,11 +1,5 @@
 import { deriveLane } from "./derive.js";
-import type {
-  DerivedLane,
-  LaneObservation,
-  LaneStatus,
-  WaveEvent,
-  WaveStatus,
-} from "./types.js";
+import type { DerivedLane, LaneObservation, LaneStatus, WaveEvent, WaveStatus } from "./types.js";
 
 /**
  * Merge the reported (events) and observed (derived from disk) feeds into one
@@ -156,12 +150,20 @@ function findDisagreements(
     disagreements.push(`lane says merge settled; PR #${derived.pr.number} is still open`);
   }
 
-  if (reported.stage === "merge" && reported.event === "settled" && derived.pr?.state === "closed") {
-    disagreements.push(`lane says merge settled; PR #${derived.pr.number} was closed without merging`);
+  if (
+    reported.stage === "merge" &&
+    reported.event === "settled" &&
+    derived.pr?.state === "closed"
+  ) {
+    disagreements.push(
+      `lane says merge settled; PR #${derived.pr.number} was closed without merging`,
+    );
   }
 
   if (reported.event === "settled" && derived.exit !== undefined && derived.exit !== 0) {
-    disagreements.push(`lane says ${reported.stage} settled; lane log reports EXIT ${derived.exit}`);
+    disagreements.push(
+      `lane says ${reported.stage} settled; lane log reports EXIT ${derived.exit}`,
+    );
   }
 
   if (
@@ -175,12 +177,7 @@ function findDisagreements(
 
   // Hang is a pgrep claim. An events-only row has no observation, so alive:false
   // there is "nobody looked", not "the process is dead".
-  if (
-    observed &&
-    reported.event === "started" &&
-    !derived.alive &&
-    derived.exit === undefined
-  ) {
+  if (observed && reported.event === "started" && !derived.alive && derived.exit === undefined) {
     disagreements.push(
       `lane says ${reported.stage} started; the process is not alive and the log has no EXIT marker`,
     );

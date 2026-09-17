@@ -98,7 +98,9 @@ export default defineEventHandler(async (event) => {
     return { error: parsed.error };
   }
 
-  const result = await new PackageForPlatformUseCase(new FileSystemPackageStore(root, campaignId)).execute({
+  const result = await new PackageForPlatformUseCase(
+    new FileSystemPackageStore(root, campaignId),
+  ).execute({
     campaignId,
     assets: parsed.assets,
     platforms,

@@ -1,5 +1,9 @@
 import { portName } from "@hexagen-monaco/sync";
-import type { BoundedContext, LegacyOrNewPort, Manifest as HexManifest } from "@hexagen-monaco/sync";
+import type {
+  BoundedContext,
+  LegacyOrNewPort,
+  Manifest as HexManifest,
+} from "@hexagen-monaco/sync";
 import { DEFAULT_NAMING, NamingError, resolveScope, resolveTemplate } from "./naming.js";
 import type { ContextDecl, ContextLists, LayerName, Manifest, StubKind } from "./types.js";
 
@@ -24,7 +28,8 @@ function layerFolders(manifest: HexManifest): Record<LayerName, string> {
   const folders = {} as Record<LayerName, string>;
   for (const layer of Object.keys(LAYER_DEFAULTS) as LayerName[]) {
     const configured = layers[layer]?.folder;
-    folders[layer] = typeof configured === "string" && configured.length > 0 ? configured : LAYER_DEFAULTS[layer];
+    folders[layer] =
+      typeof configured === "string" && configured.length > 0 ? configured : LAYER_DEFAULTS[layer];
   }
   return folders;
 }

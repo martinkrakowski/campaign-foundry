@@ -1,9 +1,6 @@
 import { describe, test, expect, afterEach } from "vitest";
 import { createApp, createRouter, toWebHandler, type EventHandler } from "h3";
-import {
-  CANONICAL_TEMPLATES,
-  type CreativeTemplate,
-} from "@campaignfoundry/CampaignOrchestration";
+import { CANONICAL_TEMPLATES, type CreativeTemplate } from "@campaignfoundry/CampaignOrchestration";
 import { FsTemplateStore } from "../../../lib/ports/fs-template-store.js";
 import { setTemplateStore, resetTemplateStore } from "../../../lib/ports/index.js";
 import listHandler from "../templates.get.js";
@@ -44,9 +41,12 @@ describe("GET /campaigns/templates", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { templates: CreativeTemplate[] };
     expect(body.templates).toHaveLength(3);
-    expect(body.templates.filter((t) => t.id === v1.id).map((t) => t.version).sort()).toEqual([
-      1, 2,
-    ]);
+    expect(
+      body.templates
+        .filter((t) => t.id === v1.id)
+        .map((t) => t.version)
+        .sort(),
+    ).toEqual([1, 2]);
   });
 
   test("a store that throws is a 500 with an error message, never an empty list", async () => {
@@ -109,29 +109,27 @@ describe("GET /campaigns/templates/:ref", () => {
     expect(body.template.version).toBe(2);
   });
 
-  test.each([
-    "abc",
-    "1.5",
-    "0",
-    "-1",
-    "007",
-    "9007199254740993",
-    "99999999999999999999",
-  ])("a non-integer / zero / negative / non-canonical / unsafe version (%s) is a 400 naming the field", async (bad) => {
-    setTemplateStore(new FsTemplateStore([v1, v2]));
+  test.each(["abc", "1.5", "0", "-1", "007", "9007199254740993", "99999999999999999999"])(
+    "a non-integer / zero / negative / non-canonical / unsafe version (%s) is a 400 naming the field",
+    async (bad) => {
+      setTemplateStore(new FsTemplateStore([v1, v2]));
 
-    const res = await get(`/campaigns/templates/${v1.id}@${bad}`);
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as { error: string };
-    expect(body.error).toMatch(/version/i);
-  });
+      const res = await get(`/campaigns/templates/${v1.id}@${bad}`);
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toMatch(/version/i);
+    },
+  );
 
-  test.each(["1", "2"])("a canonical version (%s) is accepted, not rejected as unsafe", async (ok) => {
-    setTemplateStore(new FsTemplateStore([v1, v2]));
+  test.each(["1", "2"])(
+    "a canonical version (%s) is accepted, not rejected as unsafe",
+    async (ok) => {
+      setTemplateStore(new FsTemplateStore([v1, v2]));
 
-    const res = await get(`/campaigns/templates/${v1.id}@${ok}`);
-    expect(res.status).toBe(200);
-  });
+      const res = await get(`/campaigns/templates/${v1.id}@${ok}`);
+      expect(res.status).toBe(200);
+    },
+  );
 
   test("an id containing @ resolves by splitting at the LAST @, so a version still pins", async () => {
     const weird: CreativeTemplate = { ...v1, id: "a@b", version: 3 };

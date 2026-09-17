@@ -1,10 +1,5 @@
 import { parsePremises } from "./lib/premises.js";
-import {
-  PREMISE_TIMEOUT_MS,
-  exitCodeFor,
-  formatReport,
-  verifyPremises,
-} from "./lib/verify.js";
+import { PREMISE_TIMEOUT_MS, exitCodeFor, formatReport, verifyPremises } from "./lib/verify.js";
 import type { Premise, VerifyDeps } from "./lib/types.js";
 import {
   PROVENANCE_UNKNOWN,
@@ -51,7 +46,10 @@ export async function runCli(io: PlanVerifyIo): Promise<number> {
   const isSubset = io.argv.length > 0;
   const plans = isSubset
     ? [...io.argv]
-    : (await io.listPlanDir()).filter((n) => n.endsWith(".md")).sort().map((n) => `${PLAN_DIR}/${n}`);
+    : (await io.listPlanDir())
+        .filter((n) => n.endsWith(".md"))
+        .sort()
+        .map((n) => `${PLAN_DIR}/${n}`);
   const premises: Premise[] = [];
   for (const plan of plans) {
     premises.push(...parsePremises(plan, await io.readFile(plan)));
@@ -88,16 +86,21 @@ if (process.argv[1]) {
     const deps: VerifyDeps = {
       execute: (script) =>
         new Promise((resolve) => {
-          execFile("sh", ["-c", script], { timeout: PREMISE_TIMEOUT_MS }, (error, stdout, stderr) => {
-            const err = (error ?? null) as
-              | (NodeJS.ErrnoException & { code?: number; killed?: boolean })
-              | null;
-            resolve({
-              exitCode: err === null ? 0 : typeof err.code === "number" ? err.code : 1,
-              output: `${stdout}${stderr}`.trim(),
-              timedOut: err?.killed === true,
-            });
-          });
+          execFile(
+            "sh",
+            ["-c", script],
+            { timeout: PREMISE_TIMEOUT_MS },
+            (error, stdout, stderr) => {
+              const err = (error ?? null) as
+                | (NodeJS.ErrnoException & { code?: number; killed?: boolean })
+                | null;
+              resolve({
+                exitCode: err === null ? 0 : typeof err.code === "number" ? err.code : 1,
+                output: `${stdout}${stderr}`.trim(),
+                timedOut: err?.killed === true,
+              });
+            },
+          );
         }),
     };
     runCli({

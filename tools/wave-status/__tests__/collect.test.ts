@@ -27,12 +27,18 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const { execFile: realExecFile } = await vi.importActual<typeof import("node:child_process")>("node:child_process");
+const { execFile: realExecFile } =
+  await vi.importActual<typeof import("node:child_process")>("node:child_process");
 
 const execFileMock = execFile as unknown as Mock;
 execFileMock.mockImplementation(
   (file: string, args: readonly string[], optionsOrCallback: unknown, maybeCallback?: unknown) => {
-    return (realExecFile as unknown as (...a: unknown[]) => unknown)(file, args, optionsOrCallback, maybeCallback);
+    return (realExecFile as unknown as (...a: unknown[]) => unknown)(
+      file,
+      args,
+      optionsOrCallback,
+      maybeCallback,
+    );
   },
 );
 
@@ -369,7 +375,13 @@ describe("collect", () => {
           [ROOT]: ["waveR"],
           // Highest round listed first so a lexicographic pick still prefers
           // gate-r1.log (because "-" < ".") and the assertion cannot pass by luck.
-          [`${ROOT}/waveR`]: ["r1.log", "gate-r1-3.log", "gate-r1-2.log", "gate-r1.log", "events.jsonl"],
+          [`${ROOT}/waveR`]: [
+            "r1.log",
+            "gate-r1-3.log",
+            "gate-r1-2.log",
+            "gate-r1.log",
+            "events.jsonl",
+          ],
         },
         files: {
           [`${ROOT}/waveR/events.jsonl`]:
@@ -452,10 +464,7 @@ describe("collect", () => {
 
   test("the liveness probe dynamically derives pattern from worktrees when layout changes", async () => {
     const root = await mkdtemp(join(tmpdir(), "wave-status-custom-"));
-    const customWorktrees = [
-      join(root, "campaign-foundry"),
-      join(root, "custom-c5"),
-    ];
+    const customWorktrees = [join(root, "campaign-foundry"), join(root, "custom-c5")];
     const pattern = pgrepPattern("c5", customWorktrees);
     expect(pattern).toBe("custom-c5(/|$| )");
     const re = new RegExp(pattern);
@@ -476,14 +485,23 @@ describe("collect", () => {
       skipped: 0,
     });
     expect(gh).not.toHaveBeenCalled();
-    expect(status.waves[0]?.lanes[0]?.derived.pr).toEqual({ number: 7, state: "open", checks: "pass" });
+    expect(status.waves[0]?.lanes[0]?.derived.pr).toEqual({
+      number: 7,
+      state: "open",
+      checks: "pass",
+    });
     expect(status.waves[1]?.lanes[0]?.derived.pr).toBeUndefined();
   });
 
   test("a failing gh rejects with could not fetch, never an empty list", async () => {
     await expect(
       collect(
-        fakeDeps({ ...TREE, gh: async () => { throw new Error("gh: no auth"); } }),
+        fakeDeps({
+          ...TREE,
+          gh: async () => {
+            throw new Error("gh: no auth");
+          },
+        }),
         ROOT,
         "now",
       ),
@@ -517,7 +535,6 @@ describe("collect", () => {
     const status = await collect(fakeDeps({ ...TREE, gh }), ROOT, "now", { facts: [], skipped: 3 });
     expect(status.prs).toEqual({ skipped: 3 });
   });
-
 
   test("waves come out newest-first by their lanes' log mtimes, not in the directories' lexicographic order", async () => {
     // Directory names sort wave-10 < wave-7 < wave-8 < wave-9; the lane mtimes
@@ -642,11 +659,7 @@ describe("collect", () => {
   test("malformed gh output is a flagged gap, not a crash and not a claim of no PRs", async () => {
     // The page says "no PR" for a lane that joined nothing. With a row that
     // could not be read, that claim is not available to it.
-    const status = await collect(
-      fakeDeps({ ...TREE, gh: async () => "not json" }),
-      ROOT,
-      "now",
-    );
+    const status = await collect(fakeDeps({ ...TREE, gh: async () => "not json" }), ROOT, "now");
     expect(status.waves[0]?.lanes[0]?.derived.pr).toBeUndefined();
     expect(status.prs).toEqual({ skipped: 1 });
   });
@@ -660,7 +673,9 @@ describe("collect", () => {
       "[1]",
       "[null]",
       JSON.stringify([{ state: "OPEN", headRefName: "feat/t1", headRefOid: "oid1" }]),
-      JSON.stringify([{ number: "218", state: "OPEN", headRefName: "feat/t1", headRefOid: "oid1" }]),
+      JSON.stringify([
+        { number: "218", state: "OPEN", headRefName: "feat/t1", headRefOid: "oid1" },
+      ]),
       JSON.stringify([{ number: 218, state: 1, headRefName: "feat/t1", headRefOid: "oid1" }]),
       JSON.stringify([{ number: 218, state: "OPEN", headRefName: 1, headRefOid: "oid1" }]),
       JSON.stringify([{ number: 218, state: "OPEN", headRefName: "feat/t1", headRefOid: 1 }]),
@@ -898,7 +913,10 @@ describe("collect", () => {
 });
 
 describe("prFacts", () => {
-  function prListDeps(list: unknown, checkRuns = async (): Promise<string> => "not json"): CollectDeps {
+  function prListDeps(
+    list: unknown,
+    checkRuns = async (): Promise<string> => "not json",
+  ): CollectDeps {
     return fakeDeps({
       gh: async (args) => {
         if ((args[0] === "api" && args[1].includes("pulls")) || args[0] === "pr") {
@@ -936,7 +954,12 @@ describe("prFacts", () => {
     // corpus — one truncated row rendered as a repository with no PRs.
     const rows = [
       JSON.stringify({ number: 1000, state: "OPEN", headRefName: "feat/lane-0", headRefOid: "o0" }),
-      JSON.stringify({ number: 1001, state: "OPEN", headRefName: "feat/lane-1", headRefOid: "o1" }).slice(0, 24),
+      JSON.stringify({
+        number: 1001,
+        state: "OPEN",
+        headRefName: "feat/lane-1",
+        headRefOid: "o1",
+      }).slice(0, 24),
       JSON.stringify({ number: 1002, state: "OPEN", headRefName: "feat/lane-2", headRefOid: "o2" }),
     ];
     const corpus = await prFacts(fakeDeps({ gh: async () => rows.join("\n") }));
@@ -1305,7 +1328,8 @@ describe("thread state", () => {
   test("a malformed search page marks nothing read, and every open PR stays unknown", async () => {
     const { deps } = threadDeps({
       list: [openRow(218)],
-      threads: () => '{"data":{"search":{"nodes":[{"number":"218","reviewThreads":{}}],"pageInfo":{}}}}',
+      threads: () =>
+        '{"data":{"search":{"nodes":[{"number":"218","reviewThreads":{}}],"pageInfo":{}}}}',
     });
     const { facts } = await prFacts(deps);
     expect(facts[0]?.unresolvedThreads).toBe("unknown");
@@ -1385,7 +1409,12 @@ describe("parsePrList", () => {
   });
 
   test("blank lines are not rows, and an empty output is an empty corpus with no gap", () => {
-    const row = JSON.stringify({ number: 1, state: "OPEN", headRefName: "feat/a", headRefOid: "oa" });
+    const row = JSON.stringify({
+      number: 1,
+      state: "OPEN",
+      headRefName: "feat/a",
+      headRefOid: "oa",
+    });
     expect(parsePrList(`\n${row}\n\n`)).toEqual({
       entries: [{ number: 1, state: "OPEN", headRefName: "feat/a", headRefOid: "oa" }],
       skipped: 0,
@@ -1415,11 +1444,7 @@ describe("joinPrForLane", () => {
     return { number, state, checks, branchTail };
   }
 
-  const facts = [
-    fact(273, "l3b-layer-props"),
-    fact(265, "l2a-layer-list"),
-    fact(221, "main"),
-  ];
+  const facts = [fact(273, "l3b-layer-props"), fact(265, "l2a-layer-list"), fact(221, "main")];
 
   test("the event's own pr number wins over any branch match", () => {
     const withExact = [...facts, fact(999, "l3b-layer-props", "open", "pending")];
@@ -1440,14 +1465,13 @@ describe("joinPrForLane", () => {
 
   test("the branch fallback is case- and prefix-insensitive", () => {
     expect(joinPrForLane("L3b-layer-props", undefined, facts)?.number).toBe(273);
-    expect(joinPrForLane("h2-hit-testing", undefined, [fact(285, "h2-hit-testing")])?.number).toBe(285);
+    expect(joinPrForLane("h2-hit-testing", undefined, [fact(285, "h2-hit-testing")])?.number).toBe(
+      285,
+    );
   });
 
   test("an exact tail beats a descendant even with an older number", () => {
-    const candidates = [
-      fact(300, "l5-template-editor-2"),
-      fact(278, "l5-template-editor"),
-    ];
+    const candidates = [fact(300, "l5-template-editor-2"), fact(278, "l5-template-editor")];
     expect(joinPrForLane("L5-template-editor", undefined, candidates)?.number).toBe(278);
   });
 
@@ -1461,7 +1485,9 @@ describe("joinPrForLane", () => {
   });
 
   test("a lane never joins a sibling that merely shares a prefix", () => {
-    expect(joinPrForLane("w1", undefined, [fact(282, "w1a-status-cli"), fact(221, "main")])).toBeUndefined();
+    expect(
+      joinPrForLane("w1", undefined, [fact(282, "w1a-status-cli"), fact(221, "main")]),
+    ).toBeUndefined();
   });
 });
 
@@ -1473,9 +1499,9 @@ describe("collect — the PR-to-lane join", () => {
     },
     files,
     gh: async (args) =>
-      ((args[0] === "api" && args[1].includes("pulls")) || args[0] === "pr"
+      (args[0] === "api" && args[1].includes("pulls")) || args[0] === "pr"
         ? JSON.stringify(ghList)
-        : "not json"),
+        : "not json",
   });
 
   test("a lane whose event carries pr shows that PR when no branch could have found it", async () => {
@@ -1506,7 +1532,14 @@ describe("collect — the PR-to-lane join", () => {
             [`${ROOT}/waveJ/events.jsonl`]:
               '{"ts":"2026-09-08T22:07:15Z","wave":"J","lane":"H1a-tokens-selector","stage":"implement","event":"settled"}\n',
           },
-          [{ number: 280, state: "MERGED", headRefName: "fix/h1a-tokens-selector", headRefOid: "o" }],
+          [
+            {
+              number: 280,
+              state: "MERGED",
+              headRefName: "fix/h1a-tokens-selector",
+              headRefOid: "o",
+            },
+          ],
         ),
       ),
       ROOT,
@@ -1530,7 +1563,12 @@ describe("collect — the PR-to-lane join", () => {
           },
           [
             { number: 273, state: "MERGED", headRefName: "feat/l3b-layer-props", headRefOid: "o" },
-            { number: 999, state: "OPEN", headRefName: "feat/l3b-layer-props-suffix", headRefOid: "o" },
+            {
+              number: 999,
+              state: "OPEN",
+              headRefName: "feat/l3b-layer-props-suffix",
+              headRefOid: "o",
+            },
           ],
         ),
       ),
@@ -1586,9 +1624,7 @@ describe("collect — the PR-to-lane join", () => {
     const row = status.waves.find((wave) => wave.id === "J")?.lanes[0];
     expect(row?.derived.pr).toBeUndefined();
     // The other directory's claim belongs to its own lane, not this one's row.
-    expect(
-      status.waves.find((wave) => wave.id === "K")?.lanes[0]?.derived.pr?.number,
-    ).toBe(273);
+    expect(status.waves.find((wave) => wave.id === "K")?.lanes[0]?.derived.pr?.number).toBe(273);
   });
 });
 
@@ -1754,7 +1790,9 @@ describe("parseChecks", () => {
   test("a failed Build run is fail", () => {
     expect(
       parseChecks(
-        JSON.stringify({ check_runs: [{ name: "Build", status: "completed", conclusion: "failure" }] }),
+        JSON.stringify({
+          check_runs: [{ name: "Build", status: "completed", conclusion: "failure" }],
+        }),
       ),
     ).toBe("fail");
   });
@@ -1762,7 +1800,9 @@ describe("parseChecks", () => {
   test("a completed successful Build run is pass", () => {
     expect(
       parseChecks(
-        JSON.stringify({ check_runs: [{ name: "Build", status: "completed", conclusion: "success" }] }),
+        JSON.stringify({
+          check_runs: [{ name: "Build", status: "completed", conclusion: "success" }],
+        }),
       ),
     ).toBe("pass");
   });
@@ -1770,7 +1810,9 @@ describe("parseChecks", () => {
   test("runs not named Build are ignored; no Build runs is none", () => {
     expect(
       parseChecks(
-        JSON.stringify({ check_runs: [{ name: "Lint", status: "completed", conclusion: "failure" }] }),
+        JSON.stringify({
+          check_runs: [{ name: "Lint", status: "completed", conclusion: "failure" }],
+        }),
       ),
     ).toBe("none");
     expect(parseChecks(JSON.stringify({ total_count: 0, check_runs: [] }))).toBe("none");
@@ -1789,9 +1831,7 @@ describe("parseChecks", () => {
 
   test("a run without a name is ignored", () => {
     expect(
-      parseChecks(
-        JSON.stringify({ check_runs: [{ status: "completed", conclusion: "success" }] }),
-      ),
+      parseChecks(JSON.stringify({ check_runs: [{ status: "completed", conclusion: "success" }] })),
     ).toBe("none");
     // Junk run entries ride along; a named Build still reads.
     expect(
@@ -1818,7 +1858,9 @@ describe("waveIdFromDirName", () => {
 });
 
 describe("realDeps — the process-level wiring", () => {
-  function stubExec(behavior: (file: string, args: readonly string[]) => [ExecError | null, string]): void {
+  function stubExec(
+    behavior: (file: string, args: readonly string[]) => [ExecError | null, string],
+  ): void {
     execFileMock.mockImplementation(
       (
         file: string,

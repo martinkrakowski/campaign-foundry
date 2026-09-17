@@ -97,7 +97,10 @@ export class FsJobStore implements JobStorePort {
 
     const cached = this.memoryCache.get(id);
     if (cached && cached.mtimeMs >= st.mtimeMs) {
-      if (cached.entry.settledAt !== undefined && Date.now() - cached.entry.settledAt >= JOB_TTL_MS) {
+      if (
+        cached.entry.settledAt !== undefined &&
+        Date.now() - cached.entry.settledAt >= JOB_TTL_MS
+      ) {
         await this.deleteJob(id);
         return undefined;
       }
@@ -251,10 +254,7 @@ export class FsJobStore implements JobStorePort {
       if (stored) entries.push(stored);
     }
     return entries.sort(
-      (a, b) =>
-        a.createdAt - b.createdAt ||
-        a.seq - b.seq ||
-        a.id.localeCompare(b.id),
+      (a, b) => a.createdAt - b.createdAt || a.seq - b.seq || a.id.localeCompare(b.id),
     );
   }
 

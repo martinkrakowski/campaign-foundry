@@ -57,7 +57,12 @@ describe("POST /campaigns/plan", () => {
     setCapabilities({ motion: true });
     const res = await call(
       variationBrief({
-        variation: { count: 6, seed: 42, minDistance: 1, axes: { motion: ["ken-burns-in"], duration: [4] } },
+        variation: {
+          count: 6,
+          seed: 42,
+          minDistance: 1,
+          axes: { motion: ["ken-burns-in"], duration: [4] },
+        },
         output: { formats: ["static", "motion"] },
       }),
     );
@@ -69,7 +74,9 @@ describe("POST /campaigns/plan", () => {
     const motion = body.variants.filter((v) => v.motion !== undefined);
     expect(motion.length).toBeGreaterThan(0);
     expect(motion.every((v) => v.motion === "ken-burns-in" && v.durationSec === 4)).toBe(true);
-    expect(body.variants.filter((v) => v.motion === undefined).every((v) => !("durationSec" in v))).toBe(true);
+    expect(
+      body.variants.filter((v) => v.motion === undefined).every((v) => !("durationSec" in v)),
+    ).toBe(true);
     expect(body.estimate.frames).toBe(motion.length * 4 * 30);
   });
 
@@ -81,12 +88,19 @@ describe("POST /campaigns/plan", () => {
     setCapabilities({ motion: true });
     const res = await call(
       variationBrief({
-        variation: { count: 4, seed: 7, minDistance: 1, axes: { motion: ["ken-burns-in"], duration: [4] } },
+        variation: {
+          count: 4,
+          seed: 7,
+          minDistance: 1,
+          axes: { motion: ["ken-burns-in"], duration: [4] },
+        },
         output: { formats: ["motion"], platforms: ["instagram-reel"] },
       }),
     );
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { variants: Array<{ aspectRatio: string; motion?: string }> };
+    const body = (await res.json()) as {
+      variants: Array<{ aspectRatio: string; motion?: string }>;
+    };
     expect(body.variants.length).toBeGreaterThan(0);
     expect(body.variants.every((v) => v.aspectRatio === "9:16")).toBe(true);
     expect(body.variants.every((v) => v.motion !== undefined)).toBe(true);
@@ -96,12 +110,19 @@ describe("POST /campaigns/plan", () => {
     setCapabilities({ motion: true });
     const res = await call(
       variationBrief({
-        variation: { count: 6, seed: 42, minDistance: 1, axes: { motion: ["ken-burns-in"], duration: [4] } },
+        variation: {
+          count: 6,
+          seed: 42,
+          minDistance: 1,
+          axes: { motion: ["ken-burns-in"], duration: [4] },
+        },
         output: { formats: ["static", "motion"], platforms: ["instagram-feed", "instagram-reel"] },
       }),
     );
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { variants: Array<{ aspectRatio: string; motion?: string }> };
+    const body = (await res.json()) as {
+      variants: Array<{ aspectRatio: string; motion?: string }>;
+    };
     const motion = body.variants.filter((v) => v.motion !== undefined);
     expect(motion.length).toBeGreaterThan(0);
     expect(motion.every((v) => v.aspectRatio === "9:16")).toBe(true);
@@ -151,7 +172,9 @@ describe("POST /campaigns/plan", () => {
       }),
     );
     expect(res.status).toBe(422);
-    expect(((await res.json()) as { error: string }).error).toMatch(/exceeds axisProductSize|shortfall/);
+    expect(((await res.json()) as { error: string }).error).toMatch(
+      /exceeds axisProductSize|shortfall/,
+    );
   });
 
   test("returns 400 when the brief is not variation mode", async () => {
@@ -161,8 +184,18 @@ describe("POST /campaigns/plan", () => {
       targetAudience: "a",
       campaignMessage: "Hi",
       products: [
-        { id: "alpha", name: "A", primaryColor: "#1473E6", logoPath: "assets/inputs/hydra-logo.png" },
-        { id: "beta", name: "B", primaryColor: "#E0218A", logoPath: "assets/inputs/trail-logo.png" },
+        {
+          id: "alpha",
+          name: "A",
+          primaryColor: "#1473E6",
+          logoPath: "assets/inputs/hydra-logo.png",
+        },
+        {
+          id: "beta",
+          name: "B",
+          primaryColor: "#E0218A",
+          logoPath: "assets/inputs/trail-logo.png",
+        },
       ],
     });
     expect(res.status).toBe(400);
@@ -260,7 +293,12 @@ describe("POST /campaigns/plan with headline: pool://copy", () => {
       mkdirSync(join(dir, "briefs", "camp"), { recursive: true });
       writeFileSync(
         join(dir, "briefs", "camp", "pools.json"),
-        JSON.stringify({ briefId: "camp", generatedAt: "2026-01-01T00:00:00.000Z", model: "m", entries }),
+        JSON.stringify({
+          briefId: "camp",
+          generatedAt: "2026-01-01T00:00:00.000Z",
+          model: "m",
+          entries,
+        }),
       );
     }
     vi.resetModules();
@@ -284,7 +322,8 @@ describe("POST /campaigns/plan with headline: pool://copy", () => {
     const res = await post(await freshHandler(undefined), pooledBrief());
     expect(res.status).toBe(422);
     expect(await res.json()).toEqual({
-      error: 'Headline axis "pool://copy" needs at least one approved entry in copy pool briefs/camp/pools.json.',
+      error:
+        'Headline axis "pool://copy" needs at least one approved entry in copy pool briefs/camp/pools.json.',
     });
   });
 
@@ -298,7 +337,10 @@ describe("POST /campaigns/plan with headline: pool://copy", () => {
   });
 
   test("returns 422 naming the pool file when the pool is hand-edited into an invalid shape", async () => {
-    const res = await post(await freshHandler([{ id: "h1", text: 42, status: "approved" }]), pooledBrief());
+    const res = await post(
+      await freshHandler([{ id: "h1", text: 42, status: "approved" }]),
+      pooledBrief(),
+    );
     expect(res.status).toBe(422);
     expect(await res.json()).toEqual({
       error: "Copy pool briefs/camp/pools.json is invalid: entries[0].text must be a string.",
@@ -346,7 +388,8 @@ describe("POST /campaigns/plan with headline: pool://copy", () => {
     };
     expect(body.estimate.axisProductSize).toBe(2 * 3 * 1 * 1 * 1 * 1 * 2);
     expect(body.variants).toHaveLength(4);
-    for (const variant of body.variants) expect(["Stay wild", "Go far"]).toContain(variant.headline);
+    for (const variant of body.variants)
+      expect(["Stay wild", "Go far"]).toContain(variant.headline);
   });
 
   test("returns 400 naming the value for any other headline reference", async () => {
@@ -354,7 +397,9 @@ describe("POST /campaigns/plan with headline: pool://copy", () => {
       variationBrief({ variation: { count: 1, axes: { headline: "pool://other" } } }),
     );
     expect(res.status).toBe(400);
-    expect(((await res.json()) as { error: string }).error).toMatch(/variation\.axes\.headline.*"pool:\/\/other"/);
+    expect(((await res.json()) as { error: string }).error).toMatch(
+      /variation\.axes\.headline.*"pool:\/\/other"/,
+    );
   });
 
   // D71/C9 — a duplicated randomized brief kept `headline: "pool://copy"` from
@@ -370,15 +415,19 @@ describe("POST /campaigns/plan with headline: pool://copy", () => {
     mkdirSync(join(dir, "briefs"), { recursive: true });
     writeFileSync(
       join(dir, "briefs", "src.yaml"),
-      dumpBrief(parseBrief(variationBrief({
-        id: "src",
-        variation: {
-          count: 4,
-          seed: 42,
-          minDistance: 1,
-          axes: { layout: ["headline-top"], tone: ["bold"], headline: "pool://copy" },
-        },
-      }))),
+      dumpBrief(
+        parseBrief(
+          variationBrief({
+            id: "src",
+            variation: {
+              count: 4,
+              seed: 42,
+              minDistance: 1,
+              axes: { layout: ["headline-top"], tone: ["bold"], headline: "pool://copy" },
+            },
+          }),
+        ),
+      ),
     );
     mkdirSync(join(dir, "briefs", "src"), { recursive: true });
     writeFileSync(
@@ -414,8 +463,11 @@ describe("POST /campaigns/plan with headline: pool://copy", () => {
     const dupBody = (await dupRes.json()) as { brief: Record<string, unknown> };
     // the copied pool names the destination brief, not the source
     expect(
-      (JSON.parse(readFileSync(join(dir, "briefs", "dup-camp", "pools.json"), "utf8")) as { briefId: string })
-        .briefId,
+      (
+        JSON.parse(readFileSync(join(dir, "briefs", "dup-camp", "pools.json"), "utf8")) as {
+          briefId: string;
+        }
+      ).briefId,
     ).toBe("dup-camp");
 
     const planRes = await route(

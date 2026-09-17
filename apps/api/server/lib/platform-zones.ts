@@ -1,4 +1,8 @@
-import type { AspectRatioValue, PlatformSafeZoneResolver, PlanInput } from "@campaignfoundry/CampaignOrchestration";
+import type {
+  AspectRatioValue,
+  PlatformSafeZoneResolver,
+  PlanInput,
+} from "@campaignfoundry/CampaignOrchestration";
 import { platformProfile } from "@campaignfoundry/Distribution";
 
 /**
@@ -31,7 +35,9 @@ export const platformZones: PlatformSafeZoneResolver = (platformId) => {
  * are all static yield `[]`, so a brief that cannot ship a clip anywhere never
  * renders one.
  */
-export function motionRatiosFor(platformIds: readonly string[] | undefined): Pick<PlanInput, "motionRatios"> {
+export function motionRatiosFor(
+  platformIds: readonly string[] | undefined,
+): Pick<PlanInput, "motionRatios"> {
   if (!platformIds) return {};
   const motionRatios = new Set<AspectRatioValue>();
   for (const id of platformIds) {

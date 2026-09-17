@@ -91,7 +91,9 @@ describe("buildArtifact", () => {
       git: git(),
       scope: full,
       plans: ["docs/planning/a.md"],
-      premises: [{ lane: "S5", plan: "docs/planning/S5.md", status: "stale", reason: "already merged" }],
+      premises: [
+        { lane: "S5", plan: "docs/planning/S5.md", status: "stale", reason: "already merged" },
+      ],
     });
   });
 

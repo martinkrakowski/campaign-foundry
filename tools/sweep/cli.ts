@@ -129,8 +129,7 @@ export async function runCli(io: SweepCliIo): Promise<number> {
   let post: boolean;
   try {
     const args = parseSweepArgs(rest);
-    const disposition =
-      "text" in args.body ? args.body.text : await io.readFile(args.body.file);
+    const disposition = "text" in args.body ? args.body.text : await io.readFile(args.body.file);
     if (disposition.trim() === "") {
       throw new Error(`a disposition body must not be blank\n${SWEEP_USAGE}`);
     }
@@ -183,13 +182,20 @@ if (process.argv[1]) {
       readFile: (path) => readFile(path, "utf8"),
       gh: (args) =>
         new Promise((resolve, reject) => {
-          execFile("gh", [...args], { maxBuffer: 16 * 1024 * 1024, env: ghChildEnv(process.env) }, (error, stdout, stderr) => {
-            if (error !== null) {
-              reject(new Error(`gh ${args.slice(0, 2).join(" ")}: ${stderr.trim() || error.message}`));
-            } else {
-              resolve(stdout);
-            }
-          });
+          execFile(
+            "gh",
+            [...args],
+            { maxBuffer: 16 * 1024 * 1024, env: ghChildEnv(process.env) },
+            (error, stdout, stderr) => {
+              if (error !== null) {
+                reject(
+                  new Error(`gh ${args.slice(0, 2).join(" ")}: ${stderr.trim() || error.message}`),
+                );
+              } else {
+                resolve(stdout);
+              }
+            },
+          );
         }),
     })
       .then((code) => {

@@ -95,7 +95,11 @@ export function laneState(status: LaneStatus, nowMs: number): LaneState {
   ) {
     return "failed";
   }
-  if (derived.alive && derived.log !== undefined && derived.log.mtimeMs < nowMs - stallThresholdMs) {
+  if (
+    derived.alive &&
+    derived.log !== undefined &&
+    derived.log.mtimeMs < nowMs - stallThresholdMs
+  ) {
     return "stalled";
   }
   if (derived.alive) {
@@ -208,10 +212,7 @@ export function laneNeedsHuman(status: LaneStatus, nowMs: number): boolean {
 // same one the row cells use, so a count can never disagree with the rows
 // beneath it. This is the module's half of that seam; the parity test in
 // page.test.ts drives the fixture through both.
-export function laneStateCounts(
-  lanes: readonly LaneStatus[],
-  nowMs: number,
-): LaneStateCounts {
+export function laneStateCounts(lanes: readonly LaneStatus[], nowMs: number): LaneStateCounts {
   const counts = {} as LaneStateCounts;
   for (const state of LANE_STATES) counts[state] = 0;
   for (const lane of lanes) counts[laneState(lane, nowMs)] += 1;

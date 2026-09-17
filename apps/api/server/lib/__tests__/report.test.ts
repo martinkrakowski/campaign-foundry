@@ -52,14 +52,17 @@ const asset = (over: Partial<GeneratedAsset> = {}): GeneratedAsset => ({
   backgroundSource: "procedural",
   ...over,
 });
-const beta = (over: Partial<GeneratedAsset> = {}) => asset({ productId: "beta", outputPath: "beta/1x1.png", ...over });
-const gamma = (over: Partial<GeneratedAsset> = {}) => asset({ productId: "gamma", outputPath: "gamma/1x1.png", ...over });
+const beta = (over: Partial<GeneratedAsset> = {}) =>
+  asset({ productId: "beta", outputPath: "beta/1x1.png", ...over });
+const gamma = (over: Partial<GeneratedAsset> = {}) =>
+  asset({ productId: "gamma", outputPath: "gamma/1x1.png", ...over });
 const result = (assets: GeneratedAsset[], campaignId = "camp"): PipelineResult => ({
   assets,
   log: new PipelineExecutionLog(campaignId, () => new Date("2026-01-01T00:00:00.000Z")),
   halted: false,
 });
-const readAssets = (p: string): ReportAsset[] => (JSON.parse(readFileSync(p, "utf8")) as { assets: ReportAsset[] }).assets;
+const readAssets = (p: string): ReportAsset[] =>
+  (JSON.parse(readFileSync(p, "utf8")) as { assets: ReportAsset[] }).assets;
 
 describe("report persistence", () => {
   let root: string;
@@ -246,7 +249,11 @@ describe("report persistence", () => {
     writeFileSync(campaignReportPath(root, "camp")!, JSON.stringify({ assets: [beta()] }));
 
     const path = await writeReport(result([gamma()]), { merge: true });
-    expect(readAssets(path).map((a) => a.productId).sort()).toEqual(["beta", "gamma"]);
+    expect(
+      readAssets(path)
+        .map((a) => a.productId)
+        .sort(),
+    ).toEqual(["beta", "gamma"]);
   });
 
   test("a refused merge with no campaign id names no campaign", async () => {
@@ -264,23 +271,42 @@ describe("report persistence", () => {
 
   test("isPersistedAsset requires the four string identity/path fields", () => {
     expect(isPersistedAsset({ productId: "alpha", aspectRatio: "1:1" })).toBe(false);
-    expect(isPersistedAsset({ productId: "alpha", aspectRatio: "1:1", treatment: "default" })).toBe(false);
+    expect(isPersistedAsset({ productId: "alpha", aspectRatio: "1:1", treatment: "default" })).toBe(
+      false,
+    );
     expect(
-      isPersistedAsset({ productId: "alpha", aspectRatio: "1:1", treatment: "default", outputPath: "alpha/1x1.png" }),
+      isPersistedAsset({
+        productId: "alpha",
+        aspectRatio: "1:1",
+        treatment: "default",
+        outputPath: "alpha/1x1.png",
+      }),
     ).toBe(true);
     expect(isPersistedAsset(null)).toBe(false);
     expect(isPersistedAsset("nope")).toBe(false);
     expect(
-      isPersistedAsset({ productId: 1, aspectRatio: "1:1", treatment: "default", outputPath: "alpha/1x1.png" }),
+      isPersistedAsset({
+        productId: 1,
+        aspectRatio: "1:1",
+        treatment: "default",
+        outputPath: "alpha/1x1.png",
+      }),
     ).toBe(false);
   });
 
   test("isPersistedAsset takes a display size instead of a ratio — exactly one canvas (D113)", () => {
     expect(
-      isPersistedAsset({ productId: "alpha", size: "728x90", treatment: "default", outputPath: "alpha/728x90.png" }),
+      isPersistedAsset({
+        productId: "alpha",
+        size: "728x90",
+        treatment: "default",
+        outputPath: "alpha/728x90.png",
+      }),
     ).toBe(true);
     // Neither canvas: cannot be keyed or packaged.
-    expect(isPersistedAsset({ productId: "alpha", treatment: "default", outputPath: "alpha/x.png" })).toBe(false);
+    expect(
+      isPersistedAsset({ productId: "alpha", treatment: "default", outputPath: "alpha/x.png" }),
+    ).toBe(false);
     // Both canvases: a corrupt row, skipped like any other unusable one.
     expect(
       isPersistedAsset({
@@ -330,8 +356,22 @@ describe("report persistence", () => {
     expect(isPersistedAsset({ ...motion, format: "gif" })).toBe(false);
     expect(isPersistedAsset({ ...motion, format: null })).toBe(false);
     // Classic rows carry no format; static rows need no motion metadata.
-    expect(isPersistedAsset({ ...motion, format: undefined, videoPath: undefined, durationSec: undefined })).toBe(true);
-    expect(isPersistedAsset({ ...motion, format: "static", videoPath: undefined, durationSec: undefined })).toBe(true);
+    expect(
+      isPersistedAsset({
+        ...motion,
+        format: undefined,
+        videoPath: undefined,
+        durationSec: undefined,
+      }),
+    ).toBe(true);
+    expect(
+      isPersistedAsset({
+        ...motion,
+        format: "static",
+        videoPath: undefined,
+        durationSec: undefined,
+      }),
+    ).toBe(true);
   });
 
   test("isPersistedAsset validates html rows and requires htmlBundlePath and htmlFallbackPath (HL4)", () => {
@@ -362,11 +402,15 @@ describe("report persistence", () => {
     // Absent stays valid: not every creative is clickable.
     expect(isPersistedAsset(row)).toBe(true);
     // A string destination rides through, as HL4 wrote it.
-    expect(isPersistedAsset({ ...row, clickDestination: "https://example.com/landing" })).toBe(true);
+    expect(isPersistedAsset({ ...row, clickDestination: "https://example.com/landing" })).toBe(
+      true,
+    );
     // Present but not a string is a malformed row — the guard refuses what the type promises.
     expect(isPersistedAsset({ ...row, clickDestination: 42 })).toBe(false);
     expect(isPersistedAsset({ ...row, clickDestination: null })).toBe(false);
-    expect(isPersistedAsset({ ...row, clickDestination: { url: "https://example.com" } })).toBe(false);
+    expect(isPersistedAsset({ ...row, clickDestination: { url: "https://example.com" } })).toBe(
+      false,
+    );
   });
 
   test("isPersistedAsset refuses a present, malformed audioRights, and accepts a valid one (VE-D8)", () => {
@@ -381,13 +425,18 @@ describe("report persistence", () => {
     };
     // Absent stays valid: most assets carry no audio.
     expect(isPersistedAsset(row)).toBe(true);
-    expect(
-      isPersistedAsset({ ...row, audioRights: { licenceId: "lic-1", source: "acme" } }),
-    ).toBe(true);
+    expect(isPersistedAsset({ ...row, audioRights: { licenceId: "lic-1", source: "acme" } })).toBe(
+      true,
+    );
     expect(
       isPersistedAsset({
         ...row,
-        audioRights: { licenceId: "lic-1", source: "acme", expiresOn: "2026-12-31", territories: ["US"] },
+        audioRights: {
+          licenceId: "lic-1",
+          source: "acme",
+          expiresOn: "2026-12-31",
+          territories: ["US"],
+        },
       }),
     ).toBe(true);
     // Missing licenceId/source, malformed expiresOn, or a non-alpha-2 territories array
@@ -395,17 +444,28 @@ describe("report persistence", () => {
     expect(isPersistedAsset({ ...row, audioRights: { source: "acme" } })).toBe(false);
     expect(isPersistedAsset({ ...row, audioRights: { licenceId: "lic-1" } })).toBe(false);
     expect(
-      isPersistedAsset({ ...row, audioRights: { licenceId: "lic-1", source: "acme", expiresOn: "nope" } }),
+      isPersistedAsset({
+        ...row,
+        audioRights: { licenceId: "lic-1", source: "acme", expiresOn: "nope" },
+      }),
     ).toBe(false);
     expect(
-      isPersistedAsset({ ...row, audioRights: { licenceId: "lic-1", source: "acme", territories: [] } }),
+      isPersistedAsset({
+        ...row,
+        audioRights: { licenceId: "lic-1", source: "acme", territories: [] },
+      }),
     ).toBe(false);
     expect(isPersistedAsset({ ...row, audioRights: "lic-1" })).toBe(false);
   });
 
   test("isPersistedAsset refuses audioRights on a non-motion row (VE-D8 fix2 #5)", () => {
     const rights = { licenceId: "lic-1", source: "acme" };
-    const staticRow = { productId: "alpha", aspectRatio: "1:1", treatment: "default", outputPath: "alpha/1x1.png" };
+    const staticRow = {
+      productId: "alpha",
+      aspectRatio: "1:1",
+      treatment: "default",
+      outputPath: "alpha/1x1.png",
+    };
     expect(isPersistedAsset({ ...staticRow, audioRights: rights })).toBe(false);
     expect(isPersistedAsset({ ...staticRow, format: "static", audioRights: rights })).toBe(false);
     const htmlRow = {
@@ -421,7 +481,12 @@ describe("report persistence", () => {
   });
 
   test("audioRights persists on the asset through writeReport/readReport and the guard (VE-D8)", async () => {
-    const rights = { licenceId: "lic-1", source: "acme", expiresOn: "2026-12-31", territories: ["US"] };
+    const rights = {
+      licenceId: "lic-1",
+      source: "acme",
+      expiresOn: "2026-12-31",
+      territories: ["US"],
+    };
     const path = await writeReport(
       result([
         asset({
@@ -532,7 +597,11 @@ describe("report persistence", () => {
       seed: 42,
     });
     const path = await writeReport(
-      { ...result([asset({ ...v0, complianceScore: 0.9, seed: 99 })]), policyHash: "abc", seed: 42 },
+      {
+        ...result([asset({ ...v0, complianceScore: 0.9, seed: 99 })]),
+        policyHash: "abc",
+        seed: 42,
+      },
       { merge: true },
     );
     const per = readAssets(path);
@@ -550,31 +619,51 @@ describe("report persistence", () => {
     writeFileSync(
       resolve(root, "reports", "camp.json"),
       JSON.stringify({
-        assets: [null, { productId: "x" }, { productId: "alpha", aspectRatio: "1:1", treatment: "default" }, beta()],
+        assets: [
+          null,
+          { productId: "x" },
+          { productId: "alpha", aspectRatio: "1:1", treatment: "default" },
+          beta(),
+        ],
       }),
     );
     const path = await writeReport(result([asset()]), { merge: true });
 
-    expect(readAssets(path).map((a) => a.productId).sort()).toEqual(["alpha", "beta"]);
+    expect(
+      readAssets(path)
+        .map((a) => a.productId)
+        .sort(),
+    ).toEqual(["alpha", "beta"]);
     expect(warn).toHaveBeenCalled();
   });
 
   test("merge treats a prior report with a non-array assets field as empty", async () => {
     mkdirSync(resolve(root, "reports"), { recursive: true });
-    writeFileSync(resolve(root, "reports", "camp.json"), JSON.stringify({ assets: "not-an-array" }));
+    writeFileSync(
+      resolve(root, "reports", "camp.json"),
+      JSON.stringify({ assets: "not-an-array" }),
+    );
     const path = await writeReport(result([asset()]), { merge: true });
     expect(readAssets(path)).toHaveLength(1);
   });
 
   test("falls back to the latest pointer when the run lacks a campaign id", async () => {
-    const path = await writeReport({ halted: false, assets: [asset()], log: undefined } as unknown as PipelineResult);
+    const path = await writeReport({
+      halted: false,
+      assets: [asset()],
+      log: undefined,
+    } as unknown as PipelineResult);
     expect(path).toBe(resolve(root, "report.json"));
   });
 
   test("merge without a campaign id uses the latest pointer as its base", async () => {
     await writeReport(result([asset()]));
     const path = await writeReport(
-      { halted: false, assets: [asset({ complianceScore: 0.7 })], log: undefined } as unknown as PipelineResult,
+      {
+        halted: false,
+        assets: [asset({ complianceScore: 0.7 })],
+        log: undefined,
+      } as unknown as PipelineResult,
       { merge: true },
     );
     expect(path).toBe(resolve(root, "report.json"));
@@ -608,7 +697,11 @@ describe("report persistence", () => {
     await expect(readReport(root, "camp")).resolves.toMatchObject({ assets: expect.any(Array) });
     release();
     await writing;
-    expect(readAssets(target).map((a) => a.productId).sort()).toEqual(["alpha", "beta"]);
+    expect(
+      readAssets(target)
+        .map((a) => a.productId)
+        .sort(),
+    ).toEqual(["alpha", "beta"]);
   });
 
   test("a write that fails before the rename leaves the previous report intact", async () => {
@@ -619,7 +712,9 @@ describe("report persistence", () => {
       throw new Error("simulated crash before the rename");
     };
 
-    await expect(writeReport(result([beta()]))).rejects.toThrow("simulated crash before the rename");
+    await expect(writeReport(result([beta()]))).rejects.toThrow(
+      "simulated crash before the rename",
+    );
     // The old bytes survive and nothing half-written is left behind.
     expect(readFileSync(target)).toEqual(before);
     expect(readdirSync(resolve(root, "reports")).some((n) => n.endsWith(".tmp"))).toBe(false);

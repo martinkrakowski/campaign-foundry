@@ -125,7 +125,8 @@ describe("hasAllowedAudioMagic", () => {
 
   test("rejects an ftyp box whose major brand is not an audio brand (e.g. a generic/video mp4)", () => {
     const genericMp4 = Buffer.from([
-      0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d, 0x00, 0x00, 0x02, 0x00,
+      0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d, 0x00, 0x00, 0x02,
+      0x00,
     ]);
     expect(hasAllowedAudioMagic(genericMp4)).toBe(false);
   });
@@ -263,7 +264,9 @@ describe("rewriteAssetPath and rewriteAssetPaths", () => {
       targetRegion: "US",
       targetAudience: "all",
       campaignMessage: "msg",
-      products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/p1.png" }],
+      products: [
+        { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/p1.png" },
+      ],
       audio: {
         path: "assets/inputs/old-camp/bed.mp3",
         rights: { licenceId: "lic-1", source: "acme" },
@@ -284,8 +287,13 @@ describe("rewriteAssetPath and rewriteAssetPaths", () => {
       targetRegion: "US",
       targetAudience: "all",
       campaignMessage: "msg",
-      products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/p1.png" }],
-      audio: { path: "assets/inputs/shared-bed.mp3", rights: { licenceId: "lic-1", source: "acme" } },
+      products: [
+        { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/p1.png" },
+      ],
+      audio: {
+        path: "assets/inputs/shared-bed.mp3",
+        rights: { licenceId: "lic-1", source: "acme" },
+      },
     };
     expect(rewriteAssetPaths(withRootAudio, "old-camp", "new-camp").audio?.path).toBe(
       "assets/inputs/shared-bed.mp3",
@@ -306,7 +314,9 @@ describe("rewriteAssetPath and rewriteAssetPaths", () => {
       targetRegion: "US",
       targetAudience: "all",
       campaignMessage: "msg",
-      products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/p1.png" }],
+      products: [
+        { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/p1.png" },
+      ],
       audio: {
         path: "assets/inputs/source-c/bed.mp3",
         rights: { licenceId: "lic-1", source: "acme" },
@@ -324,12 +334,20 @@ describe("rewriteAssetPath and rewriteAssetPaths", () => {
       targetRegion: "US",
       targetAudience: "all",
       campaignMessage: "msg",
-      products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/p1.png" }],
+      products: [
+        { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/p1.png" },
+      ],
     };
     // Root-level: no `assets/inputs/<id>/` prefix at all — the pattern does not match.
     expect(
       extractSourceAssetBriefIds(
-        { ...base, audio: { path: "assets/inputs/shared-bed.mp3", rights: { licenceId: "lic-1", source: "acme" } } },
+        {
+          ...base,
+          audio: {
+            path: "assets/inputs/shared-bed.mp3",
+            rights: { licenceId: "lic-1", source: "acme" },
+          },
+        },
         "target-camp",
       ),
     ).toEqual([]);
@@ -338,7 +356,10 @@ describe("rewriteAssetPath and rewriteAssetPaths", () => {
       extractSourceAssetBriefIds(
         {
           ...base,
-          audio: { path: "assets/inputs/target-camp/bed.mp3", rights: { licenceId: "lic-1", source: "acme" } },
+          audio: {
+            path: "assets/inputs/target-camp/bed.mp3",
+            rights: { licenceId: "lic-1", source: "acme" },
+          },
         },
         "target-camp",
       ),
@@ -391,7 +412,9 @@ describe("rewriteAssetPath and rewriteAssetPaths", () => {
       targetRegion: "US",
       targetAudience: "all",
       campaignMessage: "msg",
-      products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/p1.png" }],
+      products: [
+        { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/p1.png" },
+      ],
       copy: {
         timeline: {
           transition: "fade" as const,
@@ -427,13 +450,17 @@ describe("rewriteAssetPath and rewriteAssetPaths", () => {
       targetRegion: "US",
       targetAudience: "all",
       campaignMessage: "msg",
-      products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/p1.png" }],
+      products: [
+        { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/p1.png" },
+      ],
     };
     expect("copy" in rewriteAssetPaths(withoutCopy, "old-camp", "new-camp")).toBe(false);
 
     const withTimelineNoBackgrounds = {
       ...withoutCopy,
-      copy: { timeline: { transition: "cut" as const, keyBeat: 1, beats: [{ text: "Alpha", weight: 1 }] } },
+      copy: {
+        timeline: { transition: "cut" as const, keyBeat: 1, beats: [{ text: "Alpha", weight: 1 }] },
+      },
     };
     const rewritten = rewriteAssetPaths(withTimelineNoBackgrounds, "old-camp", "new-camp");
     expect(rewritten.copy).toBe(withTimelineNoBackgrounds.copy);
@@ -448,7 +475,9 @@ describe("rewriteAssetPath and rewriteAssetPaths", () => {
       targetRegion: "US",
       targetAudience: "all",
       campaignMessage: "msg",
-      products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/p1.png" }],
+      products: [
+        { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/p1.png" },
+      ],
       copy: {
         timeline: {
           transition: "cut" as const,
@@ -505,9 +534,10 @@ describe("rewriteAssetPath and rewriteAssetPaths", () => {
 
   test("rewriteAssetPaths and extractSourceAssetBriefIds handle missing or malformed products gracefully", async () => {
     const { rewriteAssetPaths, extractSourceAssetBriefIds } = await import("../asset-files.js");
-    const invalidBrief = { id: "test" } as unknown as import("@campaignfoundry/CampaignOrchestration").CampaignBrief;
+    const invalidBrief = {
+      id: "test",
+    } as unknown as import("@campaignfoundry/CampaignOrchestration").CampaignBrief;
     expect(rewriteAssetPaths(invalidBrief, "a", "b")).toEqual(invalidBrief);
     expect(extractSourceAssetBriefIds(invalidBrief, "b")).toEqual([]);
   });
 });
-

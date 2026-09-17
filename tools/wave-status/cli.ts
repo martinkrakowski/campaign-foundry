@@ -27,7 +27,9 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
     } else if (arg.startsWith(WATCH_PREFIX)) {
       const seconds = Number(arg.slice(WATCH_PREFIX.length));
       if (!Number.isInteger(seconds) || seconds < 1) {
-        throw new Error(`invalid --watch seconds: ${JSON.stringify(arg.slice(WATCH_PREFIX.length))}`);
+        throw new Error(
+          `invalid --watch seconds: ${JSON.stringify(arg.slice(WATCH_PREFIX.length))}`,
+        );
       }
       watch = seconds;
     } else if (arg === ROOT_FLAG) {

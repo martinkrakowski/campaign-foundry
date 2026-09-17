@@ -13,7 +13,12 @@ import { motionRatiosFor } from "./platform-zones.js";
 import { getPoolStore } from "./ports/index.js";
 import { InvalidCopyPoolError, type StoredPool } from "./ports/pool-store.port.js";
 
-export { copyPoolProblem, InvalidCopyPoolError, isCopyPool, type StoredPool } from "./ports/pool-store.port.js";
+export {
+  copyPoolProblem,
+  InvalidCopyPoolError,
+  isCopyPool,
+  type StoredPool,
+} from "./ports/pool-store.port.js";
 
 /** Read `briefs/<briefId>/pools.json` through the pool store port; undefined when absent. */
 export async function readPool(briefId: string): Promise<StoredPool | undefined> {
@@ -25,12 +30,18 @@ export async function readPool(briefId: string): Promise<StoredPool | undefined>
  * `briefs/<pool.briefId>/pools.json`, conditional when `expectedRevision` is
  * given: a stale one is refused with `ECONFLICT` carrying the fresh revision.
  */
-export async function writePool(pool: CopyPool, options?: { expectedRevision?: string }): Promise<StoredPool> {
+export async function writePool(
+  pool: CopyPool,
+  options?: { expectedRevision?: string },
+): Promise<StoredPool> {
   return getPoolStore().writePool(pool, options);
 }
 
 /** Copy `briefs/<fromBriefId>/pools.json` to `briefs/<toBriefId>/`, rewritten to name the destination. */
-export async function copyPool(fromBriefId: string, toBriefId: string): Promise<CopyPool | undefined> {
+export async function copyPool(
+  fromBriefId: string,
+  toBriefId: string,
+): Promise<CopyPool | undefined> {
   return getPoolStore().copyPool(fromBriefId, toBriefId);
 }
 

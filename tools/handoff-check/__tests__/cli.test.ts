@@ -32,11 +32,15 @@ describe("runCli", () => {
   test("exits 0 when every rule is bound to a failing test", async () => {
     const { io: i, log } = io();
     expect(await runCli(i)).toBe(EXIT_READY);
-    expect(log).toHaveBeenCalledWith("W1: 1 rule(s), each bound to a failing test. Ready for stage 2.");
+    expect(log).toHaveBeenCalledWith(
+      "W1: 1 rule(s), each bound to a failing test. Ready for stage 2.",
+    );
   });
 
   test("exits 1 and names the rule when its test already passes", async () => {
-    const { io: i, log } = io({ deps: { readFile: async () => SRC, failingTests: async () => [] } });
+    const { io: i, log } = io({
+      deps: { readFile: async () => SRC, failingTests: async () => [] },
+    });
     expect(await runCli(i)).toBe(EXIT_NOT_READY);
     expect(log.mock.calls[0]?.[0]).toContain("NOT RED   conflict");
   });

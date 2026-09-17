@@ -110,9 +110,13 @@ export function formatChecks(lane: string, checks: readonly MutationCheck[]): st
     }
   }
   const bad = checks.filter((c) => c.status === "mismatch").length;
-  const blocked = checks.filter((c) => c.status === "red-baseline" || c.status === "launch-failure").length;
+  const blocked = checks.filter(
+    (c) => c.status === "red-baseline" || c.status === "launch-failure",
+  ).length;
   if (blocked > 0) {
-    lines.push(`${lane}: ${blocked} of ${checks.length} mutation(s) could not be checked — see above.`);
+    lines.push(
+      `${lane}: ${blocked} of ${checks.length} mutation(s) could not be checked — see above.`,
+    );
   } else {
     lines.push(
       bad === 0

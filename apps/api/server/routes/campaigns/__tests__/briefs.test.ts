@@ -30,7 +30,8 @@ const mount = (routes: { method: Method; path: string; handler: EventHandler }[]
   return toWebHandler(app);
 };
 
-const web = (handler: EventHandler) => mount([{ method: "get", path: "/campaigns/briefs", handler }]);
+const web = (handler: EventHandler) =>
+  mount([{ method: "get", path: "/campaigns/briefs", handler }]);
 
 /** Fresh handler import with PROJECT_ROOT pointed at `root` (projectRoot is memoized). */
 const handlerFor = async (root: string): Promise<EventHandler> => {
@@ -147,7 +148,9 @@ describe("GET /campaigns/briefs", () => {
     mkdirSync(join(dir, "briefs"), { recursive: true });
     writeFileSync(join(dir, "briefs", "good.yaml"), validBrief);
     const res = await web(await handlerFor(dir))(new Request("http://x/campaigns/briefs"));
-    const json = (await res.json()) as { briefs: { file: string; brief: { id: string }; revision: string }[] };
+    const json = (await res.json()) as {
+      briefs: { file: string; brief: { id: string }; revision: string }[];
+    };
     expect(json.briefs).toHaveLength(1);
     expect(json.briefs[0].revision).toBeDefined();
     expect(json.briefs[0].revision).toMatch(/^[a-f0-9]{64}$/);
@@ -269,7 +272,9 @@ describe("authoring briefs", () => {
     const first = await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
     expect(first.status).toBe(201);
     const original = readFileSync(campYaml());
-    const again = await create()(jsonReq("http://x/campaigns/briefs", "POST", brief({ campaignMessage: "Nope" })));
+    const again = await create()(
+      jsonReq("http://x/campaigns/briefs", "POST", brief({ campaignMessage: "Nope" })),
+    );
     expect(again.status).toBe(409);
     expect(await again.json()).toEqual({ error: 'Brief "camp" already exists.' });
     expect(readFileSync(campYaml())).toEqual(original);
@@ -293,9 +298,9 @@ describe("authoring briefs", () => {
       jsonReq("http://x/campaigns/briefs?replace=1", "POST", brief({ campaignMessage: "Updated" })),
     );
     expect(replaced.status).toBe(201);
-    expect(((await replaced.json()) as { brief: { campaignMessage: string } }).brief.campaignMessage).toBe(
-      "Updated",
-    );
+    expect(
+      ((await replaced.json()) as { brief: { campaignMessage: string } }).brief.campaignMessage,
+    ).toBe("Updated");
     expect(await loadBrief(campYaml())).toMatchObject({
       campaignMessage: "Updated",
     });
@@ -305,7 +310,11 @@ describe("authoring briefs", () => {
     const { create } = await api();
     await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
     const replaced = await create()(
-      jsonReq("http://x/campaigns/briefs?replace=1&replace=1", "POST", brief({ campaignMessage: "Twice" })),
+      jsonReq(
+        "http://x/campaigns/briefs?replace=1&replace=1",
+        "POST",
+        brief({ campaignMessage: "Twice" }),
+      ),
     );
     expect(replaced.status).toBe(201);
     expect(await loadBrief(campYaml())).toMatchObject({ campaignMessage: "Twice" });
@@ -509,7 +518,9 @@ describe("authoring briefs", () => {
     const { create, update } = await api();
     await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
     const original = readFileSync(campYaml());
-    const res = await update()(jsonReq("http://x/campaigns/briefs/camp", "PUT", brief({ id: "other" })));
+    const res = await update()(
+      jsonReq("http://x/campaigns/briefs/camp", "PUT", brief({ id: "other" })),
+    );
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({
       error: 'Path id "camp" does not match brief.id "other".',
@@ -562,10 +573,12 @@ describe("authoring briefs", () => {
     await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
     const original = readFileSync(campYaml());
     const { getBriefStore } = await import("../../../lib/ports/index.js");
-    const spy = vi.spyOn(getBriefStore(), "rewriteBrief").mockRejectedValueOnce(
-      new Error("Refusing to write through a symlink."),
+    const spy = vi
+      .spyOn(getBriefStore(), "rewriteBrief")
+      .mockRejectedValueOnce(new Error("Refusing to write through a symlink."));
+    const res = await update()(
+      jsonReq("http://x/campaigns/briefs/camp", "PUT", brief({ campaignMessage: "Nope" })),
     );
-    const res = await update()(jsonReq("http://x/campaigns/briefs/camp", "PUT", brief({ campaignMessage: "Nope" })));
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error: "Refusing to write through a symlink." });
     expect(readFileSync(campYaml())).toEqual(original);
@@ -640,7 +653,11 @@ describe("authoring briefs", () => {
     await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
     const staleRevision = "stalehash";
     const res = await update()(
-      jsonReq(`http://x/campaigns/briefs/camp?revision=${staleRevision}`, "PUT", brief({ campaignMessage: "Edited" })),
+      jsonReq(
+        `http://x/campaigns/briefs/camp?revision=${staleRevision}`,
+        "PUT",
+        brief({ campaignMessage: "Edited" }),
+      ),
     );
     expect(res.status).toBe(409);
     const json = (await res.json()) as { error: string; revision: string };
@@ -881,7 +898,9 @@ describe("authoring briefs", () => {
     const { create, duplicate } = await api();
     await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
     const original = readFileSync(campYaml());
-    const res = await duplicate()(jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", body));
+    const res = await duplicate()(
+      jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", body),
+    );
     expect(res.status).toBe(400);
     expect(readFileSync(campYaml())).toEqual(original);
     expect(existsSync(yamlPath("copy.yaml"))).toBe(false);
@@ -1033,7 +1052,9 @@ describe("authoring briefs", () => {
         }),
       );
       expect(res.status).toBe(201);
-      const json = (await res.json()) as { brief: { targetRegion: string; targetAudience: string } };
+      const json = (await res.json()) as {
+        brief: { targetRegion: string; targetAudience: string };
+      };
       expect(json.brief.targetRegion).toBe("FR");
       expect(json.brief.targetAudience).toBe("paris");
       expect(await loadBrief(yamlPath("tuned.yaml"))).toMatchObject({
@@ -1046,10 +1067,15 @@ describe("authoring briefs", () => {
       const { create, duplicate } = await api();
       await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
       const res = await duplicate()(
-        jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { newId: "copied", overrides: null }),
+        jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", {
+          newId: "copied",
+          overrides: null,
+        }),
       );
       expect(res.status).toBe(201);
-      expect(((await res.json()) as { brief: { targetRegion: string } }).brief.targetRegion).toBe("DE");
+      expect(((await res.json()) as { brief: { targetRegion: string } }).brief.targetRegion).toBe(
+        "DE",
+      );
     });
 
     test.each([
@@ -1155,7 +1181,11 @@ describe("authoring briefs", () => {
     mkdirSync(join(dir, "briefs"), { recursive: true });
     writeFileSync(campYaml(), dumpBrief(brief({ campaignMessage: "Original" })));
     const res = await create()(
-      jsonReq("http://x/campaigns/briefs?replace=1", "POST", brief({ campaignMessage: "Fallback" })),
+      jsonReq(
+        "http://x/campaigns/briefs?replace=1",
+        "POST",
+        brief({ campaignMessage: "Fallback" }),
+      ),
     );
     expect(res.status).toBe(201);
   });
@@ -1168,7 +1198,11 @@ describe("authoring briefs", () => {
       Object.assign(new Error("ENOENT"), { code: "ENOENT" }),
     );
     const res = await update()(
-      jsonReq(`http://x/campaigns/briefs/camp?revision=stalehash`, "PUT", brief({ campaignMessage: "Edited" })),
+      jsonReq(
+        `http://x/campaigns/briefs/camp?revision=stalehash`,
+        "PUT",
+        brief({ campaignMessage: "Edited" }),
+      ),
     );
     expect(res.status).toBe(404);
     expect(await res.json()).toEqual({ error: 'Brief "camp" not found.' });
@@ -1182,7 +1216,11 @@ describe("authoring briefs", () => {
       Object.assign(new Error("EIO"), { code: "EIO" }),
     );
     const res = await create()(
-      jsonReq("http://x/campaigns/briefs?replace=1&revision=stalehash", "POST", brief({ campaignMessage: "Nope" })),
+      jsonReq(
+        "http://x/campaigns/briefs?replace=1&revision=stalehash",
+        "POST",
+        brief({ campaignMessage: "Nope" }),
+      ),
     );
     expect(res.status).toBe(500);
   });
@@ -1195,7 +1233,11 @@ describe("authoring briefs", () => {
       Object.assign(new Error("EIO"), { code: "EIO" }),
     );
     const res = await update()(
-      jsonReq(`http://x/campaigns/briefs/camp?revision=stalehash`, "PUT", brief({ campaignMessage: "Edited" })),
+      jsonReq(
+        `http://x/campaigns/briefs/camp?revision=stalehash`,
+        "PUT",
+        brief({ campaignMessage: "Edited" }),
+      ),
     );
     expect(res.status).toBe(500);
   });
@@ -1213,8 +1255,20 @@ describe("authoring briefs", () => {
     // both pass the hash comparison and the later write silently discards the earlier.
     const put = update();
     const [first, second] = await Promise.all([
-      put(jsonReq(`http://x/campaigns/briefs/camp?revision=${revision}`, "PUT", brief({ campaignMessage: "A" }))),
-      put(jsonReq(`http://x/campaigns/briefs/camp?revision=${revision}`, "PUT", brief({ campaignMessage: "B" }))),
+      put(
+        jsonReq(
+          `http://x/campaigns/briefs/camp?revision=${revision}`,
+          "PUT",
+          brief({ campaignMessage: "A" }),
+        ),
+      ),
+      put(
+        jsonReq(
+          `http://x/campaigns/briefs/camp?revision=${revision}`,
+          "PUT",
+          brief({ campaignMessage: "B" }),
+        ),
+      ),
     ]);
 
     expect([first.status, second.status].sort()).toEqual([200, 409]);
@@ -1327,8 +1381,12 @@ describe("authoring briefs", () => {
       expect(res.status).toBe(201);
 
       // Brief-scoped assets copied to target-camp/
-      expect(readFileSync(join(assetsDir, "target-camp", "logo.png"), "utf8")).toBe("SOURCE-LOGO-BYTES");
-      expect(readFileSync(join(assetsDir, "target-camp", "bg.jpg"), "utf8")).toBe("SOURCE-BG-BYTES");
+      expect(readFileSync(join(assetsDir, "target-camp", "logo.png"), "utf8")).toBe(
+        "SOURCE-LOGO-BYTES",
+      );
+      expect(readFileSync(join(assetsDir, "target-camp", "bg.jpg"), "utf8")).toBe(
+        "SOURCE-BG-BYTES",
+      );
 
       // Root-level shared assets survive unchanged
       expect(readFileSync(join(assetsDir, "hydra-logo.png"), "utf8")).toBe("DEMO-LOGO-BYTES");
@@ -1420,7 +1478,9 @@ describe("authoring briefs", () => {
         jsonReq("http://x/campaigns/briefs/source-camp/duplicate", "POST", { newId: "dest-camp" }),
       );
       expect(res.status).toBe(201);
-      expect(readFileSync(join(assetsDir, "dest-camp", "extra.png"), "utf8")).toBe("THIRD-PARTY-ASSET");
+      expect(readFileSync(join(assetsDir, "dest-camp", "extra.png"), "utf8")).toBe(
+        "THIRD-PARTY-ASSET",
+      );
     });
 
     test("POST /campaigns/briefs/:id/duplicate clones unreferenced bin assets from source brief", async () => {
@@ -1448,7 +1508,9 @@ describe("authoring briefs", () => {
       );
       expect(res.status).toBe(201);
       // unreferenced asset in source bin is copied because duplicate operates on the source brief ID
-      expect(readFileSync(join(assetsDir, "unref-dest", "unreferenced.png"), "utf8")).toBe("UNREF-ASSET-BYTES");
+      expect(readFileSync(join(assetsDir, "unref-dest", "unreferenced.png"), "utf8")).toBe(
+        "UNREF-ASSET-BYTES",
+      );
     });
 
     test("rejected Save as write (409 revision conflict) does not mutate or copy assets to target", async () => {
@@ -1460,7 +1522,14 @@ describe("authoring briefs", () => {
       const initial = brief({
         id: "conflict-target",
         campaignMessage: "Initial",
-        products: [{ id: "p1", name: "P1", primaryColor: "#1473E6", logoPath: "assets/inputs/conflict-src/logo.png" }],
+        products: [
+          {
+            id: "p1",
+            name: "P1",
+            primaryColor: "#1473E6",
+            logoPath: "assets/inputs/conflict-src/logo.png",
+          },
+        ],
       });
       await create()(jsonReq("http://x/campaigns/briefs", "POST", initial));
 
@@ -1468,19 +1537,32 @@ describe("authoring briefs", () => {
       const updatePayload = brief({
         id: "conflict-target",
         campaignMessage: "Updated",
-        products: [{ id: "p1", name: "P1", primaryColor: "#1473E6", logoPath: "assets/inputs/conflict-src/logo.png" }],
+        products: [
+          {
+            id: "p1",
+            name: "P1",
+            primaryColor: "#1473E6",
+            logoPath: "assets/inputs/conflict-src/logo.png",
+          },
+        ],
       });
 
       // Modify source logo before conflicting save
       writeFileSync(join(assetsDir, "conflict-src", "logo.png"), "MODIFIED-SRC-LOGO");
 
       const res = await create()(
-        jsonReq("http://x/campaigns/briefs?replace=1&revision=wrong-revision", "POST", updatePayload),
+        jsonReq(
+          "http://x/campaigns/briefs?replace=1&revision=wrong-revision",
+          "POST",
+          updatePayload,
+        ),
       );
       expect(res.status).toBe(409);
 
       // Target asset directory must retain original content, NOT the modified content from rejected write
-      expect(readFileSync(join(assetsDir, "conflict-target", "logo.png"), "utf8")).toBe("CONFLICT-SRC-LOGO");
+      expect(readFileSync(join(assetsDir, "conflict-target", "logo.png"), "utf8")).toBe(
+        "CONFLICT-SRC-LOGO",
+      );
     });
 
     test("rejected duplicate (409 duplicate id) does not copy assets into target", async () => {
@@ -1495,7 +1577,9 @@ describe("authoring briefs", () => {
       await create()(jsonReq("http://x/campaigns/briefs", "POST", initial2));
 
       const res = await duplicate()(
-        jsonReq("http://x/campaigns/briefs/dup-existing-src/duplicate", "POST", { newId: "dup-existing-dest" }),
+        jsonReq("http://x/campaigns/briefs/dup-existing-src/duplicate", "POST", {
+          newId: "dup-existing-dest",
+        }),
       );
       expect(res.status).toBe(409);
 
@@ -1536,7 +1620,9 @@ describe("authoring briefs", () => {
       expect(existsSync(join(assetsDir, "multi-dest", "logo.png"))).toBe(true);
       expect(existsSync(join(assetsDir, "multi-dest", "logo-source-b.png"))).toBe(true);
       expect(readFileSync(join(assetsDir, "multi-dest", "logo.png"), "utf8")).toBe("LOGO-A-DATA");
-      expect(readFileSync(join(assetsDir, "multi-dest", "logo-source-b.png"), "utf8")).toBe("LOGO-B-DATA");
+      expect(readFileSync(join(assetsDir, "multi-dest", "logo-source-b.png"), "utf8")).toBe(
+        "LOGO-B-DATA",
+      );
 
       // Brief references rewritten correctly
       const saved = await loadBrief(yamlPath("multi-dest.yaml"));
@@ -1569,7 +1655,9 @@ describe("authoring briefs", () => {
       );
       expect(res.status).toBe(201);
 
-      expect(readFileSync(join(assetsDir, "nested-dest", "sub", "icons", "badge.png"), "utf8")).toBe("NESTED-BADGE");
+      expect(
+        readFileSync(join(assetsDir, "nested-dest", "sub", "icons", "badge.png"), "utf8"),
+      ).toBe("NESTED-BADGE");
       const dup = await loadBrief(yamlPath("nested-dest.yaml"));
       expect(dup.products[0].logoPath).toBe("assets/inputs/nested-dest/sub/icons/badge.png");
     });
@@ -1591,21 +1679,32 @@ describe("authoring briefs", () => {
       const updatePayload = brief({
         id: "match-target",
         campaignMessage: "Updated",
-        products: [{ id: "p1", name: "P1", primaryColor: "#1473E6", logoPath: "assets/inputs/match-src/logo.png" }],
+        products: [
+          {
+            id: "p1",
+            name: "P1",
+            primaryColor: "#1473E6",
+            logoPath: "assets/inputs/match-src/logo.png",
+          },
+        ],
       });
 
       const res = await create()(
         jsonReq(`http://x/campaigns/briefs?replace=1&revision=${rev}`, "POST", updatePayload),
       );
       expect(res.status).toBe(201);
-      expect(readFileSync(join(assetsDir, "match-target", "logo.png"), "utf8")).toBe("MATCH-SRC-LOGO");
+      expect(readFileSync(join(assetsDir, "match-target", "logo.png"), "utf8")).toBe(
+        "MATCH-SRC-LOGO",
+      );
     });
   });
 
   test("GET /campaigns/briefs answers 500 when the brief store throws", async () => {
     const { list } = await api();
     const { getBriefStore } = await import("../../../lib/ports/index.js");
-    const spy = vi.spyOn(getBriefStore(), "listBriefs").mockRejectedValueOnce(new Error("Disk failure"));
+    const spy = vi
+      .spyOn(getBriefStore(), "listBriefs")
+      .mockRejectedValueOnce(new Error("Disk failure"));
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const res = await list()(new Request("http://x/campaigns/briefs"));
     expect(res.status).toBe(500);
@@ -1614,5 +1713,3 @@ describe("authoring briefs", () => {
     spy.mockRestore();
   });
 });
-
-

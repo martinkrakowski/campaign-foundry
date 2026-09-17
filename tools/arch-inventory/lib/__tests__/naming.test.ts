@@ -65,7 +65,11 @@ describe("resolveScope", () => {
 
 describe("resolveTemplate", () => {
   test("has no directory prefix for a bare filename template", () => {
-    expect(resolveTemplate("{name}.vo.ts", SCOPE)).toEqual({ dirPrefix: "", prefix: "", suffix: ".vo.ts" });
+    expect(resolveTemplate("{name}.vo.ts", SCOPE)).toEqual({
+      dirPrefix: "",
+      prefix: "",
+      suffix: ".vo.ts",
+    });
   });
 
   test("splits a directory component off the leaf", () => {
@@ -91,7 +95,9 @@ describe("canonicalEntry", () => {
   });
 
   test("strips a suffix the entry already carries", () => {
-    expect(canonicalEntry("CampaignPipeline.in-port.ts", DEFAULT_NAMING.inPort, SCOPE)).toBe("CampaignPipeline");
+    expect(canonicalEntry("CampaignPipeline.in-port.ts", DEFAULT_NAMING.inPort, SCOPE)).toBe(
+      "CampaignPipeline",
+    );
   });
 
   test("never strips a prefix (hexagen's normalizeStubName does not either)", () => {
@@ -115,7 +121,9 @@ describe("fileForEntry", () => {
   });
 
   test("PascalCases the entry, exactly like the generator", () => {
-    expect(fileForEntry("advertising-units", DEFAULT_NAMING.valueObject, SCOPE)).toBe("AdvertisingUnits.vo.ts");
+    expect(fileForEntry("advertising-units", DEFAULT_NAMING.valueObject, SCOPE)).toBe(
+      "AdvertisingUnits.vo.ts",
+    );
   });
 
   test("resolves a {scope} directory prefix", () => {
@@ -138,11 +146,15 @@ describe("entryForFile", () => {
   });
 
   test("matches the generator convention for port stubs", () => {
-    expect(entryForFile("DemoPipeline.in-port.ts", DEFAULT_NAMING.inPort, SCOPE)).toBe("DemoPipeline");
+    expect(entryForFile("DemoPipeline.in-port.ts", DEFAULT_NAMING.inPort, SCOPE)).toBe(
+      "DemoPipeline",
+    );
   });
 
   test("matches an overridden naming template", () => {
-    expect(entryForFile("CampaignPipelinePort.ts", "{name}.ts", SCOPE)).toBe("CampaignPipelinePort");
+    expect(entryForFile("CampaignPipelinePort.ts", "{name}.ts", SCOPE)).toBe(
+      "CampaignPipelinePort",
+    );
   });
 
   test("is undefined for a kebab-case module the generator could never emit", () => {

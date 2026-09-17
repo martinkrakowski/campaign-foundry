@@ -32,6 +32,9 @@ describe("GET /campaigns/capabilities", () => {
     const handler = await handlerFor();
     const res = await mount(handler)(new Request("http://localhost/campaigns/capabilities"));
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ motion: false, reason: "ffmpeg-static binary is not available" });
+    expect(await res.json()).toEqual({
+      motion: false,
+      reason: "ffmpeg-static binary is not available",
+    });
   });
 });

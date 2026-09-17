@@ -101,7 +101,9 @@ describe("runCli", () => {
     expect(logError).not.toHaveBeenCalled();
     expect(log).toHaveBeenCalledTimes(1);
     const printed = log.mock.calls[0]?.[0] as string;
-    expect(printed.startsWith("exit code: 0\nverdict: survived\nbecause: verify survival")).toBe(true);
+    expect(printed.startsWith("exit code: 0\nverdict: survived\nbecause: verify survival")).toBe(
+      true,
+    );
   });
 
   test("returns Refusal exit code and logs to logError on RefusalError", async () => {
@@ -311,7 +313,7 @@ describe("realDeps integration", () => {
     const res = await realDeps.execute([
       process.execPath,
       "-e",
-      'process.stdout.write(Buffer.from([0xf0, 0x9f])); setTimeout(() => { process.stdout.write(Buffer.from([0x98, 0x80])); process.stderr.write(Buffer.from([0xf0, 0x9f])); setTimeout(() => { process.stderr.write(Buffer.from([0x99, 0x82])); process.exit(0); }, 10); }, 10);',
+      "process.stdout.write(Buffer.from([0xf0, 0x9f])); setTimeout(() => { process.stdout.write(Buffer.from([0x98, 0x80])); process.stderr.write(Buffer.from([0xf0, 0x9f])); setTimeout(() => { process.stderr.write(Buffer.from([0x99, 0x82])); process.exit(0); }, 10); }, 10);",
     ]);
     expect(res.exitCode).toBe(0);
     expect(res.stdout).toBe("😀");

@@ -39,7 +39,12 @@ const briefJson = (over: Record<string, unknown> = {}) =>
     campaignMessage: "Hi",
     products: [
       { id: "alpha", name: "A", primaryColor: "#1473E6", logoPath: "assets/inputs/hydra-logo.png" },
-      { id: "beta", name: "B", primaryColor: "#E0218A", logoPath: "assets/inputs/missing-logo.png" },
+      {
+        id: "beta",
+        name: "B",
+        primaryColor: "#E0218A",
+        logoPath: "assets/inputs/missing-logo.png",
+      },
     ],
     ...over,
   });
@@ -113,7 +118,8 @@ describe("generate CLI main()", () => {
   });
 
   test.skipIf(!ffmpegOk)(
-    skipReason ?? "integration: a motion brief writes mp4 + poster through the real ffmpeg-static encoder",
+    skipReason ??
+      "integration: a motion brief writes mp4 + poster through the real ffmpeg-static encoder",
     async () => {
       const path = join(dir, "motion.json");
       writeFileSync(
@@ -121,14 +127,28 @@ describe("generate CLI main()", () => {
         briefJson({
           id: "motion",
           mode: "variation",
-          variation: { count: 1, seed: 1, axes: { motion: ["accent-wipe"], duration: [2], layout: ["headline-bottom"], tone: ["bold"] } },
+          variation: {
+            count: 1,
+            seed: 1,
+            axes: {
+              motion: ["accent-wipe"],
+              duration: [2],
+              layout: ["headline-bottom"],
+              tone: ["bold"],
+            },
+          },
           output: { formats: ["motion"], platforms: ["instagram-reel"] },
         }),
       );
       await main(path);
       expect(process.exitCode).not.toBe(1);
       const report = JSON.parse(readFileSync(resolve(dir, "reports", "motion.json"), "utf8")) as {
-        assets: Array<{ outputPath: string; videoPath?: string; format?: string; durationSec?: number }>;
+        assets: Array<{
+          outputPath: string;
+          videoPath?: string;
+          format?: string;
+          durationSec?: number;
+        }>;
       };
       expect(report.assets).toHaveLength(1);
       const [asset] = report.assets;
@@ -148,7 +168,9 @@ describe("generate CLI main()", () => {
     await main(path);
     expect(process.exitCode).not.toBe(1);
     expect(probeMock).toHaveBeenCalledWith({ timeoutMs: 2_000 });
-    expect(vi.mocked(console.warn).mock.calls.flat().join(" ")).toMatch(/motion unavailable: no binary/);
+    expect(vi.mocked(console.warn).mock.calls.flat().join(" ")).toMatch(
+      /motion unavailable: no binary/,
+    );
   });
 
   test("warns and writes no creatives when the legal gate halts", async () => {

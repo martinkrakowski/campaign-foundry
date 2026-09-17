@@ -1,6 +1,14 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import { readFile } from "node:fs/promises";
 import { request as httpRequest, type IncomingMessage } from "node:http";
 import { tmpdir } from "node:os";
@@ -21,17 +29,13 @@ import { readEvents } from "../lib/events.js";
 import { mergeStatus } from "../lib/merge.js";
 import type { DerivedLane, LaneStatus, WaveStatus } from "../lib/types.js";
 
-const PAGE_PATH = fileURLToPath(
-  new URL("../public/index.html", import.meta.url),
-);
+const PAGE_PATH = fileURLToPath(new URL("../public/index.html", import.meta.url));
 
 const realTokensPath = fileURLToPath(
   new URL("../../../apps/web/src/styles/tokens.css", import.meta.url),
 );
 
-const waveEventSh = fileURLToPath(
-  new URL("../../../scripts/wave-event.sh", import.meta.url),
-);
+const waveEventSh = fileURLToPath(new URL("../../../scripts/wave-event.sh", import.meta.url));
 
 class FakeEventSource {
   static instances: FakeEventSource[] = [];
@@ -40,18 +44,14 @@ class FakeEventSource {
   readonly url: string;
   closed = false;
 
-  readonly listeners: Record<string, ((event: { data: string }) => void)[]> =
-    {};
+  readonly listeners: Record<string, ((event: { data: string }) => void)[]> = {};
 
   constructor(url: string) {
     this.url = url;
     FakeEventSource.instances.push(this);
   }
 
-  addEventListener(
-    type: string,
-    listener: (event: { data: string }) => void,
-  ): void {
+  addEventListener(type: string, listener: (event: { data: string }) => void): void {
     (this.listeners[type] ??= []).push(listener);
   }
 
@@ -333,10 +333,7 @@ const scanReferencedTokens = (html: string): Set<string> => {
   return referencedTokens;
 };
 
-type LogPayload =
-  | string
-  | Uint8Array
-  | ((url: string) => Promise<Response> | Response);
+type LogPayload = string | Uint8Array | ((url: string) => Promise<Response> | Response);
 
 interface LoadPageOptions {
   width?: number;
@@ -537,9 +534,7 @@ describe("the status page", () => {
 
     const logUrl = "/api/log/T/t1?tail=16";
     press(button!, "Enter");
-    const logView = page.window.document.getElementById(
-      "log",
-    ) as HTMLElement | null;
+    const logView = page.window.document.getElementById("log") as HTMLElement | null;
     await vi.waitFor(() => {
       expect(page.fetches).toContain(logUrl);
       expect(logView?.hidden).toBe(false);
@@ -562,9 +557,7 @@ describe("the status page", () => {
 
   test("a click anywhere on a lane row still opens the log", async () => {
     const page = await loadPage(statusAt());
-    const row = page.window.document.querySelector(
-      "tr.lane",
-    ) as unknown as HTMLElement | null;
+    const row = page.window.document.querySelector("tr.lane") as unknown as HTMLElement | null;
     expect(row).not.toBeNull();
     row?.click();
     await vi.waitFor(() => {
@@ -602,9 +595,7 @@ describe("the status page", () => {
     page.source.onerror?.();
     // Counted by period, not by total: the page also keeps its own age tick,
     // which is registered once at load and is not this test's subject.
-    const polls = [...page.intervals.values()].filter(
-      (timer) => timer.ms === POLL_INTERVAL_MS,
-    );
+    const polls = [...page.intervals.values()].filter((timer) => timer.ms === POLL_INTERVAL_MS);
     expect(polls).toHaveLength(1);
   });
 
@@ -642,33 +633,21 @@ describe("the status page", () => {
     // PR metrics come from observed PRs, not from lanes: five lanes (one with
     // no PR at all) yield PRs open 2 — a count fed by lanes instead of PR
     // observations would read 5, or sweep the no-PR lane into some bucket.
-    expect(doc.querySelector('[data-metric="open"] .value')?.textContent).toBe(
-      "2",
-    );
-    expect(
-      doc.querySelector('[data-metric="merged"] .value')?.textContent,
-    ).toBe("2");
-    expect(doc.querySelector('[data-metric="lanes"] .value')?.textContent).toBe(
-      "5",
-    );
+    expect(doc.querySelector('[data-metric="open"] .value')?.textContent).toBe("2");
+    expect(doc.querySelector('[data-metric="merged"] .value')?.textContent).toBe("2");
+    expect(doc.querySelector('[data-metric="lanes"] .value')?.textContent).toBe("5");
     // A problem count only turns red when there is a problem — mixedStatus
     // has one failed lane and one failing check, so those two values (and
     // only those two) carry the hot class.
-    expect(
-      doc.querySelector('[data-metric="failed"] .value')?.classList.contains(
-        "hot",
-      ),
-    ).toBe(true);
-    expect(
-      doc.querySelector('[data-metric="failing"] .value')?.classList.contains(
-        "hot",
-      ),
-    ).toBe(true);
-    expect(
-      doc.querySelector('[data-metric="settled"] .value')?.classList.contains(
-        "hot",
-      ),
-    ).toBe(false);
+    expect(doc.querySelector('[data-metric="failed"] .value')?.classList.contains("hot")).toBe(
+      true,
+    );
+    expect(doc.querySelector('[data-metric="failing"] .value')?.classList.contains("hot")).toBe(
+      true,
+    );
+    expect(doc.querySelector('[data-metric="settled"] .value')?.classList.contains("hot")).toBe(
+      false,
+    );
   });
 
   test("an unknown metric renders —, never 0", async () => {
@@ -676,29 +655,14 @@ describe("the status page", () => {
     // about outcomes or PRs, and the header must say so.
     const page = await loadPage(statusAt());
     const doc = page.window.document;
-    for (const name of [
-      "settled",
-      "failed",
-      "running",
-      "open",
-      "merged",
-      "failing",
-    ]) {
-      expect(
-        doc.querySelector(`[data-metric="${name}"] .value`)?.textContent,
-      ).toBe("—");
+    for (const name of ["settled", "failed", "running", "open", "merged", "failing"]) {
+      expect(doc.querySelector(`[data-metric="${name}"] .value`)?.textContent).toBe("—");
     }
     // The structural counts are known the moment a status arrives; a known
     // zero (all lanes not alive) is a real answer, unlike an unknown one.
-    expect(doc.querySelector('[data-metric="lanes"] .value')?.textContent).toBe(
-      "1",
-    );
-    expect(doc.querySelector('[data-metric="alive"] .value')?.textContent).toBe(
-      "0",
-    );
-    expect(doc.querySelector('[data-metric="waves"] .value')?.textContent).toBe(
-      "1",
-    );
+    expect(doc.querySelector('[data-metric="lanes"] .value')?.textContent).toBe("1");
+    expect(doc.querySelector('[data-metric="alive"] .value')?.textContent).toBe("0");
+    expect(doc.querySelector('[data-metric="waves"] .value')?.textContent).toBe("1");
   });
 
   test("an unknown check count on an open PR renders —, but a measured zero renders 0", async () => {
@@ -759,16 +723,10 @@ describe("the status page", () => {
     // Two rows with no log open, three with one — the grid sizes both panes;
     // JavaScript only flips the state, it must never listen for resizes.
     expect(style).toMatch(/#page\s*\{[^}]*grid-template-rows:\s*auto 1fr\s*;/);
-    expect(style).toMatch(
-      /#page\.with-log\s*\{[^}]*grid-template-rows:\s*auto 1fr 1fr\s*;/,
-    );
+    expect(style).toMatch(/#page\.with-log\s*\{[^}]*grid-template-rows:\s*auto 1fr 1fr\s*;/);
     expect(style).not.toMatch(/max-height:\s*40vh/);
-    expect(script).not.toMatch(
-      /addEventListener\(\s*["']resize["']|onresize\s*=/,
-    );
-    const logView = page.window.document.getElementById(
-      "log",
-    ) as HTMLElement | null;
+    expect(script).not.toMatch(/addEventListener\(\s*["']resize["']|onresize\s*=/);
+    const logView = page.window.document.getElementById("log") as HTMLElement | null;
     expect(logView?.hidden).toBe(true);
   });
 
@@ -861,29 +819,21 @@ describe("the status page", () => {
       expect(container?.classList.contains("with-log")).toBe(true);
     });
 
-    const expandBtn = doc.querySelector(
-      'button[aria-label="expand"]',
-    ) as unknown as HTMLElement;
+    const expandBtn = doc.querySelector('button[aria-label="expand"]') as unknown as HTMLElement;
     expect(expandBtn.textContent?.trim()).toBe("expand");
-    expect(page.window.getComputedStyle(container!).gridTemplateRows).toBe(
-      "auto 1fr 1fr",
-    );
+    expect(page.window.getComputedStyle(container!).gridTemplateRows).toBe("auto 1fr 1fr");
 
     expandBtn.click();
     expect(container?.classList.contains("expanded")).toBe(true);
     expect(expandBtn.textContent?.trim()).toBe("collapse");
     expect(expandBtn.getAttribute("aria-label")).toBe("collapse");
-    expect(page.window.getComputedStyle(container!).gridTemplateRows).toBe(
-      "auto 0 1fr",
-    );
+    expect(page.window.getComputedStyle(container!).gridTemplateRows).toBe("auto 0 1fr");
 
     expandBtn.click();
     expect(container?.classList.contains("expanded")).toBe(false);
     expect(expandBtn.textContent?.trim()).toBe("expand");
     expect(expandBtn.getAttribute("aria-label")).toBe("expand");
-    expect(page.window.getComputedStyle(container!).gridTemplateRows).toBe(
-      "auto 1fr 1fr",
-    );
+    expect(page.window.getComputedStyle(container!).gridTemplateRows).toBe("auto 1fr 1fr");
   });
 
   test("the expand icon reflects aria-expanded in both states", async () => {
@@ -895,35 +845,25 @@ describe("the status page", () => {
     const row = doc.querySelector("tr.lane");
     press(row!.querySelector("button")!, "Enter");
     await vi.waitFor(() => {
-      expect(
-        (doc.getElementById("log-pane") as HTMLElement | null)?.hidden,
-      ).toBe(false);
+      expect((doc.getElementById("log-pane") as HTMLElement | null)?.hidden).toBe(false);
     });
 
-    const expandBtn = doc.querySelector(
-      'button[aria-label="expand"]',
-    ) as unknown as HTMLElement;
+    const expandBtn = doc.querySelector('button[aria-label="expand"]') as unknown as HTMLElement;
     const icon = doc.querySelector("#log-expand svg");
 
     expect(expandBtn.getAttribute("aria-expanded")).toBe("false");
     expect(expandBtn.getAttribute("aria-controls")).toBe("log-pane");
-    expect(page.window.getComputedStyle(icon!).transform).not.toBe(
-      "rotate(180deg)",
-    );
+    expect(page.window.getComputedStyle(icon!).transform).not.toBe("rotate(180deg)");
 
     expandBtn.click();
     expect(expandBtn.getAttribute("aria-expanded")).toBe("true");
     expect(expandBtn.getAttribute("aria-label")).toBe("collapse");
-    expect(page.window.getComputedStyle(icon!).transform).toBe(
-      "rotate(180deg)",
-    );
+    expect(page.window.getComputedStyle(icon!).transform).toBe("rotate(180deg)");
 
     expandBtn.click();
     expect(expandBtn.getAttribute("aria-expanded")).toBe("false");
     expect(expandBtn.getAttribute("aria-label")).toBe("expand");
-    expect(page.window.getComputedStyle(icon!).transform).not.toBe(
-      "rotate(180deg)",
-    );
+    expect(page.window.getComputedStyle(icon!).transform).not.toBe("rotate(180deg)");
   });
 
   test("copy writes the body text without line numbers — assert the clipboard payload", async () => {
@@ -938,9 +878,7 @@ describe("the status page", () => {
       expect(doc.querySelectorAll(".line").length).toBeGreaterThan(0);
     });
 
-    const copyBtn = doc.querySelector(
-      'button[aria-label="copy"]',
-    ) as unknown as HTMLElement;
+    const copyBtn = doc.querySelector('button[aria-label="copy"]') as unknown as HTMLElement;
     copyBtn.click();
     await vi.waitFor(async () => {
       const text = await page.window.navigator.clipboard.readText();
@@ -957,9 +895,7 @@ describe("the status page", () => {
       expect(doc.querySelectorAll(".line").length).toBeGreaterThan(0);
     });
 
-    const copyBtn = doc.querySelector(
-      'button[aria-label="copy"]',
-    ) as unknown as HTMLElement;
+    const copyBtn = doc.querySelector('button[aria-label="copy"]') as unknown as HTMLElement;
 
     vi.useFakeTimers();
     try {
@@ -1084,8 +1020,7 @@ describe("the status page", () => {
     });
     const doc = page.window.document;
     const indicator = doc.getElementById("connection") as HTMLElement | null;
-    const findings = () =>
-      doc.querySelector("tr.lane td:last-child")?.textContent ?? "";
+    const findings = () => doc.querySelector("tr.lane td:last-child")?.textContent ?? "";
 
     // The stream drops, which starts a fallback poll (call 2) — it is
     // now in flight, awaiting `pendingPoll`.
@@ -1222,9 +1157,7 @@ describe("the status page", () => {
     expect(doc.getElementById("log-lane")?.textContent).toBe("T/t2");
     expect(doc.getElementById("log-size")?.textContent).toBe("10 B");
     expect(doc.getElementById("log")?.textContent).toContain("log for t2");
-    expect(doc.getElementById("log")?.textContent).not.toContain(
-      "stale log for t1",
-    );
+    expect(doc.getElementById("log")?.textContent).not.toContain("stale log for t1");
   });
 
   test("a log that resolves after a newer open does not move focus", async () => {
@@ -1354,9 +1287,7 @@ describe("the status page", () => {
       const checkbox = doc.getElementById("log-follow");
       expect(checkbox).not.toBeNull();
     });
-    const followCheckbox = doc.getElementById(
-      "log-follow",
-    ) as unknown as HTMLInputElement;
+    const followCheckbox = doc.getElementById("log-follow") as unknown as HTMLInputElement;
     followCheckbox.checked = true;
     const changeEvent = new (
       followCheckbox.ownerDocument!.defaultView as unknown as {
@@ -1387,9 +1318,7 @@ describe("the status page", () => {
       expect(doc.getElementById("log-size")?.textContent).toBe("10 B");
       expect(doc.getElementById("log")?.textContent).toContain("t2 content");
     });
-    expect(doc.getElementById("log")?.textContent).not.toContain(
-      "stale t1 follow content",
-    );
+    expect(doc.getElementById("log")?.textContent).not.toContain("stale t1 follow content");
   });
 
   test("copy reports failure and does not claim success when clipboard API is absent or writeText rejects", async () => {
@@ -1398,14 +1327,10 @@ describe("the status page", () => {
     const row = doc.querySelector("tr.lane");
     press(row!.querySelector("button")!, "Enter");
     await vi.waitFor(() => {
-      expect(
-        (doc.getElementById("log-pane") as HTMLElement | null)?.hidden,
-      ).toBe(false);
+      expect((doc.getElementById("log-pane") as HTMLElement | null)?.hidden).toBe(false);
     });
 
-    const copyBtn = doc.querySelector(
-      'button[aria-label="copy"]',
-    ) as unknown as HTMLElement;
+    const copyBtn = doc.querySelector('button[aria-label="copy"]') as unknown as HTMLElement;
 
     // A: navigator.clipboard absent
     Object.defineProperty(page.window.navigator, "clipboard", {
@@ -1421,9 +1346,7 @@ describe("the status page", () => {
     // B: writeText rejects
     Object.defineProperty(page.window.navigator, "clipboard", {
       value: {
-        writeText: vi
-          .fn()
-          .mockRejectedValue(new Error("clipboard permission denied")),
+        writeText: vi.fn().mockRejectedValue(new Error("clipboard permission denied")),
       },
       configurable: true,
     });
@@ -1454,9 +1377,7 @@ describe("the status page", () => {
       expect(page.window.getComputedStyle(gutter).userSelect).toBe("auto");
     }
 
-    const copyBtn = doc.querySelector(
-      'button[aria-label="copy"]',
-    ) as unknown as HTMLElement;
+    const copyBtn = doc.querySelector('button[aria-label="copy"]') as unknown as HTMLElement;
     copyBtn.click();
 
     await vi.waitFor(async () => {
@@ -1473,9 +1394,7 @@ describe("the status page", () => {
     press(row!.querySelector("button")!, "Enter");
 
     await vi.waitFor(() => {
-      expect(
-        (doc.getElementById("log-pane") as HTMLElement | null)?.hidden,
-      ).toBe(false);
+      expect((doc.getElementById("log-pane") as HTMLElement | null)?.hidden).toBe(false);
       expect(doc.getElementById("log-size")?.textContent).toBe("3 B");
     });
   });
@@ -1486,9 +1405,7 @@ describe("the status page", () => {
     const row = doc.querySelector("tr.lane");
     press(row!.querySelector("button")!, "Enter");
     await vi.waitFor(() => {
-      expect(
-        (doc.getElementById("log-pane") as HTMLElement | null)?.hidden,
-      ).toBe(false);
+      expect((doc.getElementById("log-pane") as HTMLElement | null)?.hidden).toBe(false);
     });
 
     const toolbar = doc.getElementById("log-toolbar");
@@ -1522,9 +1439,7 @@ describe("the status page", () => {
       };
     }
 
-    const rules = Array.from(
-      sheet.cssRules,
-    ) as unknown as readonly StyleRuleLike[];
+    const rules = Array.from(sheet.cssRules) as unknown as readonly StyleRuleLike[];
 
     const controls = doc.querySelectorAll("#log-toolbar button");
     expect(controls.length).toBeGreaterThan(0);
@@ -1540,12 +1455,8 @@ describe("the status page", () => {
       expect(rule?.style.borderColor).toBe("var(--color-border-control)");
     }
 
-    const hoverRule = rules.find(
-      (r) => r.selectorText === "#log-toolbar button:hover",
-    );
-    expect(hoverRule?.style.borderColor).toBe(
-      "var(--color-border-control-hover)",
-    );
+    const hoverRule = rules.find((r) => r.selectorText === "#log-toolbar button:hover");
+    expect(hoverRule?.style.borderColor).toBe("var(--color-border-control-hover)");
 
     // At least one frame still resolves to the frame token
     const frame = doc.getElementById("log-pane");
@@ -1575,49 +1486,36 @@ describe("the status page", () => {
 
     const downloads: Array<{ href: string; download: string }> = [];
     const origCreateElement = doc.createElement.bind(doc);
-    vi.spyOn(doc, "createElement").mockImplementation(
-      (tagName: string, ...args) => {
-        const el = origCreateElement(tagName, ...args);
-        if (tagName.toLowerCase() === "a") {
-          vi.spyOn(el, "click").mockImplementation(() => {
-            downloads.push({
-              href:
-                el.getAttribute("href") ??
-                (el as unknown as { href: string }).href,
-              download:
-                el.getAttribute("download") ??
-                (el as unknown as { download: string }).download,
-            });
+    vi.spyOn(doc, "createElement").mockImplementation((tagName: string, ...args) => {
+      const el = origCreateElement(tagName, ...args);
+      if (tagName.toLowerCase() === "a") {
+        vi.spyOn(el, "click").mockImplementation(() => {
+          downloads.push({
+            href: el.getAttribute("href") ?? (el as unknown as { href: string }).href,
+            download:
+              el.getAttribute("download") ?? (el as unknown as { download: string }).download,
           });
-        }
-        return el;
-      },
-    );
+        });
+      }
+      return el;
+    });
 
     // Open first lane: T/t1
     press(rows[0]!.querySelector("button")!, "Enter");
     await vi.waitFor(() => {
-      expect(
-        (doc.getElementById("log-pane") as HTMLElement | null)?.hidden,
-      ).toBe(false);
+      expect((doc.getElementById("log-pane") as HTMLElement | null)?.hidden).toBe(false);
       expect(doc.getElementById("log-lane")?.textContent).toBe("T/t1");
     });
 
-    const downloadBtn = doc.querySelector(
-      'button[aria-label="download"]',
-    ) as HTMLElement | null;
+    const downloadBtn = doc.querySelector('button[aria-label="download"]') as HTMLElement | null;
     expect(downloadBtn).not.toBeNull();
 
     const fetchesAfterLane1 = page.fetches.length;
     downloadBtn?.click();
 
-    expect(downloads).toEqual([
-      { href: "/api/log/T/t1?full=1", download: "T-t1.log" },
-    ]);
+    expect(downloads).toEqual([{ href: "/api/log/T/t1?full=1", download: "T-t1.log" }]);
     expect(page.fetches.length).toBe(fetchesAfterLane1);
-    expect(page.fetches.filter((url) => url.includes("full=1"))).toHaveLength(
-      0,
-    );
+    expect(page.fetches.filter((url) => url.includes("full=1"))).toHaveLength(0);
 
     // Switch to second lane: T/t2
     press(rows[1]!.querySelector("button")!, "Enter");
@@ -1633,9 +1531,7 @@ describe("the status page", () => {
       { href: "/api/log/T/t2?full=1", download: "T-t2.log" },
     ]);
     expect(page.fetches.length).toBe(fetchesAfterLane2);
-    expect(page.fetches.filter((url) => url.includes("full=1"))).toHaveLength(
-      0,
-    );
+    expect(page.fetches.filter((url) => url.includes("full=1"))).toHaveLength(0);
   });
 
   test("every wave renders collapsed, and its lanes are not present or not visible until it is opened", async () => {
@@ -1645,9 +1541,7 @@ describe("the status page", () => {
     expect(waveRows.length).toBe(2);
 
     for (const waveRow of waveRows) {
-      expect(
-        waveRow.querySelector("button")?.getAttribute("aria-expanded"),
-      ).toBe("false");
+      expect(waveRow.querySelector("button")?.getAttribute("aria-expanded")).toBe("false");
     }
 
     const laneRows = doc.querySelectorAll("tr.lane");
@@ -1690,43 +1584,25 @@ describe("the status page", () => {
     expect(disagreementRows.length).toBe(1);
 
     // Initially collapsed
-    expect((laneRows[0] as unknown as HTMLElement | undefined)?.hidden).toBe(
-      true,
-    );
-    expect((laneRows[1] as unknown as HTMLElement | undefined)?.hidden).toBe(
-      true,
-    );
-    expect(
-      (disagreementRows[0] as unknown as HTMLElement | undefined)?.hidden,
-    ).toBe(true);
+    expect((laneRows[0] as unknown as HTMLElement | undefined)?.hidden).toBe(true);
+    expect((laneRows[1] as unknown as HTMLElement | undefined)?.hidden).toBe(true);
+    expect((disagreementRows[0] as unknown as HTMLElement | undefined)?.hidden).toBe(true);
 
     const waveButton = waveRow.querySelector("button")!;
 
     // Open wave
     waveRow.click();
     expect(waveButton.getAttribute("aria-expanded")).toBe("true");
-    expect((laneRows[0] as unknown as HTMLElement | undefined)?.hidden).toBe(
-      false,
-    );
-    expect((laneRows[1] as unknown as HTMLElement | undefined)?.hidden).toBe(
-      false,
-    );
-    expect(
-      (disagreementRows[0] as unknown as HTMLElement | undefined)?.hidden,
-    ).toBe(false);
+    expect((laneRows[0] as unknown as HTMLElement | undefined)?.hidden).toBe(false);
+    expect((laneRows[1] as unknown as HTMLElement | undefined)?.hidden).toBe(false);
+    expect((disagreementRows[0] as unknown as HTMLElement | undefined)?.hidden).toBe(false);
 
     // Close wave
     waveRow.click();
     expect(waveButton.getAttribute("aria-expanded")).toBe("false");
-    expect((laneRows[0] as unknown as HTMLElement | undefined)?.hidden).toBe(
-      true,
-    );
-    expect((laneRows[1] as unknown as HTMLElement | undefined)?.hidden).toBe(
-      true,
-    );
-    expect(
-      (disagreementRows[0] as unknown as HTMLElement | undefined)?.hidden,
-    ).toBe(true);
+    expect((laneRows[0] as unknown as HTMLElement | undefined)?.hidden).toBe(true);
+    expect((laneRows[1] as unknown as HTMLElement | undefined)?.hidden).toBe(true);
+    expect((disagreementRows[0] as unknown as HTMLElement | undefined)?.hidden).toBe(true);
   });
 
   test("the wave row's button is reachable by keyboard and carries aria-expanded in both states", async () => {
@@ -1771,12 +1647,8 @@ describe("the status page", () => {
 
     // Open wave T
     waveT.click();
-    expect(waveT.querySelector("button")?.getAttribute("aria-expanded")).toBe(
-      "true",
-    );
-    expect(waveU.querySelector("button")?.getAttribute("aria-expanded")).toBe(
-      "false",
-    );
+    expect(waveT.querySelector("button")?.getAttribute("aria-expanded")).toBe("true");
+    expect(waveU.querySelector("button")?.getAttribute("aria-expanded")).toBe("false");
 
     // Re-render via SSE status event
     page.source.emit("status", JSON.stringify(mixedStatus));
@@ -1785,12 +1657,8 @@ describe("the status page", () => {
     const updatedWaveT = updatedWaveRows[0] as unknown as HTMLElement;
     const updatedWaveU = updatedWaveRows[1] as unknown as HTMLElement;
 
-    expect(
-      updatedWaveT.querySelector("button")?.getAttribute("aria-expanded"),
-    ).toBe("true");
-    expect(
-      updatedWaveU.querySelector("button")?.getAttribute("aria-expanded"),
-    ).toBe("false");
+    expect(updatedWaveT.querySelector("button")?.getAttribute("aria-expanded")).toBe("true");
+    expect(updatedWaveU.querySelector("button")?.getAttribute("aria-expanded")).toBe("false");
 
     const lanesT = doc.querySelectorAll(
       'tr.lane[data-wave="T"]',
@@ -1809,17 +1677,13 @@ describe("the status page", () => {
   test("a re-render leaves the focused wave's button focused, and a vanished row gets nothing back", async () => {
     const page = await loadPage(mixedStatus);
     const doc = page.window.document;
-    const waveT = doc.querySelector(
-      'tr.wave[data-wave="T"]',
-    ) as unknown as HTMLElement;
+    const waveT = doc.querySelector('tr.wave[data-wave="T"]') as unknown as HTMLElement;
     const waveTButton = waveT.querySelector("button")!;
     waveTButton.focus();
     expect(doc.activeElement).toBe(waveTButton);
 
     page.source.emit("status", JSON.stringify(mixedStatus));
-    const reRendered = doc.querySelector(
-      'tr.wave[data-wave="T"]',
-    ) as unknown as HTMLElement;
+    const reRendered = doc.querySelector('tr.wave[data-wave="T"]') as unknown as HTMLElement;
     const reRenderedButton = reRendered.querySelector("button")!;
     expect(reRendered).not.toBe(waveT);
     expect(doc.activeElement).toBe(reRenderedButton);
@@ -1895,16 +1759,13 @@ describe("the status page", () => {
     const page = await loadPage(before);
     const doc = page.window.document;
     (doc.querySelector("tr.wave") as unknown as HTMLElement).click();
-    const hot = doc.querySelector(
-      'tr.lane[data-lane="l_hot"]',
-    ) as unknown as HTMLElement;
+    const hot = doc.querySelector('tr.lane[data-lane="l_hot"]') as unknown as HTMLElement;
     const hotButton = hot.querySelector("button")!;
     hotButton.focus();
     expect(doc.activeElement).toBe(hotButton);
-    expect(
-      (doc.querySelectorAll("tr.lane")[0] as unknown as HTMLElement).dataset
-        .lane,
-    ).toBe("l_hot");
+    expect((doc.querySelectorAll("tr.lane")[0] as unknown as HTMLElement).dataset.lane).toBe(
+      "l_hot",
+    );
 
     page.source.emit("status", JSON.stringify(after));
 
@@ -1914,14 +1775,10 @@ describe("the status page", () => {
     // position-based focus restore would satisfy the assertions below just
     // as well as an identity-based one — this is what rules that out.
     const rowsAfter = doc.querySelectorAll("tr.lane");
-    expect((rowsAfter[0] as unknown as HTMLElement).dataset.lane).toBe(
-      "l_cold",
-    );
+    expect((rowsAfter[0] as unknown as HTMLElement).dataset.lane).toBe("l_cold");
     expect((rowsAfter[1] as unknown as HTMLElement).dataset.lane).toBe("l_hot");
 
-    const hotAgain = doc.querySelector(
-      'tr.lane[data-lane="l_hot"]',
-    ) as unknown as HTMLElement;
+    const hotAgain = doc.querySelector('tr.lane[data-lane="l_hot"]') as unknown as HTMLElement;
     const hotAgainButton = hotAgain.querySelector("button")!;
     expect(hotAgain).not.toBe(hot);
     expect(hotAgain).toBe(rowsAfter[1]);
@@ -1936,18 +1793,14 @@ describe("the status page", () => {
 
     const seen = new Set<string>();
     for (const waveRow of waveRows) {
-      const control = waveRow
-        .querySelector("button")
-        ?.getAttribute("aria-controls");
+      const control = waveRow.querySelector("button")?.getAttribute("aria-controls");
       expect(control).toBeTruthy();
       expect(seen.has(control!)).toBe(false);
       seen.add(control!);
       const group = doc.getElementById(control!);
       expect(group).not.toBeNull();
       for (const lane of group!.querySelectorAll("tr.lane")) {
-        expect(lane.getAttribute("data-wave")).toBe(
-          waveRow.getAttribute("data-wave"),
-        );
+        expect(lane.getAttribute("data-wave")).toBe(waveRow.getAttribute("data-wave"));
       }
     }
   });
@@ -2065,9 +1918,7 @@ describe("the status page", () => {
     const waveRows = Array.from(doc.querySelectorAll("tr.wave"));
     expect(waveRows.length).toBe(3);
     for (const waveRow of waveRows) {
-      expect(
-        waveRow.querySelector("button")?.getAttribute("aria-expanded"),
-      ).toBe("false");
+      expect(waveRow.querySelector("button")?.getAttribute("aria-expanded")).toBe("false");
     }
     const laneRows = Array.from(doc.querySelectorAll("tr.lane"));
     expect(laneRows.length).toBe(3);
@@ -2136,32 +1987,17 @@ describe("the status page", () => {
 
     const page = await loadPage(multiLevelStatus);
     const doc = page.window.document;
-    const switchEl = doc.getElementById(
-      "sort-switch",
-    ) as unknown as HTMLElement;
+    const switchEl = doc.getElementById("sort-switch") as unknown as HTMLElement;
     expect(switchEl).not.toBeNull();
     expect(switchEl.getAttribute("aria-checked")).toBe("true");
 
     // Initially sorted newest first at both wave and lane levels
     let waveRows = Array.from(doc.querySelectorAll("tr.wave"));
-    expect(waveRows.map((w) => w.getAttribute("data-wave"))).toEqual([
-      "W_server2",
-      "W_server1",
-    ]);
-    let lanesW2 = Array.from(
-      doc.querySelectorAll('tr.lane[data-wave="W_server2"]'),
-    );
-    expect(lanesW2.map((l) => l.getAttribute("data-lane"))).toEqual([
-      "l_s2_new",
-      "l_s2_old",
-    ]);
-    let lanesW1 = Array.from(
-      doc.querySelectorAll('tr.lane[data-wave="W_server1"]'),
-    );
-    expect(lanesW1.map((l) => l.getAttribute("data-lane"))).toEqual([
-      "l_s1_new",
-      "l_s1_old",
-    ]);
+    expect(waveRows.map((w) => w.getAttribute("data-wave"))).toEqual(["W_server2", "W_server1"]);
+    let lanesW2 = Array.from(doc.querySelectorAll('tr.lane[data-wave="W_server2"]'));
+    expect(lanesW2.map((l) => l.getAttribute("data-lane"))).toEqual(["l_s2_new", "l_s2_old"]);
+    let lanesW1 = Array.from(doc.querySelectorAll('tr.lane[data-wave="W_server1"]'));
+    expect(lanesW1.map((l) => l.getAttribute("data-lane"))).toEqual(["l_s1_new", "l_s1_old"]);
 
     // Flip switch off
     switchEl.click();
@@ -2169,48 +2005,22 @@ describe("the status page", () => {
 
     // Server order is restored at both levels
     waveRows = Array.from(doc.querySelectorAll("tr.wave"));
-    expect(waveRows.map((w) => w.getAttribute("data-wave"))).toEqual([
-      "W_server1",
-      "W_server2",
-    ]);
-    lanesW1 = Array.from(
-      doc.querySelectorAll('tr.lane[data-wave="W_server1"]'),
-    );
-    expect(lanesW1.map((l) => l.getAttribute("data-lane"))).toEqual([
-      "l_s1_old",
-      "l_s1_new",
-    ]);
-    lanesW2 = Array.from(
-      doc.querySelectorAll('tr.lane[data-wave="W_server2"]'),
-    );
-    expect(lanesW2.map((l) => l.getAttribute("data-lane"))).toEqual([
-      "l_s2_old",
-      "l_s2_new",
-    ]);
+    expect(waveRows.map((w) => w.getAttribute("data-wave"))).toEqual(["W_server1", "W_server2"]);
+    lanesW1 = Array.from(doc.querySelectorAll('tr.lane[data-wave="W_server1"]'));
+    expect(lanesW1.map((l) => l.getAttribute("data-lane"))).toEqual(["l_s1_old", "l_s1_new"]);
+    lanesW2 = Array.from(doc.querySelectorAll('tr.lane[data-wave="W_server2"]'));
+    expect(lanesW2.map((l) => l.getAttribute("data-lane"))).toEqual(["l_s2_old", "l_s2_new"]);
 
     // Flip switch on again
     switchEl.click();
     expect(switchEl.getAttribute("aria-checked")).toBe("true");
 
     waveRows = Array.from(doc.querySelectorAll("tr.wave"));
-    expect(waveRows.map((w) => w.getAttribute("data-wave"))).toEqual([
-      "W_server2",
-      "W_server1",
-    ]);
-    lanesW2 = Array.from(
-      doc.querySelectorAll('tr.lane[data-wave="W_server2"]'),
-    );
-    expect(lanesW2.map((l) => l.getAttribute("data-lane"))).toEqual([
-      "l_s2_new",
-      "l_s2_old",
-    ]);
-    lanesW1 = Array.from(
-      doc.querySelectorAll('tr.lane[data-wave="W_server1"]'),
-    );
-    expect(lanesW1.map((l) => l.getAttribute("data-lane"))).toEqual([
-      "l_s1_new",
-      "l_s1_old",
-    ]);
+    expect(waveRows.map((w) => w.getAttribute("data-wave"))).toEqual(["W_server2", "W_server1"]);
+    lanesW2 = Array.from(doc.querySelectorAll('tr.lane[data-wave="W_server2"]'));
+    expect(lanesW2.map((l) => l.getAttribute("data-lane"))).toEqual(["l_s2_new", "l_s2_old"]);
+    lanesW1 = Array.from(doc.querySelectorAll('tr.lane[data-wave="W_server1"]'));
+    expect(lanesW1.map((l) => l.getAttribute("data-lane"))).toEqual(["l_s1_new", "l_s1_old"]);
   });
 
   test("a wave with no timestamped lane sorts last", async () => {
@@ -2442,11 +2252,7 @@ describe("the status page", () => {
     // active more recently than it was.
     const html = await readFile(PAGE_PATH, "utf8");
     const script = /<script>([\s\S]*?)<\/script>/.exec(html)?.[1] ?? "";
-    const tick = Number(
-      /AGE_TICK_MS\s*=\s*([0-9_]+)/
-        .exec(script)?.[1]
-        ?.replace(/_/g, ""),
-    );
+    const tick = Number(/AGE_TICK_MS\s*=\s*([0-9_]+)/.exec(script)?.[1]?.replace(/_/g, ""));
     // The tick must exist, and run finer than the smallest bin the header
     // displays (a minute) — a coarser one just re-freezes the age between ticks.
     expect(Number.isFinite(tick)).toBe(true);
@@ -2481,8 +2287,7 @@ describe("the status page", () => {
       });
       const doc = page.window.document;
       const header = (): string =>
-        (doc.querySelector('tr.wave[data-wave="9"]') as unknown as HTMLElement)
-          ?.textContent ?? "";
+        (doc.querySelector('tr.wave[data-wave="9"]') as unknown as HTMLElement)?.textContent ?? "";
 
       expect(header()).toContain("1m ago");
 
@@ -2619,10 +2424,7 @@ describe("the status page", () => {
 
     // Initial state with sorting on: W_B (2000) is first, W_A (1000) is second
     let waveRows = Array.from(doc.querySelectorAll("tr.wave"));
-    expect(waveRows.map((r) => r.getAttribute("data-wave"))).toEqual([
-      "W_B",
-      "W_A",
-    ]);
+    expect(waveRows.map((r) => r.getAttribute("data-wave"))).toEqual(["W_B", "W_A"]);
 
     // Expand W_A
     const waveAButton = doc.querySelector(
@@ -2639,9 +2441,7 @@ describe("the status page", () => {
     laneA.click();
     await vi.waitFor(() => {
       expect(page.fetches).toContain("/api/log/W_A/l_a?tail=16");
-      expect(
-        (doc.getElementById("log-pane") as HTMLElement | null)?.hidden,
-      ).toBe(false);
+      expect((doc.getElementById("log-pane") as HTMLElement | null)?.hidden).toBe(false);
     });
     expect(doc.getElementById("log-lane")?.textContent).toBe("W_A/l_a");
     expect(laneA.classList.contains("selected")).toBe(true);
@@ -2652,10 +2452,7 @@ describe("the status page", () => {
 
     // Prove the re-sort moved W_A to the first position
     waveRows = Array.from(doc.querySelectorAll("tr.wave"));
-    expect(waveRows.map((r) => r.getAttribute("data-wave"))).toEqual([
-      "W_A",
-      "W_B",
-    ]);
+    expect(waveRows.map((r) => r.getAttribute("data-wave"))).toEqual(["W_A", "W_B"]);
 
     // W_A is still expanded after moving
     const waveAButtonAfter = doc.querySelector(
@@ -2674,9 +2471,7 @@ describe("the status page", () => {
     expect(laneAAfter.classList.contains("selected")).toBe(true);
 
     // Now flip the sort switch off to restore server order (W_A, W_B)
-    const switchEl = doc.getElementById(
-      "sort-switch",
-    ) as unknown as HTMLElement;
+    const switchEl = doc.getElementById("sort-switch") as unknown as HTMLElement;
     switchEl.click();
     expect(switchEl.getAttribute("aria-checked")).toBe("false");
     expect(waveAButtonAfter.getAttribute("aria-expanded")).toBe("true");
@@ -2717,9 +2512,7 @@ describe("the status page", () => {
 
     const page = await loadPage(statusWithMtimes);
     const doc = page.window.document;
-    const switchEl = doc.getElementById(
-      "sort-switch",
-    ) as unknown as HTMLElement;
+    const switchEl = doc.getElementById("sort-switch") as unknown as HTMLElement;
     expect(switchEl).not.toBeNull();
     expect(switchEl.getAttribute("role")).toBe("switch");
     expect(switchEl.getAttribute("aria-label")).toBeTruthy();
@@ -2728,10 +2521,7 @@ describe("the status page", () => {
 
     // Initially sorted newest first
     let lanes = Array.from(doc.querySelectorAll('tr.lane[data-wave="W"]'));
-    expect(lanes.map((l) => l.getAttribute("data-lane"))).toEqual([
-      "l_server2",
-      "l_server1",
-    ]);
+    expect(lanes.map((l) => l.getAttribute("data-lane"))).toEqual(["l_server2", "l_server1"]);
 
     const fetchCountBefore = page.fetches.length;
 
@@ -2741,10 +2531,7 @@ describe("the status page", () => {
 
     // Server order is restored without any network fetch
     lanes = Array.from(doc.querySelectorAll('tr.lane[data-wave="W"]'));
-    expect(lanes.map((l) => l.getAttribute("data-lane"))).toEqual([
-      "l_server1",
-      "l_server2",
-    ]);
+    expect(lanes.map((l) => l.getAttribute("data-lane"))).toEqual(["l_server1", "l_server2"]);
     expect(page.fetches.length).toBe(fetchCountBefore);
 
     // Stored preference is saved in localStorage
@@ -2755,13 +2542,9 @@ describe("the status page", () => {
       storage: { "wave-status:sort": "false" },
     });
     const reloadedDoc = reloadedPage.window.document;
-    const reloadedSwitch = reloadedDoc.getElementById(
-      "sort-switch",
-    ) as unknown as HTMLElement;
+    const reloadedSwitch = reloadedDoc.getElementById("sort-switch") as unknown as HTMLElement;
     expect(reloadedSwitch.getAttribute("aria-checked")).toBe("false");
-    const reloadedLanes = Array.from(
-      reloadedDoc.querySelectorAll('tr.lane[data-wave="W"]'),
-    );
+    const reloadedLanes = Array.from(reloadedDoc.querySelectorAll('tr.lane[data-wave="W"]'));
     expect(reloadedLanes.map((l) => l.getAttribute("data-lane"))).toEqual([
       "l_server1",
       "l_server2",
@@ -2802,16 +2585,11 @@ describe("the status page", () => {
       mockStorageError: true,
     });
     const doc = page.window.document;
-    const switchEl = doc.getElementById(
-      "sort-switch",
-    ) as unknown as HTMLElement;
+    const switchEl = doc.getElementById("sort-switch") as unknown as HTMLElement;
     expect(switchEl.getAttribute("aria-checked")).toBe("true");
 
     const lanes = Array.from(doc.querySelectorAll('tr.lane[data-wave="W"]'));
-    expect(lanes.map((l) => l.getAttribute("data-lane"))).toEqual([
-      "l_new",
-      "l_old",
-    ]);
+    expect(lanes.map((l) => l.getAttribute("data-lane"))).toEqual(["l_new", "l_old"]);
   });
 
   test("the sort switch control resolves its border to the control token", async () => {
@@ -2828,9 +2606,7 @@ describe("the status page", () => {
       };
     }
 
-    const rules = Array.from(
-      sheet.cssRules,
-    ) as unknown as readonly StyleRuleLike[];
+    const rules = Array.from(sheet.cssRules) as unknown as readonly StyleRuleLike[];
     const sortSwitch = doc.getElementById("sort-switch");
     expect(sortSwitch).not.toBeNull();
 
@@ -2880,9 +2656,7 @@ describe("the status page", () => {
       expect(checkbox).not.toBeNull();
     });
 
-    const followCheckbox = doc.getElementById(
-      "log-follow",
-    ) as unknown as HTMLInputElement | null;
+    const followCheckbox = doc.getElementById("log-follow") as unknown as HTMLInputElement | null;
     expect(followCheckbox?.getAttribute("id")).toBe("log-follow");
 
     const followLabel = doc.querySelector('label[for="log-follow"]');
@@ -2938,9 +2712,7 @@ describe("the status page", () => {
     const row = doc.querySelector("tr.lane");
     press(row!.querySelector("button")!, "Enter");
     await vi.waitFor(() => {
-      expect(
-        (doc.getElementById("log-pane") as HTMLElement | null)?.hidden,
-      ).toBe(false);
+      expect((doc.getElementById("log-pane") as HTMLElement | null)?.hidden).toBe(false);
     });
 
     const logView = doc.getElementById("log") as HTMLElement | null;
@@ -2965,14 +2737,11 @@ describe("the status page", () => {
     });
 
     // Check the follow checkbox
-    const followCheckbox = doc.getElementById(
-      "log-follow",
-    ) as unknown as HTMLInputElement | null;
+    const followCheckbox = doc.getElementById("log-follow") as unknown as HTMLInputElement | null;
     expect(followCheckbox).not.toBeNull();
     followCheckbox!.checked = true;
     const changeEvent = new (
-      followCheckbox!.ownerDocument!
-        .defaultView as unknown as { Event: typeof Event }
+      followCheckbox!.ownerDocument!.defaultView as unknown as { Event: typeof Event }
     ).Event("change", { bubbles: true });
     followCheckbox!.dispatchEvent(changeEvent);
 
@@ -3011,9 +2780,7 @@ describe("the status page", () => {
     const row = doc.querySelector("tr.lane");
     press(row!.querySelector("button")!, "Enter");
     await vi.waitFor(() => {
-      expect(
-        (doc.getElementById("log-pane") as HTMLElement | null)?.hidden,
-      ).toBe(false);
+      expect((doc.getElementById("log-pane") as HTMLElement | null)?.hidden).toBe(false);
     });
 
     const logView = doc.getElementById("log") as HTMLElement | null;
@@ -3045,9 +2812,7 @@ describe("the status page", () => {
     const fetchCountBefore = page.fetches.length;
 
     // Do NOT check the follow checkbox (keep follow off)
-    const followCheckbox = doc.getElementById(
-      "log-follow",
-    ) as unknown as HTMLInputElement | null;
+    const followCheckbox = doc.getElementById("log-follow") as unknown as HTMLInputElement | null;
     expect(followCheckbox?.checked).toBe(false);
 
     // Emit a new status to trigger a refresh
@@ -3097,9 +2862,7 @@ describe("the status page", () => {
     await vi.waitFor(() => {
       expect(doc.getElementById("log-follow")).not.toBeNull();
     });
-    const followCheckboxT1 = doc.getElementById(
-      "log-follow",
-    ) as unknown as HTMLInputElement;
+    const followCheckboxT1 = doc.getElementById("log-follow") as unknown as HTMLInputElement;
     followCheckboxT1.checked = true;
     followCheckboxT1.dispatchEvent(
       new (
@@ -3122,9 +2885,7 @@ describe("the status page", () => {
 
     // The checkbox itself — not a closure variable the test cannot see —
     // must not still claim the view is live.
-    const followCheckboxT2 = doc.getElementById(
-      "log-follow",
-    ) as unknown as HTMLInputElement;
+    const followCheckboxT2 = doc.getElementById("log-follow") as unknown as HTMLInputElement;
     expect(followCheckboxT2).not.toBeNull();
     expect(followCheckboxT2.checked).toBe(false);
 
@@ -3174,18 +2935,14 @@ describe("the status page", () => {
     // unambiguously the second call.
     await vi.waitFor(() => {
       expect(doc.getElementById("log-follow")).not.toBeNull();
-      expect(doc.getElementById("log")?.textContent).toContain(
-        "initial log",
-      );
+      expect(doc.getElementById("log")?.textContent).toContain("initial log");
     });
 
     const unhandled: unknown[] = [];
     const onUnhandled = (reason: unknown) => unhandled.push(reason);
     process.on("unhandledRejection", onUnhandled);
     try {
-      const followCheckbox = doc.getElementById(
-        "log-follow",
-      ) as unknown as HTMLInputElement;
+      const followCheckbox = doc.getElementById("log-follow") as unknown as HTMLInputElement;
       followCheckbox.checked = true;
       followCheckbox.dispatchEvent(
         new (
@@ -3200,9 +2957,7 @@ describe("the status page", () => {
       await vi.waitFor(() => {
         expect(followCheckbox.checked).toBe(false);
       });
-      expect(doc.getElementById("log-size")?.textContent).toMatch(
-        /follow.*failed/i,
-      );
+      expect(doc.getElementById("log-size")?.textContent).toMatch(/follow.*failed/i);
 
       // Give any unhandled rejection a turn to surface before asserting
       // none did.
@@ -3251,14 +3006,10 @@ describe("the status page", () => {
     // response chains cannot flip which content ends up on screen first.
     await vi.waitFor(() => {
       expect(doc.getElementById("log-follow")).not.toBeNull();
-      expect(doc.getElementById("log")?.textContent).toContain(
-        "initial log",
-      );
+      expect(doc.getElementById("log")?.textContent).toContain("initial log");
     });
 
-    const followCheckbox = doc.getElementById(
-      "log-follow",
-    ) as unknown as HTMLInputElement;
+    const followCheckbox = doc.getElementById("log-follow") as unknown as HTMLInputElement;
     followCheckbox.checked = true;
     followCheckbox.dispatchEvent(
       new (
@@ -3274,9 +3025,7 @@ describe("the status page", () => {
     await vi.waitFor(() => {
       expect(followCheckbox.checked).toBe(false);
     });
-    expect(doc.getElementById("log-size")?.textContent).toMatch(
-      /follow.*failed/i,
-    );
+    expect(doc.getElementById("log-size")?.textContent).toMatch(/follow.*failed/i);
     expect(doc.getElementById("log")?.textContent).toContain("initial log");
   });
 
@@ -3310,13 +3059,10 @@ describe("the status page", () => {
     });
 
     // Check the follow checkbox
-    const followCheckbox = doc.getElementById(
-      "log-follow",
-    ) as unknown as HTMLInputElement | null;
+    const followCheckbox = doc.getElementById("log-follow") as unknown as HTMLInputElement | null;
     followCheckbox!.checked = true;
     const changeEvent = new (
-      followCheckbox!.ownerDocument!
-        .defaultView as unknown as { Event: typeof Event }
+      followCheckbox!.ownerDocument!.defaultView as unknown as { Event: typeof Event }
     ).Event("change", { bubbles: true });
     followCheckbox!.dispatchEvent(changeEvent);
 
@@ -3346,14 +3092,10 @@ describe("the status page", () => {
     });
 
     // Subsequent status updates should not try to fetch the log for a dead lane
-    const fetchCountBefore = page.fetches.filter((url) =>
-      url.includes("/api/log/"),
-    ).length;
+    const fetchCountBefore = page.fetches.filter((url) => url.includes("/api/log/")).length;
     page.source.emit("status", JSON.stringify(deadStatus));
     await new Promise((resolve) => setTimeout(resolve, 50));
-    const fetchCountAfter = page.fetches.filter((url) =>
-      url.includes("/api/log/"),
-    ).length;
+    const fetchCountAfter = page.fetches.filter((url) => url.includes("/api/log/")).length;
     expect(fetchCountAfter).toBe(fetchCountBefore);
   });
 
@@ -3408,14 +3150,11 @@ describe("the status page", () => {
     });
 
     // Check the follow checkbox
-    const followCheckbox = doc.getElementById(
-      "log-follow",
-    ) as unknown as HTMLInputElement | null;
+    const followCheckbox = doc.getElementById("log-follow") as unknown as HTMLInputElement | null;
     expect(followCheckbox).not.toBeNull();
     followCheckbox!.checked = true;
     const changeEvent = new (
-      followCheckbox!.ownerDocument!
-        .defaultView as unknown as { Event: typeof Event }
+      followCheckbox!.ownerDocument!.defaultView as unknown as { Event: typeof Event }
     ).Event("change", { bubbles: true });
     followCheckbox!.dispatchEvent(changeEvent);
     expect(followCheckbox!.checked).toBe(true);
@@ -3423,8 +3162,7 @@ describe("the status page", () => {
     // Simulate user scrolling away from the bottom
     scrollTopValue = 400;
     const scrollEvent = new (
-      logView!.ownerDocument!
-        .defaultView as unknown as { Event: typeof Event }
+      logView!.ownerDocument!.defaultView as unknown as { Event: typeof Event }
     ).Event("scroll", { bubbles: true });
     logView!.dispatchEvent(scrollEvent);
 
@@ -3479,9 +3217,7 @@ describe("the status page", () => {
       expect(doc.getElementById("log-follow")).not.toBeNull();
     });
 
-    const followCheckbox = doc.getElementById(
-      "log-follow",
-    ) as unknown as HTMLInputElement;
+    const followCheckbox = doc.getElementById("log-follow") as unknown as HTMLInputElement;
     followCheckbox.checked = true;
     const changeEvent = new (
       followCheckbox.ownerDocument!.defaultView as unknown as {
@@ -3497,24 +3233,16 @@ describe("the status page", () => {
 
     // Resolve the newer request first, then let the older one land after —
     // the older response must never overwrite the newer content.
-    resolveSecond(
-      new Response("second (newer) content", { status: 200 }),
-    );
+    resolveSecond(new Response("second (newer) content", { status: 200 }));
     await vi.waitFor(() => {
-      expect(doc.getElementById("log")?.textContent).toContain(
-        "second (newer) content",
-      );
+      expect(doc.getElementById("log")?.textContent).toContain("second (newer) content");
     });
 
     resolveFirst(new Response("first (stale) content", { status: 200 }));
     await new Promise((resolve) => setTimeout(resolve, 20));
 
-    expect(doc.getElementById("log")?.textContent).toContain(
-      "second (newer) content",
-    );
-    expect(doc.getElementById("log")?.textContent).not.toContain(
-      "first (stale) content",
-    );
+    expect(doc.getElementById("log")?.textContent).toContain("second (newer) content");
+    expect(doc.getElementById("log")?.textContent).not.toContain("first (stale) content");
   });
 
   test("follow unchecked while a refresh is in flight: the response does not scroll the view", async () => {
@@ -3578,9 +3306,7 @@ describe("the status page", () => {
       configurable: true,
     });
 
-    const followCheckbox = doc.getElementById(
-      "log-follow",
-    ) as unknown as HTMLInputElement;
+    const followCheckbox = doc.getElementById("log-follow") as unknown as HTMLInputElement;
     followCheckbox.checked = true;
     const check = new (
       followCheckbox.ownerDocument!.defaultView as unknown as {
@@ -3668,9 +3394,7 @@ describe("the status page", () => {
       configurable: true,
     });
 
-    const followCheckbox = doc.getElementById(
-      "log-follow",
-    ) as unknown as HTMLInputElement;
+    const followCheckbox = doc.getElementById("log-follow") as unknown as HTMLInputElement;
     followCheckbox.checked = true;
     const check = new (
       followCheckbox.ownerDocument!.defaultView as unknown as {
@@ -3793,9 +3517,7 @@ describe("the status page", () => {
       // Leading the row: the state is the first cell a reader meets, so the
       // verdict never depends on scanning the other six.
       const cell = row!.querySelector("td");
-      expect(cell?.className, `lane ${laneId}'s first cell is not the state cell`).toBe(
-        "c-state",
-      );
+      expect(cell?.className, `lane ${laneId}'s first cell is not the state cell`).toBe("c-state");
       const pill = cell?.querySelector(".pill") as unknown as HTMLElement;
       expect(pill, `lane ${laneId} has no state pill`).toBeTruthy();
       expect(pill.textContent?.trim()).toBe(state);
@@ -3833,7 +3555,11 @@ describe("the status page", () => {
       // module's `unknown`) and a start whose log ended without a PR (the
       // module's `vanished`). The no-report silence above pins the second
       // copy of the vanished default; these pin the split.
-      ["no-pr-started", { alive: false }, { stage: "implement", event: "started", ts: new Date(now).toISOString() }],
+      [
+        "no-pr-started",
+        { alive: false },
+        { stage: "implement", event: "started", ts: new Date(now).toISOString() },
+      ],
       [
         "no-pr-started-exit0",
         { alive: false, exit: 0 },
@@ -3943,9 +3669,7 @@ describe("the status page", () => {
     const status = stateFixture(now);
     const lanes = status.waves[0].lanes as unknown as LaneStatus[];
     const moduleCounts = laneStateCounts(lanes, now);
-    const present = (Object.entries(moduleCounts) as [string, number][]).filter(
-      ([, n]) => n > 0,
-    );
+    const present = (Object.entries(moduleCounts) as [string, number][]).filter(([, n]) => n > 0);
 
     const page = await loadPage(status);
     const doc = page.window.document;
@@ -3966,15 +3690,11 @@ describe("the status page", () => {
     // whose numbers are merely plausible is not a roll-up. The expected string is
     // built from the module's counts in the module's `LANE_STATES` order, which
     // also pins the page's copy of that order to the module's.
-    const meta = doc.querySelector(
-      'tr.wave[data-wave="S"] .wave-meta',
-    )?.textContent ?? "";
+    const meta = doc.querySelector('tr.wave[data-wave="S"] .wave-meta')?.textContent ?? "";
     expect(meta).toBe(
       [
         `${lanes.length} ${lanes.length === 1 ? "lane" : "lanes"}`,
-        ...LANE_STATES.filter((s) => moduleCounts[s] > 0).map(
-          (s) => `${moduleCounts[s]} ${s}`,
-        ),
+        ...LANE_STATES.filter((s) => moduleCounts[s] > 0).map((s) => `${moduleCounts[s]} ${s}`),
       ].join(" · "),
     );
     expect(present.length).toBeGreaterThan(0);
@@ -3986,8 +3706,7 @@ describe("the status page", () => {
     // rule, and this is the seam between them. A thread-blocked lane must
     // raise the total exactly as a running one does; a CI-only block must not.
     const attention =
-      doc.querySelector('#state-summary [data-state="attention"] .value')
-        ?.textContent ?? "";
+      doc.querySelector('#state-summary [data-state="attention"] .value')?.textContent ?? "";
     const wantsHuman = lanes.filter((lane) => laneNeedsHuman(lane, now)).length;
     expect(Number(attention)).toBe(wantsHuman);
     // The lead only turns red when there is someone to call.
@@ -4001,9 +3720,7 @@ describe("the status page", () => {
     const chipText = [...doc.querySelectorAll("#state-summary .ss-chip")].map(
       (el) => el.textContent?.trim() ?? "",
     );
-    expect(chipText.sort()).toEqual(
-      present.map(([s, n]) => `${n} ${s}`).sort(),
-    );
+    expect(chipText.sort()).toEqual(present.map(([s, n]) => `${n} ${s}`).sort());
 
     // X38 (plan §41 + fix round), explicitly: every past-wave lane in the
     // fixture keeps naming its earned state in the row — the rollup above
@@ -4042,12 +3759,8 @@ describe("the status page", () => {
     // the seam and not an echo: a page that drops a state the module still keeps
     // (or the reverse) is caught here, exactly as a divergent word is caught by
     // the row-pill parity test.
-    const activeIds = lanes
-      .filter((lane) => laneNeedsHuman(lane, now))
-      .map((lane) => lane.lane);
-    const inactiveIds = lanes
-      .map((lane) => lane.lane)
-      .filter((id) => !activeIds.includes(id));
+    const activeIds = lanes.filter((lane) => laneNeedsHuman(lane, now)).map((lane) => lane.lane);
+    const inactiveIds = lanes.map((lane) => lane.lane).filter((id) => !activeIds.includes(id));
     expect(activeIds.length).toBeGreaterThan(0);
     expect(inactiveIds.length).toBeGreaterThan(0);
     // X38, explicitly: a past-wave lane with no fresh, live-probed fact falls
@@ -4075,8 +3788,8 @@ describe("the status page", () => {
     // Turn it on: only the needs-a-human lanes remain.
     toggle.click();
     expect(toggle.getAttribute("aria-checked")).toBe("true");
-    const shown = [...doc.querySelectorAll("tr.lane[data-wave=\"S\"]")].map(
-      (row) => row.getAttribute("data-lane"),
+    const shown = [...doc.querySelectorAll('tr.lane[data-wave="S"]')].map((row) =>
+      row.getAttribute("data-lane"),
     );
     expect(shown.sort()).toEqual([...activeIds].sort());
     for (const id of inactiveIds) {
@@ -4084,16 +3797,12 @@ describe("the status page", () => {
     }
 
     // The preference is written where the sort preference is written.
-    expect(page.window.localStorage.getItem("wave-status:hide-inactive")).toBe(
-      "true",
-    );
+    expect(page.window.localStorage.getItem("wave-status:hide-inactive")).toBe("true");
 
     // Turn it back off: everything returns, and the choice is persisted false.
     toggle.click();
     expect(doc.querySelectorAll("tr.lane").length).toBe(lanes.length);
-    expect(page.window.localStorage.getItem("wave-status:hide-inactive")).toBe(
-      "false",
-    );
+    expect(page.window.localStorage.getItem("wave-status:hide-inactive")).toBe("false");
 
     // A reload with the stored choice starts hidden, without a click.
     const reloaded = await loadPage(status, undefined, {
@@ -4104,9 +3813,9 @@ describe("the status page", () => {
     ) as unknown as HTMLElement;
     expect(reloadedToggle.getAttribute("aria-checked")).toBe("true");
     expect(
-      [...reloaded.window.document.querySelectorAll("tr.lane[data-wave=\"S\"]")].map(
-        (row) => row.getAttribute("data-lane"),
-      ).sort(),
+      [...reloaded.window.document.querySelectorAll('tr.lane[data-wave="S"]')]
+        .map((row) => row.getAttribute("data-lane"))
+        .sort(),
     ).toEqual([...activeIds].sort());
 
     // A wave whose every lane is inactive says so, rather than vanishing blank.
@@ -4118,15 +3827,26 @@ describe("the status page", () => {
         {
           id: "D",
           lanes: [
-            { wave: "D", lane: "ready", derived: { alive: false, pr: { number: 1, state: "open", checks: "pass", unresolvedThreads: 0 } }, disagreements: [] },
-            { wave: "D", lane: "merged", derived: { alive: false, pr: { number: 2, state: "merged", checks: "pass" } }, disagreements: [] },
+            {
+              wave: "D",
+              lane: "ready",
+              derived: {
+                alive: false,
+                pr: { number: 1, state: "open", checks: "pass", unresolvedThreads: 0 },
+              },
+              disagreements: [],
+            },
+            {
+              wave: "D",
+              lane: "merged",
+              derived: { alive: false, pr: { number: 2, state: "merged", checks: "pass" } },
+              disagreements: [],
+            },
           ],
         },
         {
           id: "A",
-          lanes: [
-            { wave: "A", lane: "live", derived: { alive: true }, disagreements: [] },
-          ],
+          lanes: [{ wave: "A", lane: "live", derived: { alive: true }, disagreements: [] }],
         },
       ],
     } as unknown as WaveStatus;
@@ -4135,8 +3855,8 @@ describe("the status page", () => {
     });
     const hiddenDoc = hiddenPage.window.document;
     // Wave A's running lane survives; wave D's inactive lanes are all hidden.
-    expect(hiddenDoc.querySelectorAll("tr.lane[data-wave=\"A\"]").length).toBe(1);
-    expect(hiddenDoc.querySelector("tr.lane[data-wave=\"D\"]")).toBeNull();
+    expect(hiddenDoc.querySelectorAll('tr.lane[data-wave="A"]').length).toBe(1);
+    expect(hiddenDoc.querySelector('tr.lane[data-wave="D"]')).toBeNull();
     const empty = hiddenDoc.querySelector('tr.empty[data-wave="D"]');
     // The empty row names the control that emptied the wave, and how many rows it
     // took: "no lanes need a human" is the fact, "hide inactive is hiding 2 lanes"
@@ -4160,14 +3880,32 @@ describe("the status page", () => {
           id: "V",
           lanes: [
             { wave: "V", lane: "v-live", derived: { alive: true }, disagreements: [] },
-            { wave: "V", lane: "v-ready", derived: { alive: false, pr: { number: 20, state: "open", checks: "pass", unresolvedThreads: 0 } }, disagreements: [] },
+            {
+              wave: "V",
+              lane: "v-ready",
+              derived: {
+                alive: false,
+                pr: { number: 20, state: "open", checks: "pass", unresolvedThreads: 0 },
+              },
+              disagreements: [],
+            },
           ],
         },
         {
           id: "W",
           lanes: [
-            { wave: "W", lane: "w-merged", derived: { alive: false, pr: { number: 21, state: "merged", checks: "pass" } }, disagreements: [] },
-            { wave: "W", lane: "w-blocked", derived: { alive: false, pr: { number: 22, state: "open", checks: "pending" } }, disagreements: [] },
+            {
+              wave: "W",
+              lane: "w-merged",
+              derived: { alive: false, pr: { number: 21, state: "merged", checks: "pass" } },
+              disagreements: [],
+            },
+            {
+              wave: "W",
+              lane: "w-blocked",
+              derived: { alive: false, pr: { number: 22, state: "open", checks: "pending" } },
+              disagreements: [],
+            },
           ],
         },
         { id: "X", lanes: [] },
@@ -4182,10 +3920,9 @@ describe("the status page", () => {
     const setInput = (value: string) => {
       filter.value = value;
       filter.dispatchEvent(
-        new (doc.defaultView as unknown as { Event: typeof Event }).Event(
-          "input",
-          { bubbles: true },
-        ),
+        new (doc.defaultView as unknown as { Event: typeof Event }).Event("input", {
+          bubbles: true,
+        }),
       );
     };
 
@@ -4193,9 +3930,7 @@ describe("the status page", () => {
     // after the switch that hid them, in the plural form.
     setInput("w-");
     const hiddenW = doc.querySelector('tr.empty[data-wave="W"]');
-    expect(hiddenW?.textContent).toBe(
-      "2 lanes matching “w-” hidden by “hide inactive”",
-    );
+    expect(hiddenW?.textContent).toBe("2 lanes matching “w-” hidden by “hide inactive”");
     // The same render, the other direction: wave V's rows really do not answer
     // the query, and that is what the row says. Two waves, two different answers,
     // because two different controls emptied them.
@@ -4204,9 +3939,7 @@ describe("the status page", () => {
 
     // A wave with no lanes at all: nothing to match and nothing hidden. The query
     // must not be blamed for an empty wave either.
-    expect(doc.querySelector('tr.empty[data-wave="X"]')?.textContent).toBe(
-      "No lanes in wave",
-    );
+    expect(doc.querySelector('tr.empty[data-wave="X"]')?.textContent).toBe("No lanes in wave");
 
     // A singular match, and the query echoed back exactly as typed — the case the
     // reader searched for, in the reader's own spelling.
@@ -4254,10 +3987,9 @@ describe("the status page", () => {
     for (const name of clockTaking) {
       for (const call of script.matchAll(new RegExp(`${name}\\(([^)]*)\\)`, "g"))) {
         occurrences++;
-        expect(
-          call[1],
-          `${name} must be called with a clock, not a defaulted one`,
-        ).toMatch(/\bnowMs\b/);
+        expect(call[1], `${name} must be called with a clock, not a defaulted one`).toMatch(
+          /\bnowMs\b/,
+        );
       }
     }
     // Each name appears at least as a definition and a call: a helper nobody
@@ -4271,9 +4003,7 @@ describe("the status page", () => {
     const page = await loadPage(stateFixture(Date.now()), undefined, {
       mockStorageError: true,
     });
-    const toggle = page.window.document.getElementById(
-      "hide-inactive",
-    ) as unknown as HTMLElement;
+    const toggle = page.window.document.getElementById("hide-inactive") as unknown as HTMLElement;
     expect(toggle.getAttribute("aria-checked")).toBe("false");
     // One lane per state the derivation can name, plus the three S3 lanes
     // (a measured thread blocker, a checks read that could not be taken, and
@@ -4320,12 +4050,9 @@ describe("the status page", () => {
     expect(pill.classList.contains("dim")).toBe(true);
     // The module answers in the same word — and nothing about the row's
     // oddity takes the rest of the table down.
-    expect(
-      laneState(closedStatus.waves[0].lanes[18], now),
-    ).toBe("unknown");
+    expect(laneState(closedStatus.waves[0].lanes[18], now)).toBe("unknown");
     expect(doc.querySelectorAll("tr.lane").length).toBe(19);
   });
-
 
   test("the page mirrors the exported stall threshold, to the millisecond", async () => {
     // The inline script cannot import the module, so it carries its own copy of
@@ -4353,10 +4080,22 @@ describe("the status page", () => {
     ).toContain(`quiet ${Math.floor((stallThresholdMs - 5 * 60_000) / 60_000)}m`);
     // Nothing to be quiet about: a lane with no log gets no invented number,
     // and the quiet time belongs to the living states only.
-    const noLog = doc.querySelector('tr.lane[data-lane="no-log"] td.c-state') as unknown as HTMLElement;
+    const noLog = doc.querySelector(
+      'tr.lane[data-lane="no-log"] td.c-state',
+    ) as unknown as HTMLElement;
     expect(noLog.textContent).not.toContain("quiet");
-    for (const laneId of ["stalled", "blocked", "ready", "merged", "vanished", "failed", "conflict"]) {
-      const cell = doc.querySelector(`tr.lane[data-lane="${laneId}"] td.c-state`) as unknown as HTMLElement;
+    for (const laneId of [
+      "stalled",
+      "blocked",
+      "ready",
+      "merged",
+      "vanished",
+      "failed",
+      "conflict",
+    ]) {
+      const cell = doc.querySelector(
+        `tr.lane[data-lane="${laneId}"] td.c-state`,
+      ) as unknown as HTMLElement;
       expect(cell.textContent, `lane ${laneId}`).not.toContain("quiet");
     }
   });
@@ -4467,7 +4206,9 @@ describe("the status page", () => {
     const doc = page.window.document;
 
     for (const waveId of ["OLD", "EV"]) {
-      const age = doc.querySelector(`tr.wave[data-wave="${waveId}"] .wave-age`) as unknown as HTMLElement;
+      const age = doc.querySelector(
+        `tr.wave[data-wave="${waveId}"] .wave-age`,
+      ) as unknown as HTMLElement;
       expect(age.textContent, `wave ${waveId}`).toBe("3d ago");
       expect(age.classList.contains("past"), `wave ${waveId}`).toBe(true);
     }
@@ -4478,10 +4219,14 @@ describe("the status page", () => {
     expect(liveAge.classList.contains("past")).toBe(false);
 
     for (const lane of ["o1", "o2"]) {
-      const cell = doc.querySelector(`tr.lane[data-lane="${lane}"] td.c-state`) as unknown as HTMLElement;
+      const cell = doc.querySelector(
+        `tr.lane[data-lane="${lane}"] td.c-state`,
+      ) as unknown as HTMLElement;
       expect(cell.textContent, `lane ${lane}`).toContain("stale evidence");
     }
-    const liveCell = doc.querySelector('tr.lane[data-lane="t1"] td.c-state') as unknown as HTMLElement;
+    const liveCell = doc.querySelector(
+      'tr.lane[data-lane="t1"] td.c-state',
+    ) as unknown as HTMLElement;
     expect(liveCell.textContent).not.toContain("stale evidence");
   });
 
@@ -4523,10 +4268,14 @@ describe("the status page", () => {
     expect(age.textContent).toBe("now");
     expect(age.classList.contains("past")).toBe(false);
 
-    const staleRow = doc.querySelector('tr.lane[data-lane="m2"] td.c-state') as unknown as HTMLElement;
+    const staleRow = doc.querySelector(
+      'tr.lane[data-lane="m2"] td.c-state',
+    ) as unknown as HTMLElement;
     expect(staleRow.textContent).toContain("stale evidence");
     expect(staleRow.textContent).not.toContain("past wave");
-    const freshRow = doc.querySelector('tr.lane[data-lane="m1"] td.c-state') as unknown as HTMLElement;
+    const freshRow = doc.querySelector(
+      'tr.lane[data-lane="m1"] td.c-state',
+    ) as unknown as HTMLElement;
     expect(freshRow.textContent).not.toContain("stale evidence");
     expect(freshRow.textContent).not.toContain("past wave");
   });
@@ -4640,9 +4389,7 @@ describe("the status page", () => {
     const doc = page.window.document;
     const pills = Array.from(doc.querySelectorAll(".pill"));
     expect(pills.length).toBeGreaterThan(0);
-    const byText = new Map(
-      pills.map((el) => [el.textContent?.trim(), el]),
-    );
+    const byText = new Map(pills.map((el) => [el.textContent?.trim(), el]));
 
     const expectTone = (text: string, tone: string) => {
       const el = byText.get(text);
@@ -4909,9 +4656,7 @@ describe("the status page", () => {
   test("the wave band exposes eyebrow, id and a derived-state rollup inside the accordion button, and aria-controls resolves to that wave's own lane rows", async () => {
     const page = await loadPage(mixedStatus);
     const doc = page.window.document;
-    const waveT = doc.querySelector(
-      'tr.wave[data-wave="T"]',
-    ) as unknown as HTMLElement;
+    const waveT = doc.querySelector('tr.wave[data-wave="T"]') as unknown as HTMLElement;
     const button = waveT.querySelector("button.wave-band");
     expect(button).not.toBeNull();
     expect(button!.querySelector(".wave-eyebrow")?.textContent).toBe("wave");
@@ -4946,9 +4691,7 @@ describe("the status page", () => {
   test("the open lane's row carries .selected, survives a re-render, and clears on close", async () => {
     const page = await loadPage(mixedStatus);
     const doc = page.window.document;
-    (
-      doc.querySelector('tr.wave[data-wave="T"]') as unknown as HTMLElement
-    ).click();
+    (doc.querySelector('tr.wave[data-wave="T"]') as unknown as HTMLElement).click();
 
     const row = doc.querySelector(
       'tr.lane[data-wave="T"][data-lane="t1"]',
@@ -4978,9 +4721,7 @@ describe("the status page", () => {
     expect(reRendered).not.toBe(row);
     expect(reRendered.classList.contains("selected")).toBe(true);
 
-    (
-      doc.getElementById("log-close") as unknown as HTMLElement
-    ).click();
+    (doc.getElementById("log-close") as unknown as HTMLElement).click();
     const afterClose = doc.querySelector(
       'tr.lane[data-wave="T"][data-lane="t1"]',
     ) as unknown as HTMLElement;
@@ -4999,10 +4740,7 @@ describe("the status page", () => {
     const doc = page.window.document;
     expect(doc.querySelectorAll("tr.wave").length).toBeGreaterThan(0);
 
-    page.source.emit(
-      "status",
-      JSON.stringify({ generatedAt: "now", waves: [] }),
-    );
+    page.source.emit("status", JSON.stringify({ generatedAt: "now", waves: [] }));
 
     expect(doc.querySelectorAll("tr.wave").length).toBe(0);
     expect(doc.querySelectorAll("tr.lane").length).toBe(0);
@@ -5014,9 +4752,7 @@ describe("the status page", () => {
   test("every semantic column keeps its header treatment distinct from its own body cells", async () => {
     const page = await loadPage(mixedStatus);
     const doc = page.window.document;
-    (
-      doc.querySelector('tr.wave[data-wave="T"]') as unknown as HTMLElement
-    ).click();
+    (doc.querySelector('tr.wave[data-wave="T"]') as unknown as HTMLElement).click();
 
     const bodyRow = doc.querySelector('tr.lane[data-wave="T"][data-lane="t1"]');
     expect(bodyRow).not.toBeNull();
@@ -5102,9 +4838,7 @@ describe("the status page", () => {
     dispatchInput();
 
     expect(doc.querySelectorAll("tr.lane").length).toBe(1);
-    expect(
-      doc.querySelector('tr.lane[data-wave="T"][data-lane="t1"]'),
-    ).toBeNull();
+    expect(doc.querySelector('tr.lane[data-wave="T"][data-lane="t1"]')).toBeNull();
     // Wave T now has no surviving lanes
     const emptyT = doc.querySelector('tr.empty[data-wave="T"]');
     expect(emptyT).not.toBeNull();
@@ -5118,9 +4852,7 @@ describe("the status page", () => {
     filter.value = "";
     dispatchInput();
     expect(doc.querySelectorAll("tr.lane").length).toBe(5);
-    const restoredT1 = doc.querySelector(
-      'tr.lane[data-wave="T"][data-lane="t1"]',
-    );
+    const restoredT1 = doc.querySelector('tr.lane[data-wave="T"][data-lane="t1"]');
     expect(restoredT1?.classList.contains("selected")).toBe(true);
     expect(logPane?.hidden).toBe(false);
   });
@@ -5206,14 +4938,20 @@ describe("the status page", () => {
     }
 
     // Toggling the wave open and closed keeps the empty row visible
-    const waveUButton = doc.querySelector('tr.wave[data-wave="U"] button') as unknown as HTMLElement;
+    const waveUButton = doc.querySelector(
+      'tr.wave[data-wave="U"] button',
+    ) as unknown as HTMLElement;
     waveUButton.click();
     expect(waveUButton.getAttribute("aria-expanded")).toBe("true");
-    expect((doc.querySelector('tr.empty[data-wave="U"]') as unknown as HTMLElement).hidden).toBe(false);
+    expect((doc.querySelector('tr.empty[data-wave="U"]') as unknown as HTMLElement).hidden).toBe(
+      false,
+    );
 
     waveUButton.click();
     expect(waveUButton.getAttribute("aria-expanded")).toBe("false");
-    expect((doc.querySelector('tr.empty[data-wave="U"]') as unknown as HTMLElement).hidden).toBe(false);
+    expect((doc.querySelector('tr.empty[data-wave="U"]') as unknown as HTMLElement).hidden).toBe(
+      false,
+    );
   });
 
   test("typing in the filter does not refetch the followed log", async () => {
@@ -5225,7 +4963,9 @@ describe("the status page", () => {
     const doc = page.window.document;
 
     // Open log for T/t1
-    const laneT1 = doc.querySelector('tr.lane[data-wave="T"][data-lane="t1"]') as unknown as HTMLElement;
+    const laneT1 = doc.querySelector(
+      'tr.lane[data-wave="T"][data-lane="t1"]',
+    ) as unknown as HTMLElement;
     laneT1.click();
     await vi.waitFor(() => {
       expect(page.fetches).toContain("/api/log/T/t1?tail=16");
@@ -5236,9 +4976,12 @@ describe("the status page", () => {
     const followCheckbox = doc.getElementById("log-follow") as unknown as HTMLInputElement;
     followCheckbox.checked = true;
     followCheckbox.dispatchEvent(
-      new (followCheckbox.ownerDocument!.defaultView as unknown as { Event: typeof Event }).Event("change", {
-        bubbles: true,
-      }),
+      new (followCheckbox.ownerDocument!.defaultView as unknown as { Event: typeof Event }).Event(
+        "change",
+        {
+          bubbles: true,
+        },
+      ),
     );
     await vi.waitFor(() => {
       expect(page.fetches.length).toBeGreaterThan(initialFetches);
@@ -5445,7 +5188,12 @@ describe("the status page — backlog panel (S5)", () => {
     plans: ["docs/planning/a.md"],
     premises: [
       { lane: "W1", plan: "docs/planning/a.md", status: "holds" as const },
-      { lane: "S5", plan: "docs/planning/S5.md", status: "stale" as const, reason: "already merged" },
+      {
+        lane: "S5",
+        plan: "docs/planning/S5.md",
+        status: "stale" as const,
+        reason: "already merged",
+      },
       { lane: "T9", plan: "docs/planning/t9.md", status: "timed-out" as const },
     ],
   };
@@ -5519,7 +5267,12 @@ describe("the status page — backlog panel (S5)", () => {
         artifact: {
           ...recordedArtifact,
           premises: [
-            { lane: "E1", plan: "docs/planning/e.md", status: "error" as const, reason: "spawn sh ENOENT" },
+            {
+              lane: "E1",
+              plan: "docs/planning/e.md",
+              status: "error" as const,
+              reason: "spawn sh ENOENT",
+            },
           ],
         },
       },
