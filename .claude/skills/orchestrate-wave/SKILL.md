@@ -332,12 +332,32 @@ that did not happen.
    **after a wave's installs, verify the main checkout still has its native binaries** rather than
    letting the owner's next dev start find out:
 
-       find node_modules -name "*.node" -path "*darwin*" | head
+   ```sh
+   # Names any platform package left with metadata only, and is silent when healthy.
+   #
+   # `find node_modules -name '*.node' | head` is NOT a check: a stripped package simply
+   # contributes no line, so the command prints the survivors and exits 0 — it reports what
+   # exists, never what is missing. Nor is "has a .node file" the test: @esbuild ships
+   # `bin/esbuild`, @img/sharp-libvips ships `lib/`, and both are healthy with no .node at
+   # all. The payload test below has neither false negative nor false positive on this repo.
+   for d in node_modules/@*/*darwin*/ node_modules/*darwin*/; do
+     [ -d "$d" ] || continue
+     n=$(find "$d" -type f ! -name '*.json' ! -name '*.md' ! -name 'LICENSE*' | wc -l)
+     [ "$n" -eq 0 ] && echo "STRIPPED: $d"
+   done
+   ```
+
+   Run on 2026-09-17 it found **two more** beyond the two that had already broken `yarn dev`:
+   `@turbo/darwin-arm64` — which is why that day's dev run opened with *"Turborepo did not find the
+   correct binary for your platform"* and repaired itself — and `@rolldown/binding-darwin-arm64`,
+   which nothing had asked for yet and would have failed later, with no obvious cause.
 
    The repair is to delete the stripped package directory and reinstall — a plain `yarn install` will
-   not restore it, because the directory's presence makes the package look installed. Write each brief from Template A, then dispatch it as an `Agent`. **Record the
-   worktree tip first** — an agent that reports success having committed nothing looks identical to
-   one that did the work. Never let two lanes own the same file at the same time.
+   not restore it, because the directory's presence makes the package look installed.
+
+   Write each brief from Template A, then dispatch it as an `Agent`. **Record the worktree tip
+   first** — an agent that reports success having committed nothing looks identical to one that did
+   the work. Never let two lanes own the same file at the same time.
 
    **A lane is not done until the PR exists, and lanes routinely stop one step short.** On
    2026-09-16, CC1 and CC6 each committed clean, verified work and never pushed or opened a PR, and
