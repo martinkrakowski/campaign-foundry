@@ -87,13 +87,20 @@ lane names the fault that must turn it **red**:
 test -f .claude/skills/orchestrate-wave/scripts/dispatch-lane.sh
 ```
 
-```premise W2
-# No esbuild target is set for the API, so Nitro's es2019 default stands against
-# tsconfig's ES2022. Measured: ~4 ms. Greps the config rather than running the
-# bundler, because a fence that invokes a build cannot answer inside the budget --
-# the lesson X1's second fence cost.
-! grep -q "esbuild" apps/api/nitro.config.ts
-```
+**W2 — shipped.** `apps/api/nitro.config.ts` now sets `esbuild: { options: { target: "es2022" } }`,
+matching `tsconfig.base.json`'s `ES2022` instead of inheriting Nitro's `es2019` default (W-D3). The
+key nests — `esbuild.options.target`, not `esbuild.target` — because Nitro passes `options` straight
+through to the esbuild plugin. Measured with the DoD's own command, `yarn workspace
+@campaignfoundry/api build`: **7** "Big integer literals are not available" warnings before, **0**
+after, the build exiting 0 both times. Nitro honoured the setting, so the reporting branch this lane
+was told to take — *if the setting is ignored, that is the finding* — did not arise, and the target
+was not raised anywhere else.
+
+The fence is retired. It grepped the config rather than running the bundler, which was the right
+call for a 10s budget and is also its limit: `! grep -q "esbuild" apps/api/nitro.config.ts` flips on
+the word appearing in the file, not on the target being correct, so it could have been satisfied by a
+comment. What actually holds the target is the mutation manifest at `.agents/manifests/w2-api-esbuild.json`,
+which removes the block and requires the warnings to come back.
 
 ```premise W3
 # The staleness token has no shared definition. The mechanism, not the identifier: both

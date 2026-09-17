@@ -22,6 +22,18 @@ export default defineNitroConfig({
   // package (or a platform ffmpeg-static does not ship) must still start —
   // the boot probe then reports motion as unavailable instead of the config
   // load throwing before Nitro even exists.
+  // Nitro's esbuild default is es2019, which contradicts the `"target": "ES2022"`
+  // every workspace compiles against in tsconfig.base.json. The mismatch was
+  // invisible until a source file used syntax that falls between the two:
+  // packages/CampaignOrchestration/src/application/use-cases/PlanCapacity.ts
+  // writes BigInt *literals* (`0n`, `1n`), which are ES2020, so every build
+  // printed seven "Big integer literals are not available in the configured
+  // target environment (\"es2019\") ... may crash at run-time" warnings. It never
+  // crashed — Node evaluates BigInt regardless of a declared target — so the
+  // declaration was wrong, not the runtime, and seven warnings on every build is
+  // how a real warning gets missed. Stated here rather than inherited so the
+  // bundler and the compiler visibly agree and a future divergence is a diff.
+  esbuild: { options: { target: "es2022" } },
   externals: { traceInclude: resolveOptional("ffmpeg-static") },
 });
 
