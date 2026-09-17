@@ -503,6 +503,25 @@ locked decision; or a seat runs out of credit.
 
 ## House rules that bite here
 
+- **Never spawn a funded model seat to reproduce a defect.** `opencode run`, `agy`, `grok` and the
+  rest bill the owner. On 2026-09-17 lane W1 demonstrated the launcher's process-group kill by
+  launching one real `opencode run` against the owner's account — about four seconds of a paid seat,
+  disclosed unprompted, for a fact a stub would have shown just as well. The dispatch mechanics being
+  probed (does the child survive a group signal?) are a property of `setpgid`, `nohup` and `disown`,
+  not of any model: `sleep 60` reproduces them exactly. The existing rules named the owner's dev
+  servers and their GenAI credits and did not name this, so write it into every brief: **reproduce
+  dispatch and launcher behaviour with a stub process, never a paid CLI.** A seat is for doing the
+  lane's work, not for demonstrating that a launcher kills it.
+
+- **Touching a manifest arms it.** CI replays only the manifests a change *touches*
+  (`ci.yml:125`), so editing one for an unrelated reason pulls it into the replay set and every
+  anchor in it must then resolve. On 2026-09-17 lane TS1 re-anchored two entries in `cc1.json` and
+  turned its third — stale since X1's formatter run — into a red gate. The corollary is worse than
+  the inconvenience: a manifest nobody touches is **never checked again**, so its evidence rots in
+  silence. An audit that day found **45 stale anchors across 29 manifests**. Before editing a
+  manifest, check that all of its anchors still resolve, and treat a stale one as a finding rather
+  than a chore you inherited.
+
 - **Before `git reset --hard`, save the diff.** `git diff > /tmp/<name>.patch` (and
   `git diff --cached` if anything is staged) first. A hard reset silently destroys uncommitted work,
   and the moment it costs most is the one where you are resetting *because* something went wrong —
