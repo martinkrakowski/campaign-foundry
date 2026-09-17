@@ -328,7 +328,11 @@ that did not happen.
    `package.json` and `README.md` intact and its `.node` file gone. Platform-specific optional
    dependencies are what break, because they are the large binaries.
 
-   So: serialise installs, skip them for lanes that touch no code (a deletion lane, a docs lane), and
+   So: serialise installs; skip them **only for a lane that runs no local command needing
+   dependencies** — which in practice means a docs-only lane and very little else. **A deletion lane
+   is not one of them**: W1 deletes a test file, and proving the *remaining* suite still passes is
+   exactly the command that needs `node_modules`. (I skipped `cf-w1`'s install on the strength of the
+   first draft of this rule; review caught it before the lane ran.) And
    **after a wave's installs, verify the main checkout still has its native binaries** rather than
    letting the owner's next dev start find out:
 
