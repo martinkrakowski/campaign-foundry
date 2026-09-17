@@ -41,8 +41,8 @@ const IDENTITY_STEP = "identity";
 
 /**
  * D144 / CC6: The four campaign types grouped by format.
- * - Static: social-post, paid-social, display-ad
- * - Video/motion: short-video
+ * - Still images (static): social-post, paid-social, display-ad
+ * - Video (motion): short-video
  *
  * A view grouping only: domain values, presets, and selection behaviour are unchanged.
  */
@@ -53,11 +53,11 @@ export interface CampaignTypeGroup {
 
 export const CAMPAIGN_TYPE_GROUPS: readonly CampaignTypeGroup[] = [
   {
-    label: messages.createFormatGroupStatic,
+    label: formatDisplayName("static"),
     types: ["social-post", "paid-social", "display-ad"],
   },
   {
-    label: messages.createFormatGroupMotion,
+    label: formatDisplayName("motion"),
     types: ["short-video"],
   },
 ];

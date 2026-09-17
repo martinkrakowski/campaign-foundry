@@ -770,49 +770,35 @@ describe("the inline discard guard (W2(a) / D90)", () => {
   });
 });
 
-describe("CC6 — format grouping by Static and Video/motion (D144)", () => {
+describe("CC6 — format grouping by format display names (D144)", () => {
   test("each group exposes an accessible name, and each tile appears under the correct one", async () => {
     const user = userEvent.setup();
     renderDialog();
     const dialog = await openDialog(user);
 
-    const staticGroup = within(dialog).getByRole("group", { name: messages.createFormatGroupStatic });
+    const staticGroup = within(dialog).getByRole("group", { name: formatDisplayName("static") });
     expect(within(staticGroup).getAllByRole("button").map((tile) => tile.getAttribute("aria-label"))).toEqual([
       "social-post",
       "paid-social",
       "display-ad",
     ]);
 
-    const motionGroup = within(dialog).getByRole("group", { name: messages.createFormatGroupMotion });
+    const motionGroup = within(dialog).getByRole("group", { name: formatDisplayName("motion") });
     expect(within(motionGroup).getAllByRole("button").map((tile) => tile.getAttribute("aria-label"))).toEqual([
       "short-video",
     ]);
   });
 
-  test("all four types remain reachable and selectable, one assertion per type", async () => {
+  test("all four types remain reachable and selectable, iterating CAMPAIGN_TYPES", async () => {
     const user = userEvent.setup();
     renderDialog();
     const dialog = await openDialog(user);
 
-    // social-post is reachable and selectable
-    const socialPostTile = within(dialog).getByRole("button", { name: "social-post" });
-    await user.click(socialPostTile);
-    expect(socialPostTile.getAttribute("aria-pressed")).toBe("true");
-
-    // paid-social is reachable and selectable
-    const paidSocialTile = within(dialog).getByRole("button", { name: "paid-social" });
-    await user.click(paidSocialTile);
-    expect(paidSocialTile.getAttribute("aria-pressed")).toBe("true");
-
-    // display-ad is reachable and selectable
-    const displayAdTile = within(dialog).getByRole("button", { name: "display-ad" });
-    await user.click(displayAdTile);
-    expect(displayAdTile.getAttribute("aria-pressed")).toBe("true");
-
-    // short-video is reachable and selectable
-    const shortVideoTile = within(dialog).getByRole("button", { name: "short-video" });
-    await user.click(shortVideoTile);
-    expect(shortVideoTile.getAttribute("aria-pressed")).toBe("true");
+    for (const type of CAMPAIGN_TYPES) {
+      const tile = within(dialog).getByRole("button", { name: type });
+      await user.click(tile);
+      expect(tile.getAttribute("aria-pressed")).toBe("true");
+    }
   });
 
   test("selecting short-video produces mode: variation through the preset (asserting resulting mode)", async () => {
