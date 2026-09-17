@@ -179,7 +179,7 @@ describe("PreviewDock", () => {
     const { container } = render(<PreviewDock {...showcase} step={undefined} stepCount={undefined} />);
     expect(container.textContent).toContain("Summer Launch");
     expect(container.textContent).toContain("Stay wild. Stay hydrated.");
-    expect(container.textContent).not.toMatch(/\d+ \/ \d+/);
+    expect(container.textContent).not.toContain(" / ");
   });
 });
 
@@ -197,7 +197,7 @@ describe("PreviewRailEmptyState (D142)", () => {
 
   test("omits the step readout when no cursor is given (Everything, D141)", () => {
     const { container } = render(<PreviewRailEmptyState campaignName="Summer Launch" />);
-    expect(container.textContent).not.toMatch(/\d+ \/ \d+/);
+    expect(container.textContent).not.toContain(" / ");
   });
 });
 

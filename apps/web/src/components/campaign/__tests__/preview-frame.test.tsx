@@ -289,5 +289,42 @@ describe("the rail's memo must not hide a switch of creative from usePreviewFram
     expect(view.container.querySelector("img")).toBeNull();
     expect(view.container.querySelector("svg")).not.toBeNull();
   });
+
+  /**
+   * CodeRabbit, caught in review: the SAME defect, one value short. The
+   * brief stays "twin-a" throughout — only the first product's id changes,
+   * with its colour and logo held fixed, so `previewFetchKey`'s lookup
+   * result is unchanged too. `usePreviewFrame`'s own identity tuple
+   * includes `cell.productId` directly; the real `/preview-frame` request
+   * would ask for a different product while the memo, without the fix,
+   * kept the rail showing the old one's frame.
+   */
+  const twinProductState = (productId: string): EditorState => {
+    let state = initialEditorState("variation");
+    state = editorReducer(state, {
+      type: "setProduct",
+      key: 1,
+      patch: { id: productId, name: "A", primaryColor: "#1473E6", logoPath: "a.png" },
+    });
+    state.campaignName = "twin";
+    state.briefId = "twin-a";
+    state.source = { kind: "file", file: "twin-a.yaml", loadedId: "twin-a", savedSnapshot: null, revision: undefined };
+    return state;
+  };
+
+  test("switching the first product's id clears the stale frame, even with the same colour and logo", async () => {
+    vi.useFakeTimers();
+    vi.mocked(globalThis.fetch).mockResolvedValue(pngResponse());
+
+    const view = render(dock(twinProductState("p1")));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(PREVIEW_FRAME_DEBOUNCE_MS + 10);
+    });
+    expect(view.container.querySelector("img")).not.toBeNull();
+
+    view.rerender(dock(twinProductState("p2")));
+    expect(view.container.querySelector("img")).toBeNull();
+    expect(view.container.querySelector("svg")).not.toBeNull();
+  });
 });
 

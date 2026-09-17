@@ -143,14 +143,26 @@ export function previewDockProps(
  * campaign name, never the id, and `previewFetchKey` is a pure CONTENT
  * fingerprint with no id in it either — so two SAVED briefs sharing every
  * visual input but a different id would never move this key without the
- * identity term below, and the memo would keep handing `PreviewDock` the
- * OLD brief. `usePreviewFrame`'s own identity guard (`identityAxis =
- * identityKey ?? brief.id`, `preview-frame.ts`) can only clear on a switch
- * it actually SEES — a memo upstream that hides the switch defeats it
- * (FI1's defect, #448, reintroduced narrower). `rawRailProps.identityKey ??
- * brief.id` is exactly that same expression, over the same two values this
- * function is handed, so the memo and the hook's guard can never disagree
- * about when the creative has changed.
+ * `rawRailProps.identityKey ?? brief.id` term, and the memo would keep
+ * handing `PreviewDock` the OLD brief. `usePreviewFrame`'s own identity
+ * guard (`identityAxis = identityKey ?? brief.id`, `preview-frame.ts`) can
+ * only clear on a switch it actually SEES — a memo upstream that hides the
+ * switch defeats it (FI1's defect, #448, reintroduced narrower). That term
+ * is exactly the same expression, over the same two values this function
+ * is handed, so the memo and the hook's guard can never disagree about
+ * when the CREATIVE has changed.
+ *
+ * The PRODUCT is the other half of what the hook keys on (CodeRabbit,
+ * caught in review): `usePreviewFrame`'s own identity tuple includes
+ * `cell.productId` directly, but `productId` here is only ever used to
+ * LOOK UP a product inside `previewFetchKey` (its colour/logo) — neither
+ * `rawRailProps` (no product id in the look) nor that lookup's result
+ * carries the id itself. So the first product's id changing while its
+ * colour and logo stay put — a real, editable-in-the-editor case, unlike
+ * the brief-id coincidence above — would not move this key either, even
+ * though the actual `/preview-frame` request (keyed on `cell.productId`)
+ * asks the server for a different product entirely. `productId` is
+ * therefore folded into the key directly, not only through the lookup.
  */
 export function previewRailKey(
   rawRailProps: PreviewShowcaseProps | null,
@@ -158,5 +170,5 @@ export function previewRailKey(
   productId: string,
 ): string | null {
   if (rawRailProps === null) return null;
-  return `${JSON.stringify(rawRailProps)} ${previewFetchKey(brief, productId)} ${rawRailProps.identityKey ?? brief.id}`;
+  return `${JSON.stringify(rawRailProps)} ${previewFetchKey(brief, productId)} ${rawRailProps.identityKey ?? brief.id} ${productId}`;
 }

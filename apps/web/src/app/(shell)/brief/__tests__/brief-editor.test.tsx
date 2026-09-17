@@ -3457,7 +3457,7 @@ describe("BriefPage — the preview rail (R7)", () => {
     expect(mountedFrameCount()).toBe(1);
     // Everything has no step cursor — `stepIndex` is stale outside Guided — so
     // the rail's own step readout must not show a guided cursor here (D141).
-    expect(within(rail).queryByText(/^\d+ \/ \d+$/)).toBeNull();
+    expect(within(rail).queryByText(/ \/ /)).toBeNull();
   });
 
   test("a brief with nothing to draw shows the rail's empty state, not no rail (D142)", async () => {
@@ -3503,7 +3503,7 @@ describe("BriefPage — the preview rail (R7)", () => {
       expect(within(rail).getByText(messages.previewNeedsProductId)).toBeTruthy();
       // D141 — no step cursor outside Guided, whether the rail shows the
       // dock or (D142) the empty state.
-      expect(within(rail).queryByText(/^\d+ \/ \d+$/)).toBeNull();
+      expect(within(rail).queryByText(/ \/ /)).toBeNull();
     });
     expect(mountedFrameCount()).toBe(0);
   });

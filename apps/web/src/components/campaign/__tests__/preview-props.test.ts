@@ -245,4 +245,41 @@ describe("previewRailKey — the memo boundary's identity axis (Qodo, caught in 
   test("null rawRailProps (nothing to draw) never computes a key", () => {
     expect(previewRailKey(null, twinBrief("x"), "p1")).toBeNull();
   });
+
+  /**
+   * CodeRabbit, caught in review: `usePreviewFrame`'s own identity tuple
+   * includes `cell.productId` directly, but `productId` here previously fed
+   * ONLY the `previewFetchKey` lookup (the product's colour/logo) — neither
+   * `rawRailProps` (no product id in the look) nor that lookup's result
+   * carries the id itself. So the first product's id changing while its
+   * colour and logo stay put — an ordinary, editable-in-the-editor case —
+   * would not move the key, even though the real `/preview-frame` request
+   * (keyed on `cell.productId`) would ask the server for a different
+   * product than the one still painted.
+   */
+  test("moves when the first product's id changes even though its colour and logo stay put", () => {
+    const rawRailPropsFor = (productId: string) => {
+      const state = initialEditorState("variation");
+      state.products = [{ ...namedProduct(1), id: productId, primaryColor: "#1473E6", logoPath: "a.png" }];
+      state.campaignName = "twin";
+      state.source = { kind: "file", file: "twin.yaml", loadedId: "twin", savedSnapshot: null, revision: undefined };
+      return previewDockProps(state, 0, 6)!;
+    };
+    const briefWithProduct = (productId: string): CampaignBrief => ({
+      schemaVersion: 1,
+      template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+      id: "twin",
+      targetRegion: "DE",
+      targetAudience: "a",
+      campaignMessage: "Hi",
+      products: [{ id: productId, name: "A", primaryColor: "#1473E6", logoPath: "a.png" }],
+    });
+
+    // rawRailProps is IDENTICAL between p1 and p2 (the look carries no
+    // product id — only colour, which is unchanged) — the product id
+    // argument itself is the only thing that can distinguish these calls.
+    const keyA = previewRailKey(rawRailPropsFor("p1"), briefWithProduct("p1"), "p1");
+    const keyB = previewRailKey(rawRailPropsFor("p2"), briefWithProduct("p2"), "p2");
+    expect(keyA).not.toBe(keyB);
+  });
 });
