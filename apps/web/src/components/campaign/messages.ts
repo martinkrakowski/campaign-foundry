@@ -1194,6 +1194,36 @@ export function templateRequiredNote(names: string[]): string {
 export const templateAddLabel = "Add a layer";
 
 /**
+ * A row's select control (CC3, D139): the same D18 contract as every other
+ * control in the stack — the accessible name is the raw layer id and the words
+ * live here. "Pick" rather than "select": the selection is ephemeral editor
+ * state, not a field of the document, so nothing about it is saved.
+ */
+export function layerSelectDescription(name: string): string {
+  return `Pick ${name}`;
+}
+
+/**
+ * The Template step, after CC3 moved the stack into the creative rail: the step
+ * says where its controls went rather than going quiet. The stack itself is
+ * mounted exactly once (the plan's §4.6), so this is a pointer, never a second
+ * copy of the offers.
+ */
+export const templateStackInRail =
+  "Layers are edited beside the creative, in the preview rail: pick one, hide it, reorder it, add or remove.";
+
+/**
+ * The heading over one html layer's element editor, now that the editor no
+ * longer rides inside that layer's stack row and cannot borrow the row's
+ * context. The layer's raw id, because that is what the rail's row shows and
+ * what the brief carries — a display name would name the kind, of which a
+ * template may hold several.
+ */
+export function templateHtmlLayerLabel(layerId: string): string {
+  return `Elements of layer ${layerId}`;
+}
+
+/**
  * An add control's description: the control's accessible name is the raw kind
  * id (the kit contract, as `PlatformCard` pins it) — the words live here,
  * reached through `aria-describedby`, never inside the name. `name` is a

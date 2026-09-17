@@ -109,6 +109,8 @@ import { SECTION_TITLES, sectionOrder, LayoutSection, type SectionId } from "./s
 import { ReviewStep } from "./ReviewStep";
 import { PreviewDock, PreviewRailEmptyState, type PlayheadState } from "./PreviewDock";
 import { previewDockProps, previewRailKey } from "./preview-props";
+import { LayerStack } from "./LayerStack";
+import { layerStackKey, layerStackProps } from "./layer-stack-props";
 import { useMinInlineSize, PREVIEW_RAIL_MIN_INLINE_PX } from "@/lib/use-min-inline-size";
 import { DEFAULT_DURATION_SEC } from "@campaignfoundry/CampaignOrchestration/variation-defaults";
 import { resolveTimeline } from "@campaignfoundry/CampaignOrchestration/copy-timeline";
@@ -826,6 +828,46 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   useEffect(() => {
     setSelectedBeatIndex(null);
   }, [state.timeline.beats]);
+  /**
+   * CC3 — the rail's layer stack, fed and memoised exactly as the preview is.
+   *
+   * `layerStackKey` is the layer-side twin of `previewKey`: a fingerprint of
+   * everything `layerStackProps` reads (the creative type, each layer's id,
+   * kind and enabled flag IN ORDER, the occlusion advisory). `previewKey`
+   * cannot serve here — it fingerprints the previewed LOOK and carries no layer
+   * at all, so switching a layer off would not move it — and `[state]` cannot
+   * serve either, because that is the whole defect: the rail is a child of the
+   * editor's single commit, so a keystroke in `targetAudience` would re-render
+   * every layer row without it. A fresh object here defeats `LayerStack`'s
+   * `memo` while every fetch-count assertion stays green, which is how #469
+   * regressed; `brief-editor.layers.test.tsx` counts the re-render for that
+   * reason rather than inferring it from the network.
+   */
+  const rawLayerStackProps = layerStackProps(state);
+  const layerStackFingerprint = layerStackKey(state);
+  const layerStack = useMemo(() => rawLayerStackProps, [layerStackFingerprint]);
+  /**
+   * D139 — which layer the operator has picked out. Ephemeral: local component
+   * state, the same bucket as the scrub position (VE-D5), the tape's beat and
+   * the timeline zoom (D147). Never a field of `EditorState`, never in the
+   * brief, never in `localStorage` — a selection that reached the document
+   * would dirty a loaded brief on a click that changed nothing.
+   */
+  /**
+   * An ID, never an index — the opposite of `selectedBeatIndex` above, and for
+   * a reason that reverses its conclusion. A beat has no identity but its slot,
+   * so carrying an index across an edit silently re-points the selection at
+   * whichever beat now occupies it and the honest answer is to retire it. A
+   * layer HAS an identity: its id survives a reorder, so a selection keyed on
+   * the id follows the layer the operator picked rather than the slot it was
+   * standing in, and needs no retiring effect at all. An id that names no
+   * layer any more (it was removed) matches no row, so the highlight clears by
+   * construction — `LayerStack` compares per row and there is no second place
+   * that decides what "picked" means.
+   */
+  const [pickedLayerId, setPickedLayerId] = useState<string | null>(null);
+  /** Stable across every render: a fresh arrow would defeat the `memo` above. */
+  const pickLayer = useCallback((id: string) => setPickedLayerId(id), []);
   // CC2 — the JS-side mirror of the row's own `@container(min-width:56rem)`
   // query (§6 question 1): the CSS hides the rail below the breakpoint, but
   // the element stays mounted and would keep fetching without this. Observes
@@ -1583,8 +1625,11 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
           />
         );
       case "template":
-        // The layer list (L5): add and remove, exactly what the compatibility
-        // table offers — the boundary's own offers, never a second list (D124).
+        // CC3 — the layer STACK is not here: it is the rail's `LayerStack`, and
+        // there is exactly one of it in the tree (the plan's §4.6). What the
+        // step still holds is the html layer's element editor, an inspector
+        // CC4's sheet takes over. A second stack mounted here would be the
+        // disposition defect the plan forbids, not a convenience.
         return (
           <TemplateSection
             state={state}
@@ -1933,6 +1978,22 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
               {dump(draftBrief)}
             </pre>
           )}
+          {/* CC3 — the layers container under the creative, which is where the
+            owner's diagram puts it. Outside the view switcher on purpose: the
+            switcher is exclusive between the composed PREVIEW and the YAML
+            projection (D61), and a list of controls is neither — hiding the
+            only layer stack in the tree behind a read-only view would make it
+            unreachable while that view is up. Outside the `railProps !== null`
+            branch for the same kind of reason: the template is real whether or
+            not the first product has an id yet (D142 is about the preview), and
+            answering "no layers" because the preview has nothing to draw would
+            be a failure dressed as an empty result. */}
+          <LayerStack
+            {...layerStack}
+            dispatch={dispatch}
+            selectedLayerId={pickedLayerId}
+            onSelectLayer={pickLayer}
+          />
         </aside>
       ) : null}
     </>

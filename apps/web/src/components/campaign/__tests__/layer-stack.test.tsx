@@ -1,5 +1,5 @@
 import { describe, test, expect, vi } from "vitest";
-import { useReducer } from "react";
+import { useReducer, useState } from "react";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { templateFromCanonical } from "@campaignfoundry/CampaignOrchestration/brief-template";
@@ -9,12 +9,27 @@ import {
   initialEditorState,
   normalizeDraftState,
   toBrief,
+  type EditorAction,
   type EditorState,
 } from "@/components/campaign/editor-state";
 import { removableLayerIds } from "@/components/campaign/derive";
 import { layerKindDisplayName } from "@/components/campaign/display-names";
-import { TemplateSection } from "../TemplateSection";
-import * as messages from "../../messages";
+import { LayerStack } from "../LayerStack";
+import { layerStackProps } from "../layer-stack-props";
+import * as messages from "../messages";
+
+/**
+ * The layer stack (CC3), where it now lives: the creative rail, not the
+ * Template step's form. These tests moved with the component, unchanged in
+ * substance — the offers, the refusals, the ordering and the toggle are the same
+ * domain rules they always pinned, and `premise CC3`'s disposition moved WHERE
+ * the stack is, never WHAT it may do. What is new here is at the foot of the
+ * file: the selection (D139) and the props seam the rail's memo boundary keys on.
+ *
+ * Every render goes through `layerStackProps`, the same function `BriefEditor`
+ * feeds the rail with, so no test fixture is a second definition of how the
+ * stack is fed.
+ */
 
 const state = (over: Partial<EditorState> = {}): EditorState => ({
   ...initialEditorState(),
@@ -27,18 +42,41 @@ const addGroup = () => within(screen.getByRole("group", { name: messages.templat
 const list = () => within(screen.getByRole("list", { name: messages.templateListLabel }));
 
 /**
+ * The stack as the editor mounts it: state through `layerStackProps`, selection
+ * as the host's own ephemeral state (D139). A static `state` with a `vi.fn()`
+ * dispatch renders exactly the tree `BriefEditor` renders.
+ */
+function Stack({
+  state,
+  dispatch,
+}: {
+  state: EditorState;
+  dispatch: (action: EditorAction) => void;
+}) {
+  const [picked, setPicked] = useState<string | null>(null);
+  return (
+    <LayerStack
+      {...layerStackProps(state)}
+      dispatch={dispatch}
+      selectedLayerId={picked}
+      onSelectLayer={setPicked}
+    />
+  );
+}
+
+/**
  * A real-reducer harness: add and remove go through `editorReducer`, so the
  * round-trip tests exercise the editor's actual save path (`toBrief`) and its
  * actual load path (`fromBrief`), not a mock of either.
  */
 function Harness({ initial }: { initial: EditorState }) {
   const [state, dispatch] = useReducer(editorReducer, initial);
-  return <TemplateSection state={state} dispatch={dispatch} errors={{}} />;
+  return <Stack state={state} dispatch={dispatch} />;
 }
 
-describe("TemplateSection — the layer list (L5, D124)", () => {
+describe("LayerStack — the layer list (L5, D124)", () => {
   test("renders every layer bottom first, each with its kind's display name and its id", () => {
-    render(<TemplateSection state={state()} dispatch={vi.fn()} errors={{}} />);
+    render(<Stack state={state()} dispatch={vi.fn()} />);
     const rows = screen.getAllByRole("listitem");
     // image-text's canonical list, in draw order — the array order the list renders.
     const expected = [
@@ -58,7 +96,7 @@ describe("TemplateSection — the layer list (L5, D124)", () => {
   test("add offers exactly addableKinds and dispatches the kind alone", async () => {
     const user = userEvent.setup();
     const dispatch = vi.fn();
-    render(<TemplateSection state={state()} dispatch={dispatch} errors={{}} />);
+    render(<Stack state={state()} dispatch={dispatch} />);
     // The fresh social post's decorated kinds sit at their own caps or fill the
     // shared text budget; only `image` — unbounded — is offered.
     expect(addGroup().getAllByRole("button")).toHaveLength(1);
@@ -67,7 +105,7 @@ describe("TemplateSection — the layer list (L5, D124)", () => {
   });
 
   test("a kind at its limit is absent from the offer, never present-and-disabled", () => {
-    render(<TemplateSection state={state()} dispatch={vi.fn()} errors={{}} />);
+    render(<Stack state={state()} dispatch={vi.fn()} />);
     // The fresh social post's decorated kinds sit at their own caps or fill the
     // shared text budget — one expect per kind: the scanner refuses a literal
     // list of the vocabulary here (D121), and the failures read better apart.
@@ -93,7 +131,7 @@ describe("TemplateSection — the layer list (L5, D124)", () => {
   });
 
   test("a required layer has no remove control; a removable one does — and the sentence says why", () => {
-    render(<TemplateSection state={state()} dispatch={vi.fn()} errors={{}} />);
+    render(<Stack state={state()} dispatch={vi.fn()} />);
     expect(
       list().queryByRole("button", {
         name: "image",
@@ -160,7 +198,7 @@ describe("TemplateSection — the layer list (L5, D124)", () => {
         layers: [...canonical.layers, { id: "shade", kind: "shade" }],
       },
     };
-    render(<TemplateSection state={duplicated} dispatch={vi.fn()} errors={{}} />);
+    render(<Stack state={duplicated} dispatch={vi.fn()} />);
     // One remove control per row — scoped by description, since each row's
     // toggle carries the same raw id as its name.
     expect(
@@ -213,10 +251,10 @@ describe("TemplateSection — the layer list (L5, D124)", () => {
         layers: base.template.layers.filter((layer) => removableIds.includes(layer.id)),
       },
     };
-    render(<TemplateSection state={stripped} dispatch={vi.fn()} errors={{}} />);
+    render(<Stack state={stripped} dispatch={vi.fn()} />);
     // Nothing left under the list needs the why sentence: every layer shown
     // carries its own remove control.
-    expect(document.querySelector('[data-section="template"]')?.textContent).not.toContain(
+    expect(document.querySelector('[data-testid="layer-stack"]')?.textContent).not.toContain(
       "cannot be removed",
     );
     // And the freed required kinds join the offer.
@@ -238,7 +276,7 @@ describe("TemplateSection — the layer list (L5, D124)", () => {
   });
 
   test("each control names itself by its raw id; the display words live in the description", () => {
-    render(<TemplateSection state={state()} dispatch={vi.fn()} errors={{}} />);
+    render(<Stack state={state()} dispatch={vi.fn()} />);
     const remove = list().getByRole("button", {
       name: "shade",
       description: messages.templateRemoveDescription("Shade"),
@@ -299,9 +337,9 @@ describe("moveLayer (L8a, D128)", () => {
   });
 });
 
-describe("TemplateSection — layer reordering (L8, D128)", () => {
+describe("LayerStack — layer reordering (L8, D128)", () => {
   test("move controls name themselves by raw id and display words live in aria-describedby", () => {
-    render(<TemplateSection state={state()} dispatch={vi.fn()} errors={{}} />);
+    render(<Stack state={state()} dispatch={vi.fn()} />);
     // In canonical image-text, accent (index 2) can move up:
     const accentUp = list().getByRole("button", {
       name: "accent",
@@ -328,7 +366,7 @@ describe("TemplateSection — layer reordering (L8, D128)", () => {
   test("a move control dispatches moveLayer with the right indices", async () => {
     const user = userEvent.setup();
     const dispatch = vi.fn();
-    render(<TemplateSection state={state()} dispatch={dispatch} errors={{}} />);
+    render(<Stack state={state()} dispatch={dispatch} />);
 
     // In canonical image-text, accent sits at index 2. Moving it up moves to index 3:
     const accentUp = list().getByRole("button", {
@@ -454,7 +492,7 @@ describe("TemplateSection — layer reordering (L8, D128)", () => {
     //   Moving up would mean moving above the top — no up control is offered.
     // - "up" moves toward the top of the stack (from index i to i + 1).
     // - "down" moves toward the bottom of the stack (from index i to i - 1).
-    render(<TemplateSection state={state()} dispatch={vi.fn()} errors={{}} />);
+    render(<Stack state={state()} dispatch={vi.fn()} />);
     const rows = screen.getAllByRole("listitem");
 
     // First layer: image at index 0 (bottom).
@@ -480,7 +518,7 @@ describe("TemplateSection — layer reordering (L8, D128)", () => {
     // In canonical image-text, CREATIVE_TYPE_RULES declares:
     // - "logo above image"
     // - "shade directly above image"
-    render(<TemplateSection state={state()} dispatch={vi.fn()} errors={{}} />);
+    render(<Stack state={state()} dispatch={vi.fn()} />);
     const rows = screen.getAllByRole("listitem");
 
     // 1. image at index 0: moving up to 1 would place shade below image (or at index 0),
@@ -521,7 +559,7 @@ describe("TemplateSection — layer reordering (L8, D128)", () => {
   });
 });
 
-describe("TemplateSection — the layer toggle (L9, D129, MP-D3, MP-D4)", () => {
+describe("LayerStack — the layer toggle (L9, D129, MP-D3, MP-D4)", () => {
   test("disabling an optional layer serialises enabled: false, and the brief round-trips", () => {
     const base = state();
     const off = editorReducer(base, {
@@ -557,7 +595,7 @@ describe("TemplateSection — the layer toggle (L9, D129, MP-D3, MP-D4)", () => 
   });
 
   test("the last enabled required layer offers no toggle, and the reducer refuses it", () => {
-    render(<TemplateSection state={state()} dispatch={vi.fn()} errors={{}} />);
+    render(<Stack state={state()} dispatch={vi.fn()} />);
     // Absent from the offer, never present-and-disabled (DESIGN.md §1.5): image
     // and static-text are the type's required kinds, each present once.
     expect(
@@ -618,7 +656,7 @@ describe("TemplateSection — the layer toggle (L9, D129, MP-D3, MP-D4)", () => 
   test("the toggle dispatches setLayerEnabled with the layer id and the state it asks for", async () => {
     const user = userEvent.setup();
     const dispatch = vi.fn();
-    render(<TemplateSection state={state()} dispatch={dispatch} errors={{}} />);
+    render(<Stack state={state()} dispatch={dispatch} />);
     await user.click(
       list().getByRole("button", {
         name: "shade",
@@ -633,7 +671,7 @@ describe("TemplateSection — the layer toggle (L9, D129, MP-D3, MP-D4)", () => 
   });
 
   test("the toggle names itself by its raw id; the display words live in the description", () => {
-    render(<TemplateSection state={state()} dispatch={vi.fn()} errors={{}} />);
+    render(<Stack state={state()} dispatch={vi.fn()} />);
     const toggle = list().getByRole("button", {
       name: "shade",
       description: messages.templateDisableDescription("Shade"),
@@ -748,7 +786,7 @@ describe("TemplateSection — the layer toggle (L9, D129, MP-D3, MP-D4)", () => 
   });
 });
 
-describe("TemplateSection — the draft and its brief", () => {
+describe("LayerStack — the draft and its brief", () => {
   test("adding a kind places a layer with that kind and a unique id at a legal index, and the brief serialises with it", () => {
     const added = editorReducer(state(), { type: "addLayer", kind: "image" });
     // The id derives from the kind, deduplicated against the ids held — and a
@@ -778,7 +816,7 @@ describe("TemplateSection — the draft and its brief", () => {
   });
 });
 
-describe("TemplateSection — a corrupt restored draft falls back, never crashes (L5)", () => {
+describe("LayerStack — a corrupt restored draft falls back, never crashes (L5)", () => {
   test("a draft whose layers hold non-objects falls back to the canonical template, and the section mounts", () => {
     // The crash this fix closes: `isBriefTemplate`'s per-layer check used to
     // answer "no props problem" for an entry that is not an object, so a stored
@@ -797,7 +835,7 @@ describe("TemplateSection — a corrupt restored draft falls back, never crashes
       },
     });
     expect(restored.template).toEqual(templateFromCanonical("social-post"));
-    render(<TemplateSection state={restored} dispatch={vi.fn()} errors={{}} />);
+    render(<Stack state={restored} dispatch={vi.fn()} />);
     expect(screen.getAllByRole("listitem")).toHaveLength(5);
   });
 
@@ -814,5 +852,138 @@ describe("TemplateSection — a corrupt restored draft falls back, never crashes
       },
     });
     expect(restored.template).toEqual(templateFromCanonical("social-post"));
+  });
+});
+
+describe("LayerStack — the selection is ephemeral (CC3, D139)", () => {
+  /** A row's own name control — the thing the operator clicks to pick a layer. */
+  const pick = (id: string, name: string) =>
+    list().getByRole("button", { name: id, description: messages.layerSelectDescription(name) });
+
+  test("picking a row marks exactly that row, and reaches the reducer with nothing", async () => {
+    const user = userEvent.setup();
+    const dispatch = vi.fn();
+    render(<Stack state={state()} dispatch={dispatch} />);
+    // Nothing is picked on arrival: a stack that opened with a selection would
+    // be asserting an answer the operator never gave.
+    expect(pick("accent", "Accent").getAttribute("aria-pressed")).toBe("false");
+
+    await user.click(pick("accent", "Accent"));
+    expect(pick("accent", "Accent").getAttribute("aria-pressed")).toBe("true");
+    // One at a time — never two pressed rows for one selection.
+    expect(pick("shade", "Shade").getAttribute("aria-pressed")).toBe("false");
+    expect(pick("logo", "Logo").getAttribute("aria-pressed")).toBe("false");
+    // D139: the selection is local component state. The click must not reach
+    // the reducer at all — a document action here would dirty a loaded brief
+    // on a gesture that changed nothing about the creative.
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  test("the pick follows the LAYER across a reorder, not the slot it was standing in", async () => {
+    const user = userEvent.setup();
+    render(<Harness initial={state()} />);
+    // Canonical image-text: image (0), shade (1), accent (2), static-text (3), logo (4).
+    await user.click(pick("accent", "Accent"));
+
+    // Move the picked layer up, so accent and static-text swap slots. An
+    // index-keyed selection would stay on index 2 and silently re-point at
+    // static-text — the exact invariant `CopyTimeline.vo.ts` names for the
+    // persisted key beat ("the selected text must not change because rows
+    // moved"), and the reason the tape's own beat selection is RETIRED on an
+    // edit instead: a raw index cannot follow its subject, and a layer id can.
+    await user.click(
+      list().getByRole("button", {
+        name: "accent",
+        description: messages.templateMoveUpDescription("Accent"),
+      }),
+    );
+    const rows = screen.getAllByRole("listitem");
+    expect(rows[2].textContent).toContain("static-text");
+    expect(rows[3].textContent).toContain("accent");
+
+    // Still accent, now in slot 3 — and static-text, which took slot 2, is not
+    // picked. Both halves matter: the first alone would pass if every row were
+    // pressed, the second alone if the selection had simply been dropped.
+    expect(pick("accent", "Accent").getAttribute("aria-pressed")).toBe("true");
+    expect(pick("static-text", "Static text").getAttribute("aria-pressed")).toBe("false");
+  });
+
+  test("removing the picked layer clears the pick, and picks nothing in its place", async () => {
+    const user = userEvent.setup();
+    render(<Harness initial={state()} />);
+    await user.click(pick("shade", "Shade"));
+    expect(pick("shade", "Shade").getAttribute("aria-pressed")).toBe("true");
+
+    await user.click(
+      list().getByRole("button", {
+        name: "shade",
+        description: messages.templateRemoveDescription("Shade"),
+      }),
+    );
+    // The row is gone, and no surviving row inherited its highlight — the id
+    // simply names nothing now, which is what `null` means here.
+    expect(screen.getAllByRole("listitem")).toHaveLength(4);
+    for (const [id, name] of [
+      ["image", "Image"],
+      ["accent", "Accent"],
+      ["static-text", "Static text"],
+      ["logo", "Logo"],
+    ]) {
+      expect(pick(id, name).getAttribute("aria-pressed")).toBe("false");
+    }
+  });
+
+  test("the select control names itself by its raw id; the display words live in the description", () => {
+    render(<Stack state={state()} dispatch={vi.fn()} />);
+    const control = pick("shade", "Shade");
+    expect(
+      document.getElementById(control.getAttribute("aria-describedby") ?? "")?.textContent,
+    ).toBe(messages.layerSelectDescription("Shade"));
+    // And it is not the remove control wearing the same name (D18 puts the raw
+    // id on every control in the row): the two are told apart by description.
+    expect(control).not.toBe(
+      list().getByRole("button", {
+        name: "shade",
+        description: messages.templateRemoveDescription("Shade"),
+      }),
+    );
+  });
+});
+
+describe("layerStackProps — the seam the rail's memo keys on (CC3)", () => {
+  test("every offer is the derivation's answer, and a strict subset of the vocabulary", () => {
+    const props = layerStackProps(state());
+    // The fresh social post's decorated kinds sit at their own caps or fill the
+    // shared text budget, so `image` — unbounded — is the only offer. A
+    // hard-coded list would have to be exactly this, on exactly this template,
+    // and would then be wrong for the stripped one below.
+    expect([...props.addable]).toEqual(["image"]);
+    expect(props.rows.map((row) => row.id)).toEqual([
+      "image",
+      "shade",
+      "accent",
+      "static-text",
+      "logo",
+    ]);
+    // Required kinds carry no remove offer; the rest do.
+    expect(props.rows.filter((row) => !row.removable).map((row) => row.id)).toEqual([
+      "image",
+      "static-text",
+    ]);
+    expect([...props.requiredNames]).toEqual(["Image", "Static text"]);
+
+    // The same function on a template whose required kinds were stripped
+    // answers differently — so the figures above are read, not written here.
+    const base = initialEditorState();
+    const removableIds = removableLayerIds(base);
+    const stripped = layerStackProps({
+      ...base,
+      template: {
+        ...base.template,
+        layers: base.template.layers.filter((layer) => removableIds.includes(layer.id)),
+      },
+    });
+    expect([...stripped.addable]).toContain("static-text");
+    expect([...stripped.requiredNames]).toEqual([]);
   });
 });

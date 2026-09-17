@@ -1,0 +1,104 @@
+{
+  "version": 1,
+  "lane": "CC3",
+  "mutations": [
+    {
+      "file": "apps/web/src/components/campaign/BriefEditor.tsx",
+      "before": "        return (\n          <TemplateSection\n            state={state}\n            dispatch={dispatch}\n            errors={sectionErrorsVisible(\"template\")}\n          />\n        );",
+      "after": "        return (\n          <>\n            <TemplateSection\n              state={state}\n              dispatch={dispatch}\n              errors={sectionErrorsVisible(\"template\")}\n            />\n            <LayerStack\n              {...layerStack}\n              dispatch={dispatch}\n              selectedLayerId={pickedLayerId}\n              onSelectLayer={pickLayer}\n            />\n          </>\n        );",
+      "because": "The disposition defect the plan forbids, in the shape a lane would actually ship it: the step form renders a stack TOO, so the rail and the Template step each hold one and every offer has two places to drift. It is written in BriefEditor rather than inside TemplateSection because everything is already in scope there -- a hand-rolled copy in the section would need an import the mutation cannot add, and a mutation that fails on a module-resolution error is not evidence about the assertion. Two synchronised stacks LOOK correct: every control works, every derivation is the same one, and no existing test counts them. It is caught only by a count of MOUNTS, and only one written over something structurally part of any stack (the add-offer group) rather than over this lane's own marker, which a hand-rolled copy would not carry.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.layers.test.tsx",
+        "-t",
+        "exists exactly once"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/layer-stack-props.ts",
+      "before": "    addable: addableKinds(state),",
+      "after": "    addable: state.template.layers.map((layer) => layer.kind),",
+      "because": "The second copy of the compatibility table, in the smallest form it takes: an offer computed from the layers on screen instead of read from `addableKinds`. It is not obviously wrong on sight -- it produces a plausible list of kinds, in template order, with no literal vocabulary anywhere for the D121 scanner to catch -- and it is exactly the class of defect D124 exists to prevent, because it offers kinds already at their cardinality cap and ignores the shared text budget, so Save refuses what the rail offered. Caught by the file that MOCKS the derivation: asserting `offered === addableKinds(state)` would pass whether or not the call was real, which is the vacuous shape this repository has been burned by, so the proof replaces the derivation's answer with one no state can produce and requires the rail to say it.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/layer-stack-offers.test.tsx"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/layer-stack-props.ts",
+      "before": "      removable: removable.includes(layer.id),",
+      "after": "      removable: true,",
+      "because": "\"Video and Animated text are part of every creative and cannot be removed\" -- the rule the brief names, deleted. Every row gains a remove control, which is the gating defect DESIGN.md 1.5 names read backwards: the surface offers what the boundary refuses, so the press dispatches, the reducer silently declines it (`removeLayer` is a no-op for a required layer) and the operator is left pressing a control that does nothing. Nothing throws, nothing looks broken, and the rail's own rendering tests would all still pass -- a row with MORE controls satisfies every `getByRole` that looks for one. Caught by the assertions that require an ABSENCE, plus the \"why\" sentence, which is derived from the same answer and disappears with it.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/layer-stack.test.tsx"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/LayerStack.tsx",
+      "before": "                  onClick={() => onSelectLayer(row.id)}",
+      "after": "                  onClick={() => {\n                    onSelectLayer(row.id);\n                    dispatch({ type: \"setLayerEnabled\", id: row.id, enabled: row.off });\n                  }}",
+      "because": "D139, undone: the selection reaches the document. This is the plausible version of that mistake -- a row click that both picks the layer and acts on it -- and it dirties a freshly loaded brief on a gesture that was supposed to change nothing, which is precisely why the decision puts the selection in local component state. The highlight still appears, so the selection tests stay green, and no network assertion moves either. Caught by the pair that reads the SERIALISED brief before and after the pick and then asks the unsaved-work guard, whose silence is the dirty flag (D67). The sibling test in that file switches a layer off deliberately and requires the guard to speak, so the silence cannot be a guard that never asks.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.layers.test.tsx",
+        "-t",
+        "changes no document byte"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/BriefEditor.tsx",
+      "before": "  const layerStack = useMemo(() => rawLayerStackProps, [layerStackFingerprint]);",
+      "after": "  const layerStack = rawLayerStackProps;",
+      "because": "#469's defect, re-introduced through the third child of the same subtree: a freshly allocated props object per render defeats a `memo`-wrapped child even when nothing in it changed. Every fetch-count proof stays green -- `usePreviewFrame` has a content key of its own and does not care how often its component re-renders -- and every rendering assertion stays green too, because the tree drawn is identical; only the COST changes, and every layer row now re-commits on every character typed anywhere in the form, which is exactly what C3 says an always-on rail must not do. It was review, not the lane's own cost proofs, that caught this on #469. Caught here only by a render COUNT on the stack, whose sibling assertion (a layer edit DOES re-render it) rules out a memo that is simply frozen.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.layers.test.tsx",
+        "-t",
+        "cost contract"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/BriefEditor.tsx",
+      "before": "  const [pickedLayerId, setPickedLayerId] = useState<string | null>(null);\n  /** Stable across every render: a fresh arrow would defeat the `memo` above. */\n  const pickLayer = useCallback((id: string) => setPickedLayerId(id), []);",
+      "after": "  const [pickedIndex, setPickedIndex] = useState<number | null>(null);\n  const pickedLayerId =\n    pickedIndex === null ? null : (rawLayerStackProps.rows[pickedIndex]?.id ?? null);\n  const pickLayer = useCallback(\n    (id: string) => setPickedIndex(rawLayerStackProps.rows.findIndex((row) => row.id === id)),\n    [rawLayerStackProps],\n  );",
+      "because": "The selection held as a SLOT rather than as the layer. It is the obvious thing to write -- the tape's beat selection next to it is an index, so the shape is already in this file -- and it is wrong here for the reason `CopyTimeline.vo.ts` states for the persisted key beat: the operator can reorder the list, so an index does not keep the selection on the layer it was on, it moves it to whichever layer now occupies that slot. Nothing looks broken: a row is still highlighted, exactly one row, and it is even a row adjacent to the one picked. A layer HAS an identity where a beat does not, which is why the fix is an id rather than the retirement the beat selection needs. Caught by an editor-level reorder that requires the pick to be on the moved layer AND not on the layer that took its slot -- the first assertion alone would pass if every row were pressed, the second alone if the selection had simply been dropped.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.layers.test.tsx",
+        "-t",
+        "follows the LAYER"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
