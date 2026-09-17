@@ -11,10 +11,12 @@ const setup = (items?: { label: string; onSelect: () => void }[]) => {
       <button type="button">outside</button>
       <OverflowMenu
         label="More actions"
-        items={items ?? [
-          { label: "Save as…", onSelect: onSaveAs },
-          { label: "Revert", onSelect: onRevert },
-        ]}
+        items={
+          items ?? [
+            { label: "Save as…", onSelect: onSaveAs },
+            { label: "Revert", onSelect: onRevert },
+          ]
+        }
       />
       {/* Something for Tab to land on after the trigger, so the tests can prove
           the menu lets the browser move focus on rather than trapping it. */}
@@ -34,7 +36,10 @@ describe("OverflowMenu", () => {
 
     await user.click(trigger());
     expect(trigger().getAttribute("aria-expanded")).toBe("true");
-    expect(screen.getAllByRole("menuitem").map((i) => i.textContent)).toEqual(["Save as…", "Revert"]);
+    expect(screen.getAllByRole("menuitem").map((i) => i.textContent)).toEqual([
+      "Save as…",
+      "Revert",
+    ]);
 
     await user.click(trigger());
     expect(screen.queryByRole("menu")).toBeNull();
@@ -85,7 +90,12 @@ describe("OverflowMenu", () => {
     // batching the panel would still be painted behind it when that runs.
     let menuWhileActing: HTMLElement | null = null;
     const { user } = setup([
-      { label: "Revert", onSelect: () => { menuWhileActing = screen.queryByRole("menu"); } },
+      {
+        label: "Revert",
+        onSelect: () => {
+          menuWhileActing = screen.queryByRole("menu");
+        },
+      },
     ]);
     await user.click(trigger());
     await user.click(screen.getByRole("menuitem", { name: "Revert" }));
@@ -151,7 +161,10 @@ describe("OverflowMenu", () => {
     expect(document.activeElement).toBe(screen.getAllByRole("menuitem")[0]);
     // Roving focus: Tab is reserved for leaving the menu, so the items are only
     // reachable through the arrow keys.
-    expect(screen.getAllByRole("menuitem").map((i) => i.getAttribute("tabindex"))).toEqual(["-1", "-1"]);
+    expect(screen.getAllByRole("menuitem").map((i) => i.getAttribute("tabindex"))).toEqual([
+      "-1",
+      "-1",
+    ]);
   });
 
   test("ArrowUp on the trigger opens onto the last item", async () => {

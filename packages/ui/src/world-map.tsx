@@ -1,7 +1,15 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { cn } from "./cn";
 import { polyPath, type Pt } from "./geo/chaikin";
-import { dotMatrix, GRATICULE_HORIZONTALS, GRATICULE_VERTICALS, MAP_HEIGHT, MAP_WIDTH, type Footprint, type MapDot } from "./geo/footprints";
+import {
+  dotMatrix,
+  GRATICULE_HORIZONTALS,
+  GRATICULE_VERTICALS,
+  MAP_HEIGHT,
+  MAP_WIDTH,
+  type Footprint,
+  type MapDot,
+} from "./geo/footprints";
 
 export interface WorldMapProps {
   /** The footprints to paint, in vocabulary order (§2.3). */
@@ -64,7 +72,8 @@ export function WorldMap({
   // The dot matrix and the footprint areas are generated geometry — compute them
   // once per footprints prop, not on every hover or click re-render.
   const painted = useMemo<Painted[]>(
-    () => footprints.map((f) => ({ ...f, dots: dotMatrix(f.polys, f.hub), area: footprintArea(f) })),
+    () =>
+      footprints.map((f) => ({ ...f, dots: dotMatrix(f.polys, f.hub), area: footprintArea(f) })),
     [footprints],
   );
   // Descending area: the smallest footprint paints last and is therefore topmost.
@@ -123,7 +132,11 @@ export function WorldMap({
                     cy={dot.y}
                     r={1.5}
                     pointerEvents="none"
-                    style={{ transformBox: "fill-box", transformOrigin: "center", transitionDelay: `${dot.delay}s` }}
+                    style={{
+                      transformBox: "fill-box",
+                      transformOrigin: "center",
+                      transitionDelay: `${dot.delay}s`,
+                    }}
                     className={cn(
                       "fill-brand-primary/90 motion-safe:transition-transform motion-safe:duration-fast",
                       selected ? "scale-100" : "scale-0",

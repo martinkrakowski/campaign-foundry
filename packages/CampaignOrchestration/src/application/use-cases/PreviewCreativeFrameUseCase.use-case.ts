@@ -24,7 +24,10 @@ import type { CompositeRequest, CompositorPort } from "../ports/out/CompositorPo
 import type { BackgroundContext, ImageGeneratorPort } from "../ports/out/ImageGeneratorPort.js";
 import type { PlatformSafeZoneResolver } from "../ports/out/PlatformProfilePort.js";
 import type { SceneAssetPort } from "../ports/out/SceneAssetPort.js";
-import type { VideoCompositeRequest, VideoCompositorPort } from "../ports/out/VideoCompositorPort.js";
+import type {
+  VideoCompositeRequest,
+  VideoCompositorPort,
+} from "../ports/out/VideoCompositorPort.js";
 import type { CopyTimeline } from "../../domain/value-objects/CopyTimeline.vo.js";
 import { resolveTimelineBackgrounds, unionSafeInsets } from "./GenerateCampaignUseCase.use-case.js";
 
@@ -100,7 +103,9 @@ export interface PreviewCreativeFrameDeps {
 }
 
 /** Social fingerprints keep the `ratio` key so style-less hashes stay put. */
-function canvasFingerprint(spec: CanvasSpec): { readonly ratio: AspectRatioValue } | { readonly size: DisplaySize } {
+function canvasFingerprint(
+  spec: CanvasSpec,
+): { readonly ratio: AspectRatioValue } | { readonly size: DisplaySize } {
   const exclusive = spec as { readonly ratio: AspectRatioValue } | { readonly size: DisplaySize };
   if ("ratio" in exclusive) return { ratio: exclusive.ratio };
   return { size: exclusive.size };
@@ -205,7 +210,9 @@ export class PreviewCreativeFrameUseCase {
     }
     if (size !== undefined && !(DISPLAY_SIZE_VALUES as readonly string[]).includes(size)) {
       return err(
-        new Error(`Unsupported display size "${size}" (expected one of ${DISPLAY_SIZE_VALUES.join(", ")})`),
+        new Error(
+          `Unsupported display size "${size}" (expected one of ${DISPLAY_SIZE_VALUES.join(", ")})`,
+        ),
       );
     }
 
@@ -214,7 +221,9 @@ export class PreviewCreativeFrameUseCase {
     const hasDuration = durationSec !== undefined;
     const hasAtSec = atSec !== undefined;
     if ((hasMotion || hasDuration || hasAtSec) && !(hasMotion && hasDuration && hasAtSec)) {
-      return err(new Error("Preview cell must carry motion, durationSec and atSec together or not at all."));
+      return err(
+        new Error("Preview cell must carry motion, durationSec and atSec together or not at all."),
+      );
     }
     if (hasMotion) {
       if (!(MOTION_KINDS as readonly string[]).includes(motion!)) {
@@ -232,7 +241,12 @@ export class PreviewCreativeFrameUseCase {
           ),
         );
       }
-      if (typeof atSec !== "number" || !Number.isFinite(atSec) || atSec < 0 || atSec > durationSec) {
+      if (
+        typeof atSec !== "number" ||
+        !Number.isFinite(atSec) ||
+        atSec < 0 ||
+        atSec > durationSec
+      ) {
         return err(new Error(`Preview cell atSec must be a finite number in [0, ${durationSec}].`));
       }
       if (!this.deps.videoCompositor) {
@@ -263,7 +277,11 @@ export class PreviewCreativeFrameUseCase {
         if (!this.deps.sceneAssets) {
           return err(new Error("Cannot render motion preview: no scene asset resolver is wired."));
         }
-        const resolved = await resolveTimelineBackgrounds(timeline, backgroundRatio.value, this.deps.sceneAssets);
+        const resolved = await resolveTimelineBackgrounds(
+          timeline,
+          backgroundRatio.value,
+          this.deps.sceneAssets,
+        );
         if (!resolved.success) return resolved;
         backgrounds = resolved.value;
       }
@@ -350,13 +368,19 @@ export class PreviewCreativeFrameUseCase {
       targetRegion: brief.targetRegion,
       campaignType: brief.type,
     };
-    const background = await this.deps.imageGenerator.resolveBackground(product, backgroundRatio, context);
+    const background = await this.deps.imageGenerator.resolveBackground(
+      product,
+      backgroundRatio,
+      context,
+    );
     // D11: the same per-ratio union of the requested platforms' safe insets the
     // run passes — keyed by the social ratio, so a display size (which no
     // platform zone describes) passes none.
     const safeInsets =
       selection.canvas.ratio !== undefined
-        ? unionSafeInsets(brief.output?.platforms, this.deps.platformSafeZones).get(selection.canvas.ratio)
+        ? unionSafeInsets(brief.output?.platforms, this.deps.platformSafeZones).get(
+            selection.canvas.ratio,
+          )
         : undefined;
     const request: CompositeRequest = {
       background: background.image,

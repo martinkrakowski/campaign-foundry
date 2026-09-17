@@ -70,7 +70,10 @@ interface GlyphGroupRun {
  * (`creative-glyph.byte-identity.test.tsx`); runs derive from the iterated
  * order, never a second list.
  */
-function groupRuns(painted: readonly LayerKind[], paintings: Partial<Record<LayerKind, GlyphPainting>>): GlyphGroupRun[] {
+function groupRuns(
+  painted: readonly LayerKind[],
+  paintings: Partial<Record<LayerKind, GlyphPainting>>,
+): GlyphGroupRun[] {
   const runs: { className: string; kinds: LayerKind[] }[] = [];
   for (const kind of painted) {
     const className = paintings[kind]!.group;
@@ -114,8 +117,22 @@ export function CreativeGlyph({ layout, tone, motion, size = 46 }: CreativeGlyph
     group: "glyph-anim glyph-text",
     element: (
       <>
-        <rect x={longBarX} y={longBarY} width={longBarWidth} height={barHeight} rx={barHeight / 2} className="fill-text-primary" />
-        <rect x={shortBarX} y={shortBarY} width={shortBarWidth} height={barHeight} rx={barHeight / 2} className="fill-text-primary" />
+        <rect
+          x={longBarX}
+          y={longBarY}
+          width={longBarWidth}
+          height={barHeight}
+          rx={barHeight / 2}
+          className="fill-text-primary"
+        />
+        <rect
+          x={shortBarX}
+          y={shortBarY}
+          width={shortBarWidth}
+          height={barHeight}
+          rx={barHeight / 2}
+          className="fill-text-primary"
+        />
       </>
     ),
   };
@@ -126,9 +143,15 @@ export function CreativeGlyph({ layout, tone, motion, size = 46 }: CreativeGlyph
    */
   const paintings: Partial<Record<LayerKind, GlyphPainting>> = {
     /* Layer 1 — photo ground (text-muted: the neutral placeholder). */
-    image: { group: "glyph-anim glyph-ground", element: <rect x="0" y="0" width={VIEWBOX} height={VIEWBOX} className="fill-text-muted" /> },
+    image: {
+      group: "glyph-anim glyph-ground",
+      element: <rect x="0" y="0" width={VIEWBOX} height={VIEWBOX} className="fill-text-muted" />,
+    },
     /* Layer 2 — contrast shade on the headline edge, fading into the image. */
-    shade: { group: "glyph-anim glyph-ground", element: <rect x="0" y="0" width={VIEWBOX} height={VIEWBOX} fill={`url(#${gradientId})`} /> },
+    shade: {
+      group: "glyph-anim glyph-ground",
+      element: <rect x="0" y="0" width={VIEWBOX} height={VIEWBOX} fill={`url(#${gradientId})`} />,
+    },
     /* Layer 3 — the soft fade the accent band melts into (the accent-wipe layer),
        then the brand accent band flush to the headline edge. */
     accent: {
@@ -143,7 +166,13 @@ export function CreativeGlyph({ layout, tone, motion, size = 46 }: CreativeGlyph
             fill={`url(#${fadeGradientId})`}
             className="glyph-anim glyph-fade"
           />
-          <rect x="0" y={top ? 0 : VIEWBOX - BAND} width={VIEWBOX} height={BAND} className="fill-brand-primary" />
+          <rect
+            x="0"
+            y={top ? 0 : VIEWBOX - BAND}
+            width={VIEWBOX}
+            height={BAND}
+            className="fill-brand-primary"
+          />
         </>
       ),
     },
@@ -171,7 +200,13 @@ export function CreativeGlyph({ layout, tone, motion, size = 46 }: CreativeGlyph
           from `--color-background` would invert it there (#ffffff), and the card would
           misrepresent the creative it is previewing.
         */}
-        <linearGradient id={gradientId} x1="0" y1={top ? LAYERS.shade.start.top : LAYERS.shade.start.bottom} x2="0" y2={top ? "0" : "1"}>
+        <linearGradient
+          id={gradientId}
+          x1="0"
+          y1={top ? LAYERS.shade.start.top : LAYERS.shade.start.bottom}
+          x2="0"
+          y2={top ? "0" : "1"}
+        >
           <stop offset="0" stopColor="#000000" stopOpacity={0} />
           <stop offset="1" stopColor="#000000" stopOpacity={shadeAlpha} />
         </linearGradient>
@@ -197,29 +232,58 @@ export function CreativeGlyph({ layout, tone, motion, size = 46 }: CreativeGlyph
       {/* Group 4 — Directional cue group (always rendered; revealed when reduced-motion/disabled). */}
       <g className="glyph-cue" aria-hidden="true">
         {motion === "ken-burns-in" ? (
-          <g stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-white">
+          <g
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="text-white"
+          >
             <path d="M 6 6 L 14 14 M 14 6 L 14 14 L 6 14" />
             <path d="M 40 40 L 32 32 M 32 40 L 32 32 L 40 32" />
           </g>
         ) : null}
         {motion === "ken-burns-out" ? (
-          <g stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-white">
+          <g
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="text-white"
+          >
             <path d="M 14 14 L 6 6 M 14 6 L 6 6 L 6 14" />
             <path d="M 32 32 L 40 40 M 32 40 L 40 40 L 40 32" />
           </g>
         ) : null}
         {motion === "headline-rise" ? (
-          <g stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-white">
+          <g
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="text-white"
+          >
             <path d="M 23 34 L 23 18 M 17 24 L 23 18 L 29 24" />
           </g>
         ) : null}
         {motion === "accent-wipe" ? (
-          <g stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-white">
-            <path d={top ? "M 23 8 L 23 24 M 17 18 L 23 24 L 29 18" : "M 23 38 L 23 22 M 17 28 L 23 22 L 29 28"} />
+          <g
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="text-white"
+          >
+            <path
+              d={
+                top
+                  ? "M 23 8 L 23 24 M 17 18 L 23 24 L 29 18"
+                  : "M 23 38 L 23 22 M 17 28 L 23 22 L 29 28"
+              }
+            />
           </g>
         ) : null}
       </g>
     </svg>
   );
 }
-

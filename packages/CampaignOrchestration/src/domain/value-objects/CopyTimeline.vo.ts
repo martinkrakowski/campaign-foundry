@@ -222,10 +222,7 @@ export function scenesProblem(t: CopyTimeline): string | undefined {
  * than reading one condition's answer off another's failure. `timelineProblem` composes
  * them; the composition is the full authoring rule.
  */
-export function dwellProblem(
-  t: CopyTimeline,
-  durations: readonly number[],
-): string | undefined {
+export function dwellProblem(t: CopyTimeline, durations: readonly number[]): string | undefined {
   const total = t.beats.reduce((sum, beat) => sum + beat.weight, 0);
   const d = durations.length > 0 ? Math.min(...durations) : DEFAULT_DURATION_SEC;
   for (let i = 0; i < t.beats.length; i += 1) {

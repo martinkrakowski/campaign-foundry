@@ -23,10 +23,17 @@ export class ProceduralBackgroundGenerator implements ImageGeneratorPort {
     ratio: AspectRatio,
     context: BackgroundContext,
   ): Promise<BackgroundResult> {
-    return { image: this.generateGradient(product.primaryColor, ratio, context.paletteShift), source: "procedural" };
+    return {
+      image: this.generateGradient(product.primaryColor, ratio, context.paletteShift),
+      source: "procedural",
+    };
   }
 
-  private generateGradient(primaryColor: string, ratio: AspectRatio, paletteShift?: number): Uint8Array {
+  private generateGradient(
+    primaryColor: string,
+    ratio: AspectRatio,
+    paletteShift?: number,
+  ): Uint8Array {
     const canvas = createCanvas(ratio.width, ratio.height);
     const ctx = canvas.getContext("2d");
     const [r, g, b] = shiftRgb(hexToRgb(primaryColor), paletteShift);

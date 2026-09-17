@@ -179,7 +179,8 @@ function fakeFfmpeg(opts: {
         }
         stderr.end();
         stdout.end();
-        if ((opts.code ?? 0) === 0) writeFileSync(outPath, opts.stdout ?? Buffer.from("xxxxftypxxxxmoovxxxx"));
+        if ((opts.code ?? 0) === 0)
+          writeFileSync(outPath, opts.stdout ?? Buffer.from("xxxxftypxxxxmoovxxxx"));
         proc.emit("close", opts.code ?? 0);
       }, opts.delayMs ?? 5);
     });
@@ -212,17 +213,20 @@ describe("CanvasFfmpegVideoCompositor", () => {
       const spawn: FfmpegSpawn = (command, args, options) =>
         realSpawn(command, ["-not-a-real-flag", ...args], options);
       const compositor = new CanvasFfmpegVideoCompositor({ spawn });
-      await expect(compositor.compositeVideo(videoRequest({ durationSec: 5, fps: 30 }))).rejects.toSatisfy(
-        (error: unknown) => {
-          const message = error instanceof Error ? error.message : String(error);
-          expect(message).toMatch(/Unrecognized option|not-a-real-flag/);
-          // No absolute path survives (the banner's lone "/" separators are not paths).
-          expect(message).not.toMatch(/(?:^|[\s'"=])\/[^\s/]+\//);
-          return true;
-        },
-      );
+      await expect(
+        compositor.compositeVideo(videoRequest({ durationSec: 5, fps: 30 })),
+      ).rejects.toSatisfy((error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error);
+        expect(message).toMatch(/Unrecognized option|not-a-real-flag/);
+        // No absolute path survives (the banner's lone "/" separators are not paths).
+        expect(message).not.toMatch(/(?:^|[\s'"=])\/[^\s/]+\//);
+        return true;
+      });
       // The gate was released: a follow-up encode with a healthy fake still runs.
-      const next = new CanvasFfmpegVideoCompositor({ spawn: fakeFfmpeg({}), ffmpegPath: "/opt/ffmpeg" });
+      const next = new CanvasFfmpegVideoCompositor({
+        spawn: fakeFfmpeg({}),
+        ffmpegPath: "/opt/ffmpeg",
+      });
       await expect(next.compositeVideo(videoRequest({ sampleAt: [] }))).resolves.toBeTruthy();
     },
   );
@@ -262,31 +266,40 @@ describe("CanvasFfmpegVideoCompositor", () => {
   );
 
   test("rejects when durationSec * fps yields fewer than 2 frames", async () => {
-    const compositor = new CanvasFfmpegVideoCompositor({ spawn: fakeFfmpeg({}), ffmpegPath: "/opt/ffmpeg" });
-    await expect(compositor.compositeVideo(videoRequest({ durationSec: 0.05, fps: 12 }))).rejects.toThrow(
-      /at least 2 frames/,
-    );
+    const compositor = new CanvasFfmpegVideoCompositor({
+      spawn: fakeFfmpeg({}),
+      ffmpegPath: "/opt/ffmpeg",
+    });
+    await expect(
+      compositor.compositeVideo(videoRequest({ durationSec: 0.05, fps: 12 })),
+    ).rejects.toThrow(/at least 2 frames/);
   });
 
   test.each([0, 61, 12.5, Number.POSITIVE_INFINITY, Number.NaN, "12"] as const)(
     "rejects fps %s with a named validation error",
     async (fps) => {
-      const compositor = new CanvasFfmpegVideoCompositor({ spawn: fakeFfmpeg({}), ffmpegPath: "/opt/ffmpeg" });
-      await expect(compositor.compositeVideo(videoRequest({ fps: fps as unknown as number }))).rejects.toSatisfy(
-        (error: unknown) => {
-          expect(error).toBeInstanceOf(VideoCompositeValidationError);
-          expect((error as Error).name).toBe("VideoCompositeValidationError");
-          expect((error as Error).message).toMatch(/fps must be an integer in \[1, 60\]/);
-          return true;
-        },
-      );
+      const compositor = new CanvasFfmpegVideoCompositor({
+        spawn: fakeFfmpeg({}),
+        ffmpegPath: "/opt/ffmpeg",
+      });
+      await expect(
+        compositor.compositeVideo(videoRequest({ fps: fps as unknown as number })),
+      ).rejects.toSatisfy((error: unknown) => {
+        expect(error).toBeInstanceOf(VideoCompositeValidationError);
+        expect((error as Error).name).toBe("VideoCompositeValidationError");
+        expect((error as Error).message).toMatch(/fps must be an integer in \[1, 60\]/);
+        return true;
+      });
     },
   );
 
   test.each([0, -1, 60.5, Number.POSITIVE_INFINITY, Number.NaN, "2"] as const)(
     "rejects durationSec %s",
     async (durationSec) => {
-      const compositor = new CanvasFfmpegVideoCompositor({ spawn: fakeFfmpeg({}), ffmpegPath: "/opt/ffmpeg" });
+      const compositor = new CanvasFfmpegVideoCompositor({
+        spawn: fakeFfmpeg({}),
+        ffmpegPath: "/opt/ffmpeg",
+      });
       await expect(
         compositor.compositeVideo(videoRequest({ durationSec: durationSec as unknown as number })),
       ).rejects.toThrow(/durationSec must be a finite number in \(0, 60\]/);
@@ -294,21 +307,30 @@ describe("CanvasFfmpegVideoCompositor", () => {
   );
 
   test.each([2, -0.1, Number.NaN, "x"] as const)("rejects sampleAt value %s", async (t) => {
-    const compositor = new CanvasFfmpegVideoCompositor({ spawn: fakeFfmpeg({}), ffmpegPath: "/opt/ffmpeg" });
+    const compositor = new CanvasFfmpegVideoCompositor({
+      spawn: fakeFfmpeg({}),
+      ffmpegPath: "/opt/ffmpeg",
+    });
     await expect(
       compositor.compositeVideo(videoRequest({ sampleAt: [t as unknown as number] })),
     ).rejects.toThrow(/sampleAt values must be finite numbers in \[0, 1\]/);
   });
 
   test("rejects a non-array sampleAt", async () => {
-    const compositor = new CanvasFfmpegVideoCompositor({ spawn: fakeFfmpeg({}), ffmpegPath: "/opt/ffmpeg" });
+    const compositor = new CanvasFfmpegVideoCompositor({
+      spawn: fakeFfmpeg({}),
+      ffmpegPath: "/opt/ffmpeg",
+    });
     await expect(
       compositor.compositeVideo(videoRequest({ sampleAt: 0.5 as unknown as number[] })),
     ).rejects.toThrow(/sampleAt must be an array/);
   });
 
   test("de-duplicates and sorts sampleAt before sampling frames", async () => {
-    const compositor = new CanvasFfmpegVideoCompositor({ spawn: fakeFfmpeg({}), ffmpegPath: "/opt/ffmpeg" });
+    const compositor = new CanvasFfmpegVideoCompositor({
+      spawn: fakeFfmpeg({}),
+      ffmpegPath: "/opt/ffmpeg",
+    });
     const out = await compositor.compositeVideo(videoRequest({ sampleAt: [1, 0.5, 0, 0.5, 1] }));
     expect(out.sampledFrames).toHaveLength(3);
     const sorted = await compositor.compositeVideo(videoRequest({ sampleAt: [0, 0.5, 1] }));
@@ -318,15 +340,22 @@ describe("CanvasFfmpegVideoCompositor", () => {
   });
 
   test("accepts the boundary values fps 60 and durationSec 60", async () => {
-    const compositor = new CanvasFfmpegVideoCompositor({ spawn: fakeFfmpeg({}), ffmpegPath: "/opt/ffmpeg" });
-    await expect(compositor.compositeVideo(videoRequest({ fps: 1, durationSec: 60, sampleAt: [] }))).resolves.toBeTruthy();
+    const compositor = new CanvasFfmpegVideoCompositor({
+      spawn: fakeFfmpeg({}),
+      ffmpegPath: "/opt/ffmpeg",
+    });
+    await expect(
+      compositor.compositeVideo(videoRequest({ fps: 1, durationSec: 60, sampleAt: [] })),
+    ).resolves.toBeTruthy();
     expect(MAX_FPS).toBe(60);
     expect(MAX_DURATION_SEC).toBe(60);
   });
 
   test("rejects when ffmpeg-static path is missing", async () => {
     const compositor = new CanvasFfmpegVideoCompositor({ spawn: fakeFfmpeg({}), ffmpegPath: null });
-    await expect(compositor.compositeVideo(videoRequest())).rejects.toThrow(/ffmpeg-static binary is not available/);
+    await expect(compositor.compositeVideo(videoRequest())).rejects.toThrow(
+      /ffmpeg-static binary is not available/,
+    );
   });
 
   test("rejects when ffmpeg stdio pipes are missing", async () => {
@@ -334,7 +363,9 @@ describe("CanvasFfmpegVideoCompositor", () => {
       spawn: fakeFfmpeg({ missingStdio: true }),
       ffmpegPath: "/opt/ffmpeg",
     });
-    await expect(compositor.compositeVideo(videoRequest())).rejects.toThrow(/stdio pipes were not created/);
+    await expect(compositor.compositeVideo(videoRequest())).rejects.toThrow(
+      /stdio pipes were not created/,
+    );
   });
 
   test("rejects a non-zero ffmpeg exit with a redacted stderr tail and no absolute paths", async () => {
@@ -368,7 +399,8 @@ describe("CanvasFfmpegVideoCompositor", () => {
   });
 
   test("leaves lone slashes, fractions, and single-segment roots alone", async () => {
-    const stderr = "libavutil 58. 2.100 / 58. 2.100 fps=30000/1001 root=/tmp bad=/opt/ffmpeg/x C:\\Users\\me\\clip";
+    const stderr =
+      "libavutil 58. 2.100 / 58. 2.100 fps=30000/1001 root=/tmp bad=/opt/ffmpeg/x C:\\Users\\me\\clip";
     const compositor = new CanvasFfmpegVideoCompositor({
       spawn: fakeFfmpeg({ code: 1, stderr }),
       ffmpegPath: "/opt/ffmpeg",
@@ -407,7 +439,11 @@ describe("CanvasFfmpegVideoCompositor", () => {
 
   test("surfaces a write Error after ffmpeg exits 0", async () => {
     const compositor = new CanvasFfmpegVideoCompositor({
-      spawn: fakeFfmpeg({ throwOnWrite: new Error("write /opt/ffmpeg failed"), alreadyKilled: true, closeOnWriteThrow: 0 }),
+      spawn: fakeFfmpeg({
+        throwOnWrite: new Error("write /opt/ffmpeg failed"),
+        alreadyKilled: true,
+        closeOnWriteThrow: 0,
+      }),
       ffmpegPath: "/opt/ffmpeg",
     });
     await expect(compositor.compositeVideo(videoRequest())).rejects.toSatisfy((error: unknown) => {
@@ -450,14 +486,18 @@ describe("CanvasFfmpegVideoCompositor", () => {
       spawn: fakeFfmpeg({}),
       ffmpegPath: "/opt/ffmpeg",
     });
-    const out = await compositor.compositeVideo(videoRequest({ logoPath: "assets/inputs/missing-logo.png" }));
+    const out = await compositor.compositeVideo(
+      videoRequest({ logoPath: "assets/inputs/missing-logo.png" }),
+    );
     expect(out.logoApplied).toBe(false);
   });
 
   test("defaults ffmpegPath to ffmpeg-static when omitted", async () => {
     const compositor = new CanvasFfmpegVideoCompositor({ spawn: fakeFfmpeg({}) });
     if (!ffmpegStatic) {
-      await expect(compositor.compositeVideo(videoRequest())).rejects.toThrow(/ffmpeg-static binary is not available/);
+      await expect(compositor.compositeVideo(videoRequest())).rejects.toThrow(
+        /ffmpeg-static binary is not available/,
+      );
       return;
     }
     const out = await compositor.compositeVideo(videoRequest({ sampleAt: [] }));
@@ -469,7 +509,11 @@ describe("CanvasFfmpegVideoCompositor", () => {
     let closed = false;
     const spawn: FfmpegSpawn = (command, args, options) => {
       // Exits only on SIGKILL — SIGTERM is ignored, as a wedged encoder would.
-      const inner = fakeFfmpeg({ hang: true, signals, closeOnSignal: "SIGKILL" })(command, args, options);
+      const inner = fakeFfmpeg({ hang: true, signals, closeOnSignal: "SIGKILL" })(
+        command,
+        args,
+        options,
+      );
       inner.once("close", () => {
         closed = true;
       });
@@ -481,15 +525,23 @@ describe("CanvasFfmpegVideoCompositor", () => {
       encodeTimeoutMs: 40,
       killGraceMs: 20,
     });
-    await expect(compositor.compositeVideo(videoRequest())).rejects.toThrow(/ffmpeg encode timed out after 40ms/);
+    await expect(compositor.compositeVideo(videoRequest())).rejects.toThrow(
+      /ffmpeg encode timed out after 40ms/,
+    );
     // The rejection waited for the escalation and the close: no live child is left behind.
     expect(signals).toEqual(["SIGTERM", "SIGKILL"]);
     expect(closed).toBe(true);
 
     // Gate released: two healthy encodes still run concurrently afterwards.
-    const healthy = new CanvasFfmpegVideoCompositor({ spawn: fakeFfmpeg({}), ffmpegPath: "/opt/ffmpeg" });
+    const healthy = new CanvasFfmpegVideoCompositor({
+      spawn: fakeFfmpeg({}),
+      ffmpegPath: "/opt/ffmpeg",
+    });
     await expect(
-      Promise.all([healthy.compositeVideo(videoRequest({ sampleAt: [] })), healthy.compositeVideo(videoRequest({ sampleAt: [] }))]),
+      Promise.all([
+        healthy.compositeVideo(videoRequest({ sampleAt: [] })),
+        healthy.compositeVideo(videoRequest({ sampleAt: [] })),
+      ]),
     ).resolves.toHaveLength(2);
   });
 
@@ -509,14 +561,24 @@ describe("CanvasFfmpegVideoCompositor", () => {
     const hung: FfmpegSpawn = (command, args, options) => {
       const signals: NodeJS.Signals[] = [];
       hungSignals.push(signals);
-      return track(fakeFfmpeg({ hang: true, signals, closeOnSignal: "SIGKILL" })(command, args, options));
+      return track(
+        fakeFfmpeg({ hang: true, signals, closeOnSignal: "SIGKILL" })(command, args, options),
+      );
     };
     const healthySpawn: FfmpegSpawn = (command, args, options) => {
       liveWhenHealthySpawned = live;
       return track(fakeFfmpeg({})(command, args, options));
     };
-    const hungCompositor = new CanvasFfmpegVideoCompositor({ spawn: hung, ffmpegPath: "/opt/ffmpeg", encodeTimeoutMs: 40, killGraceMs: 20 });
-    const healthy = new CanvasFfmpegVideoCompositor({ spawn: healthySpawn, ffmpegPath: "/opt/ffmpeg" });
+    const hungCompositor = new CanvasFfmpegVideoCompositor({
+      spawn: hung,
+      ffmpegPath: "/opt/ffmpeg",
+      encodeTimeoutMs: 40,
+      killGraceMs: 20,
+    });
+    const healthy = new CanvasFfmpegVideoCompositor({
+      spawn: healthySpawn,
+      ffmpegPath: "/opt/ffmpeg",
+    });
 
     // Two hung encodes fill the pool; the healthy one must wait for a real exit.
     const results = await Promise.allSettled([
@@ -599,12 +661,17 @@ describe("CanvasFfmpegVideoCompositor", () => {
     const fps = 4;
 
     for (const kind of MOTION_KINDS) {
-      const compositor = new CanvasFfmpegVideoCompositor({ spawn: fakeFfmpeg({}), ffmpegPath: "/opt/ffmpeg" });
+      const compositor = new CanvasFfmpegVideoCompositor({
+        spawn: fakeFfmpeg({}),
+        ffmpegPath: "/opt/ffmpeg",
+      });
       const spy = vi.spyOn(NodeCanvasCompositor, "draw").mockClear();
       const req = videoRequest({ motion: kind, durationSec, fps, timeline });
       const result = await compositor.compositeVideo(req);
 
-      const calls = spy.mock.calls as Array<[unknown, unknown, number, MotionKind?, number?, number?]>;
+      const calls = spy.mock.calls as Array<
+        [unknown, unknown, number, MotionKind?, number?, number?]
+      >;
       // frames, poster, and sampled frames — nothing else draws (D7).
       expect(calls).toHaveLength(durationSec * fps + 1 + req.sampleAt.length);
       const posterCall = calls[durationSec * fps];
@@ -631,13 +698,18 @@ describe("CanvasFfmpegVideoCompositor", () => {
   });
 
   test("keeps the poster on the legacy path when the request has no timeline (D10)", async () => {
-    const compositor = new CanvasFfmpegVideoCompositor({ spawn: fakeFfmpeg({}), ffmpegPath: "/opt/ffmpeg" });
+    const compositor = new CanvasFfmpegVideoCompositor({
+      spawn: fakeFfmpeg({}),
+      ffmpegPath: "/opt/ffmpeg",
+    });
     const spy = vi.spyOn(NodeCanvasCompositor, "draw");
     const durationSec = 2;
     const fps = 12;
     await compositor.compositeVideo(videoRequest({ durationSec, fps }));
 
-    const calls = spy.mock.calls as Array<[unknown, unknown, number, MotionKind?, number?, number?]>;
+    const calls = spy.mock.calls as Array<
+      [unknown, unknown, number, MotionKind?, number?, number?]
+    >;
     const posterCall = calls[durationSec * fps];
     if (!posterCall) throw new Error("missing poster draw call");
     expect(posterCall[4]).toBeUndefined();
@@ -647,7 +719,10 @@ describe("CanvasFfmpegVideoCompositor", () => {
   test("ken-burns-out poster settles the effect clock: each kind matches the effect-less poster, a mid-clip sample does not", async () => {
     // Mutation: pass the motion t (restT = 0) as the poster's effect clock
     // instead of 1 → the poster pins fail; the mid-clip sample stays green.
-    const compositor = new CanvasFfmpegVideoCompositor({ spawn: fakeFfmpeg({}), ffmpegPath: "/opt/ffmpeg" });
+    const compositor = new CanvasFfmpegVideoCompositor({
+      spawn: fakeFfmpeg({}),
+      ffmpegPath: "/opt/ffmpeg",
+    });
     const base = {
       motion: "ken-burns-out" as MotionKind,
       durationSec: 2,
@@ -656,9 +731,13 @@ describe("CanvasFfmpegVideoCompositor", () => {
     };
     const plain = await compositor.compositeVideo(videoRequest(base));
     for (const kind of TEXT_EFFECT_VALUES) {
-      const out = await compositor.compositeVideo(videoRequest({ ...base, style: { textEffect: kind } }));
+      const out = await compositor.compositeVideo(
+        videoRequest({ ...base, style: { textEffect: kind } }),
+      );
       expect(Buffer.from(out.poster).equals(Buffer.from(plain.poster))).toBe(true);
-      expect(Buffer.from(out.sampledFrames[0]).equals(Buffer.from(plain.sampledFrames[0]))).toBe(false);
+      expect(Buffer.from(out.sampledFrames[0]).equals(Buffer.from(plain.sampledFrames[0]))).toBe(
+        false,
+      );
     }
   });
 
@@ -713,9 +792,13 @@ describe("CanvasFfmpegVideoCompositor", () => {
       };
       const plain = await compositor.compositeVideo(videoRequest({ ...base }));
       for (const kind of TEXT_EFFECT_VALUES) {
-        const out = await compositor.compositeVideo(videoRequest({ ...base, style: { textEffect: kind } }));
+        const out = await compositor.compositeVideo(
+          videoRequest({ ...base, style: { textEffect: kind } }),
+        );
         expect(out.sampledFrames).toHaveLength(1);
-        expect(Buffer.from(out.sampledFrames[0]).equals(Buffer.from(plain.sampledFrames[0]))).toBe(false);
+        expect(Buffer.from(out.sampledFrames[0]).equals(Buffer.from(plain.sampledFrames[0]))).toBe(
+          false,
+        );
         expect(Buffer.from(out.poster).equals(Buffer.from(plain.poster))).toBe(true);
       }
     },

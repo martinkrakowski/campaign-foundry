@@ -158,7 +158,6 @@ describe("CanvasFfmpegVideoCompositor.compositeFrame — the encoded frame, exac
       expect(decoded.equals(slice)).toBe(true);
       expect(Array.from(frame.image.slice(0, 4))).toEqual(PNG_MAGIC);
     }
-
   });
 
   test("a motion frame at restT-settled time is not the poster — the poster call is not the model", async () => {
@@ -213,7 +212,9 @@ describe("CanvasFfmpegVideoCompositor.compositeFrame — the encoded frame, exac
     await expect(compositor.compositeFrame(scrubRequest({ durationSec: 0.05 }), 0)).rejects.toThrow(
       /durationSec \* fps must yield at least 2 frames|durationSec must be a finite number/,
     );
-    await expect(compositor.compositeFrame(scrubRequest({ fps: 0 }), 0)).rejects.toThrow(/fps must be an integer/);
+    await expect(compositor.compositeFrame(scrubRequest({ fps: 0 }), 0)).rejects.toThrow(
+      /fps must be an integer/,
+    );
   });
 
   test("reports the logo verdict the still path reports", async () => {

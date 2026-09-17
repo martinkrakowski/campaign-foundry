@@ -6,10 +6,7 @@
  * Each layer may carry its own `props` (D134): overrides of the geometry that layer already
  * reads — nothing invented — where every absent prop means the value the layer resolves today.
  */
-import {
-  ADVERTISING_UNITS,
-  type AdvertisingUnit,
-} from "./advertising-units.js";
+import { ADVERTISING_UNITS, type AdvertisingUnit } from "./advertising-units.js";
 import type { CampaignType } from "./campaign-types.js";
 import { CAMPAIGN_TYPE_PRESETS } from "./campaign-types.js";
 import {
@@ -29,10 +26,7 @@ import { LAYER_KINDS, type LayerKind } from "./layer-kinds.js";
 import { layerTracksProblem, type Track } from "./tracks.js";
 import { ANCHOR_VALUES, type AnchorKind } from "./variation-defaults.js";
 
-export {
-  clickDestinationProblem,
-  type ClickDestinationProblem,
-} from "./click-destination.js";
+export { clickDestinationProblem, type ClickDestinationProblem } from "./click-destination.js";
 
 /**
  * The per-layer props (D134): overrides of the geometry each layer already
@@ -122,9 +116,7 @@ export interface LayerEnabledProblem {
  * `layerPropsProblem` is shared. Absent enabled is always fine: absence means
  * enabled (true). Defined enabled must be a boolean.
  */
-export function layerEnabledProblem(
-  enabled: unknown,
-): LayerEnabledProblem | undefined {
+export function layerEnabledProblem(enabled: unknown): LayerEnabledProblem | undefined {
   if (enabled === undefined || typeof enabled === "boolean") return undefined;
   return { field: "enabled", must: "be a boolean", value: enabled };
 }
@@ -150,10 +142,7 @@ export interface LayerPropsProblem {
  * a fraction: it is a string, and the empty string is admitted, because it
  * declares a decorative image rather than naming no alternative at all.
  */
-export function layerPropsProblem(
-  kind: LayerKind,
-  props: unknown,
-): LayerPropsProblem | undefined {
+export function layerPropsProblem(kind: LayerKind, props: unknown): LayerPropsProblem | undefined {
   if (props === undefined) return undefined;
   if (!(LAYER_KINDS as readonly string[]).includes(kind)) {
     return {
@@ -173,9 +162,7 @@ export function layerPropsProblem(
       value: props,
     };
   }
-  for (const [field, value] of Object.entries(
-    props as Record<string, unknown>,
-  )) {
+  for (const [field, value] of Object.entries(props as Record<string, unknown>)) {
     if (!allowed.includes(field)) {
       return {
         path: `.${field}`,
@@ -184,10 +171,7 @@ export function layerPropsProblem(
       };
     }
     if (field === "anchor") {
-      if (
-        typeof value !== "string" ||
-        !(ANCHOR_VALUES as readonly string[]).includes(value)
-      ) {
+      if (typeof value !== "string" || !(ANCHOR_VALUES as readonly string[]).includes(value)) {
         return {
           path: `.${field}`,
           must: `be one of ${ANCHOR_VALUES.map((anchor) => `"${anchor}"`).join(", ")}`,
@@ -202,12 +186,7 @@ export function layerPropsProblem(
       }
       continue;
     }
-    if (
-      typeof value !== "number" ||
-      !Number.isFinite(value) ||
-      value < 0 ||
-      value > 1
-    ) {
+    if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 1) {
       return { path: `.${field}`, must: "be a number in [0, 1]", value };
     }
   }
@@ -224,9 +203,7 @@ export function layerPropsProblem(
  * the same split `layerPropsProblem` keeps between the domain decision and
  * the boundary's message shape.
  */
-export function templateHasAnchorProp(
-  layers: readonly CreativeTemplateLayer[],
-): boolean {
+export function templateHasAnchorProp(layers: readonly CreativeTemplateLayer[]): boolean {
   return layers.some(
     (layer) =>
       (layer.kind === "static-text" || layer.kind === "animated-text") &&
@@ -352,8 +329,7 @@ export function satisfiesOrderConstraints(
  * restored draft that fails here falls back to the canonical template.
  */
 export function isBriefTemplate(value: unknown): value is BriefTemplate {
-  if (typeof value !== "object" || value === null || Array.isArray(value))
-    return false;
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
   const raw = value as Record<string, unknown>;
   if (
     !(
@@ -369,8 +345,7 @@ export function isBriefTemplate(value: unknown): value is BriefTemplate {
       Array.isArray(raw.layers) &&
       raw.layers.length > 0 &&
       raw.layers.every(isLayerEntry) &&
-      new Set(raw.layers.map((layer) => (layer as LayerEntry).id)).size ===
-        raw.layers.length
+      new Set(raw.layers.map((layer) => (layer as LayerEntry).id)).size === raw.layers.length
     )
   ) {
     return false;
@@ -390,10 +365,7 @@ export function isBriefTemplate(value: unknown): value is BriefTemplate {
  * present, disabled included (MP-D5); "required" counts only ENABLED
  * instances, absent meaning enabled (D129, MP-D4).
  */
-function satisfiesTypeRules(
-  creativeType: CreativeType,
-  layers: readonly LayerEntry[],
-): boolean {
+function satisfiesTypeRules(creativeType: CreativeType, layers: readonly LayerEntry[]): boolean {
   const rules = CREATIVE_TYPE_RULES[creativeType];
   const counts = new Map<string, number>();
   const enabledKinds = new Set<string>();
@@ -412,10 +384,7 @@ function satisfiesTypeRules(
     if ((counts.get(kind) ?? 0) > max) return false;
   }
   for (const budget of rules.sharedBudgets) {
-    const used = budget.kinds.reduce(
-      (sum, kind) => sum + (counts.get(kind) ?? 0),
-      0,
-    );
+    const used = budget.kinds.reduce((sum, kind) => sum + (counts.get(kind) ?? 0), 0);
     if (used > budget.max) return false;
   }
   return rules.required.every((kind) => enabledKinds.has(kind));
@@ -471,9 +440,7 @@ function isLayerEntry(layer: unknown): layer is LayerEntry {
   ) {
     return false;
   }
-  if (
-    layerElementsProblem(rec.kind as LayerKind, rec.elements) !== undefined
-  ) {
+  if (layerElementsProblem(rec.kind as LayerKind, rec.elements) !== undefined) {
     return false;
   }
   return layerTracksProblem(rec.kind as LayerKind, rec.tracks) === undefined;

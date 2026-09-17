@@ -1,6 +1,11 @@
 import { describe, test, expect } from "vitest";
 import { createCanvas } from "@napi-rs/canvas";
-import { AspectRatio, MOTION_KINDS, type CompositeRequest, type MotionKind } from "@campaignfoundry/CampaignOrchestration";
+import {
+  AspectRatio,
+  MOTION_KINDS,
+  type CompositeRequest,
+  type MotionKind,
+} from "@campaignfoundry/CampaignOrchestration";
 import { NodeCanvasCompositor } from "../NodeCanvasCompositor.js";
 
 const ratio = (v = "1:1") => {
@@ -71,7 +76,9 @@ async function spyDraw(req: CompositeRequest, t: number, motion?: MotionKind): P
     return origFill(x, y, w, h);
   }) as typeof ctx.fillRect;
   const proto = Object.getPrototypeOf(ctx) as object;
-  const desc = Object.getOwnPropertyDescriptor(proto, "globalAlpha") ?? Object.getOwnPropertyDescriptor(ctx, "globalAlpha");
+  const desc =
+    Object.getOwnPropertyDescriptor(proto, "globalAlpha") ??
+    Object.getOwnPropertyDescriptor(ctx, "globalAlpha");
   Object.defineProperty(ctx, "globalAlpha", {
     configurable: true,
     get() {
@@ -83,7 +90,15 @@ async function spyDraw(req: CompositeRequest, t: number, motion?: MotionKind): P
     },
   });
   NodeCanvasCompositor.draw(ctx, prepared, t, motion);
-  return { scales, translates, fillRects, alphas, images, width: prepared.width, height: prepared.height };
+  return {
+    scales,
+    translates,
+    fillRects,
+    alphas,
+    images,
+    width: prepared.width,
+    height: prepared.height,
+  };
 }
 
 describe("NodeCanvasCompositor.draw motion", () => {
@@ -94,19 +109,25 @@ describe("NodeCanvasCompositor.draw motion", () => {
     expect(atZero.translates.filter((p) => p[0] === 0 && p[1] !== 0)).toEqual([]);
   });
 
-  test.each([0, 0.5, 1] as const)("ken-burns-in scale at t=%s eases 1.08 toward 1.00", async (t) => {
-    const { scales } = await spyDraw(request(), t, "ken-burns-in");
-    const expected = 1 + 0.08 * (1 - easeOutCubic(t));
-    if (expected === 1) expect(scales).toEqual([]);
-    else expect(scales).toEqual([[expected, expected]]);
-  });
+  test.each([0, 0.5, 1] as const)(
+    "ken-burns-in scale at t=%s eases 1.08 toward 1.00",
+    async (t) => {
+      const { scales } = await spyDraw(request(), t, "ken-burns-in");
+      const expected = 1 + 0.08 * (1 - easeOutCubic(t));
+      if (expected === 1) expect(scales).toEqual([]);
+      else expect(scales).toEqual([[expected, expected]]);
+    },
+  );
 
-  test.each([0, 0.5, 1] as const)("ken-burns-out scale at t=%s eases 1.00 toward 1.08", async (t) => {
-    const { scales } = await spyDraw(request(), t, "ken-burns-out");
-    const expected = 1 + 0.08 * easeOutCubic(t);
-    if (expected === 1) expect(scales).toEqual([]);
-    else expect(scales).toEqual([[expected, expected]]);
-  });
+  test.each([0, 0.5, 1] as const)(
+    "ken-burns-out scale at t=%s eases 1.00 toward 1.08",
+    async (t) => {
+      const { scales } = await spyDraw(request(), t, "ken-burns-out");
+      const expected = 1 + 0.08 * easeOutCubic(t);
+      if (expected === 1) expect(scales).toEqual([]);
+      else expect(scales).toEqual([[expected, expected]]);
+    },
+  );
 
   test("ken-burns translates about the canvas centre before scaling", async () => {
     const { translates, width, height } = await spyDraw(request(), 0, "ken-burns-in");
@@ -114,50 +135,65 @@ describe("NodeCanvasCompositor.draw motion", () => {
     expect(translates[1]).toEqual([-width / 2, -height / 2]);
   });
 
-  test.each([0, 0.5, 1] as const)("headline-rise at t=%s eases alpha 0→1 and y-offset 12%→0", async (t) => {
-    const { alphas, translates, height } = await spyDraw(request(), t, "headline-rise");
-    const eased = easeOutCubic(t);
-    const dy = (1 - eased) * 0.12 * height;
-    if (dy === 0 && eased === 1) {
-      expect(alphas).toEqual([]);
-      expect(translates.filter((p) => p[0] === 0)).toEqual([]);
-    } else {
-      // opacity is a 0 -> 1 track (K2): resolveTracks folds it as
-      // `0 + (1 - 0) * eased`, exactly `eased` with no rounding at all.
-      expect(alphas).toEqual([eased]);
-      // dy is a C -> 0 track (K2): resolveTracks folds it as
-      // `C + (0 - C) * eased`, reassociating the old `(1 - eased) * C` —
-      // within a double's last bit at an interior t (exact at the t = 0/1
-      // stops, which this fixture's [0, 1] cases already exercise via the
-      // dy === 0 branch above and the t = 0 case below). Not something the
-      // rasterizer resolves — see NodeCanvasCompositor.motion-goldens.test.ts.
-      const match = translates.find((p) => p[0] === 0);
-      expect(match).toBeDefined();
-      expect(match![1]).toBeCloseTo(dy, 9);
-    }
-  });
+  test.each([0, 0.5, 1] as const)(
+    "headline-rise at t=%s eases alpha 0→1 and y-offset 12%→0",
+    async (t) => {
+      const { alphas, translates, height } = await spyDraw(request(), t, "headline-rise");
+      const eased = easeOutCubic(t);
+      const dy = (1 - eased) * 0.12 * height;
+      if (dy === 0 && eased === 1) {
+        expect(alphas).toEqual([]);
+        expect(translates.filter((p) => p[0] === 0)).toEqual([]);
+      } else {
+        // opacity is a 0 -> 1 track (K2): resolveTracks folds it as
+        // `0 + (1 - 0) * eased`, exactly `eased` with no rounding at all.
+        expect(alphas).toEqual([eased]);
+        // dy is a C -> 0 track (K2): resolveTracks folds it as
+        // `C + (0 - C) * eased`, reassociating the old `(1 - eased) * C` —
+        // within a double's last bit at an interior t (exact at the t = 0/1
+        // stops, which this fixture's [0, 1] cases already exercise via the
+        // dy === 0 branch above and the t = 0 case below). Not something the
+        // rasterizer resolves — see NodeCanvasCompositor.motion-goldens.test.ts.
+        const match = translates.find((p) => p[0] === 0);
+        expect(match).toBeDefined();
+        expect(match![1]).toBeCloseTo(dy, 9);
+      }
+    },
+  );
 
-  test.each([0, 0.5, 1] as const)("accent-wipe bottom layout at t=%s sweeps the fade height", async (t) => {
-    const { fillRects, width, height } = await spyDraw(request(), t, "accent-wipe");
-    const solidH = height * 0.05;
-    const fadeH = height * 0.06;
-    const wipe = easeOutCubic(t);
-    expect(fillRects).toContainEqual([0, height - solidH, width, solidH]);
-    const fade = fillRects.find((r) => r[0] === 0 && r[2] === width && r[3] === fadeH * wipe && r[1] !== 0);
-    if (wipe === 0) expect(fade).toBeUndefined();
-    else expect(fade).toEqual([0, height - solidH - fadeH * wipe, width, fadeH * wipe]);
-  });
+  test.each([0, 0.5, 1] as const)(
+    "accent-wipe bottom layout at t=%s sweeps the fade height",
+    async (t) => {
+      const { fillRects, width, height } = await spyDraw(request(), t, "accent-wipe");
+      const solidH = height * 0.05;
+      const fadeH = height * 0.06;
+      const wipe = easeOutCubic(t);
+      expect(fillRects).toContainEqual([0, height - solidH, width, solidH]);
+      const fade = fillRects.find(
+        (r) => r[0] === 0 && r[2] === width && r[3] === fadeH * wipe && r[1] !== 0,
+      );
+      if (wipe === 0) expect(fade).toBeUndefined();
+      else expect(fade).toEqual([0, height - solidH - fadeH * wipe, width, fadeH * wipe]);
+    },
+  );
 
-  test.each([0, 0.5, 1] as const)("accent-wipe top layout at t=%s keeps the solid band and sweeps the fade", async (t) => {
-    const { fillRects, width, height } = await spyDraw(request({ layout: "headline-top" }), t, "accent-wipe");
-    const solidH = height * 0.05;
-    const fadeH = height * 0.06;
-    const wipe = easeOutCubic(t);
-    expect(fillRects).toContainEqual([0, 0, width, solidH]);
-    const fade = fillRects.find((r) => r[1] === solidH && r[2] === width);
-    if (wipe === 0) expect(fade).toBeUndefined();
-    else expect(fade).toEqual([0, solidH, width, fadeH * wipe]);
-  });
+  test.each([0, 0.5, 1] as const)(
+    "accent-wipe top layout at t=%s keeps the solid band and sweeps the fade",
+    async (t) => {
+      const { fillRects, width, height } = await spyDraw(
+        request({ layout: "headline-top" }),
+        t,
+        "accent-wipe",
+      );
+      const solidH = height * 0.05;
+      const fadeH = height * 0.06;
+      const wipe = easeOutCubic(t);
+      expect(fillRects).toContainEqual([0, 0, width, solidH]);
+      const fade = fillRects.find((r) => r[1] === solidH && r[2] === width);
+      if (wipe === 0) expect(fade).toBeUndefined();
+      else expect(fade).toEqual([0, solidH, width, fadeH * wipe]);
+    },
+  );
 
   test("headline-rise keeps the logo where the rest pose put it while the headline is translated", async () => {
     // Deep insets on 16:9: the rest-pose box clears the bottom-left logo, but the
@@ -182,7 +218,11 @@ describe("NodeCanvasCompositor.draw motion", () => {
       // Overlong copy + deep insets: the overlap snap fires in both layouts.
       const message =
         "Stay wild, stay hydrated, and never stop exploring the trail ahead of you today and tomorrow and every single day after that too";
-      const req = request({ layout, message, safeInsets: { top: 200, right: 0, bottom: 200, left: 0 } });
+      const req = request({
+        layout,
+        message,
+        safeInsets: { top: 200, right: 0, bottom: 200, left: 0 },
+      });
       const still = await spyDraw(req, 1);
       const stillLogo = still.images[still.images.length - 1];
       for (const kind of MOTION_KINDS) {

@@ -1,9 +1,20 @@
 import { describe, test, expect, beforeEach, afterEach } from "vitest";
-import { existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+  rmSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { FileSystemPackageStore } from "../FileSystemPackageStore.js";
-import type { PackageManifest, PackageManifestItem } from "../../../application/ports/out/PackageStorePort.js";
+import type {
+  PackageManifest,
+  PackageManifestItem,
+} from "../../../application/ports/out/PackageStorePort.js";
 import { platformProfile } from "../../../domain/value-objects/PlatformProfile.vo.js";
 
 const bytes = (): Uint8Array => new Uint8Array([137, 80, 78, 71]);
@@ -42,15 +53,23 @@ describe("FileSystemPackageStore", () => {
   afterEach(() => rmSync(root, { recursive: true, force: true }));
 
   test("constructor refuses a campaign id that escapes or is not a child segment", () => {
-    expect(() => new FileSystemPackageStore(root, "..")).toThrow(/Refusing to write outside the output root/);
-    expect(() => new FileSystemPackageStore(root, "")).toThrow(/Refusing to write outside the output root/);
-    expect(() => new FileSystemPackageStore(root, ".")).toThrow(/Refusing to write outside the output root/);
+    expect(() => new FileSystemPackageStore(root, "..")).toThrow(
+      /Refusing to write outside the output root/,
+    );
+    expect(() => new FileSystemPackageStore(root, "")).toThrow(
+      /Refusing to write outside the output root/,
+    );
+    expect(() => new FileSystemPackageStore(root, ".")).toThrow(
+      /Refusing to write outside the output root/,
+    );
   });
 
   test("readAsset returns the bytes of a source file under the output root", async () => {
     mkdirSync(resolve(root, "alpha"), { recursive: true });
     writeFileSync(resolve(root, "alpha/1x1.png"), bytes());
-    expect(Buffer.from(await store.readAsset("alpha/1x1.png")).equals(Buffer.from(bytes()))).toBe(true);
+    expect(Buffer.from(await store.readAsset("alpha/1x1.png")).equals(Buffer.from(bytes()))).toBe(
+      true,
+    );
   });
 
   test("readAsset refuses a path that escapes the output root", async () => {
@@ -102,7 +121,9 @@ describe("FileSystemPackageStore", () => {
     expect(parsed.platformId).toBe("instagram-feed");
     expect(parsed.packagedAt).toBe("2026-08-25T12:00:00.000Z");
     expect(existsSync(resolve(root, "packages/camp/instagram-feed/alpha/1x1.png"))).toBe(true);
-    const leftover = readdirSync(resolve(root, "packages/camp")).filter((n) => n.includes(".staging-"));
+    const leftover = readdirSync(resolve(root, "packages/camp")).filter((n) =>
+      n.includes(".staging-"),
+    );
     expect(leftover).toEqual([]);
   });
 
@@ -169,9 +190,7 @@ describe("FileSystemPackageStore", () => {
     );
     // The same store keeps refusing rather than quietly starting over —
     // starting a fresh staging dir here could stomp on B's still-live one.
-    await expect(a.writeManifest("instagram-feed", manifest())).rejects.toThrow(
-      /export/i,
-    );
+    await expect(a.writeManifest("instagram-feed", manifest())).rejects.toThrow(/export/i);
 
     // A never reached `rm(finalDir)` + `rename`: the prior commit stands.
     expect(existsSync(resolve(root, "packages/camp/instagram-feed/alpha/old.png"))).toBe(true);

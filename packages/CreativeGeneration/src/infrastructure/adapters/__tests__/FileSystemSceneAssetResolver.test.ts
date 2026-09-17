@@ -23,7 +23,10 @@ const ratio = (v = "1:1") => {
 describe("FileSystemSceneAssetResolver (SceneAssetPort adapter)", () => {
   test("resolves a readable scene, cover-fitted to the target ratio's exact pixel dimensions", async () => {
     const target = ratio("9:16");
-    const out = await new FileSystemSceneAssetResolver().resolveScene("assets/inputs/reuse-bg.png", target);
+    const out = await new FileSystemSceneAssetResolver().resolveScene(
+      "assets/inputs/reuse-bg.png",
+      target,
+    );
     expect(out.length).toBeGreaterThan(0);
     // PNG magic — a real cover-fitted image, not the source bytes verbatim.
     expect(Buffer.from(out.subarray(0, 4))).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47]));
@@ -37,7 +40,10 @@ describe("FileSystemSceneAssetResolver (SceneAssetPort adapter)", () => {
 
   test("cover-fits to a second, differently-shaped ratio too — the dimensions track the request, not a fixed output size", async () => {
     const target = ratio("16:9");
-    const out = await new FileSystemSceneAssetResolver().resolveScene("assets/inputs/reuse-bg.png", target);
+    const out = await new FileSystemSceneAssetResolver().resolveScene(
+      "assets/inputs/reuse-bg.png",
+      target,
+    );
     const decoded = await loadImage(Buffer.from(out));
     expect(decoded.width).toBe(target.width);
     expect(decoded.height).toBe(target.height);

@@ -48,10 +48,17 @@ const cellKey = (layout: LayoutKind, tone: ToneKind, ratioValue: string) =>
 const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 
 const fixture = JSON.parse(
-  readFileSync(join(dirname(fileURLToPath(import.meta.url)), "fixtures/compositor-goldens.json"), "utf8"),
+  readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "fixtures/compositor-goldens.json"),
+    "utf8",
+  ),
 ) as GoldenFixture;
 
-const render = (prepared: Awaited<ReturnType<typeof NodeCanvasCompositor.prepare>>, t: number, motion?: MotionKind) => {
+const render = (
+  prepared: Awaited<ReturnType<typeof NodeCanvasCompositor.prepare>>,
+  t: number,
+  motion?: MotionKind,
+) => {
   const canvas = createCanvas(prepared.width, prepared.height);
   const ctx = canvas.getContext("2d");
   NodeCanvasCompositor.draw(ctx, prepared, t, motion);
@@ -102,11 +109,15 @@ describe("NodeCanvasCompositor D10 — the legacy path is byte-identical after t
 
             for (const kind of MOTION_KINDS) {
               // draw (no timeline) routes to drawLegacy — both must match the still.
-              expect(sha256(render(prepared, restT(kind), kind))).toBe(map[cellKey(layout, tone, ratioValue)]);
+              expect(sha256(render(prepared, restT(kind), kind))).toBe(
+                map[cellKey(layout, tone, ratioValue)],
+              );
               const legacyCanvas = createCanvas(prepared.width, prepared.height);
               const legacyCtx = legacyCanvas.getContext("2d");
               NodeCanvasCompositor.drawLegacy(legacyCtx, prepared, restT(kind), kind);
-              expect(sha256(legacyCanvas.toBuffer("image/png"))).toBe(map[cellKey(layout, tone, ratioValue)]);
+              expect(sha256(legacyCanvas.toBuffer("image/png"))).toBe(
+                map[cellKey(layout, tone, ratioValue)],
+              );
             }
           }
         }
@@ -119,52 +130,59 @@ describe("NodeCanvasCompositor D10 — the legacy path is byte-identical after t
     { timeout: 120_000 },
     async () => {
       const base = {
-      brandColor: BRAND,
-      logoPath: LOGO,
-      background: (() => {
-        const c = createCanvas(64, 64);
-        const g = c.getContext("2d");
-        g.fillStyle = "#333333";
-        g.fillRect(0, 0, 64, 64);
-        return c.toBuffer("image/png");
-      })(),
-    };
-    const variants: CompositeRequest[] = [
-      { ...base, message: MESSAGE, canvas: { ratio: "1:1" }, layout: "headline-bottom", tone: "bold" },
-      {
-        ...base,
-        message: MESSAGE,
-        canvas: { ratio: "16:9" },
-        layout: "headline-top",
-        tone: "subtle",
-        safeInsets: { top: 120, right: 0, bottom: 200, left: 0 },
-      },
-      { ...base, message: "Hi", canvas: { ratio: "9:16" }, layout: "headline-top", tone: "bold" },
-    ];
+        brandColor: BRAND,
+        logoPath: LOGO,
+        background: (() => {
+          const c = createCanvas(64, 64);
+          const g = c.getContext("2d");
+          g.fillStyle = "#333333";
+          g.fillRect(0, 0, 64, 64);
+          return c.toBuffer("image/png");
+        })(),
+      };
+      const variants: CompositeRequest[] = [
+        {
+          ...base,
+          message: MESSAGE,
+          canvas: { ratio: "1:1" },
+          layout: "headline-bottom",
+          tone: "bold",
+        },
+        {
+          ...base,
+          message: MESSAGE,
+          canvas: { ratio: "16:9" },
+          layout: "headline-top",
+          tone: "subtle",
+          safeInsets: { top: 120, right: 0, bottom: 200, left: 0 },
+        },
+        { ...base, message: "Hi", canvas: { ratio: "9:16" }, layout: "headline-top", tone: "bold" },
+      ];
 
-    for (const request of variants) {
-      const prepared = await NodeCanvasCompositor.prepare(request);
-      for (const kind of [undefined, ...MOTION_KINDS] as const) {
-        for (const t of [0, 0.5, 1] as const) {
-          // Comparing `draw` against `drawLegacy` pixel-for-pixel would be tautological:
-          // with no timeline prepared, `draw` *calls* `drawLegacy`, so the assertion can
-          // only fail if canvas rendering is non-deterministic — never if this code
-          // regresses. The golden-hash comparison above is what actually pins the bytes.
-          //
-          // The invariant worth asserting is the one that would break: that a request
-          // with no timeline still travels the single legacy path, rather than a second
-          // copy of it growing beside the first and drifting.
-          const spy = vi.spyOn(NodeCanvasCompositor, "drawLegacy");
-          const canvas = createCanvas(prepared.width, prepared.height);
-          NodeCanvasCompositor.draw(canvas.getContext("2d"), prepared, t, kind);
-          expect(spy).toHaveBeenCalledTimes(1);
-          // D10: drawLegacy gained the effect clock (5th arg, defaulting to the
-          // motion t). Timeline-free draw always forwards it so still bytes stay
-          // on one path; a style-less brief is the identity pose either way.
-          expect(spy.mock.calls[0].slice(1)).toEqual([prepared, t, kind, t]);
-          spy.mockRestore();
+      for (const request of variants) {
+        const prepared = await NodeCanvasCompositor.prepare(request);
+        for (const kind of [undefined, ...MOTION_KINDS] as const) {
+          for (const t of [0, 0.5, 1] as const) {
+            // Comparing `draw` against `drawLegacy` pixel-for-pixel would be tautological:
+            // with no timeline prepared, `draw` *calls* `drawLegacy`, so the assertion can
+            // only fail if canvas rendering is non-deterministic — never if this code
+            // regresses. The golden-hash comparison above is what actually pins the bytes.
+            //
+            // The invariant worth asserting is the one that would break: that a request
+            // with no timeline still travels the single legacy path, rather than a second
+            // copy of it growing beside the first and drifting.
+            const spy = vi.spyOn(NodeCanvasCompositor, "drawLegacy");
+            const canvas = createCanvas(prepared.width, prepared.height);
+            NodeCanvasCompositor.draw(canvas.getContext("2d"), prepared, t, kind);
+            expect(spy).toHaveBeenCalledTimes(1);
+            // D10: drawLegacy gained the effect clock (5th arg, defaulting to the
+            // motion t). Timeline-free draw always forwards it so still bytes stay
+            // on one path; a style-less brief is the identity pose either way.
+            expect(spy.mock.calls[0].slice(1)).toEqual([prepared, t, kind, t]);
+            spy.mockRestore();
+          }
         }
       }
-    }
-  });
+    },
+  );
 });

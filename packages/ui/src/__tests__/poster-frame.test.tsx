@@ -46,7 +46,9 @@ describe("PosterFrame", () => {
     // 1:1 at 96 → viewBox 0 0 96 96; pA's image is 82 % wide, 52 % tall, at the top.
     const { container } = render(<PosterFrame ratio="1:1" variant="pA" size={96} />);
     const rects = Array.from(container.querySelectorAll("rect"));
-    const image = rects.find((rect) => rect.getAttribute("class")?.includes("fill-text-muted/[0.18]"));
+    const image = rects.find((rect) =>
+      rect.getAttribute("class")?.includes("fill-text-muted/[0.18]"),
+    );
     expect(image).toBeTruthy();
     expect(Number(image?.getAttribute("x"))).toBeCloseTo(0.09 * 96);
     expect(Number(image?.getAttribute("y"))).toBeCloseTo(0.07 * 96);
@@ -81,7 +83,9 @@ describe("PosterFrame", () => {
   test("pC centres the round image, the text and the CTA", () => {
     const { container } = render(<PosterFrame ratio="1:1" variant="pC" size={96} />);
     const rects = Array.from(container.querySelectorAll("rect"));
-    const image = rects.find((rect) => rect.getAttribute("class")?.includes("fill-text-muted/[0.18]"));
+    const image = rects.find((rect) =>
+      rect.getAttribute("class")?.includes("fill-text-muted/[0.18]"),
+    );
     expect(image).toBeTruthy();
     // Round: the rx rounds the rect into a circle at half its width.
     expect(image?.getAttribute("rx")).toBe(String(Number(image?.getAttribute("width")) / 2));
@@ -107,7 +111,9 @@ describe("PosterFrame", () => {
         "fill-brand-primary",
       ]) {
         expect(
-          Array.from(svg.querySelectorAll("[class]")).some((node) => node.getAttribute("class")?.includes(fill)),
+          Array.from(svg.querySelectorAll("[class]")).some((node) =>
+            node.getAttribute("class")?.includes(fill),
+          ),
         ).toBe(false);
       }
       // pB's avatar is gated on `!blank`; dropping that conjunct stays green if

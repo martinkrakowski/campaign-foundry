@@ -49,7 +49,11 @@ describe("PreviewPanel", () => {
       </PreviewPanel>,
     );
     const withoutCaption = container.firstElementChild as HTMLElement;
-    expect(Array.from(withoutCaption.querySelectorAll("span")).some((span) => span.className.includes("font-mono"))).toBe(false);
+    expect(
+      Array.from(withoutCaption.querySelectorAll("span")).some((span) =>
+        span.className.includes("font-mono"),
+      ),
+    ).toBe(false);
   });
 
   test("dimmed toggles the unselected treatment — a transition, never a loop (D88)", () => {

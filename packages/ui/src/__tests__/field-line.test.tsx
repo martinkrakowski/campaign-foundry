@@ -27,9 +27,11 @@ describe("FieldLine", () => {
   });
 
   test("a caller's className is merged over the primitive's own", () => {
-    render(<FieldLine tone="error" className="block">
-      Choose at least one format
-    </FieldLine>);
+    render(
+      <FieldLine tone="error" className="block">
+        Choose at least one format
+      </FieldLine>,
+    );
     const el = screen.getByText("Choose at least one format");
     expect(el.className).toContain("block");
     expect(el.className).toContain("text-error");

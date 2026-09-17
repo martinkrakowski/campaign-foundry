@@ -115,7 +115,9 @@ describe("styleProblem — the validator both brief boundaries share (T5)", () =
         textEffect: "fade-in",
       }),
     ).toBeUndefined();
-    expect(styleProblem({ sizeScale: 0.02, lineHeight: 1, letterSpacing: -0.05, align: "left" })).toBeUndefined();
+    expect(
+      styleProblem({ sizeScale: 0.02, lineHeight: 1, letterSpacing: -0.05, align: "left" }),
+    ).toBeUndefined();
     for (const effect of TEXT_EFFECT_VALUES) {
       expect(styleProblem({ textEffect: effect })).toBeUndefined();
     }
@@ -146,7 +148,11 @@ describe("styleProblem — the validator both brief boundaries share (T5)", () =
     ["letterSpacing", 0.5, /"style\.letterSpacing" must be a finite number in \[-0\.05, 0\.2\]/],
     ["letterSpacing", -0.5, /"style\.letterSpacing" must be a finite number in \[-0\.05, 0\.2\]/],
     ["align", "justified", /"style\.align" must be one of left, center, right/],
-    ["textEffect", "spin", /"style\.textEffect" must be one of fade-in, rise-in, slide-in, scale-in/],
+    [
+      "textEffect",
+      "spin",
+      /"style\.textEffect" must be one of fade-in, rise-in, slide-in, scale-in/,
+    ],
     ["textEffect", 3, /"style\.textEffect" must be one of fade-in, rise-in, slide-in, scale-in/],
   ])("rejects style.%s = %p", (field, value, message) => {
     expect(styleProblem({ [field]: value })).toMatch(message);

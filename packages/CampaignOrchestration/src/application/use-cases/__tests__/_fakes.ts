@@ -20,7 +20,9 @@ import type { VariationPlanner } from "../GenerateCampaignUseCase.use-case.js";
  * `vi.fn()` so a test can assert what the ports were called with.
  */
 
-export const fakeImageGenerator = (source: BackgroundSource = "procedural"): ImageGeneratorPort => ({
+export const fakeImageGenerator = (
+  source: BackgroundSource = "procedural",
+): ImageGeneratorPort => ({
   resolveBackground: vi.fn(async () => ({ image: new Uint8Array([1, 2, 3]), source })),
 });
 
@@ -69,10 +71,17 @@ export interface FakeComplianceOptions {
 }
 
 export const fakeCompliance = (opts: FakeComplianceOptions = {}): CompliancePort => {
-  const { legalPass = true, legalReason = "Prohibited terminology: guaranteed", density = 0.5, scoreless = false } = opts;
+  const {
+    legalPass = true,
+    legalReason = "Prohibited terminology: guaranteed",
+    density = 0.5,
+    scoreless = false,
+  } = opts;
   let call = 0;
   return {
-    validateLegalCopy: vi.fn(async () => (legalPass ? { passed: true } : { passed: false, reason: legalReason })),
+    validateLegalCopy: vi.fn(async () =>
+      legalPass ? { passed: true } : { passed: false, reason: legalReason },
+    ),
     validateBrandColorDensity: vi.fn(async () => {
       const score = opts.densities?.[call] ?? density;
       call += 1;
@@ -82,7 +91,9 @@ export const fakeCompliance = (opts: FakeComplianceOptions = {}): CompliancePort
 };
 
 /** Motion port fake: `frames` sampled frames (default 5, one byte each so tests can tell them apart). */
-export const fakeVideoCompositor = (opts: { logoApplied?: boolean; frames?: number } = {}): VideoCompositorPort => ({
+export const fakeVideoCompositor = (
+  opts: { logoApplied?: boolean; frames?: number } = {},
+): VideoCompositorPort => ({
   compositeVideo: vi.fn(async () => ({
     video: new Uint8Array([7, 8, 9, 10]),
     poster: new Uint8Array([4, 5, 6]),
@@ -114,7 +125,10 @@ export const fakeVariant = (over: Partial<Variant> = {}): Variant => ({
   ...over,
 });
 
-export const fakePlan = (variants: Variant[], over: Partial<VariationPlan> = {}): VariationPlan => ({
+export const fakePlan = (
+  variants: Variant[],
+  over: Partial<VariationPlan> = {},
+): VariationPlan => ({
   policyHash: "hash",
   copyHash: "copy-hash",
   seed: 42,
@@ -125,7 +139,9 @@ export const fakePlan = (variants: Variant[], over: Partial<VariationPlan> = {})
   ...over,
 });
 
-export const fakePlanner = (plan: VariationPlan | Error = fakePlan([fakeVariant()])): VariationPlanner => ({
+export const fakePlanner = (
+  plan: VariationPlan | Error = fakePlan([fakeVariant()]),
+): VariationPlanner => ({
   plan: vi.fn(() => (plan instanceof Error ? err(plan) : ok(plan))),
   replan: vi.fn((current: VariationPlan, index: number, attempt: number) => {
     if (index < 0 || index >= current.variants.length) {

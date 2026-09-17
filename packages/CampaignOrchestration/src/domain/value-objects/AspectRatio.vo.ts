@@ -21,7 +21,9 @@ export class AspectRatio {
   static create(value: string): Result<AspectRatio, Error> {
     if (!(RATIO_VALUES as readonly string[]).includes(value)) {
       return err(
-        new Error(`Unsupported aspect ratio "${value}" (expected one of ${RATIO_VALUES.join(", ")})`),
+        new Error(
+          `Unsupported aspect ratio "${value}" (expected one of ${RATIO_VALUES.join(", ")})`,
+        ),
       );
     }
     const v = value as AspectRatioValue;

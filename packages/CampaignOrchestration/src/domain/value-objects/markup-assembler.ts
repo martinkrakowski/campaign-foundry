@@ -23,7 +23,12 @@
 import { resolveCanvas, scaleBasis, type CanvasSpec } from "./aspect-ratios.js";
 import { CLICK_TAG_VARIABLE } from "./click-destination.js";
 import { DEFAULT_STYLE, resolveStyle, toneFontWeight, type Style } from "./creative-style.js";
-import { htmlTextGeometry, htmlButtonFontSize, htmlElementFont, type HtmlElement } from "./html-element.js";
+import {
+  htmlTextGeometry,
+  htmlButtonFontSize,
+  htmlElementFont,
+  type HtmlElement,
+} from "./html-element.js";
 import { DEFAULT_TREATMENT, type ToneKind } from "./Treatment.vo.js";
 
 /** HTML-escape user-authored strings for the HTML text / quoted-attribute contexts (HL-D7). */
@@ -48,10 +53,7 @@ export function escapeHtml(value: string): string {
  * order is safe.
  */
 function escapeScriptJson(json: string): string {
-  return json
-    .replace(/</g, "\\u003C")
-    .replace(/>/g, "\\u003E")
-    .replace(/&/g, "\\u0026");
+  return json.replace(/</g, "\\u003C").replace(/>/g, "\\u003E").replace(/&/g, "\\u0026");
 }
 
 /** The documented brand colour shape: a 6-digit hex colour, e.g. `#1473E6`. */

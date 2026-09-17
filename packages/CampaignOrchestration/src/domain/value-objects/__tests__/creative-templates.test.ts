@@ -28,8 +28,14 @@ describe("canonical creative templates (D123, D128)", () => {
 
   test("every canonical template's version is a positive integer", () => {
     for (const template of Object.values(CANONICAL_TEMPLATES)) {
-      expect(Number.isInteger(template.version), `canonical template "${template.id}" version must be an integer`).toBe(true);
-      expect(template.version, `canonical template "${template.id}" version must be positive`).toBeGreaterThan(0);
+      expect(
+        Number.isInteger(template.version),
+        `canonical template "${template.id}" version must be an integer`,
+      ).toBe(true);
+      expect(
+        template.version,
+        `canonical template "${template.id}" version must be positive`,
+      ).toBeGreaterThan(0);
       expect(template.version).toBe(1);
       expect(typeof template.name).toBe("string");
       expect(template.name.length).toBeGreaterThan(0);
@@ -84,10 +90,9 @@ describe("canonical creative templates (D123, D128)", () => {
     for (const template of Object.values(CANONICAL_TEMPLATES)) {
       const ids = template.layers.map((l) => l.id);
       const uniqueIds = new Set(ids);
-      expect(
-        uniqueIds.size,
-        `duplicate layer ids found in template "${template.id}"`,
-      ).toBe(ids.length);
+      expect(uniqueIds.size, `duplicate layer ids found in template "${template.id}"`).toBe(
+        ids.length,
+      );
     }
   });
 

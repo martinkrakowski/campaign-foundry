@@ -83,19 +83,10 @@ export interface CreativeTypeRule {
   ];
 }
 
-export const CREATIVE_TYPE_RULES: Readonly<
-  Record<CreativeType, CreativeTypeRule>
-> = {
+export const CREATIVE_TYPE_RULES: Readonly<Record<CreativeType, CreativeTypeRule>> = {
   "image-text": {
     unit: "standard-web",
-    accepts: [
-      "image",
-      "shade",
-      "accent",
-      "static-text",
-      "animated-text",
-      "logo",
-    ],
+    accepts: ["image", "shade", "accent", "static-text", "animated-text", "logo"],
     required: ["image", "static-text"],
     maxOf: { logo: 1, shade: 1, accent: 1 },
     sharedBudgets: [{ kinds: ["static-text", "animated-text"], max: 1 }],
@@ -141,8 +132,7 @@ export function outputFamilyProblem(
   creativeType: CreativeType,
   formats: readonly string[],
 ): OutputFamilyProblem | undefined {
-  const families = CREATIVE_TYPE_RULES[creativeType]
-    .outputFamilies as readonly string[];
+  const families = CREATIVE_TYPE_RULES[creativeType].outputFamilies as readonly string[];
   for (const format of formats) {
     if (!families.includes(format)) {
       return { format, creativeType };
@@ -258,17 +248,13 @@ export function formatOcclusionReason(
  * but explicitly declares `severity: "advisory"` alongside the explanatory `reason`
  * so consumers can distinguish an advisory from a gate failure without inference.
  */
-export function checkPairOcclusion(
-  above: LayerKind,
-  below: LayerKind,
-): ComplianceResult {
+export function checkPairOcclusion(above: LayerKind, below: LayerKind): ComplianceResult {
   const rule = OCCLUSION_TABLE[above];
   if (!rule || rule.behavior === "none" || !rule.obscures) {
     return { passed: true };
   }
   const isObscured =
-    rule.obscures === "all" ||
-    (Array.isArray(rule.obscures) && rule.obscures.includes(below));
+    rule.obscures === "all" || (Array.isArray(rule.obscures) && rule.obscures.includes(below));
   if (!isObscured) {
     return { passed: true };
   }
@@ -409,11 +395,7 @@ export function checkRepositionOcclusion(
     return {
       passed: true,
       severity: "advisory",
-      reason: formatOcclusionReason(
-        finding.above,
-        finding.below,
-        finding.behavior,
-      ),
+      reason: formatOcclusionReason(finding.above, finding.below, finding.behavior),
     };
   }
 

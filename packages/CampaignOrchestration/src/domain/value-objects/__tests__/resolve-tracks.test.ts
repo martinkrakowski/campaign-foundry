@@ -1,7 +1,13 @@
 import { describe, test, expect } from "vitest";
 import { beatAt, resolveTimeline, type CopyTimeline } from "../CopyTimeline.vo.js";
 import { easeOutCubic } from "../easing.js";
-import { IDENTITY_POSE, IMPLICIT_BEAT, poseOf, resolveTracks, type TrackedLayer } from "../resolve-tracks.js";
+import {
+  IDENTITY_POSE,
+  IMPLICIT_BEAT,
+  poseOf,
+  resolveTracks,
+  type TrackedLayer,
+} from "../resolve-tracks.js";
 import type { Track } from "../tracks.js";
 
 /** A single-stop track holds its one value everywhere — a cheap constant fixture. */
@@ -80,7 +86,9 @@ describe("resolveTracks — interpolation per clock (K-D8)", () => {
         { t: 1, value: 2, clock: "pose" },
       ],
     };
-    const layers: TrackedLayer[] = [{ id: "txt", kind: "static-text", tracks: [track, scaleTrack] }];
+    const layers: TrackedLayer[] = [
+      { id: "txt", kind: "static-text", tracks: [track, scaleTrack] },
+    ];
 
     // Global t = 0.25, quarter-way into beat A's own [0, 0.5) window: beat-local
     // progress is 0.5, same as t = 0.75 a quarter-way into beat B's [0.5, 1]
@@ -138,7 +146,9 @@ describe("resolveTracks — interpolation per clock (K-D8)", () => {
       keyBeat: 1,
     };
     const resolved = resolveTimeline(timeline, 10);
-    const layers: TrackedLayer[] = [{ id: "txt", kind: "static-text", tracks: [constant("dy", 42)] }];
+    const layers: TrackedLayer[] = [
+      { id: "txt", kind: "static-text", tracks: [constant("dy", 42)] },
+    ];
 
     // No copyT given -- must select beat B by t alone (t = 0.75 falls in B's
     // [0.5, 1] window), not fall back to beat A.
@@ -258,7 +268,9 @@ describe("resolveTracks — copy is one pose per (beat, mix), not per text layer
     const pair = beatAt(resolved, copyT);
     expect(pair.incoming).toBeDefined();
 
-    const layers: TrackedLayer[] = [{ id: "txt", kind: "static-text", tracks: [constant("opacity", 0.5)] }];
+    const layers: TrackedLayer[] = [
+      { id: "txt", kind: "static-text", tracks: [constant("opacity", 0.5)] },
+    ];
     const result = resolveTracks(layers, resolved, { t: copyT, copyT });
 
     expect(result.copy).toHaveLength(2);

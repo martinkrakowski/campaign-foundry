@@ -102,7 +102,13 @@ describe("the compositor does not draw a disabled layer (X9, D129)", () => {
 
   test("still: a disabled layer renders the frame of the template without that layer", async () => {
     const enabled = await renderStill(
-      request({ template: templateWith([{ id: "image", kind: "image" }, { id: "shade", kind: "shade" }, COPY]) }),
+      request({
+        template: templateWith([
+          { id: "image", kind: "image" },
+          { id: "shade", kind: "shade" },
+          COPY,
+        ]),
+      }),
     );
     const absent = await renderStill(
       request({ template: templateWith([{ id: "image", kind: "image" }, COPY]) }),
@@ -205,10 +211,16 @@ describe("the compositor does not draw a disabled layer (X9, D129)", () => {
 
   test("timeline: a disabled layer renders the frame of the template without that layer", async () => {
     const enabled = await renderTimeline(
-      timelineRequest(templateWith([{ id: "image", kind: "image" }, { id: "shade", kind: "shade" }, COPY]), "Stay wild, stay hydrated"),
+      timelineRequest(
+        templateWith([{ id: "image", kind: "image" }, { id: "shade", kind: "shade" }, COPY]),
+        "Stay wild, stay hydrated",
+      ),
     );
     const absent = await renderTimeline(
-      timelineRequest(templateWith([{ id: "image", kind: "image" }, COPY]), "Stay wild, stay hydrated"),
+      timelineRequest(
+        templateWith([{ id: "image", kind: "image" }, COPY]),
+        "Stay wild, stay hydrated",
+      ),
     );
     const disabled = await renderTimeline(
       timelineRequest(
@@ -301,7 +313,13 @@ describe("the compositor does not draw a disabled layer (X9, D129)", () => {
     expect(absent.logoApplied).toBe(false);
     expect(Buffer.from(disabled.image)).toEqual(Buffer.from(absent.image));
     const enabled = await compositor.compositeAsset(
-      request({ template: templateWith([{ id: "image", kind: "image" }, COPY, { id: "logo", kind: "logo" }]) }),
+      request({
+        template: templateWith([
+          { id: "image", kind: "image" },
+          COPY,
+          { id: "logo", kind: "logo" },
+        ]),
+      }),
     );
     expect(enabled.logoApplied).toBe(true);
     expect(Buffer.from(enabled.image)).not.toEqual(Buffer.from(absent.image));

@@ -15,7 +15,11 @@ describe("Button", () => {
   });
 
   test("applies an explicit variant and size", () => {
-    render(<Button variant="destructive" size="lg">X</Button>);
+    render(
+      <Button variant="destructive" size="lg">
+        X
+      </Button>,
+    );
     const b = screen.getByRole("button");
     expect(b.className).toContain("bg-error");
     expect(b.className).toContain("h-12");

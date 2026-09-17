@@ -81,9 +81,7 @@ export interface ClickDestinationProblem {
  * is always fine: absence means no destination is configured. When present, it must be
  * an absolute URL (with http: or https: scheme).
  */
-export function clickDestinationProblem(
-  destination: unknown,
-): ClickDestinationProblem | undefined {
+export function clickDestinationProblem(destination: unknown): ClickDestinationProblem | undefined {
   if (destination === undefined) return undefined;
   if (typeof destination !== "string" || !isAbsoluteUrl(destination)) {
     return {

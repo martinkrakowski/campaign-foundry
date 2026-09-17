@@ -16,7 +16,13 @@ export interface RegionChipProps {
  * pressed. The accessible name is exactly `label` (the kit's card contract) — the
  * dot and the mono code are `aria-hidden`, so they never join the name.
  */
-export function RegionChip({ label, code, pressed, onToggle, disabled = false }: RegionChipProps): ReactNode {
+export function RegionChip({
+  label,
+  code,
+  pressed,
+  onToggle,
+  disabled = false,
+}: RegionChipProps): ReactNode {
   return (
     <button
       type="button"
@@ -35,7 +41,10 @@ export function RegionChip({ label, code, pressed, onToggle, disabled = false }:
     >
       <span
         aria-hidden="true"
-        className={cn("size-1.5 rounded-full", pressed ? "bg-brand-primary" : "border border-border-control")}
+        className={cn(
+          "size-1.5 rounded-full",
+          pressed ? "bg-brand-primary" : "border border-border-control",
+        )}
       />
       <span>{label}</span>
       <span aria-hidden="true" className="font-mono text-[10px] text-text-muted">

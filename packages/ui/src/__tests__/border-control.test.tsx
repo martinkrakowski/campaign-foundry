@@ -39,9 +39,15 @@ describe("control boundaries carry border-control", () => {
 
   test("Stepper — the − / + buttons and the spinbutton readout", () => {
     render(<Stepper aria-label="Distance" value="2" min={0} max={5} onChange={vi.fn()} />);
-    expect(classes(screen.getByRole("button", { name: "Decrease Distance" }))).toContain("border-border-control");
-    expect(classes(screen.getByRole("button", { name: "Increase Distance" }))).toContain("border-border-control");
-    expect(classes(screen.getByRole("spinbutton", { name: "Distance" }))).toContain("border-border-control");
+    expect(classes(screen.getByRole("button", { name: "Decrease Distance" }))).toContain(
+      "border-border-control",
+    );
+    expect(classes(screen.getByRole("button", { name: "Increase Distance" }))).toContain(
+      "border-border-control",
+    );
+    expect(classes(screen.getByRole("spinbutton", { name: "Distance" }))).toContain(
+      "border-border-control",
+    );
   });
 
   test("Stepper — invalid keeps the error arm and takes no control token", () => {
@@ -73,7 +79,9 @@ describe("control boundaries carry border-control", () => {
 
     // The selected chip takes the brand border instead.
     render(<ChipGroup label="Region" options={["nordics"]} value="nordics" onChange={vi.fn()} />);
-    expect(classes(screen.getByRole("button", { name: "nordics" }))).toContain("border-brand-primary");
+    expect(classes(screen.getByRole("button", { name: "nordics" }))).toContain(
+      "border-brand-primary",
+    );
   });
 
   test("SwatchChip — the button; the colour dot's rim stays decorative border", () => {
@@ -118,7 +126,11 @@ describe("control boundaries carry border-control", () => {
 
   test("PlatformCard — the unselected card and its hover", () => {
     render(
-      <PlatformCard profile={platformProfile("instagram-feed")!} selected={false} onToggle={vi.fn()} />,
+      <PlatformCard
+        profile={platformProfile("instagram-feed")!}
+        selected={false}
+        onToggle={vi.fn()}
+      />,
     );
     const card = screen.getByRole("button", { name: "instagram-feed" });
     expect(classes(card)).toContain("border-border-control");
@@ -127,7 +139,9 @@ describe("control boundaries carry border-control", () => {
 
   test("SwitchRow — the off rail; the checked rail keeps the brand border", () => {
     const off = render(<SwitchRow label="Vary the headline" checked={false} onToggle={vi.fn()} />);
-    expect(classes(screen.getByRole("switch", { name: "Vary the headline" }))).toContain("border-border-control");
+    expect(classes(screen.getByRole("switch", { name: "Vary the headline" }))).toContain(
+      "border-border-control",
+    );
     off.unmount();
 
     render(<SwitchRow label="Vary the tone" checked onToggle={vi.fn()} />);

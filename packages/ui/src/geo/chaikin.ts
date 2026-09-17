@@ -10,8 +10,12 @@ export function chaikin(pts: readonly Pt[], it = 2): Pt[] {
   for (let n = 0; n < it; n++) {
     const out: Pt[] = [cur[0]];
     for (let i = 0; i < cur.length - 1; i++) {
-      const [x1, y1] = cur[i], [x2, y2] = cur[i + 1];
-      out.push([x1 * .75 + x2 * .25, y1 * .75 + y2 * .25], [x1 * .25 + x2 * .75, y1 * .25 + y2 * .75]);
+      const [x1, y1] = cur[i],
+        [x2, y2] = cur[i + 1];
+      out.push(
+        [x1 * 0.75 + x2 * 0.25, y1 * 0.75 + y2 * 0.25],
+        [x1 * 0.25 + x2 * 0.75, y1 * 0.25 + y2 * 0.75],
+      );
     }
     out.push(cur[cur.length - 1]);
     cur = out;
@@ -20,4 +24,8 @@ export function chaikin(pts: readonly Pt[], it = 2): Pt[] {
 }
 
 export const polyPath = (pts: readonly Pt[]): string =>
-  "M" + chaikin(pts).map((p) => p[0].toFixed(1) + " " + p[1].toFixed(1)).join("L") + "Z";
+  "M" +
+  chaikin(pts)
+    .map((p) => p[0].toFixed(1) + " " + p[1].toFixed(1))
+    .join("L") +
+  "Z";

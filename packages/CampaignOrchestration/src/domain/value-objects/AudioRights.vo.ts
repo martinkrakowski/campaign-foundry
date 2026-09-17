@@ -151,7 +151,8 @@ export function isAudioRights(value: unknown): value is AudioRights {
   if (typeof rec.licenceId !== "string" || rec.licenceId.length === 0) return false;
   if (typeof rec.source !== "string" || rec.source.length === 0) return false;
   if (rec.expiresOn !== undefined) {
-    if (typeof rec.expiresOn !== "string" || parseExpiresOnMs(rec.expiresOn) === undefined) return false;
+    if (typeof rec.expiresOn !== "string" || parseExpiresOnMs(rec.expiresOn) === undefined)
+      return false;
   }
   if (rec.territories !== undefined) {
     if (!Array.isArray(rec.territories) || rec.territories.length === 0) return false;
@@ -183,9 +184,7 @@ function hasOnlyKeys(value: Record<string, unknown>, allowed: readonly string[])
  * `parseBrief` would refuse too, so it must be dropped before it can produce a
  * save the user cannot repair or clear.
  */
-export function isAudio(
-  value: unknown,
-): value is { path: string; rights: AudioRights } {
+export function isAudio(value: unknown): value is { path: string; rights: AudioRights } {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
   const rec = value as Record<string, unknown>;
   if (!hasOnlyKeys(rec, AUDIO_KEYS)) return false;

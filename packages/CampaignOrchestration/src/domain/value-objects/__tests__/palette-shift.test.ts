@@ -17,7 +17,17 @@ describe("isPaletteShift — what the parser will honour exactly as written", ()
   });
 
   test("refuses negatives, more than a turn, and non-numbers", () => {
-    for (const v of [-0.1, -1, 1.1, 7, Number.NaN, Number.POSITIVE_INFINITY, "0.1", null, undefined]) {
+    for (const v of [
+      -0.1,
+      -1,
+      1.1,
+      7,
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+      "0.1",
+      null,
+      undefined,
+    ]) {
       expect(isPaletteShift(v)).toBe(false);
     }
   });

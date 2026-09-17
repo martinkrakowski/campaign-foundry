@@ -14,7 +14,10 @@ const ctx = { campaignMessage: "m", targetAudience: "a", targetRegion: "r" };
 const baseProduct = { id: "p", name: "P", primaryColor: "#1473E6", logoPath: "x.png" };
 
 const delegate = (): ImageGeneratorPort => ({
-  resolveBackground: vi.fn(async () => ({ image: new Uint8Array([9]), source: "procedural" as const })),
+  resolveBackground: vi.fn(async () => ({
+    image: new Uint8Array([9]),
+    source: "procedural" as const,
+  })),
 });
 
 describe("AssetReusingImageGenerator (decorator)", () => {
@@ -32,7 +35,11 @@ describe("AssetReusingImageGenerator (decorator)", () => {
 
   test("delegates when no input asset is supplied", async () => {
     const inner = delegate();
-    const out = await new AssetReusingImageGenerator(inner).resolveBackground(baseProduct, ratio(), ctx);
+    const out = await new AssetReusingImageGenerator(inner).resolveBackground(
+      baseProduct,
+      ratio(),
+      ctx,
+    );
     expect(out.source).toBe("procedural");
     expect(inner.resolveBackground).toHaveBeenCalledTimes(1);
   });

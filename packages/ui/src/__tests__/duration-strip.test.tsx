@@ -101,13 +101,7 @@ describe("DurationStrip component", () => {
   test("keyboard navigation adjusts duration and Delete removes it", async () => {
     const onChange = vi.fn();
     const onRemove = vi.fn();
-    render(
-      <DurationStrip
-        values={[6]}
-        onChange={onChange}
-        onRemove={onRemove}
-      />,
-    );
+    render(<DurationStrip values={[6]} onChange={onChange} onRemove={onRemove} />);
 
     const slider = screen.getByRole("slider", { name: "Duration 1 (seconds)" });
     fireEvent.keyDown(slider, { key: "ArrowRight" });
@@ -202,14 +196,24 @@ describe("DurationStrip component", () => {
 
     expect(screen.getByTestId("lanes-slot")).toBeTruthy();
     expect(screen.getByText("Clip length is invalid")).toBeTruthy();
-    expect(screen.getByRole("slider", { name: "Duration 1 (seconds)" }).getAttribute("tabindex")).toBe("-1");
+    expect(
+      screen.getByRole("slider", { name: "Duration 1 (seconds)" }).getAttribute("tabindex"),
+    ).toBe("-1");
   });
 
   test("a strip click without onAdd is a no-op", () => {
     const { container } = render(<DurationStrip values={[6]} />);
     const strip = container.querySelector(".select-none")!;
     vi.spyOn(strip, "getBoundingClientRect").mockReturnValue({
-      left: 0, top: 0, right: 300, bottom: 50, width: 300, height: 50, x: 0, y: 0, toJSON: () => {},
+      left: 0,
+      top: 0,
+      right: 300,
+      bottom: 50,
+      width: 300,
+      height: 50,
+      x: 0,
+      y: 0,
+      toJSON: () => {},
     });
     fireEvent.click(strip, { clientX: 150 });
     // no onAdd provided → nothing dispatched, no throw
@@ -227,7 +231,9 @@ describe("DurationStrip component", () => {
   test("keyboard navigation is suppressed while disabled", () => {
     const onChange = vi.fn();
     render(<DurationStrip values={[6]} onChange={onChange} disabled />);
-    fireEvent.keyDown(screen.getByRole("slider", { name: "Duration 1 (seconds)" }), { key: "ArrowRight" });
+    fireEvent.keyDown(screen.getByRole("slider", { name: "Duration 1 (seconds)" }), {
+      key: "ArrowRight",
+    });
     expect(onChange).not.toHaveBeenCalled();
   });
 
@@ -243,7 +249,15 @@ describe("DurationStrip component", () => {
     const { container, unmount } = render(<DurationStrip values={[6]} onChange={onChange} />);
     const strip = container.querySelector(".select-none")!;
     vi.spyOn(strip, "getBoundingClientRect").mockReturnValue({
-      left: 0, top: 0, right: 300, bottom: 50, width: 300, height: 50, x: 0, y: 0, toJSON: () => {},
+      left: 0,
+      top: 0,
+      right: 300,
+      bottom: 50,
+      width: 300,
+      height: 50,
+      x: 0,
+      y: 0,
+      toJSON: () => {},
     });
     const bead = screen.getByRole("slider", { name: "Duration 1 (seconds)" }) as HTMLButtonElement;
     bead.setPointerCapture = vi.fn();
@@ -256,14 +270,24 @@ describe("DurationStrip component", () => {
 
   test("a non-positive duration renders no reel fill", () => {
     render(<DurationStrip values={[0, 6]} />);
-    expect(screen.getByRole("slider", { name: "Duration 1 (seconds)" }).getAttribute("aria-valuenow")).toBe("0");
+    expect(
+      screen.getByRole("slider", { name: "Duration 1 (seconds)" }).getAttribute("aria-valuenow"),
+    ).toBe("0");
     expect(screen.getByRole("slider", { name: "Duration 2 (seconds)" })).toBeTruthy();
   });
 });
 
 describe("the reel's error reaches the control, not only the page", () => {
   test("a bead is marked invalid and points at the message", () => {
-    render(<DurationStrip values={[6]} onChange={vi.fn()} onAdd={vi.fn()} onRemove={vi.fn()} error="too many" />);
+    render(
+      <DurationStrip
+        values={[6]}
+        onChange={vi.fn()}
+        onAdd={vi.fn()}
+        onRemove={vi.fn()}
+        error="too many"
+      />,
+    );
     const bead = screen.getByRole("slider", { name: "Duration 1 (seconds)" });
     expect(bead.getAttribute("aria-invalid")).toBe("true");
     const describedBy = bead.getAttribute("aria-describedby") as string;

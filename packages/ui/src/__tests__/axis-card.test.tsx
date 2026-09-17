@@ -115,7 +115,13 @@ describe("AxisCard", () => {
 
   test("a description renders with an optional leading icon, aria-hidden from the name", () => {
     render(
-      <AxisCard value="headline-top" selected={false} onToggle={vi.fn()} description="gated" descriptionIcon="⚠">
+      <AxisCard
+        value="headline-top"
+        selected={false}
+        onToggle={vi.fn()}
+        description="gated"
+        descriptionIcon="⚠"
+      >
         <CreativeGlyph layout="headline-top" />
       </AxisCard>,
     );
@@ -144,7 +150,9 @@ describe("AxisCard's visible label is separable from its name", () => {
         <span />
       </AxisCard>,
     );
-    expect(screen.getByRole("button", { name: "headline-top" }).textContent).toContain("headline-top");
+    expect(screen.getByRole("button", { name: "headline-top" }).textContent).toContain(
+      "headline-top",
+    );
   });
 });
 

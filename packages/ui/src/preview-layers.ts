@@ -18,7 +18,11 @@
  * the same double as the literal `2.3`, while `(46 × 1) / 20` does. `times`
  * multiplies numerator-first for exactly that reason.
  */
-import { resolveCanvas, type AspectRatioValue, type CanvasSpec } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
+import {
+  resolveCanvas,
+  type AspectRatioValue,
+  type CanvasSpec,
+} from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import { CANONICAL_TEMPLATES } from "@campaignfoundry/CampaignOrchestration/creative-templates";
 import { CREATIVE_GEOMETRY } from "@campaignfoundry/CampaignOrchestration/creative-geometry";
 import type { LayerKind } from "@campaignfoundry/CampaignOrchestration/layer-kinds";
@@ -27,7 +31,10 @@ import type { LayerKind } from "@campaignfoundry/CampaignOrchestration/layer-kin
  * Prefer `spec` when the caller already has a CanvasSpec; otherwise wrap a
  * social-ratio shorthand. Neither → the square the kit has always defaulted to.
  */
-export function canvasSpecOf(spec: CanvasSpec | undefined, ratio: AspectRatioValue | undefined): CanvasSpec {
+export function canvasSpecOf(
+  spec: CanvasSpec | undefined,
+  ratio: AspectRatioValue | undefined,
+): CanvasSpec {
   if (spec !== undefined) return spec;
   if (ratio !== undefined) return { ratio };
   return { ratio: "1:1" };
@@ -70,8 +77,9 @@ export const fractionOfBox = (fraction: BoxFraction): number => times(fraction, 
  * output with it; nothing under `packages/ui/src` may hardcode a second ordering
  * (a boundary test under `__tests__` fails on one).
  */
-export const PREVIEW_LAYER_ORDER: readonly LayerKind[] =
-  CANONICAL_TEMPLATES["image-text"].layers.map((layer) => layer.kind);
+export const PREVIEW_LAYER_ORDER: readonly LayerKind[] = CANONICAL_TEMPLATES[
+  "image-text"
+].layers.map((layer) => layer.kind);
 
 /**
  * The compositor's layers as fractions of the box, used to *size* the miniature's

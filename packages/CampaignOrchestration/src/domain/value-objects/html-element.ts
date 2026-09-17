@@ -211,7 +211,9 @@ function elementProblem(element: unknown): LayerElementsProblem | undefined {
  * parser accept as `{}` today (D54). The editor still never writes one: its
  * reducer drops an all-absent style, the X16 canonical form.
  */
-function elementStyleProblem(style: unknown): { path: string; must: string; value: unknown } | undefined {
+function elementStyleProblem(
+  style: unknown,
+): { path: string; must: string; value: unknown } | undefined {
   if (typeof style !== "object" || style === null || Array.isArray(style)) {
     return { path: "", must: "be an object", value: style };
   }
@@ -266,20 +268,12 @@ function frameProblem(frame: unknown, path: string): LayerElementsProblem | unde
   }
   for (const field of ["x", "y", "w", "h"] as const) {
     const value = record[field];
-    if (
-      typeof value !== "number" ||
-      !Number.isFinite(value) ||
-      value < 0 ||
-      value > 1
-    ) {
+    if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 1) {
       return { path: `${path}.${field}`, must: "be a number in [0, 1]", value };
     }
   }
   const anchor = record.anchor;
-  if (
-    typeof anchor !== "string" ||
-    !(ANCHOR_VALUES as readonly string[]).includes(anchor)
-  ) {
+  if (typeof anchor !== "string" || !(ANCHOR_VALUES as readonly string[]).includes(anchor)) {
     return {
       path: `${path}.anchor`,
       must: `be one of ${ANCHOR_VALUES.map((value) => `"${value}"`).join(", ")}`,
@@ -306,10 +300,7 @@ export interface ElementFont {
   readonly fontFamily: string;
 }
 
-export function htmlElementFont(
-  element: HtmlElement,
-  briefFont: ElementFont,
-): ElementFont {
+export function htmlElementFont(element: HtmlElement, briefFont: ElementFont): ElementFont {
   return {
     fontWeight:
       element.style?.fontWeight !== undefined

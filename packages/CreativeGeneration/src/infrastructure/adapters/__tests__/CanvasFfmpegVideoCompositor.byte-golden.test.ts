@@ -69,7 +69,8 @@ const skipReason = ffmpegOk
 /** "ffmpeg version 6.0 Copyright ..." -> "6.0" */
 function parseFfmpegVersion(versionStdout: string): string {
   const match = /ffmpeg version (\S+)/.exec(versionStdout);
-  if (!match) throw new Error(`could not parse ffmpeg version from: ${versionStdout.slice(0, 200)}`);
+  if (!match)
+    throw new Error(`could not parse ffmpeg version from: ${versionStdout.slice(0, 200)}`);
   return match[1];
 }
 
@@ -81,10 +82,14 @@ function parseFfmpegVersion(versionStdout: string): string {
  * `CanvasFfmpegVideoCompositor` really produced: a drift in preset, crf or
  * `-threads` shows up here exactly because it shows up in the file.
  */
-function parseX264Banner(video: Uint8Array): { readonly version: string; readonly threads: string } {
+function parseX264Banner(video: Uint8Array): {
+  readonly version: string;
+  readonly threads: string;
+} {
   const text = Buffer.from(video).toString("latin1");
   const match = /x264 - (core \d+ \S+ \S+) - .*?threads=(\d+)/.exec(text);
-  if (!match) throw new Error("no x264 SEI banner found in the encoded MP4 (was -fflags +bitexact changed?)");
+  if (!match)
+    throw new Error("no x264 SEI banner found in the encoded MP4 (was -fflags +bitexact changed?)");
   return { version: match[1], threads: match[2] };
 }
 
@@ -92,11 +97,26 @@ function parseX264Banner(video: Uint8Array): { readonly version: string; readonl
 function extractVideoStream(ffmpeg: string, mp4Path: string, outPath: string): Uint8Array {
   const result = spawnSync(
     ffmpeg,
-    ["-y", "-i", mp4Path, "-map", "0:v", "-c", "copy", "-bsf:v", "h264_mp4toannexb", "-f", "h264", outPath],
+    [
+      "-y",
+      "-i",
+      mp4Path,
+      "-map",
+      "0:v",
+      "-c",
+      "copy",
+      "-bsf:v",
+      "h264_mp4toannexb",
+      "-f",
+      "h264",
+      outPath,
+    ],
     { timeout: 30_000 },
   );
   if (result.status !== 0) {
-    throw new Error(`stream extraction failed (exit ${String(result.status)}): ${result.stderr?.toString().slice(-2000)}`);
+    throw new Error(
+      `stream extraction failed (exit ${String(result.status)}): ${result.stderr?.toString().slice(-2000)}`,
+    );
   }
   return readFileSync(outPath);
 }
@@ -121,7 +141,8 @@ describe("CanvasFfmpegVideoCompositor byte golden (VG2)", () => {
   const goldens = resolveGoldenMap(fixture, key);
   const missingMessage = missingGoldenMapMessage(key, goldenPlatformKeys(fixture), {
     fixtureFile: "compositor-goldens-mp4.json",
-    cellsHint: "5 fields (fileHash, streamHash, ffmpegVersion, x264Version, threads) for the one canonical timeline",
+    cellsHint:
+      "5 fields (fileHash, streamHash, ffmpegVersion, x264Version, threads) for the one canonical timeline",
   });
 
   test.skipIf(!recording && !ffmpegOk)(
@@ -137,7 +158,9 @@ describe("CanvasFfmpegVideoCompositor byte golden (VG2)", () => {
       // extracts streams with (`ffmpegPath`, honouring COMPOSITOR_FFMPEG_PATH) —
       // otherwise a hash mismatch could mean "two different ffmpeg builds",
       // not "the encoder changed". VE3b1's audio golden already had this shape.
-      const { video } = await new CanvasFfmpegVideoCompositor({ ffmpegPath }).compositeVideo(canonicalMp4Request());
+      const { video } = await new CanvasFfmpegVideoCompositor({ ffmpegPath }).compositeVideo(
+        canonicalMp4Request(),
+      );
       const banner = parseX264Banner(video);
 
       const dir = mkdtempSync(join(tmpdir(), "cf-mp4-golden-"));
@@ -187,7 +210,9 @@ describe("CanvasFfmpegVideoCompositor byte golden (VG2)", () => {
         const alias = join(dir, "ffmpeg-resolved");
         linkSync(ffmpegPath, alias);
 
-        await new CanvasFfmpegVideoCompositor({ ffmpegPath: alias, spawn }).compositeVideo(canonicalMp4Request());
+        await new CanvasFfmpegVideoCompositor({ ffmpegPath: alias, spawn }).compositeVideo(
+          canonicalMp4Request(),
+        );
 
         expect(invocations.map((call) => call.command)).toEqual([alias]);
         expect(invocations[0].args).toContain("libx264");

@@ -12,10 +12,7 @@ import {
   type PlatformCapabilities,
   type PlatformProfile,
 } from "../../domain/value-objects/PlatformProfile.vo.js";
-import type {
-  PackageManifestItem,
-  PackageStorePort,
-} from "../ports/out/PackageStorePort.js";
+import type { PackageManifestItem, PackageStorePort } from "../ports/out/PackageStorePort.js";
 
 /** The fields packaging needs from a persisted report row (`variantIndex` only on variation rows). */
 export interface PackageableAsset {
@@ -85,7 +82,9 @@ export function withoutAbsolutePaths(message: string): string {
 }
 
 /** Motion rows carry an mp4; anything else (classic rows have no `format`) is a static. */
-const isMotionAsset = (asset: PackageableAsset): asset is PackageableAsset & { videoPath: string } =>
+const isMotionAsset = (
+  asset: PackageableAsset,
+): asset is PackageableAsset & { videoPath: string } =>
   asset.format === "motion" && typeof asset.videoPath === "string";
 
 /** HTML rows carry a bundle and its raster fallback rendition (D122). */
@@ -110,7 +109,9 @@ export class PackageForPlatformUseCase {
   constructor(
     private readonly store: PackageStorePort,
     /** Profile lookup — injected so tests can register a profile that declares `html` (none ships one yet, D122). */
-    private readonly resolveProfile: (platformId: string) => PlatformProfile | undefined = platformProfile,
+    private readonly resolveProfile: (
+      platformId: string,
+    ) => PlatformProfile | undefined = platformProfile,
   ) {}
 
   async execute(input: PackageForPlatformInput): Promise<Result<PackageForPlatformResult, Error>> {
@@ -174,7 +175,8 @@ export class PackageForPlatformUseCase {
           if (profile.sizes === undefined) return asset.aspectRatio === profile.ratio;
           return asset.size !== undefined && profile.sizes.some((slot) => slot.size === asset.size);
         });
-        const selected = include === null ? eligible : eligible.filter((a) => include.has(assetIdentity(a)));
+        const selected =
+          include === null ? eligible : eligible.filter((a) => include.has(assetIdentity(a)));
         // A display profile with nothing to package means the run was generated
         // without `output.sizes` (or for the wrong sizes) — or that the HITL
         // `include` set left nothing for it. The guard is applied to the
@@ -189,7 +191,9 @@ export class PackageForPlatformUseCase {
         }
         selections.push({ platformId, profile, eligible, selected });
       } catch (error) {
-        return err(new Error(`Platform "${platformId}": ${withoutAbsolutePaths(errorMessage(error))}`));
+        return err(
+          new Error(`Platform "${platformId}": ${withoutAbsolutePaths(errorMessage(error))}`),
+        );
       }
     }
 
@@ -267,7 +271,9 @@ export class PackageForPlatformUseCase {
         });
         platforms.push({ platformId, manifestPath, items, skipped, included, excluded });
       } catch (error) {
-        return err(new Error(`Platform "${platformId}": ${withoutAbsolutePaths(errorMessage(error))}`));
+        return err(
+          new Error(`Platform "${platformId}": ${withoutAbsolutePaths(errorMessage(error))}`),
+        );
       }
     }
 
@@ -351,7 +357,11 @@ export class PackageForPlatformUseCase {
     }
     const fallback = await this.store.readAsset(asset.htmlFallbackPath);
     const packagedPath = await this.store.writePackaged(platformId, asset.htmlBundlePath, bundle);
-    const fallbackPath = await this.store.writePackaged(platformId, asset.htmlFallbackPath, fallback);
+    const fallbackPath = await this.store.writePackaged(
+      platformId,
+      asset.htmlFallbackPath,
+      fallback,
+    );
     // The budget is the unit's, and the unit a network measures is the package it
     // uploads: `index.html` *and* its raster fallback. Counting the bundle alone
     // would pass a unit whose fallback pushes it over (X14).

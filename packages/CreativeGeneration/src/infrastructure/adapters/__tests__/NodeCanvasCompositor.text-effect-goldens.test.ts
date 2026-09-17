@@ -126,7 +126,10 @@ const TIMELINE: CopyTimeline = {
   keyBeat: 1,
 };
 
-type TimelineRequest = CompositeRequest & { readonly durationSec: number; readonly timeline: CopyTimeline };
+type TimelineRequest = CompositeRequest & {
+  readonly durationSec: number;
+  readonly timeline: CopyTimeline;
+};
 
 const timelineRequest = (textEffect: TextEffectKind): TimelineRequest => ({
   ...baseRequest(textEffect),
@@ -173,8 +176,11 @@ async function timelineFrame(effect: TextEffectKind, windowFraction: number): Pr
   return canvas.toBuffer("image/png");
 }
 
-const cellKey = (effect: TextEffectKind, path: "legacy" | "timeline", frame: "entrance" | "settled") =>
-  `${effect}/${path}/${frame}`;
+const cellKey = (
+  effect: TextEffectKind,
+  path: "legacy" | "timeline",
+  frame: "entrance" | "settled",
+) => `${effect}/${path}/${frame}`;
 
 const fixturesDir =
   process.env.COMPOSITOR_GOLDEN_FIXTURE_DIR ??
@@ -203,10 +209,18 @@ describe("NodeCanvasCompositor text-effect goldens (K3 gap)", () => {
     const run = goldenRun(goldens, recording, missingMessage);
     const observed: Record<string, string> = {};
     for (const effect of TEXT_EFFECT_VALUES) {
-      observed[cellKey(effect, "legacy", "entrance")] = sha256(await legacyFrame(effect, LOCAL_ENTRANCE));
-      observed[cellKey(effect, "legacy", "settled")] = sha256(await legacyFrame(effect, LOCAL_SETTLED));
-      observed[cellKey(effect, "timeline", "entrance")] = sha256(await timelineFrame(effect, LOCAL_ENTRANCE));
-      observed[cellKey(effect, "timeline", "settled")] = sha256(await timelineFrame(effect, LOCAL_SETTLED));
+      observed[cellKey(effect, "legacy", "entrance")] = sha256(
+        await legacyFrame(effect, LOCAL_ENTRANCE),
+      );
+      observed[cellKey(effect, "legacy", "settled")] = sha256(
+        await legacyFrame(effect, LOCAL_SETTLED),
+      );
+      observed[cellKey(effect, "timeline", "entrance")] = sha256(
+        await timelineFrame(effect, LOCAL_ENTRANCE),
+      );
+      observed[cellKey(effect, "timeline", "settled")] = sha256(
+        await timelineFrame(effect, LOCAL_SETTLED),
+      );
     }
     finishGolden(key, observed, run);
   });

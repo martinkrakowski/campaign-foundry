@@ -61,13 +61,12 @@ const DRAWABLE_KINDS = [
  * (or its draw-context type) would leak `SKRSContext2D` from the package
  * surface — the tests spy it through the index-signature escape instead.
  */
-const layerTable = (): Record<
-  (typeof DRAWABLE_KINDS)[number],
-  (c: unknown) => void
-> =>
-  (NodeCanvasCompositor as unknown as {
-    layerDrawers: Record<(typeof DRAWABLE_KINDS)[number], (c: unknown) => void>;
-  }).layerDrawers;
+const layerTable = (): Record<(typeof DRAWABLE_KINDS)[number], (c: unknown) => void> =>
+  (
+    NodeCanvasCompositor as unknown as {
+      layerDrawers: Record<(typeof DRAWABLE_KINDS)[number], (c: unknown) => void>;
+    }
+  ).layerDrawers;
 
 /** Swap every drawer for a kind recorder; returns the recorded order. */
 function recordDrawOrder(): LayerKind[] {
@@ -315,7 +314,9 @@ describe("the compositor's draw order is the template's layer list (L2a, D121)",
     };
     const preparedMotion = await NodeCanvasCompositor.prepare(reqMotion);
     const ctxMotion = createCanvas(preparedMotion.width, preparedMotion.height).getContext("2d");
-    expect(() => NodeCanvasCompositor.draw(ctxMotion, preparedMotion, 0.5, "ken-burns-out", 0.5)).not.toThrow();
+    expect(() =>
+      NodeCanvasCompositor.draw(ctxMotion, preparedMotion, 0.5, "ken-burns-out", 0.5),
+    ).not.toThrow();
 
     const orderMotion = recordDrawOrder();
     NodeCanvasCompositor.draw(ctxMotion, preparedMotion, 0.5, "ken-burns-out", 0.5);
@@ -353,8 +354,14 @@ describe("the compositor's draw order is the template's layer list (L2a, D121)",
     };
 
     // Still path proof
-    const prepImageStill = await NodeCanvasCompositor.prepare({ ...baseReq, template: imageTemplate });
-    const prepVideoStill = await NodeCanvasCompositor.prepare({ ...baseReq, template: videoTemplate });
+    const prepImageStill = await NodeCanvasCompositor.prepare({
+      ...baseReq,
+      template: imageTemplate,
+    });
+    const prepVideoStill = await NodeCanvasCompositor.prepare({
+      ...baseReq,
+      template: videoTemplate,
+    });
     const canvasImageStill = createCanvas(prepImageStill.width, prepImageStill.height);
     const canvasVideoStill = createCanvas(prepVideoStill.width, prepVideoStill.height);
     NodeCanvasCompositor.draw(canvasImageStill.getContext("2d"), prepImageStill, 1);
@@ -374,12 +381,30 @@ describe("the compositor's draw order is the template's layer list (L2a, D121)",
         keyBeat: 1,
       },
     };
-    const prepImageMotion = await NodeCanvasCompositor.prepare({ ...motionReq, template: imageTemplate });
-    const prepVideoMotion = await NodeCanvasCompositor.prepare({ ...motionReq, template: videoTemplate });
+    const prepImageMotion = await NodeCanvasCompositor.prepare({
+      ...motionReq,
+      template: imageTemplate,
+    });
+    const prepVideoMotion = await NodeCanvasCompositor.prepare({
+      ...motionReq,
+      template: videoTemplate,
+    });
     const canvasImageMotion = createCanvas(prepImageMotion.width, prepImageMotion.height);
     const canvasVideoMotion = createCanvas(prepVideoMotion.width, prepVideoMotion.height);
-    NodeCanvasCompositor.draw(canvasImageMotion.getContext("2d"), prepImageMotion, 0.5, "ken-burns-in", 0.5);
-    NodeCanvasCompositor.draw(canvasVideoMotion.getContext("2d"), prepVideoMotion, 0.5, "ken-burns-in", 0.5);
+    NodeCanvasCompositor.draw(
+      canvasImageMotion.getContext("2d"),
+      prepImageMotion,
+      0.5,
+      "ken-burns-in",
+      0.5,
+    );
+    NodeCanvasCompositor.draw(
+      canvasVideoMotion.getContext("2d"),
+      prepVideoMotion,
+      0.5,
+      "ken-burns-in",
+      0.5,
+    );
     const imgMotionBuf = canvasImageMotion.toBuffer("image/png");
     const vidMotionBuf = canvasVideoMotion.toBuffer("image/png");
     expect(vidMotionBuf.length).toBeGreaterThan(0);
@@ -603,7 +628,9 @@ describe("the compositor's draw order is the template's layer list (L2a, D121)",
       // The drawer reads the layer it was dispatched for (HL3) — a missing
       // html layer is no longer an input it can receive, and the dispatch
       // loop never calls it for other kinds.
-      const drawer = (NodeCanvasCompositor as unknown as { layerDrawers: Record<string, (c: unknown) => void> }).layerDrawers.html;
+      const drawer = (
+        NodeCanvasCompositor as unknown as { layerDrawers: Record<string, (c: unknown) => void> }
+      ).layerDrawers.html;
       const templateAbsentElements: BriefTemplate = {
         id: "canonical-image-html",
         version: 1,
@@ -611,9 +638,18 @@ describe("the compositor's draw order is the template's layer list (L2a, D121)",
         unit: "standard-web",
         layers: [{ id: "html", kind: "html" }],
       };
-      const prepAbsent = await NodeCanvasCompositor.prepare(request({ template: templateAbsentElements }));
+      const prepAbsent = await NodeCanvasCompositor.prepare(
+        request({ template: templateAbsentElements }),
+      );
       const ctx = createCanvas(prepAbsent.width, prepAbsent.height).getContext("2d");
-      const cAbsent = { ctx, prepared: prepAbsent, layer: prepAbsent.layers[0], motion: undefined, eased: 1, effectT: 1 };
+      const cAbsent = {
+        ctx,
+        prepared: prepAbsent,
+        layer: prepAbsent.layers[0],
+        motion: undefined,
+        eased: 1,
+        effectT: 1,
+      };
       expect(() => drawer(cAbsent)).not.toThrow();
 
       const templateEmptyElements: BriefTemplate = {
@@ -623,8 +659,17 @@ describe("the compositor's draw order is the template's layer list (L2a, D121)",
         unit: "standard-web",
         layers: [{ id: "html", kind: "html", elements: [] }],
       };
-      const prepEmpty = await NodeCanvasCompositor.prepare(request({ template: templateEmptyElements }));
-      const cEmpty = { ctx, prepared: prepEmpty, layer: prepEmpty.layers[0], motion: undefined, eased: 1, effectT: 1 };
+      const prepEmpty = await NodeCanvasCompositor.prepare(
+        request({ template: templateEmptyElements }),
+      );
+      const cEmpty = {
+        ctx,
+        prepared: prepEmpty,
+        layer: prepEmpty.layers[0],
+        motion: undefined,
+        eased: 1,
+        effectT: 1,
+      };
       expect(() => drawer(cEmpty)).not.toThrow();
     });
 
@@ -670,7 +715,11 @@ describe("the compositor's draw order is the template's layer list (L2a, D121)",
 
       expect(roundRectSpy).toHaveBeenCalled();
       expect(fillTextSpy).toHaveBeenCalledWith("Shop Now", expect.any(Number), expect.any(Number));
-      expect(fillTextSpy).toHaveBeenCalledWith("Top Left Headline", expect.any(Number), expect.any(Number));
+      expect(fillTextSpy).toHaveBeenCalledWith(
+        "Top Left Headline",
+        expect.any(Number),
+        expect.any(Number),
+      );
       expect(drawImageSpy).toHaveBeenCalledTimes(2);
 
       // Middle anchor text & center align
@@ -683,7 +732,10 @@ describe("the compositor's draw order is the template's layer list (L2a, D121)",
       ];
       const prepCenter = await NodeCanvasCompositor.prepare(
         request({
-          template: { ...template, layers: [{ id: "html", kind: "html", elements: elementsCenter }] },
+          template: {
+            ...template,
+            layers: [{ id: "html", kind: "html", elements: elementsCenter }],
+          },
           style: { align: "center" },
         }),
       );
@@ -700,7 +752,10 @@ describe("the compositor's draw order is the template's layer list (L2a, D121)",
       ];
       const prepRight = await NodeCanvasCompositor.prepare(
         request({
-          template: { ...template, layers: [{ id: "html", kind: "html", elements: elementsRight }] },
+          template: {
+            ...template,
+            layers: [{ id: "html", kind: "html", elements: elementsRight }],
+          },
           style: { align: "right" },
         }),
       );
@@ -724,14 +779,22 @@ describe("the compositor's draw order is the template's layer list (L2a, D121)",
             id: "html-a",
             kind: "html",
             elements: [
-              { kind: "text", text: "First html layer copy", frame: { x: 0.05, y: 0.2, w: 0.9, h: 0.1, anchor: "top" } },
+              {
+                kind: "text",
+                text: "First html layer copy",
+                frame: { x: 0.05, y: 0.2, w: 0.9, h: 0.1, anchor: "top" },
+              },
             ],
           },
           {
             id: "html-b",
             kind: "html",
             elements: [
-              { kind: "text", text: "Second html layer copy", frame: { x: 0.05, y: 0.6, w: 0.9, h: 0.1, anchor: "top" } },
+              {
+                kind: "text",
+                text: "Second html layer copy",
+                frame: { x: 0.05, y: 0.6, w: 0.9, h: 0.1, anchor: "top" },
+              },
             ],
           },
         ],
@@ -758,14 +821,22 @@ describe("the compositor's draw order is the template's layer list (L2a, D121)",
             id: "html-a",
             kind: "html",
             elements: [
-              { kind: "text", text: "First html layer copy", frame: { x: 0.05, y: 0.2, w: 0.9, h: 0.1, anchor: "top" } },
+              {
+                kind: "text",
+                text: "First html layer copy",
+                frame: { x: 0.05, y: 0.2, w: 0.9, h: 0.1, anchor: "top" },
+              },
             ],
           },
           {
             id: "html-b",
             kind: "html",
             elements: [
-              { kind: "text", text: "Second html layer copy", frame: { x: 0.05, y: 0.6, w: 0.9, h: 0.1, anchor: "top" } },
+              {
+                kind: "text",
+                text: "Second html layer copy",
+                frame: { x: 0.05, y: 0.6, w: 0.9, h: 0.1, anchor: "top" },
+              },
             ],
           },
         ],

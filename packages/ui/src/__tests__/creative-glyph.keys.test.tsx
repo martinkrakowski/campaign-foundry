@@ -24,7 +24,13 @@ describe("CreativeGlyph keys its animation-group runs by position (L8a)", () => 
         // accent, shade — makes `groupRuns` emit two runs with the same
         // className, siblings whose className keys would collide. The mocked
         // order is exactly that split.
-        PREVIEW_LAYER_ORDER: ["image", "accent", "shade", "static-text", "logo"] as unknown as typeof actual.PREVIEW_LAYER_ORDER,
+        PREVIEW_LAYER_ORDER: [
+          "image",
+          "accent",
+          "shade",
+          "static-text",
+          "logo",
+        ] as unknown as typeof actual.PREVIEW_LAYER_ORDER,
       };
     });
     const { CreativeGlyph } = await import("../creative-glyph");

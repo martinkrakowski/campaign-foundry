@@ -1,6 +1,9 @@
 import { useId, useRef, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { cn } from "./cn";
-import { MIN_DURATION_SEC, MAX_DURATION_SEC } from "@campaignfoundry/CampaignOrchestration/variation-defaults";
+import {
+  MIN_DURATION_SEC,
+  MAX_DURATION_SEC,
+} from "@campaignfoundry/CampaignOrchestration/variation-defaults";
 
 export { MIN_DURATION_SEC, MAX_DURATION_SEC };
 
@@ -30,11 +33,7 @@ export function slideToFree(
   target: number,
   currentIndex?: number,
 ): number {
-  const taken = new Set(
-    values
-      .filter((_, i) => i !== currentIndex)
-      .map((v) => Math.round(v)),
-  );
+  const taken = new Set(values.filter((_, i) => i !== currentIndex).map((v) => Math.round(v)));
   const rounded = Math.max(MIN_DURATION_SEC, Math.min(MAX_DURATION_SEC, Math.round(target)));
   if (!taken.has(rounded)) return rounded;
 
@@ -223,7 +222,9 @@ export function DurationStrip({
           {values.map((seconds, index) => {
             const clamped = Math.max(0, Math.min(TOTAL_SECONDS, Math.round(seconds)));
             const isValid =
-              Number.isInteger(seconds) && seconds >= MIN_DURATION_SEC && seconds <= MAX_DURATION_SEC;
+              Number.isInteger(seconds) &&
+              seconds >= MIN_DURATION_SEC &&
+              seconds <= MAX_DURATION_SEC;
             // 1-based gridColumn placement for clamped second
             const gridCol = Math.max(1, Math.min(31, clamped + 1));
 
@@ -268,7 +269,12 @@ export function DurationStrip({
                     }}
                     className="ml-0.5 rounded-full p-0.5 opacity-80 hover:opacity-100 focus:outline-none"
                   >
-                    <svg viewBox="0 0 10 10" focusable="false" aria-hidden="true" className="size-2.5">
+                    <svg
+                      viewBox="0 0 10 10"
+                      focusable="false"
+                      aria-hidden="true"
+                      className="size-2.5"
+                    >
                       <path
                         d="M2 2 L8 8 M8 2 L2 8"
                         fill="none"

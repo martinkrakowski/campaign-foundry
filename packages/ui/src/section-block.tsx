@@ -36,8 +36,14 @@ export function SectionBlock({
   const Heading = headingLevel === 2 ? "h2" : "h3";
   return (
     <section aria-labelledby={headingId} className="space-y-4 scroll-mt-24">
-      <Heading id={headingId} className="flex items-baseline gap-2 text-lg font-semibold text-text-emphasis">
-        <span aria-hidden="true" className="font-mono text-[11px] font-medium tracking-wider text-text-muted">
+      <Heading
+        id={headingId}
+        className="flex items-baseline gap-2 text-lg font-semibold text-text-emphasis"
+      >
+        <span
+          aria-hidden="true"
+          className="font-mono text-[11px] font-medium tracking-wider text-text-muted"
+        >
           {numeral}
         </span>
         <span>{title}</span>

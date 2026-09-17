@@ -93,13 +93,21 @@ describe("REGION_FOOTPRINTS", () => {
 
 describe("centroid", () => {
   test("is the mean of the anchors", () => {
-    const triangle: Pt[] = [[0, 0], [30, 0], [0, 30]];
+    const triangle: Pt[] = [
+      [0, 0],
+      [30, 0],
+      [0, 30],
+    ];
     expect(centroid(triangle)).toEqual([10, 10]);
   });
 });
 
 describe("dotMatrix", () => {
-  const TRIANGLE: Pt[] = [[0, 0], [30, 0], [0, 30]];
+  const TRIANGLE: Pt[] = [
+    [0, 0],
+    [30, 0],
+    [0, 30],
+  ];
 
   test("drops a dot on exactly the grid points the polygon covers", () => {
     // The 15 px grid from 10 hits this triangle once, at (10, 10); (10, 25) and

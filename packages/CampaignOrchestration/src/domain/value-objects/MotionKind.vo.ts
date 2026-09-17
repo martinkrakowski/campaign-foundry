@@ -2,7 +2,12 @@
  * Motion kinds for the motion wave. Declared here so the planner and compositor
  * share one list; each kind's rest pose `t` is the still-frame sample.
  */
-export const MOTION_KINDS = ["ken-burns-in", "ken-burns-out", "headline-rise", "accent-wipe"] as const;
+export const MOTION_KINDS = [
+  "ken-burns-in",
+  "ken-burns-out",
+  "headline-rise",
+  "accent-wipe",
+] as const;
 export type MotionKind = (typeof MOTION_KINDS)[number];
 export const MOTION_FPS = 30;
 

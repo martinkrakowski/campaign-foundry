@@ -46,7 +46,9 @@ describe("SwatchPicker", () => {
 
     rerender(<SwatchPicker value="#ABCDEF" onChange={vi.fn()} />);
     for (const swatch of SWATCH_PALETTE) {
-      expect(screen.getByRole("button", { name: swatch }).getAttribute("aria-pressed")).toBe("false");
+      expect(screen.getByRole("button", { name: swatch }).getAttribute("aria-pressed")).toBe(
+        "false",
+      );
     }
     expect(customBtn.getAttribute("aria-pressed")).toBe("true");
   });
@@ -73,9 +75,7 @@ describe("SwatchPicker", () => {
   });
 
   test("supports size='lg' (52px) and ring-style selection with custom colour and label", () => {
-    const { rerender } = render(
-      <SwatchPicker value="#1473E6" onChange={vi.fn()} size="lg" />,
-    );
+    const { rerender } = render(<SwatchPicker value="#1473E6" onChange={vi.fn()} size="lg" />);
 
     const first = screen.getByRole("button", { name: "#1473E6" });
     expect(first.className).toContain("size-[52px]");
@@ -86,9 +86,7 @@ describe("SwatchPicker", () => {
     expect(customBtn.getAttribute("aria-pressed")).toBe("false");
 
     // Rerender with custom colour selected and size='lg' with label
-    rerender(
-      <SwatchPicker value="#ABCDEF" onChange={vi.fn()} size="lg" label="Product" />,
-    );
+    rerender(<SwatchPicker value="#ABCDEF" onChange={vi.fn()} size="lg" label="Product" />);
     const customWithLabel = screen.getByRole("button", { name: "Product custom colour" });
     expect(customWithLabel.getAttribute("aria-pressed")).toBe("true");
     expect(customWithLabel.className).toContain("ring-brand-primary");
@@ -137,5 +135,3 @@ describe("SwatchPicker", () => {
     expect(group.getAttribute("aria-describedby")).toBe("swatch-hint-id");
   });
 });
-
-

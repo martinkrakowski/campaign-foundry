@@ -90,7 +90,7 @@ export const CANONICAL_TEMPLATES: Readonly<Record<CreativeType, CreativeTemplate
       { id: "logo", kind: "logo" },
     ],
   },
-  "video": {
+  video: {
     id: "canonical-video",
     version: 1,
     name: "Canonical Video",

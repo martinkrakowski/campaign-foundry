@@ -1,7 +1,13 @@
 /** Parse a hex colour ("#1473E6" / "1473E6" / "#14e") into an [r, g, b] triple (0..255). */
 export function hexToRgb(hex: string): [number, number, number] {
   const h = hex.replace(/^#/, "");
-  const full = h.length === 3 ? h.split("").map((c) => c + c).join("") : h.padEnd(6, "0").slice(0, 6);
+  const full =
+    h.length === 3
+      ? h
+          .split("")
+          .map((c) => c + c)
+          .join("")
+      : h.padEnd(6, "0").slice(0, 6);
   const n = Number.parseInt(full, 16);
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }

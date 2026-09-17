@@ -1,13 +1,23 @@
 import { describe, test, expect, vi } from "vitest";
-import { GenerateCampaignUseCase, unionSafeInsets, unionSizeInsets } from "../GenerateCampaignUseCase.use-case.js";
+import {
+  GenerateCampaignUseCase,
+  unionSafeInsets,
+  unionSizeInsets,
+} from "../GenerateCampaignUseCase.use-case.js";
 import type { GenerateCampaignDeps } from "../GenerateCampaignUseCase.use-case.js";
-import type { PlatformSafeZone, PlatformSafeZoneResolver } from "../../ports/out/PlatformProfilePort.js";
+import type {
+  PlatformSafeZone,
+  PlatformSafeZoneResolver,
+} from "../../ports/out/PlatformProfilePort.js";
 import type { CompositeRequest } from "../../ports/out/CompositorPort.js";
 import { resolveCanvas } from "../../../domain/value-objects/aspect-ratios.js";
 import type { AspectRatio } from "../../../domain/value-objects/AspectRatio.vo.js";
 import { BRIEF_SCHEMA_VERSION } from "../../../domain/value-objects/brief-schema-version.js";
 import { DEFAULT_CAMPAIGN_TYPE } from "../../../domain/value-objects/campaign-types.js";
-import { templateFromCanonical, type BriefTemplate } from "../../../domain/value-objects/brief-template.js";
+import {
+  templateFromCanonical,
+  type BriefTemplate,
+} from "../../../domain/value-objects/brief-template.js";
 import { CANONICAL_TEMPLATES } from "../../../domain/value-objects/creative-templates.js";
 import type { CampaignBrief } from "../../../domain/entities/CampaignBrief.js";
 import type { Product } from "../../../domain/entities/Product.js";
@@ -71,8 +81,16 @@ const deps = (over: Partial<GenerateCampaignDeps> = {}): GenerateCampaignDeps =>
 describe("GenerateCampaignUseCase — validation", () => {
   test.each([
     ["a non-slug campaign id", baseBrief({ id: "Bad Id" }), /path-safe slug/],
-    ["a non-slug product id", baseBrief({ products: [product("Alpha"), product("beta")] }), /Product ids must be path-safe/],
-    ["duplicate product ids", baseBrief({ products: [product("alpha"), product("alpha")] }), /unique product ids/],
+    [
+      "a non-slug product id",
+      baseBrief({ products: [product("Alpha"), product("beta")] }),
+      /Product ids must be path-safe/,
+    ],
+    [
+      "duplicate product ids",
+      baseBrief({ products: [product("alpha"), product("alpha")] }),
+      /unique product ids/,
+    ],
     ["zero products", baseBrief({ products: [] }), /at least one unique product/],
     [
       "a non-slug treatment id",
@@ -105,7 +123,9 @@ describe("GenerateCampaignUseCase — validation", () => {
 
   test("accepts a classic brief with exactly one product (boundary)", async () => {
     const d = deps();
-    const result = await new GenerateCampaignUseCase(d).execute(baseBrief({ products: [product("solo")] }));
+    const result = await new GenerateCampaignUseCase(d).execute(
+      baseBrief({ products: [product("solo")] }),
+    );
     expect(result.success).toBe(true);
     if (!result.success) return;
     expect(result.value.assets.length).toBeGreaterThan(0);
@@ -137,7 +157,11 @@ describe("GenerateCampaignUseCase — validation", () => {
           id: "html",
           kind: "html",
           elements: [
-            { kind: "button", text: "Buy Now", frame: { x: 0.1, y: 0.8, w: 0.3, h: 0.1, anchor: "middle" } },
+            {
+              kind: "button",
+              text: "Buy Now",
+              frame: { x: 0.1, y: 0.8, w: 0.3, h: 0.1, anchor: "middle" },
+            },
           ],
         },
         { id: "logo", kind: "logo" },
@@ -257,7 +281,9 @@ describe("GenerateCampaignUseCase — legal gate — music rights (VE-D8)", () =
     if (result.success) {
       expect(result.value.halted).toBe(true);
       expect(result.value.assets).toEqual([]);
-      const halt = result.value.log.entries.find((e) => e.stage === "ExecuteLegalGateCheck" && e.level === "error");
+      const halt = result.value.log.entries.find(
+        (e) => e.stage === "ExecuteLegalGateCheck" && e.level === "error",
+      );
       expect(halt?.message).toContain("lic-expired");
     }
     expect(d.imageGenerator.resolveBackground).not.toHaveBeenCalled();
@@ -269,7 +295,11 @@ describe("GenerateCampaignUseCase — legal gate — music rights (VE-D8)", () =
       baseBrief({
         audio: {
           path: "assets/inputs/camp/bed.mp3",
-          rights: { licenceId: "lic-boundary", source: "acme", expiresOn: "2026-01-01T00:00:00.000Z" },
+          rights: {
+            licenceId: "lic-boundary",
+            source: "acme",
+            expiresOn: "2026-01-01T00:00:00.000Z",
+          },
         },
       }),
     );
@@ -291,7 +321,9 @@ describe("GenerateCampaignUseCase — legal gate — music rights (VE-D8)", () =
     expect(result.success).toBe(true);
     if (result.success) {
       expect(result.value.halted).toBe(true);
-      const halt = result.value.log.entries.find((e) => e.stage === "ExecuteLegalGateCheck" && e.level === "error");
+      const halt = result.value.log.entries.find(
+        (e) => e.stage === "ExecuteLegalGateCheck" && e.level === "error",
+      );
       expect(halt?.message).toContain("lic-territory");
     }
   });
@@ -303,7 +335,12 @@ describe("GenerateCampaignUseCase — legal gate — music rights (VE-D8)", () =
         targetRegion: "DE",
         audio: {
           path: "assets/inputs/camp/bed.mp3",
-          rights: { licenceId: "lic-ok", source: "acme", expiresOn: "2027-01-01", territories: ["DE"] },
+          rights: {
+            licenceId: "lic-ok",
+            source: "acme",
+            expiresOn: "2027-01-01",
+            territories: ["DE"],
+          },
         },
       }),
     );
@@ -373,7 +410,9 @@ describe("GenerateCampaignUseCase — happy path", () => {
 
   test("namespaces output by treatment when a brief requests more than one", async () => {
     const d = deps();
-    const result = await new GenerateCampaignUseCase(d).execute(baseBrief({ treatments: TWO_TREATMENTS }));
+    const result = await new GenerateCampaignUseCase(d).execute(
+      baseBrief({ treatments: TWO_TREATMENTS }),
+    );
     expect(result.success).toBe(true);
     if (!result.success) return;
 
@@ -521,7 +560,9 @@ describe("GenerateCampaignUseCase — display sizes (A4b)", () => {
     expect(canvases).toContainEqual({ ratio: "16:9" });
 
     // The output PNG's IHDR carries the display unit's own dimensions (D113: never scaled).
-    const saved = (compositor as { outputs: Array<{ canvas: CompositeRequest["canvas"]; image: Uint8Array }> }).outputs;
+    const saved = (
+      compositor as { outputs: Array<{ canvas: CompositeRequest["canvas"]; image: Uint8Array }> }
+    ).outputs;
     const leaderboard = saved.find((s) => s.canvas.size === "728x90");
     const rectangle = saved.find((s) => s.canvas.size === "300x250");
     expect(leaderboard).toBeDefined();
@@ -535,15 +576,26 @@ describe("GenerateCampaignUseCase — display sizes (A4b)", () => {
 
     // Display assets carry their size, not a ratio; ratio assets are untouched.
     const leaderboardAsset = result.value.assets.find((a) => a.outputPath === "alpha/728x90.png");
-    expect(leaderboardAsset).toMatchObject({ productId: "alpha", size: "728x90", treatment: "default" });
+    expect(leaderboardAsset).toMatchObject({
+      productId: "alpha",
+      size: "728x90",
+      treatment: "default",
+    });
     expect(leaderboardAsset).not.toHaveProperty("aspectRatio");
     const ratioAsset = result.value.assets.find((a) => a.outputPath === "alpha/1x1.png");
-    expect(ratioAsset).toMatchObject({ productId: "alpha", aspectRatio: "1:1", treatment: "default" });
+    expect(ratioAsset).toMatchObject({
+      productId: "alpha",
+      aspectRatio: "1:1",
+      treatment: "default",
+    });
     expect(ratioAsset).not.toHaveProperty("size");
   });
 
   test("composites display cells with the display profile's insets for that size (F5)", async () => {
-    const d = deps({ compositor: canvasHonouringCompositor(), platformSafeZones: googleDisplayZones });
+    const d = deps({
+      compositor: canvasHonouringCompositor(),
+      platformSafeZones: googleDisplayZones,
+    });
     const result = await new GenerateCampaignUseCase(d).execute(displayBrief());
     expect(result.success).toBe(true);
     if (!result.success) return;
@@ -562,9 +614,9 @@ describe("GenerateCampaignUseCase — display sizes (A4b)", () => {
       baseBrief({ output: { platforms: ["instagram-feed"], sizes: ["728x90"] } }),
     );
     expect(result.success).toBe(true);
-    const request = vi.mocked(d.compositor.compositeAsset).mock.calls.find(
-      (call) => call[0].canvas.size === "728x90",
-    );
+    const request = vi
+      .mocked(d.compositor.compositeAsset)
+      .mock.calls.find((call) => call[0].canvas.size === "728x90");
     expect(request).toBeDefined();
     expect(request![0]).not.toHaveProperty("safeInsets");
   });
@@ -589,7 +641,9 @@ describe("GenerateCampaignUseCase — display sizes (A4b)", () => {
     // 2 products × (3 ratios + 1 deduped size) = 8 creatives.
     expect(result.value.assets).toHaveLength(8);
     expect(result.value.assets.filter((a) => a.size === "728x90")).toHaveLength(2);
-    expect(result.value.assets.map((a) => a.outputPath).filter((p) => p === "alpha/728x90.png")).toHaveLength(1);
+    expect(
+      result.value.assets.map((a) => a.outputPath).filter((p) => p === "alpha/728x90.png"),
+    ).toHaveLength(1);
     expect(result.value.log.totalOperations).toBe(8);
   });
 
@@ -623,9 +677,7 @@ describe("GenerateCampaignUseCase — display sizes (A4b)", () => {
   // font straight into a quoted style attribute. The API boundary allowlists
   // it via `layerElementsProblem`; the use case must too, for the same
   // programmatic callers `styleProblem` above already covers.
-  const htmlTemplateWith = (
-    elementStyle: Record<string, unknown>,
-  ): BriefTemplate =>
+  const htmlTemplateWith = (elementStyle: Record<string, unknown>): BriefTemplate =>
     ({
       ...CANONICAL_TEMPLATES["image-html"],
       id: "canonical-image-html",
@@ -728,7 +780,10 @@ describe("GenerateCampaignUseCase — selective regeneration", () => {
       regenerateOnly: [{ productId: "alpha", variantIndex: 0 }],
     });
     expect(result.success).toBe(false);
-    if (!result.success) expect(result.error.message).toMatch(/came from a randomized run, but the brief is now a classic campaign/);
+    if (!result.success)
+      expect(result.error.message).toMatch(
+        /came from a randomized run, but the brief is now a classic campaign/,
+      );
     expect(d.imageGenerator.resolveBackground).not.toHaveBeenCalled();
   });
 
@@ -747,7 +802,9 @@ describe("GenerateCampaignUseCase — selective regeneration", () => {
 
   test("an empty target list is a no-op run (no cells, no proofs)", async () => {
     const d = deps();
-    const result = await new GenerateCampaignUseCase(d).execute(baseBrief(), { regenerateOnly: [] });
+    const result = await new GenerateCampaignUseCase(d).execute(baseBrief(), {
+      regenerateOnly: [],
+    });
     expect(result.success).toBe(true);
     if (!result.success) return;
     expect(result.value.assets).toEqual([]);
@@ -772,13 +829,18 @@ describe("GenerateCampaignUseCase — variation", () => {
   });
 
   test("composites a variant's pooled headline, else the resolved copy", async () => {
-    const variants = [fakeVariant({ headline: "Stay wild" }), fakeVariant({ index: 1, aspectRatio: "9:16" })];
+    const variants = [
+      fakeVariant({ headline: "Stay wild" }),
+      fakeVariant({ index: 1, aspectRatio: "9:16" }),
+    ];
     const d = deps({ planner: fakePlanner(fakePlan(variants)) });
     const result = await new GenerateCampaignUseCase(d).execute(
       variationBrief({ localizedMessage: "Bleib wild" }),
     );
     expect(result.success).toBe(true);
-    const messages = vi.mocked(d.compositor.compositeAsset).mock.calls.map((call) => call[0].message);
+    const messages = vi
+      .mocked(d.compositor.compositeAsset)
+      .mock.calls.map((call) => call[0].message);
     expect(messages).toEqual(["Stay wild", "Bleib wild"]);
     // Provenance: the drawn headline is stamped on the descriptor (and so the report); absent otherwise.
     if (!result.success) return;
@@ -787,7 +849,10 @@ describe("GenerateCampaignUseCase — variation", () => {
   });
 
   test("threads a drawn anchor into the composite request and descriptor, absent otherwise (T4)", async () => {
-    const variants = [fakeVariant({ anchor: "middle" }), fakeVariant({ index: 1, aspectRatio: "9:16" })];
+    const variants = [
+      fakeVariant({ anchor: "middle" }),
+      fakeVariant({ index: 1, aspectRatio: "9:16" }),
+    ];
     const d = deps({ planner: fakePlanner(fakePlan(variants)) });
     const result = await new GenerateCampaignUseCase(d).execute(variationBrief());
     expect(result.success).toBe(true);
@@ -804,15 +869,21 @@ describe("GenerateCampaignUseCase — variation", () => {
     // Classic: every treatment cell renders with the brief's style.
     const classicD = deps();
     await new GenerateCampaignUseCase(classicD).execute(baseBrief({ style }));
-    const classicRequests = vi.mocked(classicD.compositor.compositeAsset).mock.calls.map((call) => call[0]);
+    const classicRequests = vi
+      .mocked(classicD.compositor.compositeAsset)
+      .mock.calls.map((call) => call[0]);
     expect(classicRequests.length).toBeGreaterThan(0);
     for (const request of classicRequests) {
       expect(request.style).toEqual(style);
     }
     // Variation: every variant cell renders with the brief's style.
-    const variationD = deps({ planner: fakePlanner(fakePlan([fakeVariant(), fakeVariant({ index: 1 })])) });
+    const variationD = deps({
+      planner: fakePlanner(fakePlan([fakeVariant(), fakeVariant({ index: 1 })])),
+    });
     await new GenerateCampaignUseCase(variationD).execute(variationBrief({ style }));
-    const variationRequests = vi.mocked(variationD.compositor.compositeAsset).mock.calls.map((call) => call[0]);
+    const variationRequests = vi
+      .mocked(variationD.compositor.compositeAsset)
+      .mock.calls.map((call) => call[0]);
     expect(variationRequests.length).toBeGreaterThan(0);
     for (const request of variationRequests) {
       expect(request.style).toEqual(style);
@@ -820,7 +891,9 @@ describe("GenerateCampaignUseCase — variation", () => {
     // A style-less brief requests nothing — the renderer's defaults stand (D54).
     const plainD = deps();
     await new GenerateCampaignUseCase(plainD).execute(baseBrief());
-    for (const request of vi.mocked(plainD.compositor.compositeAsset).mock.calls.map((call) => call[0])) {
+    for (const request of vi
+      .mocked(plainD.compositor.compositeAsset)
+      .mock.calls.map((call) => call[0])) {
       expect(request.style).toBeUndefined();
     }
   });
@@ -845,7 +918,9 @@ describe("GenerateCampaignUseCase — variation", () => {
     // Classic: every treatment cell's request carries the brief's template.
     const classicD = deps();
     await new GenerateCampaignUseCase(classicD).execute(baseBrief({ template }));
-    const classicRequests = vi.mocked(classicD.compositor.compositeAsset).mock.calls.map((call) => call[0]);
+    const classicRequests = vi
+      .mocked(classicD.compositor.compositeAsset)
+      .mock.calls.map((call) => call[0]);
     expect(classicRequests.length).toBeGreaterThan(0);
     for (const request of classicRequests) {
       expect(request.template).toEqual(template);
@@ -853,7 +928,9 @@ describe("GenerateCampaignUseCase — variation", () => {
     // Variation, static slot: same template rides the variant's request.
     const variationD = deps({ planner: fakePlanner(fakePlan([fakeVariant()])) });
     await new GenerateCampaignUseCase(variationD).execute(variationBrief({ template }));
-    const variationRequests = vi.mocked(variationD.compositor.compositeAsset).mock.calls.map((call) => call[0]);
+    const variationRequests = vi
+      .mocked(variationD.compositor.compositeAsset)
+      .mock.calls.map((call) => call[0]);
     expect(variationRequests.length).toBeGreaterThan(0);
     for (const request of variationRequests) {
       expect(request.template).toEqual(template);
@@ -878,7 +955,11 @@ describe("GenerateCampaignUseCase — variation", () => {
           id: "html",
           kind: "html",
           elements: [
-            { kind: "button", text: "Buy Now", frame: { x: 0.1, y: 0.8, w: 0.3, h: 0.1, anchor: "middle" } },
+            {
+              kind: "button",
+              text: "Buy Now",
+              frame: { x: 0.1, y: 0.8, w: 0.3, h: 0.1, anchor: "middle" },
+            },
           ],
         },
         { id: "logo", kind: "logo" },
@@ -924,7 +1005,9 @@ describe("GenerateCampaignUseCase — variation", () => {
   test("legal-gates every distinct pooled headline and halts like a prohibited campaign message", async () => {
     const compliance = {
       validateLegalCopy: vi.fn(async (text: string) =>
-        text.includes("miracle") ? { passed: false, reason: "Prohibited terminology: miracle" } : { passed: true },
+        text.includes("miracle")
+          ? { passed: false, reason: "Prohibited terminology: miracle" }
+          : { passed: true },
       ),
       validateBrandColorDensity: vi.fn(async () => ({ passed: true, score: 0.5 })),
     };
@@ -949,7 +1032,10 @@ describe("GenerateCampaignUseCase — variation", () => {
     expect(d.compositor.compositeAsset).not.toHaveBeenCalled();
     expect(d.imageGenerator.resolveBackground).not.toHaveBeenCalled();
     const halt = result.value.log.entries.filter((e) => e.stage === "ExecuteLegalGateCheck").at(-1);
-    expect(halt).toMatchObject({ level: "error", message: "Pipeline halted — Prohibited terminology: miracle" });
+    expect(halt).toMatchObject({
+      level: "error",
+      message: "Pipeline halted — Prohibited terminology: miracle",
+    });
     expect(result.value.log.completedAt).toBeDefined();
   });
 
@@ -962,7 +1048,13 @@ describe("GenerateCampaignUseCase — variation", () => {
   test("produces count assets with v<index> paths, descriptor, and plan provenance", async () => {
     const variants = [
       fakeVariant({ index: 0, aspectRatio: "1:1" }),
-      fakeVariant({ index: 1, productId: "beta", aspectRatio: "9:16", layout: "headline-top", tone: "subtle" }),
+      fakeVariant({
+        index: 1,
+        productId: "beta",
+        aspectRatio: "9:16",
+        layout: "headline-top",
+        tone: "subtle",
+      }),
       fakeVariant({ index: 2, aspectRatio: "16:9", backgroundSource: "genai", paletteShift: 0.1 }),
     ];
     const d = deps({ planner: fakePlanner(fakePlan(variants)) });
@@ -997,7 +1089,9 @@ describe("GenerateCampaignUseCase — variation", () => {
   });
 
   test("returns a planner error without touching generation ports", async () => {
-    const d = deps({ planner: fakePlanner(new Error("Variation plan shortfall: accepted 1 of count 12")) });
+    const d = deps({
+      planner: fakePlanner(new Error("Variation plan shortfall: accepted 1 of count 12")),
+    });
     const result = await new GenerateCampaignUseCase(d).execute(variationBrief());
     expect(result.success).toBe(false);
     if (!result.success) expect(result.error.message).toMatch(/shortfall/);
@@ -1009,7 +1103,12 @@ describe("GenerateCampaignUseCase — variation", () => {
     const variants = [
       fakeVariant({ index: 0, backgroundSource: "procedural" }),
       fakeVariant({ index: 1, productId: "beta", backgroundSource: "genai" }),
-      fakeVariant({ index: 2, productId: "beta", aspectRatio: "9:16", backgroundSource: "asset-pool" }),
+      fakeVariant({
+        index: 2,
+        productId: "beta",
+        aspectRatio: "9:16",
+        backgroundSource: "asset-pool",
+      }),
     ];
     const d = deps({ planner: fakePlanner(fakePlan(variants)) });
     await new GenerateCampaignUseCase(d).execute(variationBrief());
@@ -1057,7 +1156,9 @@ describe("GenerateCampaignUseCase — variation", () => {
   });
 
   test("regenerateOnly defaults omitted attempt to 1 (first re-roll)", async () => {
-    const planner = fakePlanner(fakePlan([fakeVariant(), fakeVariant({ index: 1, productId: "beta" })]));
+    const planner = fakePlanner(
+      fakePlan([fakeVariant(), fakeVariant({ index: 1, productId: "beta" })]),
+    );
     const d = deps({ planner });
     const result = await new GenerateCampaignUseCase(d).execute(variationBrief(), {
       regenerateOnly: [{ productId: "alpha", variantIndex: 0 }],
@@ -1080,7 +1181,10 @@ describe("GenerateCampaignUseCase — variation", () => {
 
   test("returns a replan error without generating", async () => {
     const planner = fakePlanner(fakePlan([fakeVariant()]));
-    planner.replan = vi.fn(() => ({ success: false as const, error: new Error("replan exhausted") }));
+    planner.replan = vi.fn(() => ({
+      success: false as const,
+      error: new Error("replan exhausted"),
+    }));
     const d = deps({ planner });
     const result = await new GenerateCampaignUseCase(d).execute(variationBrief(), {
       regenerateOnly: [{ productId: "alpha", variantIndex: 0, attempt: 1 }],
@@ -1099,7 +1203,9 @@ describe("GenerateCampaignUseCase — variation", () => {
 
   test("fails loud when the plan references an unsupported ratio", async () => {
     const d = deps({
-      planner: fakePlanner(fakePlan([fakeVariant({ aspectRatio: "21:9" as Variant["aspectRatio"] })])),
+      planner: fakePlanner(
+        fakePlan([fakeVariant({ aspectRatio: "21:9" as Variant["aspectRatio"] })]),
+      ),
     });
     const result = await new GenerateCampaignUseCase(d).execute(variationBrief());
     expect(result.success).toBe(false);
@@ -1107,19 +1213,26 @@ describe("GenerateCampaignUseCase — variation", () => {
   });
 
   test("classic-only regenerateOnly targets on a variation brief are an error", async () => {
-    const planner = fakePlanner(fakePlan([fakeVariant(), fakeVariant({ index: 1, productId: "beta" })]));
+    const planner = fakePlanner(
+      fakePlan([fakeVariant(), fakeVariant({ index: 1, productId: "beta" })]),
+    );
     const d = deps({ planner });
     const result = await new GenerateCampaignUseCase(d).execute(variationBrief(), {
       regenerateOnly: [{ productId: "alpha", aspectRatio: "1:1", treatment: "default" }],
     });
     expect(result.success).toBe(false);
-    if (!result.success) expect(result.error.message).toMatch(/came from a classic run, but the brief is now a randomized campaign/);
+    if (!result.success)
+      expect(result.error.message).toMatch(
+        /came from a classic run, but the brief is now a randomized campaign/,
+      );
     expect(planner.replan).not.toHaveBeenCalled();
     expect(d.proceduralGenerator.resolveBackground).not.toHaveBeenCalled();
   });
 
   test("a mixed target list is refused on a randomized brief — nothing is silently dropped", async () => {
-    const planner = fakePlanner(fakePlan([fakeVariant(), fakeVariant({ index: 1, productId: "beta" })]));
+    const planner = fakePlanner(
+      fakePlan([fakeVariant(), fakeVariant({ index: 1, productId: "beta" })]),
+    );
     const d = deps({ planner });
     const result = await new GenerateCampaignUseCase(d).execute(variationBrief(), {
       regenerateOnly: [
@@ -1135,14 +1248,18 @@ describe("GenerateCampaignUseCase — variation", () => {
   test("an empty target list is a no-op run on a randomized brief too", async () => {
     const planner = fakePlanner(fakePlan([fakeVariant()]));
     const d = deps({ planner });
-    const result = await new GenerateCampaignUseCase(d).execute(variationBrief(), { regenerateOnly: [] });
+    const result = await new GenerateCampaignUseCase(d).execute(variationBrief(), {
+      regenerateOnly: [],
+    });
     expect(result.success).toBe(true);
     if (result.success) expect(result.value.assets).toEqual([]);
     expect(d.proceduralGenerator.resolveBackground).not.toHaveBeenCalled();
   });
 
   test("rejects a variation target whose productId does not match the planned slot", async () => {
-    const planner = fakePlanner(fakePlan([fakeVariant(), fakeVariant({ index: 1, productId: "beta" })]));
+    const planner = fakePlanner(
+      fakePlan([fakeVariant(), fakeVariant({ index: 1, productId: "beta" })]),
+    );
     const d = deps({ planner });
     const result = await new GenerateCampaignUseCase(d).execute(variationBrief(), {
       regenerateOnly: [{ productId: "beta", variantIndex: 0, attempt: 1 }],
@@ -1181,7 +1298,8 @@ describe("GenerateCampaignUseCase — variation", () => {
       regenerateOnly: [{ productId: "alpha", variantIndex: 0, attempt: 1.5 }],
     });
     expect(badAttempt.success).toBe(false);
-    if (!badAttempt.success) expect(badAttempt.error.message).toMatch(/attempt must be an integer >= 1/);
+    if (!badAttempt.success)
+      expect(badAttempt.error.message).toMatch(/attempt must be an integer >= 1/);
     expect(planner.replan).not.toHaveBeenCalled();
   });
 
@@ -1226,7 +1344,9 @@ describe("GenerateCampaignUseCase — variation", () => {
   });
 
   test("a still removes the slot's mp4 (a re-rolled motion slot leaves no stale clip)", async () => {
-    const d = deps({ planner: fakePlanner(fakePlan([fakeVariant({ index: 0, aspectRatio: "9:16" })])) });
+    const d = deps({
+      planner: fakePlanner(fakePlan([fakeVariant({ index: 0, aspectRatio: "9:16" })])),
+    });
     const result = await new GenerateCampaignUseCase(d).execute(variationBrief(), {
       regenerateOnly: [{ productId: "alpha", variantIndex: 0, attempt: 1 }],
     });
@@ -1267,7 +1387,10 @@ describe("GenerateCampaignUseCase — variation", () => {
     const d = deps({ planner: fakePlanner(fakePlan(variants)) });
     const result = await new GenerateCampaignUseCase(d).execute(variationBrief());
     expect(result.success).toBe(true);
-    expect((d.exporter as RecordingExporter).proofs).toEqual(["proofs/alpha.pdf", "proofs/beta.pdf"]);
+    expect((d.exporter as RecordingExporter).proofs).toEqual([
+      "proofs/alpha.pdf",
+      "proofs/beta.pdf",
+    ]);
   });
 
   test("re-rolling a non-pinned 1:1 variant does not rewrite the product proof", async () => {
@@ -1360,7 +1483,9 @@ describe("GenerateCampaignUseCase — VE5b2 scene backgrounds", () => {
       sceneAssets,
       planner: fakePlanner(fakePlan([motionVariant(), motionVariant({ index: 1 })])),
     });
-    const result = await new GenerateCampaignUseCase(d).execute(variationBrief({ copy: { timeline } }));
+    const result = await new GenerateCampaignUseCase(d).execute(
+      variationBrief({ copy: { timeline } }),
+    );
     expect(result.success).toBe(true);
 
     // Once per DISTINCT path, not once per cell — two motion cells share the same two scenes.
@@ -1384,8 +1509,9 @@ describe("GenerateCampaignUseCase — VE5b2 scene backgrounds", () => {
       beats: [{ text: "Alpha", weight: 1, background: SCENE_A }],
     };
     const sceneAssets = {
-      resolveScene: vi.fn(async (path: string, ratio: AspectRatio) =>
-        new Uint8Array(Buffer.from(`${path}::${ratio.value}`, "utf8")),
+      resolveScene: vi.fn(
+        async (path: string, ratio: AspectRatio) =>
+          new Uint8Array(Buffer.from(`${path}::${ratio.value}`, "utf8")),
       ),
     };
     const d = deps({
@@ -1394,13 +1520,21 @@ describe("GenerateCampaignUseCase — VE5b2 scene backgrounds", () => {
         fakePlan([motionVariant(), motionVariant({ index: 1, aspectRatio: "9:16" })]),
       ),
     });
-    const result = await new GenerateCampaignUseCase(d).execute(variationBrief({ copy: { timeline } }));
+    const result = await new GenerateCampaignUseCase(d).execute(
+      variationBrief({ copy: { timeline } }),
+    );
     expect(result.success).toBe(true);
 
     // Once per DISTINCT RATIO, never once for the whole run and never per cell.
     expect(sceneAssets.resolveScene).toHaveBeenCalledTimes(2);
-    expect(sceneAssets.resolveScene).toHaveBeenCalledWith(SCENE_A, expect.objectContaining({ value: "1:1" }));
-    expect(sceneAssets.resolveScene).toHaveBeenCalledWith(SCENE_A, expect.objectContaining({ value: "9:16" }));
+    expect(sceneAssets.resolveScene).toHaveBeenCalledWith(
+      SCENE_A,
+      expect.objectContaining({ value: "1:1" }),
+    );
+    expect(sceneAssets.resolveScene).toHaveBeenCalledWith(
+      SCENE_A,
+      expect.objectContaining({ value: "9:16" }),
+    );
 
     const requests = vi.mocked(d.videoCompositor.compositeVideo).mock.calls.map((call) => call[0]);
     const squareRequest = requests.find((r) => (r.canvas as { ratio?: string }).ratio === "1:1");
@@ -1413,7 +1547,9 @@ describe("GenerateCampaignUseCase — VE5b2 scene backgrounds", () => {
     });
     // The two ratios' scene bytes must actually differ — a shared resolution
     // would give both cells the same (wrongly cover-fitted) bytes.
-    expect(squareRequest?.backgrounds?.[SCENE_A]).not.toEqual(portraitRequest?.backgrounds?.[SCENE_A]);
+    expect(squareRequest?.backgrounds?.[SCENE_A]).not.toEqual(
+      portraitRequest?.backgrounds?.[SCENE_A],
+    );
   });
 
   test("a timeline naming no backgrounds leaves the request without a backgrounds key, and never touches the scene port", async () => {
@@ -1427,7 +1563,9 @@ describe("GenerateCampaignUseCase — VE5b2 scene backgrounds", () => {
     };
     const sceneAssets = fakeSceneAssets();
     const d = deps({ sceneAssets, planner: fakePlanner(fakePlan([motionVariant()])) });
-    const result = await new GenerateCampaignUseCase(d).execute(variationBrief({ copy: { timeline } }));
+    const result = await new GenerateCampaignUseCase(d).execute(
+      variationBrief({ copy: { timeline } }),
+    );
     expect(result.success).toBe(true);
     const request = vi.mocked(d.videoCompositor.compositeVideo).mock.calls[0][0];
     expect("backgrounds" in request).toBe(false);
@@ -1453,7 +1591,9 @@ describe("GenerateCampaignUseCase — VE5b2 scene backgrounds", () => {
     };
     const sceneAssets = fakeSceneAssets([SCENE_A]);
     const d = deps({ sceneAssets, planner: fakePlanner(fakePlan([motionVariant()])) });
-    const result = await new GenerateCampaignUseCase(d).execute(variationBrief({ copy: { timeline } }));
+    const result = await new GenerateCampaignUseCase(d).execute(
+      variationBrief({ copy: { timeline } }),
+    );
     expect(result.success).toBe(false);
     if (!result.success) {
       expect(result.error.message).toContain("Beat 2");
@@ -1580,7 +1720,9 @@ describe("GenerateCampaignUseCase — motion variants", () => {
     expect((d.exporter as RecordingExporter).removed).toEqual(["alpha/9x16/v1.mp4"]);
     // Every sampled frame was brand-checked (5) plus the one static composite.
     expect(d.compliance.validateBrandColorDensity).toHaveBeenCalledTimes(6);
-    expect(result.value.log.entries.some((e) => /ken-burns-in 6s/.test(e.message) && e.level === "info")).toBe(true);
+    expect(
+      result.value.log.entries.some((e) => /ken-burns-in 6s/.test(e.message) && e.level === "info"),
+    ).toBe(true);
   });
 
   test("carries the brief's audio rights onto a motion asset, not its static siblings (VE-D8)", async () => {
@@ -1612,8 +1754,13 @@ describe("GenerateCampaignUseCase — motion variants", () => {
     const result = await new GenerateCampaignUseCase(d).execute(variationBrief());
     expect(result.success).toBe(true);
     if (!result.success) return;
-    expect(result.value.assets[0]).toMatchObject({ complianceScore: 0.01, passedCompliance: false });
-    expect(result.value.log.entries.some((e) => /below threshold/.test(e.message) && e.level === "warn")).toBe(true);
+    expect(result.value.assets[0]).toMatchObject({
+      complianceScore: 0.01,
+      passedCompliance: false,
+    });
+    expect(
+      result.value.log.entries.some((e) => /below threshold/.test(e.message) && e.level === "warn"),
+    ).toBe(true);
   });
 
   test("a scoreless frame counts as 0 and a missing logo warns", async () => {
@@ -1625,8 +1772,14 @@ describe("GenerateCampaignUseCase — motion variants", () => {
     const result = await new GenerateCampaignUseCase(d).execute(variationBrief());
     expect(result.success).toBe(true);
     if (!result.success) return;
-    expect(result.value.assets[0]).toMatchObject({ complianceScore: 0, passedCompliance: true, logoApplied: false });
-    expect(result.value.log.entries.some((e) => /logo missing/.test(e.message) && e.level === "warn")).toBe(true);
+    expect(result.value.assets[0]).toMatchObject({
+      complianceScore: 0,
+      passedCompliance: true,
+      logoApplied: false,
+    });
+    expect(
+      result.value.log.entries.some((e) => /logo missing/.test(e.message) && e.level === "warn"),
+    ).toBe(true);
   });
 
   test("no sampled frames is no evidence: the asset fails with score 0", async () => {
@@ -1657,18 +1810,27 @@ describe("GenerateCampaignUseCase — motion variants", () => {
     const result = await new GenerateCampaignUseCase(d).execute(variationBrief());
     expect(result.success).toBe(true);
     expect((d.exporter as RecordingExporter).proofs).toEqual(["proofs/alpha.pdf"]);
-    expect(d.exporter.generatePrintProof).toHaveBeenCalledWith(new Uint8Array([4, 5, 6]), "proofs/alpha.pdf");
+    expect(d.exporter.generatePrintProof).toHaveBeenCalledWith(
+      new Uint8Array([4, 5, 6]),
+      "proofs/alpha.pdf",
+    );
   });
 
   test("a motion re-roll keeps the slot identity and returns the regenerated motion asset", async () => {
-    const d = deps({ planner: fakePlanner(fakePlan([motionVariant(), motionVariant({ index: 1 })])) });
+    const d = deps({
+      planner: fakePlanner(fakePlan([motionVariant(), motionVariant({ index: 1 })])),
+    });
     const result = await new GenerateCampaignUseCase(d).execute(variationBrief(), {
       regenerateOnly: [{ productId: "alpha", variantIndex: 1, attempt: 2 }],
     });
     expect(result.success).toBe(true);
     if (!result.success) return;
     expect(result.value.assets).toHaveLength(1);
-    expect(result.value.assets[0]).toMatchObject({ variantIndex: 1, attempt: 2, videoPath: "alpha/1x1/v1.mp4" });
+    expect(result.value.assets[0]).toMatchObject({
+      variantIndex: 1,
+      attempt: 2,
+      videoPath: "alpha/1x1/v1.mp4",
+    });
   });
 
   const threeBeatTimeline = (beats: { text: string; weight: number }[]): CopyTimeline => ({
@@ -1684,7 +1846,9 @@ describe("GenerateCampaignUseCase — motion variants", () => {
       { text: "Shop now", weight: 2 },
     ]);
     const d = deps({ planner: fakePlanner(fakePlan([motionVariant()])) });
-    const result = await new GenerateCampaignUseCase(d).execute(variationBrief({ copy: { timeline } }));
+    const result = await new GenerateCampaignUseCase(d).execute(
+      variationBrief({ copy: { timeline } }),
+    );
     expect(result.success).toBe(true);
     // Assert on the request the port received, not a mock call count.
     const request = vi.mocked(d.videoCompositor.compositeVideo).mock.calls[0]?.[0];
@@ -1696,7 +1860,9 @@ describe("GenerateCampaignUseCase — motion variants", () => {
   test("E3.1 a prohibited term in any beat halts the run before a frame is drawn", async () => {
     const compliance = {
       validateLegalCopy: vi.fn(async (text: string) =>
-        text.includes("miracle") ? { passed: false, reason: "Prohibited terminology: miracle" } : { passed: true },
+        text.includes("miracle")
+          ? { passed: false, reason: "Prohibited terminology: miracle" }
+          : { passed: true },
       ),
       validateBrandColorDensity: vi.fn(async () => ({ passed: true, score: 0.5 })),
     };
@@ -1706,7 +1872,9 @@ describe("GenerateCampaignUseCase — motion variants", () => {
       { text: "Shop now", weight: 2 },
     ]);
     const d = deps({ compliance, planner: fakePlanner(fakePlan([motionVariant()])) });
-    const result = await new GenerateCampaignUseCase(d).execute(variationBrief({ copy: { timeline } }));
+    const result = await new GenerateCampaignUseCase(d).execute(
+      variationBrief({ copy: { timeline } }),
+    );
     expect(result.success).toBe(true);
     if (!result.success) return;
     expect(result.value).toMatchObject({ halted: true, assets: [] });
@@ -1723,7 +1891,9 @@ describe("GenerateCampaignUseCase — motion variants", () => {
     // returns halted:true on copy no output could ever render.
     const compliance = {
       validateLegalCopy: vi.fn(async (text: string) =>
-        text.includes("miracle") ? { passed: false, reason: "Prohibited terminology: miracle" } : { passed: true },
+        text.includes("miracle")
+          ? { passed: false, reason: "Prohibited terminology: miracle" }
+          : { passed: true },
       ),
       validateBrandColorDensity: vi.fn(async () => ({ passed: true, score: 0.5 })),
     };
@@ -1778,7 +1948,12 @@ describe("GenerateCampaignUseCase — motion variants", () => {
     const d = deps({ planner: fakePlanner(fakePlan([motionVariant()])) });
     const result = await new GenerateCampaignUseCase(d).execute(
       variationBrief({
-        copy: { timeline: threeBeatTimeline([{ text: "One", weight: 1 }, { text: "Two", weight: 1 }]) },
+        copy: {
+          timeline: threeBeatTimeline([
+            { text: "One", weight: 1 },
+            { text: "Two", weight: 1 },
+          ]),
+        },
       }),
     );
     expect(result.success).toBe(true);
@@ -1795,7 +1970,12 @@ describe("GenerateCampaignUseCase — motion variants", () => {
           unit: "standard-web",
           layers: CANONICAL_TEMPLATES["image-html"].layers,
         },
-        copy: { timeline: threeBeatTimeline([{ text: "One", weight: 1 }, { text: "Two", weight: 1 }]) },
+        copy: {
+          timeline: threeBeatTimeline([
+            { text: "One", weight: 1 },
+            { text: "Two", weight: 1 },
+          ]),
+        },
       }),
     );
     expect(result.success).toBe(false);
@@ -1818,7 +1998,12 @@ describe("GenerateCampaignUseCase — motion variants", () => {
     const result = await new GenerateCampaignUseCase(d).execute(
       variationBrief({
         template: videoTemplateNoText,
-        copy: { timeline: threeBeatTimeline([{ text: "One", weight: 1 }, { text: "Two", weight: 1 }]) },
+        copy: {
+          timeline: threeBeatTimeline([
+            { text: "One", weight: 1 },
+            { text: "Two", weight: 1 },
+          ]),
+        },
       }),
     );
     expect(result.success).toBe(false);
@@ -1843,7 +2028,12 @@ describe("GenerateCampaignUseCase — motion variants", () => {
     const result = await new GenerateCampaignUseCase(d).execute(
       variationBrief({
         template: videoTemplateDisabledText,
-        copy: { timeline: threeBeatTimeline([{ text: "One", weight: 1 }, { text: "Two", weight: 1 }]) },
+        copy: {
+          timeline: threeBeatTimeline([
+            { text: "One", weight: 1 },
+            { text: "Two", weight: 1 },
+          ]),
+        },
       }),
     );
     expect(result.success).toBe(false);
@@ -1922,7 +2112,10 @@ describe("GenerateCampaignUseCase — motion variants", () => {
     // The duration axis has to match the clip: #107 refuses a timeline whose beats breach
     // the dwell floor, and 1:1:20 over the default 6 s would. Over 60 s each beat clears it.
     await new GenerateCampaignUseCase(d).execute(
-      variationBrief({ copy: { timeline }, variation: { count: 3, seed: 42, axes: { duration: [60] } } }),
+      variationBrief({
+        copy: { timeline },
+        variation: { count: 3, seed: 42, axes: { duration: [60] } },
+      }),
     );
     const request = vi.mocked(d.videoCompositor.compositeVideo).mock.calls[0]?.[0];
     const sampleAt = request?.sampleAt ?? [];
@@ -1951,7 +2144,9 @@ describe("GenerateCampaignUseCase — motion variants", () => {
     expect(sequenced.success).toBe(true);
     if (!sequenced.success) return;
     expect(sequenced.value.assets[0]?.descriptor?.beats).toBe(3);
-    const line = sequenced.value.log.entries.filter((e) => e.stage === "CompositeVariations").at(-1);
+    const line = sequenced.value.log.entries
+      .filter((e) => e.stage === "CompositeVariations")
+      .at(-1);
     expect(line?.message).toMatch(/3 beats/);
 
     // Absent, not zero: no timeline is a different statement from a sequence of length 0.
@@ -1960,15 +2155,29 @@ describe("GenerateCampaignUseCase — motion variants", () => {
     expect(legacy.success).toBe(true);
     if (!legacy.success) return;
     expect(legacy.value.assets[0]?.descriptor).not.toHaveProperty("beats");
-    const legacyLine = legacy.value.log.entries.filter((e) => e.stage === "CompositeVariations").at(-1);
+    const legacyLine = legacy.value.log.entries
+      .filter((e) => e.stage === "CompositeVariations")
+      .at(-1);
     expect(legacyLine?.message).not.toMatch(/beats/);
   });
 });
 
 const ZONES: Record<string, PlatformSafeZone> = {
-  "instagram-feed": { ratio: "1:1", safeInsets: { top: 0, right: 0, bottom: 0, left: 0 }, formats: ["static"] },
-  "instagram-reel": { ratio: "9:16", safeInsets: { top: 250, right: 0, bottom: 340, left: 60 }, formats: ["motion"] },
-  tiktok: { ratio: "9:16", safeInsets: { top: 120, right: 120, bottom: 400, left: 0 }, formats: ["motion"] },
+  "instagram-feed": {
+    ratio: "1:1",
+    safeInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+    formats: ["static"],
+  },
+  "instagram-reel": {
+    ratio: "9:16",
+    safeInsets: { top: 250, right: 0, bottom: 340, left: 60 },
+    formats: ["motion"],
+  },
+  tiktok: {
+    ratio: "9:16",
+    safeInsets: { top: 120, right: 120, bottom: 400, left: 0 },
+    formats: ["motion"],
+  },
 };
 const resolver: PlatformSafeZoneResolver = (id) => ZONES[id];
 
@@ -1981,7 +2190,9 @@ describe("unionSafeInsets (D11)", () => {
   });
 
   test("ignores unknown platform ids and is empty without platforms or a resolver", () => {
-    expect(unionSafeInsets(["nope", "tiktok"], resolver).get("9:16")).toEqual(ZONES.tiktok.safeInsets);
+    expect(unionSafeInsets(["nope", "tiktok"], resolver).get("9:16")).toEqual(
+      ZONES.tiktok.safeInsets,
+    );
     expect(unionSafeInsets(undefined, resolver).size).toBe(0);
     expect(unionSafeInsets(["tiktok"], undefined).size).toBe(0);
   });
@@ -2036,9 +2247,14 @@ describe("GenerateCampaignUseCase — safe insets at generation (D11)", () => {
     variationBrief(platforms ? { output: { formats: ["static"], platforms } } : {});
 
   test("variation + platforms passes the per-ratio union; untargeted ratios get nothing", async () => {
-    const variants = [fakeVariant({ aspectRatio: "9:16" }), fakeVariant({ index: 1, aspectRatio: "16:9" })];
+    const variants = [
+      fakeVariant({ aspectRatio: "9:16" }),
+      fakeVariant({ index: 1, aspectRatio: "16:9" }),
+    ];
     const d = deps({ planner: fakePlanner(fakePlan(variants)), platformSafeZones: resolver });
-    const result = await new GenerateCampaignUseCase(d).execute(withPlatforms(["instagram-reel", "tiktok"]));
+    const result = await new GenerateCampaignUseCase(d).execute(
+      withPlatforms(["instagram-reel", "tiktok"]),
+    );
     expect(result.success).toBe(true);
     const calls = vi.mocked(d.compositor.compositeAsset).mock.calls.map((c) => c[0]);
     expect(calls[0].safeInsets).toEqual({ top: 250, right: 120, bottom: 400, left: 60 });
@@ -2046,7 +2262,10 @@ describe("GenerateCampaignUseCase — safe insets at generation (D11)", () => {
   });
 
   test("a motion variant receives the same insets", async () => {
-    const d = deps({ planner: fakePlanner(fakePlan([motionVariant({ aspectRatio: "9:16" })])), platformSafeZones: resolver });
+    const d = deps({
+      planner: fakePlanner(fakePlan([motionVariant({ aspectRatio: "9:16" })])),
+      platformSafeZones: resolver,
+    });
     await new GenerateCampaignUseCase(d).execute(withPlatforms(["instagram-reel"]));
     expect(d.videoCompositor.compositeVideo).toHaveBeenCalledWith(
       expect.objectContaining({ safeInsets: ZONES["instagram-reel"].safeInsets }),
@@ -2054,18 +2273,25 @@ describe("GenerateCampaignUseCase — safe insets at generation (D11)", () => {
   });
 
   test("a brief without platforms, or a root without a resolver, passes no insets (zero path)", async () => {
-    const noPlatforms = deps({ planner: fakePlanner(fakePlan([fakeVariant({ aspectRatio: "9:16" })])), platformSafeZones: resolver });
+    const noPlatforms = deps({
+      planner: fakePlanner(fakePlan([fakeVariant({ aspectRatio: "9:16" })])),
+      platformSafeZones: resolver,
+    });
     await new GenerateCampaignUseCase(noPlatforms).execute(withPlatforms());
     expect(firstCompositeCall(noPlatforms)).not.toHaveProperty("safeInsets");
 
-    const noResolver = deps({ planner: fakePlanner(fakePlan([fakeVariant({ aspectRatio: "9:16" })])) });
+    const noResolver = deps({
+      planner: fakePlanner(fakePlan([fakeVariant({ aspectRatio: "9:16" })])),
+    });
     await new GenerateCampaignUseCase(noResolver).execute(withPlatforms(["instagram-reel"]));
     expect(firstCompositeCall(noResolver)).not.toHaveProperty("safeInsets");
   });
 
   test("classic mode never passes insets even with platforms and a resolver", async () => {
     const d = deps({ platformSafeZones: resolver });
-    await new GenerateCampaignUseCase(d).execute(baseBrief({ output: { formats: ["static"], platforms: ["instagram-reel"] } }));
+    await new GenerateCampaignUseCase(d).execute(
+      baseBrief({ output: { formats: ["static"], platforms: ["instagram-reel"] } }),
+    );
     for (const call of vi.mocked(d.compositor.compositeAsset).mock.calls) {
       expect(call[0]).not.toHaveProperty("safeInsets");
     }
@@ -2086,7 +2312,9 @@ describe("GenerateCampaignUseCase — campaign type in background context (T4)",
     const d = deps({
       planner: fakePlanner(fakePlan([fakeVariant({ backgroundSource: "genai" })])),
     });
-    const result = await new GenerateCampaignUseCase(d).execute(variationBrief({ type: "short-video" }));
+    const result = await new GenerateCampaignUseCase(d).execute(
+      variationBrief({ type: "short-video" }),
+    );
     expect(result.success).toBe(true);
     const ctx = vi.mocked(d.imageGenerator.resolveBackground).mock.calls[0][2];
     expect(ctx.campaignType).toBe("short-video");

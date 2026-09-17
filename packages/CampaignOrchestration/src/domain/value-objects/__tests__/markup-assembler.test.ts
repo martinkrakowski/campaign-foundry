@@ -227,7 +227,11 @@ describe("assembleHtml (HL4, HL-D3, HL-D6)", () => {
     test("a button's font size is the canvas's own two-term min, hand-computed (HL5f item 3)", () => {
       const result = assembleHtml({
         elements: [
-          { kind: "button", text: "Shop", frame: { x: 0.1, y: 0.1, w: 0.3, h: 0.08, anchor: "middle" } },
+          {
+            kind: "button",
+            text: "Shop",
+            frame: { x: 0.1, y: 0.1, w: 0.3, h: 0.08, anchor: "middle" },
+          },
         ],
         canvas: { ratio: "1:1" },
         brandColor: "#1473E6",

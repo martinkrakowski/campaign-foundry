@@ -1,5 +1,8 @@
 import { SeededRandom, seedFrom } from "@campaignfoundry/shared";
-import { DISTANCE_AXES, type VariationPolicy } from "../../domain/value-objects/VariationPolicy.vo.js";
+import {
+  DISTANCE_AXES,
+  type VariationPolicy,
+} from "../../domain/value-objects/VariationPolicy.vo.js";
 import type { AnchorKind } from "../../domain/value-objects/variation-defaults.js";
 import type { Variant } from "../../domain/entities/Variant.js";
 
@@ -22,8 +25,10 @@ export interface AxisNeed {
 /** Every combination the draw could produce, in a fixed order, so it can be searched or counted. */
 export function enumerateAxes(policy: VariationPolicy): Axes[] {
   const out: Axes[] = [];
-  const headlines: ReadonlyArray<string | undefined> = policy.headline.length > 0 ? policy.headline : [undefined];
-  const anchors: ReadonlyArray<AnchorKind | undefined> = policy.anchor.length > 0 ? policy.anchor : [undefined];
+  const headlines: ReadonlyArray<string | undefined> =
+    policy.headline.length > 0 ? policy.headline : [undefined];
+  const anchors: ReadonlyArray<AnchorKind | undefined> =
+    policy.anchor.length > 0 ? policy.anchor : [undefined];
   for (const productId of policy.productIds) {
     for (const aspectRatio of policy.ratios) {
       const canMotion = policy.motionEnabled && policy.motionRatios.includes(aspectRatio);
@@ -47,7 +52,8 @@ export function enumerateAxes(policy: VariationPolicy): Axes[] {
                   if (!canMotion || policy.mixStatic) out.push(base);
                   if (!canMotion) continue;
                   for (const motion of policy.motion) {
-                    for (const durationSec of policy.duration) out.push({ ...base, motion, durationSec });
+                    for (const durationSec of policy.duration)
+                      out.push({ ...base, motion, durationSec });
                   }
                 }
               }
@@ -79,7 +85,9 @@ export function lineBound(space: readonly Axes[], policy: VariationPolicy): numb
     policy.paletteShift.length,
     Math.max(1, policy.headline.length),
     Math.max(1, policy.anchor.length),
-    policy.motionEnabled ? policy.motion.length * policy.duration.length + (policy.mixStatic ? 1 : 0) : 1,
+    policy.motionEnabled
+      ? policy.motion.length * policy.duration.length + (policy.mixStatic ? 1 : 0)
+      : 1,
   );
   return Math.floor(space.length / largestAxis);
 }
@@ -88,7 +96,10 @@ export function lineBound(space: readonly Axes[], policy: VariationPolicy): numb
  * Size of a maximum independent set, by branch and bound over bitsets. Returns
  * undefined when the step budget runs out, so the caller can fall back to a bound.
  */
-export function maximumIndependentSet(adjacency: readonly bigint[], stepLimit: number): number | undefined {
+export function maximumIndependentSet(
+  adjacency: readonly bigint[],
+  stepLimit: number,
+): number | undefined {
   const popcount = (bits: bigint): number => {
     let count = 0;
     for (let x = bits; x > 0n; x &= x - 1n) count += 1;
@@ -161,7 +172,9 @@ export function exhaustiveAccept(
 ): Variant[] {
   let best: Axes[] = [];
   for (let restart = 0; restart < EXHAUSTIVE_RESTARTS && best.length < policy.count; restart += 1) {
-    const rng = new SeededRandom(seedFrom(briefId, String(policy.seed), "exhaustive", String(restart)));
+    const rng = new SeededRandom(
+      seedFrom(briefId, String(policy.seed), "exhaustive", String(restart)),
+    );
     const order = [...space];
     for (let i = order.length - 1; i > 0; i -= 1) {
       const j = rng.nextInt(i + 1);
@@ -186,15 +199,26 @@ export function exhaustiveAccept(
     }
     if (chosen.length > best.length) best = chosen;
   }
-  return best.map((axes, index) => ({ index, seed: seedFrom(briefId, String(index), "0"), ...axes }));
+  return best.map((axes, index) => ({
+    index,
+    seed: seedFrom(briefId, String(index), "0"),
+    ...axes,
+  }));
 }
 
-export function shortfallMessage(policy: VariationPolicy, space: readonly Axes[], accepted: number): string {
+export function shortfallMessage(
+  policy: VariationPolicy,
+  space: readonly Axes[],
+  accepted: number,
+): string {
   const { max, exact } = capacityAt(space, policy);
   const singleRatio = policy.motionEnabled && !policy.mixStatic && policy.ratios.length === 1;
-  const why = singleRatio ? ` — every motion platform is ${policy.ratios[0]}, so the aspect ratio cannot vary` : "";
+  const why = singleRatio
+    ? ` — every motion platform is ${policy.ratios[0]}, so the aspect ratio cannot vary`
+    : "";
   const remedies = [`lower count to ${max}`];
-  if (policy.minDistance > 1) remedies.push(`lower minDistance (at 1 the maximum is ${space.length})`);
+  if (policy.minDistance > 1)
+    remedies.push(`lower minDistance (at 1 the maximum is ${space.length})`);
   remedies.push("add axis values (another palette shift, layout, tone, motion kind or duration)");
   return (
     `Variation plan shortfall: accepted ${accepted} of count ${policy.count}. ` +

@@ -136,62 +136,59 @@ describe("HL5f — canvas/markup renderer fidelity", () => {
       frames.flatMap((frame) => tones.map((tone) => ({ anchor, frame, tone }))),
     );
 
-    test.each(cases)(
-      "anchor $anchor, frame $frame, tone $tone",
-      ({ anchor, frame, tone }) => {
-        const element: HtmlElement = {
-          kind: "text",
-          text: "Short label",
-          frame: { ...frame, anchor },
-        };
-        const assembled = assembleHtml({
-          elements: [element],
-          canvas: { ratio: "1:1" },
-          brandColor: "#1473E6",
-          tone,
-        });
+    test.each(cases)("anchor $anchor, frame $frame, tone $tone", ({ anchor, frame, tone }) => {
+      const element: HtmlElement = {
+        kind: "text",
+        text: "Short label",
+        frame: { ...frame, anchor },
+      };
+      const assembled = assembleHtml({
+        elements: [element],
+        canvas: { ratio: "1:1" },
+        brandColor: "#1473E6",
+        tone,
+      });
 
-        const styleMatch = /<div style="([^"]*)">Short label<\/div>/.exec(assembled.html);
-        expect(styleMatch).not.toBeNull();
-        const style = styleMatch![1]!;
+      const styleMatch = /<div style="([^"]*)">Short label<\/div>/.exec(assembled.html);
+      expect(styleMatch).not.toBeNull();
+      const style = styleMatch![1]!;
 
-        // CSS flex, not a padding-top computed for one line: the browser
-        // must be free to centre/end-align however many lines this text
-        // actually wraps to.
-        expect(style).toContain("display: flex");
-        expect(style).toContain(`justify-content: ${justifyFor[anchor]};`);
-        expect(style).not.toContain("padding-top");
+      // CSS flex, not a padding-top computed for one line: the browser
+      // must be free to centre/end-align however many lines this text
+      // actually wraps to.
+      expect(style).toContain("display: flex");
+      expect(style).toContain(`justify-content: ${justifyFor[anchor]};`);
+      expect(style).not.toContain("padding-top");
 
-        const fontSize = Number(/font-size: ([\d.]+)px/.exec(style)?.[1]);
-        const lineHeightPx = Number(/line-height: ([\d.]+)px/.exec(style)?.[1]);
-        const letterSpacingPx = Number(/letter-spacing: ([\d.]+)px/.exec(style)?.[1]);
-        const fontWeight = /font-weight: ([a-z0-9]+);/.exec(style)?.[1];
-        const widthPx = Number(/width: ([\d.]+)px/.exec(style)?.[1]);
+      const fontSize = Number(/font-size: ([\d.]+)px/.exec(style)?.[1]);
+      const lineHeightPx = Number(/line-height: ([\d.]+)px/.exec(style)?.[1]);
+      const letterSpacingPx = Number(/letter-spacing: ([\d.]+)px/.exec(style)?.[1]);
+      const fontWeight = /font-weight: ([a-z0-9]+);/.exec(style)?.[1];
+      const widthPx = Number(/width: ([\d.]+)px/.exec(style)?.[1]);
 
-        const boxH = frame.h * CANVAS_PX;
-        const boxW = frame.w * CANVAS_PX;
-        // Line-wrapping input: both renderers wrap/lay out at the frame's own
-        // width verbatim (`drawHtml` calls `wrapText(ctx, text, boxW)`;
-        // `assembleHtml`'s baseStyle sets `width: ${boxW}px`) — no separate
-        // number to share, so pin the one that already must agree.
-        expect(widthPx).toBe(boxW);
+      const boxH = frame.h * CANVAS_PX;
+      const boxW = frame.w * CANVAS_PX;
+      // Line-wrapping input: both renderers wrap/lay out at the frame's own
+      // width verbatim (`drawHtml` calls `wrapText(ctx, text, boxW)`;
+      // `assembleHtml`'s baseStyle sets `width: ${boxW}px`) — no separate
+      // number to share, so pin the one that already must agree.
+      expect(widthPx).toBe(boxW);
 
-        // The numbers that ARE independent of line count — font size, line
-        // height, letter spacing, weight — still come from the one shared
-        // function and must be equal for any line count.
-        const geometry = htmlTextGeometry({
-          boxH,
-          canvasBasis: CANVAS_PX,
-          sizeScale: DEFAULT_STYLE.sizeScale,
-          lineHeight: DEFAULT_STYLE.lineHeight,
-          letterSpacing: DEFAULT_STYLE.letterSpacing,
-        });
-        expect(fontSize).toBe(geometry.fontSize);
-        expect(lineHeightPx).toBe(geometry.lineHeight);
-        expect(letterSpacingPx).toBe(geometry.letterSpacing);
-        expect(fontWeight).toBe(tone === "subtle" ? "500" : "bold");
-      },
-    );
+      // The numbers that ARE independent of line count — font size, line
+      // height, letter spacing, weight — still come from the one shared
+      // function and must be equal for any line count.
+      const geometry = htmlTextGeometry({
+        boxH,
+        canvasBasis: CANVAS_PX,
+        sizeScale: DEFAULT_STYLE.sizeScale,
+        lineHeight: DEFAULT_STYLE.lineHeight,
+        letterSpacing: DEFAULT_STYLE.letterSpacing,
+      });
+      expect(fontSize).toBe(geometry.fontSize);
+      expect(lineHeightPx).toBe(geometry.lineHeight);
+      expect(letterSpacingPx).toBe(geometry.letterSpacing);
+      expect(fontWeight).toBe(tone === "subtle" ? "500" : "bold");
+    });
   });
 });
 
@@ -254,10 +251,7 @@ describe("HL5e — per-element style overrides reach both renderers identically"
   }
 
   /** The inline style of the markup element whose text is `needle`. */
-  function markupFont(
-    html: string,
-    needle: string,
-  ): { fontWeight: string; fontFamily: string } {
+  function markupFont(html: string, needle: string): { fontWeight: string; fontFamily: string } {
     const m = new RegExp(`style="([^"]*)">(?:${needle})</(?:div|button)>`).exec(html);
     expect(m, `no markup element for ${needle}`).not.toBeNull();
     const style = m![1]!;
@@ -338,8 +332,18 @@ describe("HL5e — per-element style overrides reach both renderers identically"
     const emptyRender = await paintElements([explicitEmpty], "subtle");
     const sha = (b: Buffer) => createHash("sha256").update(b).digest("hex");
     expect(sha(emptyRender.raster)).toBe(sha(withRender.raster));
-    const a = assembleHtml({ elements: [plain], canvas: { ratio: "1:1" }, brandColor: "#1473E6", tone: "subtle" });
-    const b = assembleHtml({ elements: [explicitEmpty], canvas: { ratio: "1:1" }, brandColor: "#1473E6", tone: "subtle" });
+    const a = assembleHtml({
+      elements: [plain],
+      canvas: { ratio: "1:1" },
+      brandColor: "#1473E6",
+      tone: "subtle",
+    });
+    const b = assembleHtml({
+      elements: [explicitEmpty],
+      canvas: { ratio: "1:1" },
+      brandColor: "#1473E6",
+      tone: "subtle",
+    });
     expect(b.html).toBe(a.html);
   });
 
@@ -348,9 +352,7 @@ describe("HL5e — per-element style overrides reach both renderers identically"
     // renderers call it with: absent override = the brief-level resolved font
     // (weight already tone-derived), present override wins per field.
     const briefFont = { fontWeight: "500", fontFamily: "Inter" };
-    expect(
-      htmlElementFont({ kind: "text", text: "x", frame }, briefFont),
-    ).toEqual(briefFont);
+    expect(htmlElementFont({ kind: "text", text: "x", frame }, briefFont)).toEqual(briefFont);
     expect(
       htmlElementFont({ kind: "text", text: "x", frame, style: { fontFamily: "Lora" } }, briefFont),
     ).toEqual({ fontWeight: "500", fontFamily: "Lora" });

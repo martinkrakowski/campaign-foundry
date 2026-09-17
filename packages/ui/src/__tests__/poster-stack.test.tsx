@@ -22,7 +22,9 @@ describe("PosterStack", () => {
     expect(lefts).toEqual(["0px", "8px", "16px"]);
     expect(tops).toEqual(["0px", "6px", "12px"]);
     // The three variants are actually distinct: pA, pB and pC each appear once.
-    expect(svgs.filter((svg) => svg.querySelector('rect[class*="fill-brand-primary/80"]'))).toHaveLength(1);
+    expect(
+      svgs.filter((svg) => svg.querySelector('rect[class*="fill-brand-primary/80"]')),
+    ).toHaveLength(1);
     expect(svgs.filter((svg) => svg.querySelector("circle"))).toHaveLength(1);
   });
 

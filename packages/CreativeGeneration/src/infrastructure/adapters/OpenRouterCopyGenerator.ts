@@ -107,9 +107,14 @@ export class OpenRouterCopyGenerator implements CopyGeneratorPort {
 
   private async httpError(response: Response): Promise<CopyGeneratorError> {
     const detail = `OpenRouter HTTP ${response.status}: ${(await response.text()).slice(0, 200)}`;
-    if (response.status === 401 || response.status === 403) return new CopyGeneratorError("auth", detail);
+    if (response.status === 401 || response.status === 403)
+      return new CopyGeneratorError("auth", detail);
     if (response.status === 429) {
-      return new CopyGeneratorError("rate_limited", detail, retryAfterSeconds(response.headers.get("retry-after")));
+      return new CopyGeneratorError(
+        "rate_limited",
+        detail,
+        retryAfterSeconds(response.headers.get("retry-after")),
+      );
     }
     return new CopyGeneratorError("upstream", detail);
   }
@@ -149,7 +154,10 @@ export class OpenRouterCopyGenerator implements CopyGeneratorPort {
     }
     const headlines = (parsed as { headlines?: unknown }).headlines;
     if (!Array.isArray(headlines)) {
-      throw new CopyGeneratorError("malformed", "OpenRouter copy response was missing a headlines array");
+      throw new CopyGeneratorError(
+        "malformed",
+        "OpenRouter copy response was missing a headlines array",
+      );
     }
     return headlines.filter((item): item is string => typeof item === "string");
   }
@@ -159,7 +167,9 @@ export class OpenRouterCopyGenerator implements CopyGeneratorPort {
     const text = Array.isArray(content)
       ? content
           .map((part: unknown) =>
-            typeof part === "object" && part !== null && typeof (part as { text?: unknown }).text === "string"
+            typeof part === "object" &&
+            part !== null &&
+            typeof (part as { text?: unknown }).text === "string"
               ? (part as { text: string }).text
               : "",
           )

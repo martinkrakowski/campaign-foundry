@@ -56,7 +56,12 @@ function cornerPixel(canvas: Canvas): readonly [number, number, number, number] 
   return [data[0]!, data[1]!, data[2]!, data[3]!];
 }
 
-async function drawAt(req: SceneRequest, t: number, motion?: "ken-burns-in", copyT?: number): Promise<Canvas> {
+async function drawAt(
+  req: SceneRequest,
+  t: number,
+  motion?: "ken-burns-in",
+  copyT?: number,
+): Promise<Canvas> {
   const prepared = await NodeCanvasCompositor.prepare(req);
   const canvas = createCanvas(prepared.width, prepared.height);
   const ctx = canvas.getContext("2d");
@@ -182,8 +187,18 @@ describe("NodeCanvasCompositor scene grounds (VE5b1)", () => {
       backgrounds: { "scene-a.png": SCENE_A },
     });
 
-    const inSceneBeat = await drawAt(req, resolved[0].startT + 0.01, undefined, resolved[0].startT + 0.01);
-    const inScenelessBeat = await drawAt(req, resolved[1].startT + 0.01, undefined, resolved[1].startT + 0.01);
+    const inSceneBeat = await drawAt(
+      req,
+      resolved[0].startT + 0.01,
+      undefined,
+      resolved[0].startT + 0.01,
+    );
+    const inScenelessBeat = await drawAt(
+      req,
+      resolved[1].startT + 0.01,
+      undefined,
+      resolved[1].startT + 0.01,
+    );
 
     expect(cornerPixel(inSceneBeat)).toEqual([0xff, 0, 0, 0xff]);
     expect(cornerPixel(inScenelessBeat)).toEqual([0x33, 0x33, 0x33, 0xff]);
@@ -229,7 +244,12 @@ describe("NodeCanvasCompositor scene grounds (VE5b1)", () => {
       transition: "fade",
       keyBeat: 1,
     };
-    const absent = await drawAt(request({ durationSec: DURATION_SEC, timeline }), 0.4, undefined, 0.4);
+    const absent = await drawAt(
+      request({ durationSec: DURATION_SEC, timeline }),
+      0.4,
+      undefined,
+      0.4,
+    );
     const empty = await drawAt(
       request({ durationSec: DURATION_SEC, timeline, backgrounds: {} }),
       0.4,

@@ -86,14 +86,15 @@ export function SwatchPicker({
                 "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary focus-visible:ring-offset-2",
                 "disabled:cursor-not-allowed disabled:opacity-50",
                 sizeClasses,
-                isSelected
-                  ? ringClasses
-                  : "hover:scale-105 hover:border-border-control-hover",
+                isSelected ? ringClasses : "hover:scale-105 hover:border-border-control-hover",
               )}
               style={{ backgroundColor: hex }}
             >
               {isSelected ? (
-                <span className="flex items-center justify-center text-white drop-shadow-sm" aria-hidden="true">
+                <span
+                  className="flex items-center justify-center text-white drop-shadow-sm"
+                  aria-hidden="true"
+                >
                   <svg viewBox="0 0 12 12" focusable="false" className={isLg ? "size-5" : "size-3"}>
                     <path
                       d="M2 6.5 5 9.5 10 3"
@@ -129,7 +130,10 @@ export function SwatchPicker({
           style={isCustomSelected && isValidHex(value) ? { backgroundColor: value } : undefined}
         >
           {isCustomSelected ? (
-            <span className="flex items-center justify-center text-white drop-shadow-sm" aria-hidden="true">
+            <span
+              className="flex items-center justify-center text-white drop-shadow-sm"
+              aria-hidden="true"
+            >
               <svg viewBox="0 0 12 12" focusable="false" className={isLg ? "size-5" : "size-3"}>
                 <path
                   d="M2 6.5 5 9.5 10 3"

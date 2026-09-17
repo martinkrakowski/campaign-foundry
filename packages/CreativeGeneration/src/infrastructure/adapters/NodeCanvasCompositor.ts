@@ -82,7 +82,6 @@ function mergeGeometry(defaultFraction: number, override: number | undefined): n
   return override ?? defaultFraction;
 }
 
-
 /**
  * Everything {@link NodeCanvasCompositor.draw} needs to blit a still (or a later
  * motion frame). Images and logo geometry are loaded once in
@@ -476,8 +475,7 @@ export class NodeCanvasCompositor implements CompositorPort {
     const layers = resolveLayerList(request.template, request.creativeType);
     const textProps = (layers.find(
       (layer) =>
-        (layer.kind === "static-text" || layer.kind === "animated-text") &&
-        layer.enabled !== false,
+        (layer.kind === "static-text" || layer.kind === "animated-text") && layer.enabled !== false,
     )?.props ?? {}) as TextProps;
     // The anchor axis (T4) wins over the text layer's `anchor` prop (R-D4 —
     // a prop never shadows a live axis): absent axis and absent prop both
@@ -511,7 +509,9 @@ export class NodeCanvasCompositor implements CompositorPort {
     // active beat's own `background` path — VE-D3's fallback is simply a key
     // this map does not have.
     const referencedBackgrounds = new Set(
-      (request.timeline?.beats ?? []).flatMap((beat) => (beat.background !== undefined ? [beat.background] : [])),
+      (request.timeline?.beats ?? []).flatMap((beat) =>
+        beat.background !== undefined ? [beat.background] : [],
+      ),
     );
     const backgroundEntries =
       request.backgrounds !== undefined
@@ -548,9 +548,8 @@ export class NodeCanvasCompositor implements CompositorPort {
         // The block's own geometry merge (C4, R-D3): the enabled `logo` layer's
         // width/margin props over the `CREATIVE_GEOMETRY` default. Absent → the
         // constant → the pre-merge bytes (the goldens pin them).
-        const logoProps = (layers.find(
-          (layer) => layer.kind === "logo" && layer.enabled !== false,
-        )?.props ?? {}) as LogoProps;
+        const logoProps = (layers.find((layer) => layer.kind === "logo" && layer.enabled !== false)
+          ?.props ?? {}) as LogoProps;
         const target =
           scaleBasis(canvas, width, height) *
           mergeGeometry(CREATIVE_GEOMETRY.logoWidthFraction, logoProps.width);
@@ -575,7 +574,9 @@ export class NodeCanvasCompositor implements CompositorPort {
         // report flags it.
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
           const reason = error instanceof Error ? error.message : String(error);
-          console.warn(`[NodeCanvasCompositor] logo at ${logoPath} could not be applied: ${reason}`);
+          console.warn(
+            `[NodeCanvasCompositor] logo at ${logoPath} could not be applied: ${reason}`,
+          );
         }
       }
     }
@@ -669,7 +670,14 @@ const ELLIPSIS = "…";
  * the style-less (and rest-pose) frame renders byte-identically (D54). Returns
  * whether a block was opened — the caller closes it with `ctx.restore()`.
  */
-function openTextPose(ctx: SKRSContext2D, alpha: number, dx: number, dy: number, scale: number, layout: HeadlineLayout): boolean {
+function openTextPose(
+  ctx: SKRSContext2D,
+  alpha: number,
+  dx: number,
+  dy: number,
+  scale: number,
+  layout: HeadlineLayout,
+): boolean {
   if (dx === 0 && dy === 0 && alpha === 1 && scale === 1) return false;
   ctx.save();
   ctx.globalAlpha = alpha;
@@ -746,7 +754,16 @@ interface HeadlineLayout {
  */
 type LayoutSource = Pick<
   PreparedCreative,
-  "canvas" | "width" | "height" | "top" | "anchor" | "headlineTypeFloor" | "fontWeight" | "fontFamily" | "style" | "insets"
+  | "canvas"
+  | "width"
+  | "height"
+  | "top"
+  | "anchor"
+  | "headlineTypeFloor"
+  | "fontWeight"
+  | "fontFamily"
+  | "style"
+  | "insets"
 >;
 
 /**
@@ -762,7 +779,10 @@ function anchorFirstY(p: LayoutSource, span: number, fontSize: number): number {
   if (p.anchor === "middle") {
     const safeHeight = p.height - p.insets.top - p.insets.bottom;
     return (
-      p.insets.top + safeHeight * CREATIVE_GEOMETRY.headlineAnchor.middle - (span + fontSize) / 2 + fontSize
+      p.insets.top +
+      safeHeight * CREATIVE_GEOMETRY.headlineAnchor.middle -
+      (span + fontSize) / 2 +
+      fontSize
     );
   }
   return p.anchor === "top"
@@ -808,12 +828,22 @@ function fitText(ctx: SKRSContext2D, p: LayoutSource, text: string): HeadlineLay
  * Lay a text out at a caller-chosen type size — the D6 common size decided once
  * in `prepare`, never the autofit loop (M4). `draw` no longer re-wraps.
  */
-function layoutFixed(ctx: SKRSContext2D, p: LayoutSource, text: string, fontSize: number): HeadlineLayout {
+function layoutFixed(
+  ctx: SKRSContext2D,
+  p: LayoutSource,
+  text: string,
+  fontSize: number,
+): HeadlineLayout {
   return settleLayout(ctx, p, layoutAt(ctx, p, text, fontSize));
 }
 
 /** The exact legacy fitting arithmetic at a single type size. */
-function layoutAt(ctx: SKRSContext2D, p: LayoutSource, text: string, fontSize: number): LayoutAttempt {
+function layoutAt(
+  ctx: SKRSContext2D,
+  p: LayoutSource,
+  text: string,
+  fontSize: number,
+): LayoutAttempt {
   const wrapBasis = widthTermBasis(p.canvas, p.width, p.height);
   const innerWidth = wrapBasis - p.insets.left - p.insets.right;
   const wrapWidth = innerWidth * 0.85;
@@ -871,7 +901,10 @@ export function headlineBoxX(p: LayoutSource, centerX: number, boxWidth: number)
 
 function settleLayout(ctx: SKRSContext2D, p: LayoutSource, attempt: LayoutAttempt): HeadlineLayout {
   if (!attempt.fits) {
-    const maxLines = Math.max(1, Math.floor((attempt.maxLast - attempt.minFirst) / attempt.lineHeight) + 1);
+    const maxLines = Math.max(
+      1,
+      Math.floor((attempt.maxLast - attempt.minFirst) / attempt.lineHeight) + 1,
+    );
     let lines = [...attempt.lines];
     if (lines.length > maxLines) {
       lines = lines.slice(0, maxLines);
@@ -902,7 +935,12 @@ function layoutHeadline(ctx: SKRSContext2D, prepared: PreparedCreative): Headlin
   return fitText(ctx, prepared, prepared.message);
 }
 
-function flushLogoY(edge: "top" | "bottom", height: number, logoH: number, insets: SafeInsets): number {
+function flushLogoY(
+  edge: "top" | "bottom",
+  height: number,
+  logoH: number,
+  insets: SafeInsets,
+): number {
   return edge === "top" ? insets.top : height - insets.bottom - logoH;
 }
 
@@ -1022,7 +1060,15 @@ function drawTimeline(
   effectT?: number,
 ): void {
   const eased = motion === undefined ? 1 : easeOutCubic(t);
-  const c: Omit<LayerDrawContext, "layer"> = { ctx, prepared, motion, t, eased, effectT: effectT ?? t, copyT };
+  const c: Omit<LayerDrawContext, "layer"> = {
+    ctx,
+    prepared,
+    motion,
+    t,
+    eased,
+    effectT: effectT ?? t,
+    copyT,
+  };
   let copyDrawn = false;
   for (const layer of prepared.layers) {
     // A layer the brief disabled does not draw (X9), and the check runs BEFORE
@@ -1087,7 +1133,12 @@ function drawSequencedCopy(
         kind: layer.kind,
         tracks: [
           ...copyMotionTracks(motion, prepared.height),
-          ...textEffectTracks(prepared.textEffect, prepared.canvas, prepared.width, prepared.height),
+          ...textEffectTracks(
+            prepared.textEffect,
+            prepared.canvas,
+            prepared.width,
+            prepared.height,
+          ),
           ...(layer.tracks ?? []),
         ],
       },
@@ -1161,7 +1212,8 @@ function selectGround(prepared: PreparedCreative, copyT: number | undefined): Gr
   }
   const scenes = prepared.scenes;
   const groundFor = (beat: ResolvedBeat): Image =>
-    (beat.background !== undefined ? scenes.get(beat.background) : undefined) ?? prepared.background;
+    (beat.background !== undefined ? scenes.get(beat.background) : undefined) ??
+    prepared.background;
   const pair = beatAt(prepared.timeline, copyT);
   const current = groundFor(pair.current);
   if (pair.incoming === undefined || pair.mix === 0) {
@@ -1442,7 +1494,9 @@ function drawHtml(c: LayerDrawContext): void {
         // consume that offset (it positions with CSS flex `justify-content`,
         // which the browser resolves against the real line count); this
         // canvas pass uses the REAL post-wrap line count.
-        const startY = boxY + htmlTextFirstLineOffset(element.frame.anchor, boxH, fontSize, lineHeight, lines.length);
+        const startY =
+          boxY +
+          htmlTextFirstLineOffset(element.frame.anchor, boxH, fontSize, lineHeight, lines.length);
 
         let lineX: number;
         if (prepared.style.align === "left") {

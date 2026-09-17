@@ -2,7 +2,10 @@ import { useId, type ReactNode } from "react";
 import { cn } from "./cn";
 import { RatioFrame } from "./ratio-frame";
 import { PreviewFrame } from "./PreviewFrame";
-import type { DisplaySizeSlot, PlatformProfile } from "@campaignfoundry/Distribution/platform-profiles";
+import type {
+  DisplaySizeSlot,
+  PlatformProfile,
+} from "@campaignfoundry/Distribution/platform-profiles";
 
 /**
  * A4 widens RatioFrame to CanvasSpec; until then a display profile's first
@@ -96,7 +99,12 @@ export function PlatformCard({
           className="absolute right-2.5 top-2.5 flex size-[22px] items-center justify-center rounded-full bg-brand-primary text-white motion-safe:animate-check-pop"
           aria-hidden="true"
         >
-          <svg viewBox="0 0 12 12" focusable="false" aria-hidden="true" className="size-3 text-white">
+          <svg
+            viewBox="0 0 12 12"
+            focusable="false"
+            aria-hidden="true"
+            className="size-3 text-white"
+          >
             <path
               d="M2 6.5 5 9.5 10 3"
               fill="none"
@@ -123,7 +131,12 @@ export function PlatformCard({
           ) : null}
         </PreviewFrame>
       </span>
-      <span className={cn("text-[15px] font-bold leading-tight", selected ? "text-text-emphasis" : "text-text-primary")}>
+      <span
+        className={cn(
+          "text-[15px] font-bold leading-tight",
+          selected ? "text-text-emphasis" : "text-text-primary",
+        )}
+      >
         {profile.label}
       </span>
       {meta ? (

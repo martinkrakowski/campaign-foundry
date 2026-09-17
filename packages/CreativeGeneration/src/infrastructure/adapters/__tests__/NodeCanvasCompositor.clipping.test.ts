@@ -147,9 +147,15 @@ describe("html layer clipping (X10)", () => {
 
     const clipAt = calls.findIndex((c) => c.name === "clip");
     expect(clipAt).toBeGreaterThan(0);
-    const clipShape = calls.slice(0, clipAt).reverse().find((c) => c.name === "rect" || c.name === "roundRect");
+    const clipShape = calls
+      .slice(0, clipAt)
+      .reverse()
+      .find((c) => c.name === "rect" || c.name === "roundRect");
     const fillAt = calls.findIndex((c, i) => i > clipAt && c.name === "fill");
-    const fillShape = calls.slice(clipAt, fillAt).reverse().find((c) => c.name === "rect" || c.name === "roundRect");
+    const fillShape = calls
+      .slice(clipAt, fillAt)
+      .reverse()
+      .find((c) => c.name === "rect" || c.name === "roundRect");
 
     expect(fillShape?.name).toBe("roundRect");
     expect(clipShape).toEqual(fillShape);
@@ -160,7 +166,11 @@ describe("html layer clipping (X10)", () => {
     const longText =
       "This is an extraordinarily long text headline label designed specifically to exceed and overflow its frame boundaries across multiple lines";
 
-    const { ctx: ctxOverflow, width, height } = await renderHtmlElement({
+    const {
+      ctx: ctxOverflow,
+      width,
+      height,
+    } = await renderHtmlElement({
       kind: "text",
       text: longText,
       frame,
@@ -183,7 +193,11 @@ describe("html layer clipping (X10)", () => {
     const longText =
       "This is an extremely long button label that extends horizontally far beyond the boundaries of this button element frame";
 
-    const { ctx: ctxOverflow, width, height } = await renderHtmlElement({
+    const {
+      ctx: ctxOverflow,
+      width,
+      height,
+    } = await renderHtmlElement({
       kind: "button",
       text: longText,
       frame,

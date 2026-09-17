@@ -1,5 +1,8 @@
 import type { ReactNode } from "react";
-import type { AspectRatioValue, CanvasSpec } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
+import type {
+  AspectRatioValue,
+  CanvasSpec,
+} from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import { canvasSpecOf, frameBox } from "./preview-layers";
 
 export type RatioOption = AspectRatioValue;

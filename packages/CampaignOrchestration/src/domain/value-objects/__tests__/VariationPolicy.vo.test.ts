@@ -126,9 +126,7 @@ describe("VariationPolicy.fromBrief", () => {
   });
 
   test("defaults backgroundSource when axes.background omits source", () => {
-    const result = fromBrief(
-      brief({ variation: { count: 1, axes: { background: {} } } }),
-    );
+    const result = fromBrief(brief({ variation: { count: 1, axes: { background: {} } } }));
     expect(result.success).toBe(true);
     if (!result.success) return;
     expect(result.value.backgroundSource).toEqual(["procedural"]);
@@ -159,7 +157,6 @@ describe("VariationPolicy.fromBrief", () => {
     expect(a.success && b.success).toBe(true);
     if (a.success && b.success) expect(a.value.policyHash).toBe(b.value.policyHash);
   });
-
 
   test("delegates hashing to the supplied PolicyHasher", () => {
     const customHasher = vi.fn((_payloadJson: string) => "custom-digest-12345");
@@ -203,9 +200,7 @@ describe("VariationPolicy.fromBrief", () => {
   });
 
   test("formats: motion with no motion axis defaults to every MOTION_KINDS entry (every variant a clip)", () => {
-    const result = fromBrief(
-      brief({ variation: { count: 1 }, output: { formats: ["motion"] } }),
-    );
+    const result = fromBrief(brief({ variation: { count: 1 }, output: { formats: ["motion"] } }));
     expect(result.success).toBe(true);
     if (!result.success) return;
     expect(result.value.motion).toEqual([...MOTION_KINDS]);
@@ -229,10 +224,16 @@ describe("VariationPolicy.fromBrief", () => {
 
   test("formats: [static, motion] mixes (still slot kept); [motion] alone does not", () => {
     const mixed = fromBrief(
-      brief({ variation: { count: 1, axes: { motion: ["ken-burns-in"] } }, output: { formats: ["static", "motion"] } }),
+      brief({
+        variation: { count: 1, axes: { motion: ["ken-burns-in"] } },
+        output: { formats: ["static", "motion"] },
+      }),
     );
     const clipsOnly = fromBrief(
-      brief({ variation: { count: 1, axes: { motion: ["ken-burns-in"] } }, output: { formats: ["motion"] } }),
+      brief({
+        variation: { count: 1, axes: { motion: ["ken-burns-in"] } },
+        output: { formats: ["motion"] },
+      }),
     );
     expect(mixed.success && clipsOnly.success).toBe(true);
     if (!mixed.success || !clipsOnly.success) return;
@@ -242,7 +243,12 @@ describe("VariationPolicy.fromBrief", () => {
 
   test("axisProductSize counts the mixed still slot once, not per duration", () => {
     // base = 2 products × 3 ratios × 1 layout × 1 tone × 1 background × 1 shift = 6
-    const axes = { layout: ["headline-top"], tone: ["bold"], motion: ["ken-burns-in", "headline-rise"], duration: [4, 6] };
+    const axes = {
+      layout: ["headline-top"],
+      tone: ["bold"],
+      motion: ["ken-burns-in", "headline-rise"],
+      duration: [4, 6],
+    };
     const mixed = fromBrief(
       brief({ variation: { count: 1, axes }, output: { formats: ["static", "motion"] } }),
     );
@@ -276,7 +282,8 @@ describe("VariationPolicy.fromBrief", () => {
     const golden = fromBrief(still);
     const narrowed = fromBrief(still, { motionRatios: ["9:16"] });
     expect(golden.success && narrowed.success).toBe(true);
-    if (golden.success && narrowed.success) expect(narrowed.value.policyHash).toBe(golden.value.policyHash);
+    if (golden.success && narrowed.success)
+      expect(narrowed.value.policyHash).toBe(golden.value.policyHash);
   });
 
   test("BACKGROUND_AXIS_SOURCES is the brief-parser set", () => {
@@ -337,16 +344,12 @@ describe("VariationPolicy.fromBrief", () => {
   });
 
   test("accepts paletteShift endpoint 0 and refuses 1 (a whole turn is identical to 0)", () => {
-    const accepted = fromBrief(
-      brief({ variation: { count: 1, axes: { paletteShift: [0] } } }),
-    );
+    const accepted = fromBrief(brief({ variation: { count: 1, axes: { paletteShift: [0] } } }));
     expect(accepted.success).toBe(true);
     if (!accepted.success) return;
     expect(accepted.value.paletteShift).toEqual([0]);
 
-    const refused = fromBrief(
-      brief({ variation: { count: 1, axes: { paletteShift: [1] } } }),
-    );
+    const refused = fromBrief(brief({ variation: { count: 1, axes: { paletteShift: [1] } } }));
     expect(refused.success).toBe(false);
     if (!refused.success) {
       expect(refused.error.message).toMatch(/paletteShift/);
@@ -358,9 +361,7 @@ describe("VariationPolicy.fromBrief", () => {
     const duplicated = fromBrief(
       brief({ variation: { count: 1, seed: 7, axes: { layout: ["bold", "bold"] } } }),
     );
-    const once = fromBrief(
-      brief({ variation: { count: 1, seed: 7, axes: { layout: ["bold"] } } }),
-    );
+    const once = fromBrief(brief({ variation: { count: 1, seed: 7, axes: { layout: ["bold"] } } }));
     expect(duplicated.success && once.success).toBe(true);
     if (!duplicated.success || !once.success) return;
     expect(duplicated.value.layout).toEqual(["bold"]);
@@ -424,11 +425,15 @@ describe("VariationPolicy anchor axis", () => {
     const seven = fromBrief(brief({ variation: { count: 1, minDistance: 7 } }));
     expect(seven.success).toBe(false);
     const withAnchor = fromBrief(
-      brief({ variation: { count: 1, minDistance: 7, axes: { anchor: ["top", "middle", "bottom"] } } }),
+      brief({
+        variation: { count: 1, minDistance: 7, axes: { anchor: ["top", "middle", "bottom"] } },
+      }),
     );
     expect(withAnchor.success).toBe(true);
     const eight = fromBrief(
-      brief({ variation: { count: 1, minDistance: 8, axes: { anchor: ["top", "middle", "bottom"] } } }),
+      brief({
+        variation: { count: 1, minDistance: 8, axes: { anchor: ["top", "middle", "bottom"] } },
+      }),
     );
     expect(eight.success).toBe(false);
   });
@@ -437,7 +442,9 @@ describe("VariationPolicy anchor axis", () => {
     const duplicated = fromBrief(
       brief({ variation: { count: 1, seed: 7, axes: { anchor: ["middle", "middle"] } } }),
     );
-    const once = fromBrief(brief({ variation: { count: 1, seed: 7, axes: { anchor: ["middle"] } } }));
+    const once = fromBrief(
+      brief({ variation: { count: 1, seed: 7, axes: { anchor: ["middle"] } } }),
+    );
     expect(duplicated.success && once.success).toBe(true);
     if (!duplicated.success || !once.success) return;
     expect(duplicated.value.anchor).toEqual(["middle"]);
@@ -521,7 +528,10 @@ describe("VariationPolicy requested ratio subset", () => {
       variation: { count: 4, axes: { motion: ["ken-burns-in"], duration: [4] } },
       output: { formats: ["motion"], platforms: ["instagram-reel"] },
     });
-    const result = fromBrief(motionOnly, { ratios: ["1:1", "9:16", "16:9"], motionRatios: ["9:16"] });
+    const result = fromBrief(motionOnly, {
+      ratios: ["1:1", "9:16", "16:9"],
+      motionRatios: ["9:16"],
+    });
     expect(result.success).toBe(true);
     if (!result.success) return;
     expect(result.value.ratios).toEqual(["9:16"]);
@@ -566,7 +576,9 @@ describe("VariationPolicy requested ratio subset", () => {
 });
 
 describe("VariationPolicy headline axis", () => {
-  const pooled = brief({ variation: { count: 12, seed: 7, minDistance: 1, axes: { headline: "pool://copy" } } });
+  const pooled = brief({
+    variation: { count: 12, seed: 7, minDistance: 1, axes: { headline: "pool://copy" } },
+  });
 
   test("headline is a Hamming axis and pool://copy is the only pool reference", () => {
     expect(DISTANCE_AXES).toContain("headline");
@@ -594,7 +606,11 @@ describe("VariationPolicy headline axis", () => {
     expect(a.value.policyHash).toBe(b.value.policyHash);
     // Code-unit order, not locale order: upper-case sorts before lower-case, so the
     // de-duplication keeps "STAY WILD" when it is the first survivor in that order.
-    expect(canonicalHeadlines(["stay wild", "STAY WILD", "Zebra", "apple"])).toEqual(["STAY WILD", "Zebra", "apple"]);
+    expect(canonicalHeadlines(["stay wild", "STAY WILD", "Zebra", "apple"])).toEqual([
+      "STAY WILD",
+      "Zebra",
+      "apple",
+    ]);
   });
 
   test("minDistance may reach the seventh axis only when the headline axis is active", () => {
@@ -648,43 +664,45 @@ describe("VariationPolicy headline axis", () => {
       { headlines: ["x"] },
     );
     expect(result.success).toBe(false);
-    if (!result.success) expect(result.error.message).toMatch(/Unsupported headline axis "pool:\/\/other"/);
+    if (!result.success)
+      expect(result.error.message).toMatch(/Unsupported headline axis "pool:\/\/other"/);
   });
 
-describe("motion-only briefs draw only at ratios a motion platform packages", () => {
-  const motionOnly = (formats: readonly string[]) =>
-    brief({
-      variation: { count: 4, axes: { motion: ["ken-burns-in"], duration: [4] } },
-      output: { formats: [...formats] as never, platforms: ["instagram-reel"] },
+  describe("motion-only briefs draw only at ratios a motion platform packages", () => {
+    const motionOnly = (formats: readonly string[]) =>
+      brief({
+        variation: { count: 4, axes: { motion: ["ken-burns-in"], duration: [4] } },
+        output: { formats: [...formats] as never, platforms: ["instagram-reel"] },
+      });
+
+    test("the ratio axis narrows to motionRatios, so no slot can fall back to a still", () => {
+      const result = fromBrief(motionOnly(["motion"]), { motionRatios: ["9:16"] });
+      expect(result.success).toBe(true);
+      if (!result.success) return;
+      expect(result.value.motionEnabled).toBe(true);
+      expect(result.value.mixStatic).toBe(false);
+      expect(result.value.ratios).toEqual(["9:16"]);
+      // axisProductSize follows the narrowed axis: 2 products × 1 ratio × 2 layouts × 2 tones × 1 × 1
+      expect(result.value.axisProductSize).toBe(2 * 1 * 2 * 2 * 1 * 1);
     });
 
-  test("the ratio axis narrows to motionRatios, so no slot can fall back to a still", () => {
-    const result = fromBrief(motionOnly(["motion"]), { motionRatios: ["9:16"] });
-    expect(result.success).toBe(true);
-    if (!result.success) return;
-    expect(result.value.motionEnabled).toBe(true);
-    expect(result.value.mixStatic).toBe(false);
-    expect(result.value.ratios).toEqual(["9:16"]);
-    // axisProductSize follows the narrowed axis: 2 products × 1 ratio × 2 layouts × 2 tones × 1 × 1
-    expect(result.value.axisProductSize).toBe(2 * 1 * 2 * 2 * 1 * 1);
-  });
+    test("a mixed brief keeps every ratio — its non-motion ratios are the stills it asked for", () => {
+      const result = fromBrief(motionOnly(["static", "motion"]), { motionRatios: ["9:16"] });
+      expect(result.success).toBe(true);
+      if (!result.success) return;
+      expect(result.value.mixStatic).toBe(true);
+      expect(result.value.ratios).toEqual(["1:1", "9:16", "16:9"]);
+    });
 
-  test("a mixed brief keeps every ratio — its non-motion ratios are the stills it asked for", () => {
-    const result = fromBrief(motionOnly(["static", "motion"]), { motionRatios: ["9:16"] });
-    expect(result.success).toBe(true);
-    if (!result.success) return;
-    expect(result.value.mixStatic).toBe(true);
-    expect(result.value.ratios).toEqual(["1:1", "9:16", "16:9"]);
+    test("a motion-only brief whose platforms package motion at no ratio is refused, not rendered as stills", () => {
+      const result = fromBrief(motionOnly(["motion"]), { motionRatios: [] });
+      expect(result.success).toBe(false);
+      if (result.success) return;
+      expect(result.error.message).toMatch(
+        /requests only "motion" but none of output\.platforms package it/,
+      );
+    });
   });
-
-  test("a motion-only brief whose platforms package motion at no ratio is refused, not rendered as stills", () => {
-    const result = fromBrief(motionOnly(["motion"]), { motionRatios: [] });
-    expect(result.success).toBe(false);
-    if (result.success) return;
-    expect(result.error.message).toMatch(/requests only "motion" but none of output\.platforms package it/);
-  });
-});
-
 });
 
 describe("hashCopy — the brief's copy surface, independent of hashPolicy (X33, §35)", () => {
@@ -707,7 +725,10 @@ describe("hashCopy — the brief's copy surface, independent of hashPolicy (X33,
   });
 
   test("a brief with a localizedMessage hashes differently from the same brief without one", () => {
-    const withLocalized = hashCopy(brief({ localizedMessage: "Reste sauvage" }), nodeCryptoPolicyHasher);
+    const withLocalized = hashCopy(
+      brief({ localizedMessage: "Reste sauvage" }),
+      nodeCryptoPolicyHasher,
+    );
     const withoutLocalized = hashCopy(brief(), nodeCryptoPolicyHasher);
     expect(withLocalized).not.toBe(withoutLocalized);
   });
@@ -840,7 +861,9 @@ describe("hashCopy — the brief's copy surface, independent of hashPolicy (X33,
       expect(policyA.value.policyHash).not.toBe(policyB.value.policyHash);
     }
     // ...but copyHash, which never reads an axis, does not.
-    expect(hashCopy(layoutA, nodeCryptoPolicyHasher)).toBe(hashCopy(layoutB, nodeCryptoPolicyHasher));
+    expect(hashCopy(layoutA, nodeCryptoPolicyHasher)).toBe(
+      hashCopy(layoutB, nodeCryptoPolicyHasher),
+    );
   });
 
   test("the same brief yields the same copyHash twice", () => {
@@ -907,7 +930,9 @@ describe("policyHash is unmoved by the copyHash addition (X33, §35)", () => {
     // Same timeline, only weight changed — hashCopy's newly covered field.
     const differentWeight = {
       ...base,
-      copy: { timeline: { ...withTimeline.copy.timeline, beats: [{ text: "Beat one", weight: 5 }] } },
+      copy: {
+        timeline: { ...withTimeline.copy.timeline, beats: [{ text: "Beat one", weight: 5 }] },
+      },
     };
     // Same timeline, only transition changed.
     const differentTransition = {

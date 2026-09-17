@@ -39,8 +39,15 @@ type LayoutCapture = {
   readonly fontSize: number;
   readonly lines: readonly { readonly x: number; readonly y: number; readonly text: string }[];
   readonly wrapWidth: number;
-  readonly box: { readonly x: number; readonly y: number; readonly width: number; readonly height: number };
-  readonly logo: { readonly x: number; readonly y: number; readonly width: number; readonly height: number } | undefined;
+  readonly box: {
+    readonly x: number;
+    readonly y: number;
+    readonly width: number;
+    readonly height: number;
+  };
+  readonly logo:
+    | { readonly x: number; readonly y: number; readonly width: number; readonly height: number }
+    | undefined;
 };
 
 async function captureLayout(req: CompositeRequest): Promise<LayoutCapture> {

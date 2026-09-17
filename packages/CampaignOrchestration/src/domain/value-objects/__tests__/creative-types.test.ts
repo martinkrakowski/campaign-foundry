@@ -26,9 +26,7 @@ describe("creative types and compatibility rules (D119, D124, D131)", () => {
   });
 
   test("every CREATIVE_TYPE_RULES key is a CREATIVE_TYPES member and vice versa", () => {
-    expect(Object.keys(CREATIVE_TYPE_RULES).sort()).toEqual(
-      [...CREATIVE_TYPES].sort(),
-    );
+    expect(Object.keys(CREATIVE_TYPE_RULES).sort()).toEqual([...CREATIVE_TYPES].sort());
   });
 
   test("every kind in every accepts and required list is a LAYER_KINDS member", () => {
@@ -95,14 +93,7 @@ describe("creative types and compatibility rules (D119, D124, D131)", () => {
   test("rules match the plan's §2.1 compatibility table exactly", () => {
     expect(CREATIVE_TYPE_RULES["image-text"]).toEqual({
       unit: "standard-web",
-      accepts: [
-        "image",
-        "shade",
-        "accent",
-        "static-text",
-        "animated-text",
-        "logo",
-      ],
+      accepts: ["image", "shade", "accent", "static-text", "animated-text", "logo"],
       required: ["image", "static-text"],
       maxOf: { logo: 1, shade: 1, accent: 1 },
       sharedBudgets: [{ kinds: ["static-text", "animated-text"], max: 1 }],
@@ -195,28 +186,20 @@ describe("occlusion table and guard checks (D135, D136)", () => {
     // 1. opaque: image and fill obscure anything below them
     const imageOnText = checkPairOcclusion("image", "static-text");
     expect(imageOnText.passed).toBe(true);
-    expect(imageOnText.reason).toBe(
-      "the image layer now sits above the headline and will hide it",
-    );
+    expect(imageOnText.reason).toBe("the image layer now sits above the headline and will hide it");
 
     const fillOnImage = checkPairOcclusion("fill", "image");
     expect(fillOnImage.passed).toBe(true);
-    expect(fillOnImage.reason).toBe(
-      "the fill layer now sits above the image and will hide it",
-    );
+    expect(fillOnImage.reason).toBe("the fill layer now sits above the image and will hide it");
 
     const imageOnAccent = checkPairOcclusion("image", "accent");
     expect(imageOnAccent.passed).toBe(true);
-    expect(imageOnAccent.reason).toBe(
-      "the image layer now sits above the accent and will hide it",
-    );
+    expect(imageOnAccent.reason).toBe("the image layer now sits above the accent and will hide it");
 
     // 2. attenuating: shade and accent mute text below them
     const shadeOnText = checkPairOcclusion("shade", "static-text");
     expect(shadeOnText.passed).toBe(true);
-    expect(shadeOnText.reason).toBe(
-      "the shade layer now sits above the headline and will mute it",
-    );
+    expect(shadeOnText.reason).toBe("the shade layer now sits above the headline and will mute it");
 
     const accentOnAnimText = checkPairOcclusion("accent", "animated-text");
     expect(accentOnAnimText.passed).toBe(true);
@@ -240,9 +223,7 @@ describe("occlusion table and guard checks (D135, D136)", () => {
     // Stacked images: image is opaque and obscures all, so image above image warns (L8o-fix2)
     const imageOnImage = checkPairOcclusion("image", "image");
     expect(imageOnImage.passed).toBe(true);
-    expect(imageOnImage.reason).toBe(
-      "the image layer now sits above the image and will hide it",
-    );
+    expect(imageOnImage.reason).toBe("the image layer now sits above the image and will hide it");
   });
 
   test("each behaviour class produces NO finding for a pair that does not trigger it (D135, D136)", () => {
@@ -321,9 +302,7 @@ describe("occlusion table and guard checks (D135, D136)", () => {
     ];
     const finding = checkRepositionOcclusion(reordered, 2, 1);
     expect(finding.passed).toBe(true);
-    expect(finding.reason).toBe(
-      "the shade layer now sits above the headline and will mute it",
-    );
+    expect(finding.reason).toBe("the shade layer now sits above the headline and will mute it");
 
     // Moving shade back down from (2) to (1) restores order and clears finding
     const cleared = checkRepositionOcclusion(videoCanonical, 1, 2);
@@ -337,11 +316,7 @@ describe("occlusion table and guard checks (D135, D136)", () => {
     );
 
     // In a stack without logo, moving animated-text back up to 2 clears finding
-    const threeLayers = [
-      videoCanonical[0]!,
-      videoCanonical[1]!,
-      videoCanonical[2]!,
-    ];
+    const threeLayers = [videoCanonical[0]!, videoCanonical[1]!, videoCanonical[2]!];
     const movedUpCleared = checkRepositionOcclusion(threeLayers, 2, 1);
     expect(movedUpCleared).toEqual({ passed: true });
 
@@ -353,11 +328,7 @@ describe("occlusion table and guard checks (D135, D136)", () => {
       { id: "text", kind: "static-text" as LayerKind },
       { id: "shade", kind: "shade" as LayerKind },
     ];
-    const textMovedUnderShade = checkRepositionOcclusion(
-      headlineUnderShade,
-      1,
-      2,
-    );
+    const textMovedUnderShade = checkRepositionOcclusion(headlineUnderShade, 1, 2);
     expect(textMovedUnderShade.passed).toBe(true);
     expect(textMovedUnderShade.reason).toBe(
       "the shade layer now sits above the headline and will mute it",
@@ -368,11 +339,7 @@ describe("occlusion table and guard checks (D135, D136)", () => {
 
     // When shade was already above static-text before the move, moving static-text up (0 -> 1)
     // produces NO finding because the move did not create the occlusion (L8o-fix3, D135).
-    const textMovedUpPreExisting = checkRepositionOcclusion(
-      headlineUnderShade,
-      1,
-      0,
-    );
+    const textMovedUpPreExisting = checkRepositionOcclusion(headlineUnderShade, 1, 0);
     expect(textMovedUpPreExisting).toEqual({ passed: true });
 
     // In videoCanonical, moving animated-text from 1 to 2 places it beneath logo at 3;
@@ -384,12 +351,7 @@ describe("occlusion table and guard checks (D135, D136)", () => {
     const L = (kind: LayerKind) => ({ id: kind, kind });
     // before: [image, static-text, animated-text, shade]   — shade(3) is already above static-text(1)
     // move static-text 1 -> 2
-    const after = [
-      L("image"),
-      L("animated-text"),
-      L("static-text"),
-      L("shade"),
-    ];
+    const after = [L("image"), L("animated-text"), L("static-text"), L("shade")];
     expect(checkRepositionOcclusion(after, 2, 1).reason).toBeUndefined();
     expect(checkRepositionOcclusion(after, 2, 1)).toEqual({ passed: true });
 
@@ -401,15 +363,11 @@ describe("occlusion table and guard checks (D135, D136)", () => {
     // Move img2 from 0 up to 1: img2 now sits above img1
     const imgMovedUp = checkRepositionOcclusion(stackedImages, 1, 0);
     expect(imgMovedUp.passed).toBe(true);
-    expect(imgMovedUp.reason).toBe(
-      "the image layer now sits above the image and will hide it",
-    );
+    expect(imgMovedUp.reason).toBe("the image layer now sits above the image and will hide it");
     // Move img1 from 1 down to 0: img2 now sits above img1
     const imgMovedDown = checkRepositionOcclusion(stackedImages, 0, 1);
     expect(imgMovedDown.passed).toBe(true);
-    expect(imgMovedDown.reason).toBe(
-      "the image layer now sits above the image and will hide it",
-    );
+    expect(imgMovedDown.reason).toBe("the image layer now sits above the image and will hide it");
 
     // Out of range or empty layers returns { passed: true }
     expect(checkRepositionOcclusion([], 0)).toEqual({ passed: true });
@@ -433,11 +391,7 @@ describe("occlusion table and guard checks (D135, D136)", () => {
       { id: "shade", kind: "shade" as LayerKind },
       { id: "video", kind: "video" as LayerKind },
     ];
-    const movedDownPreExisting = checkRepositionOcclusion(
-      downOccludesBelow,
-      1,
-      2,
-    );
+    const movedDownPreExisting = checkRepositionOcclusion(downOccludesBelow, 1, 2);
     expect(movedDownPreExisting).toEqual({ passed: true });
 
     // Calling without from parameter checks both directions
@@ -454,10 +408,7 @@ describe("occlusion table and guard checks (D135, D136)", () => {
       { id: "shade", kind: "shade" as LayerKind },
     ];
     // Subject at 0 is static-text (occludes nothing below); shade at 1 occludes static-text
-    const noFromAboveOccludes = checkRepositionOcclusion(
-      aboveOccludesSubject,
-      0,
-    );
+    const noFromAboveOccludes = checkRepositionOcclusion(aboveOccludesSubject, 0);
     expect(noFromAboveOccludes.passed).toBe(true);
     expect(noFromAboveOccludes.reason).toBe(
       "the shade layer now sits above the headline and will mute it",
@@ -477,11 +428,7 @@ describe("occlusion table and guard checks (D135, D136)", () => {
       videoWithoutShade[0]!, // video at 1
       videoWithoutShade[2]!, // logo at 2
     ];
-    const qodoFinding = checkRepositionOcclusion(
-      animatedTextMovedDownPastVideo,
-      0,
-      1,
-    );
+    const qodoFinding = checkRepositionOcclusion(animatedTextMovedDownPastVideo, 0, 1);
     expect(qodoFinding).toEqual({ passed: true });
   });
 
@@ -527,17 +474,10 @@ describe("occlusion table and guard checks (D135, D136)", () => {
     const advisory = checkPairOcclusion("shade", "static-text");
     expect(advisory.passed).toBe(true);
     expect(advisory.severity).toBe("advisory");
-    expect(advisory.reason).toBe(
-      "the shade layer now sits above the headline and will mute it",
-    );
+    expect(advisory.reason).toBe("the shade layer now sits above the headline and will mute it");
 
     const repositionAdvisory = checkRepositionOcclusion(
-      [
-        { kind: "video" },
-        { kind: "animated-text" },
-        { kind: "shade" },
-        { kind: "logo" },
-      ],
+      [{ kind: "video" }, { kind: "animated-text" }, { kind: "shade" }, { kind: "logo" }],
       2,
       1,
     );

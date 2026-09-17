@@ -12,7 +12,11 @@ const THREE_WAY = [
 describe("GuardBar", () => {
   test("the question and its detail read as one labelled group", () => {
     render(
-      <GuardBar title="Discard this draft?" detail="A named draft and its answers would be dropped." actions={THREE_WAY.map((a) => ({ ...a, onAct: vi.fn() }))} />,
+      <GuardBar
+        title="Discard this draft?"
+        detail="A named draft and its answers would be dropped."
+        actions={THREE_WAY.map((a) => ({ ...a, onAct: vi.fn() }))}
+      />,
     );
     // the group's accessible name is the question, via its own title
     expect(screen.getByRole("group", { name: "Discard this draft?" })).toBeTruthy();
@@ -46,13 +50,26 @@ describe("GuardBar", () => {
   });
 
   test("an answer can be styled as the destructive one", () => {
-    render(<GuardBar title="Discard this draft?" actions={[{ label: "Discard and close", onAct: vi.fn(), variant: "destructive" }]} />);
-    expect(screen.getByRole("button", { name: "Discard and close" }).className).toContain("bg-error");
+    render(
+      <GuardBar
+        title="Discard this draft?"
+        actions={[{ label: "Discard and close", onAct: vi.fn(), variant: "destructive" }]}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Discard and close" }).className).toContain(
+      "bg-error",
+    );
   });
 
   test("while busy the actions hold still and the region says so", () => {
     const onAct = vi.fn();
-    render(<GuardBar title="Discard this draft?" busy actions={[{ label: "Discard and close", onAct }]} />);
+    render(
+      <GuardBar
+        title="Discard this draft?"
+        busy
+        actions={[{ label: "Discard and close", onAct }]}
+      />,
+    );
     const group = screen.getByRole("group", { name: "Discard this draft?" });
     expect(group.getAttribute("aria-busy")).toBe("true");
     const button = screen.getByRole("button", { name: "Discard and close" }) as HTMLButtonElement;
@@ -74,7 +91,9 @@ describe("GuardBar", () => {
       />,
     );
     expect(screen.getByRole("group", { name: "Start over?" }).getAttribute("aria-busy")).toBeNull();
-    expect((screen.getByRole("button", { name: "Start over" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Start over" }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
     fireEvent.click(screen.getByRole("button", { name: "Start over" }));
     expect(held).not.toHaveBeenCalled();
   });

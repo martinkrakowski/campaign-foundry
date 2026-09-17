@@ -40,7 +40,10 @@ const request = (): CompositeRequest => ({
   tone: "bold",
 });
 
-async function frameAt(t: number, motion: Parameters<typeof NodeCanvasCompositor.draw>[3]): Promise<Uint8Array> {
+async function frameAt(
+  t: number,
+  motion: Parameters<typeof NodeCanvasCompositor.draw>[3],
+): Promise<Uint8Array> {
   const prepared = await NodeCanvasCompositor.prepare(request());
   const canvas = createCanvas(prepared.width, prepared.height);
   const ctx = canvas.getContext("2d");
@@ -83,7 +86,10 @@ describe("K2: a resolved pose reaches the canvas, not just the resolver", () => 
  * before it moved into `textEffectTracks`.
  */
 describe("K3: a resolved text-effect pose reaches the canvas, not just the resolver", () => {
-  async function styledFrameAt(effectT: number, textEffect: NonNullable<CompositeRequest["style"]>["textEffect"]) {
+  async function styledFrameAt(
+    effectT: number,
+    textEffect: NonNullable<CompositeRequest["style"]>["textEffect"],
+  ) {
     const prepared = await NodeCanvasCompositor.prepare({ ...request(), style: { textEffect } });
     const canvas = createCanvas(prepared.width, prepared.height);
     const ctx = canvas.getContext("2d");

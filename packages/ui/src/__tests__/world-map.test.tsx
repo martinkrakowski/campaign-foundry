@@ -99,7 +99,11 @@ describe("WorldMap", () => {
   });
 
   test("an exact area tie goes to the footprint declared later", () => {
-    const equal: readonly Pt[] = [[0, 0], [10, 0], [0, 10]];
+    const equal: readonly Pt[] = [
+      [0, 0],
+      [10, 0],
+      [0, 10],
+    ];
     const tied: readonly Footprint[] = [
       { value: "A", polys: [equal] },
       { value: "B", polys: [equal] },
@@ -136,7 +140,13 @@ describe("WorldMap", () => {
     const { container, rerender } = renderMap({ value: "DE" });
     expect(dotSpy.mock.calls.length).toBe(REGION_FOOTPRINTS.length);
     rerender(
-      <WorldMap footprints={REGION_FOOTPRINTS} value={null} onSelect={() => {}} fallbackHint={HINT} labelFor={labelFor} />,
+      <WorldMap
+        footprints={REGION_FOOTPRINTS}
+        value={null}
+        onSelect={() => {}}
+        fallbackHint={HINT}
+        labelFor={labelFor}
+      />,
     );
     fireEvent.click(regionOf(container, "DE"));
     fireEvent.click(regionOf(container, "EU"));
@@ -195,7 +205,13 @@ describe("WorldMap", () => {
 
   test("the dot matrix reveals on selection, staggered by distance from the hub", () => {
     const { container, rerender } = render(
-      <WorldMap footprints={REGION_FOOTPRINTS} value="EU" onSelect={() => {}} fallbackHint={HINT} labelFor={labelFor} />,
+      <WorldMap
+        footprints={REGION_FOOTPRINTS}
+        value="EU"
+        onSelect={() => {}}
+        fallbackHint={HINT}
+        labelFor={labelFor}
+      />,
     );
     const dots = regionOf(container, "EU").querySelectorAll("circle[r='1.5']");
     expect(dots.length).toBeGreaterThan(0);
@@ -204,7 +220,13 @@ describe("WorldMap", () => {
     expect(first.getAttribute("class")).not.toContain("scale-0");
     expect(first.style.transitionDelay).toMatch(/^0\.\d+s$/);
     rerender(
-      <WorldMap footprints={REGION_FOOTPRINTS} value={null} onSelect={() => {}} fallbackHint={HINT} labelFor={labelFor} />,
+      <WorldMap
+        footprints={REGION_FOOTPRINTS}
+        value={null}
+        onSelect={() => {}}
+        fallbackHint={HINT}
+        labelFor={labelFor}
+      />,
     );
     expect((dots[0] as SVGCircleElement).getAttribute("class")).toContain("scale-0");
   });
@@ -224,12 +246,24 @@ describe("WorldMap", () => {
     const { container, rerender } = renderMap({ value: null });
     expect(container.querySelectorAll("circle[r='2.5']").length).toBe(0);
     rerender(
-      <WorldMap footprints={REGION_FOOTPRINTS} value="EU" onSelect={() => {}} fallbackHint={HINT} labelFor={labelFor} />,
+      <WorldMap
+        footprints={REGION_FOOTPRINTS}
+        value="EU"
+        onSelect={() => {}}
+        fallbackHint={HINT}
+        labelFor={labelFor}
+      />,
     );
     expect(container.querySelectorAll("circle[r='2.5']").length).toBe(1);
     expect(regionOf(container, "DE").querySelectorAll("circle[r='2.5']").length).toBe(0);
     rerender(
-      <WorldMap footprints={REGION_FOOTPRINTS} value={null} onSelect={() => {}} fallbackHint={HINT} labelFor={labelFor} />,
+      <WorldMap
+        footprints={REGION_FOOTPRINTS}
+        value={null}
+        onSelect={() => {}}
+        fallbackHint={HINT}
+        labelFor={labelFor}
+      />,
     );
     expect(container.querySelectorAll("circle[r='2.5']").length).toBe(0);
   });

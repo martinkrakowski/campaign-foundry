@@ -16,7 +16,10 @@ export const RATIO_VALUES = ["1:1", "9:16", "16:9"] as const;
 export type AspectRatioValue = (typeof RATIO_VALUES)[number];
 
 /** Canvas pixel dimensions per ratio (DeterministicLayerStacking contract). */
-export const RATIO_DIMENSIONS: Record<AspectRatioValue, { readonly width: number; readonly height: number }> = {
+export const RATIO_DIMENSIONS: Record<
+  AspectRatioValue,
+  { readonly width: number; readonly height: number }
+> = {
   "1:1": { width: 1080, height: 1080 },
   "9:16": { width: 1080, height: 1920 },
   "16:9": { width: 1920, height: 1080 },
@@ -31,7 +34,10 @@ export type CanvasSpec =
  * The only function that turns a spec into pixels. Social ratios stay
  * 1080/1920; display sizes are exact, never scaled (D113).
  */
-export function resolveCanvas(spec: CanvasSpec): { readonly width: number; readonly height: number } {
+export function resolveCanvas(spec: CanvasSpec): {
+  readonly width: number;
+  readonly height: number;
+} {
   if ("ratio" in spec && "size" in spec) {
     throw new Error("CanvasSpec must carry exactly one of ratio/size");
   }
@@ -43,7 +49,9 @@ export function resolveCanvas(spec: CanvasSpec): { readonly width: number; reado
 }
 
 /** The social family: a spec that names a ratio, not a display size. */
-function isRatioFamily(spec: CanvasSpec): spec is { readonly ratio: AspectRatioValue; readonly size?: never } {
+function isRatioFamily(
+  spec: CanvasSpec,
+): spec is { readonly ratio: AspectRatioValue; readonly size?: never } {
   return spec.ratio !== undefined;
 }
 

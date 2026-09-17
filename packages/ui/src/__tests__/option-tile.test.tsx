@@ -56,7 +56,11 @@ describe("OptionTile", () => {
 
   test("the tag, the blurb and the meta line are aria-hidden, so none of them extends the name", () => {
     render(allSlots());
-    for (const slot of [screen.getByText("Guided"), screen.getByText("One design, repeated."), screen.getByText("6 creatives")]) {
+    for (const slot of [
+      screen.getByText("Guided"),
+      screen.getByText("One design, repeated."),
+      screen.getByText("6 creatives"),
+    ]) {
       expect(slot.getAttribute("aria-hidden")).toBe("true");
     }
     // the exact-name query again: anything un-hidden would have broken it above
@@ -78,7 +82,9 @@ describe("OptionTile", () => {
         <span />
       </OptionTile>,
     );
-    expect(screen.getByRole("button", { name: "variation" }).getAttribute("aria-describedby")).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "variation" }).getAttribute("aria-describedby"),
+    ).toBeNull();
   });
 
   test("aria-pressed follows selected", () => {
@@ -87,7 +93,9 @@ describe("OptionTile", () => {
         <span />
       </OptionTile>,
     );
-    expect(screen.getByRole("button", { name: "brief" }).getAttribute("aria-pressed")).toBe("false");
+    expect(screen.getByRole("button", { name: "brief" }).getAttribute("aria-pressed")).toBe(
+      "false",
+    );
     rerender(
       <OptionTile value="brief" name="Classic" selected onToggle={vi.fn()}>
         <span />
@@ -107,7 +115,9 @@ describe("OptionTile", () => {
     expect(unselected.className).toContain("hover:border-border-control-hover");
     expect(unselected.className).not.toContain("border-brand-primary");
     expect(
-      Array.from(unselected.querySelectorAll("span")).some((span) => span.className.includes("animate-check-pop")),
+      Array.from(unselected.querySelectorAll("span")).some((span) =>
+        span.className.includes("animate-check-pop"),
+      ),
     ).toBe(false);
 
     rerender(

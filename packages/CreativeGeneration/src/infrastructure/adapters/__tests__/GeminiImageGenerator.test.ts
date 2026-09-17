@@ -15,11 +15,18 @@ const ratio = (v = "1:1") => {
 const ctx = { campaignMessage: "m", targetAudience: "Urban", targetRegion: "DE" };
 const product = { id: "hydra", name: "Hydra Bottle", primaryColor: "#1473E6", logoPath: "x.png" };
 const fallback = (): ImageGeneratorPort => ({
-  resolveBackground: vi.fn(async () => ({ image: new Uint8Array([7]), source: "procedural" as const })),
+  resolveBackground: vi.fn(async () => ({
+    image: new Uint8Array([7]),
+    source: "procedural" as const,
+  })),
 });
 
 /** Mirrors the `generateImages` argument shape so `.mock.calls[0][0]` is typed. */
-type GenArgs = { model: string; prompt: string; config: { numberOfImages: number; aspectRatio: string } };
+type GenArgs = {
+  model: string;
+  prompt: string;
+  config: { numberOfImages: number; aspectRatio: string };
+};
 
 beforeEach(() => vi.spyOn(console, "warn").mockImplementation(() => {}));
 afterEach(() => vi.restoreAllMocks());
@@ -30,7 +37,11 @@ describe("GeminiImageGenerator", () => {
       generatedImages: [{ image: { imageBytes: Buffer.from("hello").toString("base64") } }],
     }));
     const client: ImagenClient = { models: { generateImages } };
-    const out = await new GeminiImageGenerator({ apiKey: "k", client }).resolveBackground(product, ratio("9:16"), ctx);
+    const out = await new GeminiImageGenerator({ apiKey: "k", client }).resolveBackground(
+      product,
+      ratio("9:16"),
+      ctx,
+    );
 
     expect(out.source).toBe("imagen");
     expect(Buffer.from(out.image).toString()).toBe("hello");
@@ -42,12 +53,14 @@ describe("GeminiImageGenerator", () => {
   });
 
   test("honours a custom model id", async () => {
-    const generateImages = vi.fn(async (_args: GenArgs) => ({ generatedImages: [{ image: { imageBytes: "AA==" } }] }));
-    await new GeminiImageGenerator({ apiKey: "k", model: "imagen-x", client: { models: { generateImages } } }).resolveBackground(
-      product,
-      ratio(),
-      ctx,
-    );
+    const generateImages = vi.fn(async (_args: GenArgs) => ({
+      generatedImages: [{ image: { imageBytes: "AA==" } }],
+    }));
+    await new GeminiImageGenerator({
+      apiKey: "k",
+      model: "imagen-x",
+      client: { models: { generateImages } },
+    }).resolveBackground(product, ratio(), ctx);
     expect(generateImages.mock.calls[0][0].model).toBe("imagen-x");
   });
 
@@ -56,9 +69,15 @@ describe("GeminiImageGenerator", () => {
   });
 
   test("falls back when Imagen returns no image data", async () => {
-    const client: ImagenClient = { models: { generateImages: vi.fn(async () => ({ generatedImages: [{ image: {} }] })) } };
+    const client: ImagenClient = {
+      models: { generateImages: vi.fn(async () => ({ generatedImages: [{ image: {} }] })) },
+    };
     const fb = fallback();
-    const out = await new GeminiImageGenerator({ apiKey: "k", client, fallback: fb }).resolveBackground(product, ratio(), ctx);
+    const out = await new GeminiImageGenerator({
+      apiKey: "k",
+      client,
+      fallback: fb,
+    }).resolveBackground(product, ratio(), ctx);
     expect(out.source).toBe("procedural");
     expect(fb.resolveBackground).toHaveBeenCalledTimes(1);
   });
@@ -71,11 +90,11 @@ describe("GeminiImageGenerator", () => {
         }),
       },
     };
-    const out = await new GeminiImageGenerator({ apiKey: "k", client, fallback: fallback() }).resolveBackground(
-      product,
-      ratio(),
-      ctx,
-    );
+    const out = await new GeminiImageGenerator({
+      apiKey: "k",
+      client,
+      fallback: fallback(),
+    }).resolveBackground(product, ratio(), ctx);
     expect(out.source).toBe("procedural");
   });
 
@@ -112,7 +131,13 @@ describe("GeminiImageGenerator", () => {
     expect(cache.set).toHaveBeenCalledTimes(1);
     const key = vi.mocked(cache.set).mock.calls[0][0];
     expect(key).toBe(
-      backgroundCacheKey("imagen", "imagen-4.0-generate-001", generateImages.mock.calls[0][0].prompt, "1:1", 7),
+      backgroundCacheKey(
+        "imagen",
+        "imagen-4.0-generate-001",
+        generateImages.mock.calls[0][0].prompt,
+        "1:1",
+        7,
+      ),
     );
   });
 

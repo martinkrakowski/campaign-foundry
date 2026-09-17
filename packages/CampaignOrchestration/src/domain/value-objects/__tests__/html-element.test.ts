@@ -1,8 +1,5 @@
 import { describe, test, expect } from "vitest";
-import {
-  FONT_FAMILY_VALUES,
-  FONT_WEIGHT_VALUES,
-} from "../creative-style.js";
+import { FONT_FAMILY_VALUES, FONT_WEIGHT_VALUES } from "../creative-style.js";
 import type { LayerKind } from "../layer-kinds.js";
 import {
   HTML_ELEMENT_KINDS,
@@ -38,9 +35,7 @@ describe("layerElementsProblem (HL1)", () => {
       ]),
     ).toBeUndefined();
     // An image carries no copy at all: `frame` alone is its whole contract.
-    expect(
-      layerElementsProblem("html", [{ kind: "image", frame }]),
-    ).toBeUndefined();
+    expect(layerElementsProblem("html", [{ kind: "image", frame }])).toBeUndefined();
   });
 
   test("accepts every anchor the vocabulary names, and 0/1 fractions", () => {
@@ -106,17 +101,13 @@ describe("layerElementsProblem (HL1)", () => {
 
   test("refuses a field the element's kind does not carry", () => {
     // An image may not carry copy: the field table refuses it, not a special case.
-    expect(
-      layerElementsProblem("html", [{ kind: "image", text: "buy", frame }]),
-    ).toEqual({
+    expect(layerElementsProblem("html", [{ kind: "image", text: "buy", frame }])).toEqual({
       path: "[0].text",
       must: 'be one of "kind", "frame" for element kind "image"',
       value: "buy",
     });
     expect(
-      layerElementsProblem("html", [
-        { kind: "text", text: "x", color: "red", frame },
-      ]),
+      layerElementsProblem("html", [{ kind: "text", text: "x", color: "red", frame }]),
     ).toEqual({
       path: "[0].color",
       must: 'be one of "kind", "text", "style", "frame" for element kind "text"',
@@ -126,9 +117,11 @@ describe("layerElementsProblem (HL1)", () => {
 
   test("refuses copy that is not a string", () => {
     for (const text of [5, null, {}, ["x"]]) {
-      expect(
-        layerElementsProblem("html", [{ kind: "text", text, frame }]),
-      ).toEqual({ path: "[0].text", must: "be a string", value: text });
+      expect(layerElementsProblem("html", [{ kind: "text", text, frame }])).toEqual({
+        path: "[0].text",
+        must: "be a string",
+        value: text,
+      });
     }
   });
 
@@ -144,17 +137,17 @@ describe("layerElementsProblem (HL1)", () => {
 
   test("refuses a frame that is not an object", () => {
     for (const value of [undefined, null, "frame", 5, []]) {
-      expect(
-        layerElementsProblem("html", [{ kind: "text", text: "x", frame: value }]),
-      ).toEqual({ path: "[0].frame", must: "be an object", value });
+      expect(layerElementsProblem("html", [{ kind: "text", text: "x", frame: value }])).toEqual({
+        path: "[0].frame",
+        must: "be an object",
+        value,
+      });
     }
   });
 
   test("refuses a frame field D130 does not name", () => {
     expect(
-      layerElementsProblem("html", [
-        { kind: "text", text: "x", frame: { ...frame, z: 1 } },
-      ]),
+      layerElementsProblem("html", [{ kind: "text", text: "x", frame: { ...frame, z: 1 } }]),
     ).toEqual({
       path: "[0].frame.z",
       must: 'be one of "x", "y", "w", "h", "anchor"',
@@ -187,19 +180,17 @@ describe("layerElementsProblem (HL1)", () => {
       h: frame.h,
       anchor: frame.anchor,
     };
-    expect(
-      layerElementsProblem("html", [
-        { kind: "text", text: "x", frame: withoutW },
-      ]),
-    ).toEqual({ path: "[0].frame.w", must: "be a number in [0, 1]", value: undefined });
+    expect(layerElementsProblem("html", [{ kind: "text", text: "x", frame: withoutW }])).toEqual({
+      path: "[0].frame.w",
+      must: "be a number in [0, 1]",
+      value: undefined,
+    });
   });
 
   test("refuses an anchor outside the vocabulary, or a missing one", () => {
     for (const anchor of [undefined, "sideways", 5, null]) {
       expect(
-        layerElementsProblem("html", [
-          { kind: "text", text: "x", frame: { ...frame, anchor } },
-        ]),
+        layerElementsProblem("html", [{ kind: "text", text: "x", frame: { ...frame, anchor } }]),
       ).toEqual({
         path: "[0].frame.anchor",
         must: 'be one of "top", "middle", "bottom"',
@@ -225,14 +216,10 @@ describe("element style overrides (HL5e, HL-D4, HL-D8)", () => {
   test("accepts a weight and a family override on the kinds that carry copy", () => {
     for (const kind of ["text", "button"] as const) {
       expect(
-        layerElementsProblem("html", [
-          { kind, text: "x", frame, style: { fontWeight: 400 } },
-        ]),
+        layerElementsProblem("html", [{ kind, text: "x", frame, style: { fontWeight: 400 } }]),
       ).toBeUndefined();
       expect(
-        layerElementsProblem("html", [
-          { kind, text: "x", frame, style: { fontFamily: "Lora" } },
-        ]),
+        layerElementsProblem("html", [{ kind, text: "x", frame, style: { fontFamily: "Lora" } }]),
       ).toBeUndefined();
       expect(
         layerElementsProblem("html", [
@@ -267,17 +254,17 @@ describe("element style overrides (HL5e, HL-D4, HL-D8)", () => {
 
   test("refuses a style that is not an object", () => {
     for (const style of ["bold", 700, null, [], true]) {
-      expect(
-        layerElementsProblem("html", [{ kind: "text", text: "x", frame, style }]),
-      ).toEqual({ path: "[0].style", must: "be an object", value: style });
+      expect(layerElementsProblem("html", [{ kind: "text", text: "x", frame, style }])).toEqual({
+        path: "[0].style",
+        must: "be an object",
+        value: style,
+      });
     }
   });
 
   test("refuses a key the override shape does not carry", () => {
     expect(
-      layerElementsProblem("html", [
-        { kind: "text", text: "x", frame, style: { color: "#fff" } },
-      ]),
+      layerElementsProblem("html", [{ kind: "text", text: "x", frame, style: { color: "#fff" } }]),
     ).toEqual({
       path: "[0].style.color",
       must: 'be one of "fontWeight", "fontFamily"',
@@ -288,9 +275,7 @@ describe("element style overrides (HL5e, HL-D4, HL-D8)", () => {
   test("refuses a weight outside the vocabulary, naming the path", () => {
     for (const fontWeight of [500, "700", null, 400.5]) {
       expect(
-        layerElementsProblem("html", [
-          { kind: "button", text: "x", frame, style: { fontWeight } },
-        ]),
+        layerElementsProblem("html", [{ kind: "button", text: "x", frame, style: { fontWeight } }]),
       ).toEqual({
         path: "[0].style.fontWeight",
         must: `be one of ${FONT_WEIGHT_VALUES.join(", ")}`,
@@ -302,9 +287,7 @@ describe("element style overrides (HL5e, HL-D4, HL-D8)", () => {
   test("refuses a family outside the vocabulary, naming the path", () => {
     for (const fontFamily of ["Comic Sans", 400, null]) {
       expect(
-        layerElementsProblem("html", [
-          { kind: "text", text: "x", frame, style: { fontFamily } },
-        ]),
+        layerElementsProblem("html", [{ kind: "text", text: "x", frame, style: { fontFamily } }]),
       ).toEqual({
         path: "[0].style.fontFamily",
         must: `be one of ${FONT_FAMILY_VALUES.map((v) => `"${v}"`).join(", ")}`,
@@ -329,7 +312,12 @@ describe("htmlElementFont (HL5e — the one resolution both renderers share)", (
     expect(htmlElementFont(weight, briefFont)).toEqual({ fontWeight: "400", fontFamily: "Inter" });
     const family: HtmlElement = { kind: "button", text: "x", frame, style: { fontFamily: "Lora" } };
     expect(htmlElementFont(family, briefFont)).toEqual({ fontWeight: "bold", fontFamily: "Lora" });
-    const both: HtmlElement = { kind: "text", text: "x", frame, style: { fontWeight: 700, fontFamily: "Lora" } };
+    const both: HtmlElement = {
+      kind: "text",
+      text: "x",
+      frame,
+      style: { fontWeight: 700, fontFamily: "Lora" },
+    };
     expect(htmlElementFont(both, briefFont)).toEqual({ fontWeight: "700", fontFamily: "Lora" });
   });
 });

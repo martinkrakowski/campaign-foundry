@@ -20,7 +20,7 @@ export interface UseDialogFocusTrapOptions {
 export function getFocusableDialogElements(container: HTMLElement | null): HTMLElement[] {
   if (!container) return [];
   return Array.from(
-    container.querySelectorAll<HTMLElement>('a[href], button, input, textarea, select, [tabindex]'),
+    container.querySelectorAll<HTMLElement>("a[href], button, input, textarea, select, [tabindex]"),
   ).filter(isFocusableCandidate);
 }
 
@@ -194,7 +194,12 @@ export function DialogHead({
       : undefined;
 
   return (
-    <div className={cn("flex items-start justify-between gap-3 border-b border-border px-4 py-3", className)}>
+    <div
+      className={cn(
+        "flex items-start justify-between gap-3 border-b border-border px-4 py-3",
+        className,
+      )}
+    >
       <div>
         <Heading className="text-sm font-semibold text-text-emphasis">{title}</Heading>
         {description ? <p className="mt-0.5 text-[11px] text-text-muted">{description}</p> : null}
@@ -215,8 +220,19 @@ export function DialogHead({
             </button>
           ) : (
             <IconButton label={iconCloseLabel} onClick={onClose}>
-              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              <svg
+                className="h-5 w-5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M6 18L18 6M6 6l12 12"
+                />
               </svg>
             </IconButton>
           )
@@ -243,7 +259,11 @@ export interface DialogFootProps {
 
 /** Shared foot section for dialogs and drawers (W10.5 / SHELL-43). */
 export function DialogFoot({ children, className }: DialogFootProps): ReactNode {
-  return <div className={cn("border-t border-border bg-surface-2/40 px-4 py-3", className)}>{children}</div>;
+  return (
+    <div className={cn("border-t border-border bg-surface-2/40 px-4 py-3", className)}>
+      {children}
+    </div>
+  );
 }
 
 export interface DialogShellProps {

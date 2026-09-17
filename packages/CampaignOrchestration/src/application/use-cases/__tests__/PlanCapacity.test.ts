@@ -1,6 +1,9 @@
 import { describe, test, expect } from "vitest";
 import type { CampaignBrief } from "../../../domain/entities/CampaignBrief.js";
-import { VariationPolicy, type PlanInput } from "../../../domain/value-objects/VariationPolicy.vo.js";
+import {
+  VariationPolicy,
+  type PlanInput,
+} from "../../../domain/value-objects/VariationPolicy.vo.js";
 import { nodeCryptoPolicyHasher } from "../../../infrastructure/index.js";
 import {
   EXACT_CAPACITY_MAX_SPACE,
@@ -55,7 +58,12 @@ describe("enumerateAxes", () => {
   test("a motion-only brief at one ratio enumerates exactly its product space", () => {
     const space = enumerateAxes(tight(8, 2));
     expect(space).toHaveLength(24);
-    expect(space.every((axes) => axes.aspectRatio === "9:16" && axes.motion === "ken-burns-out" && axes.durationSec === 5)).toBe(true);
+    expect(
+      space.every(
+        (axes) =>
+          axes.aspectRatio === "9:16" && axes.motion === "ken-burns-out" && axes.durationSec === 5,
+      ),
+    ).toBe(true);
   });
 
   test("a mixed brief adds one still per base, and non-motion ratios are stills only", () => {
@@ -70,12 +78,17 @@ describe("enumerateAxes", () => {
     const bases = 2 * 2 * 2 * 1 * 1; // products × layout × tone × bg × palette
     // 1:1 and 16:9 → one still each per base; 9:16 → one still + one clip per base
     expect(space).toHaveLength(bases * (1 + 1 + 2));
-    expect(space.filter((a) => a.motion !== undefined).every((a) => a.aspectRatio === "9:16")).toBe(true);
+    expect(space.filter((a) => a.motion !== undefined).every((a) => a.aspectRatio === "9:16")).toBe(
+      true,
+    );
   });
 
   test("a pooled brief carries the headline on every point", () => {
     const policy = policyOf(
-      { variation: { count: 2, axes: { headline: "pool://copy" } }, output: { formats: ["static"] } },
+      {
+        variation: { count: 2, axes: { headline: "pool://copy" } },
+        output: { formats: ["static"] },
+      },
       { headlines: ["Stay wild", "Go far"] },
     );
     const space = enumerateAxes(policy);
@@ -84,9 +97,10 @@ describe("enumerateAxes", () => {
   });
 
   test("an anchored brief enumerates the anchor axis; an axis-less one carries none (T4)", () => {
-    const anchored = policyOf(
-      { variation: { count: 2, axes: { anchor: ["top", "middle", "bottom"] } }, output: { formats: ["static"] } },
-    );
+    const anchored = policyOf({
+      variation: { count: 2, axes: { anchor: ["top", "middle", "bottom"] } },
+      output: { formats: ["static"] },
+    });
     const space = enumerateAxes(anchored);
     // 2 products × 3 ratios × 2 layouts × 2 tones × 1 bg × 1 palette × 3 anchors
     expect(space).toHaveLength(72);
@@ -114,7 +128,11 @@ describe("conflicts / lineBound", () => {
   test("in a mixed plan the still slot counts as one more value on the motion axis", () => {
     const mixed = policyOf(
       {
-        variation: { count: 2, minDistance: 2, axes: { motion: ["ken-burns-in", "ken-burns-out"], duration: [4, 6] } },
+        variation: {
+          count: 2,
+          minDistance: 2,
+          axes: { motion: ["ken-burns-in", "ken-burns-out"], duration: [4, 6] },
+        },
         output: { formats: ["static", "motion"], platforms: ["instagram-reel"] },
       },
       { motionRatios: ["9:16"] },
@@ -150,7 +168,10 @@ describe("capacityAt", () => {
       variation: {
         count: 2,
         minDistance: 2,
-        axes: { background: { source: ["procedural", "asset-pool", "genai"] }, paletteShift: [0, 0.1, 0.2] },
+        axes: {
+          background: { source: ["procedural", "asset-pool", "genai"] },
+          paletteShift: [0, 0.1, 0.2],
+        },
       },
       output: { formats: ["static"] },
     });
@@ -173,7 +194,9 @@ describe("matchesNeed", () => {
     expect(matchesNeed(candidate, { productId: candidate.productId })).toBe(true);
     expect(matchesNeed(candidate, { productId: "other" })).toBe(false);
     expect(matchesNeed(candidate, { aspectRatio: "1:1" })).toBe(false);
-    expect(matchesNeed(candidate, { productId: candidate.productId, aspectRatio: "9:16" })).toBe(true);
+    expect(matchesNeed(candidate, { productId: candidate.productId, aspectRatio: "9:16" })).toBe(
+      true,
+    );
   });
 });
 
@@ -182,19 +205,23 @@ describe("exhaustiveAccept", () => {
     const policy = tight(8, 2);
     const chosen = exhaustiveAccept(enumerateAxes(policy), policy, "tight", noNeeds);
     expect(chosen).toHaveLength(8);
-    for (const a of chosen) for (const b of chosen) if (a !== b) expect(conflicts(a, b, 2)).toBe(false);
+    for (const a of chosen)
+      for (const b of chosen) if (a !== b) expect(conflicts(a, b, 2)).toBe(false);
     expect(chosen.map((v) => v.index)).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
   });
 
   test("stops short when the space cannot hold the count", () => {
     const policy = tight(12, 2);
-    expect(exhaustiveAccept(enumerateAxes(policy), policy, "tight", noNeeds).length).toBeLessThan(12);
+    expect(exhaustiveAccept(enumerateAxes(policy), policy, "tight", noNeeds).length).toBeLessThan(
+      12,
+    );
   });
 
   test("coverage needs rank their candidates first", () => {
     const policy = tight(2, 1);
     // demand beta first: the first pick must be a beta point
-    const needs = (accepted: readonly unknown[]) => (accepted.length === 0 ? [{ productId: "beta" }] : []);
+    const needs = (accepted: readonly unknown[]) =>
+      accepted.length === 0 ? [{ productId: "beta" }] : [];
     const chosen = exhaustiveAccept(enumerateAxes(policy), policy, "tight", needs);
     expect(chosen[0].productId).toBe("beta");
     expect(chosen).toHaveLength(2);
@@ -203,7 +230,9 @@ describe("exhaustiveAccept", () => {
   test("is deterministic for a brief and seed", () => {
     const policy = tight(8, 2);
     const space = enumerateAxes(policy);
-    expect(exhaustiveAccept(space, policy, "tight", noNeeds)).toEqual(exhaustiveAccept(space, policy, "tight", noNeeds));
+    expect(exhaustiveAccept(space, policy, "tight", noNeeds)).toEqual(
+      exhaustiveAccept(space, policy, "tight", noNeeds),
+    );
   });
 });
 
@@ -212,8 +241,12 @@ describe("shortfallMessage", () => {
     const policy = tight(12, 2);
     const message = shortfallMessage(policy, enumerateAxes(policy), 7);
     expect(message).toMatch(/accepted 7 of count 12/);
-    expect(message).toMatch(/At minDistance 2 this brief can yield at most 8 distinct variants \(24 combinations — every motion platform is 9:16, so the aspect ratio cannot vary\)/);
-    expect(message).toMatch(/lower count to 8, lower minDistance \(at 1 the maximum is 24\), add axis values/);
+    expect(message).toMatch(
+      /At minDistance 2 this brief can yield at most 8 distinct variants \(24 combinations — every motion platform is 9:16, so the aspect ratio cannot vary\)/,
+    );
+    expect(message).toMatch(
+      /lower count to 8, lower minDistance \(at 1 the maximum is 24\), add axis values/,
+    );
   });
 
   test("a bounded capacity says 'no more than', a static brief gives no ratio reason, minDistance 1 drops that remedy", () => {
@@ -221,7 +254,10 @@ describe("shortfallMessage", () => {
       variation: {
         count: 2,
         minDistance: 2,
-        axes: { background: { source: ["procedural", "asset-pool", "genai"] }, paletteShift: [0, 0.1, 0.2] },
+        axes: {
+          background: { source: ["procedural", "asset-pool", "genai"] },
+          paletteShift: [0, 0.1, 0.2],
+        },
       },
       output: { formats: ["static"] },
     });

@@ -49,4 +49,3 @@ export interface VideoCompositorPort {
   compositeVideo(request: VideoCompositeRequest): Promise<VideoCompositeResult>;
   compositeFrame(request: VideoCompositeRequest, atSec: number): Promise<CompositeResult>;
 }
-

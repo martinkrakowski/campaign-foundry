@@ -43,9 +43,16 @@ import type { PlatformSafeZoneResolver } from "../ports/out/PlatformProfilePort.
 import type { SceneAssetPort } from "../ports/out/SceneAssetPort.js";
 import type { VideoCompositorPort } from "../ports/out/VideoCompositorPort.js";
 import { MOTION_FPS } from "../../domain/value-objects/MotionKind.vo.js";
-import { resolveTimeline, timelineProblem, type CopyTimeline } from "../../domain/value-objects/CopyTimeline.vo.js";
+import {
+  resolveTimeline,
+  timelineProblem,
+  type CopyTimeline,
+} from "../../domain/value-objects/CopyTimeline.vo.js";
 import { CREATIVE_TYPE_RULES } from "../../domain/value-objects/creative-types.js";
-import { DEFAULT_DURATION, DEFAULT_DURATION_SEC } from "../../domain/value-objects/variation-defaults.js";
+import {
+  DEFAULT_DURATION,
+  DEFAULT_DURATION_SEC,
+} from "../../domain/value-objects/variation-defaults.js";
 
 /**
  * A single subject is a legitimate campaign (a conference, a hiring drive), so
@@ -80,9 +87,14 @@ const MOTION_SAMPLE_AT: readonly number[] = [0, 0.25, 0.5, 0.75, 1];
  *
  * With no timeline this returns MOTION_SAMPLE_AT itself, so the legacy path is unchanged.
  */
-function motionSampleAt(timeline: CopyTimeline | undefined, durationSec: number): readonly number[] {
+function motionSampleAt(
+  timeline: CopyTimeline | undefined,
+  durationSec: number,
+): readonly number[] {
   if (timeline === undefined) return MOTION_SAMPLE_AT;
-  const midpoints = resolveTimeline(timeline, durationSec).map((beat) => (beat.startT + beat.endT) / 2);
+  const midpoints = resolveTimeline(timeline, durationSec).map(
+    (beat) => (beat.startT + beat.endT) / 2,
+  );
   return [...new Set([...MOTION_SAMPLE_AT, ...midpoints])].sort((a, b) => a - b);
 }
 
@@ -112,7 +124,9 @@ export async function resolveTimelineBackgrounds(
 ): Promise<Result<Readonly<Record<string, Uint8Array>> | undefined, Error>> {
   const distinctPaths = [
     ...new Set(
-      (timeline?.beats ?? []).flatMap((beat) => (beat.background !== undefined ? [beat.background] : [])),
+      (timeline?.beats ?? []).flatMap((beat) =>
+        beat.background !== undefined ? [beat.background] : [],
+      ),
     ),
   ];
   if (distinctPaths.length === 0) return ok(undefined);
@@ -122,7 +136,11 @@ export async function resolveTimelineBackgrounds(
       backgrounds[path] = await sceneAssets.resolveScene(path, ratio);
     } catch (cause) {
       const beatIndex = timeline!.beats.findIndex((beat) => beat.background === path);
-      return err(new Error(`Beat ${beatIndex + 1} names a scene ("${path}") that could not be read.`, { cause }));
+      return err(
+        new Error(`Beat ${beatIndex + 1} names a scene ("${path}") that could not be read.`, {
+          cause,
+        }),
+      );
     }
   }
   return ok(backgrounds);
@@ -158,7 +176,10 @@ export async function resolveBriefAudio(
 }
 
 /** Row identity + paths: the leading keys of every persisted asset row. */
-type VariationAssetIdentity = Pick<GeneratedAsset, "productId" | "aspectRatio" | "outputPath" | "proofPath">;
+type VariationAssetIdentity = Pick<
+  GeneratedAsset,
+  "productId" | "aspectRatio" | "outputPath" | "proofPath"
+>;
 /** Variation lineage: the keys that follow the compliance verdict in a persisted row. */
 type VariationAssetLineage = Pick<
   GeneratedAsset,
@@ -281,7 +302,9 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     const targetKeys = targets
       ? new Set(
           targets.flatMap((t) =>
-            isVariationTarget(t) ? [] : [`${t.productId}/${t.aspectRatio ?? t.size}/${t.treatment}`],
+            isVariationTarget(t)
+              ? []
+              : [`${t.productId}/${t.aspectRatio ?? t.size}/${t.treatment}`],
           ),
         )
       : null;
@@ -306,8 +329,7 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
         total +
         [...ratios.map((ratio) => ratio.value), ...sizes].reduce(
           (perProduct, canvas) =>
-            perProduct +
-            treatments.filter((t) => isTarget(product.id, canvas, t.id)).length,
+            perProduct + treatments.filter((t) => isTarget(product.id, canvas, t.id)).length,
           0,
         ),
       0,
@@ -379,9 +401,21 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     const cellResults = await mapWithConcurrency(
       cells,
       MAX_CONCURRENT_BACKGROUNDS,
-      async ({ product, canvas, spec, backgroundRatio, assetCanvas, safeInsets, treatments: ratioTreatments }) => {
+      async ({
+        product,
+        canvas,
+        spec,
+        backgroundRatio,
+        assetCanvas,
+        safeInsets,
+        treatments: ratioTreatments,
+      }) => {
         // ResolveBackgroundAssets — reuse inputAsset or generate, once per cell.
-        const background = await this.deps.imageGenerator.resolveBackground(product, backgroundRatio, context);
+        const background = await this.deps.imageGenerator.resolveBackground(
+          product,
+          backgroundRatio,
+          context,
+        );
         log.record(
           "ResolveBackgroundAssets",
           `${product.id} @ ${canvas} — background: ${background.source}${background.source === "procedural" ? " (procedural fallback — no GenAI background)" : ""}`,
@@ -465,7 +499,9 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
                   format: "html",
                   htmlBundlePath,
                   htmlFallbackPath,
-                  ...(brief.clickDestination !== undefined ? { clickDestination: brief.clickDestination } : {}),
+                  ...(brief.clickDestination !== undefined
+                    ? { clickDestination: brief.clickDestination }
+                    : {}),
                 }
               : {}),
           });
@@ -575,8 +611,11 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
 
     // Pooled headlines are copy too: gate every distinct text the (re)plan will
     // render, halting exactly like a prohibited campaignMessage would.
-    const headlines = [...new Set(plan.variants.flatMap((v) => (v.headline === undefined ? [] : [v.headline])))];
-    if (await this.haltsOnProhibitedCopy(headlines, log)) return ok({ assets: [], log, halted: true });
+    const headlines = [
+      ...new Set(plan.variants.flatMap((v) => (v.headline === undefined ? [] : [v.headline]))),
+    ];
+    if (await this.haltsOnProhibitedCopy(headlines, log))
+      return ok({ assets: [], log, halted: true });
 
     log.totalOperations = variants.length;
     log.record(
@@ -590,8 +629,12 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     const insetsByRatio = unionSafeInsets(brief.output?.platforms, this.deps.platformSafeZones);
 
     const productById = new Map(brief.products.map((product) => [product.id, product]));
-    const cells: Array<{ variant: Variant; product: Product; ratio: AspectRatio; attempt: number }> =
-      [];
+    const cells: Array<{
+      variant: Variant;
+      product: Product;
+      ratio: AspectRatio;
+      attempt: number;
+    }> = [];
     for (const variant of variants) {
       const product = productById.get(variant.productId);
       if (!product) {
@@ -637,7 +680,11 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     // VE3b2: resolve the brief's music bed ONCE for the whole run (no ratio to
     // key by — see resolveBriefAudio's own doc comment) and hand the SAME
     // bytes to every motion cell's compositeVideo request.
-    const audioResolved = await resolveBriefAudio(brief, motionRatios.size > 0, this.deps.audioAssets);
+    const audioResolved = await resolveBriefAudio(
+      brief,
+      motionRatios.size > 0,
+      this.deps.audioAssets,
+    );
     if (!audioResolved.success) return audioResolved;
     const audio = audioResolved.value;
 
@@ -891,7 +938,10 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     let passed = video.sampledFrames.length > 0;
     let minScore = passed ? 1 : 0;
     for (const frame of video.sampledFrames) {
-      const visual = await this.deps.compliance.validateBrandColorDensity(frame, product.primaryColor);
+      const visual = await this.deps.compliance.validateBrandColorDensity(
+        frame,
+        product.primaryColor,
+      );
       if (!visual.passed) passed = false;
       minScore = Math.min(minScore, visual.score ?? 0);
     }
@@ -932,7 +982,9 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     // can't create a campaign that runs but can never be persisted/reloaded by id.
     if (!SAFE_ID_PATTERN.test(brief.id)) {
       return err(
-        new Error("Campaign id must be a path-safe slug (lowercase letters, digits, hyphens; max 64 chars)."),
+        new Error(
+          "Campaign id must be a path-safe slug (lowercase letters, digits, hyphens; max 64 chars).",
+        ),
       );
     }
     // Product and treatment ids are output-path segments and the asset identity.
@@ -943,7 +995,9 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     const productIds = brief.products.map((p) => p.id);
     if (productIds.some((id) => !SAFE_ID_PATTERN.test(id))) {
       return err(
-        new Error("Product ids must be path-safe slugs (lowercase letters, digits, hyphens; max 64 chars)."),
+        new Error(
+          "Product ids must be path-safe slugs (lowercase letters, digits, hyphens; max 64 chars).",
+        ),
       );
     }
     const unique = new Set(productIds);
@@ -971,7 +1025,9 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     if (timeline !== undefined) {
       if (brief.mode !== "variation") {
         return err(
-          new Error('A campaign brief with "copy.timeline" must be in variation mode — a classic run renders no motion.'),
+          new Error(
+            'A campaign brief with "copy.timeline" must be in variation mode — a classic run renders no motion.',
+          ),
         );
       }
       // The duration axis decides every beat's dwell; absent means the single default,
@@ -984,7 +1040,9 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
       const ids = brief.treatments.map((t) => t.id);
       if (ids.some((id) => !SAFE_ID_PATTERN.test(id))) {
         return err(
-          new Error("Treatment ids must be path-safe slugs (lowercase letters, digits, hyphens; max 64 chars)."),
+          new Error(
+            "Treatment ids must be path-safe slugs (lowercase letters, digits, hyphens; max 64 chars).",
+          ),
         );
       }
       if (new Set(ids).size !== ids.length) {
@@ -1161,7 +1219,10 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
   }
 
   /** Legal-gate each text; on the first failure record the halt (same stage/shape) and return true. */
-  private async haltsOnProhibitedCopy(texts: readonly string[], log: PipelineExecutionLog): Promise<boolean> {
+  private async haltsOnProhibitedCopy(
+    texts: readonly string[],
+    log: PipelineExecutionLog,
+  ): Promise<boolean> {
     for (const text of texts) {
       const result = await this.deps.compliance.validateLegalCopy(text);
       if (!result.passed) {

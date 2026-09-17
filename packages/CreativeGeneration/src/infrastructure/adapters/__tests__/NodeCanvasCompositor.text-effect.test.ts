@@ -38,7 +38,10 @@ const request = (over: Partial<CompositeRequest> = {}): CompositeRequest => ({
   ...over,
 });
 
-type TimelineRequest = CompositeRequest & { readonly durationSec?: number; readonly timeline?: CopyTimeline };
+type TimelineRequest = CompositeRequest & {
+  readonly durationSec?: number;
+  readonly timeline?: CopyTimeline;
+};
 
 const timelineOf = (beats: string[], keyBeat = 1): CopyTimeline => ({
   beats: beats.map((text) => ({ text, weight: 1 })),
@@ -168,7 +171,9 @@ describe("the text effect rides prepare (T6)", () => {
   test("an absent effect resolves to undefined — the pre-effect path bit for bit (D54)", async () => {
     const prepared = await NodeCanvasCompositor.prepare(request());
     expect(prepared.textEffect).toBeUndefined();
-    const explicitNone = await NodeCanvasCompositor.prepare(request({ style: { textEffect: undefined } }));
+    const explicitNone = await NodeCanvasCompositor.prepare(
+      request({ style: { textEffect: undefined } }),
+    );
     expect(explicitNone.textEffect).toBeUndefined();
   });
 });
@@ -187,7 +192,12 @@ describe("the rest pose is the still's truth (H4/D54)", () => {
     "at t = 1 the %s timeline frame is byte-identical to the same brief with no effect",
     async (kind) => {
       const plain = await blit(timelineRequest(), 1, undefined, 1);
-      const withEffect = await blit(timelineRequest({ style: { textEffect: kind } }), 1, undefined, 1);
+      const withEffect = await blit(
+        timelineRequest({ style: { textEffect: kind } }),
+        1,
+        undefined,
+        1,
+      );
       expect(sha256(withEffect.raster)).toBe(sha256(plain.raster));
     },
   );
@@ -196,7 +206,11 @@ describe("the rest pose is the still's truth (H4/D54)", () => {
     // The one motion kind that also moves the copy: the rest pose must hold
     // under composition too — the poster samples exactly this frame.
     const plain = await blit(request(), 1, "headline-rise");
-    const withEffect = await blit(request({ style: { textEffect: "rise-in" } }), 1, "headline-rise");
+    const withEffect = await blit(
+      request({ style: { textEffect: "rise-in" } }),
+      1,
+      "headline-rise",
+    );
     expect(sha256(withEffect.raster)).toBe(sha256(plain.raster));
   });
 
@@ -209,7 +223,13 @@ describe("the rest pose is the still's truth (H4/D54)", () => {
     async (kind) => {
       const t = restT("ken-burns-out");
       const plain = await blit(request(), t, "ken-burns-out", undefined, 1);
-      const withEffect = await blit(request({ style: { textEffect: kind } }), t, "ken-burns-out", undefined, 1);
+      const withEffect = await blit(
+        request({ style: { textEffect: kind } }),
+        t,
+        "ken-burns-out",
+        undefined,
+        1,
+      );
       expect(sha256(withEffect.raster)).toBe(sha256(plain.raster));
     },
   );
@@ -232,7 +252,11 @@ describe("the rest pose is the still's truth (H4/D54)", () => {
 
   test("a ken-burns-out + fade-in video frame mid-clip still differs from plain", async () => {
     const plain = await blit(request(), MID_T, "ken-burns-out");
-    const withEffect = await blit(request({ style: { textEffect: "fade-in" } }), MID_T, "ken-burns-out");
+    const withEffect = await blit(
+      request({ style: { textEffect: "fade-in" } }),
+      MID_T,
+      "ken-burns-out",
+    );
     expect(sha256(withEffect.raster)).not.toBe(sha256(plain.raster));
     for (const op of withEffect.fillText) {
       expect(op.alpha).toBe(SETTLED_AT_MID);
@@ -250,52 +274,69 @@ function timelineRequest(over: Partial<TimelineRequest> = {}): TimelineRequest {
 }
 
 describe("each kind animates the copy layer's entrance — the legacy path", () => {
-  test.each(TEXT_EFFECT_VALUES)("%s paints its pose mid-entrance and moves the raster", async (kind) => {
-    const r = ratio("1:1");
-    const plain = await blit(request(), MID_T);
-    const withEffect = await blit(request({ style: { textEffect: kind } }), MID_T);
-    expect(withEffect.fillText.length).toBeGreaterThan(0);
-    const expected = expectedPoseAtMid(kind, r.width, r.height);
-    for (const op of withEffect.fillText) {
-      expect(op.alpha).toBe(expected.alpha);
-      expect(op.dx).toBeCloseTo(expected.dx, 9);
-      expect(op.dy).toBeCloseTo(expected.dy, 9);
-    }
-    if (expected.scale === 1) {
-      expect(withEffect.scales).toEqual([]);
-    } else {
-      expect(withEffect.scales).toEqual([[expected.scale, expected.scale]]);
-    }
-    // And the entrance genuinely rasterises differently from the plain brief.
-    expect(sha256(withEffect.raster)).not.toBe(sha256(plain.raster));
-  });
+  test.each(TEXT_EFFECT_VALUES)(
+    "%s paints its pose mid-entrance and moves the raster",
+    async (kind) => {
+      const r = ratio("1:1");
+      const plain = await blit(request(), MID_T);
+      const withEffect = await blit(request({ style: { textEffect: kind } }), MID_T);
+      expect(withEffect.fillText.length).toBeGreaterThan(0);
+      const expected = expectedPoseAtMid(kind, r.width, r.height);
+      for (const op of withEffect.fillText) {
+        expect(op.alpha).toBe(expected.alpha);
+        expect(op.dx).toBeCloseTo(expected.dx, 9);
+        expect(op.dy).toBeCloseTo(expected.dy, 9);
+      }
+      if (expected.scale === 1) {
+        expect(withEffect.scales).toEqual([]);
+      } else {
+        expect(withEffect.scales).toEqual([[expected.scale, expected.scale]]);
+      }
+      // And the entrance genuinely rasterises differently from the plain brief.
+      expect(sha256(withEffect.raster)).not.toBe(sha256(plain.raster));
+    },
+  );
 
   test("the entrance settles: past the window the pose is the identity", async () => {
-    const withEffect = await blit(request({ style: { textEffect: "slide-in" } }), EFFECT.entranceFraction + 0.1);
+    const withEffect = await blit(
+      request({ style: { textEffect: "slide-in" } }),
+      EFFECT.entranceFraction + 0.1,
+    );
     const plain = await blit(request(), EFFECT.entranceFraction + 0.1);
     expect(sha256(withEffect.raster)).toBe(sha256(plain.raster));
   });
 });
 
 describe("each kind animates the DRAWN timeline frames too (F5a)", () => {
-  test.each(TEXT_EFFECT_VALUES)("%s paints its pose on a drawn timeline frame and moves the raster", async (kind) => {
-    const r = ratio("1:1");
-    const plain = await blit(timelineRequest(), MID_T, undefined, MID_T);
-    const withEffect = await blit(timelineRequest({ style: { textEffect: kind } }), MID_T, undefined, MID_T);
-    expect(withEffect.fillText.length).toBeGreaterThan(0);
-    const expected = expectedPoseAtMid(kind, r.width, r.height);
-    for (const op of withEffect.fillText) {
-      expect(op.alpha).toBe(expected.alpha);
-      expect(op.dx).toBeCloseTo(expected.dx, 9);
-      expect(op.dy).toBeCloseTo(expected.dy, 9);
-    }
-    expect(sha256(withEffect.raster)).not.toBe(sha256(plain.raster));
-  });
+  test.each(TEXT_EFFECT_VALUES)(
+    "%s paints its pose on a drawn timeline frame and moves the raster",
+    async (kind) => {
+      const r = ratio("1:1");
+      const plain = await blit(timelineRequest(), MID_T, undefined, MID_T);
+      const withEffect = await blit(
+        timelineRequest({ style: { textEffect: kind } }),
+        MID_T,
+        undefined,
+        MID_T,
+      );
+      expect(withEffect.fillText.length).toBeGreaterThan(0);
+      const expected = expectedPoseAtMid(kind, r.width, r.height);
+      for (const op of withEffect.fillText) {
+        expect(op.alpha).toBe(expected.alpha);
+        expect(op.dx).toBeCloseTo(expected.dx, 9);
+        expect(op.dy).toBeCloseTo(expected.dy, 9);
+      }
+      expect(sha256(withEffect.raster)).not.toBe(sha256(plain.raster));
+    },
+  );
 
   test("each beat plays the effect on its OWN window, not the clip's", async () => {
     // Beta's window starts at 0.5; a quarter of the way in its local progress
     // equals MID_T — an effect driven against the whole clip would be settled.
-    const req = timelineRequest({ timeline: timelineOf(["Alpha", "Beta"]), style: { textEffect: "rise-in" } });
+    const req = timelineRequest({
+      timeline: timelineOf(["Alpha", "Beta"]),
+      style: { textEffect: "rise-in" },
+    });
     const t = 0.5 + 0.5 * MID_T;
     const withEffect = await blit(req, t, undefined, t);
     expect(withEffect.fillText.map((op) => op.text)).toEqual(["Beta"]);
@@ -312,7 +353,11 @@ describe("the effect composes with headline-rise (T6)", () => {
     const eased = easeOutCubic(MID_T);
     const riseDy = (1 - eased) * 0.12 * r.height;
     const effectDy = (1 - SETTLED_AT_MID) * EFFECT.riseOffsetFraction * r.height;
-    const composed = await blit(request({ style: { textEffect: "rise-in" } }), MID_T, "headline-rise");
+    const composed = await blit(
+      request({ style: { textEffect: "rise-in" } }),
+      MID_T,
+      "headline-rise",
+    );
     for (const op of composed.fillText) {
       expect(op.dy).toBeCloseTo(riseDy + effectDy, 9);
       expect(op.alpha).toBe(eased);
@@ -325,7 +370,11 @@ describe("the effect composes with headline-rise (T6)", () => {
 
   test("alphas multiply: headline-rise + fade-in at a mid-curve t", async () => {
     const eased = easeOutCubic(MID_T);
-    const composed = await blit(request({ style: { textEffect: "fade-in" } }), MID_T, "headline-rise");
+    const composed = await blit(
+      request({ style: { textEffect: "fade-in" } }),
+      MID_T,
+      "headline-rise",
+    );
     for (const op of composed.fillText) {
       expect(op.alpha).toBe(eased * SETTLED_AT_MID);
       expect(op.dy).toBeCloseTo((1 - eased) * 0.12 * 1080, 9);

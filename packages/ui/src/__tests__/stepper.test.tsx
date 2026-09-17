@@ -5,7 +5,9 @@ import { Stepper } from "../stepper";
 
 const setup = (over: Partial<Parameters<typeof Stepper>[0]> = {}) => {
   const onChange = vi.fn();
-  const view = render(<Stepper aria-label="Distance" value="2" min={0} max={5} onChange={onChange} {...over} />);
+  const view = render(
+    <Stepper aria-label="Distance" value="2" min={0} max={5} onChange={onChange} {...over} />,
+  );
   const q = within(view.container);
   return {
     onChange,
@@ -43,7 +45,11 @@ describe("Stepper", () => {
   });
 
   test("an unset value reads as its label, steps up to the minimum, and back down to unset", async () => {
-    const { user, onChange, readout, up, down } = setup({ value: "", allowUnset: true, unsetLabel: "Auto (1)" });
+    const { user, onChange, readout, up, down } = setup({
+      value: "",
+      allowUnset: true,
+      unsetLabel: "Auto (1)",
+    });
     expect(readout.textContent).toBe("Auto (1)");
     expect(readout.getAttribute("aria-valuenow")).toBeNull();
     expect(readout.getAttribute("aria-valuetext")).toBe("Auto (1)");
@@ -93,4 +99,3 @@ describe("Stepper", () => {
     expect(setup().readout.hasAttribute("aria-invalid")).toBe(false);
   });
 });
-

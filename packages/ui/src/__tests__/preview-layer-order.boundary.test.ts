@@ -16,7 +16,17 @@ import { join, relative, resolve } from "node:path";
  * Deleting it as noise is exactly the regression it guards against.
  */
 
-const LAYER_KINDS = ["image", "fill", "static-text", "animated-text", "html", "video", "logo", "accent", "shade"] as const;
+const LAYER_KINDS = [
+  "image",
+  "fill",
+  "static-text",
+  "animated-text",
+  "html",
+  "video",
+  "logo",
+  "accent",
+  "shade",
+] as const;
 
 /** Recurse `packages/ui/src`, skipping `__tests__`: behavioural tests enumerate
  * kinds to assert on outputs (that is their job); the boundary protects the
@@ -59,6 +69,8 @@ test("only preview-layers.ts may hold an ordering of layer kinds (D121)", () => 
       if (secondOrdering(match[1])) violations.push(file);
     }
   }
-  expect(violations, "a second hardcoded ordering of layer kinds — read from PREVIEW_LAYER_ORDER instead")
-    .toEqual([]);
+  expect(
+    violations,
+    "a second hardcoded ordering of layer kinds — read from PREVIEW_LAYER_ORDER instead",
+  ).toEqual([]);
 });

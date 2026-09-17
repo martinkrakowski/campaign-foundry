@@ -27,7 +27,9 @@ export interface EyebrowProps {
  */
 export function Eyebrow({ as: Tag = "span", className, children }: EyebrowProps): ReactNode {
   return (
-    <Tag className={cn("font-mono text-[11px] uppercase tracking-eyebrow text-text-muted", className)}>
+    <Tag
+      className={cn("font-mono text-[11px] uppercase tracking-eyebrow text-text-muted", className)}
+    >
       {children}
     </Tag>
   );

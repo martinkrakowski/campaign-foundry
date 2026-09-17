@@ -220,8 +220,13 @@ export const PLATFORM_PROFILES: Readonly<Record<string, PlatformProfile>> = {
  * `static` and `html` always are (markup assembly needs no host binary);
  * `motion` requires the ffmpeg capability.
  */
-export function isPlatformVisible(profile: PlatformProfile, capabilities: PlatformCapabilities): boolean {
-  return profile.formats.every((format) => format === "static" || format === "html" || capabilities.motion);
+export function isPlatformVisible(
+  profile: PlatformProfile,
+  capabilities: PlatformCapabilities,
+): boolean {
+  return profile.formats.every(
+    (format) => format === "static" || format === "html" || capabilities.motion,
+  );
 }
 
 /** Ids a caller may request: static canvases always, motion ones when the probe says so. */
@@ -267,4 +272,3 @@ export function motionPackagedRatios(platformIds: readonly string[]): Set<Canvas
   }
   return ratios;
 }
-
