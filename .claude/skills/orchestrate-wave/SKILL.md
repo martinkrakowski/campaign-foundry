@@ -318,7 +318,24 @@ output for a cell, the cell is *unknown* — a valid answer. A confident wrong o
 that did not happen.
 
 1. **Implement.** One lane = one worktree = one branch = one PR. `yarn install` per worktree
-   yourself. Write each brief from Template A, then dispatch it as an `Agent`. **Record the
+   yourself — **one at a time, never in parallel, and only where the lane actually needs one.**
+
+   Yarn Berry hardlinks package contents from a shared global cache. Concurrent installs across
+   worktrees can evict or relink an entry while another checkout is holding it, and the victim is the
+   checkout nobody is installing into: the **main checkout**, which silently loses a native binary
+   while keeping the package directory. Twice on 2026-09-17 this broke the owner's `yarn dev` —
+   `@next/swc-darwin-arm64` and then `@napi-rs/canvas-darwin-arm64`, each left with its
+   `package.json` and `README.md` intact and its `.node` file gone. Platform-specific optional
+   dependencies are what break, because they are the large binaries.
+
+   So: serialise installs, skip them for lanes that touch no code (a deletion lane, a docs lane), and
+   **after a wave's installs, verify the main checkout still has its native binaries** rather than
+   letting the owner's next dev start find out:
+
+       find node_modules -name "*.node" -path "*darwin*" | head
+
+   The repair is to delete the stripped package directory and reinstall — a plain `yarn install` will
+   not restore it, because the directory's presence makes the package look installed. Write each brief from Template A, then dispatch it as an `Agent`. **Record the
    worktree tip first** — an agent that reports success having committed nothing looks identical to
    one that did the work. Never let two lanes own the same file at the same time.
 
