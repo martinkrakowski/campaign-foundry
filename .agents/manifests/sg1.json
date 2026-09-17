@@ -21,8 +21,8 @@
     },
     {
       "file": "apps/web/src/components/campaign/BriefEditor.tsx",
-      "before": "      revealSection(section);\n      if (focus) focusSection(section === MOTION_ERROR_KEY ? MOTION_HOST_SECTION : section);",
-      "after": "      const target = section === MOTION_ERROR_KEY ? MOTION_HOST_SECTION : section;\n      revealSection(target);\n      if (focus) focusSection(target);",
+      "before": "      const host = section === MOTION_ERROR_KEY ? MOTION_HOST_SECTION : section;\n      revealSection(section);\n      if (focus) focusSection(host);",
+      "after": "      const host = section === MOTION_ERROR_KEY ? MOTION_HOST_SECTION : section;\n      revealSection(host);\n      if (focus) focusSection(host);",
       "because": "`reveal`'s two halves deliberately point at DIFFERENT things for motion, and this collapses them into one. Motion is a bucket with no section of its own: the scroll must reach `#motion` (the panel inside Output, where the field the user has to fix actually is), while focus goes to the HOST section, because a `<section>` is what the handoff can make focusable. Unifying them looks like removing a duplicated ternary -- the two lines even read as though one of them forgot to map -- and for every non-motion bucket the two are identical, so the whole suite stays green except the one test that drives a Motion chip. The cost is silent and specific: the operator presses \"Motion\" on a refusal and lands on the top of Output instead of on the motion controls, with nothing to say it moved at all.",
       "command": [
         "yarn",
@@ -38,8 +38,8 @@
     },
     {
       "file": "apps/web/src/components/campaign/BriefEditor.tsx",
-      "before": "      revealSection(section);\n      if (focus) focusSection(section === MOTION_ERROR_KEY ? MOTION_HOST_SECTION : section);",
-      "after": "      if (focus) focusSection(section === MOTION_ERROR_KEY ? MOTION_HOST_SECTION : section);",
+      "before": "      const host = section === MOTION_ERROR_KEY ? MOTION_HOST_SECTION : section;\n      revealSection(section);\n      if (focus) focusSection(host);",
+      "after": "      const host = section === MOTION_ERROR_KEY ? MOTION_HOST_SECTION : section;\n      if (focus) focusSection(host);",
       "because": "SG1's whole reveal contract: with no steps left to change, `reveal` IS the scroll -- and this drops it, keeping only the focus handoff. It is the plausible simplification, not a random deletion: `focusSection` calls `focus({ preventScroll: true })` and its own comment says \"the scroll above already placed it\", so a reader who removes the scroll believes focus will do the placing. In a real browser a focus without `preventScroll` very nearly would, which is exactly why this survives a visual check. It leaves every reveal from a CHIP silently inert (chips are scroll-only, `focus` defaults false), so a refusal names a section the page never moves to. Caught by the chip test, which asserts the scroll ran ONCE and on the section element itself -- not merely that something scrolled.",
       "command": [
         "yarn",

@@ -951,16 +951,24 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
    * `pendingReveal` marker, the layout effect that spent it, and the step-heading
    * focus handoff it had to suppress.
    *
-   * Motion has no section of its own; it validates inside its host, so a motion
-   * chip scrolls the motion panel (`#motion`) and hands focus to the HOST section.
-   * The declared constants are read rather than spelled again: the totality test
-   * asserts them, and a third copy here would let the code and the test disagree
-   * silently — the exact drift the vocabulary collapse exists to stop.
+   * Motion has no section of its own; it validates inside its Output host, so the
+   * two halves of a reveal point at DIFFERENT nodes: the scroll reaches the motion
+   * panel (`#motion`, where the field the user has to fix is), and the focus
+   * handoff goes to the host `<section>`, which is what `focusSection` can make
+   * focusable. Every other bucket makes those the same node.
+   *
+   * The host is derived BEFORE the branch, not inside it: the mapping is a property
+   * of the bucket, not of whether focus was asked for, and a motion reveal without
+   * focus (every ErrorStrip chip) is what exercises it. The declared constants are
+   * read rather than spelled again — the totality test asserts them, and a third
+   * copy here would let the code and the test disagree silently, the exact drift
+   * the vocabulary collapse exists to stop.
    */
   const reveal = useCallback(
     (section: string, focus = false) => {
+      const host = section === MOTION_ERROR_KEY ? MOTION_HOST_SECTION : section;
       revealSection(section);
-      if (focus) focusSection(section === MOTION_ERROR_KEY ? MOTION_HOST_SECTION : section);
+      if (focus) focusSection(host);
     },
     [focusSection],
   );
