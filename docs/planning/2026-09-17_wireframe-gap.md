@@ -1,7 +1,7 @@
 # The wireframe gap — what the owner drew, and what the editor actually is
 
 **Date:** 2026-09-17 · **Revised:** 2026-09-17 (owner stamped SG-D1, SG-D2, SG-D4, SG-D5; SG-D6 dissolved; SG-D8 raised)
-**Status:** **two open — SG-D7, and the staleness question in §8.4.** SG-D8 stamped; SG-D9 answered then partly superseded; SG-D10–SG-D14 recorded from the owner's run-gate correction (§8). CC3 dispatched; TS1 merged as `#469`.
+**Status:** **one decision open — SG-D7.** §8.4 answered by the owner 2026-09-17. SG-D8 stamped; SG-D9 answered then partly superseded; SG-D10–SG-D14 recorded from the owner's run-gate correction (§8). CC3 dispatched; TS1 merged as `#469`.
 **Verified against:** `origin/main` at `4876aa31`.
 **Source:** the owner's annotated wireframe of the campaign editor (two images, 2026-09-17), read against the shipped DOM of `/brief/new` captured from the owner's own browser the same day.
 **Related:** `2026-09-16_studio-editor.md` (D137–D140, SE0–SE5, TL1–TL7 — **drafted, never dispatched**), `2026-09-16_creative-first-chrome.md` (D141–D145, CC1 shipped), `2026-09-16_rail-timeline-surface.md` (TS1, in PR #469, **unmerged**), `DESIGN.md` §3 shell anatomy.
@@ -168,6 +168,7 @@ test "$(grep -rl 'aria-label="Seed"' apps/web/src --include='*.tsx' | grep -vc _
 | **SG-D12** | **`Validate` runs the validation and reveals the validation view.** |
 | **SG-D13** | **The segmented control grows to three: `editor │ yaml │ validate`.** This **revises SG-D4**, which had two positions. |
 | **SG-D14** | **The validation view carries a refresh icon** to re-run the validation. |
+| **SG-D15** | **Any update to the editor reverts the verb to `Validate`.** A prior validation does not survive an edit. Keyed on the `state` reference — see §8.4. |
 
 ### 8.2 Why this fits the existing principle rather than breaking it
 
@@ -190,21 +191,34 @@ Both surfaces already refuse to disable their verb, and say so:
 
 So two of the three get simpler by moving. **The third is a regression risk and the lane must pin it with a test.**
 
-### 8.4 The one thing this introduces: validation becomes stateful
+### 8.4 Validation becomes stateful — **answered**
 
-Today validation is **derived** — `validate.ts` recomputes from `state` on every render, so it is never stale by construction. *"Has not been validated"* and a **refresh** button both imply the opposite: a result that exists, can be re-run, and **can therefore go out of date**.
+Today validation is **derived**: `validate.ts` recomputes from `state` on every render, so it is never stale by construction. *"Has not been validated"* and a **refresh** button imply the opposite — a result that exists, can be re-run, and can go out of date.
 
-**The question that must be answered before SG9 is dispatched: after validating, then editing the brief, does the verb revert to `Validate`?** It must — otherwise `Generate` runs against a validation that no longer describes the document, which is precisely the class of defect Review existed to catch.
+**STAMPED (owner, 2026-09-17): any update to the editor hides `Generate` and surfaces `Validate` again.** A prior validation does not survive an edit.
 
-**Recommended mechanism, because the codebase already has it.** `BriefEditor.tsx:772` computes `previewKey = previewRailKey(...)` — a **content fingerprint** the rail already uses to decide whether anything it draws has changed. A validation result that stores the fingerprint it was computed against makes staleness **derived, not tracked**:
+#### The mechanism — and two wrong answers I proposed first
+
+The requirement is exact: validation is fresh iff nothing has changed since it ran. It took three attempts to key that correctly, and the two rejected keys are recorded because each looks right.
+
+**Rejected 1 — `previewRailKey` (my first recommendation).** Wrong because it is *deliberately* narrower than validation's input. `preview-props.ts:185-192` fingerprints `rawRailProps` + `previewFetchKey(brief, productId)` + the identity axis — the **look and the fetch inputs**, built by CC1/CC2 precisely so a look-preserving keystroke does **not** refetch. A change to the seed, to `minDistance`, or to a policy axis need not move it, and validation cares about all three. Keying on it would leave validation looking **fresh after an edit that changed validity** — the exact bug this decision exists to prevent.
+
+**Rejected 2 — the `draftBrief` projection.** Closer, and still wrong. `toBrief(state)` is what `Save` sends, so an **invalid** value can be dropped or clamped on the way out: type a bad `count`, and the projection may be byte-identical while validity changed. Same failure, one step subtler.
+
+**Adopted — the `state` reference itself.** Validation is a pure function of `state`, so it is fresh exactly while `state` is unchanged:
 
 ```
-current fingerprint === stored fingerprint  →  validated   →  show Generate
-current fingerprint !== stored fingerprint  →  stale       →  show Validate
-no stored result                            →  unvalidated →  show Validate
+validatedState === state   →  validated    →  Generate
+validatedState !== state   →  stale        →  Validate
+no stored result           →  unvalidated  →  Validate
 ```
 
-No invalidation bookkeeping, no state machine to get wrong, and it is the same monotonic-token discipline used for the scrub position and the headline pool. **Do not add a boolean `isValidated`** — a flag has to be cleared by every writer that can invalidate it, and the writer that forgets is the bug.
+Reference equality is sufficient and needs no fingerprint, no hash and no flag. Two properties of the existing reducer make it exact rather than approximate:
+
+- **A real change returns a new object**, so any edit flips the comparison — which is the owner's requirement, verbatim.
+- **A refused or no-op action deliberately stays identity-equal** (`editor-state.ts:744`, `:1155-1156` — *"A flip to the same mode changed nothing — keep the state identity-equal, the way a refused action stays identity-equal"*). So a rejected keystroke does **not** invalidate a good validation, which is correct: nothing changed.
+
+**Explicitly not a boolean `isValidated`.** A flag must be cleared by every writer that can invalidate it, and the writer that forgets is the bug. There is no such flag in `editor-state.ts` today and none should be added.
 
 ### 8.5 Consequences for lanes already recorded
 
@@ -216,7 +230,7 @@ No invalidation bookkeeping, no state machine to get wrong, and it is the same m
 
 | Lane | Owns | Depends on | Ships |
 |---|---|---|---|
-| **SG9** | `Header.tsx`, the editor toolbar | SG-D10–SG-D12, **§8.4 answered** | **Generate leaves the header; the toolbar gains the `Validate` → `Generate` slot.** Must preserve `guardedAction`'s whole-gesture contract and pin it with a test. |
+| **SG9** | `Header.tsx`, the editor toolbar | SG-D10–SG-D12, SG-D15 | **Generate leaves the header; the toolbar gains the `Validate` → `Generate` slot.** Must preserve `guardedAction`'s whole-gesture contract and pin it with a test. |
 | **SG10** | the validation view | SG-D12–SG-D14, SG5 | **The validation view** — every error including the ones shown inline, each row a control that reveals its field, plus the refresh. Reached by `validate` on the segmented control **and** by pressing `Validate`. |
 
-**Order.** §8.4 answered → **SG9 ‖ SG10** (disjoint: one is the toolbar, one is a new view), both after **SG1** retires `guided`.
+**Order.** **SG9 ‖ SG10** (disjoint: one is the toolbar, one is a new view), both after **SG1** retires `guided`.
