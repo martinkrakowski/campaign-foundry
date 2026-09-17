@@ -87,6 +87,18 @@ const RunBriefProbe = () => {
   return <span data-testid="run-brief">{brief.id}</span>;
 };
 
+/**
+ * The EDITOR column's own status line (D38), which is one — not the rail's.
+ *
+ * TS1 gave the timeline tape its own `role="status"` sentence (rail-timeline plan
+ * §3.5), so a bare `getByRole("status")` on a motion draft now finds two live
+ * regions in two different landmarks. Filtering by landmark keeps what these
+ * assertions have always meant — the refusal the action bar owes, in the column,
+ * exactly once — rather than weakening them to "some status somewhere says it".
+ */
+const editorStatuses = () =>
+  screen.getAllByRole("status").filter((el) => el.closest('[role="complementary"]') === null);
+
 const brief = (id: string) => ({
   schemaVersion: 1,
   template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
@@ -2016,8 +2028,8 @@ describe("BriefPage — capabilities and motion", () => {
 
     // the Output section already shows this as a field error; the notice is the
     // separate status the action bar owes after applying
-    const notice = await screen.findByRole("status");
-    expect(notice.textContent).toBe(messages.statusApplyRefusal);
+    await waitFor(() => expect(editorStatuses()).toHaveLength(1));
+    expect(editorStatuses()[0].textContent).toBe(messages.statusApplyRefusal);
   });
 
   test("the capabilities are refetched when the window regains focus", async () => {
@@ -2603,9 +2615,10 @@ describe("BriefPage — capabilities and motion", () => {
 
     // Corrected for D35: "Apply to run" is retired — Save is the verb that commits,
     // and having committed, it owes the user the same motion refusal Apply gave (D7).
-    await waitFor(() =>
-      expect(screen.getByRole("status").textContent).toBe(messages.statusApplyRefusal),
-    );
+    await waitFor(() => {
+      expect(editorStatuses()).toHaveLength(1);
+      expect(editorStatuses()[0].textContent).toBe(messages.statusApplyRefusal);
+    });
   });
 
   test("an incompatible format/platform pair is reported in the editor, not only by the API", async () => {

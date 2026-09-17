@@ -584,14 +584,63 @@ A capturing test that the committed frame equals the encoded frame **already exi
 
 Each fence exits 0 **while the gap is still open**. `yarn plan:verify` runs them. They probe a mechanism, not a name.
 
-```premise TS1
-# The rail still has no campaign TimelineTape module. PreviewDock still owns
-# the only playhead range input in apps/web campaign components. TS1 is the
-# file plus the lift; either one landing alone leaves this true, so the
-# probe is the module's absence -- CC5's own TL1 fence already covers the
-# useState pair in PreviewDock and is not duplicated here. Measured: ~4 ms.
-! test -f apps/web/src/components/campaign/TimelineTape.tsx
-```
+**`premise TS1` retired — TS1 shipped in this PR, with CC5 in the same diff** (§4:
+"TS1 may share a PR with CC5 if the diff stays reviewable"). Its probe was the
+module's absence, and `apps/web/src/components/campaign/TimelineTape.tsx` now
+exists, so `plan:verify` no longer tracks it. CC5's own half is retired where it
+lived: `premise TL1` in `2026-09-16_studio-editor.md`.
+
+**Where the implementation departs from this document, and why.** Two places, both
+recorded in the PR body:
+
+1. **§5 puts `scrubSec` / `committedSec` in `BriefEditor`'s body; they ship one
+   level down, in a `PlayheadHost` component in that same file.** §4's own
+   acceptance (b) is unsatisfiable in the body: `renderStepCard` builds the step
+   form inline and no section is `memo`-wrapped, so a second that moves on every
+   pointermove re-renders the whole editor tree per frame. The main column reaches
+   the host as `children`, so React's element-identity bailout skips it. Ownership
+   is still singular and still in `BriefEditor.tsx`, and every literal §5 makes
+   load-bearing is unchanged. **TS2's section host lives inside that bailed-out
+   subtree and will need its own slot or a subscription.**
+2. **§3.5's `PlayheadSlider` sketch is the stale draft §3.3a corrects.** It shows
+   `value={committedSec}`, `onInput` live and `onChange` committing — the exact
+   "commit on change" §3.3a proves wrong in React, and a controlled range whose
+   value is the committed second snaps its thumb back mid-drag. The shipped
+   slider follows §3.3a, §8 and §10.2: `value` is the live second, `onChange` is
+   live, and the commit is `onPointerUp` **and** `onKeyUp`.
+3. **`xFor` spells the label column as a px constant, not `var(--tt-label)`.**
+   happy-dom drops any `calc()` containing a `var()` outright, which makes §8's
+   own proof for this lane — "a string match on the `calc(...)`" — impossible to
+   write with that spelling. The number comes from the same exported constant the
+   custom property is set from, so there is no second source of truth. `--tt-label`
+   is still read, by the lane grid's `grid-cols-[var(--tt-label)_1fr]`;
+   `--tt-end-pad`, `--tt-px` and `--tt-duration` ship on the root because §3.2
+   declares them and the TL2–TL6 paint-overs will want them, but nothing reads
+   them today.
+
+Two more things a reviewer should weigh rather than assume:
+
+- **§6's table says the playhead's `aria-valuenow` is `committedSec`.** The shipped
+  slider binds `value={scrubSec}`. The two are equal at rest — a commit writes both
+  seconds — and differ only mid-drag, which is when a native range should announce
+  the thumb. Binding the committed second instead would snap the thumb back on
+  every re-render and kill the drag (§3.3a).
+- **Two range controls now live in the rail**: the dock's shipped scrub (VE-D5,
+  `previewScrubLabel`) and the tape's "Playhead". §3.5's prose calls the dock's
+  range "the accessible playhead" while §3.5's own `PlayheadSlider` puts one in the
+  tape's footer, and §6/§8 name the tape's. Nothing in this plan retires the dock's
+  control, and deleting a shipped, tested surface is not TS1's scope — so both ship,
+  writing the SAME lifted second so they cannot disagree. **This wants an owner's
+  decision**: retire the dock's range in the rail host now that the tape is there,
+  or keep it as the compact scrub for when TS2 puts the tape under Copy.
+
+**Fields of §3.4's `TimelineTapeProps` that TS1 does not ship**, each with the
+lane that adds it, so no dead prop lands: `encodedDurationSec`, `hasAudio` and
+`audioLabel` (TL4 / the audio-clip lane), `background` on a beat (TL2's scene
+clips), `keyBeatIndex` (TS-Q1's recommendation is the form alone in TS1),
+`transition` and `previewedDurationSec` (the fade band, which §11 defers to a
+paint-over that can caption it). `weight` is absent because the windows come from
+`resolveTimeline`, which is the point.
 
 ```premise TS2
 # D146's section host is absent: TimelineSection does not render a tape.

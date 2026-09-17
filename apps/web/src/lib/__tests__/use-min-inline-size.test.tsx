@@ -3,6 +3,7 @@ import { useRef } from "react";
 import { render, act } from "@testing-library/react";
 import {
   useMinInlineSize,
+  useInlineWidth,
   initialMinInlineSizeSeed,
   PREVIEW_RAIL_MIN_INLINE_PX,
 } from "../use-min-inline-size";
@@ -138,5 +139,63 @@ describe("useMinInlineSize", () => {
     vi.stubGlobal("ResizeObserver", undefined);
     const { getByTestId } = render(<Probe minPx={PREVIEW_RAIL_MIN_INLINE_PX} />);
     expect(getByTestId("probe").textContent).toBe("wide");
+  });
+});
+
+describe("useInlineWidth — the measured width (TS1's fit)", () => {
+  /** Reports the hook's answer, with a ref a test can leave unattached. */
+  const WidthProbe = ({ attach = true }: { attach?: boolean }) => {
+    const ref = useRef<HTMLDivElement>(null);
+    const width = useInlineWidth(ref);
+    return (
+      <div ref={attach ? ref : undefined} data-testid="width">
+        {width}
+      </div>
+    );
+  };
+
+  test("answers 0 until something measures it — never a guessed width", () => {
+    vi.stubGlobal("ResizeObserver", FakeResizeObserver);
+    const { getByTestId } = render(<WidthProbe />);
+    // There is no `window.innerWidth` seed here on purpose: a WIDTH taken from
+    // the viewport would be wrong by the shell's sidebar and would show as a
+    // visible re-fit on the first real measurement.
+    expect(getByTestId("width").textContent).toBe("0");
+  });
+
+  test("a real measurement is reported, and a zero one is ignored", () => {
+    vi.stubGlobal("ResizeObserver", FakeResizeObserver);
+    const { getByTestId } = render(<WidthProbe />);
+    const observer = FakeResizeObserver.instances[0];
+
+    observer.fire(640);
+    expect(getByTestId("width").textContent).toBe("640");
+
+    // Zero is "not laid out yet" — a collapse to nothing would be a layout the
+    // caller should re-fit for, and this element cannot have one.
+    observer.fire(0);
+    expect(getByTestId("width").textContent).toBe("640");
+  });
+
+  test("an unattached ref observes nothing rather than throwing", () => {
+    vi.stubGlobal("ResizeObserver", FakeResizeObserver);
+    const { getByTestId } = render(<WidthProbe attach={false} />);
+    expect(FakeResizeObserver.instances.length).toBe(0);
+    expect(getByTestId("width").textContent).toBe("0");
+  });
+
+  test("an environment with no ResizeObserver at all is answered, not crashed", () => {
+    vi.stubGlobal("ResizeObserver", undefined);
+    const { getByTestId } = render(<WidthProbe />);
+    expect(getByTestId("width").textContent).toBe("0");
+  });
+
+  test("the observer is disconnected on unmount", () => {
+    vi.stubGlobal("ResizeObserver", FakeResizeObserver);
+    const view = render(<WidthProbe />);
+    const observer = FakeResizeObserver.instances[0];
+    expect(observer.disconnected).toBe(false);
+    view.unmount();
+    expect(observer.disconnected).toBe(true);
   });
 });

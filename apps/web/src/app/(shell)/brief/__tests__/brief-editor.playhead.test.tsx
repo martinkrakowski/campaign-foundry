@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, vi } from "vitest";
-import { createElement, type ComponentType } from "react";
+import { createElement, memo, type ComponentType } from "react";
 import { screen, waitFor, fireEvent } from "@testing-library/react";
 import { renderWithRun as renderWithShell, json } from "@/__tests__/helpers";
 import { API } from "@/lib/run-context";
@@ -9,6 +9,7 @@ import { templateFromCanonical } from "@campaignfoundry/CampaignOrchestration/br
 import { DEFAULT_CAMPAIGN_TYPE } from "@campaignfoundry/CampaignOrchestration/campaign-types";
 import * as messages from "@/components/campaign/messages";
 import { BriefEditor } from "@/components/campaign/BriefEditor";
+import type { TimelineTapeProps } from "@/components/campaign/TimelineTape";
 
 /**
  * CC5's cost criterion, through the editor that actually ships (the plan's §4
@@ -51,6 +52,27 @@ vi.mock("@/components/campaign/sections", async (importOriginal) => {
     OutputSection: counted(actual.OutputSection),
     PolicySection: counted(actual.PolicySection),
   };
+});
+
+/**
+ * Renders of the tape ITSELF, behind a `memo` with the default shallow compare.
+ *
+ * The real component is underneath: what this wrapper adds is a second memo
+ * boundary over exactly the props `BriefEditor` passes, so "the tape re-rendered"
+ * becomes a number. The plan's revision note is why it exists — CC1 keyed the
+ * rail's feed on a content fingerprint precisely so a look-preserving keystroke
+ * costs nothing, and a new component whose props are freshly allocated per keystroke
+ * would re-open that cost through the back door.
+ */
+const tapeRenders = vi.hoisted(() => ({ count: 0 }));
+
+vi.mock("@/components/campaign/TimelineTape", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/components/campaign/TimelineTape")>();
+  const Counting = memo(function CountingTape(props: TimelineTapeProps) {
+    tapeRenders.count += 1;
+    return createElement(actual.TimelineTape, props);
+  });
+  return { ...actual, TimelineTape: Counting };
 });
 
 /**
@@ -177,6 +199,7 @@ describe("the playhead's cost (CC5, plan §4 acceptance (b))", () => {
     localStorage.setItem("cf:brief-picked", "1");
     localStorage.setItem("cf:presentation", "guided");
     formRenders.count = 0;
+    tapeRenders.count = 0;
   });
 
   test("a drag issues no frame request and does not re-render the step form", async () => {
@@ -252,5 +275,88 @@ describe("the playhead's cost (CC5, plan §4 acceptance (b))", () => {
     // the encoder renders t = 1 on every clip's final frame (VE-D6).
     expect(cell?.atSec).toBe(DURATION_SEC);
     expect(cell?.durationSec).toBe(DURATION_SEC);
+  });
+});
+
+describe("TS1 — the tape in the rail (plan §4 acceptance (e), §5)", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    localStorage.setItem("cf:brief-picked", "1");
+    localStorage.setItem("cf:presentation", "guided");
+    tapeRenders.count = 0;
+  });
+
+  test("a moving draft mounts exactly one tape, inside the rail's landmark", async () => {
+    await mountScrubbing();
+    const rail = screen.getByRole("complementary", { name: messages.previewLegend });
+    const playheads = screen.getAllByLabelText(messages.tapePlayheadName);
+    expect(playheads).toHaveLength(1);
+    expect(rail.contains(playheads[0])).toBe(true);
+    // The tape's own lanes, drawn from the brief's beats through resolveTimeline.
+    expect(screen.getByRole("button", { name: messages.tapeBeatName(1) })).toBeTruthy();
+    expect(screen.getByRole("button", { name: messages.tapeBeatName(2) })).toBeTruthy();
+    expect(screen.getByRole("button", { name: messages.tapeVideoClip })).toBeTruthy();
+  });
+
+  test("a brief with no motion mounts no tape at all", async () => {
+    const stillBrief = {
+      ...tapeBrief,
+      id: "still",
+      variation: {
+        ...tapeBrief.variation,
+        axes: { ...tapeBrief.variation.axes, motion: [] as string[] },
+      },
+      output: { formats: ["static"], platforms: ["linkedin"] },
+    };
+    vi.mocked(globalThis.fetch).mockImplementation((url, init) => {
+      const u = String(url);
+      const method = (init?.method ?? "GET").toUpperCase();
+      if (method === "GET" && u === `${API}/campaigns/capabilities`) {
+        return Promise.resolve(json({ motion: true }));
+      }
+      if (method === "GET" && u.startsWith(`${API}/campaigns/briefs`)) {
+        return Promise.resolve(
+          json({ briefs: [{ file: "still.yaml", revision: "r1", brief: stillBrief }] }),
+        );
+      }
+      return Promise.resolve(json({}, 200));
+    });
+    renderWithRun(<BriefEditor briefId="still" />);
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("still"),
+    );
+    await settle();
+
+    // The rail is there — the still creative is still previewed — but there are
+    // no seconds to draw, so neither the tape nor the dock's own range mounts.
+    expect(screen.getByRole("complementary", { name: messages.previewLegend })).toBeTruthy();
+    expect(screen.queryByLabelText(messages.tapePlayheadName)).toBeNull();
+    expect(screen.queryByLabelText(messages.previewScrubLabel)).toBeNull();
+    expect(screen.queryByText(messages.tapeLegend)).toBeNull();
+    expect(tapeRenders.count).toBe(0);
+  });
+
+  test("a look-preserving keystroke does not re-render the tape (CC1/CC2, through a new component)", async () => {
+    await mountScrubbing();
+    expect(tapeRenders.count).toBeGreaterThan(0);
+    const before = tapeRenders.count;
+
+    // `targetAudience` rides in no frame request and appears nowhere on the tape.
+    // If any prop the tape is handed were freshly allocated per keystroke — an
+    // inline arrow, or a `beats` array rebuilt outside its memo — this climbs.
+    const audience = screen.getByLabelText("Target Audience") as HTMLInputElement;
+    fireEvent.click(audience);
+    audience.focus();
+    fireEvent.change(audience, { target: { value: "a new audience" } });
+    await settle();
+
+    expect(tapeRenders.count).toBe(before);
+  });
+
+  test("a scrub DOES re-render the tape — the sibling proof that the test above is not vacuous", async () => {
+    await mountScrubbing();
+    const before = tapeRenders.count;
+    fireEvent.change(scrub(), { target: { value: "2" } });
+    expect(tapeRenders.count).toBeGreaterThan(before);
   });
 });

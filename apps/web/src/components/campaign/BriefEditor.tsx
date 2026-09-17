@@ -50,6 +50,8 @@ import {
   purgeDraftFromStorage,
   blankBrief,
   slugify,
+  asCopyTimeline,
+  timelineDurations,
 } from "@/components/campaign/editor-state";
 import { useEditorHistory, useHistoryKeys } from "@/components/campaign/editor-history";
 import {
@@ -109,6 +111,8 @@ import { PreviewDock, PreviewRailEmptyState, type PlayheadState } from "./Previe
 import { previewDockProps, previewRailKey } from "./preview-props";
 import { useMinInlineSize, PREVIEW_RAIL_MIN_INLINE_PX } from "@/lib/use-min-inline-size";
 import { DEFAULT_DURATION_SEC } from "@campaignfoundry/CampaignOrchestration/variation-defaults";
+import { resolveTimeline } from "@campaignfoundry/CampaignOrchestration/copy-timeline";
+import { TimelineTape, beatUnderFloor } from "@/components/campaign/TimelineTape";
 import * as messages from "./messages";
 import type { CampaignMode } from "@/components/campaign/editor-state";
 
@@ -744,6 +748,30 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   // of `previewFetchKey`'s content fingerprint, so `previewBrief` moves whenever
   // the axis does.
   const previewDurationSec = previewBrief.variation?.axes?.duration?.[0] ?? DEFAULT_DURATION_SEC;
+  /**
+   * TS1 — the tape's projection of the copy timeline, memoised on the three
+   * things it reads. The windows come from `resolveTimeline` — the compositor's
+   * own function, the rule `ProportionBar` already lives by — so the tape never
+   * divides a weight and the two surfaces cannot disagree about the same beat.
+   *
+   * The floor is evaluated at the SHORTEST duration the axis can draw, not at the
+   * previewed one (`studio-editor.md` §4.2), and with the domain's own slack:
+   * `3 × MIN_DWELL_SEC` is `3.5999999999999996`, so a strict comparison marks a
+   * beat the validator accepts.
+   */
+  const shortestDurationSec = Math.min(...timelineDurations(state));
+  const tapeBeats = useMemo(
+    () =>
+      resolveTimeline(asCopyTimeline(state.timeline), previewDurationSec).map((beat) => ({
+        text: beat.text,
+        startT: beat.startT,
+        endT: beat.endT,
+        underFloor: beatUnderFloor((beat.endT - beat.startT) * shortestDurationSec),
+      })),
+    [state.timeline, previewDurationSec, shortestDurationSec],
+  );
+  /** D139 — which beat the operator has picked out. Ephemeral, never a document field. */
+  const [selectedBeatIndex, setSelectedBeatIndex] = useState<number | null>(null);
   // CC2 — the JS-side mirror of the row's own `@container(min-width:56rem)`
   // query (§6 question 1): the CSS hides the rail below the breakpoint, but
   // the element stays mounted and would keep fetching without this. Observes
@@ -1803,11 +1831,32 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
               // (inside `PreviewDock` → `PreviewFrame`) treats an undefined brief
               // exactly like an unspecified look and never builds a request, so a
               // rail nobody can see never reaches the network.
-              <PreviewDock
-                {...railProps}
-                brief={isRailWideEnough ? previewBrief : undefined}
-                playhead={playhead}
-              />
+              <>
+                <PreviewDock
+                  {...railProps}
+                  brief={isRailWideEnough ? previewBrief : undefined}
+                  playhead={playhead}
+                />
+                {/* TS1 — the time surface, under the creative it belongs to. It
+                  mounts ONLY for a moving draft: a still brief has no seconds to
+                  draw, and a tape over a static creative would invite a scrub
+                  that means nothing. `hasMotion` is the rail's own look, so the
+                  tape and the dock's range appear and disappear together. */}
+                {railProps.motion !== undefined ? (
+                  <TimelineTape
+                    durationSec={playhead.durationSec}
+                    beats={tapeBeats}
+                    shortestDurationSec={shortestDurationSec}
+                    scrubSec={playhead.scrubSec}
+                    committedSec={playhead.committedSec}
+                    selectedBeatIndex={selectedBeatIndex}
+                    onScrubLive={playhead.onScrubLive}
+                    onScrubCommit={playhead.onScrubCommit}
+                    onSelectBeat={setSelectedBeatIndex}
+                    host="rail"
+                  />
+                ) : null}
+              </>
             ) : (
               // D142 — the empty state before the first product has an id: names
               // the missing field, never "add a product" (the Products step
