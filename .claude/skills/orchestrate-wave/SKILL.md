@@ -27,8 +27,10 @@ where they differ; it deliberately does not copy them, so they cannot drift apar
   restate them, because it drifted once already: it named `agy gemini-3.8-flash-high` as the
   implementer long after the roster moved to `openrouter/qwen/qwen3.8-flash` primary with gemini as
   the reserve. Whatever the seat, **record the worktree tip first** and watch the provider's quota.
-  Reviewers stay in-house: a second `Agent` that is **not** the implementer. `scripts/dispatch-lane.sh`
-  is **retired** — its detached launch killed lanes (below); it stays only to read old wave logs.
+  Reviewers stay in-house: a second `Agent` that is **not** the implementer. There is **no lane
+  launcher**: `scripts/dispatch-lane.sh` was deleted on 2026-09-17 because its detached launch killed
+  the lanes it started (the mechanism is in the Implement stage, below). Launch every lane yourself
+  and emit its event in the call immediately before — `scripts/wave-event.sh` is the emitter.
 
 ## Naming waves and lanes
 
@@ -376,17 +378,22 @@ that did not happen.
    `scripts/wave-event.sh` are different tools by construction, so a rule demanding one call is
    unfollowable, and an unfollowable rule teaches that rules are optional. The property that matters
    is that **no lane is ever launched without its event already written**; the adjacency is how you
-   get there. **Do not reach for `dispatch-lane.sh` to get atomicity**: it emits and
-   launches in one call, but its detached launch is the script this skill already retires two
-   paragraphs below, and it killed every lane it started on 2026-09-13 — and again on 2026-09-16,
-   when both lanes dispatched through it wrote 0 bytes with no process while every directly-launched
-   lane that day worked. Adjacency from a direct launch is the supported shape; the script's
-   atomicity is not worth a dead lane. On 2026-09-16 four of five lanes ran through the `Agent`
-   tool or a direct CLI rather than `dispatch-lane.sh`, the only path that emits for you (and a path
-   this skill retires for other reasons),
-   so the wave-status page showed **one event for the whole wave** and 30+ events had to be
-   backfilled afterwards with a note that their timestamps were recording times, not event times.
-   A stage with no event did not happen, and a backfilled one cannot be trusted for timing.
+   get there. **There is no launcher that emits for you, and there will not be one.** A script that
+   emitted and launched in one call existed until 2026-09-17 and was deleted: it killed every lane it
+   started on 2026-09-13, and again on 2026-09-16, when both lanes dispatched through it wrote 0 bytes
+   with no process while every directly-launched lane that day worked. **The mechanism, so nobody
+   rebuilds it:** `nohup` only ignores `SIGHUP` and `disown` only drops the shell's job-table entry —
+   neither calls `setpgid`, so a lane launched that way stays in the **caller's process group**. A
+   launcher that then *waits* holds the tool call open past its timeout, and the harness signals the
+   whole group, taking the lanes with it. A direct `nohup … & disown` survives precisely because the
+   tool call **returns immediately** and a finished call is never group-killed. Atomicity bought this
+   way costs the lane; adjacency from a direct launch is the supported shape.
+
+   Emission is therefore yours. On 2026-09-16 four of five lanes ran through the `Agent` tool or a
+   direct CLI and nobody emitted for them, so the wave-status page showed **one event for the whole
+   wave** and 30+ events had to be backfilled afterwards with a note that their timestamps were
+   recording times, not event times. A stage with no event did not happen, and a backfilled one
+   cannot be trusted for timing.
 
    Emit as you go (`scripts/wave-event.sh`): `dispatch started` per lane just before its launch,
    carrying the seat that runs it in `--detail` — `--detail '{"seat":"<implementer model>"}'` — because
@@ -394,8 +401,8 @@ that did not happen.
    **unknown**. The seat is a property of the lane, so later stages need not repeat it.
    **When the seat is an external CLI** (the `openrouter/` roster in `references/cast.md`), launch it
    directly from a tool call — `nohup zsh -c "cd <worktree> && <cli> … \"\$(cat <ABSOLUTE brief>)\" >
-   <log> 2>&1; echo \"EXIT \$?\" >> <log>" < /dev/null > /dev/null 2>&1 & disown` — and never through
-   `scripts/dispatch-lane.sh`, whose detached launch killed every lane it started on 2026-09-13. The
+   <log> 2>&1; echo \"EXIT \$?\" >> <log>" < /dev/null > /dev/null 2>&1 & disown` — from a tool call
+   that returns straight away, never from a wrapper that launches and then waits (see above). The
    brief path **must be absolute**: the command `cd`s into the worktree first and `briefs/` exists only
    in the main checkout. The template assumes paths without spaces or glob characters, true of this
    repo's worktrees; quote them for the inner shell if that ever changes. Liveness differs by CLI:

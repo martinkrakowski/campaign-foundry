@@ -54,11 +54,11 @@ export const MAX_TAIL_KB = 1024;
  * The evidence rule for a lane, stated once because everything downstream
  * rests on it: **evidence creates a lane; a log only ever attaches to one.**
  * A lane exists because something *says* it does — an event in that
- * directory's `events.jsonl` naming it. `dispatch-lane.sh` emits as part of
- * dispatching, so a lane launched through it is named by its own first event;
- * a runner that emits nothing keeps its log, its process and its silence to
- * itself, and the page says nothing about it — invisible is honest where a
- * phantom row is not.
+ * directory's `events.jsonl` naming it. The orchestrator emits that event
+ * (`scripts/wave-event.sh`) in the call immediately before it launches the
+ * lane, so a dispatched lane is named by its own first event; a runner that
+ * emits nothing keeps its log, its process and its silence to itself, and the
+ * page says nothing about it — invisible is honest where a phantom row is not.
  *
  * A `.log` file never buys a row. Its name is a caller's free-form token —
  * this repository has genuinely run lanes named `x13-fix`, `x16-fix2` and
