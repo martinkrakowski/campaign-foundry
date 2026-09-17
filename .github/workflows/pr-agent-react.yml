@@ -1,0 +1,269 @@
+name: "PR-Agent React Effects Review"
+
+# An LLM reviewer for React effect discipline in `apps/web` — the fourth PR-Agent reviewer.
+# It applies the "War on useEffect" position: `useEffect` is a primitive for synchronising
+# with systems OUTSIDE React, never a general-purpose reaction mechanism. Effects that mirror
+# state, fire business logic when a value changes, or chain into one another make data flow
+# untraceable for a human reviewer and for the next agent editing the file.
+#
+# WHY IT EXISTS, AND WHAT WOULD MAKE IT WORTHLESS. Nothing in this repository checks this
+# today: `lint` has no rule against raw `useEffect`, the UI reviewer (pr-agent.yml) is pointed
+# at DESIGN.md contracts, and CodeRabbit is generic. The failure mode to guard against is the
+# one pr-agent-arch.yml names: a bot that reports what a deterministic tool already catches
+# trains people to skim it, and a bot people skim is how a real finding gets missed. So this
+# reviewer must earn every comment by naming a traceability or correctness consequence, not
+# by counting effects.
+#
+# CALIBRATED TO THIS REPOSITORY, DELIBERATELY, AND THIS IS THE PART TO RE-READ BEFORE TUNING:
+#
+#   * `apps/web` carries ~83 `useEffect`/`useLayoutEffect` call sites today (measured
+#     2026-09-16). This reviewer sees ONLY the PR diff, and is instructed to judge what the
+#     diff adds or changes. A reviewer that opened by demanding 83 rewrites would be noise on
+#     its first run and ignored by its third.
+#   * NONE of TanStack Query, SWR, Zustand, Jotai, Redux Toolkit, React Hook Form or Zod is
+#     installed. The canonical "War on useEffect" answers name those libraries; here they are
+#     unactionable, and adding a dependency is the owner's decision, never a reviewer's. The
+#     instructions therefore require fixes expressible with what is already here — derive
+#     during render, `useMemo`, move the work into the event handler that caused it, lift
+#     state — and allow a library to be NAMED AT MOST ONCE, as an explicitly flagged
+#     suggestion, never as the fix.
+#   * This app is a client-heavy editor. Genuine external synchronisation exists and is
+#     CORRECT: `AbortController` fetches, a `ResizeObserver` width probe, `localStorage`
+#     reads, focus and scroll management. Flagging those is the quickest way to make this
+#     reviewer useless.
+#
+# An ESLint `no-restricted-syntax` ban on raw `useEffect` is the deterministic version of
+# this check and would be strictly better. It is NOT proposed here because it would fail on
+# ~83 existing sites the moment it landed; it becomes possible after the effect count in
+# `apps/web` comes down, and that is its own lane, not a reviewer setting.
+#
+# OPERATIONAL SCAFFOLDING IS IDENTICAL TO pr-agent.yml AND pr-agent-api.yml BY CONSTRUCTION —
+# the digest pin, the concurrency key, the did-it-actually-run guard. Every one of those
+# blocks records a failure that was actually hit; a change to one is a change to all four
+# files. Read pr-agent.yml's comments for the reasoning, which is not repeated here.
+#
+# Config in .pr_agent.toml is read from the DEFAULT BRANCH and is SHARED by all four
+# workflows. Per-reviewer differences live in this file's env block.
+
+on:
+  pull_request:
+    # `synchronize` removed (2026-09-03): re-reviewing every push produced the
+    # finding-decay loop — round one found real defects, round three posted style
+    # opinions and re-raised already-refuted findings verbatim. One review per PR
+    # lifecycle; a human can still summon a fresh pass with /improve via pr-agent.yml.
+    types: [opened, reopened, ready_for_review]
+    # D4: a CSS-only PR must not pay for three LLM reviews.
+    paths:
+      # Extension-scoped, not the whole of `apps/web`. D4 — "a CSS-only PR must not pay for
+      # three LLM reviews" — is quoted in this file's own header, and `apps/web/**` breaks it:
+      # a PR touching only Tailwind classes, an SVG, a JSON fixture or a config file cannot
+      # contain a React effect, so a model call on it buys nothing. Only TS and TSX can carry
+      # the defect classes below. Caught in review of this very PR, which is the D4 violation
+      # arriving in the file that cites D4.
+      - "apps/web/**/*.ts"
+      - "apps/web/**/*.tsx"
+  # NOTE the deliberate absence of `issue_comment`, which pr-agent.yml does have.
+  #
+  # GitHub has no `paths` filter for issue_comment. Wiring the command path here would mean
+  # a single `/improve` on ANY pull request — including one that changes no `apps/web` file at all
+  # — fires every reviewer, which is precisely the cost D4 exists to avoid. The plan's
+  # P1.2 named the command path before that interaction was worked through.
+  #
+  # The cost of leaving it out is covered by `synchronize` above, not by "Re-run jobs":
+  # re-running replays the ORIGINAL head SHA, so it re-reviews code that was already
+  # reviewed and says nothing about commits pushed since. Without `synchronize` a defect
+  # pushed after the PR opened would never be seen by this reviewer at all, and unlike
+  # pr-agent.yml there is no `/improve` fallback to compensate.
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+# Prefixed `pr-agent-react-` so this reviewer has its OWN group. D1: a rate-limited or failing
+# React review must not cancel the UI, API or architecture one. The keying by what the run produces and by sender
+# type is carried from pr-agent.yml; with no issue_comment trigger only the 'improve' arm is
+# reachable here, and it is kept in full so the three files stay diffable against each other.
+concurrency:
+  group: >-
+    pr-agent-react-${{ github.event.pull_request.number || github.event.issue.number
+    }}-${{ ((github.event_name == 'pull_request'
+    || github.event.comment.body == '/improve'
+    || startsWith(github.event.comment.body, '/improve '))
+    && 'improve')
+    || ((github.event.comment.body == '/review'
+    || startsWith(github.event.comment.body, '/review '))
+    && 'review')
+    || 'other' }}-${{ github.event.sender.type }}
+  cancel-in-progress: true
+
+jobs:
+  pr_agent_react:
+    name: "PR-Agent React discipline review"
+    if: >-
+      github.event.sender.type != 'Bot'
+      && github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: "Stamp run start"
+        id: started
+        run: echo "at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+      - name: "PR Agent"
+        uses: docker://pragent/pr-agent@sha256:b81235c3bddc551939a1feca8926f4b6e8abcec2ae5bf4620424f8f56dd9cb93 # 0.42.0-github_action
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENROUTER__KEY: ${{ secrets.OPENROUTER_KEY }}
+          config.restricted_mode: "true"
+          config.model: "openrouter/inception/mercury-2"
+          config.fallback_models: '["openrouter/anthropic/claude-haiku-4.5"]'
+          config.custom_model_max_tokens: "128000"
+          config.max_model_tokens: "70000"
+          # Every entry verified to exist. A missing file is SKIPPED, not fatal, so a stale
+          # list is a silent way to ship a reviewer with less context than intended.
+          # DESIGN.md is deliberately absent: it is the UI reviewer's context (pr-agent.yml),
+          # and handing it to this one invites duplicate contract findings on a diff this
+          # reviewer is meant to read for DATA FLOW. `.agents/architecture.md` is absent for
+          # the same reason — it belongs to the architecture reviewer.
+          config.repo_context_files: '["AGENTS.md", ".agents/testing.md", "best_practices.md"]'
+          config.repo_context_max_lines: "3000"
+          config.ai_timeout: "600"
+          pr_reviewer.require_ticket_analysis_review: "false"
+          github_action_config.auto_review: "false"
+          github_action_config.auto_describe: "false"
+          github_action_config.auto_improve: "true"
+          github_action_config.pr_actions: '["opened", "reopened", "ready_for_review"]'
+          pr_code_suggestions.extra_instructions: |
+            You are the React effect-discipline reviewer for campaign-foundry's `apps/web`.
+            Your subject is data flow: can a human, or the next agent to edit this file, trace
+            what causes what? Find defects; do not summarise the PR, and do not count effects.
+
+            THE POSITION YOU ENFORCE. `useEffect` synchronises React with something OUTSIDE
+            React. It is not a reaction mechanism. An effect that exists to keep one piece of
+            React state agreeing with another piece of React state is a bug in the shape of a
+            feature: it adds a render, it can tear (the two disagree for one commit), and it
+            hides the cause of a change from anyone reading the handler that actually caused
+            it.
+
+            THE FOUR SMELLS, IN THE ORDER THEY MATTER HERE:
+
+            1. MIRROR STATE. An effect whose body is `setX(...)` in response to a prop or
+               another state value. The value is derived, so derive it during render, or with
+               `useMemo` when it is genuinely expensive. Failure scenario to state: name the
+               commit in which the mirror and its source disagree, and what the user sees in
+               that frame.
+            2. TRIGGER EFFECTS. An effect that runs business logic — a request, a save, a
+               navigation, analytics, a toast — because a value changed. The cause is the
+               event that set that value, so the work belongs in that handler. Failure
+               scenario to state: the path that sets the value WITHOUT the user action (a
+               load, a reset, a round-trip from the server) and therefore fires the logic
+               nobody asked for.
+            3. EFFECT CHAINS. Two or more effects where one's write is another's dependency.
+               State the ordering that breaks, or the extra render pass it costs.
+            4. LIFECYCLE GUESSWORK. `useEffect` with a dependency array shaped to approximate
+               "on mount", "when X becomes true", or "only the first time". Say what happens
+               on the second occurrence, or under StrictMode's double-invoke.
+
+            WHAT IS NOT A FINDING, AND THIS LIST IS BINDING:
+
+            * An effect that synchronises with a real external system: a fetch with
+              `AbortController`, a `ResizeObserver` or `IntersectionObserver`, an event
+              listener, `localStorage`, focus or scroll management, a timer. These are the
+              legitimate use, and this repository has several that are correct.
+            * An existing effect the diff merely moves, renames or reformats. Judge what the
+              diff ADDS or CHANGES in behaviour.
+            * The number of effects in a file.
+            * `useMemo`/`useCallback` that is not obviously wrong. Do not police memoisation
+              on taste; this repository has a measured per-keystroke commit budget (see the
+              X30/X32 lanes) and a suggestion that costs a commit is a regression, not a fix.
+
+            THE FIX MUST BE EXPRESSIBLE WITH WHAT IS ALREADY INSTALLED. There is no TanStack
+            Query, SWR, Zustand, Jotai, Redux Toolkit, React Hook Form or Zod in this
+            repository. Propose: compute during render; `useMemo`; move the call into the
+            event handler; lift the state to the one owner; or a named semantic wrapper hook
+            (`useMountEffect`, `useResizeObserver`) that declares its intent when external
+            sync is genuinely required. You MAY name a library at most once per review, marked
+            plainly as a dependency suggestion for a human to decide, and never as the fix
+            itself — adding a dependency is the owner's call.
+
+            HOUSE RULES THAT OUTRANK THE POSITION ABOVE.
+
+            * Every finding carries a concrete failure scenario: specific state or interaction,
+              and the wrong render, extra request, stale value or lost edit that results. "This
+              could be simplified" is not a finding. "Loading a brief sets `draft`, whose effect
+              sets `dirty`, so a freshly loaded brief is dirty and the unsaved-changes prompt
+              fires on a page the user never edited" is a finding.
+            * State what your fix does to inputs the current code already handles, and whether
+              it turns a loud failure into a quiet one. A fix that trades a visible bug for a
+              silent wrong value is worse than the bug.
+            * This app is prerendered by Next at build time. A `"use client"` component still
+              runs its render and its `useState` initialiser ON THE SERVER, where there is no
+              `window`. A suggestion that moves work from an effect into render must say
+              whether it is safe under that render, because moving a `window` read into the
+              render phase breaks `yarn build` and not the test suite.
+            * User-facing strings live in `apps/web/src/components/campaign/messages.ts` (D2).
+              A suggestion that inlines copy is wrong even when its logic is right.
+            * Cite D-numbers from docs/planning/ where a rule has one; never paraphrase a rule
+              that already has a number.
+
+            Do not re-raise what CodeRabbit, the UI reviewer or the architecture reviewer owns.
+            Do not comment to acknowledge, praise or summarise. Prefer silence to a speculative
+            finding: one real traceability defect is worth more than five style opinions, and a
+            wrong finding costs a human more time than it saves.
+          pr_code_suggestions.commitable_code_suggestions: "true"
+          pr_code_suggestions.publish_output_no_suggestions: "false"
+          pr_code_suggestions.focus_only_on_problems: "true"
+          pr_code_suggestions.num_code_suggestions_per_chunk: "6"
+          pr_code_suggestions.max_number_of_calls: "6"
+          pr_code_suggestions.parallel_calls: "true"
+          pr_code_suggestions.suggestions_score_threshold: "0"
+
+      # Identical in intent and text to pr-agent.yml's guard: PR-Agent exits 0 even when it
+      # could not produce a review, so a green check would claim work that did not happen.
+      # --paginate --slurp because --paginate alone concatenates one JSON document per page
+      # and the count would stop being a single integer. Errors are NOT converted to zero.
+      # KNOWN LIMIT, stated rather than hidden: PR-Agent's failure notice is posted by
+      # github-actions[bot] with the same text from all FOUR reviewers, and the issue
+      # comment carries nothing identifying which workflow produced it. On a PR that
+      # triggers two reviewers at once, one failing makes both guards red.
+      #
+      # Adding this reviewer WIDENS that limit rather than leaving it unchanged, which is
+      # the honest cost of the fourth file: an `apps/web` PR now commonly triggers both the
+      # UI reviewer and this one, so a single OpenRouter failure reddens two checks and
+      # names neither. The fix is upstream attribution, not a weaker guard here — a guard
+      # that cannot tell "I could not check" from "nothing was wrong" is the defect this
+      # step exists to prevent.
+      #
+      # That weakens D1's isolation, and the trade is deliberate: this guard exists because
+      # PR-Agent exits 0 when it could not produce a review, so a green check would claim
+      # work that never happened. Cross-contamination fails in the SAFE direction — a
+      # spurious red on an advisory check that gates nothing (D8) — and the alternative,
+      # dropping the guard, restores exactly the false-green it was built to catch.
+      #
+      # `since` is the step stamp rather than the job start, which narrows the overlap
+      # window to this reviewer's own LLM call. It does not eliminate it.
+      - name: "Fail if the review did not actually run"
+        if: always() && github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          STARTED_AT: ${{ steps.started.outputs.at }}
+        run: |
+          set -euo pipefail
+          gh api --paginate --slurp --method GET "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments" > "$RUNNER_TEMP/pages.json"
+          FILTER='[.[][] | select(.user.login == "github-actions[bot]") | select(.created_at >= $since) | select(.body | test("Failed to generate"))] | length'
+          jq --arg since "$STARTED_AT" "$FILTER" "$RUNNER_TEMP/pages.json" > "$RUNNER_TEMP/failures"
+          failed=$(cat "$RUNNER_TEMP/failures")
+          case "$failed" in
+            ''|*[!0-9]*)
+              echo "Expected a single integer from the comment scan, got: $failed"
+              exit 1
+              ;;
+          esac
+          if [ "$failed" -gt 0 ]; then
+            echo "PR-Agent reported it could not generate a review."
+            echo "A green check here would claim a review that never happened."
+            exit 1
+          fi
+          echo "No PR-Agent failure notice from this run."
