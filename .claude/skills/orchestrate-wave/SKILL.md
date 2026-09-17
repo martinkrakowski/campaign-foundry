@@ -318,9 +318,50 @@ output for a cell, the cell is *unknown* — a valid answer. A confident wrong o
 that did not happen.
 
 1. **Implement.** One lane = one worktree = one branch = one PR. `yarn install` per worktree
-   yourself. Write each brief from Template A, then dispatch it as an `Agent`. **Record the
-   worktree tip first** — an agent that reports success having committed nothing looks identical to
-   one that did the work. Never let two lanes own the same file at the same time.
+   yourself — **one at a time, never in parallel, and only where the lane actually needs one.**
+
+   Yarn Berry hardlinks package contents from a shared global cache. Concurrent installs across
+   worktrees can evict or relink an entry while another checkout is holding it, and the victim is the
+   checkout nobody is installing into: the **main checkout**, which silently loses a native binary
+   while keeping the package directory. Twice on 2026-09-17 this broke the owner's `yarn dev` —
+   `@next/swc-darwin-arm64` and then `@napi-rs/canvas-darwin-arm64`, each left with its
+   `package.json` and `README.md` intact and its `.node` file gone. Platform-specific optional
+   dependencies are what break, because they are the large binaries.
+
+   So: serialise installs; skip them **only for a lane that runs no local command needing
+   dependencies** — which in practice means a docs-only lane and very little else. **A deletion lane
+   is not one of them**: W1 deletes a test file, and proving the *remaining* suite still passes is
+   exactly the command that needs `node_modules`. (I skipped `cf-w1`'s install on the strength of the
+   first draft of this rule; review caught it before the lane ran.) And
+   **after a wave's installs, verify the main checkout still has its native binaries** rather than
+   letting the owner's next dev start find out:
+
+   ```sh
+   # Names any platform package left with metadata only, and is silent when healthy.
+   #
+   # `find node_modules -name '*.node' | head` is NOT a check: a stripped package simply
+   # contributes no line, so the command prints the survivors and exits 0 — it reports what
+   # exists, never what is missing. Nor is "has a .node file" the test: @esbuild ships
+   # `bin/esbuild`, @img/sharp-libvips ships `lib/`, and both are healthy with no .node at
+   # all. The payload test below has neither false negative nor false positive on this repo.
+   for d in node_modules/@*/*darwin*/ node_modules/*darwin*/; do
+     [ -d "$d" ] || continue
+     n=$(find "$d" -type f ! -name '*.json' ! -name '*.md' ! -name 'LICENSE*' | wc -l)
+     [ "$n" -eq 0 ] && echo "STRIPPED: $d"
+   done
+   ```
+
+   Run on 2026-09-17 it found **two more** beyond the two that had already broken `yarn dev`:
+   `@turbo/darwin-arm64` — which is why that day's dev run opened with *"Turborepo did not find the
+   correct binary for your platform"* and repaired itself — and `@rolldown/binding-darwin-arm64`,
+   which nothing had asked for yet and would have failed later, with no obvious cause.
+
+   The repair is to delete the stripped package directory and reinstall — a plain `yarn install` will
+   not restore it, because the directory's presence makes the package look installed.
+
+   Write each brief from Template A, then dispatch it as an `Agent`. **Record the worktree tip
+   first** — an agent that reports success having committed nothing looks identical to one that did
+   the work. Never let two lanes own the same file at the same time.
 
    **A lane is not done until the PR exists, and lanes routinely stop one step short.** On
    2026-09-16, CC1 and CC6 each committed clean, verified work and never pushed or opened a PR, and
