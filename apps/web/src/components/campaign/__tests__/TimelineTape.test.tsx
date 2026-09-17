@@ -105,6 +105,37 @@ const canvas = () => document.querySelector("[data-tape-canvas]") as HTMLElement
 const ticks = () => [...document.querySelectorAll("[data-tape-tick]")] as HTMLElement[];
 const playhead = () => document.querySelector("[data-tape-playhead]") as HTMLElement;
 const playheadSlider = () => screen.getByLabelText(messages.tapePlayheadName) as HTMLInputElement;
+/** The video clip: a static box, so it is found by its own mark, not by a role. */
+const videoClip = () => document.querySelector('[data-tape-clip="video"]') as HTMLElement;
+
+/**
+ * The number a `calc(a + b * cpx + d)` string denotes.
+ *
+ * Proof (a) is a RELATIONSHIP — the canvas is wider than the last thing drawn on
+ * it, by the end pad — and three independently hard-coded strings do not state a
+ * relationship, they state three strings. happy-dom lays nothing out, so the
+ * relationship cannot be read off `scrollWidth`; it CAN be computed from what the
+ * component itself wrote, which is what this does.
+ */
+const px = (calc: string): number => {
+  const inner = calc
+    .trim()
+    .replace(/^calc\(/, "")
+    .replace(/\)$/, "");
+  let total = 0;
+  for (const term of inner.split("+")) {
+    const t = term.trim();
+    const product = /^([\d.]+)\s*\*\s*([\d.]+)px$/.exec(t);
+    if (product !== null) {
+      total += Number(product[1]) * Number(product[2]);
+      continue;
+    }
+    const plain = /^([\d.]+)px$/.exec(t);
+    if (plain === null) throw new Error(`px(): cannot read term ${JSON.stringify(t)}`);
+    total += Number(plain[1]);
+  }
+  return total;
+};
 
 describe("(a) one scrollport, one coordinate system, and an end pad", () => {
   test("the canvas is label + duration × pxPerSec + endPad wide", () => {
@@ -131,7 +162,7 @@ describe("(a) one scrollport, one coordinate system, and an end pad", () => {
     expect(last.style.left).toBe(end);
 
     // The video clip spans 0…durationSec, so its right edge is that same x.
-    const video = screen.getByRole("button", { name: messages.tapeVideoClip });
+    const video = videoClip();
     expect(video.style.left).toBe(`calc(0 * ${TAPE_PX_MIN}px)`);
     expect(video.style.width).toBe(`calc(${DURATION} * ${TAPE_PX_MIN}px)`);
 
@@ -140,6 +171,35 @@ describe("(a) one scrollport, one coordinate system, and an end pad", () => {
     // …and the canvas is wider than all three by exactly the end pad, which is
     // why the last second is not cropped by the well's radius.
     expect(canvas().style.width).toBe(`${end.slice(0, -1)} + ${TAPE_END_PAD_PX}px)`);
+  });
+
+  test("the canvas is WIDER than the last thing drawn on it, by exactly the end pad", () => {
+    /**
+     * Proof (a) is a RELATIONSHIP, and three independently hard-coded strings
+     * state three strings rather than a relationship. happy-dom lays nothing
+     * out, so it cannot be read off `scrollWidth` — but it CAN be computed from
+     * what the component itself wrote, which is what this does. This is the
+     * assertion that goes red if `xFor` and `canvasWidth` ever drift apart while
+     * each stays individually well-formed; the string tests above would not.
+     */
+    renderTape({ scrubSec: DURATION });
+    const canvasW = px(canvas().style.width);
+    const lastTickX = px(ticks()[ticks().length - 1].style.left);
+    const playheadX = px(playhead().style.left);
+    const videoRight = px(videoClip().style.left) + px(videoClip().style.width) + TAPE_LABEL_PX;
+
+    // Everything at t = durationSec lands on one x …
+    expect(lastTickX).toBe(playheadX);
+    expect(videoRight).toBe(playheadX);
+    // … and the canvas extends past it by the end pad, which is the clearance
+    // the playhead's knob and the last tick's label need not to be cropped.
+    expect(canvasW - playheadX).toBe(TAPE_END_PAD_PX);
+    expect(canvasW).toBeGreaterThan(playheadX);
+
+    // Still true after a zoom, which is when a fixed-pad assumption would break.
+    fireEvent.change(screen.getByLabelText(messages.tapeZoomName), { target: { value: "70" } });
+    expect(px(canvas().style.width) - px(playhead().style.left)).toBe(TAPE_END_PAD_PX);
+    expect(px(ticks()[ticks().length - 1].style.left)).toBe(px(playhead().style.left));
   });
 
   test("there is exactly ONE horizontal scroller, and the ruler is inside it", () => {
@@ -317,6 +377,24 @@ describe("(c) tokens only — no literal survives a theme toggle", () => {
     expect(source).toContain("bg-text-emphasis");
   });
 
+  test("no operator-facing string is written in the component", () => {
+    /**
+     * §7: every word the operator reads lives in `messages.ts`. Asserting
+     * `getByText(messages.tapeNudgeBackGlyph)` would NOT catch a re-inlined
+     * literal — the rendered text is identical either way — so this greps the
+     * source for the glyphs as literals instead. The nudges' accessible names
+     * always came from messages; their visible labels did not.
+     */
+    expect(source).toContain("messages.tapeNudgeBackGlyph");
+    expect(source).toContain("messages.tapeNudgeForwardGlyph");
+    expect(source).not.toMatch(/["'`>]\s*[−+-]1s\s*[<"'`]/);
+    // And they still reach the screen, so the indirection is not merely tidy.
+    expect(screen.queryByText(messages.tapeNudgeBackGlyph)).toBeNull();
+    renderTape();
+    expect(screen.getByText(messages.tapeNudgeBackGlyph)).toBeTruthy();
+    expect(screen.getByText(messages.tapeNudgeForwardGlyph)).toBeTruthy();
+  });
+
   test("the tape grows no theme switch of its own", () => {
     // The sketch's third anti-lesson: a second source of `cf:theme`.
     expect(source).not.toContain("cf:theme");
@@ -410,11 +488,13 @@ describe("(e) / §6 — the assistive-technology contract", () => {
     const describedBy = second.getAttribute("aria-describedby");
     expect(describedBy).not.toBeNull();
 
-    const status = document.getElementById(describedBy as string) as HTMLElement;
-    expect(status.getAttribute("role")).toBe("status");
-    // The existing sentence, not a new one (§7), and the dwell is measured at the
-    // SHORTEST duration — where the floor actually binds.
-    expect(status.textContent).toBe(messages.timelineDwellUnderFloor(1, 1.2));
+    // The description is the beat's OWN, inside the beat's own clip — not a
+    // shared status node that would describe every breach with the first one's
+    // number. The existing sentence, not a new one (§7), and the dwell is
+    // measured at the SHORTEST duration, where the floor actually binds.
+    const described = document.getElementById(describedBy as string) as HTMLElement;
+    expect(described.textContent).toBe(messages.timelineDwellUnderFloor(1, 1.2));
+    expect(second.contains(described)).toBe(true);
 
     // The first beat clears the floor at 3 s and carries neither flag.
     const first = screen.getByRole("button", { name: messages.tapeBeatName(1) });
@@ -454,6 +534,30 @@ describe("§7 — the status sentence", () => {
     render(<Driven />);
     fireEvent.click(screen.getByRole("button", { name: messages.tapeNudgeBack }));
     expect(screen.getByRole("status").textContent).toBe(messages.tapeCommittedStatus("00:00.00"));
+  });
+
+  test("each breaching beat announces ITS OWN dwell, not the first one's", () => {
+    // Two beats under the floor, with different dwells. A single shared status
+    // node described both with the first breach's number, so a screen reader on
+    // beat 3 heard beat 2's seconds.
+    const shortest = 3;
+    const uneven: TimelineTapeBeat[] = [
+      { text: "a", startT: 0, endT: 0.5, underFloor: false },
+      { text: "b", startT: 0.5, endT: 0.7, underFloor: true },
+      { text: "c", startT: 0.7, endT: 1, underFloor: true },
+    ];
+    renderTape({ beats: uneven, shortestDurationSec: shortest });
+
+    const describedText = (position: number) => {
+      const clip = screen.getByRole("button", { name: messages.tapeBeatName(position) });
+      const id = clip.getAttribute("aria-describedby") as string;
+      return (document.getElementById(id) as HTMLElement).textContent;
+    };
+    // 0.2 × 3 = 0.6s and 0.3 × 3 = 0.9s — two different numbers, each on its own
+    // clip. If they were equal this test would pass on the shared-node defect.
+    expect(describedText(2)).toBe(messages.timelineDwellUnderFloor(0.6000000000000001, 1.2));
+    expect(describedText(3)).toBe(messages.timelineDwellUnderFloor(0.8999999999999999, 1.2));
+    expect(describedText(2)).not.toBe(describedText(3));
   });
 
   test("an under-floor beat outranks the commit sentence", () => {
@@ -608,10 +712,22 @@ describe("the lanes TS1 ships", () => {
 
   test("the video lane draws one clip across the whole clip length", () => {
     const { container } = renderTape();
-    const video = screen.getByRole("button", { name: messages.tapeVideoClip });
-    expect(within(container).getAllByRole("button", { name: messages.tapeVideoClip })).toHaveLength(
-      1,
-    );
-    expect(video.style.width).toBe(`calc(${DURATION} * ${TAPE_PX_MIN}px)`);
+    expect(container.querySelectorAll('[data-tape-clip="video"]')).toHaveLength(1);
+    expect(videoClip().style.width).toBe(`calc(${DURATION} * ${TAPE_PX_MIN}px)`);
+  });
+
+  test("the video clip is NOT a control — it has nothing to do and no tab stop", () => {
+    // A focusable `button` that does nothing wastes a keyboard user's time and
+    // announces an affordance this surface does not have. The video clip is the
+    // projection of the creative, not something to pick.
+    renderTape();
+    expect(screen.queryByRole("button", { name: messages.tapeVideoClip })).toBeNull();
+    const video = videoClip();
+    expect(video.tagName).toBe("DIV");
+    expect(video.getAttribute("tabindex")).toBeNull();
+    expect(video.querySelector("button, input, [tabindex]")).toBeNull();
+    // A beat clip, by contrast, IS a control — the sibling proof that this test
+    // is about the video clip and not about clips in general.
+    expect(screen.getByRole("button", { name: messages.tapeBeatName(1) }).tagName).toBe("BUTTON");
   });
 });

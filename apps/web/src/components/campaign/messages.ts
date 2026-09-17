@@ -1457,6 +1457,14 @@ export const tapeZoomName = "Timeline zoom";
 /** The nudges. Action names, because they are buttons that do a thing. */
 export const tapeNudgeBack = "Back one second";
 export const tapeNudgeForward = "Forward one second";
+/**
+ * What the nudge buttons SHOW. Operator-facing, so they live here with every
+ * other word the operator reads (§7) rather than as literals in the component —
+ * and the minus is U+2212, not a hyphen, which is the kind of thing that only
+ * stays right when one file owns it.
+ */
+export const tapeNudgeBackGlyph = "−1s";
+export const tapeNudgeForwardGlyph = "+1s";
 /** A title clip's stable name: its position, never its live seconds. */
 export function tapeBeatName(position: number): string {
   return `Beat ${position}`;

@@ -72,6 +72,53 @@ describe("PlayheadHost — the element-identity bailout (CC5, plan §4 (b))", ()
     expect(mainRenders).toBe(1);
   });
 
+  test("a re-render that changes no second hands the surfaces the SAME playhead object", () => {
+    /**
+     * `PreviewDock` is `memo`-wrapped and takes the whole object as one prop, so
+     * a fresh literal per render fails its shallow compare on every keystroke —
+     * re-opening the RE-RENDER half of CC1/CC2's contract while the fetch-count
+     * proofs stay green (usePreviewFrame has a content key of its own) and the
+     * tape stays green too (it is handed primitives, not this object).
+     */
+    const seen: PlayheadState[] = [];
+    function Outer(): ReactNode {
+      const [tick, setTick] = useState(0);
+      return (
+        <>
+          <button type="button" onClick={() => setTick(tick + 1)}>
+            unrelated
+          </button>
+          <PlayheadHost
+            durationSec={6}
+            rail={(playhead) => {
+              seen.push(playhead);
+              return null;
+            }}
+          >
+            {null}
+          </PlayheadHost>
+        </>
+      );
+    }
+    render(<Outer />);
+    // Index-free: the clamp effect's same-value write costs one extra render
+    // pass at mount, which the children-bailout test above cannot see (its child
+    // bails on identical props while `rail()` is still called). What matters is
+    // the object across the edit, not how many times the slot was invoked.
+    const atMount = seen.length;
+    const before = seen[atMount - 1];
+    fireEvent.click(screen.getByRole("button", { name: "unrelated" }));
+    expect(seen.length).toBeGreaterThan(atMount);
+    expect(seen[seen.length - 1]).toBe(before);
+
+    // And a scrub DOES hand a new one — the sibling proof that the memo is not
+    // simply frozen. A stale object here would leave the thumb where it was.
+    act(() => before.onScrubLive(3));
+    const after = seen[seen.length - 1];
+    expect(after).not.toBe(before);
+    expect(after.scrubSec).toBe(3);
+  });
+
   test("both callbacks are referentially stable across a scrub", () => {
     let live: PlayheadState | undefined;
     const seen: PlayheadState[] = [];
@@ -140,6 +187,9 @@ describe("PlayheadHost — the clamp lives with the owner", () => {
             <button type="button" onClick={() => setDurationSec(5)}>
               shorten
             </button>
+            <button type="button" onClick={() => setDurationSec(10)}>
+              lengthen
+            </button>
           </>
         )}
       >
@@ -157,6 +207,23 @@ describe("PlayheadHost — the clamp lives with the owner", () => {
     // Not 9: `usePreviewFrame` would ask the route for a frame past the end of
     // the clip, and the route refuses `atSec > durationSec` with a 400 — the
     // preview would fall back to the placeholder for a brief that draws fine.
+    expect(screen.getByTestId("committed").textContent).toBe("5");
+    expect(screen.getByTestId("live").textContent).toBe("5");
+  });
+
+  test("a LENGTHENED axis does not revive the second the shrink clamped away", () => {
+    // Clamping only on read leaves state and view out of step, and the divergence
+    // is not harmless: the untouched 9 reappears when the axis grows back, so the
+    // playhead jumps to a second the operator last chose two axis changes ago and
+    // the preview fetches that frame — with no gesture anywhere in between.
+    render(<Shrinkable />);
+    fireEvent.click(screen.getByRole("button", { name: "commit 9" }));
+    expect(screen.getByTestId("committed").textContent).toBe("9");
+
+    fireEvent.click(screen.getByRole("button", { name: "shorten" }));
+    expect(screen.getByTestId("committed").textContent).toBe("5");
+
+    fireEvent.click(screen.getByRole("button", { name: "lengthen" }));
     expect(screen.getByTestId("committed").textContent).toBe("5");
     expect(screen.getByTestId("live").textContent).toBe("5");
   });

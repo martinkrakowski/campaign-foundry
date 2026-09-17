@@ -10,6 +10,7 @@ import { DEFAULT_CAMPAIGN_TYPE } from "@campaignfoundry/CampaignOrchestration/ca
 import * as messages from "@/components/campaign/messages";
 import { BriefEditor } from "@/components/campaign/BriefEditor";
 import type { TimelineTapeProps } from "@/components/campaign/TimelineTape";
+import type { PreviewShowcaseProps } from "@/components/campaign/PreviewDock";
 
 /**
  * CC5's cost criterion, through the editor that actually ships (the plan's §4
@@ -66,6 +67,27 @@ vi.mock("@/components/campaign/sections", async (importOriginal) => {
  */
 const tapeRenders = vi.hoisted(() => ({ count: 0 }));
 
+/**
+ * Renders of the DOCK itself, behind the same kind of boundary.
+ *
+ * `PreviewDock` is already `memo`-wrapped in production; this counts how often
+ * the real component is entered. CC1/CC2's contract has two halves — a
+ * look-preserving keystroke must skip the FETCH and must skip the RE-RENDER —
+ * and TS1's original cost proofs only ever measured the first. The playhead
+ * object handed to the dock was freshly allocated per render, so the second half
+ * had quietly regressed with every fetch-count assertion still green.
+ */
+const dockRenders = vi.hoisted(() => ({ count: 0 }));
+
+vi.mock("@/components/campaign/PreviewDock", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/components/campaign/PreviewDock")>();
+  const Counting = memo(function CountingDock(props: PreviewShowcaseProps) {
+    dockRenders.count += 1;
+    return createElement(actual.PreviewDock, props);
+  });
+  return { ...actual, PreviewDock: Counting };
+});
+
 vi.mock("@/components/campaign/TimelineTape", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/components/campaign/TimelineTape")>();
   const Counting = memo(function CountingTape(props: TimelineTapeProps) {
@@ -114,9 +136,15 @@ const tapeBrief = {
   products: [{ id: "alpha", name: "A", primaryColor: "#1473E6", logoPath: "a.png" }],
   copy: {
     timeline: {
+      // THREE beats, not two, and it matters for the selection test below: with
+      // two, removing the first leaves a stale index 1 OUT OF RANGE, so nothing
+      // is pressed whether the selection is retired or not and the assertion is
+      // vacuous. With three, index 1 still names an existing beat after the
+      // removal — a different one — which is the defect being pinned.
       beats: [
-        { text: "First beat", weight: 2 },
+        { text: "First beat", weight: 1 },
         { text: "Second beat", weight: 1 },
+        { text: "Third beat", weight: 1 },
       ],
       transition: "cut",
       keyBeat: 1,
@@ -211,6 +239,7 @@ describe("the playhead's cost (CC5, plan §4 acceptance (b))", () => {
     localStorage.setItem("cf:presentation", "guided");
     formRenders.count = 0;
     tapeRenders.count = 0;
+    dockRenders.count = 0;
   });
 
   test("a drag issues no frame request and does not re-render the step form", async () => {
@@ -295,6 +324,7 @@ describe("TS1 — the tape in the rail (plan §4 acceptance (e), §5)", () => {
     localStorage.setItem("cf:brief-picked", "1");
     localStorage.setItem("cf:presentation", "guided");
     tapeRenders.count = 0;
+    dockRenders.count = 0;
   });
 
   test("a moving draft mounts exactly one tape, inside the rail's landmark", async () => {
@@ -306,7 +336,9 @@ describe("TS1 — the tape in the rail (plan §4 acceptance (e), §5)", () => {
     // The tape's own lanes, drawn from the brief's beats through resolveTimeline.
     expect(screen.getByRole("button", { name: messages.tapeBeatName(1) })).toBeTruthy();
     expect(screen.getByRole("button", { name: messages.tapeBeatName(2) })).toBeTruthy();
-    expect(screen.getByRole("button", { name: messages.tapeVideoClip })).toBeTruthy();
+    // The video clip is a static box, not a control (it has nothing to do), so
+    // it is found by its own mark rather than by a role.
+    expect(rail.querySelectorAll('[data-tape-clip="video"]')).toHaveLength(1);
   });
 
   test("the rail carries ONE scrub control, and it is the tape's Playhead", async () => {
@@ -413,5 +445,76 @@ describe("TS1 — the tape in the rail (plan §4 acceptance (e), §5)", () => {
     const before = tapeRenders.count;
     fireEvent.change(scrub(), { target: { value: "2" } });
     expect(tapeRenders.count).toBeGreaterThan(before);
+  });
+});
+
+describe("the other half of CC1/CC2's contract — the dock must BAIL, not merely not fetch", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    localStorage.setItem("cf:brief-picked", "1");
+    localStorage.setItem("cf:presentation", "guided");
+    dockRenders.count = 0;
+  });
+
+  test("a look-preserving keystroke does not re-render the preview dock", async () => {
+    await mountScrubbing();
+    expect(dockRenders.count).toBeGreaterThan(0);
+    const before = dockRenders.count;
+
+    // `targetAudience` rides in no frame request and changes nothing the dock
+    // draws. The fetch-count proofs stayed green through a regression here,
+    // because `usePreviewFrame` has a content key of its own and does not care
+    // how often its component re-renders — which is exactly why this is counted
+    // separately rather than inferred from them.
+    const audience = screen.getByLabelText("Target Audience") as HTMLInputElement;
+    fireEvent.click(audience);
+    audience.focus();
+    fireEvent.change(audience, { target: { value: "a different audience" } });
+    await settle();
+
+    expect(dockRenders.count).toBe(before);
+  });
+
+  test("a scrub DOES re-render it — the sibling proof that the bail is not a freeze", async () => {
+    await mountScrubbing();
+    const before = dockRenders.count;
+    fireEvent.change(scrub(), { target: { value: "2" } });
+    // The dock's frame follows the COMMITTED second, but its playhead prop
+    // carries the live one, so it must redraw or the two would drift.
+    expect(dockRenders.count).toBeGreaterThan(before);
+  });
+});
+
+describe("the ephemeral beat selection (D139)", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    localStorage.setItem("cf:brief-picked", "1");
+    localStorage.setItem("cf:presentation", "everything");
+  });
+
+  test("an edit to the sequence retires the selection rather than re-pointing it", async () => {
+    await mountScrubbing();
+    const beat = (n: number) => screen.getByRole("button", { name: messages.tapeBeatName(n) });
+
+    fireEvent.click(beat(2));
+    await waitFor(() => expect(beat(2).getAttribute("aria-pressed")).toBe("true"));
+    expect(beat(1).getAttribute("aria-pressed")).toBe("false");
+    expect(beat(3).getAttribute("aria-pressed")).toBe("false");
+
+    // Removing the FIRST beat leaves a raw index 1 pointing at whatever beat now
+    // occupies that slot — here the beat that used to be third. A selection that
+    // moved because rows moved is the invariant `CopyTimeline.vo.ts` names for
+    // the persisted keyBeat and says a reducer must maintain; there is no
+    // reducer for an ephemeral selection, so it is dropped rather than silently
+    // re-pointed.
+    fireEvent.click(screen.getAllByRole("button", { name: messages.timelineRemoveBeat(1) })[0]);
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: messages.tapeBeatName(3) })).toBeNull(),
+    );
+
+    // Two beats left and NEITHER is pressed. Without the fix the survivor now
+    // sitting at index 1 wears the highlight the operator put on a different beat.
+    expect(beat(1).getAttribute("aria-pressed")).toBe("false");
+    expect(beat(2).getAttribute("aria-pressed")).toBe("false");
   });
 });

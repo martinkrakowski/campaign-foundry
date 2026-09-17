@@ -151,6 +151,81 @@
         "apps/web/src/app/(shell)/brief/__tests__/brief-editor.playhead.test.tsx"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/BriefEditor.tsx",
+      "before": "  useEffect(() => {\n    setScrubSec((sec) => Math.min(sec, ceiling));\n    setCommittedSec((sec) => Math.min(sec, ceiling));\n  }, [ceiling]);",
+      "after": "  useEffect(() => {\n    setScrubSec((sec) => sec);\n  }, [ceiling]);",
+      "because": "Qodo, caught in review. Clamping only on READ leaves the stored second and the shown one out of step, and the divergence survives: commit 9 on a 10s clip, shorten to 5 (every surface correctly shows 5), then lengthen back to 10 -- and the untouched 9 reappears. The playhead jumps to a second the operator last chose two axis changes ago and usePreviewFrame fetches that frame, with no gesture in between; scrubbing is user-driven (VE-D5) and a second nobody asked for is not. The SHORTENING direction was already tested and stays green under this mutation -- which is why the test that catches it lengthens the axis afterwards.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/playhead-host.test.tsx"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/BriefEditor.tsx",
+      "before": "  const playhead = useMemo<PlayheadState>(\n    () => ({",
+      "after": "  const playhead: PlayheadState = ((): PlayheadState => ({",
+      "because": "Qodo, caught in review, and a hole in this lane's own cost proof. PreviewDock is memo-wrapped and takes the whole playhead as ONE prop, so a fresh object literal per render fails its shallow compare on every keystroke -- re-opening the RE-RENDER half of CC1/CC2's contract (\"lets this bail on a re-render for a keystroke the look does not change, exactly as it already skips a network fetch for one\"). Every fetch-count proof stayed green through it, because usePreviewFrame has a content key of its own and does not care how often its component re-renders; the tape stayed green too, because it is handed primitives rather than this object. Caught only by a RENDER COUNT on the dock.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.playhead.test.tsx"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/BriefEditor.tsx",
+      "before": "  useEffect(() => {\n    setSelectedBeatIndex(null);\n  }, [state.timeline.beats]);",
+      "after": "  useEffect(() => {\n    setSelectedBeatIndex((i) => i);\n  }, [state.timeline.beats]);",
+      "because": "Qodo, caught in review. selectedBeatIndex is a raw array index over a list the operator can reorder, insert into and remove from, so carrying it across an edit does not keep the selection on its beat -- it moves it to whichever beat now occupies that slot. That is the exact invariant CopyTimeline.vo.ts names for the PERSISTED keyBeat (\"the selected text must not change because rows moved\") and says a reducer must maintain; there is no reducer for an ephemeral selection. The test needs THREE beats: with two, removing the first leaves the stale index out of range, nothing is pressed either way, and the assertion is vacuous -- which is how the first version of that test passed under this mutation.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.playhead.test.tsx"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/TimelineTape.tsx",
+      "before": "underFloorText={dwellTextFor(beat)}",
+      "after": "underFloorText={breached !== undefined ? dwellTextFor(breached) : undefined}",
+      "because": "Qodo, caught in review. Every breaching clip pointed aria-describedby at ONE shared status node, so a screen reader on beat 3 heard beat 2's seconds -- the paint was right on every clip and only the spoken number was wrong, which no visual check finds. Caught by a test with TWO breaching beats whose dwells DIFFER: equal dwells would agree under the defect and prove nothing.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/TimelineTape.test.tsx"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/TimelineTape.tsx",
+      "before": "              tone=\"video\"\n              name={messages.tapeVideoClip}",
+      "after": "              tone=\"video\"\n              name={messages.tapeVideoClip}\n              onSelect={() => {}}",
+      "because": "Qodo, caught in review. The video clip was a native button with no handler: a tab stop that does nothing, announcing an affordance the surface does not have. It is the projection of the creative, not something to pick (TS-Q1 keeps the poster choice in the form). Caught by a test that asserts it is NOT a button AND that a beat clip still is -- the sibling half, so the assertion cannot be satisfied by making every clip inert.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/TimelineTape.test.tsx"
+      ],
+      "verdict": "caught"
     }
   ]
 }

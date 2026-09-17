@@ -3,6 +3,7 @@
 import {
   memo,
   useEffect,
+  useId,
   useRef,
   useState,
   type CSSProperties,
@@ -246,9 +247,18 @@ function Clip(props: {
   tone: "title" | "video";
   selected?: boolean;
   underFloor?: boolean;
+  /** The beat's dwell where the floor binds — its OWN, said in its own element. */
+  underFloorText?: string;
   name: string;
   title?: string;
-  describedBy?: string;
+  /**
+   * The selection handler — and, by its presence, whether this clip is a CONTROL
+   * at all. A clip with nothing to do is drawn as a `div`: a focusable `button`
+   * that does nothing is a tab stop that wastes a keyboard user's time and
+   * announces an affordance the surface does not have. The video clip is the
+   * projection of the creative, not a thing to pick, so it has none until a lane
+   * gives it one.
+   */
   onSelect?: () => void;
   children?: ReactNode;
 }): ReactNode {
@@ -256,32 +266,62 @@ function Clip(props: {
     title: "bg-modified/20 text-modified border-modified/50",
     video: "bg-brand-tint text-brand-on-tint border-border",
   } as const;
+  const reactId = useId();
+  const dwellId = `${reactId}-dwell`;
+  const body = (
+    <>
+      {props.children}
+      <span className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-[11px] font-semibold">
+        {props.name}
+      </span>
+      {/* THIS beat's dwell, in THIS beat's own element. A single shared status
+        node described every breaching clip with the FIRST breach's number, so a
+        screen reader on beat 3 heard beat 2's seconds. The visible summary in the
+        status line still names the first breach; the per-clip description is what
+        `aria-describedby` points at. */}
+      {props.underFloorText !== undefined ? (
+        <span id={dwellId} className="sr-only">
+          {props.underFloorText}
+        </span>
+      ) : null}
+    </>
+  );
+  const className = cn(
+    "absolute bottom-1 top-1 overflow-hidden rounded-md border text-left transition-colors duration-fast",
+    tones[props.tone],
+    props.selected === true && "border-brand-primary shadow-[0_0_0_2px] shadow-brand-primary/30",
+    props.underFloor === true && "border-error/50 bg-error/20 text-error",
+    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+  );
+  const style = {
+    left: `calc(${props.startSec} * ${props.pxPerSec}px)`,
+    width: `calc(${props.durSec} * ${props.pxPerSec}px)`,
+  };
+
+  // No handler, no control: a plain box, out of the tab order, that still reads
+  // its name in document order to anyone walking the surface.
+  if (props.onSelect === undefined) {
+    return (
+      <div className={className} style={style} title={props.title} data-tape-clip={props.tone}>
+        {body}
+      </div>
+    );
+  }
+
   return (
     <button
       type="button"
       aria-label={props.name}
       aria-pressed={props.selected}
       aria-invalid={props.underFloor === true ? true : undefined}
-      aria-describedby={props.underFloor === true ? props.describedBy : undefined}
+      aria-describedby={props.underFloorText !== undefined ? dwellId : undefined}
       title={props.title}
-      className={cn(
-        "absolute bottom-1 top-1 overflow-hidden rounded-md border text-left transition-colors duration-fast",
-        tones[props.tone],
-        props.selected === true &&
-          "border-brand-primary shadow-[0_0_0_2px] shadow-brand-primary/30",
-        props.underFloor === true && "border-error/50 bg-error/20 text-error",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background",
-      )}
-      style={{
-        left: `calc(${props.startSec} * ${props.pxPerSec}px)`,
-        width: `calc(${props.durSec} * ${props.pxPerSec}px)`,
-      }}
+      className={className}
+      style={style}
+      data-tape-clip={props.tone}
       onClick={props.onSelect}
     >
-      {props.children}
-      <span className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-[11px] font-semibold">
-        {props.name}
-      </span>
+      {body}
     </button>
   );
 }
@@ -491,13 +531,19 @@ function TimelineTapeImpl(props: TimelineTapeProps): ReactNode {
    * `3.5999999999999996`, so a strict comparison would paint a beat red that
    * `timelineProblem` accepts.
    */
+  /** One beat's dwell where the floor binds — its own number, not a neighbour's. */
+  const dwellTextFor = (beat: TimelineTapeBeat): string | undefined =>
+    beat.underFloor
+      ? messages.timelineDwellUnderFloor(
+          (beat.endT - beat.startT) * shortestDurationSec,
+          MIN_DWELL_SEC,
+        )
+      : undefined;
+
   const breached = beats.find((beat) => beat.underFloor);
   const statusSentence =
     breached !== undefined
-      ? messages.timelineDwellUnderFloor(
-          (breached.endT - breached.startT) * shortestDurationSec,
-          MIN_DWELL_SEC,
-        )
+      ? (dwellTextFor(breached) as string)
       : committed
         ? messages.tapeCommittedStatus(formatTapeClock(committedSec))
         : messages.tapeIdleStatus;
@@ -548,7 +594,7 @@ function TimelineTapeImpl(props: TimelineTapeProps): ReactNode {
                 tone="title"
                 selected={props.selectedBeatIndex === index}
                 underFloor={beat.underFloor}
-                describedBy={statusId}
+                underFloorText={dwellTextFor(beat)}
                 name={messages.tapeBeatName(index + 1)}
                 title={beat.text}
                 onSelect={() => props.onSelectBeat(index)}
@@ -579,7 +625,7 @@ function TimelineTapeImpl(props: TimelineTapeProps): ReactNode {
 
       <div className="flex items-center gap-2 px-3 py-3">
         <Nudge name={messages.tapeNudgeBack} onClick={() => commit(committedSec - 1)}>
-          −1s
+          {messages.tapeNudgeBackGlyph}
         </Nudge>
         <PlayheadSlider
           durationSec={durationSec}
@@ -588,7 +634,7 @@ function TimelineTapeImpl(props: TimelineTapeProps): ReactNode {
           onCommit={commit}
         />
         <Nudge name={messages.tapeNudgeForward} onClick={() => commit(committedSec + 1)}>
-          +1s
+          {messages.tapeNudgeForwardGlyph}
         </Nudge>
         <input
           type="range"

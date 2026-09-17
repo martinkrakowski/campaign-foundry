@@ -262,20 +262,55 @@ export function PlayheadHost({
     setCommittedSec(sec);
   }, []);
 
-  // The clamp lives with the owner, so no surface can clamp it differently and a
-  // shortened duration axis cannot leave a stale second addressing a frame the
-  // clip no longer has (`preview-dock`'s own shrink test, moved here with it).
   // `Math.max(0, durationSec)` guards a zero/negative axis: the ceiling can never
   // be below the floor.
   const ceiling = Math.max(0, durationSec);
-  const playhead: PlayheadState = {
-    durationSec,
-    scrubSec: Math.min(Math.max(0, scrubSec), ceiling),
-    committedSec: Math.min(Math.max(0, committedSec), ceiling),
-    // A `useState` setter is already referentially stable — no wrapper needed.
-    onScrubLive: setScrubSec,
-    onScrubCommit: handleScrubCommit,
-  };
+
+  /**
+   * A shortened axis clamps the STORED seconds, not only the ones read below.
+   *
+   * Clamping on read alone leaves the two out of step, and the divergence is not
+   * harmless: commit 9 on a 10 s clip, shorten to 5 (the surfaces correctly show
+   * 5), then lengthen back to 10 — and the untouched 9 in state reappears. The
+   * playhead jumps to a second the operator last chose two axis changes ago and
+   * `usePreviewFrame` fetches that frame, with no gesture anywhere in between.
+   * Scrubbing is user-driven (VE-D5); a second nobody asked for is not.
+   *
+   * The clamp on read STAYS as well. This effect runs after the render that first
+   * sees the new duration, so for exactly one commit the raw state is still the
+   * old second — and that is the render `PreviewFrame` would build a request from.
+   * Belt and braces, in the order they fire.
+   */
+  useEffect(() => {
+    setScrubSec((sec) => Math.min(sec, ceiling));
+    setCommittedSec((sec) => Math.min(sec, ceiling));
+  }, [ceiling]);
+
+  /**
+   * ONE object per distinct playhead, not one per render.
+   *
+   * `PreviewDock` is `memo`-wrapped and takes this whole object as a prop, so a
+   * fresh literal here would fail its shallow compare on every render — and
+   * `PlayheadHost` re-renders whenever `BriefEditor` does, which is every
+   * keystroke. That silently re-opens the half of CC1/CC2's contract that is
+   * about RE-RENDERS rather than fetches ("lets this bail on a re-render for a
+   * keystroke the look does not change, exactly as it already skips a network
+   * fetch for one"). The fetch-count proofs never saw it, because
+   * `usePreviewFrame` has a content key of its own and does not care how often
+   * its component re-renders; the tape never saw it either, because it is handed
+   * primitives rather than this object. Caught by a render count on the dock.
+   */
+  const playhead = useMemo<PlayheadState>(
+    () => ({
+      durationSec,
+      scrubSec: Math.min(Math.max(0, scrubSec), ceiling),
+      committedSec: Math.min(Math.max(0, committedSec), ceiling),
+      // A `useState` setter is already referentially stable — no wrapper needed.
+      onScrubLive: setScrubSec,
+      onScrubCommit: handleScrubCommit,
+    }),
+    [durationSec, ceiling, scrubSec, committedSec, handleScrubCommit],
+  );
 
   return (
     <>
@@ -772,6 +807,25 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   );
   /** D139 — which beat the operator has picked out. Ephemeral, never a document field. */
   const [selectedBeatIndex, setSelectedBeatIndex] = useState<number | null>(null);
+  /**
+   * An edit to the sequence RETIRES the selection rather than re-pointing it.
+   *
+   * The selection is a raw array index, and the beats are a list the operator can
+   * reorder, insert into and remove from. Carrying an index across that edit does
+   * not keep the selection on the beat it was on — it silently moves it to
+   * whichever beat now occupies that slot, which is the exact invariant
+   * `CopyTimeline.vo.ts` names for the PERSISTED `keyBeat` ("the selected text
+   * must not change because rows moved") and says a reducer must maintain. There
+   * is no reducer for an ephemeral selection, so the honest answer is to drop it:
+   * a cleared highlight is obviously nothing, a moved one looks like an answer.
+   *
+   * Keyed on the beats array's identity, so any edit to the sequence clears it.
+   * A later lane that wants to SURVIVE an edit (SE1's inspector) needs per-beat
+   * identity to do it correctly; an index cannot, and should not pretend to.
+   */
+  useEffect(() => {
+    setSelectedBeatIndex(null);
+  }, [state.timeline.beats]);
   // CC2 — the JS-side mirror of the row's own `@container(min-width:56rem)`
   // query (§6 question 1): the CSS hides the rail below the breakpoint, but
   // the element stays mounted and would keep fetching without this. Observes

@@ -664,7 +664,7 @@ paint-over that can caption it). `weight` is absent because the windows come fro
 ! grep -q 'host="section"' apps/web/src/components/campaign/TimelineSection.tsx
 ```
 
-CC5's existing TL1 fence (`PreviewDock.tsx` still declaring `[xSec, setXSec] = useState`) stays in the studio plan. TS1 does not steal it. Shipping TS1 without CC5 would draw a playhead the preview does not follow; the dependency table forbids that dispatch.
+CC5's TL1 fence (`PreviewDock.tsx` still declaring `[xSec, setXSec] = useState`) lived in the studio plan, and this section used to end "TS1 does not steal it". **That is no longer true, and the sentence is corrected rather than left to mislead:** TS1 shipped the lift as CC5 in its own PR, so `PreviewDock` declares neither second and the probe is false by construction — `premise TL1` is retired in `2026-09-16_studio-editor.md`, in the same commit that removed the `useState` pair. A reader following the old sentence to the studio plan would look for a fence that is not there. Shipping TS1 without CC5 would have drawn a playhead the preview does not follow; the dependency table forbade that dispatch, which is exactly why the two travelled together.
 
 ---
 
