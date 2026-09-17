@@ -96,26 +96,46 @@ function FrameHarness({ initial }: { initial: EditorState }) {
 }
 
 describe("HtmlElementsEditor — where it appears (HL5a)", () => {
-  test("the html layer's row carries the element editor; no other row does", () => {
+  test("one editor, for the html layer alone, named by the layer it edits (CC3)", () => {
     render(<TemplateSection state={htmlState()} dispatch={vi.fn()} errors={{}} />);
-    const rows = screen.getAllByRole("listitem");
-    // canonical-image-html: image (0), html (1), logo (2).
-    expect(rows).toHaveLength(3);
+    // CC3 moved the layer STACK into the creative rail, so the editor no longer
+    // rides inside an `html` row and cannot borrow that row's context — it
+    // carries the layer's own id instead. canonical-image-html holds image,
+    // html and logo; exactly one of them is an element host, so exactly one
+    // editor mounts and it names `html`.
+    expect(screen.getAllByRole("group", { name: messages.htmlElementAddLabel })).toHaveLength(1);
+    // A HEADING, not styled text: it names the editor that follows it, and a
+    // heading is what a screen-reader user can move between. `h3` under the
+    // step's own `h2` from `SectionShell` — asserted by LEVEL, because a
+    // heading at the wrong level is a broken outline, not a fixed one.
     expect(
-      within(rows[1]!).getByRole("group", {
-        name: messages.htmlElementAddLabel,
-      }),
+      screen.getByRole("heading", { level: 3, name: messages.templateHtmlLayerLabel("html") }),
     ).toBeTruthy();
-    expect(
-      within(rows[0]!).queryByRole("group", {
-        name: messages.htmlElementAddLabel,
-      }),
-    ).toBeNull();
-    expect(
-      within(rows[2]!).queryByRole("group", {
-        name: messages.htmlElementAddLabel,
-      }),
-    ).toBeNull();
+    expect(screen.queryByText(messages.templateHtmlLayerLabel("image"))).toBeNull();
+    expect(screen.queryByText(messages.templateHtmlLayerLabel("logo"))).toBeNull();
+    // And the stack itself is not here: the step points at the rail instead of
+    // rendering a second copy of it (the plan's §4.6).
+    expect(screen.getByText(messages.templateStackInRail)).toBeTruthy();
+    expect(screen.queryByRole("group", { name: messages.templateAddLabel })).toBeNull();
+    expect(screen.queryByRole("list", { name: messages.templateListLabel })).toBeNull();
+  });
+
+  test("a template holding TWO html layers gets one editor each, each naming its own layer (CC3)", () => {
+    // The reason the heading carries the raw layer id rather than the kind's
+    // display name: a display name would say "Html" twice and answer for
+    // neither layer. `canonical-image-html` accepts a second html layer, so the
+    // reducer's own add is the state under test.
+    const twoHtml = editorReducer(htmlState(), { type: "addLayer", kind: "html" });
+    const ids = twoHtml.template.layers.filter((l) => l.kind === "html").map((l) => l.id);
+    expect(ids).toHaveLength(2);
+    render(<TemplateSection state={twoHtml} dispatch={vi.fn()} errors={{}} />);
+    expect(screen.getAllByRole("group", { name: messages.htmlElementAddLabel })).toHaveLength(2);
+    // TWO headings — which is the whole point of them being headings: this is
+    // the case where a screen-reader user has somewhere to navigate to, and
+    // where two identical `<p>` labels would leave them scrolling.
+    expect(screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent)).toEqual(
+      ids.map((id) => messages.templateHtmlLayerLabel(id)),
+    );
   });
 
   test("a template with no html layer offers no element editing at all", () => {

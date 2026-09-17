@@ -124,13 +124,38 @@ the rail's gate is now `presentation !== "guided" || (steps[stepIndex] !== "revi
 steps[stepIndex] !== "layout")` (`BriefEditor.tsx`), which is presentation-agnostic
 outside Guided by design (D141).
 
-```premise CC3
-# The layer stack is still rendered by the template section. CC3's disposition is
-# fixed (the section stops rendering the stack), so this flips exactly when the lane
-# ships -- the earlier "host or retire" wording would have left it holding forever
-# under one of its own sanctioned outcomes.
-grep -qE '(layers|template)\.layers\.map' apps/web/src/components/campaign/sections/TemplateSection.tsx
-```
+`premise CC3` retired: CC3 shipped. The stack is `LayerStack`
+(`apps/web/src/components/campaign/LayerStack.tsx`), mounted once, in the rail;
+`TemplateSection` no longer iterates `template.layers` at all — it points at the
+rail and keeps only the html layer's element editor, which is an inspector and
+CC4's to move (see below). The fence probed the section's own iteration, and that
+is what left.
+
+Three things this lane found, recorded here rather than folded into the code:
+
+1. **`premise SE1` does NOT flip, and CC3 does not close it.** The §3 lane row
+   says "closes SE1", but SE1's mechanism is a COUNT of `HtmlElementsEditor`
+   mount sites (`≤ 2`), and CC3 cannot move it under any design: the editor's one
+   non-test mount site is relocated, never multiplied — it is 2 before (the
+   component + `TemplateSection`) and 2 after (the component + `TemplateSection`,
+   which keeps it), and it would still be 2 had the rail taken it instead. CC3
+   delivers SE1's *selection* half; the fence measures its *hosting* half, which
+   is **CC4**'s sheet — exactly what `premise CC4`'s own comment says ("CC4's
+   sheet is necessarily a third"). The fence is left standing on purpose.
+2. **Below the breakpoint there is now no layer editing at all.** The rail is
+   `hidden … [@container(min-width:56rem)]:flex` (D141 kept the container query),
+   so on a narrow container the only stack in the tree is CSS-hidden and the
+   Template step carries no offers of its own. Before CC3, add/remove/reorder/
+   toggle were reachable at any width. This is a consequence of D141's retained
+   query meeting §4.6's one-stack invariant, not of a choice CC3 made — and it is
+   not answered by shipping two stacks, which §3 forbids. It needs a decision
+   (a narrow-width home for the stack, or dropping the query for the layers
+   container alone); until then it is a known loss, stated, not discovered later.
+3. **A step's own commit.** The selection is `BriefEditor`'s `useState` because
+   CC4's sheet is a sibling of the step card (D44) and must read it, so a pick
+   costs one commit of the editor — like a press on any other control, and
+   asserted as exactly one (`brief-editor.layers.test.tsx`). The per-keystroke
+   path, which is what C3 is about, stays at zero stack re-renders.
 
 ```premise CC4
 # The html element editor is still mounted inline in the stack row, so no sheet hosts
