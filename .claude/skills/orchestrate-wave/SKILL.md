@@ -513,8 +513,10 @@ locked decision; or a seat runs out of credit.
   dispatch and launcher behaviour with a stub process, never a paid CLI.** A seat is for doing the
   lane's work, not for demonstrating that a launcher kills it.
 
-- **Touching a manifest arms it.** CI replays only the manifests a change *touches*
-  (`ci.yml:125`), so editing one for an unrelated reason pulls it into the replay set and every
+- **Touching a manifest arms it.** CI replays only the manifests a change *touches* — the
+  **`Replay changed mutation manifests`** step in `ci.yml`, which runs `scripts/verify-manifests.sh`
+  against `MANIFEST_DIFF_BASE` (named, not cited by line: a line number in a rule about anchors
+  rotting is the joke writing itself) — so editing one for an unrelated reason pulls it into the replay set and every
   anchor in it must then resolve. On 2026-09-17 lane TS1 re-anchored two entries in `cc1.json` and
   turned its third — stale since X1's formatter run — into a red gate. The corollary is worse than
   the inconvenience: a manifest nobody touches is **never checked again**, so its evidence rots in
