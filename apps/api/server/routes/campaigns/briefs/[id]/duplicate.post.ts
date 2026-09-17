@@ -1,9 +1,6 @@
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { errorMessage } from "@campaignfoundry/shared";
-import {
-  extractSourceAssetBriefIds,
-  rewriteAssetPaths,
-} from "../../../../lib/asset-files.js";
+import { extractSourceAssetBriefIds, rewriteAssetPaths } from "../../../../lib/asset-files.js";
 import { isExistsError, SYMLINK_WRITE_ERROR } from "../../../../lib/brief-files.js";
 import { assertSafeId, parseBrief } from "../../../../lib/load-brief.js";
 import {

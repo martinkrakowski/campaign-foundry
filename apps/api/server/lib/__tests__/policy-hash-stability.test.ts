@@ -15,7 +15,15 @@ import { VariationPolicy } from "@campaignfoundry/CampaignOrchestration";
  * read-only, and the pooled brief is fed its approved pool texts exactly as
  * the plan path does.
  */
-const BRIEFS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..", "..", "briefs");
+const BRIEFS_DIR = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "..",
+  "..",
+  "..",
+  "..",
+  "briefs",
+);
 
 const GOLDEN_HASHES: Record<string, string> = {
   "sample-motion.yaml": "f7291c1016b5d2c4b3b1ff363b86629ffc7c923c66720f98c16cedb5f70b79fb",
@@ -79,7 +87,8 @@ describe("the style block is hashed nowhere (T5/D57)", () => {
     const text = readFileSync(join(BRIEFS_DIR, file), "utf8");
     // Insert the style block right after the required campaignMessage line.
     const anchor = /^campaignMessage:.*$/m;
-    if (!anchor.test(text)) throw new Error(`fixture ${file} has no campaignMessage line to anchor on`);
+    if (!anchor.test(text))
+      throw new Error(`fixture ${file} has no campaignMessage line to anchor on`);
     return text.replace(anchor, (line) => `${line}\n${styleBlock}`);
   };
 
@@ -91,13 +100,30 @@ describe("the style block is hashed nowhere (T5/D57)", () => {
       path,
       styledTwinOf(
         file,
-        ["style:", "  fontFamily: Lora", "  fontWeight: 700", "  sizeScale: 0.08", "  lineHeight: 1.4", "  letterSpacing: 0.05", "  align: left", "  textEffect: fade-in"].join("\n"),
+        [
+          "style:",
+          "  fontFamily: Lora",
+          "  fontWeight: 700",
+          "  sizeScale: 0.08",
+          "  lineHeight: 1.4",
+          "  letterSpacing: 0.05",
+          "  align: left",
+          "  textEffect: fade-in",
+        ].join("\n"),
       ),
     );
     expect(styled.style).toBeDefined();
     const pooled = approvedPoolTexts(plain.id);
-    const plainPolicy = VariationPolicy.fromBrief(plain, { headlines: pooled }, nodeCryptoPolicyHasher);
-    const styledPolicy = VariationPolicy.fromBrief(styled, { headlines: pooled }, nodeCryptoPolicyHasher);
+    const plainPolicy = VariationPolicy.fromBrief(
+      plain,
+      { headlines: pooled },
+      nodeCryptoPolicyHasher,
+    );
+    const styledPolicy = VariationPolicy.fromBrief(
+      styled,
+      { headlines: pooled },
+      nodeCryptoPolicyHasher,
+    );
     expect(plainPolicy.success).toBe(true);
     expect(styledPolicy.success).toBe(true);
     if (!plainPolicy.success || !styledPolicy.success) return;

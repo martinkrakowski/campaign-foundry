@@ -18,14 +18,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function entryProblem(value: unknown, index: number, seen: Set<string>): string | undefined {
   const at = `entries[${index}]`;
   if (!isRecord(value)) return `${at} must be an object`;
-  if (typeof value.id !== "string" || value.id.length === 0) return `${at}.id must be a non-empty string`;
+  if (typeof value.id !== "string" || value.id.length === 0)
+    return `${at}.id must be a non-empty string`;
   if (seen.has(value.id)) return `${at}.id "${value.id}" appears more than once`;
   seen.add(value.id);
   if (typeof value.text !== "string") return `${at}.text must be a string`;
   if (value.status !== "approved" && value.status !== "rejected") {
     return `${at}.status must be "approved" or "rejected"`;
   }
-  if (value.reason !== undefined && typeof value.reason !== "string") return `${at}.reason must be a string`;
+  if (value.reason !== undefined && typeof value.reason !== "string")
+    return `${at}.reason must be a string`;
   return undefined;
 }
 

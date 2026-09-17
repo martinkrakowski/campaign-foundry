@@ -90,7 +90,10 @@ describe("formatReport", () => {
   });
 
   test("declares the handoff ready when every rule is bound to a failing test", async () => {
-    const r = await checkHandoff(handoff([RULE]), deps(`test("conflict wins", () => {})`, ["conflict wins"]));
+    const r = await checkHandoff(
+      handoff([RULE]),
+      deps(`test("conflict wins", () => {})`, ["conflict wins"]),
+    );
     expect(formatReport(r)).toBe("W1: 1 rule(s), each bound to a failing test. Ready for stage 2.");
   });
 

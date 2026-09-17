@@ -69,7 +69,11 @@ describe("fromHexagen", () => {
   test("defaults to no contexts when bounded_contexts is absent", () => {
     expect(fromHexagen({})).toEqual({
       contexts: [],
-      folders: { domain: "src/domain", application: "src/application", infrastructure: "src/infrastructure" },
+      folders: {
+        domain: "src/domain",
+        application: "src/application",
+        infrastructure: "src/infrastructure",
+      },
       scope: "generated-project",
     });
   });

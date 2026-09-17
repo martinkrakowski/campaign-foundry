@@ -1,9 +1,19 @@
-import type { CopyPool, CopyPoolEntry, CopyPoolEntryStatus } from "@campaignfoundry/CampaignOrchestration";
+import type {
+  CopyPool,
+  CopyPoolEntry,
+  CopyPoolEntryStatus,
+} from "@campaignfoundry/CampaignOrchestration";
 import { errorMessage } from "@campaignfoundry/shared";
 import { BrandComplianceChecker } from "@campaignfoundry/GovernanceAndCompliance";
 import { isErrno, SYMLINK_WRITE_ERROR } from "../../../lib/brief-files.js";
 import { assertSafeId } from "../../../lib/load-brief.js";
-import { InvalidCopyPoolError, isPoolDirSymlink, readPool, withPoolLock, writePool } from "../../../lib/pools.js";
+import {
+  InvalidCopyPoolError,
+  isPoolDirSymlink,
+  readPool,
+  withPoolLock,
+  writePool,
+} from "../../../lib/pools.js";
 
 interface EntryPatch {
   readonly id: string;
@@ -68,11 +78,17 @@ async function applyPatch(current: CopyPoolEntry, patch: EntryPatch): Promise<Co
       reason = legal.reason;
     }
   }
-  return reason === undefined ? { id: current.id, text, status } : { id: current.id, text, status, reason };
+  return reason === undefined
+    ? { id: current.id, text, status }
+    : { id: current.id, text, status, reason };
 }
 
 /** The id of another entry whose normalised text matches `text`, if any. */
-function collidingId(entries: readonly CopyPoolEntry[], id: string, text: string): string | undefined {
+function collidingId(
+  entries: readonly CopyPoolEntry[],
+  id: string,
+  text: string,
+): string | undefined {
   const key = normalisedText(text);
   return entries.find((entry) => entry.id !== id && normalisedText(entry.text) === key)?.id;
 }

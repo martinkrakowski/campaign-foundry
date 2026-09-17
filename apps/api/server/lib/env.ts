@@ -59,7 +59,9 @@ export function loadEnv(): void {
   const fireflyId = process.env.FIREFLY_CLIENT_ID;
   const fireflySecret = process.env.FIREFLY_CLIENT_SECRET;
   if (fireflyId && fireflySecret) {
-    providers.push(`firefly (FIREFLY_CLIENT_ID/FIREFLY_CLIENT_SECRET ✓; select the "firefly" model)`);
+    providers.push(
+      `firefly (FIREFLY_CLIENT_ID/FIREFLY_CLIENT_SECRET ✓; select the "firefly" model)`,
+    );
   } else if (fireflyId || fireflySecret) {
     // Half-configured Firefly silently does nothing — exactly the trap this log exists for.
     console.warn(

@@ -47,10 +47,6 @@ export function formatEvent(input: EventInput, clock: () => string): string {
   return line;
 }
 
-export async function appendEvent(
-  path: string,
-  input: EventInput,
-  deps: EmitDeps,
-): Promise<void> {
+export async function appendEvent(path: string, input: EventInput, deps: EmitDeps): Promise<void> {
   await deps.appendFile(path, formatEvent(input, deps.clock));
 }

@@ -57,7 +57,9 @@ export const PREVIEW_FRAME_CACHE_ENTRIES = 32;
 /** The preview's background source, wired directly (D52 credit safety). Exported for the wiring test. */
 export const previewBackgroundGenerator = new ProceduralBackgroundGenerator();
 export const previewCompositor = new NodeCanvasCompositor(process.env.MESSAGE_FONT);
-export const previewVideoCompositor = new CanvasFfmpegVideoCompositor({ fontFamily: process.env.MESSAGE_FONT });
+export const previewVideoCompositor = new CanvasFfmpegVideoCompositor({
+  fontFamily: process.env.MESSAGE_FONT,
+});
 // VE5b2: a beat's own scene is a reused uploaded asset, never a GenAI call, so
 // wiring the real resolver here carries none of D52's credit-safety concern.
 export const previewSceneAssets = new FileSystemSceneAssetResolver();
@@ -115,14 +117,19 @@ function parsePreviewCell(value: unknown): PreviewCellSelection {
   if (typeof tone !== "string" || !(TONE_VALUES as readonly string[]).includes(tone)) {
     throw new Error(`Preview cell tone must be one of ${TONE_VALUES.join(", ")}.`);
   }
-  if (anchor !== undefined && (typeof anchor !== "string" || !(ANCHOR_VALUES as readonly string[]).includes(anchor))) {
+  if (
+    anchor !== undefined &&
+    (typeof anchor !== "string" || !(ANCHOR_VALUES as readonly string[]).includes(anchor))
+  ) {
     throw new Error(`Preview cell anchor must be one of ${ANCHOR_VALUES.join(", ")}.`);
   }
   const hasMotion = motion !== undefined;
   const hasDuration = durationSec !== undefined;
   const hasAtSec = atSec !== undefined;
   if ((hasMotion || hasDuration || hasAtSec) && !(hasMotion && hasDuration && hasAtSec)) {
-    throw new Error("Preview cell must carry motion, durationSec and atSec together or not at all.");
+    throw new Error(
+      "Preview cell must carry motion, durationSec and atSec together or not at all.",
+    );
   }
   if (hasMotion) {
     if (typeof motion !== "string" || !(MOTION_KINDS as readonly string[]).includes(motion)) {
@@ -166,7 +173,7 @@ export default defineEventHandler(async (event) => {
   try {
     const body: unknown = await readBody(event);
     if (!isEnvelope(body)) {
-      throw new Error('Preview frame body must be an envelope { brief, cell }.');
+      throw new Error("Preview frame body must be an envelope { brief, cell }.");
     }
     brief = parseBrief(body.brief);
     selection = parsePreviewCell(body.cell);

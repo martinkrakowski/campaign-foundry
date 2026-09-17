@@ -84,7 +84,13 @@ function assertNoAliasAtPath(doc: Document, filePath: string, path: string[]): v
   }
 }
 
-function patchNode(doc: Document, filePath: string, oldValue: unknown, newValue: unknown, path: string[]): void {
+function patchNode(
+  doc: Document,
+  filePath: string,
+  oldValue: unknown,
+  newValue: unknown,
+  path: string[],
+): void {
   if (deepEqual(oldValue, newValue)) return;
   if (isPlainObject(oldValue) && isPlainObject(newValue)) {
     for (const key of Object.keys(newValue)) {
@@ -119,11 +125,16 @@ export function patchBriefYaml(filePath: string, raw: string, brief: object): st
   // re-emit one — strip it for parsing and re-attach it on output.
   const bom = raw.startsWith("\uFEFF");
   const docs = parseAllDocuments(bom ? raw.slice(1) : raw);
-  if (docs.length === 0) throw new BriefDocumentError(filePath, "the file contains no YAML document");
-  if (docs.length > 1) throw new BriefDocumentError(filePath, "the file contains more than one YAML document");
+  if (docs.length === 0)
+    throw new BriefDocumentError(filePath, "the file contains no YAML document");
+  if (docs.length > 1)
+    throw new BriefDocumentError(filePath, "the file contains more than one YAML document");
   const doc = docs[0];
   if (doc.errors.length > 0) {
-    throw new BriefDocumentError(filePath, `the file does not parse as YAML (${doc.errors[0].message})`);
+    throw new BriefDocumentError(
+      filePath,
+      `the file does not parse as YAML (${doc.errors[0].message})`,
+    );
   }
   if (!isMap(doc.contents)) {
     throw new BriefDocumentError(filePath, "the file's top-level YAML node is not a mapping");
@@ -143,7 +154,9 @@ export function patchBriefYaml(filePath: string, raw: string, brief: object): st
  * "not a YAML Document"; the canonical YAML dump applies only to `.yaml`/`.yml`.
  */
 export function serializeBrief(path: string, brief: CampaignBrief): string {
-  return extname(path).toLowerCase() === ".json" ? JSON.stringify(brief, null, 2) : dumpBrief(brief);
+  return extname(path).toLowerCase() === ".json"
+    ? JSON.stringify(brief, null, 2)
+    : dumpBrief(brief);
 }
 
 export function briefsDir(): string {

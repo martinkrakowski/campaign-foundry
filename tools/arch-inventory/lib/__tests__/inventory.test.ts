@@ -65,7 +65,8 @@ const listDirOf =
     return entries;
   };
 
-const check = async (t: Tree, manifest = MANIFEST) => checkInventory(manifest, { listDir: listDirOf(t) });
+const check = async (t: Tree, manifest = MANIFEST) =>
+  checkInventory(manifest, { listDir: listDirOf(t) });
 
 describe("checkInventory", () => {
   test("a matching manifest and tree produce no findings", async () => {
@@ -170,31 +171,52 @@ describe("checkInventory", () => {
 
   test("two declared entries that resolve to the same file are duplicates", async () => {
     const m = fromHexagen({
-      bounded_contexts: [{ name: "Demo", layers: { domain: { value_objects: ["Money", "money"] } } }],
+      bounded_contexts: [
+        { name: "Demo", layers: { domain: { value_objects: ["Money", "money"] } } },
+      ],
     });
     const t = tree({ "packages/Demo/src/domain/value-objects": ["Money.vo.ts"] });
     const findings = await checkInventory(m, { listDir: listDirOf(t) });
     expect(findings).toEqual([
-      { context: "Demo", list: "value_objects", missing: [], stale: [], duplicates: ["Money", "money"] },
+      {
+        context: "Demo",
+        list: "value_objects",
+        missing: [],
+        stale: [],
+        duplicates: ["Money", "money"],
+      },
     ]);
   });
 
   test("a literal repeat in the same list is a duplicate", async () => {
     const m = fromHexagen({
       generator: { sync: { stubs: { naming: { adapter: "{name}.ts" } } } },
-      bounded_contexts: [{ name: "Demo", layers: { infrastructure: { adapters: ["NodeThingAdapter", "NodeThingAdapter"] } } }],
+      bounded_contexts: [
+        {
+          name: "Demo",
+          layers: { infrastructure: { adapters: ["NodeThingAdapter", "NodeThingAdapter"] } },
+        },
+      ],
     });
     const t = tree({ "packages/Demo/src/infrastructure/adapters": ["NodeThingAdapter.ts"] });
     const findings = await checkInventory(m, { listDir: listDirOf(t) });
     expect(findings).toEqual([
-      { context: "Demo", list: "adapters", missing: [], stale: [], duplicates: ["NodeThingAdapter"] },
+      {
+        context: "Demo",
+        list: "adapters",
+        missing: [],
+        stale: [],
+        duplicates: ["NodeThingAdapter"],
+      },
     ]);
   });
 
   test("a bare {name} naming template does not collapse every entry into one file", async () => {
     const m = fromHexagen({
       generator: { sync: { stubs: { naming: { valueObject: "{name}" } } } },
-      bounded_contexts: [{ name: "Demo", layers: { domain: { value_objects: ["Widget", "Money"] } } }],
+      bounded_contexts: [
+        { name: "Demo", layers: { domain: { value_objects: ["Widget", "Money"] } } },
+      ],
     });
     const t = tree({ "packages/Demo/src/domain/value-objects": ["Widget", "Money"] });
     expect(await checkInventory(m, { listDir: listDirOf(t) })).toEqual([]);

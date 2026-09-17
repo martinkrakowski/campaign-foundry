@@ -1,5 +1,10 @@
 import { describe, test, expect, beforeEach } from "vitest";
-import { getCapabilities, resolveFfmpegBinary, setCapabilities, waitForCapabilities } from "../capabilities.js";
+import {
+  getCapabilities,
+  resolveFfmpegBinary,
+  setCapabilities,
+  waitForCapabilities,
+} from "../capabilities.js";
 
 describe("capabilities", () => {
   beforeEach(() => {
@@ -56,12 +61,17 @@ describe("waitForCapabilities", () => {
 describe("resolveFfmpegBinary", () => {
   test("returns the ffmpeg-static path when the binary is executable", () => {
     const seen: string[] = [];
-    expect(resolveFfmpegBinary("/opt/ffmpeg", (p) => seen.push(p))).toEqual({ path: "/opt/ffmpeg" });
+    expect(resolveFfmpegBinary("/opt/ffmpeg", (p) => seen.push(p))).toEqual({
+      path: "/opt/ffmpeg",
+    });
     expect(seen).toEqual(["/opt/ffmpeg"]);
   });
 
   test.each([null, ""])("degrades to a reason when ffmpeg-static exports %j", (candidate) => {
-    expect(resolveFfmpegBinary(candidate)).toEqual({ path: null, reason: "ffmpeg-static binary is not available" });
+    expect(resolveFfmpegBinary(candidate)).toEqual({
+      path: null,
+      reason: "ffmpeg-static binary is not available",
+    });
   });
 
   test("degrades to a redacted reason when the binary cannot be accessed", () => {
@@ -74,9 +84,11 @@ describe("resolveFfmpegBinary", () => {
   });
 
   test("stringifies a non-Error thrown by the check", () => {
-    expect(resolveFfmpegBinary("/opt/ffmpeg", () => {
-      throw "boom";
-    })).toEqual({ path: null, reason: "ffmpeg-static binary is not available: boom" });
+    expect(
+      resolveFfmpegBinary("/opt/ffmpeg", () => {
+        throw "boom";
+      }),
+    ).toEqual({ path: null, reason: "ffmpeg-static binary is not available: boom" });
   });
 
   test("defaults to the real ffmpeg-static export and the executable check", () => {

@@ -4,7 +4,11 @@ import { parseBrief, parseRegenerateOnly } from "../../lib/load-brief.js";
 import { outputRoot } from "../../lib/config.js";
 import { ALLOWED_IMAGE_MODELS, runCampaign } from "../../lib/pipeline.js";
 import { readReport, reportRevision, writeReport } from "../../lib/report.js";
-import { NOT_PROBED_REASON, PROBE_PENDING_ERROR, waitForCapabilities } from "../../lib/capabilities.js";
+import {
+  NOT_PROBED_REASON,
+  PROBE_PENDING_ERROR,
+  waitForCapabilities,
+} from "../../lib/capabilities.js";
 
 /**
  * POST /campaigns/generate — validates the brief, starts an in-process run, and
@@ -24,10 +28,16 @@ import { NOT_PROBED_REASON, PROBE_PENDING_ERROR, waitForCapabilities } from "../
  */
 
 /** The persisted report's policyHash for a variation re-roll, else undefined (no pin). */
-async function persistedPolicyHash(brief: CampaignBrief, reroll: boolean): Promise<string | undefined> {
+async function persistedPolicyHash(
+  brief: CampaignBrief,
+  reroll: boolean,
+): Promise<string | undefined> {
   if (!reroll || brief.mode !== "variation") return undefined;
   const report = await readReport(outputRoot(), brief.id);
-  const hash = typeof report === "object" && report !== null ? (report as { policyHash?: unknown }).policyHash : undefined;
+  const hash =
+    typeof report === "object" && report !== null
+      ? (report as { policyHash?: unknown }).policyHash
+      : undefined;
   return typeof hash === "string" ? hash : undefined;
 }
 
@@ -39,10 +49,16 @@ async function persistedPolicyHash(brief: CampaignBrief, reroll: boolean): Promi
  * pinned on copy, by the same "absent hash is no pin" rule `persistedPolicyHash`
  * already follows.
  */
-async function persistedCopyHash(brief: CampaignBrief, reroll: boolean): Promise<string | undefined> {
+async function persistedCopyHash(
+  brief: CampaignBrief,
+  reroll: boolean,
+): Promise<string | undefined> {
   if (!reroll || brief.mode !== "variation") return undefined;
   const report = await readReport(outputRoot(), brief.id);
-  const hash = typeof report === "object" && report !== null ? (report as { copyHash?: unknown }).copyHash : undefined;
+  const hash =
+    typeof report === "object" && report !== null
+      ? (report as { copyHash?: unknown }).copyHash
+      : undefined;
   return typeof hash === "string" ? hash : undefined;
 }
 export default defineEventHandler(async (event) => {
@@ -127,7 +143,13 @@ export default defineEventHandler(async (event) => {
   runJob(jobId, async () => {
     const expectedPolicyHash = await persistedPolicyHash(brief, reroll);
     const expectedCopyHash = await persistedCopyHash(brief, reroll);
-    const result = await runCampaign(brief, imageModel, regenerateOnly, expectedPolicyHash, expectedCopyHash);
+    const result = await runCampaign(
+      brief,
+      imageModel,
+      regenerateOnly,
+      expectedPolicyHash,
+      expectedCopyHash,
+    );
     if (!result.success) {
       await failJob(jobId, result.error.message);
       return;

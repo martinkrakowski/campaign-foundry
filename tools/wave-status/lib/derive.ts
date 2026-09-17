@@ -67,8 +67,7 @@ export function deriveLane(obs: LaneObservation): DerivedLane {
   const exit = obs.log === undefined ? undefined : parseLastExit(obs.log.tail);
   const parsedGate = obs.gateLog === undefined ? undefined : parseGateLog(obs.gateLog);
   const gate =
-    parsedGate !== undefined &&
-    (parsedGate.exit !== undefined || parsedGate.coverage !== undefined)
+    parsedGate !== undefined && (parsedGate.exit !== undefined || parsedGate.coverage !== undefined)
       ? parsedGate
       : undefined;
 

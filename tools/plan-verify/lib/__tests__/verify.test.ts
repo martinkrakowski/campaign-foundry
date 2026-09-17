@@ -11,7 +11,8 @@ import {
 
 const premise = (lane: string, script = "true"): Premise => ({ plan: "p.md", lane, script });
 
-const execWith = (codes: Record<string, number>, output = "") =>
+const execWith =
+  (codes: Record<string, number>, output = "") =>
   async (script: string) => ({ exitCode: codes[script] ?? 0, output });
 
 const killed = async (script: string) =>
@@ -34,7 +35,10 @@ describe("verifyPremises", () => {
     const r = await verifyPremises([premise("A", "a"), premise("B", "b")], {
       execute: execWith({ a: 0, b: 1 }),
     });
-    expect(r.map((x) => [x.premise.lane, x.status])).toEqual([["A", "holds"], ["B", "stale"]]);
+    expect(r.map((x) => [x.premise.lane, x.status])).toEqual([
+      ["A", "holds"],
+      ["B", "stale"],
+    ]);
   });
 
   test("a premise killed by the timeout is timed-out, not holds and not stale", async () => {
@@ -55,15 +59,12 @@ describe("verifyPremises", () => {
   });
 
   test("an executor that throws is a failed check with a reason, never a crashed run", async () => {
-    const r = await verifyPremises(
-      [premise("Z9", "boom"), premise("W1", "open")],
-      {
-        execute: async (script: string) => {
-          if (script === "boom") throw new Error("spawn sh ENOENT");
-          return { exitCode: 0, output: "" };
-        },
+    const r = await verifyPremises([premise("Z9", "boom"), premise("W1", "open")], {
+      execute: async (script: string) => {
+        if (script === "boom") throw new Error("spawn sh ENOENT");
+        return { exitCode: 0, output: "" };
       },
-    );
+    });
     expect(r[0]?.status).toBe("error");
     expect(r[0]?.reason).toContain("spawn sh ENOENT");
     expect(r[1]?.status).toBe("holds");
@@ -71,7 +72,9 @@ describe("verifyPremises", () => {
   });
 
   test("a hanging premise does not stop the premises queued after it", async () => {
-    const r = await verifyPremises([premise("W1", "hang"), premise("W2", "ok")], { execute: killed });
+    const r = await verifyPremises([premise("W1", "hang"), premise("W2", "ok")], {
+      execute: killed,
+    });
     expect(r.map((x) => x.status)).toEqual(["timed-out", "holds"]);
   });
 });
@@ -127,26 +130,20 @@ describe("formatReport", () => {
   });
 
   test("counts all three outcomes when a run has each", async () => {
-    const r = await verifyPremises(
-      [premise("A", "a"), premise("B", "b"), premise("H", "hang")],
-      {
-        execute: async (script: string) =>
-          script === "b" ? { exitCode: 1, output: "" } : killed(script),
-      },
-    );
+    const r = await verifyPremises([premise("A", "a"), premise("B", "b"), premise("H", "hang")], {
+      execute: async (script: string) =>
+        script === "b" ? { exitCode: 1, output: "" } : killed(script),
+    });
     expect(formatReport(r)).toContain("1 stale, 1 timed out, 1 holding.");
   });
 
   test("names an errored premise and says it could not be checked, never to not dispatch", async () => {
-    const r = await verifyPremises(
-      [premise("Z9", "boom"), premise("W1", "open")],
-      {
-        execute: async (script: string) => {
-          if (script === "boom") throw new Error("spawn sh ENOENT");
-          return { exitCode: 0, output: "" };
-        },
+    const r = await verifyPremises([premise("Z9", "boom"), premise("W1", "open")], {
+      execute: async (script: string) => {
+        if (script === "boom") throw new Error("spawn sh ENOENT");
+        return { exitCode: 0, output: "" };
       },
-    );
+    });
     const text = formatReport(r);
     expect(text).toContain("ERROR  Z9  (p.md)");
     expect(text).toContain("the premise could not be checked: spawn sh ENOENT");

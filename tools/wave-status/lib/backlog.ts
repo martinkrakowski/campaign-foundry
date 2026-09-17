@@ -13,7 +13,12 @@ export async function readBacklog(
   try {
     text = await readFile(path);
   } catch (err: unknown) {
-    if (err !== null && typeof err === "object" && "code" in err && (err as { code: unknown }).code === "ENOENT") {
+    if (
+      err !== null &&
+      typeof err === "object" &&
+      "code" in err &&
+      (err as { code: unknown }).code === "ENOENT"
+    ) {
       return { state: "absent" };
     }
     return { state: "unknown" };

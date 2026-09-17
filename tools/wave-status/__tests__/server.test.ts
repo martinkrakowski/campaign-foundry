@@ -38,9 +38,7 @@ type ExecCallback = (error: Error | null, stdout: string) => void;
     maybeCallback?: ExecCallback,
   ) => {
     const callback = (
-      typeof optionsOrCallback === "function"
-        ? optionsOrCallback
-        : maybeCallback
+      typeof optionsOrCallback === "function" ? optionsOrCallback : maybeCallback
     ) as ExecCallback;
     queueMicrotask(() => callback(null, file === "gh" ? "[]" : ""));
     return undefined;
@@ -65,9 +63,7 @@ afterEach(async () => {
   }
 });
 
-async function start(
-  options: Parameters<typeof startServer>[0],
-): Promise<ServerHandle> {
+async function start(options: Parameters<typeof startServer>[0]): Promise<ServerHandle> {
   const handle = await startServer(options);
   handles.push(handle);
   return handle;
@@ -113,10 +109,7 @@ async function makeFixture(): Promise<string> {
   await mkdir(join(root, "waveU"));
   await mkdir(join(root, "notwave"));
   await writeFile(join(root, "loose.txt"), "not a wave dir\n");
-  await writeFile(
-    join(root, "waveT", "t1.log"),
-    `${"x".repeat(3000)}\nEXIT 0\n`,
-  );
+  await writeFile(join(root, "waveT", "t1.log"), `${"x".repeat(3000)}\nEXIT 0\n`);
   await writeFile(join(root, "waveT", "gate-t1.log"), "GATE EXIT 0\n");
   await writeFile(
     join(root, "waveT", "events.jsonl"),
@@ -199,21 +192,13 @@ function get(
           body: Buffer.concat(chunks),
         }),
       );
-      res.on("error", (error) =>
-        fail(error instanceof Error ? error : new Error(String(error))),
-      );
+      res.on("error", (error) => fail(error instanceof Error ? error : new Error(String(error))));
     });
     req.setTimeout(timeoutMs, () => {
       req.destroy();
-      fail(
-        new Error(
-          `timed out after ${timeoutMs}ms waiting for ${method} ${path}`,
-        ),
-      );
+      fail(new Error(`timed out after ${timeoutMs}ms waiting for ${method} ${path}`));
     });
-    req.on("error", (error) =>
-      fail(error instanceof Error ? error : new Error(String(error))),
-    );
+    req.on("error", (error) => fail(error instanceof Error ? error : new Error(String(error))));
     req.end();
   });
 }
@@ -247,9 +232,7 @@ class SseReader {
     const deadline = Date.now() + timeoutMs;
     while (this.events.length < count) {
       if (Date.now() > deadline) {
-        throw new Error(
-          `timed out waiting for ${count} SSE events; have ${this.events.length}`,
-        );
+        throw new Error(`timed out waiting for ${count} SSE events; have ${this.events.length}`);
       }
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
@@ -260,23 +243,16 @@ class SseReader {
     const before = this.events.length;
     await new Promise((resolve) => setTimeout(resolve, ms));
     if (this.events.length !== before) {
-      throw new Error(
-        `expected quiet, received ${this.events.length - before} extra event(s)`,
-      );
+      throw new Error(`expected quiet, received ${this.events.length - before} extra event(s)`);
     }
   }
 }
 
-async function openStream(
-  port: number,
-): Promise<{ reader: SseReader; response: IncomingMessage }> {
+async function openStream(port: number): Promise<{ reader: SseReader; response: IncomingMessage }> {
   return new Promise((resolve, reject) => {
-    const req = httpRequest(
-      { host: "127.0.0.1", port, path: "/api/stream" },
-      (response) => {
-        resolve({ reader: new SseReader(response), response });
-      },
-    );
+    const req = httpRequest({ host: "127.0.0.1", port, path: "/api/stream" }, (response) => {
+      resolve({ reader: new SseReader(response), response });
+    });
     req.on("error", reject);
     req.end();
   });
@@ -373,21 +349,17 @@ describe("extractDarkBlock", () => {
   });
 
   test("a brace inside a double-quoted string is ignored", () => {
-    expect(extractDarkBlock('.dark { --color-a: "}"; }')).toBe(
-      '.dark { --color-a: "}"; }',
-    );
+    expect(extractDarkBlock('.dark { --color-a: "}"; }')).toBe('.dark { --color-a: "}"; }');
   });
 
   test("an escaped quote inside a string does not close it", () => {
-    expect(
-      extractDarkBlock('.dark { --color-a: "\\" }"; --color-b: 2; }'),
-    ).toBe('.dark { --color-a: "\\" }"; --color-b: 2; }');
+    expect(extractDarkBlock('.dark { --color-a: "\\" }"; --color-b: 2; }')).toBe(
+      '.dark { --color-a: "\\" }"; --color-b: 2; }',
+    );
   });
 
   test("a brace inside a single-quoted string is ignored", () => {
-    expect(extractDarkBlock(".dark { --color-a: '}'; }")).toBe(
-      ".dark { --color-a: '}'; }",
-    );
+    expect(extractDarkBlock(".dark { --color-a: '}'; }")).toBe(".dark { --color-a: '}'; }");
   });
 
   test("nested braces balance before the block closes", () => {
@@ -403,17 +375,13 @@ describe("extractDarkBlock", () => {
   });
 
   test("a class that merely starts like .dark is not the block", () => {
-    expect(
-      extractDarkBlock(
-        ".own { --a: 1; }\n.darkish { --c: 3; }\n.dark { --b: 2; }",
-      ),
-    ).toBe(".dark { --b: 2; }");
+    expect(extractDarkBlock(".own { --a: 1; }\n.darkish { --c: 3; }\n.dark { --b: 2; }")).toBe(
+      ".dark { --b: 2; }",
+    );
   });
 
   test("a decimal value inside a rule body is not a selector", () => {
-    expect(extractDarkBlock(":root { --x: .5; }\n.dark { --y: .5; }")).toBe(
-      ".dark { --y: .5; }",
-    );
+    expect(extractDarkBlock(":root { --x: .5; }\n.dark { --y: .5; }")).toBe(".dark { --y: .5; }");
   });
 
   test("the real tokens.css extracts to a .dark block of token declarations (H1b)", async () => {
@@ -459,21 +427,17 @@ describe("extractRootBlock", () => {
   });
 
   test("a brace inside a double-quoted string is ignored", () => {
-    expect(extractRootBlock(':root { --color-a: "}"; }')).toBe(
-      ':root { --color-a: "}"; }',
-    );
+    expect(extractRootBlock(':root { --color-a: "}"; }')).toBe(':root { --color-a: "}"; }');
   });
 
   test("an escaped quote inside a string does not close it", () => {
-    expect(
-      extractRootBlock(':root { --color-a: "\\" }"; --color-b: 2; }'),
-    ).toBe(':root { --color-a: "\\" }"; --color-b: 2; }');
+    expect(extractRootBlock(':root { --color-a: "\\" }"; --color-b: 2; }')).toBe(
+      ':root { --color-a: "\\" }"; --color-b: 2; }',
+    );
   });
 
   test("a brace inside a single-quoted string is ignored", () => {
-    expect(extractRootBlock(":root { --color-a: '}'; }")).toBe(
-      ":root { --color-a: '}'; }",
-    );
+    expect(extractRootBlock(":root { --color-a: '}'; }")).toBe(":root { --color-a: '}'; }");
   });
 
   test("nested braces balance before the block closes", () => {
@@ -489,11 +453,9 @@ describe("extractRootBlock", () => {
   });
 
   test("a selector that merely starts like :root is not the block", () => {
-    expect(
-      extractRootBlock(
-        ".own { --a: 1; }\n:rootish { --c: 3; }\n:root { --b: 2; }",
-      ),
-    ).toBe(":root { --b: 2; }");
+    expect(extractRootBlock(".own { --a: 1; }\n:rootish { --c: 3; }\n:root { --b: 2; }")).toBe(
+      ":root { --b: 2; }",
+    );
   });
 
   test(":root.dark, :root > body, and :root[data-x] are rejected", () => {
@@ -503,21 +465,15 @@ describe("extractRootBlock", () => {
   });
 
   test(":root alone and :root within a comma-separated list are accepted", () => {
-    expect(extractRootBlock(":root { --color: 1; }")).toBe(
-      ":root { --color: 1; }",
-    );
-    expect(extractRootBlock(":root, html { --color: 1; }")).toBe(
-      ":root, html { --color: 1; }",
-    );
-    expect(extractRootBlock("html, :root { --color: 1; }")).toBe(
-      "html, :root { --color: 1; }",
-    );
+    expect(extractRootBlock(":root { --color: 1; }")).toBe(":root { --color: 1; }");
+    expect(extractRootBlock(":root, html { --color: 1; }")).toBe(":root, html { --color: 1; }");
+    expect(extractRootBlock("html, :root { --color: 1; }")).toBe("html, :root { --color: 1; }");
   });
 
   test("a top-level at-rule or leading brace without selector is handled", () => {
-    expect(
-      extractRootBlock('@import "base.css";\n:root { --color: 1; }'),
-    ).toBe(":root { --color: 1; }");
+    expect(extractRootBlock('@import "base.css";\n:root { --color: 1; }')).toBe(
+      ":root { --color: 1; }",
+    );
     expect(extractRootBlock("{ --color: 1; }")).toBeUndefined();
   });
 
@@ -555,9 +511,7 @@ describe("the server over real HTTP", () => {
     expectStylesheetLink(html);
     expect(html).toContain("stage");
     expect(html).toContain("liveness");
-    expect(html).toContain(
-      '<button type="button" class="wave-band" tabindex="0" aria-expanded=',
-    );
+    expect(html).toContain('<button type="button" class="wave-band" tabindex="0" aria-expanded=');
     expect(html).toContain('addEventListener("click"');
     expect(html).toContain("esc(detail.fixed");
     expect(html).toContain("clearInterval(pollTimer)");
@@ -611,9 +565,7 @@ describe("the server over real HTTP", () => {
     expect(darkIndex).toBeGreaterThan(rootIndex);
     // Dark override resolves correctly
     const window = new Window({ url: "http://127.0.0.1/" });
-    window.document.write(
-      '<html class="dark"><head></head><body></body></html>',
-    );
+    window.document.write('<html class="dark"><head></head><body></body></html>');
     const style = window.document.createElement("style");
     style.textContent = body;
     window.document.head.appendChild(style);
@@ -801,13 +753,9 @@ describe("the server over real HTTP", () => {
     const post = await get(handle.port, "/api/status", "POST");
     expect(post.status).toBe(405);
     expect(post.headers.allow).toBe("GET");
-    expect((await get(handle.port, "/api/log/T/t1", "DELETE")).status).toBe(
-      405,
-    );
+    expect((await get(handle.port, "/api/log/T/t1", "DELETE")).status).toBe(405);
     expect((await get(handle.port, "/nope")).status).toBe(404);
-    expect((await get(handle.port, "/api/log/T/../../etc/passwd")).status).toBe(
-      404,
-    );
+    expect((await get(handle.port, "/api/log/T/../../etc/passwd")).status).toBe(404);
   });
 
   test("GET /api/log/T/t1?tail=1 returns exactly the last 1 KB", async () => {
@@ -831,10 +779,7 @@ describe("the server over real HTTP", () => {
     const root = await mkdtemp(join(tmpdir(), "wave-status-big-"));
     roots.push(root);
     await mkdir(join(root, "waveT"));
-    const payload = Buffer.concat([
-      Buffer.alloc(1_500_000, 0x61),
-      Buffer.from("TAILEND\n"),
-    ]);
+    const payload = Buffer.concat([Buffer.alloc(1_500_000, 0x61), Buffer.from("TAILEND\n")]);
     const logPath = join(root, "waveT", "t1.log");
     await writeFile(logPath, payload);
 
@@ -901,10 +846,7 @@ describe("the server over real HTTP", () => {
     roots.push(root);
     await mkdir(join(root, "waveT"));
     // 32 KB payload is larger than the default 16 KB tail
-    const payload = Buffer.concat([
-      Buffer.alloc(32_000, 0x61),
-      Buffer.from("FULL_EXPORT_END\n"),
-    ]);
+    const payload = Buffer.concat([Buffer.alloc(32_000, 0x61), Buffer.from("FULL_EXPORT_END\n")]);
     const logPath = join(root, "waveT", "t1.log");
     await writeFile(logPath, payload);
 
@@ -916,9 +858,7 @@ describe("the server over real HTTP", () => {
     const res = await get(handle.port, "/api/log/T/t1?full=1");
     expect(res.status).toBe(200);
     expect(res.headers["content-type"]).toContain("text/plain");
-    expect(res.headers["content-disposition"]).toBe(
-      'attachment; filename="T-t1.log"',
-    );
+    expect(res.headers["content-disposition"]).toBe('attachment; filename="T-t1.log"');
     expect(res.headers["content-length"]).toBe(String(payload.length));
     expect(res.body.length).toBe(payload.length);
     expect(res.body.equals(payload)).toBe(true);
@@ -928,10 +868,7 @@ describe("the server over real HTTP", () => {
     const root = await mkdtemp(join(tmpdir(), "wave-status-full-wins-"));
     roots.push(root);
     await mkdir(join(root, "waveT"));
-    const payload = Buffer.concat([
-      Buffer.alloc(32_000, 0x62),
-      Buffer.from("FULL_WINS_END\n"),
-    ]);
+    const payload = Buffer.concat([Buffer.alloc(32_000, 0x62), Buffer.from("FULL_WINS_END\n")]);
     await writeFile(join(root, "waveT", "t1.log"), payload);
 
     const handle = await start({
@@ -941,9 +878,7 @@ describe("the server over real HTTP", () => {
     });
     const res = await get(handle.port, "/api/log/T/t1?full=1&tail=1");
     expect(res.status).toBe(200);
-    expect(res.headers["content-disposition"]).toBe(
-      'attachment; filename="T-t1.log"',
-    );
+    expect(res.headers["content-disposition"]).toBe('attachment; filename="T-t1.log"');
     expect(res.headers["content-length"]).toBe(String(payload.length));
     expect(res.body.length).toBe(payload.length);
     expect(res.body.equals(payload)).toBe(true);
@@ -986,9 +921,7 @@ describe("the server over real HTTP", () => {
       root,
       collect: async () => statusAt(0),
     });
-    expect((await get(handle.port, "/api/log/T/missing?full=1")).status).toBe(
-      404,
-    );
+    expect((await get(handle.port, "/api/log/T/missing?full=1")).status).toBe(404);
     expect((await get(handle.port, "/api/log/ZZ/zz?full=1")).status).toBe(404);
   });
 
@@ -1020,18 +953,12 @@ describe("the server over real HTTP", () => {
       root: await makeFixture(),
       collect: async () => statusAt(0),
     });
-    expect(
-      (await get(handle.port, "/api/log/U/u2?tail=16")).body.toString("utf8"),
-    ).toBe("short\n");
-    expect(
-      (await get(handle.port, "/api/log/U/u2")).body.toString("utf8"),
-    ).toBe("short\n");
-    expect(
-      (await get(handle.port, "/api/log/U/u2?tail=abc")).body.toString("utf8"),
-    ).toBe("short\n");
-    expect(
-      (await get(handle.port, "/api/log/U/u2?tail=0")).body.toString("utf8"),
-    ).toBe("short\n");
+    expect((await get(handle.port, "/api/log/U/u2?tail=16")).body.toString("utf8")).toBe("short\n");
+    expect((await get(handle.port, "/api/log/U/u2")).body.toString("utf8")).toBe("short\n");
+    expect((await get(handle.port, "/api/log/U/u2?tail=abc")).body.toString("utf8")).toBe(
+      "short\n",
+    );
+    expect((await get(handle.port, "/api/log/U/u2?tail=0")).body.toString("utf8")).toBe("short\n");
   });
 
   test("unknown waves, missing logs and an unreadable root are 404", async () => {
@@ -1594,9 +1521,7 @@ describe("the server over real HTTP", () => {
     const deadline = Date.now() + 2_000;
     while (gh.mock.calls.length < 2) {
       if (Date.now() > deadline) {
-        throw new Error(
-          `poll queued behind watch never called gh; have ${gh.mock.calls.length}`,
-        );
+        throw new Error(`poll queued behind watch never called gh; have ${gh.mock.calls.length}`);
       }
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
@@ -1708,19 +1633,13 @@ describe("cleanup", () => {
 
     await expect(
       new Promise<void>((resolve, reject) => {
-        const req = httpRequest(
-          { host: "127.0.0.1", port, path: "/api/status" },
-          (res) => {
-            res.resume();
-            resolve();
-          },
-        );
-        req.on("error", () =>
-          reject(new Error("connection refused — server is closed")),
-        );
+        const req = httpRequest({ host: "127.0.0.1", port, path: "/api/status" }, (res) => {
+          res.resume();
+          resolve();
+        });
+        req.on("error", () => reject(new Error("connection refused — server is closed")));
         req.end();
       }),
     ).rejects.toThrow("connection refused — server is closed");
   });
-
 });

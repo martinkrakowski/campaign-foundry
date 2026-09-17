@@ -69,12 +69,16 @@ describe("FsAssetStore", () => {
     expect(list[0].name).toBe("hero-a.jpg");
     expect(list[0].type).toBe("image/jpeg");
     expect(list[0].size).toBe(jpegBytes.length);
-    expect(list[0].thumbnailUrl).toBe("/api/pipeline/campaigns/assets?briefId=camp-1&name=hero-a.jpg");
+    expect(list[0].thumbnailUrl).toBe(
+      "/api/pipeline/campaigns/assets?briefId=camp-1&name=hero-a.jpg",
+    );
 
     expect(list[1].name).toBe("logo-b.png");
     expect(list[1].type).toBe("image/png");
     expect(list[1].size).toBe(pngBytes.length);
-    expect(list[1].thumbnailUrl).toBe("/api/pipeline/campaigns/assets?briefId=camp-1&name=logo-b.png");
+    expect(list[1].thumbnailUrl).toBe(
+      "/api/pipeline/campaigns/assets?briefId=camp-1&name=logo-b.png",
+    );
   });
 
   test("listAssets formats audio content types (VE3b2)", async () => {
@@ -87,7 +91,6 @@ describe("FsAssetStore", () => {
     expect(byName["bed.m4a"]).toBe("audio/mp4");
     expect(byName["bed.mp3"]).toBe("audio/mpeg");
   });
-
 
   test("copyAssets copies all brief assets from source to destination including nested files", async () => {
     await store.writeAsset("camp-src", "logo.png", pngBytes);
@@ -108,7 +111,9 @@ describe("FsAssetStore", () => {
 
     expect(map["logo.png"]).toBe("logo.png");
     expect(map["sub/dir/nested.png"]).toBe("sub/dir/nested.png");
-    expect(map["assets/inputs/camp-src/sub/dir/nested.png"]).toBe("assets/inputs/camp-dst/sub/dir/nested.png");
+    expect(map["assets/inputs/camp-src/sub/dir/nested.png"]).toBe(
+      "assets/inputs/camp-dst/sub/dir/nested.png",
+    );
   });
 
   test("copyAssets disambiguates same-name assets with differing content from multiple sources", async () => {
@@ -132,7 +137,11 @@ describe("FsAssetStore", () => {
     // Pre-populate target to exercise candidate collision loop and candidate reuse
     const diffPngBytes2 = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0x11, 0x22, 0x33]);
     await store.writeAsset("src-c", "logo.png", diffPngBytes2);
-    await store.writeAsset("target", "logo-src-c.png", Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0xaa, 0xbb, 0xcc]));
+    await store.writeAsset(
+      "target",
+      "logo-src-c.png",
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0xaa, 0xbb, 0xcc]),
+    );
     const mapD = await store.copyAssets("src-c", "target");
     expect(mapD["logo.png"]).toBe("logo-src-c-2.png");
     expect(readFileSync(join(dir, "target", "logo-src-c-2.png"))).toEqual(diffPngBytes2);
@@ -147,13 +156,18 @@ describe("FsAssetStore", () => {
     mkdirSync(join(dir, "target", "sub", "dir"), { recursive: true });
     writeFileSync(join(dir, "src-nested-a", "sub", "dir", "icon.png"), pngBytes);
     writeFileSync(join(dir, "src-nested-b", "sub", "dir", "icon.png"), diffPngBytes);
-    writeFileSync(join(dir, "target", "sub", "dir", "icon-src-nested-b.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x99]));
+    writeFileSync(
+      join(dir, "target", "sub", "dir", "icon-src-nested-b.png"),
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x99]),
+    );
 
     const mapNestA = await store.copyAssets("src-nested-a", "target");
     const mapNestB = await store.copyAssets("src-nested-b", "target");
     expect(mapNestA["sub/dir/icon.png"]).toBe("sub/dir/icon.png");
     expect(mapNestB["sub/dir/icon.png"]).toBe("sub/dir/icon-src-nested-b-2.png");
-    expect(readFileSync(join(dir, "target", "sub", "dir", "icon-src-nested-b-2.png"))).toEqual(diffPngBytes);
+    expect(readFileSync(join(dir, "target", "sub", "dir", "icon-src-nested-b-2.png"))).toEqual(
+      diffPngBytes,
+    );
   });
 
   test("copyAssets handles same source and destination, missing source, or empty source gracefully", async () => {

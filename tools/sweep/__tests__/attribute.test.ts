@@ -57,8 +57,7 @@ function threadPage(nodes: readonly Record<string, unknown>[]): string {
  * then a JSON object whose `text` field is JSON-escaped (`\n`, `\"`).
  */
 function aiLog(suggestion: string): string {
-  const text =
-    `\nAI response:\n\`\`\`yaml\ncode_suggestions:\n- relevant_file: |\n    apps/api/foo.ts\n  suggestion_content: |\n    ${suggestion}\n`;
+  const text = `\nAI response:\n\`\`\`yaml\ncode_suggestions:\n- relevant_file: |\n    apps/api/foo.ts\n  suggestion_content: |\n    ${suggestion}\n`;
   return `PR-Agent review\tUNKNOWN STEP\t2026-09-14T20:45:58.0033196Z ${JSON.stringify({ text })}`;
 }
 
@@ -73,7 +72,11 @@ interface StubOpts {
   readonly threadsError?: Error;
   readonly branch?: string;
   readonly branchError?: Error;
-  readonly runs?: { UI?: readonly number[]; API?: readonly number[]; Architecture?: readonly number[] };
+  readonly runs?: {
+    UI?: readonly number[];
+    API?: readonly number[];
+    Architecture?: readonly number[];
+  };
   readonly logs?: Record<number, string>;
   readonly logErrors?: Record<number, Error>;
   readonly listRaw?: Record<string, string>;
@@ -195,7 +198,9 @@ describe("parseAttributeArgs", () => {
   });
 
   test("an unknown argument is refused", () => {
-    expect(() => parseAttributeArgs(["--pr", "401", "--yolo"])).toThrow(/unknown argument '--yolo'/);
+    expect(() => parseAttributeArgs(["--pr", "401", "--yolo"])).toThrow(
+      /unknown argument '--yolo'/,
+    );
   });
 
   test("usage names the issue_comment coverage limit so /improve threads stay unattributed", () => {
@@ -283,7 +288,10 @@ describe("sweep attribute — matching a thread to one workflow", () => {
       commits: [DEFAULT_HEAD],
       runs: { UI: [10], API: [11], Architecture: [] },
       runHeads: { 10: "sha-other-pr", 11: DEFAULT_HEAD },
-      logs: { 10: aiLog(SUGGESTION_API), 11: aiLog("an unrelated suggestion that lives only in this log") },
+      logs: {
+        10: aiLog(SUGGESTION_API),
+        11: aiLog("an unrelated suggestion that lives only in this log"),
+      },
     });
     const { code, log } = await runAttribute(["--pr", "401"], s.gh);
     expect(code).toBe(0);
@@ -295,7 +303,10 @@ describe("sweep attribute — matching a thread to one workflow", () => {
     expect(listCalls.length).toBeGreaterThan(0);
     expect(listCalls.every((c) => c.includes("databaseId,headSha,event"))).toBe(true);
     const commitView = s.calls.find(
-      (c) => c[0] === "pr" && c[1] === "view" && String(c[c.indexOf("--json") + 1] ?? "").includes("commits"),
+      (c) =>
+        c[0] === "pr" &&
+        c[1] === "view" &&
+        String(c[c.indexOf("--json") + 1] ?? "").includes("commits"),
     );
     expect(commitView).toBeDefined();
   });
@@ -394,7 +405,7 @@ describe("sweep attribute — fail closed", () => {
   });
 
   test("a run list that is not a JSON array exits 1", async () => {
-    const s = stub({ listRaw: { [WORKFLOW.UI]: "{\"databaseId\":1}" } });
+    const s = stub({ listRaw: { [WORKFLOW.UI]: '{"databaseId":1}' } });
     const { code, err } = await runAttribute(["--pr", "401"], s.gh);
     expect(code).toBe(1);
     expect(err).toMatch(/not a JSON array|could not attribute/);
@@ -523,7 +534,9 @@ describe("sweep attribute — bodies that cannot be matched", () => {
 
   test("a Suggestion with no trailing [label, importance: n] is unattributed", async () => {
     const s = stub({
-      nodes: [threadNode("PRRT_trail", false, "github-actions", `**Suggestion:** ${SUGGESTION_API}`)],
+      nodes: [
+        threadNode("PRRT_trail", false, "github-actions", `**Suggestion:** ${SUGGESTION_API}`),
+      ],
     });
     const { code, log } = await runAttribute(["--pr", "401"], s.gh);
     expect(code).toBe(0);
@@ -532,7 +545,14 @@ describe("sweep attribute — bodies that cannot be matched", () => {
 
   test("a Suggestion whose content is blank is unattributed", async () => {
     const s = stub({
-      nodes: [threadNode("PRRT_blank", true, "github-actions", "**Suggestion:**   [critical bug, importance: 4]")],
+      nodes: [
+        threadNode(
+          "PRRT_blank",
+          true,
+          "github-actions",
+          "**Suggestion:**   [critical bug, importance: 4]",
+        ),
+      ],
     });
     const { code, log } = await runAttribute(["--pr", "401"], s.gh);
     expect(code).toBe(0);
@@ -541,10 +561,16 @@ describe("sweep attribute — bodies that cannot be matched", () => {
 
   test("a log line with no JSON object still decodes escapes, so a quoted suggestion matches", async () => {
     const suggestion = `Guard against a missing "cache${NBH}key" header.`;
-    const raw =
-      `plain prefix suggestion_content: |\\n    Guard against a missing \\"cache\\u2011key\\" header.\\n`;
+    const raw = `plain prefix suggestion_content: |\\n    Guard against a missing \\"cache\\u2011key\\" header.\\n`;
     const s = stub({
-      nodes: [threadNode("PRRT_raw", false, "github-actions", suggestionBody(suggestion, "possible issue", 3))],
+      nodes: [
+        threadNode(
+          "PRRT_raw",
+          false,
+          "github-actions",
+          suggestionBody(suggestion, "possible issue", 3),
+        ),
+      ],
       logs: { 111: raw },
     });
     const { code, log } = await runAttribute(["--pr", "401"], s.gh);

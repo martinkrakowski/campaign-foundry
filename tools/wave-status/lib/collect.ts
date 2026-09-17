@@ -131,10 +131,7 @@ export function waveIdFromDirName(name: string): string {
   return name.replace(/^wave-?/, "");
 }
 
-export function resolveScanRoots(
-  root: string,
-  legacyRoots?: readonly string[],
-): readonly string[] {
+export function resolveScanRoots(root: string, legacyRoots?: readonly string[]): readonly string[] {
   const scanRoots = [root];
   const resolvedLegacy = legacyRoots ?? (root === WAVE_LOG_ROOT ? [LEGACY_WAVE_LOG_ROOT] : []);
   for (const legacy of resolvedLegacy) {
@@ -640,10 +637,13 @@ export function joinPrForLane(
   let best: PrFact | undefined;
   let bestScore = 0;
   for (const fact of facts) {
-    const score =
-      fact.branchTail === wanted ? 2 : fact.branchTail.startsWith(`${wanted}-`) ? 1 : 0;
+    const score = fact.branchTail === wanted ? 2 : fact.branchTail.startsWith(`${wanted}-`) ? 1 : 0;
     if (score === 0) continue;
-    if (best === undefined || score > bestScore || (score === bestScore && fact.number > best.number)) {
+    if (
+      best === undefined ||
+      score > bestScore ||
+      (score === bestScore && fact.number > best.number)
+    ) {
       best = fact;
       bestScore = score;
     }
@@ -656,9 +656,7 @@ function asPr(fact: PrFact): LaneObservation["pr"] {
     number: fact.number,
     state: fact.state,
     checks: fact.checks,
-    ...(fact.unresolvedThreads === undefined
-      ? {}
-      : { unresolvedThreads: fact.unresolvedThreads }),
+    ...(fact.unresolvedThreads === undefined ? {} : { unresolvedThreads: fact.unresolvedThreads }),
   };
 }
 

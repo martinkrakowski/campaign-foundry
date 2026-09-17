@@ -59,10 +59,7 @@ describe("runCli", () => {
     const readFile = vi.fn(async (_p: string) => "```premise X\ntrue\n```");
     const listPlanDir = async (): Promise<readonly string[]> => ["b.md", "notes.txt", "a.md"];
     await runCli(io({ listPlanDir, readFile }).io);
-    expect(readFile.mock.calls.map((c) => c[0])).toEqual([
-      `${PLAN_DIR}/a.md`,
-      `${PLAN_DIR}/b.md`,
-    ]);
+    expect(readFile.mock.calls.map((c) => c[0])).toEqual([`${PLAN_DIR}/a.md`, `${PLAN_DIR}/b.md`]);
   });
 
   test("given paths, it checks exactly those and never lists the directory", async () => {

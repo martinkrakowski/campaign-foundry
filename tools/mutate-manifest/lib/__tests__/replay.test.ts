@@ -117,7 +117,10 @@ describe("replayManifest", () => {
     const writeFileBuffer = vi.fn(async (_path: string, _buffer: Buffer) => undefined);
     const checks = await replayManifest(
       manifest(),
-      { ...deps({ exitCode: 1 }, { exitCode: 0, launchError: "spawn run ENOENT" }), writeFileBuffer },
+      {
+        ...deps({ exitCode: 1 }, { exitCode: 0, launchError: "spawn run ENOENT" }),
+        writeFileBuffer,
+      },
       scratch(),
     );
     expect(checks[0]).toMatchObject({ status: "launch-failure", launchError: "spawn run ENOENT" });
@@ -142,7 +145,11 @@ describe("formatChecks", () => {
   });
 
   test("names the command that was already red, and says the claim was not checked", async () => {
-    const checks = await replayManifest(manifest(), deps({ exitCode: 1 }, { exitCode: 1 }), scratch());
+    const checks = await replayManifest(
+      manifest(),
+      deps({ exitCode: 1 }, { exitCode: 1 }),
+      scratch(),
+    );
     const text = formatChecks("W4", checks);
     expect(text).toContain("RED BASELINE  target.ts");
     expect(text).toContain("command: run tests");
@@ -151,7 +158,11 @@ describe("formatChecks", () => {
   });
 
   test("names the command that never ran, and why", async () => {
-    const checks = await replayManifest(manifest(), deps({ exitCode: 1, launchError: "spawn run ENOENT" }), scratch());
+    const checks = await replayManifest(
+      manifest(),
+      deps({ exitCode: 1, launchError: "spawn run ENOENT" }),
+      scratch(),
+    );
     const text = formatChecks("W4", checks);
     expect(text).toContain("LAUNCH FAILURE  target.ts");
     expect(text).toContain("command: run tests");
@@ -174,7 +185,11 @@ describe("exitCodeFor", () => {
   });
 
   test("is non-zero when a red baseline blocked the check", async () => {
-    const checks = await replayManifest(manifest(), deps({ exitCode: 1 }, { exitCode: 1 }), scratch());
+    const checks = await replayManifest(
+      manifest(),
+      deps({ exitCode: 1 }, { exitCode: 1 }),
+      scratch(),
+    );
     expect(exitCodeFor(checks)).toBe(EXIT_MISMATCH);
   });
 

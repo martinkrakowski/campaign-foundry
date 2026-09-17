@@ -139,7 +139,10 @@ export function canonicalEntry(entry: string, template: string, scope: string): 
   // zero-length suffix must never touch `entry` (a naive `entry.slice(0,
   // -suffix.length)` degenerates to `slice(0, -0)`, i.e. `slice(0, 0)`, which
   // would empty every entry into the "Stub" fallback below).
-  const base = suffix.length > 0 && entry.endsWith(suffix) ? entry.slice(0, entry.length - suffix.length) : entry;
+  const base =
+    suffix.length > 0 && entry.endsWith(suffix)
+      ? entry.slice(0, entry.length - suffix.length)
+      : entry;
   return toPascalCase(base);
 }
 

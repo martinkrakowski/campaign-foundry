@@ -163,7 +163,7 @@ export function parseArtifact(text: string): PlanVerifyArtifact {
     if (!Array.isArray(rawScope.plans)) {
       throw new Error("malformed artifact: partial scope missing plans array");
     }
-    scope = { kind: "partial", plans: [...rawScope.plans as readonly string[]] };
+    scope = { kind: "partial", plans: [...(rawScope.plans as readonly string[])] };
   } else {
     throw new Error("malformed artifact: unknown scope kind");
   }
@@ -190,7 +190,12 @@ export function parseArtifact(text: string): PlanVerifyArtifact {
     if (typeof rawItem.lane !== "string" || rawItem.lane === "") {
       throw new Error("malformed artifact: premise entry missing lane");
     }
-    if (rawItem.status !== "holds" && rawItem.status !== "stale" && rawItem.status !== "timed-out" && rawItem.status !== "error") {
+    if (
+      rawItem.status !== "holds" &&
+      rawItem.status !== "stale" &&
+      rawItem.status !== "timed-out" &&
+      rawItem.status !== "error"
+    ) {
       throw new Error("malformed artifact: premise entry has invalid status");
     }
     if ("reason" in rawItem) {

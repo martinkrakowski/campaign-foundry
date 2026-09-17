@@ -48,18 +48,23 @@ describe("FsBriefStore", () => {
   // than fail: the branch it covers is exercised by the route-level test, which mocks
   // the store instead of relying on filesystem permissions.
   const canDenyRead = process.platform !== "win32" && process.getuid?.() !== 0;
-  test.skipIf(!canDenyRead)("listBriefs rethrows when readdir fails with a non-ENOENT errno", async () => {
-    chmodSync(dir, 0o000);
-    try {
-      await expect(store.listBriefs()).rejects.toMatchObject({ code: "EACCES" });
-    } finally {
-      chmodSync(dir, 0o755);
-    }
-  });
+  test.skipIf(!canDenyRead)(
+    "listBriefs rethrows when readdir fails with a non-ENOENT errno",
+    async () => {
+      chmodSync(dir, 0o000);
+      try {
+        await expect(store.listBriefs()).rejects.toMatchObject({ code: "EACCES" });
+      } finally {
+        chmodSync(dir, 0o755);
+      }
+    },
+  );
 
   test("listBriefs lists, sorts, and parses valid briefs while skipping invalid files", async () => {
-    const yamlA = "id: camp-a\ntargetRegion: US\ntargetAudience: dev\ncampaignMessage: A\nproducts:\n  - id: p1\n";
-    const yamlB = "id: camp-b\ntargetRegion: US\ntargetAudience: dev\ncampaignMessage: B\nproducts:\n  - id: p2\n";
+    const yamlA =
+      "id: camp-a\ntargetRegion: US\ntargetAudience: dev\ncampaignMessage: A\nproducts:\n  - id: p1\n";
+    const yamlB =
+      "id: camp-b\ntargetRegion: US\ntargetAudience: dev\ncampaignMessage: B\nproducts:\n  - id: p2\n";
     writeFileSync(join(dir, "camp-b.yaml"), yamlB);
     writeFileSync(join(dir, "camp-a.yaml"), yamlA);
     writeFileSync(join(dir, "bad.yaml"), "invalid: yaml: content: [");
@@ -109,8 +114,12 @@ describe("FsBriefStore", () => {
     expect(fromConfinedPath.id).toBe("test-camp");
 
     // Security: rejects absolute paths outside this.dir and traversal
-    await expect(store.readBrief("/etc/hosts")).rejects.toThrow(/Path escapes the allowed directory/);
-    await expect(store.readBrief("../../etc/passwd")).rejects.toThrow(/Path escapes the allowed directory/);
+    await expect(store.readBrief("/etc/hosts")).rejects.toThrow(
+      /Path escapes the allowed directory/,
+    );
+    await expect(store.readBrief("../../etc/passwd")).rejects.toThrow(
+      /Path escapes the allowed directory/,
+    );
   });
 
   test("createBrief creates file exclusively and fails with EEXIST if duplicate", async () => {
@@ -146,9 +155,9 @@ describe("FsBriefStore", () => {
 
     // Fails when regular file exists but does not parse as a brief
     writeFileSync(join(dir, "unparseable.yaml"), "invalid: [");
-    await expect(
-      store.rewriteBrief({ ...minimalBrief, id: "unparseable" }),
-    ).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(store.rewriteBrief({ ...minimalBrief, id: "unparseable" })).rejects.toMatchObject({
+      code: "ENOENT",
+    });
   });
 
   test("rewriteBrief refuses symlinks", async () => {
@@ -157,14 +166,14 @@ describe("FsBriefStore", () => {
     const link = join(dir, "linked.yaml");
     symlinkSync(outside, link);
 
-    await expect(
-      store.rewriteBrief({ ...minimalBrief, id: "linked" }),
-    ).rejects.toThrow(/Refusing to write through a symlink/);
+    await expect(store.rewriteBrief({ ...minimalBrief, id: "linked" })).rejects.toThrow(
+      /Refusing to write through a symlink/,
+    );
 
     // Symlink on replaceBrief
-    await expect(
-      store.replaceBrief({ ...minimalBrief, id: "linked" }),
-    ).rejects.toThrow(/Refusing to write through a symlink/);
+    await expect(store.replaceBrief({ ...minimalBrief, id: "linked" })).rejects.toThrow(
+      /Refusing to write through a symlink/,
+    );
   });
 
   // `rewriteBrief` stages its bytes in a sibling temp file and renames it over the
@@ -184,7 +193,9 @@ describe("FsBriefStore", () => {
     for (let attempt = 0; attempt < 20; attempt += 1) {
       const settled = await Promise.allSettled([store.rewriteBrief(byA), store.rewriteBrief(byB)]);
       const failures = settled.flatMap((s) => (s.status === "rejected" ? [String(s.reason)] : []));
-      expect(failures, `overlapping rewrites shared one temp file (attempt ${attempt})`).toEqual([]);
+      expect(failures, `overlapping rewrites shared one temp file (attempt ${attempt})`).toEqual(
+        [],
+      );
 
       const text = readFileSync(join(dir, "test-camp.yaml"), "utf8");
       expect(text.includes("written by A") || text.includes("written by B")).toBe(true);
@@ -231,9 +242,9 @@ describe("FsBriefStore", () => {
     const link = join(dir, "linked-create.yaml");
     symlinkSync(outside, link);
 
-    await expect(
-      store.createBrief({ ...minimalBrief, id: "linked-create" }),
-    ).rejects.toThrow(/Refusing to write through a symlink/);
+    await expect(store.createBrief({ ...minimalBrief, id: "linked-create" })).rejects.toThrow(
+      /Refusing to write through a symlink/,
+    );
   });
 
   test("withBriefLock serialises critical sections per brief ID", async () => {

@@ -36,7 +36,9 @@ function u32(n: number): Buffer {
  * Measure a byte stream: total size and CRC-32 (node:zlib — no extra dependency),
  * one chunk at a time. This is the first pass; the bytes are re-read when streamed.
  */
-export async function measure(chunks: AsyncIterable<Uint8Array>): Promise<{ size: number; crc: number }> {
+export async function measure(
+  chunks: AsyncIterable<Uint8Array>,
+): Promise<{ size: number; crc: number }> {
   let size = 0;
   let crc = 0;
   for await (const chunk of chunks) {
@@ -88,7 +90,11 @@ export function centralHeader(entry: ZipEntry, localOffset: number): Buffer {
   ]);
 }
 
-export function endOfCentralDirectory(count: number, directorySize: number, directoryOffset: number): Buffer {
+export function endOfCentralDirectory(
+  count: number,
+  directorySize: number,
+  directoryOffset: number,
+): Buffer {
   return Buffer.concat([
     u32(EOCD_SIGNATURE),
     u16(0),

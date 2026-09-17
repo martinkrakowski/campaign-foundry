@@ -27,7 +27,10 @@ interface RecordedFixture {
 
 const ROOT = "/recorded";
 
-async function recordedFixture(): Promise<{ readonly lanes: readonly LaneStatus[]; readonly fixture: RecordedFixture }> {
+async function recordedFixture(): Promise<{
+  readonly lanes: readonly LaneStatus[];
+  readonly fixture: RecordedFixture;
+}> {
   const fixture = JSON.parse(
     await readFile(new URL("./fixtures/pr-lane-join-2026-09-12.json", import.meta.url), "utf8"),
   ) as RecordedFixture;
@@ -47,9 +50,9 @@ async function recordedFixture(): Promise<{ readonly lanes: readonly LaneStatus[
     },
     pgrep: async () => 0,
     gh: async (args) =>
-      ((args[0] === "api" && args[1].includes("pulls")) || args[0] === "pr"
+      (args[0] === "api" && args[1].includes("pulls")) || args[0] === "pr"
         ? JSON.stringify(fixture.ghPrList)
-        : "not json"),
+        : "not json",
   };
   const status = await collect(deps, ROOT, "2026-09-12T00:00:00Z");
   return {

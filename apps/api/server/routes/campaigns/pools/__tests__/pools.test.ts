@@ -1,5 +1,14 @@
 import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
-import { chmodSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, symlinkSync } from "node:fs";
+import {
+  chmodSync,
+  mkdtempSync,
+  mkdirSync,
+  writeFileSync,
+  readFileSync,
+  existsSync,
+  rmSync,
+  symlinkSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createApp, createRouter, toWebHandler, type EventHandler } from "h3";
@@ -84,7 +93,9 @@ describe("copy pool routes", () => {
     copyGeneratorMock.mockReturnValue(generator);
     const { generate, get, patch, list } = await api();
 
-    const created = await generate()(jsonReq("http://x/campaigns/pools/copy", "POST", { briefId: "camp" }));
+    const created = await generate()(
+      jsonReq("http://x/campaigns/pools/copy", "POST", { briefId: "camp" }),
+    );
     expect(created.status).toBe(201);
     const createdBody = (await created.json()) as {
       pool: {
@@ -113,7 +124,9 @@ describe("copy pool routes", () => {
       brief: expect.objectContaining({ id: "camp" }),
       count: 10,
     });
-    expect(JSON.parse(readFileSync(join(dir, "briefs", "camp", "pools.json"), "utf8"))).toEqual(createdBody.pool);
+    expect(JSON.parse(readFileSync(join(dir, "briefs", "camp", "pools.json"), "utf8"))).toEqual(
+      createdBody.pool,
+    );
 
     const listed = await list()(new Request("http://x/campaigns/briefs"));
     const listedJson = (await listed.json()) as { briefs: { file: string }[] };
@@ -126,7 +139,9 @@ describe("copy pool routes", () => {
     // The revision rides along: it is what the next PATCH guards its write with.
     expect(fetchedBody.revision).toMatch(/^[0-9a-f]{64}$/);
     expect(fetchedBody.revision).toBe(
-      createHash("sha256").update(readFileSync(join(dir, "briefs", "camp", "pools.json"))).digest("hex"),
+      createHash("sha256")
+        .update(readFileSync(join(dir, "briefs", "camp", "pools.json")))
+        .digest("hex"),
     );
 
     const patched = await patch()(
@@ -153,12 +168,18 @@ describe("copy pool routes", () => {
   test("POST merges with an existing pool and allocates unused ids", async () => {
     copyGeneratorMock.mockReturnValue(fakeGenerator(["Stay wild. Stay hydrated."]));
     const { generate } = await api();
-    expect((await generate()(jsonReq("http://x/campaigns/pools/copy", "POST", { briefId: "camp", count: 1 }))).status).toBe(
-      201,
-    );
+    expect(
+      (
+        await generate()(
+          jsonReq("http://x/campaigns/pools/copy", "POST", { briefId: "camp", count: 1 }),
+        )
+      ).status,
+    ).toBe(201);
 
     copyGeneratorMock.mockReturnValue(fakeGenerator(["Stay wild. Stay hydrated.", "New angle"]));
-    const again = await generate()(jsonReq("http://x/campaigns/pools/copy", "POST", { briefId: "camp", count: 2 }));
+    const again = await generate()(
+      jsonReq("http://x/campaigns/pools/copy", "POST", { briefId: "camp", count: 2 }),
+    );
     expect(again.status).toBe(201);
     const body = (await again.json()) as {
       pool: { model: string; entries: Array<{ id: string; text: string }> };
@@ -185,9 +206,14 @@ describe("copy pool routes", () => {
       mode: "variation",
       variation: { count: 2 },
     };
-    const res = await generate()(jsonReq("http://x/campaigns/pools/copy", "POST", { brief: draft, count: 1 }));
+    const res = await generate()(
+      jsonReq("http://x/campaigns/pools/copy", "POST", { brief: draft, count: 1 }),
+    );
     expect(res.status).toBe(201);
-    const body = (await res.json()) as { pool: { briefId: string; entries: unknown[] }; added: number };
+    const body = (await res.json()) as {
+      pool: { briefId: string; entries: unknown[] };
+      added: number;
+    };
     expect(body.added).toBe(1);
     expect(body.pool.briefId).toBe("draft-brief");
     expect(generator.suggestHeadlines).toHaveBeenCalledWith({
@@ -195,7 +221,9 @@ describe("copy pool routes", () => {
       count: 1,
     });
     expect(existsSync(join(dir, "briefs", "draft-brief.yaml"))).toBe(false);
-    expect(JSON.parse(readFileSync(join(dir, "briefs", "draft-brief", "pools.json"), "utf8"))).toEqual(body.pool);
+    expect(
+      JSON.parse(readFileSync(join(dir, "briefs", "draft-brief", "pools.json"), "utf8")),
+    ).toEqual(body.pool);
     const fetched = await get()(new Request("http://x/campaigns/pools/draft-brief"));
     expect(fetched.status).toBe(200);
   });
@@ -203,11 +231,21 @@ describe("copy pool routes", () => {
   test("POST validates an inline brief like generate (400 naming the problem)", async () => {
     copyGeneratorMock.mockReturnValue(fakeGenerator(["Stay wild"]));
     const { generate } = await api();
-    const res = await generate()(jsonReq("http://x/campaigns/pools/copy", "POST", { brief: { id: "camp" } }));
+    const res = await generate()(
+      jsonReq("http://x/campaigns/pools/copy", "POST", { brief: { id: "camp" } }),
+    );
     expect(res.status).toBe(400);
     expect(((await res.json()) as { error: string }).error).toMatch(/missing required field/);
     const unsafe = await generate()(
-      jsonReq("http://x/campaigns/pools/copy", "POST", { brief: { id: "Bad Id", targetRegion: "DE", targetAudience: "a", campaignMessage: "Hi", products: [] } }),
+      jsonReq("http://x/campaigns/pools/copy", "POST", {
+        brief: {
+          id: "Bad Id",
+          targetRegion: "DE",
+          targetAudience: "a",
+          campaignMessage: "Hi",
+          products: [],
+        },
+      }),
     );
     expect(unsafe.status).toBe(400);
     expect(existsSync(join(dir, "briefs", "Bad Id"))).toBe(false);
@@ -216,7 +254,9 @@ describe("copy pool routes", () => {
   test("POST returns 404 when the brief is unknown", async () => {
     copyGeneratorMock.mockReturnValue(fakeGenerator(["Hi"]));
     const { generate } = await api();
-    const res = await generate()(jsonReq("http://x/campaigns/pools/copy", "POST", { briefId: "missing" }));
+    const res = await generate()(
+      jsonReq("http://x/campaigns/pools/copy", "POST", { briefId: "missing" }),
+    );
     expect(res.status).toBe(404);
     expect(await res.json()).toEqual({ error: 'Brief "missing" not found.' });
     expect(existsSync(join(dir, "briefs", "missing"))).toBe(false);
@@ -224,7 +264,9 @@ describe("copy pool routes", () => {
 
   test("POST returns 503 when OPENROUTER_API_KEY is missing", async () => {
     const { generate } = await api();
-    const res = await generate()(jsonReq("http://x/campaigns/pools/copy", "POST", { briefId: "camp" }));
+    const res = await generate()(
+      jsonReq("http://x/campaigns/pools/copy", "POST", { briefId: "camp" }),
+    );
     expect(res.status).toBe(503);
     expect(await res.json()).toEqual({ error: "OPENROUTER_API_KEY is not set" });
   });
@@ -232,24 +274,36 @@ describe("copy pool routes", () => {
   test("POST returns 422 when the generator returns nothing usable", async () => {
     copyGeneratorMock.mockReturnValue(fakeGenerator(["  ", ""]));
     const { generate } = await api();
-    const res = await generate()(jsonReq("http://x/campaigns/pools/copy", "POST", { briefId: "camp" }));
+    const res = await generate()(
+      jsonReq("http://x/campaigns/pools/copy", "POST", { briefId: "camp" }),
+    );
     expect(res.status).toBe(422);
     expect(await res.json()).toEqual({ error: "Copy generator returned no usable headlines" });
   });
 
   test("POST returns 400 for an invalid count or briefId", async () => {
     const { generate } = await api();
-    const badCount = await generate()(jsonReq("http://x/campaigns/pools/copy", "POST", { briefId: "camp", count: 26 }));
+    const badCount = await generate()(
+      jsonReq("http://x/campaigns/pools/copy", "POST", { briefId: "camp", count: 26 }),
+    );
     expect(badCount.status).toBe(400);
-    expect(((await badCount.json()) as { error: string }).error).toMatch(/count must be an integer between 1 and 25/);
+    expect(((await badCount.json()) as { error: string }).error).toMatch(
+      /count must be an integer between 1 and 25/,
+    );
 
-    const zero = await generate()(jsonReq("http://x/campaigns/pools/copy", "POST", { briefId: "camp", count: 0 }));
+    const zero = await generate()(
+      jsonReq("http://x/campaigns/pools/copy", "POST", { briefId: "camp", count: 0 }),
+    );
     expect(zero.status).toBe(400);
 
-    const notInt = await generate()(jsonReq("http://x/campaigns/pools/copy", "POST", { briefId: "camp", count: 1.5 }));
+    const notInt = await generate()(
+      jsonReq("http://x/campaigns/pools/copy", "POST", { briefId: "camp", count: 1.5 }),
+    );
     expect(notInt.status).toBe(400);
 
-    const unsafe = await generate()(jsonReq("http://x/campaigns/pools/copy", "POST", { briefId: "Bad" }));
+    const unsafe = await generate()(
+      jsonReq("http://x/campaigns/pools/copy", "POST", { briefId: "Bad" }),
+    );
     expect(unsafe.status).toBe(400);
 
     const arrayBody = await generate()(jsonReq("http://x/campaigns/pools/copy", "POST", []));
@@ -260,7 +314,9 @@ describe("copy pool routes", () => {
     const generator = fakeGenerator(["Only one"]);
     copyGeneratorMock.mockReturnValue(generator);
     const { generate } = await api();
-    const res = await generate()(jsonReq("http://x/campaigns/pools/copy", "POST", { briefId: "camp", count: 25 }));
+    const res = await generate()(
+      jsonReq("http://x/campaigns/pools/copy", "POST", { briefId: "camp", count: 25 }),
+    );
     expect(res.status).toBe(201);
     expect(generator.suggestHeadlines).toHaveBeenCalledWith(expect.objectContaining({ count: 25 }));
   });
@@ -273,7 +329,9 @@ describe("copy pool routes", () => {
       throw "non-error parse failure";
     };
     try {
-      const res = await generate()(jsonReq("http://x/campaigns/pools/copy", "POST", { briefId: "camp" }));
+      const res = await generate()(
+        jsonReq("http://x/campaigns/pools/copy", "POST", { briefId: "camp" }),
+      );
       expect(res.status).toBe(400);
       expect(await res.json()).toEqual({ error: "non-error parse failure" });
     } finally {
@@ -318,15 +376,20 @@ describe("copy pool routes", () => {
     await generate()(jsonReq("http://x/campaigns/pools/copy", "POST", { briefId: "camp" }));
 
     const rejected = await patch()(
-      jsonReq("http://x/campaigns/pools/camp", "PATCH", { entries: [{ id: "h1", status: "rejected" }] }),
+      jsonReq("http://x/campaigns/pools/camp", "PATCH", {
+        entries: [{ id: "h1", status: "rejected" }],
+      }),
     );
     expect(rejected.status).toBe(200);
-    expect(((await rejected.json()) as { pool: { entries: Array<{ status: string }> } }).pool.entries[0].status).toBe(
-      "rejected",
-    );
+    expect(
+      ((await rejected.json()) as { pool: { entries: Array<{ status: string }> } }).pool.entries[0]
+        .status,
+    ).toBe("rejected");
 
     const unknown = await patch()(
-      jsonReq("http://x/campaigns/pools/camp", "PATCH", { entries: [{ id: "nope", status: "approved" }] }),
+      jsonReq("http://x/campaigns/pools/camp", "PATCH", {
+        entries: [{ id: "nope", status: "approved" }],
+      }),
     );
     expect(unknown.status).toBe(404);
     expect(await unknown.json()).toEqual({ error: 'Copy pool entry "nope" not found.' });
@@ -338,7 +401,12 @@ describe("copy pool routes", () => {
     mkdirSync(join(dir, "briefs", "camp"), { recursive: true });
     writeFileSync(
       join(dir, "briefs", "camp", "pools.json"),
-      JSON.stringify({ briefId: "camp", generatedAt: "t", model: "m", entries: [{ id: "h1", text: 42, status: "approved" }] }),
+      JSON.stringify({
+        briefId: "camp",
+        generatedAt: "t",
+        model: "m",
+        entries: [{ id: "h1", text: 42, status: "approved" }],
+      }),
     );
     const error = "Copy pool briefs/camp/pools.json is invalid: entries[0].text must be a string.";
 
@@ -347,12 +415,16 @@ describe("copy pool routes", () => {
     expect(await fetched.json()).toEqual({ error });
 
     const patched = await patch()(
-      jsonReq("http://x/campaigns/pools/camp", "PATCH", { entries: [{ id: "h1", status: "approved" }] }),
+      jsonReq("http://x/campaigns/pools/camp", "PATCH", {
+        entries: [{ id: "h1", status: "approved" }],
+      }),
     );
     expect(patched.status).toBe(422);
     expect(await patched.json()).toEqual({ error });
 
-    const generated = await generate()(jsonReq("http://x/campaigns/pools/copy", "POST", { briefId: "camp" }));
+    const generated = await generate()(
+      jsonReq("http://x/campaigns/pools/copy", "POST", { briefId: "camp" }),
+    );
     expect(generated.status).toBe(422);
     expect(await generated.json()).toEqual({ error });
     expect(readFileSync(join(dir, "briefs", "camp", "pools.json"), "utf8")).toContain('"text":42');
@@ -377,15 +449,21 @@ describe("copy pool routes", () => {
     expect(await fetched.json()).toEqual({ error });
 
     const patched = await patch()(
-      jsonReq("http://x/campaigns/pools/camp", "PATCH", { entries: [{ id: "h1", status: "approved" }] }),
+      jsonReq("http://x/campaigns/pools/camp", "PATCH", {
+        entries: [{ id: "h1", status: "approved" }],
+      }),
     );
     expect(patched.status).toBe(422);
     expect(await patched.json()).toEqual({ error });
 
-    const generated = await generate()(jsonReq("http://x/campaigns/pools/copy", "POST", { briefId: "camp" }));
+    const generated = await generate()(
+      jsonReq("http://x/campaigns/pools/copy", "POST", { briefId: "camp" }),
+    );
     expect(generated.status).toBe(422);
     expect(await generated.json()).toEqual({ error });
-    expect(JSON.parse(readFileSync(join(dir, "briefs", "camp", "pools.json"), "utf8"))).toEqual(mismatched);
+    expect(JSON.parse(readFileSync(join(dir, "briefs", "camp", "pools.json"), "utf8"))).toEqual(
+      mismatched,
+    );
     expect(existsSync(join(dir, "briefs", "other", "pools.json"))).toBe(false);
   });
 
@@ -397,17 +475,24 @@ describe("copy pool routes", () => {
     expect(
       (
         await patch()(
-          jsonReq("http://x/campaigns/pools/camp", "PATCH", { entries: [{ id: "h1", status: "approved" }] }),
+          jsonReq("http://x/campaigns/pools/camp", "PATCH", {
+            entries: [{ id: "h1", status: "approved" }],
+          }),
         )
       ).status,
     ).toBe(500);
-    expect((await generate()(jsonReq("http://x/campaigns/pools/copy", "POST", { briefId: "camp" }))).status).toBe(500);
+    expect(
+      (await generate()(jsonReq("http://x/campaigns/pools/copy", "POST", { briefId: "camp" })))
+        .status,
+    ).toBe(500);
   });
 
   test("PATCH returns 404 when no pool exists", async () => {
     const { patch } = await api();
     const res = await patch()(
-      jsonReq("http://x/campaigns/pools/camp", "PATCH", { entries: [{ id: "h1", status: "approved" }] }),
+      jsonReq("http://x/campaigns/pools/camp", "PATCH", {
+        entries: [{ id: "h1", status: "approved" }],
+      }),
     );
     expect(res.status).toBe(404);
     expect(await res.json()).toEqual({ error: 'Headline pool for brief "camp" not found.' });
@@ -440,7 +525,9 @@ describe("copy pool routes", () => {
     }
 
     const unsafe = await patch()(
-      jsonReq("http://x/campaigns/pools/Bad", "PATCH", { entries: [{ id: "h1", status: "approved" }] }),
+      jsonReq("http://x/campaigns/pools/Bad", "PATCH", {
+        entries: [{ id: "h1", status: "approved" }],
+      }),
     );
     expect(unsafe.status).toBe(400);
 
@@ -462,7 +549,9 @@ describe("copy pool routes", () => {
     };
     try {
       const res = await patch()(
-        jsonReq("http://x/campaigns/pools/camp", "PATCH", { entries: [{ id: "h1", status: "approved" }] }),
+        jsonReq("http://x/campaigns/pools/camp", "PATCH", {
+          entries: [{ id: "h1", status: "approved" }],
+        }),
       );
       expect(res.status).toBe(400);
       expect(await res.json()).toEqual({ error: "non-error parse failure" });
@@ -481,7 +570,10 @@ describe("copy pool routes", () => {
       }),
     );
     expect(res.status).toBe(200);
-    expect(((await res.json()) as { pool: { entries: Array<{ status: string; text: string }> } }).pool.entries[0]).toEqual({
+    expect(
+      ((await res.json()) as { pool: { entries: Array<{ status: string; text: string }> } }).pool
+        .entries[0],
+    ).toEqual({
       id: "h1",
       text: "Alpine spring water",
       status: "rejected",
@@ -490,10 +582,13 @@ describe("copy pool routes", () => {
   test("PATCH clears a stale legal reason when edited text passes and status stays rejected", async () => {
     copyGeneratorMock.mockReturnValue(fakeGenerator(["A miracle in every sip"]));
     const { generate, patch } = await api();
-    const created = await generate()(jsonReq("http://x/campaigns/pools/copy", "POST", { briefId: "camp" }));
-    expect(((await created.json()) as { pool: { entries: Array<{ reason?: string }> } }).pool.entries[0].reason).toBe(
-      "Prohibited terminology: miracle",
+    const created = await generate()(
+      jsonReq("http://x/campaigns/pools/copy", "POST", { briefId: "camp" }),
     );
+    expect(
+      ((await created.json()) as { pool: { entries: Array<{ reason?: string }> } }).pool.entries[0]
+        .reason,
+    ).toBe("Prohibited terminology: miracle");
 
     const res = await patch()(
       jsonReq("http://x/campaigns/pools/camp", "PATCH", {
@@ -501,7 +596,8 @@ describe("copy pool routes", () => {
       }),
     );
     expect(res.status).toBe(200);
-    const entry = ((await res.json()) as { pool: { entries: Array<Record<string, unknown>> } }).pool.entries[0];
+    const entry = ((await res.json()) as { pool: { entries: Array<Record<string, unknown>> } }).pool
+      .entries[0];
     expect(entry).toEqual({ id: "h1", text: "Alpine spring water", status: "rejected" });
     expect("reason" in entry).toBe(false);
   });
@@ -517,7 +613,9 @@ describe("copy pool routes", () => {
       }),
     );
     expect(res.status).toBe(422);
-    expect(await res.json()).toEqual({ error: 'Edited text for entry "h2" duplicates entry "h1".' });
+    expect(await res.json()).toEqual({
+      error: 'Edited text for entry "h2" duplicates entry "h1".',
+    });
     const file = JSON.parse(readFileSync(join(dir, "briefs", "camp", "pools.json"), "utf8")) as {
       entries: Array<{ text: string }>;
     };
@@ -535,14 +633,21 @@ describe("copy pool routes", () => {
     const forty = Array.from({ length: 40 }, (_, i) => `Headline number ${i + 1}`);
     copyGeneratorMock.mockReturnValue(fakeGenerator(["x".repeat(61), ...forty]));
     const { generate } = await api();
-    const res = await generate()(jsonReq("http://x/campaigns/pools/copy", "POST", { briefId: "camp", count: 1 }));
+    const res = await generate()(
+      jsonReq("http://x/campaigns/pools/copy", "POST", { briefId: "camp", count: 1 }),
+    );
     expect(res.status).toBe(201);
-    const body = (await res.json()) as { pool: { entries: Array<{ text: string }> }; added: number };
+    const body = (await res.json()) as {
+      pool: { entries: Array<{ text: string }> };
+      added: number;
+    };
     expect(body.added).toBe(1);
     expect(body.pool.entries.map((e) => e.text)).toEqual(["Headline number 1"]);
 
     copyGeneratorMock.mockReturnValue(fakeGenerator(["y".repeat(61)]));
-    const tooLong = await generate()(jsonReq("http://x/campaigns/pools/copy", "POST", { briefId: "camp" }));
+    const tooLong = await generate()(
+      jsonReq("http://x/campaigns/pools/copy", "POST", { briefId: "camp" }),
+    );
     expect(tooLong.status).toBe(422);
   });
 
@@ -554,9 +659,14 @@ describe("copy pool routes", () => {
     const before = readFileSync(file, "utf8");
 
     copyGeneratorMock.mockReturnValue(fakeGenerator(["STAY  wild"]));
-    const res = await generate()(jsonReq("http://x/campaigns/pools/copy", "POST", { briefId: "camp" }));
+    const res = await generate()(
+      jsonReq("http://x/campaigns/pools/copy", "POST", { briefId: "camp" }),
+    );
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { pool: { entries: Array<{ text: string }> }; added: number };
+    const body = (await res.json()) as {
+      pool: { entries: Array<{ text: string }> };
+      added: number;
+    };
     expect(body.added).toBe(0);
     expect(body.pool.entries.map((e) => e.text)).toEqual(["Stay wild"]);
     expect(readFileSync(file, "utf8")).toBe(before);
@@ -625,14 +735,14 @@ describe("copy pool routes", () => {
     copyGeneratorMock.mockReturnValue(fakeGenerator(["Stay wild", "Stay hydrated"]));
     const { generate, get, patch } = await api();
     await generate()(jsonReq("http://x/campaigns/pools/copy", "POST", { briefId: "camp" }));
-    const read = (await (await get()(new Request("http://x/campaigns/pools/camp"))).json()) as { revision: string };
+    const read = (await (await get()(new Request("http://x/campaigns/pools/camp"))).json()) as {
+      revision: string;
+    };
     const stale = read.revision;
     const reject = (id: string, revision?: string) =>
-      jsonReq(
-        `http://x/campaigns/pools/camp${revision ? `?revision=${revision}` : ""}`,
-        "PATCH",
-        { entries: [{ id, status: "rejected" }] },
-      );
+      jsonReq(`http://x/campaigns/pools/camp${revision ? `?revision=${revision}` : ""}`, "PATCH", {
+        entries: [{ id, status: "rejected" }],
+      });
 
     const first = await patch()(reject("h1", stale));
     expect(first.status).toBe(200);
@@ -643,7 +753,10 @@ describe("copy pool routes", () => {
     // have dropped the first edit, so the store refuses it and says what is there.
     const second = await patch()(reject("h2", stale));
     expect(second.status).toBe(409);
-    expect(await second.json()).toEqual({ error: "Headline pool was modified by another user.", revision: fresh });
+    expect(await second.json()).toEqual({
+      error: "Headline pool was modified by another user.",
+      revision: fresh,
+    });
 
     const retried = await patch()(reject("h2", fresh));
     expect(retried.status).toBe(200);
@@ -657,7 +770,9 @@ describe("copy pool routes", () => {
     copyGeneratorMock.mockReturnValue(fakeGenerator(["Stay wild"]));
     const { generate, get, patch } = await api();
     await generate()(jsonReq("http://x/campaigns/pools/copy", "POST", { briefId: "camp" }));
-    const read = (await (await get()(new Request("http://x/campaigns/pools/camp"))).json()) as { revision: string };
+    const read = (await (await get()(new Request("http://x/campaigns/pools/camp"))).json()) as {
+      revision: string;
+    };
 
     const res = await patch()(
       jsonReq(`http://x/campaigns/pools/camp?revision=${read.revision}&revision=stale`, "PATCH", {
@@ -677,12 +792,16 @@ describe("copy pool routes", () => {
     chmodSync(poolDir, 0o500);
     try {
       const patched = await patch()(
-        jsonReq("http://x/campaigns/pools/camp", "PATCH", { entries: [{ id: "h1", status: "rejected" }] }),
+        jsonReq("http://x/campaigns/pools/camp", "PATCH", {
+          entries: [{ id: "h1", status: "rejected" }],
+        }),
       );
       expect(patched.status).toBe(500);
 
       copyGeneratorMock.mockReturnValue(fakeGenerator(["Second angle"]));
-      const generated = await generate()(jsonReq("http://x/campaigns/pools/copy", "POST", { briefId: "camp" }));
+      const generated = await generate()(
+        jsonReq("http://x/campaigns/pools/copy", "POST", { briefId: "camp" }),
+      );
       expect(generated.status).toBe(500);
     } finally {
       chmodSync(poolDir, 0o755);
@@ -692,7 +811,9 @@ describe("copy pool routes", () => {
   test("POST refuses a stale ?revision= with 409 carrying the fresh revision", async () => {
     copyGeneratorMock.mockReturnValue(fakeGenerator(["Stay wild"]));
     const { generate, get } = await api();
-    const created = await generate()(jsonReq("http://x/campaigns/pools/copy", "POST", { briefId: "camp" }));
+    const created = await generate()(
+      jsonReq("http://x/campaigns/pools/copy", "POST", { briefId: "camp" }),
+    );
     const stale = ((await created.json()) as { revision: string }).revision;
 
     copyGeneratorMock.mockReturnValue(fakeGenerator(["Second angle"]));
@@ -709,13 +830,19 @@ describe("copy pool routes", () => {
     copyGeneratorMock.mockReturnValue(fakeGenerator(["Third angle"]));
     // A repeated query takes the first: two revisions cannot both be expected.
     const retried = await generate()(
-      jsonReq(`http://x/campaigns/pools/copy?revision=${body.revision}&revision=stale`, "POST", { briefId: "camp" }),
+      jsonReq(`http://x/campaigns/pools/copy?revision=${body.revision}&revision=stale`, "POST", {
+        briefId: "camp",
+      }),
     );
     expect(retried.status).toBe(201);
     const final = (await (await get()(new Request("http://x/campaigns/pools/camp"))).json()) as {
       pool: { entries: Array<{ text: string }> };
     };
-    expect(final.pool.entries.map((e) => e.text)).toEqual(["Stay wild", "Second angle", "Third angle"]);
+    expect(final.pool.entries.map((e) => e.text)).toEqual([
+      "Stay wild",
+      "Second angle",
+      "Third angle",
+    ]);
   });
 
   test("POST and PATCH refuse a symlinked briefs/<id> directory", async () => {
@@ -725,13 +852,17 @@ describe("copy pool routes", () => {
     mkdirSync(elsewhere, { recursive: true });
     symlinkSync(elsewhere, join(dir, "briefs", "camp"));
 
-    const created = await generate()(jsonReq("http://x/campaigns/pools/copy", "POST", { briefId: "camp" }));
+    const created = await generate()(
+      jsonReq("http://x/campaigns/pools/copy", "POST", { briefId: "camp" }),
+    );
     expect(created.status).toBe(400);
     expect(await created.json()).toEqual({ error: "Refusing to write through a symlink." });
     expect(existsSync(join(elsewhere, "pools.json"))).toBe(false);
 
     const patched = await patch()(
-      jsonReq("http://x/campaigns/pools/camp", "PATCH", { entries: [{ id: "h1", status: "approved" }] }),
+      jsonReq("http://x/campaigns/pools/camp", "PATCH", {
+        entries: [{ id: "h1", status: "approved" }],
+      }),
     );
     expect(patched.status).toBe(400);
   });
@@ -748,27 +879,49 @@ describe("copy pool routes", () => {
     });
     const cases: Array<[CopyGeneratorError, number, string]> = [
       [new CopyGeneratorError("missing_key", "no key"), 503, "OPENROUTER_API_KEY is not set"],
-      [new CopyGeneratorError("auth", "OpenRouter HTTP 401: bad key"), 502, "OpenRouter rejected the configured API key"],
-      [new CopyGeneratorError("rate_limited", "429"), 503, "OpenRouter is rate limiting copy generation"],
+      [
+        new CopyGeneratorError("auth", "OpenRouter HTTP 401: bad key"),
+        502,
+        "OpenRouter rejected the configured API key",
+      ],
+      [
+        new CopyGeneratorError("rate_limited", "429"),
+        503,
+        "OpenRouter is rate limiting copy generation",
+      ],
       [new CopyGeneratorError("network", "timeout"), 503, "OpenRouter could not be reached"],
-      [new CopyGeneratorError("malformed", "junk"), 422, "Copy generator returned an unreadable response"],
-      [new CopyGeneratorError("upstream", "OpenRouter HTTP 500: boom"), 502, "OpenRouter returned an error"],
+      [
+        new CopyGeneratorError("malformed", "junk"),
+        422,
+        "Copy generator returned an unreadable response",
+      ],
+      [
+        new CopyGeneratorError("upstream", "OpenRouter HTTP 500: boom"),
+        502,
+        "OpenRouter returned an error",
+      ],
     ];
     for (const [error, status, message] of cases) {
       copyGeneratorMock.mockReturnValue(failing(error));
-      const res = await generate()(jsonReq("http://x/campaigns/pools/copy", "POST", { briefId: "camp" }));
+      const res = await generate()(
+        jsonReq("http://x/campaigns/pools/copy", "POST", { briefId: "camp" }),
+      );
       expect(res.status, error.kind).toBe(status);
       expect(await res.json()).toEqual({ error: message });
       expect(res.headers.get("retry-after")).toBeNull();
     }
 
     copyGeneratorMock.mockReturnValue(failing(new CopyGeneratorError("rate_limited", "429", 7)));
-    const limited = await generate()(jsonReq("http://x/campaigns/pools/copy", "POST", { briefId: "camp" }));
+    const limited = await generate()(
+      jsonReq("http://x/campaigns/pools/copy", "POST", { briefId: "camp" }),
+    );
     expect(limited.status).toBe(429);
     expect(limited.headers.get("retry-after")).toBe("7");
 
     copyGeneratorMock.mockReturnValue(failing(new Error("unexpected")));
-    const unknown = await generate()(jsonReq("http://x/campaigns/pools/copy", "POST", { briefId: "camp" }));
+    const unknown = await generate()(
+      jsonReq("http://x/campaigns/pools/copy", "POST", { briefId: "camp" }),
+    );
     expect(unknown.status).toBe(500);
     expect(existsSync(join(dir, "briefs", "camp"))).toBe(false);
   });

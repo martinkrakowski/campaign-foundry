@@ -2,7 +2,8 @@ import { describe, expect, test } from "vitest";
 import { dispositionMutation, sweep } from "../lib/sweep.js";
 import { runCli } from "../cli.js";
 
-const ghFetch = (nodes: readonly { id: string; isResolved: boolean }[], writeResult?: string) =>
+const ghFetch =
+  (nodes: readonly { id: string; isResolved: boolean }[], writeResult?: string) =>
   async (args: readonly string[]): Promise<string> => {
     if (args.some((a) => a.includes("mutation"))) {
       return (
@@ -70,11 +71,10 @@ describe("sweep — refusals that keep half a class from landing", () => {
 
 describe("sweep — the post write", () => {
   test("a write that reports no data resolves nothing, and says so", async () => {
-    const r = await sweep(
-      { pr: 361, requested: ["PRRT_a"], disposition: "x" },
-      true,
-      { gh: ghFetch([{ id: "PRRT_a", isResolved: false }], "{}"), out: () => undefined },
-    );
+    const r = await sweep({ pr: 361, requested: ["PRRT_a"], disposition: "x" }, true, {
+      gh: ghFetch([{ id: "PRRT_a", isResolved: false }], "{}"),
+      out: () => undefined,
+    });
     expect(r.commentUrl).toBeNull();
     expect(r.resolvedThreadIds).toEqual([]);
   });

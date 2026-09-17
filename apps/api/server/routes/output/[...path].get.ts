@@ -59,7 +59,12 @@ export default defineEventHandler(async (event) => {
   const relative = getRouterParam(event, "path") ?? "";
   const posix = relative.replace(/\\/g, "/");
   // The GenAI seed cache lives under output/cache and jobs under output/jobs, but neither is a downloadable creative.
-  if (posix === "cache" || posix.startsWith("cache/") || posix === "jobs" || posix.startsWith("jobs/")) {
+  if (
+    posix === "cache" ||
+    posix.startsWith("cache/") ||
+    posix === "jobs" ||
+    posix.startsWith("jobs/")
+  ) {
     setResponseStatus(event, 404);
     return { error: "Not found" };
   }
@@ -112,7 +117,11 @@ export default defineEventHandler(async (event) => {
     return { error: "Not found" };
   }
   const size = st.size;
-  setHeader(event, "content-type", CONTENT_TYPES[extname(target).toLowerCase()] ?? "application/octet-stream");
+  setHeader(
+    event,
+    "content-type",
+    CONTENT_TYPES[extname(target).toLowerCase()] ?? "application/octet-stream",
+  );
   setHeader(event, "cache-control", "no-store");
   setHeader(event, "accept-ranges", "bytes");
 
@@ -124,7 +133,9 @@ export default defineEventHandler(async (event) => {
     return { error: "Range not satisfiable" };
   }
   const stream =
-    range === undefined ? handle.createReadStream() : handle.createReadStream({ start: range.start, end: range.end });
+    range === undefined
+      ? handle.createReadStream()
+      : handle.createReadStream({ start: range.start, end: range.end });
   // FileHandle read streams close their handle when they end; this is belt-and-suspenders
   // for every exit, including a client abort (which destroys the stream without an 'end') —
   // calling handle.close() again once it is already closed does not throw.

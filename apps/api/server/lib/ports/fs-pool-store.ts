@@ -5,7 +5,12 @@ import type { CopyPool } from "@campaignfoundry/CampaignOrchestration";
 import { errorMessage, projectRoot } from "@campaignfoundry/shared";
 import { hashBytes, isErrno, SYMLINK_WRITE_ERROR } from "../brief-files.js";
 import { resolveConfined } from "../confined-path.js";
-import { copyPoolProblem, InvalidCopyPoolError, type PoolStorePort, type StoredPool } from "./pool-store.port.js";
+import {
+  copyPoolProblem,
+  InvalidCopyPoolError,
+  type PoolStorePort,
+  type StoredPool,
+} from "./pool-store.port.js";
 
 /**
  * Filesystem implementation of PoolStorePort.

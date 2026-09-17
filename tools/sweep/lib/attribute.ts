@@ -161,7 +161,11 @@ function commitShasFromView(stdout: string, pr: number): Set<string> {
   return shas;
 }
 
-function runIdsFromList(stdout: string, workflow: string, commitShas: ReadonlySet<string>): number[] {
+function runIdsFromList(
+  stdout: string,
+  workflow: string,
+  commitShas: ReadonlySet<string>,
+): number[] {
   const parsed: unknown = JSON.parse(stdout);
   if (!Array.isArray(parsed)) {
     throw new Error(`run list for ${workflow} was not a JSON array`);
@@ -203,7 +207,10 @@ function runIdsFromList(stdout: string, workflow: string, commitShas: ReadonlySe
  * branch, so they are not among the PR's commits; an Architecture run
  * whose log carries no model response has nothing to match.
  */
-export async function attribute(plan: AttributeArgs, deps: AttributeDeps): Promise<AttributeDecision> {
+export async function attribute(
+  plan: AttributeArgs,
+  deps: AttributeDeps,
+): Promise<AttributeDecision> {
   const fetched = await fetchAllThreads(plan.pr, deps.gh);
   if (fetched.failures.length > 0) {
     return {
@@ -223,7 +230,15 @@ export async function attribute(plan: AttributeArgs, deps: AttributeDeps): Promi
   let branch: string;
   try {
     branch = (
-      await deps.gh(["pr", "view", String(plan.pr), "--json", "headRefName", "--jq", ".headRefName"])
+      await deps.gh([
+        "pr",
+        "view",
+        String(plan.pr),
+        "--json",
+        "headRefName",
+        "--jq",
+        ".headRefName",
+      ])
     ).trim();
   } catch (error) {
     return {
@@ -286,7 +301,9 @@ export async function attribute(plan: AttributeArgs, deps: AttributeDeps): Promi
       } catch (error) {
         return {
           kind: "fail",
-          reasons: [`could not attribute — log of run ${id} could not be read: ${errorText(error)}`],
+          reasons: [
+            `could not attribute — log of run ${id} could not be read: ${errorText(error)}`,
+          ],
         };
       }
       parts.push(decodeRunLog(raw));

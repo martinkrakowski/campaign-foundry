@@ -55,7 +55,10 @@ export function hasAllowedImageMagic(bytes: Buffer): boolean {
 
 /** ID3v2 tag, or a bare MPEG frame sync (11 leading set bits: 0xff then top 3 bits of the next byte). */
 function hasMp3Magic(bytes: Buffer): boolean {
-  if (bytes.length >= MP3_ID3_MAGIC.length && bytes.subarray(0, MP3_ID3_MAGIC.length).equals(MP3_ID3_MAGIC)) {
+  if (
+    bytes.length >= MP3_ID3_MAGIC.length &&
+    bytes.subarray(0, MP3_ID3_MAGIC.length).equals(MP3_ID3_MAGIC)
+  ) {
     return true;
   }
   return bytes.length >= 2 && bytes[0] === 0xff && (bytes[1] & 0xe0) === 0xe0;
@@ -101,7 +104,6 @@ export function assetAbsPath(briefId: string, name: string): string {
   const dir = resolveConfined(projectRoot(), "assets", "inputs", briefId);
   return resolveConfined(dir, name);
 }
-
 
 /**
  * Rewrite a single repo-relative asset path from `fromBriefId` to `toBriefId`.

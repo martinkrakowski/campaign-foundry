@@ -3,7 +3,19 @@ import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const CLEAR = ["GEMINI_API_KEY", "GOOGLE_API_KEY", "OPENROUTER_API_KEY", "FIREFLY_CLIENT_ID", "FIREFLY_CLIENT_SECRET", "A", "B", "C", "D", "E", "X"];
+const CLEAR = [
+  "GEMINI_API_KEY",
+  "GOOGLE_API_KEY",
+  "OPENROUTER_API_KEY",
+  "FIREFLY_CLIENT_ID",
+  "FIREFLY_CLIENT_SECRET",
+  "A",
+  "B",
+  "C",
+  "D",
+  "E",
+  "X",
+];
 
 /** Fresh module so the `loaded` flag starts false each test. */
 const loadFresh = async () => {
@@ -36,7 +48,10 @@ describe("loadEnv", () => {
 
   test("parses values, strips quotes, skips comment/blank/no-eq lines, never overrides", async () => {
     process.env.D = "orig";
-    writeEnv(".env.local", ['A="quoted"', "B='single'", "C=plain", "# comment", "", "NOEQ", "D=new"].join("\n"));
+    writeEnv(
+      ".env.local",
+      ['A="quoted"', "B='single'", "C=plain", "# comment", "", "NOEQ", "D=new"].join("\n"),
+    );
     (await loadFresh())();
     expect(process.env.A).toBe("quoted");
     expect(process.env.B).toBe("single");

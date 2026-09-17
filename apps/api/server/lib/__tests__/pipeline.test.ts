@@ -9,7 +9,14 @@ import {
   templateFromCanonical,
   type CampaignBrief,
 } from "@campaignfoundry/CampaignOrchestration";
-import { ALLOWED_IMAGE_MODELS, buildPipeline, copyGenerator, messageFont, platformZones, runCampaign } from "../pipeline.js";
+import {
+  ALLOWED_IMAGE_MODELS,
+  buildPipeline,
+  copyGenerator,
+  messageFont,
+  platformZones,
+  runCampaign,
+} from "../pipeline.js";
 
 const brief: CampaignBrief = {
   schemaVersion: BRIEF_SCHEMA_VERSION,
@@ -70,7 +77,9 @@ describe("pipeline composition root", () => {
     expect(buildPipeline("firefly")).toBeInstanceOf(GenerateCampaignUseCase); // no Firefly creds → default chain
 
     process.env.OPENROUTER_API_KEY = "o";
-    expect(buildPipeline("x-ai/grok-imagine-image-quality")).toBeInstanceOf(GenerateCampaignUseCase); // explicit OpenRouter model
+    expect(buildPipeline("x-ai/grok-imagine-image-quality")).toBeInstanceOf(
+      GenerateCampaignUseCase,
+    ); // explicit OpenRouter model
     expect(buildPipeline("imagen")).toBeInstanceOf(GenerateCampaignUseCase); // no gemini → OpenRouter
 
     process.env.GEMINI_API_KEY = "g";
@@ -91,11 +100,18 @@ describe("pipeline composition root", () => {
   });
 
   test("runCampaign generates a variation brief from the planner", async () => {
-    const r = await runCampaign({ ...brief, mode: "variation", variation: { count: 4, seed: 42 } }, "procedural");
+    const r = await runCampaign(
+      { ...brief, mode: "variation", variation: { count: 4, seed: 42 } },
+      "procedural",
+    );
     expect(r.success).toBe(true);
     if (r.success) {
       expect(r.value.assets).toHaveLength(4);
-      expect(r.value.assets.every((a) => a.outputPath.includes("/v") && a.format === "static" && a.attempt === 0)).toBe(true);
+      expect(
+        r.value.assets.every(
+          (a) => a.outputPath.includes("/v") && a.format === "static" && a.attempt === 0,
+        ),
+      ).toBe(true);
       expect(r.value.policyHash).toEqual(expect.any(String));
       expect(r.value.seed).toBe(42);
     }
@@ -137,7 +153,12 @@ describe("pipeline composition root", () => {
       mkdirSync(join(dir, "briefs", "camp"), { recursive: true });
       writeFileSync(
         join(dir, "briefs", "camp", "pools.json"),
-        JSON.stringify({ briefId: "camp", generatedAt: "t", model: "m", entries: [{ id: "h1", text: 42, status: "approved" }] }),
+        JSON.stringify({
+          briefId: "camp",
+          generatedAt: "t",
+          model: "m",
+          entries: [{ id: "h1", text: 42, status: "approved" }],
+        }),
       );
       const pooled: CampaignBrief = {
         ...brief,
@@ -181,11 +202,17 @@ describe("pipeline composition root", () => {
       expect(r.success).toBe(true);
       if (r.success) {
         expect(r.value.assets).toHaveLength(2);
-        expect(r.value.assets.map((a) => a.descriptor?.headline)).toEqual(["Stay wild", "Stay wild"]);
+        expect(r.value.assets.map((a) => a.descriptor?.headline)).toEqual([
+          "Stay wild",
+          "Stay wild",
+        ]);
       }
       // The compositor rendered the pool text, not the campaign message.
       expect(compositeAsset).toHaveBeenCalledTimes(2);
-      expect(compositeAsset.mock.calls.map((call) => call[0].message)).toEqual(["Stay wild", "Stay wild"]);
+      expect(compositeAsset.mock.calls.map((call) => call[0].message)).toEqual([
+        "Stay wild",
+        "Stay wild",
+      ]);
     } finally {
       vi.restoreAllMocks();
       if (origRoot === undefined) delete process.env.PROJECT_ROOT;
@@ -232,7 +259,11 @@ describe("pipeline composition root", () => {
   });
 
   test("runCampaign pins a re-roll to expectedPolicyHash", async () => {
-    const vbrief: CampaignBrief = { ...brief, mode: "variation", variation: { count: 4, seed: 42 } };
+    const vbrief: CampaignBrief = {
+      ...brief,
+      mode: "variation",
+      variation: { count: 4, seed: 42 },
+    };
     const first = await runCampaign(vbrief, "procedural");
     expect(first.success).toBe(true);
     if (!first.success) return;
@@ -243,20 +274,36 @@ describe("pipeline composition root", () => {
     expect(same.success).toBe(true);
     if (same.success) expect(same.value.assets).toHaveLength(1);
 
-    const changed = await runCampaign({ ...vbrief, variation: { count: 4, seed: 43 } }, "procedural", target, hash);
+    const changed = await runCampaign(
+      { ...vbrief, variation: { count: 4, seed: 43 } },
+      "procedural",
+      target,
+      hash,
+    );
     expect(changed.success).toBe(false);
     if (!changed.success) {
-      expect(changed.error.message).toMatch(/^Plan changed since the last run \(policyHash [0-9a-f]{64} ≠ [0-9a-f]{64}\); run the full campaign\.$/);
+      expect(changed.error.message).toMatch(
+        /^Plan changed since the last run \(policyHash [0-9a-f]{64} ≠ [0-9a-f]{64}\); run the full campaign\.$/,
+      );
       expect(changed.error.message).toContain(hash);
     }
 
-    const unplannable = await runCampaign({ ...vbrief, variation: { count: 999, seed: 42 } }, "procedural", target, hash);
+    const unplannable = await runCampaign(
+      { ...vbrief, variation: { count: 999, seed: 42 } },
+      "procedural",
+      target,
+      hash,
+    );
     expect(unplannable.success).toBe(false);
     if (!unplannable.success) expect(unplannable.error.message).toMatch(/exceeds axisProductSize/);
   });
 
   test("runCampaign pins a re-roll to expectedCopyHash, independent of expectedPolicyHash (X33, §35)", async () => {
-    const vbrief: CampaignBrief = { ...brief, mode: "variation", variation: { count: 4, seed: 42 } };
+    const vbrief: CampaignBrief = {
+      ...brief,
+      mode: "variation",
+      variation: { count: 4, seed: 42 },
+    };
     const first = await runCampaign(vbrief, "procedural");
     expect(first.success).toBe(true);
     if (!first.success) return;
@@ -291,7 +338,9 @@ describe("pipeline composition root", () => {
   });
 
   test("runCampaign forwards regenerateOnly targets", async () => {
-    const r = await runCampaign(brief, "procedural", [{ productId: "alpha", aspectRatio: "1:1", treatment: "default" }]);
+    const r = await runCampaign(brief, "procedural", [
+      { productId: "alpha", aspectRatio: "1:1", treatment: "default" },
+    ]);
     expect(r.success).toBe(true);
     if (r.success) expect(r.value.assets.map((a) => a.outputPath)).toEqual(["alpha/1x1.png"]);
   });

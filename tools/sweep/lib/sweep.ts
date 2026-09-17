@@ -283,11 +283,7 @@ interface SweepReply extends PullRequestShape {
  * the budget's own rules exist to keep that judgement out of the tool
  * (V-D3).
  */
-export async function sweep(
-  plan: SweepPlan,
-  post: boolean,
-  deps: SweepDeps,
-): Promise<SweepResult> {
+export async function sweep(plan: SweepPlan, post: boolean, deps: SweepDeps): Promise<SweepResult> {
   const fetch = await fetchAllThreads(plan.pr, deps.gh);
   if (fetch.failures.length > 0) {
     throw new SweepRefusal(
@@ -310,7 +306,8 @@ export async function sweep(
   for (const id of ids) {
     const found = fetched.find((t) => t.id === id);
     if (found === undefined) problems.push(`${id}: not a review-thread node on PR #${plan.pr}`);
-    else if (found.isResolved) problems.push(`${id}: already resolved — a class member must be open`);
+    else if (found.isResolved)
+      problems.push(`${id}: already resolved — a class member must be open`);
   }
   if (problems.length > 0) {
     throw new SweepRefusal(

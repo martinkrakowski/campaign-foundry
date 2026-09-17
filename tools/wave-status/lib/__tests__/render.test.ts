@@ -94,9 +94,12 @@ describe("renderStatus", () => {
   });
 
   test("a seat carrying a bare escape character is stripped, not painted", () => {
-    const out = renderStatus(makeStatus([makeLane("t1", { seat: "agy\x1b[2Jgemini", alive: true })]), {
-      color: false,
-    });
+    const out = renderStatus(
+      makeStatus([makeLane("t1", { seat: "agy\x1b[2Jgemini", alive: true })]),
+      {
+        color: false,
+      },
+    );
     const row = out.split("\n").find((line) => line.includes("T/t1"));
     expect(row).toContain("agy[2Jgemini");
     expect(row).not.toContain("\x1b");
@@ -189,7 +192,10 @@ describe("renderStatus", () => {
   test("a reported round renders with the stage; its absence renders without one", () => {
     const out = renderStatus(
       makeStatus([
-        makeLane("t1", { reported: { stage: "gate", event: "started", ts: TS, round: 0 }, alive: true }),
+        makeLane("t1", {
+          reported: { stage: "gate", event: "started", ts: TS, round: 0 },
+          alive: true,
+        }),
         makeLane("t2", { reported: { stage: "gate", event: "started", ts: TS }, alive: true }),
       ]),
     );
@@ -200,10 +206,14 @@ describe("renderStatus", () => {
   test("the gate column renders exit and coverage, or — when either is missing", () => {
     const out = renderStatus(
       makeStatus([
-        makeLane("t1", { gate: { exit: 0, coverage: { statements: 98, branches: 95, functions: 97, lines: 98 } } }),
+        makeLane("t1", {
+          gate: { exit: 0, coverage: { statements: 98, branches: 95, functions: 97, lines: 98 } },
+        }),
         makeLane("t2", { gate: { exit: 3 } }),
         makeLane("t3", { gate: {} }),
-        makeLane("t4", { gate: { coverage: { statements: 50, branches: 60, functions: 70, lines: 80 } } }),
+        makeLane("t4", {
+          gate: { coverage: { statements: 50, branches: 60, functions: 70, lines: 80 } },
+        }),
       ]),
     );
     expect(out).toContain("exit 0 · 98/95/97/98%");
@@ -235,7 +245,10 @@ describe("renderStatus", () => {
         pr: { number: 16, state: "open", checks: "pending" },
         gate: { exit: 0, coverage: { statements: 98, branches: 95, functions: 97, lines: 98 } },
       }),
-      makeLane("t6", { alive: true, gate: { coverage: { statements: 50, branches: 60, functions: 70, lines: 80 } } }),
+      makeLane("t6", {
+        alive: true,
+        gate: { coverage: { statements: 50, branches: 60, functions: 70, lines: 80 } },
+      }),
     ]);
     const out = renderStatus(status, { color: true });
     expect(out).toContain("\x1b[31m"); // red: failed, closed, fail, exit 2
@@ -251,7 +264,9 @@ describe("renderStatus", () => {
       makeStatus([
         makeLane("t0", { pr: { number: 1, state: "open", checks: "pass", unresolvedThreads: 0 } }),
         makeLane("t2", { pr: { number: 2, state: "open", checks: "pass", unresolvedThreads: 3 } }),
-        makeLane("tq", { pr: { number: 3, state: "open", checks: "unknown", unresolvedThreads: "unknown" } }),
+        makeLane("tq", {
+          pr: { number: 3, state: "open", checks: "unknown", unresolvedThreads: "unknown" },
+        }),
         makeLane("tn", { pr: { number: 4, state: "open", checks: "none" } }),
         makeLane("tm", { pr: { number: 5, state: "merged", checks: "unknown" } }),
       ]),
@@ -275,7 +290,9 @@ describe("renderStatus", () => {
       makeStatus([
         makeLane("t0", { pr: { number: 1, state: "open", checks: "pass", unresolvedThreads: 0 } }),
         makeLane("t2", { pr: { number: 2, state: "open", checks: "pass", unresolvedThreads: 3 } }),
-        makeLane("tq", { pr: { number: 3, state: "open", checks: "unknown", unresolvedThreads: "unknown" } }),
+        makeLane("tq", {
+          pr: { number: 3, state: "open", checks: "unknown", unresolvedThreads: "unknown" },
+        }),
       ]),
       { color: true },
     );
@@ -387,7 +404,12 @@ describe("renderStatus — backlog panel", () => {
     plans: ["docs/planning/a.md"],
     premises: [
       { lane: "W1", plan: "docs/planning/a.md", status: "holds" as const },
-      { lane: "S5", plan: "docs/planning/S5.md", status: "stale" as const, reason: "already merged" },
+      {
+        lane: "S5",
+        plan: "docs/planning/S5.md",
+        status: "stale" as const,
+        reason: "already merged",
+      },
       { lane: "T9", plan: "docs/planning/t9.md", status: "timed-out" as const },
     ],
   };

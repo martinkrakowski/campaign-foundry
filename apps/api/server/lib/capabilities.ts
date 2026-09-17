@@ -105,7 +105,10 @@ export async function probeFfmpeg(opts?: {
   timeoutMs?: number;
   ffmpegPath?: string | null;
 }): Promise<Capabilities> {
-  const binary = opts?.ffmpegPath !== undefined ? resolveFfmpegBinary(opts.ffmpegPath, () => {}) : resolveFfmpegBinary();
+  const binary =
+    opts?.ffmpegPath !== undefined
+      ? resolveFfmpegBinary(opts.ffmpegPath, () => {})
+      : resolveFfmpegBinary();
   const timeoutMs = opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const spawnFn = opts?.spawn ?? defaultSpawn;
 
@@ -130,7 +133,9 @@ export async function probeFfmpeg(opts?: {
     } catch (error) {
       finish({
         motion: false,
-        reason: redactAbsolutePaths(error instanceof Error ? error.message : String(error), [ffmpegPath]),
+        reason: redactAbsolutePaths(error instanceof Error ? error.message : String(error), [
+          ffmpegPath,
+        ]),
       });
       return;
     }

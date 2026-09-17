@@ -124,7 +124,11 @@ describe("deriveLane — derived facts stay absent when the observation lacks th
     });
     expect(derived.exit).toBe(1);
     expect(derived.alive).toBe(false);
-    expect(derived.log).toEqual({ bytes: 1024, mtimeMs: 1_000, tail: "opencode run\nerror: locked\nEXIT 1\n" });
+    expect(derived.log).toEqual({
+      bytes: 1024,
+      mtimeMs: 1_000,
+      tail: "opencode run\nerror: locked\nEXIT 1\n",
+    });
   });
 
   test("no log, no gate log: exit and gate stay absent — never defaulted", () => {
@@ -145,7 +149,9 @@ describe("deriveLane — derived facts stay absent when the observation lacks th
       coverage: { statements: 100, branches: 100, functions: 100, lines: 100 },
     });
     expect(deriveLane({ alive: false }).gate).toBeUndefined();
-    expect(deriveLane({ alive: true, gateLog: "yarn run test:cov\nrunning...\n" }).gate).toBeUndefined();
+    expect(
+      deriveLane({ alive: true, gateLog: "yarn run test:cov\nrunning...\n" }).gate,
+    ).toBeUndefined();
   });
 
   test("coverage without a trailing gate exit still produces a gate object", () => {

@@ -2,7 +2,14 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { EXIT_MALFORMED, EXIT_UNRESTORED, onSignal, realDeps, runCli, type ManifestCliIo } from "../cli.js";
+import {
+  EXIT_MALFORMED,
+  EXIT_UNRESTORED,
+  onSignal,
+  realDeps,
+  runCli,
+  type ManifestCliIo,
+} from "../cli.js";
 import { EXIT_MISMATCH, EXIT_VERIFIED, type ScratchDeps } from "../lib/replay.js";
 import type { MutationDeps } from "../../mutate/lib/types.js";
 

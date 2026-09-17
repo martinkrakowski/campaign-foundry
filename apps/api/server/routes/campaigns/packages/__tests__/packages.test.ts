@@ -19,7 +19,9 @@ vi.mock("node:fs/promises", async (importOriginal) => {
   return {
     ...actual,
     readdir: (path: string, options?: unknown) =>
-      fsHook.readdir ? fsHook.readdir(path) : (actual.readdir as (p: string, o?: unknown) => Promise<unknown>)(path, options),
+      fsHook.readdir
+        ? fsHook.readdir(path)
+        : (actual.readdir as (p: string, o?: unknown) => Promise<unknown>)(path, options),
   };
 });
 
@@ -32,14 +34,18 @@ const web = (method: "get", path: string, handler: EventHandler) => {
 };
 
 const listCall = (campaignId: string) =>
-  web("get", "/campaigns/packages/:campaignId", listHandler)(
-    new Request(`http://x/campaigns/packages/${campaignId}`),
-  );
+  web(
+    "get",
+    "/campaigns/packages/:campaignId",
+    listHandler,
+  )(new Request(`http://x/campaigns/packages/${campaignId}`));
 
 const zipCall = (campaignId: string, platformZip: string) =>
-  web("get", "/campaigns/packages/:campaignId/:platformZip", zipHandler)(
-    new Request(`http://x/campaigns/packages/${campaignId}/${platformZip}`),
-  );
+  web(
+    "get",
+    "/campaigns/packages/:campaignId/:platformZip",
+    zipHandler,
+  )(new Request(`http://x/campaigns/packages/${campaignId}/${platformZip}`));
 
 const DOS_DATE_1980_01_01 = 0x0021;
 
@@ -76,7 +82,9 @@ function parseCentralDirectory(buf: Buffer): Array<{ name: string; size: number;
     expect(buf.readUInt32LE(localOffset + 14)).toBe(crc);
     expect(buf.readUInt32LE(localOffset + 22)).toBe(size);
     const localNameLen = buf.readUInt16LE(localOffset + 26);
-    expect(buf.subarray(localOffset + 30, localOffset + 30 + localNameLen).toString("utf8")).toBe(name);
+    expect(buf.subarray(localOffset + 30, localOffset + 30 + localNameLen).toString("utf8")).toBe(
+      name,
+    );
     files.push({ name, size, crc });
     p += 46 + nameLen + extraLen + commentLen;
   }
@@ -147,7 +155,10 @@ describe("GET /campaigns/packages/:campaignId", () => {
     mkdirSync(resolve(dir, "packages/camp/arrayjson"), { recursive: true });
     mkdirSync(resolve(dir, "packages/camp/nulljson"), { recursive: true });
     writeFileSync(resolve(dir, "packages/camp/note.txt"), "hi");
-    writeFileSync(resolve(dir, "packages/camp/instagram-feed/manifest.json"), JSON.stringify(manifest("instagram-feed")));
+    writeFileSync(
+      resolve(dir, "packages/camp/instagram-feed/manifest.json"),
+      JSON.stringify(manifest("instagram-feed")),
+    );
     writeFileSync(resolve(dir, "packages/camp/badjson/manifest.json"), "{");
     writeFileSync(resolve(dir, "packages/camp/arrayjson/manifest.json"), "[]");
     writeFileSync(resolve(dir, "packages/camp/nulljson/manifest.json"), "null");
@@ -168,7 +179,10 @@ describe("GET /campaigns/packages/:campaignId", () => {
     const outside = mkdtempSync(join(tmpdir(), "cf-pkg-outside-"));
     try {
       mkdirSync(join(outside, "instagram-feed"), { recursive: true });
-      writeFileSync(join(outside, "instagram-feed/manifest.json"), JSON.stringify(manifest("leaked")));
+      writeFileSync(
+        join(outside, "instagram-feed/manifest.json"),
+        JSON.stringify(manifest("leaked")),
+      );
       mkdirSync(resolve(dir, "packages"), { recursive: true });
       symlinkSync(outside, resolve(dir, "packages/camp"));
       const res = await listCall("camp");
@@ -188,7 +202,10 @@ describe("GET /campaigns/packages/:campaignId", () => {
       resolve(dir, "packages/camp/instagram-feed/manifest.json"),
       JSON.stringify(manifest("instagram-feed")),
     );
-    writeFileSync(resolve(dir, "packages/camp/meta-manifest.json"), JSON.stringify(manifest("meta-feed")));
+    writeFileSync(
+      resolve(dir, "packages/camp/meta-manifest.json"),
+      JSON.stringify(manifest("meta-feed")),
+    );
     symlinkSync(
       resolve(dir, "packages/camp/meta-manifest.json"),
       resolve(dir, "packages/camp/meta-feed/manifest.json"),
@@ -207,7 +224,10 @@ describe("GET /campaigns/packages/:campaignId/:platformId.zip", () => {
     mkdirSync(resolve(dir, "packages/camp/instagram-feed/alpha"), { recursive: true });
     writeFileSync(resolve(dir, "packages/camp/instagram-feed/manifest.json"), manifestJson);
     writeFileSync(resolve(dir, "packages/camp/instagram-feed/alpha/1x1.png"), png);
-    symlinkSync(resolve(dir, "packages/camp/instagram-feed/manifest.json"), resolve(dir, "packages/camp/instagram-feed/link"));
+    symlinkSync(
+      resolve(dir, "packages/camp/instagram-feed/manifest.json"),
+      resolve(dir, "packages/camp/instagram-feed/link"),
+    );
     const res = await zipCall("camp", "instagram-feed.zip");
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toMatch(/application\/zip/);
@@ -351,7 +371,8 @@ describe("store-zip", () => {
     const chunks: Buffer[] = [];
     for await (const c of storeZipStream([], () => Readable.from([]))) chunks.push(c as Buffer);
     const empty = { name: "e.txt", size: 0, crc: 0 };
-    for await (const c of storeZipStream([empty], () => Readable.from([Buffer.alloc(0)]))) chunks.push(c as Buffer);
+    for await (const c of storeZipStream([empty], () => Readable.from([Buffer.alloc(0)])))
+      chunks.push(c as Buffer);
     expect(chunks.every((c) => c.length > 0)).toBe(true);
   });
 

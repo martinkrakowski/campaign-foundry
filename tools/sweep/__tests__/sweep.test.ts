@@ -1,10 +1,5 @@
 import { describe, expect, test } from "vitest";
-import {
-  classBody,
-  dispositionMutation,
-  sweep,
-  type SweepPlan,
-} from "../lib/sweep.js";
+import { classBody, dispositionMutation, sweep, type SweepPlan } from "../lib/sweep.js";
 import { SweepRefusal } from "../lib/types.js";
 
 /**
@@ -12,9 +7,7 @@ import { SweepRefusal } from "../lib/types.js";
  * omits it is a page the read cannot place — and a read that cannot place a
  * page is a failure now, not an empty answer.
  */
-const threads = (
-  ...specs: readonly (readonly [string, boolean])[]
-): string =>
+const threads = (...specs: readonly (readonly [string, boolean])[]): string =>
   JSON.stringify({
     data: {
       repository: {
@@ -32,7 +25,7 @@ const threads = (
 const plan = (over: Partial<SweepPlan> = {}): SweepPlan => ({
   pr: 361,
   requested: ["PRRT_a", "PRRT_b"],
-  disposition: "Refuted — `?? [\"static\"]` is the default family, not the support list.",
+  disposition: 'Refuted — `?? ["static"]` is the default family, not the support list.',
   ...over,
 });
 
@@ -127,12 +120,18 @@ describe("sweep — preview (hazard: the wrong thread is public and unrecoverabl
 });
 
 describe("sweep — the class guardrail (hazard: resolved without being addressed)", () => {
-  const fetchOnly = (result: string) => async (args: readonly string[]): Promise<string> => {
-    if (args.some((a) => a.includes("mutation"))) throw new Error("a refused sweep must never write");
-    return result;
-  };
+  const fetchOnly =
+    (result: string) =>
+    async (args: readonly string[]): Promise<string> => {
+      if (args.some((a) => a.includes("mutation")))
+        throw new Error("a refused sweep must never write");
+      return result;
+    };
 
-  const refusalOf = async (over: Partial<SweepPlan>, fetchResult: string): Promise<SweepRefusal> => {
+  const refusalOf = async (
+    over: Partial<SweepPlan>,
+    fetchResult: string,
+  ): Promise<SweepRefusal> => {
     try {
       await sweep(plan(over), true, { gh: fetchOnly(fetchResult), out: () => undefined });
       throw new Error("expected a refusal");
@@ -281,13 +280,10 @@ describe("sweep — the mutation carries the whole class", () => {
   });
 
   test("a mutation GraphQL error without a message refuses with unknown GraphQL error", async () => {
-    const r = recorder(
-      threads(["PRRT_a", false]),
-      JSON.stringify({ errors: [{}] }),
-    );
-    await expect(sweep(plan({ requested: ["PRRT_a"] }), true, { gh: r.gh, out: () => undefined })).rejects.toThrow(
-      /unknown GraphQL error/,
-    );
+    const r = recorder(threads(["PRRT_a", false]), JSON.stringify({ errors: [{}] }));
+    await expect(
+      sweep(plan({ requested: ["PRRT_a"] }), true, { gh: r.gh, out: () => undefined }),
+    ).rejects.toThrow(/unknown GraphQL error/);
   });
 });
 
@@ -302,7 +298,11 @@ describe("classBody and dispositionMutation", () => {
 
   test("the mutation declares each thread variable once", () => {
     const q = dispositionMutation(3);
-    expect(q.match(/\$thread\d: ID!/g)).toEqual(["$thread0: ID!", "$thread1: ID!", "$thread2: ID!"]);
+    expect(q.match(/\$thread\d: ID!/g)).toEqual([
+      "$thread0: ID!",
+      "$thread1: ID!",
+      "$thread2: ID!",
+    ]);
     expect(q).toContain("resolve2: resolveReviewThread");
   });
 });

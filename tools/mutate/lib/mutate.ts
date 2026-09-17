@@ -37,36 +37,45 @@ export function parseArgs(argv: readonly string[]): ParsedMutateArgs {
     const arg = flagArgs[i]!;
     if (arg === "--file") {
       const next = flagArgs[++i];
-      if (!next || next.startsWith("-")) throw new RefusalError("usage", "Refusal: --file requires a path");
+      if (!next || next.startsWith("-"))
+        throw new RefusalError("usage", "Refusal: --file requires a path");
       file = next;
     } else if (arg.startsWith("--file=")) {
       const val = arg.slice("--file=".length);
-      if (!val || val.startsWith("-")) throw new RefusalError("usage", "Refusal: --file requires a path");
+      if (!val || val.startsWith("-"))
+        throw new RefusalError("usage", "Refusal: --file requires a path");
       file = val;
     } else if (arg === "--before") {
       const next = flagArgs[++i];
-      if (!next || next.startsWith("-")) throw new RefusalError("usage", "Refusal: --before requires a path");
+      if (!next || next.startsWith("-"))
+        throw new RefusalError("usage", "Refusal: --before requires a path");
       before = next;
     } else if (arg.startsWith("--before=")) {
       const val = arg.slice("--before=".length);
-      if (!val || val.startsWith("-")) throw new RefusalError("usage", "Refusal: --before requires a path");
+      if (!val || val.startsWith("-"))
+        throw new RefusalError("usage", "Refusal: --before requires a path");
       before = val;
     } else if (arg === "--after") {
       const next = flagArgs[++i];
-      if (!next || next.startsWith("-")) throw new RefusalError("usage", "Refusal: --after requires a path");
+      if (!next || next.startsWith("-"))
+        throw new RefusalError("usage", "Refusal: --after requires a path");
       after = next;
     } else if (arg.startsWith("--after=")) {
       const val = arg.slice("--after=".length);
-      if (!val || val.startsWith("-")) throw new RefusalError("usage", "Refusal: --after requires a path");
+      if (!val || val.startsWith("-"))
+        throw new RefusalError("usage", "Refusal: --after requires a path");
       after = val;
     } else if (arg === "--because") {
       const next = flagArgs[++i];
-      if (next === undefined) throw new RefusalError("Rule 5", "Refusal (Rule 5): missing required flag --because");
-      if (next.startsWith("-")) throw new RefusalError("Rule 5", "Refusal (Rule 5): --because value cannot start with '-'");
+      if (next === undefined)
+        throw new RefusalError("Rule 5", "Refusal (Rule 5): missing required flag --because");
+      if (next.startsWith("-"))
+        throw new RefusalError("Rule 5", "Refusal (Rule 5): --because value cannot start with '-'");
       because = next;
     } else if (arg.startsWith("--because=")) {
       const val = arg.slice("--because=".length);
-      if (val.startsWith("-")) throw new RefusalError("Rule 5", "Refusal (Rule 5): --because value cannot start with '-'");
+      if (val.startsWith("-"))
+        throw new RefusalError("Rule 5", "Refusal (Rule 5): --because value cannot start with '-'");
       because = val;
     } else {
       throw new RefusalError("usage", `Refusal: unknown argument: ${JSON.stringify(arg)}`);
@@ -76,8 +85,10 @@ export function parseArgs(argv: readonly string[]): ParsedMutateArgs {
   if (!file) throw new RefusalError("usage", "Refusal: missing required flag --file");
   if (!before) throw new RefusalError("usage", "Refusal: missing required flag --before");
   if (!after) throw new RefusalError("usage", "Refusal: missing required flag --after");
-  if (because === undefined) throw new RefusalError("Rule 5", "Refusal (Rule 5): missing required flag --because");
-  if (because.trim().length === 0) throw new RefusalError("Rule 5", "Refusal (Rule 5): --because cannot be empty");
+  if (because === undefined)
+    throw new RefusalError("Rule 5", "Refusal (Rule 5): missing required flag --because");
+  if (because.trim().length === 0)
+    throw new RefusalError("Rule 5", "Refusal (Rule 5): --because cannot be empty");
   if (because.includes("\n") || because.includes("\r")) {
     throw new RefusalError("Rule 5", "Refusal (Rule 5): --because must be a single line");
   }
@@ -104,16 +115,25 @@ export function applyMutation(
 ): string {
   // Rule 3: Refuse a no-op
   if (beforeText.length === 0) {
-    throw new RefusalError("Rule 3", "Refusal (Rule 3): before-text is empty; an empty before-text is not a mutation");
+    throw new RefusalError(
+      "Rule 3",
+      "Refusal (Rule 3): before-text is empty; an empty before-text is not a mutation",
+    );
   }
   if (beforeText === afterText) {
-    throw new RefusalError("Rule 3", "Refusal (Rule 3): before-text and after-text are identical; a no-op is not a mutation");
+    throw new RefusalError(
+      "Rule 3",
+      "Refusal (Rule 3): before-text and after-text are identical; a no-op is not a mutation",
+    );
   }
 
   // Rule 2: Exactly one occurrence, or refuse
   const occurrences = countOccurrences(originalContent, beforeText);
   if (occurrences === 0) {
-    throw new RefusalError("Rule 2", `Refusal (Rule 2): before-text not found in ${filePath} (0 occurrences)`);
+    throw new RefusalError(
+      "Rule 2",
+      `Refusal (Rule 2): before-text not found in ${filePath} (0 occurrences)`,
+    );
   }
   if (occurrences > 1) {
     throw new RefusalError(
@@ -124,7 +144,9 @@ export function applyMutation(
 
   // Rule 1: Literal replacement only, no regular expressions
   const index = originalContent.indexOf(beforeText);
-  return originalContent.slice(0, index) + afterText + originalContent.slice(index + beforeText.length);
+  return (
+    originalContent.slice(0, index) + afterText + originalContent.slice(index + beforeText.length)
+  );
 }
 
 export async function runMutation(

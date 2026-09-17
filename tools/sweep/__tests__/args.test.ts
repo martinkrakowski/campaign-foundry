@@ -42,9 +42,11 @@ describe("parseSweepArgs", () => {
   });
 
   test("--body-file carries a path, not text", () => {
-    expect(parseSweepArgs(["--pr", "9", "--thread", "PRRT_a", "--body-file", "d.md"]).body).toEqual({
-      file: "d.md",
-    });
+    expect(parseSweepArgs(["--pr", "9", "--thread", "PRRT_a", "--body-file", "d.md"]).body).toEqual(
+      {
+        file: "d.md",
+      },
+    );
   });
 
   test("both body sources are refused", () => {
@@ -109,7 +111,10 @@ describe("parseSweepArgs", () => {
 
 describe("parseGateArgs", () => {
   test("the happy path: the PR and the head the checks were verified on", () => {
-    expect(parseGateArgs(["--pr", "361", "--sha", "abc1234"])).toEqual({ pr: 361, head: "abc1234" });
+    expect(parseGateArgs(["--pr", "361", "--sha", "abc1234"])).toEqual({
+      pr: 361,
+      head: "abc1234",
+    });
   });
 
   test("a missing --pr is refused", () => {

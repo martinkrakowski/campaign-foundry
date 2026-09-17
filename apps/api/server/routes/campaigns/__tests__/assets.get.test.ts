@@ -81,18 +81,24 @@ describe("GET /campaigns/assets", () => {
     const handler = await web(dir);
     const res = await get(handler, "?briefId=camp");
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { assets: Array<{ name: string; type: string; size: number; thumbnailUrl: string }> };
+    const body = (await res.json()) as {
+      assets: Array<{ name: string; type: string; size: number; thumbnailUrl: string }>;
+    };
 
     expect(body.assets).toHaveLength(2);
     expect(body.assets[0].name).toBe("logo-b.png");
     expect(body.assets[0].type).toBe("image/png");
     expect(body.assets[0].size).toBe(png.length);
-    expect(body.assets[0].thumbnailUrl).toBe("/api/pipeline/campaigns/assets?briefId=camp&name=logo-b.png");
+    expect(body.assets[0].thumbnailUrl).toBe(
+      "/api/pipeline/campaigns/assets?briefId=camp&name=logo-b.png",
+    );
 
     expect(body.assets[1].name).toBe("photo-a.jpg");
     expect(body.assets[1].type).toBe("image/jpeg");
     expect(body.assets[1].size).toBe(jpeg.length);
-    expect(body.assets[1].thumbnailUrl).toBe("/api/pipeline/campaigns/assets?briefId=camp&name=photo-a.jpg");
+    expect(body.assets[1].thumbnailUrl).toBe(
+      "/api/pipeline/campaigns/assets?briefId=camp&name=photo-a.jpg",
+    );
   });
 
   test("serves raw asset content with content-type when name query parameter is supplied", async () => {
@@ -160,7 +166,9 @@ describe("GET /campaigns/assets", () => {
   test("returns empty list on store list failure", async () => {
     const handler = await web(dir);
     const { getAssetStore } = await import("../../../lib/ports/index.js");
-    const spy = vi.spyOn(getAssetStore(), "listAssets").mockRejectedValueOnce(new Error("Disk error"));
+    const spy = vi
+      .spyOn(getAssetStore(), "listAssets")
+      .mockRejectedValueOnce(new Error("Disk error"));
 
     const res = await get(handler, "?briefId=camp");
     expect(res.status).toBe(200);

@@ -2,7 +2,11 @@ import { PlanVariationsUseCase } from "@campaignfoundry/CampaignOrchestration";
 import { nodeCryptoPolicyHasher } from "@campaignfoundry/CampaignOrchestration/infrastructure";
 import { parseBrief } from "../../lib/load-brief.js";
 import { planInputFor } from "../../lib/pools.js";
-import { NOT_PROBED_REASON, PROBE_PENDING_ERROR, waitForCapabilities } from "../../lib/capabilities.js";
+import {
+  NOT_PROBED_REASON,
+  PROBE_PENDING_ERROR,
+  waitForCapabilities,
+} from "../../lib/capabilities.js";
 
 /**
  * POST /campaigns/plan — dry-run the variation planner (no generation).
@@ -60,7 +64,9 @@ export default defineEventHandler(async (event) => {
       paletteShift: variant.paletteShift,
       ...(variant.headline === undefined ? {} : { headline: variant.headline }),
       // Motion slots only — static plans serialize exactly as before.
-      ...(variant.motion !== undefined ? { motion: variant.motion, durationSec: variant.durationSec } : {}),
+      ...(variant.motion !== undefined
+        ? { motion: variant.motion, durationSec: variant.durationSec }
+        : {}),
     })),
   };
 });

@@ -206,7 +206,9 @@ describe("mergeGate — a read that stopped early is undecidable, never complete
   test("a pull request whose reviewThreads is absent refuses as could-not-decide", async () => {
     // An absent connection is not an empty one: the query asks for it, so a
     // reply without it measured nothing.
-    const s = stub(() => JSON.stringify({ data: { repository: { pullRequest: { id: "PR_I_1" } } } }));
+    const s = stub(() =>
+      JSON.stringify({ data: { repository: { pullRequest: { id: "PR_I_1" } } } }),
+    );
     const decision = await mergeGate(plan, { gh: s.gh });
     expect(decision.kind).toBe("refuse");
     const joined = reasonsOf(decision).join("\n");
@@ -239,7 +241,9 @@ describe("mergeGate — a read that stopped early is undecidable, never complete
         // endless read — so the third ask is refused loudly instead.
         if (reads > 2) throw new Error("the read asked for a page it had already read");
         const after = args.find((a) => a.startsWith("after="));
-        return after === undefined ? page([node("PRRT_a", true)], "c1") : page([node("PRRT_b", true)], "c1");
+        return after === undefined
+          ? page([node("PRRT_a", true)], "c1")
+          : page([node("PRRT_b", true)], "c1");
       },
     });
     expect(decision.kind).toBe("refuse");

@@ -19,7 +19,9 @@ describe("resolveConfined", () => {
   });
 
   test("rejects an absolute segment that leaves the base", () => {
-    expect(() => resolveConfined(base, "/etc/passwd")).toThrow(/Path escapes the allowed directory/);
+    expect(() => resolveConfined(base, "/etc/passwd")).toThrow(
+      /Path escapes the allowed directory/,
+    );
   });
 
   test("rejects resolving to the base directory itself", () => {
@@ -96,8 +98,9 @@ describe("resolveConfinedForRead", () => {
     const root = join(dir, "root");
     mkdirSync(root);
     writeFileSync(join(root, "plain.png"), "x");
-    const rejection = await resolveConfinedForRead(root, "plain.png", "nested").catch((error: unknown) => error);
+    const rejection = await resolveConfinedForRead(root, "plain.png", "nested").catch(
+      (error: unknown) => error,
+    );
     expect((rejection as NodeJS.ErrnoException).code).toBe("ENOTDIR");
   });
 });
-

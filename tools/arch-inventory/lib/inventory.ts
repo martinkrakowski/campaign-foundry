@@ -68,7 +68,11 @@ async function moduleFiles(dir: string, deps: InventoryDeps): Promise<readonly s
 /** Declared entries that collide once resolved: a literal repeat, or two
  *  distinct names the naming template resolves to the same file. Reports the
  *  raw declared names (not the resolved file) that share a target. */
-function findDuplicates(declared: readonly string[], template: string, scope: string): readonly string[] {
+function findDuplicates(
+  declared: readonly string[],
+  template: string,
+  scope: string,
+): readonly string[] {
   const firstFor = new Map<string, string>();
   const dupes = new Set<string>();
   for (const entry of declared) {
@@ -108,12 +112,16 @@ async function checkList(
   // Compare by canonical form, not raw string equality: a kebab-case
   // declaration (`user-repo`) and its PascalCase file (`UserRepo.ts`) must
   // agree, the same way hexagen's own generator would treat them.
-  const declaredCanonical = new Set(declared.map((entry) => canonicalEntry(entry, template, manifest.scope)));
+  const declaredCanonical = new Set(
+    declared.map((entry) => canonicalEntry(entry, template, manifest.scope)),
+  );
   const missing = files
     .map((file) => entryForFile(file, template, manifest.scope))
     .filter((entry): entry is string => entry !== undefined && !declaredCanonical.has(entry))
     .sort();
-  const stale = declared.filter((entry) => !present.has(fileForEntry(entry, template, manifest.scope))).sort();
+  const stale = declared
+    .filter((entry) => !present.has(fileForEntry(entry, template, manifest.scope)))
+    .sort();
   const duplicates = findDuplicates(declared, template, manifest.scope);
   if (missing.length === 0 && stale.length === 0 && duplicates.length === 0) return undefined;
   return { context: context.name, list: spec.key, missing, stale, duplicates };
@@ -161,6 +169,8 @@ export function formatReport(findings: readonly Finding[], contextCount: number)
   const missing = findings.reduce((sum, f) => sum + f.missing.length, 0);
   const stale = findings.reduce((sum, f) => sum + f.stale.length, 0);
   const duplicates = findings.reduce((sum, f) => sum + f.duplicates.length, 0);
-  lines.push(`summary: ${missing} missing, ${stale} stale, ${duplicates} duplicate across ${checked}.`);
+  lines.push(
+    `summary: ${missing} missing, ${stale} stale, ${duplicates} duplicate across ${checked}.`,
+  );
   return lines.join("\n");
 }

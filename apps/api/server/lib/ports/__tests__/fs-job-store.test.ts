@@ -1,5 +1,13 @@
 import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, chmodSync } from "node:fs";
+import {
+  mkdtempSync,
+  mkdirSync,
+  writeFileSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  chmodSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PipelineExecutionLog } from "@campaignfoundry/CampaignOrchestration";
@@ -95,7 +103,10 @@ describe("FsJobStore", () => {
 
   test("completeJob uses 0/0 when the run halted", async () => {
     const id = await store.createJob("camp");
-    await store.completeJob(id, payload({ halted: true, assets: [{}] as unknown as JobResult["assets"] }));
+    await store.completeJob(
+      id,
+      payload({ halted: true, assets: [{}] as unknown as JobResult["assets"] }),
+    );
     expect(await store.getJob(id)).toMatchObject({ status: "completed", done: 0, total: 0 });
   });
 
@@ -242,7 +253,9 @@ describe("FsJobStore", () => {
   test("cached settled job is expired and deleted on getStoredJob when past TTL", async () => {
     const id = await store.createJob("camp");
     await store.failJob(id, "err");
-    const cached = (store as unknown as { memoryCache: Map<string, { entry: StoredJob; mtimeMs: number }> }).memoryCache.get(id);
+    const cached = (
+      store as unknown as { memoryCache: Map<string, { entry: StoredJob; mtimeMs: number }> }
+    ).memoryCache.get(id);
     expect(cached).toBeDefined();
     if (cached) cached.entry = { ...cached.entry, settledAt: Date.now() - (JOB_TTL_MS + 1000) };
     expect(await store.getJob(id)).toBeUndefined();
@@ -310,10 +323,34 @@ describe("FsJobStore", () => {
 
   test("listJobs sorts by createdAt, seq, and id", async () => {
     const now = Date.now();
-    const entry1: StoredJob = { id: "b", campaignId: "c", job: { status: "running", done: 0, total: 0, log: null }, createdAt: now, seq: 1 };
-    const entry2: StoredJob = { id: "a", campaignId: "c", job: { status: "running", done: 0, total: 0, log: null }, createdAt: now, seq: 1 };
-    const entry3: StoredJob = { id: "c", campaignId: "c", job: { status: "running", done: 0, total: 0, log: null }, createdAt: now - 1000, seq: 1 };
-    const entry4: StoredJob = { id: "d", campaignId: "c", job: { status: "running", done: 0, total: 0, log: null }, createdAt: now, seq: 2 };
+    const entry1: StoredJob = {
+      id: "b",
+      campaignId: "c",
+      job: { status: "running", done: 0, total: 0, log: null },
+      createdAt: now,
+      seq: 1,
+    };
+    const entry2: StoredJob = {
+      id: "a",
+      campaignId: "c",
+      job: { status: "running", done: 0, total: 0, log: null },
+      createdAt: now,
+      seq: 1,
+    };
+    const entry3: StoredJob = {
+      id: "c",
+      campaignId: "c",
+      job: { status: "running", done: 0, total: 0, log: null },
+      createdAt: now - 1000,
+      seq: 1,
+    };
+    const entry4: StoredJob = {
+      id: "d",
+      campaignId: "c",
+      job: { status: "running", done: 0, total: 0, log: null },
+      createdAt: now,
+      seq: 2,
+    };
 
     writeFileSync(join(dir, "b.json"), JSON.stringify(entry1));
     writeFileSync(join(dir, "a.json"), JSON.stringify(entry2));
@@ -334,32 +371,38 @@ describe("FsJobStore", () => {
 
   const canDenyRead = process.platform !== "win32" && process.getuid?.() !== 0;
 
-  test.skipIf(!canDenyRead)("getStoredJob, deleteJob, listJobs, clear rethrow non-ENOENT errors", async () => {
-    const id = await store.createJob("camp");
-    (store as unknown as { memoryCache: Map<string, unknown> }).memoryCache.clear();
+  test.skipIf(!canDenyRead)(
+    "getStoredJob, deleteJob, listJobs, clear rethrow non-ENOENT errors",
+    async () => {
+      const id = await store.createJob("camp");
+      (store as unknown as { memoryCache: Map<string, unknown> }).memoryCache.clear();
 
-    chmodSync(dir, 0o000);
-    try {
-      await expect(store.getStoredJob(id)).rejects.toMatchObject({ code: "EACCES" });
-      await expect(store.listJobs()).rejects.toMatchObject({ code: "EACCES" });
-      await expect(store.clear()).rejects.toMatchObject({ code: "EACCES" });
-      await expect(store.deleteJob(id)).rejects.toMatchObject({ code: "EACCES" });
-    } finally {
-      chmodSync(dir, 0o755);
-    }
-  });
+      chmodSync(dir, 0o000);
+      try {
+        await expect(store.getStoredJob(id)).rejects.toMatchObject({ code: "EACCES" });
+        await expect(store.listJobs()).rejects.toMatchObject({ code: "EACCES" });
+        await expect(store.clear()).rejects.toMatchObject({ code: "EACCES" });
+        await expect(store.deleteJob(id)).rejects.toMatchObject({ code: "EACCES" });
+      } finally {
+        chmodSync(dir, 0o755);
+      }
+    },
+  );
 
-  test.skipIf(!canDenyRead)("getStoredJob rethrows when readFile fails with non-ENOENT error", async () => {
-    const id = await store.createJob("camp");
-    (store as unknown as { memoryCache: Map<string, unknown> }).memoryCache.clear();
-    const filePath = store.jobPath(id);
-    chmodSync(filePath, 0o000);
-    try {
-      await expect(store.getStoredJob(id)).rejects.toMatchObject({ code: "EACCES" });
-    } finally {
-      chmodSync(filePath, 0o644);
-    }
-  });
+  test.skipIf(!canDenyRead)(
+    "getStoredJob rethrows when readFile fails with non-ENOENT error",
+    async () => {
+      const id = await store.createJob("camp");
+      (store as unknown as { memoryCache: Map<string, unknown> }).memoryCache.clear();
+      const filePath = store.jobPath(id);
+      chmodSync(filePath, 0o000);
+      try {
+        await expect(store.getStoredJob(id)).rejects.toMatchObject({ code: "EACCES" });
+      } finally {
+        chmodSync(filePath, 0o644);
+      }
+    },
+  );
 
   test("getStoredJob returns undefined when readFile encounters ENOENT", async () => {
     const id = await store.createJob("camp");
@@ -374,12 +417,15 @@ describe("FsJobStore", () => {
     expect(await store.getStoredJob(id)).toBeUndefined();
   });
 
-  test.skipIf(!canDenyRead)("writeJobEntry cleans up and throws when directory write fails", async () => {
-    chmodSync(dir, 0o555);
-    try {
-      await expect(store.createJob("camp")).rejects.toMatchObject({ code: "EACCES" });
-    } finally {
-      chmodSync(dir, 0o755);
-    }
-  });
+  test.skipIf(!canDenyRead)(
+    "writeJobEntry cleans up and throws when directory write fails",
+    async () => {
+      chmodSync(dir, 0o555);
+      try {
+        await expect(store.createJob("camp")).rejects.toMatchObject({ code: "EACCES" });
+      } finally {
+        chmodSync(dir, 0o755);
+      }
+    },
+  );
 });

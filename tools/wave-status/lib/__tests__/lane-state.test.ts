@@ -132,7 +132,10 @@ it("laneEvidenceMs takes the newest dated artefact, and invents nothing", () => 
   // An unparseable event ts is not a measurement either.
   expect(
     laneEvidenceMs(
-      makeStatus({ reported: { stage: "gate", event: "started", ts: "now" }, derived: { alive: false } }),
+      makeStatus({
+        reported: { stage: "gate", event: "started", ts: "now" },
+        derived: { alive: false },
+      }),
     ),
   ).toBeUndefined();
   const logMs = now - 10 * 60_000;
@@ -313,27 +316,35 @@ it("merged", () => {
   expect(laneState(s, now)).toBe("merged");
 });
 
- // gate.exit non-zero without derived.exit -> failed
- it("gate.exit non-zero without derived.exit -> failed", () => {
-   const s = makeStatus({ derived: { alive: false, gate: { exit: 1 } } });
-   expect(laneState(s, now)).toBe("failed");
- });
- // gate.exit non-zero with derived.exit === 0 -> failed
- it("gate.exit non-zero with derived.exit === 0 -> failed", () => {
-   const s = makeStatus({ derived: { alive: false, exit: 0, gate: { exit: 2 } } });
-   expect(laneState(s, now)).toBe("failed");
- });
- // pr.checks fail on open PR -> failed
- it("pr.checks fail on open PR -> failed", () => {
-   const s = makeStatus({ derived: { alive: false, pr: { number: 1, state: "open", checks: "fail" } } });
-   expect(laneState(s, now)).toBe("failed");
- });
- // failed outranks blocked and ready
- it("failed outranks blocked and ready", () => {
-   const s = makeStatus({ derived: { alive: false, gate: { exit: 1 }, pr: { number: 1, state: "open", checks: "pending" } } });
-   expect(laneState(s, now)).toBe("failed");
- });
- // Precedence tests
+// gate.exit non-zero without derived.exit -> failed
+it("gate.exit non-zero without derived.exit -> failed", () => {
+  const s = makeStatus({ derived: { alive: false, gate: { exit: 1 } } });
+  expect(laneState(s, now)).toBe("failed");
+});
+// gate.exit non-zero with derived.exit === 0 -> failed
+it("gate.exit non-zero with derived.exit === 0 -> failed", () => {
+  const s = makeStatus({ derived: { alive: false, exit: 0, gate: { exit: 2 } } });
+  expect(laneState(s, now)).toBe("failed");
+});
+// pr.checks fail on open PR -> failed
+it("pr.checks fail on open PR -> failed", () => {
+  const s = makeStatus({
+    derived: { alive: false, pr: { number: 1, state: "open", checks: "fail" } },
+  });
+  expect(laneState(s, now)).toBe("failed");
+});
+// failed outranks blocked and ready
+it("failed outranks blocked and ready", () => {
+  const s = makeStatus({
+    derived: {
+      alive: false,
+      gate: { exit: 1 },
+      pr: { number: 1, state: "open", checks: "pending" },
+    },
+  });
+  expect(laneState(s, now)).toBe("failed");
+});
+// Precedence tests
 
 it("conflict overrides failed", () => {
   const s = makeStatus({
@@ -379,7 +390,10 @@ it("laneStateCounts buckets every state once each, keyed by LANE_STATES", () => 
     makeStatus({ derived: { alive: false } }), // vanished
     makeStatus({ derived: { alive: false, pr: { number: 1, state: "open", checks: "pending" } } }), // blocked
     makeStatus({
-      derived: { alive: false, pr: { number: 1, state: "open", checks: "pass", unresolvedThreads: 0 } },
+      derived: {
+        alive: false,
+        pr: { number: 1, state: "open", checks: "pass", unresolvedThreads: 0 },
+      },
     }), // ready
     makeStatus({ derived: { alive: false, pr: { number: 1, state: "merged", checks: "pass" } } }), // merged
     makeStatus({ derived: { alive: false, pr: { number: 1, state: "closed", checks: "none" } } }), // unknown
@@ -397,9 +411,7 @@ it("laneStateCounts buckets every state once each, keyed by LANE_STATES", () => 
   });
   // Every state is a key — a known zero, not a missing one — and the keys are
   // exactly LANE_STATES, so the rollup can never be shown a state it cannot name.
-  expect(Object.keys(laneStateCounts(oneOfEach, now)).sort()).toEqual(
-    [...LANE_STATES].sort(),
-  );
+  expect(Object.keys(laneStateCounts(oneOfEach, now)).sort()).toEqual([...LANE_STATES].sort());
 });
 
 it("laneStateCounts tallies repeats and sums to the lanes given", () => {
@@ -673,4 +685,3 @@ it("laneNeedsHuman: the quiet states never need a human, gap or no gap", () => {
   });
   expect(laneNeedsHuman(unasked, now)).toBe(false);
 });
-

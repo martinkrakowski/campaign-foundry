@@ -20,7 +20,10 @@ function sourceFiles(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {
     const path = join(dir, name);
     if (statSync(path).isDirectory()) {
-      return name === "__tests__" || name === "fixtures" || name === "node_modules" || name === "public"
+      return name === "__tests__" ||
+        name === "fixtures" ||
+        name === "node_modules" ||
+        name === "public"
         ? []
         : sourceFiles(path);
     }
@@ -31,7 +34,8 @@ function sourceFiles(dir: string): string[] {
 const REPO = resolve(WAVE_STATUS, "../..");
 const IMPORT = /\bfrom\s+["']([^"']+)["']|\bimport\s*\(\s*["']([^"']+)["']\s*\)/g;
 // A bare call, not a method: `pattern.exec(text)` is a RegExp, not a subprocess.
-const SUBPROCESS = /(?<![.\w$])(execFile|execFileSync|spawn|spawnSync|exec|execSync|fork)\s*\(\s*([^,)]*)/g;
+const SUBPROCESS =
+  /(?<![.\w$])(execFile|execFileSync|spawn|spawnSync|exec|execSync|fork)\s*\(\s*([^,)]*)/g;
 
 function importsOf(file: string): string[] {
   return [...readFileSync(file, "utf8").matchAll(IMPORT)].map((m) => m[1] ?? m[2]);
@@ -72,7 +76,10 @@ describe("the status server's charter (D106, S5)", () => {
     for (const target of planVerifyImports) expect(ALLOWED_PLAN_VERIFY).toContain(target);
     for (const allowed of ALLOWED_PLAN_VERIFY) {
       const specs = importsOf(join(REPO, allowed));
-      expect(specs.some((spec) => /child_process/.test(spec)), `${allowed} imports child_process`).toBe(false);
+      expect(
+        specs.some((spec) => /child_process/.test(spec)),
+        `${allowed} imports child_process`,
+      ).toBe(false);
     }
   });
 });

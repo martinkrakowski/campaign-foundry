@@ -60,7 +60,11 @@ describe("probeFfmpeg", () => {
 
   test("extracts version string from stdout when present", async () => {
     const cap = await probeFfmpeg({
-      spawn: fakeProcess({ code: 0, stdout: "ffmpeg version 6.1.1-static https://johnvansickle.com/ffmpeg/ Copyright (c) 2000-2023 the FFmpeg developers\n" }),
+      spawn: fakeProcess({
+        code: 0,
+        stdout:
+          "ffmpeg version 6.1.1-static https://johnvansickle.com/ffmpeg/ Copyright (c) 2000-2023 the FFmpeg developers\n",
+      }),
       ffmpegPath: "/opt/ffmpeg",
     });
     expect(cap).toEqual({ motion: true, version: "6.1.1-static" });

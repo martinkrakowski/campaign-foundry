@@ -17,7 +17,15 @@ import { FsBriefStore } from "../ports/fs-brief-store.js";
  */
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "brief-corpus");
-const REPO_BRIEFS = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..", "..", "briefs");
+const REPO_BRIEFS = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "..",
+  "..",
+  "..",
+  "..",
+  "briefs",
+);
 
 const YAML_FIXTURES = ["anchors-merge.yaml", "comments.yaml", "doc-start.yaml", "scalars.yaml"];
 
@@ -196,7 +204,9 @@ describe("brief corpus round trip (R4 — a save must not destroy what the opera
 
 describe("fail-closed writes (R4.1 — never fall back to a whole-object dump)", () => {
   test("an unparseable file refuses the write and names the reason", () => {
-    expect(() => patchBriefYaml("briefs/broken.yaml", "id: [unclosed\n", {})).toThrow(BriefDocumentError);
+    expect(() => patchBriefYaml("briefs/broken.yaml", "id: [unclosed\n", {})).toThrow(
+      BriefDocumentError,
+    );
     expect(() => patchBriefYaml("briefs/broken.yaml", "id: [unclosed\n", {})).toThrow(
       /does not parse as YAML/,
     );

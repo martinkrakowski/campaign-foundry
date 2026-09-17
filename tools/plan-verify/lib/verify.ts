@@ -20,7 +20,8 @@ export async function verifyPremises(
   for (const premise of premises) {
     try {
       const { exitCode, output, timedOut } = await deps.execute(premise.script);
-      const status: PremiseStatus = timedOut === true ? "timed-out" : exitCode === 0 ? "holds" : "stale";
+      const status: PremiseStatus =
+        timedOut === true ? "timed-out" : exitCode === 0 ? "holds" : "stale";
       const trimmed = output.trim();
       results.push({
         premise,
