@@ -54,7 +54,14 @@ on:
     types: [opened, reopened, ready_for_review]
     # D4: a CSS-only PR must not pay for three LLM reviews.
     paths:
-      - "apps/web/**"
+      # Extension-scoped, not the whole of `apps/web`. D4 — "a CSS-only PR must not pay for
+      # three LLM reviews" — is quoted in this file's own header, and `apps/web/**` breaks it:
+      # a PR touching only Tailwind classes, an SVG, a JSON fixture or a config file cannot
+      # contain a React effect, so a model call on it buys nothing. Only TS and TSX can carry
+      # the defect classes below. Caught in review of this very PR, which is the D4 violation
+      # arriving in the file that cites D4.
+      - "apps/web/**/*.ts"
+      - "apps/web/**/*.tsx"
   # NOTE the deliberate absence of `issue_comment`, which pr-agent.yml does have.
   #
   # GitHub has no `paths` filter for issue_comment. Wiring the command path here would mean
