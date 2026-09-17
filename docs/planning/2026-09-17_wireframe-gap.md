@@ -1,7 +1,7 @@
 # The wireframe gap — what the owner drew, and what the editor actually is
 
 **Date:** 2026-09-17 · **Revised:** 2026-09-17 (owner stamped SG-D1, SG-D2, SG-D4, SG-D5; SG-D6 dissolved; SG-D8 raised)
-**Status:** **two decisions open — SG-D7 and SG-D8.** CC3 dispatched; TS1 merged as `#469`.
+**Status:** **one decision open — SG-D7.** §8.4 answered by the owner 2026-09-17. SG-D8 stamped; SG-D9 answered then partly superseded; SG-D10–SG-D14 recorded from the owner's run-gate correction (§8). CC3 dispatched; TS1 merged as `#469`.
 **Verified against:** `origin/main` at `4876aa31`.
 **Source:** the owner's annotated wireframe of the campaign editor (two images, 2026-09-17), read against the shipped DOM of `/brief/new` captured from the owner's own browser the same day.
 **Related:** `2026-09-16_studio-editor.md` (D137–D140, SE0–SE5, TL1–TL7 — **drafted, never dispatched**), `2026-09-16_creative-first-chrome.md` (D141–D145, CC1 shipped), `2026-09-16_rail-timeline-surface.md` (TS1, in PR #469, **unmerged**), `DESIGN.md` §3 shell anatomy.
@@ -71,7 +71,8 @@ dispatch ledger before the build pipeline.**
 | **SG-D5** | **Template: sidebar panel or modal?** | — | **STAMPED (owner, 2026-09-17): a new modal view.** *This overrides my recommendation of a sidebar accordion.* Thumbnails, searchable, sortable; clicking a template opens its **detail view within the same modal** with a back arrow to the listing; the detail view shows the creative as generated plus the brief details and attached assets. **Specified in full in `2026-09-17_template-library-modal.md`**, which supersedes lane SG3. A 320px column cannot give a template library browsing room; the owner is right. |
 | **SG-D6** | **Where do the layer stack and inspector sit?** | — | **DISSOLVED by SG-D2.** The question only existed because `studio` was to be a third presentation beside `guided`/`everything`. With `guided` deprecated there is one layout, and the wireframe's right column is it. Recorded rather than deleted so `2026-09-16_studio-editor.md` §10's open question has a visible answer. |
 | **SG-D7** | **If `mode` is retired, is `count` at its ceiling *exhaustive*?** | (a) Verify and rely on it — at `count = axisProductSize` the draw enumerates the space, so no separate concept is needed. (b) If it merely samples to that size, add an explicit exhaustive path. | **(a), pending one verification — and note this question is much smaller than it first looked.** A first draft of this row claimed `count` was capped at 48 and that "count = everything" was therefore inexpressible. **That was wrong.** `editor-state.ts:734` sets the ceiling to `axisProductSize(state)` and clamps `count` to it, so the ceiling **is** the cross-product size and the 48 in the owner's editor was simply their axis space. "Give me every combination" is already sayable: count at maximum. What remains is a property to **verify, not assume** — whether `executeVariation` at `count = axisProductSize` enumerates the space exactly once or samples to that size under `minDistance`. If it enumerates, retiring `mode` loses nothing. **A lane must prove this with a test before SG-D1 is implemented**; it is the one place the retirement could silently drop a guarantee. |
-| **SG-D8** | **Where does Review go?** *(new — raised by SG-D2)* | (a) The right column, beside the creative. (b) A modal, like Template. (c) A section at the foot of the middle scroll. | **(a) The right column.** `ReviewStep.tsx` exists and is referenced 5× from `BriefEditor`; it owns the composed figure that D43's "exactly one composed preview" protects. The right column is already where the creative lives, so putting Review there keeps the count invariant trivially true instead of requiring a new exclusion rule. **This is the one thing removing the wizard genuinely displaces**, and it needs the owner's answer before SG2 is dispatched. |
+| **SG-D8** | **Where does Review go?** | — | **STAMPED (owner, 2026-09-17): nowhere. Review as a step is deleted, and its three jobs are split by what each fact belongs to.** *My recommendations moved twice here and both moves came from the owner: first to the Generate confirm once "what is Review a review of?" forced the answer (a pre-flight on the **document**, not the creatives — it renders `toBrief(state)`, the exact projection `Save` sends), then to this split once the owner asked why it is not simply a field error.* **(i) Per-field — inline, beside the control, exactly like a validation error but read from the PROJECTION rather than from `state`.** This is the one thing inline validation structurally cannot do today: `validate.ts` (589 lines) asks *is this value acceptable?* and reads `state`; the missing question is *did this value reach the document?*, which no field can answer because no field looks at `toBrief`. A valid letter-spacing that the projection drops has nothing to complain about and no row to be missing from. **(ii) Aggregates and the composed creative → the Generate confirm.** *"12 creatives · 4 layers · these platforms"* plus the figure have no field to attach to, and they are a **cost** question, not a problem — and `Header.tsx:339` wires **Generate** straight to `handleGenerate` with no pre-flight on an action that spends the owner's GenAI credits. **(iii) The aggregate list → a `Problems` tab in the telemetry drawer (SG-D9).** D43's rail-vs-Review arbitration dissolves with the step: the rail keeps the only composed frame while editing, and the confirm draws its own where the rail is not the subject. |
+| **SG-D9** | **Does the telemetry drawer host the problem list?** *(new — owner's proposal, 2026-09-17)* | (a) Reuse the drawer **chrome** and add tabs — `Telemetry │ Problems` — two panels, two data models. (b) Dump validation into the existing log. (c) A separate surface. | **(a).** The owner's instinct is right and fills a real gap: `messages.ts:427` already renders **`"No issues"` / `"N things to fix"`** — a count with **no list to open**. The drawer is also already **shell-wide** (`(shell)/layout.tsx:71`), not grid-only, so it is reachable from the editor today. **(b) is refused, and the reason is the data model, not the container.** The drawer renders `useRun().log` — `LogEntry[]` = `{ timestamp, stage, message, level }`, the **last run's** pipeline events: historical, frozen once the run ends, machine-voiced, and `Copy` flattens it to `HH:MM [stage] message`. Validation is the opposite on every axis — **current**, recomputed per keystroke, keyed by field, and each entry must be a **control that jumps to its field**. Forcing it into `LogEntry[]` means fabricating a timestamp and a stage for things that are not events, losing the Edit affordance a monospace log line cannot carry, and having validation and run telemetry fight for one surface. So: **reuse the container, not the log.** The drawer's floating panel, `max-w-[800px]`, expand/collapse, Copy and its `inert`/`aria-hidden` open-close mechanics are a solved problem worth inheriting; the log's shape is not. |
 
 ---
 
@@ -87,8 +88,14 @@ dispatch ledger before the build pipeline.**
 | **SG4** | `BriefEditor.tsx`, `PreviewDock.tsx` | SG-D4 | **`Visual │ Yaml` over the middle column**, with presentation kept as a separate control. |
 | *(existing)* | — | SG1 | **SE0–SE5** (layer stack + inspector) and **TL1–TL7** (time surface) from `2026-09-16_studio-editor.md`, now unblocked on SG-D6. |
 | *(existing)* | — | — | **TS1** — PR #469. Merge it; it is the timeline the wireframe draws. |
+| **SG5** | *(measurement only — no product change)* | — | **How often does the projection actually drop a valid field?** *The first task under SG-D8, and it must run before SG6.* Enumerate every conditional write in `toBrief(state)` and, for each, state whether a field can be **valid in `state` and absent from the projection**. Output is a list, not a feature: the field, the condition, and whether the loss is intentional (a gated block) or a defect. **If the answer is "never", SG6 is deleted and the inline notice is not built** — a mapping that detects nothing is worse than no mapping. |
+| **SG6** | `validate.ts`, the field components | **SG5** | **The projection notice** — per-field, inline, beside the control, worded as a distinct thing from a validation error because it is one: the value is fine, it did not reach the document. Rides the existing `aria-describedby` rail (X15/X19). |
+| ~~SG7~~ | — | — | **RETIRED by §8.5** — the validation view is a middle-column view reached by the segmented control (SG-D13), so a `Problems` tab in the telemetry drawer is redundant. The `"N things to fix"` count still becomes a control that opens the list; the list is **SG10's view**, not a drawer panel. The drawer stays telemetry-only. |
+| **SG8** | the editor toolbar, a new confirm | SG-D8, **SG-D10** | **The Generate pre-flight** — *"12 creatives · 4 layers · these platforms"* and the composed figure, shown before a run spends credits. Replaces Review's aggregate half. **Revised by §8.5:** it sits behind the **toolbar's** `Generate`, not the header's, which SG-D10 removes. |
 
-**Order.** TS1 ✅ merged (`#469`) → **CC3** (dispatched 2026-09-17; the wireframe's layers container) → **SG1** (retire `guided`) → **SG2 ‖ SG4**, then SE/TL lanes. The template modal's **TM1–TM4** are independent of all of it — they touch a new client and a new component — and may run in parallel from the start.
+**Order.** TS1 ✅ merged (`#469`) → **CC3** ✅ built (`#474`, in review) → **SG5** (measure, no code) → **SG1** (retire `guided`, which deletes the Review step) → **SG2 ‖ SG4 ‖ SG8 ‖ SG9 ‖ SG10**, then **SG6** if SG5 says it is needed, then SE/TL lanes.
+
+**SG5 gates SG6 and nothing else** — it is measurement, touches no product code, and may run immediately and in parallel with everything. **SG7 is retired** (§8.5) and is no longer in this order. The template modal's **TM1–TM4** are independent throughout: a new client and a new component, sharing no file with any SG lane.
 
 **`BriefEditor.tsx` is the contended file.** SG1, SG2, SG4 and CC3 all want it. Nothing that touches it may be dispatched in parallel with anything else that does.
 
@@ -147,3 +154,85 @@ Shared gate: CI, which runs every step. Per the repo's rule, each lane names the
 # fence permanently red for a reason unrelated to the lane. Measured: ~30 ms.
 test "$(grep -rl 'aria-label="Seed"' apps/web/src --include='*.tsx' | grep -vc __tests__)" -eq 1
 ```
+
+---
+
+## 8. The run gate (owner's correction, 2026-09-17)
+
+**The owner records that putting Generate in the top header was a decision made in error.** This section supersedes parts of SG-D4, SG-D8 and SG-D9.
+
+### 8.1 What is decided
+
+| ID | Decision |
+|---|---|
+| **SG-D10** | **Generate leaves the top header.** It moves into the editor's own toolbar, following the **grid toolbar pattern** (`CommandBar`). |
+| **SG-D11** | **The verb is `Validate` until the brief has been validated, then `Generate`.** One slot, two verbs — never a disabled Generate. |
+| **SG-D12** | **`Validate` runs the validation and reveals the validation view.** |
+| **SG-D13** | **The segmented control grows to three: `editor │ yaml │ validate`.** This **revises SG-D4**, which had two positions. |
+| **SG-D14** | **The validation view carries a refresh icon** to re-run the validation. |
+| **SG-D15** | **Any update to the editor reverts the verb to `Validate`.** A prior validation does not survive an edit. Keyed on the `state` reference — see §8.4. |
+
+### 8.2 Why this fits the existing principle rather than breaking it
+
+Both surfaces already refuse to disable their verb, and say so:
+
+- `Header.tsx:197` — *"D3 / DESIGN.md §5: Generate is never disabled, so with nothing committed it answers out loud instead of sitting dead."*
+- `CommandBar.tsx:136` — *"The verb is never disabled for being invalid (GB-D3) — the press is how a user asks what is wrong, so every state answers."*
+
+**Swapping `Generate` for `Validate` is not disabling the verb — it is always offering a meaningful one.** The owner's design is the same principle carried one step further: instead of pressing a verb to be told what is wrong, you press the verb *whose job is to tell you*.
+
+### 8.3 What moving Generate costs, and what it simplifies
+
+`handleGenerate` (`Header.tsx:235`) carries three behaviours that must move rather than vanish:
+
+| Behaviour | Fate in the editor's toolbar |
+|---|---|
+| **D35 three-way** — editor mounted and its draft differs from the shell brief ⇒ *"which brief do you want to run?"* | **Collapses.** In the editor's own toolbar there is no ambiguity: the brief on screen is the brief. One question disappears. |
+| **D3 fallback** — nothing committed ⇒ say what is missing and route to `/brief` | **Simplifies.** The header could not scroll a section it does not render, so it routed. The editor's toolbar *can* scroll it — `refuseInvalid`'s third act (attempted → reveal → scroll) becomes reachable without a route change. |
+| **`guardedAction` over the whole gesture** — *"Leave is consent to Generate; Stay cancels both"* | **Must be preserved.** This exists so a user answering *Leave* does not land on the grid with nothing running. It is the subtlest of the three and the easiest to drop by accident. |
+
+So two of the three get simpler by moving. **The third is a regression risk and the lane must pin it with a test.**
+
+### 8.4 Validation becomes stateful — **answered**
+
+Today validation is **derived**: `validate.ts` recomputes from `state` on every render, so it is never stale by construction. *"Has not been validated"* and a **refresh** button imply the opposite — a result that exists, can be re-run, and can go out of date.
+
+**STAMPED (owner, 2026-09-17): any update to the editor hides `Generate` and surfaces `Validate` again.** A prior validation does not survive an edit.
+
+#### The mechanism — and two wrong answers I proposed first
+
+The requirement is exact: validation is fresh iff nothing has changed since it ran. It took three attempts to key that correctly, and the two rejected keys are recorded because each looks right.
+
+**Rejected 1 — `previewRailKey` (my first recommendation).** Wrong because it is *deliberately* narrower than validation's input. `preview-props.ts:185-192` fingerprints `rawRailProps` + `previewFetchKey(brief, productId)` + the identity axis — the **look and the fetch inputs**, built by CC1/CC2 precisely so a look-preserving keystroke does **not** refetch. A change to the seed, to `minDistance`, or to a policy axis need not move it, and validation cares about all three. Keying on it would leave validation looking **fresh after an edit that changed validity** — the exact bug this decision exists to prevent.
+
+**Rejected 2 — the `draftBrief` projection.** Closer, and still wrong. `toBrief(state)` is what `Save` sends, so an **invalid** value can be dropped or clamped on the way out: type a bad `count`, and the projection may be byte-identical while validity changed. Same failure, one step subtler.
+
+**Adopted — the `state` reference itself.** Validation is a pure function of `state`, so it is fresh exactly while `state` is unchanged:
+
+```
+validatedState === state   →  validated    →  Generate
+validatedState !== state   →  stale        →  Validate
+no stored result           →  unvalidated  →  Validate
+```
+
+Reference equality is sufficient and needs no fingerprint, no hash and no flag. Two properties of the existing reducer make it exact rather than approximate:
+
+- **A real change returns a new object**, so any edit flips the comparison — which is the owner's requirement, verbatim.
+- **A refused or no-op action deliberately stays identity-equal** (`editor-state.ts:744`, `:1155-1156` — *"A flip to the same mode changed nothing — keep the state identity-equal, the way a refused action stays identity-equal"*). So a rejected keystroke does **not** invalidate a good validation, which is correct: nothing changed.
+
+**Explicitly not a boolean `isValidated`.** A flag must be cleared by every writer that can invalidate it, and the writer that forgets is the bug. There is no such flag in `editor-state.ts` today and none should be added.
+
+### 8.5 Consequences for lanes already recorded
+
+- **SG7 is retired.** The validation view is a middle-column view reached by the segmented control, so the `Problems` tab in the telemetry drawer is redundant. **SG-D9's analysis still stands and is worth keeping**: the drawer's log is `LogEntry[]` of the last run's events and was never the right data model for validation — that reasoning is why validation gets its own view rather than borrowing one. The drawer stays telemetry-only.
+- **SG4 is revised** — the segmented control it builds has three positions, not two (SG-D13).
+- **SG8 is revised** — the Generate pre-flight now lives behind the toolbar's `Generate`, not the header's.
+
+### 8.6 New lanes
+
+| Lane | Owns | Depends on | Ships |
+|---|---|---|---|
+| **SG9** | `Header.tsx`, the editor toolbar | SG-D10–SG-D12, SG-D15 | **Generate leaves the header; the toolbar gains the `Validate` → `Generate` slot.** Must preserve `guardedAction`'s whole-gesture contract and pin it with a test. |
+| **SG10** | the validation view | SG-D12–SG-D14, SG5 | **The validation view** — every error including the ones shown inline, each row a control that reveals its field, plus the refresh. Reached by `validate` on the segmented control **and** by pressing `Validate`. |
+
+**Order.** **SG9 ‖ SG10** (disjoint: one is the toolbar, one is a new view), both after **SG1** retires `guided`.
