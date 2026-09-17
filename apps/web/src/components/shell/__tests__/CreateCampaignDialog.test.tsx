@@ -80,7 +80,10 @@ describe("CreateCampaignDialog", () => {
     const group = within(dialog).getByRole("group", { name: messages.createTypeLabel });
     expect(within(group).getAllByRole("button")).toHaveLength(4);
     expect(within(group).getAllByRole("button").map((tile) => tile.getAttribute("aria-label"))).toEqual([
-      ...CAMPAIGN_TYPES,
+      "social-post",
+      "paid-social",
+      "display-ad",
+      "short-video",
     ]);
     expect(within(dialog).getAllByRole("status")).toHaveLength(1);
   });
@@ -764,5 +767,191 @@ describe("the inline discard guard (W2(a) / D90)", () => {
     const namesAfter = getFocusableDialogElements(dialog).map((el) => el.textContent);
     expect(namesAfter).toContain(messages.confirmCancel);
     expect(namesAfter).toContain(messages.createCampaignConfirm);
+  });
+});
+
+describe("CC6 — format grouping by Static and Video/motion (D144)", () => {
+  test("each group exposes an accessible name, and each tile appears under the correct one", async () => {
+    const user = userEvent.setup();
+    renderDialog();
+    const dialog = await openDialog(user);
+
+    const staticGroup = within(dialog).getByRole("group", { name: messages.createFormatGroupStatic });
+    expect(within(staticGroup).getAllByRole("button").map((tile) => tile.getAttribute("aria-label"))).toEqual([
+      "social-post",
+      "paid-social",
+      "display-ad",
+    ]);
+
+    const motionGroup = within(dialog).getByRole("group", { name: messages.createFormatGroupMotion });
+    expect(within(motionGroup).getAllByRole("button").map((tile) => tile.getAttribute("aria-label"))).toEqual([
+      "short-video",
+    ]);
+  });
+
+  test("all four types remain reachable and selectable, one assertion per type", async () => {
+    const user = userEvent.setup();
+    renderDialog();
+    const dialog = await openDialog(user);
+
+    // social-post is reachable and selectable
+    const socialPostTile = within(dialog).getByRole("button", { name: "social-post" });
+    await user.click(socialPostTile);
+    expect(socialPostTile.getAttribute("aria-pressed")).toBe("true");
+
+    // paid-social is reachable and selectable
+    const paidSocialTile = within(dialog).getByRole("button", { name: "paid-social" });
+    await user.click(paidSocialTile);
+    expect(paidSocialTile.getAttribute("aria-pressed")).toBe("true");
+
+    // display-ad is reachable and selectable
+    const displayAdTile = within(dialog).getByRole("button", { name: "display-ad" });
+    await user.click(displayAdTile);
+    expect(displayAdTile.getAttribute("aria-pressed")).toBe("true");
+
+    // short-video is reachable and selectable
+    const shortVideoTile = within(dialog).getByRole("button", { name: "short-video" });
+    await user.click(shortVideoTile);
+    expect(shortVideoTile.getAttribute("aria-pressed")).toBe("true");
+  });
+
+  test("selecting short-video produces mode: variation through the preset (asserting resulting mode)", async () => {
+    const user = userEvent.setup();
+    const view = renderDialog();
+    const dialog = await openDialog(user);
+    await fillValid(user);
+    await user.click(within(dialog).getByRole("button", { name: "short-video" }));
+    await user.click(within(dialog).getByRole("button", { name: messages.createCampaignConfirm }));
+
+    expect(JSON.parse(localStorage.getItem(CREATE_SEED_KEY) as string)).toEqual({
+      name: "Summer Spark",
+      type: "short-video",
+    });
+    view.unmount();
+
+    localStorage.setItem("cf:brief-picked", "1");
+    localStorage.removeItem("cf:presentation");
+    mockPipelineApi({
+      result: (url) =>
+        String(url).includes("/campaigns/capabilities")
+          ? json({ motion: true })
+          : String(url).includes("/campaigns/briefs")
+            ? json({ briefs: [] })
+            : json({ halted: false, assets: [], log: null }),
+    });
+    nextMock().nav.pathname = "/brief/new";
+    render(
+      <ShellProviders>
+        <CreateCampaignProvider>
+          <NewBriefPage />
+        </CreateCampaignProvider>
+      </ShellProviders>,
+    );
+    await waitFor(() =>
+      expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
+        "Summer Spark",
+      ),
+    );
+    // Assert the resulting mode comes from CAMPAIGN_TYPE_PRESETS["short-video"].mode ("variation")
+    expect(screen.getByRole("button", { name: "variation" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "brief" }).getAttribute("aria-pressed")).toBe("false");
+  });
+
+  test("selecting a static type produces its own preset's mode (brief) through the preset", async () => {
+    const user = userEvent.setup();
+    const view = renderDialog();
+    const dialog = await openDialog(user);
+    await fillValid(user);
+    await user.click(within(dialog).getByRole("button", { name: "display-ad" }));
+    await user.click(within(dialog).getByRole("button", { name: messages.createCampaignConfirm }));
+
+    expect(JSON.parse(localStorage.getItem(CREATE_SEED_KEY) as string)).toEqual({
+      name: "Summer Spark",
+      type: "display-ad",
+    });
+    view.unmount();
+
+    localStorage.setItem("cf:brief-picked", "1");
+    localStorage.removeItem("cf:presentation");
+    mockPipelineApi({
+      result: (url) =>
+        String(url).includes("/campaigns/capabilities")
+          ? json({ motion: true })
+          : String(url).includes("/campaigns/briefs")
+            ? json({ briefs: [] })
+            : json({ halted: false, assets: [], log: null }),
+    });
+    nextMock().nav.pathname = "/brief/new";
+    render(
+      <ShellProviders>
+        <CreateCampaignProvider>
+          <NewBriefPage />
+        </CreateCampaignProvider>
+      </ShellProviders>,
+    );
+    await waitFor(() =>
+      expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
+        "Summer Spark",
+      ),
+    );
+    // Assert the resulting mode comes from CAMPAIGN_TYPE_PRESETS["display-ad"].mode ("brief")
+    expect(screen.getByRole("button", { name: "brief" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "variation" }).getAttribute("aria-pressed")).toBe("false");
+  });
+
+  test("applyPreset runs once per selection, not once per group", async () => {
+    const user = userEvent.setup();
+    const createSpy = vi.spyOn(createCampaignLib, "createCampaign");
+    try {
+      const view = renderDialog();
+      const dialog = await openDialog(user);
+      await fillValid(user);
+
+      // Select in static group then in motion group
+      await user.click(within(dialog).getByRole("button", { name: "paid-social" }));
+      await user.click(within(dialog).getByRole("button", { name: "short-video" }));
+      await user.click(within(dialog).getByRole("button", { name: messages.createCampaignConfirm }));
+
+      // Create seeds only once for the single selected type
+      expect(createSpy).toHaveBeenCalledTimes(1);
+      expect(createSpy).toHaveBeenCalledWith({
+        name: "Summer Spark",
+        type: "short-video",
+      });
+      view.unmount();
+
+      localStorage.setItem("cf:brief-picked", "1");
+      localStorage.removeItem("cf:presentation");
+      mockPipelineApi({
+        result: (url) =>
+          String(url).includes("/campaigns/capabilities")
+            ? json({ motion: true })
+            : String(url).includes("/campaigns/briefs")
+              ? json({ briefs: [] })
+              : json({ halted: false, assets: [], log: null }),
+      });
+      nextMock().nav.pathname = "/brief/new";
+      render(
+        <ShellProviders>
+          <CreateCampaignProvider>
+            <NewBriefPage />
+          </CreateCampaignProvider>
+        </ShellProviders>,
+      );
+      await waitFor(() =>
+        expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
+          "Summer Spark",
+        ),
+      );
+      // The seed was consumed exactly once by applyPreset (seed key is spent)
+      expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
+      const draft = JSON.parse(localStorage.getItem("cf:draft:new") as string) as {
+        state: { type: string; mode: string };
+      };
+      expect(draft.state.type).toBe("short-video");
+      expect(draft.state.mode).toBe("variation");
+    } finally {
+      createSpy.mockRestore();
+    }
   });
 });

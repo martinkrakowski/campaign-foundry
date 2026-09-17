@@ -1426,3 +1426,10 @@ export function htmlWeightOverage(overBytes: number): string {
   return `Over budget by ${weightKb(overBytes)} KB.`;
 }
 
+/* ── Format group headings for the create campaign dialog (CC6, D144) ────── */
+
+/** The static format group heading in the create campaign dialog (D144). */
+export const createFormatGroupStatic = "Static";
+/** The video/motion format group heading in the create campaign dialog (D144). */
+export const createFormatGroupMotion = "Video/motion";
+

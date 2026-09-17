@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import {
-  CAMPAIGN_TYPES,
   CAMPAIGN_TYPE_PRESETS,
   DEFAULT_CAMPAIGN_TYPE,
   type CampaignType,
@@ -39,6 +38,29 @@ import * as messages from "@/components/campaign/messages";
  * the user one step past two empty required fields.
  */
 const IDENTITY_STEP = "identity";
+
+/**
+ * D144 / CC6: The four campaign types grouped by format.
+ * - Static: social-post, paid-social, display-ad
+ * - Video/motion: short-video
+ *
+ * A view grouping only: domain values, presets, and selection behaviour are unchanged.
+ */
+export interface CampaignTypeGroup {
+  readonly label: string;
+  readonly types: readonly CampaignType[];
+}
+
+export const CAMPAIGN_TYPE_GROUPS: readonly CampaignTypeGroup[] = [
+  {
+    label: messages.createFormatGroupStatic,
+    types: ["social-post", "paid-social", "display-ad"],
+  },
+  {
+    label: messages.createFormatGroupMotion,
+    types: ["short-video"],
+  },
+];
 
 const STILL_FRAMES: readonly { readonly ratio: RatioOption; readonly variant: PosterVariant }[] = [
   { ratio: "1:1", variant: "pA" },
@@ -328,29 +350,36 @@ export function CreateCampaignDialog() {
           </label>
           <div>
             <p className="mb-1.5 text-[11px] text-text-muted">{messages.createTypeLabel}</p>
-            <div role="group" aria-label={messages.createTypeLabel} className="grid gap-2">
-              {CAMPAIGN_TYPES.map((option) => {
-                const preset = CAMPAIGN_TYPE_PRESETS[option];
-                return (
-                  <OptionTile
-                    key={option}
-                    value={option}
-                    name={typeDisplayName(option)}
-                    tag={modeDisplayName(preset.mode)}
-                    blurb={typeTileBlurb(option)}
-                    meta={
-                      option === "short-video"
-                        ? messages.typeTileRunsAs(modeDisplayName("variation"))
-                        : undefined
-                    }
-                    description={typeTileDescription(option)}
-                    selected={type === option}
-                    onToggle={(value) => setType(value as CampaignType)}
-                  >
-                    <TypePreview type={option} />
-                  </OptionTile>
-                );
-              })}
+            <div role="group" aria-label={messages.createTypeLabel} className="space-y-4">
+              {CAMPAIGN_TYPE_GROUPS.map((group) => (
+                <div key={group.label} className="space-y-1.5">
+                  <h3 className="text-[11px] font-medium text-text-muted">{group.label}</h3>
+                  <div role="group" aria-label={group.label} className="grid gap-2">
+                    {group.types.map((option) => {
+                      const preset = CAMPAIGN_TYPE_PRESETS[option];
+                      return (
+                        <OptionTile
+                          key={option}
+                          value={option}
+                          name={typeDisplayName(option)}
+                          tag={modeDisplayName(preset.mode)}
+                          blurb={typeTileBlurb(option)}
+                          meta={
+                            option === "short-video"
+                              ? messages.typeTileRunsAs(modeDisplayName("variation"))
+                              : undefined
+                          }
+                          description={typeTileDescription(option)}
+                          selected={type === option}
+                          onToggle={(value) => setType(value as CampaignType)}
+                        >
+                          <TypePreview type={option} />
+                        </OptionTile>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         </DialogBody>
