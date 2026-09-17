@@ -11,6 +11,7 @@ import {
   derivePreviewSpec,
 } from "../PreviewDock";
 import type { PreviewDockLook } from "../preview-props";
+import type { PlayheadState, SurfaceHost } from "../PreviewDock";
 import { PlayheadHost } from "../BriefEditor";
 import * as messages from "../messages";
 
@@ -23,11 +24,29 @@ import * as messages from "../messages";
  * `durationSec` defaults to the same derivation the dock used to make for
  * itself (`brief.variation.axes.duration[0]`, else the default), so every test
  * written before the lift still drives a range with the same `max`.
+ *
+ * `host` defaults to `"section"` — the host that still draws the dock's own
+ * scrub after the owner's 2026-09-17 decision. The tests that are ABOUT that
+ * control therefore keep exercising it, and the rail's suppression is asserted
+ * explicitly rather than by silently deleting them.
  */
-const Dock = ({ durationSec, ...look }: PreviewDockLook & { readonly durationSec?: number }) => (
+const Dock = ({
+  durationSec,
+  host = "section",
+  onPlayhead,
+  ...look
+}: PreviewDockLook & {
+  readonly durationSec?: number;
+  readonly host?: SurfaceHost;
+  /** Hands a test the live playhead, so a COMMIT is observable rather than assumed. */
+  readonly onPlayhead?: (playhead: PlayheadState) => void;
+}) => (
   <PlayheadHost
     durationSec={durationSec ?? look.brief?.variation?.axes?.duration?.[0] ?? DEFAULT_DURATION_SEC}
-    rail={(playhead) => <PreviewDock {...look} playhead={playhead} />}
+    rail={(playhead) => {
+      onPlayhead?.(playhead);
+      return <PreviewDock {...look} playhead={playhead} host={host} />;
+    }}
   >
     {null}
   </PlayheadHost>
@@ -270,13 +289,36 @@ describe("PreviewDock — the stand-in caption (D52)", () => {
 });
 
 describe("PreviewDock — scrub control (VE-D5, VE-D6)", () => {
-  test("renders a range control when motion is present", () => {
-    const { container } = render(<Dock {...showcase} motion="ken-burns-in" />);
+  test("renders a range control when motion is present, in the host that owns the scrub", () => {
+    const { container } = render(<Dock {...showcase} motion="ken-burns-in" host="section" />);
     const slider = container.querySelector('input[type="range"]');
     expect(slider).not.toBeNull();
     expect(slider?.getAttribute("aria-label")).toBe(messages.previewScrubLabel);
     expect(slider?.getAttribute("min")).toBe("0");
     expect(Number(slider?.getAttribute("max"))).toBeGreaterThan(0);
+  });
+
+  /**
+   * Owner's decision, 2026-09-17 (rail-timeline plan §11): the rail's scrub is
+   * the tape's "Playhead", so the dock does not draw a second one there — but
+   * the control still exists for the `section` host D146 gives TS2.
+   *
+   * BOTH halves are asserted here. A conditional with only its negative pinned
+   * is one a later lane deletes as dead code with nothing going red, and the
+   * `section` host has no production call site until TS2 lands — so this pair of
+   * tests is the only thing standing between that code path and a tidy-up.
+   */
+  test("in the RAIL the dock draws no scrub — the tape's Playhead is the one control", () => {
+    const { container } = render(<Dock {...showcase} motion="ken-burns-in" host="rail" />);
+    expect(container.querySelector('input[type="range"]')).toBeNull();
+    expect(container.textContent).not.toContain(messages.previewScrubLabel);
+  });
+
+  test("in the SECTION host the dock still draws it — the code path is suppressed, not deleted", () => {
+    const { container } = render(<Dock {...showcase} motion="ken-burns-in" host="section" />);
+    const slider = container.querySelector('input[type="range"]') as HTMLInputElement;
+    expect(slider).not.toBeNull();
+    expect(slider.getAttribute("aria-label")).toBe(messages.previewScrubLabel);
   });
 
   test("the range control is absent when the brief renders no motion", () => {
@@ -307,13 +349,33 @@ describe("PreviewDock — scrub control (VE-D5, VE-D6)", () => {
   });
 
   test("committing the scrub position on pointerUp and keyUp updates the committed scrub time", () => {
-    const { container } = render(<Dock {...showcase} motion="ken-burns-in" />);
+    /**
+     * This test fired the two events and asserted NOTHING about their effect, so
+     * dropping either handler left it green. It matters more now: after the
+     * owner's 2026-09-17 decision the dock's range renders only under the
+     * `section` host, so this file — not the editor suite, which now drives the
+     * tape's Playhead — is the only place either handler is exercised at all.
+     */
+    let playhead: PlayheadState | undefined;
+    const { container } = render(
+      <Dock {...showcase} motion="ken-burns-in" onPlayhead={(p) => (playhead = p)} />,
+    );
     const slider = container.querySelector('input[type="range"]') as HTMLInputElement;
     expect(slider).not.toBeNull();
+
+    // A live move is not a commit.
     fireEvent.change(slider, { target: { value: "2.5" } });
+    expect(playhead!.scrubSec).toBe(2.5);
+    expect(playhead!.committedSec).toBe(0);
+
     fireEvent.pointerUp(slider);
+    expect(playhead!.committedSec).toBe(2.5);
+
+    // And the keyboard half, which no pointer event can stand in for.
     fireEvent.change(slider, { target: { value: "4" } });
-    fireEvent.keyUp(slider);
+    expect(playhead!.committedSec).toBe(2.5);
+    fireEvent.keyUp(slider, { key: "ArrowRight" });
+    expect(playhead!.committedSec).toBe(4);
   });
 
   test("committing near the end and shortening clip duration clamps atSec to durationSec without falling back", async () => {

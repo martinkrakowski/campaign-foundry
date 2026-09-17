@@ -161,7 +161,7 @@ describe("the preview only ever speaks the brief and the sanctioned labels", () 
     (_name, state) => {
       const props = previewDockProps(state, 0, 6);
       expect(props).not.toBeNull();
-      const view = render(<PreviewDock {...props!} playhead={restingPlayhead} />);
+      const view = render(<PreviewDock {...props!} playhead={restingPlayhead} host="section" />);
       const tokens = previewTokens(view);
       expect(tokens.length).toBeGreaterThan(0);
       const corpusTokens = corpusTokensFor(state);
@@ -197,7 +197,11 @@ describe("the preview only ever speaks the brief and the sanctioned labels", () 
     // the rejected chrome (§2.3) against the rendered text itself, so the two checks
     // fail for different reasons and cannot both be defeated by one mistake.
     const { container } = render(
-      <PreviewDock {...previewDockProps(variationState, 0, 6)!} playhead={restingPlayhead} />,
+      <PreviewDock
+        {...previewDockProps(variationState, 0, 6)!}
+        playhead={restingPlayhead}
+        host="section"
+      />,
     );
     const rendered = container.textContent ?? "";
     for (const fake of ["12.4K", "1,203", "8,741", "@", "original sound", "Following", "For You"]) {

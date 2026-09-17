@@ -223,7 +223,9 @@ describe("renaming a fresh draft must not blank the preview frame", () => {
 
     const dock = (next: typeof state) => {
       const props = previewDockProps(next, 0, 6)!;
-      return <PreviewDock {...props} brief={toBrief(next)} playhead={restingPlayhead} />;
+      return (
+        <PreviewDock {...props} brief={toBrief(next)} playhead={restingPlayhead} host="section" />
+      );
     };
 
     const view = render(dock(state));
@@ -267,7 +269,9 @@ function MemoDock({
   const railProps = useMemo(() => rawRailProps, [previewKey]);
   const previewBrief = useMemo(() => brief, [previewKey]);
   if (railProps === null) return null;
-  return <PreviewDock {...railProps} brief={previewBrief} playhead={restingPlayhead} />;
+  return (
+    <PreviewDock {...railProps} brief={previewBrief} playhead={restingPlayhead} host="section" />
+  );
 }
 
 describe("the rail's memo must not hide a switch of creative from usePreviewFrame (Qodo, caught in review)", () => {

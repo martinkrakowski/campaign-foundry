@@ -173,7 +173,18 @@ const frameCalls = (calls: readonly Call[]) =>
 /** Longer than PREVIEW_FRAME_DEBOUNCE_MS, so a request that WOULD be issued has been. */
 const settle = () => new Promise((r) => setTimeout(r, 400));
 
-const scrub = () => screen.getByLabelText(messages.previewScrubLabel) as HTMLInputElement;
+/**
+ * The rail's scrub control.
+ *
+ * It is the TAPE's "Playhead": the owner's 2026-09-17 decision retired the dock's
+ * own range in this host, so this is the single control a rail user has. The
+ * proofs below therefore run through the whole chain that ships — tape →
+ * `PlayheadHost` → `PreviewDock` → `usePreviewFrame` — rather than through a
+ * control the rail no longer draws. The dock's own range keeps its handlers
+ * exercised in `preview-dock.test.tsx`, under the `section` host that still
+ * renders it.
+ */
+const scrub = () => screen.getByLabelText(messages.tapePlayheadName) as HTMLInputElement;
 
 /**
  * Mounts the editor on the motion draft and lets the mount's own frame request
@@ -185,7 +196,7 @@ const mountScrubbing = async () => {
   await waitFor(() =>
     expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("clip"),
   );
-  await waitFor(() => expect(screen.queryByLabelText(messages.previewScrubLabel)).not.toBeNull());
+  await waitFor(() => expect(screen.queryByLabelText(messages.tapePlayheadName)).not.toBeNull());
   await settle();
   // The mount's own fetch actually happened: a zero here would make every
   // "no further calls" assertion below vacuous.
@@ -298,6 +309,48 @@ describe("TS1 — the tape in the rail (plan §4 acceptance (e), §5)", () => {
     expect(screen.getByRole("button", { name: messages.tapeVideoClip })).toBeTruthy();
   });
 
+  test("the rail carries ONE scrub control, and it is the tape's Playhead", async () => {
+    // Owner's decision, 2026-09-17 (plan §11). Before it, this rail held
+    // ['Scrub preview', 'Playhead', 'Timeline zoom'] — two ranges over the SAME
+    // lifted second, in a 16rem column, each announcing the same fact.
+    await mountScrubbing();
+    const rail = screen.getByRole("complementary", { name: messages.previewLegend });
+    const names = [...rail.querySelectorAll('input[type="range"]')].map((el) =>
+      el.getAttribute("aria-label"),
+    );
+    expect(names).toEqual([messages.tapePlayheadName, messages.tapeZoomName]);
+    // Named explicitly, because "one range fewer" is not the claim — "the dock's
+    // scrub is the one that went" is.
+    expect(screen.queryByLabelText(messages.previewScrubLabel)).toBeNull();
+  });
+
+  test("the tape's playhead is still reachable and still commits from the keyboard alone", async () => {
+    // The property this lane most needs not to break quietly: with the dock's
+    // range gone from the rail, the tape's is the ONLY scrub there, so if its
+    // keyboard commit regressed a keyboard user would have no way at all to move
+    // the frame. No pointer event is dispatched anywhere in this test.
+    const calls = await mountScrubbing();
+    const before = frameCalls(calls).length;
+
+    const playhead = screen.getByLabelText(messages.tapePlayheadName) as HTMLInputElement;
+    playhead.focus();
+    expect(document.activeElement).toBe(playhead);
+    expect(playhead.getAttribute("type")).toBe("range");
+    // A native range is also what `use-step-navigation.ts`'s allow-list hands a
+    // drag to, so the guided swipe does not swallow it (studio §9.3 point 5).
+    expect(playhead.tabIndex).toBeGreaterThanOrEqual(0);
+
+    fireEvent.change(playhead, { target: { value: "2" } });
+    await settle();
+    expect(frameCalls(calls).length).toBe(before);
+
+    fireEvent.keyUp(playhead, { key: "ArrowRight" });
+    await settle();
+    const after = frameCalls(calls);
+    expect(after.length).toBe(before + 1);
+    expect((after[after.length - 1].body?.cell as { atSec?: number }).atSec).toBe(2);
+  });
+
   test("a brief with no motion mounts no tape at all", async () => {
     const stillBrief = {
       ...tapeBrief,
@@ -331,6 +384,8 @@ describe("TS1 — the tape in the rail (plan §4 acceptance (e), §5)", () => {
     // no seconds to draw, so neither the tape nor the dock's own range mounts.
     expect(screen.getByRole("complementary", { name: messages.previewLegend })).toBeTruthy();
     expect(screen.queryByLabelText(messages.tapePlayheadName)).toBeNull();
+    // The dock's own scrub is suppressed in the rail by host, and absent here by
+    // motion too — a still draft has no seconds for either control.
     expect(screen.queryByLabelText(messages.previewScrubLabel)).toBeNull();
     expect(screen.queryByText(messages.tapeLegend)).toBeNull();
     expect(tapeRenders.count).toBe(0);

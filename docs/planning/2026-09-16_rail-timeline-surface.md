@@ -625,14 +625,26 @@ Two more things a reviewer should weigh rather than assume:
   seconds — and differ only mid-drag, which is when a native range should announce
   the thumb. Binding the committed second instead would snap the thumb back on
   every re-render and kill the drag (§3.3a).
-- **Two range controls now live in the rail**: the dock's shipped scrub (VE-D5,
-  `previewScrubLabel`) and the tape's "Playhead". §3.5's prose calls the dock's
-  range "the accessible playhead" while §3.5's own `PlayheadSlider` puts one in the
-  tape's footer, and §6/§8 name the tape's. Nothing in this plan retires the dock's
-  control, and deleting a shipped, tested surface is not TS1's scope — so both ship,
-  writing the SAME lifted second so they cannot disagree. **This wants an owner's
-  decision**: retire the dock's range in the rail host now that the tape is there,
-  or keep it as the compact scrub for when TS2 puts the tape under Copy.
+- **Two range controls in the rail — SETTLED by the owner, 2026-09-17: the dock's
+  range retires in the rail host and is kept for the narrow host.** TS1 first
+  shipped both (the dock's VE-D5 scrub, named `previewScrubLabel`, beside the
+  tape's "Playhead") because this document contradicts itself — §3.5's prose calls
+  the dock's range "the accessible playhead" while §3.5's own markup puts a
+  `PlayheadSlider` in the tape's footer, and §6 and §8 both name the tape's — and
+  deleting a shipped, tested surface on a plan's ambiguity is not an implementer's
+  call. **What shipped after the decision:** `PreviewShowcaseProps` carries the
+  same `SurfaceHost` discriminant `TimelineTape` already took (imported, not
+  restated, so the two cannot disagree about which of them owns the scrub), and
+  the dock's range renders only under `host="section"`. The rail went from
+  `['Scrub preview', 'Playhead', 'Timeline zoom']` to
+  `['Playhead', 'Timeline zoom']`. The code path is **suppressed, not deleted**:
+  D146's narrow host is where TS2 puts the tape under Copy, and the compact scrub
+  is the control for that case. It has no production call site until TS2 lands, so
+  both halves of the conditional are pinned by tests — the absence in the rail AND
+  the presence in the section — because a conditional with only its negative
+  asserted is one a later lane removes as dead code with nothing going red. The
+  lifted second did not move: this changes which control is visible, never who
+  owns the state.
 
 **Fields of §3.4's `TimelineTapeProps` that TS1 does not ship**, each with the
 lane that adds it, so no dead prop lands: `encodedDurationSec`, `hasAudio` and

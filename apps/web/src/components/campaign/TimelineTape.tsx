@@ -16,6 +16,7 @@ import {
   DWELL_TOLERANCE,
   MIN_DWELL_SEC,
 } from "@campaignfoundry/CampaignOrchestration/copy-timeline";
+import type { SurfaceHost } from "@/components/campaign/PreviewDock";
 import * as messages from "@/components/campaign/messages";
 
 /**
@@ -168,8 +169,15 @@ export interface TimelineTapeProps {
   /** Commit: pointer release, key-up, a ±1 s nudge, or a click on the ruler. */
   readonly onScrubCommit: (sec: number) => void;
   readonly onSelectBeat: (index: number) => void;
-  /** Which host mounted it (D145 rail, D146 Copy section). Reflected, not styled. */
-  readonly host: "rail" | "section";
+  /**
+   * Which host mounted it (D145 rail, D146 Copy section). Reflected, not styled.
+   *
+   * The SAME discriminant `PreviewDock` reads, imported rather than restated:
+   * the two components have to agree about which of them owns the scrub where
+   * they are (owner's decision 2026-09-17 — in the rail, this one does), and two
+   * independent unions could disagree in the same render.
+   */
+  readonly host: SurfaceHost;
 }
 
 /* ── Pieces ───────────────────────────────────────────────────────────────── */
@@ -427,12 +435,13 @@ function TimelineTapeImpl(props: TimelineTapeProps): ReactNode {
    * Whether a commit has landed yet, so the status can say what happened.
    *
    * It follows the committed second itself, not only this component's own commit
-   * path: the rail hosts the dock's shipped scrub control beside the tape, and
-   * both write the SAME lifted second (that is what CC5 is for). A flag set only
-   * by the tape's own buttons would leave the sentence saying "drag the playhead
-   * to scrub" while the readout under the diamond already showed the frame a
-   * release on the dock's range had landed — the tape and the dock disagreeing
-   * about the same draft, which is the class of defect this lane keeps closing.
+   * path: every surface that can commit writes the SAME lifted second (that is
+   * what CC5 is for) — the dock's own scrub under the `section` host today, and
+   * whatever TL3's boundary handles add later. A flag set only by the tape's own
+   * buttons would leave the sentence saying "drag the playhead to scrub" while
+   * the readout under the diamond already showed the frame somebody else's
+   * commit had landed — two surfaces disagreeing about the same draft, which is
+   * the class of defect this lane keeps closing.
    *
    * The local set stays for the case the effect cannot see: a nudge that clamps
    * to a second already committed (−1 s at 0) moves nothing, and is still the

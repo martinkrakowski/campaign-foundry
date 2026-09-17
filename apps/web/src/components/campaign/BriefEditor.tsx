@@ -1836,6 +1836,7 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
                   {...railProps}
                   brief={isRailWideEnough ? previewBrief : undefined}
                   playhead={playhead}
+                  host="rail"
                 />
                 {/* TS1 — the time surface, under the creative it belongs to. It
                   mounts ONLY for a moving draft: a still brief has no seconds to

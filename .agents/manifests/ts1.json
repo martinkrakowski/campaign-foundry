@@ -21,14 +21,14 @@
       "file": "apps/web/src/components/campaign/PreviewDock.tsx",
       "before": "            onPointerUp={handleCommit}\n            onKeyUp={handleCommit}",
       "after": "            onPointerUp={handleCommit}",
-      "because": "onPointerUp never fires for an arrow key. Dropping onKeyUp therefore leaves a keyboard user able to move the thumb and unable to move the frame -- the control looks and behaves correctly under every pointer test, and the regression is invisible to all of them. The plan caught this once already in review (§3.3a: \"onKeyUp is the half a reviewer usually misses\"), which is why the keyboard commit has a test of its own that dispatches NO pointer event anywhere.",
+      "because": "onPointerUp never fires for an arrow key, so dropping onKeyUp leaves a keyboard user able to move the thumb and unable to move the frame -- correct under every pointer test, invisible to all of them. The plan caught this once already in review (§3.3a: \"onKeyUp is the half a reviewer usually misses\"). The COMMAND moved with the owner's 2026-09-17 decision: the dock's range now renders only under the `section` host, so the editor suite drives the tape's Playhead instead and this handler is exercised here, against a test that was previously assertion-free and would have stayed green on this very mutation.",
       "command": [
         "yarn",
         "vitest",
         "run",
         "--project",
         "web",
-        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.playhead.test.tsx"
+        "apps/web/src/components/campaign/__tests__/preview-dock.test.tsx"
       ],
       "verdict": "caught"
     },
@@ -112,6 +112,36 @@
       "before": "                {railProps.motion !== undefined ? (",
       "after": "                {railProps.motion === undefined || railProps.motion !== undefined ? (",
       "because": "The plan's §4 acceptance (e), second half: a brief without motion must not mount the tape. A still creative has no seconds to draw, and a tape over one invites a scrub that means nothing and a playhead that addresses a frame index the encoder never produces. The mutation is written as a tautology rather than as a deleted guard so that ONLY the still-brief path moves -- every motion test stays green, which is the point: this is caught by a test that asserts an ABSENCE on a draft that has no motion, and by nothing else in the suite.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.playhead.test.tsx"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/TimelineTape.tsx",
+      "before": "      onPointerUp={(e) => onCommit(Number(e.currentTarget.value))}\n      onKeyUp={(e) => onCommit(Number(e.currentTarget.value))}",
+      "after": "      onPointerUp={(e) => onCommit(Number(e.currentTarget.value))}",
+      "because": "The same keyboard half, on the control that now matters most. After the owner's 2026-09-17 decision the tape's Playhead is the ONLY scrub in the rail, so losing its key-up commit does not degrade a keyboard user to a second-best control -- it leaves them no way at all to move the frame from that surface. Caught by an editor-level test that dispatches NO pointer event anywhere and asserts the /preview-frame CALL COUNT rose by exactly one, and by the tape's own unit test driven through its owner's state.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.playhead.test.tsx"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/PreviewDock.tsx",
+      "before": "      {hasMotion && props.host === \"section\" ? (",
+      "after": "      {hasMotion ? (",
+      "because": "The owner's 2026-09-17 decision (plan §11), undone: the dock draws its own range in the rail again, beside the tape's Playhead, so one 16rem column carries two sliders over the SAME lifted second and announces the same fact twice. Nothing looks broken -- both controls work and agree, because CC5 made them share the state -- which is exactly why this needs a COUNT rather than an eye: the rail's range inputs are asserted by NAME and in order, so the reappearance of 'Scrub preview' fails rather than merely adding a control nobody counted. The opposite simplification (deleting the conditional's surviving `section` branch) is caught by preview-dock.test.tsx, which pins the control's PRESENCE in that host.",
       "command": [
         "yarn",
         "vitest",

@@ -92,6 +92,17 @@ export interface PlayheadState {
   readonly onScrubCommit: (sec: number) => void;
 }
 
+/**
+ * Which surface mounted a time control (D145 the rail, D146 the Copy section).
+ *
+ * One vocabulary, shared by the dock and `TimelineTape`, because the two now
+ * have to agree about a single question: **which of them owns the scrub where
+ * they are**. Two independent booleans could answer it differently in the same
+ * render, which is precisely how a surface ends up with two sliders for one
+ * second — the thing this discriminant exists to stop.
+ */
+export type SurfaceHost = "rail" | "section";
+
 export interface PreviewShowcaseProps extends Omit<CreativePreviewProps, "className"> {
   readonly campaignName: string;
   /**
@@ -101,6 +112,25 @@ export interface PreviewShowcaseProps extends Omit<CreativePreviewProps, "classN
    * it, and a second copy would desync the preview (D146's risk).
    */
   readonly playhead: PlayheadState;
+  /**
+   * Where this dock is mounted — and therefore whether it draws its own scrub.
+   *
+   * **Owner's decision, 2026-09-17** (the rail-timeline plan's §11): in the
+   * `rail`, where `TimelineTape` mounts beside the dock, the tape's "Playhead"
+   * is the single scrub control and this one is suppressed. Two ranges over the
+   * same second announced the same fact twice and made "which one am I holding"
+   * a real question in a 16rem column.
+   *
+   * It is suppressed, NOT deleted: under `section` — the narrow host D146 gives
+   * TS2, where the tape goes under the Copy form — the compact scrub is the
+   * control for the case, and the code path has to survive until that lane
+   * arrives. A future "simplification" of this conditional is caught by a test
+   * that pins the surviving case, not only the absent one.
+   *
+   * This changes which control is VISIBLE, never who owns the state: the second
+   * is still `PlayheadHost`'s in both hosts.
+   */
+  readonly host: SurfaceHost;
   readonly platformId?: string;
   /**
    * The draft's projection (T1b): when present, the dock composites a REAL frame
@@ -304,7 +334,13 @@ function PreviewDockImpl(props: PreviewShowcaseProps): ReactNode {
         identityKey={props.identityKey}
         className="block h-auto w-full"
       />
-      {hasMotion ? (
+      {/* Owner's decision, 2026-09-17: in the rail the tape's "Playhead" is the
+        single scrub, so this one does not render there. Kept for the `section`
+        host D146 gives TS2 — see `host` on the props above. Both halves are
+        pinned by tests: the absence in the rail AND the presence in the section,
+        because a conditional with only its negative asserted is one a later
+        lane "simplifies" away in silence. */}
+      {hasMotion && props.host === "section" ? (
         <div className="flex items-center gap-2 px-1">
           <input
             type="range"

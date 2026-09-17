@@ -10,13 +10,14 @@ import type { PreviewShowcaseProps } from "./PreviewDock";
 
 /**
  * Everything the dock needs that is derived from the DRAFT — i.e. the whole of
- * `PreviewShowcaseProps` except the playhead, which is not a property of the
- * document at all but ephemeral editor state the host owns (CC5, VE-D5/D139).
+ * `PreviewShowcaseProps` except the playhead and the host, neither of which is a
+ * property of the DOCUMENT: the playhead is ephemeral editor state the host owns
+ * (CC5, VE-D5/D139), and the host is where the editor chose to mount the dock.
  * Keeping it out of this shape is what lets the rail memo key (`previewRailKey`)
  * stay a fingerprint of the BRIEF: a second that moved on a pointermove must
  * never look like a changed creative.
  */
-export type PreviewDockLook = Omit<PreviewShowcaseProps, "playhead">;
+export type PreviewDockLook = Omit<PreviewShowcaseProps, "playhead" | "host">;
 import { anchorAxisActive, briefStyle, isDefaultOutput, type EditorState } from "./editor-state";
 import { previewFetchKey } from "@/lib/preview-frame";
 
