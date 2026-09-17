@@ -16,7 +16,6 @@ describe("Field — assistive technology describedby and invalid attributes", ()
   });
 
   test("with a hint only: aria-describedby names the hint element and resolves to hint text; aria-invalid is not set", () => {
-
     render(
       <Field label="Campaign Name" hint="Choose a memorable name">
         <input data-testid="control" />
@@ -236,7 +235,10 @@ describe("Field — assistive technology describedby and invalid attributes", ()
 
   test("with a warning only: aria-describedby names the warning element and resolves to warning text; aria-invalid is not set", () => {
     render(
-      <Field label="Headline" warning={'Contains prohibited term "guaranteed" — remove before generation.'}>
+      <Field
+        label="Headline"
+        warning={'Contains prohibited term "guaranteed" — remove before generation.'}
+      >
         <input data-testid="control" />
       </Field>,
     );
@@ -256,7 +258,10 @@ describe("Field — assistive technology describedby and invalid attributes", ()
 
   test("with a warning only, function children: the spread target names the warning element; aria-invalid is not set", () => {
     render(
-      <Field label="Headline" warning={'Contains prohibited term "miracle" — remove before generation.'}>
+      <Field
+        label="Headline"
+        warning={'Contains prohibited term "miracle" — remove before generation.'}
+      >
         {(control) => <input data-testid="spread-target" {...control} />}
       </Field>,
     );
@@ -272,7 +277,11 @@ describe("Field — assistive technology describedby and invalid attributes", ()
 
   test("with hint and warning: aria-describedby names both, hint first; both ids resolve to text", () => {
     render(
-      <Field label="Headline" hint="Keep it short" warning={'Contains prohibited term "cure" — remove before generation.'}>
+      <Field
+        label="Headline"
+        hint="Keep it short"
+        warning={'Contains prohibited term "cure" — remove before generation.'}
+      >
         <input data-testid="control" />
       </Field>,
     );
@@ -293,7 +302,11 @@ describe("Field — assistive technology describedby and invalid attributes", ()
 
   test("with error and warning: the warning is not rendered and not referenced", () => {
     render(
-      <Field label="Headline" error="Headline is required" warning={'Contains prohibited term "cure" — remove before generation.'}>
+      <Field
+        label="Headline"
+        error="Headline is required"
+        warning={'Contains prohibited term "cure" — remove before generation.'}
+      >
         <input data-testid="control" />
       </Field>,
     );
@@ -398,4 +411,3 @@ describe("Field — assistive technology describedby and invalid attributes", ()
     expect(logoInput.getAttribute("aria-invalid")).toBe("true");
   });
 });
-

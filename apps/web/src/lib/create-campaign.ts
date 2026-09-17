@@ -1,6 +1,9 @@
 "use client";
 
-import { CAMPAIGN_TYPES, type CampaignType } from "@campaignfoundry/CampaignOrchestration/campaign-types";
+import {
+  CAMPAIGN_TYPES,
+  type CampaignType,
+} from "@campaignfoundry/CampaignOrchestration/campaign-types";
 import { slugify } from "@/components/campaign/editor-state";
 import { duplicateBrief } from "./briefs-api";
 import { takeStashedStep } from "./use-step-navigation";
@@ -124,7 +127,9 @@ export function takeSeed(): CreateCampaignInput | null {
   }
 }
 
-export async function createCampaign(input: CreateCampaignInput): Promise<CreateCampaignResult | null> {
+export async function createCampaign(
+  input: CreateCampaignInput,
+): Promise<CreateCampaignResult | null> {
   // W2 (D71) — with a source the create is a duplicate-with-overrides: the copy's
   // id is derived HERE, by importing the Identity step's own rule (F18 — never
   // reproduced), and no seed is published. The seed is spent only by a mounted

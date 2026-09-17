@@ -72,10 +72,7 @@ const renderHtml = () =>
 const htmlElements = (state: EditorState): readonly HtmlElement[] =>
   state.template.layers.find((layer) => layer.id === "html")?.elements ?? [];
 
-const send = (
-  hook: ReturnType<typeof render>,
-  ...actions: EditorAction[]
-) => {
+const send = (hook: ReturnType<typeof render>, ...actions: EditorAction[]) => {
   act(() => {
     for (const action of actions) hook.result.current.dispatch(action);
   });
@@ -200,10 +197,13 @@ describe("useEditorHistory — load, discard and restore clear both stacks", () 
   const baselines: [string, () => EditorAction][] = [
     ["load", () => ({ type: "load", brief: blankBrief() })],
     ["discard", () => ({ type: "discard" })],
-    ["restore", () => ({
-      type: "restore",
-      state: { ...initialEditorState(), campaignName: "from draft" },
-    })],
+    [
+      "restore",
+      () => ({
+        type: "restore",
+        state: { ...initialEditorState(), campaignName: "from draft" },
+      }),
+    ],
   ];
 
   test.each(baselines)("%s replaces the baseline and clears undo AND redo", (_name, make) => {
@@ -240,9 +240,7 @@ describe("useEditorHistory — the layer toggle is an ordinary undoable edit (L9
     const before = hook.result.current.state.template.layers;
     send(hook, { type: "setLayerEnabled", id: "shade", enabled: false });
     expect(
-      hook.result.current.state.template.layers.find(
-        (layer) => layer.id === "shade",
-      )?.enabled,
+      hook.result.current.state.template.layers.find((layer) => layer.id === "shade")?.enabled,
     ).toBe(false);
     act(() => hook.result.current.undo());
     // `toStrictEqual`, so an `enabled: undefined` left behind by the toggle
@@ -250,9 +248,7 @@ describe("useEditorHistory — the layer toggle is an ordinary undoable edit (L9
     expect(hook.result.current.state.template.layers).toStrictEqual(before);
     act(() => hook.result.current.redo());
     expect(
-      hook.result.current.state.template.layers.find(
-        (layer) => layer.id === "shade",
-      )?.enabled,
+      hook.result.current.state.template.layers.find((layer) => layer.id === "shade")?.enabled,
     ).toBe(false);
   });
 
@@ -271,9 +267,7 @@ describe("useEditorHistory — an html element edit is an ordinary undoable edit
     const before = hook.result.current.state.template;
     send(hook, { type: "addHtmlElement", layerId: "html", kind: "text" });
     expect(
-      hook.result.current.state.template.layers.find(
-        (layer) => layer.id === "html",
-      )?.elements,
+      hook.result.current.state.template.layers.find((layer) => layer.id === "html")?.elements,
     ).toHaveLength(1);
     act(() => hook.result.current.undo());
     // `toStrictEqual`, so an `elements: undefined` the add might have left
@@ -281,9 +275,7 @@ describe("useEditorHistory — an html element edit is an ordinary undoable edit
     expect(hook.result.current.state.template).toStrictEqual(before);
     act(() => hook.result.current.redo());
     expect(
-      hook.result.current.state.template.layers.find(
-        (layer) => layer.id === "html",
-      )?.elements,
+      hook.result.current.state.template.layers.find((layer) => layer.id === "html")?.elements,
     ).toHaveLength(1);
   });
 
@@ -411,9 +403,7 @@ describe("useEditorHistory — coalescing", () => {
       { type: "addHtmlElement", layerId: "html", kind: "text" },
       { type: "addHtmlElement", layerId: "html", kind: "text" },
     );
-    const copyBefore = htmlElements(hook.result.current.state).map(
-      (element) => element.text,
-    );
+    const copyBefore = htmlElements(hook.result.current.state).map((element) => element.text);
     send(
       hook,
       { type: "setHtmlElementText", layerId: "html", index: 0, text: "A" },
@@ -422,15 +412,11 @@ describe("useEditorHistory — coalescing", () => {
     );
     act(() => hook.result.current.undo());
     // The second element's run reverts; the first element's stands whole.
-    expect(htmlElements(hook.result.current.state)[1]!.text).toBe(
-      copyBefore[1],
-    );
+    expect(htmlElements(hook.result.current.state)[1]!.text).toBe(copyBefore[1]);
     expect(htmlElements(hook.result.current.state)[0]!.text).toBe("AB");
     act(() => hook.result.current.undo());
     // One more step and the FIRST run reverts too — "AB", not "A".
-    expect(htmlElements(hook.result.current.state)[0]!.text).toBe(
-      copyBefore[0],
-    );
+    expect(htmlElements(hook.result.current.state)[0]!.text).toBe(copyBefore[0]);
   });
 
   test("consecutive frame edits to one field coalesce; another field starts a new entry", () => {
@@ -443,9 +429,7 @@ describe("useEditorHistory — coalescing", () => {
       { type: "setHtmlElementFrame", layerId: "html", index: 0, patch: { x: 0.25 } },
     );
     act(() => hook.result.current.undo());
-    expect(htmlElements(hook.result.current.state)[0]!.frame.x).toBe(
-      frameBefore.x,
-    );
+    expect(htmlElements(hook.result.current.state)[0]!.frame.x).toBe(frameBefore.x);
     send(
       hook,
       { type: "setHtmlElementFrame", layerId: "html", index: 0, patch: { x: 0.3 } },
@@ -453,9 +437,7 @@ describe("useEditorHistory — coalescing", () => {
     );
     act(() => hook.result.current.undo());
     // Only the `y` edit reverts: a different field is a different run.
-    expect(htmlElements(hook.result.current.state)[0]!.frame.y).toBe(
-      frameBefore.y,
-    );
+    expect(htmlElements(hook.result.current.state)[0]!.frame.y).toBe(frameBefore.y);
     expect(htmlElements(hook.result.current.state)[0]!.frame.x).toBe(0.3);
   });
 });

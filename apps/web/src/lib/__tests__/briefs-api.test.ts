@@ -40,7 +40,9 @@ const brief: CampaignBrief = {
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
-const mockFetch = (handler: (url: string, init: RequestInit) => Response | Promise<Response> | never) => {
+const mockFetch = (
+  handler: (url: string, init: RequestInit) => Response | Promise<Response> | never,
+) => {
   vi.mocked(globalThis.fetch).mockImplementation((url, init) =>
     Promise.resolve(handler(String(url), (init ?? {}) as RequestInit)),
   );
@@ -85,7 +87,9 @@ describe("getCapabilities / isTransientCapabilities", () => {
     await expect(getCapabilities()).resolves.toBeNull();
     mockFetch(() => Promise.reject(new Error("network")));
     await expect(getCapabilities()).resolves.toBeNull();
-    mockFetch(() => new Response("null", { status: 200, headers: { "content-type": "application/json" } }));
+    mockFetch(
+      () => new Response("null", { status: 200, headers: { "content-type": "application/json" } }),
+    );
     await expect(getCapabilities()).resolves.toBeNull();
     mockFetch(() => json({ motion: "yes" }));
     await expect(getCapabilities()).resolves.toBeNull();
@@ -111,7 +115,9 @@ describe("listBriefs", () => {
   test("returns an empty list when the payload is missing or not an object", async () => {
     mockFetch(() => json({}));
     await expect(listBriefs()).resolves.toEqual([]);
-    mockFetch(() => new Response("null", { status: 200, headers: { "content-type": "application/json" } }));
+    mockFetch(
+      () => new Response("null", { status: 200, headers: { "content-type": "application/json" } }),
+    );
     await expect(listBriefs()).resolves.toEqual([]);
   });
 
@@ -208,11 +214,15 @@ describe("createBrief / duplicateBrief / uploadAsset", () => {
     mockFetch(() => json(null));
     await expect(createBrief(brief)).rejects.toMatchObject({ message: "Invalid response" });
     mockFetch(() => json({ path: 1 }));
-    await expect(uploadAsset({ briefId: "c", name: "a.png", contentBase64: "x" })).rejects.toMatchObject({
+    await expect(
+      uploadAsset({ briefId: "c", name: "a.png", contentBase64: "x" }),
+    ).rejects.toMatchObject({
       message: "Invalid response",
     });
     mockFetch(() => json(null));
-    await expect(uploadAsset({ briefId: "c", name: "a.png", contentBase64: "x" })).rejects.toMatchObject({
+    await expect(
+      uploadAsset({ briefId: "c", name: "a.png", contentBase64: "x" }),
+    ).rejects.toMatchObject({
       message: "Invalid response",
     });
   });
@@ -224,7 +234,9 @@ describe("createBrief / duplicateBrief / uploadAsset", () => {
 
   test("uses a fallback when { error } is empty", async () => {
     mockFetch(() => json({ error: "" }, 400));
-    await expect(createBrief(brief)).rejects.toMatchObject({ message: "Request failed (HTTP 400)" });
+    await expect(createBrief(brief)).rejects.toMatchObject({
+      message: "Request failed (HTTP 400)",
+    });
   });
 });
 
@@ -283,7 +295,9 @@ describe("planCampaign", () => {
   // true (a conditional spread), mirroring VariationPlan.vo.ts:19 — this is the web
   // side of that same "present only when true" contract.
   test("VE5b2: isEstimate accepts a plan estimate with the flag, and still accepts one without it", async () => {
-    mockFetch(() => json({ policyHash: "abc", seed: 1, estimate: { ...estimate, sceneBackgrounds: true } }));
+    mockFetch(() =>
+      json({ policyHash: "abc", seed: 1, estimate: { ...estimate, sceneBackgrounds: true } }),
+    );
     await expect(planCampaign(brief)).resolves.toMatchObject({
       kind: "ok",
       estimate: { ...estimate, sceneBackgrounds: true },
@@ -297,12 +311,16 @@ describe("planCampaign", () => {
     // isEstimate does not validate this field at all — same as the pre-existing
     // `frames` field — so `rec.estimate` passes through raw; the strict `=== true`
     // gate that keeps this from being misread lives in `estimateSentence`, not here.
-    mockFetch(() => json({ policyHash: "abc", seed: 1, estimate: { ...estimate, sceneBackgrounds: false } }));
+    mockFetch(() =>
+      json({ policyHash: "abc", seed: 1, estimate: { ...estimate, sceneBackgrounds: false } }),
+    );
     await expect(planCampaign(brief)).resolves.toMatchObject({
       kind: "ok",
       estimate: { ...estimate, sceneBackgrounds: false },
     });
-    mockFetch(() => json({ policyHash: "abc", seed: 1, estimate: { ...estimate, sceneBackgrounds: "true" } }));
+    mockFetch(() =>
+      json({ policyHash: "abc", seed: 1, estimate: { ...estimate, sceneBackgrounds: "true" } }),
+    );
     await expect(planCampaign(brief)).resolves.toMatchObject({
       kind: "ok",
       estimate: { ...estimate, sceneBackgrounds: "true" },
@@ -324,9 +342,19 @@ describe("packageCampaign / listPackages", () => {
   test("POSTs { campaignId, platforms } and returns packaged platforms", async () => {
     mockFetch((url, init) => {
       expect(url).toBe(`${API}/campaigns/package`);
-      expect(JSON.parse(String(init.body))).toEqual({ campaignId: "camp", platforms: ["instagram-feed"] });
+      expect(JSON.parse(String(init.body))).toEqual({
+        campaignId: "camp",
+        platforms: ["instagram-feed"],
+      });
       return json({
-        platforms: [{ platformId: "instagram-feed", items: [item], skipped: 0, manifestPath: "packages/camp/instagram-feed/manifest.json" }],
+        platforms: [
+          {
+            platformId: "instagram-feed",
+            items: [item],
+            skipped: 0,
+            manifestPath: "packages/camp/instagram-feed/manifest.json",
+          },
+        ],
       });
     });
     await expect(packageCampaign("camp", ["instagram-feed"])).resolves.toEqual({
@@ -436,11 +464,17 @@ describe("packageCampaign / listPackages", () => {
 
   test("listPackages throws on network failure and non-404 errors", async () => {
     vi.mocked(globalThis.fetch).mockRejectedValue(new TypeError("offline"));
-    await expect(listPackages("camp")).rejects.toMatchObject({ message: "Network error", status: 0 });
+    await expect(listPackages("camp")).rejects.toMatchObject({
+      message: "Network error",
+      status: 0,
+    });
     mockFetch(() => json({ error: "boom" }, 500));
     await expect(listPackages("camp")).rejects.toMatchObject({ message: "boom", status: 500 });
     mockFetch(() => new Response("", { status: 500 }));
-    await expect(listPackages("camp")).rejects.toMatchObject({ message: "Request failed (HTTP 500)", status: 500 });
+    await expect(listPackages("camp")).rejects.toMatchObject({
+      message: "Request failed (HTTP 500)",
+      status: 500,
+    });
   });
 
   test("packageCampaign throws on a failed POST", async () => {
@@ -527,7 +561,11 @@ describe("copy pool calls", () => {
       expect(url).toBe(`${API}/campaigns/pools/copy?revision=rev-1`);
       return json({ pool, revision: "rev-2", added: 1 }, 201);
     });
-    expect(await generatePool(brief, 10, { revision: "rev-1" })).toEqual({ pool, revision: "rev-2", added: 1 });
+    expect(await generatePool(brief, 10, { revision: "rev-1" })).toEqual({
+      pool,
+      revision: "rev-2",
+      added: 1,
+    });
   });
 
   test("patchPool sends entries and returns the updated pool", async () => {
@@ -544,7 +582,10 @@ describe("copy pool calls", () => {
       expect(url).toBe(`${API}/campaigns/pools/camp%2Fx?revision=rev-1`);
       return json({ pool, revision: "rev-2" });
     });
-    expect(await patchPool("camp/x", entries, { revision: "rev-1" })).toEqual({ pool, revision: "rev-2" });
+    expect(await patchPool("camp/x", entries, { revision: "rev-1" })).toEqual({
+      pool,
+      revision: "rev-2",
+    });
   });
 });
 
@@ -626,13 +667,18 @@ describe("listAssets", () => {
     await expect(listAssets("camp")).rejects.toMatchObject({ message: "Network error", status: 0 });
 
     mockFetch(() => json({ error: "Invalid briefId" }, 400));
-    await expect(listAssets("camp")).rejects.toMatchObject({ message: "Invalid briefId", status: 400 });
+    await expect(listAssets("camp")).rejects.toMatchObject({
+      message: "Invalid briefId",
+      status: 400,
+    });
 
     mockFetch(() => new Response("", { status: 500 }));
-    await expect(listAssets("camp")).rejects.toMatchObject({ message: "Request failed (HTTP 500)", status: 500 });
+    await expect(listAssets("camp")).rejects.toMatchObject({
+      message: "Request failed (HTTP 500)",
+      status: 500,
+    });
   });
 });
-
 
 describe("getCapabilities carries every field the UI renders", () => {
   test("the probe's ffmpeg version survives the trip to the client", async () => {
@@ -649,4 +695,4 @@ describe("getCapabilities carries every field the UI renders", () => {
     vi.mocked(globalThis.fetch).mockResolvedValue(json({ motion: true }) as unknown as Response);
     await expect(getCapabilities()).resolves.toEqual({ motion: true });
   });
-})
+});

@@ -110,7 +110,6 @@ export function LogoField({
         tabIndex={-1}
       />
 
-
       {hasLogo ? (
         <div
           className={cn(
@@ -158,7 +157,9 @@ export function LogoField({
               <span className="flex items-center gap-1 font-mono text-[10px] text-text-muted">
                 <span className="uppercase tracking-wider text-text-muted">{fileExt}</span>
                 <span>·</span>
-                <span>{typeof fileSize === "number" ? formatBytes(fileSize) : fileSize ?? "file"}</span>
+                <span>
+                  {typeof fileSize === "number" ? formatBytes(fileSize) : (fileSize ?? "file")}
+                </span>
               </span>
             </div>
           </div>
@@ -189,7 +190,9 @@ export function LogoField({
         <div
           className={cn(
             "flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed p-4 text-center transition-colors",
-            invalid ? "border-error bg-error/5" : "border-border bg-surface-2/30 hover:border-border-hover",
+            invalid
+              ? "border-error bg-error/5"
+              : "border-border bg-surface-2/30 hover:border-border-hover",
           )}
         >
           <div

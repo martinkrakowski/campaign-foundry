@@ -1,7 +1,10 @@
 "use client";
 
 import { useMemo, type ReactNode } from "react";
-import type { AspectRatioValue, CanvasSpec } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
+import type {
+  AspectRatioValue,
+  CanvasSpec,
+} from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import { canvasSpecOf } from "@/components/ui/preview-layers";
 import type { CampaignBrief, PreviewCellSelection } from "@campaignfoundry/CampaignOrchestration";
 import type { MotionKind } from "@campaignfoundry/CampaignOrchestration/motion-kinds";
@@ -88,7 +91,10 @@ export function PreviewFrame({
 
   if (frame !== null) {
     return (
-      <div data-testid="preview-frame" className="overflow-hidden rounded-lg border border-border bg-text-muted">
+      <div
+        data-testid="preview-frame"
+        className="overflow-hidden rounded-lg border border-border bg-text-muted"
+      >
         {/* The frame IS the creative — decorative to the reader, named by the caption. */}
         <img src={frame.dataUrl} alt="" className={className} />
       </div>

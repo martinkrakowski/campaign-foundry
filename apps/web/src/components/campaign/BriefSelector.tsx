@@ -23,7 +23,7 @@ export function BriefSelector({ briefs, currentId, onSelect, onCreateNew }: Brie
   const [search, setSearch] = useState("");
 
   const filteredBriefs = briefs.filter((entry) =>
-    entry.brief.id.toLowerCase().includes(search.toLowerCase())
+    entry.brief.id.toLowerCase().includes(search.toLowerCase()),
   );
 
   const handleSelect = useCallback(
@@ -32,7 +32,7 @@ export function BriefSelector({ briefs, currentId, onSelect, onCreateNew }: Brie
       setOpen(false);
       setSearch("");
     },
-    [onSelect]
+    [onSelect],
   );
 
   const handleCreateNew = useCallback(() => {
@@ -84,7 +84,12 @@ export function BriefSelector({ briefs, currentId, onSelect, onCreateNew }: Brie
               className="flex w-full items-center gap-2 border-b border-border px-3 py-2 text-left text-[13px] font-medium text-brand-primary transition-colors hover:bg-surface-2"
             >
               <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v14m-7-7h14" />
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M12 5v14m-7-7h14"
+                />
               </svg>
               New brief...
             </button>

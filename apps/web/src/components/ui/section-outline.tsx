@@ -67,9 +67,7 @@ export function SectionOutline({
   return (
     <div className="space-y-1">
       <div className="mb-1 flex items-center justify-between">
-        <Eyebrow>
-          {messages.outlineLegend}
-        </Eyebrow>
+        <Eyebrow>{messages.outlineLegend}</Eyebrow>
         <span className="text-[11px] text-text-muted">{messages.outlineIssueCount(total)}</span>
       </div>
       {order.map((id, index) => {
@@ -86,15 +84,22 @@ export function SectionOutline({
             onClick={() => onActivate?.(id)}
             className={cn(
               "flex w-full items-center gap-2 rounded-lg border-l-2 px-2 py-1.5 text-left transition-colors",
-              isCurrent ? "border-brand-primary bg-surface-2" : "border-transparent hover:bg-surface-2",
+              isCurrent
+                ? "border-brand-primary bg-surface-2"
+                : "border-transparent hover:bg-surface-2",
             )}
           >
             <span
-              className={cn("font-mono text-[11px]", isCurrent ? "text-brand-primary" : "text-text-muted")}
+              className={cn(
+                "font-mono text-[11px]",
+                isCurrent ? "text-brand-primary" : "text-text-muted",
+              )}
             >
               {numeral}
             </span>
-            <span className={cn("text-[13px]", isCurrent ? "text-text-emphasis" : "text-text-primary")}>
+            <span
+              className={cn("text-[13px]", isCurrent ? "text-text-emphasis" : "text-text-primary")}
+            >
               {title}
             </span>
             {count > 0 ? (

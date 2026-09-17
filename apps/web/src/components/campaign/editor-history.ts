@@ -1,9 +1,5 @@
 import { useCallback, useEffect, useRef, useReducer } from "react";
-import {
-  editorReducer,
-  type EditorAction,
-  type EditorState,
-} from "./editor-state";
+import { editorReducer, type EditorAction, type EditorState } from "./editor-state";
 import { isTypingTarget } from "@/lib/use-step-navigation";
 
 /**
@@ -23,19 +19,12 @@ import { isTypingTarget } from "@/lib/use-step-navigation";
  * The last three replace the baseline and are handled separately — they also
  * clear both stacks.
  */
-const SERVER_ANSWER_TYPES = [
-  "setCapabilities",
-  "loadPool",
-  "apply",
-  "save",
-] as const;
+const SERVER_ANSWER_TYPES = ["setCapabilities", "loadPool", "apply", "save"] as const;
 
 /** Actions that replace the draft wholesale: a new baseline, so history is moot. */
 const BASELINE_TYPES = ["load", "discard", "restore"] as const;
 
-function phaseOf(
-  action: EditorAction,
-): "baseline" | "server" | "edit" {
+function phaseOf(action: EditorAction): "baseline" | "server" | "edit" {
   const type = action.type;
   if ((BASELINE_TYPES as readonly string[]).includes(type)) return "baseline";
   if ((SERVER_ANSWER_TYPES as readonly string[]).includes(type)) return "server";
@@ -185,10 +174,7 @@ export function useEditorHistory(initial: EditorState): EditorHistory {
     initial,
     (seed): HistoryState => ({ past: [], present: seed, future: [], lastKey: null }),
   );
-  const dispatch = useCallback(
-    (action: EditorAction) => send({ kind: "action", action }),
-    [],
-  );
+  const dispatch = useCallback((action: EditorAction) => send({ kind: "action", action }), []);
   const undo = useCallback(() => send({ kind: "undo" }), []);
   const redo = useCallback(() => send({ kind: "redo" }), []);
   return {
@@ -211,9 +197,7 @@ export function useEditorHistory(initial: EditorState): EditorHistory {
  * behind it is inert, so the chord is ignored whenever one is in the document —
  * not only when it lands inside the dialog.
  */
-export function useHistoryKeys(
-  history: Pick<EditorHistory, "undo" | "redo">,
-): void {
+export function useHistoryKeys(history: Pick<EditorHistory, "undo" | "redo">): void {
   const actions = useRef(history);
   actions.current = history;
   useEffect(() => {

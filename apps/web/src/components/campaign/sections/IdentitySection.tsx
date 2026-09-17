@@ -14,7 +14,14 @@ import {
   type Dispatch,
 } from "react";
 
-import { Input, ChipGroup, WorldMap, REGION_FOOTPRINTS, MAP_WIDTH, MAP_HEIGHT } from "@/components/ui";
+import {
+  Input,
+  ChipGroup,
+  WorldMap,
+  REGION_FOOTPRINTS,
+  MAP_WIDTH,
+  MAP_HEIGHT,
+} from "@/components/ui";
 import type { EditorState, EditorAction } from "@/components/campaign/editor-state";
 import type { FieldErrors } from "@/components/campaign/validate";
 import { keyForLabel } from "@/components/campaign/error-sections";
@@ -86,7 +93,10 @@ export function SectionShell({
       className="space-y-4 scroll-mt-24"
       onBlurCapture={onBlurCapture}
     >
-      <h2 id={headingId} className="flex items-center gap-2 text-lg font-semibold text-text-emphasis">
+      <h2
+        id={headingId}
+        className="flex items-center gap-2 text-lg font-semibold text-text-emphasis"
+      >
         {displayTitle}
         {errorCount ? <ErrorPill count={errorCount} /> : null}
       </h2>
@@ -135,7 +145,6 @@ export function Field({
       ...(describedBy ? { "aria-describedby": describedBy } : {}),
       ...(invalid ? { "aria-invalid": "true" as const } : {}),
     });
-
   } else {
     let attached = false;
     renderedChildren = Children.map(children, (child) => {
@@ -143,7 +152,8 @@ export function Field({
         attached = true;
         const childProps = child.props as Record<string, unknown>;
         const existingDescribedBy = childProps["aria-describedby"] as string | undefined;
-        const mergedDescribedBy = [existingDescribedBy, describedBy].filter(Boolean).join(" ") || undefined;
+        const mergedDescribedBy =
+          [existingDescribedBy, describedBy].filter(Boolean).join(" ") || undefined;
         return cloneElement(child, {
           ...(mergedDescribedBy ? { "aria-describedby": mergedDescribedBy } : {}),
           ...(invalid ? { "aria-invalid": invalid } : {}),
@@ -178,7 +188,6 @@ export function Field({
     </div>
   );
 }
-
 
 export function IdentitySection({
   state,
@@ -225,9 +234,7 @@ export function IdentitySection({
   };
 
   const campaignNameValue =
-    state.source.kind === "file"
-      ? state.briefId
-      : state.campaignName || state.briefId;
+    state.source.kind === "file" ? state.briefId : state.campaignName || state.briefId;
 
   const onSelectRegion = useCallback(
     (value: string) => dispatch({ type: "patch", patch: { targetRegion: value } }),
@@ -250,11 +257,22 @@ export function IdentitySection({
         fallbackHint={messages.worldMapFallbackHint}
       />
     ),
-    [mapValue, onSelectRegion, REGION_FOOTPRINTS, messages.regionDisplayName, messages.worldMapFallbackHint],
+    [
+      mapValue,
+      onSelectRegion,
+      REGION_FOOTPRINTS,
+      messages.regionDisplayName,
+      messages.worldMapFallbackHint,
+    ],
   );
 
   return (
-    <SectionShell id="identity" title="1 · Identity" errorCount={countErrors(errors)} compact={compact}>
+    <SectionShell
+      id="identity"
+      title="1 · Identity"
+      errorCount={countErrors(errors)}
+      compact={compact}
+    >
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <Field fieldKey="briefId" label={messages.campaignNameLabel} error={errors.briefId}>
           <Input
@@ -287,7 +305,12 @@ export function IdentitySection({
             </button>
           </div>
         </Field>
-        <Field fieldKey="targetRegion" label={messages.targetRegionLabel} error={errors.targetRegion} as="div">
+        <Field
+          fieldKey="targetRegion"
+          label={messages.targetRegionLabel}
+          error={errors.targetRegion}
+          as="div"
+        >
           {(control) => (
             <div className={compact ? undefined : "space-y-2"}>
               {!compact ? (
@@ -319,9 +342,12 @@ export function IdentitySection({
             </div>
           )}
         </Field>
-
       </div>
-      <Field fieldKey="targetAudience" label={messages.targetAudienceLabel} error={errors.targetAudience}>
+      <Field
+        fieldKey="targetAudience"
+        label={messages.targetAudienceLabel}
+        error={errors.targetAudience}
+      >
         <Input
           aria-label={messages.targetAudienceLabel}
           value={state.targetAudience}

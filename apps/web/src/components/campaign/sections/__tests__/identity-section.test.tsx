@@ -3,7 +3,12 @@ import { describe, test, expect, afterEach, vi } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { IdentitySection } from "../IdentitySection";
-import { editorReducer, initialEditorState, type EditorAction, type EditorState } from "../../editor-state";
+import {
+  editorReducer,
+  initialEditorState,
+  type EditorAction,
+  type EditorState,
+} from "../../editor-state";
 import * as messages from "../../messages";
 import { WorldMap } from "@/components/ui";
 
@@ -100,9 +105,9 @@ describe("IdentitySection — the world map", () => {
 
     expect(getState().targetRegion).toBe("DE");
     expect(screen.getByRole("button", { name: "DE" }).getAttribute("aria-pressed")).toBe("true");
-    expect(screen.getByRole("button", { name: messages.targetRegionOther }).getAttribute("aria-pressed")).toBe(
-      "false",
-    );
+    expect(
+      screen.getByRole("button", { name: messages.targetRegionOther }).getAttribute("aria-pressed"),
+    ).toBe("false");
     expect(screen.queryByLabelText(messages.targetRegionOtherInputLabel)).toBeNull();
   });
 
@@ -123,7 +128,9 @@ describe("IdentitySection — the world map", () => {
 
   test("the map is aria-hidden chrome: it adds no focusable element to the section", async () => {
     const user = userEvent.setup();
-    const { container } = render(<IdentitySection state={state()} dispatch={vi.fn()} errors={{}} />);
+    const { container } = render(
+      <IdentitySection state={state()} dispatch={vi.fn()} errors={{}} />,
+    );
 
     await user.click(screen.getByRole("button", { name: "EU" }));
 
@@ -137,7 +144,9 @@ describe("IdentitySection — the world map", () => {
   });
 
   test("the hint is written against F2, and the section adds no live region of its own", async () => {
-    const { container } = render(<IdentitySection state={state()} dispatch={vi.fn()} errors={{}} />);
+    const { container } = render(
+      <IdentitySection state={state()} dispatch={vi.fn()} errors={{}} />,
+    );
 
     const hint = screen.getByText(messages.worldMapRegionHint);
     expect(hint.textContent).not.toMatch(/dispatch|per region|\brun/i);
@@ -225,7 +234,9 @@ describe("IdentitySection — the world map", () => {
     vi.useFakeTimers();
     vi.stubGlobal("requestAnimationFrame", undefined);
 
-    const { container } = render(<IdentitySection state={state()} dispatch={vi.fn()} errors={{}} />);
+    const { container } = render(
+      <IdentitySection state={state()} dispatch={vi.fn()} errors={{}} />,
+    );
     expect(container.querySelector("[data-region]")).toBeNull();
 
     act(() => {

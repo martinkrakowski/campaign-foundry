@@ -103,7 +103,12 @@ function Readout({ children }: { children: ReactNode }): ReactNode {
  * mounts the controls only (`preview` absent), where no composed preview
  * surface exists by design.
  */
-export function LayoutSection({ state, dispatch, errors, preview = false }: SectionProps & { preview?: boolean }) {
+export function LayoutSection({
+  state,
+  dispatch,
+  errors,
+  preview = false,
+}: SectionProps & { preview?: boolean }) {
   // The projection the frame is fed (D26/D45): exactly what Save will send, so
   // the preview can never show a style the brief would not carry.
   const brief = useMemo(() => toBrief(state), [state]);
@@ -120,7 +125,9 @@ export function LayoutSection({ state, dispatch, errors, preview = false }: Sect
   const sizePx = scaleBasisPx(spec, sizeScale);
   const canvasLabel = canvasDisplayName(spec);
   const platformLabel =
-    look?.platformId !== undefined ? platformDisplayName(look.platformId) : messages.previewNoPlatform;
+    look?.platformId !== undefined
+      ? platformDisplayName(look.platformId)
+      : messages.previewNoPlatform;
   // The caption names the effect when the template carries one (T6, the D50
   // pattern): the frame is the effect's REST pose, so the name in words — a
   // display label, never a raw kind id — is what says the video animates.
@@ -160,7 +167,9 @@ export function LayoutSection({ state, dispatch, errors, preview = false }: Sect
     <SectionShell id="layout" title="Layout" errorCount={Object.keys(errors).length}>
       <div
         className={
-          frame !== null ? "grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,20rem)] lg:items-start" : "space-y-6"
+          frame !== null
+            ? "grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,20rem)] lg:items-start"
+            : "space-y-6"
         }
       >
         <div className="space-y-6">
@@ -172,7 +181,12 @@ export function LayoutSection({ state, dispatch, errors, preview = false }: Sect
                   label="Typeface"
                   options={FAMILY_CHOICES.options}
                   value={style.fontFamily ?? DEFAULT_STYLE.fontFamily}
-                  onChange={(value) => dispatch({ type: "setStyle", patch: { fontFamily: FAMILY_CHOICES.parse(value) } })}
+                  onChange={(value) =>
+                    dispatch({
+                      type: "setStyle",
+                      patch: { fontFamily: FAMILY_CHOICES.parse(value) },
+                    })
+                  }
                 />
               </Field>
               <Field label="Weight" hint="Only the weights that have faces">
@@ -180,7 +194,12 @@ export function LayoutSection({ state, dispatch, errors, preview = false }: Sect
                   label="Weight"
                   options={WEIGHT_CHOICES.options}
                   value={WEIGHT_LABELS[style.fontWeight ?? toneRenderedWeight(state)]}
-                  onChange={(value) => dispatch({ type: "setStyle", patch: { fontWeight: WEIGHT_CHOICES.parse(value) } })}
+                  onChange={(value) =>
+                    dispatch({
+                      type: "setStyle",
+                      patch: { fontWeight: WEIGHT_CHOICES.parse(value) },
+                    })
+                  }
                 />
               </Field>
               <Field label="Alignment">
@@ -188,11 +207,16 @@ export function LayoutSection({ state, dispatch, errors, preview = false }: Sect
                   label="Alignment"
                   options={ALIGN_CHOICES.options}
                   value={ALIGN_LABELS[style.align ?? DEFAULT_STYLE.align]}
-                  onChange={(value) => dispatch({ type: "setStyle", patch: { align: ALIGN_CHOICES.parse(value) } })}
+                  onChange={(value) =>
+                    dispatch({ type: "setStyle", patch: { align: ALIGN_CHOICES.parse(value) } })
+                  }
                 />
               </Field>
             </div>
-            <Field label="Effect" hint="An entrance for the headline — the preview shows its final pose">
+            <Field
+              label="Effect"
+              hint="An entrance for the headline — the preview shows its final pose"
+            >
               <ChipGroup
                 label="Effect"
                 options={EFFECT_OPTIONS}
@@ -202,12 +226,17 @@ export function LayoutSection({ state, dispatch, errors, preview = false }: Sect
                 onChange={(value) =>
                   dispatch({
                     type: "setStyle",
-                    patch: { textEffect: value === EFFECT_NONE ? undefined : EFFECT_CHOICES.parse(value) },
+                    patch: {
+                      textEffect: value === EFFECT_NONE ? undefined : EFFECT_CHOICES.parse(value),
+                    },
                   })
                 }
               />
             </Field>
-            <Field label="Size" hint="A share of the canvas width, shown as pixels at the previewed ratio">
+            <Field
+              label="Size"
+              hint="A share of the canvas width, shown as pixels at the previewed ratio"
+            >
               <Slider
                 aria-label="Size"
                 min={MIN_SIZE_SCALE}
@@ -237,7 +266,9 @@ export function LayoutSection({ state, dispatch, errors, preview = false }: Sect
                 step={0.01}
                 value={letterSpacing}
                 readout={<Readout>{`${letterSpacing.toFixed(2)} em`}</Readout>}
-                onChange={(value) => dispatch({ type: "setStyle", patch: { letterSpacing: value } })}
+                onChange={(value) =>
+                  dispatch({ type: "setStyle", patch: { letterSpacing: value } })
+                }
               />
             </Field>
           </fieldset>

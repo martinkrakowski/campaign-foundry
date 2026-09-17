@@ -15,10 +15,7 @@ import {
   templateFromCanonical,
   type BriefTemplate,
 } from "@campaignfoundry/CampaignOrchestration/brief-template";
-import {
-  LAYER_KINDS,
-  type LayerKind,
-} from "@campaignfoundry/CampaignOrchestration/layer-kinds";
+import { LAYER_KINDS, type LayerKind } from "@campaignfoundry/CampaignOrchestration/layer-kinds";
 import { assembleHtml } from "@campaignfoundry/CampaignOrchestration/markup-assembler";
 import type { HtmlElement } from "@campaignfoundry/CampaignOrchestration/html-element";
 import type { PlatformProfile } from "@campaignfoundry/Distribution/platform-profiles";
@@ -42,11 +39,7 @@ import {
   findOcclusionDelta,
 } from "../derive";
 import * as deriveModule from "../derive";
-import {
-  initialEditorState,
-  editorReducer,
-  type EditorState,
-} from "../editor-state";
+import { initialEditorState, editorReducer, type EditorState } from "../editor-state";
 
 // The weight meter's memo (HL5c) is only observable at the seam it protects: how
 // many times the markup is actually assembled. Wrap the assembler with a spy that
@@ -59,9 +52,7 @@ vi.mock("@campaignfoundry/CampaignOrchestration/markup-assembler", async (import
       typeof import("@campaignfoundry/CampaignOrchestration/markup-assembler")
     >();
   assembleSpy.mockImplementation((options) =>
-    actual.assembleHtml(
-      options as Parameters<typeof actual.assembleHtml>[0],
-    ),
+    actual.assembleHtml(options as Parameters<typeof actual.assembleHtml>[0]),
   );
   return { ...actual, assembleHtml: assembleSpy };
 });
@@ -74,28 +65,19 @@ describe("derive.ts", () => {
     });
 
     test("derives static for photo-only platforms in canonical order", () => {
-      expect(platformsToFormats(["instagram-feed", "linkedin"])).toEqual([
-        "static",
-      ]);
+      expect(platformsToFormats(["instagram-feed", "linkedin"])).toEqual(["static"]);
     });
 
     test("derives motion for video-only platforms", () => {
-      expect(platformsToFormats(["instagram-story", "tiktok"])).toEqual([
-        "motion",
-      ]);
+      expect(platformsToFormats(["instagram-story", "tiktok"])).toEqual(["motion"]);
     });
 
     test("derives static and motion for mixed platforms in canonical order", () => {
-      expect(platformsToFormats(["tiktok", "instagram-feed"])).toEqual([
-        "static",
-        "motion",
-      ]);
+      expect(platformsToFormats(["tiktok", "instagram-feed"])).toEqual(["static", "motion"]);
     });
 
     test("a mixed social+display selection stays static when no motion platform is selected", () => {
-      expect(platformsToFormats(["instagram-feed", "google-display"])).toEqual([
-        "static",
-      ]);
+      expect(platformsToFormats(["instagram-feed", "google-display"])).toEqual(["static"]);
     });
   });
 
@@ -107,25 +89,19 @@ describe("derive.ts", () => {
 
     test("derives canonical ratios from platforms", () => {
       expect(platformsToRatios(["instagram-feed"])).toEqual(["1:1"]);
-      expect(platformsToRatios(["instagram-feed", "x"])).toEqual([
-        "1:1",
-        "16:9",
-      ]);
-      expect(platformsToRatios(["instagram-story", "linkedin"])).toEqual([
+      expect(platformsToRatios(["instagram-feed", "x"])).toEqual(["1:1", "16:9"]);
+      expect(platformsToRatios(["instagram-story", "linkedin"])).toEqual(["1:1", "9:16"]);
+      expect(platformsToRatios(["instagram-reel", "x", "instagram-feed"])).toEqual([
         "1:1",
         "9:16",
+        "16:9",
       ]);
-      expect(
-        platformsToRatios(["instagram-reel", "x", "instagram-feed"]),
-      ).toEqual(["1:1", "9:16", "16:9"]);
     });
 
     test("a display profile contributes no ratio, even in a mixed selection", () => {
       // Treating a display profile as "1:1" would make the empty case below fail.
       expect(platformsToRatios(["google-display"])).toEqual([]);
-      expect(platformsToRatios(["instagram-feed", "google-display"])).toEqual([
-        "1:1",
-      ]);
+      expect(platformsToRatios(["instagram-feed", "google-display"])).toEqual(["1:1"]);
     });
   });
 
@@ -137,12 +113,12 @@ describe("derive.ts", () => {
     });
 
     test("dedupes in DISPLAY_SIZE_VALUES order, not insertion order", () => {
-      expect(
-        platformsToSizes(["google-display", "meta-audience-network"]),
-      ).toEqual([...DISPLAY_SIZE_VALUES]);
-      expect(
-        platformsToSizes(["meta-audience-network", "google-display"]),
-      ).toEqual([...DISPLAY_SIZE_VALUES]);
+      expect(platformsToSizes(["google-display", "meta-audience-network"])).toEqual([
+        ...DISPLAY_SIZE_VALUES,
+      ]);
+      expect(platformsToSizes(["meta-audience-network", "google-display"])).toEqual([
+        ...DISPLAY_SIZE_VALUES,
+      ]);
     });
   });
 
@@ -161,9 +137,7 @@ describe("derive.ts", () => {
       const state = initialEditorState();
       expect(addableKinds(state)).toEqual(["image"]);
       // Below the cap: dropping the shade frees the single slot the table declares.
-      const noShade = stateWithLayers(
-        state.template.layers.filter((l) => l.kind !== "shade"),
-      );
+      const noShade = stateWithLayers(state.template.layers.filter((l) => l.kind !== "shade"));
       expect(addableKinds(noShade)).toContain("shade");
     });
 
@@ -188,9 +162,7 @@ describe("derive.ts", () => {
       expect(kinds.length).toBeGreaterThan(0);
       const accepts = CREATIVE_TYPE_RULES["image-text"].accepts;
       for (let i = 1; i < kinds.length; i++) {
-        expect(accepts.indexOf(kinds[i])).toBeGreaterThan(
-          accepts.indexOf(kinds[i - 1]),
-        );
+        expect(accepts.indexOf(kinds[i])).toBeGreaterThan(accepts.indexOf(kinds[i - 1]));
       }
     });
 
@@ -207,10 +179,7 @@ describe("derive.ts", () => {
 
     test("removableLayerIds includes a required kind still present twice", () => {
       const state = initialEditorState();
-      const doubled = [
-        ...state.template.layers,
-        { id: "image-2", kind: "image" as const },
-      ];
+      const doubled = [...state.template.layers, { id: "image-2", kind: "image" as const }];
       const removable = removableLayerIds(stateWithLayers(doubled));
       expect(removable).toContain("image");
       expect(removable).toContain("image-2");
@@ -274,10 +243,7 @@ describe("derive.ts", () => {
 
     test("disableableLayerIds offers both instances of a required kind present twice enabled", () => {
       const state = initialEditorState();
-      const doubled = [
-        ...state.template.layers,
-        { id: "image-2", kind: "image" as const },
-      ];
+      const doubled = [...state.template.layers, { id: "image-2", kind: "image" as const }];
       const disableable = disableableLayerIds(stateWithLayers(doubled));
       expect(disableable).toContain("image");
       expect(disableable).toContain("image-2");
@@ -323,22 +289,16 @@ describe("derive.ts", () => {
       const shade = { id: "shade", kind: "shade" as const };
       const off = { ...shade, enabled: false };
       // Enabled, the shade sits above the headline and mutes it.
-      expect(
-        findOcclusionDeltaOverEnabled([image, shade, text], [image, text, shade]),
-      ).toEqual({
+      expect(findOcclusionDeltaOverEnabled([image, shade, text], [image, text, shade])).toEqual({
         above: "shade",
         below: "static-text",
         behavior: "attenuating",
       });
       // Disabled, it draws nothing — the same move is no finding at all.
-      expect(
-        findOcclusionDeltaOverEnabled([image, off, text], [image, text, off]),
-      ).toBeNull();
+      expect(findOcclusionDeltaOverEnabled([image, off, text], [image, text, off])).toBeNull();
       // And the layer a disabled one would have occluded is left out of the
       // comparison entirely: no pair involving it can be a new finding.
-      expect(
-        findOcclusionDeltaOverEnabled([], [image, off, text]),
-      ).toBeNull();
+      expect(findOcclusionDeltaOverEnabled([], [image, off, text])).toBeNull();
       expect(findOcclusionDeltaOverEnabled([], [image, text, shade])).toEqual({
         above: "shade",
         below: "static-text",
@@ -360,9 +320,7 @@ describe("derive.ts", () => {
     const literalKindLists = (source: string): string[] => {
       const offenders: string[] = [];
       for (const list of source.matchAll(LITERAL_KIND_LIST)) {
-        const members = [...list[0].matchAll(/"([^"]*)"|'([^']*)'/g)].map(
-          (m) => m[1] ?? m[2],
-        );
+        const members = [...list[0].matchAll(/"([^"]*)"|'([^']*)'/g)].map((m) => m[1] ?? m[2]);
         const named = members.filter((member) => kinds.has(member));
         if (named.length >= 2) offenders.push(list[0]);
       }
@@ -390,8 +348,7 @@ describe("derive.ts", () => {
 
     test("the D121 scanner flags a list naming two or more layer kinds, in either quote style", () => {
       const doubleQuoted = "[" + '"image", "logo"' + "]";
-      const singleQuoted =
-        "[" + "'static-text', 'animated-text', \"headline-top\"" + "]";
+      const singleQuoted = "[" + "'static-text', 'animated-text', \"headline-top\"" + "]";
       expect(literalKindLists(doubleQuoted)).toHaveLength(1);
       expect(literalKindLists(singleQuoted)).toHaveLength(1);
     });
@@ -399,9 +356,7 @@ describe("derive.ts", () => {
     test("the D121 scanner ignores a single kind, non-kind strings, and non-list syntax", () => {
       const oneKind = "[" + '"image", "static"' + "]";
       expect(literalKindLists(oneKind)).toEqual([]);
-      expect(
-        literalKindLists('const kind = "shade"; { kind: "accent" }'),
-      ).toEqual([]);
+      expect(literalKindLists('const kind = "shade"; { kind: "accent" }')).toEqual([]);
     });
   });
 
@@ -433,9 +388,7 @@ describe("derive.ts", () => {
 
       const lastIndex = unconstrainedState.template.layers.length - 1;
       expect(canMoveLayer(unconstrainedState, lastIndex, "up")).toBe(false);
-      expect(layerMoveDirections(unconstrainedState, lastIndex)).not.toContain(
-        "up",
-      );
+      expect(layerMoveDirections(unconstrainedState, lastIndex)).not.toContain("up");
     });
 
     test("out of bounds index yields no move directions", () => {
@@ -503,9 +456,7 @@ describe("derive.ts", () => {
           ...state,
           template: {
             ...state.template,
-            layers: canonical.layers.filter((l) =>
-              requiredKinds.includes(l.kind),
-            ),
+            layers: canonical.layers.filter((l) => requiredKinds.includes(l.kind)),
           },
         };
         for (const kind of addableKinds(minimalState)) {
@@ -557,9 +508,7 @@ describe("derive.ts", () => {
       const noLogoLayers = CANONICAL_TEMPLATES["image-text"].layers.filter(
         (l) => l.kind !== "logo",
       );
-      expect(findLegalInsertionIndex("image-text", noLogoLayers, "logo")).toBe(
-        noLogoLayers.length,
-      );
+      expect(findLegalInsertionIndex("image-text", noLogoLayers, "logo")).toBe(noLogoLayers.length);
 
       // In image-text with image and logo, shade cannot be topmost (2) but can be at 1:
       const imageLogo = [
@@ -584,10 +533,7 @@ describe("derive.ts", () => {
     const ZERO = { top: 0, right: 0, bottom: 0, left: 0 } as const;
 
     /** An html profile for the two seams that take an injected table. */
-    const fakeHtml = (
-      id: string,
-      over: Partial<PlatformProfile> = {},
-    ): PlatformProfile => ({
+    const fakeHtml = (id: string, over: Partial<PlatformProfile> = {}): PlatformProfile => ({
       id,
       label: `Fake ${id}`,
       formats: ["html"],
@@ -598,19 +544,18 @@ describe("derive.ts", () => {
     });
 
     const htmlTemplate = (
-      layers: { readonly id: string; readonly kind: "html"; readonly elements?: readonly HtmlElement[]; readonly enabled?: boolean }[] = [
-        { id: "html", kind: "html" },
-      ],
+      layers: {
+        readonly id: string;
+        readonly kind: "html";
+        readonly elements?: readonly HtmlElement[];
+        readonly enabled?: boolean;
+      }[] = [{ id: "html", kind: "html" }],
     ): BriefTemplate => ({
       id: "canonical-image-html",
       version: 1,
       creativeType: "image-html",
       unit: "standard-web",
-      layers: [
-        { id: "image", kind: "image" },
-        ...layers,
-        { id: "logo", kind: "logo" },
-      ],
+      layers: [{ id: "image", kind: "image" }, ...layers, { id: "logo", kind: "logo" }],
     });
 
     const frame = { x: 0.1, y: 0.2, w: 0.5, h: 0.3, anchor: "middle" } as const;
@@ -663,23 +608,22 @@ describe("derive.ts", () => {
         expect(budget?.maxBytes).toBe(100 * 1024);
         expect(budget?.label).toBe("Tight");
         // Order-independent: the tightest wins whichever way they are listed.
-        expect(htmlByteBudget(["tight", "wide"], profiles)?.maxBytes).toBe(
-          100 * 1024,
-        );
+        expect(htmlByteBudget(["tight", "wide"], profiles)?.maxBytes).toBe(100 * 1024);
       });
     });
 
     describe("htmlWeightReading", () => {
       test("no html profile selected → no reading", () => {
-        expect(
-          htmlWeightReading(meterState({ platforms: ["instagram-feed"] })),
-        ).toBeUndefined();
+        expect(htmlWeightReading(meterState({ platforms: ["instagram-feed"] }))).toBeUndefined();
       });
 
       test("the figure is assembleHtml's byteLength for the same inputs", () => {
         // Expected computed INDEPENDENTLY here — the same options spelled out,
         // not the derivation's own internals.
-        const elements = [text("Stay wild"), { kind: "button", text: "Shop", frame } as HtmlElement];
+        const elements = [
+          text("Stay wild"),
+          { kind: "button", text: "Shop", frame } as HtmlElement,
+        ];
         const state = meterState({
           template: htmlTemplate([{ id: "html", kind: "html", elements }]),
           clickDestination: "https://example.com/shop",
@@ -853,7 +797,9 @@ describe("derive.ts", () => {
       });
 
       test("an html profile with no sizes at all yields no reading", () => {
-        const profiles = { "ratio-html": fakeHtml("ratio-html", { sizes: undefined, ratio: "1:1" }) };
+        const profiles = {
+          "ratio-html": fakeHtml("ratio-html", { sizes: undefined, ratio: "1:1" }),
+        };
         expect(
           htmlWeightReading(meterState({ platforms: ["ratio-html"] }), profiles),
         ).toBeUndefined();
@@ -898,10 +844,9 @@ describe("derive.ts", () => {
         );
         expect(over?.overBy).toBe(measured - 512);
         expect(over?.profileLabel).toBe("Fake tiny-html");
-        const within = htmlWeightReading(
-          meterState({ platforms: ["roomy-html"] }),
-          { "roomy-html": fakeHtml("roomy-html", { maxBytes: 150 * 1024 }) },
-        );
+        const within = htmlWeightReading(meterState({ platforms: ["roomy-html"] }), {
+          "roomy-html": fakeHtml("roomy-html", { maxBytes: 150 * 1024 }),
+        });
         expect(within?.overBy).toBe(0);
       });
     });
@@ -1018,9 +963,7 @@ describe("derive.ts", () => {
         expect(assembleSpy).not.toHaveBeenCalled();
         assembleSpy.mockClear();
         const badColour = meterState({
-          template: htmlTemplate([
-            { id: "html", kind: "html", elements: [text("bad-colour")] },
-          ]),
+          template: htmlTemplate([{ id: "html", kind: "html", elements: [text("bad-colour")] }]),
           products: [
             {
               key: 1,

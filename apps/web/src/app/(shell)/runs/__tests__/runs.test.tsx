@@ -43,7 +43,11 @@ describe("RunsPage — estimate summary", () => {
           "button",
           {
             onClick: () =>
-              setEstimate({ status: "infeasible", estimate: null, error: "shortfall: accepted 4 of 100" }),
+              setEstimate({
+                status: "infeasible",
+                estimate: null,
+                error: "shortfall: accepted 4 of 100",
+              }),
           },
           "seed-bad",
         ),
@@ -58,7 +62,13 @@ describe("RunsPage — estimate summary", () => {
             onClick: () =>
               setEstimate({
                 status: "ok",
-                estimate: { creatives: 8, axisProductSize: 96, feasible: true, genaiCalls: 0, frames: 11_000 },
+                estimate: {
+                  creatives: 8,
+                  axisProductSize: 96,
+                  feasible: true,
+                  genaiCalls: 0,
+                  frames: 11_000,
+                },
                 error: null,
               }),
           },

@@ -43,7 +43,14 @@ describe("tokens.css theme contract (D24 / TOK-26 / W3.2)", () => {
   test("the two themes differ where they must: every surface, text and state token", () => {
     // Not a value test — the palette is a design decision and moves. What cannot move is
     // a theme that silently shares a value with the other one and so never appears.
-    const perTheme = ["background", "surface", "surface-2", "border", "text-primary", "text-emphasis"];
+    const perTheme = [
+      "background",
+      "surface",
+      "surface-2",
+      "border",
+      "text-primary",
+      "text-emphasis",
+    ];
     for (const token of perTheme) {
       expect(light, `--color-${token} is missing from :root`).toContain(`--color-${token}:`);
       expect(dark, `--color-${token} is missing from .dark`).toContain(`--color-${token}:`);
@@ -59,7 +66,11 @@ describe("tokens.css theme contract (D24 / TOK-26 / W3.2)", () => {
  */
 const RGB = (hex: string): [number, number, number] => {
   const digits = hex.replace("#", "");
-  return [parseInt(digits.slice(0, 2), 16), parseInt(digits.slice(2, 4), 16), parseInt(digits.slice(4, 6), 16)];
+  return [
+    parseInt(digits.slice(0, 2), 16),
+    parseInt(digits.slice(2, 4), 16),
+    parseInt(digits.slice(4, 6), 16),
+  ];
 };
 const linearise = (channel: number): number => {
   const c = channel / 255;
@@ -116,7 +127,10 @@ describe("the state-tint contract (the carried dark-theme contrast audit)", () =
     for (const token of ["error", "info"]) {
       const value = hexValue(dark, token);
       for (const [ground, hex] of Object.entries(darkGrounds)) {
-        expect(contrast(value, tinted(value, 0.2, hex)), `dark --color-${token} on its tint over ${ground}`).toBeGreaterThanOrEqual(4.5);
+        expect(
+          contrast(value, tinted(value, 0.2, hex)),
+          `dark --color-${token} on its tint over ${ground}`,
+        ).toBeGreaterThanOrEqual(4.5);
       }
     }
   });
@@ -126,7 +140,10 @@ describe("the state-tint contract (the carried dark-theme contrast audit)", () =
     // darkest light ground gives the darkest tint, so it is the worst case.
     for (const token of ["error", "info"]) {
       const value = hexValue(light, token);
-      expect(contrast(value, tinted(value, 0.2, lightGrounds["surface-2"])), `light --color-${token} on its tint over surface-2`).toBeGreaterThanOrEqual(4.5);
+      expect(
+        contrast(value, tinted(value, 0.2, lightGrounds["surface-2"])),
+        `light --color-${token} on its tint over surface-2`,
+      ).toBeGreaterThanOrEqual(4.5);
     }
   });
 
@@ -141,7 +158,10 @@ describe("the state-tint contract (the carried dark-theme contrast audit)", () =
     for (let i = 0; i < values.length; i++) {
       for (let j = i + 1; j < values.length; j++) {
         const gap = Math.abs(values[i].hue - values[j].hue);
-        expect(gap > 180 ? 360 - gap : gap, `${values[i].token} vs ${values[j].token}`).toBeGreaterThanOrEqual(30);
+        expect(
+          gap > 180 ? 360 - gap : gap,
+          `${values[i].token} vs ${values[j].token}`,
+        ).toBeGreaterThanOrEqual(30);
       }
     }
   });
@@ -157,7 +177,13 @@ describe("the solid error ground keeps readable ink in both palettes (WCAG 4.5:1
     expect(contrast("#ffffff", hexValue(dark, "error"))).toBeCloseTo(2.25, 1);
   });
   test("on-error over error clears 4.5:1 in both palettes", () => {
-    expect(contrast(hexValue(light, "on-error"), hexValue(light, "error")), "light").toBeGreaterThanOrEqual(4.5);
-    expect(contrast(hexValue(dark, "on-error"), hexValue(dark, "error")), "dark").toBeGreaterThanOrEqual(4.5);
+    expect(
+      contrast(hexValue(light, "on-error"), hexValue(light, "error")),
+      "light",
+    ).toBeGreaterThanOrEqual(4.5);
+    expect(
+      contrast(hexValue(dark, "on-error"), hexValue(dark, "error")),
+      "dark",
+    ).toBeGreaterThanOrEqual(4.5);
   });
 });

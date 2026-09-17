@@ -40,7 +40,9 @@ describe("revealSection", () => {
   });
 
   test("falls back to the first copy when layout says nothing (test DOM, print)", () => {
-    const [first, second] = mount('<section data-section="policy"></section><section data-section="policy"></section>');
+    const [first, second] = mount(
+      '<section data-section="policy"></section><section data-section="policy"></section>',
+    );
     first.scrollIntoView = vi.fn();
     second.scrollIntoView = vi.fn();
     notLaidOut(first);

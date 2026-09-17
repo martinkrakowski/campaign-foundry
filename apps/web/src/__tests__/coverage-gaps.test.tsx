@@ -2,7 +2,13 @@ import { describe, test, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createElement, Fragment } from "react";
-import { renderWithRun, seedPersistedRun, makeAsset, mockPipelineApi, storedTemplate } from "@/__tests__/helpers";
+import {
+  renderWithRun,
+  seedPersistedRun,
+  makeAsset,
+  mockPipelineApi,
+  storedTemplate,
+} from "@/__tests__/helpers";
 import { useRun } from "@/lib/run-context";
 import { CommandBar } from "@/components/shell/CommandBar";
 import { Sidebar } from "@/components/shell/Sidebar";
@@ -14,7 +20,17 @@ import RunsPage from "@/app/(shell)/runs/page";
 beforeEach(() => localStorage.setItem("cf:brief-picked", "1"));
 
 const seedSingle = (assets: ReturnType<typeof makeAsset>[], postPending = false) => {
-  localStorage.setItem("cf:brief", JSON.stringify({ id: "seed", targetRegion: "DE", targetAudience: "a", campaignMessage: "Hi", template: storedTemplate, products: [{ id: "alpha", name: "Alpha", primaryColor: "#1473E6", logoPath: "a.png" }] }));
+  localStorage.setItem(
+    "cf:brief",
+    JSON.stringify({
+      id: "seed",
+      targetRegion: "DE",
+      targetAudience: "a",
+      campaignMessage: "Hi",
+      template: storedTemplate,
+      products: [{ id: "alpha", name: "Alpha", primaryColor: "#1473E6", logoPath: "a.png" }],
+    }),
+  );
   const report = { halted: false, assets, log: { entries: [], campaignId: "seed" } };
   mockPipelineApi({
     report,
@@ -40,7 +56,10 @@ describe("CommandBar — states", () => {
 
   test("a re-run confirm reflects the existing run, with plural rejected copy", async () => {
     const user = userEvent.setup();
-    localStorage.setItem("cf:decisions", JSON.stringify({ "alpha/1:1/default": "rejected", "beta/1:1/default": "rejected" }));
+    localStorage.setItem(
+      "cf:decisions",
+      JSON.stringify({ "alpha/1:1/default": "rejected", "beta/1:1/default": "rejected" }),
+    );
     seedPersistedRun([makeAsset(), makeAsset({ productId: "beta", outputPath: "beta/1x1.png" })]);
     renderWithRun(<CommandBar onToggleTelemetry={() => {}} />);
     const regenButton = await screen.findByRole("button", { name: /Regenerate Rejected/ });
@@ -56,7 +75,12 @@ describe("CommandBar — states", () => {
 describe("RunsPage — running and rejected", () => {
   function Harness() {
     const { execute } = useRun();
-    return createElement(Fragment, null, createElement("button", { onClick: () => execute(), key: "b" }, "go"), createElement(RunsPage, { key: "p" }));
+    return createElement(
+      Fragment,
+      null,
+      createElement("button", { onClick: () => execute(), key: "b" }, "go"),
+      createElement(RunsPage, { key: "p" }),
+    );
   }
 
   test("counts rejected creatives and shows the running badge", async () => {
@@ -82,7 +106,17 @@ describe("ExportPage — approved render without a proof", () => {
 
 describe("Sidebar — localized fallback", () => {
   test("falls back to the campaign message when no localized copy is set", async () => {
-    localStorage.setItem("cf:brief", JSON.stringify({ id: "nolocale", targetRegion: "DE", targetAudience: "a", campaignMessage: "Plain message", template: storedTemplate, products: [{ id: "p", name: "P", primaryColor: "#111111", logoPath: "l.png" }] }));
+    localStorage.setItem(
+      "cf:brief",
+      JSON.stringify({
+        id: "nolocale",
+        targetRegion: "DE",
+        targetAudience: "a",
+        campaignMessage: "Plain message",
+        template: storedTemplate,
+        products: [{ id: "p", name: "P", primaryColor: "#111111", logoPath: "l.png" }],
+      }),
+    );
     renderWithRun(<Sidebar />);
     expect(await screen.findByText("Plain message")).toBeTruthy();
   });
@@ -90,9 +124,28 @@ describe("Sidebar — localized fallback", () => {
 
 describe("TelemetryDrawer — clipboard edges", () => {
   const seedLog = () => {
-    localStorage.setItem("cf:brief", JSON.stringify({ id: "log3", targetRegion: "DE", targetAudience: "a", campaignMessage: "Hi", template: storedTemplate, products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: "a.png" }] }));
+    localStorage.setItem(
+      "cf:brief",
+      JSON.stringify({
+        id: "log3",
+        targetRegion: "DE",
+        targetAudience: "a",
+        campaignMessage: "Hi",
+        template: storedTemplate,
+        products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: "a.png" }],
+      }),
+    );
     mockPipelineApi({
-      report: { halted: false, assets: [], log: { campaignId: "log3", entries: [{ timestamp: "2026-01-01T10:00:00Z", stage: "S", message: "hello", level: "info" }] } },
+      report: {
+        halted: false,
+        assets: [],
+        log: {
+          campaignId: "log3",
+          entries: [
+            { timestamp: "2026-01-01T10:00:00Z", stage: "S", message: "hello", level: "info" },
+          ],
+        },
+      },
     });
   };
 
@@ -108,7 +161,10 @@ describe("TelemetryDrawer — clipboard edges", () => {
 
   test("rapid copies reset the prior timer", async () => {
     const user = userEvent.setup();
-    Object.defineProperty(navigator, "clipboard", { value: { writeText: vi.fn(async () => {}) }, configurable: true });
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText: vi.fn(async () => {}) },
+      configurable: true,
+    });
     seedLog();
     renderWithRun(<TelemetryDrawer open onClose={() => {}} />);
     await screen.findByText("hello");
@@ -120,16 +176,22 @@ describe("TelemetryDrawer — clipboard edges", () => {
 
   test("resets the Copied indicator after the timeout elapses", async () => {
     const user = userEvent.setup();
-    Object.defineProperty(navigator, "clipboard", { value: { writeText: vi.fn(async () => {}) }, configurable: true });
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText: vi.fn(async () => {}) },
+      configurable: true,
+    });
     seedLog();
     renderWithRun(<TelemetryDrawer open onClose={() => {}} />);
     await screen.findByText("hello");
     await user.click(screen.getByLabelText("Copy telemetry to clipboard"));
     expect(await screen.findByText(/Copied/)).toBeTruthy();
     // The 1500ms reset timer fires (real timers) → label returns to "Copy".
-    await waitFor(() => expect(screen.getByLabelText("Copy telemetry to clipboard").textContent).toBe("Copy"), {
-      timeout: 2500,
-    });
+    await waitFor(
+      () => expect(screen.getByLabelText("Copy telemetry to clipboard").textContent).toBe("Copy"),
+      {
+        timeout: 2500,
+      },
+    );
   });
 });
 

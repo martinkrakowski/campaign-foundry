@@ -27,7 +27,9 @@ const svgOf = (ui: React.ReactNode): SVGSVGElement =>
   render(<div>{ui}</div>).container.querySelector("svg")!;
 
 const bandRect = (svg: SVGSVGElement): SVGElement =>
-  Array.from(svg.querySelectorAll("rect")).find((r) => r.getAttribute("class") === "fill-[var(--c)]")!;
+  Array.from(svg.querySelectorAll("rect")).find(
+    (r) => r.getAttribute("class") === "fill-[var(--c)]",
+  )!;
 
 const fadeRect = (svg: SVGSVGElement): SVGElement =>
   // Two rects paint gradients — the full-canvas shade, then the accent fade.
@@ -58,7 +60,10 @@ describe("wrapHeadline", () => {
   });
 
   test("a word longer than the budget sits on its own line when breakWords is false", () => {
-    expect(wrapHeadline("supercalifragilistic spirit", 7)).toEqual(["supercalifragilistic", "spirit"]);
+    expect(wrapHeadline("supercalifragilistic spirit", 7)).toEqual([
+      "supercalifragilistic",
+      "spirit",
+    ]);
   });
 
   test("a word longer than the budget is split across lines when breakWords is true", () => {
@@ -102,7 +107,9 @@ describe("fitHeadline", () => {
   test("a word that cannot fit at any size falls back to the exact floor and breaks", () => {
     const fit = fitHeadline("supercalifragilistic", 100, 100, 200, 50);
     expect(fit.fontSize).toBe(50);
-    expect(fit.lines.every((line) => line.length <= Math.floor(100 / (CHAR_WIDTH_RATIO * 50)))).toBe(true);
+    expect(
+      fit.lines.every((line) => line.length <= Math.floor(100 / (CHAR_WIDTH_RATIO * 50))),
+    ).toBe(true);
   });
 
   test("blank headline fits with no lines", () => {
@@ -151,7 +158,9 @@ describe("CreativePreview", () => {
   test("bottom layout flushes the band to the bottom edge", () => {
     const svg = svgOf(<CreativePreview primaryColor="#1473E6" layout="headline-bottom" />);
     const { height: H } = resolveCanvas({ ratio: "1:1" });
-    expect(Number(bandRect(svg).getAttribute("y"))).toBe(H - H * CREATIVE_GEOMETRY.accentSolidHeightFraction);
+    expect(Number(bandRect(svg).getAttribute("y"))).toBe(
+      H - H * CREATIVE_GEOMETRY.accentSolidHeightFraction,
+    );
   });
 
   test("the accent fade is the compositor's height, starting at full accent colour (C5)", () => {
@@ -162,7 +171,9 @@ describe("CreativePreview", () => {
     const { height: H } = resolveCanvas({ ratio: "1:1" });
     const fade = fadeRect(svg);
     const band = H * CREATIVE_GEOMETRY.accentSolidHeightFraction;
-    expect(Number(fade.getAttribute("height"))).toBe(H * CREATIVE_GEOMETRY.accentFadeHeightFraction);
+    expect(Number(fade.getAttribute("height"))).toBe(
+      H * CREATIVE_GEOMETRY.accentFadeHeightFraction,
+    );
     expect(Number(fade.getAttribute("y"))).toBe(band);
     const stops = Array.from(svg.querySelectorAll("linearGradient")[1].querySelectorAll("stop"));
     expect(Number(stops[0]?.getAttribute("stop-opacity"))).toBe(1);
@@ -188,7 +199,9 @@ describe("CreativePreview", () => {
   });
 
   test("renders the headline as real wrapped svg text, never beyond three lines", () => {
-    const svg = svgOf(<CreativePreview primaryColor="#1473E6" headline="Stay wild. Stay hydrated." />);
+    const svg = svgOf(
+      <CreativePreview primaryColor="#1473E6" headline="Stay wild. Stay hydrated." />,
+    );
     const text = svg.querySelector("text")!;
     expect(text).not.toBeNull();
     const tspans = Array.from(text.querySelectorAll("tspan"));
@@ -234,7 +247,9 @@ describe("CreativePreview", () => {
     // C1: the preview used to scale off the canvas height; the compositor's
     // fitText starts at Math.round(width * 0.06). Assert the rendered attribute.
     for (const ratio of ["1:1", "9:16", "16:9"] as const) {
-      const svg = svgOf(<CreativePreview primaryColor="#1473E6" headline="Stay wild" ratio={ratio} />);
+      const svg = svgOf(
+        <CreativePreview primaryColor="#1473E6" headline="Stay wild" ratio={ratio} />,
+      );
       const { width: W } = resolveCanvas({ ratio });
       const text = svg.querySelector("text")!;
       expect(Number(text.getAttribute("font-size"))).toBe(
@@ -246,7 +261,9 @@ describe("CreativePreview", () => {
   test("centres the headline like the compositor's textAlign center (C2)", () => {
     // C2: the compositor only ever centres; the preview used to left-align —
     // a state the renderer cannot produce. Assert the rendered attributes.
-    const svg = svgOf(<CreativePreview primaryColor="#1473E6" headline="Stay wild. Stay hydrated." />);
+    const svg = svgOf(
+      <CreativePreview primaryColor="#1473E6" headline="Stay wild. Stay hydrated." />,
+    );
     const { width: W } = resolveCanvas({ ratio: "1:1" });
     const text = svg.querySelector("text")!;
     expect(text.getAttribute("text-anchor")).toBe("middle");
@@ -266,7 +283,9 @@ describe("CreativePreview", () => {
   test("subtle tone settles for Regular — the weight the compositor actually renders (D60)", () => {
     // D60: only 400/700 faces are registered, so the compositor's "500" request
     // silently renders Regular. The preview shows what is rendered.
-    const subtle = svgOf(<CreativePreview primaryColor="#1473E6" tone="subtle" headline="Stay wild" />);
+    const subtle = svgOf(
+      <CreativePreview primaryColor="#1473E6" tone="subtle" headline="Stay wild" />,
+    );
     const bold = svgOf(<CreativePreview primaryColor="#1473E6" tone="bold" headline="Stay wild" />);
     expect(Number(subtle.querySelector("text")!.getAttribute("font-weight"))).toBe(400);
     expect(Number(bold.querySelector("text")!.getAttribute("font-weight"))).toBe(700);
@@ -282,16 +301,25 @@ describe("CreativePreview", () => {
     test("an absent anchor derives from layout — the pre-axis behaviour", () => {
       // Bottom layout with no anchor: the block's last baseline sits at the
       // bottom edge fraction — the compositor's own derived rule.
-      const bottom = svgOf(<CreativePreview primaryColor="#1473E6" layout="headline-bottom" headline="Stay wild" />);
+      const bottom = svgOf(
+        <CreativePreview primaryColor="#1473E6" layout="headline-bottom" headline="Stay wild" />,
+      );
       expect(baselineOf(bottom)).toBe(H - H * CREATIVE_GEOMETRY.headlineAnchor.bottom);
       // Top layout with no anchor: block top + the 0.75em ascent convention.
-      const top = svgOf(<CreativePreview primaryColor="#1473E6" layout="headline-top" headline="Stay wild" />);
+      const top = svgOf(
+        <CreativePreview primaryColor="#1473E6" layout="headline-top" headline="Stay wild" />,
+      );
       expect(baselineOf(top)).toBe(H * CREATIVE_GEOMETRY.headlineAnchor.top + fontSize * 0.75);
     });
 
     test("anchor middle centres the wrapped block (rendered arithmetic, not a class assertion)", () => {
       const svg = svgOf(
-        <CreativePreview primaryColor="#1473E6" layout="headline-bottom" anchor="middle" headline="Stay wild" />,
+        <CreativePreview
+          primaryColor="#1473E6"
+          layout="headline-bottom"
+          anchor="middle"
+          headline="Stay wild"
+        />,
       );
       const text = headlineOf(svg);
       expect(Number(text.getAttribute("y"))).toBe(
@@ -299,14 +327,19 @@ describe("CreativePreview", () => {
       );
       // One line: the block's box midpoint is the canvas centre (zero insets here).
       const span = 0;
-      const blockMidpoint = Number(text.getAttribute("y")) - fontSize * 0.75 + (span + fontSize) / 2;
+      const blockMidpoint =
+        Number(text.getAttribute("y")) - fontSize * 0.75 + (span + fontSize) / 2;
       expect(blockMidpoint).toBe(H * 0.5);
     });
 
     test("anchor top and bottom pin the block to the leaf's edge fractions", () => {
-      const top = svgOf(<CreativePreview primaryColor="#1473E6" anchor="top" headline="Stay wild" />);
+      const top = svgOf(
+        <CreativePreview primaryColor="#1473E6" anchor="top" headline="Stay wild" />,
+      );
       expect(baselineOf(top)).toBe(H * PREVIEW_ANCHOR_TOP + fontSize * 0.75);
-      const bottom = svgOf(<CreativePreview primaryColor="#1473E6" anchor="bottom" headline="Stay wild" />);
+      const bottom = svgOf(
+        <CreativePreview primaryColor="#1473E6" anchor="bottom" headline="Stay wild" />,
+      );
       expect(baselineOf(bottom)).toBe(H - H * PREVIEW_ANCHOR_BOTTOM);
     });
 
@@ -315,7 +348,9 @@ describe("CreativePreview", () => {
         <CreativePreview primaryColor="#1473E6" layout="headline-bottom" anchor="middle" />,
       );
       // headline-bottom: the solid band stays flush to the bottom edge.
-      expect(Number(bandRect(svg).getAttribute("y"))).toBe(H - H * CREATIVE_GEOMETRY.accentSolidHeightFraction);
+      expect(Number(bandRect(svg).getAttribute("y"))).toBe(
+        H - H * CREATIVE_GEOMETRY.accentSolidHeightFraction,
+      );
     });
   });
 
@@ -354,7 +389,9 @@ describe("CreativePreview", () => {
     const margin = resolveCanvas({ ratio: "1:1" }).width * CREATIVE_GEOMETRY.logoMarginFraction;
 
     test("a top headline's logo RESTS margined at the bottom edge", () => {
-      expect(resolveOverlappingLogoY(undefined, logo, H, true, margin)).toBe(H - logo.height - margin);
+      expect(resolveOverlappingLogoY(undefined, logo, H, true, margin)).toBe(
+        H - logo.height - margin,
+      );
     });
 
     test("a bottom headline's logo RESTS margined at the top edge", () => {
@@ -400,18 +437,21 @@ describe("CreativePreview", () => {
     ["ken-burns-out", "kf-ken-burns-out", "g"],
     ["headline-rise", "kf-headline-rise", "g"],
     ["accent-wipe", "kf-accent-wipe", "rect"],
-  ] as const)("motion %s animates the %s keyframe once, forwards-filled, on the %s group", (motion, keyframe, tag) => {
-    const svg = svgOf(<CreativePreview primaryColor="#1473E6" motion={motion} />);
-    const target = Array.from(svg.querySelectorAll(tag)).find(
-      (el) => el.getAttribute("class")?.includes(keyframe),
-    );
-    expect(target).toBeTruthy();
-    expect(target!.getAttribute("class")).toContain("motion-safe:animate-[");
-    // D50: one iteration holding its final frame — the fill-mode lives in this
-    // class, never in globals.css (whose keyframes the glyph loops share).
-    expect(target!.getAttribute("class")).toContain("_forwards]");
-    expect(target!.getAttribute("class")).not.toContain("infinite");
-  });
+  ] as const)(
+    "motion %s animates the %s keyframe once, forwards-filled, on the %s group",
+    (motion, keyframe, tag) => {
+      const svg = svgOf(<CreativePreview primaryColor="#1473E6" motion={motion} />);
+      const target = Array.from(svg.querySelectorAll(tag)).find((el) =>
+        el.getAttribute("class")?.includes(keyframe),
+      );
+      expect(target).toBeTruthy();
+      expect(target!.getAttribute("class")).toContain("motion-safe:animate-[");
+      // D50: one iteration holding its final frame — the fill-mode lives in this
+      // class, never in globals.css (whose keyframes the glyph loops share).
+      expect(target!.getAttribute("class")).toContain("_forwards]");
+      expect(target!.getAttribute("class")).not.toContain("infinite");
+    },
+  );
 
   test("without motion the preview is a still: no animation class, no keyframe", () => {
     const svg = svgOf(<CreativePreview primaryColor="#1473E6" />);
@@ -425,7 +465,9 @@ describe("CreativePreview", () => {
     "a 60-character unbroken string stays inside the text block at ratio %s",
     (ratio) => {
       const unbroken = "A".repeat(60);
-      const svg = svgOf(<CreativePreview primaryColor="#1473E6" headline={unbroken} ratio={ratio} />);
+      const svg = svgOf(
+        <CreativePreview primaryColor="#1473E6" headline={unbroken} ratio={ratio} />,
+      );
       const { textWidth, maxHeight, start, min } = fitArgs(ratio);
 
       const fit = fitHeadline(unbroken, textWidth, maxHeight, start, min);
@@ -461,7 +503,9 @@ describe("CreativePreview", () => {
       const text = textOf(svg);
       const { width: W } = resolveCanvas({ ratio: "1:1" });
       expect(text.getAttribute("font-family")).toBe(DEFAULT_STYLE.fontFamily);
-      expect(text.getAttribute("letter-spacing")).toBe(`${DEFAULT_STYLE.letterSpacing * Number(text.getAttribute("font-size"))}px`);
+      expect(text.getAttribute("letter-spacing")).toBe(
+        `${DEFAULT_STYLE.letterSpacing * Number(text.getAttribute("font-size"))}px`,
+      );
       expect(text.getAttribute("text-anchor")).toBe("middle");
       expect(Number(text.getAttribute("x"))).toBe(W / 2);
     });
@@ -473,10 +517,17 @@ describe("CreativePreview", () => {
     });
 
     test("a styled weight overrides the tone-derived rendered weight (D60 faces only)", () => {
-      expect(Number(textOf(styled({ fontWeight: 400 }, "Stay wild")).getAttribute("font-weight"))).toBe(400);
+      expect(
+        Number(textOf(styled({ fontWeight: 400 }, "Stay wild")).getAttribute("font-weight")),
+      ).toBe(400);
       // And it composes with the tone: subtle asks 500/renders 400, the style pins 700.
       const svg = svgOf(
-        <CreativePreview primaryColor="#1473E6" headline="Stay wild" tone="subtle" style={{ fontWeight: 700 }} />,
+        <CreativePreview
+          primaryColor="#1473E6"
+          headline="Stay wild"
+          tone="subtle"
+          style={{ fontWeight: 700 }}
+        />,
       );
       expect(Number(textOf(svg).getAttribute("font-weight"))).toBe(700);
     });

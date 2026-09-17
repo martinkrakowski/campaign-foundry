@@ -62,13 +62,7 @@ describe("LogoField", () => {
   });
 
   test("renders plain filename when value has no slashes and default file size label", () => {
-    render(
-      <LogoField
-        value="logo.png"
-        onChange={vi.fn()}
-        onUploadFile={vi.fn()}
-      />,
-    );
+    render(<LogoField value="logo.png" onChange={vi.fn()} onUploadFile={vi.fn()} />);
     expect(screen.getByText("logo.png")).toBeTruthy();
     expect(screen.getByText("file")).toBeTruthy();
   });
@@ -106,36 +100,19 @@ describe("LogoField", () => {
 
   test("displays uploading state when uploading is true for empty and populated states", () => {
     const { unmount } = render(
-      <LogoField
-        value=""
-        onChange={vi.fn()}
-        onUploadFile={vi.fn()}
-        uploading={true}
-      />,
+      <LogoField value="" onChange={vi.fn()} onUploadFile={vi.fn()} uploading={true} />,
     );
     expect(screen.getByRole("button", { name: "Uploading..." })).toBeTruthy();
     unmount();
 
     render(
-      <LogoField
-        value="logo.png"
-        onChange={vi.fn()}
-        onUploadFile={vi.fn()}
-        uploading={true}
-      />,
+      <LogoField value="logo.png" onChange={vi.fn()} onUploadFile={vi.fn()} uploading={true} />,
     );
     expect(screen.getByRole("button", { name: "Uploading..." })).toBeTruthy();
   });
 
   test("displays error message when provided", () => {
-    render(
-      <LogoField
-        value=""
-        onChange={vi.fn()}
-        onUploadFile={vi.fn()}
-        error="File too large"
-      />,
-    );
+    render(<LogoField value="" onChange={vi.fn()} onUploadFile={vi.fn()} error="File too large" />);
     expect(screen.getByText("File too large")).toBeTruthy();
   });
 
@@ -152,4 +129,3 @@ describe("LogoField", () => {
     expect(input.getAttribute("aria-describedby")).toBe("logo-error-id");
   });
 });
-

@@ -49,7 +49,9 @@ describe("globals.css token contract (W2a.3 / SHELL-57)", () => {
     expect(webkitColours.length).toBeGreaterThan(0);
     for (const value of webkitColours) {
       expect(value, `scrollbar colour is not a token: ${value}`).toMatch(/var\(--color-/);
-      expect(value, `scrollbar colour carries a literal: ${value}`).not.toMatch(/#[0-9a-fA-F]{3,8}\b|\b(rgba?|hsla?)\(/);
+      expect(value, `scrollbar colour carries a literal: ${value}`).not.toMatch(
+        /#[0-9a-fA-F]{3,8}\b|\b(rgba?|hsla?)\(/,
+      );
     }
   });
 

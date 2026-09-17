@@ -4,7 +4,10 @@ import type { Dispatch } from "react";
 import { FieldLine, Input, PlatformCard, DurationStrip } from "@/components/ui";
 import { MOTION_KINDS } from "@campaignfoundry/CampaignOrchestration/motion-kinds";
 import { CREATIVE_TYPE_RULES } from "@campaignfoundry/CampaignOrchestration/creative-types";
-import { PLATFORM_PROFILES, isPlatformVisible } from "@campaignfoundry/Distribution/platform-profiles";
+import {
+  PLATFORM_PROFILES,
+  isPlatformVisible,
+} from "@campaignfoundry/Distribution/platform-profiles";
 import type { PlatformProfile } from "@campaignfoundry/Distribution/platform-profiles";
 import type { EditorState, EditorAction } from "@/components/campaign/editor-state";
 import { PLATFORM_ORDER } from "@/components/campaign/editor-state";
@@ -35,12 +38,7 @@ export interface OutputSectionProps {
  *   - MotionKindPanel × 4 with animated CreativeGlyphs and reduced-motion fallback cues.
  *   - DurationStrip film strip on 0..30s grid with draggable slider beads and lanes slot.
  */
-export function OutputSection({
-  state,
-  dispatch,
-  errors,
-  compact = false,
-}: OutputSectionProps) {
+export function OutputSection({ state, dispatch, errors, compact = false }: OutputSectionProps) {
   const motionRequested = state.formats.includes("motion");
   const motionOff = state.capabilities?.motion === false;
 
@@ -174,14 +172,19 @@ export function OutputSection({
             aria-label={messages.clickDestinationLabel}
             value={state.clickDestination}
             placeholder={messages.clickDestinationPlaceholder}
-            onChange={(e) => dispatch({ type: "patch", patch: { clickDestination: e.target.value } })}
+            onChange={(e) =>
+              dispatch({ type: "patch", patch: { clickDestination: e.target.value } })
+            }
             invalid={errors.clickDestination !== undefined}
           />
         </Field>
 
         {/* Video options (Motion kinds & Duration) */}
         {motionRequested ? (
-          <div id="motion" className="space-y-6 rounded-md border-l-2 border-brand-primary/40 pl-4 scroll-mt-24">
+          <div
+            id="motion"
+            className="space-y-6 rounded-md border-l-2 border-brand-primary/40 pl-4 scroll-mt-24"
+          >
             <fieldset className="space-y-2">
               <legend className="text-[11px] text-text-muted">{messages.outputMotionLegend}</legend>
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -198,7 +201,9 @@ export function OutputSection({
             </fieldset>
 
             <fieldset className="space-y-2">
-              <legend className="text-[11px] text-text-muted">{messages.outputDurationLegend}</legend>
+              <legend className="text-[11px] text-text-muted">
+                {messages.outputDurationLegend}
+              </legend>
               <DurationStrip
                 values={state.duration}
                 onChange={(index, value) => dispatch({ type: "setDuration", index, value })}

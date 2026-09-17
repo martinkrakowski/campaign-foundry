@@ -1,4 +1,7 @@
-import { MAX_DURATION_SEC, MIN_DURATION_SEC } from "@campaignfoundry/CampaignOrchestration/variation-defaults";
+import {
+  MAX_DURATION_SEC,
+  MIN_DURATION_SEC,
+} from "@campaignfoundry/CampaignOrchestration/variation-defaults";
 // The domain's one output-family decision (X14), shared with the API boundary
 // (`validateTemplateOutputFamilies`, load-brief.ts) so Save refuses exactly
 // what the parser refuses — never a second family table in the editor.
@@ -41,17 +44,29 @@ import { DWELL_TOLERANCE } from "@campaignfoundry/CampaignOrchestration/copy-tim
 // The draw-size helpers moved to `editor-state.ts` (the reducer's clamp needs them, and
 // the two modules were importing each other); re-exported here for their old callers.
 export { axisProductSize, drawableRatios, motionPackagedRatios } from "./editor-state";
-import { PLATFORM_PROFILES, type PlatformProfile } from "@campaignfoundry/Distribution/platform-profiles";
+import {
+  PLATFORM_PROFILES,
+  type PlatformProfile,
+} from "@campaignfoundry/Distribution/platform-profiles";
 // The weight derivation (HL5c): the warning and the meter read the one figure,
 // so they cannot disagree about what over budget is.
 import { htmlWeightReading } from "./derive";
 import * as messages from "./messages";
-import { creativeTypeDisplayName, formatDisplayName, modeDisplayName, platformDisplayName, ratioDisplayName } from "./display-names";
+import {
+  creativeTypeDisplayName,
+  formatDisplayName,
+  modeDisplayName,
+  platformDisplayName,
+  ratioDisplayName,
+} from "./display-names";
 
 export const SAFE_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 export const HEX_COLOR_PATTERN = /^#[0-9A-Fa-f]{6}$/;
 /** Whole-second clip durations the API accepts (load-brief's MIN/MAX_DURATION_SEC). */
-export { MIN_DURATION_SEC, MAX_DURATION_SEC } from "@campaignfoundry/CampaignOrchestration/variation-defaults";
+export {
+  MIN_DURATION_SEC,
+  MAX_DURATION_SEC,
+} from "@campaignfoundry/CampaignOrchestration/variation-defaults";
 
 export type FieldErrors = Record<string, string>;
 export type FieldWarnings = Record<string, string>;
@@ -59,14 +74,6 @@ export { matchProhibitedTerms, PROHIBITED_TERMS } from "@campaignfoundry/Governa
 
 const UINT32_MAX = 0xffffffff;
 const BASE_DISTANCE_AXES = 6;
-
-
-
-
-
-
-
-
 
 export function maxMinDistance(state: EditorState): number {
   let axes = BASE_DISTANCE_AXES;
@@ -201,7 +208,10 @@ export function validateTimeline(state: EditorState): FieldErrors {
   }
   beats.forEach((beat, index) => {
     if (!Number.isInteger(beat.weight) || beat.weight < 1 || beat.weight > MAX_WEIGHT) {
-      errors[`copy-timeline-beat-${index}`] = messages.timelineBeatWeightOutOfRange(index + 1, MAX_WEIGHT);
+      errors[`copy-timeline-beat-${index}`] = messages.timelineBeatWeightOutOfRange(
+        index + 1,
+        MAX_WEIGHT,
+      );
     }
   });
   if (Object.keys(errors).length > 0) return errors;
@@ -387,7 +397,10 @@ export function validateOutput(state: EditorState): FieldErrors {
   for (const profile of profiles) {
     if (!profile.formats.some((format) => state.formats.includes(format))) {
       // The API states the rejection; the editor has to say what to do about it.
-      errors.platforms = messages.platformsIncompatible(platformDisplayName(profile.id), (profile.formats as string[]).map(formatDisplayName));
+      errors.platforms = messages.platformsIncompatible(
+        platformDisplayName(profile.id),
+        (profile.formats as string[]).map(formatDisplayName),
+      );
       break;
     }
   }
@@ -398,7 +411,10 @@ export function validateOutput(state: EditorState): FieldErrors {
       const candidates = Object.values(PLATFORM_PROFILES)
         .filter((profile) => (profile.formats as readonly string[]).includes(format))
         .map((profile) => profile.id);
-      errors.formats = messages.formatsUnsupported(formatDisplayName(format), candidates.map(platformDisplayName));
+      errors.formats = messages.formatsUnsupported(
+        formatDisplayName(format),
+        candidates.map(platformDisplayName),
+      );
       break;
     }
   }
@@ -408,10 +424,7 @@ export function validateOutput(state: EditorState): FieldErrors {
   // decides Save refuses it too, through the domain's one decision. It
   // outranks the format/platform messages above: no platform fix ships a
   // family this creative type cannot make.
-  const familyProblem = outputFamilyProblem(
-    state.template.creativeType,
-    state.formats,
-  );
+  const familyProblem = outputFamilyProblem(state.template.creativeType, state.formats);
   if (familyProblem !== undefined) {
     errors.formats = messages.formatsOutOfType(
       formatDisplayName(familyProblem.format),
@@ -453,7 +466,11 @@ export function validateMotion(state: EditorState): FieldErrors {
   // `output.formats` says. Keying them on the format selection let a draft pass here
   // that the parser then refused on Save — pick clip lengths in Randomized, turn Video
   // off, and the draft still carries them.
-  if (!state.formats.includes("motion") && state.motion.length === 0 && state.duration.length === 0) {
+  if (
+    !state.formats.includes("motion") &&
+    state.motion.length === 0 &&
+    state.duration.length === 0
+  ) {
     return errors;
   }
   // The FormatPanel gate stops Video being *selected* in Classic, but a brief can arrive
@@ -473,13 +490,17 @@ export function validateMotion(state: EditorState): FieldErrors {
       }
     }
   }
-  if (state.motion.length > 0 && state.motion.some((kind) => !(MOTION_KINDS as readonly string[]).includes(kind))) {
+  if (
+    state.motion.length > 0 &&
+    state.motion.some((kind) => !(MOTION_KINDS as readonly string[]).includes(kind))
+  ) {
     errors.motion = messages.motionKindUnknown;
   }
   if (state.duration.length > 0) {
     if (
       state.duration.some(
-        (seconds) => !Number.isInteger(seconds) || seconds < MIN_DURATION_SEC || seconds > MAX_DURATION_SEC,
+        (seconds) =>
+          !Number.isInteger(seconds) || seconds < MIN_DURATION_SEC || seconds > MAX_DURATION_SEC,
       )
     ) {
       errors.duration = messages.durationRange(MIN_DURATION_SEC, MAX_DURATION_SEC);
@@ -492,7 +513,10 @@ export function validateMotion(state: EditorState): FieldErrors {
   return errors;
 }
 
-export function validateState(state: EditorState, existingIds?: string[]): Record<string, FieldErrors> {
+export function validateState(
+  state: EditorState,
+  existingIds?: string[],
+): Record<string, FieldErrors> {
   return {
     identity: validateIdentity(state, existingIds),
     copy: validateCopy(state),
@@ -508,12 +532,18 @@ export function hasErrors(errors: FieldErrors): boolean {
   return Object.keys(errors).length > 0;
 }
 
-export function hasSectionErrors(sectionErrors: Record<string, FieldErrors>, section: string): boolean {
+export function hasSectionErrors(
+  sectionErrors: Record<string, FieldErrors>,
+  section: string,
+): boolean {
   return hasErrors(sectionErrors[section] ?? {});
 }
 
 export function getTotalErrorCount(sectionErrors: Record<string, FieldErrors>): number {
-  return Object.values(sectionErrors).reduce((count, errors) => count + Object.keys(errors).length, 0);
+  return Object.values(sectionErrors).reduce(
+    (count, errors) => count + Object.keys(errors).length,
+    0,
+  );
 }
 
 /**
@@ -544,10 +574,16 @@ export function hasWarnings(warnings: FieldWarnings): boolean {
   return Object.keys(warnings).length > 0;
 }
 
-export function hasSectionWarnings(sectionWarnings: Record<string, FieldWarnings>, section: string): boolean {
+export function hasSectionWarnings(
+  sectionWarnings: Record<string, FieldWarnings>,
+  section: string,
+): boolean {
   return hasWarnings(sectionWarnings[section] ?? {});
 }
 
 export function getTotalWarningCount(sectionWarnings: Record<string, FieldWarnings>): number {
-  return Object.values(sectionWarnings).reduce((count, warnings) => count + Object.keys(warnings).length, 0);
+  return Object.values(sectionWarnings).reduce(
+    (count, warnings) => count + Object.keys(warnings).length,
+    0,
+  );
 }

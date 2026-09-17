@@ -1,5 +1,8 @@
 import { memo, useState, type CSSProperties, type ReactNode, type SyntheticEvent } from "react";
-import type { AspectRatioValue, CanvasSpec } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
+import type {
+  AspectRatioValue,
+  CanvasSpec,
+} from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import { RATIO_VALUES } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import { DISPLAY_SIZE_VALUES } from "@campaignfoundry/CampaignOrchestration/display-sizes";
 import type { CampaignBrief, Style } from "@campaignfoundry/CampaignOrchestration";
@@ -147,7 +150,9 @@ export function PreviewIdentity(props: PreviewIdentityProps): ReactNode {
         <p className="truncate text-[12px] text-text-muted">{props.headline}</p>
       ) : null}
       {props.step !== undefined && props.stepCount !== undefined ? (
-        <p className="font-mono text-[11px] text-text-muted">{messages.previewStep(props.step, props.stepCount)}</p>
+        <p className="font-mono text-[11px] text-text-muted">
+          {messages.previewStep(props.step, props.stepCount)}
+        </p>
       ) : null}
     </div>
   );
@@ -178,7 +183,10 @@ export function PreviewPicture(props: {
     // rail's container query hides without unmounting, and this marker is
     // present in both branches `PreviewFrame` can render (this placeholder,
     // and the real `<img>` frame below).
-    <div data-testid="preview-frame" className="overflow-hidden rounded-lg border border-border bg-text-muted">
+    <div
+      data-testid="preview-frame"
+      className="overflow-hidden rounded-lg border border-border bg-text-muted"
+    >
       <CreativePreview
         layout={props.layout}
         tone={props.tone}
@@ -226,7 +234,8 @@ export function PreviewRailEmptyState(props: PreviewIdentityProps): ReactNode {
  * as it already skips a network fetch for one.
  */
 function PreviewDockImpl(props: PreviewShowcaseProps): ReactNode {
-  const spec = props.spec ?? derivePreviewSpec(props.platformId, props.ratio, props.brief?.output?.sizes);
+  const spec =
+    props.spec ?? derivePreviewSpec(props.platformId, props.ratio, props.brief?.output?.sizes);
   const durationSec = props.brief?.variation?.axes?.duration?.[0] ?? DEFAULT_DURATION_SEC;
   const [scrubSec, setScrubSec] = useState(0);
   const [committedSec, setCommittedSec] = useState(0);

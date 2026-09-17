@@ -4,7 +4,14 @@ import { createElement, useEffect, type ReactElement } from "react";
 import userEvent from "@testing-library/user-event";
 import { DEFAULT_CAMPAIGN_TYPE } from "@campaignfoundry/CampaignOrchestration/campaign-types";
 import { templateFromCanonical } from "@campaignfoundry/CampaignOrchestration/brief-template";
-import { renderWithRun as renderWithShell, seedPersistedRun, nextMock, exerciseFocusTrap, makeAsset, ShellProviders } from "@/__tests__/helpers";
+import {
+  renderWithRun as renderWithShell,
+  seedPersistedRun,
+  nextMock,
+  exerciseFocusTrap,
+  makeAsset,
+  ShellProviders,
+} from "@/__tests__/helpers";
 import { useEditorDirty } from "@/lib/editor-dirty-context";
 import { CreateCampaignProvider } from "@/lib/create-campaign-context";
 import * as messages from "@/components/campaign/messages";
@@ -63,7 +70,12 @@ describe("Sidebar", () => {
   test("renders the brief fields and project bin with real assets", async () => {
     vi.spyOn(briefsApi, "listAssets").mockResolvedValueOnce({
       assets: [
-        { name: "hydra-logo.png", type: "image/png", size: 1024, thumbnailUrl: "data:image/png;base64,AAA" },
+        {
+          name: "hydra-logo.png",
+          type: "image/png",
+          size: 1024,
+          thumbnailUrl: "data:image/png;base64,AAA",
+        },
         { name: "trail-logo.png", type: "image/png", size: 2048, thumbnailUrl: "" },
       ],
     });
@@ -128,7 +140,12 @@ describe("Sidebar", () => {
     const user = userEvent.setup();
     vi.spyOn(briefsApi, "listAssets").mockResolvedValue({
       assets: [
-        { name: "hydra-logo.png", type: "image/png", size: 1024, thumbnailUrl: "data:image/png;base64,AAA" },
+        {
+          name: "hydra-logo.png",
+          type: "image/png",
+          size: 1024,
+          thumbnailUrl: "data:image/png;base64,AAA",
+        },
       ],
     });
     renderWithRun(<Sidebar />);
@@ -476,7 +493,14 @@ describe("guarded navigation when the editor is dirty", () => {
       useEffect(() => setBrief(blankBrief()), [setBrief]);
       return null;
     };
-    render(createElement(ShellProviders, null, createElement(ReleaseBrief), createElement(SidebarContent, { onNavigate: vi.fn() })));
+    render(
+      createElement(
+        ShellProviders,
+        null,
+        createElement(ReleaseBrief),
+        createElement(SidebarContent, { onNavigate: vi.fn() }),
+      ),
+    );
     await waitFor(() => expect(screen.getByText("Edit").getAttribute("href")).toBe("/brief/new"));
   });
 
@@ -504,7 +528,13 @@ describe("guarded navigation when the editor is dirty", () => {
   test("a clean mobile tab click routes client-side instead of reloading", async () => {
     const user = userEvent.setup();
     const tabs = [{ href: "/grid", label: "Grid" }] as const;
-    render(createElement(ShellProviders, null, createElement(MobileMenu, { open: true, onClose: () => {}, tabs })));
+    render(
+      createElement(
+        ShellProviders,
+        null,
+        createElement(MobileMenu, { open: true, onClose: () => {}, tabs }),
+      ),
+    );
     await user.click(screen.getByRole("link", { name: "Grid" }));
     // The tab is a raw <a>, so without preventDefault this would be a native page
     // load — routing through the client router is the "did not reload" proof.
@@ -520,7 +550,13 @@ describe("guarded navigation when the editor is dirty", () => {
     (modifier) => {
       const tabs = [{ href: "/grid", label: "Grid" }] as const;
       const onClose = vi.fn();
-      render(createElement(ShellProviders, null, createElement(MobileMenu, { open: true, onClose, tabs })));
+      render(
+        createElement(
+          ShellProviders,
+          null,
+          createElement(MobileMenu, { open: true, onClose, tabs }),
+        ),
+      );
       fireEvent.click(screen.getByRole("link", { name: "Grid" }), {
         [modifier]: modifier === "button" ? 1 : true,
       });

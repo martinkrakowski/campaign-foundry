@@ -1,8 +1,24 @@
 "use client";
 
-import { useState, useEffect, useMemo, useCallback, useRef, useLayoutEffect, type ReactNode, type RefObject } from "react";
+import {
+  useState,
+  useEffect,
+  useMemo,
+  useCallback,
+  useRef,
+  useLayoutEffect,
+  type ReactNode,
+  type RefObject,
+} from "react";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
-import { Button, Input, SegBar, OverflowMenu, ConfirmDialog, useDialogFocusTrap } from "@/components/ui";
+import {
+  Button,
+  Input,
+  SegBar,
+  OverflowMenu,
+  ConfirmDialog,
+  useDialogFocusTrap,
+} from "@/components/ui";
 import { useRun } from "@/lib/run-context";
 import { useRouter } from "next/navigation";
 import { dump } from "js-yaml";
@@ -44,10 +60,23 @@ import {
   SAFE_ID_PATTERN,
   type FieldErrors,
 } from "@/components/campaign/validate";
-import { IdentitySection, CopySection, ProductsSection, TreatmentsSection, OutputSection, PolicySection, TemplateSection } from "@/components/campaign/sections";
+import {
+  IdentitySection,
+  CopySection,
+  ProductsSection,
+  TreatmentsSection,
+  OutputSection,
+  PolicySection,
+  TemplateSection,
+} from "@/components/campaign/sections";
 import { StatusChip } from "@/components/campaign/StatusChip";
 import { StatusLine } from "@/components/campaign/StatusLine";
-import { ErrorStrip, MOTION_ERROR_KEY, MOTION_HOST_SECTION, sectionForErrorBucket } from "@/components/campaign/ErrorStrip";
+import {
+  ErrorStrip,
+  MOTION_ERROR_KEY,
+  MOTION_HOST_SECTION,
+  sectionForErrorBucket,
+} from "@/components/campaign/ErrorStrip";
 import { ErrorPill } from "@/components/ui";
 import { useEditorDirty, type DraftRunHandoff } from "@/lib/editor-dirty-context";
 import { useCreateCampaign } from "@/lib/create-campaign-context";
@@ -261,7 +290,8 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
     // is no non-Element case to branch on here.
     const el = (event.target as Element).closest("[data-section]");
     const section = el?.getAttribute("data-section");
-    if (section) setTouchedSections((prev) => (prev.has(section) ? prev : new Set([...prev, section])));
+    if (section)
+      setTouchedSections((prev) => (prev.has(section) ? prev : new Set([...prev, section])));
   }, []);
   const [attempted, setAttempted] = useState(false);
 
@@ -399,7 +429,11 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
       return;
     }
     setUnknownId(null);
-    dispatch({ type: "load", brief: match.brief, entry: { file: match.file, revision: match.revision } });
+    dispatch({
+      type: "load",
+      brief: match.brief,
+      entry: { file: match.file, revision: match.revision },
+    });
     // The file identity rides the load, so the canonical projection is what `apply`
     // snapshots — and committing the shell here (never before) is what makes
     // Generate run the brief the URL named.
@@ -452,10 +486,7 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   // it as a chained update. See .agents/manifests/x30.json and the work-count
   // test in brief-editor.test.tsx that pins the commit count this removes.
   const existingIds = useMemo(() => briefs.map((b) => b.brief.id), [briefs]);
-  const errors = useMemo(
-    () => validateState(state, existingIds),
-    [state, existingIds],
-  );
+  const errors = useMemo(() => validateState(state, existingIds), [state, existingIds]);
   const warnings = useMemo(() => validateWarnings(state), [state]);
   // Not a boolean: the section that blocks is what the refusal needs to scroll to, and
   // deriving it here keeps "is it blocked" and "where" from disagreeing. null = valid.
@@ -629,8 +660,7 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
    * committed brief.
    */
   const draftDiffers = useMemo(
-    () =>
-      !isPristine(state) && !valuesEqual(draftBrief, canonicalBrief(runBrief)),
+    () => !isPristine(state) && !valuesEqual(draftBrief, canonicalBrief(runBrief)),
     [state, draftBrief, runBrief],
   );
 
@@ -680,7 +710,8 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
       const filteredSection: FieldErrors = {};
       for (const [key, msg] of Object.entries(sectionErrors)) {
         const host = SECTION_HOSTS[section] ?? section;
-        if (touched.has(key) || touchedSections.has(section) || touchedSections.has(host)) filteredSection[key] = msg;
+        if (touched.has(key) || touchedSections.has(section) || touchedSections.has(host))
+          filteredSection[key] = msg;
       }
       if (Object.keys(filteredSection).length > 0) filtered[section] = filteredSection;
     }
@@ -690,7 +721,7 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   // L1.1: Touch field on blur
   const handleMainBlur = useCallback((e: React.FocusEvent<HTMLElement>) => {
     const target = e.target as HTMLElement;
-    const field = target.closest('[data-field-key]') as HTMLElement | null;
+    const field = target.closest("[data-field-key]") as HTMLElement | null;
     if (field) {
       // Every `data-field-key` in the tree comes from error-sections.ts, and the
       // coverage test proves that set matches what validateState emits — so a key
@@ -711,7 +742,6 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   }, []);
 
   const sectionErrorsVisible = (section: string): FieldErrors => visibleErrors[section] ?? {};
-
 
   // Derived, not stored: the refusal describes the draft *as committed*, so it holds
   // exactly while the committed snapshot still matches the draft. Any edit — switching
@@ -865,10 +895,22 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
           compact
           formatDropped={state.mode === "brief" && state.formats.includes("motion")}
         />
-        <SectionOutline mode={state.mode} visibleErrors={visibleErrors} onActivate={outlineActivate} />
+        <SectionOutline
+          mode={state.mode}
+          visibleErrors={visibleErrors}
+          onActivate={outlineActivate}
+        />
       </>,
     );
-  }, [state.mode, state.formats, visibleErrors, setTopPanels, outlineActivate, unknownId, failedRouteId]);
+  }, [
+    state.mode,
+    state.formats,
+    visibleErrors,
+    setTopPanels,
+    outlineActivate,
+    unknownId,
+    failedRouteId,
+  ]);
   useEffect(() => () => setTopPanels(null), []);
 
   // Publish the sections that live in the left bar while this editor is mounted. The
@@ -901,16 +943,17 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
           // needs its own capture: a click on an axis card there is still "the user
           // has been to the policy section" (D1).
           <div onClickCapture={touchSectionFromEvent} data-section="policy">
-          <Accordion
-            title="Variation Policy"
-            aside={
-              policyErrors > 0 ? (
-                <ErrorPill count={policyErrors} />
-              ) : null
-            }
-          >
-            <PolicySection state={state} dispatch={dispatch} errors={sectionErrorsVisible("policy")} compact />
-          </Accordion>
+            <Accordion
+              title="Variation Policy"
+              aside={policyErrors > 0 ? <ErrorPill count={policyErrors} /> : null}
+            >
+              <PolicySection
+                state={state}
+                dispatch={dispatch}
+                errors={sectionErrorsVisible("policy")}
+                compact
+              />
+            </Accordion>
           </div>
         ) : null}
         <Accordion title="Estimate">
@@ -919,7 +962,16 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
       </>,
     );
     // sectionErrors only reads what `errors` already covers.
-  }, [state, errors, policyErrors, setPanels, touchSectionFromEvent, presentation, unknownId, failedRouteId]);
+  }, [
+    state,
+    errors,
+    policyErrors,
+    setPanels,
+    touchSectionFromEvent,
+    presentation,
+    unknownId,
+    failedRouteId,
+  ]);
   useEffect(() => () => setPanels(null), []);
 
   /**
@@ -1008,7 +1060,10 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
       dispatch({
         type: "save",
         saved: stored.brief,
-        entry: { file: stored.file, ...(stored.revision === undefined ? {} : { revision: stored.revision }) },
+        entry: {
+          file: stored.file,
+          ...(stored.revision === undefined ? {} : { revision: stored.revision }),
+        },
       });
       // D35: committing and saving are one act — the shell runs what was written.
       dispatch({ type: "apply", applied: stored.brief });
@@ -1066,7 +1121,11 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   const adoptSavedCopy = async (created: BriefEntry) => {
     purgeDraftFromStorage(state);
     if (created.brief.id === routeId) {
-      dispatch({ type: "load", brief: created.brief, entry: { file: created.file, revision: created.revision } });
+      dispatch({
+        type: "load",
+        brief: created.brief,
+        entry: { file: created.file, revision: created.revision },
+      });
       setRunBrief(created.brief);
       setSaveAsId(null);
       return;
@@ -1306,9 +1365,16 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
    * over the closed section set (exhaustive): the review step is handled by the caller,
    * and the mode-derived step list guarantees this only ever receives one of those.
    */
-  const renderStepSection = (section: SectionId) => {    switch (section) {
+  const renderStepSection = (section: SectionId) => {
+    switch (section) {
       case "identity":
-        return <IdentitySection state={state} dispatch={dispatch} errors={sectionErrorsVisible("identity")} />;
+        return (
+          <IdentitySection
+            state={state}
+            dispatch={dispatch}
+            errors={sectionErrorsVisible("identity")}
+          />
+        );
       case "copy":
         return (
           <CopySection
@@ -1329,15 +1395,34 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
           />
         );
       case "treatments":
-        return <TreatmentsSection state={state} dispatch={dispatch} errors={sectionErrorsVisible("treatments")} />;
+        return (
+          <TreatmentsSection
+            state={state}
+            dispatch={dispatch}
+            errors={sectionErrorsVisible("treatments")}
+          />
+        );
       case "template":
         // The layer list (L5): add and remove, exactly what the compatibility
         // table offers — the boundary's own offers, never a second list (D124).
-        return <TemplateSection state={state} dispatch={dispatch} errors={sectionErrorsVisible("template")} />;
+        return (
+          <TemplateSection
+            state={state}
+            dispatch={dispatch}
+            errors={sectionErrorsVisible("template")}
+          />
+        );
       case "layout":
         // The template's home (T7): the T5 type block and the step's own
         // compositor frame (D63) — the guided walk mounts the preview.
-        return <LayoutSection state={state} dispatch={dispatch} errors={sectionErrorsVisible("layout")} preview />;
+        return (
+          <LayoutSection
+            state={state}
+            dispatch={dispatch}
+            errors={sectionErrorsVisible("layout")}
+            preview
+          />
+        );
       case "output":
         return (
           <OutputSection
@@ -1347,7 +1432,13 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
           />
         );
       case "policy":
-        return <PolicySection state={state} dispatch={dispatch} errors={sectionErrorsVisible("policy")} />;
+        return (
+          <PolicySection
+            state={state}
+            dispatch={dispatch}
+            errors={sectionErrorsVisible("policy")}
+          />
+        );
     }
   };
 
@@ -1388,7 +1479,9 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
         onScrollToSection={reveal}
       />
       <div className="min-w-0 flex-1">
-        {getTotalErrorCount(visibleErrors) > 0 ? <ErrorStrip errors={visibleErrors} onErrorClick={reveal} /> : null}
+        {getTotalErrorCount(visibleErrors) > 0 ? (
+          <ErrorStrip errors={visibleErrors} onErrorClick={reveal} />
+        ) : null}
       </div>
     </>
   );
@@ -1516,133 +1609,152 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
       {/* §6 question 1 — the row is the query container the rail's visibility reads,
           so the rail's own width can never lie to a viewport breakpoint. */}
       <div ref={railContainerRef} className="flex items-start [container-type:inline-size]">
-       <SectionModeContext.Provider value={state.mode}>
-           {/* Main content */}
-            <div
-              className="mx-auto flex w-full max-w-5xl flex-col gap-6 p-4 sm:p-8 pb-24"
-              onBlurCapture={handleMainBlur} onClickCapture={touchSectionFromEvent}
-            >
-          {/* Header with selector, status chip, and the presentation toggle.
+        <SectionModeContext.Provider value={state.mode}>
+          {/* Main content */}
+          <div
+            className="mx-auto flex w-full max-w-5xl flex-col gap-6 p-4 sm:p-8 pb-24"
+            onBlurCapture={handleMainBlur}
+            onClickCapture={touchSectionFromEvent}
+          >
+            {/* Header with selector, status chip, and the presentation toggle.
               In Guided the chip moves out of this row — the StepHeader announces the
               step's own status — so this row only ever holds one of the two. */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <BriefSelector
-                briefs={briefs}
-                currentId={state.source.kind === "file" ? state.source.loadedId : undefined}
-                onSelect={loadBrief}
-                onCreateNew={createNew}
-              />
-              {presentation === "everything" ? <StatusChip state={state} /> : null}
-            </div>
-            <div
-              role="group"
-              aria-label={messages.presentationLabel}
-              // Always visible. It is the only control that returns to Guided, and the
-              // choice persists — hiding it in Everything made Guided unreachable for
-              // good, including across a reload. jsdom applies no CSS, so the suite
-              // could still find the button and the tests passed regardless.
-              className="flex shrink-0 items-center gap-1"
-            >
-              <button
-                type="button"
-                aria-pressed={presentation === "guided"}
-                onClick={() => choosePresentation("guided")}
-                className={cn(
-                  "rounded-md px-3 py-1.5 text-[12px] font-semibold transition-colors",
-                  presentation === "guided"
-                    ? "bg-surface-2 text-text-emphasis"
-                    : "text-text-muted hover:bg-surface-2 hover:text-text-primary",
-                )}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <BriefSelector
+                  briefs={briefs}
+                  currentId={state.source.kind === "file" ? state.source.loadedId : undefined}
+                  onSelect={loadBrief}
+                  onCreateNew={createNew}
+                />
+                {presentation === "everything" ? <StatusChip state={state} /> : null}
+              </div>
+              <div
+                role="group"
+                aria-label={messages.presentationLabel}
+                // Always visible. It is the only control that returns to Guided, and the
+                // choice persists — hiding it in Everything made Guided unreachable for
+                // good, including across a reload. jsdom applies no CSS, so the suite
+                // could still find the button and the tests passed regardless.
+                className="flex shrink-0 items-center gap-1"
               >
-                {messages.presentationGuided}
-              </button>
-              <button
-                type="button"
-                aria-pressed={presentation === "everything"}
-                onClick={() => choosePresentation("everything")}
-                className={cn(
-                  "rounded-md px-3 py-1.5 text-[12px] font-semibold transition-colors",
-                  presentation === "everything"
-                    ? "bg-surface-2 text-text-emphasis"
-                    : "text-text-muted hover:bg-surface-2 hover:text-text-primary",
-                )}
-              >
-                {messages.presentationEverything}
-              </button>
+                <button
+                  type="button"
+                  aria-pressed={presentation === "guided"}
+                  onClick={() => choosePresentation("guided")}
+                  className={cn(
+                    "rounded-md px-3 py-1.5 text-[12px] font-semibold transition-colors",
+                    presentation === "guided"
+                      ? "bg-surface-2 text-text-emphasis"
+                      : "text-text-muted hover:bg-surface-2 hover:text-text-primary",
+                  )}
+                >
+                  {messages.presentationGuided}
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={presentation === "everything"}
+                  onClick={() => choosePresentation("everything")}
+                  className={cn(
+                    "rounded-md px-3 py-1.5 text-[12px] font-semibold transition-colors",
+                    presentation === "everything"
+                      ? "bg-surface-2 text-text-emphasis"
+                      : "text-text-muted hover:bg-surface-2 hover:text-text-primary",
+                  )}
+                >
+                  {messages.presentationEverything}
+                </button>
+              </div>
             </div>
-          </div>
 
-          {/* Sections: the whole stack (Everything) or one step (Guided) */}
-          {presentation === "guided" ? (
-            <div className="space-y-4">
-              {/* W7.1 — the walk, above the sticky step head: the segbar scrolls away
+            {/* Sections: the whole stack (Everything) or one step (Guided) */}
+            {presentation === "guided" ? (
+              <div className="space-y-4">
+                {/* W7.1 — the walk, above the sticky step head: the segbar scrolls away
                   with the page while the head stays, and the two never fight for the
                   same pixel. */}
-              <SegBar segments={segments} index={stepIndex} maxVisited={maxVisited} onSelect={go} />
-              <div className="space-y-8">
-                <StepHeader
-                  step={stepIndex + 1}
-                  total={steps.length}
-                  title={stepTitle(steps[stepIndex])}
-                  subtitle={STEP_SUBTITLES[steps[stepIndex]]}
-                  state={state}
-                  headingRef={stepHeadingRef}
+                <SegBar
+                  segments={segments}
+                  index={stepIndex}
+                  maxVisited={maxVisited}
+                  onSelect={go}
                 />
-                {/* W7.2 — the two cards of a step change. The arriving one is keyed on
+                <div className="space-y-8">
+                  <StepHeader
+                    step={stepIndex + 1}
+                    total={steps.length}
+                    title={stepTitle(steps[stepIndex])}
+                    subtitle={STEP_SUBTITLES[steps[stepIndex]]}
+                    state={state}
+                    headingRef={stepHeadingRef}
+                  />
+                  {/* W7.2 — the two cards of a step change. The arriving one is keyed on
                     the step, because a CSS animation only replays on a fresh node;
                     the leaving one is out of flow for the same breath, so the pair
                     slide past each other instead of reflowing down the column. */}
-                <div className="relative" data-testid="step-card" {...swipe}>
-                  {exiting ? (
+                  <div className="relative" data-testid="step-card" {...swipe}>
+                    {exiting ? (
+                      <div
+                        key={`exit-${exiting.index}`}
+                        // Inert as well as hidden: an `aria-hidden` box full of live
+                        // controls is a trap, and this one has a whole section's worth
+                        // of them for as long as it is on screen. `pointer-events-none`
+                        // is the same promise to an engine that has no `inert`.
+                        aria-hidden="true"
+                        inert
+                        className={cn(
+                          "pointer-events-none absolute inset-x-0 top-0",
+                          exiting.direction === 1 ? "step-exit-l" : "step-exit-r",
+                        )}
+                      >
+                        {renderStepCard(steps[exiting.index])}
+                      </div>
+                    ) : null}
                     <div
-                      key={`exit-${exiting.index}`}
-                      // Inert as well as hidden: an `aria-hidden` box full of live
-                      // controls is a trap, and this one has a whole section's worth
-                      // of them for as long as it is on screen. `pointer-events-none`
-                      // is the same promise to an engine that has no `inert`.
-                      aria-hidden="true"
-                      inert
-                      className={cn(
-                        "pointer-events-none absolute inset-x-0 top-0",
-                        exiting.direction === 1 ? "step-exit-l" : "step-exit-r",
-                      )}
+                      key={stepIndex}
+                      className={direction === 1 ? "step-enter-r" : "step-enter-l"}
                     >
-                      {renderStepCard(steps[exiting.index])}
+                      {renderStepCard(steps[stepIndex])}
                     </div>
-                  ) : null}
-                  <div key={stepIndex} className={direction === 1 ? "step-enter-r" : "step-enter-l"}>
-                    {renderStepCard(steps[stepIndex])}
                   </div>
-                </div>
-                <StepFooter
-                  statusText={stepFooterStatus}
-                  onBack={stepIndex > 0 ? () => go(stepIndex - 1) : undefined}
-                  onNext={steps[stepIndex] === "review" ? undefined : () => handleNext()}
-                  // The last section step, not a named one: `output` is last in classic
-                  // but randomized puts `policy` after it, so keying on the id promised
-                  // a launch and delivered the Variation Policy step.
-                  nextLabel={stepIndex === steps.length - 2 ? messages.stepNextReview : undefined}
-                  nudgeKey={nudgeKey}
-                  readyKey={readyKey}
-                />
-                {/* D38 — the surface stands on every guided step, Review included: a
+                  <StepFooter
+                    statusText={stepFooterStatus}
+                    onBack={stepIndex > 0 ? () => go(stepIndex - 1) : undefined}
+                    onNext={steps[stepIndex] === "review" ? undefined : () => handleNext()}
+                    // The last section step, not a named one: `output` is last in classic
+                    // but randomized puts `policy` after it, so keying on the id promised
+                    // a launch and delivered the Variation Policy step.
+                    nextLabel={stepIndex === steps.length - 2 ? messages.stepNextReview : undefined}
+                    nudgeKey={nudgeKey}
+                    readyKey={readyKey}
+                  />
+                  {/* D38 — the surface stands on every guided step, Review included: a
                     refusal spoken from the Review bar names sections on steps the user
                     is about to be bounced to, and it must still be on screen there. */}
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-2">{statusSurface}</div>
-                {/* W8.2 — Guided placement: the verbs stand on the Review step. The
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-2">{statusSurface}</div>
+                  {/* W8.2 — Guided placement: the verbs stand on the Review step. The
                     status surface above is the step's own, so the bar carries only
                     the verbs (D38) — one status line, not two. */}
-                {steps[stepIndex] === "review" ? actionBar(false) : null}
+                  {steps[stepIndex] === "review" ? actionBar(false) : null}
+                </div>
               </div>
-            </div>
-          ) : (
-            <div className="space-y-8">
-               <div>
-                 <IdentitySection state={state} dispatch={dispatch} errors={sectionErrorsVisible("identity")} />
-               </div>
+            ) : (
+              <div className="space-y-8">
                 <div>
-                  <CopySection state={state} dispatch={dispatch} errors={sectionErrorsVisible("copy")} warnings={warnings.copy} onOpenPool={() => setPoolDrawerOpen(true)} />
+                  <IdentitySection
+                    state={state}
+                    dispatch={dispatch}
+                    errors={sectionErrorsVisible("identity")}
+                  />
+                </div>
+                <div>
+                  <CopySection
+                    state={state}
+                    dispatch={dispatch}
+                    errors={sectionErrorsVisible("copy")}
+                    warnings={warnings.copy}
+                    onOpenPool={() => setPoolDrawerOpen(true)}
+                  />
                 </div>
                 <div>
                   <ProductsSection
@@ -1652,28 +1764,39 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
                     onChooseFromBin={setAssetPickerKey}
                   />
                 </div>
-               <div>
-                 {state.mode === "brief" ? (
-                   <TreatmentsSection state={state} dispatch={dispatch} errors={sectionErrorsVisible("treatments")} />
-                 ) : null}
-               </div>
-               {/* The layer list (L5): the offer is the boundary's own (D124). */}
-               <TemplateSection state={state} dispatch={dispatch} errors={sectionErrorsVisible("template")} />
+                <div>
+                  {state.mode === "brief" ? (
+                    <TreatmentsSection
+                      state={state}
+                      dispatch={dispatch}
+                      errors={sectionErrorsVisible("treatments")}
+                    />
+                  ) : null}
+                </div>
+                {/* The layer list (L5): the offer is the boundary's own (D124). */}
+                <TemplateSection
+                  state={state}
+                  dispatch={dispatch}
+                  errors={sectionErrorsVisible("template")}
+                />
                 {/* The template view (T7): the type block, no frame — the Everything
                     stack has no composed preview surface by design (D43 keeps the
                     preview Guided-only), so the step-scoped frame stays a step's. */}
-                <LayoutSection state={state} dispatch={dispatch} errors={sectionErrorsVisible("layout")} />
-               <OutputSection
-                 state={state}
-                 dispatch={dispatch}
-                 errors={{ ...sectionErrorsVisible("output"), ...sectionErrorsVisible("motion") }}
-               />
-            </div>
-          )}
+                <LayoutSection
+                  state={state}
+                  dispatch={dispatch}
+                  errors={sectionErrorsVisible("layout")}
+                />
+                <OutputSection
+                  state={state}
+                  dispatch={dispatch}
+                  errors={{ ...sectionErrorsVisible("output"), ...sectionErrorsVisible("motion") }}
+                />
+              </div>
+            )}
+          </div>
 
-        </div>
-
-        {/* D43/D44/D61/D141 — the preview rail: one right-hand slot, a sibling of the
+          {/* D43/D44/D61/D141 — the preview rail: one right-hand slot, a sibling of the
             main column — never inside `renderStepCard`, which renders two live copies
             during a step change and whose `transform` traps overlays (M7). `sticky
             top-0 self-start` resolves against the shell's own scrollport; never
@@ -1695,95 +1818,102 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
             fresh debounce), it just does not feed the frame a `brief` while hidden. */}
           {presentation !== "guided" ||
           (steps[stepIndex] !== "review" && steps[stepIndex] !== "layout") ? (
-          <aside
-            role="complementary"
-            aria-label={messages.previewLegend}
-            className="sticky top-0 hidden max-h-screen w-64 shrink-0 self-start flex-col gap-3 overflow-y-auto border-l border-border bg-surface p-4 [@container(min-width:56rem)]:flex"
-          >
-            {/* The segmented switcher (D61): an eye for the preview, code for the
+            <aside
+              role="complementary"
+              aria-label={messages.previewLegend}
+              className="sticky top-0 hidden max-h-screen w-64 shrink-0 self-start flex-col gap-3 overflow-y-auto border-l border-border bg-surface p-4 [@container(min-width:56rem)]:flex"
+            >
+              {/* The segmented switcher (D61): an eye for the preview, code for the
                 YAML view — exclusive, never side by side. The glyphs are decoration;
                 the names are on the buttons. */}
-            <div
-              role="group"
-              aria-label={messages.previewRailViews}
-              className="flex shrink-0 items-center gap-1"
-            >
-              <button
-                type="button"
-                aria-pressed={railView === "preview"}
-                aria-label={messages.previewRailPreviewView}
-                onClick={() => chooseRailView("preview")}
-                className={cn(
-                  "rounded-md p-1.5 transition-colors",
-                  railView === "preview"
-                    ? "bg-surface-2 text-text-emphasis"
-                    : "text-text-muted hover:bg-surface-2 hover:text-text-primary",
-                )}
+              <div
+                role="group"
+                aria-label={messages.previewRailViews}
+                className="flex shrink-0 items-center gap-1"
               >
-                <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true" className="size-4">
-                  <path
-                    d="M2 12s3.5-6.5 10-6.5S22 12 22 12s-3.5 6.5-10 6.5S2 12 2 12Z"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth={2}
+                <button
+                  type="button"
+                  aria-pressed={railView === "preview"}
+                  aria-label={messages.previewRailPreviewView}
+                  onClick={() => chooseRailView("preview")}
+                  className={cn(
+                    "rounded-md p-1.5 transition-colors",
+                    railView === "preview"
+                      ? "bg-surface-2 text-text-emphasis"
+                      : "text-text-muted hover:bg-surface-2 hover:text-text-primary",
+                  )}
+                >
+                  <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true" className="size-4">
+                    <path
+                      d="M2 12s3.5-6.5 10-6.5S22 12 22 12s-3.5 6.5-10 6.5S2 12 2 12Z"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth={2}
+                    />
+                    <circle
+                      cx="12"
+                      cy="12"
+                      r="2.75"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth={2}
+                    />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={railView === "yaml"}
+                  aria-label={messages.previewRailYamlView}
+                  onClick={() => chooseRailView("yaml")}
+                  className={cn(
+                    "rounded-md p-1.5 transition-colors",
+                    railView === "yaml"
+                      ? "bg-surface-2 text-text-emphasis"
+                      : "text-text-muted hover:bg-surface-2 hover:text-text-primary",
+                  )}
+                >
+                  <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true" className="size-4">
+                    <path
+                      d="m8 7-5 5 5 5M16 7l5 5-5 5M13.5 5l-3 14"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth={2}
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </button>
+              </div>
+              {railView === "preview" ? (
+                railProps !== null ? (
+                  // CC2 — below the breakpoint, `brief` is withheld: `usePreviewFrame`
+                  // (inside `PreviewDock` → `PreviewFrame`) treats an undefined brief
+                  // exactly like an unspecified look and never builds a request, so a
+                  // rail nobody can see never reaches the network.
+                  <PreviewDock {...railProps} brief={isRailWideEnough ? previewBrief : undefined} />
+                ) : (
+                  // D142 — the empty state before the first product has an id: names
+                  // the missing field, never "add a product" (the Products step
+                  // already shows a stub) and never a fabricated placeholder creative.
+                  <PreviewRailEmptyState
+                    campaignName={state.campaignName}
+                    step={railCursorIndex !== undefined ? railCursorIndex + 1 : undefined}
+                    stepCount={railCursorCount}
                   />
-                  <circle cx="12" cy="12" r="2.75" fill="none" stroke="currentColor" strokeWidth={2} />
-                </svg>
-              </button>
-              <button
-                type="button"
-                aria-pressed={railView === "yaml"}
-                aria-label={messages.previewRailYamlView}
-                onClick={() => chooseRailView("yaml")}
-                className={cn(
-                  "rounded-md p-1.5 transition-colors",
-                  railView === "yaml"
-                    ? "bg-surface-2 text-text-emphasis"
-                    : "text-text-muted hover:bg-surface-2 hover:text-text-primary",
-                )}
-              >
-                <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true" className="size-4">
-                  <path
-                    d="m8 7-5 5 5 5M16 7l5 5-5 5M13.5 5l-3 14"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth={2}
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              </button>
-            </div>
-            {railView === "preview" ? (
-              railProps !== null ? (
-                // CC2 — below the breakpoint, `brief` is withheld: `usePreviewFrame`
-                // (inside `PreviewDock` → `PreviewFrame`) treats an undefined brief
-                // exactly like an unspecified look and never builds a request, so a
-                // rail nobody can see never reaches the network.
-                <PreviewDock {...railProps} brief={isRailWideEnough ? previewBrief : undefined} />
+                )
               ) : (
-                // D142 — the empty state before the first product has an id: names
-                // the missing field, never "add a product" (the Products step
-                // already shows a stub) and never a fabricated placeholder creative.
-                <PreviewRailEmptyState
-                  campaignName={state.campaignName}
-                  step={railCursorIndex !== undefined ? railCursorIndex + 1 : undefined}
-                  stepCount={railCursorCount}
-                />
-              )
-            ) : (
-              <pre className="overflow-auto text-[11px] text-text-primary">
-                {/* Real YAML, because that is what the label promises and what the
+                <pre className="overflow-auto text-[11px] text-text-primary">
+                  {/* Real YAML, because that is what the label promises and what the
                     save path writes — a JSON body under a `</>`-YAML name showed a
                     format the pipeline never reads (CodeRabbit, PR #174). Always the
                     LIVE `draftBrief`, never the memoised `previewBrief`: this is the
                     rail's read-only SECOND view (D61) and must never lag the preview's
                     own memo boundary (CC1/CC2 mutation (c)). */}
-                {dump(draftBrief)}
-              </pre>
-            )}
-          </aside>
-        ) : null}
+                  {dump(draftBrief)}
+                </pre>
+              )}
+            </aside>
+          ) : null}
         </SectionModeContext.Provider>
       </div>
 
@@ -1792,73 +1922,73 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
           mount to carry the surface here. */}
       {presentation === "everything" ? actionBar(true) : null}
 
-       {/* Headline pool drawer */}
-       <HeadlinePoolDrawer
-         state={state}
-         dispatch={dispatch}
-         open={poolDrawerOpen}
-         onClose={() => setPoolDrawerOpen(false)}
-       />
+      {/* Headline pool drawer */}
+      <HeadlinePoolDrawer
+        state={state}
+        dispatch={dispatch}
+        open={poolDrawerOpen}
+        onClose={() => setPoolDrawerOpen(false)}
+      />
 
-       {/* M7 — the Asset Bin drawer, hoisted to the editor's root beside the headline
+      {/* M7 — the Asset Bin drawer, hoisted to the editor's root beside the headline
            pool drawer for the same reason: the guided step card's permanent transform
            makes it the containing block for `fixed` descendants, so the drawer's
            viewport-covering scrim is trapped inside the card if it mounts there.
            ProductsSection keeps the trigger; this owns the drawer and the selection. */}
-       <AssetPickerDrawer
-         briefId={state.briefId}
-         open={assetPickerKey !== null}
-         onClose={() => setAssetPickerKey(null)}
-         selectedPath={state.products.find((p) => p.key === assetPickerKey)?.logoPath}
-         onSelect={(asset) => {
-           // The drawer renders only while a product opened it, so the key is set
-           // by construction — the cast restates it, like the step-heading handoff.
-           dispatch({
-             type: "setProduct",
-             key: assetPickerKey as number,
-             patch: { logoPath: `assets/inputs/${state.briefId}/${asset.name}` },
-           });
-           setAssetPickerKey(null);
-         }}
-       />
+      <AssetPickerDrawer
+        briefId={state.briefId}
+        open={assetPickerKey !== null}
+        onClose={() => setAssetPickerKey(null)}
+        selectedPath={state.products.find((p) => p.key === assetPickerKey)?.logoPath}
+        onSelect={(asset) => {
+          // The drawer renders only while a product opened it, so the key is set
+          // by construction — the cast restates it, like the step-heading handoff.
+          dispatch({
+            type: "setProduct",
+            key: assetPickerKey as number,
+            patch: { logoPath: `assets/inputs/${state.briefId}/${asset.name}` },
+          });
+          setAssetPickerKey(null);
+        }}
+      />
 
-       {/* D14 — the replace confirmation, the editor's own instance of the shell's
+      {/* D14 — the replace confirmation, the editor's own instance of the shell's
            "Unsaved edits" pattern (DESIGN.md §5): one prompt, a refusal changes
            nothing, and re-triggering never stacks a second question. Revert and the
            blank route's New brief both throw away unsaved work, so both park their
            action in `pendingReplace` and ask here. */}
-       <ConfirmDialog
-         open={pendingReplace !== null}
-         message={messages.statusReplacePrompt}
-         confirmLabel={messages.confirmDialogDiscard}
-         onConfirm={() => {
-           const action = pendingReplace;
-           setPendingReplace(null);
-           action?.();
-         }}
-         onClose={() => setPendingReplace(null)}
-       />
+      <ConfirmDialog
+        open={pendingReplace !== null}
+        message={messages.statusReplacePrompt}
+        confirmLabel={messages.confirmDialogDiscard}
+        onConfirm={() => {
+          const action = pendingReplace;
+          setPendingReplace(null);
+          action?.();
+        }}
+        onClose={() => setPendingReplace(null)}
+      />
 
-       {/* D9 — the Save-as overwrite decision. The confirm is what sends
+      {/* D9 — the Save-as overwrite decision. The confirm is what sends
            `{ replace: true }`; the cancel clears the pending id and returns to the
            Save-as dialog. Escape and Cancel are held while the retry write is in
            flight (the #163 `saving` guard) — a dismissal would hand the user an
            editable page whose pending adoption is about to discard their edits. */}
-       {pendingOverwrite !== null && (
-         <ConfirmDialog
-           open
-           title={messages.saveAsOverwriteTitle}
-           message={messages.saveAsOverwritePrompt(pendingOverwrite)}
-           confirmLabel={messages.saveAsOverwriteConfirm}
-           cancelLabel={messages.confirmCancel}
-           onConfirm={() => void retrySaveAsOverwrite(pendingOverwrite)}
-           onClose={() => {
-             if (!saving) setPendingOverwrite(null);
-           }}
-         />
-       )}
+      {pendingOverwrite !== null && (
+        <ConfirmDialog
+          open
+          title={messages.saveAsOverwriteTitle}
+          message={messages.saveAsOverwritePrompt(pendingOverwrite)}
+          confirmLabel={messages.saveAsOverwriteConfirm}
+          cancelLabel={messages.confirmCancel}
+          onConfirm={() => void retrySaveAsOverwrite(pendingOverwrite)}
+          onClose={() => {
+            if (!saving) setPendingOverwrite(null);
+          }}
+        />
+      )}
 
-       {/* Save as dialog */}
+      {/* Save as dialog */}
       {saveAsId !== null && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-scrim/80 p-4 backdrop-blur-sm">
           <div
@@ -1868,7 +1998,9 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
             aria-labelledby="save-as-title"
             className="w-full max-w-md rounded-xl border border-border bg-surface p-6"
           >
-            <h3 id="save-as-title" className="mb-4 text-sm font-semibold text-text-emphasis">Save as...</h3>
+            <h3 id="save-as-title" className="mb-4 text-sm font-semibold text-text-emphasis">
+              Save as...
+            </h3>
             <p className="mb-4 text-[12px] text-text-muted">
               This creates a copy. The original file stays on disk until deleted.
             </p>

@@ -1,7 +1,10 @@
 import { describe, test, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { resolveTimeline, timelineProblem } from "@campaignfoundry/CampaignOrchestration/copy-timeline";
+import {
+  resolveTimeline,
+  timelineProblem,
+} from "@campaignfoundry/CampaignOrchestration/copy-timeline";
 import { TimelineSection } from "../TimelineSection";
 import * as messages from "../messages";
 import {
@@ -33,14 +36,22 @@ function renderLive(initial: EditorState) {
     rerender(<TimelineSection state={state} dispatch={dispatch} />);
   });
   const { rerender } = render(<TimelineSection state={state} dispatch={dispatch} />);
-  return { get state() { return state; }, dispatch };
+  return {
+    get state() {
+      return state;
+    },
+    dispatch,
+  };
 }
 
 describe("TimelineSection — beat rows (E5.2)", () => {
   test("an empty sequence says so and offers a first beat", () => {
     render(<TimelineSection state={withBeats([])} dispatch={vi.fn()} />);
     expect(screen.getByText(messages.timelineEmpty)).toBeTruthy();
-    expect((screen.getByRole("button", { name: messages.timelineAddBeat }) as HTMLButtonElement).disabled).toBe(false);
+    expect(
+      (screen.getByRole("button", { name: messages.timelineAddBeat }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(false);
   });
 
   test("a beat with only a warning shows the warning", () => {
@@ -74,7 +85,12 @@ describe("TimelineSection — beat rows (E5.2)", () => {
 
   test("each beat gets a text field, a share stepper and a poster control", async () => {
     const user = userEvent.setup();
-    const live = renderLive(withBeats([{ text: "One", weight: 1 }, { text: "Two", weight: 2 }]));
+    const live = renderLive(
+      withBeats([
+        { text: "One", weight: 1 },
+        { text: "Two", weight: 2 },
+      ]),
+    );
 
     await user.type(screen.getByLabelText(messages.timelineBeatTextLabel(1)), "!");
     expect(live.state.timeline.beats[0]?.text).toBe("One!");
@@ -87,7 +103,11 @@ describe("TimelineSection — beat rows (E5.2)", () => {
   test("reordering moves the row and carries the poster with it", async () => {
     const user = userEvent.setup();
     const live = renderLive(
-      withBeats([{ text: "One", weight: 1 }, { text: "Two", weight: 1 }, { text: "Three", weight: 1 }]),
+      withBeats([
+        { text: "One", weight: 1 },
+        { text: "Two", weight: 1 },
+        { text: "Three", weight: 1 },
+      ]),
     );
     await user.click(screen.getByLabelText(messages.timelineKeyBeatLabel(1)));
     await user.click(screen.getByLabelText(messages.timelineMoveBeatDown(1)));
@@ -101,9 +121,16 @@ describe("TimelineSection — beat rows (E5.2)", () => {
     // stable beat identity, the node moves with the beat and focus follows it.
     const user = userEvent.setup();
     const live = renderLive(
-      withBeats([{ text: "One", weight: 1 }, { text: "Two", weight: 1 }, { text: "Three", weight: 1 }], {
-        duration: [30],
-      }),
+      withBeats(
+        [
+          { text: "One", weight: 1 },
+          { text: "Two", weight: 1 },
+          { text: "Three", weight: 1 },
+        ],
+        {
+          duration: [30],
+        },
+      ),
     );
     await user.click(screen.getByLabelText(messages.timelineMoveBeatDown(1)));
     expect(live.state.timeline.beats.map((b) => b.text)).toEqual(["Two", "One", "Three"]);
@@ -114,22 +141,49 @@ describe("TimelineSection — beat rows (E5.2)", () => {
   });
 
   test("the ends cannot be moved past the ends", () => {
-    render(<TimelineSection state={withBeats([{ text: "One", weight: 1 }, { text: "Two", weight: 1 }])} dispatch={vi.fn()} />);
-    expect((screen.getByLabelText(messages.timelineMoveBeatUp(1)) as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.getByLabelText(messages.timelineMoveBeatDown(2)) as HTMLButtonElement).disabled).toBe(true);
+    render(
+      <TimelineSection
+        state={withBeats([
+          { text: "One", weight: 1 },
+          { text: "Two", weight: 1 },
+        ])}
+        dispatch={vi.fn()}
+      />,
+    );
+    expect(
+      (screen.getByLabelText(messages.timelineMoveBeatUp(1)) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    expect(
+      (screen.getByLabelText(messages.timelineMoveBeatDown(2)) as HTMLButtonElement).disabled,
+    ).toBe(true);
   });
 
   test("the share stepper writes the beat's weight", async () => {
     const user = userEvent.setup();
-    const live = renderLive(withBeats([{ text: "One", weight: 2 }, { text: "Two", weight: 2 }], { duration: [30] }));
+    const live = renderLive(
+      withBeats(
+        [
+          { text: "One", weight: 2 },
+          { text: "Two", weight: 2 },
+        ],
+        { duration: [30] },
+      ),
+    );
     // The Stepper prefixes its own verb onto the field's label.
-    await user.click(screen.getByRole("button", { name: "Increase " + messages.timelineBeatWeightLabel(1) }));
+    await user.click(
+      screen.getByRole("button", { name: "Increase " + messages.timelineBeatWeightLabel(1) }),
+    );
     expect(live.state.timeline.beats[0]?.weight).toBe(3);
   });
 
   test("moving a beat earlier is the mirror of moving it later", async () => {
     const user = userEvent.setup();
-    const live = renderLive(withBeats([{ text: "One", weight: 1 }, { text: "Two", weight: 1 }]));
+    const live = renderLive(
+      withBeats([
+        { text: "One", weight: 1 },
+        { text: "Two", weight: 1 },
+      ]),
+    );
     await user.click(screen.getByLabelText(messages.timelineMoveBeatUp(2)));
     expect(live.state.timeline.beats.map((b) => b.text)).toEqual(["Two", "One"]);
   });
@@ -143,7 +197,15 @@ describe("TimelineSection — beat rows (E5.2)", () => {
 
   test("the transition control writes cut and fade", async () => {
     const user = userEvent.setup();
-    const live = renderLive(withBeats([{ text: "One", weight: 1 }, { text: "Two", weight: 1 }], { duration: [30] }));
+    const live = renderLive(
+      withBeats(
+        [
+          { text: "One", weight: 1 },
+          { text: "Two", weight: 1 },
+        ],
+        { duration: [30] },
+      ),
+    );
     await user.click(screen.getByRole("button", { name: messages.timelineTransitionCut }));
     expect(live.state.timeline.transition).toBe("cut");
     await user.click(screen.getByRole("button", { name: messages.timelineTransitionFade }));
@@ -152,14 +214,20 @@ describe("TimelineSection — beat rows (E5.2)", () => {
 
   test("removing a beat removes exactly that row", async () => {
     const user = userEvent.setup();
-    const live = renderLive(withBeats([{ text: "One", weight: 1 }, { text: "Two", weight: 1 }]));
+    const live = renderLive(
+      withBeats([
+        { text: "One", weight: 1 },
+        { text: "Two", weight: 1 },
+      ]),
+    );
     await user.click(screen.getByLabelText(messages.timelineRemoveBeat(1)));
     expect(live.state.timeline.beats.map((b) => b.text)).toEqual(["Two"]);
   });
 });
 
 describe("TimelineSection — beat messages reach assistive technology (X20)", () => {
-  const textInput = (position: number) => screen.getByLabelText(messages.timelineBeatTextLabel(position));
+  const textInput = (position: number) =>
+    screen.getByLabelText(messages.timelineBeatTextLabel(position));
   const weightSpinbutton = (position: number) =>
     screen.getByRole("spinbutton", { name: messages.timelineBeatWeightLabel(position) });
   const describedBy = (el: Element) => el.getAttribute("aria-describedby");
@@ -171,7 +239,10 @@ describe("TimelineSection — beat messages reach assistive technology (X20)", (
     const error = messages.timelineBeatWeightOutOfRange(1, MAX_WEIGHT);
     render(
       <TimelineSection
-        state={withBeats([{ text: "One", weight: 99 }, { text: "Two", weight: 1 }])}
+        state={withBeats([
+          { text: "One", weight: 99 },
+          { text: "Two", weight: 1 },
+        ])}
         dispatch={vi.fn()}
         errors={{ "copy-timeline-beat-0": error }}
       />,
@@ -235,7 +306,10 @@ describe("TimelineSection — the dwell floor (E5.2/D3)", () => {
       { duration: [5] },
     );
     render(<TimelineSection state={state} dispatch={vi.fn()} />);
-    expect((screen.getByRole("button", { name: messages.timelineAddBeat }) as HTMLButtonElement).disabled).toBe(true);
+    expect(
+      (screen.getByRole("button", { name: messages.timelineAddBeat }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
     expect(screen.getByText(messages.timelineAddBlockedFloor(5, MIN_DWELL_SEC))).toBeTruthy();
   });
 
@@ -247,35 +321,57 @@ describe("TimelineSection — the dwell floor (E5.2/D3)", () => {
       { text: "Two", weight: 1 },
       { text: "Three", weight: 1 },
     ];
-    const { unmount } = render(<TimelineSection state={withBeats(beats, { duration: [30] })} dispatch={vi.fn()} />);
-    expect((screen.getByRole("button", { name: messages.timelineAddBeat }) as HTMLButtonElement).disabled).toBe(false);
+    const { unmount } = render(
+      <TimelineSection state={withBeats(beats, { duration: [30] })} dispatch={vi.fn()} />,
+    );
+    expect(
+      (screen.getByRole("button", { name: messages.timelineAddBeat }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(false);
     unmount();
 
     render(<TimelineSection state={withBeats(beats, { duration: [4] })} dispatch={vi.fn()} />);
-    expect((screen.getByRole("button", { name: messages.timelineAddBeat }) as HTMLButtonElement).disabled).toBe(true);
+    expect(
+      (screen.getByRole("button", { name: messages.timelineAddBeat }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
     expect(screen.getByText(messages.timelineAddBlockedFloor(4, MIN_DWELL_SEC))).toBeTruthy();
   });
 
   test("the shortest clip in the axis is the one the reason names", () => {
     // Two equal beats plus a third would be 1.0s each on a 3s clip and 4.0s on a 12s one.
     // The floor is measured against the shortest, so 3 is the number the reason must say.
-    const state = withBeats([{ text: "One", weight: 1 }, { text: "Two", weight: 1 }], { duration: [30, 3, 12] });
+    const state = withBeats(
+      [
+        { text: "One", weight: 1 },
+        { text: "Two", weight: 1 },
+      ],
+      { duration: [30, 3, 12] },
+    );
     render(<TimelineSection state={state} dispatch={vi.fn()} />);
-    expect((screen.getByRole("button", { name: messages.timelineAddBeat }) as HTMLButtonElement).disabled).toBe(true);
+    expect(
+      (screen.getByRole("button", { name: messages.timelineAddBeat }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
     expect(screen.getByText(messages.timelineAddBlockedFloor(3, MIN_DWELL_SEC))).toBeTruthy();
   });
 
   test("Add is disabled at the beat ceiling, for a different reason", () => {
     const beats = Array.from({ length: MAX_BEATS }, (_, i) => ({ text: `B${i}`, weight: 1 }));
     render(<TimelineSection state={withBeats(beats, { duration: [30] })} dispatch={vi.fn()} />);
-    expect((screen.getByRole("button", { name: messages.timelineAddBeat }) as HTMLButtonElement).disabled).toBe(true);
+    expect(
+      (screen.getByRole("button", { name: messages.timelineAddBeat }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
     expect(screen.getByText(messages.timelineAddBlockedMax(MAX_BEATS))).toBeTruthy();
   });
 });
 
 describe("TimelineSection — insert from the approved pool (E5.4)", () => {
   const pool = (entries: { text: string; status: string }[]) =>
-    ({ entries: entries.map((e, i) => ({ id: `e${i}`, text: e.text, status: e.status })) }) as unknown as EditorState["pool"];
+    ({
+      entries: entries.map((e, i) => ({ id: `e${i}`, text: e.text, status: e.status })),
+    }) as unknown as EditorState["pool"];
 
   test("only approved copy is offered, and inserting it becomes a beat", async () => {
     const user = userEvent.setup();
@@ -319,7 +415,10 @@ describe("TimelineSection — insert from the approved pool (E5.4)", () => {
     const beats = Array.from({ length: MAX_BEATS }, (_, i) => ({ text: `B${i}`, weight: 1 }));
     render(
       <TimelineSection
-        state={withBeats(beats, { duration: [30], pool: pool([{ text: "Approved line", status: "approved" }]) })}
+        state={withBeats(beats, {
+          duration: [30],
+          pool: pool([{ text: "Approved line", status: "approved" }]),
+        })}
         dispatch={vi.fn()}
       />,
     );
@@ -365,7 +464,9 @@ describe("TimelineSection — the proportion bar (E5.3)", () => {
     const resolved = resolveTimeline(asCopyTimeline(state.timeline), 6);
     const blink = (resolved[1].endT - resolved[1].startT) * 6;
     expect(blink).toBeLessThan(MIN_DWELL_SEC);
-    expect(screen.getAllByText(messages.timelineDwellUnderFloor(blink, MIN_DWELL_SEC)).length).toBeGreaterThan(0);
+    expect(
+      screen.getAllByText(messages.timelineDwellUnderFloor(blink, MIN_DWELL_SEC)).length,
+    ).toBeGreaterThan(0);
   });
 
   test("a beat exactly on the floor is not painted as under it", () => {
@@ -387,7 +488,9 @@ describe("TimelineSection — the proportion bar (E5.3)", () => {
     expect(timelineProblem(asCopyTimeline(state.timeline), [6])).toBeUndefined();
 
     render(<TimelineSection state={state} dispatch={vi.fn()} />);
-    expect(screen.queryByText(messages.timelineDwellUnderFloor(dwellSec, MIN_DWELL_SEC))).toBeNull();
+    expect(
+      screen.queryByText(messages.timelineDwellUnderFloor(dwellSec, MIN_DWELL_SEC)),
+    ).toBeNull();
     expect(screen.getAllByText(messages.timelineDwell(dwellSec)).length).toBeGreaterThan(0);
   });
 

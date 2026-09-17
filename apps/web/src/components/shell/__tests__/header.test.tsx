@@ -5,7 +5,13 @@ import { createElement, useEffect, useRef, type ReactElement } from "react";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { DEFAULT_CAMPAIGN_TYPE } from "@campaignfoundry/CampaignOrchestration/campaign-types";
 import { templateFromCanonical } from "@campaignfoundry/CampaignOrchestration/brief-template";
-import { nextMock, renderWithRun, ShellProviders, jobOk, mockPipelineApi } from "@/__tests__/helpers";
+import {
+  nextMock,
+  renderWithRun,
+  ShellProviders,
+  jobOk,
+  mockPipelineApi,
+} from "@/__tests__/helpers";
 import { useEditorDirty } from "@/lib/editor-dirty-context";
 import { useRun } from "@/lib/run-context";
 import {
@@ -49,9 +55,9 @@ const ApplyBrief = () => {
 
 /** POSTs to the generate endpoint — the proof that a run really was started. */
 const generatePosts = () =>
-  vi.mocked(globalThis.fetch).mock.calls.filter(
-    ([, init]) => (init as RequestInit | undefined)?.method === "POST",
-  );
+  vi
+    .mocked(globalThis.fetch)
+    .mock.calls.filter(([, init]) => (init as RequestInit | undefined)?.method === "POST");
 
 describe("Header", () => {
   test("the mobile menu trigger is a 32px icon control, named and marked as a popup", () => {
@@ -321,7 +327,11 @@ describe("Header — Generate's three-way question (D35)", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Generate" }));
-    await user.click(within(screen.getByRole("dialog", { name: generateDraftTitle })).getByRole("button", { name: new RegExp(`^${generateDraftRunThis}`) }));
+    await user.click(
+      within(screen.getByRole("dialog", { name: generateDraftTitle })).getByRole("button", {
+        name: new RegExp(`^${generateDraftRunThis}`),
+      }),
+    );
 
     await waitFor(() => expect(generatePosts()).toHaveLength(1));
     const body = JSON.parse(String(generatePosts()[0][1]?.body)) as { id?: string };
@@ -331,7 +341,8 @@ describe("Header — Generate's three-way question (D35)", () => {
       .mocked(globalThis.fetch)
       .mock.calls.filter(
         ([url, init]) =>
-          String(url).includes("/campaigns/briefs") && (init as RequestInit | undefined)?.method !== "GET",
+          String(url).includes("/campaigns/briefs") &&
+          (init as RequestInit | undefined)?.method !== "GET",
       );
     expect(briefWrites).toHaveLength(0);
     expect(nextMock().router.push).toHaveBeenCalledTimes(1);
@@ -348,7 +359,11 @@ describe("Header — Generate's three-way question (D35)", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Generate" }));
-    await user.click(within(screen.getByRole("dialog", { name: generateDraftTitle })).getByRole("button", { name: new RegExp(`^${generateDraftSaveRun}`) }));
+    await user.click(
+      within(screen.getByRole("dialog", { name: generateDraftTitle })).getByRole("button", {
+        name: new RegExp(`^${generateDraftSaveRun}`),
+      }),
+    );
 
     await waitFor(() => expect(generatePosts()).toHaveLength(1));
     const body = JSON.parse(String(generatePosts()[0][1]?.body)) as { id?: string };
@@ -367,7 +382,11 @@ describe("Header — Generate's three-way question (D35)", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Generate" }));
-    await user.click(within(screen.getByRole("dialog", { name: generateDraftTitle })).getByRole("button", { name: "Cancel" }));
+    await user.click(
+      within(screen.getByRole("dialog", { name: generateDraftTitle })).getByRole("button", {
+        name: "Cancel",
+      }),
+    );
 
     expect(screen.queryByRole("dialog", { name: generateDraftTitle })).toBeNull();
     expect(generatePosts()).toHaveLength(0);
@@ -453,7 +472,9 @@ describe("Header — Generate's three-way question (D35)", () => {
       }),
     );
 
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: generateDraftTitle })).toBeNull());
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: generateDraftTitle })).toBeNull(),
+    );
     expect(generatePosts()).toHaveLength(0);
     expect(nextMock().router.push).not.toHaveBeenCalled();
   });
@@ -470,7 +491,12 @@ describe("Header — Generate's three-way question (D35)", () => {
       const draftRef = useRef<CampaignBrief>(onScreenDraft);
       const blockedRef = useRef<SectionId | null>("products");
       useEffect(() => {
-        setDraftRun({ draftRef, blockedRef, refuseInvalid, saveAndRun: () => Promise.resolve(null) });
+        setDraftRun({
+          draftRef,
+          blockedRef,
+          refuseInvalid,
+          saveAndRun: () => Promise.resolve(null),
+        });
         return () => setDraftRun(null);
       }, [setDraftRun, draftRef, blockedRef, refuseInvalid]);
       return null;
@@ -490,13 +516,17 @@ describe("Header — Generate's three-way question (D35)", () => {
     );
 
     // The question is answered (nothing stays modal over the revealed section)…
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: generateDraftTitle })).toBeNull());
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: generateDraftTitle })).toBeNull(),
+    );
     // …the money: the run never left the page…
     expect(generatePosts()).toHaveLength(0);
     expect(nextMock().router.push).not.toHaveBeenCalled();
     // …the refusal names the blocking section (the one-vocabulary title)…
     await waitFor(() =>
-      expect(screen.getByRole("status").textContent).toBe(generateDraftBlocked(SECTION_TITLES.products)),
+      expect(screen.getByRole("status").textContent).toBe(
+        generateDraftBlocked(SECTION_TITLES.products),
+      ),
     );
     // …and the editor's reveal ran — the navigation to the blocking section.
     expect(refuseInvalid).toHaveBeenCalledTimes(1);
@@ -520,7 +550,9 @@ describe("Header — Generate's three-way question (D35)", () => {
 
     // …and Tab cannot leave it: forward from the last control wraps to the first,
     // backward from the first wraps to the last.
-    const run = within(dialog).getByRole("button", { name: new RegExp(`^${generateDraftRunThis}`) });
+    const run = within(dialog).getByRole("button", {
+      name: new RegExp(`^${generateDraftRunThis}`),
+    });
     const cancel = within(dialog).getByRole("button", { name: "Cancel" });
     cancel.focus();
     fireEvent.keyDown(window, { key: "Tab" });
@@ -542,7 +574,11 @@ describe("Header — Generate's three-way question (D35)", () => {
 
     const generate = screen.getByRole("button", { name: "Generate" });
     await user.click(generate);
-    await user.click(within(screen.getByRole("dialog", { name: generateDraftTitle })).getByRole("button", { name: "Cancel" }));
+    await user.click(
+      within(screen.getByRole("dialog", { name: generateDraftTitle })).getByRole("button", {
+        name: "Cancel",
+      }),
+    );
 
     expect(screen.queryByRole("dialog", { name: generateDraftTitle })).toBeNull();
     // The trap hands focus back where it came from — the page behind an open modal

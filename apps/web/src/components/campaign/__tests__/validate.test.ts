@@ -32,7 +32,14 @@ import { PROHIBITED_TERMS as DOMAIN_PROHIBITED_TERMS } from "@campaignfoundry/Go
 import { clickDestinationProblem } from "@campaignfoundry/CampaignOrchestration/click-destination";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { CANONICAL_TEMPLATES } from "@campaignfoundry/CampaignOrchestration/creative-templates";
-import { initialEditorState, editorReducer, toBrief, fromBrief, parsePolicyInteger, type EditorState } from "../editor-state";
+import {
+  initialEditorState,
+  editorReducer,
+  toBrief,
+  fromBrief,
+  parsePolicyInteger,
+  type EditorState,
+} from "../editor-state";
 // The real gate Save hits, imported across apps for the divergence tests below: tests
 // may cross package boundaries (arch test-double rules), and a mirror without the
 // parser it mirrors is exactly the drift these tests exist to catch.
@@ -79,7 +86,9 @@ describe("maxMinDistance", () => {
     // them only when `output.formats` includes motion, and the client must agree or a
     // draft passes here and is rejected by the planner
     expect(maxMinDistance({ ...state, motion: ["ken-burns-in"] })).toBe(6);
-    expect(maxMinDistance({ ...state, formats: ["static", "motion"], motion: ["ken-burns-in"] })).toBe(8);
+    expect(
+      maxMinDistance({ ...state, formats: ["static", "motion"], motion: ["ken-burns-in"] }),
+    ).toBe(8);
     // requesting motion without kinds draws nothing, so it adds nothing
     expect(maxMinDistance({ ...state, formats: ["static", "motion"], motion: [] })).toBe(6);
   });
@@ -100,13 +109,17 @@ describe("motionUnavailableReason", () => {
   test("says video is unavailable exactly when motion is requested and the probe is off", () => {
     expect(motionUnavailableReason(valid())).toBeUndefined();
     expect(motionUnavailableReason(valid({ formats: ["static", "motion"] }))).toBeUndefined();
-    expect(motionUnavailableReason(valid({ capabilities: { motion: true }, formats: ["motion"] }))).toBeUndefined();
-    expect(motionUnavailableReason(valid({ capabilities: { motion: false, reason: "no ffmpeg" }, formats: ["motion"] }))).toBe(
-      messages.formatsMotionUnavailable,
-    );
-    expect(motionUnavailableReason(valid({ capabilities: { motion: false }, formats: ["motion"] }))).toBe(
-      messages.formatsMotionUnavailable,
-    );
+    expect(
+      motionUnavailableReason(valid({ capabilities: { motion: true }, formats: ["motion"] })),
+    ).toBeUndefined();
+    expect(
+      motionUnavailableReason(
+        valid({ capabilities: { motion: false, reason: "no ffmpeg" }, formats: ["motion"] }),
+      ),
+    ).toBe(messages.formatsMotionUnavailable);
+    expect(
+      motionUnavailableReason(valid({ capabilities: { motion: false }, formats: ["motion"] })),
+    ).toBe(messages.formatsMotionUnavailable);
   });
 });
 
@@ -127,7 +140,9 @@ describe("axisProductSize", () => {
     expect(axisProductSize(reel)).toBe(2 * 1 * 2 * 2 * 1 * 3 * 1);
 
     // a second motion platform at the same ratio adds nothing; tiktok is 9:16 too
-    expect(axisProductSize({ ...reel, platforms: ["instagram-reel", "tiktok"] })).toBe(axisProductSize(reel));
+    expect(axisProductSize({ ...reel, platforms: ["instagram-reel", "tiktok"] })).toBe(
+      axisProductSize(reel),
+    );
   });
 
   test("a mixed brief keeps every ratio and adds the still slot", () => {
@@ -142,7 +157,11 @@ describe("axisProductSize", () => {
   });
 
   test("unknown platform ids and a motion format with no kinds do not collapse it to zero", () => {
-    const unknown = valid({ formats: ["motion"], platforms: ["myspace"], motion: ["ken-burns-in"] });
+    const unknown = valid({
+      formats: ["motion"],
+      platforms: ["myspace"],
+      motion: ["ken-burns-in"],
+    });
     expect(axisProductSize(unknown)).toBeGreaterThan(0);
     const noKinds = valid({ formats: ["motion"], platforms: ["instagram-reel"], motion: [] });
     expect(axisProductSize(noKinds)).toBeGreaterThan(0);
@@ -153,14 +172,19 @@ describe("axisProductSize", () => {
     const pooled = {
       ...base,
       variation: { ...base.variation, headline: true },
-      pool: { entries: [{ id: "a", text: "x", status: "approved" }, { id: "b", text: "y", status: "approved" }] },
+      pool: {
+        entries: [
+          { id: "a", text: "x", status: "approved" },
+          { id: "b", text: "y", status: "approved" },
+        ],
+      },
     } as unknown as typeof base;
     expect(axisProductSize(pooled)).toBe(axisProductSize(base) * 2);
   });
 
   test("a requested ratio subset shrinks the space; a motion-only brief intersects it", () => {
     const narrowed = { ...valid(), variation: { ...valid().variation, ratio: ["1:1", "16:9"] } };
-    expect(axisProductSize(narrowed)).toBe(axisProductSize(valid()) / 3 * 2);
+    expect(axisProductSize(narrowed)).toBe((axisProductSize(valid()) / 3) * 2);
 
     const reel = valid({
       formats: ["motion"],
@@ -180,7 +204,11 @@ describe("drawableRatios", () => {
     expect(drawableRatios(valid())).toEqual(["1:1", "9:16", "16:9"]);
     const narrowed = { ...valid(), variation: { ...valid().variation, ratio: ["16:9"] } };
     expect(drawableRatios(narrowed)).toEqual(["16:9"]);
-    const mixed = valid({ formats: ["static", "motion"], platforms: ["instagram-reel"], motion: ["ken-burns-in"] });
+    const mixed = valid({
+      formats: ["static", "motion"],
+      platforms: ["instagram-reel"],
+      motion: ["ken-burns-in"],
+    });
     expect(drawableRatios(mixed)).toEqual(["1:1", "9:16", "16:9"]);
   });
 
@@ -240,12 +268,20 @@ describe("validateIdentity", () => {
 
   test("a loaded file may keep its own id but not take another brief's", () => {
     const loaded = valid({
-      source: { kind: "file", file: "camp.yaml", loadedId: "camp", savedSnapshot: null, revision: undefined },
+      source: {
+        kind: "file",
+        file: "camp.yaml",
+        loadedId: "camp",
+        savedSnapshot: null,
+        revision: undefined,
+      },
     });
     // unchanged id — its own filename is not a conflict
     expect(validateIdentity(loaded, ["camp", "other"])).toEqual({});
     // renamed onto a different existing brief
-    expect(validateIdentity({ ...loaded, briefId: "other" }, ["camp", "other"]).briefId).toMatch(/already exists/);
+    expect(validateIdentity({ ...loaded, briefId: "other" }, ["camp", "other"]).briefId).toMatch(
+      /already exists/,
+    );
     // renamed to something free
     expect(validateIdentity({ ...loaded, briefId: "fresh" }, ["camp", "other"])).toEqual({});
   });
@@ -258,7 +294,9 @@ describe("validateIdentity", () => {
 describe("validateCopy", () => {
   test("only the campaign message belongs to Copy — its section renders it", () => {
     expect(validateCopy(valid())).toEqual({});
-    expect(Object.keys(validateCopy(valid({ campaignMessage: "  " })))).toEqual(["campaignMessage"]);
+    expect(Object.keys(validateCopy(valid({ campaignMessage: "  " })))).toEqual([
+      "campaignMessage",
+    ]);
   });
 
   test("enforces headline max length of 60 characters", () => {
@@ -281,7 +319,9 @@ describe("validateProducts", () => {
     expect(validateProducts(valid())).toEqual({});
     expect(validateProducts(valid({ products: [product()] }))).toEqual({});
     expect(validateProducts(valid({ mode: "variation", products: [product()] }))).toEqual({});
-    expect(validateProducts(valid({ products: [] })).products).toBe(messages.products(1, "Classic"));
+    expect(validateProducts(valid({ products: [] })).products).toBe(
+      messages.products(1, "Classic"),
+    );
     expect(validateProducts(valid({ mode: "variation", products: [] })).products).toBe(
       messages.products(1, "Randomized"),
     );
@@ -333,17 +373,13 @@ describe("null scalars from a listed brief do not crash the editor (X17)", () =>
 
   test("a product with a null name is a product-name error, not a throw", () => {
     const brief = toBrief(valid());
-    const errors = validateProducts(
-      listed({ products: [{ ...brief.products[0], name: null }] }),
-    );
+    const errors = validateProducts(listed({ products: [{ ...brief.products[0], name: null }] }));
     expect(errors["product-0-name"]).toBe(messages.productName);
   });
 
   test("a product with a null id is a product-id error, not a throw", () => {
     const brief = toBrief(valid());
-    const errors = validateProducts(
-      listed({ products: [{ ...brief.products[0], id: null }] }),
-    );
+    const errors = validateProducts(listed({ products: [{ ...brief.products[0], id: null }] }));
     expect(errors["product-0-id"]).toBe(messages.productId);
   });
 
@@ -375,7 +411,9 @@ describe("validateTreatments", () => {
   test("is skipped outside classic mode and when there are none", () => {
     expect(validateTreatments(valid())).toEqual({});
     expect(
-      validateTreatments(valid({ mode: "variation", treatments: [{ id: "!!", layout: "x", tone: "y" }] })),
+      validateTreatments(
+        valid({ mode: "variation", treatments: [{ id: "!!", layout: "x", tone: "y" }] }),
+      ),
     ).toEqual({});
   });
 
@@ -423,10 +461,16 @@ describe("validatePolicy", () => {
 
   test("minDistance is bounded by the number of active axes", () => {
     expect(validatePolicy(randomized({ minDistance: "6" })).minDistance).toBeUndefined();
-    expect(validatePolicy(randomized({ minDistance: "7" })).minDistance).toBe(messages.minDistance(6));
-    expect(validatePolicy(randomized({ minDistance: "-1" })).minDistance).toBe(messages.minDistance(6));
+    expect(validatePolicy(randomized({ minDistance: "7" })).minDistance).toBe(
+      messages.minDistance(6),
+    );
+    expect(validatePolicy(randomized({ minDistance: "-1" })).minDistance).toBe(
+      messages.minDistance(6),
+    );
     expect(validatePolicy(randomized({ minDistance: "" })).minDistance).toBeUndefined();
-    expect(validatePolicy(randomized({ headline: true, minDistance: "7" })).minDistance).toBeUndefined();
+    expect(
+      validatePolicy(randomized({ headline: true, minDistance: "7" })).minDistance,
+    ).toBeUndefined();
   });
 
   test("an empty anchor selection is an error, like the other value axes (T4)", () => {
@@ -477,7 +521,9 @@ describe("validatePolicy", () => {
     expect(validatePolicy(randomized({ tone: [] })).tone).toBe(messages.tone);
     expect(validatePolicy(randomized({ ratio: [] })).ratio).toBe(messages.ratio);
     expect(validatePolicy(randomized({ background: [] })).background).toBe(messages.background);
-    expect(validatePolicy(randomized({ paletteShift: [] })).paletteShift).toBe(messages.paletteShift);
+    expect(validatePolicy(randomized({ paletteShift: [] })).paletteShift).toBe(
+      messages.paletteShift,
+    );
   });
 
   test("the ratio floor must fit the count: perRatio × the ratios the plan draws", () => {
@@ -487,7 +533,10 @@ describe("validatePolicy", () => {
     const over = validatePolicy(randomized({ perRatio: "2", count: "5" }));
     expect(over.perRatio).toBe(messages.perRatioExceeds(3, 2, 5));
     // selecting a third ratio is what can make a valid floor impossible
-    const twoRatios = { ...randomized({ perRatio: "2", count: "5" }).variation, ratio: ["1:1", "16:9"] };
+    const twoRatios = {
+      ...randomized({ perRatio: "2", count: "5" }).variation,
+      ratio: ["1:1", "16:9"],
+    };
     expect(validatePolicy({ ...randomized(), variation: twoRatios }).perRatio).toBeUndefined();
     // an unset floor never trips it, whatever the count parses to
     expect(validatePolicy(randomized({ perRatio: "", count: "-5" })).perRatio).toBeUndefined();
@@ -622,17 +671,23 @@ describe("validateOutput", () => {
     // only structural complaint would be a missing motion platform); the notice lives
     // on the FormatPanel gate and `motionUnavailableReason` drives the Save/apply
     // refusal, rather than a duplicate red field error.
-    const off = valid({ mode: "variation", formats: ["static", "motion"],
+    const off = valid({
+      mode: "variation",
+      formats: ["static", "motion"],
       platforms: ["instagram-feed", "instagram-reel"],
       capabilities: { motion: false, reason: "no ffmpeg" },
     });
     expect(validateOutput(off).formats).toBeUndefined();
-    const noReason = valid({ mode: "variation", formats: ["motion"],
+    const noReason = valid({
+      mode: "variation",
+      formats: ["motion"],
       platforms: ["instagram-reel"],
       capabilities: { motion: false },
     });
     expect(validateOutput(noReason).formats).toBeUndefined();
-    const on = valid({ mode: "variation", formats: ["static", "motion"],
+    const on = valid({
+      mode: "variation",
+      formats: ["static", "motion"],
       platforms: ["instagram-feed", "instagram-reel"],
       capabilities: { motion: true },
     });
@@ -640,18 +695,31 @@ describe("validateOutput", () => {
   });
 
   test("a platform packaging none of the requested formats says how to resolve it", () => {
-    const errors = validateOutput(valid({ formats: ["motion"], platforms: ["instagram-feed", "instagram-reel"] }));
+    const errors = validateOutput(
+      valid({ formats: ["motion"], platforms: ["instagram-feed", "instagram-reel"] }),
+    );
     expect(errors.platforms).toBe(
       messages.platformsIncompatible("Instagram Feed", ["Still images"]),
     );
   });
 
   test("a format no platform packages names the platforms that would", () => {
-    const errors = validateOutput(valid({ mode: "variation", formats: ["static", "motion"], platforms: ["instagram-feed", "linkedin", "x"] }));
+    const errors = validateOutput(
+      valid({
+        mode: "variation",
+        formats: ["static", "motion"],
+        platforms: ["instagram-feed", "linkedin", "x"],
+      }),
+    );
     // the remedy, not just the rejection: these four appear in the picker the moment
     // motion is requested, so the message points straight at them
     expect(errors.formats).toBe(
-      messages.formatsUnsupported("Video", ["Instagram Story", "Instagram Reel", "TikTok", "YouTube Short"]),
+      messages.formatsUnsupported("Video", [
+        "Instagram Story",
+        "Instagram Reel",
+        "TikTok",
+        "YouTube Short",
+      ]),
     );
   });
 
@@ -659,7 +727,9 @@ describe("validateOutput", () => {
     // D12: the compatibility mirror must not add an error a save would be blocked by,
     // and the capability does not gate persistence — the gate owns the notice.
     const errors = validateOutput(
-      valid({ mode: "variation", formats: ["static", "motion"],
+      valid({
+        mode: "variation",
+        formats: ["static", "motion"],
         platforms: ["instagram-feed", "instagram-reel"],
         capabilities: { motion: false, reason: "no ffmpeg" },
       }),
@@ -674,9 +744,9 @@ describe("validateOutput", () => {
     // must refuse it too: the domain's clickDestinationProblem is the one decision.
     const problem = clickDestinationProblem("example.com/landing");
     expect(problem).toBeDefined();
-    expect(validateOutput(valid({ clickDestination: "example.com/landing" })).clickDestination).toBe(
-      messages.clickDestinationInvalid(problem!),
-    );
+    expect(
+      validateOutput(valid({ clickDestination: "example.com/landing" })).clickDestination,
+    ).toBe(messages.clickDestinationInvalid(problem!));
     // An empty field is "no destination", the one absence that is always valid.
     expect(validateOutput(valid({ clickDestination: "" })).clickDestination).toBeUndefined();
     expect(validateOutput(valid({ clickDestination: "   " })).clickDestination).toBeUndefined();
@@ -713,12 +783,18 @@ describe("validateOutput — motion needs a randomized campaign", () => {
     // The classic matrix renders stills, so motion is drawn only by the variation
     // planner; the remedy is a mode switch, surfaced on the motion FormatPanel gate
     // rather than a red field error (D7: gates are never red).
-    const errors = validateOutput(valid({ mode: "brief", formats: ["motion"], platforms: ["instagram-reel"] }));
+    const errors = validateOutput(
+      valid({ mode: "brief", formats: ["motion"], platforms: ["instagram-reel"] }),
+    );
     expect(errors.formats).toBeUndefined();
   });
 
   test("a randomized brief requesting motion on a motion platform is clean", () => {
-    expect(validateOutput(valid({ mode: "variation", formats: ["motion"], platforms: ["instagram-reel"] }))).toEqual({});
+    expect(
+      validateOutput(
+        valid({ mode: "variation", formats: ["motion"], platforms: ["instagram-reel"] }),
+      ),
+    ).toEqual({});
   });
 });
 
@@ -731,15 +807,47 @@ describe("validateMotion", () => {
     const errors = validateMotion(valid({ mode: "variation" as const, formats: ["motion"] }));
     expect(errors.motion).toBe(messages.motion);
     expect(errors.duration).toBe(messages.duration);
-    expect(validateMotion(valid({ mode: "variation" as const, formats: ["motion"], motion: ["ken-burns-in"], duration: [5] }))).toEqual({});
+    expect(
+      validateMotion(
+        valid({
+          mode: "variation" as const,
+          formats: ["motion"],
+          motion: ["ken-burns-in"],
+          duration: [5],
+        }),
+      ),
+    ).toEqual({});
   });
 
   test("durations are whole seconds bounded to the API's 2–30 range", () => {
-    expect(validateMotion(valid({ mode: "variation" as const, formats: ["motion"], motion: ["ken-burns-in"], duration: [2, 30] })).duration).toBeUndefined();
-    const bad = validateMotion(valid({ mode: "variation" as const, formats: ["motion"], motion: ["ken-burns-in"], duration: [1, 31] }));
+    expect(
+      validateMotion(
+        valid({
+          mode: "variation" as const,
+          formats: ["motion"],
+          motion: ["ken-burns-in"],
+          duration: [2, 30],
+        }),
+      ).duration,
+    ).toBeUndefined();
+    const bad = validateMotion(
+      valid({
+        mode: "variation" as const,
+        formats: ["motion"],
+        motion: ["ken-burns-in"],
+        duration: [1, 31],
+      }),
+    );
     expect(bad.duration).toBe(messages.durationRange(2, 30));
     expect(
-      validateMotion(valid({ mode: "variation" as const, formats: ["motion"], motion: ["ken-burns-in"], duration: [Number.NaN] })).duration,
+      validateMotion(
+        valid({
+          mode: "variation" as const,
+          formats: ["motion"],
+          motion: ["ken-burns-in"],
+          duration: [Number.NaN],
+        }),
+      ).duration,
     ).toBe(messages.durationRange(2, 30));
   });
 });
@@ -747,14 +855,26 @@ describe("validateMotion", () => {
 describe("validateMotion — duplicate durations", () => {
   test("a repeated length is reported, because the planner draws each once", () => {
     const errors = validateMotion(
-      valid({ mode: "variation" as const, formats: ["static", "motion"], motion: ["ken-burns-in"], duration: [6, 6] }),
+      valid({
+        mode: "variation" as const,
+        formats: ["static", "motion"],
+        motion: ["ken-burns-in"],
+        duration: [6, 6],
+      }),
     );
     expect(errors.duration).toBe(messages.durationDuplicate);
   });
 
   test("distinct lengths pass", () => {
     expect(
-      validateMotion(valid({ mode: "variation" as const, formats: ["static", "motion"], motion: ["ken-burns-in"], duration: [6, 8] })).duration,
+      validateMotion(
+        valid({
+          mode: "variation" as const,
+          formats: ["static", "motion"],
+          motion: ["ken-burns-in"],
+          duration: [6, 8],
+        }),
+      ).duration,
     ).toBeUndefined();
   });
 });
@@ -780,7 +900,9 @@ describe("aggregation", () => {
     expect(getTotalErrorCount(clean)).toBe(0);
 
     // both of these now land in Identity, which is where their inputs are rendered
-    const broken = validateState(valid({ mode: "variation" as const, briefId: "Bad Id", targetRegion: "" }));
+    const broken = validateState(
+      valid({ mode: "variation" as const, briefId: "Bad Id", targetRegion: "" }),
+    );
     expect(hasErrors(broken.identity)).toBe(true);
     expect(hasSectionErrors(broken, "copy")).toBe(false);
     expect(getTotalErrorCount(broken)).toBe(2);
@@ -792,15 +914,25 @@ describe("a Classic brief cannot quietly ask for video", () => {
     // pick Video in Randomized, then switch to Classic: `setMode` leaves formats alone,
     // and the generate path branches on mode, so without this the brief saves clean and
     // produces still images instead of the clips it names
-    const classicWithMotion = { ...initialEditorState(), mode: "brief" as const, formats: ["static", "motion"] };
-    expect(validateMotion(classicWithMotion).formats).toBe(messages.formatsMotionNeedsRandomizedMode);
+    const classicWithMotion = {
+      ...initialEditorState(),
+      mode: "brief" as const,
+      formats: ["static", "motion"],
+    };
+    expect(validateMotion(classicWithMotion).formats).toBe(
+      messages.formatsMotionNeedsRandomizedMode,
+    );
   });
 
   test("the same brief in Randomized is not refused for its mode", () => {
-    const randomized = { ...initialEditorState(), mode: "variation" as const, formats: ["static", "motion"] };
+    const randomized = {
+      ...initialEditorState(),
+      mode: "variation" as const,
+      formats: ["static", "motion"],
+    };
     expect(validateMotion(randomized).formats).toBeUndefined();
   });
-})
+});
 
 describe("validateMotion — axes carrying values while Video is off", () => {
   test("a retained kind and a clip length are checked even though Video is off", () => {
@@ -815,7 +947,12 @@ describe("validateMotion — axes carrying values while Video is off", () => {
   });
 
   test("a Classic brief carrying motion values is checked for its mode and its values", () => {
-    const errors = validateMotion({ ...initialEditorState(), mode: "brief" as const, formats: ["static", "motion"], duration: [45] });
+    const errors = validateMotion({
+      ...initialEditorState(),
+      mode: "brief" as const,
+      formats: ["static", "motion"],
+      duration: [45],
+    });
     expect(errors.formats).toBe(messages.formatsMotionNeedsRandomizedMode);
     expect(errors.duration).toBe(messages.durationRange(2, 30));
   });
@@ -833,7 +970,9 @@ describe("the editor says what the parser refuses (B3 divergences)", () => {
   test("a video style the picker never offered, with Video off, is flagged here and refused by the parser", () => {
     const state = valid({ mode: "variation", formats: ["static"], motion: ["slow-pan"] });
     expect(validateState(state).motion.motion).toBe(messages.motionKindUnknown);
-    expect(() => parse(state)).toThrow(/"variation\.axes\.motion" has unsupported value "slow-pan"/);
+    expect(() => parse(state)).toThrow(
+      /"variation\.axes\.motion" has unsupported value "slow-pan"/,
+    );
   });
 
   test("an unknown platform is named here and refused by the parser", () => {
@@ -865,9 +1004,7 @@ describe("inline legal lint warnings (R1)", () => {
     // 1. Prohibited term in campaignMessage
     const stateWithHeadline = valid({ campaignMessage: "Our miracle cure for everything" });
     const warnings = validateWarnings(stateWithHeadline);
-    expect(warnings.copy.campaignMessage).toBe(
-      messages.prohibitedTerminology(["miracle", "cure"]),
-    );
+    expect(warnings.copy.campaignMessage).toBe(messages.prohibitedTerminology(["miracle", "cure"]));
     // The brief still saves: 0 validation errors, structurally valid, and parseBrief accepts it
     const errors = validateState(stateWithHeadline);
     expect(getTotalErrorCount(errors)).toBe(0);
@@ -1057,7 +1194,10 @@ describe("html weight warning (HL5c, HL-D6)", () => {
   });
 
   test("no html profile selected → no weight warning", () => {
-    const state = { ...weightState("A".repeat(200_000)), platforms: ["instagram-feed"] } as EditorState;
+    const state = {
+      ...weightState("A".repeat(200_000)),
+      platforms: ["instagram-feed"],
+    } as EditorState;
     expect(hasSectionWarnings(validateWarnings(state), "template")).toBe(false);
   });
 });

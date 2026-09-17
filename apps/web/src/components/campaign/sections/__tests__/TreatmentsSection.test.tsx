@@ -26,7 +26,9 @@ describe("TreatmentsSection", () => {
 
   test("renders nothing outside classic mode", () => {
     const state = initialEditorState("variation");
-    const { container } = render(<TreatmentsSection state={state} dispatch={vi.fn()} errors={{}} />);
+    const { container } = render(
+      <TreatmentsSection state={state} dispatch={vi.fn()} errors={{}} />,
+    );
     expect(container.firstChild).toBeNull();
   });
 });

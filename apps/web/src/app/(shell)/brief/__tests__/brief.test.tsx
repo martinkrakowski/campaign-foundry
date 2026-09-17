@@ -133,7 +133,9 @@ describe("the blank editor route (/brief/new)", () => {
     expect(labels).not.toContain("YAML split on");
     // D3: a blank draft is invalid, but the verbs stay pressable so the refusal can
     // be spoken; the menu's own behaviour is covered in ui/__tests__/overflow-menu.test.tsx
-    expect((screen.getByRole("button", { name: /^Save$/ }) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByRole("button", { name: /^Save$/ }) as HTMLButtonElement).disabled).toBe(
+      false,
+    );
   });
 
   test("Save as... opens dialog", async () => {

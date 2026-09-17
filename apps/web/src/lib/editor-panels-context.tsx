@@ -42,7 +42,9 @@ export function EditorPanelsProvider({ children }: { children: ReactNode }) {
     return () => setSinks((n) => n - 1);
   }, []);
   return (
-    <EditorPanelsContext.Provider value={{ panels, setPanels, topPanels, setTopPanels, hasSink: sinks > 0, registerSink }}>
+    <EditorPanelsContext.Provider
+      value={{ panels, setPanels, topPanels, setTopPanels, hasSink: sinks > 0, registerSink }}
+    >
       {children}
     </EditorPanelsContext.Provider>
   );

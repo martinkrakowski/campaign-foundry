@@ -7,7 +7,13 @@ import {
 } from "@campaignfoundry/CampaignOrchestration/copy-timeline";
 import { validateTimeline } from "../validate";
 import * as messages from "../messages";
-import { initialEditorState, asCopyTimeline, timelineDurations, toBrief, type EditorState } from "../editor-state";
+import {
+  initialEditorState,
+  asCopyTimeline,
+  timelineDurations,
+  toBrief,
+  type EditorState,
+} from "../editor-state";
 
 const draft = (
   beats: { text: string; weight: number; background?: string }[],
@@ -34,34 +40,76 @@ describe("validateTimeline mirrors timelineProblem (E5.5)", () => {
    * asserted on the verdict, not the string.
    */
   const cases: [string, EditorState][] = [
-    ["a sound two-beat sequence", draft([{ text: "One", weight: 1 }, { text: "Two", weight: 1 }], { duration: [30] })],
+    [
+      "a sound two-beat sequence",
+      draft(
+        [
+          { text: "One", weight: 1 },
+          { text: "Two", weight: 1 },
+        ],
+        { duration: [30] },
+      ),
+    ],
     ["one beat holding the whole clip", draft([{ text: "Only", weight: 1 }], { duration: [6] })],
     [
       "more beats than a sequence holds",
-      draft(Array.from({ length: MAX_BEATS + 1 }, (_, i) => ({ text: `B${i}`, weight: 1 })), { duration: [30] }),
+      draft(
+        Array.from({ length: MAX_BEATS + 1 }, (_, i) => ({ text: `B${i}`, weight: 1 })),
+        { duration: [30] },
+      ),
     ],
     ["a fractional share", draft([{ text: "One", weight: 1.5 }], { duration: [30] })],
     ["a share of zero", draft([{ text: "One", weight: 0 }], { duration: [30] })],
-    ["a share past the ceiling", draft([{ text: "One", weight: MAX_WEIGHT + 1 }], { duration: [30] })],
+    [
+      "a share past the ceiling",
+      draft([{ text: "One", weight: MAX_WEIGHT + 1 }], { duration: [30] }),
+    ],
     [
       "a poster pointing past the last beat",
-      draft([{ text: "One", weight: 1 }], { duration: [30], timeline: { beats: [{ key: 1, text: "One", weight: 1 }], transition: "fade", keyBeat: 4 } }),
+      draft([{ text: "One", weight: 1 }], {
+        duration: [30],
+        timeline: { beats: [{ key: 1, text: "One", weight: 1 }], transition: "fade", keyBeat: 4 },
+      }),
     ],
     [
       "a beat too brief to read on the shortest clip",
-      draft([{ text: "Long", weight: 20 }, { text: "Blink", weight: 1 }], { duration: [6] }),
+      draft(
+        [
+          { text: "Long", weight: 20 },
+          { text: "Blink", weight: 1 },
+        ],
+        { duration: [6] },
+      ),
     ],
     [
       "the same beats, comfortable on a longer clip",
-      draft([{ text: "Long", weight: 20 }, { text: "Blink", weight: 1 }], { duration: [30] }),
+      draft(
+        [
+          { text: "Long", weight: 20 },
+          { text: "Blink", weight: 1 },
+        ],
+        { duration: [30] },
+      ),
     ],
     [
       "the shortest clip in a wide axis is the one that decides",
-      draft([{ text: "Long", weight: 20 }, { text: "Blink", weight: 1 }], { duration: [30, 6, 12] }),
+      draft(
+        [
+          { text: "Long", weight: 20 },
+          { text: "Blink", weight: 1 },
+        ],
+        { duration: [30, 6, 12] },
+      ),
     ],
     [
       "an empty duration axis reads as the single default",
-      draft([{ text: "Long", weight: 20 }, { text: "Blink", weight: 1 }], { duration: [] }),
+      draft(
+        [
+          { text: "Long", weight: 20 },
+          { text: "Blink", weight: 1 },
+        ],
+        { duration: [] },
+      ),
     ],
     [
       "three distinct backgrounds, with repeats and beats naming none",
@@ -121,7 +169,13 @@ describe("validateTimeline mirrors timelineProblem (E5.5)", () => {
 
 describe("validateTimeline speaks the editor's language, not the parser's", () => {
   test("an under-floor beat is named by its position, its seconds and the clip", () => {
-    const state = draft([{ text: "Long", weight: 20 }, { text: "Blink", weight: 1 }], { duration: [6] });
+    const state = draft(
+      [
+        { text: "Long", weight: 20 },
+        { text: "Blink", weight: 1 },
+      ],
+      { duration: [6] },
+    );
     const errors = validateTimeline(state);
     const dwellSec = (6 * 1) / 21;
     expect(errors["copy-timeline-beat-1"]).toBe(
@@ -136,7 +190,9 @@ describe("validateTimeline speaks the editor's language, not the parser's", () =
       Array.from({ length: MAX_BEATS + 1 }, (_, i) => ({ text: `B${i}`, weight: 1 })),
       { duration: [30] },
     );
-    expect(validateTimeline(tooMany)["copy-timeline"]).toBe(messages.timelineTooManyBeats(MAX_BEATS));
+    expect(validateTimeline(tooMany)["copy-timeline"]).toBe(
+      messages.timelineTooManyBeats(MAX_BEATS),
+    );
 
     const stranded = draft([{ text: "One", weight: 1 }], {
       duration: [30],
@@ -155,7 +211,9 @@ describe("validateTimeline speaks the editor's language, not the parser's", () =
       ],
       { duration: [15] },
     );
-    expect(validateTimeline(fourScenes)["copy-timeline"]).toBe(messages.timelineTooManyBackgrounds(3));
+    expect(validateTimeline(fourScenes)["copy-timeline"]).toBe(
+      messages.timelineTooManyBackgrounds(3),
+    );
     // Three distinct values stay clean — the cap counts scenes, not beats that name one.
     const threeScenes = draft(
       [
@@ -170,7 +228,13 @@ describe("validateTimeline speaks the editor's language, not the parser's", () =
   });
 
   test("the errors land under a key the Copy section counts", () => {
-    const state = draft([{ text: "Long", weight: 20 }, { text: "Blink", weight: 1 }], { duration: [6] });
+    const state = draft(
+      [
+        { text: "Long", weight: 20 },
+        { text: "Blink", weight: 1 },
+      ],
+      { duration: [6] },
+    );
     // CopySection counts keys starting with "copy"; a key it cannot see is an error nobody reads.
     expect(Object.keys(validateTimeline(state)).every((key) => key.startsWith("copy"))).toBe(true);
   });

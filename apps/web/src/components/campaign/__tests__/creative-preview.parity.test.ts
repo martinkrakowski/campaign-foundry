@@ -81,7 +81,10 @@ describe("preview and compositor share one creative-geometry source", () => {
     const repoRoot = resolve(__dirname, "../../../../../..");
     const leafImport = "@campaignfoundry/CampaignOrchestration/creative-geometry";
     const compositor = readFileSync(
-      join(repoRoot, "packages/CreativeGeneration/src/infrastructure/adapters/NodeCanvasCompositor.ts"),
+      join(
+        repoRoot,
+        "packages/CreativeGeneration/src/infrastructure/adapters/NodeCanvasCompositor.ts",
+      ),
       "utf-8",
     );
     const preview = readFileSync(

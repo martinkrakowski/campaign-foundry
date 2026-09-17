@@ -35,7 +35,12 @@ describe("StepFooter", () => {
     const plain = ring();
     // A second transition into complete: a remount is what replays the animation.
     rerender(
-      <StepFooter statusText={messages.statusStepReady} onNext={() => {}} nudgeKey={0} readyKey={1} />,
+      <StepFooter
+        statusText={messages.statusStepReady}
+        onNext={() => {}}
+        nudgeKey={0}
+        readyKey={1}
+      />,
     );
     expect(ring()?.className).toContain("animate-ready-ring");
     expect(ring()).not.toBe(plain);
@@ -44,14 +49,20 @@ describe("StepFooter", () => {
     // the node alone, so the CSS one-shot is not restarted.
     const rung = ring();
     rerender(
-      <StepFooter statusText={messages.statusStepReady} onNext={() => {}} nudgeKey={0} readyKey={1} />,
+      <StepFooter
+        statusText={messages.statusStepReady}
+        onNext={() => {}}
+        nudgeKey={0}
+        readyKey={1}
+      />,
     );
     expect(ring()).toBe(rung);
   });
 
   test("the refusal nudge rides the Next label, and only once it has been refused", () => {
     const { rerender } = footer();
-    const label = () => screen.getByRole("button", { name: messages.stepNext }).querySelector("span");
+    const label = () =>
+      screen.getByRole("button", { name: messages.stepNext }).querySelector("span");
     expect(label()?.className).not.toContain("animate-nudge");
     const untouched = label();
 

@@ -1,7 +1,10 @@
 import type { ReactNode } from "react";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import type { MotionKind } from "@campaignfoundry/CampaignOrchestration/motion-kinds";
-import { scaleBasisPx, type CanvasSpec } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
+import {
+  scaleBasisPx,
+  type CanvasSpec,
+} from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import type { LayoutOption, ToneOption, AnchorOption } from "./CreativePreview";
 import { derivePreviewSpec } from "./PreviewDock";
 import { PreviewFrame } from "./PreviewFrame";
@@ -104,7 +107,10 @@ function summaryRows(brief: CampaignBrief, spec: CanvasSpec): SummaryRow[] {
         // The layer list the brief will carry, as a count (L5): the ids are
         // the editor's own vocabulary, never review copy (D18) — the count is
         // the fact worth one line here.
-        rows.push({ section, lines: [messages.reviewTemplateLayers(brief.template.layers.length)] });
+        rows.push({
+          section,
+          lines: [messages.reviewTemplateLayers(brief.template.layers.length)],
+        });
         break;
       case "layout": {
         // The template row (T7): the brief's authored type, in display labels
@@ -114,18 +120,29 @@ function summaryRows(brief: CampaignBrief, spec: CanvasSpec): SummaryRow[] {
         const style = brief.style;
         if (style !== undefined) {
           const lines = [
-            ...(style.fontFamily !== undefined ? [messages.reviewStyleFamily(style.fontFamily)] : []),
+            ...(style.fontFamily !== undefined
+              ? [messages.reviewStyleFamily(style.fontFamily)]
+              : []),
             ...(style.fontWeight !== undefined
               ? [messages.reviewStyleWeight(weightDisplayName(style.fontWeight))]
               : []),
             ...(style.sizeScale !== undefined
-              ? [messages.styleSizeReadout(scaleBasisPx(spec, style.sizeScale), canvasDisplayName(spec))]
+              ? [
+                  messages.styleSizeReadout(
+                    scaleBasisPx(spec, style.sizeScale),
+                    canvasDisplayName(spec),
+                  ),
+                ]
               : []),
-            ...(style.lineHeight !== undefined ? [messages.reviewStyleLineHeight(style.lineHeight.toFixed(2))] : []),
+            ...(style.lineHeight !== undefined
+              ? [messages.reviewStyleLineHeight(style.lineHeight.toFixed(2))]
+              : []),
             ...(style.letterSpacing !== undefined
               ? [messages.reviewStyleLetterSpacing(style.letterSpacing.toFixed(2))]
               : []),
-            ...(style.align !== undefined ? [messages.reviewStyleAlign(alignDisplayName(style.align))] : []),
+            ...(style.align !== undefined
+              ? [messages.reviewStyleAlign(alignDisplayName(style.align))]
+              : []),
           ];
           // Content, not presence: `style: {}` is a declared-but-empty block
           // and would yield a blank row — the same wrongness as a missing one.
@@ -166,7 +183,9 @@ export function ReviewStep({
   const spec = derivePreviewSpec(platformId, undefined, brief.output?.sizes);
   const rows = summaryRows(brief, spec);
   const layout: LayoutOption | undefined =
-    treatment !== undefined ? treatment.layout : (firstOf(axes?.layout) as LayoutOption | undefined);
+    treatment !== undefined
+      ? treatment.layout
+      : (firstOf(axes?.layout) as LayoutOption | undefined);
   const tone: ToneOption | undefined =
     treatment !== undefined ? treatment.tone : (firstOf(axes?.tone) as ToneOption | undefined);
   // The anchor axis (T4) is a variation-axis value only — classic treatments do not carry one.
@@ -232,7 +251,9 @@ export function ReviewStep({
             spec={spec}
             className="block h-auto w-full"
           />
-          <figcaption className="font-mono text-[11px] text-text-muted">{figcaptionText}</figcaption>
+          <figcaption className="font-mono text-[11px] text-text-muted">
+            {figcaptionText}
+          </figcaption>
         </figure>
       ) : null}
     </div>

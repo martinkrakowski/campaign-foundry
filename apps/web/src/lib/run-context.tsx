@@ -2,7 +2,10 @@
 
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { BRIEF_SCHEMA_VERSION } from "@campaignfoundry/CampaignOrchestration/brief-schema-version";
-import { isBriefTemplate, templateFromCanonical } from "@campaignfoundry/CampaignOrchestration/brief-template";
+import {
+  isBriefTemplate,
+  templateFromCanonical,
+} from "@campaignfoundry/CampaignOrchestration/brief-template";
 import { DEFAULT_CAMPAIGN_TYPE } from "@campaignfoundry/CampaignOrchestration/campaign-types";
 import {
   createContext,
@@ -184,7 +187,9 @@ export function normalizeDescriptor(value: unknown): Asset["descriptor"] | undef
   const descriptor: NonNullable<Asset["descriptor"]> = {
     ...(str(raw.layout) !== undefined ? { layout: str(raw.layout) } : {}),
     ...(str(raw.tone) !== undefined ? { tone: str(raw.tone) } : {}),
-    ...(str(raw.backgroundSource) !== undefined ? { backgroundSource: str(raw.backgroundSource) } : {}),
+    ...(str(raw.backgroundSource) !== undefined
+      ? { backgroundSource: str(raw.backgroundSource) }
+      : {}),
     ...(num(raw.paletteShift) !== undefined ? { paletteShift: num(raw.paletteShift) } : {}),
     ...(str(raw.motion) !== undefined ? { motion: str(raw.motion) } : {}),
     ...(num(raw.durationSec) !== undefined ? { durationSec: num(raw.durationSec) } : {}),
@@ -219,7 +224,8 @@ export async function fetchPersistedRun(campaignId: string): Promise<RunResult |
   if (!res.ok) throw pipelineUnreachable(res.status);
   const d = (await res.json()) as RunResult;
   // The one place persisted JSON becomes a RunResult, so the one place to narrow it.
-  if (d?.log?.campaignId === campaignId && (d.assets?.length || d.log)) return normalizeRunResult(d);
+  if (d?.log?.campaignId === campaignId && (d.assets?.length || d.log))
+    return normalizeRunResult(d);
   return null;
 }
 
@@ -249,7 +255,10 @@ async function pollJob(jobId: string, signal: AbortSignal): Promise<PollOutcome>
     if (!res.ok || !data) {
       transient += 1;
       if (transient >= JOB_POLL_MAX_TRANSIENT) {
-        throw pipelineUnreachable(res.status, typeof data?.error === "string" ? data.error : undefined);
+        throw pipelineUnreachable(
+          res.status,
+          typeof data?.error === "string" ? data.error : undefined,
+        );
       }
     } else {
       transient = 0; // a well-formed "running" snapshot
@@ -334,7 +343,11 @@ export function isStoredBrief(value: unknown): value is CampaignBrief {
     Array.isArray(b.products) &&
     b.products.length > 0 &&
     b.products.every(
-      (p) => p && typeof p.id === "string" && typeof p.name === "string" && typeof p.primaryColor === "string",
+      (p) =>
+        p &&
+        typeof p.id === "string" &&
+        typeof p.name === "string" &&
+        typeof p.primaryColor === "string",
     ) &&
     isBriefTemplate(b.template)
   );
@@ -353,8 +366,18 @@ const DEFAULT_BRIEF: CampaignBrief = {
   campaignMessage: "Stay wild. Stay hydrated.",
   localizedMessage: "Bleib wild. Bleib hydriert.",
   products: [
-    { id: "hydra-bottle", name: "Hydra Bottle", primaryColor: "#1473E6", logoPath: "assets/inputs/hydra-logo.png" },
-    { id: "trail-pack", name: "Trail Pack", primaryColor: "#E0218A", logoPath: "assets/inputs/trail-logo.png" },
+    {
+      id: "hydra-bottle",
+      name: "Hydra Bottle",
+      primaryColor: "#1473E6",
+      logoPath: "assets/inputs/hydra-logo.png",
+    },
+    {
+      id: "trail-pack",
+      name: "Trail Pack",
+      primaryColor: "#E0218A",
+      logoPath: "assets/inputs/trail-logo.png",
+    },
   ],
   // Two treatments so the HITL grid demonstrates the variation matrix out of the
   // box (each ratio slot rendered bold-bottom and subtle-top, side-by-side).
@@ -755,58 +778,64 @@ export function RunProvider({ children }: { children: ReactNode }) {
           `Unexpected response from the pipeline API (HTTP ${res.status}, expected 202 with a job id) — the API and UI versions differ.`,
         );
       }
-      throw pipelineUnreachable(res.status, typeof data?.error === "string" ? data.error : undefined);
+      throw pipelineUnreachable(
+        res.status,
+        typeof data?.error === "string" ? data.error : undefined,
+      );
     },
     [selectedModel],
   );
 
-  const execute = useCallback(async (override?: CampaignBrief) => {
-    // The brief this press runs: the shell's active brief by default, or the draft
-    // handed in (Generate's "Run this draft" — the on-screen draft, which may never
-    // have been saved). Everything below keys off the target, never off `brief`, so
-    // a run cannot silently POST the previous campaign (R6).
-    const target = override ?? brief;
-    // The token this press owns while its POST is in flight — captured, not bumped:
-    // beginRun() runs only once the POST has answered with a job to poll. Of two
-    // presses racing, the first to get a job claims the run and the other drops out
-    // silently here (its 409, when the server sent one, named the very job being
-    // polled), so exactly one run is ever adopted and one result committed.
-    let owned = runSeq.current;
-    setLoading(true);
-    setError(null);
-    try {
-      const jobId = await postGenerate(target);
-      if (runSeq.current !== owned) return; // a brief switch (or newer run) superseded this press
-      const started = beginRun();
-      owned = started.seq;
-      const outcome = await pollJob(jobId, started.signal);
-      if (runSeq.current !== owned) return; // a brief switch (or newer run) superseded this
-      if (outcome.kind === "lost") {
-        // The job vanished mid-run. Whatever is on disk is the *previous* run, so show
-        // it without pretending it is new: no cache-bust, review decisions kept. It
-        // shares the target's campaign id, so the target is recorded unchanged.
-        // F6: a failed re-read is not "nothing was saved" either — and the
-        // interruption notice below already names the fact and the remedy, so a
-        // failed read keeps that notice instead of being conflated with absence.
-        const persisted = await fetchPersistedRun(target.id).catch(() => null);
+  const execute = useCallback(
+    async (override?: CampaignBrief) => {
+      // The brief this press runs: the shell's active brief by default, or the draft
+      // handed in (Generate's "Run this draft" — the on-screen draft, which may never
+      // have been saved). Everything below keys off the target, never off `brief`, so
+      // a run cannot silently POST the previous campaign (R6).
+      const target = override ?? brief;
+      // The token this press owns while its POST is in flight — captured, not bumped:
+      // beginRun() runs only once the POST has answered with a job to poll. Of two
+      // presses racing, the first to get a job claims the run and the other drops out
+      // silently here (its 409, when the server sent one, named the very job being
+      // polled), so exactly one run is ever adopted and one result committed.
+      let owned = runSeq.current;
+      setLoading(true);
+      setError(null);
+      try {
+        const jobId = await postGenerate(target);
+        if (runSeq.current !== owned) return; // a brief switch (or newer run) superseded this press
+        const started = beginRun();
+        owned = started.seq;
+        const outcome = await pollJob(jobId, started.signal);
+        if (runSeq.current !== owned) return; // a brief switch (or newer run) superseded this
+        if (outcome.kind === "lost") {
+          // The job vanished mid-run. Whatever is on disk is the *previous* run, so show
+          // it without pretending it is new: no cache-bust, review decisions kept. It
+          // shares the target's campaign id, so the target is recorded unchanged.
+          // F6: a failed re-read is not "nothing was saved" either — and the
+          // interruption notice below already names the fact and the remedy, so a
+          // failed read keeps that notice instead of being conflated with absence.
+          const persisted = await fetchPersistedRun(target.id).catch(() => null);
+          if (runSeq.current !== owned) return;
+          if (persisted) setRun({ result: persisted, target });
+          setError(LOST_JOB_MESSAGE);
+          return;
+        }
+        // Commit the result beside the brief it actually ran — the draft handed in when
+        // there was one, so every result-scoped action can key off it (R6).
+        setRun({ result: outcome.result, target });
+        setAssetVersion((v) => v + 1);
+        setDecisions({});
+        setError(null); // the result replaces any stale complaint about this run
+      } catch (e) {
         if (runSeq.current !== owned) return;
-        if (persisted) setRun({ result: persisted, target });
-        setError(LOST_JOB_MESSAGE);
-        return;
+        setError(e instanceof Error ? e.message : "Generation failed");
+      } finally {
+        if (runSeq.current === owned) setLoading(false);
       }
-      // Commit the result beside the brief it actually ran — the draft handed in when
-      // there was one, so every result-scoped action can key off it (R6).
-      setRun({ result: outcome.result, target });
-      setAssetVersion((v) => v + 1);
-      setDecisions({});
-      setError(null); // the result replaces any stale complaint about this run
-    } catch (e) {
-      if (runSeq.current !== owned) return;
-      setError(e instanceof Error ? e.message : "Generation failed");
-    } finally {
-      if (runSeq.current === owned) setLoading(false);
-    }
-  }, [brief, postGenerate]);
+    },
+    [brief, postGenerate],
+  );
 
   const runMode = useMemo<"brief" | "variation" | null>(() => {
     const assets = run?.result.assets ?? [];
@@ -826,7 +855,9 @@ export function RunProvider({ children }: { children: ReactNode }) {
 
   const regenerateRejected = useCallback(async () => {
     const current = run;
-    const rejected = (current?.result.assets ?? []).filter((a) => decisions[assetKey(a)] === "rejected");
+    const rejected = (current?.result.assets ?? []).filter(
+      (a) => decisions[assetKey(a)] === "rejected",
+    );
     if (current === null || rejected.length === 0) return;
     // The brief this run actually ran — an override draft when "Run this draft" was
     // used, the shell's brief otherwise. A re-roll regenerates the assets on screen,
@@ -949,7 +980,10 @@ export function RunProvider({ children }: { children: ReactNode }) {
       setPackaging(true);
       setPackageError(null);
       try {
-        const result = await packageCampaign(campaignId, platforms, { include, signal: packageSignal() });
+        const result = await packageCampaign(campaignId, platforms, {
+          include,
+          signal: packageSignal(),
+        });
         if (briefIdRef.current !== briefId || packageSeq.current !== seq) return; // superseded
         packageSeq.current += 1;
         setPackages((prev) => {

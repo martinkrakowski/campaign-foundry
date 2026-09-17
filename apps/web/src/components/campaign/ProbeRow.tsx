@@ -22,14 +22,14 @@ export function ProbeRow({ capabilities, className }: ProbeRowProps): ReactNode 
   return (
     <div
       aria-label="Capabilities probe"
-      className={cn(
-        "flex items-center gap-2 font-mono text-[11px] text-text-muted",
-        className,
-      )}
+      className={cn("flex items-center gap-2 font-mono text-[11px] text-text-muted", className)}
     >
       <span className="flex items-center gap-1.5">
         {isProbing && (
-          <span className="inline-block size-2 rounded-full bg-info/80 animate-pulse" aria-hidden="true" />
+          <span
+            className="inline-block size-2 rounded-full bg-info/80 animate-pulse"
+            aria-hidden="true"
+          />
         )}
         {isFound && (
           <span className="inline-block size-2 rounded-full bg-success" aria-hidden="true" />
@@ -41,11 +41,7 @@ export function ProbeRow({ capabilities, className }: ProbeRowProps): ReactNode 
       </span>
       <span>·</span>
       {isProbing && <span>probing…</span>}
-      {isFound && (
-        <span>
-          found{capabilities?.version ? ` · ${capabilities.version}` : ""}
-        </span>
-      )}
+      {isFound && <span>found{capabilities?.version ? ` · ${capabilities.version}` : ""}</span>}
       {isUnavailable && (
         <span className="text-text-muted">
           not available{capabilities?.reason ? ` · ${capabilities.reason}` : ""}

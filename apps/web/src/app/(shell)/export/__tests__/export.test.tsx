@@ -1,7 +1,14 @@
 import { describe, test, expect, beforeEach } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { renderWithRun, seedPersistedRun, makeAsset, makeMotionAsset, json, mockPipelineApi } from "@/__tests__/helpers";
+import {
+  renderWithRun,
+  seedPersistedRun,
+  makeAsset,
+  makeMotionAsset,
+  json,
+  mockPipelineApi,
+} from "@/__tests__/helpers";
 import { API, useRun } from "@/lib/run-context";
 import { DEFAULT_CAMPAIGN_TYPE } from "@campaignfoundry/CampaignOrchestration/campaign-types";
 import { templateFromCanonical } from "@campaignfoundry/CampaignOrchestration/brief-template";
@@ -73,7 +80,14 @@ describe("ExportPage — platform packaging", () => {
           platforms: [
             {
               platformId: "instagram-feed",
-              items: [item(), item({ productId: "beta", checks: { size: "fail" }, packagedPath: "packages/seed/instagram-feed/beta/1x1.png" })],
+              items: [
+                item(),
+                item({
+                  productId: "beta",
+                  checks: { size: "fail" },
+                  packagedPath: "packages/seed/instagram-feed/beta/1x1.png",
+                }),
+              ],
             },
           ],
         }),
@@ -101,14 +115,14 @@ describe("ExportPage — platform packaging", () => {
     expect(screen.getByRole("button", { name: "linkedin", pressed: true })).toBeTruthy();
     expect(screen.getByRole("button", { name: "instagram-feed", pressed: false })).toBeTruthy();
     expect(screen.queryByRole("link", { name: "Download zip" })).toBeNull();
-    expect((screen.getByRole("button", { name: "Download zip" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(
+      (screen.getByRole("button", { name: "Download zip" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
   });
 
   test("a display package row names its size, not a ratio (D113)", async () => {
     const user = userEvent.setup();
-    const assets = [
-      makeAsset({ size: "728x90", outputPath: "alpha/728x90.png" }),
-    ];
+    const assets = [makeAsset({ size: "728x90", outputPath: "alpha/728x90.png" })];
     seedPersistedRun(assets);
     mockPipelineApi({
       report: { halted: false, assets, log: { entries: [], campaignId: "seed" } },
@@ -118,7 +132,13 @@ describe("ExportPage — platform packaging", () => {
           platforms: [
             {
               platformId: "google-display",
-              items: [item({ aspectRatio: undefined, size: "728x90", packagedPath: "packages/seed/google-display/alpha/728x90.png" })],
+              items: [
+                item({
+                  aspectRatio: undefined,
+                  size: "728x90",
+                  packagedPath: "packages/seed/google-display/alpha/728x90.png",
+                }),
+              ],
             },
           ],
         }),
@@ -174,7 +194,9 @@ describe("ExportPage — platform packaging", () => {
     seedPersistedRun(assets);
     renderWithRun(<ExportPage />);
     expect(await screen.findByRole("group", { name: "Platforms" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "google-display-html", pressed: false })).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "google-display-html", pressed: false }),
+    ).toBeTruthy();
     expect(screen.getByRole("button", { name: "display-web-html", pressed: false })).toBeTruthy();
     // The run holds no static asset, so the static display profiles are out on
     // the same format rule.
@@ -324,7 +346,9 @@ describe("ExportPage — platform packaging", () => {
           platforms: [
             {
               platformId: "instagram-feed",
-              items: [item({ packagedPath: "packages/on-screen-draft/instagram-feed/alpha/1x1.png" })],
+              items: [
+                item({ packagedPath: "packages/on-screen-draft/instagram-feed/alpha/1x1.png" }),
+              ],
             },
           ],
         }),
@@ -338,7 +362,9 @@ describe("ExportPage — platform packaging", () => {
     await user.click(screen.getByRole("button", { name: "run draft" }));
     expect(await screen.findByRole("group", { name: "Platforms" })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Package" }));
-    expect(await screen.findByText("packages/on-screen-draft/instagram-feed/alpha/1x1.png")).toBeTruthy();
+    expect(
+      await screen.findByText("packages/on-screen-draft/instagram-feed/alpha/1x1.png"),
+    ).toBeTruthy();
     expect(screen.getByRole("link", { name: "Download zip" }).getAttribute("href")).toBe(
       `${API}/campaigns/packages/on-screen-draft/instagram-feed.zip`,
     );
@@ -348,8 +374,19 @@ describe("ExportPage — platform packaging", () => {
 describe("ExportPage — motion", () => {
   test("approved motion rows show the duration and link the mp4; motion platforms join the picker", async () => {
     const user = userEvent.setup();
-    localStorage.setItem("cf:decisions", JSON.stringify({ "alpha/v1": "approved", "alpha/v2": "approved" }));
-    const assets = [makeMotionAsset(), makeMotionAsset({ variantIndex: 2, outputPath: "alpha/9x16/v2.png", videoPath: "alpha/9x16/v2.mp4", durationSec: undefined })];
+    localStorage.setItem(
+      "cf:decisions",
+      JSON.stringify({ "alpha/v1": "approved", "alpha/v2": "approved" }),
+    );
+    const assets = [
+      makeMotionAsset(),
+      makeMotionAsset({
+        variantIndex: 2,
+        outputPath: "alpha/9x16/v2.png",
+        videoPath: "alpha/9x16/v2.mp4",
+        durationSec: undefined,
+      }),
+    ];
     seedPersistedRun(assets);
     mockPipelineApi({
       report: { halted: false, assets, log: { entries: [], campaignId: "seed" } },
@@ -412,8 +449,16 @@ describe("ExportPage — motion", () => {
 
   test("a run switch that hides the selected motion platform drops the selection and disables Package", async () => {
     const user = userEvent.setup();
-    const motionRun = { halted: false, assets: [makeMotionAsset()], log: { entries: [], campaignId: "seed" } };
-    const staticRun = { halted: false, assets: [makeAsset()], log: { entries: [], campaignId: "other" } };
+    const motionRun = {
+      halted: false,
+      assets: [makeMotionAsset()],
+      log: { entries: [], campaignId: "seed" },
+    };
+    const staticRun = {
+      halted: false,
+      assets: [makeAsset()],
+      log: { entries: [], campaignId: "other" },
+    };
     seedPersistedRun(motionRun.assets);
     const bodies: unknown[] = [];
     mockPipelineApi({
@@ -434,7 +479,9 @@ describe("ExportPage — motion", () => {
     expect(screen.getByRole("button", { name: "instagram-reel", pressed: true })).toBeTruthy();
 
     await user.click(screen.getByRole("button", { name: "switch run" }));
-    await waitFor(() => expect(screen.queryByRole("button", { name: "instagram-reel" })).toBeNull());
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "instagram-reel" })).toBeNull(),
+    );
     // No visible platform is selected any more.
     for (const id of ["instagram-feed", "linkedin", "x"]) {
       expect(screen.getByRole("button", { name: id, pressed: false })).toBeTruthy();

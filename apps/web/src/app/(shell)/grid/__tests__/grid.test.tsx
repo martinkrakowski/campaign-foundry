@@ -20,7 +20,9 @@ import { typeDisplayName } from "@/components/campaign/display-names";
 /** A tiny harness exposing execute/regenerate so loading states can be driven. */
 function Harness() {
   const { execute, regenerateRejected } = useRun();
-  return createElement(Fragment, null,
+  return createElement(
+    Fragment,
+    null,
     createElement("button", { onClick: () => execute(), key: "e" }, "exec"),
     createElement("button", { onClick: () => regenerateRejected(), key: "r" }, "regen"),
     createElement(GridPage, { key: "g" }),
@@ -49,7 +51,13 @@ describe("GridPage", () => {
       // alpha has two ratios (exercises the ratio sort), incl. an unranked one (ratioRank -1).
       makeAsset({ backgroundSource: "imagen", passedCompliance: true, logoApplied: true }),
       makeAsset({ aspectRatio: "21:9", backgroundSource: "imagen" }),
-      makeAsset({ productId: "beta", aspectRatio: "9:16", backgroundSource: "procedural", passedCompliance: false, logoApplied: false }),
+      makeAsset({
+        productId: "beta",
+        aspectRatio: "9:16",
+        backgroundSource: "procedural",
+        passedCompliance: false,
+        logoApplied: false,
+      }),
       makeAsset({ productId: "gamma", aspectRatio: "16:9", backgroundSource: "reused" }),
       makeAsset({ productId: "delta", aspectRatio: "1:1", backgroundSource: "openrouter" }),
       makeAsset({ productId: "epsilon", aspectRatio: "1:1", backgroundSource: "firefly" }),
@@ -82,7 +90,8 @@ describe("GridPage", () => {
     expect(screen.getByText("alpha @ 728x90 · default")).toBeTruthy();
   });
 
-  test("a short-video brief shows the type display name on the review summary, never the raw id", async () => {    seedPersistedRun([makeAsset()]);
+  test("a short-video brief shows the type display name on the review summary, never the raw id", async () => {
+    seedPersistedRun([makeAsset()]);
     const stored = JSON.parse(localStorage.getItem("cf:brief") ?? "{}") as Record<string, unknown>;
     localStorage.setItem("cf:brief", JSON.stringify({ ...stored, type: "short-video" }));
     renderWithRun(<GridPage />);
@@ -104,7 +113,12 @@ describe("GridPage", () => {
       makeAsset({
         variantIndex: 0,
         treatment: "headline-top-subtle",
-        descriptor: { layout: "headline-top", tone: "subtle", backgroundSource: "procedural", paletteShift: 0.1 },
+        descriptor: {
+          layout: "headline-top",
+          tone: "subtle",
+          backgroundSource: "procedural",
+          paletteShift: 0.1,
+        },
       }),
     ]);
     renderWithRun(<GridPage />);
@@ -427,7 +441,17 @@ describe("GridPage", () => {
       report: { halted: false, assets: [makeAsset()], log: { entries: [], campaignId: "seed" } },
     });
     localStorage.setItem("cf:brief-picked", "1");
-    localStorage.setItem("cf:brief", JSON.stringify({ id: "seed", targetRegion: "DE", targetAudience: "a", campaignMessage: "Hi", template: storedTemplate, products: [{ id: "alpha", name: "Alpha", primaryColor: "#1473E6", logoPath: "a.png" }] }));
+    localStorage.setItem(
+      "cf:brief",
+      JSON.stringify({
+        id: "seed",
+        targetRegion: "DE",
+        targetAudience: "a",
+        campaignMessage: "Hi",
+        template: storedTemplate,
+        products: [{ id: "alpha", name: "Alpha", primaryColor: "#1473E6", logoPath: "a.png" }],
+      }),
+    );
     renderWithRun(<Harness />);
     await screen.findByText("Approve"); // run restored
     await user.click(screen.getByText("regen"));
@@ -481,21 +505,33 @@ describe("GridPage", () => {
   test("a brief switch resets the filters and the page to defaults", async () => {
     function Switch() {
       const { setBrief, brief } = useRun();
-      return createElement(Fragment, null,
-        createElement("button", {
-          onClick: () =>
-            setBrief({
-              ...brief,
-              id: "other",
-              products: [{ id: "gamma", name: "Gamma", primaryColor: "#111111", logoPath: "g.png" }],
-            }),
-        }, "switch"),
+      return createElement(
+        Fragment,
+        null,
+        createElement(
+          "button",
+          {
+            onClick: () =>
+              setBrief({
+                ...brief,
+                id: "other",
+                products: [
+                  { id: "gamma", name: "Gamma", primaryColor: "#111111", logoPath: "g.png" },
+                ],
+              }),
+          },
+          "switch",
+        ),
         createElement(GridPage, null),
       );
     }
     const user = userEvent.setup();
     const seedAssets = Array.from({ length: 30 }, (_, i) =>
-      makeAsset({ productId: i % 2 ? "alpha" : "beta", outputPath: `a-${i}.png`, treatment: `t${i}` }),
+      makeAsset({
+        productId: i % 2 ? "alpha" : "beta",
+        outputPath: `a-${i}.png`,
+        treatment: `t${i}`,
+      }),
     );
     const otherAssets = [
       makeAsset({ productId: "gamma", outputPath: "gamma/1x1.png" }),
@@ -540,13 +576,23 @@ describe("GridPage", () => {
     seedPersistedRun([
       makeAsset({
         variantIndex: 0,
-        descriptor: { layout: "headline-top", tone: "bold", backgroundSource: "genai", paletteShift: 0 },
+        descriptor: {
+          layout: "headline-top",
+          tone: "bold",
+          backgroundSource: "genai",
+          paletteShift: 0,
+        },
       }),
       makeAsset({
         productId: "beta",
         variantIndex: 1,
         outputPath: "beta/1x1.png",
-        descriptor: { layout: "headline-bottom", tone: "subtle", backgroundSource: "procedural", paletteShift: 0.2 },
+        descriptor: {
+          layout: "headline-bottom",
+          tone: "subtle",
+          backgroundSource: "procedural",
+          paletteShift: 0.2,
+        },
       }),
     ]);
     renderWithRun(<GridPage />);
@@ -574,7 +620,9 @@ describe("GridPage — motion cells", () => {
     expect(video.getAttribute("poster")).toContain("/output/alpha/9x16/v1.png?v=");
     expect(video.getAttribute("src")).toContain("/output/alpha/9x16/v1.mp4?v=");
     expect(screen.getByText("ken-burns-in · 6s")).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Download .MP4" }).getAttribute("href")).toContain("alpha/9x16/v1.mp4");
+    expect(screen.getByRole("link", { name: "Download .MP4" }).getAttribute("href")).toContain(
+      "alpha/9x16/v1.mp4",
+    );
     expect(screen.getByRole("link", { name: "Download poster .PNG" })).toBeTruthy();
     // The static tile keeps its plain image + download label.
     expect(screen.getByRole("img", { name: "alpha @ 1:1 · default" })).toBeTruthy();
@@ -582,7 +630,9 @@ describe("GridPage — motion cells", () => {
   });
 
   test("hover plays and leaving rewinds; the play control toggles for keyboard users", async () => {
-    const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockImplementation(() => Promise.resolve());
+    const play = vi
+      .spyOn(HTMLMediaElement.prototype, "play")
+      .mockImplementation(() => Promise.resolve());
     const pause = vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
     const user = userEvent.setup();
     seedPersistedRun([makeMotionAsset()]);
@@ -593,7 +643,9 @@ describe("GridPage — motion cells", () => {
     fireEvent.mouseEnter(tile);
     expect(play).toHaveBeenCalledTimes(1);
     // The control flips to "playing" only once play() has resolved.
-    expect(await screen.findByRole("button", { name: `Pause ${LABEL}`, pressed: true })).toBeTruthy();
+    expect(
+      await screen.findByRole("button", { name: `Pause ${LABEL}`, pressed: true }),
+    ).toBeTruthy();
     video.currentTime = 3;
     fireEvent.mouseLeave(tile);
     expect(pause).toHaveBeenCalledTimes(1);
@@ -604,10 +656,14 @@ describe("GridPage — motion cells", () => {
     screen.getByRole("button", { name: `Play ${LABEL}` }).focus();
     await user.keyboard("{Enter}");
     expect(play).toHaveBeenCalledTimes(2);
-    expect((await screen.findByRole("button", { name: `Pause ${LABEL}`, pressed: true })).textContent).toBe("❚❚ 6s");
+    expect(
+      (await screen.findByRole("button", { name: `Pause ${LABEL}`, pressed: true })).textContent,
+    ).toBe("❚❚ 6s");
     await user.keyboard("{Enter}");
     expect(pause).toHaveBeenCalledTimes(2);
-    expect(screen.getByRole("button", { name: `Play ${LABEL}`, pressed: false }).textContent).toBe("▶ 6s");
+    expect(screen.getByRole("button", { name: `Play ${LABEL}`, pressed: false }).textContent).toBe(
+      "▶ 6s",
+    );
   });
 
   test("a play() that returns nothing counts as playing; a rejected play() keeps the play control and shows a hint", async () => {
@@ -616,14 +672,27 @@ describe("GridPage — motion cells", () => {
     play.mockImplementationOnce(() => Promise.reject(new Error("NotAllowedError")));
     play.mockImplementationOnce(() => Promise.resolve());
     const user = userEvent.setup();
-    seedPersistedRun([makeMotionAsset({ durationSec: undefined, descriptor: { layout: "headline-top", tone: "bold", backgroundSource: "procedural", paletteShift: 0, motion: "headline-rise" } })]);
+    seedPersistedRun([
+      makeMotionAsset({
+        durationSec: undefined,
+        descriptor: {
+          layout: "headline-top",
+          tone: "bold",
+          backgroundSource: "procedural",
+          paletteShift: 0,
+          motion: "headline-rise",
+        },
+      }),
+    ]);
     renderWithRun(<GridPage />);
     const button = await screen.findByRole("button", { name: `Play ${LABEL}` });
     expect(button.textContent).toContain("clip");
     expect(screen.getByText("headline-rise · ?s")).toBeTruthy();
     button.focus();
     await user.keyboard("{Enter}"); // play() → undefined (old engine): treated as started
-    expect(await screen.findByRole("button", { name: `Pause ${LABEL}`, pressed: true })).toBeTruthy();
+    expect(
+      await screen.findByRole("button", { name: `Pause ${LABEL}`, pressed: true }),
+    ).toBeTruthy();
     expect(screen.queryByRole("status")).toBeNull();
     await user.keyboard("{Enter}"); // pause
     await user.keyboard("{Enter}"); // play() → rejected: not playing, hint shown
@@ -631,12 +700,25 @@ describe("GridPage — motion cells", () => {
     expect(await screen.findByRole("status")).toHaveProperty("textContent", "can't play");
     expect(screen.getByRole("button", { name: `Play ${LABEL}`, pressed: false })).toBeTruthy();
     await user.keyboard("{Enter}"); // play() → resolves: the hint clears
-    expect(await screen.findByRole("button", { name: `Pause ${LABEL}`, pressed: true })).toBeTruthy();
+    expect(
+      await screen.findByRole("button", { name: `Pause ${LABEL}`, pressed: true }),
+    ).toBeTruthy();
     expect(screen.queryByRole("status")).toBeNull();
   });
 
   test("the chip falls back to the asset duration when the descriptor lacks one", async () => {
-    seedPersistedRun([makeMotionAsset({ durationSec: 4, descriptor: { layout: "headline-top", tone: "bold", backgroundSource: "procedural", paletteShift: 0, motion: "accent-wipe" } })]);
+    seedPersistedRun([
+      makeMotionAsset({
+        durationSec: 4,
+        descriptor: {
+          layout: "headline-top",
+          tone: "bold",
+          backgroundSource: "procedural",
+          paletteShift: 0,
+          motion: "accent-wipe",
+        },
+      }),
+    ]);
     renderWithRun(<GridPage />);
     expect(await screen.findByText("accent-wipe · 4s")).toBeTruthy();
   });
@@ -672,7 +754,11 @@ describe("GridPage — motion cells", () => {
   test("re-rolling a rejected motion variant sends its identity with attempt + 1 and swaps the tile in place", async () => {
     const user = userEvent.setup();
     const original = makeMotionAsset();
-    const rerolled = makeMotionAsset({ attempt: 1, complianceScore: 0.9, descriptor: { ...original.descriptor!, motion: "accent-wipe" } });
+    const rerolled = makeMotionAsset({
+      attempt: 1,
+      complianceScore: 0.9,
+      descriptor: { ...original.descriptor!, motion: "accent-wipe" },
+    });
     seedPersistedRun([original]);
     let body: unknown;
     mockPipelineApi({
@@ -681,14 +767,17 @@ describe("GridPage — motion cells", () => {
         body = JSON.parse(String(init.body));
         return json({ jobId: "job-2" }, 202);
       },
-      job: () => jobOk({ halted: false, assets: [rerolled], log: { entries: [], campaignId: "seed" } }),
+      job: () =>
+        jobOk({ halted: false, assets: [rerolled], log: { entries: [], campaignId: "seed" } }),
     });
     renderWithRun(<Harness />);
     await screen.findByLabelText(LABEL);
     await user.click(screen.getByRole("button", { name: "Reject" }));
     await user.click(screen.getByText("regen"));
     expect(await screen.findByText("accent-wipe · 6s")).toBeTruthy();
-    expect((body as { regenerateOnly: unknown[] }).regenerateOnly).toEqual([{ productId: "alpha", variantIndex: 1, attempt: 1 }]);
+    expect((body as { regenerateOnly: unknown[] }).regenerateOnly).toEqual([
+      { productId: "alpha", variantIndex: 1, attempt: 1 },
+    ]);
     expect(screen.getAllByLabelText(LABEL)).toHaveLength(1);
     expect(screen.getByText(/90\.0%/)).toBeTruthy();
   });

@@ -2,7 +2,13 @@ import { describe, test, expect, vi } from "vitest";
 import { render, fireEvent, act } from "@testing-library/react";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { PREVIEW_FRAME_DEBOUNCE_MS } from "@/lib/preview-frame";
-import { PreviewDock, PreviewPicture, PreviewRailEmptyState, derivePreviewRatio, derivePreviewSpec } from "../PreviewDock";
+import {
+  PreviewDock,
+  PreviewPicture,
+  PreviewRailEmptyState,
+  derivePreviewRatio,
+  derivePreviewSpec,
+} from "../PreviewDock";
 import * as messages from "../messages";
 
 const showcase = {
@@ -62,7 +68,12 @@ describe("PreviewPicture", () => {
     // through. A second derivation here would need a platform it is not given —
     // so a final 16:9 must reach the canvas as exactly 16:9.
     const { container } = render(
-      <PreviewPicture primaryColor="#1473E6" headline="Hi" ratio="16:9" className="block h-auto w-full" />,
+      <PreviewPicture
+        primaryColor="#1473E6"
+        headline="Hi"
+        ratio="16:9"
+        className="block h-auto w-full"
+      />,
     );
     const svg = container.querySelector("svg")!;
     expect(svg.getAttribute("viewBox")).toBe("0 0 1920 1080");
@@ -94,13 +105,17 @@ describe("PreviewDock", () => {
   });
 
   test("derives the ratio once, at its own call site: the platform wins over the shape chips", () => {
-    const { container } = render(<PreviewDock {...showcase} platformId="instagram-story" ratio="1:1" />);
+    const { container } = render(
+      <PreviewDock {...showcase} platformId="instagram-story" ratio="1:1" />,
+    );
     const svg = container.querySelector("svg")!;
     expect(svg.getAttribute("viewBox")).toBe("0 0 1080 1920");
   });
 
   test("names the platform and ratio as display labels, never raw values", () => {
-    const { container } = render(<PreviewDock {...showcase} platformId="instagram-story" ratio="1:1" />);
+    const { container } = render(
+      <PreviewDock {...showcase} platformId="instagram-story" ratio="1:1" />,
+    );
     expect(container.textContent).toContain("Tall · Instagram Story");
     expect(container.textContent).not.toContain("9:16");
     expect(container.textContent).not.toContain("instagram-story");
@@ -156,7 +171,9 @@ describe("PreviewDock", () => {
   });
 
   test("the legend renders through Eyebrow as a p on the token", () => {
-    const { container } = render(<PreviewDock {...showcase} platformId="instagram-story" ratio="1:1" />);
+    const { container } = render(
+      <PreviewDock {...showcase} platformId="instagram-story" ratio="1:1" />,
+    );
     const legend = container.querySelector("p")!;
     expect(legend.textContent).toBe(messages.previewLegend);
     expect(legend.className).toContain("tracking-eyebrow");
@@ -176,7 +193,9 @@ describe("PreviewDock", () => {
    * `previewStep(undefined, undefined)`.
    */
   test("omits the step readout when the caller has no cursor to give it (D141)", () => {
-    const { container } = render(<PreviewDock {...showcase} step={undefined} stepCount={undefined} />);
+    const { container } = render(
+      <PreviewDock {...showcase} step={undefined} stepCount={undefined} />,
+    );
     expect(container.textContent).toContain("Summer Launch");
     expect(container.textContent).toContain("Stay wild. Stay hydrated.");
     expect(container.textContent).not.toContain(" / ");
@@ -238,9 +257,7 @@ describe("PreviewDock — the stand-in caption (D52)", () => {
 
 describe("PreviewDock — scrub control (VE-D5, VE-D6)", () => {
   test("renders a range control when motion is present", () => {
-    const { container } = render(
-      <PreviewDock {...showcase} motion="ken-burns-in" />,
-    );
+    const { container } = render(<PreviewDock {...showcase} motion="ken-burns-in" />);
     const slider = container.querySelector('input[type="range"]');
     expect(slider).not.toBeNull();
     expect(slider?.getAttribute("aria-label")).toBe(messages.previewScrubLabel);
@@ -249,18 +266,14 @@ describe("PreviewDock — scrub control (VE-D5, VE-D6)", () => {
   });
 
   test("the range control is absent when the brief renders no motion", () => {
-    const { container } = render(
-      <PreviewDock {...showcase} motion={undefined} />,
-    );
+    const { container } = render(<PreviewDock {...showcase} motion={undefined} />);
     const slider = container.querySelector('input[type="range"]');
     expect(slider).toBeNull();
   });
 
   test("the scrub control never autoplays", async () => {
     vi.useFakeTimers();
-    const { container } = render(
-      <PreviewDock {...showcase} motion="ken-burns-in" />,
-    );
+    const { container } = render(<PreviewDock {...showcase} motion="ken-burns-in" />);
     const slider = container.querySelector('input[type="range"]') as HTMLInputElement;
     expect(slider).not.toBeNull();
     const initialVal = slider.value;
@@ -272,9 +285,7 @@ describe("PreviewDock — scrub control (VE-D5, VE-D6)", () => {
   });
 
   test("scrubbing dispatches no EditorAction and maintains local component state", () => {
-    const { container } = render(
-      <PreviewDock {...showcase} motion="ken-burns-in" />,
-    );
+    const { container } = render(<PreviewDock {...showcase} motion="ken-burns-in" />);
     const slider = container.querySelector('input[type="range"]') as HTMLInputElement;
     expect(slider).not.toBeNull();
     fireEvent.change(slider, { target: { value: "3" } });
@@ -282,9 +293,7 @@ describe("PreviewDock — scrub control (VE-D5, VE-D6)", () => {
   });
 
   test("committing the scrub position on pointerUp and keyUp updates the committed scrub time", () => {
-    const { container } = render(
-      <PreviewDock {...showcase} motion="ken-burns-in" />,
-    );
+    const { container } = render(<PreviewDock {...showcase} motion="ken-burns-in" />);
     const slider = container.querySelector('input[type="range"]') as HTMLInputElement;
     expect(slider).not.toBeNull();
     fireEvent.change(slider, { target: { value: "2.5" } });
@@ -326,11 +335,7 @@ describe("PreviewDock — scrub control (VE-D5, VE-D6)", () => {
       }) as unknown as CampaignBrief;
 
     const { container, rerender } = render(
-      <PreviewDock
-        {...showcase}
-        motion="ken-burns-in"
-        brief={briefWithDuration(10)}
-      />,
+      <PreviewDock {...showcase} motion="ken-burns-in" brief={briefWithDuration(10)} />,
     );
 
     await act(async () => {
@@ -352,13 +357,7 @@ describe("PreviewDock — scrub control (VE-D5, VE-D6)", () => {
     expect(container.querySelector("img")).not.toBeNull();
 
     // Re-render with a shorter duration (5s)
-    rerender(
-      <PreviewDock
-        {...showcase}
-        motion="ken-burns-in"
-        brief={briefWithDuration(5)}
-      />,
-    );
+    rerender(<PreviewDock {...showcase} motion="ken-burns-in" brief={briefWithDuration(5)} />);
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(PREVIEW_FRAME_DEBOUNCE_MS);
@@ -373,4 +372,3 @@ describe("PreviewDock — scrub control (VE-D5, VE-D6)", () => {
     vi.useRealTimers();
   });
 });
-

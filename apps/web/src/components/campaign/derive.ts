@@ -92,16 +92,12 @@ export function classicAdCount(
   // substitutes DEFAULT_TREATMENT when the list is absent *or* empty
   // (GenerateCampaignUseCase.use-case.ts:163). `?? 1` only catches undefined, so an
   // empty array would otherwise multiply the whole estimate to zero.
-  return (
-    products * (RATIO_VALUES.length + sizes) * Math.max(1, treatments ?? 1)
-  );
+  return products * (RATIO_VALUES.length + sizes) * Math.max(1, treatments ?? 1);
 }
 
 /** Kind → layer count for a template's layer list — the arithmetic both
  * cardinality derivations and the boundary agree on (D124). */
-function countKinds(
-  layers: readonly { readonly kind: LayerKind }[],
-): Map<string, number> {
+function countKinds(layers: readonly { readonly kind: LayerKind }[]): Map<string, number> {
   const counts = new Map<string, number>();
   for (const layer of layers) {
     counts.set(layer.kind, (counts.get(layer.kind) ?? 0) + 1);
@@ -116,10 +112,7 @@ function countEnabledKinds(
 ): Map<string, number> {
   const counts = new Map<string, number>();
   for (const layer of layers) {
-    counts.set(
-      layer.kind,
-      (counts.get(layer.kind) ?? 0) + (layer.enabled !== false ? 1 : 0),
-    );
+    counts.set(layer.kind, (counts.get(layer.kind) ?? 0) + (layer.enabled !== false ? 1 : 0));
   }
   return counts;
 }
@@ -163,22 +156,15 @@ export function addableKinds(state: EditorState): readonly LayerKind[] {
   const rules = CREATIVE_TYPE_RULES[state.template.creativeType];
   const counts = countKinds(state.template.layers);
   return rules.accepts.filter((kind) => {
-    if ((counts.get(kind) ?? 0) >= (rules.maxOf[kind] ?? Infinity))
-      return false;
+    if ((counts.get(kind) ?? 0) >= (rules.maxOf[kind] ?? Infinity)) return false;
     for (const budget of rules.sharedBudgets) {
       if (!budget.kinds.includes(kind)) continue;
-      const used = budget.kinds.reduce(
-        (sum, budgeted) => sum + (counts.get(budgeted) ?? 0),
-        0,
-      );
+      const used = budget.kinds.reduce((sum, budgeted) => sum + (counts.get(budgeted) ?? 0), 0);
       if (used >= budget.max) return false;
     }
     if (
-      findLegalInsertionIndex(
-        state.template.creativeType,
-        state.template.layers,
-        kind,
-      ) === undefined
+      findLegalInsertionIndex(state.template.creativeType, state.template.layers, kind) ===
+      undefined
     ) {
       return false;
     }
@@ -232,11 +218,7 @@ export function disableableLayerIds(state: EditorState): readonly string[] {
   const rules = CREATIVE_TYPE_RULES[state.template.creativeType];
   const enabledCounts = countEnabledKinds(state.template.layers);
   return state.template.layers
-    .filter(
-      (layer) =>
-        layer.enabled !== false &&
-        leavesARequiredKind(rules, layer, enabledCounts),
-    )
+    .filter((layer) => layer.enabled !== false && leavesARequiredKind(rules, layer, enabledCounts))
     .map((layer) => layer.id);
 }
 
@@ -249,9 +231,7 @@ export function disableableLayerIds(state: EditorState): readonly string[] {
 export function toggleableLayerIds(state: EditorState): readonly string[] {
   const disableable = disableableLayerIds(state);
   return state.template.layers
-    .filter(
-      (layer) => layer.enabled === false || disableable.includes(layer.id),
-    )
+    .filter((layer) => layer.enabled === false || disableable.includes(layer.id))
     .map((layer) => layer.id);
 }
 
@@ -289,10 +269,7 @@ export type MoveDirection = "up" | "down";
  * (e.g. "logo above image", "shade directly above image") are enforced here so
  * the UI never offers what the boundary refuses.
  */
-export function layerMoveDirections(
-  state: EditorState,
-  index: number,
-): readonly MoveDirection[] {
+export function layerMoveDirections(state: EditorState, index: number): readonly MoveDirection[] {
   const layers = state.template.layers;
   if (index < 0 || index >= layers.length) return [];
 
@@ -324,11 +301,7 @@ export function layerMoveDirections(
 /**
  * True when the layer at `index` can legally move in `direction`.
  */
-export function canMoveLayer(
-  state: EditorState,
-  index: number,
-  direction: MoveDirection,
-): boolean {
+export function canMoveLayer(state: EditorState, index: number, direction: MoveDirection): boolean {
   return layerMoveDirections(state, index).includes(direction);
 }
 
@@ -382,9 +355,7 @@ export function htmlByteBudget(
  * keystroke invalidates it wholesale. A wider cache would hold superseded
  * readings for nothing.
  */
-let weightReadingCache:
-  | { readonly key: string; readonly reading: HtmlWeightReading }
-  | undefined;
+let weightReadingCache: { readonly key: string; readonly reading: HtmlWeightReading } | undefined;
 
 /**
  * A stable serialisation of exactly the inputs the reading is a function of —
@@ -506,9 +477,7 @@ export function htmlWeightReading(
 ): HtmlWeightReading | undefined {
   const budget = htmlByteBudget(state.platforms, profiles);
   if (budget === undefined) return undefined;
-  const shipSizes = new Set(
-    (budget.sizes ?? []).map((slot) => slot.size as string),
-  );
+  const shipSizes = new Set((budget.sizes ?? []).map((slot) => slot.size as string));
   const sizes = state.sizes.filter((size) => shipSizes.has(size));
   if (sizes.length === 0) return undefined;
   // The same gather GenerateCampaignUseCase runs for its html rows (HL4).
@@ -523,15 +492,7 @@ export function htmlWeightReading(
   if (!isBrandColor(brandColor)) return undefined;
   const tones = draftTones(state);
 
-  const key = htmlWeightKey(
-    sizes,
-    elements,
-    brandColor,
-    state.style,
-    destination,
-    budget,
-    tones,
-  );
+  const key = htmlWeightKey(sizes, elements, brandColor, state.style, destination, budget, tones);
   const cached = weightReadingCache;
   if (cached !== undefined && cached.key === key) return cached.reading;
   let bytes = 0;

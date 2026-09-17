@@ -2,7 +2,14 @@
 
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import type { SectionId } from "@/components/campaign/sections";
-import { createContext, useContext, useState, useCallback, type ReactNode, type RefObject } from "react";
+import {
+  createContext,
+  useContext,
+  useState,
+  useCallback,
+  type ReactNode,
+  type RefObject,
+} from "react";
 import { useRouter } from "next/navigation";
 import { ConfirmDialog } from "@/components/ui";
 
@@ -99,7 +106,9 @@ export function EditorDirtyProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <EditorDirtyContext.Provider value={{ isDirty, setDirty, guardedAction, guardedPush, draftRun, setDraftRun }}>
+    <EditorDirtyContext.Provider
+      value={{ isDirty, setDirty, guardedAction, guardedPush, draftRun, setDraftRun }}
+    >
       {children}
       <ConfirmDialog
         open={pendingAction !== null}

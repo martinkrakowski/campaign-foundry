@@ -7,7 +7,9 @@ import { initialEditorState, toBrief } from "../editor-state";
 import type { EditorState } from "../editor-state";
 import * as messages from "../messages";
 
-const props = (over: Partial<ComponentProps<typeof StepHeader>> = {}): ComponentProps<typeof StepHeader> => ({
+const props = (
+  over: Partial<ComponentProps<typeof StepHeader>> = {},
+): ComponentProps<typeof StepHeader> => ({
   step: 2,
   total: 6,
   title: "Identity",
@@ -16,7 +18,8 @@ const props = (over: Partial<ComponentProps<typeof StepHeader>> = {}): Component
   ...over,
 });
 
-const header = (over: Partial<ComponentProps<typeof StepHeader>> = {}) => render(<StepHeader {...props(over)} />);
+const header = (over: Partial<ComponentProps<typeof StepHeader>> = {}) =>
+  render(<StepHeader {...props(over)} />);
 
 /** A draft that has been applied and saved — the chip's settled green state. */
 const savedAndApplied = (): EditorState => {
@@ -27,7 +30,13 @@ const savedAndApplied = (): EditorState => {
   return {
     ...state,
     appliedSnapshot: brief,
-    source: { kind: "file", file: `${brief.id}.yaml`, loadedId: brief.id, savedSnapshot: brief, revision: undefined },
+    source: {
+      kind: "file",
+      file: `${brief.id}.yaml`,
+      loadedId: brief.id,
+      savedSnapshot: brief,
+      revision: undefined,
+    },
   };
 };
 

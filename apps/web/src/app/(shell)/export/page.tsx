@@ -2,7 +2,10 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { API, assetCanvas, assetKey, assetLabel, useRun } from "@/lib/run-context";
-import { platformProfile, visiblePlatformIds } from "@campaignfoundry/Distribution/platform-profiles";
+import {
+  platformProfile,
+  visiblePlatformIds,
+} from "@campaignfoundry/Distribution/platform-profiles";
 import { MiniChip } from "@/components/ui";
 
 /** Clip length shown on motion export rows, in whole seconds (the brief's `duration` axis). */
@@ -101,23 +104,29 @@ export default function ExportPage() {
     );
   }
 
-  const selected = activePlatform === null ? undefined : packages.find((p) => p.platformId === activePlatform);
+  const selected =
+    activePlatform === null ? undefined : packages.find((p) => p.platformId === activePlatform);
 
   return (
     <div className="mx-auto flex min-h-full w-full max-w-4xl flex-col gap-8 p-4 pb-12 sm:p-8">
       {approved.length === 0 ? (
         <div>
-          <span className="font-mono text-[11px] uppercase tracking-widest text-text-muted">Export</span>
+          <span className="font-mono text-[11px] uppercase tracking-widest text-text-muted">
+            Export
+          </span>
           <h2 className="mb-6 text-lg font-semibold text-text-emphasis">Print Export Queue</h2>
           <p className="max-w-md text-text-muted">
-            No creatives approved yet. Approve creatives in the <span className="text-text-primary">Grid</span>{" "}
-            to add them here — only approved creatives are exported ({pending} pending review).
+            No creatives approved yet. Approve creatives in the{" "}
+            <span className="text-text-primary">Grid</span> to add them here — only approved
+            creatives are exported ({pending} pending review).
           </p>
         </div>
       ) : (
         <>
           <div>
-            <span className="font-mono text-[11px] uppercase tracking-widest text-text-muted">Export</span>
+            <span className="font-mono text-[11px] uppercase tracking-widest text-text-muted">
+              Export
+            </span>
             <h2 className="text-lg font-semibold text-text-emphasis">Print Export Queue</h2>
             <p className="mt-1 text-[13px] text-text-muted">
               {approved.length} of {assets.length} creatives approved for export.
@@ -130,7 +139,13 @@ export default function ExportPage() {
             </h3>
             <div className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-surface shadow-2xl">
               {proofs.map(([path, productId]) => (
-                <Row key={path} label={productId} sub={path} href={`${API}/output/${path}`} cta="Download .PDF" />
+                <Row
+                  key={path}
+                  label={productId}
+                  sub={path}
+                  href={`${API}/output/${path}`}
+                  cta="Download .PDF"
+                />
               ))}
             </div>
           </section>
@@ -196,7 +211,8 @@ export default function ExportPage() {
           <button
             type="button"
             onClick={() =>
-              activePlatform !== null && void packageSelected([activePlatform], hasDecisions ? approvedKeys : undefined)
+              activePlatform !== null &&
+              void packageSelected([activePlatform], hasDecisions ? approvedKeys : undefined)
             }
             disabled={packaging || activePlatform === null}
             title={activePlatform === null ? "Select a platform first" : undefined}
@@ -235,13 +251,19 @@ export default function ExportPage() {
                 <div className="min-w-0">
                   <div className="truncate text-[13px] text-text-primary">
                     {item.productId} @ {assetCanvas(item)} · {item.treatment}
-                    {item.format === "motion" && item.durationSec !== undefined && ` · ${formatDuration(item.durationSec)}`}
+                    {item.format === "motion" &&
+                      item.durationSec !== undefined &&
+                      ` · ${formatDuration(item.durationSec)}`}
                   </div>
-                  <div className="truncate font-mono text-[11px] text-text-muted">{item.packagedPath}</div>
+                  <div className="truncate font-mono text-[11px] text-text-muted">
+                    {item.packagedPath}
+                  </div>
                 </div>
                 <span className="flex shrink-0 gap-1">
                   <CheckBadge label="size" verdict={item.checks.size} />
-                  {item.checks.duration !== undefined && <CheckBadge label="duration" verdict={item.checks.duration} />}
+                  {item.checks.duration !== undefined && (
+                    <CheckBadge label="duration" verdict={item.checks.duration} />
+                  )}
                 </span>
               </div>
             ))}

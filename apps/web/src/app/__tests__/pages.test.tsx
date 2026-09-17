@@ -39,7 +39,12 @@ describe("CompliancePage", () => {
   test("renders a row per asset with pass/fail gates", async () => {
     seedPersistedRun([
       makeAsset({ passedCompliance: true, logoApplied: true }),
-      makeAsset({ productId: "beta", aspectRatio: "9:16", passedCompliance: false, logoApplied: false }),
+      makeAsset({
+        productId: "beta",
+        aspectRatio: "9:16",
+        passedCompliance: false,
+        logoApplied: false,
+      }),
     ]);
     renderWithRun(<CompliancePage />);
     await waitFor(() => expect(screen.getAllByText(/Brand-colour density/)).toHaveLength(2));
@@ -74,7 +79,10 @@ describe("ExportPage", () => {
 
   test("lists approved renders and their proofs", async () => {
     localStorage.setItem("cf:decisions", JSON.stringify({ "alpha/1:1/default": "approved" }));
-    seedPersistedRun([makeAsset(), makeAsset({ productId: "beta", outputPath: "beta/1x1.png", proofPath: "proofs/beta.pdf" })]);
+    seedPersistedRun([
+      makeAsset(),
+      makeAsset({ productId: "beta", outputPath: "beta/1x1.png", proofPath: "proofs/beta.pdf" }),
+    ]);
     renderWithRun(<ExportPage />);
     await waitFor(() => expect(screen.getByText(/1 of 2 creatives approved/)).toBeTruthy());
     expect(screen.getByText("proofs/alpha.pdf")).toBeTruthy();
@@ -102,7 +110,10 @@ describe("RunsPage", () => {
 
   test("summarizes a completed run", async () => {
     localStorage.setItem("cf:decisions", JSON.stringify({ "alpha/1:1/default": "approved" }));
-    seedPersistedRun([makeAsset({ passedCompliance: true }), makeAsset({ productId: "beta", passedCompliance: false })]);
+    seedPersistedRun([
+      makeAsset({ passedCompliance: true }),
+      makeAsset({ productId: "beta", passedCompliance: false }),
+    ]);
     renderWithRun(<RunsPage />);
     await waitFor(() => expect(screen.getByText("complete")).toBeTruthy());
     expect(screen.getByText("seed")).toBeTruthy();

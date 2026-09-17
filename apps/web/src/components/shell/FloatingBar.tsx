@@ -6,7 +6,10 @@ import type { ReactNode } from "react";
  * scroll box: it cannot cover the sidebar, and it cannot scroll away up the page,
  * which `absolute` inside a scrolling child would do.
  */
-export function FloatingBar({ children, ...rest }: { children: ReactNode } & Record<string, unknown>) {
+export function FloatingBar({
+  children,
+  ...rest
+}: { children: ReactNode } & Record<string, unknown>) {
   return (
     <div
       {...rest}

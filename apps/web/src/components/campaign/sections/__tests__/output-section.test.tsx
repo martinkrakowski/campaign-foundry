@@ -30,7 +30,9 @@ const renderWithReducer = (initial: EditorState) => {
   let current = initial;
   const dispatch = vi.fn((action: EditorAction) => {
     current = editorReducer(current, action);
-    rerender(<OutputSection state={current} dispatch={dispatch} errors={validateOutput(current)} />);
+    rerender(
+      <OutputSection state={current} dispatch={dispatch} errors={validateOutput(current)} />,
+    );
   });
   const { rerender, container } = render(
     <OutputSection state={current} dispatch={dispatch} errors={validateOutput(current)} />,

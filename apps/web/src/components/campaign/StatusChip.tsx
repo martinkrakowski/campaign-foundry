@@ -28,7 +28,9 @@ export function StatusChip({ state }: StatusChipProps) {
     : "bg-success/20 text-success border-success/50";
 
   return (
-    <span className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[11px] font-medium ${color}`}>
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[11px] font-medium ${color}`}
+    >
       <span aria-hidden="true" className="w-2 h-2 rounded-full bg-current" />
       <span>{label}</span>
     </span>

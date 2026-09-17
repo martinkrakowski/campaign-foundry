@@ -16,10 +16,18 @@ export default function CompliancePage() {
         <table className="w-full min-w-[640px] text-left text-[13px]">
           <thead className="border-b border-border bg-surface-2 text-text-muted">
             <tr>
-              <Eyebrow as="th" className="p-4 font-normal">Asset Target</Eyebrow>
-              <Eyebrow as="th" className="p-4 font-normal">Rule Engine</Eyebrow>
-              <Eyebrow as="th" className="p-4 font-normal">Telemetry Result</Eyebrow>
-              <Eyebrow as="th" className="p-4 font-normal">Gate Status</Eyebrow>
+              <Eyebrow as="th" className="p-4 font-normal">
+                Asset Target
+              </Eyebrow>
+              <Eyebrow as="th" className="p-4 font-normal">
+                Rule Engine
+              </Eyebrow>
+              <Eyebrow as="th" className="p-4 font-normal">
+                Telemetry Result
+              </Eyebrow>
+              <Eyebrow as="th" className="p-4 font-normal">
+                Gate Status
+              </Eyebrow>
             </tr>
           </thead>
           <tbody className="divide-y divide-border text-text-emphasis">
@@ -35,17 +43,17 @@ export default function CompliancePage() {
             ) : (
               assets.map((asset) => (
                 <tr key={assetKey(asset)}>
-                  <td className="p-4 font-mono">
-                    {assetLabel(asset)}
-                  </td>
+                  <td className="p-4 font-mono">{assetLabel(asset)}</td>
                   <td className="p-4">Brand Density + Logo</td>
                   <td className="p-4 text-text-muted">
                     Brand-colour density {(asset.complianceScore * 100).toFixed(1)}%
-                    {asset.passedCompliance ? " — at or above threshold" : " — below threshold"}; logo{" "}
-                    {asset.logoApplied ? "present" : "missing"}.
+                    {asset.passedCompliance ? " — at or above threshold" : " — below threshold"};
+                    logo {asset.logoApplied ? "present" : "missing"}.
                   </td>
                   <td className="p-4">
-                    <GateBadge status={asset.passedCompliance && asset.logoApplied ? "pass" : "fail"} />
+                    <GateBadge
+                      status={asset.passedCompliance && asset.logoApplied ? "pass" : "fail"}
+                    />
                   </td>
                 </tr>
               ))

@@ -85,15 +85,13 @@ const GENERIC_ARGS: readonly unknown[] = ["sample", 1, ["sample"], true];
 const JARGON_ALLOWLIST = {
   timelineBeatUnderFloor:
     "pre-existing: the clip's readability floor in seconds, not variation-policy jargon.",
-  timelineDwellUnderFloor:
-    "pre-existing: same readability-floor wording as the dwell caption.",
+  timelineDwellUnderFloor: "pre-existing: same readability-floor wording as the dwell caption.",
 } as const satisfies Partial<Record<keyof typeof messages, string>>;
 
 function stringsFrom(value: unknown): string[] {
   if (typeof value === "string") return [value];
   if (Array.isArray(value)) return value.flatMap(stringsFrom);
-  if (value !== null && typeof value === "object")
-    return Object.values(value).flatMap(stringsFrom);
+  if (value !== null && typeof value === "object") return Object.values(value).flatMap(stringsFrom);
   return [];
 }
 
@@ -117,9 +115,7 @@ function scanMessages(): {
     }
     if (typeof value !== "function") continue;
     try {
-      const extracted = stringsFrom(
-        (value as (...args: unknown[]) => unknown)(...argsFor(name)),
-      );
+      const extracted = stringsFrom((value as (...args: unknown[]) => unknown)(...argsFor(name)));
       if (extracted.length === 0) unscannable.push(name);
       else entries.push({ name, strings: extracted });
     } catch {
@@ -149,9 +145,7 @@ describe("messages jargon test", () => {
 
   test("every SAMPLE_ARGS key names a function export", () => {
     for (const name of Object.keys(SAMPLE_ARGS)) {
-      expect(typeof (messages as Record<string, unknown>)[name], name).toBe(
-        "function",
-      );
+      expect(typeof (messages as Record<string, unknown>)[name], name).toBe("function");
     }
   });
 
@@ -159,22 +153,16 @@ describe("messages jargon test", () => {
     const { entries } = scanMessages();
     const byName = new Map(entries.map((entry) => [entry.name, entry.strings]));
     for (const [name, reason] of Object.entries(JARGON_ALLOWLIST)) {
-      expect(
-        reason.trim().length,
-        `${name} must carry a one-line reason`,
-      ).toBeGreaterThan(0);
+      expect(reason.trim().length, `${name} must carry a one-line reason`).toBeGreaterThan(0);
       const scanned = byName.get(name) ?? [];
       expect(
         scanned.length,
         `${name} is not a scanned function export — remove its allowlist entry`,
       ).toBeGreaterThan(0);
-      const stillHits = scanned.some((str) =>
-        forbidden.some((term) => str.includes(term)),
+      const stillHits = scanned.some((str) => forbidden.some((term) => str.includes(term)));
+      expect(stillHits, `${name} no longer hits the jargon list — remove its allowlist entry`).toBe(
+        true,
       );
-      expect(
-        stillHits,
-        `${name} no longer hits the jargon list — remove its allowlist entry`,
-      ).toBe(true);
     }
   });
 
@@ -188,9 +176,7 @@ describe("messages jargon test", () => {
       for (const str of strings) {
         const lower = str.toLowerCase();
         expect(lower, `${name}: ${JSON.stringify(str)}`).not.toContain("appl");
-        expect(lower, `${name}: ${JSON.stringify(str)}`).not.toContain(
-          "launch",
-        );
+        expect(lower, `${name}: ${JSON.stringify(str)}`).not.toContain("launch");
       }
     }
   });
@@ -228,9 +214,7 @@ describe("descriptor messages", () => {
 
 describe("readout.ratioFloor", () => {
   test("states the budget, and only says it is too many when it is", () => {
-    expect(messages.readoutRatioFloor(3, 2, 6, 12, false)).not.toContain(
-      "too many",
-    );
+    expect(messages.readoutRatioFloor(3, 2, 6, 12, false)).not.toContain("too many");
     expect(messages.readoutRatioFloor(3, 2, 6, 5, true)).toContain("too many");
   });
 });
@@ -238,9 +222,7 @@ describe("readout.ratioFloor", () => {
 describe("startFromRatioCaption", () => {
   test("is a count with both plural arms, never the raw ratio ids", () => {
     expect(messages.startFromRatioCaption(["16:9"])).toBe("1 ratio");
-    expect(messages.startFromRatioCaption(["1:1", "9:16", "16:9"])).toBe(
-      "3 ratios",
-    );
+    expect(messages.startFromRatioCaption(["1:1", "9:16", "16:9"])).toBe("3 ratios");
   });
 });
 
@@ -263,15 +245,13 @@ describe("template messages (L5)", () => {
     expect(messages.templateOcclusionNote("Shade", "Static text", "mute")).toBe(
       "the shade layer now sits above the headline and will mute it",
     );
-    expect(
-      messages.templateOcclusionNote("Accent", "Animated text", "mute"),
-    ).toBe("the accent layer now sits above the headline and will mute it");
+    expect(messages.templateOcclusionNote("Accent", "Animated text", "mute")).toBe(
+      "the accent layer now sits above the headline and will mute it",
+    );
     expect(messages.templateOcclusionNote("Image", "Accent", "hide")).toBe(
       "the image layer now sits above the accent and will hide it",
     );
-    expect(
-      messages.templateOcclusionNote("Logo", "Static text", "overlap"),
-    ).toBe(
+    expect(messages.templateOcclusionNote("Logo", "Static text", "overlap")).toBe(
       "the logo layer now sits above the headline and will overlap where it sits",
     );
     expect(messages.templateOcclusionNote("Logo", "Accent", "overlap")).toBe(

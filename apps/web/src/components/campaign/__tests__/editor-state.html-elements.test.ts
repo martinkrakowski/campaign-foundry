@@ -60,8 +60,7 @@ const reduce = (state: EditorState, ...actions: EditorAction[]): EditorState =>
 const htmlLayer = (state: EditorState): CreativeTemplateLayer =>
   state.template.layers.find((layer) => layer.id === "html")!;
 
-const elementsOf = (state: EditorState): readonly HtmlElement[] =>
-  htmlLayer(state).elements ?? [];
+const elementsOf = (state: EditorState): readonly HtmlElement[] => htmlLayer(state).elements ?? [];
 
 /** One element of each kind, in the order added. */
 const withThree = (state = htmlState()): EditorState =>
@@ -98,9 +97,7 @@ describe("addHtmlElement (HL5a)", () => {
       layerId: "html",
       kind: "button",
     });
-    expect(elementsOf(button)[0]!.text).toBe(
-      messages.htmlElementDefaultCopy("button"),
-    );
+    expect(elementsOf(button)[0]!.text).toBe(messages.htmlElementDefaultCopy("button"));
     const image = editorReducer(htmlState(), {
       type: "addHtmlElement",
       layerId: "html",
@@ -115,22 +112,21 @@ describe("addHtmlElement (HL5a)", () => {
   });
 
   test("a second add appends, and the first element is untouched", () => {
-    const next = reduce(htmlState(), {
-      type: "addHtmlElement",
-      layerId: "html",
-      kind: "text",
-    }, {
-      type: "addHtmlElement",
-      layerId: "html",
-      kind: "image",
-    });
-    expect(elementsOf(next).map((element) => element.kind)).toEqual([
-      "text",
-      "image",
-    ]);
-    expect(elementsOf(next)[0]!.text).toBe(
-      messages.htmlElementDefaultCopy("text"),
+    const next = reduce(
+      htmlState(),
+      {
+        type: "addHtmlElement",
+        layerId: "html",
+        kind: "text",
+      },
+      {
+        type: "addHtmlElement",
+        layerId: "html",
+        kind: "image",
+      },
     );
+    expect(elementsOf(next).map((element) => element.kind)).toEqual(["text", "image"]);
+    expect(elementsOf(next)[0]!.text).toBe(messages.htmlElementDefaultCopy("text"));
   });
 
   test("a missing layer, a layer of another kind, and a fresh draft are all no-ops", () => {
@@ -170,10 +166,7 @@ describe("removeHtmlElement (HL5a)", () => {
       layerId: "html",
       index: 1,
     });
-    expect(elementsOf(next).map((element) => element.kind)).toEqual([
-      "text",
-      "image",
-    ]);
+    expect(elementsOf(next).map((element) => element.kind)).toEqual(["text", "image"]);
   });
 
   test("removing the last element deletes the key, so add-then-remove is valuesEqual to the loaded template", () => {
@@ -259,11 +252,7 @@ describe("moveHtmlElement (HL5a)", () => {
       from: 2,
       to: 0,
     });
-    expect(elementsOf(next).map((element) => element.kind)).toEqual([
-      "image",
-      "text",
-      "button",
-    ]);
+    expect(elementsOf(next).map((element) => element.kind)).toEqual(["image", "text", "button"]);
     // The moved element is the same object, never a copy.
     expect(elementsOf(next)[0]).toBe(elementsOf(base)[2]);
     // And back: the move is its own inverse.
@@ -385,9 +374,7 @@ describe("setHtmlElementFrame (HL5a)", () => {
     });
     expect(elementsOf(next)[0]!.frame.x).toBe(0.25);
     // Only the field named moved.
-    expect(elementsOf(next)[0]!.frame.y).toBe(
-      elementsOf(withThree())[0]!.frame.y,
-    );
+    expect(elementsOf(next)[0]!.frame.y).toBe(elementsOf(withThree())[0]!.frame.y);
   });
 
   test("clamps a value outside [0, 1] to the nearer end", () => {
@@ -690,8 +677,7 @@ describe("setHtmlElementStyle (HL5e)", () => {
       ),
     };
     const canonical = canonicalTemplate(withEmptyStyle as unknown as BriefTemplate);
-    for (const element of canonical.layers.find((layer) => layer.id === "html")!
-      .elements ?? []) {
+    for (const element of canonical.layers.find((layer) => layer.id === "html")!.elements ?? []) {
       expect("style" in element).toBe(false);
     }
     // Already-canonical: the SAME object back.

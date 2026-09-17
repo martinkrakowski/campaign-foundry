@@ -62,7 +62,9 @@ describe("PreviewFrame (D52)", () => {
     });
     const img = container.querySelector("img")!;
     expect(img).not.toBeNull();
-    expect(img.getAttribute("src")).toBe(`data:image/png;base64,${btoa(String.fromCharCode(...pngBytes))}`);
+    expect(img.getAttribute("src")).toBe(
+      `data:image/png;base64,${btoa(String.fromCharCode(...pngBytes))}`,
+    );
     expect(img.className).toBe("block h-auto w-full");
     expect(container.querySelector("svg")).toBeNull();
     // The real frame lives in the same bordered box the placeholder drew.
@@ -83,7 +85,14 @@ describe("PreviewFrame (D52)", () => {
   test.each([
     ["no brief at all", { brief: undefined }],
     ["a brief without products", { brief: brief({ products: [] }) }],
-    ["a product with an empty id", { brief: brief({ products: [{ id: "", name: "A", primaryColor: "#1473E6", logoPath: "a.png" }] }) }],
+    [
+      "a product with an empty id",
+      {
+        brief: brief({
+          products: [{ id: "", name: "A", primaryColor: "#1473E6", logoPath: "a.png" }],
+        }),
+      },
+    ],
     ["no layout", { layout: undefined }],
     ["no tone", { tone: undefined }],
   ])("with %s, the look is unspecified and nothing is ever requested", async (_label, props) => {
@@ -100,7 +109,9 @@ describe("PreviewFrame (D52)", () => {
     vi.useFakeTimers();
     vi.mocked(globalThis.fetch).mockResolvedValue(pngResponse());
     const view = renderFrame({
-      brief: brief({ products: [{ id: "", name: "A", primaryColor: "#1473E6", logoPath: "a.png" }] }),
+      brief: brief({
+        products: [{ id: "", name: "A", primaryColor: "#1473E6", logoPath: "a.png" }],
+      }),
     });
     await act(async () => {
       await vi.advanceTimersByTimeAsync(PREVIEW_FRAME_DEBOUNCE_MS);
@@ -124,7 +135,7 @@ describe("PreviewFrame (D52)", () => {
     expect(globalThis.fetch).toHaveBeenCalledTimes(1);
   });
 
-  test("a display-size spec issues exactly one preview request carrying { size: \"728x90\" } and mounts the frame", async () => {
+  test('a display-size spec issues exactly one preview request carrying { size: "728x90" } and mounts the frame', async () => {
     vi.useFakeTimers();
     vi.mocked(globalThis.fetch).mockResolvedValue(pngResponse());
     const { container } = renderFrame({ spec: { size: "728x90" } });
@@ -167,7 +178,9 @@ describe("PreviewFrame (D52)", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(PREVIEW_FRAME_DEBOUNCE_MS);
     });
-    const body = JSON.parse((vi.mocked(globalThis.fetch).mock.calls[0][1] as RequestInit).body as string);
+    const body = JSON.parse(
+      (vi.mocked(globalThis.fetch).mock.calls[0][1] as RequestInit).body as string,
+    );
     expect(body.cell.motion).toBe("ken-burns-in");
     expect(body.cell.durationSec).toBe(6);
     expect(body.cell.atSec).toBe(2);
@@ -259,7 +272,13 @@ describe("the rail's memo must not hide a switch of creative from usePreviewFram
     state = editorReducer(state, { type: "setProduct", key: 1, patch: { id: "p1", name: "A" } });
     state.campaignName = "twin";
     state.briefId = loadedId;
-    state.source = { kind: "file", file: `${loadedId}.yaml`, loadedId, savedSnapshot: null, revision: undefined };
+    state.source = {
+      kind: "file",
+      file: `${loadedId}.yaml`,
+      loadedId,
+      savedSnapshot: null,
+      revision: undefined,
+    };
     return state;
   };
 
@@ -308,7 +327,13 @@ describe("the rail's memo must not hide a switch of creative from usePreviewFram
     });
     state.campaignName = "twin";
     state.briefId = "twin-a";
-    state.source = { kind: "file", file: "twin-a.yaml", loadedId: "twin-a", savedSnapshot: null, revision: undefined };
+    state.source = {
+      kind: "file",
+      file: "twin-a.yaml",
+      loadedId: "twin-a",
+      savedSnapshot: null,
+      revision: undefined,
+    };
     return state;
   };
 
@@ -327,4 +352,3 @@ describe("the rail's memo must not hide a switch of creative from usePreviewFram
     expect(view.container.querySelector("svg")).not.toBeNull();
   });
 });
-

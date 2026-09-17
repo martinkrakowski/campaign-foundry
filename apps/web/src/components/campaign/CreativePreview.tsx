@@ -396,7 +396,9 @@ export function CreativePreview({
        to invent — D26). */
     logo: {
       block: "logo",
-      element: <rect x={logoX} y={logoY} width={logoW} height={logoW} fill="#ffffff" fillOpacity={0.4} />,
+      element: (
+        <rect x={logoX} y={logoY} width={logoW} height={logoW} fill="#ffffff" fillOpacity={0.4} />
+      ),
     },
   };
   // The painted kinds, in the shared order — never a second list (C2).

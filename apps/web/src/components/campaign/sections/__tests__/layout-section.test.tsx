@@ -2,7 +2,11 @@ import { describe, test, expect, vi, afterEach } from "vitest";
 import { render, screen, act, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { scaleBasisPx } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
-import { emptyProduct, initialEditorState, type EditorState } from "@/components/campaign/editor-state";
+import {
+  emptyProduct,
+  initialEditorState,
+  type EditorState,
+} from "@/components/campaign/editor-state";
 import { derivePreviewSpec } from "@/components/campaign/PreviewDock";
 import { LayoutSection } from "../LayoutSection";
 import { PREVIEW_FRAME_DEBOUNCE_MS } from "@/lib/preview-frame";
@@ -52,9 +56,13 @@ describe("LayoutSection — the type controls (T5/T7)", () => {
 
     fireEvent.change(screen.getByRole("slider", { name: "Size" }), { target: { value: "0.08" } });
     expect(dispatch).toHaveBeenCalledWith({ type: "setStyle", patch: { sizeScale: 0.08 } });
-    fireEvent.change(screen.getByRole("slider", { name: "Line height" }), { target: { value: "1.4" } });
+    fireEvent.change(screen.getByRole("slider", { name: "Line height" }), {
+      target: { value: "1.4" },
+    });
     expect(dispatch).toHaveBeenCalledWith({ type: "setStyle", patch: { lineHeight: 1.4 } });
-    fireEvent.change(screen.getByRole("slider", { name: "Letter spacing" }), { target: { value: "0.05" } });
+    fireEvent.change(screen.getByRole("slider", { name: "Letter spacing" }), {
+      target: { value: "0.05" },
+    });
     expect(dispatch).toHaveBeenCalledWith({ type: "setStyle", patch: { letterSpacing: 0.05 } });
   });
 
@@ -65,14 +73,22 @@ describe("LayoutSection — the type controls (T5/T7)", () => {
     // the compositor's non-subtle path, so Bold, not Regular.
     expect(screen.getByRole("button", { name: "Inter" }).getAttribute("aria-pressed")).toBe("true");
     expect(screen.getByRole("button", { name: "Bold" }).getAttribute("aria-pressed")).toBe("true");
-    expect(screen.getByRole("button", { name: "Center" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "Center" }).getAttribute("aria-pressed")).toBe(
+      "true",
+    );
   });
 
   test("the Effect row shows the kind's label when the draft carries one, None otherwise (T6)", () => {
     const { unmount } = render(
-      <LayoutSection state={state({ style: { textEffect: "scale-in" } })} dispatch={vi.fn()} errors={{}} />,
+      <LayoutSection
+        state={state({ style: { textEffect: "scale-in" } })}
+        dispatch={vi.fn()}
+        errors={{}}
+      />,
     );
-    expect(screen.getByRole("button", { name: "Scale in" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "Scale in" }).getAttribute("aria-pressed")).toBe(
+      "true",
+    );
     expect(screen.getByRole("button", { name: "None" }).getAttribute("aria-pressed")).toBe("false");
     // Raw kind ids never render (D18/D50) — the label map is the only face.
     expect(screen.queryByRole("button", { name: "scale-in" })).toBeNull();
@@ -102,7 +118,9 @@ describe("LayoutSection — the type controls (T5/T7)", () => {
         errors={{}}
       />,
     );
-    expect(screen.getByRole("button", { name: "Regular" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "Regular" }).getAttribute("aria-pressed")).toBe(
+      "true",
+    );
     expect(screen.getByRole("button", { name: "Bold" }).getAttribute("aria-pressed")).toBe("false");
     subtle.unmount();
     render(
@@ -113,7 +131,9 @@ describe("LayoutSection — the type controls (T5/T7)", () => {
       />,
     );
     expect(screen.getByRole("button", { name: "Bold" }).getAttribute("aria-pressed")).toBe("true");
-    expect(screen.getByRole("button", { name: "Regular" }).getAttribute("aria-pressed")).toBe("false");
+    expect(screen.getByRole("button", { name: "Regular" }).getAttribute("aria-pressed")).toBe(
+      "false",
+    );
   });
 
   test("an explicit weight overrides the tone-derived default", () => {
@@ -127,13 +147,19 @@ describe("LayoutSection — the type controls (T5/T7)", () => {
         errors={{}}
       />,
     );
-    expect(screen.getByRole("button", { name: "Regular" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "Regular" }).getAttribute("aria-pressed")).toBe(
+      "true",
+    );
     expect(screen.getByRole("button", { name: "Bold" }).getAttribute("aria-pressed")).toBe("false");
   });
 
   test("the size readout shows the derived pixels at the previewed ratio, never the stored fraction (D55)", () => {
     const { unmount } = render(
-      <LayoutSection state={state({ style: { sizeScale: 0.08 } })} dispatch={vi.fn()} errors={{}} />,
+      <LayoutSection
+        state={state({ style: { sizeScale: 0.08 } })}
+        dispatch={vi.fn()}
+        errors={{}}
+      />,
     );
     // 0.08 of the square canvas' 1080 px width, rounded — derived text.
     expect(screen.getByText(messages.styleSizeReadout(86, "Square"))).toBeTruthy();
@@ -174,7 +200,9 @@ describe("LayoutSection — the hosted surfaces", () => {
 
   test("without the preview flag there is no frame and no request — the Everything stack shows controls only", () => {
     const calls = vi.mocked(globalThis.fetch).mock.calls.length;
-    const { container } = render(<LayoutSection state={variationState()} dispatch={vi.fn()} errors={{}} />);
+    const { container } = render(
+      <LayoutSection state={variationState()} dispatch={vi.fn()} errors={{}} />,
+    );
     expect(container.querySelector("figure")).toBeNull();
     expect(vi.mocked(globalThis.fetch).mock.calls.length).toBe(calls);
   });
@@ -193,7 +221,9 @@ describe("LayoutSection — the frame follows the controls (T1b/D63)", () => {
   test("the frame refetches when a style control changes — debounced, never per keystroke", async () => {
     vi.useFakeTimers();
     vi.mocked(globalThis.fetch).mockResolvedValue(pngResponse());
-    const view = render(<LayoutSection state={variationState()} dispatch={vi.fn()} errors={{}} preview />);
+    const view = render(
+      <LayoutSection state={variationState()} dispatch={vi.fn()} errors={{}} preview />,
+    );
     await act(async () => {
       await vi.advanceTimersByTimeAsync(PREVIEW_FRAME_DEBOUNCE_MS);
     });
@@ -201,7 +231,12 @@ describe("LayoutSection — the frame follows the controls (T1b/D63)", () => {
 
     // Two edits inside the debounce window settle into ONE request for the latest look.
     view.rerender(
-      <LayoutSection state={variationState({ style: { sizeScale: 0.08 } })} dispatch={vi.fn()} errors={{}} preview />,
+      <LayoutSection
+        state={variationState({ style: { sizeScale: 0.08 } })}
+        dispatch={vi.fn()}
+        errors={{}}
+        preview
+      />,
     );
     view.rerender(
       <LayoutSection
@@ -233,7 +268,9 @@ describe("LayoutSection — the frame follows the controls (T1b/D63)", () => {
     });
     expect(vi.mocked(globalThis.fetch).mock.calls.length).toBe(0);
 
-    view.rerender(<LayoutSection state={variationState()} dispatch={vi.fn()} errors={{}} preview />);
+    view.rerender(
+      <LayoutSection state={variationState()} dispatch={vi.fn()} errors={{}} preview />,
+    );
     await act(async () => {
       await vi.advanceTimersByTimeAsync(PREVIEW_FRAME_DEBOUNCE_MS);
     });

@@ -14,7 +14,8 @@ import { render, screen } from "@testing-library/react";
  * whatever arithmetic it substitutes.
  */
 vi.mock("@campaignfoundry/CampaignOrchestration/copy-timeline", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@campaignfoundry/CampaignOrchestration/copy-timeline")>();
+  const actual =
+    await importOriginal<typeof import("@campaignfoundry/CampaignOrchestration/copy-timeline")>();
   return {
     ...actual,
     // Two beats, but windows of 10% and 90% — nothing a 1:1 weight split would ever yield.

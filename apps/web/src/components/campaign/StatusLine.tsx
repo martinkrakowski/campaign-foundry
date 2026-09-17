@@ -19,8 +19,10 @@ function getIncompleteSections(state: EditorState): SectionId[] {
   if (getTotalErrorCount({ identity: errors.identity }) > 0) sections.push("identity");
   if (getTotalErrorCount({ copy: errors.copy }) > 0) sections.push("copy");
   if (getTotalErrorCount({ products: errors.products }) > 0) sections.push("products");
-  if (getTotalErrorCount({ output: errors.output, motion: errors.motion }) > 0) sections.push("output");
-  if (state.mode === "variation" && getTotalErrorCount({ policy: errors.policy }) > 0) sections.push("policy");
+  if (getTotalErrorCount({ output: errors.output, motion: errors.motion }) > 0)
+    sections.push("output");
+  if (state.mode === "variation" && getTotalErrorCount({ policy: errors.policy }) > 0)
+    sections.push("policy");
   return sections;
 }
 
@@ -59,10 +61,21 @@ export function StatusLine({
     if (isLoaded) return plain(messages.statusLoaded(state.briefId));
     if (incompleteSections.length === 0) return plain(messages.statusReady);
     return {
-      ...(incompleteSections.length === 1 ? messages.statusAlmostThere() : messages.statusNewBrief()),
+      ...(incompleteSections.length === 1
+        ? messages.statusAlmostThere()
+        : messages.statusNewBrief()),
       sections: incompleteSections,
     };
-  }, [totalErrors, attempted, applied, isLoaded, state.briefId, incompleteSections, applyRefusal, persistError]);
+  }, [
+    totalErrors,
+    attempted,
+    applied,
+    isLoaded,
+    state.briefId,
+    incompleteSections,
+    applyRefusal,
+    persistError,
+  ]);
 
   return (
     <p role="status" className="text-[13px] text-text-primary">

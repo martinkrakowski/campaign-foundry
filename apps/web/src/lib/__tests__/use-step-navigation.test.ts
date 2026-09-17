@@ -79,10 +79,9 @@ describe("useStepNavigation", () => {
   });
 
   test("a shortened list clamps the cursor and the visited mark into it", () => {
-    const { result, rerender } = renderHook(
-      (list: readonly string[]) => useStepNavigation(list),
-      { initialProps: steps },
-    );
+    const { result, rerender } = renderHook((list: readonly string[]) => useStepNavigation(list), {
+      initialProps: steps,
+    });
     act(() => result.current.go(5));
     expect(result.current.index).toBe(5);
 
@@ -104,10 +103,9 @@ describe("useStepNavigation", () => {
   const RANDOMIZED = ["identity", "copy", "products", "output", "policy", "review"];
 
   test("a mode flip keeps the user on the same step, not the same index", () => {
-    const { result, rerender } = renderHook(
-      (list: readonly string[]) => useStepNavigation(list),
-      { initialProps: CLASSIC as readonly string[] },
-    );
+    const { result, rerender } = renderHook((list: readonly string[]) => useStepNavigation(list), {
+      initialProps: CLASSIC as readonly string[],
+    });
     act(() => result.current.go(4)); // `output` in classic
     expect(CLASSIC[result.current.index]).toBe("output");
 
@@ -119,10 +117,9 @@ describe("useStepNavigation", () => {
   });
 
   test("a step the flip really removes falls back to the remembered ordinal", () => {
-    const { result, rerender } = renderHook(
-      (list: readonly string[]) => useStepNavigation(list),
-      { initialProps: CLASSIC as readonly string[] },
-    );
+    const { result, rerender } = renderHook((list: readonly string[]) => useStepNavigation(list), {
+      initialProps: CLASSIC as readonly string[],
+    });
     act(() => result.current.go(3)); // `treatments` — randomized has no such step
     expect(CLASSIC[result.current.index]).toBe("treatments");
 
@@ -183,7 +180,6 @@ describe("isTypingTarget", () => {
   });
 });
 
-
 describe("overlayIsOpen", () => {
   test("no overlay, no answer to give the arrow keys", () => {
     render(createElement("div", { "data-testid": "plain" }));
@@ -191,9 +187,7 @@ describe("overlayIsOpen", () => {
   });
 
   test("a modal on screen is a modal that is mounted: dialogs and drawers both", () => {
-    render(
-      createElement("div", { "data-testid": "dialog", role: "dialog", "aria-modal": "true" }),
-    );
+    render(createElement("div", { "data-testid": "dialog", role: "dialog", "aria-modal": "true" }));
     expect(overlayIsOpen()).toBe(true);
   });
 
@@ -282,7 +276,11 @@ describe("useStepSwipe", () => {
   });
 });
 
-function KeyPage({ enabled, onStep, withField = false }: {
+function KeyPage({
+  enabled,
+  onStep,
+  withField = false,
+}: {
   enabled: boolean;
   onStep: (step: -1 | 1) => void;
   withField?: boolean;
@@ -290,7 +288,9 @@ function KeyPage({ enabled, onStep, withField = false }: {
   useStepKeys({ enabled, onStep });
   return createElement("div", null, [
     withField ? createElement("input", { key: "f", "aria-label": "field" }) : null,
-    withField ? createElement("div", { key: "s", role: "slider", "aria-label": "slider", tabIndex: 0 }) : null,
+    withField
+      ? createElement("div", { key: "s", role: "slider", "aria-label": "slider", tabIndex: 0 })
+      : null,
   ]);
 }
 
@@ -422,7 +422,6 @@ describe("useBecameTrue", () => {
     rerender({ valid: false, step: "copy" });
     expect(result.current).toBe(0);
   });
-
 });
 
 describe("STEP_TRANSITION_MS", () => {

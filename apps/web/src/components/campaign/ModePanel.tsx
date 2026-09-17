@@ -22,10 +22,22 @@ interface CellSpec {
   readonly ground: string;
 }
 
-const TIDY_CELL: CellSpec = { top: true, bold: true, band: "fill-brand-primary", ground: "fill-text-muted" };
+const TIDY_CELL: CellSpec = {
+  top: true,
+  bold: true,
+  band: "fill-brand-primary",
+  ground: "fill-text-muted",
+};
 
 /** Classic: near-identical miniatures — one design, repeated. */
-const TIDY: readonly CellSpec[] = [TIDY_CELL, TIDY_CELL, TIDY_CELL, TIDY_CELL, TIDY_CELL, TIDY_CELL];
+const TIDY: readonly CellSpec[] = [
+  TIDY_CELL,
+  TIDY_CELL,
+  TIDY_CELL,
+  TIDY_CELL,
+  TIDY_CELL,
+  TIDY_CELL,
+];
 
 /** Randomized: the same six cells with different edges, weights and tints. */
 const SCATTERED: readonly CellSpec[] = [
@@ -52,7 +64,13 @@ const MARGIN = 1.5;
 function ModeGlyph({ scattered }: { scattered: boolean }): ReactNode {
   const cells = scattered ? SCATTERED : TIDY;
   return (
-    <svg width={VIEWBOX} height={VIEWBOX} viewBox={`0 0 ${VIEWBOX} ${VIEWBOX}`} aria-hidden="true" focusable="false">
+    <svg
+      width={VIEWBOX}
+      height={VIEWBOX}
+      viewBox={`0 0 ${VIEWBOX} ${VIEWBOX}`}
+      aria-hidden="true"
+      focusable="false"
+    >
       {cells.map((cell, index) => {
         const x = MARGIN + (index % 3) * (CELL + GAP);
         const y = MARGIN + Math.floor(index / 3) * (CELL + GAP);
@@ -130,7 +148,10 @@ function ClassicPreview(): ReactNode {
 }
 
 /** Union-keyed so a fourth ratio or variant is a compile error, not a blank frame. */
-const VARIATION_FRAMES: readonly { readonly ratio: RatioOption; readonly variant: PosterVariant }[] = [
+const VARIATION_FRAMES: readonly {
+  readonly ratio: RatioOption;
+  readonly variant: PosterVariant;
+}[] = [
   { ratio: "9:16", variant: "pA" },
   { ratio: "1:1", variant: "pB" },
   { ratio: "16:9", variant: "pC" },

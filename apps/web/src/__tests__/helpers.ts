@@ -13,7 +13,9 @@ import { DEFAULT_CAMPAIGN_TYPE } from "@campaignfoundry/CampaignOrchestration/ca
  */
 export const exerciseFocusTrap = (dialog: HTMLElement) => {
   const focusables = [
-    ...dialog.querySelectorAll<HTMLElement>('a[href], button, input, [tabindex]:not([tabindex="-1"])'),
+    ...dialog.querySelectorAll<HTMLElement>(
+      'a[href], button, input, [tabindex]:not([tabindex="-1"])',
+    ),
   ];
   // Focus every element and tab both ways, so the forward-wrap (at the last element)
   // and backward-wrap (at the first) both fire regardless of selector ordering.
@@ -70,7 +72,14 @@ export const makeMotionAsset = (over: Partial<Asset> = {}): Asset =>
     variantIndex: 1,
     attempt: 0,
     treatment: "headline-top-bold",
-    descriptor: { layout: "headline-top", tone: "bold", backgroundSource: "procedural", paletteShift: 0, motion: "ken-burns-in", durationSec: 6 },
+    descriptor: {
+      layout: "headline-top",
+      tone: "bold",
+      backgroundSource: "procedural",
+      paletteShift: 0,
+      motion: "ken-burns-in",
+      durationSec: 6,
+    },
     ...over,
   });
 
@@ -138,7 +147,9 @@ export const mockPipelineApi = (
         if (opts.post) return Promise.resolve(opts.post(u, req));
         return Promise.resolve(json({ platforms: [] }));
       }
-      return Promise.resolve(opts.post ? opts.post(u, req) : json({ jobId: opts.jobId ?? "job-1" }, 202));
+      return Promise.resolve(
+        opts.post ? opts.post(u, req) : json({ jobId: opts.jobId ?? "job-1" }, 202),
+      );
     }
     if (u.includes(`${API}/campaigns/jobs/`)) {
       return Promise.resolve(opts.job ? opts.job(u) : jobOk(jobSnapshot(report)));
@@ -177,7 +188,9 @@ export const seedPersistedRun = (
         { id: "alpha", name: "Alpha", primaryColor: "#1473E6", logoPath: "a.png" },
         { id: "beta", name: "Beta", primaryColor: "#E0218A", logoPath: "b.png" },
       ],
-      ...(randomized ? { mode: "variation", variation: { count: Math.max(1, assets.length) } } : {}),
+      ...(randomized
+        ? { mode: "variation", variation: { count: Math.max(1, assets.length) } }
+        : {}),
     }),
   );
   mockPipelineApi({

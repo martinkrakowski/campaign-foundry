@@ -2,7 +2,15 @@ import { describe, test, expect, vi, beforeEach, afterEach } from "vitest";
 import { screen, waitFor, within, act, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createElement, Fragment } from "react";
-import { renderWithRun, seedPersistedRun, makeAsset, exerciseFocusTrap, json, mockPipelineApi, storedTemplate } from "@/__tests__/helpers";
+import {
+  renderWithRun,
+  seedPersistedRun,
+  makeAsset,
+  exerciseFocusTrap,
+  json,
+  mockPipelineApi,
+  storedTemplate,
+} from "@/__tests__/helpers";
 import { useRun } from "@/lib/run-context";
 import { CommandBar } from "../CommandBar";
 import { executeNoEstimate, executeStillEstimating } from "@/components/campaign/messages";
@@ -55,7 +63,9 @@ describe("CommandBar", () => {
     const dialog = await screen.findByRole("dialog", { name: "Confirm pipeline action" });
     expect(within(dialog).getByText(/every product × aspect ratio × treatment/)).toBeTruthy();
     await user.click(within(dialog).getByText("Generate"));
-    await waitFor(() => expect(screen.getByText(/Execution complete|Standing by|Orchestrating/)).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByText(/Execution complete|Standing by|Orchestrating/)).toBeTruthy(),
+    );
   });
 
   test("cancel closes the confirm dialog without running", async () => {
@@ -114,7 +124,9 @@ describe("CommandBar", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
     await waitFor(() =>
       expect(
-        screen.getAllByText(/came from a classic run, but the brief they were produced under is now a randomized campaign/),
+        screen.getAllByText(
+          /came from a classic run, but the brief they were produced under is now a randomized campaign/,
+        ),
       ).toHaveLength(2),
     );
   });
@@ -127,7 +139,9 @@ describe("CommandBar", () => {
     expect(screen.queryByText("Estimating…")).toBeNull();
     await new Promise((r) => setTimeout(r, 400));
     expect(plan).not.toHaveBeenCalled();
-    expect((screen.getByRole("button", { name: /Execute/ }) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByRole("button", { name: /Execute/ }) as HTMLButtonElement).disabled).toBe(
+      false,
+    );
   });
 
   test("shows a feasible variation estimate and Execute answers every state (never disabled mid-estimate)", async () => {
@@ -139,13 +153,19 @@ describe("CommandBar", () => {
     // The verb is never disabled for being mid-estimate (GB-D3) — that greying-out is
     // what made a hung estimate look like "unable to generate a campaign". A settled
     // feasible plan opens the confirm as before.
-    expect((screen.getByRole("button", { name: /Execute/ }) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByRole("button", { name: /Execute/ }) as HTMLButtonElement).disabled).toBe(
+      false,
+    );
     expect(await screen.findByText("12")).toBeTruthy();
     expect(screen.getByText("36")).toBeTruthy();
     expect(screen.getByText("yes")).toBeTruthy();
-    expect((screen.getByRole("button", { name: /Execute/ }) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByRole("button", { name: /Execute/ }) as HTMLButtonElement).disabled).toBe(
+      false,
+    );
     await user.click(screen.getByRole("button", { name: /Execute/ }));
-    expect(within(await screen.findByRole("dialog")).getByText(/from the variation plan/)).toBeTruthy();
+    expect(
+      within(await screen.findByRole("dialog")).getByText(/from the variation plan/),
+    ).toBeTruthy();
   });
 
   test("shows frames and the encode estimate for a motion plan", async () => {
@@ -208,10 +228,16 @@ describe("CommandBar", () => {
   test("skips a UI replace when a refetch returns the same policyHash", async () => {
     function Tweak() {
       const { setBrief, brief } = useRun();
-      return createElement(Fragment, null,
-        createElement("button", {
-          onClick: () => setBrief({ ...brief, campaignMessage: "Stay wilder" }),
-        }, "tweak"),
+      return createElement(
+        Fragment,
+        null,
+        createElement(
+          "button",
+          {
+            onClick: () => setBrief({ ...brief, campaignMessage: "Stay wilder" }),
+          },
+          "tweak",
+        ),
         createElement(CommandBar, { onToggleTelemetry: () => {} }),
       );
     }
@@ -236,10 +262,16 @@ describe("CommandBar", () => {
   test("a brief change re-estimates: Execute stays live, and a mid-estimate press answers instead of confirming", async () => {
     function Tweak() {
       const { setBrief, brief, estimateStatus } = useRun();
-      return createElement(Fragment, null,
-        createElement("button", {
-          onClick: () => setBrief({ ...brief, campaignMessage: "Stay wilder" }),
-        }, "tweak"),
+      return createElement(
+        Fragment,
+        null,
+        createElement(
+          "button",
+          {
+            onClick: () => setBrief({ ...brief, campaignMessage: "Stay wilder" }),
+          },
+          "tweak",
+        ),
         createElement("span", null, `status:${estimateStatus}`),
         createElement(CommandBar, { onToggleTelemetry: () => {} }),
       );
@@ -284,10 +316,16 @@ describe("CommandBar", () => {
   test("replaces a cached ok estimate when a later plan is infeasible", async () => {
     function Tweak() {
       const { setBrief, brief } = useRun();
-      return createElement(Fragment, null,
-        createElement("button", {
-          onClick: () => setBrief({ ...brief, campaignMessage: "Stay wilder" }),
-        }, "tweak"),
+      return createElement(
+        Fragment,
+        null,
+        createElement(
+          "button",
+          {
+            onClick: () => setBrief({ ...brief, campaignMessage: "Stay wilder" }),
+          },
+          "tweak",
+        ),
         createElement(CommandBar, { onToggleTelemetry: () => {} }),
       );
     }
@@ -306,7 +344,9 @@ describe("CommandBar", () => {
     await user.click(screen.getByText("tweak"));
     expect(await screen.findByText("shortfall: accepted 4 of 100")).toBeTruthy();
     // The cached estimate was replaced, and the verb answers instead of greying out.
-    expect((screen.getByRole("button", { name: /Execute/ }) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByRole("button", { name: /Execute/ }) as HTMLButtonElement).disabled).toBe(
+      false,
+    );
   });
 
   test("aborts an in-flight plan on unmount", async () => {

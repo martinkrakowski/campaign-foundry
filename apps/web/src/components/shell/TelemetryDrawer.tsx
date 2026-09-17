@@ -44,9 +44,7 @@ export function TelemetryDrawer({ open, onClose }: TelemetryDrawerProps) {
 
   const copyLog = async () => {
     if (!navigator.clipboard) return;
-    const text = log
-      .map((e) => `${formatTime(e.timestamp)} [${e.stage}] ${e.message}`)
-      .join("\n");
+    const text = log.map((e) => `${formatTime(e.timestamp)} [${e.stage}] ${e.message}`).join("\n");
     try {
       await navigator.clipboard.writeText(text);
       setCopied(true);
@@ -92,17 +90,44 @@ export function TelemetryDrawer({ open, onClose }: TelemetryDrawerProps) {
             label={expanded ? "Collapse telemetry" : "Expand telemetry"}
             onClick={() => setExpanded((v) => !v)}
           >
-            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+            <svg
+              className="h-4 w-4"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+              aria-hidden
+            >
               {expanded ? (
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M19 14l-7 7m0 0l-7-7m7 7V3"
+                />
               ) : (
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 10l7-7m0 0l7 7m-7-7v18" />
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M5 10l7-7m0 0l7 7m-7-7v18"
+                />
               )}
             </svg>
           </IconButton>
           <IconButton label="Close telemetry" onClick={onClose}>
-            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            <svg
+              className="h-4 w-4"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+              aria-hidden
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M6 18L18 6M6 6l12 12"
+              />
             </svg>
           </IconButton>
         </div>

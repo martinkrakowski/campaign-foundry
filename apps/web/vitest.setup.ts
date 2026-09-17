@@ -86,8 +86,11 @@ vi.mock("next/link", () => ({
     scroll: _scroll,
     shallow: _shallow,
     ...rest
-  }: { href?: string; children?: ReactNode; [key: string]: unknown }) =>
-    createElement("a", { href: typeof href === "string" ? href : "#", ...rest }, children),
+  }: {
+    href?: string;
+    children?: ReactNode;
+    [key: string]: unknown;
+  }) => createElement("a", { href: typeof href === "string" ? href : "#", ...rest }, children),
 }));
 
 interface NextTestControls {

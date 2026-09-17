@@ -201,7 +201,9 @@ export function useStepSwipe(onSwipe: (direction: -1 | 1) => void): StepSwipeHan
   // keystroke elsewhere would be re-bound here too.
   const swipe = useRef(onSwipe);
   swipe.current = onSwipe;
-  const origin = useRef<{ x: number; y: number; typing: boolean; ownsGesture: boolean } | null>(null);
+  const origin = useRef<{ x: number; y: number; typing: boolean; ownsGesture: boolean } | null>(
+    null,
+  );
 
   const onTouchStart = useCallback((event: TouchEvent<HTMLElement>) => {
     const touch = event.changedTouches[0];
@@ -250,7 +252,8 @@ export function useStepKeys({ enabled, onStep }: UseStepKeysOptions): void {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
       if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-      if (isTypingTarget(event.target) || ownsItsOwnGesture(event.target) || overlayIsOpen()) return;
+      if (isTypingTarget(event.target) || ownsItsOwnGesture(event.target) || overlayIsOpen())
+        return;
       // The step walk is the only thing that wanted this key, so it is spent here
       // and nothing else downstream sees an arrow it may also have a use for.
       event.preventDefault();
@@ -273,12 +276,15 @@ export function useStepKeys({ enabled, onStep }: UseStepKeysOptions): void {
  * zero — and the caller, reading a zero, wears no ring at all.
  */
 export function useBecameTrue(watched: boolean, subject: unknown): number {
-  const [state, setState] = useState<{ subject: unknown; value: boolean; count: number } | null>(null);
+  const [state, setState] = useState<{ subject: unknown; value: boolean; count: number } | null>(
+    null,
+  );
 
   useEffect(() => {
     setState((before) => {
       // A first pass, or a new subject: nothing has become anything here yet.
-      if (before === null || before.subject !== subject) return { subject, value: watched, count: 0 };
+      if (before === null || before.subject !== subject)
+        return { subject, value: watched, count: 0 };
       const became = before.value === false && watched;
       return { subject, value: watched, count: before.count + (became ? 1 : 0) };
     });

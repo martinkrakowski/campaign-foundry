@@ -20,8 +20,7 @@ const steps: SegBarSegment[] = [
   { id: "review", label: "Review", issues: 0 },
 ];
 
-const segments = (): HTMLButtonElement[] =>
-  screen.getAllByRole("button") as HTMLButtonElement[];
+const segments = (): HTMLButtonElement[] => screen.getAllByRole("button") as HTMLButtonElement[];
 const nameOf = (position: number) => segments()[position].getAttribute("aria-label");
 
 describe("SegBar", () => {
@@ -32,7 +31,12 @@ describe("SegBar", () => {
     // step order lives here to drift from the cursor's.
     expect(segments().map((s) => s.getAttribute("aria-label"))).toEqual(
       steps.map((step, position) =>
-        messages.segBarSegment(position + 1, steps.length, step.label, position === 0 ? "current" : "unvisited"),
+        messages.segBarSegment(
+          position + 1,
+          steps.length,
+          step.label,
+          position === 0 ? "current" : "unvisited",
+        ),
       ),
     );
   });
@@ -48,9 +52,7 @@ describe("SegBar", () => {
   });
 
   test("a step behind the cursor reads as done, and one with something to fix reads as that", () => {
-    const withIssues = steps.map((step) =>
-      step.id === "copy" ? { ...step, issues: 2 } : step,
-    );
+    const withIssues = steps.map((step) => (step.id === "copy" ? { ...step, issues: 2 } : step));
     render(<SegBar segments={withIssues} index={5} maxVisited={5} onSelect={() => {}} />);
     expect(nameOf(0)).toContain("done");
     expect(nameOf(1)).toContain("has something to fix");

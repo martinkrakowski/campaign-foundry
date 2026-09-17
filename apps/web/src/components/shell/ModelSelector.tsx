@@ -50,7 +50,9 @@ export function ModelSelector({ onModelChange }: ModelSelectorProps) {
         title={modelSelectorTriggerTitle}
         className="flex min-w-0 max-w-[9rem] items-center gap-1.5 truncate whitespace-nowrap rounded-full border border-border-control bg-surface-2 px-3 py-1 font-mono text-[11px] text-text-primary transition-colors hover:border-border-control-hover sm:max-w-none"
       >
-        <span className="text-brand-primary" aria-hidden>◆</span>
+        <span className="text-brand-primary" aria-hidden>
+          ◆
+        </span>
         <span className="hidden text-text-muted sm:inline">Model:</span> {labelFor(selectedModel)}
       </button>
       {hasInputAssets && (
@@ -148,8 +150,19 @@ function ModelModal({
             aria-label={modelSelectorClose}
             className="text-text-muted transition-colors hover:text-text-emphasis"
           >
-            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            <svg
+              className="h-5 w-5"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+              aria-hidden
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M6 18L18 6M6 6l12 12"
+              />
             </svg>
           </button>
         </div>

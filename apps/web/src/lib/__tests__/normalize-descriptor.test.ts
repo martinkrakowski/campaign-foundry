@@ -33,7 +33,9 @@ describe("normalizeDescriptor — keep what is usable, drop the rest", () => {
   test("an unusable field is dropped and its neighbours are kept", () => {
     // The point of the lane: a partial descriptor must not cost the fields that are fine,
     // and must not leave `undefined` to be rendered as an empty chip.
-    expect(normalizeDescriptor({ layout: 42, tone: "bold", backgroundSource: "procedural" })).toEqual({
+    expect(
+      normalizeDescriptor({ layout: 42, tone: "bold", backgroundSource: "procedural" }),
+    ).toEqual({
       tone: "bold",
       backgroundSource: "procedural",
     });
@@ -52,7 +54,9 @@ describe("normalizeDescriptor — keep what is usable, drop the rest", () => {
   });
 
   test("a non-finite number is not a number", () => {
-    expect(normalizeDescriptor({ paletteShift: Number.NaN, tone: "bold" })).toEqual({ tone: "bold" });
+    expect(normalizeDescriptor({ paletteShift: Number.NaN, tone: "bold" })).toEqual({
+      tone: "bold",
+    });
     expect(normalizeDescriptor({ durationSec: Number.POSITIVE_INFINITY, tone: "bold" })).toEqual({
       tone: "bold",
     });
@@ -71,7 +75,8 @@ describe("normalizeDescriptor — keep what is usable, drop the rest", () => {
 });
 
 describe("normalizeRunResult — narrow provenance, never drop a creative", () => {
-  const run = (assets: Asset[]): RunResult => ({ assets, log: { campaignId: "c" } }) as unknown as RunResult;
+  const run = (assets: Asset[]): RunResult =>
+    ({ assets, log: { campaignId: "c" } }) as unknown as RunResult;
 
   test("a junk descriptor costs the provenance, not the asset", () => {
     const out = normalizeRunResult(run([asset("nonsense")]));

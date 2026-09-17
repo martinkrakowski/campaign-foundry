@@ -15,14 +15,8 @@ import type {
   HtmlElement,
   HtmlElementKind,
 } from "@/components/campaign/editor-state";
-import {
-  ANCHOR_OPTIONS,
-  HTML_ELEMENT_KINDS,
-} from "@/components/campaign/editor-state";
-import {
-  anchorDisplayName,
-  weightDisplayName,
-} from "@/components/campaign/display-names";
+import { ANCHOR_OPTIONS, HTML_ELEMENT_KINDS } from "@/components/campaign/editor-state";
+import { anchorDisplayName, weightDisplayName } from "@/components/campaign/display-names";
 import * as messages from "@/components/campaign/messages";
 import { Field } from "./IdentitySection";
 
@@ -140,8 +134,7 @@ function stylePatch(
   // (HL5e) — the reducer drops the field, and drops the whole block when the
   // last one goes, so the round trip returns the element to its loaded shape.
   if (value === "") return { [field]: undefined };
-  if (field === "fontWeight")
-    return { fontWeight: Number(value) as FontWeightKind };
+  if (field === "fontWeight") return { fontWeight: Number(value) as FontWeightKind };
   return { fontFamily: value as FontFamilyKind };
 }
 
@@ -207,16 +200,12 @@ export function HtmlElementsEditor({
   const moveDownDescId = (index: number) => `${uid}-down-${index}`;
   const removeDescId = (index: number) => `${uid}-remove-${index}`;
 
-  const add = (kind: HtmlElementKind) =>
-    dispatch({ type: "addHtmlElement", layerId, kind });
+  const add = (kind: HtmlElementKind) => dispatch({ type: "addHtmlElement", layerId, kind });
 
   return (
     <div className="space-y-2 pt-2">
       {elements.length > 0 ? (
-        <ol
-          aria-label={messages.htmlElementsLabel}
-          className="space-y-2"
-        >
+        <ol aria-label={messages.htmlElementsLabel} className="space-y-2">
           {elements.map((element, index) => {
             const position = index + 1;
             const name = messages.htmlElementName(position);
@@ -381,9 +370,7 @@ export function HtmlElementsEditor({
                     <IconButton
                       label={name}
                       aria-describedby={removeDescId(index)}
-                      onClick={() =>
-                        dispatch({ type: "removeHtmlElement", layerId, index })
-                      }
+                      onClick={() => dispatch({ type: "removeHtmlElement", layerId, index })}
                     >
                       ×
                     </IconButton>
@@ -407,9 +394,7 @@ export function HtmlElementsEditor({
         {HTML_ELEMENT_KINDS.map((kind) => (
           <span key={kind} className="flex items-center">
             <span id={addDescId(kind)} className="sr-only">
-              {messages.htmlElementAddDescription(
-                messages.htmlElementKindLabel(kind),
-              )}
+              {messages.htmlElementAddDescription(messages.htmlElementKindLabel(kind))}
             </span>
             <Button
               variant="secondary"
@@ -432,20 +417,14 @@ export function HtmlElementsEditor({
       {reading ? (
         <div className="space-y-1 pt-2">
           <p className="text-[12px] text-text-muted">
-            {messages.htmlWeightMeterText(
-              reading.bytes,
-              reading.maxBytes,
-              reading.profileLabel,
-            )}
+            {messages.htmlWeightMeterText(reading.bytes, reading.maxBytes, reading.profileLabel)}
           </p>
           {reading.overBy > 0 ? (
             <p role="status" className="block text-[11px] text-warning">
               {messages.htmlWeightOverage(reading.overBy)}
             </p>
           ) : null}
-          <p className="text-[11px] text-text-muted">
-            {messages.htmlWeightFallbackNote}
-          </p>
+          <p className="text-[11px] text-text-muted">{messages.htmlWeightFallbackNote}</p>
         </div>
       ) : null}
     </div>
