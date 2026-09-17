@@ -1,0 +1,231 @@
+{
+  "version": 1,
+  "lane": "TS1",
+  "mutations": [
+    {
+      "file": "apps/web/src/components/campaign/PreviewDock.tsx",
+      "before": "        atSec={hasMotion ? committedSec : undefined}",
+      "after": "        atSec={hasMotion ? scrubSec : undefined}",
+      "because": "The live/committed split is the whole of CC5 and of the plan's §4 acceptance (b): usePreviewFrame refetches on ANY atSec change (preview-frame.ts, cell?.atSec in the request memo's deps) and cannot see a pointer, so feeding it the LIVE second issues one /preview-frame request per pointermove. This is not a rendering defect a screenshot would show -- the frame that finally lands is the right one -- so it is caught by a CALL COUNT across a five-event drag, and by the COMMITTED second's own value on the release, not by a mount count and not by anything visible.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.playhead.test.tsx"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/PreviewDock.tsx",
+      "before": "            onPointerUp={handleCommit}\n            onKeyUp={handleCommit}",
+      "after": "            onPointerUp={handleCommit}",
+      "because": "onPointerUp never fires for an arrow key, so dropping onKeyUp leaves a keyboard user able to move the thumb and unable to move the frame -- correct under every pointer test, invisible to all of them. The plan caught this once already in review (§3.3a: \"onKeyUp is the half a reviewer usually misses\"). The COMMAND moved with the owner's 2026-09-17 decision: the dock's range now renders only under the `section` host, so the editor suite drives the tape's Playhead instead and this handler is exercised here, against a test that was previously assertion-free and would have stayed green on this very mutation.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/preview-dock.test.tsx"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/TimelineTape.tsx",
+      "before": "      onPointerUp={(e) => onCommit(Number(e.currentTarget.value))}\n      onKeyUp={(e) => onCommit(Number(e.currentTarget.value))}",
+      "after": "      onChange={(e) => onCommit(Number(e.target.value))}",
+      "because": "The plan's own §3.5 sketch of PlayheadSlider is the stale draft its §3.3a corrects: it commits on `change`. In React, onChange on a range fires continuously through a drag, so \"commit on change\" issues a frame request per pointermove -- the very criterion TS1 is measured against -- while looking perfectly correct on screen. Implementing §3.5 literally is therefore the most likely way this lane regresses, and the mutation writes exactly that. Caught by the tape's own live/commit split test, which asserts that two change events produce two LIVE writes and ZERO commits.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/TimelineTape.test.tsx"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/TimelineTape.tsx",
+      "before": "  return `calc(${TAPE_LABEL_PX}px + ${durationSec} * ${pxPerSec}px + ${TAPE_END_PAD_PX}px)`;",
+      "after": "  return `calc(${TAPE_LABEL_PX}px + ${durationSec} * ${pxPerSec}px)`;",
+      "because": "The end pad IS the cutoff fix (§3.2): without it the canvas ends exactly at t = durationSec, so the last tick, the video clip's right edge and the playhead knob all sit on the well's border-radius and lose their outer half. happy-dom does no layout, so no rendering assertion can see this -- the proof is a string match on the canvas width, which is necessary and explicitly not sufficient (§11: the pixel clearance is a browser check recorded in the PR). Caught by the canvas-width assertion, not by any geometry a test engine measured.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/TimelineTape.test.tsx"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/TimelineTape.tsx",
+      "before": "    commit((e.clientX - rect.left + port.scrollLeft - TAPE_LABEL_PX) / pxPerSec);",
+      "after": "    commit((e.clientX - rect.left - TAPE_LABEL_PX) / pxPerSec);",
+      "because": "The scrollLeft term is the sketch's fourth anti-lesson in arithmetic form (§14.4): a surface whose ruler does not share its clips' scroll offset answers a click with the wrong second the moment anybody scrolls sideways -- and at scrollLeft 0, which is where every casual test and every screenshot starts, the two are identical. So the mutation survives any test that does not deliberately scroll the port first, which is why the ruler-click test commits twice, once at each of two scroll positions.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/TimelineTape.test.tsx"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/TimelineTape.tsx",
+      "before": "  const centis = Math.floor(safe * 100 + 1e-6);",
+      "after": "  const centis = Math.floor(safe) * 100 + Math.floor((safe - Math.floor(safe)) * 100);",
+      "because": "The obvious way to write this clock -- whole seconds plus the fractional part in centiseconds -- is wrong in IEEE-754 for ordinary scrub positions: 6.4 - 6 is 0.3999999999999995, so the readout under the playhead names 00:06.39 for a second the slider calls 6.4. It is off by one centisecond, only for some values, and only in the last two digits, which is exactly the class of defect an eye passes over. Caught by a VALUE assertion on the formatter at 6.4 and 8.29, not by anything about the component.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/TimelineTape.test.tsx"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/TimelineTape.tsx",
+      "before": "  return dwellSec < MIN_DWELL_SEC - DWELL_TOLERANCE;",
+      "after": "  return dwellSec < MIN_DWELL_SEC;",
+      "because": "The domain's own slack, dropped. 3 x MIN_DWELL_SEC is 3.5999999999999996, so a strict comparison marks a beat that timelineProblem accepts -- the tape and the validator disagreeing about the same draft, with the tape painting an error the operator cannot clear. ProportionBar already carries this exact comment for this exact reason, and the brief for this lane names it (\"do not write 1.2 in the tape\"). Caught by a boundary-VALUE assertion at the tolerance, which a test using round numbers would never reach.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/TimelineTape.test.tsx"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/BriefEditor.tsx",
+      "before": "                {railProps.motion !== undefined ? (",
+      "after": "                {railProps.motion === undefined || railProps.motion !== undefined ? (",
+      "because": "The plan's §4 acceptance (e), second half: a brief without motion must not mount the tape. A still creative has no seconds to draw, and a tape over one invites a scrub that means nothing and a playhead that addresses a frame index the encoder never produces. The mutation is written as a tautology rather than as a deleted guard so that ONLY the still-brief path moves -- every motion test stays green, which is the point: this is caught by a test that asserts an ABSENCE on a draft that has no motion, and by nothing else in the suite.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.playhead.test.tsx"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/TimelineTape.tsx",
+      "before": "      onPointerUp={(e) => onCommit(Number(e.currentTarget.value))}\n      onKeyUp={(e) => onCommit(Number(e.currentTarget.value))}",
+      "after": "      onPointerUp={(e) => onCommit(Number(e.currentTarget.value))}",
+      "because": "The same keyboard half, on the control that now matters most. After the owner's 2026-09-17 decision the tape's Playhead is the ONLY scrub in the rail, so losing its key-up commit does not degrade a keyboard user to a second-best control -- it leaves them no way at all to move the frame from that surface. Caught by an editor-level test that dispatches NO pointer event anywhere and asserts the /preview-frame CALL COUNT rose by exactly one, and by the tape's own unit test driven through its owner's state.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.playhead.test.tsx"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/PreviewDock.tsx",
+      "before": "      {hasMotion && props.host === \"section\" ? (",
+      "after": "      {hasMotion ? (",
+      "because": "The owner's 2026-09-17 decision (plan §11), undone: the dock draws its own range in the rail again, beside the tape's Playhead, so one 16rem column carries two sliders over the SAME lifted second and announces the same fact twice. Nothing looks broken -- both controls work and agree, because CC5 made them share the state -- which is exactly why this needs a COUNT rather than an eye: the rail's range inputs are asserted by NAME and in order, so the reappearance of 'Scrub preview' fails rather than merely adding a control nobody counted. The opposite simplification (deleting the conditional's surviving `section` branch) is caught by preview-dock.test.tsx, which pins the control's PRESENCE in that host.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.playhead.test.tsx"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/BriefEditor.tsx",
+      "before": "  useEffect(() => {\n    setScrubSec((sec) => Math.min(sec, ceiling));\n    setCommittedSec((sec) => Math.min(sec, ceiling));\n  }, [ceiling]);",
+      "after": "  useEffect(() => {\n    setScrubSec((sec) => sec);\n  }, [ceiling]);",
+      "because": "Qodo, caught in review. Clamping only on READ leaves the stored second and the shown one out of step, and the divergence survives: commit 9 on a 10s clip, shorten to 5 (every surface correctly shows 5), then lengthen back to 10 -- and the untouched 9 reappears. The playhead jumps to a second the operator last chose two axis changes ago and usePreviewFrame fetches that frame, with no gesture in between; scrubbing is user-driven (VE-D5) and a second nobody asked for is not. The SHORTENING direction was already tested and stays green under this mutation -- which is why the test that catches it lengthens the axis afterwards.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/playhead-host.test.tsx"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/BriefEditor.tsx",
+      "before": "  const playhead = useMemo<PlayheadState>(\n    () => ({",
+      "after": "  const playhead: PlayheadState = ((): PlayheadState => ({",
+      "because": "Qodo, caught in review, and a hole in this lane's own cost proof. PreviewDock is memo-wrapped and takes the whole playhead as ONE prop, so a fresh object literal per render fails its shallow compare on every keystroke -- re-opening the RE-RENDER half of CC1/CC2's contract (\"lets this bail on a re-render for a keystroke the look does not change, exactly as it already skips a network fetch for one\"). Every fetch-count proof stayed green through it, because usePreviewFrame has a content key of its own and does not care how often its component re-renders; the tape stayed green too, because it is handed primitives rather than this object. Caught only by a RENDER COUNT on the dock.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.playhead.test.tsx"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/BriefEditor.tsx",
+      "before": "  useEffect(() => {\n    setSelectedBeatIndex(null);\n  }, [state.timeline.beats]);",
+      "after": "  useEffect(() => {\n    setSelectedBeatIndex((i) => i);\n  }, [state.timeline.beats]);",
+      "because": "Qodo, caught in review. selectedBeatIndex is a raw array index over a list the operator can reorder, insert into and remove from, so carrying it across an edit does not keep the selection on its beat -- it moves it to whichever beat now occupies that slot. That is the exact invariant CopyTimeline.vo.ts names for the PERSISTED keyBeat (\"the selected text must not change because rows moved\") and says a reducer must maintain; there is no reducer for an ephemeral selection. The test needs THREE beats: with two, removing the first leaves the stale index out of range, nothing is pressed either way, and the assertion is vacuous -- which is how the first version of that test passed under this mutation.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.playhead.test.tsx"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/TimelineTape.tsx",
+      "before": "underFloorText={dwellTextFor(beat)}",
+      "after": "underFloorText={breached !== undefined ? dwellTextFor(breached) : undefined}",
+      "because": "Qodo, caught in review. Every breaching clip pointed aria-describedby at ONE shared status node, so a screen reader on beat 3 heard beat 2's seconds -- the paint was right on every clip and only the spoken number was wrong, which no visual check finds. Caught by a test with TWO breaching beats whose dwells DIFFER: equal dwells would agree under the defect and prove nothing.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/TimelineTape.test.tsx"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/TimelineTape.tsx",
+      "before": "              tone=\"video\"\n              name={messages.tapeVideoClip}",
+      "after": "              tone=\"video\"\n              name={messages.tapeVideoClip}\n              onSelect={() => {}}",
+      "because": "Qodo, caught in review. The video clip was a native button with no handler: a tab stop that does nothing, announcing an affordance the surface does not have. It is the projection of the creative, not something to pick (TS-Q1 keeps the poster choice in the form). Caught by a test that asserts it is NOT a button AND that a beat clip still is -- the sibling half, so the assertion cannot be satisfied by making every clip inert.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/TimelineTape.test.tsx"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

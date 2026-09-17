@@ -231,14 +231,14 @@ test "$(grep -rl 'HtmlElementsEditor' apps/web/src/components/campaign | grep -v
 ! sed -n '/^function canonicalLayer/,/^}/p' apps/web/src/components/campaign/editor-state.ts | grep -q props
 ```
 
-```premise TL1
-# PreviewDock still declares the playhead itself, so no other surface can draw a
-# synchronised one. The pattern, not the identifier, is the probe: any `[<x>Sec,
-# set<X>Sec] = useState` declaration in this file means the position is still owned
-# here. TL1 moves the declaration to the editor, which flips this however the pair
-# is renamed.
-grep -qE 'const \[[a-zA-Z]*Sec, set[A-Z][a-zA-Z]*Sec\] = useState' apps/web/src/components/campaign/PreviewDock.tsx
-```
+**`premise TL1` retired — the lift shipped as CC5, in the TS1 PR** (the chrome plan's
+CC5 row already read "closes TL1", and the rail-timeline plan's §4 permits TS1 to carry
+it). `PreviewDock` no longer declares either second: `scrubSec` / `committedSec`, their
+clamps and the commit callback live in `PlayheadHost` (`BriefEditor.tsx`), and the dock
+receives them as one `playhead` prop. The probe this fence ran — any `[<x>Sec,
+set<X>Sec] = useState` in `PreviewDock.tsx` — is now false by construction, so
+`plan:verify` no longer tracks it. TL1's *ruler* half is what TS1 drew; the position
+half is this retirement.
 
 ```premise TL2
 # A beat's background can be authored in YAML (VE5a) but not in the editor. The probe

@@ -1,4 +1,4 @@
-import { memo, useState, type CSSProperties, type ReactNode, type SyntheticEvent } from "react";
+import { memo, type CSSProperties, type ReactNode, type SyntheticEvent } from "react";
 import type {
   AspectRatioValue,
   CanvasSpec,
@@ -6,7 +6,6 @@ import type {
 import { RATIO_VALUES } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import { DISPLAY_SIZE_VALUES } from "@campaignfoundry/CampaignOrchestration/display-sizes";
 import type { CampaignBrief, Style } from "@campaignfoundry/CampaignOrchestration";
-import { DEFAULT_DURATION_SEC } from "@campaignfoundry/CampaignOrchestration/variation-defaults";
 import type { MotionKind } from "@campaignfoundry/CampaignOrchestration/motion-kinds";
 import { PLATFORM_PROFILES } from "@campaignfoundry/Distribution/platform-profiles";
 import { CreativePreview, type CreativePreviewProps } from "@/components/campaign/CreativePreview";
@@ -60,8 +59,78 @@ export function derivePreviewSpec(
   return { ratio: derivePreviewRatio(platformId, explicitRatio) };
 }
 
+/**
+ * The playhead, CC5: the live second and the committed one, owned by the editor
+ * and handed to every surface that draws or writes them.
+ *
+ * The split is the whole point (VE-D5, H3). `scrubSec` is what the thumb and the
+ * painted diamond follow — it moves on every pointermove. `committedSec` is what
+ * `usePreviewFrame` reads as `atSec`, and it moves only on a release, a key-up or
+ * a ±1 s nudge, because `preview-frame.ts` refetches on ANY `atSec` change and a
+ * live value there would issue one request per pointermove.
+ *
+ * Both seconds arrive ALREADY CLAMPED to `[0, durationSec]` — the clamp lives with
+ * the owner (`PlayheadHost`, `BriefEditor.tsx`) so a shortened duration axis can
+ * never leave a stale second addressing a frame the clip no longer has, and so two
+ * surfaces cannot clamp the same value differently.
+ *
+ * Both callbacks must be REFERENTIALLY STABLE: this dock is `memo`-wrapped, and an
+ * inline arrow would allocate a fresh function per keystroke and defeat the memo
+ * boundary CC1/CC2 built (the plan's §5 — an earlier draft wrote the arrow inline
+ * and review caught it).
+ */
+export interface PlayheadState {
+  /** The previewed clip length — the range's `max` and the clamp's ceiling. */
+  readonly durationSec: number;
+  /** The live second: the thumb's position during a drag. */
+  readonly scrubSec: number;
+  /** The committed second: the only one a frame request ever sees. */
+  readonly committedSec: number;
+  /** Live write — `onChange`, which on a range fires all through the drag. */
+  readonly onScrubLive: (sec: number) => void;
+  /** Commit — `onPointerUp` AND `onKeyUp`, plus the tape's nudges and ruler clicks. */
+  readonly onScrubCommit: (sec: number) => void;
+}
+
+/**
+ * Which surface mounted a time control (D145 the rail, D146 the Copy section).
+ *
+ * One vocabulary, shared by the dock and `TimelineTape`, because the two now
+ * have to agree about a single question: **which of them owns the scrub where
+ * they are**. Two independent booleans could answer it differently in the same
+ * render, which is precisely how a surface ends up with two sliders for one
+ * second — the thing this discriminant exists to stop.
+ */
+export type SurfaceHost = "rail" | "section";
+
 export interface PreviewShowcaseProps extends Omit<CreativePreviewProps, "className"> {
   readonly campaignName: string;
+  /**
+   * CC5 — the dock draws and writes the playhead; it no longer owns it. Before
+   * this lift the pair lived in a `useState` here, which made a second surface
+   * (the timeline tape) unable to show the same second without a second copy of
+   * it, and a second copy would desync the preview (D146's risk).
+   */
+  readonly playhead: PlayheadState;
+  /**
+   * Where this dock is mounted — and therefore whether it draws its own scrub.
+   *
+   * **Owner's decision, 2026-09-17** (the rail-timeline plan's §11): in the
+   * `rail`, where `TimelineTape` mounts beside the dock, the tape's "Playhead"
+   * is the single scrub control and this one is suppressed. Two ranges over the
+   * same second announced the same fact twice and made "which one am I holding"
+   * a real question in a 16rem column.
+   *
+   * It is suppressed, NOT deleted: under `section` — the narrow host D146 gives
+   * TS2, where the tape goes under the Copy form — the compact scrub is the
+   * control for the case, and the code path has to survive until that lane
+   * arrives. A future "simplification" of this conditional is caught by a test
+   * that pins the surviving case, not only the absent one.
+   *
+   * This changes which control is VISIBLE, never who owns the state: the second
+   * is still `PlayheadHost`'s in both hosts.
+   */
+  readonly host: SurfaceHost;
   readonly platformId?: string;
   /**
    * The draft's projection (T1b): when present, the dock composites a REAL frame
@@ -236,15 +305,15 @@ export function PreviewRailEmptyState(props: PreviewIdentityProps): ReactNode {
 function PreviewDockImpl(props: PreviewShowcaseProps): ReactNode {
   const spec =
     props.spec ?? derivePreviewSpec(props.platformId, props.ratio, props.brief?.output?.sizes);
-  const durationSec = props.brief?.variation?.axes?.duration?.[0] ?? DEFAULT_DURATION_SEC;
-  const [scrubSec, setScrubSec] = useState(0);
-  const [committedSec, setCommittedSec] = useState(0);
   const hasMotion = props.motion !== undefined;
-  const clampedScrubSec = Math.min(Math.max(0, scrubSec), Math.max(0, durationSec));
-  const clampedCommittedSec = Math.min(Math.max(0, committedSec), Math.max(0, durationSec));
+  const { durationSec, scrubSec, committedSec, onScrubLive, onScrubCommit } = props.playhead;
 
+  // CC5 — both halves of the commit, because a keyboard user never fires a
+  // pointer event: `onPointerUp` alone leaves an arrow key able to move the
+  // thumb and unable to move the frame. Both read `currentTarget.value`;
+  // neither recomputes the second from a pointer coordinate.
   const handleCommit = (e: SyntheticEvent<HTMLInputElement>) => {
-    setCommittedSec(Number(e.currentTarget.value));
+    onScrubCommit(Number(e.currentTarget.value));
   };
 
   return (
@@ -260,12 +329,18 @@ function PreviewDockImpl(props: PreviewShowcaseProps): ReactNode {
         headline={props.headline}
         motion={props.motion}
         durationSec={hasMotion ? durationSec : undefined}
-        atSec={hasMotion ? clampedCommittedSec : undefined}
+        atSec={hasMotion ? committedSec : undefined}
         spec={spec}
         identityKey={props.identityKey}
         className="block h-auto w-full"
       />
-      {hasMotion ? (
+      {/* Owner's decision, 2026-09-17: in the rail the tape's "Playhead" is the
+        single scrub, so this one does not render there. Kept for the `section`
+        host D146 gives TS2 — see `host` on the props above. Both halves are
+        pinned by tests: the absence in the rail AND the presence in the section,
+        because a conditional with only its negative asserted is one a later
+        lane "simplifies" away in silence. */}
+      {hasMotion && props.host === "section" ? (
         <div className="flex items-center gap-2 px-1">
           <input
             type="range"
@@ -273,10 +348,11 @@ function PreviewDockImpl(props: PreviewShowcaseProps): ReactNode {
             min={0}
             max={durationSec}
             step="any"
-            value={clampedScrubSec}
+            value={scrubSec}
             onChange={(e) => {
-              const val = Number(e.target.value);
-              setScrubSec(val);
+              // The LIVE value: `onChange` on a range fires continuously through
+              // the drag, so this is the thumb's position, never the commit.
+              onScrubLive(Number(e.target.value));
             }}
             onPointerUp={handleCommit}
             onKeyUp={handleCommit}

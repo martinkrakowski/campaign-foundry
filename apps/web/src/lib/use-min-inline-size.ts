@@ -85,3 +85,39 @@ export function useMinInlineSize(ref: RefObject<HTMLElement | null>, minPx: numb
 
   return atLeast;
 }
+
+/**
+ * The observed element's inline size in px, or `0` before anything has measured
+ * it (TS1's fit).
+ *
+ * Same mechanism and the same caveats as {@link useMinInlineSize} above, which
+ * this deliberately sits beside rather than reimplementing: `ResizeObserver`
+ * never reports synchronously and does not fire at all under happy-dom, so `0`
+ * is the honest answer in a test and on the first client paint. A caller must
+ * therefore have a sane answer for `0` — the tape reads it as "not laid out
+ * yet" and falls back to its minimum zoom — and must never treat it as a real
+ * collapse to nothing. A zero MEASUREMENT is ignored for the same reason.
+ *
+ * There is no `window.innerWidth` seed here (unlike the hook above) on purpose:
+ * that seed answers a yes/no question where being one beat early is harmless,
+ * while a WIDTH taken from the viewport would be wrong by the width of the
+ * shell's sidebar and the rail's own padding, and would show as a visible
+ * re-fit on the first real measurement.
+ */
+export function useInlineWidth(ref: RefObject<HTMLElement | null>): number {
+  const [width, setWidth] = useState(0);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (el === null || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver((entries) => {
+      const next = entries[0].contentRect.width;
+      if (next === 0) return;
+      setWidth(next);
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [ref]);
+
+  return width;
+}

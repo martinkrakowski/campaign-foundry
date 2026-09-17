@@ -584,14 +584,75 @@ A capturing test that the committed frame equals the encoded frame **already exi
 
 Each fence exits 0 **while the gap is still open**. `yarn plan:verify` runs them. They probe a mechanism, not a name.
 
-```premise TS1
-# The rail still has no campaign TimelineTape module. PreviewDock still owns
-# the only playhead range input in apps/web campaign components. TS1 is the
-# file plus the lift; either one landing alone leaves this true, so the
-# probe is the module's absence -- CC5's own TL1 fence already covers the
-# useState pair in PreviewDock and is not duplicated here. Measured: ~4 ms.
-! test -f apps/web/src/components/campaign/TimelineTape.tsx
-```
+**`premise TS1` retired — TS1 shipped in this PR, with CC5 in the same diff** (§4:
+"TS1 may share a PR with CC5 if the diff stays reviewable"). Its probe was the
+module's absence, and `apps/web/src/components/campaign/TimelineTape.tsx` now
+exists, so `plan:verify` no longer tracks it. CC5's own half is retired where it
+lived: `premise TL1` in `2026-09-16_studio-editor.md`.
+
+**Where the implementation departs from this document, and why.** Two places, both
+recorded in the PR body:
+
+1. **§5 puts `scrubSec` / `committedSec` in `BriefEditor`'s body; they ship one
+   level down, in a `PlayheadHost` component in that same file.** §4's own
+   acceptance (b) is unsatisfiable in the body: `renderStepCard` builds the step
+   form inline and no section is `memo`-wrapped, so a second that moves on every
+   pointermove re-renders the whole editor tree per frame. The main column reaches
+   the host as `children`, so React's element-identity bailout skips it. Ownership
+   is still singular and still in `BriefEditor.tsx`, and every literal §5 makes
+   load-bearing is unchanged. **TS2's section host lives inside that bailed-out
+   subtree and will need its own slot or a subscription.**
+2. **§3.5's `PlayheadSlider` sketch is the stale draft §3.3a corrects.** It shows
+   `value={committedSec}`, `onInput` live and `onChange` committing — the exact
+   "commit on change" §3.3a proves wrong in React, and a controlled range whose
+   value is the committed second snaps its thumb back mid-drag. The shipped
+   slider follows §3.3a, §8 and §10.2: `value` is the live second, `onChange` is
+   live, and the commit is `onPointerUp` **and** `onKeyUp`.
+3. **`xFor` spells the label column as a px constant, not `var(--tt-label)`.**
+   happy-dom drops any `calc()` containing a `var()` outright, which makes §8's
+   own proof for this lane — "a string match on the `calc(...)`" — impossible to
+   write with that spelling. The number comes from the same exported constant the
+   custom property is set from, so there is no second source of truth. `--tt-label`
+   is still read, by the lane grid's `grid-cols-[var(--tt-label)_1fr]`;
+   `--tt-end-pad`, `--tt-px` and `--tt-duration` ship on the root because §3.2
+   declares them and the TL2–TL6 paint-overs will want them, but nothing reads
+   them today.
+
+Two more things a reviewer should weigh rather than assume:
+
+- **§6's table says the playhead's `aria-valuenow` is `committedSec`.** The shipped
+  slider binds `value={scrubSec}`. The two are equal at rest — a commit writes both
+  seconds — and differ only mid-drag, which is when a native range should announce
+  the thumb. Binding the committed second instead would snap the thumb back on
+  every re-render and kill the drag (§3.3a).
+- **Two range controls in the rail — SETTLED by the owner, 2026-09-17: the dock's
+  range retires in the rail host and is kept for the narrow host.** TS1 first
+  shipped both (the dock's VE-D5 scrub, named `previewScrubLabel`, beside the
+  tape's "Playhead") because this document contradicts itself — §3.5's prose calls
+  the dock's range "the accessible playhead" while §3.5's own markup puts a
+  `PlayheadSlider` in the tape's footer, and §6 and §8 both name the tape's — and
+  deleting a shipped, tested surface on a plan's ambiguity is not an implementer's
+  call. **What shipped after the decision:** `PreviewShowcaseProps` carries the
+  same `SurfaceHost` discriminant `TimelineTape` already took (imported, not
+  restated, so the two cannot disagree about which of them owns the scrub), and
+  the dock's range renders only under `host="section"`. The rail went from
+  `['Scrub preview', 'Playhead', 'Timeline zoom']` to
+  `['Playhead', 'Timeline zoom']`. The code path is **suppressed, not deleted**:
+  D146's narrow host is where TS2 puts the tape under Copy, and the compact scrub
+  is the control for that case. It has no production call site until TS2 lands, so
+  both halves of the conditional are pinned by tests — the absence in the rail AND
+  the presence in the section — because a conditional with only its negative
+  asserted is one a later lane removes as dead code with nothing going red. The
+  lifted second did not move: this changes which control is visible, never who
+  owns the state.
+
+**Fields of §3.4's `TimelineTapeProps` that TS1 does not ship**, each with the
+lane that adds it, so no dead prop lands: `encodedDurationSec`, `hasAudio` and
+`audioLabel` (TL4 / the audio-clip lane), `background` on a beat (TL2's scene
+clips), `keyBeatIndex` (TS-Q1's recommendation is the form alone in TS1),
+`transition` and `previewedDurationSec` (the fade band, which §11 defers to a
+paint-over that can caption it). `weight` is absent because the windows come from
+`resolveTimeline`, which is the point.
 
 ```premise TS2
 # D146's section host is absent: TimelineSection does not render a tape.
@@ -603,7 +664,7 @@ Each fence exits 0 **while the gap is still open**. `yarn plan:verify` runs them
 ! grep -q 'host="section"' apps/web/src/components/campaign/TimelineSection.tsx
 ```
 
-CC5's existing TL1 fence (`PreviewDock.tsx` still declaring `[xSec, setXSec] = useState`) stays in the studio plan. TS1 does not steal it. Shipping TS1 without CC5 would draw a playhead the preview does not follow; the dependency table forbids that dispatch.
+CC5's TL1 fence (`PreviewDock.tsx` still declaring `[xSec, setXSec] = useState`) lived in the studio plan, and this section used to end "TS1 does not steal it". **That is no longer true, and the sentence is corrected rather than left to mislead:** TS1 shipped the lift as CC5 in its own PR, so `PreviewDock` declares neither second and the probe is false by construction — `premise TL1` is retired in `2026-09-16_studio-editor.md`, in the same commit that removed the `useState` pair. A reader following the old sentence to the studio plan would look for a fence that is not there. Shipping TS1 without CC5 would have drawn a playhead the preview does not follow; the dependency table forbade that dispatch, which is exactly why the two travelled together.
 
 ---
 

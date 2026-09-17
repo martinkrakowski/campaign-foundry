@@ -164,9 +164,16 @@
 /* The refusal nudge (W7.4 / TOK-32). One shot per refused press — the key on the
    Next label replays it, so a second refusal shakes again. */
 @keyframes nudge {
-  0%, 100% { transform: translateX(0); }
-  25% { transform: translateX(-4px); }
-  75% { transform: translateX(4px); }
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  25% {
+    transform: translateX(-4px);
+  }
+  75% {
+    transform: translateX(4px);
+  }
 }
 
 /* A step that has just become complete (W7.4 / TOK-31). The mock ran this as an
@@ -290,6 +297,16 @@
     animation: none !important;
     display: none !important;
   }
+  /* TS1 — the timeline tape. No loop ships on this surface (VE-D2/VE-D5 forbid a
+     play clock), so this is belt and braces over the hover/colour transitions its
+     clips and controls wear. The static film perforations stay: they are a
+     texture, not motion. */
+  .timeline-tape *,
+  .timeline-tape *::before,
+  .timeline-tape *::after {
+    animation: none !important;
+    transition: none !important;
+  }
 }
 
 button:disabled .glyph-anim,
@@ -301,5 +318,3 @@ button:disabled .glyph-cue,
 button[disabled] .glyph-cue {
   display: block !important;
 }
-
-

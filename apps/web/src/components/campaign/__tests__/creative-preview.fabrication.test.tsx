@@ -1,7 +1,7 @@
 import { describe, test, expect } from "vitest";
 import { render, type RenderResult } from "@testing-library/react";
 import type { MotionKind } from "@campaignfoundry/CampaignOrchestration/motion-kinds";
-import { PreviewDock, derivePreviewRatio } from "../PreviewDock";
+import { PreviewDock, derivePreviewRatio, type PlayheadState } from "../PreviewDock";
 import { MOTION_KIND_META } from "../MotionKindPanel";
 import { previewDockProps } from "../preview-props";
 import { initialEditorState, emptyProduct, type EditorState } from "../editor-state";
@@ -130,6 +130,19 @@ function previewTokens(view: RenderResult): string[] {
   return tokens;
 }
 
+/**
+ * CC5 — the playhead is the editor's, not the dock's. These tests read the dock's
+ * rendered WORDS; a resting playhead at 0 is what it is handed before any scrub,
+ * and the range control it draws carries no text of its own.
+ */
+const restingPlayhead: PlayheadState = {
+  durationSec: 6,
+  scrubSec: 0,
+  committedSec: 0,
+  onScrubLive: () => {},
+  onScrubCommit: () => {},
+};
+
 describe("the preview only ever speaks the brief and the sanctioned labels", () => {
   const variationState = niche();
   const classicState = classic();
@@ -148,7 +161,7 @@ describe("the preview only ever speaks the brief and the sanctioned labels", () 
     (_name, state) => {
       const props = previewDockProps(state, 0, 6);
       expect(props).not.toBeNull();
-      const view = render(<PreviewDock {...props!} />);
+      const view = render(<PreviewDock {...props!} playhead={restingPlayhead} host="section" />);
       const tokens = previewTokens(view);
       expect(tokens.length).toBeGreaterThan(0);
       const corpusTokens = corpusTokensFor(state);
@@ -183,7 +196,13 @@ describe("the preview only ever speaks the brief and the sanctioned labels", () 
     // a home in the corpus, but a subtle tokenisation bug could weaken it. This asserts
     // the rejected chrome (§2.3) against the rendered text itself, so the two checks
     // fail for different reasons and cannot both be defeated by one mistake.
-    const { container } = render(<PreviewDock {...previewDockProps(variationState, 0, 6)!} />);
+    const { container } = render(
+      <PreviewDock
+        {...previewDockProps(variationState, 0, 6)!}
+        playhead={restingPlayhead}
+        host="section"
+      />,
+    );
     const rendered = container.textContent ?? "";
     for (const fake of ["12.4K", "1,203", "8,741", "@", "original sound", "Following", "For You"]) {
       expect(rendered, `the preview must never render "${fake}"`).not.toContain(fake);

@@ -1439,3 +1439,46 @@ export const htmlWeightFallbackNote =
 export function htmlWeightOverage(overBytes: number): string {
   return `Over budget by ${weightKb(overBytes)} KB.`;
 }
+
+/* ── The timeline tape (TS1) ─────────────────────────────────────────────── */
+
+/** The tape's own heading. Display words only — "scrollport" is not vocabulary. */
+export const tapeLegend = "Timeline";
+/** The tape's idle sentence: what the surface is for, and that it scrolls. */
+export const tapeIdleStatus = "Drag the playhead to scrub. Scroll sideways for later seconds.";
+/** After a commit: the frame on screen is the encoded one at that second (VE-D6). */
+export function tapeCommittedStatus(label: string): string {
+  return `Frame at ${label} — matches the encoded frame.`;
+}
+/** The named playhead — the native range, never the painted diamond. */
+export const tapePlayheadName = "Playhead";
+/** The zoom control's name. */
+export const tapeZoomName = "Timeline zoom";
+/** The nudges. Action names, because they are buttons that do a thing. */
+export const tapeNudgeBack = "Back one second";
+export const tapeNudgeForward = "Forward one second";
+/**
+ * What the nudge buttons SHOW. Operator-facing, so they live here with every
+ * other word the operator reads (§7) rather than as literals in the component —
+ * and the minus is U+2212, not a hyphen, which is the kind of thing that only
+ * stays right when one file owns it.
+ */
+export const tapeNudgeBackGlyph = "−1s";
+export const tapeNudgeForwardGlyph = "+1s";
+/** A title clip's stable name: its position, never its live seconds. */
+export function tapeBeatName(position: number): string {
+  return `Beat ${position}`;
+}
+/** The video lane's name and its single clip's name. */
+export const tapeLaneVideo = "Video";
+export const tapeVideoClip = "Video clip";
+/** The title lane's name. */
+export const tapeLaneTitle = "Title";
+/** The zoom readout, in mono. A unit, not jargon (§7). */
+export function tapePxPerSecond(pxPerSec: number): string {
+  return `${pxPerSec} px/s`;
+}
+/** A ruler tick's label, e.g. "4s". */
+export function tapeTick(seconds: number): string {
+  return `${seconds}s`;
+}
