@@ -10,7 +10,7 @@
       "command": [
         "sh",
         "-c",
-        "out=$(yarn workspace @campaignfoundry/api build 2>&1); status=$?; if [ \"$status\" -ne 0 ]; then printf '%s\\n' \"$out\"; echo \"build exited $status -- no verdict about warnings\"; exit 2; fi; n=$(printf '%s\\n' \"$out\" | grep -c 'Big integer literals are not available'); echo \"big-integer warnings: $n\"; [ \"$n\" -eq 0 ]"
+        "# A build failure must NOT exit non-zero here. tools/mutate/lib/mutate.ts:237\n# reads ANY non-zero exit as \"caught\", so a distinct code like 2 is legible to a\n# human reading the log and invisible to the runner — a transient build failure\n# on the mutated run would certify this mutation without one BigInt warning ever\n# appearing. Exiting 0 reports \"survived\" against a declared \"caught\", which\n# replayManifest renders as a loud mismatch: an investigable failure rather than\n# a silent false pass. \"The build did not run\" and \"the mutation was caught\"\n# must not be the same signal.\nout=$(yarn workspace @campaignfoundry/api build 2>&1)\nstatus=$?\nif [ \"$status\" -ne 0 ]; then\n  printf '%s\\n' \"$out\"\n  echo \"build exited $status -- no verdict about warnings; reporting survived so this reads as a mismatch, never as a catch\"\n  exit 0\nfi\nn=$(printf '%s\\n' \"$out\" | grep -c 'Big integer literals are not available')\necho \"big-integer warnings: $n\"\n[ \"$n\" -eq 0 ]"
       ],
       "verdict": "caught"
     },
@@ -22,7 +22,7 @@
       "command": [
         "sh",
         "-c",
-        "out=$(yarn workspace @campaignfoundry/api build 2>&1); status=$?; if [ \"$status\" -ne 0 ]; then printf '%s\\n' \"$out\"; echo \"build exited $status -- no verdict about warnings\"; exit 2; fi; n=$(printf '%s\\n' \"$out\" | grep -c 'Big integer literals are not available'); echo \"big-integer warnings: $n\"; [ \"$n\" -eq 0 ]"
+        "# A build failure must NOT exit non-zero here. tools/mutate/lib/mutate.ts:237\n# reads ANY non-zero exit as \"caught\", so a distinct code like 2 is legible to a\n# human reading the log and invisible to the runner — a transient build failure\n# on the mutated run would certify this mutation without one BigInt warning ever\n# appearing. Exiting 0 reports \"survived\" against a declared \"caught\", which\n# replayManifest renders as a loud mismatch: an investigable failure rather than\n# a silent false pass. \"The build did not run\" and \"the mutation was caught\"\n# must not be the same signal.\nout=$(yarn workspace @campaignfoundry/api build 2>&1)\nstatus=$?\nif [ \"$status\" -ne 0 ]; then\n  printf '%s\\n' \"$out\"\n  echo \"build exited $status -- no verdict about warnings; reporting survived so this reads as a mismatch, never as a catch\"\n  exit 0\nfi\nn=$(printf '%s\\n' \"$out\" | grep -c 'Big integer literals are not available')\necho \"big-integer warnings: $n\"\n[ \"$n\" -eq 0 ]"
       ],
       "verdict": "caught"
     }
