@@ -38,8 +38,7 @@ function parseEnv(contents: string): Map<string, EnvEntry> {
     // Split off an inline comment: the first '#' at the start of the value or
     // preceded by whitespace. A '#' inside the value (no leading space) is kept.
     const commentStart = afterEq.search(/(^|\s)#/);
-    const hashIndex =
-      commentStart >= 0 ? afterEq.indexOf("#", commentStart) : -1;
+    const hashIndex = commentStart >= 0 ? afterEq.indexOf("#", commentStart) : -1;
     const value = (hashIndex >= 0 ? afterEq.slice(0, hashIndex) : afterEq).trim();
     const comment = hashIndex >= 0 ? afterEq.slice(hashIndex + 1).trim() : "";
 
@@ -65,9 +64,7 @@ function exampleFiles(): string[] {
   } catch {
     return [];
   }
-  return entries
-    .filter((name) => name.startsWith(".env") && name.endsWith(".example"))
-    .sort();
+  return entries.filter((name) => name.startsWith(".env") && name.endsWith(".example")).sort();
 }
 
 const required = new Set<string>();

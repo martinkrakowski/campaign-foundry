@@ -6006,3 +6006,31 @@ static types) are asserted on resulting editor state, and `applyPreset` runs exa
 Mutation in `.agents/manifests/cc6.json` (moving `display-ad` into motion group) caught by the group
 membership assertion under `yarn mutate:verify`. `yarn typecheck`, `yarn lint`, and `yarn plan:verify` pass cleanly.
 Cite: CC6 in docs/planning/2026-09-16_creative-first-chrome.md.
+
+## 2026-09-16 — X1 (Prettier: a config, one format, and a gate)
+
+Shipped as five PRs rather than one, and the split is the point: a 400-file diff in the same commit
+as a config change is unreviewable, and the one place a real change could hide. Config first
+(#457), three disjoint mechanical slices (#459 packages 157, #461 api+tools 108, #460 web 134),
+then this one — `scripts/check-env.ts`, the straggler my own globs missed, plus the gate wiring.
+
+Width 100 on measurement, not preference: 400 ts/tsx files change at 100 against **613 at
+Prettier's 80 default**, code whose measured width is p90 = 84. `.md` was dropped from `yarn
+format`'s glob and never entered `format:check`'s — it would have rewrapped 97 hand-wrapped
+planning documents and made every future plan diff unreadable, which is the opposite of what this
+lane is for. Both globs were changed together so the writer and the checker cannot disagree.
+
+**The fence took three attempts and each failure taught something different.** Asking whether a
+config existed probed half of §1's own title — the half that closes first — and went STALE on the
+config commit with 400 files still unformatted, which would have forced the lane back into one
+commit. Replacing it with `prettier --check` probed the real gap but scanned 679 files: 4.8s
+locally, TIMED-OUT on the runner inside plan:verify's 10s budget, the same failure the SE2 fence
+hit hours earlier, reached from the opposite direction. What worked was grepping `ci.yml` for the
+gate step — an unforgeable marker, because a PR that wires a gate cannot land without satisfying
+it. That rule is now pre-dispatch item 9 in the orchestration skill.
+
+Two things the gate caught that the slicing missed: `scripts/` was outside all three globs, so the
+repo was one file short of clean and `format:check` would have failed on its first run; and the
+mutation manifests survived the reformat only because their quoted `before`/`after` fragments
+happened to fall on lines the formatter left alone — a latent coupling between manifest fragments
+and source formatting, recorded here rather than fixed.
