@@ -1,7 +1,14 @@
 import { describe, test, expect, vi, beforeEach } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { renderWithRun, exerciseFocusTrap, json, mockPipelineApi, EMPTY_REPORT, storedTemplate } from "@/__tests__/helpers";
+import {
+  renderWithRun,
+  exerciseFocusTrap,
+  json,
+  mockPipelineApi,
+  EMPTY_REPORT,
+  storedTemplate,
+} from "@/__tests__/helpers";
 import { useRun } from "@/lib/run-context";
 import { CreateCampaignProvider } from "@/lib/create-campaign-context";
 import { CreateCampaignDialog } from "../CreateCampaignDialog";
@@ -36,7 +43,9 @@ describe("ModelSelector", () => {
     const dialog = await screen.findByRole("dialog", { name: "Select image model" });
     exerciseFocusTrap(dialog);
     await user.keyboard("{Escape}");
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Select image model" })).toBeNull());
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Select image model" })).toBeNull(),
+    );
   });
 
   test("reports the chosen model's label so the header can say what runs next", async () => {
@@ -60,13 +69,30 @@ describe("ModelSelector", () => {
     expect(within(dialog).getByRole("heading", { name: "Image model" })).toBeTruthy();
     expect(within(dialog).getByText(/falls back automatically/)).toBeTruthy();
     await user.click(within(dialog).getByRole("button", { name: "Close" }));
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Select image model" })).toBeNull());
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Select image model" })).toBeNull(),
+    );
   });
 
   test("flags a reuse brief that may skip the model", async () => {
     localStorage.setItem(
       "cf:brief",
-      JSON.stringify({ id: "reuse", targetRegion: "DE", targetAudience: "a", campaignMessage: "Hi", template: storedTemplate, products: [{ id: "p", name: "P", primaryColor: "#111111", logoPath: "l.png", inputAsset: "assets/x.png" }] }),
+      JSON.stringify({
+        id: "reuse",
+        targetRegion: "DE",
+        targetAudience: "a",
+        campaignMessage: "Hi",
+        template: storedTemplate,
+        products: [
+          {
+            id: "p",
+            name: "P",
+            primaryColor: "#111111",
+            logoPath: "l.png",
+            inputAsset: "assets/x.png",
+          },
+        ],
+      }),
     );
     renderWithRun(<ModelSelector />);
     const note = await screen.findByRole("note");
@@ -87,15 +113,27 @@ describe("BriefPicker", () => {
 
   const routeBriefs = (body: unknown, ok = true) =>
     mockPipelineApi({
-      result: (url) => (url.includes("/campaigns/briefs") ? json(body, ok ? 200 : 500) : json(EMPTY_REPORT)),
+      result: (url) =>
+        url.includes("/campaigns/briefs") ? json(body, ok ? 200 : 500) : json(EMPTY_REPORT),
     });
 
   test("lists briefs, marks the current one, and selecting one loads it", async () => {
     const user = userEvent.setup();
     routeBriefs({
       briefs: [
-        { file: "current.yaml", brief: { id: "summer-hydration-2026", targetRegion: "DE", products: [{ id: "a" }] } },
-        { file: "demo.yaml", brief: { id: "demo", targetRegion: "DE", products: [{ id: "a" }, { id: "b" }], treatments: [{ id: "t1" }, { id: "t2" }] } },
+        {
+          file: "current.yaml",
+          brief: { id: "summer-hydration-2026", targetRegion: "DE", products: [{ id: "a" }] },
+        },
+        {
+          file: "demo.yaml",
+          brief: {
+            id: "demo",
+            targetRegion: "DE",
+            products: [{ id: "a" }, { id: "b" }],
+            treatments: [{ id: "t1" }, { id: "t2" }],
+          },
+        },
       ],
     });
     renderWithRun(<BriefPicker />);
@@ -103,7 +141,9 @@ describe("BriefPicker", () => {
     expect(screen.getByText("current")).toBeTruthy(); // badge on the active brief
     expect(screen.getByText(/1 product /)).toBeTruthy(); // singular
     await user.click(screen.getByText("demo.yaml"));
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Load a campaign brief" })).toBeNull());
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Load a campaign brief" })).toBeNull(),
+    );
   });
 
   test("shows an error state when the request returns a non-JSON 5xx", async () => {
@@ -125,13 +165,27 @@ describe("BriefPicker", () => {
 
   test("closes on Escape", async () => {
     const user = userEvent.setup();
-    routeBriefs({ briefs: [{ file: "demo.yaml", brief: { id: "demo", targetRegion: "DE", products: [{ id: "a" }], treatments: [{ id: "t" }] } }] });
+    routeBriefs({
+      briefs: [
+        {
+          file: "demo.yaml",
+          brief: {
+            id: "demo",
+            targetRegion: "DE",
+            products: [{ id: "a" }],
+            treatments: [{ id: "t" }],
+          },
+        },
+      ],
+    });
     renderWithRun(<BriefPicker />);
     const dialog = await screen.findByRole("dialog", { name: "Load a campaign brief" });
     await screen.findByText("demo.yaml");
     exerciseFocusTrap(dialog);
     await user.keyboard("{Escape}");
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Load a campaign brief" })).toBeNull());
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Load a campaign brief" })).toBeNull(),
+    );
   });
 });
 
@@ -139,10 +193,26 @@ describe("TelemetryDrawer", () => {
   const seedLog = () => {
     localStorage.setItem(
       "cf:brief",
-      JSON.stringify({ id: "log", targetRegion: "DE", targetAudience: "a", campaignMessage: "Hi", template: storedTemplate, products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: "a.png" }] }),
+      JSON.stringify({
+        id: "log",
+        targetRegion: "DE",
+        targetAudience: "a",
+        campaignMessage: "Hi",
+        template: storedTemplate,
+        products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: "a.png" }],
+      }),
     );
     mockPipelineApi({
-      report: { halted: false, assets: [], log: { campaignId: "log", entries: [{ timestamp: "2026-01-01T10:00:00Z", stage: "Stage", message: "hello", level: "warn" }] } },
+      report: {
+        halted: false,
+        assets: [],
+        log: {
+          campaignId: "log",
+          entries: [
+            { timestamp: "2026-01-01T10:00:00Z", stage: "Stage", message: "hello", level: "warn" },
+          ],
+        },
+      },
     });
   };
 
@@ -154,10 +224,24 @@ describe("TelemetryDrawer", () => {
   test("renders a placeholder time for an unparseable timestamp", async () => {
     localStorage.setItem(
       "cf:brief",
-      JSON.stringify({ id: "log2", targetRegion: "DE", targetAudience: "a", campaignMessage: "Hi", template: storedTemplate, products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: "a.png" }] }),
+      JSON.stringify({
+        id: "log2",
+        targetRegion: "DE",
+        targetAudience: "a",
+        campaignMessage: "Hi",
+        template: storedTemplate,
+        products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: "a.png" }],
+      }),
     );
     mockPipelineApi({
-      report: { halted: false, assets: [], log: { campaignId: "log2", entries: [{ timestamp: "not-a-date", stage: "S", message: "m", level: "info" }] } },
+      report: {
+        halted: false,
+        assets: [],
+        log: {
+          campaignId: "log2",
+          entries: [{ timestamp: "not-a-date", stage: "S", message: "m", level: "info" }],
+        },
+      },
     });
     renderWithRun(<TelemetryDrawer open onClose={() => {}} />);
     expect(await screen.findByText("--:--:--")).toBeTruthy();
@@ -202,7 +286,13 @@ describe("TelemetryDrawer", () => {
     // "[SYSTEM] Ready" idle line would get wrong.
     localStorage.setItem(
       "cf:brief",
-      JSON.stringify({ id: "log4", targetRegion: "DE", targetAudience: "a", campaignMessage: "Hi", products: [] }),
+      JSON.stringify({
+        id: "log4",
+        targetRegion: "DE",
+        targetAudience: "a",
+        campaignMessage: "Hi",
+        products: [],
+      }),
     );
     mockPipelineApi({ report: EMPTY_REPORT, post: () => new Promise<Response>(() => {}) });
 
@@ -249,7 +339,12 @@ describe("BriefPicker with unsaved editor changes", () => {
           null,
           createElement(RaiseDirty),
           // W1: the create dialog is mounted beside the picker, as the layout does.
-          createElement(CreateCampaignProvider, null, createElement(BriefPicker), createElement(CreateCampaignDialog)),
+          createElement(
+            CreateCampaignProvider,
+            null,
+            createElement(BriefPicker),
+            createElement(CreateCampaignDialog),
+          ),
         ),
       ),
     );
@@ -262,7 +357,11 @@ describe("BriefPicker with unsaved editor changes", () => {
 
   test("refusing the prompt keeps the picker open and loads nothing", async () => {
     const user = userEvent.setup();
-    routeBriefs({ briefs: [{ file: "demo.yaml", brief: { id: "demo", targetRegion: "DE", products: [{ id: "a" }] } }] });
+    routeBriefs({
+      briefs: [
+        { file: "demo.yaml", brief: { id: "demo", targetRegion: "DE", products: [{ id: "a" }] } },
+      ],
+    });
     renderDirty();
 
     await user.click(await screen.findByText("demo.yaml"));
@@ -309,7 +408,12 @@ describe("BriefPicker when the prompt is accepted", () => {
           null,
           createElement(RaiseDirty),
           // W1: the create dialog is mounted beside the picker, as the layout does.
-          createElement(CreateCampaignProvider, null, createElement(BriefPicker), createElement(CreateCampaignDialog)),
+          createElement(
+            CreateCampaignProvider,
+            null,
+            createElement(BriefPicker),
+            createElement(CreateCampaignDialog),
+          ),
         ),
       ),
     );
@@ -320,7 +424,14 @@ describe("BriefPicker when the prompt is accepted", () => {
     mockPipelineApi({
       result: (url) =>
         url.includes("/campaigns/briefs")
-          ? json({ briefs: [{ file: "demo.yaml", brief: { id: "demo", targetRegion: "DE", products: [{ id: "a" }] } }] })
+          ? json({
+              briefs: [
+                {
+                  file: "demo.yaml",
+                  brief: { id: "demo", targetRegion: "DE", products: [{ id: "a" }] },
+                },
+              ],
+            })
           : json(EMPTY_REPORT),
     });
     renderDirty();
@@ -336,7 +447,8 @@ describe("BriefPicker when the prompt is accepted", () => {
   test("accepting on Create new closes the picker and opens the create dialog (W1)", async () => {
     const user = userEvent.setup();
     mockPipelineApi({
-      result: (url) => (url.includes("/campaigns/briefs") ? json({ briefs: [] }) : json(EMPTY_REPORT)),
+      result: (url) =>
+        url.includes("/campaigns/briefs") ? json({ briefs: [] }) : json(EMPTY_REPORT),
     });
     renderDirty();
 

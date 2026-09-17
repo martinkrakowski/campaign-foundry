@@ -131,11 +131,7 @@ export const ANCHOR_OPTIONS: readonly string[] = ANCHOR_VALUES;
  * other divergence) is what makes the axis real.
  */
 export const DERIVED_ANCHOR_OPTIONS: readonly string[] = ["top", "bottom"];
-export const BACKGROUND_OPTIONS = [
-  "procedural",
-  "asset-pool",
-  "genai",
-] as const;
+export const BACKGROUND_OPTIONS = ["procedural", "asset-pool", "genai"] as const;
 export const PALETTE_SHIFT_OPTIONS = [0, 0.1, 0.2] as const;
 /** The two campaign modes in panel order (D4) — `brief` (Classic) first. */
 export const MODE_OPTIONS: readonly CampaignMode[] = ["brief", "variation"];
@@ -161,10 +157,7 @@ export interface ProductDraft {
 import { SWATCH_PALETTE } from "../ui/swatch-picker";
 export { SWATCH_PALETTE };
 
-export function emptyProduct(
-  key: number,
-  primaryColor = "#1473E6",
-): ProductDraft {
+export function emptyProduct(key: number, primaryColor = "#1473E6"): ProductDraft {
   return {
     key,
     id: "",
@@ -638,14 +631,8 @@ export function initialEditorState(mode: CampaignMode = "brief"): EditorState {
   };
 }
 
-function toggleOrdered<T>(
-  list: readonly T[],
-  value: T,
-  order: readonly T[],
-): T[] {
-  const next = list.includes(value)
-    ? list.filter((item) => item !== value)
-    : [...list, value];
+function toggleOrdered<T>(list: readonly T[], value: T, order: readonly T[]): T[] {
+  const next = list.includes(value) ? list.filter((item) => item !== value) : [...list, value];
   return order.filter((item) => next.includes(item));
 }
 
@@ -670,9 +657,7 @@ function isDerivedAnchorSelection(selection: readonly string[]): boolean {
  * the axis exactly as `toBrief` writes it.
  */
 export function anchorAxisActive(state: EditorState): boolean {
-  return (
-    state.anchorExplicit || !isDerivedAnchorSelection(state.variation.anchor)
-  );
+  return state.anchorExplicit || !isDerivedAnchorSelection(state.variation.anchor);
 }
 
 /*
@@ -683,9 +668,7 @@ export function anchorAxisActive(state: EditorState): boolean {
  */
 
 /** Ratios the requested platforms package motion at — the motion filter's allowlist. */
-export function motionPackagedRatios(
-  state: EditorState | readonly string[],
-): Set<string> {
+export function motionPackagedRatios(state: EditorState | readonly string[]): Set<string> {
   const platforms: readonly string[] = Array.isArray(state)
     ? (state as readonly string[])
     : (state as EditorState).platforms;
@@ -694,9 +677,7 @@ export function motionPackagedRatios(
       .map((id: string) => PLATFORM_PROFILES[id])
       .filter((profile): profile is PlatformProfile => profile !== undefined)
       .filter(isRatioProfile)
-      .filter((profile) =>
-        (profile.formats as readonly string[]).includes("motion"),
-      )
+      .filter((profile) => (profile.formats as readonly string[]).includes("motion"))
       .map((profile) => profile.ratio),
   );
 }
@@ -724,14 +705,10 @@ export function drawableRatios(state: EditorState): string[] {
  * slider's bound, so the editor cannot author a count the planner will refuse.
  */
 export function axisProductSize(state: EditorState): number {
-  const motionEnabled =
-    state.formats.includes("motion") && state.motion.length > 0;
+  const motionEnabled = state.formats.includes("motion") && state.motion.length > 0;
   const mixStatic = motionEnabled && state.formats.includes("static");
   return (
-    Math.max(
-      1,
-      state.products.filter((product) => product.id.length > 0).length,
-    ) *
+    Math.max(1, state.products.filter((product) => product.id.length > 0).length) *
     Math.max(1, drawableRatios(state).length) *
     Math.max(1, state.variation.layout.length) *
     Math.max(1, state.variation.tone.length) *
@@ -742,8 +719,7 @@ export function axisProductSize(state: EditorState): number {
     // the absent axis derives top/bottom from `layout`, adding no combination.
     (anchorAxisActive(state) ? Math.max(1, state.variation.anchor.length) : 1) *
     (motionEnabled
-      ? state.motion.length * Math.max(1, state.duration.length) +
-        (mixStatic ? 1 : 0)
+      ? state.motion.length * Math.max(1, state.duration.length) + (mixStatic ? 1 : 0)
       : 1)
   );
 }
@@ -777,10 +753,7 @@ function withCountClamp(state: EditorState): EditorState {
  * alone. Emptying the list resets `keyBeat` to 1, which no path serialises because an
  * empty timeline has no `keyBeat` to write.
  */
-function removeTimelineBeat(
-  timeline: TimelineDraft,
-  index: number,
-): TimelineDraft {
+function removeTimelineBeat(timeline: TimelineDraft, index: number): TimelineDraft {
   const beats = timeline.beats.filter((_, i) => i !== index);
   let nextKeyIndex = timeline.keyBeat - 1;
   if (index < timeline.keyBeat - 1) nextKeyIndex = timeline.keyBeat - 2;
@@ -800,19 +773,14 @@ function removeTimelineBeat(
  * would — left when a beat ahead of it is carried forward past it, right when a beat
  * behind it is carried back across it. The result is always in [1, beats.length].
  */
-function moveTimelineBeat(
-  timeline: TimelineDraft,
-  from: number,
-  to: number,
-): TimelineDraft {
+function moveTimelineBeat(timeline: TimelineDraft, from: number, to: number): TimelineDraft {
   const next = [...timeline.beats];
   const [moved] = next.splice(from, 1);
   next.splice(to, 0, moved);
   const keyIndex = timeline.keyBeat - 1;
   let nextKeyIndex = keyIndex;
   if (keyIndex === from) nextKeyIndex = to;
-  else if (keyIndex > from)
-    nextKeyIndex = to <= keyIndex - 1 ? keyIndex : keyIndex - 1;
+  else if (keyIndex > from) nextKeyIndex = to <= keyIndex - 1 ? keyIndex : keyIndex - 1;
   else nextKeyIndex = to <= keyIndex ? keyIndex + 1 : keyIndex;
   return {
     beats: next,
@@ -867,8 +835,7 @@ export type AddBeatBlock =
     };
 
 export function addBeatBlockedBy(state: EditorState): AddBeatBlock | undefined {
-  if (state.timeline.beats.length >= MAX_BEATS)
-    return { kind: "max", max: MAX_BEATS };
+  if (state.timeline.beats.length >= MAX_BEATS) return { kind: "max", max: MAX_BEATS };
   const durations = timelineDurations(state);
   const withOneMore: CopyTimeline = {
     beats: [...state.timeline.beats, { text: "", weight: 1 }],
@@ -903,9 +870,7 @@ function isLayerIndex(index: number, layerCount: number): boolean {
  * Converts raw layer kinds to display labels and maps domain occlusion behavior
  * to the catalog's effect verb ("hide" | "mute" | "overlap").
  */
-export function formatOcclusionNotice(
-  finding: OcclusionFinding | null,
-): string | null {
+export function formatOcclusionNotice(finding: OcclusionFinding | null): string | null {
   if (!finding) return null;
   const effect: "hide" | "mute" | "overlap" =
     finding.behavior === "opaque"
@@ -928,10 +893,7 @@ export function formatOcclusionNotice(
  * the shape every canonical template already carries — and a brief never grows a
  * key that only restates what absence says.
  */
-function withEnabled(
-  layer: CreativeTemplateLayer,
-  value: boolean,
-): CreativeTemplateLayer {
+function withEnabled(layer: CreativeTemplateLayer, value: boolean): CreativeTemplateLayer {
   if (!value) return { ...layer, enabled: false };
   // Removing the one optional key a copy of a readonly layer can drop: the
   // double cast is the type system's blind spot around `delete` on a record,
@@ -988,15 +950,12 @@ function htmlElementEdit(
   layerId: string,
   index?: number,
 ): HtmlElementEdit | undefined {
-  const layerIndex = state.template.layers.findIndex(
-    (layer) => layer.id === layerId,
-  );
+  const layerIndex = state.template.layers.findIndex((layer) => layer.id === layerId);
   if (layerIndex === -1) return undefined;
   const layer = state.template.layers[layerIndex]!;
   if (layer.kind !== "html") return undefined;
   const elements = layer.elements ?? [];
-  if (index !== undefined && !isListIndex(index, elements.length))
-    return undefined;
+  if (index !== undefined && !isListIndex(index, elements.length)) return undefined;
   return { layerIndex, elements };
 }
 
@@ -1061,11 +1020,8 @@ function canonicalElement(element: HtmlElement): HtmlElement {
  */
 function canonicalLayer(layer: CreativeTemplateLayer): CreativeTemplateLayer {
   const dropEnabled = layer.enabled === true;
-  const dropElements =
-    Array.isArray(layer.elements) && layer.elements.length === 0;
-  const canonicalElements = dropElements
-    ? undefined
-    : layer.elements?.map(canonicalElement);
+  const dropElements = Array.isArray(layer.elements) && layer.elements.length === 0;
+  const canonicalElements = dropElements ? undefined : layer.elements?.map(canonicalElement);
   const restyledElements =
     canonicalElements !== undefined &&
     layer.elements !== undefined &&
@@ -1093,27 +1049,15 @@ export function canonicalTemplate(template: BriefTemplate): BriefTemplate {
  * scalar is null at the boundary (D68); mapping it to "" is the form the
  * draft holds, so a freshly opened file is not dirty.
  */
-const REQUIRED_BRIEF_STRINGS = [
-  "targetRegion",
-  "targetAudience",
-  "campaignMessage",
-] as const;
+const REQUIRED_BRIEF_STRINGS = ["targetRegion", "targetAudience", "campaignMessage"] as const;
 
 /**
  * `toBrief` omits these when empty. Null is absence: drop the key so the
  * snapshot matches a save of the coalesced draft.
  */
-const OMITTED_BRIEF_STRINGS = [
-  "localizedMessage",
-  "clickDestination",
-] as const;
+const OMITTED_BRIEF_STRINGS = ["localizedMessage", "clickDestination"] as const;
 
-const REQUIRED_PRODUCT_STRINGS = [
-  "id",
-  "name",
-  "primaryColor",
-  "logoPath",
-] as const;
+const REQUIRED_PRODUCT_STRINGS = ["id", "name", "primaryColor", "logoPath"] as const;
 
 function canonicalProduct(product: Product): Product {
   // A stored snapshot's products array can hold anything: a null entry from a
@@ -1180,8 +1124,7 @@ export function canonicalBrief(brief: CampaignBrief): CampaignBrief {
   // through here must do the same, so discard does not lose the file.
   if (!isBriefTemplate(brief.template)) return canonicalNullScalars(brief);
   const template = canonicalTemplate(brief.template);
-  const withTemplate =
-    template === brief.template ? brief : { ...brief, template };
+  const withTemplate = template === brief.template ? brief : { ...brief, template };
   return canonicalNullScalars(withTemplate);
 }
 
@@ -1200,10 +1143,7 @@ function clampedFrame(patch: Partial<Frame>, prior: Frame): Frame {
     next[field] = Math.min(1, Math.max(0, value));
   }
   const anchor = patch.anchor;
-  if (
-    anchor !== undefined &&
-    (ANCHOR_VALUES as readonly string[]).includes(anchor)
-  ) {
+  if (anchor !== undefined && (ANCHOR_VALUES as readonly string[]).includes(anchor)) {
     next.anchor = anchor;
   }
   return next as unknown as Frame;
@@ -1238,11 +1178,9 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
       // retraction mirrors it the same way, so switching to a still-only
       // preset leaves no orphaned kinds behind.
       const videoTurningOn =
-        preset.formats.includes("motion") &&
-        !withMode.formats.includes("motion");
+        preset.formats.includes("motion") && !withMode.formats.includes("motion");
       const videoTurningOff =
-        !preset.formats.includes("motion") &&
-        withMode.formats.includes("motion");
+        !preset.formats.includes("motion") && withMode.formats.includes("motion");
       let motion = withMode.motion;
       let duration = withMode.duration;
       let motionSeeded = withMode.motionSeeded;
@@ -1291,8 +1229,7 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
         };
       }
       const next = { ...state, ...patch };
-      if (patch.briefId === undefined || patch.briefId === state.briefId)
-        return next;
+      if (patch.briefId === undefined || patch.briefId === state.briefId) return next;
       return {
         ...next,
         pool: null,
@@ -1321,9 +1258,7 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
     case "removeProduct":
       return {
         ...state,
-        products: state.products.filter(
-          (product) => product.key !== action.key,
-        ),
+        products: state.products.filter((product) => product.key !== action.key),
       };
     case "setTreatment": {
       return {
@@ -1345,9 +1280,7 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
     case "removeTreatment":
       return {
         ...state,
-        treatments: state.treatments.filter(
-          (_, index) => index !== action.index,
-        ),
+        treatments: state.treatments.filter((_, index) => index !== action.index),
       };
     case "addLayer": {
       // D124, D128 — the editor's offer IS the boundary's rule: a kind the Template
@@ -1399,9 +1332,7 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
       // could still carry a pair: filtering by id would strip both at once —
       // the duplicated kind required, Save would then fail for a layer the
       // user never touched. The first match goes; the duplicate stays.
-      const index = state.template.layers.findIndex(
-        (layer) => layer.id === action.id,
-      );
+      const index = state.template.layers.findIndex((layer) => layer.id === action.id);
       const nextLayers = state.template.layers.filter((_, i) => i !== index);
       return {
         ...state,
@@ -1446,9 +1377,7 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
       // the Template section could not offer (the last enabled instance of a
       // required kind) is refused here, so the draft can never hold a template the
       // boundary refuses for carrying a required kind with nothing enabled.
-      const index = state.template.layers.findIndex(
-        (layer) => layer.id === action.id,
-      );
+      const index = state.template.layers.findIndex((layer) => layer.id === action.id);
       if (index === -1) return state;
       // Already in the state asked for: no edit, so no history entry either.
       // (Two rows sharing an id — a draft restored before the storage guard —
@@ -1477,10 +1406,7 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
     case "addHtmlElement": {
       const edit = htmlElementEdit(state, action.layerId);
       if (edit === undefined) return state;
-      return withHtmlElements(state, edit, [
-        ...edit.elements,
-        newHtmlElement(action.kind),
-      ]);
+      return withHtmlElements(state, edit, [...edit.elements, newHtmlElement(action.kind)]);
     }
     case "removeHtmlElement": {
       const edit = htmlElementEdit(state, action.layerId, action.index);
@@ -1524,8 +1450,7 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
       const element = edit.elements[action.index]!;
       const frame = clampedFrame(action.patch, element.frame);
       // Already the frame asked for: no edit, so no history entry either.
-      if (FRAME_FIELDS.every((field) => frame[field] === element.frame[field]))
-        return state;
+      if (FRAME_FIELDS.every((field) => frame[field] === element.frame[field])) return state;
       return withHtmlElements(
         state,
         edit,
@@ -1541,8 +1466,9 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
       // An `image` element carries no style — the domain's field table refuses
       // it — so there is nothing to override and nothing to write.
       if (element.kind === "image") return state;
-      const style: { fontWeight?: FontWeightKind; fontFamily?: FontFamilyKind } =
-        { ...element.style };
+      const style: { fontWeight?: FontWeightKind; fontFamily?: FontFamilyKind } = {
+        ...element.style,
+      };
       // A field the patch names is written or removed; a field it does not
       // name keeps what the element had — the per-field composition of
       // `setStyle`'s patch, the `setHtmlElementFrame` patch's shape.
@@ -1553,8 +1479,7 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
           // The reducer is the contract, the way `setBeatWeight`'s bounds are:
           // a value outside the domain's own vocabulary refuses the whole
           // dispatch, so a hand-restored draft cannot smuggle one in.
-          if (!(FONT_WEIGHT_VALUES as readonly number[]).includes(value))
-            return state;
+          if (!(FONT_WEIGHT_VALUES as readonly number[]).includes(value)) return state;
           style.fontWeight = value;
         }
       }
@@ -1562,8 +1487,7 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
         const value = action.patch.fontFamily;
         if (value === undefined) delete style.fontFamily;
         else {
-          if (!(FONT_FAMILY_VALUES as readonly string[]).includes(value))
-            return state;
+          if (!(FONT_FAMILY_VALUES as readonly string[]).includes(value)) return state;
           style.fontFamily = value;
         }
       }
@@ -1690,31 +1614,19 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
     case "toggleLayout": {
       // Min-one guard (D6): the last selected value cannot be deselected — the click
       // is a no-op, which deletes the "select at least one" error by construction.
-      const layout = toggleOrdered(
-        state.variation.layout,
-        action.value,
-        LAYOUT_OPTIONS,
-      );
+      const layout = toggleOrdered(state.variation.layout, action.value, LAYOUT_OPTIONS);
       if (layout.length === 0) return state;
       return { ...state, variation: { ...state.variation, layout } };
     }
     case "toggleTone": {
-      const tone = toggleOrdered(
-        state.variation.tone,
-        action.value,
-        TONE_OPTIONS,
-      );
+      const tone = toggleOrdered(state.variation.tone, action.value, TONE_OPTIONS);
       if (tone.length === 0) return state;
       return { ...state, variation: { ...state.variation, tone } };
     }
     case "toggleAnchor": {
       // Min-one guard (D6): the last selected value cannot be deselected — the click
       // is a no-op, which deletes the "select at least one" error by construction.
-      const anchor = toggleOrdered(
-        state.variation.anchor,
-        action.value,
-        ANCHOR_OPTIONS,
-      );
+      const anchor = toggleOrdered(state.variation.anchor, action.value, ANCHOR_OPTIONS);
       if (anchor.length === 0) return state;
       return {
         ...state,
@@ -1732,11 +1644,7 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
       };
     }
     case "toggleRatio": {
-      const nextRatioSelection = toggleOrdered(
-        state.variation.ratio,
-        action.value,
-        RATIO_OPTIONS,
-      );
+      const nextRatioSelection = toggleOrdered(state.variation.ratio, action.value, RATIO_OPTIONS);
       return {
         ...state,
         variation: { ...state.variation, ratio: nextRatioSelection },
@@ -1744,10 +1652,7 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
         // to what the platforms derive, and a flag stuck at true would freeze it there —
         // the next platform change would leave the ratios behind, still showing the old
         // platform's shapes.
-        ratioOverridden: differsFrom(
-          nextRatioSelection,
-          platformsToRatios(state.platforms),
-        ),
+        ratioOverridden: differsFrom(nextRatioSelection, platformsToRatios(state.platforms)),
       };
     }
     case "toggleBackground": {
@@ -1818,9 +1723,7 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
       const formats = state.formats.includes("static")
         ? state.formats
         : [...state.formats, "static"];
-      const platforms = state.platforms.some((id) =>
-        platformsToFormats([id]).includes("static"),
-      )
+      const platforms = state.platforms.some((id) => platformsToFormats([id]).includes("static"))
         ? state.platforms
         : [...state.platforms, PHOTO_PLATFORM];
       return withCountClamp({
@@ -1864,10 +1767,8 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
         ? state.formats.filter((f) => f !== action.value)
         : [...state.formats, action.value];
 
-      const videoTurningOn =
-        action.value === "motion" && nextFormats.includes("motion");
-      const videoTurningOff =
-        action.value === "motion" && !nextFormats.includes("motion");
+      const videoTurningOn = action.value === "motion" && nextFormats.includes("motion");
+      const videoTurningOff = action.value === "motion" && !nextFormats.includes("motion");
 
       let motion = state.motion;
       let duration = state.duration;
@@ -1876,12 +1777,7 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
       // Seeding domain defaults on Video-on (D9):
       // When Video is turned on on a fresh draft with no motion/duration set,
       // seed all motion kinds and 6s duration.
-      if (
-        videoTurningOn &&
-        motion.length === 0 &&
-        duration.length === 0 &&
-        !state.motionTouched
-      ) {
+      if (videoTurningOn && motion.length === 0 && duration.length === 0 && !state.motionTouched) {
         motion = [...MOTION_KINDS];
         duration = [DEFAULT_DURATION_SEC];
         motionSeeded = true;
@@ -1908,18 +1804,11 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
         // Recomputed for the same reason as the ratio axis: turning Video on and off again
         // leaves the formats equal to what the platforms derive, and latching the flag
         // would stop a later platform change updating them.
-        formatsOverridden: differsFrom(
-          nextFormats,
-          platformsToFormats(state.platforms),
-        ),
+        formatsOverridden: differsFrom(nextFormats, platformsToFormats(state.platforms)),
       };
     }
     case "togglePlatform": {
-      const nextPlatforms = toggleOrdered(
-        state.platforms,
-        action.value,
-        PLATFORM_ORDER,
-      );
+      const nextPlatforms = toggleOrdered(state.platforms, action.value, PLATFORM_ORDER);
       const nextFormats = state.formatsOverridden
         ? state.formats
         : platformsToFormats(nextPlatforms);
@@ -1933,14 +1822,10 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
       // nothing — both branches degenerate to the list that is already there.
       const removing = state.platforms.includes(action.value);
       const nextSizes = removing
-        ? state.sizes.filter((size) =>
-            platformsToSizes(nextPlatforms).includes(size),
-          )
+        ? state.sizes.filter((size) => platformsToSizes(nextPlatforms).includes(size))
         : orderedDisplaySizes([
             ...state.sizes,
-            ...(PLATFORM_PROFILES[action.value]?.sizes ?? []).map(
-              (slot) => slot.size,
-            ),
+            ...(PLATFORM_PROFILES[action.value]?.sizes ?? []).map((slot) => slot.size),
           ]);
 
       let motion = state.motion;
@@ -1948,10 +1833,8 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
       let motionSeeded = state.motionSeeded;
 
       if (!state.formatsOverridden) {
-        const videoTurningOn =
-          nextFormats.includes("motion") && !state.formats.includes("motion");
-        const videoTurningOff =
-          !nextFormats.includes("motion") && state.formats.includes("motion");
+        const videoTurningOn = nextFormats.includes("motion") && !state.formats.includes("motion");
+        const videoTurningOff = !nextFormats.includes("motion") && state.formats.includes("motion");
         if (
           videoTurningOn &&
           motion.length === 0 &&
@@ -1988,8 +1871,7 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
       return {
         ...state,
         pool: action.pool,
-        headlineAxisDropped:
-          none && (state.headlineAxisDropped || state.variation.headline),
+        headlineAxisDropped: none && (state.headlineAxisDropped || state.variation.headline),
         variation: {
           ...state.variation,
           headline: state.variation.headline && !none,
@@ -2098,9 +1980,7 @@ export function approvedHeadlines(pool: CopyPool | null): number {
  * Order is the pool's own, and duplicates are dropped: the same line approved twice is one
  * choice to a person, and offering it twice reads as a bug.
  */
-export function approvedHeadlineTexts(
-  pool: CopyPool | null,
-): readonly string[] {
+export function approvedHeadlineTexts(pool: CopyPool | null): readonly string[] {
   if (pool === null) return [];
   const texts = pool.entries
     .filter((entry) => entry.status === "approved")
@@ -2138,9 +2018,7 @@ function toTreatment(draft: TreatmentDraft): Treatment {
  */
 export function canSerializeTimeline(state: EditorState): boolean {
   return (
-    state.mode === "variation" &&
-    state.formats.includes("motion") &&
-    !state.variation.headline
+    state.mode === "variation" && state.formats.includes("motion") && !state.variation.headline
   );
 }
 
@@ -2153,9 +2031,7 @@ export function canSerializeTimeline(state: EditorState): boolean {
  * a style the brief would not save (D45).
  */
 export function briefStyle(state: EditorState): Style | undefined {
-  return state.styleExplicit || styleDiverges(state.style)
-    ? { ...state.style }
-    : undefined;
+  return state.styleExplicit || styleDiverges(state.style) ? { ...state.style } : undefined;
 }
 
 /**
@@ -2261,16 +2137,12 @@ export function toBrief(state: EditorState): CampaignBrief {
     // The brief's style (T5) applies in both modes; emitted only when it says
     // something the absent key does not (see briefStyle).
     ...(style !== undefined ? { style } : {}),
-    ...(state.mode === "variation" || state.modeExplicit
-      ? { mode: state.mode }
-      : {}),
+    ...(state.mode === "variation" || state.modeExplicit ? { mode: state.mode } : {}),
     // D112 — `type` follows `mode`'s rule one line above: absent means
     // social-post, so a draft still on the default never grows the key (the
     // corpus round-trip and the freshly-loaded-clean check depend on it),
     // while a non-default type or an explicitly spelled default is written.
-    ...(state.type !== DEFAULT_CAMPAIGN_TYPE || state.typeExplicit
-      ? { type: state.type }
-      : {}),
+    ...(state.type !== DEFAULT_CAMPAIGN_TYPE || state.typeExplicit ? { type: state.type } : {}),
     ...(state.outputExplicit || !isDefaultOutput(state)
       ? {
           output: {
@@ -2284,9 +2156,7 @@ export function toBrief(state: EditorState): CampaignBrief {
       : {}),
   };
   const localized = state.localizedMessage.trim();
-  const withLocalized = localized
-    ? { ...brief, localizedMessage: localized }
-    : brief;
+  const withLocalized = localized ? { ...brief, localizedMessage: localized } : brief;
   // Sequenced copy for motion clips (E5). The block is written only when the state may
   // carry one — the D5 gate `canSerializeTimeline` mirrors the parser's — and only when
   // beats exist: an empty list is "no timeline", and a loaded brief with no `copy` block
@@ -2314,8 +2184,7 @@ export function toBrief(state: EditorState): CampaignBrief {
     timeline !== undefined || state.copyExplicit
       ? { ...(timeline !== undefined ? { timeline } : {}) }
       : undefined;
-  const withCopy =
-    copy !== undefined ? { ...withLocalized, copy } : withLocalized;
+  const withCopy = copy !== undefined ? { ...withLocalized, copy } : withLocalized;
   const destination = state.clickDestination.trim();
   // VE3a (D11): the music bed's licence record is carried through untouched —
   // no control in this lane authors or clears it, so a present block is
@@ -2328,9 +2197,7 @@ export function toBrief(state: EditorState): CampaignBrief {
         ? { ...withCopy, treatments: state.treatments.map(toTreatment) }
         : withCopy;
     const withAudio = { ...withTreatments, ...audio };
-    return destination
-      ? { ...withAudio, clickDestination: destination }
-      : withAudio;
+    return destination ? { ...withAudio, clickDestination: destination } : withAudio;
   }
   // X18: every policy integer goes through the validator's own parser, so a
   // draft that passes validation saves exactly the number it was validated as.
@@ -2426,8 +2293,7 @@ export function fromBrief(
   const products =
     rawProducts.length > 0
       ? rawProducts.map((p, i) => {
-          const product =
-            p !== null && typeof p === "object" ? p : ({} as Product);
+          const product = p !== null && typeof p === "object" ? p : ({} as Product);
           return {
             ...emptyProduct(i + 1, product.primaryColor),
             ...product,
@@ -2459,16 +2325,11 @@ export function fromBrief(
   // though E1 renders no controls for them yet (they arrive in E2.2 / E2.3).
   const variation = brief.variation;
   const axes = variation?.axes as Record<string, unknown> | undefined;
-  const num = (value: unknown): string =>
-    typeof value === "number" ? String(value) : "";
-  const coverage = variation?.coverage as
-    | { perProduct?: number; perRatio?: number }
-    | undefined;
+  const num = (value: unknown): string => (typeof value === "number" ? String(value) : "");
+  const coverage = variation?.coverage as { perProduct?: number; perRatio?: number } | undefined;
   const derivedFormats = platformsToFormats(platforms);
   const sizes =
-    brief.output?.sizes !== undefined
-      ? [...brief.output.sizes]
-      : platformsToSizes(platforms);
+    brief.output?.sizes !== undefined ? [...brief.output.sizes] : platformsToSizes(platforms);
   // One comparison for both paths. This used to be an inline set test while the draft
   // path used `differsFrom`, so the same brief got a different verdict depending on
   // whether it arrived from disk or from a restored draft — and the load path, the one
@@ -2479,9 +2340,7 @@ export function fromBrief(
 
   const derivedRatios = platformsToRatios(platforms);
   const storedRatios =
-    axes?.ratio !== undefined
-      ? list(axes.ratio, [...RATIO_OPTIONS])
-      : [...RATIO_OPTIONS];
+    axes?.ratio !== undefined ? list(axes.ratio, [...RATIO_OPTIONS]) : [...RATIO_OPTIONS];
   const ratioOverridden = differsFrom(storedRatios, derivedRatios);
 
   const motionList = list(axes?.motion, []);
@@ -2562,10 +2421,9 @@ export function fromBrief(
       tone: list(axes?.tone, [...TONE_OPTIONS]),
       anchor: list(axes?.anchor, [...DERIVED_ANCHOR_OPTIONS]),
       ratio: storedRatios,
-      background: list(
-        (axes?.background as { source?: unknown } | undefined)?.source,
-        [...DEFAULT_BACKGROUND_SOURCES],
-      ),
+      background: list((axes?.background as { source?: unknown } | undefined)?.source, [
+        ...DEFAULT_BACKGROUND_SOURCES,
+      ]),
       paletteShift: list(axes?.paletteShift, [...PALETTE_SHIFT_OPTIONS]),
       headline: axes?.headline === HEADLINE_POOL_REF,
     },
@@ -2600,12 +2458,8 @@ export function isPristine(state: EditorState): boolean {
   // entirely of characters the slug strips ("!!!") leaves the brief identical to a blank
   // one, and comparing briefs alone would call that pristine: the draft would never be
   // autosaved and leaving would not prompt, so the typed name would vanish without a word.
-  if (state.campaignName !== initialEditorState(state.mode).campaignName)
-    return false;
-  return (
-    JSON.stringify(toBrief(state)) ===
-    JSON.stringify(toBrief(initialEditorState(state.mode)))
-  );
+  if (state.campaignName !== initialEditorState(state.mode).campaignName) return false;
+  return JSON.stringify(toBrief(state)) === JSON.stringify(toBrief(initialEditorState(state.mode)));
 }
 
 /**
@@ -2638,8 +2492,7 @@ function canonicalKeys(value: unknown): unknown {
   if (value !== null && typeof value === "object") {
     const source = value as Record<string, unknown>;
     const sorted: Record<string, unknown> = {};
-    for (const key of Object.keys(source).sort())
-      sorted[key] = canonicalKeys(source[key]);
+    for (const key of Object.keys(source).sort()) sorted[key] = canonicalKeys(source[key]);
     return sorted;
   }
   return value;
@@ -2661,8 +2514,7 @@ export function draftKeyFor(id: string): string {
 }
 
 export function getDraftKey(state: EditorState): string {
-  const id =
-    state.source.kind === "file" ? state.source.loadedId : state.source.tempId;
+  const id = state.source.kind === "file" ? state.source.loadedId : state.source.tempId;
   return draftKeyFor(id);
 }
 
@@ -2754,13 +2606,9 @@ export function hasRecoverableDraft(): boolean {
  * `output.formats` of a brief nobody edited. The corpus round-trip is a merge gate, and
  * "same values, different order" is not the same bytes.
  */
-function differsFrom(
-  stored: readonly string[],
-  derived: readonly string[],
-): boolean {
+function differsFrom(stored: readonly string[], derived: readonly string[]): boolean {
   return (
-    stored.length !== derived.length ||
-    stored.some((value, index) => value !== derived[index])
+    stored.length !== derived.length || stored.some((value, index) => value !== derived[index])
   );
 }
 
@@ -2774,16 +2622,13 @@ function differsFrom(
  */
 function normalizeTimelineDraft(value: unknown): TimelineDraft {
   const rawTimeline =
-    typeof value === "object" && value !== null
-      ? (value as Record<string, unknown>)
-      : null;
+    typeof value === "object" && value !== null ? (value as Record<string, unknown>) : null;
   // The key is never serialised, so a restored draft has none: mint by position. That is
   // safe precisely because the list has just been read whole — no reorder has happened yet.
   const beats: TimelineBeatDraft[] = (
     Array.isArray(rawTimeline?.beats) ? rawTimeline.beats : []
   ).map((entry, index) => {
-    if (typeof entry !== "object" || entry === null)
-      return { key: index + 1, text: "", weight: 1 };
+    if (typeof entry !== "object" || entry === null) return { key: index + 1, text: "", weight: 1 };
     const beat = entry as Partial<TimelineBeatDraft>;
     const weight =
       typeof beat.weight === "number" &&
@@ -2803,8 +2648,7 @@ function normalizeTimelineDraft(value: unknown): TimelineDraft {
     };
   });
   const transition =
-    rawTimeline !== null &&
-    (rawTimeline.transition === "cut" || rawTimeline.transition === "fade")
+    rawTimeline !== null && (rawTimeline.transition === "cut" || rawTimeline.transition === "fade")
       ? rawTimeline.transition
       : "fade";
   const storedKeyBeat =
@@ -2813,8 +2657,7 @@ function normalizeTimelineDraft(value: unknown): TimelineDraft {
     Number.isInteger(rawTimeline.keyBeat)
       ? rawTimeline.keyBeat
       : 1;
-  const keyBeat =
-    beats.length === 0 ? 1 : Math.min(Math.max(1, storedKeyBeat), beats.length);
+  const keyBeat = beats.length === 0 ? 1 : Math.min(Math.max(1, storedKeyBeat), beats.length);
   return { beats, transition, keyBeat };
 }
 
@@ -2827,8 +2670,7 @@ function normalizeTimelineDraft(value: unknown): TimelineDraft {
  * the parser would refuse.
  */
 function normalizeStyleDraft(value: unknown): Style {
-  if (typeof value !== "object" || value === null || Array.isArray(value))
-    return {};
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return {};
   const raw = value as Record<string, unknown>;
   const style: {
     -readonly [K in keyof Style]: Style[K];
@@ -2869,10 +2711,7 @@ function normalizeStyleDraft(value: unknown): Style {
   ) {
     style.letterSpacing = raw.letterSpacing;
   }
-  if (
-    typeof raw.align === "string" &&
-    (ALIGN_VALUES as readonly string[]).includes(raw.align)
-  ) {
+  if (typeof raw.align === "string" && (ALIGN_VALUES as readonly string[]).includes(raw.align)) {
     style.align = raw.align as Style["align"];
   }
   if (
@@ -2904,12 +2743,8 @@ export function normalizeDraftState(raw: Record<string, unknown>): EditorState {
   // D112 — a draft saved before the type existed carries no `type`, and a
   // hand-edited one may carry anything: the enum is checked against its legal
   // vocabulary, never believed, and the absent key means the default.
-  const typeValid = (CAMPAIGN_TYPES as readonly string[]).includes(
-    raw.type as string,
-  );
-  const type: CampaignType = typeValid
-    ? (raw.type as CampaignType)
-    : DEFAULT_CAMPAIGN_TYPE;
+  const typeValid = (CAMPAIGN_TYPES as readonly string[]).includes(raw.type as string);
+  const type: CampaignType = typeValid ? (raw.type as CampaignType) : DEFAULT_CAMPAIGN_TYPE;
   // L3a — a draft saved before the template became required writes no key: it
   // normalises to the campaign type's canonical template, exactly what a fresh
   // draft and an applied preset seed. A draft that does carry one is held
@@ -2950,22 +2785,17 @@ export function normalizeDraftState(raw: Record<string, unknown>): EditorState {
         }
       : resolvedSource;
   const v = (
-    typeof raw.variation === "object" && raw.variation !== null
-      ? raw.variation
-      : {}
+    typeof raw.variation === "object" && raw.variation !== null ? raw.variation : {}
   ) as Record<string, unknown>;
   // `list` proves an array, not its members: a hand-edited draft's `anchor:
   // ["diagonal"]` (the #169 `[null]` pattern) would otherwise ride the
   // `as AnchorOption` cast preview-props makes into CreativePreview's leaf
   // lookups. Only the axis' own vocabulary survives, and min-one holds — a
   // filter that empties falls back to the pair the absent axis behaves as.
-  const anchorSelection = list(v.anchor, initial.variation.anchor).filter(
-    (value) => ANCHOR_OPTIONS.includes(value),
+  const anchorSelection = list(v.anchor, initial.variation.anchor).filter((value) =>
+    ANCHOR_OPTIONS.includes(value),
   );
-  const anchor =
-    anchorSelection.length > 0
-      ? anchorSelection
-      : [...initial.variation.anchor];
+  const anchor = anchorSelection.length > 0 ? anchorSelection : [...initial.variation.anchor];
   const variation: EditorState["variation"] = {
     count: str(v.count, initial.variation.count),
     seed: str(v.seed, initial.variation.seed),
@@ -2978,24 +2808,18 @@ export function normalizeDraftState(raw: Record<string, unknown>): EditorState {
     ratio: list(v.ratio, initial.variation.ratio),
     background: list(v.background, initial.variation.background),
     paletteShift: list(v.paletteShift, initial.variation.paletteShift),
-    headline:
-      typeof v.headline === "boolean" ? v.headline : initial.variation.headline,
+    headline: typeof v.headline === "boolean" ? v.headline : initial.variation.headline,
   };
   // A persisted array can hold anything: `list` only proves it is an array, so an
   // entry that is not a usable object (a `null` from a hand-edited draft, a bare
   // string) is replaced rather than dereferenced — reading `.key` off it would
   // throw inside the loader's try/catch and silently discard the whole draft,
   // losing every recovered edit D11 exists to keep.
-  const products = (list(raw.products, initial.products) as unknown[]).map(
-    (entry, i) => {
-      if (typeof entry !== "object" || entry === null)
-        return emptyProduct(i + 1);
-      const draft = entry as ProductDraft;
-      return typeof draft.key === "number" && draft.key > 0
-        ? draft
-        : { ...draft, key: i + 1 };
-    },
-  );
+  const products = (list(raw.products, initial.products) as unknown[]).map((entry, i) => {
+    if (typeof entry !== "object" || entry === null) return emptyProduct(i + 1);
+    const draft = entry as ProductDraft;
+    return typeof draft.key === "number" && draft.key > 0 ? draft : { ...draft, key: i + 1 };
+  });
   const storedNextProductKey =
     typeof raw.nextProductKey === "number" && raw.nextProductKey > 0
       ? raw.nextProductKey
@@ -3004,14 +2828,8 @@ export function normalizeDraftState(raw: Record<string, unknown>): EditorState {
   // (≤ an existing key) would make addProduct mint a duplicate and removeProduct
   // delete two products — the very collision D16 exists to prevent. A counter
   // burned past the keys still wins; product keys only need to be unique.
-  const nextProductKey = Math.max(
-    storedNextProductKey ?? 0,
-    nextKeyAfter(products),
-  );
-  const campaignName = str(
-    raw.campaignName,
-    typeof raw.briefId === "string" ? raw.briefId : "",
-  );
+  const nextProductKey = Math.max(storedNextProductKey ?? 0, nextKeyAfter(products));
+  const campaignName = str(raw.campaignName, typeof raw.briefId === "string" ? raw.briefId : "");
   const motion = list(raw.motion, initial.motion);
   const duration = list(raw.duration, initial.duration);
   const formats = list(raw.formats, initial.formats);
@@ -3062,9 +2880,7 @@ export function normalizeDraftState(raw: Record<string, unknown>): EditorState {
     // overrides — a block that diverges from the defaults was authored, a
     // declared flag is believed.
     styleExplicit:
-      raw.styleExplicit === undefined
-        ? styleDiverges(style)
-        : raw.styleExplicit === true,
+      raw.styleExplicit === undefined ? styleDiverges(style) : raw.styleExplicit === true,
     variation,
     motion,
     duration,
@@ -3123,16 +2939,10 @@ export const PHOTO_PLATFORM = "instagram-feed";
  * The next whole second in range that this list does not already hold, or undefined
  * when every one is taken. Duplicates are meaningless — the planner collapses them.
  */
-export function nextFreeDuration(
-  duration: readonly number[],
-): number | undefined {
+export function nextFreeDuration(duration: readonly number[]): number | undefined {
   const taken = new Set(duration);
   if (!taken.has(DEFAULT_DURATION_SEC)) return DEFAULT_DURATION_SEC;
-  for (
-    let seconds = MIN_DURATION_SEC;
-    seconds <= MAX_DURATION_SEC;
-    seconds += 1
-  ) {
+  for (let seconds = MIN_DURATION_SEC; seconds <= MAX_DURATION_SEC; seconds += 1) {
     if (!taken.has(seconds)) return seconds;
   }
   return undefined;
@@ -3171,10 +2981,7 @@ export function canPlan(state: EditorState): boolean {
  * state), and the user setting the count by hand, which is them answering the notice
  * rather than provoking a new one.
  */
-export function editorReducer(
-  state: EditorState,
-  action: EditorAction,
-): EditorState {
+export function editorReducer(state: EditorState, action: EditorAction): EditorState {
   const next = reduceEditor(state, action);
   if (next === state) return state;
   if (action.type === "setVariation" && action.field === "count") return next;

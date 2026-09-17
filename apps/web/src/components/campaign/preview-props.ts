@@ -1,6 +1,11 @@
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import type { MotionKind } from "@campaignfoundry/CampaignOrchestration/motion-kinds";
-import type { AnchorOption, CreativePreviewProps, LayoutOption, ToneOption } from "./CreativePreview";
+import type {
+  AnchorOption,
+  CreativePreviewProps,
+  LayoutOption,
+  ToneOption,
+} from "./CreativePreview";
 import type { PreviewShowcaseProps } from "./PreviewDock";
 import { anchorAxisActive, briefStyle, isDefaultOutput, type EditorState } from "./editor-state";
 import { previewFetchKey } from "@/lib/preview-frame";
@@ -129,7 +134,9 @@ export function previewDockProps(
     ...look,
     identityKey: previewIdentityKey(state),
     // The wizard readout (M2): where the walk stands, not a position in the creative set.
-    ...(stepIndex !== undefined && stepCount !== undefined ? { step: stepIndex + 1, stepCount } : {}),
+    ...(stepIndex !== undefined && stepCount !== undefined
+      ? { step: stepIndex + 1, stepCount }
+      : {}),
   };
 }
 

@@ -53,7 +53,8 @@ export function AssetPickerDrawer({
 
   return (
     <DrawerShell open={open} onClose={onClose} ariaLabel="Asset Bin">
-      <DialogHead headingLevel={3}
+      <DialogHead
+        headingLevel={3}
         title="Asset Bin"
         onClose={onClose}
         closeLabel="Close drawer"
@@ -62,89 +63,100 @@ export function AssetPickerDrawer({
       />
 
       <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <Eyebrow as="h4">Assets ({assets.length})</Eyebrow>
-          </div>
-          <p className="text-[12px] text-text-muted">
-            Uploaded campaign assets available for logos and product backgrounds.
-          </p>
-
-          {loading ? (
-            <div className="space-y-2">
-              <p className="text-[13px] text-text-muted" role="status">
-                Loading assets…
-              </p>
-              <Skeleton className="h-12" />
-              <Skeleton className="h-12" />
-            </div>
-          ) : error ? (
-            <p className="text-[13px] text-error" role="alert">{error}</p>
-          ) : assets.length === 0 ? (
-            <p className="text-[13px] text-text-muted">No assets uploaded yet.</p>
-          ) : (
-            <ul className="space-y-2" aria-label="Asset list">
-              {assets.map((asset) => {
-                const assetPath = `assets/inputs/${briefId}/${asset.name}`;
-                const isSelected = selectedPath === assetPath || selectedPath === asset.name;
-                const displayType = (asset.type ?? "image/png").replace("image/", "").toUpperCase();
-
-                return (
-                  <li
-                    key={asset.name}
-                    className={cn(
-                      "flex items-center gap-3 rounded-md border-[1.5px] p-3 text-left transition-all",
-                      "motion-safe:hover:-translate-y-px motion-safe:active:scale-[0.98]",
-                      isSelected
-                        ? "border-brand-primary bg-brand-primary/[0.08]"
-                        : "border-border bg-surface-2 hover:border-border-hover",
-                    )}
-                  >
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded border border-border bg-surface">
-                      {asset.thumbnailUrl ? (
-                        <img
-                          src={asset.thumbnailUrl}
-                          alt={asset.name}
-                          className="h-full w-full object-contain"
-                        />
-                      ) : (
-                        <span className="font-mono text-[10px] text-text-muted">{displayType}</span>
-                      )}
-                    </div>
-
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate font-mono text-xs text-text-primary" title={asset.name}>
-                        {asset.name}
-                      </div>
-                      <div className="flex items-center gap-1.5 font-mono text-[10px] text-text-muted">
-                        <span className="uppercase tracking-wider text-text-muted">{displayType}</span>
-                        <span>·</span>
-                        <span>{formatBytes(asset.size ?? 0)}</span>
-                      </div>
-                    </div>
-
-                    {onSelect ? (
-                      <Button
-                        variant={isSelected ? "primary" : "secondary"}
-                        size="sm"
-                        aria-label={`Choose ${asset.name}`}
-                        onClick={() => {
-                          onSelect(asset);
-                          onClose();
-                        }}
-                      >
-                        {isSelected ? "Selected" : "Choose"}
-                      </Button>
-                    ) : (
-                      <span className="text-xs text-warning" title="Hero asset" aria-label="Hero asset">
-                        ★
-                      </span>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
-          )}
+        <div className="flex items-center justify-between">
+          <Eyebrow as="h4">Assets ({assets.length})</Eyebrow>
         </div>
+        <p className="text-[12px] text-text-muted">
+          Uploaded campaign assets available for logos and product backgrounds.
+        </p>
+
+        {loading ? (
+          <div className="space-y-2">
+            <p className="text-[13px] text-text-muted" role="status">
+              Loading assets…
+            </p>
+            <Skeleton className="h-12" />
+            <Skeleton className="h-12" />
+          </div>
+        ) : error ? (
+          <p className="text-[13px] text-error" role="alert">
+            {error}
+          </p>
+        ) : assets.length === 0 ? (
+          <p className="text-[13px] text-text-muted">No assets uploaded yet.</p>
+        ) : (
+          <ul className="space-y-2" aria-label="Asset list">
+            {assets.map((asset) => {
+              const assetPath = `assets/inputs/${briefId}/${asset.name}`;
+              const isSelected = selectedPath === assetPath || selectedPath === asset.name;
+              const displayType = (asset.type ?? "image/png").replace("image/", "").toUpperCase();
+
+              return (
+                <li
+                  key={asset.name}
+                  className={cn(
+                    "flex items-center gap-3 rounded-md border-[1.5px] p-3 text-left transition-all",
+                    "motion-safe:hover:-translate-y-px motion-safe:active:scale-[0.98]",
+                    isSelected
+                      ? "border-brand-primary bg-brand-primary/[0.08]"
+                      : "border-border bg-surface-2 hover:border-border-hover",
+                  )}
+                >
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded border border-border bg-surface">
+                    {asset.thumbnailUrl ? (
+                      <img
+                        src={asset.thumbnailUrl}
+                        alt={asset.name}
+                        className="h-full w-full object-contain"
+                      />
+                    ) : (
+                      <span className="font-mono text-[10px] text-text-muted">{displayType}</span>
+                    )}
+                  </div>
+
+                  <div className="min-w-0 flex-1">
+                    <div
+                      className="truncate font-mono text-xs text-text-primary"
+                      title={asset.name}
+                    >
+                      {asset.name}
+                    </div>
+                    <div className="flex items-center gap-1.5 font-mono text-[10px] text-text-muted">
+                      <span className="uppercase tracking-wider text-text-muted">
+                        {displayType}
+                      </span>
+                      <span>·</span>
+                      <span>{formatBytes(asset.size ?? 0)}</span>
+                    </div>
+                  </div>
+
+                  {onSelect ? (
+                    <Button
+                      variant={isSelected ? "primary" : "secondary"}
+                      size="sm"
+                      aria-label={`Choose ${asset.name}`}
+                      onClick={() => {
+                        onSelect(asset);
+                        onClose();
+                      }}
+                    >
+                      {isSelected ? "Selected" : "Choose"}
+                    </Button>
+                  ) : (
+                    <span
+                      className="text-xs text-warning"
+                      title="Hero asset"
+                      aria-label="Hero asset"
+                    >
+                      ★
+                    </span>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
     </DrawerShell>
   );
 }

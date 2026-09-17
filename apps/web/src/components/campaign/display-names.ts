@@ -1,9 +1,20 @@
 // The leaf subpath, never the package barrel: the barrel re-exports the
 // infrastructure adapters, which pull node:fs/path/crypto into the browser bundle.
-import { RATIO_VALUES, resolveCanvas, type CanvasSpec } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
-import { DISPLAY_SIZE_VALUES, type DisplaySize } from "@campaignfoundry/CampaignOrchestration/display-sizes";
+import {
+  RATIO_VALUES,
+  resolveCanvas,
+  type CanvasSpec,
+} from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
+import {
+  DISPLAY_SIZE_VALUES,
+  type DisplaySize,
+} from "@campaignfoundry/CampaignOrchestration/display-sizes";
 import { ANCHOR_VALUES } from "@campaignfoundry/CampaignOrchestration/variation-defaults";
-import { ALIGN_VALUES, FONT_WEIGHT_VALUES, type TextEffectKind } from "@campaignfoundry/CampaignOrchestration/creative-style";
+import {
+  ALIGN_VALUES,
+  FONT_WEIGHT_VALUES,
+  type TextEffectKind,
+} from "@campaignfoundry/CampaignOrchestration/creative-style";
 // The leaf, never the barrel: the type vocabulary rides the same rule as its
 // siblings above.
 import type { LayerKind } from "@campaignfoundry/CampaignOrchestration/layer-kinds";
@@ -23,9 +34,12 @@ import type { CreativeType } from "@campaignfoundry/CampaignOrchestration/creati
 /** Display name for a format key. */
 export function formatDisplayName(format: string): string {
   switch (format) {
-    case "static": return "Still images";
-    case "motion": return "Video";
-    default: return format;
+    case "static":
+      return "Still images";
+    case "motion":
+      return "Video";
+    default:
+      return format;
   }
 }
 

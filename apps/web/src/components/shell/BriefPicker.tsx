@@ -1,7 +1,15 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Button, Input, MiniChip, DialogShell, DialogHead, DialogBody, DialogFoot } from "@/components/ui";
+import {
+  Button,
+  Input,
+  MiniChip,
+  DialogShell,
+  DialogHead,
+  DialogBody,
+  DialogFoot,
+} from "@/components/ui";
 import { duplicateBrief, listBriefs, unknownErrorMessage, type BriefEntry } from "@/lib/briefs-api";
 import { useRouter } from "next/navigation";
 import { useRun } from "@/lib/run-context";
@@ -93,7 +101,9 @@ export function BriefPicker() {
     /* istanbul ignore next -- the form only renders while a target is selected */
     if (!duplicateTarget) return;
     if (!BRIEF_ID_PATTERN.test(duplicateId)) {
-      setActionError("New id must be a path-safe slug (lowercase letters, digits, hyphens; max 64).");
+      setActionError(
+        "New id must be a path-safe slug (lowercase letters, digits, hyphens; max 64).",
+      );
       return;
     }
     setActionError(undefined);
@@ -213,7 +223,8 @@ export function BriefPicker() {
             }}
           >
             <p className="text-[12px] text-text-muted">
-              Duplicate <span className="font-mono text-text-primary">{duplicateTarget.brief.id}</span> as
+              Duplicate{" "}
+              <span className="font-mono text-text-primary">{duplicateTarget.brief.id}</span> as
             </p>
             <Input
               value={duplicateId}

@@ -10,8 +10,19 @@ import { MiniChip } from "@/components/ui";
  * per-run persistence (see the plan's follow-ups).
  */
 export default function RunsPage() {
-  const { brief, assets, halted, hasRun, loading, decisions, policyHash, seed, estimate, estimateStatus, estimateError } =
-    useRun();
+  const {
+    brief,
+    assets,
+    halted,
+    hasRun,
+    loading,
+    decisions,
+    policyHash,
+    seed,
+    estimate,
+    estimateStatus,
+    estimateError,
+  } = useRun();
 
   const passed = useMemo(() => assets.filter((a) => a.passedCompliance).length, [assets]);
   const passRate = assets.length ? Math.round((passed / assets.length) * 100) : 0;
@@ -72,15 +83,22 @@ export default function RunsPage() {
             </dl>
           )}
           {estimateStatus === "loading" && (
-            <p className="border-t border-border px-4 py-3 text-[13px] text-text-muted">estimating…</p>
+            <p className="border-t border-border px-4 py-3 text-[13px] text-text-muted">
+              estimating…
+            </p>
           )}
           {estimateStatus === "infeasible" && estimateError && (
-            <p className="border-t border-border px-4 py-3 text-[13px] text-error">{estimateError}</p>
+            <p className="border-t border-border px-4 py-3 text-[13px] text-error">
+              {estimateError}
+            </p>
           )}
           {assets.length > 0 && (
             <ul className="divide-y divide-border border-t border-border">
               {assets.map((asset) => (
-                <li key={assetKey(asset)} className="truncate px-4 py-2 font-mono text-[12px] text-text-muted">
+                <li
+                  key={assetKey(asset)}
+                  className="truncate px-4 py-2 font-mono text-[12px] text-text-muted"
+                >
                   {assetLabel(asset)}
                 </li>
               ))}

@@ -11,7 +11,11 @@ describe("formatGate", () => {
   });
 
   test("motion format is gated when capabilities.motion is false and unselected", () => {
-    const gate = formatGate("motion", { mode: "variation", formats: ["static"] }, { motion: false });
+    const gate = formatGate(
+      "motion",
+      { mode: "variation", formats: ["static"] },
+      { motion: false },
+    );
     expect(gate).toEqual({
       gated: true,
       disabled: true,
@@ -20,7 +24,11 @@ describe("formatGate", () => {
   });
 
   test("motion format allows deselecting when capabilities.motion is false and already selected", () => {
-    const gate = formatGate("motion", { mode: "variation", formats: ["static", "motion"] }, { motion: false });
+    const gate = formatGate(
+      "motion",
+      { mode: "variation", formats: ["static", "motion"] },
+      { motion: false },
+    );
     expect(gate).toEqual({
       gated: true,
       disabled: false,
@@ -38,7 +46,11 @@ describe("formatGate", () => {
   });
 
   test("motion format is gated when mode is brief even while selected — the card discloses what the brief will drop", () => {
-    const gate = formatGate("motion", { mode: "brief", formats: ["static", "motion"] }, { motion: true });
+    const gate = formatGate(
+      "motion",
+      { mode: "brief", formats: ["static", "motion"] },
+      { motion: true },
+    );
     expect(gate).toEqual({
       gated: true,
       disabled: false,
@@ -56,13 +68,7 @@ describe("FormatPanel", () => {
   test("renders static format card with still meta caption", async () => {
     const user = userEvent.setup();
     const onToggle = vi.fn();
-    render(
-      <FormatPanel
-        format="static"
-        selected={true}
-        onToggle={onToggle}
-      />,
-    );
+    render(<FormatPanel format="static" selected={true} onToggle={onToggle} />);
 
     const button = screen.getByRole("button", { name: "static" });
     expect(button).toBeTruthy();
@@ -74,7 +80,11 @@ describe("FormatPanel", () => {
   });
 
   test("a selected Video card in Classic still shows the gate's reason", () => {
-    const gate = formatGate("motion", { mode: "brief", formats: ["static", "motion"] }, { motion: true });
+    const gate = formatGate(
+      "motion",
+      { mode: "brief", formats: ["static", "motion"] },
+      { motion: true },
+    );
     render(<FormatPanel format="motion" selected onToggle={vi.fn()} gate={gate} />);
     const button = screen.getByRole("button", { name: "motion" });
     expect(button.getAttribute("aria-pressed")).toBe("true");
@@ -87,14 +97,7 @@ describe("FormatPanel", () => {
       disabled: true,
       description: "Gated reason",
     };
-    render(
-      <FormatPanel
-        format="motion"
-        selected={false}
-        onToggle={vi.fn()}
-        gate={gate}
-      />,
-    );
+    render(<FormatPanel format="motion" selected={false} onToggle={vi.fn()} gate={gate} />);
 
     const button = screen.getByRole("button", { name: "motion" });
     expect((button as HTMLButtonElement).disabled).toBe(true);

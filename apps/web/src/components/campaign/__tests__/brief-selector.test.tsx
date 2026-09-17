@@ -17,13 +17,22 @@ describe("BriefSelector", () => {
     expect(screen.getByText("beta")).toBeTruthy();
     unmount();
 
-    render(<BriefSelector briefs={briefs} currentId={undefined} onSelect={vi.fn()} onCreateNew={vi.fn()} />);
+    render(
+      <BriefSelector
+        briefs={briefs}
+        currentId={undefined}
+        onSelect={vi.fn()}
+        onCreateNew={vi.fn()}
+      />,
+    );
     expect(screen.getAllByText("New brief...").length).toBeGreaterThan(0);
   });
 
   test("the trigger opens and closes the list", async () => {
     const user = userEvent.setup();
-    render(<BriefSelector briefs={briefs} currentId="beta" onSelect={vi.fn()} onCreateNew={vi.fn()} />);
+    render(
+      <BriefSelector briefs={briefs} currentId="beta" onSelect={vi.fn()} onCreateNew={vi.fn()} />,
+    );
 
     // Once open, "beta" labels both the trigger and its row in the list; the trigger is first.
     const trigger = () => screen.getAllByText("beta")[0];
@@ -36,7 +45,9 @@ describe("BriefSelector", () => {
 
   test("lists every brief and marks the current one", async () => {
     const user = userEvent.setup();
-    render(<BriefSelector briefs={briefs} currentId="beta" onSelect={vi.fn()} onCreateNew={vi.fn()} />);
+    render(
+      <BriefSelector briefs={briefs} currentId="beta" onSelect={vi.fn()} onCreateNew={vi.fn()} />,
+    );
     await user.click(screen.getByText("beta"));
 
     expect(screen.getByText("alpha")).toBeTruthy();
@@ -47,7 +58,9 @@ describe("BriefSelector", () => {
   test("selecting a brief reports it and closes the list", async () => {
     const user = userEvent.setup();
     const onSelect = vi.fn();
-    render(<BriefSelector briefs={briefs} currentId="beta" onSelect={onSelect} onCreateNew={vi.fn()} />);
+    render(
+      <BriefSelector briefs={briefs} currentId="beta" onSelect={onSelect} onCreateNew={vi.fn()} />,
+    );
     await user.click(screen.getByText("beta"));
     await user.click(screen.getByText("gamma"));
 
@@ -58,7 +71,14 @@ describe("BriefSelector", () => {
   test("creating a new brief reports it and closes the list", async () => {
     const user = userEvent.setup();
     const onCreateNew = vi.fn();
-    render(<BriefSelector briefs={briefs} currentId="beta" onSelect={vi.fn()} onCreateNew={onCreateNew} />);
+    render(
+      <BriefSelector
+        briefs={briefs}
+        currentId="beta"
+        onSelect={vi.fn()}
+        onCreateNew={onCreateNew}
+      />,
+    );
     await user.click(screen.getByText("beta"));
     await user.click(screen.getByText("New brief..."));
 
@@ -68,7 +88,9 @@ describe("BriefSelector", () => {
 
   test("the search box filters case-insensitively and reports when nothing matches", async () => {
     const user = userEvent.setup();
-    render(<BriefSelector briefs={briefs} currentId="beta" onSelect={vi.fn()} onCreateNew={vi.fn()} />);
+    render(
+      <BriefSelector briefs={briefs} currentId="beta" onSelect={vi.fn()} onCreateNew={vi.fn()} />,
+    );
     await user.click(screen.getByText("beta"));
 
     await user.type(screen.getByPlaceholderText("Search briefs..."), "AL");
@@ -82,7 +104,9 @@ describe("BriefSelector", () => {
 
   test("the filter field is the kit input, named by the same words as its placeholder", async () => {
     const user = userEvent.setup();
-    render(<BriefSelector briefs={briefs} currentId="beta" onSelect={vi.fn()} onCreateNew={vi.fn()} />);
+    render(
+      <BriefSelector briefs={briefs} currentId="beta" onSelect={vi.fn()} onCreateNew={vi.fn()} />,
+    );
     await user.click(screen.getByText("beta"));
 
     const field = screen.getByLabelText("Search briefs...");
@@ -94,14 +118,18 @@ describe("BriefSelector", () => {
 
   test("an empty search shows no not-found message", async () => {
     const user = userEvent.setup();
-    render(<BriefSelector briefs={[]} currentId={undefined} onSelect={vi.fn()} onCreateNew={vi.fn()} />);
+    render(
+      <BriefSelector briefs={[]} currentId={undefined} onSelect={vi.fn()} onCreateNew={vi.fn()} />,
+    );
     await user.click(screen.getAllByText("New brief...")[0]);
     expect(screen.queryByText("No briefs found")).toBeNull();
   });
 
   test("the search box is cleared after a selection", async () => {
     const user = userEvent.setup();
-    render(<BriefSelector briefs={briefs} currentId="beta" onSelect={vi.fn()} onCreateNew={vi.fn()} />);
+    render(
+      <BriefSelector briefs={briefs} currentId="beta" onSelect={vi.fn()} onCreateNew={vi.fn()} />,
+    );
     await user.click(screen.getByText("beta"));
     await user.type(screen.getByPlaceholderText("Search briefs..."), "alp");
     await user.click(screen.getByText("alpha"));
@@ -111,7 +139,9 @@ describe("BriefSelector", () => {
   });
 
   test("the trigger keeps the control-boundary hairline (WCAG 1.4.11)", () => {
-    render(<BriefSelector briefs={briefs} currentId="beta" onSelect={vi.fn()} onCreateNew={vi.fn()} />);
+    render(
+      <BriefSelector briefs={briefs} currentId="beta" onSelect={vi.fn()} onCreateNew={vi.fn()} />,
+    );
     // jsdom applies no CSS, so the class list is the only observable — split, because
     // `border-border` is a substring of `border-border-control`.
     const classes = (el: Element): readonly string[] => el.className.split(/\s+/);

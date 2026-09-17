@@ -34,9 +34,15 @@ const routes = (h: {
   const calls: { url: string; method: string; body?: string }[] = [];
   vi.mocked(globalThis.fetch).mockImplementation((url, init) => {
     const method = (init?.method ?? "GET").toUpperCase();
-    calls.push({ url: String(url), method, body: typeof init?.body === "string" ? init.body : undefined });
-    if (method === "POST") return Promise.resolve(h.post?.() ?? json(poolBody([entry("a", "approved")]), 201));
-    if (method === "PATCH") return Promise.resolve(h.patch?.() ?? json(poolBody([entry("a", "approved")])));
+    calls.push({
+      url: String(url),
+      method,
+      body: typeof init?.body === "string" ? init.body : undefined,
+    });
+    if (method === "POST")
+      return Promise.resolve(h.post?.() ?? json(poolBody([entry("a", "approved")]), 201));
+    if (method === "PATCH")
+      return Promise.resolve(h.patch?.() ?? json(poolBody([entry("a", "approved")])));
     return Promise.resolve(h.get?.() ?? json(poolBody([])));
   });
   return calls;
@@ -135,10 +141,22 @@ describe("HeadlinePoolDrawer", () => {
     const dispatch = vi.fn();
     routes({ get: () => json(poolBody([entry("a")])) });
     const { rerender } = render(
-      <HeadlinePoolDrawer state={state({ briefId: "camp" })} dispatch={dispatch} open onClose={vi.fn()} />,
+      <HeadlinePoolDrawer
+        state={state({ briefId: "camp" })}
+        dispatch={dispatch}
+        open
+        onClose={vi.fn()}
+      />,
     );
     // switch brief before the first response is consumed
-    rerender(<HeadlinePoolDrawer state={state({ briefId: "other" })} dispatch={dispatch} open onClose={vi.fn()} />);
+    rerender(
+      <HeadlinePoolDrawer
+        state={state({ briefId: "other" })}
+        dispatch={dispatch}
+        open
+        onClose={vi.fn()}
+      />,
+    );
 
     await waitFor(() => expect(dispatch).toHaveBeenCalled());
     // every dispatched load names the brief it belongs to; the reducer drops mismatches
@@ -150,7 +168,10 @@ describe("HeadlinePoolDrawer", () => {
   test("generating suggestions applies them through setPool", async () => {
     const user = userEvent.setup();
     const dispatch = vi.fn();
-    const calls = routes({ get: () => json(poolBody([])), post: () => json(poolBody([entry("new", "approved")]), 201) });
+    const calls = routes({
+      get: () => json(poolBody([])),
+      post: () => json(poolBody([entry("new", "approved")]), 201),
+    });
     render(<HeadlinePoolDrawer state={state()} dispatch={dispatch} open onClose={vi.fn()} />);
     await waitFor(() => expect(dispatch).toHaveBeenCalled());
 
@@ -169,11 +190,15 @@ describe("HeadlinePoolDrawer", () => {
 
     await user.click(screen.getByText(/Generate 10 suggestions/));
     expect(await screen.findByText(/no capacity/)).toBeTruthy();
-    const generate = screen.getByText(/Generate 10 suggestions/).closest("button") as HTMLButtonElement;
+    const generate = screen
+      .getByText(/Generate 10 suggestions/)
+      .closest("button") as HTMLButtonElement;
     await waitFor(() => expect(generate.disabled).toBe(true));
 
     // close and reopen: a transient outage must not disable the control for the session
-    rerender(<HeadlinePoolDrawer state={state()} dispatch={vi.fn()} open={false} onClose={vi.fn()} />);
+    rerender(
+      <HeadlinePoolDrawer state={state()} dispatch={vi.fn()} open={false} onClose={vi.fn()} />,
+    );
     rerender(<Harness initial={state()} />);
     await waitFor(() => expect(screen.queryByText(/no capacity/)).toBeNull());
   });
@@ -299,7 +324,9 @@ describe("HeadlinePoolDrawer", () => {
     // `entry()` types its status as string, which the state's CopyPool refuses.
     const rejected = { id: "a", text: "headline a", status: "rejected" as const };
     const props = (isOpen: boolean) => ({
-      state: state({ pool: { briefId: "camp", generatedAt: "t", model: "m", entries: [rejected] } }),
+      state: state({
+        pool: { briefId: "camp", generatedAt: "t", model: "m", entries: [rejected] },
+      }),
       dispatch: vi.fn(),
       open: isOpen,
       onClose: () => {},
@@ -317,7 +344,9 @@ describe("HeadlinePoolDrawer", () => {
     await waitFor(() => expect(calls.filter((c) => c.method === "GET")).toHaveLength(2));
     answer?.(json({ pool: { entries: [entry("a", "approved")] }, revision: "rev-2" }));
 
-    await waitFor(() => expect((screen.getByLabelText("Approve a") as HTMLButtonElement).disabled).toBe(false));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Approve a") as HTMLButtonElement).disabled).toBe(false),
+    );
     await user.click(screen.getByLabelText("Approve a"));
     await waitFor(() => {
       const patches = calls.filter((c) => c.method === "PATCH");
@@ -392,7 +421,9 @@ describe("HeadlinePoolDrawer", () => {
     vi.mocked(globalThis.fetch).mockImplementation((_url, init) => {
       const method = (init?.method ?? "GET").toUpperCase();
       if (method === "POST" && failGenerate) {
-        return new Promise((res) => setTimeout(() => res(json({ error: "stale failure" }, 500)), 60));
+        return new Promise((res) =>
+          setTimeout(() => res(json({ error: "stale failure" }, 500)), 60),
+        );
       }
       return Promise.resolve(json(poolBody([])));
     });

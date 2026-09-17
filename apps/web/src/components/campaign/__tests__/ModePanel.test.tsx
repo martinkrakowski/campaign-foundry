@@ -28,8 +28,12 @@ describe("ModePanel", () => {
     const onSetMode = vi.fn();
     const user = userEvent.setup();
     render(<ModePanel mode="variation" onSetMode={onSetMode} />);
-    expect(screen.getByRole("button", { name: "variation" }).getAttribute("aria-pressed")).toBe("true");
-    expect(screen.getByRole("button", { name: "brief" }).getAttribute("aria-pressed")).toBe("false");
+    expect(screen.getByRole("button", { name: "variation" }).getAttribute("aria-pressed")).toBe(
+      "true",
+    );
+    expect(screen.getByRole("button", { name: "brief" }).getAttribute("aria-pressed")).toBe(
+      "false",
+    );
     await user.click(screen.getByRole("button", { name: "brief" }));
     expect(onSetMode).toHaveBeenCalledWith("brief");
   });
@@ -50,7 +54,9 @@ describe("ModePanel — the filled tiles (G2, F1/D93)", () => {
    */
   function posterVariantOf(frame: Element): "pA" | "pB" | "pC" {
     if (frame.querySelector("circle") !== null) return "pB";
-    const rounded = Array.from(frame.querySelectorAll("rect")).filter((rect) => rect.getAttribute("rx"));
+    const rounded = Array.from(frame.querySelectorAll("rect")).filter((rect) =>
+      rect.getAttribute("rx"),
+    );
     return rounded.length >= 3 ? "pC" : "pA";
   }
 
@@ -90,7 +96,9 @@ describe("ModePanel — the filled tiles (G2, F1/D93)", () => {
     const frames = panel.querySelectorAll("svg");
     expect(frames).toHaveLength(6);
     const shapes = new Set(
-      Array.from(frames).map((frame) => `${frame.getAttribute("width")}x${frame.getAttribute("height")}`),
+      Array.from(frames).map(
+        (frame) => `${frame.getAttribute("width")}x${frame.getAttribute("height")}`,
+      ),
     );
     expect(shapes.size).toBe(1);
     const variants = new Set(Array.from(frames).map(posterVariantOf));
@@ -109,7 +117,9 @@ describe("ModePanel — the filled tiles (G2, F1/D93)", () => {
     const variants = new Set(Array.from(frames).map(posterVariantOf));
     expect(variants.size).toBe(3);
     const shapes = new Set(
-      Array.from(frames).map((frame) => `${frame.getAttribute("width")}x${frame.getAttribute("height")}`),
+      Array.from(frames).map(
+        (frame) => `${frame.getAttribute("width")}x${frame.getAttribute("height")}`,
+      ),
     );
     expect(shapes.size).toBe(3);
     const caption = Array.from(panel.querySelectorAll("span")).find((span) =>
@@ -134,7 +144,9 @@ describe("ModePanel — the filled tiles (G2, F1/D93)", () => {
 
   test("nothing the previews render animates (D88) — the check badge's one-shot is the tile's own", () => {
     const { container } = render(<ModePanel mode="variation" onSetMode={() => {}} />);
-    for (const picture of container.querySelectorAll("div.bg-background, svg[viewBox='0 0 46 46']")) {
+    for (const picture of container.querySelectorAll(
+      "div.bg-background, svg[viewBox='0 0 46 46']",
+    )) {
       expect(picture.innerHTML.includes("animate-")).toBe(false);
       expect(picture.className).not.toContain("animate-");
     }
@@ -162,7 +174,9 @@ describe("ModePanel — the filled tiles (G2, F1/D93)", () => {
 
 describe("ModePanel — the flip's dropped-format notice (S4/D99)", () => {
   test("says the drop once, in a status line beside the tiles, when the flip removed Video", () => {
-    const { container } = render(<ModePanel mode="brief" onSetMode={() => {}} compact formatDropped />);
+    const { container } = render(
+      <ModePanel mode="brief" onSetMode={() => {}} compact formatDropped />,
+    );
     const status = container.querySelector('[role="status"]');
     expect(status).not.toBeNull();
     expect(status?.textContent).toBe(messages.modeDroppedVideo);

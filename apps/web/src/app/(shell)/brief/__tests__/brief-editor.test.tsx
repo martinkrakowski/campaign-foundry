@@ -3,7 +3,12 @@ import { Profiler } from "react";
 import * as messages from "@/components/campaign/messages";
 import { screen, waitFor, within, fireEvent, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { renderWithRun as renderWithShell, json, nextMock, ShellProviders } from "@/__tests__/helpers";
+import {
+  renderWithRun as renderWithShell,
+  json,
+  nextMock,
+  ShellProviders,
+} from "@/__tests__/helpers";
 import { API, useRun } from "@/lib/run-context";
 import { useEditorDirty } from "@/lib/editor-dirty-context";
 import { CreateCampaignProvider } from "@/lib/create-campaign-context";
@@ -15,7 +20,11 @@ import type { BriefEntry } from "@/lib/briefs-api";
 import { DEFAULT_CAMPAIGN_TYPE } from "@campaignfoundry/CampaignOrchestration/campaign-types";
 import { clickDestinationProblem } from "@campaignfoundry/CampaignOrchestration/click-destination";
 import { templateFromCanonical } from "@campaignfoundry/CampaignOrchestration/brief-template";
-import { fromBrief, initialEditorState, saveDraftToStorage } from "@/components/campaign/editor-state";
+import {
+  fromBrief,
+  initialEditorState,
+  saveDraftToStorage,
+} from "@/components/campaign/editor-state";
 import { sectionOrder, SECTION_TITLES } from "@/components/campaign/sections";
 import { BriefEditor } from "@/components/campaign/BriefEditor";
 import { PREVIEW_RAIL_MIN_INLINE_PX } from "@/lib/use-min-inline-size";
@@ -91,7 +100,11 @@ const brief = (id: string) => ({
   ],
 });
 
-const entry = (id: string, revision?: string) => ({ file: `${id}.yaml`, brief: brief(id), revision });
+const entry = (id: string, revision?: string) => ({
+  file: `${id}.yaml`,
+  brief: brief(id),
+  revision,
+});
 
 /** Route each call by URL+method; unmatched calls fail loudly rather than hanging.
  *  The write handlers receive the parsed request body, so a test can echo it back —
@@ -107,7 +120,8 @@ const routes = (handlers: {
     const u = String(url);
     const method = (init?.method ?? "GET").toUpperCase();
     const raw = init?.body;
-    const parsed = typeof raw === "string" ? (JSON.parse(raw) as Record<string, unknown>) : undefined;
+    const parsed =
+      typeof raw === "string" ? (JSON.parse(raw) as Record<string, unknown>) : undefined;
     calls.push({
       url: u,
       method,
@@ -133,7 +147,8 @@ const routes = (handlers: {
     }
     if (method === "PUT")
       return Promise.resolve(
-        handlers.put?.(u, parsed) ?? json({ file: "x.yaml", brief: brief("x"), revision: "mock-rev" }),
+        handlers.put?.(u, parsed) ??
+          json({ file: "x.yaml", brief: brief("x"), revision: "mock-rev" }),
       );
     return Promise.resolve(json({}, 404));
   });
@@ -170,7 +185,9 @@ const writes = (calls: readonly { url: string; method: string }[]) =>
   );
 
 const waitForEditorReady = async () =>
-  waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).not.toBe(""));
+  waitFor(() =>
+    expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).not.toBe(""),
+  );
 
 /**
  * X34: this helper exists to get the draft into a valid state so a test's real
@@ -236,14 +253,18 @@ describe("BriefPage — data flow", () => {
     await waitFor(() => expect(calls.filter((c) => c.method === "GET").length).toBeGreaterThan(0));
     const onMount = calls.filter((c) => c.method === "GET").length;
     window.dispatchEvent(new Event("focus"));
-    await waitFor(() => expect(calls.filter((c) => c.method === "GET").length).toBeGreaterThan(onMount));
+    await waitFor(() =>
+      expect(calls.filter((c) => c.method === "GET").length).toBeGreaterThan(onMount),
+    );
   });
 
   test("a failing list is logged rather than thrown", async () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
     routes({ list: () => json({ error: "boom" }, 500) });
     renderWithRun(<Editor />);
-    await waitFor(() => expect(error).toHaveBeenCalledWith("Failed to load briefs:", expect.anything()));
+    await waitFor(() =>
+      expect(error).toHaveBeenCalledWith("Failed to load briefs:", expect.anything()),
+    );
     error.mockRestore();
   });
 
@@ -261,8 +282,17 @@ describe("BriefPage — data flow", () => {
     // Next answers the push with the route's editor; the route drives the load.
     // W1: the rerender keeps the wrapper's tree shape (provider + dialog), so the
     // editor instance survives and the route prop change is what drives the load.
-    view.rerender(<ShellProviders><CreateCampaignProvider><Editor id="camp" /><CreateCampaignDialog /></CreateCampaignProvider></ShellProviders>);
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
+    view.rerender(
+      <ShellProviders>
+        <CreateCampaignProvider>
+          <Editor id="camp" />
+          <CreateCampaignDialog />
+        </CreateCampaignProvider>
+      </ShellProviders>,
+    );
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"),
+    );
 
     await saveVia(user, "Save");
     await waitFor(() => {
@@ -277,12 +307,16 @@ describe("BriefPage — data flow", () => {
     // A blank draft is a route now, so ask for it directly instead of clicking the
     // editor back to empty.
     renderWithRun(<NewEditor />);
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
+    );
 
     await fillValidDraft(user);
 
     await waitFor(() =>
-      expect((screen.getByRole("button", { name: /^Save$/ }) as HTMLButtonElement).disabled).toBe(false),
+      expect((screen.getByRole("button", { name: /^Save$/ }) as HTMLButtonElement).disabled).toBe(
+        false,
+      ),
     );
     await saveVia(user, "Save");
 
@@ -306,9 +340,14 @@ describe("BriefPage — data flow", () => {
 
   test("a failed save surfaces the message", async () => {
     const user = userEvent.setup();
-    routes({ list: () => json({ briefs: [entry("camp", "r1")] }), put: () => json({ error: "conflict" }, 409) });
+    routes({
+      list: () => json({ briefs: [entry("camp", "r1")] }),
+      put: () => json({ error: "conflict" }, 409),
+    });
     renderWithRun(<Editor id="camp" />);
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"),
+    );
 
     await saveVia(user, "Save");
     expect(await screen.findByText(/conflict/)).toBeTruthy();
@@ -326,7 +365,9 @@ describe("BriefPage — data flow", () => {
         <Editor id="camp" />
       </>,
     );
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"),
+    );
 
     // The verb model (D35): Save is the verb itself, not a disclosure whose first
     // item is also called Save — the bar must carry no menu before the press.
@@ -366,7 +407,9 @@ describe("BriefPage — data flow", () => {
     });
     routes({ list: () => json({ briefs: [entry("camp", "r1")] }), put: () => gate });
     renderWithRun(<Editor id="camp" />);
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"),
+    );
 
     const save = screen.getByRole("button", { name: /^Save$/ }) as HTMLButtonElement;
     expect(save.disabled).toBe(false);
@@ -376,14 +419,18 @@ describe("BriefPage — data flow", () => {
     // replaces its label with the spinner, so find it by the busy state). This is the
     // only thing that closes the verb off — an invalid draft never does (D3).
     await waitFor(() => {
-      const busy = screen.getAllByRole("button").find((b) => b.getAttribute("aria-busy") === "true");
+      const busy = screen
+        .getAllByRole("button")
+        .find((b) => b.getAttribute("aria-busy") === "true");
       expect(busy).toBeTruthy();
       expect((busy as HTMLButtonElement).disabled).toBe(true);
     });
 
     release();
     await waitFor(() => expect(screen.queryByRole("button", { name: /^Save$/ })).toBeTruthy());
-    expect((screen.getByRole("button", { name: /^Save$/ }) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByRole("button", { name: /^Save$/ }) as HTMLButtonElement).disabled).toBe(
+      false,
+    );
   });
 
   test("Save as... creates a copy under the new id and closes the dialog", async () => {
@@ -394,7 +441,9 @@ describe("BriefPage — data flow", () => {
 
     await saveVia(user, "Save as");
     await user.type(screen.getByLabelText("New brief id"), "copy");
-    await user.click(within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }));
+    await user.click(
+      within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
+    );
 
     await waitFor(() => expect(calls.some((c) => c.method === "POST")).toBe(true));
     await waitFor(() => expect(screen.queryByLabelText("New brief id")).toBeNull());
@@ -402,13 +451,18 @@ describe("BriefPage — data flow", () => {
 
   test("a failed Save as... keeps the dialog open and shows why", async () => {
     const user = userEvent.setup();
-    routes({ list: () => json({ briefs: [entry("camp", "r1")] }), post: () => json({ error: "already exists" }, 409) });
+    routes({
+      list: () => json({ briefs: [entry("camp", "r1")] }),
+      post: () => json({ error: "already exists" }, 409),
+    });
     renderWithRun(<Editor id="camp" />);
     await waitForEditorReady();
 
     await saveVia(user, "Save as");
     await user.type(screen.getByLabelText("New brief id"), "copy");
-    await user.click(within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }));
+    await user.click(
+      within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
+    );
 
     // The collision (a 409 the listing did not foresee) asks first (D9); the
     // overwrite itself is the retry.
@@ -444,7 +498,9 @@ describe("BriefPage — data flow", () => {
     // Corrected for D35: the action bar now carries its own Cancel verb, so the
     // dialog's Cancel is addressed inside the dialog it belongs to.
     await user.click(
-      within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Cancel" }),
+      within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", {
+        name: "Cancel",
+      }),
     );
     expect(screen.queryByLabelText("New brief id")).toBeNull();
   });
@@ -453,7 +509,9 @@ describe("BriefPage — data flow", () => {
     const user = userEvent.setup();
     routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
     renderWithRun(<Editor id="camp" />);
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"),
+    );
 
     // reopen the selector and choose the create-new row
     await user.click(screen.getAllByText("camp")[0]);
@@ -483,7 +541,9 @@ describe("BriefPage — data flow", () => {
     const user = userEvent.setup();
     routes({});
     renderWithRun(<NewEditor />);
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
+    );
     await fillValidDraft(user, "typed");
     expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("typed");
 
@@ -511,7 +571,9 @@ describe("BriefPage — data flow", () => {
     const user = userEvent.setup();
     routes({});
     renderWithRun(<NewEditor />);
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
+    );
 
     // W1 (D66): a pristine draft has nothing to lose, so the guard never prompts —
     // the row's old in-place reset is the create seed's job now.
@@ -525,7 +587,9 @@ describe("BriefPage — data flow", () => {
     const user = userEvent.setup();
     routes({});
     renderWithRun(<NewEditor />);
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
+    );
     await fillValidDraft(user, "typed");
 
     await user.click(screen.getAllByText("New brief...")[0]);
@@ -544,7 +608,9 @@ describe("BriefPage — data flow", () => {
     const user = userEvent.setup();
     routes({});
     renderWithRun(<NewEditor />);
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
+    );
     await fillValidDraft(user, "fresh");
 
     await saveVia(user, "Save as");
@@ -581,14 +647,25 @@ describe("BriefPage — data flow", () => {
     await waitFor(() => expect(screen.queryByLabelText("New brief id")).toBeNull());
     // W1: the rerender keeps the wrapper's tree shape (provider + dialog), so the
     // editor instance survives and the route prop change is what drives the load.
-    view.rerender(<ShellProviders><CreateCampaignProvider><Editor id="copy" /><CreateCampaignDialog /></CreateCampaignProvider></ShellProviders>);
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("copy"));
+    view.rerender(
+      <ShellProviders>
+        <CreateCampaignProvider>
+          <Editor id="copy" />
+          <CreateCampaignDialog />
+        </CreateCampaignProvider>
+      </ShellProviders>,
+    );
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("copy"),
+    );
 
     // saving the copy must send the revision the POST handed back; without it the write
     // silently drops to last-write-wins, the trap `loadBrief` carries the revision to avoid
     await saveVia(user, "Save");
     await waitFor(() =>
-      expect(calls.some((c) => c.method === "PUT" && c.url.includes("revision=rev-copy"))).toBe(true),
+      expect(calls.some((c) => c.method === "PUT" && c.url.includes("revision=rev-copy"))).toBe(
+        true,
+      ),
     );
   });
 
@@ -611,13 +688,17 @@ describe("BriefPage — data flow", () => {
 
     await saveVia(user, "Save as");
     await user.type(screen.getByLabelText("New brief id"), "camp");
-    await user.click(within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }));
+    await user.click(
+      within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
+    );
 
     // the id is taken (the listing knows it): the overwrite dialog asks, and the
     // user's accept is what retries with ?replace=1 (D9)
     const prompt = await screen.findByRole("dialog", { name: messages.saveAsOverwriteTitle });
     await user.click(within(prompt).getByRole("button", { name: messages.saveAsOverwriteConfirm }));
-    await waitFor(() => expect(calls.some((c) => c.method === "POST" && c.url.includes("replace=1"))).toBe(true));
+    await waitFor(() =>
+      expect(calls.some((c) => c.method === "POST" && c.url.includes("replace=1"))).toBe(true),
+    );
 
     // ...and the stored copy was adopted in place: both dialogs close, the shell
     // follows it, and the URL never needed to move. Same-id overwrite does not
@@ -652,7 +733,10 @@ describe("BriefPage — data flow", () => {
   test("neither Escape nor Cancel dismisses Save as… while the write is in flight", async () => {
     const user = userEvent.setup();
     // A POST that never answers, so the dialog stays mid-write for the whole test.
-    routes({ list: () => json({ briefs: [entry("camp", "r1")] }), post: () => new Promise<Response>(() => {}) });
+    routes({
+      list: () => json({ briefs: [entry("camp", "r1")] }),
+      post: () => new Promise<Response>(() => {}),
+    });
     renderWithRun(<Editor id="camp" />);
     await waitForEditorReady();
 
@@ -666,7 +750,9 @@ describe("BriefPage — data flow", () => {
     // user an editable page whose edits that pending load is about to discard.
     await user.keyboard("{Escape}");
     expect(screen.getByRole("dialog", { name: /Save as/ })).toBeTruthy();
-    expect((within(dialog).getByRole("button", { name: "Cancel" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(
+      (within(dialog).getByRole("button", { name: "Cancel" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
   });
 
   test("Save as... offers the slugified form of a name as a click, never a silent rewrite", async () => {
@@ -677,9 +763,7 @@ describe("BriefPage — data flow", () => {
 
     await saveVia(user, "Save as");
     await user.type(screen.getByLabelText("New brief id"), "Trail Blaze 2026");
-    await user.click(
-      await screen.findByRole("button", { name: 'Try "trail-blaze-2026" instead' }),
-    );
+    await user.click(await screen.findByRole("button", { name: 'Try "trail-blaze-2026" instead' }));
 
     // the offer fills the field with the slug the user can see and accept
     expect((screen.getByLabelText("New brief id") as HTMLInputElement).value).toBe(
@@ -750,7 +834,9 @@ describe("BriefPage — data flow", () => {
       put: () => json({ file: "camp.yaml", brief: brief("camp"), revision: "rev-2" }, 200),
     });
     renderWithRun(<Editor id="camp" />);
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"),
+    );
 
     // the first save guards with the load-time revision...
     await saveVia(user, "Save");
@@ -778,7 +864,9 @@ describe("BriefPage — data flow", () => {
         }),
     });
     renderWithRun(<Editor id="camp" />);
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"),
+    );
 
     await saveVia(user, "Save");
     await waitFor(() => expect(calls.some((c) => c.method === "PUT")).toBe(true));
@@ -815,7 +903,9 @@ describe("BriefPage — data flow", () => {
       },
     });
     renderWithRun(<Editor id="camp" />);
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"),
+    );
 
     await saveVia(user, "Save");
     // the refusal says what happened and what to do — the overwrite is never re-sent
@@ -837,7 +927,9 @@ describe("BriefPage — data flow", () => {
       put: () => json({ error: "disk full" }, 500),
     });
     renderWithRun(<Editor id="camp" />);
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"),
+    );
 
     await saveVia(user, "Save");
     expect(await screen.findByText(/disk full/)).toBeTruthy();
@@ -850,7 +942,9 @@ describe("BriefPage — data flow", () => {
       put: (_url, body) => json({ file: "camp.yaml", brief: body }),
     });
     renderWithRun(<Editor id="camp" />);
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"),
+    );
 
     await saveVia(user, "Save");
     await waitFor(() => expect(screen.getByText("Saved")).toBeTruthy());
@@ -862,7 +956,9 @@ describe("BriefPage — data flow", () => {
       post: () => json({ error: 'Brief "fresh" already exists.', revision: "rev-fresh" }, 409),
     });
     renderWithRun(<NewEditor />);
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
+    );
     await fillValidDraft(user, "fresh");
 
     await saveVia(user, "Save");
@@ -879,7 +975,13 @@ describe("BriefPage — data flow", () => {
     const orphan = fromBrief(brief("camp") as never, { file: "camp.yaml", revision: "r1" });
     saveDraftToStorage({
       ...orphan,
-      source: { kind: "file", file: "camp.yaml", loadedId: "camp", savedSnapshot: null, revision: "r1" },
+      source: {
+        kind: "file",
+        file: "camp.yaml",
+        loadedId: "camp",
+        savedSnapshot: null,
+        revision: "r1",
+      },
     });
     routes({
       list: () => json({ briefs: [entry("camp", "r1")] }),
@@ -887,7 +989,9 @@ describe("BriefPage — data flow", () => {
     });
     renderWithRun(<Editor id="camp" />);
     // the route loads camp, then draft recovery restores the orphan over it
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"),
+    );
 
     await saveVia(user, "Save");
     expect(await screen.findByText(/Brief was modified by another user/)).toBeTruthy();
@@ -918,7 +1022,14 @@ describe("BriefPage — data flow", () => {
     await waitFor(() => expect(screen.queryByLabelText("New brief id")).toBeNull());
     // W1: the rerender keeps the wrapper's tree shape (provider + dialog), so the
     // editor instance survives and the route prop change is what drives the load.
-    view.rerender(<ShellProviders><CreateCampaignProvider><Editor id="copy" /><CreateCampaignDialog /></CreateCampaignProvider></ShellProviders>);
+    view.rerender(
+      <ShellProviders>
+        <CreateCampaignProvider>
+          <Editor id="copy" />
+          <CreateCampaignDialog />
+        </CreateCampaignProvider>
+      </ShellProviders>,
+    );
 
     // the editor shows the path the server rewrote during the copy — dispatching the
     // brief this page constructed instead silently reverted it while the file on disk
@@ -945,7 +1056,9 @@ describe("BriefPage — data flow", () => {
         <NewEditor />
       </>,
     );
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
+    );
     await fillValidDraft(user, "fresh");
 
     // The editor publishes the differing draft; Generate asks instead of running the
@@ -955,7 +1068,9 @@ describe("BriefPage — data flow", () => {
     // Exactly one prompt: the guard's "Unsaved edits" is nowhere behind the question.
     expect(screen.queryByRole("dialog", { name: "Unsaved edits" })).toBeNull();
 
-    await user.click(within(dialog).getByRole("button", { name: new RegExp(`^${messages.generateDraftRunThis}`) }));
+    await user.click(
+      within(dialog).getByRole("button", { name: new RegExp(`^${messages.generateDraftRunThis}`) }),
+    );
 
     // The on-screen draft was POSTed — not the shell's (empty) brief...
     const generatePost = await waitFor(() => {
@@ -965,7 +1080,9 @@ describe("BriefPage — data flow", () => {
     });
     expect((generatePost.body as { id?: string }).id).toBe("fresh");
     // ...and zero brief writes left the page: run-without-write.
-    expect(calls.filter((c) => c.method !== "GET" && c.url.includes("/campaigns/briefs"))).toEqual([]);
+    expect(calls.filter((c) => c.method !== "GET" && c.url.includes("/campaigns/briefs"))).toEqual(
+      [],
+    );
   });
 
   test("arriving on the blank route lets go of the campaign being left", async () => {
@@ -979,7 +1096,9 @@ describe("BriefPage — data flow", () => {
     // D37/H5: the last-opened record survives — visiting /brief/new opens no brief,
     // so it must not destroy the pointer to the one the user opened last. (The bare
     // /brief redirect and the grid's restore read it.)
-    await waitFor(() => expect(JSON.parse(localStorage.getItem("cf:brief") ?? "null")?.id).toBe("camp"));
+    await waitFor(() =>
+      expect(JSON.parse(localStorage.getItem("cf:brief") ?? "null")?.id).toBe("camp"),
+    );
     // …and camp's unsaved work is untouched. Getting here does not always follow the
     // unsaved-changes prompt — from any other view there is no mounted editor to call
     // itself dirty — so deleting the draft would be destroying work nobody was asked
@@ -991,7 +1110,9 @@ describe("BriefPage — data flow", () => {
     const user = userEvent.setup();
     routes({});
     renderWithRun(<NewEditor />);
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
+    );
 
     await fillValidDraft(user, "fresh");
     await saveVia(user, "Save");
@@ -1025,7 +1146,9 @@ describe("BriefPage — data flow", () => {
     const user = userEvent.setup();
     routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
     renderWithRun(<Editor id="camp" />);
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"),
+    );
 
     await user.type(screen.getByLabelText("Headline"), " edited");
     await user.click(screen.getByRole("button", { name: messages.editorCancel }));
@@ -1045,7 +1168,9 @@ describe("BriefPage — data flow", () => {
     const user = userEvent.setup();
     routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
     renderWithRun(<Editor id="camp" />);
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"),
+    );
 
     await user.click(screen.getByRole("button", { name: messages.editorCancel }));
     expect(nextMock().router.push).toHaveBeenCalledWith("/grid");
@@ -1056,7 +1181,9 @@ describe("BriefPage — data flow", () => {
     const user = userEvent.setup();
     routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
     renderWithRun(<Editor id="camp" />);
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"),
+    );
 
     await user.type(screen.getByLabelText("Headline"), " edited");
     expect((screen.getByLabelText("Headline") as HTMLInputElement).value).toBe("Hi edited");
@@ -1080,7 +1207,9 @@ describe("BriefPage — data flow", () => {
     const user = userEvent.setup();
     routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
     renderWithRun(<Editor id="camp" />);
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"),
+    );
 
     // Nothing unsaved (loaded, unedited): the replace confirmation never opens, and
     // the saved state is what was on screen anyway.
@@ -1094,7 +1223,9 @@ describe("BriefPage — data flow", () => {
     const user = userEvent.setup();
     routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
     renderWithRun(<Editor id="camp" />);
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"),
+    );
 
     await user.type(screen.getByLabelText("Headline"), " edited");
     await user.click(screen.getByText("⋯"));
@@ -1112,7 +1243,9 @@ describe("BriefPage — data flow", () => {
     const user = userEvent.setup();
     routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
     renderWithRun(<Editor id="camp" />);
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"),
+    );
     await user.type(screen.getByLabelText("Headline"), " edited");
 
     await user.click(screen.getByText("⋯"));
@@ -1137,7 +1270,9 @@ describe("BriefPage — data flow", () => {
     const user = userEvent.setup();
     routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
     renderWithRun(<Editor id="camp" />);
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"),
+    );
 
     // Type an edit (autosaved under the brief's draft key), then revert it.
     await user.type(screen.getByLabelText("Headline"), " edited");
@@ -1166,7 +1301,9 @@ describe("BriefPage — data flow", () => {
     const user = userEvent.setup();
     routes({});
     renderWithRun(<NewEditor />);
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
+    );
     await fillValidDraft(user, "typed");
 
     // autosaved under the new draft's temp-id key. (The suite's localStorage is the
@@ -1222,9 +1359,9 @@ describe("BriefPage — data flow", () => {
     // "Identity" labels a table-of-contents button too, and both carry a count badge —
     // so pick the chip out of the ErrorStrip by its pill styling.
     await screen.findAllByRole("button", { name: /Identity/ });
-    const strip = Array.from(
-      document.querySelectorAll<HTMLElement>("button.rounded-full"),
-    ).find((b) => /Identity/.test(b.textContent ?? "")) as HTMLElement;
+    const strip = Array.from(document.querySelectorAll<HTMLElement>("button.rounded-full")).find(
+      (b) => /Identity/.test(b.textContent ?? ""),
+    ) as HTMLElement;
     expect(strip).toBeTruthy();
     const section = document.getElementById("identity") as HTMLElement;
     const scrollIntoView = vi.fn();
@@ -1245,7 +1382,12 @@ describe("BriefPage — data flow", () => {
         mode: "variation",
         variation: {
           count: 0,
-          axes: { layout: ["headline-top"], tone: ["bold"], background: { source: ["procedural"] }, paletteShift: [0] },
+          axes: {
+            layout: ["headline-top"],
+            tone: ["bold"],
+            background: { source: ["procedural"] },
+            paletteShift: [0],
+          },
         },
       },
     };
@@ -1260,8 +1402,8 @@ describe("BriefPage — data flow", () => {
     const scrollIntoView = vi.fn();
     section.scrollIntoView = scrollIntoView;
 
-    const chip = Array.from(document.querySelectorAll<HTMLElement>("button.rounded-full")).find((b) =>
-      /Policy/.test(b.textContent ?? ""),
+    const chip = Array.from(document.querySelectorAll<HTMLElement>("button.rounded-full")).find(
+      (b) => /Policy/.test(b.textContent ?? ""),
     ) as HTMLElement;
     expect(chip).toBeTruthy();
     await user.click(chip);
@@ -1274,14 +1416,17 @@ describe("BriefPage — data flow", () => {
     const motion = {
       file: "clip.yaml",
       revision: "r1",
-      brief: { ...brief("clip"), output: { formats: ["static", "motion"], platforms: ["linkedin"] } },
+      brief: {
+        ...brief("clip"),
+        output: { formats: ["static", "motion"], platforms: ["linkedin"] },
+      },
     };
     routes({ list: () => json({ briefs: [motion] }) });
     renderWithRun(<Editor id="clip" />);
 
     const chip = await waitFor(() => {
-      const found = Array.from(document.querySelectorAll<HTMLElement>("button.rounded-full")).find((b) =>
-        /Motion/.test(b.textContent ?? ""),
+      const found = Array.from(document.querySelectorAll<HTMLElement>("button.rounded-full")).find(
+        (b) => /Motion/.test(b.textContent ?? ""),
       );
       expect(found).toBeTruthy();
       return found as HTMLElement;
@@ -1319,7 +1464,9 @@ describe("BriefPage — data flow", () => {
     routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
 
     const first = renderWithRun(<Editor id="camp" />);
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"),
+    );
     await user.type(screen.getByLabelText("Headline"), " edited");
     await waitFor(() => expect(localStorage.getItem("cf:draft:camp")).not.toBeNull());
     first.unmount();
@@ -1335,7 +1482,9 @@ describe("BriefPage — data flow", () => {
     const user = userEvent.setup();
     routes({ list: () => json({ briefs: [entry("camp", "r1"), entry("other", "r1")] }) });
     renderWithRun(<Editor id="camp" />);
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"),
+    );
 
     await user.type(screen.getByLabelText("Headline"), "!");
 
@@ -1357,7 +1506,9 @@ describe("BriefPage — data flow", () => {
     const user = userEvent.setup();
     routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
     renderWithRun(<Editor id="camp" />);
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"),
+    );
 
     await user.type(screen.getByLabelText("Headline"), "!");
 
@@ -1388,7 +1539,9 @@ describe("BriefPage — data flow", () => {
     // written, and the errors that were hidden until now become visible.
     // Re-query inside the assertion — React replaces these nodes on re-render, so a
     // reference captured beforehand can be stale by the time the draft turns invalid.
-    expect((screen.getByRole("button", { name: /^Save$/ }) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByRole("button", { name: /^Save$/ }) as HTMLButtonElement).disabled).toBe(
+      false,
+    );
 
     // Save is the verb itself now (one press); Save as… sits in the overflow.
     await saveVia(user, "Save");
@@ -1411,7 +1564,9 @@ describe("BriefPage — data flow", () => {
     const user = userEvent.setup();
     const calls = routes({});
     renderWithRun(<NewEditor />);
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
+    );
 
     await fillValidDraft(user);
     await user.type(screen.getByLabelText(messages.clickDestinationLabel), "example.com/landing");
@@ -1420,7 +1575,9 @@ describe("BriefPage — data flow", () => {
 
     expect(writes(calls)).toEqual([]);
     expect(
-      screen.getByText(messages.clickDestinationInvalid(clickDestinationProblem("example.com/landing")!)),
+      screen.getByText(
+        messages.clickDestinationInvalid(clickDestinationProblem("example.com/landing")!),
+      ),
     ).toBeTruthy();
   });
 
@@ -1429,13 +1586,17 @@ describe("BriefPage — data flow", () => {
     globalThis.confirm = vi.fn(() => false);
     const calls = routes({ list: () => json({ briefs: [entry("taken", "r1")] }) });
     renderWithRun(<NewEditor />);
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
+    );
 
     await fillValidDraft(user);
 
     await saveVia(user, "Save as");
     await user.type(screen.getByLabelText("New brief id"), "taken");
-    await user.click(within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }));
+    await user.click(
+      within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
+    );
 
     // The pre-flight check knows the id is taken: the attempt writes nothing and
     // the overwrite dialog asks (D9 — the visible decision, never an auto-resend).
@@ -1453,13 +1614,17 @@ describe("BriefPage — data flow", () => {
     const user = userEvent.setup();
     const calls = routes({ list: () => json({ briefs: [entry("taken", "r1")] }) });
     renderWithRun(<NewEditor />);
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
+    );
 
     await fillValidDraft(user);
 
     await saveVia(user, "Save as");
     await user.type(screen.getByLabelText("New brief id"), "taken");
-    await user.click(within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }));
+    await user.click(
+      within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
+    );
 
     // the dialog is the decision point; the confirm is what sends the overwrite
     const prompt = await screen.findByRole("dialog", { name: messages.saveAsOverwriteTitle });
@@ -1472,13 +1637,17 @@ describe("BriefPage — data flow", () => {
     const user = userEvent.setup();
     const calls = routes({ list: () => json({ briefs: [entry("taken", "r1")] }) });
     renderWithRun(<NewEditor />);
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
+    );
 
     await fillValidDraft(user);
 
     await saveVia(user, "Save as");
     await user.type(screen.getByLabelText("New brief id"), "taken");
-    await user.click(within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }));
+    await user.click(
+      within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
+    );
 
     const prompt = await screen.findByRole("dialog", { name: messages.saveAsOverwriteTitle });
     const confirm = within(prompt).getByRole("button", { name: messages.saveAsOverwriteConfirm });
@@ -1498,17 +1667,23 @@ describe("BriefPage — data flow", () => {
     const calls = routes({
       post: () => {
         posts += 1;
-        return posts === 1 ? json({ error: "already exists" }, 409) : json({ file: "copy.yaml", brief: brief("copy") }, 201);
+        return posts === 1
+          ? json({ error: "already exists" }, 409)
+          : json({ file: "copy.yaml", brief: brief("copy") }, 201);
       },
     });
     renderWithRun(<NewEditor />);
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
+    );
 
     await fillValidDraft(user);
 
     await saveVia(user, "Save as");
     await user.type(screen.getByLabelText("New brief id"), "copy");
-    await user.click(within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }));
+    await user.click(
+      within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
+    );
 
     // the first attempt posted WITHOUT replace; its 409 opens the same dialog the
     // pre-flight check uses — one decision point, whichever way the collision was found
@@ -1531,13 +1706,17 @@ describe("BriefPage — data flow", () => {
       },
     });
     renderWithRun(<NewEditor />);
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
+    );
 
     await fillValidDraft(user);
 
     await saveVia(user, "Save as");
     await user.type(screen.getByLabelText("New brief id"), "copy");
-    await user.click(within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }));
+    await user.click(
+      within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
+    );
 
     const prompt = await screen.findByRole("dialog", { name: messages.saveAsOverwriteTitle });
     await user.click(within(prompt).getByRole("button", { name: messages.confirmCancel }));
@@ -1556,13 +1735,17 @@ describe("BriefPage — data flow", () => {
       post: () => new Promise<Response>(() => {}),
     });
     renderWithRun(<NewEditor />);
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
+    );
 
     await fillValidDraft(user);
 
     await saveVia(user, "Save as");
     await user.type(screen.getByLabelText("New brief id"), "taken");
-    await user.click(within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }));
+    await user.click(
+      within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
+    );
 
     const prompt = await screen.findByRole("dialog", { name: messages.saveAsOverwriteTitle });
     await user.click(within(prompt).getByRole("button", { name: messages.saveAsOverwriteConfirm }));
@@ -1578,28 +1761,38 @@ describe("BriefPage — data flow", () => {
     const user = userEvent.setup();
     routes({ post: () => json({ error: "disk full" }, 500) });
     renderWithRun(<NewEditor />);
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
+    );
 
     await fillValidDraft(user);
 
     await saveVia(user, "Save as");
     await user.type(screen.getByLabelText("New brief id"), "copy");
-    await user.click(within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }));
+    await user.click(
+      within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
+    );
 
     expect(await screen.findByText(/disk full/)).toBeTruthy();
   });
 
   test("a route brief is re-attached to its file when the listing knows it", async () => {
-    const calls = routes({ list: () => json({ briefs: [entry("summer-hydration-2026", "rev-live")] }) });
+    const calls = routes({
+      list: () => json({ briefs: [entry("summer-hydration-2026", "rev-live")] }),
+    });
     renderWithRun(<Editor id="summer-hydration-2026" />);
 
     // the route's brief arrives with the entry's file identity, so the editor can
     // save conditionally rather than as a new draft
-    await waitFor(() => expect(screen.getByLabelText("Campaign Name").hasAttribute("readonly")).toBe(true));
+    await waitFor(() =>
+      expect(screen.getByLabelText("Campaign Name").hasAttribute("readonly")).toBe(true),
+    );
 
     const user = userEvent.setup();
     await saveVia(user, "Save");
-    await waitFor(() => expect(calls.find((c) => c.method === "PUT")?.url).toContain("revision=rev-live"));
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === "PUT")?.url).toContain("revision=rev-live"),
+    );
   });
 
   test("the headline pool drawer opens from Copy and closes again", async () => {
@@ -1612,13 +1805,20 @@ describe("BriefPage — data flow", () => {
         mode: "variation",
         variation: {
           count: 4,
-          axes: { layout: ["headline-top"], tone: ["bold"], background: { source: ["procedural"] }, paletteShift: [0] },
+          axes: {
+            layout: ["headline-top"],
+            tone: ["bold"],
+            background: { source: ["procedural"] },
+            paletteShift: [0],
+          },
         },
       },
     };
     routes({ list: () => json({ briefs: [randomized] }) });
     renderWithRun(<Editor id="rand" />);
-    await waitFor(() => expect(document.querySelector('[data-section="policy"], #policy')).toBeTruthy());
+    await waitFor(() =>
+      expect(document.querySelector('[data-section="policy"], #policy')).toBeTruthy(),
+    );
 
     // the drawer is only reachable from the Copy section, and only for a randomized brief
     expect(screen.queryByText("Headline Pool")).toBeNull();
@@ -1724,7 +1924,9 @@ describe("BriefPage — capabilities and motion", () => {
     routes({
       capabilities: () => {
         calls += 1;
-        return calls <= 1 ? json({ motion: false, reason: "not probed" }) : json({ motion: false, reason: "no ffmpeg" });
+        return calls <= 1
+          ? json({ motion: false, reason: "not probed" })
+          : json({ motion: false, reason: "no ffmpeg" });
       },
     });
     renderWithRun(<Editor />);
@@ -1794,11 +1996,15 @@ describe("BriefPage — capabilities and motion", () => {
     });
     renderWithRun(<Editor id="clip" />);
 
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("clip"));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("clip"),
+    );
     // Under per-card gating (L4.4), motion kinds remain operable; the video format card
     // carries the capability gate description
     await waitFor(() =>
-      expect((screen.getByRole("button", { name: "ken-burns-in" }) as HTMLButtonElement).disabled).toBe(false),
+      expect(
+        (screen.getByRole("button", { name: "ken-burns-in" }) as HTMLButtonElement).disabled,
+      ).toBe(false),
     );
     expect(motionToggle().disabled).toBe(false);
 
@@ -1859,7 +2065,9 @@ describe("BriefPage — capabilities and motion", () => {
     const user = userEvent.setup();
     const calls = routes({});
     renderWithRun(<NewEditor />);
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
+    );
     await fillValidDraft(user);
     await user.click(screen.getByText("Randomized"));
 
@@ -1892,7 +2100,9 @@ describe("BriefPage — capabilities and motion", () => {
     const user = userEvent.setup();
     const calls = routes({});
     renderWithRun(<NewEditor />);
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
+    );
     await fillValidDraft(user);
     await user.click(screen.getByText("Randomized"));
     await user.click(screen.getByRole("button", { name: "motion" }));
@@ -1907,7 +2117,9 @@ describe("BriefPage — capabilities and motion", () => {
     expect(screen.getByText(messages.motion)).toBeTruthy();
     expect(screen.getByText(messages.duration)).toBeTruthy();
     // D3: the verb is never disabled — it stays live and refuses when pressed.
-    expect((screen.getByRole("button", { name: /^Save$/ }) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByRole("button", { name: /^Save$/ }) as HTMLButtonElement).disabled).toBe(
+      false,
+    );
     // The control named "Save" opens the menu; the verb a user actually presses is inside
     // it. Clicking only the menu button proved nothing here — this assertion passed with
     // the refusal removed entirely, because opening a menu never writes.
@@ -1959,11 +2171,18 @@ describe("BriefPage — capabilities and motion", () => {
     routes({});
     let commits = 0;
     renderWithRun(
-      <Profiler id="x30-commits" onRender={() => { commits += 1; }}>
+      <Profiler
+        id="x30-commits"
+        onRender={() => {
+          commits += 1;
+        }}
+      >
         <NewEditor />
       </Profiler>,
     );
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
+    );
     await fillValidDraft(user);
     await user.click(screen.getByText("Randomized"));
     await user.click(screen.getByRole("button", { name: "motion" }));
@@ -2044,11 +2263,18 @@ describe("BriefPage — capabilities and motion", () => {
     routes({});
     let commits = 0;
     renderWithRun(
-      <Profiler id="x32-keystroke-commits" onRender={() => { commits += 1; }}>
+      <Profiler
+        id="x32-keystroke-commits"
+        onRender={() => {
+          commits += 1;
+        }}
+      >
         <NewEditor />
       </Profiler>,
     );
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
+    );
     await fillValidDraft(user);
     // Revisit a field fillValidDraft already touched once (Target Region, blurred
     // when fillValidDraft moved on to Target Audience) — the ordinary "go back and
@@ -2084,7 +2310,9 @@ describe("BriefPage — capabilities and motion", () => {
         <NewEditor />
       </>,
     );
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
+    );
     expect(screen.getByTestId("dirty-probe").textContent).toBe("clean");
 
     // A first real edit sets it.
@@ -2100,7 +2328,9 @@ describe("BriefPage — capabilities and motion", () => {
 
     // A save clears it: the saved snapshot now matches the draft.
     await waitFor(() =>
-      expect((screen.getByRole("button", { name: /^Save$/ }) as HTMLButtonElement).disabled).toBe(false),
+      expect((screen.getByRole("button", { name: /^Save$/ }) as HTMLButtonElement).disabled).toBe(
+        false,
+      ),
     );
     await saveVia(user, "Save");
     await waitFor(() => expect(calls.some((c) => c.method === "POST")).toBe(true));
@@ -2186,7 +2416,10 @@ describe("BriefPage — capabilities and motion", () => {
      * the actual `test()` below now pays only the fast path's cost, the same
      * as every other test that calls `fillValidDraft`.
      */
-    const typeFillValidDraftByHand = async (user: ReturnType<typeof userEvent.setup>, id: string) => {
+    const typeFillValidDraftByHand = async (
+      user: ReturnType<typeof userEvent.setup>,
+      id: string,
+    ) => {
       await user.type(screen.getByLabelText("Campaign Name"), id);
       await user.type(screen.getByLabelText("Target Region"), "DE");
       await user.type(screen.getByLabelText("Target Audience"), "a");
@@ -2224,7 +2457,9 @@ describe("BriefPage — capabilities and motion", () => {
       // next — the one thing this function's caller cannot do on its behalf,
       // since `view` lives only in this closure.
       try {
-        await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""));
+        await waitFor(() =>
+          expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
+        );
         await fill(user);
 
         // (c) — captured before anything else moves focus (Save's own click included).
@@ -2273,7 +2508,9 @@ describe("BriefPage — capabilities and motion", () => {
       // runs after it in the file — this hook has no `afterEach` of its own
       // to undo them.
       try {
-        typedReference = await observeFillValidDraft((user) => typeFillValidDraftByHand(user, "fresh"));
+        typedReference = await observeFillValidDraft((user) =>
+          typeFillValidDraftByHand(user, "fresh"),
+        );
       } finally {
         // Put back what the global `afterEach` would have: nothing here
         // should leak into the first real test's own `beforeEach`/`routes()`
@@ -2324,20 +2561,28 @@ describe("BriefPage — capabilities and motion", () => {
     });
     renderWithRun(<Editor id="clip" />);
 
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("clip"));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("clip"),
+    );
 
     // the probe's verdict lands and Video card shows capability description. Under per-card
     // gating (L4.4), motion kinds remain operable and the format toggle stays operable.
     await waitFor(() =>
-      expect((screen.getByRole("button", { name: "ken-burns-in" }) as HTMLButtonElement).disabled).toBe(false),
+      expect(
+        (screen.getByRole("button", { name: "ken-burns-in" }) as HTMLButtonElement).disabled,
+      ).toBe(false),
     );
     expect(motionToggle().disabled).toBe(false);
     expect(screen.getByText(messages.formatsMotionUnavailable)).toBeTruthy();
-    expect((screen.getByRole("button", { name: "ken-burns-in" }) as HTMLButtonElement).disabled).toBe(false);
+    expect(
+      (screen.getByRole("button", { name: "ken-burns-in" }) as HTMLButtonElement).disabled,
+    ).toBe(false);
     const slider = screen.getByRole("slider", { name: "Duration 1 (seconds)" });
     expect(slider).toBeTruthy();
     expect(slider.getAttribute("aria-valuenow")).toBe("6");
-    expect((screen.getByRole("button", { name: "instagram-reel" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(
+      (screen.getByRole("button", { name: "instagram-reel" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
 
     // structurally valid ⇒ persistable: Save stays offered and keeps the fields verbatim
     const save = () => screen.getByRole("button", { name: /^Save$/ }) as HTMLButtonElement;
@@ -2358,7 +2603,9 @@ describe("BriefPage — capabilities and motion", () => {
 
     // Corrected for D35: "Apply to run" is retired — Save is the verb that commits,
     // and having committed, it owes the user the same motion refusal Apply gave (D7).
-    await waitFor(() => expect(screen.getByRole("status").textContent).toBe(messages.statusApplyRefusal));
+    await waitFor(() =>
+      expect(screen.getByRole("status").textContent).toBe(messages.statusApplyRefusal),
+    );
   });
 
   test("an incompatible format/platform pair is reported in the editor, not only by the API", async () => {
@@ -2371,15 +2618,17 @@ describe("BriefPage — capabilities and motion", () => {
     };
     routes({ list: () => json({ briefs: [mismatched] }) });
     renderWithRun(<Editor id="odd" />);
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("odd"));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("odd"),
+    );
 
     expect(
-      await screen.findByText(
-        messages.platformsIncompatible("Instagram Reel", ["Video"]),
-      ),
+      await screen.findByText(messages.platformsIncompatible("Instagram Reel", ["Video"])),
     ).toBeTruthy();
     await waitFor(() =>
-      expect((screen.getByRole("button", { name: /^Save$/ }) as HTMLButtonElement).disabled).toBe(false),
+      expect((screen.getByRole("button", { name: /^Save$/ }) as HTMLButtonElement).disabled).toBe(
+        false,
+      ),
     );
   });
 
@@ -2398,11 +2647,12 @@ describe("BriefPage — capabilities and motion", () => {
     const row = await screen.findByRole("button", { name: "Identity" });
     await user.click(row);
     expect(scrollIntoView).toHaveBeenCalled();
-    const section = document.querySelector('#identity, [data-section="identity"]') as HTMLElement | null;
+    const section = document.querySelector(
+      '#identity, [data-section="identity"]',
+    ) as HTMLElement | null;
     expect(section).not.toBeNull();
     expect(document.activeElement).toBe(section);
   });
-
 
   test("an outline row whose section has left the page does nothing", async () => {
     const user = userEvent.setup();
@@ -2419,7 +2669,6 @@ describe("BriefPage — capabilities and motion", () => {
     // its own button, so the meaningful assertion is that no section took focus.)
     expect(document.activeElement).toBe(row);
   });
-
 });
 
 describe("BriefPage — guided presentation (W6)", () => {
@@ -2442,7 +2691,9 @@ describe("BriefPage — guided presentation (W6)", () => {
   // exact window in which a click on Next is lost (L2). Waiting here drains that
   // cascade before any test clicks.
   const adopt = async (_user: ReturnType<typeof userEvent.setup>, id: string) => {
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(id));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(id),
+    );
     await waitFor(() => expect(document.querySelector(".animate-ready-ring")).toBeTruthy());
   };
 
@@ -2473,7 +2724,9 @@ describe("BriefPage — guided presentation (W6)", () => {
     // The status chip moved into the StepHeader, and the toggle mirrors the mode.
     expect(screen.getByRole("group", { name: messages.presentationLabel })).toBeTruthy();
     expect(
-      screen.getByRole("button", { name: messages.presentationGuided }).getAttribute("aria-pressed"),
+      screen
+        .getByRole("button", { name: messages.presentationGuided })
+        .getAttribute("aria-pressed"),
     ).toBe("true");
     expect(footerStatus()).toBe(messages.statusStepReady);
   });
@@ -2554,7 +2807,9 @@ describe("BriefPage — guided presentation (W6)", () => {
 
     await saveVia(user, "Save as");
     await user.type(screen.getByLabelText("New brief id"), "copy");
-    await user.click(within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }));
+    await user.click(
+      within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
+    );
     await waitFor(() => expect(nextMock().router.replace).toHaveBeenCalledWith("/brief/copy"));
 
     // Next answers that replace by swapping the segment: the old page unmounts and the
@@ -2563,7 +2818,9 @@ describe("BriefPage — guided presentation (W6)", () => {
     renderWithRun(<Editor id="copy" />);
 
     // They pressed Save on the last screen; they should still be looking at it.
-    await waitFor(() => expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Review"));
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Review"),
+    );
   });
 
   test("walk to Review: each Next lands on the next step and hands the step heading focus", async () => {
@@ -2621,7 +2878,9 @@ describe("BriefPage — guided presentation (W6)", () => {
         },
       },
     };
-    routes({ list: () => json({ briefs: [{ file: "rand.yaml", revision: "r1", brief: randomizedBrief }] }) });
+    routes({
+      list: () => json({ briefs: [{ file: "rand.yaml", revision: "r1", brief: randomizedBrief }] }),
+    });
     renderWithRun(<Editor id="rand" />);
     await adopt(user, "rand");
 
@@ -2694,7 +2953,9 @@ describe("BriefPage — guided presentation (W6)", () => {
       const u = String(url);
       const method = (init?.method ?? "GET").toUpperCase();
       if (u.includes("/campaigns/assets")) {
-        return Promise.resolve(json({ assets: [{ name: "brand-logo.png", size: 4096, type: "image/png" }] }));
+        return Promise.resolve(
+          json({ assets: [{ name: "brand-logo.png", size: 4096, type: "image/png" }] }),
+        );
       }
       if (method === "GET" && u.startsWith(`${API}/campaigns/briefs`)) {
         return Promise.resolve(json({ briefs: [entry("ok", "r1")] }));
@@ -2721,7 +2982,9 @@ describe("BriefPage — guided presentation (W6)", () => {
       screen
         .getAllByLabelText("Logo Path")
         .filter((el) => el.tagName === "INPUT" && el.getAttribute("type") !== "file");
-    await waitFor(() => expect((logos()[0] as HTMLInputElement).value).toBe("assets/inputs/ok/brand-logo.png"));
+    await waitFor(() =>
+      expect((logos()[0] as HTMLInputElement).value).toBe("assets/inputs/ok/brand-logo.png"),
+    );
     // …and the drawer closed with the choice, the way the in-section drawer did.
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Asset Bin" })).toBeNull());
   });
@@ -2742,7 +3005,9 @@ describe("BriefPage — guided presentation (W6)", () => {
     expect(group.className).not.toContain("hidden");
     await user.click(screen.getByRole("button", { name: messages.presentationGuided }));
     expect(
-      screen.getByRole("button", { name: messages.presentationGuided }).getAttribute("aria-pressed"),
+      screen
+        .getByRole("button", { name: messages.presentationGuided })
+        .getAttribute("aria-pressed"),
     ).toBe("true");
   });
 
@@ -2783,8 +3048,8 @@ describe("BriefPage — guided presentation (W6)", () => {
     await user.click(segbar.getByRole("button", { name: /: Review, / }));
     await waitFor(() => expect(stepHeading().textContent).toBe("Review"));
 
-    const chip = Array.from(document.querySelectorAll<HTMLElement>("button.rounded-full")).find((b) =>
-      /Products/.test(b.textContent ?? ""),
+    const chip = Array.from(document.querySelectorAll<HTMLElement>("button.rounded-full")).find(
+      (b) => /Products/.test(b.textContent ?? ""),
     ) as HTMLElement;
     expect(chip).toBeTruthy();
     await user.click(chip);
@@ -2829,9 +3094,11 @@ describe("BriefPage — guided presentation (W6)", () => {
     routes({ list: () => json({ briefs: [entry("ok", "r1")] }) });
     renderWithRun(<Editor id="ok" />);
     await adopt(user, "ok");
-    expect(screen.queryByRole("button", { name: messages.presentationGuided })?.getAttribute("aria-pressed")).toBe(
-      "true",
-    );
+    expect(
+      screen
+        .queryByRole("button", { name: messages.presentationGuided })
+        ?.getAttribute("aria-pressed"),
+    ).toBe("true");
 
     await user.click(screen.getByRole("button", { name: messages.presentationEverything }));
     await waitFor(() => expect(document.getElementById("products")).toBeTruthy());
@@ -2847,10 +3114,12 @@ describe("BriefPage — guided presentation (W6)", () => {
 
   test("a presentation write that cannot reach storage does not break the toggle", async () => {
     const realSet = globalThis.localStorage.setItem.bind(globalThis.localStorage);
-    const spy = vi.spyOn(globalThis.localStorage, "setItem").mockImplementation((key: string, value: string) => {
-      if (key === "cf:presentation") throw new Error("storage gone");
-      return realSet(key, value);
-    });
+    const spy = vi
+      .spyOn(globalThis.localStorage, "setItem")
+      .mockImplementation((key: string, value: string) => {
+        if (key === "cf:presentation") throw new Error("storage gone");
+        return realSet(key, value);
+      });
     const user = userEvent.setup();
     routes({ list: () => json({ briefs: [entry("ok", "r1")] }) });
     renderWithRun(<Editor id="ok" />);
@@ -2868,10 +3137,17 @@ describe("BriefPage — guided presentation (W6)", () => {
       mode: "variation",
       variation: {
         count: 0,
-        axes: { layout: ["headline-top"], tone: ["bold"], background: { source: ["procedural"] }, paletteShift: [0] },
+        axes: {
+          layout: ["headline-top"],
+          tone: ["bold"],
+          background: { source: ["procedural"] },
+          paletteShift: [0],
+        },
       },
     };
-    routes({ list: () => json({ briefs: [{ file: "rand.yaml", revision: "r1", brief: randomizedBrief }] }) });
+    routes({
+      list: () => json({ briefs: [{ file: "rand.yaml", revision: "r1", brief: randomizedBrief }] }),
+    });
     renderWithRun(<Editor id="rand" />);
     await adopt(user, "rand");
 
@@ -2898,7 +3174,9 @@ describe("BriefPage — the walk's chrome and gestures (W7)", () => {
   // exact window in which a click on Next is lost (L2). Waiting here drains that
   // cascade before any test clicks.
   const adopt = async (_user: ReturnType<typeof userEvent.setup>, id: string) => {
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(id));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(id),
+    );
     await waitFor(() => expect(document.querySelector(".animate-ready-ring")).toBeTruthy());
   };
 
@@ -3116,7 +3394,9 @@ describe("BriefPage — the review step (W8)", () => {
   // exact window in which a click on Next is lost (L2). Waiting here drains that
   // cascade before any test clicks.
   const adopt = async (_user: ReturnType<typeof userEvent.setup>, id: string) => {
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(id));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(id),
+    );
     await waitFor(() => expect(document.querySelector(".animate-ready-ring")).toBeTruthy());
   };
 
@@ -3190,7 +3470,9 @@ describe("BriefPage — the review step (W8)", () => {
     const user = userEvent.setup();
     routes({});
     renderWithRun(<NewEditor />);
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
+    );
 
     // A blank draft fails Identity, Copy and Products — but nothing is marked yet
     // (D1): the user has been nowhere and has attempted nothing.
@@ -3204,7 +3486,9 @@ describe("BriefPage — the review step (W8)", () => {
     await waitFor(() => expect(stepHeading().textContent).toBe("Identity"));
     // (The footer's status sentence speaks the first error too, so scope the
     // "marked" assertions to the sections themselves.)
-    expect(within(document.getElementById("identity") as HTMLElement).getByText(messages.briefId)).toBeTruthy();
+    expect(
+      within(document.getElementById("identity") as HTMLElement).getByText(messages.briefId),
+    ).toBeTruthy();
     // …and every failing section is marked, not only the first: Products' own
     // error is on screen the moment the walk reaches it, untouched.
     await user.click(segments()[sectionOrder("brief").indexOf("products")]);
@@ -3212,7 +3496,11 @@ describe("BriefPage — the review step (W8)", () => {
     // The argument tracks the classic floor this lane moved (2 → 1) — it is not
     // exported by validate.ts, so the literal restates it. If the floor moves
     // again, this assertion moving with it is the point: it pins the wording.
-    expect(within(document.getElementById("products") as HTMLElement).getByText(messages.products(1, "Classic"))).toBeTruthy();
+    expect(
+      within(document.getElementById("products") as HTMLElement).getByText(
+        messages.products(1, "Classic"),
+      ),
+    ).toBeTruthy();
   });
 
   /**
@@ -3229,7 +3517,12 @@ describe("BriefPage — the review step (W8)", () => {
       mode: "variation",
       variation: {
         count: 0,
-        axes: { layout: ["headline-top"], tone: ["bold"], background: { source: ["procedural"] }, paletteShift: [0] },
+        axes: {
+          layout: ["headline-top"],
+          tone: ["bold"],
+          background: { source: ["procedural"] },
+          paletteShift: [0],
+        },
       },
       output: { formats: [], platforms: [] },
     },
@@ -3254,7 +3547,9 @@ describe("BriefPage — the review step (W8)", () => {
     const user = userEvent.setup();
     routes({});
     renderWithRun(<NewEditor />);
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
+    );
     await toReview(user);
 
     await saveVia(user, "Save");
@@ -3291,7 +3586,9 @@ describe("BriefPage — the review step (W8)", () => {
     const user = userEvent.setup();
     routes({});
     renderWithRun(<NewEditor />);
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
+    );
 
     // Refuse from Review, land on Identity, then walk back to Review with every
     // error now marked — the surface must appear once, not once per placement.
@@ -3362,7 +3659,9 @@ describe("BriefPage — the preview rail (R7)", () => {
   // D37: adopting a brief IS arriving at its route — and the first step's validation
   // must have settled before the walk is driven (the same gate the guided suite uses).
   const adopt = async (_user: ReturnType<typeof userEvent.setup>, id: string) => {
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(id));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(id),
+    );
     await waitFor(() => expect(document.querySelector(".animate-ready-ring")).toBeTruthy());
   };
 
@@ -3647,7 +3946,10 @@ describe("BriefPage — the preview rail (R7)", () => {
       expect(preview()).toBeTruthy();
       expect(previewFetchCalls(calls).length).toBe(0);
     } finally {
-      Object.defineProperty(window, "innerWidth", { value: originalInnerWidth, configurable: true });
+      Object.defineProperty(window, "innerWidth", {
+        value: originalInnerWidth,
+        configurable: true,
+      });
     }
   });
 
@@ -3662,7 +3964,9 @@ describe("BriefPage — the preview rail (R7)", () => {
 
     // A fresh editor reads the last choice before anything renders.
     renderWithRun(<Editor id="ok" />);
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("ok"));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("ok"),
+    );
     expect(within(preview()).getByText(/targetRegion: /)).toBeTruthy();
   });
 
@@ -3684,10 +3988,12 @@ describe("BriefPage — the preview rail (R7)", () => {
 
   test("a rail choice that cannot reach storage does not break the switcher", async () => {
     const realSet = globalThis.localStorage.setItem.bind(globalThis.localStorage);
-    const spy = vi.spyOn(globalThis.localStorage, "setItem").mockImplementation((key: string, value: string) => {
-      if (key === "cf:preview-rail-view") throw new Error("storage gone");
-      return realSet(key, value);
-    });
+    const spy = vi
+      .spyOn(globalThis.localStorage, "setItem")
+      .mockImplementation((key: string, value: string) => {
+        if (key === "cf:preview-rail-view") throw new Error("storage gone");
+        return realSet(key, value);
+      });
     const user = userEvent.setup();
     routes({ list: () => json({ briefs: [okEntry] }) });
     renderWithRun(<Editor id="ok" />);
@@ -3756,7 +4062,9 @@ describe("BriefPage — the Layout step (T7)", () => {
   // D37: adopting a brief IS arriving at its route — and the first step's validation
   // must have settled before the walk is driven (the same gate the guided suite uses).
   const adopt = async (_user: ReturnType<typeof userEvent.setup>, id: string) => {
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(id));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(id),
+    );
     await waitFor(() => expect(document.querySelector(".animate-ready-ring")).toBeTruthy());
   };
 
@@ -3764,7 +4072,9 @@ describe("BriefPage — the Layout step (T7)", () => {
   const next = () => screen.getByRole("button", { name: messages.stepNext });
   const back = () => screen.getByRole("button", { name: messages.stepBack });
   const seg = (name: RegExp) =>
-    within(screen.getByRole("navigation", { name: messages.segBarLabel })).getByRole("button", { name });
+    within(screen.getByRole("navigation", { name: messages.segBarLabel })).getByRole("button", {
+      name,
+    });
   const okEntry = {
     file: "ok.yaml",
     revision: "r1",
@@ -3778,7 +4088,12 @@ describe("BriefPage — the Layout step (T7)", () => {
       mode: "variation" as const,
       variation: {
         count: 8,
-        axes: { layout: ["headline-top"], tone: ["bold"], background: { source: ["procedural"] }, paletteShift: [0] },
+        axes: {
+          layout: ["headline-top"],
+          tone: ["bold"],
+          background: { source: ["procedural"] },
+          paletteShift: [0],
+        },
       },
     },
   };
@@ -3894,7 +4209,9 @@ describe("BriefPage — Generate's three-way question (D35)", () => {
     const user = userEvent.setup();
     const calls = routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
     renderWithRun(<EditorAndHeader />);
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"),
+    );
 
     // Edit the loaded brief: the shell still holds camp, the screen holds camp+edit.
     await user.type(screen.getByLabelText("Headline"), " edited");
@@ -3904,7 +4221,9 @@ describe("BriefPage — Generate's three-way question (D35)", () => {
     // Exactly one prompt on this path: the guard's "Unsaved edits" is nowhere.
     expect(screen.queryByRole("dialog", { name: "Unsaved edits" })).toBeNull();
 
-    await user.click(within(dialog).getByRole("button", { name: new RegExp(`^${messages.generateDraftRunThis}`) }));
+    await user.click(
+      within(dialog).getByRole("button", { name: new RegExp(`^${messages.generateDraftRunThis}`) }),
+    );
 
     // The ON-SCREEN draft was POSTed — never the shell's previous campaign.
     const generatePost = await waitFor(() => {
@@ -3914,7 +4233,9 @@ describe("BriefPage — Generate's three-way question (D35)", () => {
     });
     expect((generatePost.body as { campaignMessage?: string }).campaignMessage).toBe("Hi edited");
     // run-without-write: no brief write left the page
-    expect(calls.filter((c) => c.method !== "GET" && c.url.includes("/campaigns/briefs"))).toEqual([]);
+    expect(calls.filter((c) => c.method !== "GET" && c.url.includes("/campaigns/briefs"))).toEqual(
+      [],
+    );
     expect(nextMock().router.push).toHaveBeenCalledWith("/grid");
   });
 
@@ -3949,12 +4270,16 @@ describe("BriefPage — Generate's three-way question (D35)", () => {
       put: (_url, body) => json({ file: "camp.yaml", brief: body, revision: "r2" }),
     });
     renderWithRun(<EditorAndHeader />);
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"),
+    );
 
     await user.type(screen.getByLabelText("Headline"), " edited");
     await user.click(screen.getByRole("button", { name: "Generate" }));
     const dialog = await screen.findByRole("dialog", { name: messages.generateDraftTitle });
-    await user.click(within(dialog).getByRole("button", { name: new RegExp(`^${messages.generateDraftSaveRun}`) }));
+    await user.click(
+      within(dialog).getByRole("button", { name: new RegExp(`^${messages.generateDraftSaveRun}`) }),
+    );
 
     // The write went through the editor's own save path (conditional PUT with the
     // load-time revision), and the run carried the brief as the server stored it.
@@ -3974,7 +4299,9 @@ describe("BriefPage — Generate's three-way question (D35)", () => {
     Element.prototype.scrollIntoView = vi.fn();
     const calls = routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
     renderWithRun(<EditorAndHeader />);
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"),
+    );
 
     // Differ AND be invalid: edit the headline, then clear it — Copy blocks an empty
     // headline, and the draft still differs from the shell's committed brief.
@@ -3985,7 +4312,9 @@ describe("BriefPage — Generate's three-way question (D35)", () => {
 
     await user.click(screen.getByRole("button", { name: "Generate" }));
     const dialog = await screen.findByRole("dialog", { name: messages.generateDraftTitle });
-    await user.click(within(dialog).getByRole("button", { name: new RegExp(`^${messages.generateDraftRunThis}`) }));
+    await user.click(
+      within(dialog).getByRole("button", { name: new RegExp(`^${messages.generateDraftRunThis}`) }),
+    );
 
     // The money: pressing with a half-filled brief must never start the pipeline —
     // the server would refuse it and the user would be charged anyway.
@@ -4015,23 +4344,25 @@ describe("BriefPage — Generate's three-way question (D35)", () => {
     Element.prototype.scrollIntoView = vi.fn();
     const calls = routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
     renderWithRun(<EditorAndHeader />);
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"),
+    );
 
     await user.type(screen.getByLabelText("Headline"), " edited");
     await user.clear(screen.getByLabelText("Headline"));
 
     await user.click(screen.getByRole("button", { name: "Generate" }));
     const dialog = await screen.findByRole("dialog", { name: messages.generateDraftTitle });
-    await user.click(within(dialog).getByRole("button", { name: new RegExp(`^${messages.generateDraftSaveRun}`) }));
+    await user.click(
+      within(dialog).getByRole("button", { name: new RegExp(`^${messages.generateDraftSaveRun}`) }),
+    );
 
     // The save path's own `refuseInvalid` gates it — nothing is written, nothing
     // runs, and the editor has already bounced to Copy with the refusal on screen;
     // the header carries no gate of its own to disagree with.
     await waitFor(() =>
       expect(
-        screen
-          .getAllByRole("status")
-          .some((el) => el.textContent.startsWith("Not saved yet —")),
+        screen.getAllByRole("status").some((el) => el.textContent.startsWith("Not saved yet —")),
       ).toBe(true),
     );
     expect(writes(calls)).toEqual([]);
@@ -4043,7 +4374,9 @@ describe("BriefPage — Generate's three-way question (D35)", () => {
     const user = userEvent.setup();
     const calls = routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
     renderWithRun(<EditorAndHeader />);
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"),
+    );
 
     // No edits: the draft matches the shell brief, so there is no question to ask.
     await user.click(screen.getByRole("button", { name: "Generate" }));
@@ -4075,7 +4408,9 @@ describe("the route is the source of truth (D37)", () => {
       </>,
     );
 
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"),
+    );
     // setRunBrief follows AFTER the load succeeds, so Generate runs what the URL shows
     await waitFor(() => expect(screen.getByTestId("run-brief").textContent).toBe("camp"));
   });
@@ -4084,14 +4419,18 @@ describe("the route is the source of truth (D37)", () => {
     routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
 
     const first = renderWithRun(<Editor id="camp" />);
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"),
+    );
     first.unmount();
 
     // The reload: no shell state to inherit (the record is dropped, not just absent),
     // only the route.
     localStorage.removeItem("cf:brief");
     renderWithRun(<Editor id="camp" />);
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"),
+    );
   });
 
   test("an unknown id is answered with the empty state, names it, and creates no draft", async () => {
@@ -4107,8 +4446,12 @@ describe("the route is the source of truth (D37)", () => {
     // M3: nothing is published into the sidebar either — this page is not an editor.
     expect(await screen.findByText(messages.briefNotFound("ghost"))).toBeTruthy();
     await waitFor(() => expect(screen.queryByText("Classic")).toBeNull());
-    expect(screen.getByRole("link", { name: messages.briefNotFoundGrid }).getAttribute("href")).toBe("/grid");
-    expect(screen.getByRole("link", { name: messages.briefNotFoundNew }).getAttribute("href")).toBe("/brief/new");
+    expect(
+      screen.getByRole("link", { name: messages.briefNotFoundGrid }).getAttribute("href"),
+    ).toBe("/grid");
+    expect(screen.getByRole("link", { name: messages.briefNotFoundNew }).getAttribute("href")).toBe(
+      "/brief/new",
+    );
     // No draft was created for the unknown id.
     await new Promise((r) => setTimeout(r, 50));
     const keys = Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i) ?? "");
@@ -4151,7 +4494,9 @@ describe("the route is the source of truth (D37)", () => {
     routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
 
     const first = renderWithRun(<NewEditor />);
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
+    );
     await fillValidDraft(user, "typed");
     await waitFor(() => expect(localStorage.getItem("cf:draft:new")).not.toBeNull());
     first.unmount();
@@ -4193,7 +4538,11 @@ describe("the create seed (W1)", () => {
         <NewEditor />
       </>,
     );
-    await waitFor(() => expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(""));
+    await waitFor(() =>
+      expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
+        "",
+      ),
+    );
     await user.type(screen.getByLabelText(messages.campaignNameLabel), "typed");
 
     // The sidebar's gesture: the guard asks first (D67)…
@@ -4203,17 +4552,24 @@ describe("the create seed (W1)", () => {
     expect(screen.queryByRole("dialog", { name: messages.createCampaignTitle })).toBeNull();
     await user.click(within(prompt).getByRole("button", { name: "Leave" }));
 
-    await fillDialog(user, within(await screen.findByRole("dialog", { name: messages.createCampaignTitle })));
+    await fillDialog(
+      user,
+      within(await screen.findByRole("dialog", { name: messages.createCampaignTitle })),
+    );
 
     // F8: the same-URL push resets nothing, so the seed was applied in place —
     // and never through requestReplace (D67): one question for the whole gesture.
     await waitFor(() =>
-      expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe("Summer Spark"),
+      expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
+        "Summer Spark",
+      ),
     );
     // D97 — the seed answers name and mode only: region and audience stay blank,
     // waiting for the Identity step this landing is now on (D98).
     expect((screen.getByLabelText("Target Region") as HTMLInputElement).value).toBe("");
-    expect((screen.getByLabelText(messages.targetAudienceLabel) as HTMLInputElement).value).toBe("");
+    expect((screen.getByLabelText(messages.targetAudienceLabel) as HTMLInputElement).value).toBe(
+      "",
+    );
     expect(screen.queryByRole("dialog", { name: messages.createCampaignTitle })).toBeNull();
     await new Promise((resolve) => setTimeout(resolve, 25));
     expect(screen.queryAllByRole("dialog", { name: "Unsaved edits" })).toHaveLength(0);
@@ -4239,7 +4595,11 @@ describe("the create seed (W1)", () => {
         <NewEditor />
       </>,
     );
-    await waitFor(() => expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(""));
+    await waitFor(() =>
+      expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
+        "",
+      ),
+    );
     await user.click(screen.getByRole("button", { name: messages.presentationGuided }));
     expect(screen.getByRole("button", { name: /: Copy, current step/ })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: messages.presentationEverything }));
@@ -4249,15 +4609,22 @@ describe("the create seed (W1)", () => {
     await user.click(screen.getByRole("button", { name: /Create new/ }));
     const prompt = await screen.findByRole("dialog", { name: "Unsaved edits" });
     await user.click(within(prompt).getByRole("button", { name: "Leave" }));
-    await fillDialog(user, within(await screen.findByRole("dialog", { name: messages.createCampaignTitle })));
+    await fillDialog(
+      user,
+      within(await screen.findByRole("dialog", { name: messages.createCampaignTitle })),
+    );
 
     await waitFor(() =>
-      expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe("Summer Spark"),
+      expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
+        "Summer Spark",
+      ),
     );
     // D97 — and no half-answers rode along: the Identity fields wait for the step
     // the landing is on.
     expect((screen.getByLabelText("Target Region") as HTMLInputElement).value).toBe("");
-    expect((screen.getByLabelText(messages.targetAudienceLabel) as HTMLInputElement).value).toBe("");
+    expect((screen.getByLabelText(messages.targetAudienceLabel) as HTMLInputElement).value).toBe(
+      "",
+    );
     expect(screen.queryAllByRole("dialog", { name: "Unsaved edits" })).toHaveLength(0);
     await user.click(screen.getByRole("button", { name: messages.presentationGuided }));
     expect(screen.getByRole("button", { name: /: Identity, current step/ })).toBeTruthy();
@@ -4274,22 +4641,33 @@ describe("the create seed (W1)", () => {
         <NewEditor />
       </>,
     );
-    await waitFor(() => expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(""));
+    await waitFor(() =>
+      expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
+        "",
+      ),
+    );
     await user.type(screen.getByLabelText(messages.campaignNameLabel), "typed");
 
     await user.click(screen.getByRole("button", { name: /Create new/ }));
     const prompt = await screen.findByRole("dialog", { name: "Unsaved edits" });
     await user.click(within(prompt).getByRole("button", { name: "Leave" }));
-    await fillDialog(user, within(await screen.findByRole("dialog", { name: messages.createCampaignTitle })));
+    await fillDialog(
+      user,
+      within(await screen.findByRole("dialog", { name: messages.createCampaignTitle })),
+    );
 
     // D98 — the cursor sits on Identity (guided: the Identity section is what is
     // mounted), BEFORE Copy: region and audience are unanswered and both are
     // required by `validateIdentity`, so the seed lands the user there.
-    await waitFor(() => expect(screen.getByRole("button", { name: /: Identity, current step/ })).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /: Identity, current step/ })).toBeTruthy(),
+    );
     expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
     // The seed rode a patch action, so the slug was derived in the reducer (F18) —
     // the Identity readout shows it; the dialog never did.
-    expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe("Summer Spark");
+    expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
+      "Summer Spark",
+    );
     expect(screen.getByText("summer-spark")).toBeTruthy();
   });
 
@@ -4303,15 +4681,24 @@ describe("the create seed (W1)", () => {
         <NewEditor />
       </>,
     );
-    await waitFor(() => expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(""));
+    await waitFor(() =>
+      expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
+        "",
+      ),
+    );
     await user.type(screen.getByLabelText(messages.campaignNameLabel), "typed");
 
     await user.click(screen.getByRole("button", { name: /Create new/ }));
     const prompt = await screen.findByRole("dialog", { name: "Unsaved edits" });
     await user.click(within(prompt).getByRole("button", { name: "Leave" }));
-    await fillDialog(user, within(await screen.findByRole("dialog", { name: messages.createCampaignTitle })));
+    await fillDialog(
+      user,
+      within(await screen.findByRole("dialog", { name: messages.createCampaignTitle })),
+    );
 
-    await waitFor(() => expect(screen.getByRole("button", { name: /: Identity, current step/ })).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /: Identity, current step/ })).toBeTruthy(),
+    );
     // Never both: in place the editor's seed effect moved the cursor, so a stashed
     // baton would survive unspent and move the NEXT mount's cursor.
     expect(localStorage.getItem("cf:step-handoff")).toBeNull();
@@ -4327,7 +4714,11 @@ describe("the create seed (W1)", () => {
         <NewEditor />
       </>,
     );
-    await waitFor(() => expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(""));
+    await waitFor(() =>
+      expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
+        "",
+      ),
+    );
     await user.type(screen.getByLabelText(messages.campaignNameLabel), "typed");
     // A refused Next sets attempted: every error shows and the status refuses.
     await user.click(screen.getByRole("button", { name: messages.stepNext }));
@@ -4336,12 +4727,17 @@ describe("the create seed (W1)", () => {
     await user.click(screen.getByRole("button", { name: /Create new/ }));
     const prompt = await screen.findByRole("dialog", { name: "Unsaved edits" });
     await user.click(within(prompt).getByRole("button", { name: "Leave" }));
-    await fillDialog(user, within(await screen.findByRole("dialog", { name: messages.createCampaignTitle })));
+    await fillDialog(
+      user,
+      within(await screen.findByRole("dialog", { name: messages.createCampaignTitle })),
+    );
 
     // D98 — validateIdentity refuses Next, so the cursor never left Identity and
     // go(identity) is a no-op on this path. The arrival is not red: the seed
     // reset attempted/touched (L1.1).
-    await waitFor(() => expect(screen.getByRole("button", { name: /: Identity, current step/ })).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /: Identity, current step/ })).toBeTruthy(),
+    );
     expect(screen.queryByText(/Not saved yet/)).toBeNull();
     expect(screen.getByText(/New brief — fill/)).toBeTruthy();
   });
@@ -4358,13 +4754,17 @@ describe("the create seed (W1)", () => {
     nextMock().nav.pathname = "/brief/new";
     renderWithRun(<NewEditor />);
     // The mount spent both batons by a read: no seed key, no leftover step baton.
-    await waitFor(() => expect(screen.getByRole("button", { name: /: Identity, current step/ })).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /: Identity, current step/ })).toBeTruthy(),
+    );
     expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
     expect(localStorage.getItem("cf:step-handoff")).toBeNull();
     // The applied field, not only the spent key — a take-then-skip would keep this
     // test green on Identity alone, because stashStep("identity") is what landed
     // us here.
-    expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe("Summer Spark");
+    expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
+      "Summer Spark",
+    );
   });
 
   test("a paid-social seed sets the editor's mode and the Randomized section list", async () => {
@@ -4378,10 +4778,18 @@ describe("the create seed (W1)", () => {
 
     nextMock().nav.pathname = "/brief/new";
     renderWithRun(<NewEditor />);
-    await waitFor(() => expect(screen.getByRole("button", { name: /: Identity, current step/ })).toBeTruthy());
-    expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe("Summer Spark");
-    expect(screen.getByRole("button", { name: "variation" }).getAttribute("aria-pressed")).toBe("true");
-    expect(screen.getByRole("button", { name: "brief" }).getAttribute("aria-pressed")).toBe("false");
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /: Identity, current step/ })).toBeTruthy(),
+    );
+    expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
+      "Summer Spark",
+    );
+    expect(screen.getByRole("button", { name: "variation" }).getAttribute("aria-pressed")).toBe(
+      "true",
+    );
+    expect(screen.getByRole("button", { name: "brief" }).getAttribute("aria-pressed")).toBe(
+      "false",
+    );
     expect(screen.getByRole("button", { name: "Variation Policy" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Treatments" })).toBeNull();
   });
@@ -4393,7 +4801,12 @@ describe("the create seed (W1)", () => {
     // discards it wholesale and the user starts clean.
     localStorage.setItem(
       CREATE_SEED_KEY,
-      JSON.stringify({ name: "Summer Spark", targetRegion: "EU", targetAudience: "trail runners", mode: "brief" }),
+      JSON.stringify({
+        name: "Summer Spark",
+        targetRegion: "EU",
+        targetAudience: "trail runners",
+        mode: "brief",
+      }),
     );
     nextMock().nav.pathname = "/brief/new";
     renderWithRun(<NewEditor />);
@@ -4401,7 +4814,9 @@ describe("the create seed (W1)", () => {
     // No partial patch: even the name is not seeded — the seed was discarded whole.
     expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe("");
     expect((screen.getByLabelText(messages.targetRegionLabel) as HTMLInputElement).value).toBe("");
-    expect((screen.getByLabelText(messages.targetAudienceLabel) as HTMLInputElement).value).toBe("");
+    expect((screen.getByLabelText(messages.targetAudienceLabel) as HTMLInputElement).value).toBe(
+      "",
+    );
     // Spent, not retried: a refused baton cannot poison the next mount either.
     expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
   });
@@ -4416,7 +4831,12 @@ describe("the create seed (W1)", () => {
     // two empty required fields.
     localStorage.setItem(
       "cf:create-seed",
-      JSON.stringify({ name: "Summer Spark", targetRegion: "EU", targetAudience: "trail runners", mode: "brief" }),
+      JSON.stringify({
+        name: "Summer Spark",
+        targetRegion: "EU",
+        targetAudience: "trail runners",
+        mode: "brief",
+      }),
     );
     localStorage.setItem("cf:step-handoff", "copy");
     nextMock().nav.pathname = "/brief/new";
@@ -4426,7 +4846,9 @@ describe("the create seed (W1)", () => {
     // navigation hook spends it by applying it). Identity is also first-paint
     // default, but render() flushes that effect, so a leftover baton has already
     // moved the cursor to Copy before this waits.
-    await waitFor(() => expect(screen.getByRole("button", { name: /: Identity, current step/ })).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /: Identity, current step/ })).toBeTruthy(),
+    );
     expect(screen.queryByRole("button", { name: /: Copy, current step/ })).toBeNull();
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Identity");
 
@@ -4434,7 +4856,9 @@ describe("the create seed (W1)", () => {
     // is the mounted step — Copy does not render these fields.
     expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe("");
     expect((screen.getByLabelText(messages.targetRegionLabel) as HTMLInputElement).value).toBe("");
-    expect((screen.getByLabelText(messages.targetAudienceLabel) as HTMLInputElement).value).toBe("");
+    expect((screen.getByLabelText(messages.targetAudienceLabel) as HTMLInputElement).value).toBe(
+      "",
+    );
   });
 
   test("the #217 {name, mode} seed is discarded, not half-applied, and spends its baton (D108)", async () => {
@@ -4443,15 +4867,22 @@ describe("the create seed (W1)", () => {
     // refused whole — no name seeded, the mode stays Classic — and the
     // companion baton is spent, so the editor lands on Identity instead of a
     // leftover "copy" moving it one step past two empty required fields (D98).
-    localStorage.setItem(CREATE_SEED_KEY, JSON.stringify({ name: "Summer Spark", mode: "variation" }));
+    localStorage.setItem(
+      CREATE_SEED_KEY,
+      JSON.stringify({ name: "Summer Spark", mode: "variation" }),
+    );
     localStorage.setItem("cf:step-handoff", "copy");
     nextMock().nav.pathname = "/brief/new";
     renderWithRun(<NewEditor />);
-    await waitFor(() => expect(screen.getByRole("button", { name: /: Identity, current step/ })).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /: Identity, current step/ })).toBeTruthy(),
+    );
     expect(screen.queryByRole("button", { name: /: Copy, current step/ })).toBeNull();
     expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe("");
     expect(screen.getByRole("button", { name: "brief" }).getAttribute("aria-pressed")).toBe("true");
-    expect(screen.getByRole("button", { name: "variation" }).getAttribute("aria-pressed")).toBe("false");
+    expect(screen.getByRole("button", { name: "variation" }).getAttribute("aria-pressed")).toBe(
+      "false",
+    );
     // Both keys cleared: a refused baton cannot poison the next mount either.
     expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
     expect(localStorage.getItem("cf:step-handoff")).toBeNull();
@@ -4461,31 +4892,48 @@ describe("the create seed (W1)", () => {
     // Everything presentation: the Output section's platform toggles are mounted.
     localStorage.setItem("cf:presentation", "everything");
     routes({});
-    localStorage.setItem(CREATE_SEED_KEY, JSON.stringify({ name: "Summer Spark", type: "paid-social" }));
+    localStorage.setItem(
+      CREATE_SEED_KEY,
+      JSON.stringify({ name: "Summer Spark", type: "paid-social" }),
+    );
     nextMock().nav.pathname = "/brief/new";
     const user = userEvent.setup();
     const view = renderWithRun(<NewEditor />);
     await waitFor(() =>
-      expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe("Summer Spark"),
+      expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
+        "Summer Spark",
+      ),
     );
     // The preset arrived: the paid platforms are on, mode is Randomized.
-    expect(screen.getByRole("button", { name: "instagram-story" }).getAttribute("aria-pressed")).toBe("true");
-    expect(screen.getByRole("button", { name: "brief" }).getAttribute("aria-pressed")).toBe("false");
+    expect(
+      screen.getByRole("button", { name: "instagram-story" }).getAttribute("aria-pressed"),
+    ).toBe("true");
+    expect(screen.getByRole("button", { name: "brief" }).getAttribute("aria-pressed")).toBe(
+      "false",
+    );
     // The user's change: one platform off.
     await user.click(screen.getByRole("button", { name: "tiktok" }));
-    expect(screen.getByRole("button", { name: "tiktok" }).getAttribute("aria-pressed")).toBe("false");
+    expect(screen.getByRole("button", { name: "tiktok" }).getAttribute("aria-pressed")).toBe(
+      "false",
+    );
     // A presentation switch remounts the sections — the preset does not re-apply.
     await user.click(screen.getByRole("button", { name: messages.presentationGuided }));
     await user.click(screen.getByRole("button", { name: messages.presentationEverything }));
-    expect(screen.getByRole("button", { name: "tiktok" }).getAttribute("aria-pressed")).toBe("false");
+    expect(screen.getByRole("button", { name: "tiktok" }).getAttribute("aria-pressed")).toBe(
+      "false",
+    );
     // And neither does a full remount (the reload case): the seed was spent by
     // its one read, so the user's toggled-off platform survives the return.
     view.unmount();
     renderWithRun(<NewEditor />);
     await waitFor(() =>
-      expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe("Summer Spark"),
+      expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
+        "Summer Spark",
+      ),
     );
-    expect(screen.getByRole("button", { name: "tiktok" }).getAttribute("aria-pressed")).toBe("false");
+    expect(screen.getByRole("button", { name: "tiktok" }).getAttribute("aria-pressed")).toBe(
+      "false",
+    );
     // Nothing is left to re-apply.
     expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
     expect(takeSeed()).toBeNull();
@@ -4502,20 +4950,28 @@ describe("the create seed (W1)", () => {
     expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
     const user = userEvent.setup();
     await user.type(screen.getByLabelText(messages.campaignNameLabel), "spark");
-    expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe("spark");
+    expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
+      "spark",
+    );
   });
 
   test("a seed published while a named brief is open is not applied in place", async () => {
     routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
     renderWithRun(<Editor id="camp" />);
-    await waitFor(() => expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe("camp"));
+    await waitFor(() =>
+      expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
+        "camp",
+      ),
+    );
 
     await act(async () => {
       await createCampaign({ name: "Other", type: "paid-social" });
     });
     // The gate is the route: the named brief stays on screen, and the seed waits in
     // the store for a blank-route mount to spend it.
-    expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe("camp");
+    expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
+      "camp",
+    );
     expect(localStorage.getItem(CREATE_SEED_KEY)).not.toBeNull();
   });
 });
@@ -4560,7 +5016,10 @@ describe("the abandoned-draft two-way (W3 / F19)", () => {
 
     // …but the guard's dirty flag is about camp-1, not the blank draft, so the
     // dialog's own two-way asks where the guard could not.
-    await fillDialog(user, within(await screen.findByRole("dialog", { name: messages.createCampaignTitle })));
+    await fillDialog(
+      user,
+      within(await screen.findByRole("dialog", { name: messages.createCampaignTitle })),
+    );
     const prompt = await screen.findByRole("dialog", { name: messages.resumeDraftTitle });
     // Start over proceeds exactly as the unguarded create.
     await user.click(within(prompt).getByRole("button", { name: messages.resumeDraftStartOver }));
@@ -4579,7 +5038,11 @@ describe("the abandoned-draft two-way (W3 / F19)", () => {
         <NewEditor />
       </>,
     );
-    await waitFor(() => expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(""));
+    await waitFor(() =>
+      expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
+        "",
+      ),
+    );
     await user.type(screen.getByLabelText(messages.campaignNameLabel), "typed");
     // The autosave effect wrote the very draft the seed would overwrite.
     await waitFor(() => expect(localStorage.getItem("cf:draft:new")).not.toBeNull());
@@ -4587,12 +5050,17 @@ describe("the abandoned-draft two-way (W3 / F19)", () => {
     await user.click(screen.getByRole("button", { name: /Create new/ }));
     const prompt = await screen.findByRole("dialog", { name: messages.confirmDialogTitle });
     await user.click(within(prompt).getByRole("button", { name: messages.confirmDialogLeave }));
-    await fillDialog(user, within(await screen.findByRole("dialog", { name: messages.createCampaignTitle })));
+    await fillDialog(
+      user,
+      within(await screen.findByRole("dialog", { name: messages.createCampaignTitle })),
+    );
 
     // One question for the whole gesture (D67): the seed applies in place, and
     // the two-way about the very draft the guard just discussed never opens.
     await waitFor(() =>
-      expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe("Summer Spark"),
+      expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
+        "Summer Spark",
+      ),
     );
     expect(screen.queryAllByRole("dialog", { name: messages.resumeDraftTitle })).toHaveLength(0);
     expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
@@ -4608,7 +5076,11 @@ describe("the abandoned-draft two-way (W3 / F19)", () => {
         <NewEditor />
       </>,
     );
-    await waitFor(() => expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(""));
+    await waitFor(() =>
+      expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
+        "",
+      ),
+    );
 
     // A pristine editor has nothing to lose, so the guard does not ask…
     await user.click(screen.getByRole("button", { name: /Create new/ }));
@@ -4618,7 +5090,9 @@ describe("the abandoned-draft two-way (W3 / F19)", () => {
     // dialog: the create proceeds exactly as it did before W3.
     await fillDialog(user, within(dialog));
     await waitFor(() =>
-      expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe("Summer Spark"),
+      expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
+        "Summer Spark",
+      ),
     );
     expect(screen.queryAllByRole("dialog", { name: messages.resumeDraftTitle })).toHaveLength(0);
   });
@@ -4642,7 +5116,9 @@ describe("a failed listing is its own state (D83 / F-A)", () => {
     );
 
     // The failure is recorded as well as logged — the log alone was the defect.
-    await waitFor(() => expect(error).toHaveBeenCalledWith("Failed to load briefs:", expect.anything()));
+    await waitFor(() =>
+      expect(error).toHaveBeenCalledWith("Failed to load briefs:", expect.anything()),
+    );
     expect(await screen.findByText(messages.briefListFailed("camp"))).toBeTruthy();
     // D83: a failed read never becomes a statement that the campaign does not exist…
     expect(screen.queryByText(messages.briefNotFound("camp"))).toBeNull();
@@ -4675,7 +5151,9 @@ describe("a failed listing is its own state (D83 / F-A)", () => {
     // so asserting first would pass before the 500 settled — green even with the render
     // scope dropped. The failure must be on the record, and the blank editor must have
     // survived it.
-    await waitFor(() => expect(error).toHaveBeenCalledWith("Failed to load briefs:", expect.anything()));
+    await waitFor(() =>
+      expect(error).toHaveBeenCalledWith("Failed to load briefs:", expect.anything()),
+    );
     expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("");
     expect(screen.getByRole("button", { name: /^Save$/ })).toBeTruthy();
     expect(screen.queryByRole("button", { name: messages.briefListFailedRetry })).toBeNull();
@@ -4687,7 +5165,8 @@ describe("a failed listing is its own state (D83 / F-A)", () => {
     const user = userEvent.setup();
     let listFails = false;
     const calls = routes({
-      list: () => (listFails ? json({ error: "boom" }, 500) : json({ briefs: [entry("camp", "r1")] })),
+      list: () =>
+        listFails ? json({ error: "boom" }, 500) : json({ briefs: [entry("camp", "r1")] }),
       // handleSave refreshes the listing after the write; that refresh is the one that fails.
       put: () => {
         listFails = true;
@@ -4695,11 +5174,15 @@ describe("a failed listing is its own state (D83 / F-A)", () => {
       },
     });
     renderWithRun(<Editor id="camp" />);
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"),
+    );
 
     await saveVia(user, "Save");
     await waitFor(() => expect(calls.some((c) => c.method === "PUT")).toBe(true));
-    await waitFor(() => expect(error).toHaveBeenCalledWith("Failed to load briefs:", expect.anything()));
+    await waitFor(() =>
+      expect(error).toHaveBeenCalledWith("Failed to load briefs:", expect.anything()),
+    );
 
     // A failed refresh on a loaded editor changes nothing on screen…
     expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp");
@@ -4720,7 +5203,9 @@ describe("a failed listing is its own state (D83 / F-A)", () => {
   test("the in-page retry re-runs the listing and renders the brief — no focus event", async () => {
     const user = userEvent.setup();
     let fail = true;
-    routes({ list: () => (fail ? json({ error: "boom" }, 500) : json({ briefs: [entry("camp", "r1")] })) });
+    routes({
+      list: () => (fail ? json({ error: "boom" }, 500) : json({ briefs: [entry("camp", "r1")] })),
+    });
     renderWithRun(<Editor id="camp" />);
     expect(await screen.findByText(messages.briefListFailed("camp"))).toBeTruthy();
 
@@ -4728,7 +5213,9 @@ describe("a failed listing is its own state (D83 / F-A)", () => {
     // retry affordance is the recovery path. Clicking it is all it takes.
     fail = false;
     await user.click(screen.getByRole("button", { name: messages.briefListFailedRetry }));
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"),
+    );
     expect(screen.queryByText(messages.briefListFailed("camp"))).toBeNull();
   });
 
@@ -4782,7 +5269,9 @@ describe("a failed listing is its own state (D83 / F-A)", () => {
 
     // The current answer decides.
     pending[1](json({ briefs: [entry("camp", "r1")] }));
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"),
+    );
     expect(screen.queryByText(messages.briefNotFound("camp"))).toBeNull();
   });
 
@@ -4802,7 +5291,9 @@ describe("a failed listing is its own state (D83 / F-A)", () => {
     await user.click(screen.getByRole("button", { name: messages.briefListFailedRetry }));
     await waitFor(() => expect(pending.length).toBe(3));
     pending[2](json({ briefs: [entry("camp", "r1")] }));
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"),
+    );
 
     // The older, failed answer lands last — it must not take the page back.
     // NB what actually guarantees this: the route has loaded, so `routeLoadedId ===
@@ -4831,7 +5322,9 @@ describe("a failed listing is its own state (D83 / F-A)", () => {
     await user.click(screen.getByRole("button", { name: messages.briefListFailedRetry }));
     await waitFor(() => expect(pending.length).toBe(3));
     pending[2](json({ briefs: [entry("camp", "r1")] }));
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"),
+    );
 
     // The older answer succeeds with an empty listing — it must not replace the
     // newer one, or the route-load effect would re-decide the id it just loaded
@@ -4853,7 +5346,8 @@ describe("a failed listing is its own state (D83 / F-A)", () => {
     const user = userEvent.setup();
     let listFails = false;
     const calls = routes({
-      list: () => (listFails ? json({ error: "boom" }, 500) : json({ briefs: [entry("camp", "r1")] })),
+      list: () =>
+        listFails ? json({ error: "boom" }, 500) : json({ briefs: [entry("camp", "r1")] }),
       // The copy is created; the refresh adoptSavedCopy awaits on the way out fails.
       post: () => {
         listFails = true;
@@ -4865,9 +5359,13 @@ describe("a failed listing is its own state (D83 / F-A)", () => {
 
     await saveVia(user, "Save as");
     await user.type(screen.getByLabelText("New brief id"), "copy-1");
-    await user.click(within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }));
+    await user.click(
+      within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
+    );
     await waitFor(() => expect(calls.some((c) => c.method === "POST")).toBe(true));
-    await waitFor(() => expect(error).toHaveBeenCalledWith("Failed to load briefs:", expect.anything()));
+    await waitFor(() =>
+      expect(error).toHaveBeenCalledWith("Failed to load briefs:", expect.anything()),
+    );
 
     // The route moves to the copy (as it always does); the stale-failure honest answer
     // is the failure state — never not-found for a brief that was just created.
@@ -4908,7 +5406,9 @@ describe("the pre-type draft (T2 / D112)", () => {
     nextMock().nav.pathname = "/brief/new";
     renderWithRun(<NewEditor />);
     await waitFor(() =>
-      expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe("Restored"),
+      expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
+        "Restored",
+      ),
     );
     // The editor path, not only the unit: a restored pre-type draft must carry
     // the default on the state the autosave writes, not merely keep the name.
@@ -4929,7 +5429,8 @@ describe("VE1 — undo and redo in the editor", () => {
   });
 
   const nameField = () => screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement;
-  const audienceField = () => screen.getByLabelText(messages.targetAudienceLabel) as HTMLInputElement;
+  const audienceField = () =>
+    screen.getByLabelText(messages.targetAudienceLabel) as HTMLInputElement;
 
   test("⌘Z steps back over a typed word; ⇧⌘Z replays it", async () => {
     const user = userEvent.setup();

@@ -35,7 +35,11 @@ function ProductRow({
   return (
     <div className="space-y-4 rounded-lg border border-border bg-surface p-4">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <Field fieldKey={`product-${index}-name`} label={messages.productNameLabel} error={errors[`product-${index}-name`]}>
+        <Field
+          fieldKey={`product-${index}-name`}
+          label={messages.productNameLabel}
+          error={errors[`product-${index}-name`]}
+        >
           <Input
             value={product.name}
             placeholder={messages.productNamePlaceholder}
@@ -83,16 +87,18 @@ function ProductRow({
                   className="sr-only"
                   value={product.id}
                   onChange={(e) =>
-                    dispatch({ type: "setProduct", key: product.key, patch: { id: e.target.value } })
+                    dispatch({
+                      type: "setProduct",
+                      key: product.key,
+                      patch: { id: e.target.value },
+                    })
                   }
                   tabIndex={-1}
                 />
-
               </div>
             )
           }
         </Field>
-
       </div>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -207,10 +213,13 @@ export function ProductsSection({
       {errors.products ? <p className="text-[13px] text-error">{errors.products}</p> : null}
       {uploadError ? <p className="text-[13px] text-error">{uploadError}</p> : null}
       <div className="flex items-center justify-between">
-        <Eyebrow as="h3">
-          {messages.productsHeading(state.products.length)}
-        </Eyebrow>
-        <Button variant="secondary" size="sm" type="button" onClick={() => dispatch({ type: "addProduct" })}>
+        <Eyebrow as="h3">{messages.productsHeading(state.products.length)}</Eyebrow>
+        <Button
+          variant="secondary"
+          size="sm"
+          type="button"
+          onClick={() => dispatch({ type: "addProduct" })}
+        >
           {messages.addProduct}
         </Button>
       </div>

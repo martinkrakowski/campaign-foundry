@@ -74,12 +74,21 @@ function corpusTokensFor(state: EditorState): Set<string> {
   if (props === null) throw new Error("the fabrication fixtures always have a product to draw");
   const ratio = derivePreviewRatio(props.platformId, undefined);
   const platformLabel =
-    props.platformId !== undefined ? platformDisplayName(props.platformId) : messages.previewNoPlatform;
+    props.platformId !== undefined
+      ? platformDisplayName(props.platformId)
+      : messages.previewNoPlatform;
   const caption =
     props.motion !== undefined
-      ? messages.previewCaptionMotion(ratioDisplayName(ratio), platformLabel, MOTION_KIND_META[props.motion])
+      ? messages.previewCaptionMotion(
+          ratioDisplayName(ratio),
+          platformLabel,
+          MOTION_KIND_META[props.motion],
+        )
       : messages.previewCaption(ratioDisplayName(ratio), platformLabel);
-  const fallbackCaption = messages.previewCaption(ratioDisplayName("1:1"), messages.previewNoPlatform);
+  const fallbackCaption = messages.previewCaption(
+    ratioDisplayName("1:1"),
+    messages.previewNoPlatform,
+  );
   const corpusString = [
     props.campaignName,
     props.headline,
@@ -134,20 +143,23 @@ describe("the preview only ever speaks the brief and the sanctioned labels", () 
     ["the dock, classic", classicState],
     ["the dock, moving", motionState],
     ["the dock without a platform", noPlatformState],
-  ] as const)("%s renders text that is all exact members of the brief-derived corpus token set", (_name, state) => {
-    const props = previewDockProps(state, 0, 6);
-    expect(props).not.toBeNull();
-    const view = render(<PreviewDock {...props!} />);
-    const tokens = previewTokens(view);
-    expect(tokens.length).toBeGreaterThan(0);
-    const corpusTokens = corpusTokensFor(state);
-    for (const token of tokens) {
-      expect(
-        corpusTokens.has(token),
-        `token "${token}" has no exact match in the sanctioned corpus token set`,
-      ).toBe(true);
-    }
-  });
+  ] as const)(
+    "%s renders text that is all exact members of the brief-derived corpus token set",
+    (_name, state) => {
+      const props = previewDockProps(state, 0, 6);
+      expect(props).not.toBeNull();
+      const view = render(<PreviewDock {...props!} />);
+      const tokens = previewTokens(view);
+      expect(tokens.length).toBeGreaterThan(0);
+      const corpusTokens = corpusTokensFor(state);
+      for (const token of tokens) {
+        expect(
+          corpusTokens.has(token),
+          `token "${token}" has no exact match in the sanctioned corpus token set`,
+        ).toBe(true);
+      }
+    },
+  );
 
   test("the classic look comes from the treatment — the leftover axes are never read (D45)", () => {
     // The mode-awareness half of the mapping, asserted on the props themselves: the
@@ -190,7 +202,16 @@ describe("the preview only ever speaks the brief and the sanctioned labels", () 
     const corpusTokens = corpusTokensFor(variationState);
     // The separators "·" and "/" are sanctioned (the caption and step readout use
     // them), so test the substantive tokens: the numbers, the handle, the credit.
-    for (const fake of ["12.4K", "1,203", "8,741", "@handle", "original", "sound", "Following", "For you"]) {
+    for (const fake of [
+      "12.4K",
+      "1,203",
+      "8,741",
+      "@handle",
+      "original",
+      "sound",
+      "Following",
+      "For you",
+    ]) {
       expect(corpusTokens.has(fake), `corpus must stay clean of "${fake}"`).toBe(false);
     }
     // Teeth: had a fake rail been rendered, its tokens would need a corpus home to

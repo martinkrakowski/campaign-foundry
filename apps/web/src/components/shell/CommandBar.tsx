@@ -37,8 +37,7 @@ export function CommandBar({ onToggleTelemetry }: CommandBarProps) {
     decisions,
     setEstimate,
     rerollBlockedReason,
-  } =
-    useRun();
+  } = useRun();
   const [confirm, setConfirm] = useState<Confirm | null>(null);
   /** The press's answer when the confirm would be meaningless — or why the run may still go. */
   const [notice, setNotice] = useState<{ text: string; tone: "warning" | "error" } | null>(null);
@@ -130,7 +129,8 @@ export function CommandBar({ onToggleTelemetry }: CommandBarProps) {
           ? "Execution complete. Assets ready for human review."
           : "Standing by…";
 
-  const statusColor = error || halted ? "text-error" : hasRun && !loading ? "text-success" : "text-text-primary";
+  const statusColor =
+    error || halted ? "text-error" : hasRun && !loading ? "text-success" : "text-text-primary";
 
   /**
    * The verb is never disabled for being invalid (GB-D3) — the press is how a user
@@ -210,14 +210,21 @@ export function CommandBar({ onToggleTelemetry }: CommandBarProps) {
       {/* Why the re-roll is refused — its own row, so a long sentence stays readable
           on a phone instead of being squeezed between two buttons. */}
       {rejectedCount > 0 && rerollBlockedReason !== null && (
-        <p id={rerollBlockedId} role="status" className="px-2 pt-2 text-[11px] leading-tight text-warning">
+        <p
+          id={rerollBlockedId}
+          role="status"
+          className="px-2 pt-2 text-[11px] leading-tight text-warning"
+        >
           {rerollBlockedReason}
         </p>
       )}
       {/* Why the press did (or did not) open the confirm — same reasoning: the answer
           is the point, so it gets its own readable row and a live region. */}
       {notice !== null && (
-        <p role="status" className={`px-2 pt-2 text-[11px] leading-tight ${notice.tone === "error" ? "text-error" : "text-warning"}`}>
+        <p
+          role="status"
+          className={`px-2 pt-2 text-[11px] leading-tight ${notice.tone === "error" ? "text-error" : "text-warning"}`}
+        >
           {notice.text}
         </p>
       )}
@@ -228,8 +235,19 @@ export function CommandBar({ onToggleTelemetry }: CommandBarProps) {
           aria-label="Toggle telemetry logs"
           className="flex shrink-0 items-center space-x-2 rounded border border-border-control bg-surface-2 px-2 py-1 text-[12px] text-text-muted transition-colors hover:text-text-emphasis"
         >
-          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l3 3-3 3m5 0h3M4 15V9a2 2 0 012-2h12a2 2 0 012 2v6a2 2 0 01-2 2H6a2 2 0 01-2-2z" />
+          <svg
+            className="h-4 w-4"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+            aria-hidden
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M8 9l3 3-3 3m5 0h3M4 15V9a2 2 0 012-2h12a2 2 0 012 2v6a2 2 0 01-2 2H6a2 2 0 01-2-2z"
+            />
           </svg>
           <span className="hidden sm:inline">Toggle Telemetry Logs</span>
         </button>
@@ -258,8 +276,19 @@ export function CommandBar({ onToggleTelemetry }: CommandBarProps) {
               aria-describedby={rerollBlockedReason === null ? undefined : rerollBlockedId}
               className="flex shrink-0 items-center space-x-2 rounded-full border border-border bg-surface-2 px-3 py-1.5 text-[13px] text-text-primary transition-colors hover:bg-border-hover disabled:cursor-not-allowed disabled:text-text-muted sm:px-4"
             >
-              <svg className="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              <svg
+                className="h-4 w-4 shrink-0"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+                aria-hidden
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                />
               </svg>
               <span>
                 Regenerate<span className="hidden sm:inline"> Rejected</span> ({rejectedCount})
@@ -286,7 +315,9 @@ export function CommandBar({ onToggleTelemetry }: CommandBarProps) {
               </svg>
             )}
             <span>
-              {loading ? "Orchestrating…" : (
+              {loading ? (
+                "Orchestrating…"
+              ) : (
                 <>
                   Execute<span className="hidden sm:inline"> Pipeline</span>
                 </>

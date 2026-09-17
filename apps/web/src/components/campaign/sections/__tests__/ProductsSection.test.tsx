@@ -9,7 +9,14 @@ function renderWithErrors(errors: FieldErrors) {
   const state = initialEditorState();
   const dispatch = vi.fn();
   const onChooseFromBin = vi.fn();
-  render(<ProductsSection state={state} dispatch={dispatch} errors={errors} onChooseFromBin={onChooseFromBin} />);
+  render(
+    <ProductsSection
+      state={state}
+      dispatch={dispatch}
+      errors={errors}
+      onChooseFromBin={onChooseFromBin}
+    />,
+  );
   return { dispatch, onChooseFromBin };
 }
 
@@ -65,7 +72,14 @@ describe("ProductsSection", () => {
     // M7: the drawer itself is hoisted to BriefEditor's root (the transformed step
     // card traps `fixed` descendants), so this section keeps the trigger only — its
     // contract is the request it publishes, carrying the product's key.
-    render(<ProductsSection state={state} dispatch={dispatch} errors={{}} onChooseFromBin={onChooseFromBin} />);
+    render(
+      <ProductsSection
+        state={state}
+        dispatch={dispatch}
+        errors={{}}
+        onChooseFromBin={onChooseFromBin}
+      />,
+    );
 
     const chooseBtn = screen.getAllByRole("button", { name: "Choose from bin" })[0];
     await user.click(chooseBtn);

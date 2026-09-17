@@ -4,7 +4,11 @@ import type {
   CopyPoolEntryStatus,
 } from "@campaignfoundry/CampaignOrchestration";
 
-export type { CopyPool, CopyPoolEntry, CopyPoolEntryStatus } from "@campaignfoundry/CampaignOrchestration";
+export type {
+  CopyPool,
+  CopyPoolEntry,
+  CopyPoolEntryStatus,
+} from "@campaignfoundry/CampaignOrchestration";
 
 /** Same path as run-context `API`. Local so RunProvider can import these helpers without a cycle. */
 const API = "/api/pipeline";
@@ -109,7 +113,13 @@ export interface PlanVariant {
 }
 
 export type PlanResult =
-  | { kind: "ok"; policyHash: string; seed: number; estimate: PlanEstimate; variants: PlanVariant[] }
+  | {
+      kind: "ok";
+      policyHash: string;
+      seed: number;
+      estimate: PlanEstimate;
+      variants: PlanVariant[];
+    }
   | { kind: "infeasible"; error: string }
   | { kind: "unavailable" };
 
@@ -170,10 +180,16 @@ async function requestJson(url: string, init?: RequestInit): Promise<unknown> {
     // A conflict body carries the store's fresh revision alongside `error` (API E1.0);
     // every other failure has none. Parse it here, once, so callers can adopt it.
     const revision =
-      typeof data === "object" && data !== null && typeof (data as { revision?: unknown }).revision === "string"
-        ? ((data as { revision: string }).revision)
+      typeof data === "object" &&
+      data !== null &&
+      typeof (data as { revision?: unknown }).revision === "string"
+        ? (data as { revision: string }).revision
         : undefined;
-    throw new BriefsApiError(errorFrom(data, `Request failed (HTTP ${res.status})`), res.status, revision);
+    throw new BriefsApiError(
+      errorFrom(data, `Request failed (HTTP ${res.status})`),
+      res.status,
+      revision,
+    );
   }
   return data;
 }
@@ -222,7 +238,9 @@ export async function createBrief(
   opts: { replace?: boolean } = {},
 ): Promise<BriefEntry> {
   const query = opts.replace ? "?replace=1" : "";
-  return asBriefEntry(await requestJson(`${API}/campaigns/briefs${query}`, jsonInit("POST", brief)));
+  return asBriefEntry(
+    await requestJson(`${API}/campaigns/briefs${query}`, jsonInit("POST", brief)),
+  );
 }
 
 export async function updateBrief(
@@ -231,7 +249,12 @@ export async function updateBrief(
   opts: { revision?: string } = {},
 ): Promise<BriefEntry> {
   const query = opts.revision ? `?revision=${opts.revision}` : "";
-  return asBriefEntry(await requestJson(`${API}/campaigns/briefs/${encodeURIComponent(id)}${query}`, jsonInit("PUT", brief)));
+  return asBriefEntry(
+    await requestJson(
+      `${API}/campaigns/briefs/${encodeURIComponent(id)}${query}`,
+      jsonInit("PUT", brief),
+    ),
+  );
 }
 
 /**
@@ -276,7 +299,11 @@ export async function uploadAsset(input: {
   contentBase64: string;
 }): Promise<AssetUploadResult> {
   const data = await requestJson(`${API}/campaigns/assets`, jsonInit("POST", input));
-  if (typeof data !== "object" || data === null || typeof (data as { path?: unknown }).path !== "string") {
+  if (
+    typeof data !== "object" ||
+    data === null ||
+    typeof (data as { path?: unknown }).path !== "string"
+  ) {
     throw new BriefsApiError("Invalid response", 200);
   }
   return { path: (data as { path: string }).path };
@@ -301,7 +328,11 @@ export async function listAssets(
   if (!res.ok) {
     throw new BriefsApiError(errorFrom(data, `Request failed (HTTP ${res.status})`), res.status);
   }
-  if (typeof data !== "object" || data === null || !Array.isArray((data as { assets?: unknown }).assets)) {
+  if (
+    typeof data !== "object" ||
+    data === null ||
+    !Array.isArray((data as { assets?: unknown }).assets)
+  ) {
     return { assets: [] };
   }
   return data as { assets: AssetEntry[] };
@@ -322,7 +353,10 @@ function isEstimate(value: unknown): value is PlanEstimate {
  * Dry-run the variation planner. 404 and network failure are "estimate unavailable"
  * (lane A's route may not exist on this branch) — never a thrown wizard-breaking error.
  */
-export async function planCampaign(brief: CampaignBrief, signal?: AbortSignal): Promise<PlanResult> {
+export async function planCampaign(
+  brief: CampaignBrief,
+  signal?: AbortSignal,
+): Promise<PlanResult> {
   let res: Response;
   try {
     res = await fetch(`${API}/campaigns/plan`, { ...jsonInit("POST", brief), signal });
@@ -340,7 +374,11 @@ export async function planCampaign(brief: CampaignBrief, signal?: AbortSignal): 
   }
   if (typeof data !== "object" || data === null) return { kind: "unavailable" };
   const rec = data as Record<string, unknown>;
-  if (typeof rec.policyHash !== "string" || typeof rec.seed !== "number" || !isEstimate(rec.estimate)) {
+  if (
+    typeof rec.policyHash !== "string" ||
+    typeof rec.seed !== "number" ||
+    !isEstimate(rec.estimate)
+  ) {
     return { kind: "unavailable" };
   }
   return {
@@ -428,7 +466,10 @@ export async function packageCampaign(
   platforms: readonly string[],
   opts: { include?: readonly string[]; signal?: AbortSignal } = {},
 ): Promise<{ platforms: PackagedPlatform[] }> {
-  const body = opts.include === undefined ? { campaignId, platforms } : { campaignId, platforms, include: opts.include };
+  const body =
+    opts.include === undefined
+      ? { campaignId, platforms }
+      : { campaignId, platforms, include: opts.include };
   const data = await requestJson(`${API}/campaigns/package`, {
     ...jsonInit("POST", body),
     signal: opts.signal,
@@ -480,11 +521,17 @@ export const POOL_SUGGESTION_COUNT = 10;
 function asStoredPool(data: unknown): StoredPool {
   if (typeof data !== "object" || data === null) throw new BriefsApiError("Invalid response", 200);
   const pool = (data as { pool?: unknown }).pool;
-  if (typeof pool !== "object" || pool === null || !Array.isArray((pool as { entries?: unknown }).entries)) {
+  if (
+    typeof pool !== "object" ||
+    pool === null ||
+    !Array.isArray((pool as { entries?: unknown }).entries)
+  ) {
     throw new BriefsApiError("Invalid response", 200);
   }
   const revision = (data as { revision?: unknown }).revision;
-  return typeof revision === "string" ? { pool: pool as CopyPool, revision } : { pool: pool as CopyPool };
+  return typeof revision === "string"
+    ? { pool: pool as CopyPool, revision }
+    : { pool: pool as CopyPool };
 }
 
 /**
@@ -520,7 +567,10 @@ export async function generatePool(
   opts: { revision?: string } = {},
 ): Promise<StoredPool & { added: number }> {
   const query = opts.revision ? `?revision=${encodeURIComponent(opts.revision)}` : "";
-  const data = await requestJson(`${API}/campaigns/pools/copy${query}`, jsonInit("POST", { brief, count }));
+  const data = await requestJson(
+    `${API}/campaigns/pools/copy${query}`,
+    jsonInit("POST", { brief, count }),
+  );
   const added = (data as { added?: unknown }).added;
   return { ...asStoredPool(data), added: typeof added === "number" ? added : 0 };
 }

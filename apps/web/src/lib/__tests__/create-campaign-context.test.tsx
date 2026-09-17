@@ -5,7 +5,8 @@ import { CreateCampaignProvider, useCreateCampaign } from "../create-campaign-co
 import { createCampaign } from "../create-campaign";
 
 const Probe = () => {
-  const { createDialogOpen, openCreateDialog, closeCreateDialog, seedVersion } = useCreateCampaign();
+  const { createDialogOpen, openCreateDialog, closeCreateDialog, seedVersion } =
+    useCreateCampaign();
   return (
     <div>
       <span data-testid="open">{String(createDialogOpen)}</span>

@@ -14,7 +14,10 @@ import {
   type EditorAction,
   type EditorState,
 } from "@/components/campaign/editor-state";
-import { DWELL_TOLERANCE, resolveTimeline } from "@campaignfoundry/CampaignOrchestration/copy-timeline";
+import {
+  DWELL_TOLERANCE,
+  resolveTimeline,
+} from "@campaignfoundry/CampaignOrchestration/copy-timeline";
 
 /**
  * The copy-timeline sub-panel (E5.2 / E5.3).
@@ -79,69 +82,71 @@ export function TimelineSection({
                     placeholder={messages.timelineBeatPlaceholder}
                     onChange={(e) => dispatch({ type: "setBeatText", index, text: e.target.value })}
                   />
-              <Stepper
-                aria-label={messages.timelineBeatWeightLabel(index + 1)}
-                aria-describedby={beatError ? beatMessageId : undefined}
-                aria-invalid={beatError ? "true" : undefined}
-                value={String(beat.weight)}
-                min={1}
-                max={MAX_WEIGHT}
-                onChange={(value) => dispatch({ type: "setBeatWeight", index, weight: Number(value) })}
-              />
-              <button
-                type="button"
-                aria-label={messages.timelineKeyBeatLabel(index + 1)}
-                aria-pressed={state.timeline.keyBeat === index + 1}
-                onClick={() => dispatch({ type: "setKeyBeat", index })}
-                className={cn(
-                  "rounded border px-2 py-1 text-[11px]",
-                  state.timeline.keyBeat === index + 1
-                    ? "border-accent text-accent"
-                    : "border-border text-text-muted",
-                )}
-              >
-                {messages.timelineKeyBeatLegend}
-              </button>
-              <button
-                type="button"
-                aria-label={messages.timelineMoveBeatUp(index + 1)}
-                disabled={index === 0}
-                onClick={() => dispatch({ type: "moveBeat", from: index, to: index - 1 })}
-                className="rounded border border-border px-2 py-1 text-[11px] disabled:opacity-40"
-              >
-                ↑
-              </button>
-              <button
-                type="button"
-                aria-label={messages.timelineMoveBeatDown(index + 1)}
-                disabled={index === beats.length - 1}
-                onClick={() => dispatch({ type: "moveBeat", from: index, to: index + 1 })}
-                className="rounded border border-border px-2 py-1 text-[11px] disabled:opacity-40"
-              >
-                ↓
-              </button>
-              <button
-                type="button"
-                aria-label={messages.timelineRemoveBeat(index + 1)}
-                onClick={() => dispatch({ type: "removeBeat", index })}
-                className="rounded border border-border px-2 py-1 text-[11px] text-text-muted"
-              >
-                ×
-              </button>
-            </div>
-            {beatError ? (
-              <span id={beatMessageId} className="block text-[11px] text-error">
-                {beatError}
-              </span>
-            ) : beatWarning ? (
-              <span id={beatMessageId} className="block text-[11px] text-warning">
-                {beatWarning}
-              </span>
-            ) : null}
-          </li>
-        );
-      })}
-    </ol>
+                  <Stepper
+                    aria-label={messages.timelineBeatWeightLabel(index + 1)}
+                    aria-describedby={beatError ? beatMessageId : undefined}
+                    aria-invalid={beatError ? "true" : undefined}
+                    value={String(beat.weight)}
+                    min={1}
+                    max={MAX_WEIGHT}
+                    onChange={(value) =>
+                      dispatch({ type: "setBeatWeight", index, weight: Number(value) })
+                    }
+                  />
+                  <button
+                    type="button"
+                    aria-label={messages.timelineKeyBeatLabel(index + 1)}
+                    aria-pressed={state.timeline.keyBeat === index + 1}
+                    onClick={() => dispatch({ type: "setKeyBeat", index })}
+                    className={cn(
+                      "rounded border px-2 py-1 text-[11px]",
+                      state.timeline.keyBeat === index + 1
+                        ? "border-accent text-accent"
+                        : "border-border text-text-muted",
+                    )}
+                  >
+                    {messages.timelineKeyBeatLegend}
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={messages.timelineMoveBeatUp(index + 1)}
+                    disabled={index === 0}
+                    onClick={() => dispatch({ type: "moveBeat", from: index, to: index - 1 })}
+                    className="rounded border border-border px-2 py-1 text-[11px] disabled:opacity-40"
+                  >
+                    ↑
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={messages.timelineMoveBeatDown(index + 1)}
+                    disabled={index === beats.length - 1}
+                    onClick={() => dispatch({ type: "moveBeat", from: index, to: index + 1 })}
+                    className="rounded border border-border px-2 py-1 text-[11px] disabled:opacity-40"
+                  >
+                    ↓
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={messages.timelineRemoveBeat(index + 1)}
+                    onClick={() => dispatch({ type: "removeBeat", index })}
+                    className="rounded border border-border px-2 py-1 text-[11px] text-text-muted"
+                  >
+                    ×
+                  </button>
+                </div>
+                {beatError ? (
+                  <span id={beatMessageId} className="block text-[11px] text-error">
+                    {beatError}
+                  </span>
+                ) : beatWarning ? (
+                  <span id={beatMessageId} className="block text-[11px] text-warning">
+                    {beatWarning}
+                  </span>
+                ) : null}
+              </li>
+            );
+          })}
+        </ol>
       ) : null}
 
       <div className="flex items-center gap-2">
@@ -199,7 +204,9 @@ export function TimelineSection({
                     : "border-border text-text-muted",
                 )}
               >
-                {transition === "cut" ? messages.timelineTransitionCut : messages.timelineTransitionFade}
+                {transition === "cut"
+                  ? messages.timelineTransitionCut
+                  : messages.timelineTransitionFade}
               </button>
             ))}
           </fieldset>
@@ -225,7 +232,9 @@ function ProportionBar({ state, durationSec }: { state: EditorState; durationSec
   const resolved = resolveTimeline(asCopyTimeline(state.timeline), durationSec);
   return (
     <div className="space-y-1">
-      <p className="text-[11px] text-text-muted">{messages.timelineProportionCaption(durationSec)}</p>
+      <p className="text-[11px] text-text-muted">
+        {messages.timelineProportionCaption(durationSec)}
+      </p>
       <div className="flex h-6 w-full overflow-hidden rounded border border-border">
         {resolved.map((beat, index) => {
           const dwellSec = (beat.endT - beat.startT) * durationSec;

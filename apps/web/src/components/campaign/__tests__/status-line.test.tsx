@@ -27,7 +27,12 @@ describe("StatusLine", () => {
 
   test("a failed write outranks everything else, and drops the links", () => {
     render(
-      <StatusLine state={blank()} attempted={false} persistError="Could not save — try Save again." onScrollToSection={vi.fn()} />,
+      <StatusLine
+        state={blank()}
+        attempted={false}
+        persistError="Could not save — try Save again."
+        onScrollToSection={vi.fn()}
+      />,
     );
     expect(screen.getByRole("status").textContent).toBe("Could not save — try Save again.");
     expect(screen.queryAllByRole("button")).toHaveLength(0);
@@ -35,7 +40,12 @@ describe("StatusLine", () => {
 
   test("applied-but-unrunnable says so as information, with no links", () => {
     render(
-      <StatusLine state={blank()} attempted={false} applyRefusal="anything" onScrollToSection={vi.fn()} />,
+      <StatusLine
+        state={blank()}
+        attempted={false}
+        applyRefusal="anything"
+        onScrollToSection={vi.fn()}
+      />,
     );
     expect(screen.getByRole("status").textContent).toBe(messages.statusApplyRefusal);
     expect(screen.queryAllByRole("button")).toHaveLength(0);

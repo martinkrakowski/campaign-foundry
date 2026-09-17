@@ -52,10 +52,11 @@ describe("StatusChip", () => {
   });
 
   test("a loaded brief reads Saved", () => {
-    const state = reduce(
-      initialEditorState(),
-      { type: "load", brief: saved(), entry: { file: "camp.yaml", revision: "r1" } },
-    );
+    const state = reduce(initialEditorState(), {
+      type: "load",
+      brief: saved(),
+      entry: { file: "camp.yaml", revision: "r1" },
+    });
     render(<StatusChip state={state} />);
     expect(screen.getByText("Saved")).toBeTruthy();
   });

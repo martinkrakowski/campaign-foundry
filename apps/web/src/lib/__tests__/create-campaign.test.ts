@@ -64,7 +64,10 @@ describe("createCampaign with a source (W2 / D71 — the duplicate path)", () =>
           newId: "summer-spark",
           overrides: {},
         });
-        return json({ file: "summer-spark.yaml", brief: { id: "summer-spark", products: [] } }, 201);
+        return json(
+          { file: "summer-spark.yaml", brief: { id: "summer-spark", products: [] } },
+          201,
+        );
       },
     });
     await expect(createCampaign(fromSource)).resolves.toEqual({
@@ -74,7 +77,9 @@ describe("createCampaign with a source (W2 / D71 — the duplicate path)", () =>
   });
 
   test("publishes no seed on the source path — the seed is the blank route's alone", async () => {
-    mockPipelineApi({ post: () => json({ file: "x.yaml", brief: { id: "x", products: [] } }, 201) });
+    mockPipelineApi({
+      post: () => json({ file: "x.yaml", brief: { id: "x", products: [] } }, 201),
+    });
     const listener = vi.fn();
     const stop = subscribeToSeed(listener);
     await createCampaign(fromSource);
@@ -132,14 +137,26 @@ describe("takeSeed — the baton is spent by a read", () => {
   // half-applied seed would be a brief with a name and nothing else, silently,
   // so the guard discards them wholesale.
   test.each([
-    ["an old-shape seed from the previous build", { name: "Summer Spark", targetRegion: "EU", targetAudience: "trail runners", mode: "brief" }],
-    ["the #217 two-field seed carrying the retired mode", { name: "Summer Spark", mode: "variation" }],
-    ["a half-old seed carrying an audience only", { name: "Summer Spark", targetAudience: "trail runners", mode: "brief" }],
+    [
+      "an old-shape seed from the previous build",
+      { name: "Summer Spark", targetRegion: "EU", targetAudience: "trail runners", mode: "brief" },
+    ],
+    [
+      "the #217 two-field seed carrying the retired mode",
+      { name: "Summer Spark", mode: "variation" },
+    ],
+    [
+      "a half-old seed carrying an audience only",
+      { name: "Summer Spark", targetAudience: "trail runners", mode: "brief" },
+    ],
     ["a non-string field", { name: 42, type: "social-post" }],
     ["a missing type", { name: "Summer Spark" }],
     // "display-ad" joined the vocabulary in A5 (D117); "banner" is still outside it.
     ["an unknown type", { name: "Summer Spark", type: "banner" }],
-    ["both the new type and the retired mode", { name: "Summer Spark", type: "social-post", mode: "variation" }],
+    [
+      "both the new type and the retired mode",
+      { name: "Summer Spark", type: "social-post", mode: "variation" },
+    ],
     ["a JSON array", ["Summer Spark", "EU"]],
     ["a bare string", "Summer Spark"],
   ] as const)("answers null on %s and still spends the key", (_label, value) => {
@@ -166,7 +183,12 @@ describe("takeSeed — the baton is spent by a read", () => {
       expect(localStorage.getItem("cf:step-handoff")).toBeNull();
     };
     // The four-field seed the oldest deployed build wrote…
-    refuse({ name: "Summer Spark", targetRegion: "EU", targetAudience: "trail runners", mode: "brief" });
+    refuse({
+      name: "Summer Spark",
+      targetRegion: "EU",
+      targetAudience: "trail runners",
+      mode: "brief",
+    });
     // …and the #217 two-field one D108 retired — same discard, same baton spend.
     refuse({ name: "Summer Spark", mode: "variation" });
   });

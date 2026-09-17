@@ -22,11 +22,9 @@ const state = (over: Partial<EditorState> = {}): EditorState => ({
 });
 
 /** The add offer, scoped so a list row's remove control can never answer for it. */
-const addGroup = () =>
-  within(screen.getByRole("group", { name: messages.templateAddLabel }));
+const addGroup = () => within(screen.getByRole("group", { name: messages.templateAddLabel }));
 /** The layer list, scoped the same way — the two offers never share a query. */
-const list = () =>
-  within(screen.getByRole("list", { name: messages.templateListLabel }));
+const list = () => within(screen.getByRole("list", { name: messages.templateListLabel }));
 
 /**
  * A real-reducer harness: add and remove go through `editorReducer`, so the
@@ -75,12 +73,8 @@ describe("TemplateSection — the layer list (L5, D124)", () => {
     // list of the vocabulary here (D121), and the failures read better apart.
     expect(addGroup().queryByRole("button", { name: "shade" })).toBeNull();
     expect(addGroup().queryByRole("button", { name: "accent" })).toBeNull();
-    expect(
-      addGroup().queryByRole("button", { name: "static-text" }),
-    ).toBeNull();
-    expect(
-      addGroup().queryByRole("button", { name: "animated-text" }),
-    ).toBeNull();
+    expect(addGroup().queryByRole("button", { name: "static-text" })).toBeNull();
+    expect(addGroup().queryByRole("button", { name: "animated-text" })).toBeNull();
     expect(addGroup().queryByRole("button", { name: "logo" })).toBeNull();
     // And the one offered kind is its raw id — `image`, the unbounded one.
     expect(addGroup().getByRole("button", { name: "image" })).toBeTruthy();
@@ -89,19 +83,13 @@ describe("TemplateSection — the layer list (L5, D124)", () => {
   test("the offer follows the list: a removed kind joins it, a re-added one leaves it", async () => {
     const user = userEvent.setup();
     // The real reducer strips `shade`, whose kind is then under its cap.
-    render(
-      <Harness
-        initial={editorReducer(state(), { type: "removeLayer", id: "shade" })}
-      />,
-    );
+    render(<Harness initial={editorReducer(state(), { type: "removeLayer", id: "shade" })} />);
     expect(addGroup().getByRole("button", { name: "shade" })).toBeTruthy();
     await user.click(addGroup().getByRole("button", { name: "shade" }));
     // Held once, the kind is back at its cap — gone from the offer, not disabled.
     expect(addGroup().queryByRole("button", { name: "shade" })).toBeNull();
     // The shared text budget still holds: `animated-text` stays unoffered.
-    expect(
-      addGroup().queryByRole("button", { name: "animated-text" }),
-    ).toBeNull();
+    expect(addGroup().queryByRole("button", { name: "animated-text" })).toBeNull();
   });
 
   test("a required layer has no remove control; a removable one does — and the sentence says why", () => {
@@ -136,9 +124,7 @@ describe("TemplateSection — the layer list (L5, D124)", () => {
         description: messages.templateRemoveDescription("Logo"),
       }),
     ).toBeTruthy();
-    expect(
-      screen.getByText(messages.templateRequiredNote(["Image", "Static text"])),
-    ).toBeTruthy();
+    expect(screen.getByText(messages.templateRequiredNote(["Image", "Static text"]))).toBeTruthy();
   });
 
   test("removing a layer removes exactly it, and the order of the rest is unchanged", async () => {
@@ -174,9 +160,7 @@ describe("TemplateSection — the layer list (L5, D124)", () => {
         layers: [...canonical.layers, { id: "shade", kind: "shade" }],
       },
     };
-    render(
-      <TemplateSection state={duplicated} dispatch={vi.fn()} errors={{}} />,
-    );
+    render(<TemplateSection state={duplicated} dispatch={vi.fn()} errors={{}} />);
     // One remove control per row — scoped by description, since each row's
     // toggle carries the same raw id as its name.
     expect(
@@ -226,24 +210,18 @@ describe("TemplateSection — the layer list (L5, D124)", () => {
       ...base,
       template: {
         ...base.template,
-        layers: base.template.layers.filter((layer) =>
-          removableIds.includes(layer.id),
-        ),
+        layers: base.template.layers.filter((layer) => removableIds.includes(layer.id)),
       },
     };
     render(<TemplateSection state={stripped} dispatch={vi.fn()} errors={{}} />);
     // Nothing left under the list needs the why sentence: every layer shown
     // carries its own remove control.
-    expect(
-      document.querySelector('[data-section="template"]')?.textContent,
-    ).not.toContain("cannot be removed");
+    expect(document.querySelector('[data-section="template"]')?.textContent).not.toContain(
+      "cannot be removed",
+    );
     // And the freed required kinds join the offer.
-    expect(
-      addGroup().getByRole("button", { name: "static-text" }),
-    ).toBeTruthy();
-    expect(
-      addGroup().getByRole("button", { name: "animated-text" }),
-    ).toBeTruthy();
+    expect(addGroup().getByRole("button", { name: "static-text" })).toBeTruthy();
+    expect(addGroup().getByRole("button", { name: "animated-text" })).toBeTruthy();
   });
 
   test("a kind the offer could not present is refused in the draft itself (D124)", () => {
@@ -251,16 +229,12 @@ describe("TemplateSection — the layer list (L5, D124)", () => {
     // The shared text budget is full on the canonical template, so an
     // `animated-text` add is a no-op in the reducer — the boundary's refusal,
     // not a hope that no caller will make it.
-    expect(
-      editorReducer(base, { type: "addLayer", kind: "animated-text" }),
-    ).toBe(base);
+    expect(editorReducer(base, { type: "addLayer", kind: "animated-text" })).toBe(base);
   });
 
   test("a required layer's remove dispatch is refused in the draft itself (D124)", () => {
     const base = state();
-    expect(editorReducer(base, { type: "removeLayer", id: "image" })).toBe(
-      base,
-    );
+    expect(editorReducer(base, { type: "removeLayer", id: "image" })).toBe(base);
   });
 
   test("each control names itself by its raw id; the display words live in the description", () => {
@@ -270,14 +244,12 @@ describe("TemplateSection — the layer list (L5, D124)", () => {
       description: messages.templateRemoveDescription("Shade"),
     });
     expect(
-      document.getElementById(remove.getAttribute("aria-describedby") ?? "")
-        ?.textContent,
+      document.getElementById(remove.getAttribute("aria-describedby") ?? "")?.textContent,
     ).toBe(messages.templateRemoveDescription("Shade"));
     const add = addGroup().getByRole("button", { name: "image" });
-    expect(
-      document.getElementById(add.getAttribute("aria-describedby") ?? "")
-        ?.textContent,
-    ).toBe(messages.templateAddDescription("Image"));
+    expect(document.getElementById(add.getAttribute("aria-describedby") ?? "")?.textContent).toBe(
+      messages.templateAddDescription("Image"),
+    );
   });
 });
 
@@ -314,28 +286,16 @@ describe("moveLayer (L8a, D128)", () => {
   test("an out-of-range index is a no-op in both directions", () => {
     const base = state();
     // A non-integer index is no index at all — the guard `isBeatIndex` states.
-    expect(editorReducer(base, { type: "moveLayer", from: -1, to: 0 })).toBe(
-      base,
-    );
-    expect(editorReducer(base, { type: "moveLayer", from: 0, to: -1 })).toBe(
-      base,
-    );
-    expect(editorReducer(base, { type: "moveLayer", from: 0.5, to: 0 })).toBe(
-      base,
-    );
-    expect(editorReducer(base, { type: "moveLayer", from: 5, to: 0 })).toBe(
-      base,
-    );
-    expect(editorReducer(base, { type: "moveLayer", from: 0, to: 5 })).toBe(
-      base,
-    );
+    expect(editorReducer(base, { type: "moveLayer", from: -1, to: 0 })).toBe(base);
+    expect(editorReducer(base, { type: "moveLayer", from: 0, to: -1 })).toBe(base);
+    expect(editorReducer(base, { type: "moveLayer", from: 0.5, to: 0 })).toBe(base);
+    expect(editorReducer(base, { type: "moveLayer", from: 5, to: 0 })).toBe(base);
+    expect(editorReducer(base, { type: "moveLayer", from: 0, to: 5 })).toBe(base);
   });
 
   test("moving a layer onto its own index is a no-op", () => {
     const base = state();
-    expect(editorReducer(base, { type: "moveLayer", from: 2, to: 2 })).toBe(
-      base,
-    );
+    expect(editorReducer(base, { type: "moveLayer", from: 2, to: 2 })).toBe(base);
   });
 });
 
@@ -350,8 +310,7 @@ describe("TemplateSection — layer reordering (L8, D128)", () => {
     expect(accentUp).toBeTruthy();
     expect(accentUp.textContent).toBe("↑");
     expect(
-      document.getElementById(accentUp.getAttribute("aria-describedby") ?? "")
-        ?.textContent,
+      document.getElementById(accentUp.getAttribute("aria-describedby") ?? "")?.textContent,
     ).toBe(messages.templateMoveUpDescription("Accent"));
 
     // static-text (index 3) can move down:
@@ -362,8 +321,7 @@ describe("TemplateSection — layer reordering (L8, D128)", () => {
     expect(textDown).toBeTruthy();
     expect(textDown.textContent).toBe("↓");
     expect(
-      document.getElementById(textDown.getAttribute("aria-describedby") ?? "")
-        ?.textContent,
+      document.getElementById(textDown.getAttribute("aria-describedby") ?? "")?.textContent,
     ).toBe(messages.templateMoveDownDescription("Static text"));
   });
 
@@ -446,9 +404,7 @@ describe("TemplateSection — layer reordering (L8, D128)", () => {
     // The quiet note shows, carrying role="status", naming both layers and what happens
     const note = screen.getByRole("status");
     expect(note).toBeTruthy();
-    expect(note.textContent).toBe(
-      "the accent layer now sits above the headline and will mute it",
-    );
+    expect(note.textContent).toBe("the accent layer now sits above the headline and will mute it");
     expect(note.className).toContain("text-text-muted");
 
     // 2. Moving accent back down (from 3 to 2) clears the note
@@ -592,14 +548,11 @@ describe("TemplateSection — the layer toggle (L9, D129, MP-D3, MP-D4)", () => 
     expect(reloaded.template.layers.map((layer) => layer.id)).toEqual(
       base.template.layers.map((layer) => layer.id),
     );
-    expect(
-      reloaded.template.layers.find((layer) => layer.id === "shade")?.enabled,
-    ).toBe(false);
+    expect(reloaded.template.layers.find((layer) => layer.id === "shade")?.enabled).toBe(false);
     // Back on: no `enabled` key at all — `toStrictEqual`, so a leftover
     // `enabled: undefined` would fail here.
     expect(
-      editorReducer(off, { type: "setLayerEnabled", id: "shade", enabled: true })
-        .template.layers,
+      editorReducer(off, { type: "setLayerEnabled", id: "shade", enabled: true }).template.layers,
     ).toStrictEqual(base.template.layers);
   });
 
@@ -653,17 +606,13 @@ describe("TemplateSection — the layer toggle (L9, D129, MP-D3, MP-D4)", () => 
       }),
     ).toBe(base);
     // An enabled layer asked to go on: no edit, so no history entry either.
-    expect(
-      editorReducer(base, { type: "setLayerEnabled", id: "shade", enabled: true }),
-    ).toBe(base);
+    expect(editorReducer(base, { type: "setLayerEnabled", id: "shade", enabled: true })).toBe(base);
     const off = editorReducer(base, {
       type: "setLayerEnabled",
       id: "shade",
       enabled: false,
     });
-    expect(
-      editorReducer(off, { type: "setLayerEnabled", id: "shade", enabled: false }),
-    ).toBe(off);
+    expect(editorReducer(off, { type: "setLayerEnabled", id: "shade", enabled: false })).toBe(off);
   });
 
   test("the toggle dispatches setLayerEnabled with the layer id and the state it asks for", async () => {
@@ -690,8 +639,7 @@ describe("TemplateSection — the layer toggle (L9, D129, MP-D3, MP-D4)", () => 
       description: messages.templateDisableDescription("Shade"),
     });
     expect(
-      document.getElementById(toggle.getAttribute("aria-describedby") ?? "")
-        ?.textContent,
+      document.getElementById(toggle.getAttribute("aria-describedby") ?? "")?.textContent,
     ).toBe(messages.templateDisableDescription("Shade"));
   });
 
@@ -807,9 +755,7 @@ describe("TemplateSection — the draft and its brief", () => {
     // new layer carries no props (L5): `{ id, kind }` and nothing more.
     // In canonical image-text, logo must sit above image (D128), so image-2 is
     // placed at index 4 (below logo), not appended past logo.
-    expect(
-      added.template.layers.find((layer) => layer.id === "image-2"),
-    ).toEqual({
+    expect(added.template.layers.find((layer) => layer.id === "image-2")).toEqual({
       id: "image-2",
       kind: "image",
     });
@@ -824,9 +770,7 @@ describe("TemplateSection — the draft and its brief", () => {
     const before = added.template.layers.map((layer) => layer.id);
     const reloaded = fromBrief(toBrief(added));
     expect(reloaded.template.layers.map((layer) => layer.id)).toEqual(before);
-    expect(
-      reloaded.template.layers.find((layer) => layer.id === "image-2")?.kind,
-    ).toBe("image");
+    expect(reloaded.template.layers.find((layer) => layer.id === "image-2")?.kind).toBe("image");
   });
 
   test("an unknown kind's display name is the kind itself — never an empty label", () => {

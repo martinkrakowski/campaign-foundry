@@ -48,14 +48,10 @@ export function TemplateSection({ state, dispatch }: SectionProps) {
   // document — the trap the kit's own cards avoid with `useId`.
   const uid = useId();
   const addDescId = (kind: LayerKind) => `${uid}-add-${kind}`;
-  const moveDownDescId = (layerId: string, index: number) =>
-    `${uid}-move-down-${layerId}-${index}`;
-  const moveUpDescId = (layerId: string, index: number) =>
-    `${uid}-move-up-${layerId}-${index}`;
-  const removeDescId = (layerId: string, index: number) =>
-    `${uid}-remove-${layerId}-${index}`;
-  const toggleDescId = (layerId: string, index: number) =>
-    `${uid}-toggle-${layerId}-${index}`;
+  const moveDownDescId = (layerId: string, index: number) => `${uid}-move-down-${layerId}-${index}`;
+  const moveUpDescId = (layerId: string, index: number) => `${uid}-move-up-${layerId}-${index}`;
+  const removeDescId = (layerId: string, index: number) => `${uid}-remove-${layerId}-${index}`;
+  const toggleDescId = (layerId: string, index: number) => `${uid}-toggle-${layerId}-${index}`;
   const listLabelId = `${uid}-list-label`;
 
   // Both offers, consumed — never reimplemented (D124).
@@ -101,111 +97,85 @@ export function TemplateSection({ state, dispatch }: SectionProps) {
                   <span className="block text-[13px] text-text-primary">
                     {layerKindDisplayName(layer.kind)}
                   </span>
-                  <span className="block font-mono text-[11px] text-text-muted">
-                    {layer.id}
-                  </span>
+                  <span className="block font-mono text-[11px] text-text-muted">{layer.id}</span>
                 </span>
                 <span className="flex shrink-0 items-center gap-1">
-                {layerToggleable ? (
-                  <span className="flex shrink-0 items-center">
-                    <span
-                      id={toggleDescId(layer.id, index)}
-                      className="sr-only"
-                    >
-                      {layerOff
-                        ? messages.templateEnableDescription(
-                            layerKindDisplayName(layer.kind),
-                          )
-                        : messages.templateDisableDescription(
-                            layerKindDisplayName(layer.kind),
-                          )}
+                  {layerToggleable ? (
+                    <span className="flex shrink-0 items-center">
+                      <span id={toggleDescId(layer.id, index)} className="sr-only">
+                        {layerOff
+                          ? messages.templateEnableDescription(layerKindDisplayName(layer.kind))
+                          : messages.templateDisableDescription(layerKindDisplayName(layer.kind))}
+                      </span>
+                      <IconButton
+                        label={layer.id}
+                        aria-describedby={toggleDescId(layer.id, index)}
+                        onClick={() =>
+                          dispatch({
+                            type: "setLayerEnabled",
+                            id: layer.id,
+                            enabled: layerOff,
+                          })
+                        }
+                      >
+                        {layerOff ? "○" : "◉"}
+                      </IconButton>
                     </span>
-                    <IconButton
-                      label={layer.id}
-                      aria-describedby={toggleDescId(layer.id, index)}
-                      onClick={() =>
-                        dispatch({
-                          type: "setLayerEnabled",
-                          id: layer.id,
-                          enabled: layerOff,
-                        })
-                      }
-                    >
-                      {layerOff ? "○" : "◉"}
-                    </IconButton>
-                  </span>
-                ) : null}
-                {mayMoveDown ? (
-                  <span className="flex shrink-0 items-center">
-                    <span
-                      id={moveDownDescId(layer.id, index)}
-                      className="sr-only"
-                    >
-                      {messages.templateMoveDownDescription(
-                        layerKindDisplayName(layer.kind),
-                      )}
+                  ) : null}
+                  {mayMoveDown ? (
+                    <span className="flex shrink-0 items-center">
+                      <span id={moveDownDescId(layer.id, index)} className="sr-only">
+                        {messages.templateMoveDownDescription(layerKindDisplayName(layer.kind))}
+                      </span>
+                      <IconButton
+                        label={layer.id}
+                        aria-describedby={moveDownDescId(layer.id, index)}
+                        onClick={() =>
+                          dispatch({
+                            type: "moveLayer",
+                            from: index,
+                            to: index - 1,
+                          })
+                        }
+                      >
+                        ↓
+                      </IconButton>
                     </span>
-                    <IconButton
-                      label={layer.id}
-                      aria-describedby={moveDownDescId(layer.id, index)}
-                      onClick={() =>
-                        dispatch({
-                          type: "moveLayer",
-                          from: index,
-                          to: index - 1,
-                        })
-                      }
-                    >
-                      ↓
-                    </IconButton>
-                  </span>
-                ) : null}
-                {mayMoveUp ? (
-                  <span className="flex shrink-0 items-center">
-                    <span
-                      id={moveUpDescId(layer.id, index)}
-                      className="sr-only"
-                    >
-                      {messages.templateMoveUpDescription(
-                        layerKindDisplayName(layer.kind),
-                      )}
+                  ) : null}
+                  {mayMoveUp ? (
+                    <span className="flex shrink-0 items-center">
+                      <span id={moveUpDescId(layer.id, index)} className="sr-only">
+                        {messages.templateMoveUpDescription(layerKindDisplayName(layer.kind))}
+                      </span>
+                      <IconButton
+                        label={layer.id}
+                        aria-describedby={moveUpDescId(layer.id, index)}
+                        onClick={() =>
+                          dispatch({
+                            type: "moveLayer",
+                            from: index,
+                            to: index + 1,
+                          })
+                        }
+                      >
+                        ↑
+                      </IconButton>
                     </span>
-                    <IconButton
-                      label={layer.id}
-                      aria-describedby={moveUpDescId(layer.id, index)}
-                      onClick={() =>
-                        dispatch({
-                          type: "moveLayer",
-                          from: index,
-                          to: index + 1,
-                        })
-                      }
-                    >
-                      ↑
-                    </IconButton>
-                  </span>
-                ) : null}
-                {layerRemovable ? (
-                  <span className="flex shrink-0 items-center">
-                    <span
-                      id={removeDescId(layer.id, index)}
-                      className="sr-only"
-                    >
-                      {messages.templateRemoveDescription(
-                        layerKindDisplayName(layer.kind),
-                      )}
+                  ) : null}
+                  {layerRemovable ? (
+                    <span className="flex shrink-0 items-center">
+                      <span id={removeDescId(layer.id, index)} className="sr-only">
+                        {messages.templateRemoveDescription(layerKindDisplayName(layer.kind))}
+                      </span>
+                      <IconButton
+                        label={layer.id}
+                        aria-describedby={removeDescId(layer.id, index)}
+                        onClick={() => dispatch({ type: "removeLayer", id: layer.id })}
+                      >
+                        ×
+                      </IconButton>
                     </span>
-                    <IconButton
-                      label={layer.id}
-                      aria-describedby={removeDescId(layer.id, index)}
-                      onClick={() =>
-                        dispatch({ type: "removeLayer", id: layer.id })
-                      }
-                    >
-                      ×
-                    </IconButton>
-                  </span>
-                ) : null}
+                  ) : null}
                 </span>
               </span>
               {/* The html layer's own vocabulary (HL5a, HL-D1): elements are

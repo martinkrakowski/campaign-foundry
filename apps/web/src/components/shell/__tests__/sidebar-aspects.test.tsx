@@ -111,6 +111,8 @@ describe("Sidebar — control boundaries carry border-control", () => {
     expect(classes(row)).toContain("hover:border-border-control-hover");
     expect(classes(row)).not.toContain("border-border");
     // The 36 px thumbnail rim inside the row stays decorative `border-border`.
-    expect(classes(row.querySelector("div.rounded.border") as HTMLElement)).toContain("border-border");
+    expect(classes(row.querySelector("div.rounded.border") as HTMLElement)).toContain(
+      "border-border",
+    );
   });
 });

@@ -34,7 +34,11 @@ export function StepHeader({ step, total, title, subtitle, state, headingRef }: 
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <Eyebrow as="p">{messages.stepEyebrow(step, total)}</Eyebrow>
-          <h1 ref={headingRef} tabIndex={-1} className="mt-1 text-lg font-semibold text-text-emphasis">
+          <h1
+            ref={headingRef}
+            tabIndex={-1}
+            className="mt-1 text-lg font-semibold text-text-emphasis"
+          >
             {title}
           </h1>
           <p className="mt-0.5 text-[13px] text-text-muted">{subtitle}</p>

@@ -6,7 +6,13 @@ import { useEditorDirty } from "@/lib/editor-dirty-context";
 import { CreateCampaignProvider } from "@/lib/create-campaign-context";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { EMPTY_REPORT, json, mockPipelineApi, nextMock, renderWithRun as renderWithShell } from "@/__tests__/helpers";
+import {
+  EMPTY_REPORT,
+  json,
+  mockPipelineApi,
+  nextMock,
+  renderWithRun as renderWithShell,
+} from "@/__tests__/helpers";
 import * as messages from "@/components/campaign/messages";
 import { BriefPicker } from "../BriefPicker";
 import { CreateCampaignDialog } from "../CreateCampaignDialog";
@@ -49,7 +55,13 @@ const demo = {
   brief: { id: "demo", targetRegion: "DE", products: [{ id: "a" }, { id: "b" }] },
 };
 
-const route = (opts: { briefs?: unknown; post?: (url: string, init: RequestInit) => Response; failReload?: boolean } = {}) => {
+const route = (
+  opts: {
+    briefs?: unknown;
+    post?: (url: string, init: RequestInit) => Response;
+    failReload?: boolean;
+  } = {},
+) => {
   let listed = 0;
   mockPipelineApi({
     post: (url, init) => (opts.post ? opts.post(url, init) : json({ jobId: "job-1" }, 202)),
@@ -74,7 +86,9 @@ describe("BriefPicker create / duplicate", () => {
     // W1 (D66/D67): the row is a door to the dialog now — the blank route is reached
     // by the dialog's Create, so nothing navigates and the picker closes first (F22).
     expect(nextMock().router.push).not.toHaveBeenCalled();
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Load a campaign brief" })).toBeNull());
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Load a campaign brief" })).toBeNull(),
+    );
     expect(screen.getByRole("dialog", { name: messages.createCampaignTitle })).toBeTruthy();
   });
 
@@ -89,7 +103,9 @@ describe("BriefPicker create / duplicate", () => {
     // The route is the source of truth for which brief is open; the editor loads
     // the brief from it, so the picker no longer sets the shell's brief directly.
     expect(nextMock().router.push).toHaveBeenCalledWith("/brief/demo");
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Load a campaign brief" })).toBeNull());
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Load a campaign brief" })).toBeNull(),
+    );
   });
 
   test("picking with an unsaved draft prompts exactly once, and leaving navigates", async () => {
@@ -108,7 +124,9 @@ describe("BriefPicker create / duplicate", () => {
     await user.click(within(dialogs[0]).getByRole("button", { name: "Leave" }));
     expect(nextMock().router.push).toHaveBeenCalledTimes(1);
     expect(nextMock().router.push).toHaveBeenCalledWith("/brief/demo");
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Load a campaign brief" })).toBeNull());
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Load a campaign brief" })).toBeNull(),
+    );
   });
 
   test("a refused prompt does not navigate and keeps the picker open", async () => {
@@ -144,7 +162,9 @@ describe("BriefPicker create / duplicate", () => {
     // it and commits it to the shell, so the picker never sets the brief itself.
     // D67: the clean editor's guard is silent, so the write runs at once.
     await waitFor(() => expect(nextMock().router.push).toHaveBeenCalledWith("/brief/demo-copy"));
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Load a campaign brief" })).toBeNull());
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Load a campaign brief" })).toBeNull(),
+    );
   });
 
   test("on a dirty editor, accepting the guard on Duplicate prompts exactly once, POSTs, and navigates (D67)", async () => {
@@ -170,7 +190,9 @@ describe("BriefPicker create / duplicate", () => {
     await user.click(within(dialogs[0]).getByRole("button", { name: "Leave" }));
 
     await waitFor(() => expect(nextMock().router.push).toHaveBeenCalledWith("/brief/demo-copy"));
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Load a campaign brief" })).toBeNull());
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Load a campaign brief" })).toBeNull(),
+    );
     // One question for one gesture: no second "Unsaved edits" after the write.
     await new Promise((resolve) => setTimeout(resolve, 25));
     expect(screen.queryAllByRole("dialog", { name: "Unsaved edits" })).toHaveLength(0);
@@ -230,7 +252,12 @@ describe("BriefPicker create / duplicate", () => {
 describe("BriefPicker type chip (T4)", () => {
   test("a brief without type shows Social post, never the raw id", async () => {
     route({
-      briefs: [{ file: "organic.yaml", brief: { id: "organic", targetRegion: "DE", products: [{ id: "a" }] } }],
+      briefs: [
+        {
+          file: "organic.yaml",
+          brief: { id: "organic", targetRegion: "DE", products: [{ id: "a" }] },
+        },
+      ],
     });
     renderWithRun(<BriefPicker />);
     await screen.findByText("organic.yaml");
@@ -258,7 +285,12 @@ describe("BriefPicker type chip (T4)", () => {
       briefs: [
         {
           file: "leaderboard.yaml",
-          brief: { id: "leaderboard", type: "display-ad", targetRegion: "DE", products: [{ id: "a" }] },
+          brief: {
+            id: "leaderboard",
+            type: "display-ad",
+            targetRegion: "DE",
+            products: [{ id: "a" }],
+          },
         },
       ],
     });
@@ -273,7 +305,12 @@ describe("BriefPicker type chip (T4)", () => {
       briefs: [
         {
           file: "banner.yaml",
-          brief: { id: "banner-brief", type: "banner", targetRegion: "DE", products: [{ id: "a" }] },
+          brief: {
+            id: "banner-brief",
+            type: "banner",
+            targetRegion: "DE",
+            products: [{ id: "a" }],
+          },
         },
       ],
     });

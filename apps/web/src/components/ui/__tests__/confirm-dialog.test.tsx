@@ -6,13 +6,7 @@ import { exerciseFocusTrap } from "@/__tests__/helpers";
 
 describe("ConfirmDialog", () => {
   test("renders nothing when open is false", () => {
-    render(
-      <ConfirmDialog
-        open={false}
-        onConfirm={vi.fn()}
-        onClose={vi.fn()}
-      />,
-    );
+    render(<ConfirmDialog open={false} onConfirm={vi.fn()} onClose={vi.fn()} />);
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
@@ -50,13 +44,7 @@ describe("ConfirmDialog", () => {
     const onConfirm = vi.fn();
     const onClose = vi.fn();
 
-    render(
-      <ConfirmDialog
-        open={true}
-        onConfirm={onConfirm}
-        onClose={onClose}
-      />,
-    );
+    render(<ConfirmDialog open={true} onConfirm={onConfirm} onClose={onClose} />);
 
     await user.click(screen.getByRole("button", { name: "Leave" }));
     expect(onConfirm).toHaveBeenCalledTimes(1);
@@ -68,13 +56,7 @@ describe("ConfirmDialog", () => {
     const onConfirm = vi.fn();
     const onClose = vi.fn();
 
-    render(
-      <ConfirmDialog
-        open={true}
-        onConfirm={onConfirm}
-        onClose={onClose}
-      />,
-    );
+    render(<ConfirmDialog open={true} onConfirm={onConfirm} onClose={onClose} />);
 
     await user.click(screen.getByRole("button", { name: "Stay" }));
     expect(onClose).toHaveBeenCalledTimes(1);
@@ -85,13 +67,7 @@ describe("ConfirmDialog", () => {
     const user = userEvent.setup();
     const onClose = vi.fn();
 
-    render(
-      <ConfirmDialog
-        open={true}
-        onConfirm={vi.fn()}
-        onClose={onClose}
-      />,
-    );
+    render(<ConfirmDialog open={true} onConfirm={vi.fn()} onClose={onClose} />);
 
     await user.click(screen.getByRole("button", { name: "Close" }));
     expect(onClose).toHaveBeenCalledTimes(1);
@@ -100,13 +76,7 @@ describe("ConfirmDialog", () => {
   test("clicking scrim triggers onClose, but clicking dialog content does not", () => {
     const onClose = vi.fn();
 
-    render(
-      <ConfirmDialog
-        open={true}
-        onConfirm={vi.fn()}
-        onClose={onClose}
-      />,
-    );
+    render(<ConfirmDialog open={true} onConfirm={vi.fn()} onClose={onClose} />);
 
     const dialog = screen.getByRole("dialog");
     const content = screen.getByText("Unsaved edits");

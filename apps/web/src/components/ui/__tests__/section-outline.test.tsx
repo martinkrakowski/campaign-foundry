@@ -10,7 +10,15 @@ import { SectionOutline } from "../section-outline";
  * home, in both modes' orders, Template immediately before Layout.
  */
 const briefRows = ["Identity", "Copy", "Products", "Treatments", "Template", "Layout", "Output"];
-const variationRows = ["Identity", "Copy", "Products", "Template", "Layout", "Output", "Variation Policy"];
+const variationRows = [
+  "Identity",
+  "Copy",
+  "Products",
+  "Template",
+  "Layout",
+  "Output",
+  "Variation Policy",
+];
 
 describe("SectionOutline", () => {
   test("the legend renders through Eyebrow on the tracking token", () => {
@@ -56,12 +64,7 @@ describe("SectionOutline", () => {
   });
 
   test("a single issue is singular, across the whole outline", () => {
-    render(
-      <SectionOutline
-        mode="variation"
-        visibleErrors={{ policy: { seed: "bad seed" } }}
-      />,
-    );
+    render(<SectionOutline mode="variation" visibleErrors={{ policy: { seed: "bad seed" } }} />);
     expect(screen.getByLabelText("1 issue")).toBeTruthy();
     expect(screen.getByText("1 thing to fix")).toBeTruthy();
   });
@@ -77,7 +80,9 @@ describe("SectionOutline", () => {
     render(<SectionOutline mode="brief" visibleErrors={{}} />);
     // getBoundingClientRect returns zeroed boxes, so the scroll-spy's height guard
     // keeps the first section current rather than sliding to the last one.
-    expect(screen.getByRole("button", { name: "Identity" }).getAttribute("aria-current")).toBe("location");
+    expect(screen.getByRole("button", { name: "Identity" }).getAttribute("aria-current")).toBe(
+      "location",
+    );
     expect(screen.getByRole("button", { name: "Output" }).getAttribute("aria-current")).toBeNull();
   });
 
@@ -99,7 +104,16 @@ describe("SectionOutline", () => {
     Element.prototype.getBoundingClientRect = function (this: Element) {
       const key = this.id || this.getAttribute("data-section") || "";
       const r = rects.get(key) ?? { top: 0, height: 0 };
-      return { ...r, bottom: r.top + r.height, left: 0, right: 0, width: 100, x: 0, y: r.top, toJSON: () => ({}) } as DOMRect;
+      return {
+        ...r,
+        bottom: r.top + r.height,
+        left: 0,
+        right: 0,
+        width: 100,
+        x: 0,
+        y: r.top,
+        toJSON: () => ({}),
+      } as DOMRect;
     };
     try {
       render(
@@ -119,7 +133,6 @@ describe("SectionOutline", () => {
       Element.prototype.getClientRects = originalRects;
     }
   });
-
 });
 
 /* W4.2 — the row's navigation handoff, exercised through the editor so the real

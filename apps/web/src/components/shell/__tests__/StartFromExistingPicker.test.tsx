@@ -6,7 +6,10 @@ import * as messages from "@/components/campaign/messages";
 import { modeDisplayName } from "@/components/campaign/display-names";
 import { StartFromExistingPicker } from "../StartFromExistingPicker";
 
-const classic = { file: "summer-spark.yaml", brief: { id: "summer-spark", targetRegion: "EU", products: [{ id: "a" }, { id: "b" }] } };
+const classic = {
+  file: "summer-spark.yaml",
+  brief: { id: "summer-spark", targetRegion: "EU", products: [{ id: "a" }, { id: "b" }] },
+};
 const randomized = {
   file: "winter-wild.yaml",
   brief: {
@@ -104,7 +107,9 @@ describe("StartFromExistingPicker (W2 / D71)", () => {
     // The brief listed none — the planner's own default, every ratio.
     const summer = screen.getByRole("button", { name: "summer-spark" });
     expect(summer.querySelectorAll("svg.shrink-0").length).toBe(3);
-    expect(within(summer).getByText(messages.startFromRatioCaption(["1:1", "9:16", "16:9"]))).toBeTruthy();
+    expect(
+      within(summer).getByText(messages.startFromRatioCaption(["1:1", "9:16", "16:9"])),
+    ).toBeTruthy();
   });
 
   test("a brief whose ratios lie outside the domain falls back to every ratio, not to an empty picture", async () => {
@@ -113,7 +118,9 @@ describe("StartFromExistingPicker (W2 / D71)", () => {
 
     const odd = await screen.findByRole("button", { name: "oddbuf" });
     expect(odd.querySelectorAll("svg.shrink-0").length).toBe(3);
-    expect(within(odd).getByText(messages.startFromRatioCaption(["1:1", "9:16", "16:9"]))).toBeTruthy();
+    expect(
+      within(odd).getByText(messages.startFromRatioCaption(["1:1", "9:16", "16:9"])),
+    ).toBeTruthy();
   });
 
   test("nothing in the rail loops — the only animation class is the exempt check badge (D88/D96)", async () => {
@@ -152,7 +159,9 @@ describe("StartFromExistingPicker (W2 / D71)", () => {
 
   test("the chosen card is the pressed one, and only until another choice", async () => {
     route([classic]);
-    const { rerender } = render(<StartFromExistingPicker selectedId="summer-spark" onSelect={vi.fn()} />);
+    const { rerender } = render(
+      <StartFromExistingPicker selectedId="summer-spark" onSelect={vi.fn()} />,
+    );
     const card = await screen.findByRole("button", { name: /summer-spark/ });
     const blank = screen.getByRole("button", { name: messages.startFromExistingBlank });
     expect(card.getAttribute("aria-pressed")).toBe("true");
@@ -173,7 +182,8 @@ describe("StartFromExistingPicker (W2 / D71)", () => {
 
   test("a failed list shows the error state, not a misleading empty one", async () => {
     mockPipelineApi({
-      result: (url) => (url.includes("/campaigns/briefs") ? json({ error: "fail" }, 500) : json(EMPTY_REPORT)),
+      result: (url) =>
+        url.includes("/campaigns/briefs") ? json({ error: "fail" }, 500) : json(EMPTY_REPORT),
     });
     render(<StartFromExistingPicker selectedId={null} onSelect={vi.fn()} />);
 

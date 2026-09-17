@@ -17,7 +17,9 @@ import {
 } from "../../editor-state";
 
 const pool = (statuses: string[]): CopyPool =>
-  ({ entries: statuses.map((status, i) => ({ id: `e${i}`, text: `t${i}`, status })) }) as unknown as CopyPool;
+  ({
+    entries: statuses.map((status, i) => ({ id: `e${i}`, text: `t${i}`, status })),
+  }) as unknown as CopyPool;
 
 const state = (over: Partial<EditorState> = {}): EditorState => ({
   ...initialEditorState(),
@@ -128,9 +130,17 @@ describe("PolicySection — the policy numbers", () => {
     expect(readout.textContent).toBe("2");
 
     await user.click(screen.getByRole("button", { name: "Increase Min distance" }));
-    expect(dispatch).toHaveBeenCalledWith({ type: "setVariation", field: "minDistance", value: "3" });
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "setVariation",
+      field: "minDistance",
+      value: "3",
+    });
     await user.click(screen.getByRole("button", { name: "Decrease Min distance" }));
-    expect(dispatch).toHaveBeenCalledWith({ type: "setVariation", field: "minDistance", value: "1" });
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "setVariation",
+      field: "minDistance",
+      value: "1",
+    });
   });
 
   test("an unset min distance reads as the planner's default, and stepping up sets it", async () => {
@@ -138,11 +148,19 @@ describe("PolicySection — the policy numbers", () => {
     const dispatch = vi.fn();
     const s = state();
     renderOpen(
-      <PolicySection state={{ ...s, variation: { ...s.variation, minDistance: "" } }} dispatch={dispatch} errors={{}} />,
+      <PolicySection
+        state={{ ...s, variation: { ...s.variation, minDistance: "" } }}
+        dispatch={dispatch}
+        errors={{}}
+      />,
     );
     expect(screen.getByRole("spinbutton", { name: "Min distance" }).textContent).toBe("Auto (1)");
     await user.click(screen.getByRole("button", { name: "Increase Min distance" }));
-    expect(dispatch).toHaveBeenCalledWith({ type: "setVariation", field: "minDistance", value: "0" });
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "setVariation",
+      field: "minDistance",
+      value: "0",
+    });
   });
 
   test.each([
@@ -153,12 +171,18 @@ describe("PolicySection — the policy numbers", () => {
     const dispatch = vi.fn();
     const s = state();
     const { unmount } = renderOpen(
-      <PolicySection state={{ ...s, variation: { ...s.variation, [field]: "" } }} dispatch={dispatch} errors={{}} />,
+      <PolicySection
+        state={{ ...s, variation: { ...s.variation, [field]: "" } }}
+        dispatch={dispatch}
+        errors={{}}
+      />,
     );
     expect(screen.getByRole("spinbutton", { name: label }).textContent).toBe("No floor");
     unmount();
 
-    renderOpen(<PolicySection state={s} dispatch={dispatch} errors={{ [field]: `bad ${field}` }} />);
+    renderOpen(
+      <PolicySection state={s} dispatch={dispatch} errors={{ [field]: `bad ${field}` }} />,
+    );
     expect(screen.getByText(`bad ${field}`)).toBeTruthy();
     await user.click(screen.getByRole("button", { name: `Increase ${label}` }));
     expect(dispatch).toHaveBeenCalledWith({ type: "setVariation", field, value: "2" });
@@ -168,28 +192,38 @@ describe("PolicySection — the policy numbers", () => {
     const user = userEvent.setup();
     const dispatch = vi.fn();
     const s = state();
-    const { unmount } = renderOpen(<PolicySection state={s} dispatch={dispatch} errors={{ seed: "bad seed" }} />);
+    const { unmount } = renderOpen(
+      <PolicySection state={s} dispatch={dispatch} errors={{ seed: "bad seed" }} />,
+    );
     await user.type(screen.getByPlaceholderText("Auto"), "7");
     expect(dispatch).toHaveBeenCalledWith({ type: "setVariation", field: "seed", value: "7" });
     expect(screen.getByText("bad seed")).toBeTruthy();
 
     // empty seed → offer to pick one
     await user.click(screen.getByRole("button", { name: "Pick a seed" }));
-    const picked = dispatch.mock.calls.map((c) => c[0]).find((a) => a.field === "seed" && a.value !== "7");
+    const picked = dispatch.mock.calls
+      .map((c) => c[0])
+      .find((a) => a.field === "seed" && a.value !== "7");
     expect(Number(picked.value)).toBeGreaterThanOrEqual(0);
     unmount();
 
     // a set seed → offer to clear it
     dispatch.mockClear();
     renderOpen(
-      <PolicySection state={{ ...s, variation: { ...s.variation, seed: "42" } }} dispatch={dispatch} errors={{}} />,
+      <PolicySection
+        state={{ ...s, variation: { ...s.variation, seed: "42" } }}
+        dispatch={dispatch}
+        errors={{}}
+      />,
     );
     await user.click(screen.getByRole("button", { name: "Clear the seed" }));
     expect(dispatch).toHaveBeenCalledWith({ type: "setVariation", field: "seed", value: "" });
   });
 
   test("the min-distance help states the bound the active axes actually allow", () => {
-    const { unmount } = renderOpen(<PolicySection state={state()} dispatch={vi.fn()} errors={{}} />);
+    const { unmount } = renderOpen(
+      <PolicySection state={state()} dispatch={vi.fn()} errors={{}} />,
+    );
     expect(screen.getByText(/up to 6, the active axes/)).toBeTruthy();
     unmount();
 
@@ -212,7 +246,11 @@ describe("PolicySection — the clamp notice", () => {
 
     // the reducer sets countNotice when a narrowing makes the ask impossible
     const lowered = editorReducer(
-      editorReducer(state(), { type: "setVariation", field: "count", value: String(axisProductSize(state())) }),
+      editorReducer(state(), {
+        type: "setVariation",
+        field: "count",
+        value: String(axisProductSize(state())),
+      }),
       { type: "toggleLayout", value: LAYOUT_OPTIONS[0] },
     );
     render(<PolicySection state={lowered} dispatch={vi.fn()} errors={{}} />);
@@ -233,7 +271,10 @@ describe("PolicySection — axes", () => {
     expect(dispatch).toHaveBeenCalledWith({ type: "toggleTone", value: TONE_OPTIONS[1] });
 
     await user.click(within(axis("Background Source")).getByText(BACKGROUND_OPTIONS[2]));
-    expect(dispatch).toHaveBeenCalledWith({ type: "toggleBackground", value: BACKGROUND_OPTIONS[2] });
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "toggleBackground",
+      value: BACKGROUND_OPTIONS[2],
+    });
   });
 
   test("layout and tone cards answer to their raw value as the whole accessible name", async () => {
@@ -243,7 +284,9 @@ describe("PolicySection — axes", () => {
 
     // the same query 61 assertions across the suite make: role + whole name.
     // The glyph and any caption inside the card must never extend that name.
-    const top = within(axis("Layout")).getByRole("button", { name: "headline-top" }) as HTMLButtonElement;
+    const top = within(axis("Layout")).getByRole("button", {
+      name: "headline-top",
+    }) as HTMLButtonElement;
     expect(top.getAttribute("aria-pressed")).toBe("true");
     await user.click(top);
     expect(dispatch).toHaveBeenCalledWith({ type: "toggleLayout", value: "headline-top" });
@@ -261,14 +304,20 @@ describe("PolicySection — axes", () => {
 
     // Display names on the face (the jargon gate), raw values as the names (D18):
     const anchorFieldset = axis("Anchor");
-    const middle = within(anchorFieldset).getByRole("button", { name: "middle" }) as HTMLButtonElement;
+    const middle = within(anchorFieldset).getByRole("button", {
+      name: "middle",
+    }) as HTMLButtonElement;
     expect(middle.textContent).toContain("Middle");
     expect(middle.getAttribute("aria-pressed")).toBe("false");
     await user.click(middle);
     expect(dispatch).toHaveBeenCalledWith({ type: "toggleAnchor", value: "middle" });
     // The derived pair starts selected: Top and Bottom pressed, Middle not.
-    expect(within(anchorFieldset).getByRole("button", { name: "top" }).getAttribute("aria-pressed")).toBe("true");
-    expect(within(anchorFieldset).getByRole("button", { name: "bottom" }).getAttribute("aria-pressed")).toBe("true");
+    expect(
+      within(anchorFieldset).getByRole("button", { name: "top" }).getAttribute("aria-pressed"),
+    ).toBe("true");
+    expect(
+      within(anchorFieldset).getByRole("button", { name: "bottom" }).getAttribute("aria-pressed"),
+    ).toBe("true");
   });
 
   test("every advanced axis shows what it does, and is still named by its raw value", () => {
@@ -279,7 +328,9 @@ describe("PolicySection — axes", () => {
     expect(bg.querySelector("svg")).toBeTruthy();
     expect(bg.textContent).toContain("A pattern we draw");
     const swatch = within(axis("Palette Shift")).getByRole("button", { name: "0.1" });
-    expect(swatch.querySelector("span[style]")?.getAttribute("style")).toContain("background-color");
+    expect(swatch.querySelector("span[style]")?.getAttribute("style")).toContain(
+      "background-color",
+    );
     expect(screen.getByRole("switch", { name: HEADLINE_POOL_REF })).toBeTruthy();
   });
 
@@ -298,7 +349,9 @@ describe("PolicySection — axes", () => {
     renderOpen(<PolicySection state={state()} dispatch={vi.fn()} errors={{}} />);
     // background defaults to procedural only
     const bg = within(axis("Background Source"));
-    expect(bg.getByRole("button", { name: "procedural" }).getAttribute("aria-pressed")).toBe("true");
+    expect(bg.getByRole("button", { name: "procedural" }).getAttribute("aria-pressed")).toBe(
+      "true",
+    );
     expect(bg.getByRole("button", { name: "genai" }).getAttribute("aria-pressed")).toBe("false");
   });
 
@@ -314,8 +367,13 @@ describe("PolicySection — axes", () => {
     const user = userEvent.setup();
     const dispatch = vi.fn();
     renderOpen(<PolicySection state={state()} dispatch={dispatch} errors={{}} />);
-    await user.click(within(axis("Palette Shift")).getByRole("button", { name: String(PALETTE_SHIFT_OPTIONS[1]) }));
-    expect(dispatch).toHaveBeenCalledWith({ type: "togglePalette", value: PALETTE_SHIFT_OPTIONS[1] });
+    await user.click(
+      within(axis("Palette Shift")).getByRole("button", { name: String(PALETTE_SHIFT_OPTIONS[1]) }),
+    );
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "togglePalette",
+      value: PALETTE_SHIFT_OPTIONS[1],
+    });
   });
 
   test("each axis renders its own error", () => {
@@ -323,7 +381,12 @@ describe("PolicySection — axes", () => {
       <PolicySection
         state={state()}
         dispatch={vi.fn()}
-        errors={{ layout: "pick a layout", tone: "pick a tone", background: "pick a source", paletteShift: "pick a shift" }}
+        errors={{
+          layout: "pick a layout",
+          tone: "pick a tone",
+          background: "pick a source",
+          paletteShift: "pick a shift",
+        }}
       />,
     );
     expect(screen.getByText("pick a layout")).toBeTruthy();
@@ -341,15 +404,16 @@ describe("PolicySection — axes", () => {
 describe("PolicySection — aspect ratio panels", () => {
   // The legend carries a "· from your platforms" hint until the ratio is diverged
   // from the platform default, so match the fieldset by its stable prefix.
-  const ratioFieldset = () =>
-    screen.getByText(/^Aspect ratios/).closest("fieldset") as HTMLElement;
+  const ratioFieldset = () => screen.getByText(/^Aspect ratios/).closest("fieldset") as HTMLElement;
 
   test("each panel answers to its raw ratio as the whole accessible name", async () => {
     const user = userEvent.setup();
     const dispatch = vi.fn();
     render(<PolicySection state={state()} dispatch={dispatch} errors={{}} />);
 
-    const square = within(ratioFieldset()).getByRole("button", { name: "1:1" }) as HTMLButtonElement;
+    const square = within(ratioFieldset()).getByRole("button", {
+      name: "1:1",
+    }) as HTMLButtonElement;
     expect(square.getAttribute("aria-pressed")).toBe("true");
     await user.click(square);
     expect(dispatch).toHaveBeenCalledWith({ type: "toggleRatio", value: "1:1" });
@@ -424,10 +488,14 @@ describe("PolicySection — aspect ratio panels", () => {
     // once per excluded panel.
     expect(screen.getByText(messages.ratioExcludedPackaged(["Tall"]))).toBeTruthy();
     // excluded-but-selected canvases stay clickable — deselecting is the way out
-    const square = within(ratioFieldset()).getByRole("button", { name: "1:1" }) as HTMLButtonElement;
+    const square = within(ratioFieldset()).getByRole("button", {
+      name: "1:1",
+    }) as HTMLButtonElement;
     expect(square.disabled).toBe(false);
     // the inline remedy turns Still images back on
-    const remedy = within(ratioFieldset()).getByRole("button", { name: messages.turnOnStillImages });
+    const remedy = within(ratioFieldset()).getByRole("button", {
+      name: messages.turnOnStillImages,
+    });
     fireEvent.click(remedy);
     expect(dispatch).toHaveBeenCalledWith({ type: "toggleFormat", value: "static" });
   });
@@ -448,7 +516,9 @@ describe("PolicySection — aspect ratio panels", () => {
         errors={{}}
       />,
     );
-    const square = within(ratioFieldset()).getByRole("button", { name: "1:1" }) as HTMLButtonElement;
+    const square = within(ratioFieldset()).getByRole("button", {
+      name: "1:1",
+    }) as HTMLButtonElement;
     expect(square.getAttribute("aria-pressed")).toBe("true");
     expect(square.disabled).toBe(false);
     await user.click(square);
@@ -471,7 +541,9 @@ describe("PolicySection — aspect ratio panels", () => {
         errors={{}}
       />,
     );
-    const square = within(ratioFieldset()).getByRole("button", { name: "1:1" }) as HTMLButtonElement;
+    const square = within(ratioFieldset()).getByRole("button", {
+      name: "1:1",
+    }) as HTMLButtonElement;
     expect(square.disabled).toBe(true);
     expect(screen.getByText(messages.ratioExcludedPackaged(["Tall"]))).toBeTruthy();
   });
@@ -479,7 +551,11 @@ describe("PolicySection — aspect ratio panels", () => {
   test("the exclusion reason says so plainly when no selected platform packages motion at any ratio", () => {
     render(
       <PolicySection
-        state={state({ formats: ["motion"], platforms: ["instagram-feed"], motion: ["ken-burns-in"] })}
+        state={state({
+          formats: ["motion"],
+          platforms: ["instagram-feed"],
+          motion: ["ken-burns-in"],
+        })}
         dispatch={vi.fn()}
         errors={{}}
       />,
@@ -496,7 +572,9 @@ describe("PolicySection — aspect ratio panels", () => {
     render(<PolicySection state={state()} dispatch={dispatch} errors={{}} />);
     const fieldset = ratioFieldset();
     expect(within(fieldset).getByRole("spinbutton", { name: "Coverage per ratio" })).toBeTruthy();
-    expect(within(fieldset).getByRole("button", { name: "Increase Coverage per ratio" })).toBeTruthy();
+    expect(
+      within(fieldset).getByRole("button", { name: "Increase Coverage per ratio" }),
+    ).toBeTruthy();
     await user.click(within(fieldset).getByRole("button", { name: "Increase Coverage per ratio" }));
     expect(dispatch).toHaveBeenCalledWith({ type: "setVariation", field: "perRatio", value: "2" });
   });
@@ -539,7 +617,13 @@ describe("PolicySection — the headline axis and its pool", () => {
   });
 
   test("a loaded pool with nothing approved blocks the axis and says why", () => {
-    renderOpen(<PolicySection state={state({ pool: pool(["pending", "rejected"]) })} dispatch={vi.fn()} errors={{}} />);
+    renderOpen(
+      <PolicySection
+        state={state({ pool: pool(["pending", "rejected"]) })}
+        dispatch={vi.fn()}
+        errors={{}}
+      />,
+    );
     expect(screen.getByText(/no approved entries/)).toBeTruthy();
     expect(headlineToggle().disabled).toBe(true);
   });
@@ -548,7 +632,11 @@ describe("PolicySection — the headline axis and its pool", () => {
     const user = userEvent.setup();
     const dispatch = vi.fn();
     renderOpen(
-      <PolicySection state={state({ pool: pool(["approved", "approved", "pending"]) })} dispatch={dispatch} errors={{}} />,
+      <PolicySection
+        state={state({ pool: pool(["approved", "approved", "pending"]) })}
+        dispatch={dispatch}
+        errors={{}}
+      />,
     );
     expect(screen.getByText("2 approved headlines")).toBeTruthy();
     await user.click(headlineToggle());
@@ -556,7 +644,9 @@ describe("PolicySection — the headline axis and its pool", () => {
   });
 
   test("one approved entry is described in the singular", () => {
-    renderOpen(<PolicySection state={state({ pool: pool(["approved"]) })} dispatch={vi.fn()} errors={{}} />);
+    renderOpen(
+      <PolicySection state={state({ pool: pool(["approved"]) })} dispatch={vi.fn()} errors={{}} />,
+    );
     expect(screen.getByText("1 approved headline")).toBeTruthy();
   });
 
@@ -575,7 +665,9 @@ describe("PolicySection — the headline axis and its pool", () => {
   });
 
   test("an axis that is off stays blocked while the pool has nothing approved", () => {
-    renderOpen(<PolicySection state={state({ pool: pool(["pending"]) })} dispatch={vi.fn()} errors={{}} />);
+    renderOpen(
+      <PolicySection state={state({ pool: pool(["pending"]) })} dispatch={vi.fn()} errors={{}} />,
+    );
     expect(headlineToggle().disabled).toBe(true);
   });
 
@@ -585,7 +677,9 @@ describe("PolicySection — the headline axis and its pool", () => {
     expect(headlineToggle().getAttribute("aria-checked")).toBe("true");
     unmount();
 
-    renderOpen(<PolicySection state={state({ pool: pool(["approved"]) })} dispatch={vi.fn()} errors={{}} />);
+    renderOpen(
+      <PolicySection state={state({ pool: pool(["approved"]) })} dispatch={vi.fn()} errors={{}} />,
+    );
     expect(headlineToggle().getAttribute("aria-checked")).toBe("false");
   });
 });
@@ -615,6 +709,8 @@ describe("the lock-or-vary hint (T2 / F6)", () => {
     locked.variation.layout = ["headline-bottom"];
     render(<PolicySection state={locked} dispatch={vi.fn()} errors={{}} />);
     expect(screen.getByText(messages.axisLocked("headline-bottom"))).toBeTruthy();
-    expect(screen.getByText(messages.axisLocked("headline-bottom")).textContent).toContain("headline bottom");
+    expect(screen.getByText(messages.axisLocked("headline-bottom")).textContent).toContain(
+      "headline bottom",
+    );
   });
 });

@@ -45,7 +45,14 @@ interface StepFooterProps {
  * `animation: none` freezes `animate-spin` mid-ring while `Button` has already
  * swapped its label for the spinner.
  */
-export function StepFooter({ statusText, onBack, onNext, nextLabel, nudgeKey, readyKey }: StepFooterProps) {
+export function StepFooter({
+  statusText,
+  onBack,
+  onNext,
+  nextLabel,
+  nudgeKey,
+  readyKey,
+}: StepFooterProps) {
   return (
     <footer className="mt-6 border-t border-border pt-4">
       <p role="status" className="text-[13px] text-text-primary">

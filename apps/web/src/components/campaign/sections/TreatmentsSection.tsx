@@ -7,11 +7,23 @@ import type { FieldErrors } from "@/components/campaign/validate";
 import { SectionShell, Field } from "./IdentitySection";
 import { LAYOUT_OPTIONS, TONE_OPTIONS } from "@/components/campaign/editor-state";
 
-export function TreatmentsSection({ state, dispatch, errors }: { state: EditorState; dispatch: Dispatch<EditorAction>; errors: FieldErrors }) {
+export function TreatmentsSection({
+  state,
+  dispatch,
+  errors,
+}: {
+  state: EditorState;
+  dispatch: Dispatch<EditorAction>;
+  errors: FieldErrors;
+}) {
   if (state.mode !== "brief") return null;
 
   return (
-    <SectionShell id="treatments" title="4 · Treatments" errorCount={Object.keys(errors).filter((k) => k.startsWith("treatment")).length}>
+    <SectionShell
+      id="treatments"
+      title="4 · Treatments"
+      errorCount={Object.keys(errors).filter((k) => k.startsWith("treatment")).length}
+    >
       {errors.treatments ? <p className="text-[13px] text-error">{errors.treatments}</p> : null}
       <div className="flex items-center justify-between">
         <h3 className="font-mono text-[11px] uppercase tracking-widest text-text-muted">
@@ -35,7 +47,11 @@ export function TreatmentsSection({ state, dispatch, errors }: { state: EditorSt
             </Field>
           </div>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <Field fieldKey={`treatment-${index}-layout`} label="Layout" error={errors[`treatment-${index}-layout`]}>
+            <Field
+              fieldKey={`treatment-${index}-layout`}
+              label="Layout"
+              error={errors[`treatment-${index}-layout`]}
+            >
               <select
                 aria-invalid={errors[`treatment-${index}-layout`] ? "true" : undefined}
                 value={treatment.layout}
@@ -45,11 +61,17 @@ export function TreatmentsSection({ state, dispatch, errors }: { state: EditorSt
                 className="rounded border border-border-control bg-surface px-3 py-2 text-sm text-text-emphasis"
               >
                 {LAYOUT_OPTIONS.map((opt) => (
-                  <option key={opt} value={opt}>{opt}</option>
+                  <option key={opt} value={opt}>
+                    {opt}
+                  </option>
                 ))}
               </select>
             </Field>
-            <Field fieldKey={`treatment-${index}-tone`} label="Tone" error={errors[`treatment-${index}-tone`]}>
+            <Field
+              fieldKey={`treatment-${index}-tone`}
+              label="Tone"
+              error={errors[`treatment-${index}-tone`]}
+            >
               <select
                 aria-invalid={errors[`treatment-${index}-tone`] ? "true" : undefined}
                 value={treatment.tone}
@@ -59,19 +81,27 @@ export function TreatmentsSection({ state, dispatch, errors }: { state: EditorSt
                 className="rounded border border-border-control bg-surface px-3 py-2 text-sm text-text-emphasis"
               >
                 {TONE_OPTIONS.map((opt) => (
-                  <option key={opt} value={opt}>{opt}</option>
+                  <option key={opt} value={opt}>
+                    {opt}
+                  </option>
                 ))}
               </select>
             </Field>
           </div>
 
-          <Button variant="ghost" size="sm" onClick={() => dispatch({ type: "removeTreatment", index })}>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => dispatch({ type: "removeTreatment", index })}
+          >
             Remove
           </Button>
         </div>
       ))}
       {state.treatments.length === 0 ? (
-        <p className="text-[13px] text-text-muted">No treatments. The default treatment will be used.</p>
+        <p className="text-[13px] text-text-muted">
+          No treatments. The default treatment will be used.
+        </p>
       ) : null}
     </SectionShell>
   );

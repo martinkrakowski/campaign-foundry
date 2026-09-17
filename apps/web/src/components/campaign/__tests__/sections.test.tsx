@@ -4,7 +4,13 @@ import userEvent from "@testing-library/user-event";
 import { renderToString } from "react-dom/server";
 import { CANONICAL_TEMPLATES } from "@campaignfoundry/CampaignOrchestration/creative-templates";
 import { initialEditorState, emptyProduct, type EditorState } from "../editor-state";
-import { IdentitySection, CopySection, ProductsSection, TreatmentsSection, OutputSection } from "../sections";
+import {
+  IdentitySection,
+  CopySection,
+  ProductsSection,
+  TreatmentsSection,
+  OutputSection,
+} from "../sections";
 import { ErrorStrip } from "../ErrorStrip";
 import * as messages from "../messages";
 
@@ -25,7 +31,13 @@ describe("IdentitySection", () => {
   test("dispatches a patch for each field", async () => {
     const user = userEvent.setup();
     const dispatch = vi.fn();
-    render(<IdentitySection state={state({ briefId: "", campaignName: "" })} dispatch={dispatch} errors={{}} />);
+    render(
+      <IdentitySection
+        state={state({ briefId: "", campaignName: "" })}
+        dispatch={dispatch}
+        errors={{}}
+      />,
+    );
 
     fireEvent.change(screen.getByLabelText("Campaign Name"), { target: { value: "New Name" } });
     expect(dispatch).toHaveBeenCalledWith({ type: "patch", patch: { campaignName: "New Name" } });
@@ -42,7 +54,15 @@ describe("IdentitySection", () => {
 
     render(
       <IdentitySection
-        state={state({ source: { kind: "file", file: "camp.yaml", loadedId: "camp", savedSnapshot: null, revision: undefined } })}
+        state={state({
+          source: {
+            kind: "file",
+            file: "camp.yaml",
+            loadedId: "camp",
+            savedSnapshot: null,
+            revision: undefined,
+          },
+        })}
         dispatch={vi.fn()}
         errors={{}}
       />,
@@ -58,7 +78,9 @@ describe("IdentitySection", () => {
       writable: true,
     });
 
-    const { unmount } = render(<IdentitySection state={state({ briefId: "camp-summer" })} dispatch={vi.fn()} errors={{}} />);
+    const { unmount } = render(
+      <IdentitySection state={state({ briefId: "camp-summer" })} dispatch={vi.fn()} errors={{}} />,
+    );
 
     const copyBtn = screen.getByRole("button", { name: "Copy brief ID" });
     expect(copyBtn.textContent).toBe("Copy");
@@ -86,7 +108,9 @@ describe("IdentitySection", () => {
       writable: true,
     });
 
-    render(<IdentitySection state={state({ briefId: "camp-summer" })} dispatch={vi.fn()} errors={{}} />);
+    render(
+      <IdentitySection state={state({ briefId: "camp-summer" })} dispatch={vi.fn()} errors={{}} />,
+    );
     const copyBtn = screen.getByRole("button", { name: "Copy brief ID" });
 
     fireEvent.click(copyBtn);
@@ -112,7 +136,9 @@ describe("IdentitySection", () => {
       writable: true,
     });
 
-    render(<IdentitySection state={state({ briefId: "camp-summer" })} dispatch={vi.fn()} errors={{}} />);
+    render(
+      <IdentitySection state={state({ briefId: "camp-summer" })} dispatch={vi.fn()} errors={{}} />,
+    );
     const copyBtn = screen.getByRole("button", { name: "Copy brief ID" });
 
     fireEvent.click(copyBtn);
@@ -127,7 +153,9 @@ describe("IdentitySection", () => {
       writable: true,
     });
 
-    render(<IdentitySection state={state({ briefId: "camp-summer" })} dispatch={vi.fn()} errors={{}} />);
+    render(
+      <IdentitySection state={state({ briefId: "camp-summer" })} dispatch={vi.fn()} errors={{}} />,
+    );
     const copyBtn = screen.getByRole("button", { name: "Copy brief ID" });
 
     fireEvent.click(copyBtn);
@@ -135,14 +163,26 @@ describe("IdentitySection", () => {
   });
 
   test("empty brief id disables copy button and shows placeholder", () => {
-    render(<IdentitySection state={state({ briefId: "", campaignName: "" })} dispatch={vi.fn()} errors={{}} />);
+    render(
+      <IdentitySection
+        state={state({ briefId: "", campaignName: "" })}
+        dispatch={vi.fn()}
+        errors={{}}
+      />,
+    );
     const copyBtn = screen.getByRole("button", { name: "Copy brief ID" }) as HTMLButtonElement;
     expect(copyBtn.disabled).toBe(true);
     expect(screen.getByText("This is the brief id — made from the name")).toBeTruthy();
   });
 
   test("shows a per-field error and a count badge on the heading", () => {
-    render(<IdentitySection state={state()} dispatch={vi.fn()} errors={{ briefId: "bad id", targetRegion: "required" }} />);
+    render(
+      <IdentitySection
+        state={state()}
+        dispatch={vi.fn()}
+        errors={{ briefId: "bad id", targetRegion: "required" }}
+      />,
+    );
     expect(screen.getByText("bad id")).toBeTruthy();
     expect(screen.getByRole("heading", { name: /Identity/ }).textContent).toContain("2");
   });
@@ -152,7 +192,13 @@ describe("CopySection", () => {
   test("dispatches both message fields and renders their errors", async () => {
     const user = userEvent.setup();
     const dispatch = vi.fn();
-    render(<CopySection state={state()} dispatch={dispatch} errors={{ campaignMessage: "required", localizedMessage: "odd" }} />);
+    render(
+      <CopySection
+        state={state()}
+        dispatch={dispatch}
+        errors={{ campaignMessage: "required", localizedMessage: "odd" }}
+      />,
+    );
 
     await user.type(screen.getByLabelText("Headline"), "H");
     expect(dispatch).toHaveBeenCalledWith({ type: "patch", patch: { campaignMessage: "H" } });
@@ -190,11 +236,23 @@ describe("CopySection", () => {
   });
 
   test("renders live character counter and warns on exceeding max limit", () => {
-    const { unmount } = render(<CopySection state={state({ campaignMessage: "Stay wild" })} dispatch={vi.fn()} errors={{}} />);
+    const { unmount } = render(
+      <CopySection
+        state={state({ campaignMessage: "Stay wild" })}
+        dispatch={vi.fn()}
+        errors={{}}
+      />,
+    );
     expect(screen.getByText("9 / 60")).toBeTruthy();
     unmount();
 
-    render(<CopySection state={state({ campaignMessage: "a".repeat(65) })} dispatch={vi.fn()} errors={{}} />);
+    render(
+      <CopySection
+        state={state({ campaignMessage: "a".repeat(65) })}
+        dispatch={vi.fn()}
+        errors={{}}
+      />,
+    );
     const counter = screen.getByText("65 / 60");
     expect(counter).toBeTruthy();
     expect(counter.className).toContain("text-error");
@@ -235,7 +293,10 @@ describe("CopySection", () => {
     const secondCard = screen.getByRole("button", { name: "Conquer the Summit" });
     expect(secondCard.getAttribute("aria-pressed")).toBe("false");
     await user.click(secondCard);
-    expect(dispatch).toHaveBeenCalledWith({ type: "patch", patch: { campaignMessage: "Conquer the Summit" } });
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "patch",
+      patch: { campaignMessage: "Conquer the Summit" },
+    });
   });
 
   test("clicking More ideas button calls onOpenPool in variation mode", async () => {
@@ -266,7 +327,9 @@ describe("CopySection", () => {
       }),
     );
 
-    const { unmount } = render(<CopySection state={state({ pool: null })} dispatch={dispatch} errors={{}} />);
+    const { unmount } = render(
+      <CopySection state={state({ pool: null })} dispatch={dispatch} errors={{}} />,
+    );
 
     await waitFor(() =>
       expect(dispatch).toHaveBeenCalledWith({
@@ -337,13 +400,25 @@ describe("OutputSection", () => {
   });
 
   test("a capability-off probe without a reason shows the same fixed sentence", () => {
-    render(<OutputSection state={state({ capabilities: { motion: false } })} dispatch={vi.fn()} errors={{}} />);
+    render(
+      <OutputSection
+        state={state({ capabilities: { motion: false } })}
+        dispatch={vi.fn()}
+        errors={{}}
+      />,
+    );
     // no "capability off" fallback string: the one fixed sentence covers every reason
     expect(screen.getAllByText(messages.formatsMotionUnavailable).length).toBeGreaterThan(0);
   });
 
   test("a brief that already declares motion still shows it as selected", () => {
-    render(<OutputSection state={state({ formats: ["static", "motion"] })} dispatch={vi.fn()} errors={{}} />);
+    render(
+      <OutputSection
+        state={state({ formats: ["static", "motion"] })}
+        dispatch={vi.fn()}
+        errors={{}}
+      />,
+    );
     const motion = screen.getByRole("button", { name: "motion" });
     const staticFmt = screen.getByRole("button", { name: "static" });
     expect(motion.className).toBe(staticFmt.className.replace(/\s*$/, ""));
@@ -351,7 +426,11 @@ describe("OutputSection", () => {
 
   test("in Classic the Video card stays selected and shows the gate, so the UI and the brief cannot disagree in silence", () => {
     render(
-      <OutputSection state={state({ formats: ["static", "motion"] })} dispatch={vi.fn()} errors={{}} />,
+      <OutputSection
+        state={state({ formats: ["static", "motion"] })}
+        dispatch={vi.fn()}
+        errors={{}}
+      />,
     );
     const motion = screen.getByRole("button", { name: "motion" });
     expect(motion.getAttribute("aria-pressed")).toBe("true");
@@ -368,7 +447,13 @@ describe("OutputSection", () => {
   });
 
   test("renders format and platform errors", () => {
-    render(<OutputSection state={state()} dispatch={vi.fn()} errors={{ formats: "pick a format", platforms: "pick a platform" }} />);
+    render(
+      <OutputSection
+        state={state()}
+        dispatch={vi.fn()}
+        errors={{ formats: "pick a format", platforms: "pick a platform" }}
+      />,
+    );
     expect(screen.getByText("pick a format")).toBeTruthy();
     expect(screen.getByText("pick a platform")).toBeTruthy();
   });
@@ -379,7 +464,13 @@ describe("OutputSection", () => {
     expect(screen.queryByText("Clip lengths")).toBeNull();
     unmount();
 
-    render(<OutputSection state={state({ formats: ["static", "motion"] })} dispatch={vi.fn()} errors={{}} />);
+    render(
+      <OutputSection
+        state={state({ formats: ["static", "motion"] })}
+        dispatch={vi.fn()}
+        errors={{}}
+      />,
+    );
     expect(screen.getByRole("button", { name: "ken-burns-in" })).toBeTruthy();
     expect(screen.getByText("Clip lengths")).toBeTruthy();
   });
@@ -389,7 +480,12 @@ describe("OutputSection", () => {
     const dispatch = vi.fn();
     const { container } = render(
       <OutputSection
-        state={state({ mode: "variation", formats: ["motion"], motion: ["ken-burns-in"], duration: [5] })}
+        state={state({
+          mode: "variation",
+          formats: ["motion"],
+          motion: ["ken-burns-in"],
+          duration: [5],
+        })}
         dispatch={dispatch}
         errors={{}}
       />,
@@ -408,7 +504,15 @@ describe("OutputSection", () => {
 
     const strip = container.querySelector(".select-none") as HTMLElement;
     vi.spyOn(strip, "getBoundingClientRect").mockReturnValue({
-      left: 0, top: 0, right: 300, bottom: 50, width: 300, height: 50, x: 0, y: 0, toJSON: () => {},
+      left: 0,
+      top: 0,
+      right: 300,
+      bottom: 50,
+      width: 300,
+      height: 50,
+      x: 0,
+      y: 0,
+      toJSON: () => {},
     });
     fireEvent.click(strip, { clientX: 150 });
     expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "addDuration" }));
@@ -433,16 +537,26 @@ describe("OutputSection", () => {
     // Per-card gating (L4.4) guards the format *choice*; the loaded motion kinds and
     // durations stay operable so the brief persists verbatim (D12). The unselected
     // motion format card is the thing that is disabled on this host.
-    expect((screen.getByRole("button", { name: "ken-burns-in" }) as HTMLButtonElement).disabled).toBe(false);
-    expect(screen.getByRole("slider", { name: "Duration 1 (seconds)" }).getAttribute("tabindex")).toBe("0");
-    expect((screen.getByRole("button", { name: "Remove duration 6 s" }) as HTMLButtonElement).disabled).toBe(false);
+    expect(
+      (screen.getByRole("button", { name: "ken-burns-in" }) as HTMLButtonElement).disabled,
+    ).toBe(false);
+    expect(
+      screen.getByRole("slider", { name: "Duration 1 (seconds)" }).getAttribute("tabindex"),
+    ).toBe("0");
+    expect(
+      (screen.getByRole("button", { name: "Remove duration 6 s" }) as HTMLButtonElement).disabled,
+    ).toBe(false);
     await user.click(screen.getByRole("button", { name: "ken-burns-in" }));
     expect(dispatch).toHaveBeenCalledWith({ type: "toggleMotion", value: "ken-burns-in" });
   });
 
   test("renders motion kind and duration errors", () => {
     render(
-      <OutputSection state={state({ formats: ["motion"] })} dispatch={vi.fn()} errors={{ motion: "pick a kind", duration: "pick a duration" }} />,
+      <OutputSection
+        state={state({ formats: ["motion"] })}
+        dispatch={vi.fn()}
+        errors={{ motion: "pick a kind", duration: "pick a duration" }}
+      />,
     );
     expect(screen.getByText("pick a kind")).toBeTruthy();
     expect(screen.getByText("pick a duration")).toBeTruthy();
@@ -450,14 +564,22 @@ describe("OutputSection", () => {
 
   test("only platforms compatible with the requested formats are offered", () => {
     // static only: the motion platforms are not offered
-    const { unmount } = render(<OutputSection state={state({ formats: ["static"] })} dispatch={vi.fn()} errors={{}} />);
+    const { unmount } = render(
+      <OutputSection state={state({ formats: ["static"] })} dispatch={vi.fn()} errors={{}} />,
+    );
     expect(screen.getByRole("button", { name: "instagram-feed" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "instagram-reel" })).toBeNull();
     expect(screen.queryByRole("button", { name: "tiktok" })).toBeNull();
     unmount();
 
     // static + motion: every profile is offered
-    render(<OutputSection state={state({ formats: ["static", "motion"] })} dispatch={vi.fn()} errors={{}} />);
+    render(
+      <OutputSection
+        state={state({ formats: ["static", "motion"] })}
+        dispatch={vi.fn()}
+        errors={{}}
+      />,
+    );
     expect(screen.getByRole("button", { name: "instagram-story" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "youtube-short" })).toBeTruthy();
   });
@@ -519,7 +641,9 @@ describe("OutputSection", () => {
     await user.click(reel);
     expect(dispatch).not.toHaveBeenCalledWith({ type: "togglePlatform", value: "instagram-reel" });
     expect(screen.queryByRole("button", { name: "tiktok" })).toBeNull();
-    expect((screen.getByRole("button", { name: "instagram-feed" }) as HTMLButtonElement).disabled).toBe(false);
+    expect(
+      (screen.getByRole("button", { name: "instagram-feed" }) as HTMLButtonElement).disabled,
+    ).toBe(false);
   });
 
   test("a format-mismatched platform can still be deselected so the error has a way out", async () => {
@@ -559,21 +683,33 @@ describe("OutputSection", () => {
 
   test("the exclusion line names no shapes when no offered platform packages motion", () => {
     render(
-      <OutputSection state={state({ formats: ["motion"], platforms: [] })} dispatch={vi.fn()} errors={{}} />,
+      <OutputSection
+        state={state({ formats: ["motion"], platforms: [] })}
+        dispatch={vi.fn()}
+        errors={{}}
+      />,
     );
     expect(screen.getByText(messages.ratioExcludedNone())).toBeTruthy();
     expect(screen.queryByRole("button", { name: messages.addPhotoPlatform })).toBeTruthy();
   });
 
   test("a selected platform id with no profile is skipped defensively", () => {
-    render(<OutputSection state={state({ platforms: ["nonexistent"] })} dispatch={vi.fn()} errors={{}} />);
+    render(
+      <OutputSection
+        state={state({ platforms: ["nonexistent"] })}
+        dispatch={vi.fn()}
+        errors={{}}
+      />,
+    );
     expect(screen.queryByRole("button", { name: "nonexistent" })).toBeNull();
   });
 });
 
 describe("TreatmentsSection", () => {
   test("renders nothing outside classic mode", () => {
-    const { container } = render(<TreatmentsSection state={state({ mode: "variation" })} dispatch={vi.fn()} errors={{}} />);
+    const { container } = render(
+      <TreatmentsSection state={state({ mode: "variation" })} dispatch={vi.fn()} errors={{}} />,
+    );
     expect(container.innerHTML).toBe("");
   });
 
@@ -590,16 +726,34 @@ describe("TreatmentsSection", () => {
     const user = userEvent.setup();
     const dispatch = vi.fn();
     const withOne = state({ treatments: [{ id: "bold", layout: "headline-top", tone: "bold" }] });
-    render(<TreatmentsSection state={withOne} dispatch={dispatch} errors={{ treatments: "list problem" }} />);
+    render(
+      <TreatmentsSection
+        state={withOne}
+        dispatch={dispatch}
+        errors={{ treatments: "list problem" }}
+      />,
+    );
 
     expect(screen.getByText("list problem")).toBeTruthy();
     await user.type(screen.getByLabelText("ID"), "x");
-    expect(dispatch).toHaveBeenCalledWith({ type: "setTreatment", index: 0, patch: { id: "boldx" } });
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "setTreatment",
+      index: 0,
+      patch: { id: "boldx" },
+    });
 
     await user.selectOptions(screen.getByLabelText("Layout"), "headline-bottom");
-    expect(dispatch).toHaveBeenCalledWith({ type: "setTreatment", index: 0, patch: { layout: "headline-bottom" } });
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "setTreatment",
+      index: 0,
+      patch: { layout: "headline-bottom" },
+    });
     await user.selectOptions(screen.getByLabelText("Tone"), "subtle");
-    expect(dispatch).toHaveBeenCalledWith({ type: "setTreatment", index: 0, patch: { tone: "subtle" } });
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "setTreatment",
+      index: 0,
+      patch: { tone: "subtle" },
+    });
 
     await user.click(screen.getByRole("button", { name: "Remove" }));
     expect(dispatch).toHaveBeenCalledWith({ type: "removeTreatment", index: 0 });
@@ -610,7 +764,11 @@ describe("TreatmentsSection", () => {
       <TreatmentsSection
         state={state({ treatments: [{ id: "", layout: "x", tone: "y" }] })}
         dispatch={vi.fn()}
-        errors={{ "treatment-0-id": "bad id", "treatment-0-layout": "bad layout", "treatment-0-tone": "bad tone" }}
+        errors={{
+          "treatment-0-id": "bad id",
+          "treatment-0-layout": "bad layout",
+          "treatment-0-tone": "bad tone",
+        }}
       />,
     );
     expect(screen.getByText("bad id")).toBeTruthy();
@@ -633,7 +791,14 @@ describe("ProductsSection", () => {
     const dispatch = vi.fn();
     const s = state();
     const key = s.products[0].key;
-    render(<ProductsSection state={s} dispatch={dispatch} errors={{ products: "need two" }} onChooseFromBin={vi.fn()} />);
+    render(
+      <ProductsSection
+        state={s}
+        dispatch={dispatch}
+        errors={{ products: "need two" }}
+        onChooseFromBin={vi.fn()}
+      />,
+    );
 
     expect(screen.getByText("need two")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Add product" }));
@@ -644,7 +809,11 @@ describe("ProductsSection", () => {
     await user.type(screen.getAllByLabelText("ID")[0], "a");
     expect(dispatch).toHaveBeenCalledWith({ type: "setProduct", key, patch: { id: "a" } });
     await user.type(screen.getAllByLabelText("Primary Colour")[0], "0");
-    expect(dispatch).toHaveBeenCalledWith({ type: "setProduct", key, patch: { primaryColor: "#1473E60" } });
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "setProduct",
+      key,
+      patch: { primaryColor: "#1473E60" },
+    });
     await user.type(screen.getAllByLabelText("Logo Path")[0], "l");
     expect(dispatch).toHaveBeenCalledWith({ type: "setProduct", key, patch: { logoPath: "l" } });
 
@@ -655,7 +824,19 @@ describe("ProductsSection", () => {
   test("clicking Edit reveals the product ID text input", async () => {
     const user = userEvent.setup();
     const dispatch = vi.fn();
-    const s = state({ products: [{ key: 1, id: "hydra", name: "Hydra", primaryColor: "#1473E6", logoPath: "", inputAsset: "", idTouched: false }] });
+    const s = state({
+      products: [
+        {
+          key: 1,
+          id: "hydra",
+          name: "Hydra",
+          primaryColor: "#1473E6",
+          logoPath: "",
+          inputAsset: "",
+          idTouched: false,
+        },
+      ],
+    });
     render(<ProductsSection state={s} dispatch={dispatch} errors={{}} onChooseFromBin={vi.fn()} />);
 
     const editBtn = screen.getByRole("button", { name: "Edit product ID" });
@@ -665,7 +846,11 @@ describe("ProductsSection", () => {
     const input = screen.getByDisplayValue("hydra");
     expect(input).toBeTruthy();
     fireEvent.change(input, { target: { value: "hydra-v2" } });
-    expect(dispatch).toHaveBeenCalledWith({ type: "setProduct", key: 1, patch: { id: "hydra-v2" } });
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "setProduct",
+      key: 1,
+      patch: { id: "hydra-v2" },
+    });
   });
 
   test("a one-product classic campaign is not warned as incomplete", () => {
@@ -751,25 +936,36 @@ describe("ProductsSection", () => {
       Array.from(html.matchAll(/\s(?:id|data-[\w-]+)="([^"]*)"/g)).map((m) => m[1]);
     const first = initialEditorState();
     const second = initialEditorState();
-    const html1 = renderToString(<ProductsSection state={first} dispatch={vi.fn()} errors={{}} onChooseFromBin={vi.fn()} />);
-    const html2 = renderToString(<ProductsSection state={second} dispatch={vi.fn()} errors={{}} onChooseFromBin={vi.fn()} />);
+    const html1 = renderToString(
+      <ProductsSection state={first} dispatch={vi.fn()} errors={{}} onChooseFromBin={vi.fn()} />,
+    );
+    const html2 = renderToString(
+      <ProductsSection state={second} dispatch={vi.fn()} errors={{}} onChooseFromBin={vi.fn()} />,
+    );
     expect(ssrFileIds(html2)).toEqual(ssrFileIds(html1));
     expect(ssrFileIds(html1)).toHaveLength(first.products.length);
 
     // The same tree keyed differently (41) must render the same ids — if an
     // id embedded its product key, moving the keys would move the ids.
     const keyed: EditorState = { ...initialEditorState(), products: [emptyProduct(41)] };
-    const html3 = renderToString(<ProductsSection state={keyed} dispatch={vi.fn()} errors={{}} onChooseFromBin={vi.fn()} />);
+    const html3 = renderToString(
+      <ProductsSection state={keyed} dispatch={vi.fn()} errors={{}} onChooseFromBin={vi.fn()} />,
+    );
     expect(ssrFileIds(html3)).toEqual(ssrFileIds(html1));
 
     const container = document.createElement("div");
     container.innerHTML = html1;
-    const { unmount } = render(<ProductsSection state={first} dispatch={vi.fn()} errors={{}} onChooseFromBin={vi.fn()} />, {
-      hydrate: true,
-      container,
-    });
+    const { unmount } = render(
+      <ProductsSection state={first} dispatch={vi.fn()} errors={{}} onChooseFromBin={vi.fn()} />,
+      {
+        hydrate: true,
+        container,
+      },
+    );
     expect(
-      Array.from(container.querySelectorAll('input[type="file"]')).map((el) => el.getAttribute("id")),
+      Array.from(container.querySelectorAll('input[type="file"]')).map((el) =>
+        el.getAttribute("id"),
+      ),
     ).toEqual(ssrFileIds(html1));
 
     // The literal probe: keys (41, 42) cannot occur in this tree's positional ids,
@@ -821,4 +1017,3 @@ describe("ErrorStrip", () => {
     expect(motion.textContent).toContain("1");
   });
 });
-

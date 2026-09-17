@@ -74,7 +74,12 @@ export function SegBar({ segments, index, maxVisited, onSelect }: SegBarProps): 
               <button
                 type="button"
                 aria-current={state === "current" ? "step" : undefined}
-                aria-label={messages.segBarSegment(position + 1, segments.length, segment.label, state)}
+                aria-label={messages.segBarSegment(
+                  position + 1,
+                  segments.length,
+                  segment.label,
+                  state,
+                )}
                 onClick={() => onSelect(position)}
                 className="group block w-full py-2.5"
               >

@@ -15,7 +15,15 @@ export { TemplateSection } from "./TemplateSection";
  * name the same thing from here rather than each spelling its own list.
  */
 /** The section ids, as a closed set — so a lookup keyed by one is total (no fallback). */
-export type SectionId = "identity" | "copy" | "products" | "treatments" | "output" | "policy" | "layout" | "template";
+export type SectionId =
+  | "identity"
+  | "copy"
+  | "products"
+  | "treatments"
+  | "output"
+  | "policy"
+  | "layout"
+  | "template";
 
 export const SECTION_TITLES: Record<SectionId, string> = {
   identity: "Identity",

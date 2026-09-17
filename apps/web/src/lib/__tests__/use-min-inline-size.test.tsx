@@ -1,7 +1,11 @@
 import { describe, test, expect, afterEach, vi } from "vitest";
 import { useRef } from "react";
 import { render, act } from "@testing-library/react";
-import { useMinInlineSize, initialMinInlineSizeSeed, PREVIEW_RAIL_MIN_INLINE_PX } from "../use-min-inline-size";
+import {
+  useMinInlineSize,
+  initialMinInlineSizeSeed,
+  PREVIEW_RAIL_MIN_INLINE_PX,
+} from "../use-min-inline-size";
 
 /**
  * happy-dom's `ResizeObserver` never invokes its callback (no real layout

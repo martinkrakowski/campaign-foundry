@@ -2,7 +2,10 @@ import type { ReactNode } from "react";
 import { AxisCard, CreativeGlyph } from "@/components/ui";
 import { formatDisplayName } from "@/components/campaign/display-names";
 import { MOTION_FPS } from "@campaignfoundry/CampaignOrchestration/motion-kinds";
-import { MIN_DURATION_SEC, MAX_DURATION_SEC } from "@campaignfoundry/CampaignOrchestration/variation-defaults";
+import {
+  MIN_DURATION_SEC,
+  MAX_DURATION_SEC,
+} from "@campaignfoundry/CampaignOrchestration/variation-defaults";
 import * as messages from "@/components/campaign/messages";
 
 export interface FormatGateResult {
@@ -58,12 +61,7 @@ export interface FormatPanelProps {
  * - Still: shows `CreativeGlyph` at rest with caption "still · one frame".
  * - Video: shows `CreativeGlyph` looping a slow ken-burns-in with caption "clip · 30 fps · 2–30 s".
  */
-export function FormatPanel({
-  format,
-  selected,
-  onToggle,
-  gate,
-}: FormatPanelProps): ReactNode {
+export function FormatPanel({ format, selected, onToggle, gate }: FormatPanelProps): ReactNode {
   const isMotion = format === "motion";
   const meta = isMotion
     ? messages.formatMotionMeta(MOTION_FPS, MIN_DURATION_SEC, MAX_DURATION_SEC)
@@ -83,9 +81,25 @@ export function FormatPanel({
             // The gate's reason is a warning, not a caption — the icon is what makes that
             // read at a glance, and this is the one place a description is set.
             descriptionIcon: (
-              <svg viewBox="0 0 12 12" className="size-3 text-warning" aria-hidden="true" focusable="false">
-                <path d="M6 1.5 11 10.5H1z" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
-                <path d="M6 5v2.2M6 8.8v.2" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+              <svg
+                viewBox="0 0 12 12"
+                className="size-3 text-warning"
+                aria-hidden="true"
+                focusable="false"
+              >
+                <path
+                  d="M6 1.5 11 10.5H1z"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.2"
+                  strokeLinejoin="round"
+                />
+                <path
+                  d="M6 5v2.2M6 8.8v.2"
+                  stroke="currentColor"
+                  strokeWidth="1.2"
+                  strokeLinecap="round"
+                />
               </svg>
             ),
           }

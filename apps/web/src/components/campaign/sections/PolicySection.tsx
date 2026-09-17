@@ -146,12 +146,21 @@ function RatioAxis({
   return (
     // The hint explains where these shapes came from, so it belongs to the group rather
     // than sitting beside it: a screen-reader user meeting the fieldset should hear it too.
-    <fieldset className="space-y-2" {...(derivedShapes ? { "aria-describedby": shapesHintId } : {})}>
+    <fieldset
+      className="space-y-2"
+      {...(derivedShapes ? { "aria-describedby": shapesHintId } : {})}
+    >
       <legend className="text-[11px] text-text-muted">
         Aspect ratios{" "}
-        {derivedShapes ? <span id={shapesHintId}>{`· ${messages.shapesFromPlatforms}`}</span> : null}
+        {derivedShapes ? (
+          <span id={shapesHintId}>{`· ${messages.shapesFromPlatforms}`}</span>
+        ) : null}
       </legend>
-      <Field label="Coverage per ratio" error={errors.perRatio} hint="Fewest creatives each aspect ratio must get">
+      <Field
+        label="Coverage per ratio"
+        error={errors.perRatio}
+        hint="Fewest creatives each aspect ratio must get"
+      >
         <Stepper
           aria-label="Coverage per ratio"
           min={0}
@@ -211,7 +220,10 @@ function RatioAxis({
  * What each background source paints, at chip size. Pictures rather than the bare
  * enum: "procedural" means nothing until you see the pattern it draws (D6).
  */
-const BACKGROUND_PREVIEW: Record<(typeof BACKGROUND_OPTIONS)[number], { readonly meta: string; readonly paint: ReactNode }> = {
+const BACKGROUND_PREVIEW: Record<
+  (typeof BACKGROUND_OPTIONS)[number],
+  { readonly meta: string; readonly paint: ReactNode }
+> = {
   procedural: {
     meta: "A pattern we draw",
     paint: (
@@ -220,7 +232,14 @@ const BACKGROUND_PREVIEW: Record<(typeof BACKGROUND_OPTIONS)[number], { readonly
           <rect width="40" height="40" fill="var(--color-surface-2)" />
           {[0, 10, 20, 30].map((x) =>
             [0, 10, 20, 30].map((y) => (
-              <circle key={`${x}-${y}`} cx={x + 5} cy={y + 5} r="2.5" fill="var(--color-brand-primary)" opacity="0.55" />
+              <circle
+                key={`${x}-${y}`}
+                cx={x + 5}
+                cy={y + 5}
+                r="2.5"
+                fill="var(--color-brand-primary)"
+                opacity="0.55"
+              />
             )),
           )}
         </svg>
@@ -256,7 +275,13 @@ const BACKGROUND_PREVIEW: Record<(typeof BACKGROUND_OPTIONS)[number], { readonly
   },
 };
 
-function HeadlineAxisToggle({ state, dispatch }: { state: EditorState; dispatch: Dispatch<EditorAction> }) {
+function HeadlineAxisToggle({
+  state,
+  dispatch,
+}: {
+  state: EditorState;
+  dispatch: Dispatch<EditorAction>;
+}) {
   const poolLoaded = state.pool !== null;
   const approvedCount = approvedHeadlines(state.pool);
   const hasApproved = approvedCount > 0;
@@ -282,12 +307,27 @@ function HeadlineAxisToggle({ state, dispatch }: { state: EditorState; dispatch:
   );
 }
 
-export function PolicySection({ state, dispatch, errors, compact = false }: { state: EditorState; dispatch: Dispatch<EditorAction>; errors: FieldErrors; compact?: boolean }) {
+export function PolicySection({
+  state,
+  dispatch,
+  errors,
+  compact = false,
+}: {
+  state: EditorState;
+  dispatch: Dispatch<EditorAction>;
+  errors: FieldErrors;
+  compact?: boolean;
+}) {
   if (state.mode !== "variation") return null;
   const axisMax = axisProductSize(state);
 
   return (
-    <SectionShell id="policy" title="4 · Variation Policy" errorCount={Object.keys(errors).length} compact={compact}>
+    <SectionShell
+      id="policy"
+      title="4 · Variation Policy"
+      errorCount={Object.keys(errors).length}
+      compact={compact}
+    >
       <div className="space-y-6">
         <div className="space-y-4">
           <Field
@@ -311,7 +351,9 @@ export function PolicySection({ state, dispatch, errors, compact = false }: { st
                   {messages.countReadout(parsePolicyInteger(state.variation.count) ?? 0, axisMax)}
                 </span>
               }
-              onChange={(value) => dispatch({ type: "setVariation", field: "count", value: String(value) })}
+              onChange={(value) =>
+                dispatch({ type: "setVariation", field: "count", value: String(value) })
+              }
             />
             {/* L2.2: the clamp is not silent. It says the number moved and why, once —
                 the next thing the user does to the count takes it down. */}
@@ -385,7 +427,11 @@ export function PolicySection({ state, dispatch, errors, compact = false }: { st
               onChange={(value) => dispatch({ type: "setVariation", field: "minDistance", value })}
             />
           </Field>
-          <Field label="Seed" error={errors.seed} hint="Fixes the draw, so the same brief plans the same creatives">
+          <Field
+            label="Seed"
+            error={errors.seed}
+            hint="Fixes the draw, so the same brief plans the same creatives"
+          >
             {(control) => (
               <div className="flex items-center gap-2">
                 <Input
@@ -397,7 +443,9 @@ export function PolicySection({ state, dispatch, errors, compact = false }: { st
                   aria-label="Seed"
                   value={state.variation.seed}
                   invalid={Boolean(errors.seed)}
-                  onChange={(e) => dispatch({ type: "setVariation", field: "seed", value: e.target.value })}
+                  onChange={(e) =>
+                    dispatch({ type: "setVariation", field: "seed", value: e.target.value })
+                  }
                 />
                 <Button
                   variant="secondary"
@@ -407,7 +455,10 @@ export function PolicySection({ state, dispatch, errors, compact = false }: { st
                     dispatch({
                       type: "setVariation",
                       field: "seed",
-                      value: state.variation.seed.trim() === "" ? String(Math.floor(Math.random() * 0xffffffff)) : "",
+                      value:
+                        state.variation.seed.trim() === ""
+                          ? String(Math.floor(Math.random() * 0xffffffff))
+                          : "",
                     })
                   }
                 >
@@ -417,60 +468,61 @@ export function PolicySection({ state, dispatch, errors, compact = false }: { st
             )}
           </Field>
 
-        <div className={compact ? "space-y-4" : "grid grid-cols-1 gap-4 sm:grid-cols-2"}>
-          <Field
-            label="Coverage per product"
-            error={errors.perProduct}
-            hint="Fewest creatives each product must get"
-          >
-            <Stepper
-              aria-label="Coverage per product"
-              min={0}
-              max={Math.max(1, parsePolicyInteger(state.variation.count) ?? 1)}
-              value={state.variation.perProduct}
-              invalid={Boolean(errors.perProduct)}
-              allowUnset
-              unsetLabel="No floor"
-              onChange={(value) => dispatch({ type: "setVariation", field: "perProduct", value })}
-            />
-          </Field>
-        </div>
-        <fieldset className="space-y-2">
-          <legend className="text-[11px] text-text-muted">Background Source</legend>
-          <div className="space-y-2">
-            {BACKGROUND_OPTIONS.map((option) => (
-              <PreviewCard
-                key={option}
-                value={option}
-                selected={state.variation.background.includes(option)}
-                meta={BACKGROUND_PREVIEW[option].meta}
-                onToggle={(value: string) =>
-                  dispatch({ type: "toggleBackground", value: value as (typeof BACKGROUND_OPTIONS)[number] })
-                }
-              >
-                {BACKGROUND_PREVIEW[option].paint}
-              </PreviewCard>
-            ))}
-          </div>
-          {errors.background ? <FieldLine tone="error">{errors.background}</FieldLine> : null}
-        </fieldset>
-        <fieldset className="space-y-2">
-          <legend className="text-[11px] text-text-muted">Palette Shift</legend>
-          <div className="flex flex-wrap gap-2">
-            {PALETTE_SHIFT_OPTIONS.map((option) => (
-              <SwatchChip
-                key={option}
-                value={option}
-                selected={state.variation.paletteShift.includes(option)}
-                baseColor={state.products[0]?.primaryColor ?? "#1473E6"}
-                onToggle={(value: number) => dispatch({ type: "togglePalette", value })}
+          <div className={compact ? "space-y-4" : "grid grid-cols-1 gap-4 sm:grid-cols-2"}>
+            <Field
+              label="Coverage per product"
+              error={errors.perProduct}
+              hint="Fewest creatives each product must get"
+            >
+              <Stepper
+                aria-label="Coverage per product"
+                min={0}
+                max={Math.max(1, parsePolicyInteger(state.variation.count) ?? 1)}
+                value={state.variation.perProduct}
+                invalid={Boolean(errors.perProduct)}
+                allowUnset
+                unsetLabel="No floor"
+                onChange={(value) => dispatch({ type: "setVariation", field: "perProduct", value })}
               />
-            ))}
+            </Field>
           </div>
-          {errors.paletteShift ? (
-            <FieldLine tone="error">{errors.paletteShift}</FieldLine>
-          ) : null}
-        </fieldset>
+          <fieldset className="space-y-2">
+            <legend className="text-[11px] text-text-muted">Background Source</legend>
+            <div className="space-y-2">
+              {BACKGROUND_OPTIONS.map((option) => (
+                <PreviewCard
+                  key={option}
+                  value={option}
+                  selected={state.variation.background.includes(option)}
+                  meta={BACKGROUND_PREVIEW[option].meta}
+                  onToggle={(value: string) =>
+                    dispatch({
+                      type: "toggleBackground",
+                      value: value as (typeof BACKGROUND_OPTIONS)[number],
+                    })
+                  }
+                >
+                  {BACKGROUND_PREVIEW[option].paint}
+                </PreviewCard>
+              ))}
+            </div>
+            {errors.background ? <FieldLine tone="error">{errors.background}</FieldLine> : null}
+          </fieldset>
+          <fieldset className="space-y-2">
+            <legend className="text-[11px] text-text-muted">Palette Shift</legend>
+            <div className="flex flex-wrap gap-2">
+              {PALETTE_SHIFT_OPTIONS.map((option) => (
+                <SwatchChip
+                  key={option}
+                  value={option}
+                  selected={state.variation.paletteShift.includes(option)}
+                  baseColor={state.products[0]?.primaryColor ?? "#1473E6"}
+                  onToggle={(value: number) => dispatch({ type: "togglePalette", value })}
+                />
+              ))}
+            </div>
+            {errors.paletteShift ? <FieldLine tone="error">{errors.paletteShift}</FieldLine> : null}
+          </fieldset>
           <HeadlineAxisToggle state={state} dispatch={dispatch} />
         </Disclosure>
       </div>

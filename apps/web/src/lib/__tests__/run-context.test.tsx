@@ -6,12 +6,22 @@ import { assetIdentity } from "@campaignfoundry/CampaignOrchestration";
 import { BRIEF_SCHEMA_VERSION } from "@campaignfoundry/CampaignOrchestration/brief-schema-version";
 import { DEFAULT_CAMPAIGN_TYPE } from "@campaignfoundry/CampaignOrchestration/campaign-types";
 import { templateFromCanonical } from "@campaignfoundry/CampaignOrchestration/brief-template";
-import { RunProvider, useRun, assetKey, assetCanvas, assetLabel, fetchPersistedRun, isStoredBrief, type Asset } from "@/lib/run-context";
+import {
+  RunProvider,
+  useRun,
+  assetKey,
+  assetCanvas,
+  assetLabel,
+  fetchPersistedRun,
+  isStoredBrief,
+  type Asset,
+} from "@/lib/run-context";
 import { json, jobOk, mockPipelineApi, EMPTY_REPORT, renderWithRun } from "@/__tests__/helpers";
 import { Header } from "@/components/shell/Header";
 import { CommandBar } from "@/components/shell/CommandBar";
 
-const wrapper = ({ children }: { children: ReactNode }) => createElement(RunProvider, null, children);
+const wrapper = ({ children }: { children: ReactNode }) =>
+  createElement(RunProvider, null, children);
 const setup = () => renderHook(() => useRun(), { wrapper });
 
 const asset = (over: Partial<Asset> = {}): Asset => ({
@@ -33,7 +43,9 @@ describe("useRun", () => {
   });
 
   test("assetKey combines product, ratio and treatment", () => {
-    expect(assetKey(asset({ productId: "p", aspectRatio: "9:16", treatment: "t" }))).toBe("p/9:16/t");
+    expect(assetKey(asset({ productId: "p", aspectRatio: "9:16", treatment: "t" }))).toBe(
+      "p/9:16/t",
+    );
   });
 
   test("assetCanvas names the canvas a row renders on; a corrupt row degrades to the empty key", () => {
@@ -46,7 +58,12 @@ describe("useRun", () => {
 
   test("web assetKey and domain assetIdentity share classic and variation fixtures", () => {
     const classic = asset({ productId: "p", aspectRatio: "9:16", treatment: "t" });
-    const display = asset({ productId: "p", aspectRatio: undefined, size: "728x90", treatment: "t" });
+    const display = asset({
+      productId: "p",
+      aspectRatio: undefined,
+      size: "728x90",
+      treatment: "t",
+    });
     const variation = asset({
       productId: "p",
       aspectRatio: "1:1",
@@ -63,12 +80,21 @@ describe("useRun", () => {
   });
 
   test("assetLabel includes v<index> for variation cells", () => {
-    expect(assetLabel(asset({ productId: "p", aspectRatio: "9:16", treatment: "t" }))).toBe("p @ 9:16 · t");
-    expect(assetLabel(asset({ productId: "p", aspectRatio: undefined, size: "728x90", treatment: "t" }))).toBe(
-      "p @ 728x90 · t",
+    expect(assetLabel(asset({ productId: "p", aspectRatio: "9:16", treatment: "t" }))).toBe(
+      "p @ 9:16 · t",
     );
     expect(
-      assetLabel(asset({ productId: "hydra-bottle", aspectRatio: "1:1", treatment: "headline-top-bold", variantIndex: 4 })),
+      assetLabel(asset({ productId: "p", aspectRatio: undefined, size: "728x90", treatment: "t" })),
+    ).toBe("p @ 728x90 · t");
+    expect(
+      assetLabel(
+        asset({
+          productId: "hydra-bottle",
+          aspectRatio: "1:1",
+          treatment: "headline-top-bold",
+          variantIndex: 4,
+        }),
+      ),
     ).toBe("hydra-bottle @ 1:1 · v4 · headline-top-bold");
   });
 });
@@ -127,7 +153,8 @@ describe("fetchPersistedRun — could not ask vs there is nothing (D83/F6)", () 
 
   test("a 200 carrying the campaign's own run resolves with it", async () => {
     mockPipelineApi({
-      result: () => json({ halted: false, assets: [asset()], log: { entries: [], campaignId: "seed" } }),
+      result: () =>
+        json({ halted: false, assets: [asset()], log: { entries: [], campaignId: "seed" } }),
     });
     const d = await fetchPersistedRun("seed");
     expect(d?.assets).toHaveLength(1);
@@ -136,7 +163,9 @@ describe("fetchPersistedRun — could not ask vs there is nothing (D83/F6)", () 
 
 describe("RunProvider — execute", () => {
   test("posts the brief and populates assets", async () => {
-    mockPipelineApi({ job: () => jobOk({ halted: false, assets: [asset()], log: { entries: [] } }) });
+    mockPipelineApi({
+      job: () => jobOk({ halted: false, assets: [asset()], log: { entries: [] } }),
+    });
     const { result } = setup();
     await act(async () => {
       await result.current.execute();
@@ -153,7 +182,12 @@ describe("RunProvider — execute", () => {
         bodies.push(JSON.parse(init.body as string));
         return json({ jobId: "job-1" }, 202);
       },
-      job: () => jobOk({ halted: false, assets: [asset()], log: { entries: [], campaignId: "on-screen-draft" } }),
+      job: () =>
+        jobOk({
+          halted: false,
+          assets: [asset()],
+          log: { entries: [], campaignId: "on-screen-draft" },
+        }),
     });
     const { result } = setup();
     // The shell holds one brief; the editor hands Generate the on-screen draft — a
@@ -173,7 +207,10 @@ describe("RunProvider — execute", () => {
     await act(async () => {
       await result.current.execute(onScreenDraft);
     });
-    expect(bodies[0]).toMatchObject({ id: "on-screen-draft", campaignMessage: "the draft as typed" });
+    expect(bodies[0]).toMatchObject({
+      id: "on-screen-draft",
+      campaignMessage: "the draft as typed",
+    });
     // Run-without-write commits nothing: the shell still holds what it held.
     expect(result.current.brief.id).toBe("summer-hydration-2026");
     expect(result.current.assets).toHaveLength(1);
@@ -265,7 +302,9 @@ describe("RunProvider — review decisions", () => {
     const { result } = setup();
     act(() => result.current.decide("alpha/1:1/default", "approved"));
     await waitFor(() => {
-      expect(JSON.parse(localStorage.getItem("cf:decisions") ?? "{}")).toEqual({ "alpha/1:1/default": "approved" });
+      expect(JSON.parse(localStorage.getItem("cf:decisions") ?? "{}")).toEqual({
+        "alpha/1:1/default": "approved",
+      });
     });
   });
 
@@ -280,7 +319,9 @@ describe("RunProvider — review decisions", () => {
   });
 
   test("regenerateRejected is a no-op when a run exists but nothing is rejected", async () => {
-    mockPipelineApi({ job: () => jobOk({ halted: false, assets: [asset()], log: { entries: [] } }) });
+    mockPipelineApi({
+      job: () => jobOk({ halted: false, assets: [asset()], log: { entries: [] } }),
+    });
     const { result } = setup();
     await act(async () => {
       await result.current.execute();
@@ -293,7 +334,10 @@ describe("RunProvider — review decisions", () => {
   });
 
   test("regenerateRejected re-rolls rejected cells and returns them to review", async () => {
-    mockPipelineApi({ job: () => jobOk({ halted: false, assets: [asset({ complianceScore: 0.9 })], log: { entries: [] } }) });
+    mockPipelineApi({
+      job: () =>
+        jobOk({ halted: false, assets: [asset({ complianceScore: 0.9 })], log: { entries: [] } }),
+    });
     const { result } = setup();
     await act(async () => {
       await result.current.execute();
@@ -348,21 +392,36 @@ describe("RunProvider — review decisions", () => {
     });
     mockPipelineApi({
       post: (_url, init) => {
-        const body = JSON.parse(init.body as string) as { regenerateOnly?: Array<{ attempt?: number }> };
+        const body = JSON.parse(init.body as string) as {
+          regenerateOnly?: Array<{ attempt?: number }>;
+        };
         bodies.push(body);
-        if (body.regenerateOnly?.[0]?.attempt !== undefined) servedAttempt = body.regenerateOnly[0].attempt;
+        if (body.regenerateOnly?.[0]?.attempt !== undefined)
+          servedAttempt = body.regenerateOnly[0].attempt;
         return json({ jobId: "job-1" }, 202);
       },
       job: () =>
         jobOk({
           halted: false,
-          assets: [{ ...variant, attempt: servedAttempt, treatment: servedAttempt === 0 ? variant.treatment : "headline-bottom-bold" }],
+          assets: [
+            {
+              ...variant,
+              attempt: servedAttempt,
+              treatment: servedAttempt === 0 ? variant.treatment : "headline-bottom-bold",
+            },
+          ],
           log: { entries: [] },
         }),
     });
     const { result } = setup();
     // a variation run can only exist under a randomized brief
-    act(() => result.current.setBrief({ ...result.current.brief, mode: "variation", variation: { count: 1 } } as never));
+    act(() =>
+      result.current.setBrief({
+        ...result.current.brief,
+        mode: "variation",
+        variation: { count: 1 },
+      } as never),
+    );
     await act(async () => {
       await result.current.execute();
     });
@@ -406,7 +465,13 @@ describe("RunProvider — review decisions", () => {
     });
     const { result } = setup();
     // a variation run can only exist under a randomized brief
-    act(() => result.current.setBrief({ ...result.current.brief, mode: "variation", variation: { count: 1 } } as never));
+    act(() =>
+      result.current.setBrief({
+        ...result.current.brief,
+        mode: "variation",
+        variation: { count: 1 },
+      } as never),
+    );
     await act(async () => {
       await result.current.execute();
     });
@@ -447,11 +512,18 @@ describe("RunProvider — review decisions", () => {
         bodies.push(JSON.parse(init.body as string));
         return json({ jobId: "job-1" }, 202);
       },
-      job: () => jobOk({ halted: false, assets: [{ ...variant, attempt: 4 }], log: { entries: [] } }),
+      job: () =>
+        jobOk({ halted: false, assets: [{ ...variant, attempt: 4 }], log: { entries: [] } }),
     });
     const { result } = setup();
     // a variation run can only exist under a randomized brief
-    act(() => result.current.setBrief({ ...result.current.brief, mode: "variation", variation: { count: 1 } } as never));
+    act(() =>
+      result.current.setBrief({
+        ...result.current.brief,
+        mode: "variation",
+        variation: { count: 1 },
+      } as never),
+    );
     await waitFor(() => expect(result.current.assets).toHaveLength(1));
     act(() => result.current.decide("alpha/v2", "rejected"));
     await act(async () => {
@@ -488,7 +560,11 @@ describe("RunProvider — result-scoped actions key off the brief the run ran (R
         return json({ jobId: "job-1" }, 202);
       },
       job: () =>
-        jobOk({ halted: false, assets: [asset({ complianceScore: 0.9 })], log: { entries: [], campaignId: "on-screen-draft" } }),
+        jobOk({
+          halted: false,
+          assets: [asset({ complianceScore: 0.9 })],
+          log: { entries: [], campaignId: "on-screen-draft" },
+        }),
     });
     const { result } = setup();
     await act(async () => {
@@ -500,8 +576,14 @@ describe("RunProvider — result-scoped actions key off the brief the run ran (R
     });
     // The money: the re-roll goes out under the brief that produced the assets —
     // the draft — never the shell's untouched brief.
-    const body = bodies[1] as { brief: { id: string; campaignMessage: string }; regenerateOnly: unknown[] };
-    expect(body.brief).toMatchObject({ id: "on-screen-draft", campaignMessage: "the draft as typed" });
+    const body = bodies[1] as {
+      brief: { id: string; campaignMessage: string };
+      regenerateOnly: unknown[];
+    };
+    expect(body.brief).toMatchObject({
+      id: "on-screen-draft",
+      campaignMessage: "the draft as typed",
+    });
     expect(body.regenerateOnly).toHaveLength(1);
     expect(result.current.assets[0].complianceScore).toBe(0.9);
     expect(result.current.decisions["alpha/1:1/default"]).toBeUndefined(); // back to review
@@ -514,7 +596,8 @@ describe("RunProvider — result-scoped actions key off the brief the run ran (R
         bodies.push(JSON.parse(init.body as string));
         return json({ jobId: "job-1" }, 202);
       },
-      job: () => jobOk({ halted: false, assets: [asset({ complianceScore: 0.9 })], log: { entries: [] } }),
+      job: () =>
+        jobOk({ halted: false, assets: [asset({ complianceScore: 0.9 })], log: { entries: [] } }),
     });
     const { result } = setup();
     await act(async () => {
@@ -538,7 +621,9 @@ describe("RunProvider — result-scoped actions key off the brief the run ran (R
       job: () =>
         jobOk({
           halted: false,
-          assets: [asset({ variantIndex: 0, outputPath: "alpha/1x1/v0.png", complianceScore: 0.9 })],
+          assets: [
+            asset({ variantIndex: 0, outputPath: "alpha/1x1/v0.png", complianceScore: 0.9 }),
+          ],
           log: { entries: [], campaignId: "on-screen-draft" },
         }),
     });
@@ -546,7 +631,11 @@ describe("RunProvider — result-scoped actions key off the brief the run ran (R
     // The shell brief is classic; the draft is a randomized campaign. The run's mode
     // guard must ask the brief the run ran — the draft — not the shell's (R6).
     await act(async () => {
-      await result.current.execute({ ...onScreenDraft, mode: "variation", variation: { count: 1 } } as never);
+      await result.current.execute({
+        ...onScreenDraft,
+        mode: "variation",
+        variation: { count: 1 },
+      } as never);
     });
     expect(result.current.runMode).toBe("variation");
     expect(result.current.rerollBlockedReason).toBeNull();
@@ -567,7 +656,8 @@ describe("RunProvider — result-scoped actions key off the brief the run ran (R
         if (body.regenerateOnly) return new Promise<Response>((res) => (resolveRegen = res));
         return json({ jobId: "job-1" }, 202);
       },
-      job: () => jobOk({ halted: false, assets: [asset({ complianceScore: 0.1 })], log: { entries: [] } }),
+      job: () =>
+        jobOk({ halted: false, assets: [asset({ complianceScore: 0.1 })], log: { entries: [] } }),
     });
     const { result } = setup();
     await act(async () => {
@@ -612,7 +702,15 @@ describe("RunProvider — briefApplied", () => {
     // `blankBrief()` (editor-state.ts): a blank id is the marker for "no campaign" —
     // nothing can be saved, listed or run under it, so nothing has been applied.
     act(() => {
-      result.current.setBrief({ schemaVersion: BRIEF_SCHEMA_VERSION, template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE), id: "", targetRegion: "", targetAudience: "", campaignMessage: "", products: [] });
+      result.current.setBrief({
+        schemaVersion: BRIEF_SCHEMA_VERSION,
+        template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+        id: "",
+        targetRegion: "",
+        targetAudience: "",
+        campaignMessage: "",
+        products: [],
+      });
     });
     expect(result.current.briefApplied).toBe(false);
   });
@@ -701,7 +799,12 @@ describe("RunProvider — brief picker & persistence", () => {
 
   test("setBrief keeps the current run when the id already matches", async () => {
     mockPipelineApi({
-      job: () => jobOk({ halted: false, assets: [asset()], log: { entries: [], campaignId: "summer-hydration-2026" } }),
+      job: () =>
+        jobOk({
+          halted: false,
+          assets: [asset()],
+          log: { entries: [], campaignId: "summer-hydration-2026" },
+        }),
     });
     const { result } = setup();
     await act(async () => {
@@ -730,7 +833,10 @@ describe("RunProvider — brief picker & persistence", () => {
   });
 
   test("restores persisted decisions on mount, filtering invalid values", async () => {
-    localStorage.setItem("cf:decisions", JSON.stringify({ "alpha/1:1/default": "approved", bad: "bogus" }));
+    localStorage.setItem(
+      "cf:decisions",
+      JSON.stringify({ "alpha/1:1/default": "approved", bad: "bogus" }),
+    );
     const { result } = setup();
     await waitFor(() => expect(result.current.decisions["alpha/1:1/default"]).toBe("approved"));
     expect(result.current.decisions.bad).toBeUndefined();
@@ -748,7 +854,9 @@ describe("RunProvider — brief picker & persistence", () => {
         products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: "a.png" }],
       }),
     );
-    mockPipelineApi({ report: { halted: false, assets: [asset()], log: { entries: [], campaignId: "stored" } } });
+    mockPipelineApi({
+      report: { halted: false, assets: [asset()], log: { entries: [], campaignId: "stored" } },
+    });
     const { result } = setup();
     await waitFor(() => expect(result.current.assets).toHaveLength(1));
   });
@@ -757,7 +865,11 @@ describe("RunProvider — brief picker & persistence", () => {
     mockPipelineApi({
       result: (url) =>
         url.includes("campaignId=other")
-          ? json({ halted: false, assets: [asset({ productId: "beta" })], log: { entries: [], campaignId: "other" } })
+          ? json({
+              halted: false,
+              assets: [asset({ productId: "beta" })],
+              log: { entries: [], campaignId: "other" },
+            })
           : json(EMPTY_REPORT),
     });
     const { result } = setup();
@@ -845,7 +957,9 @@ describe("RunProvider — late results after a switch", () => {
     mockPipelineApi({
       post: (_url, init) => {
         const body = JSON.parse(init.body as string) as { regenerateOnly?: unknown };
-        return body.regenerateOnly ? new Response("boom", { status: 500 }) : json({ jobId: "job-1" }, 202);
+        return body.regenerateOnly
+          ? new Response("boom", { status: 500 })
+          : json({ jobId: "job-1" }, 202);
       },
       job: () => jobOk({ halted: false, assets: [asset()], log: { entries: [] } }),
     });
@@ -897,7 +1011,8 @@ describe("RunProvider — late results after a switch", () => {
         if (body.regenerateOnly) return new Promise<Response>((res) => (resolveRegen = res));
         return json({ jobId: "job-1" }, 202);
       },
-      job: () => jobOk({ halted: false, assets: [asset({ complianceScore: 0.1 })], log: { entries: [] } }),
+      job: () =>
+        jobOk({ halted: false, assets: [asset({ complianceScore: 0.1 })], log: { entries: [] } }),
     });
     const { result } = setup();
     await act(async () => {
@@ -919,7 +1034,8 @@ describe("RunProvider — late results after a switch", () => {
 });
 
 describe("RunProvider — log-only and superseded restores", () => {
-  const haltedRun = (id: string) => json({ halted: true, assets: [], log: { entries: [], campaignId: id } });
+  const haltedRun = (id: string) =>
+    json({ halted: true, assets: [], log: { entries: [], campaignId: id } });
 
   test("restores a halted, log-only run on mount (no assets, no version bump)", async () => {
     localStorage.setItem(
@@ -933,7 +1049,9 @@ describe("RunProvider — log-only and superseded restores", () => {
         products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: "a.png" }],
       }),
     );
-    mockPipelineApi({ report: { halted: true, assets: [], log: { entries: [], campaignId: "halted" } } });
+    mockPipelineApi({
+      report: { halted: true, assets: [], log: { entries: [], campaignId: "halted" } },
+    });
     const { result } = setup();
     await waitFor(() => expect(result.current.halted).toBe(true));
     expect(result.current.assets).toHaveLength(0);
@@ -1040,7 +1158,8 @@ describe("RunProvider — log-only and superseded restores", () => {
     const resolvers: Array<(r: Response) => void> = [];
     mockPipelineApi({
       result: (url) => {
-        if (url.includes("campaignId=first")) return new Promise<Response>((res) => resolvers.push(res));
+        if (url.includes("campaignId=first"))
+          return new Promise<Response>((res) => resolvers.push(res));
         return json(EMPTY_REPORT);
       },
     });
@@ -1060,7 +1179,9 @@ describe("RunProvider — log-only and superseded restores", () => {
     act(() => result.current.setBrief(mk("first")));
     act(() => result.current.setBrief(mk("second"))); // supersedes 'first' before its fetch resolves
     await act(async () => {
-      resolvers.forEach((r) => r(json({ halted: false, assets: [asset()], log: { entries: [], campaignId: "first" } })));
+      resolvers.forEach((r) =>
+        r(json({ halted: false, assets: [asset()], log: { entries: [], campaignId: "first" } })),
+      );
       await Promise.resolve();
     });
     expect(result.current.brief.id).toBe("second");
@@ -1098,7 +1219,10 @@ describe("RunProvider — job polling", () => {
   });
 
   test("surfaces a failed job's error", async () => {
-    mockPipelineApi({ job: () => json({ status: "failed", done: 0, total: 0, log: null, error: "need two products" }) });
+    mockPipelineApi({
+      job: () =>
+        json({ status: "failed", done: 0, total: 0, log: null, error: "need two products" }),
+    });
     const { result } = setup();
     await act(async () => {
       await result.current.execute();
@@ -1134,7 +1258,11 @@ describe("RunProvider — job polling", () => {
       job: () => json({ error: "not found" }, 404),
       result: (url) =>
         posted && String(url).includes("campaignId=summer-hydration-2026")
-          ? json({ halted: false, assets: [asset()], log: { entries: [], campaignId: "summer-hydration-2026" } })
+          ? json({
+              halted: false,
+              assets: [asset()],
+              log: { entries: [], campaignId: "summer-hydration-2026" },
+            })
           : json(EMPTY_REPORT),
     });
     const { result } = setup();
@@ -1160,7 +1288,11 @@ describe("RunProvider — job polling", () => {
       job: () => json({ error: "not found" }, 404),
       result: () =>
         posted
-          ? json({ halted: true, assets: [], log: { entries: [], campaignId: "summer-hydration-2026" } })
+          ? json({
+              halted: true,
+              assets: [],
+              log: { entries: [], campaignId: "summer-hydration-2026" },
+            })
           : json(EMPTY_REPORT),
     });
     const { result } = setup();
@@ -1197,7 +1329,8 @@ describe("RunProvider — job polling", () => {
   test("never adopts another brief's persisted report after a lost job", async () => {
     mockPipelineApi({
       job: () => json({ error: "not found" }, 404),
-      result: () => json({ halted: false, assets: [asset()], log: { entries: [], campaignId: "other" } }),
+      result: () =>
+        json({ halted: false, assets: [asset()], log: { entries: [], campaignId: "other" } }),
     });
     const { result } = setup();
     await act(async () => {
@@ -1239,7 +1372,8 @@ describe("RunProvider — job polling", () => {
     // An API that predates the handle: there is nothing to adopt, so the press says
     // why it did not start a run instead of pretending one is underway.
     mockPipelineApi({
-      post: () => json({ error: 'A run for campaign "summer-hydration-2026" is already in progress.' }, 409),
+      post: () =>
+        json({ error: 'A run for campaign "summer-hydration-2026" is already in progress.' }, 409),
     });
     const { result } = setup();
     await act(async () => {
@@ -1289,7 +1423,9 @@ describe("RunProvider — job polling", () => {
       }),
     );
     await act(async () => {
-      resolveJob(jobOk({ halted: false, assets: [asset({ complianceScore: 0.9 })], log: { entries: [] } }));
+      resolveJob(
+        jobOk({ halted: false, assets: [asset({ complianceScore: 0.9 })], log: { entries: [] } }),
+      );
       await regen;
     });
     expect(result.current.assets).toHaveLength(0); // the switched brief has no run
@@ -1298,7 +1434,12 @@ describe("RunProvider — job polling", () => {
 
   test("a lost re-roll leaves the grid and the rejected decisions untouched", async () => {
     mockPipelineApi({
-      job: () => jobOk({ halted: false, assets: [asset()], log: { entries: [], campaignId: "summer-hydration-2026" } }),
+      job: () =>
+        jobOk({
+          halted: false,
+          assets: [asset()],
+          log: { entries: [], campaignId: "summer-hydration-2026" },
+        }),
     });
     const { result } = setup();
     await act(async () => {
@@ -1415,7 +1556,9 @@ describe("RunProvider — job polling", () => {
   test("a brief switch aborts the poller between polls", async () => {
     vi.useFakeTimers();
     let polls = 0;
-    mockPipelineApi({ job: () => (polls += 1, json({ status: "running", done: 0, total: 0, log: null })) });
+    mockPipelineApi({
+      job: () => ((polls += 1), json({ status: "running", done: 0, total: 0, log: null })),
+    });
     const { result } = setup();
     let exec!: Promise<void>;
     await act(async () => {
@@ -1519,7 +1662,11 @@ describe("RunProvider — job polling", () => {
     );
     await act(async () => {
       resolveResult(
-        json({ halted: false, assets: [asset()], log: { entries: [], campaignId: "summer-hydration-2026" } }),
+        json({
+          halted: false,
+          assets: [asset()],
+          log: { entries: [], campaignId: "summer-hydration-2026" },
+        }),
       );
       await exec;
     });
@@ -1530,7 +1677,9 @@ describe("RunProvider — job polling", () => {
   test("unmounting the provider aborts an in-flight poller", async () => {
     vi.useFakeTimers();
     let polls = 0;
-    mockPipelineApi({ job: () => (polls += 1, json({ status: "running", done: 0, total: 0, log: null })) });
+    mockPipelineApi({
+      job: () => ((polls += 1), json({ status: "running", done: 0, total: 0, log: null })),
+    });
     const { result, unmount } = setup();
     let exec!: Promise<void>;
     await act(async () => {
@@ -1632,7 +1781,10 @@ describe("RunProvider — estimate and packaging", () => {
     await act(async () => {
       await result.current.packageSelected(["linkedin"]);
     });
-    expect(result.current.packages.map((p) => p.platformId).sort()).toEqual(["instagram-feed", "linkedin"]);
+    expect(result.current.packages.map((p) => p.platformId).sort()).toEqual([
+      "instagram-feed",
+      "linkedin",
+    ]);
     await act(async () => {
       await result.current.packageSelected(["x"]);
     });
@@ -1834,7 +1986,8 @@ describe("RunProvider — estimate and packaging", () => {
       listing = result.current.loadPackages();
     });
     await waitFor(() => expect(resolveList).toEqual(expect.any(Function)));
-    const signal = (vi.mocked(globalThis.fetch).mock.calls.at(-1)?.[1] as RequestInit | undefined)?.signal;
+    const signal = (vi.mocked(globalThis.fetch).mock.calls.at(-1)?.[1] as RequestInit | undefined)
+      ?.signal;
     expect(signal?.aborted).toBe(false);
     act(() => result.current.setBrief(otherBrief));
     expect(signal?.aborted).toBe(true);
@@ -1897,7 +2050,12 @@ describe("RunProvider — estimate and packaging", () => {
   test("packageSelected keys the package POST off the campaign the run ran under (R6)", async () => {
     const bodies: unknown[] = [];
     mockPipelineApi({
-      job: () => jobOk({ halted: false, assets: [asset()], log: { entries: [], campaignId: "on-screen-draft" } }),
+      job: () =>
+        jobOk({
+          halted: false,
+          assets: [asset()],
+          log: { entries: [], campaignId: "on-screen-draft" },
+        }),
       packagePost: (_url, init) => {
         bodies.push(JSON.parse(String(init.body)));
         return json({ platforms: [] });
@@ -1912,13 +2070,21 @@ describe("RunProvider — estimate and packaging", () => {
     });
     // The report the server reads is keyed by the campaign id, so the POST must name
     // the draft's id — the shell's brief would package (or miss) another campaign.
-    expect(bodies[0]).toMatchObject({ campaignId: "on-screen-draft", platforms: ["instagram-feed"] });
+    expect(bodies[0]).toMatchObject({
+      campaignId: "on-screen-draft",
+      platforms: ["instagram-feed"],
+    });
   });
 
   test("loadPackages lists the packages of the campaign the run ran under (R6)", async () => {
     const urls: string[] = [];
     mockPipelineApi({
-      job: () => jobOk({ halted: false, assets: [asset()], log: { entries: [], campaignId: "on-screen-draft" } }),
+      job: () =>
+        jobOk({
+          halted: false,
+          assets: [asset()],
+          log: { entries: [], campaignId: "on-screen-draft" },
+        }),
       packages: (url) => {
         urls.push(url);
         return json({ platforms: [] }, 404);
@@ -1934,132 +2100,145 @@ describe("RunProvider — estimate and packaging", () => {
     expect(urls.some((u) => u.includes("/campaigns/packages/on-screen-draft"))).toBe(true);
   });
 
-describe("re-roll across a mode change", () => {
-  /** A randomized brief on file — the mismatch scenarios restore a run under it. */
-  const variationStoredBrief = {
-    id: "camp",
-    template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
-    mode: "variation",
-    variation: { count: 1 },
-    targetRegion: "DE",
-    targetAudience: "a",
-    campaignMessage: "Hi",
-    products: [{ id: "alpha", name: "Alpha", primaryColor: "#1473E6", logoPath: "a.png" }],
-  };
+  describe("re-roll across a mode change", () => {
+    /** A randomized brief on file — the mismatch scenarios restore a run under it. */
+    const variationStoredBrief = {
+      id: "camp",
+      template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+      mode: "variation",
+      variation: { count: 1 },
+      targetRegion: "DE",
+      targetAudience: "a",
+      campaignMessage: "Hi",
+      products: [{ id: "alpha", name: "Alpha", primaryColor: "#1473E6", logoPath: "a.png" }],
+    };
 
-  test("refuses to re-roll a classic run recorded under a randomized brief, and says why", async () => {
-    const bodies: unknown[] = [];
-    mockPipelineApi({
-      post: (_url, init) => {
-        bodies.push(JSON.parse(init.body as string));
-        return json({ jobId: "job-1" }, 202);
-      },
-      report: { halted: false, assets: [asset()], log: { entries: [], campaignId: "camp" } },
+    test("refuses to re-roll a classic run recorded under a randomized brief, and says why", async () => {
+      const bodies: unknown[] = [];
+      mockPipelineApi({
+        post: (_url, init) => {
+          bodies.push(JSON.parse(init.body as string));
+          return json({ jobId: "job-1" }, 202);
+        },
+        report: { halted: false, assets: [asset()], log: { entries: [], campaignId: "camp" } },
+      });
+      localStorage.setItem("cf:brief-picked", "1");
+      localStorage.setItem("cf:brief", JSON.stringify(variationStoredBrief));
+      const { result } = setup();
+      await waitFor(() => expect(result.current.assets).toHaveLength(1)); // the classic report restored
+      expect(result.current.runMode).toBe("brief");
+      expect(result.current.rerollBlockedReason).toMatch(
+        /came from a classic run, but the brief they were produced under is now a randomized campaign/,
+      );
+
+      act(() => result.current.decide("alpha/1:1/default", "rejected"));
+      await act(async () => {
+        await result.current.regenerateRejected();
+      });
+      // nothing was sent — classic targets against a randomized brief can only fail
+      expect(bodies.length).toBe(0);
+      expect(result.current.error).toMatch(/cannot be re-rolled\. Run the full campaign/);
     });
-    localStorage.setItem("cf:brief-picked", "1");
-    localStorage.setItem("cf:brief", JSON.stringify(variationStoredBrief));
-    const { result } = setup();
-    await waitFor(() => expect(result.current.assets).toHaveLength(1)); // the classic report restored
-    expect(result.current.runMode).toBe("brief");
-    expect(result.current.rerollBlockedReason).toMatch(
-      /came from a classic run, but the brief they were produced under is now a randomized campaign/,
-    );
 
-    act(() => result.current.decide("alpha/1:1/default", "rejected"));
-    await act(async () => {
-      await result.current.regenerateRejected();
-    });
-    // nothing was sent — classic targets against a randomized brief can only fail
-    expect(bodies.length).toBe(0);
-    expect(result.current.error).toMatch(/cannot be re-rolled\. Run the full campaign/);
-  });
-
-  test("the other direction blocks too: a randomized run recorded under a classic brief", async () => {
-    localStorage.setItem("cf:brief-picked", "1");
-    localStorage.setItem(
-      "cf:brief",
-      JSON.stringify({
-        id: "camp",
-        template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
-        targetRegion: "DE",
-        targetAudience: "a",
-        campaignMessage: "Hi",
-        products: variationStoredBrief.products,
-      }),
-    );
-    mockPipelineApi({
-      report: {
-        halted: false,
-        assets: [asset({ variantIndex: 0, outputPath: "alpha/1x1/v0.png" })],
-        log: { entries: [], campaignId: "camp" },
-      },
-    });
-    const { result } = setup();
-    await waitFor(() => expect(result.current.assets).toHaveLength(1));
-    expect(result.current.runMode).toBe("variation");
-    expect(result.current.rerollBlockedReason).toMatch(
-      /came from a randomized run, but the brief they were produced under is now a classic campaign/,
-    );
-  });
-
-  test("a matching mode does not block", async () => {
-    mockPipelineApi({
-      post: () => json({ jobId: "job-1" }, 202),
-      job: () =>
-        jobOk({
+    test("the other direction blocks too: a randomized run recorded under a classic brief", async () => {
+      localStorage.setItem("cf:brief-picked", "1");
+      localStorage.setItem(
+        "cf:brief",
+        JSON.stringify({
+          id: "camp",
+          template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+          targetRegion: "DE",
+          targetAudience: "a",
+          campaignMessage: "Hi",
+          products: variationStoredBrief.products,
+        }),
+      );
+      mockPipelineApi({
+        report: {
           halted: false,
           assets: [asset({ variantIndex: 0, outputPath: "alpha/1x1/v0.png" })],
           log: { entries: [], campaignId: "camp" },
-        }),
+        },
+      });
+      const { result } = setup();
+      await waitFor(() => expect(result.current.assets).toHaveLength(1));
+      expect(result.current.runMode).toBe("variation");
+      expect(result.current.rerollBlockedReason).toMatch(
+        /came from a randomized run, but the brief they were produced under is now a classic campaign/,
+      );
     });
-    const { result } = setup();
-    act(() =>
-      result.current.setBrief({ ...result.current.brief, id: "camp", mode: "variation", variation: { count: 1 } } as never),
-    );
-    await act(async () => {
-      await result.current.execute();
+
+    test("a matching mode does not block", async () => {
+      mockPipelineApi({
+        post: () => json({ jobId: "job-1" }, 202),
+        job: () =>
+          jobOk({
+            halted: false,
+            assets: [asset({ variantIndex: 0, outputPath: "alpha/1x1/v0.png" })],
+            log: { entries: [], campaignId: "camp" },
+          }),
+      });
+      const { result } = setup();
+      act(() =>
+        result.current.setBrief({
+          ...result.current.brief,
+          id: "camp",
+          mode: "variation",
+          variation: { count: 1 },
+        } as never),
+      );
+      await act(async () => {
+        await result.current.execute();
+      });
+      expect(result.current.runMode).toBe("variation");
+      expect(result.current.rerollBlockedReason).toBeNull();
     });
-    expect(result.current.runMode).toBe("variation");
-    expect(result.current.rerollBlockedReason).toBeNull();
+
+    test("a same-id brief edit after the run keeps the re-roll on the brief that ran (R6)", async () => {
+      const bodies: unknown[] = [];
+      mockPipelineApi({
+        post: (_url, init) => {
+          bodies.push(JSON.parse(init.body as string));
+          return json({ jobId: "job-1" }, 202);
+        },
+        job: () =>
+          jobOk({
+            halted: false,
+            assets: [asset({ complianceScore: 0.9 })],
+            log: { entries: [], campaignId: "camp" },
+          }),
+      });
+      const { result } = setup();
+      act(() => result.current.setBrief({ ...result.current.brief, id: "camp" }));
+      await act(async () => {
+        await result.current.execute();
+      });
+      expect(result.current.runMode).toBe("brief");
+      expect(result.current.rerollBlockedReason).toBeNull();
+
+      // the brief becomes a randomized campaign — but the run on screen (and the brief
+      // recorded beside it as its producer) is untouched: the re-roll still goes out
+      // under the classic brief the run actually used, so it stays possible.
+      act(() =>
+        result.current.setBrief({
+          ...result.current.brief,
+          mode: "variation",
+          variation: { count: 1 },
+        } as never),
+      );
+      expect(result.current.assets).toHaveLength(1);
+      expect(result.current.rerollBlockedReason).toBeNull();
+
+      act(() => result.current.decide("alpha/1:1/default", "rejected"));
+      await act(async () => {
+        await result.current.regenerateRejected();
+      });
+      const body = bodies[1] as { brief: { id: string; mode?: string } };
+      expect(body.brief).toMatchObject({ id: "camp" });
+      expect(body.brief.mode).toBeUndefined();
+      expect(result.current.decisions["alpha/1:1/default"]).toBeUndefined(); // back to review
+    });
   });
-
-  test("a same-id brief edit after the run keeps the re-roll on the brief that ran (R6)", async () => {
-    const bodies: unknown[] = [];
-    mockPipelineApi({
-      post: (_url, init) => {
-        bodies.push(JSON.parse(init.body as string));
-        return json({ jobId: "job-1" }, 202);
-      },
-      job: () => jobOk({ halted: false, assets: [asset({ complianceScore: 0.9 })], log: { entries: [], campaignId: "camp" } }),
-    });
-    const { result } = setup();
-    act(() => result.current.setBrief({ ...result.current.brief, id: "camp" }));
-    await act(async () => {
-      await result.current.execute();
-    });
-    expect(result.current.runMode).toBe("brief");
-    expect(result.current.rerollBlockedReason).toBeNull();
-
-    // the brief becomes a randomized campaign — but the run on screen (and the brief
-    // recorded beside it as its producer) is untouched: the re-roll still goes out
-    // under the classic brief the run actually used, so it stays possible.
-    act(() =>
-      result.current.setBrief({ ...result.current.brief, mode: "variation", variation: { count: 1 } } as never),
-    );
-    expect(result.current.assets).toHaveLength(1);
-    expect(result.current.rerollBlockedReason).toBeNull();
-
-    act(() => result.current.decide("alpha/1:1/default", "rejected"));
-    await act(async () => {
-      await result.current.regenerateRejected();
-    });
-    const body = bodies[1] as { brief: { id: string; mode?: string } };
-    expect(body.brief).toMatchObject({ id: "camp" });
-    expect(body.brief.mode).toBeUndefined();
-    expect(result.current.decisions["alpha/1:1/default"]).toBeUndefined(); // back to review
-  });
-});
-
 });
 
 describe("RunProvider — a second Generate does not lose the campaign (C4)", () => {
@@ -2067,7 +2246,9 @@ describe("RunProvider — a second Generate does not lose the campaign (C4)", ()
   const ApplyBrief = () => {
     const { brief, setBrief } = useRun();
     return (
-      <button type="button" onClick={() => setBrief({ ...brief, id: "applied-brief" })}>apply</button>
+      <button type="button" onClick={() => setBrief({ ...brief, id: "applied-brief" })}>
+        apply
+      </button>
     );
   };
 
@@ -2081,7 +2262,11 @@ describe("RunProvider — a second Generate does not lose the campaign (C4)", ()
     mockPipelineApi({
       post: () => new Promise<Response>((res) => postAnswers.push(res)),
       job: () =>
-        jobOk({ halted: false, assets: [asset()], log: { entries: [], campaignId: "applied-brief" } }),
+        jobOk({
+          halted: false,
+          assets: [asset()],
+          log: { entries: [], campaignId: "applied-brief" },
+        }),
     });
     renderWithRun(
       <>
@@ -2095,8 +2280,12 @@ describe("RunProvider — a second Generate does not lose the campaign (C4)", ()
     // Generate — which, like the header's, is never disabled by loading. Both stay
     // pressable while a run is in flight: exactly how a campaign gets pressed twice.
     await user.click(screen.getByRole("button", { name: /Execute/ }));
-    const headerGenerate = within(screen.getByRole("banner")).getByRole("button", { name: "Generate" });
-    const dialogGenerate = within(screen.getByRole("dialog", { name: "Confirm pipeline action" })).getByText("Generate");
+    const headerGenerate = within(screen.getByRole("banner")).getByRole("button", {
+      name: "Generate",
+    });
+    const dialogGenerate = within(
+      screen.getByRole("dialog", { name: "Confirm pipeline action" }),
+    ).getByText("Generate");
     // One tick: both presses dispatch in the same synchronous burst, before React can
     // flush the first press's loading state or either POST can answer.
     act(() => {
@@ -2120,4 +2309,3 @@ describe("RunProvider — a second Generate does not lose the campaign (C4)", ()
     expect(screen.queryByText(/already in progress/)).toBeNull();
   });
 });
-

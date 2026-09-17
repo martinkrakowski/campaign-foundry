@@ -40,13 +40,7 @@ export interface RatioPanelProps {
  * blocks *entering* the state, so an excluded ratio the brief already selects
  * stays clickable — deselecting it is the way out.
  */
-export function RatioPanel({
-  ratio,
-  selected,
-  excluded,
-  floor,
-  onToggle,
-}: RatioPanelProps) {
+export function RatioPanel({ ratio, selected, excluded, floor, onToggle }: RatioPanelProps) {
   return (
     <AxisCard
       value={ratio.value}
@@ -58,7 +52,10 @@ export function RatioPanel({
       <span className="flex flex-col items-center gap-1">
         <RatioFrame ratio={ratio.value} />
         <span
-          className={cn("font-mono text-[11px]", excluded ? "text-text-muted" : "text-text-secondary")}
+          className={cn(
+            "font-mono text-[11px]",
+            excluded ? "text-text-muted" : "text-text-secondary",
+          )}
           aria-hidden="true"
         >
           {floor > 0 ? `≥ ${floor} each` : "no floor"}

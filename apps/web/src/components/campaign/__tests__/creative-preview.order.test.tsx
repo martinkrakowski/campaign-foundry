@@ -19,9 +19,7 @@ describe("CreativePreview paints the shared layer order (C2)", () => {
     Array.from(svg.querySelectorAll("rect")).find((r) => r.getAttribute("fill") === "#ffffff")!;
 
   test("canonically, the headline paints before the logo — PREVIEW_LAYER_ORDER's own sequence", () => {
-    const { container } = render(
-      <CreativePreview primaryColor="#1473E6" headline="Hello there" />,
-    );
+    const { container } = render(<CreativePreview primaryColor="#1473E6" headline="Hello there" />);
     const svg = container.querySelector("svg")!;
     const text = svg.querySelector("text")!;
     const logo = logoOf(svg);

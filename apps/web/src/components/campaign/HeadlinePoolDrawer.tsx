@@ -47,9 +47,7 @@ function PoolEntryRow({
           onChange={(e) => setDraft(e.target.value)}
         />
       )}
-      <Eyebrow className={approved ? "text-success" : "text-error"}>
-        {entry.status}
-      </Eyebrow>
+      <Eyebrow className={approved ? "text-success" : "text-error"}>{entry.status}</Eyebrow>
       {entry.reason ? <span className="text-[11px] text-text-muted">{entry.reason}</span> : null}
       {draft === null ? (
         <>
@@ -63,16 +61,33 @@ function PoolEntryRow({
           >
             {approved ? "Reject" : "Approve"}
           </Button>
-          <Button variant="ghost" size="sm" aria-label={`Edit ${entry.id}`} disabled={busy} onClick={() => setDraft(entry.text)}>
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-label={`Edit ${entry.id}`}
+            disabled={busy}
+            onClick={() => setDraft(entry.text)}
+          >
             Edit
           </Button>
         </>
       ) : (
         <>
-          <Button size="sm" aria-label={`Save ${entry.id}`} disabled={busy || draft.trim() === ""} onClick={() => void save(draft)}>
+          <Button
+            size="sm"
+            aria-label={`Save ${entry.id}`}
+            disabled={busy || draft.trim() === ""}
+            onClick={() => void save(draft)}
+          >
             Save
           </Button>
-          <Button variant="ghost" size="sm" aria-label={`Cancel ${entry.id}`} disabled={busy} onClick={() => setDraft(null)}>
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-label={`Cancel ${entry.id}`}
+            disabled={busy}
+            onClick={() => setDraft(null)}
+          >
             Cancel
           </Button>
         </>
@@ -170,7 +185,8 @@ export function HeadlinePoolDrawer({
         // A 409 carries the revision that is stored now. Adopt it: without it
         // every retry re-sends the revision that just lost, is refused again,
         // and the only way out for the user is a reload.
-        const conflict = isBriefsApiError(cause) && cause.status === 409 ? cause.revision : undefined;
+        const conflict =
+          isBriefsApiError(cause) && cause.status === 409 ? cause.revision : undefined;
         if (conflict !== undefined) setRevision(conflict);
         setError(unknownErrorMessage(cause, "Headline pool update failed"));
       }
@@ -187,7 +203,8 @@ export function HeadlinePoolDrawer({
 
   return (
     <DrawerShell open={open} onClose={onClose} ariaLabel="Headline Pool">
-      <DialogHead headingLevel={3}
+      <DialogHead
+        headingLevel={3}
         title="Headline Pool"
         onClose={onClose}
         closeText="Close"
@@ -201,13 +218,18 @@ export function HeadlinePoolDrawer({
             size="sm"
             disabled={busy || loading || unavailable !== undefined}
             isLoading={busy}
-            onClick={() => void apply(async () => generatePool(toBrief(state), POOL_SUGGESTION_COUNT, { revision }))}
+            onClick={() =>
+              void apply(async () =>
+                generatePool(toBrief(state), POOL_SUGGESTION_COUNT, { revision }),
+              )
+            }
           >
             Generate {POOL_SUGGESTION_COUNT} suggestions
           </Button>
         </div>
         <p className="text-[12px] text-text-muted">
-          Approved entries become the <code>headline: {HEADLINE_POOL_REF}</code> axis in the policy section.
+          Approved entries become the <code>headline: {HEADLINE_POOL_REF}</code> axis in the policy
+          section.
         </p>
         {unavailable ? (
           <p role="status" className="text-[13px] text-warning">
@@ -243,9 +265,15 @@ export function HeadlinePoolDrawer({
                 key={entry.id}
                 entry={entry}
                 busy={busy || loading}
-                onStatus={(status) => void apply(() => patchPool(briefId, [{ id: entry.id, status }], { revision }))}
+                onStatus={(status) =>
+                  void apply(() => patchPool(briefId, [{ id: entry.id, status }], { revision }))
+                }
                 onEdit={(text) =>
-                  apply(() => patchPool(briefId, [{ id: entry.id, status: entry.status, text }], { revision }))
+                  apply(() =>
+                    patchPool(briefId, [{ id: entry.id, status: entry.status, text }], {
+                      revision,
+                    }),
+                  )
                 }
               />
             ))}

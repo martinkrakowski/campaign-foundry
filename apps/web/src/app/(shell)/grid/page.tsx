@@ -51,7 +51,8 @@ const formatOf = (a: Asset): "static" | "motion" | "html" => a.format ?? "static
 
 const uniqueSorted = (values: string[]): string[] => [...new Set(values)].sort();
 
-const TILE_CLASS = "relative w-[240px] overflow-hidden rounded border border-border bg-scrim shadow-2xl";
+const TILE_CLASS =
+  "relative w-[240px] overflow-hidden rounded border border-border bg-scrim shadow-2xl";
 
 interface GridFilters {
   product: string;
@@ -74,7 +75,8 @@ const DEFAULT_FILTERS: GridFilters = {
 };
 
 /** A stored filter value only applies while it is one of the current options; otherwise it is "All". */
-const effective = (value: string, options: string[]): string => (options.includes(value) ? value : "");
+const effective = (value: string, options: string[]): string =>
+  options.includes(value) ? value : "";
 
 /** Review grid — the HITL surface where a human approves or rejects creatives. */
 export default function GridPage() {
@@ -117,19 +119,21 @@ export default function GridPage() {
       formats: uniqueSorted(assets.map((a) => formatOf(a))),
       // A descriptor that lost a field to normalisation contributes no option for it —
       // `flatMap` over `?? []` drops it rather than offering an "undefined" filter.
-      layouts: uniqueSorted(assets.flatMap((a) => (a.descriptor?.layout ? [a.descriptor.layout] : []))),
+      layouts: uniqueSorted(
+        assets.flatMap((a) => (a.descriptor?.layout ? [a.descriptor.layout] : [])),
+      ),
       tones: uniqueSorted(assets.flatMap((a) => (a.descriptor?.tone ? [a.descriptor.tone] : []))),
       backgrounds: uniqueSorted(
-        assets.flatMap((a) => (a.descriptor?.backgroundSource ? [a.descriptor.backgroundSource] : [])),
+        assets.flatMap((a) =>
+          a.descriptor?.backgroundSource ? [a.descriptor.backgroundSource] : [],
+        ),
       ),
     }),
     [assets],
   );
 
-  const applyFilter =
-    (name: keyof Omit<GridFilters, "page">) =>
-    (value: string) =>
-      updateFilters({ [name]: value, page: 1 });
+  const applyFilter = (name: keyof Omit<GridFilters, "page">) => (value: string) =>
+    updateFilters({ [name]: value, page: 1 });
 
   // Each select's effective value is checked against the live options, so a value
   // that no longer exists (e.g. a product missing from the new run) acts as "All".
@@ -203,9 +207,7 @@ export default function GridPage() {
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-border bg-surface px-4 py-2 font-mono text-[11px]">
         <span className="uppercase tracking-wider text-text-muted">Review</span>
         <span className="text-text-primary">{brief.id}</span>
-        <MiniChip tone="neutral">
-          {typeDisplayName(campaignTypeOf(brief))}
-        </MiniChip>
+        <MiniChip tone="neutral">{typeDisplayName(campaignTypeOf(brief))}</MiniChip>
         <span className="text-success">✓ {review.approved} approved</span>
         <span className="text-error">✗ {review.rejected} rejected</span>
         <span className="text-text-muted">○ {review.pending} pending</span>
@@ -354,10 +356,7 @@ function DescriptorChip({
   return (
     <span
       title={title}
-      className={cn(
-        "rounded bg-surface-2 px-1.5 py-0.5 text-[10px] text-text-muted",
-        className,
-      )}
+      className={cn("rounded bg-surface-2 px-1.5 py-0.5 text-[10px] text-text-muted", className)}
     >
       {children}
     </span>
@@ -535,10 +534,7 @@ function Artboard({
               // kind. A pooled headline is arbitrary author text with no length limit, and
               // the row does not wrap, so an unbounded chip stretches the tile past its
               // artboard and breaks the grid. Bound it and keep the full text on hover.
-              <DescriptorChip
-                title={asset.descriptor.headline}
-                className="max-w-[10rem] truncate"
-              >
+              <DescriptorChip title={asset.descriptor.headline} className="max-w-[10rem] truncate">
                 {descriptorHeadline(asset.descriptor.headline)}
               </DescriptorChip>
             )}
@@ -735,7 +731,12 @@ function PreviewModal({
         className="absolute right-6 top-6 text-white/70 transition-colors hover:text-white"
       >
         <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M6 18L18 6M6 6l12 12"
+          />
         </svg>
       </button>
 
@@ -765,9 +766,7 @@ function PreviewModal({
         className="flex items-center gap-2 font-mono text-xs text-white/70"
         onClick={(e) => e.stopPropagation()}
       >
-        <span className="text-white">
-          {assetLabel(asset)}
-        </span>
+        <span className="text-white">{assetLabel(asset)}</span>
         <SourceBadge source={asset.backgroundSource} />
         <ComplianceBadge asset={asset} />
       </div>

@@ -17,7 +17,11 @@ import {
   saveDraftToStorage,
   toBrief,
 } from "@/components/campaign/editor-state";
-import { formatDisplayName, modeDisplayName, typeDisplayName } from "@/components/campaign/display-names";
+import {
+  formatDisplayName,
+  modeDisplayName,
+  typeDisplayName,
+} from "@/components/campaign/display-names";
 import * as messages from "@/components/campaign/messages";
 import * as createCampaignLib from "@/lib/create-campaign";
 import { getFocusableDialogElements } from "@/components/ui";
@@ -79,12 +83,11 @@ describe("CreateCampaignDialog", () => {
     expect(within(dialog).getAllByRole("textbox")).toHaveLength(1);
     const group = within(dialog).getByRole("group", { name: messages.createTypeLabel });
     expect(within(group).getAllByRole("button")).toHaveLength(4);
-    expect(within(group).getAllByRole("button").map((tile) => tile.getAttribute("aria-label"))).toEqual([
-      "social-post",
-      "paid-social",
-      "display-ad",
-      "short-video",
-    ]);
+    expect(
+      within(group)
+        .getAllByRole("button")
+        .map((tile) => tile.getAttribute("aria-label")),
+    ).toEqual(["social-post", "paid-social", "display-ad", "short-video"]);
     expect(within(dialog).getAllByRole("status")).toHaveLength(1);
   });
 
@@ -101,14 +104,18 @@ describe("CreateCampaignDialog", () => {
       expect(tile.textContent).toContain(
         messages.typeTileGives(
           CAMPAIGN_TYPE_PRESETS[type].platforms.length,
-          messages.joinList(CAMPAIGN_TYPE_PRESETS[type].formats.map((format) => formatDisplayName(format))),
+          messages.joinList(
+            CAMPAIGN_TYPE_PRESETS[type].formats.map((format) => formatDisplayName(format)),
+          ),
         ),
       );
       expect(tile.textContent).not.toContain("static");
       expect(tile.textContent).not.toContain("motion");
     }
     expect(
-      within(dialog).getByRole("button", { name: DEFAULT_CAMPAIGN_TYPE }).getAttribute("aria-pressed"),
+      within(dialog)
+        .getByRole("button", { name: DEFAULT_CAMPAIGN_TYPE })
+        .getAttribute("aria-pressed"),
     ).toBe("true");
   });
 
@@ -132,7 +139,9 @@ describe("CreateCampaignDialog", () => {
       const target = document.getElementById(describedBy as string);
       expect(target?.textContent).toContain(typeDisplayName(type));
       if (type === "short-video") {
-        expect(target?.textContent).toContain(messages.typeTileRunsAs(modeDisplayName("variation")));
+        expect(target?.textContent).toContain(
+          messages.typeTileRunsAs(modeDisplayName("variation")),
+        );
       }
     }
   });
@@ -143,7 +152,9 @@ describe("CreateCampaignDialog", () => {
     const dialog = await openDialog(user);
     const tile = within(dialog).getByRole("button", { name: "display-ad" });
     const target = document.getElementById(tile.getAttribute("aria-describedby") as string);
-    expect(target?.textContent).toContain("Runs on Google Display, Meta Audience Network and Display Web.");
+    expect(target?.textContent).toContain(
+      "Runs on Google Display, Meta Audience Network and Display Web.",
+    );
     // The jargon gate: display words only — never a raw platform or format id.
     expect(target?.textContent).not.toContain("google-display");
     expect(target?.textContent).not.toContain("display-web");
@@ -158,9 +169,9 @@ describe("CreateCampaignDialog", () => {
 
     expect(within(dialog).getAllByRole("status")).toHaveLength(1);
     expect(within(dialog).getByRole("status").textContent).toBe(messages.campaignNameRequired);
-    expect(within(dialog).getByLabelText(messages.campaignNameLabel).getAttribute("aria-invalid")).toBe(
-      "true",
-    );
+    expect(
+      within(dialog).getByLabelText(messages.campaignNameLabel).getAttribute("aria-invalid"),
+    ).toBe("true");
     expect(screen.getByRole("dialog", { name: messages.createCampaignTitle })).toBeTruthy();
     expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
   });
@@ -223,7 +234,7 @@ describe("CreateCampaignDialog", () => {
     expect(localStorage.getItem("cf:step-handoff")).toBeNull();
   });
 
-  test("choosing short-video stores { name, type: \"short-video\" } and the editor that consumes it is Randomized", async () => {
+  test('choosing short-video stores { name, type: "short-video" } and the editor that consumes it is Randomized', async () => {
     const user = userEvent.setup();
     const view = renderDialog();
     const dialog = await openDialog(user);
@@ -261,11 +272,15 @@ describe("CreateCampaignDialog", () => {
         "Summer Spark",
       ),
     );
-    expect(screen.getByRole("button", { name: "variation" }).getAttribute("aria-pressed")).toBe("true");
-    expect(screen.getByRole("button", { name: "brief" }).getAttribute("aria-pressed")).toBe("false");
+    expect(screen.getByRole("button", { name: "variation" }).getAttribute("aria-pressed")).toBe(
+      "true",
+    );
+    expect(screen.getByRole("button", { name: "brief" }).getAttribute("aria-pressed")).toBe(
+      "false",
+    );
   });
 
-  test("choosing display-ad stores { name, type: \"display-ad\" } and the editor that consumes it runs (D117)", async () => {
+  test('choosing display-ad stores { name, type: "display-ad" } and the editor that consumes it runs (D117)', async () => {
     const user = userEvent.setup();
     const view = renderDialog();
     const dialog = await openDialog(user);
@@ -305,7 +320,9 @@ describe("CreateCampaignDialog", () => {
     );
     // Classic mode — static + brief is legal, the D110 invariant the preset rides on.
     expect(screen.getByRole("button", { name: "brief" }).getAttribute("aria-pressed")).toBe("true");
-    expect(screen.getByRole("button", { name: "variation" }).getAttribute("aria-pressed")).toBe("false");
+    expect(screen.getByRole("button", { name: "variation" }).getAttribute("aria-pressed")).toBe(
+      "false",
+    );
     // A3's three display profiles start selected — the editor lands on Identity,
     // so the Output step's platform cards need the walk there first.
     await user.click(screen.getByRole("button", { name: /Step 7 of 8: Output/ }));
@@ -352,7 +369,9 @@ describe("CreateCampaignDialog", () => {
       renderDialog();
       const dialog = await openDialog(user);
       await fillValid(user);
-      await user.click(within(dialog).getByRole("button", { name: messages.createCampaignConfirm }));
+      await user.click(
+        within(dialog).getByRole("button", { name: messages.createCampaignConfirm }),
+      );
 
       await waitFor(() =>
         expect(within(createDialog()).getByRole("status").textContent).toBe(
@@ -396,7 +415,10 @@ describe("the abandoned-draft two-way (W3 / F19)", () => {
    */
   const stashAbandonedDraft = () => {
     saveDraftToStorage(
-      editorReducer(initialEditorState(), { type: "patch", patch: { campaignName: "Half-written" } }),
+      editorReducer(initialEditorState(), {
+        type: "patch",
+        patch: { campaignName: "Half-written" },
+      }),
     );
   };
 
@@ -530,7 +552,9 @@ describe("the abandoned-draft two-way (W3 / F19)", () => {
     // Back to the form, answers intact; nothing was published, the draft untouched.
     expect(screen.queryByRole("dialog", { name: messages.resumeDraftTitle })).toBeNull();
     expect(screen.getByRole("dialog", { name: messages.createCampaignTitle })).toBeTruthy();
-    expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe("Summer Spark");
+    expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
+      "Summer Spark",
+    );
     expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
     expect(localStorage.getItem("cf:draft:new")).not.toBeNull();
 
@@ -777,16 +801,18 @@ describe("CC6 — format grouping by format display names (D144)", () => {
     const dialog = await openDialog(user);
 
     const staticGroup = within(dialog).getByRole("group", { name: formatDisplayName("static") });
-    expect(within(staticGroup).getAllByRole("button").map((tile) => tile.getAttribute("aria-label"))).toEqual([
-      "social-post",
-      "paid-social",
-      "display-ad",
-    ]);
+    expect(
+      within(staticGroup)
+        .getAllByRole("button")
+        .map((tile) => tile.getAttribute("aria-label")),
+    ).toEqual(["social-post", "paid-social", "display-ad"]);
 
     const motionGroup = within(dialog).getByRole("group", { name: formatDisplayName("motion") });
-    expect(within(motionGroup).getAllByRole("button").map((tile) => tile.getAttribute("aria-label"))).toEqual([
-      "short-video",
-    ]);
+    expect(
+      within(motionGroup)
+        .getAllByRole("button")
+        .map((tile) => tile.getAttribute("aria-label")),
+    ).toEqual(["short-video"]);
   });
 
   test("all four types remain reachable and selectable, iterating CAMPAIGN_TYPES", async () => {
@@ -839,8 +865,12 @@ describe("CC6 — format grouping by format display names (D144)", () => {
       ),
     );
     // Assert the resulting mode comes from CAMPAIGN_TYPE_PRESETS["short-video"].mode ("variation")
-    expect(screen.getByRole("button", { name: "variation" }).getAttribute("aria-pressed")).toBe("true");
-    expect(screen.getByRole("button", { name: "brief" }).getAttribute("aria-pressed")).toBe("false");
+    expect(screen.getByRole("button", { name: "variation" }).getAttribute("aria-pressed")).toBe(
+      "true",
+    );
+    expect(screen.getByRole("button", { name: "brief" }).getAttribute("aria-pressed")).toBe(
+      "false",
+    );
   });
 
   test("selecting a static type produces its own preset's mode (brief) through the preset", async () => {
@@ -882,7 +912,9 @@ describe("CC6 — format grouping by format display names (D144)", () => {
     );
     // Assert the resulting mode comes from CAMPAIGN_TYPE_PRESETS["display-ad"].mode ("brief")
     expect(screen.getByRole("button", { name: "brief" }).getAttribute("aria-pressed")).toBe("true");
-    expect(screen.getByRole("button", { name: "variation" }).getAttribute("aria-pressed")).toBe("false");
+    expect(screen.getByRole("button", { name: "variation" }).getAttribute("aria-pressed")).toBe(
+      "false",
+    );
   });
 
   test("applyPreset runs once per selection, not once per group", async () => {
@@ -896,7 +928,9 @@ describe("CC6 — format grouping by format display names (D144)", () => {
       // Select in static group then in motion group
       await user.click(within(dialog).getByRole("button", { name: "paid-social" }));
       await user.click(within(dialog).getByRole("button", { name: "short-video" }));
-      await user.click(within(dialog).getByRole("button", { name: messages.createCampaignConfirm }));
+      await user.click(
+        within(dialog).getByRole("button", { name: messages.createCampaignConfirm }),
+      );
 
       // Create seeds only once for the single selected type
       expect(createSpy).toHaveBeenCalledTimes(1);

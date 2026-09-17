@@ -3,7 +3,12 @@ import { render, screen, waitFor } from "@testing-library/react";
 import * as messages from "../messages";
 import { EstimatePanel } from "../EstimatePanel";
 import { classicAdCount } from "../derive";
-import { initialEditorState, editorReducer, PLAN_DEBOUNCE_MS, type EditorState } from "../editor-state";
+import {
+  initialEditorState,
+  editorReducer,
+  PLAN_DEBOUNCE_MS,
+  type EditorState,
+} from "../editor-state";
 import { API } from "@/lib/run-context";
 
 const json = (body: unknown, status = 200) =>
@@ -12,7 +17,11 @@ const json = (body: unknown, status = 200) =>
 /** A state canPlan() accepts: variation mode, an id, a product, count >= 1. */
 const planReady = (): EditorState => {
   const base = { ...initialEditorState(), mode: "variation" as const, briefId: "camp" };
-  return editorReducer(base, { type: "setProduct", key: base.products[0].key, patch: { id: "alpha" } });
+  return editorReducer(base, {
+    type: "setProduct",
+    key: base.products[0].key,
+    patch: { id: "alpha" },
+  });
 };
 
 const OK_PLAN = {
@@ -66,7 +75,9 @@ describe("EstimatePanel", () => {
   });
 
   test("an infeasible plan shows the reason the API gave", async () => {
-    vi.mocked(globalThis.fetch).mockResolvedValue(json({ error: "minDistance exceeds the axes" }, 422));
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      json({ error: "minDistance exceeds the axes" }, 422),
+    );
     render(<EstimatePanel state={planReady()} />);
     expect(await screen.findByText("minDistance exceeds the axes")).toBeTruthy();
   });
@@ -114,7 +125,11 @@ describe("EstimatePanel", () => {
     // component when it interrupts the body stream after the response resolved.
     const abort = Object.assign(new Error("aborted"), { name: "AbortError" });
     vi.mocked(globalThis.fetch).mockImplementation(() =>
-      Promise.resolve({ status: 200, ok: true, text: () => Promise.reject(abort) } as unknown as Response),
+      Promise.resolve({
+        status: 200,
+        ok: true,
+        text: () => Promise.reject(abort),
+      } as unknown as Response),
     );
     render(<EstimatePanel state={planReady()} />);
     await tick(PLAN_DEBOUNCE_MS + 120);
@@ -128,7 +143,8 @@ describe("EstimatePanel", () => {
       Promise.resolve({
         status: 200,
         ok: true,
-        text: () => new Promise((_, rej) => setTimeout(() => rej(new Error("stream died late")), 60)),
+        text: () =>
+          new Promise((_, rej) => setTimeout(() => rej(new Error("stream died late")), 60)),
       } as unknown as Response),
     );
     const { unmount } = render(<EstimatePanel state={planReady()} />);
@@ -169,7 +185,9 @@ describe("EstimatePanel", () => {
 
     // toBrief carries motion and duration, so a change to either must re-plan
     rerender(<EstimatePanel state={{ ...ready, motion: ["ken-burns-in"], duration: [6] }} />);
-    await waitFor(() => expect(vi.mocked(globalThis.fetch).mock.calls.length).toBeGreaterThan(before));
+    await waitFor(() =>
+      expect(vi.mocked(globalThis.fetch).mock.calls.length).toBeGreaterThan(before),
+    );
   });
 
   // Corrected by W4 (D31), not deleted: this asserted that switching to classic left the
@@ -195,7 +213,9 @@ describe("EstimatePanel", () => {
     const before = vi.mocked(globalThis.fetch).mock.calls.length;
 
     rerender(<EstimatePanel state={{ ...ready, formats: ["static", "motion"] }} />);
-    await waitFor(() => expect(vi.mocked(globalThis.fetch).mock.calls.length).toBeGreaterThan(before));
+    await waitFor(() =>
+      expect(vi.mocked(globalThis.fetch).mock.calls.length).toBeGreaterThan(before),
+    );
     expect(String(vi.mocked(globalThis.fetch).mock.calls[0][0])).toContain(`${API}/campaigns/plan`);
   });
 
@@ -346,9 +366,9 @@ describe("estimateSentence", () => {
   });
 
   test("no ratios at all still says what you get", () => {
-    expect(messages.estimateSentence({ creatives: 4, ratios: [], products: 2, genaiCalls: 9 })).toBe(
-      "You will get 4 ads for 2 products. 9 AI image calls.",
-    );
+    expect(
+      messages.estimateSentence({ creatives: 4, ratios: [], products: 2, genaiCalls: 9 }),
+    ).toBe("You will get 4 ads for 2 products. 9 AI image calls.");
   });
 
   test("a classic brief with no treatments still shows a count — the pipeline substitutes one", () => {
@@ -359,5 +379,4 @@ describe("estimateSentence", () => {
     expect(screen.queryByText(messages.estimateNotReady)).toBeNull();
     expect(screen.getByText(/You will get/)).toBeTruthy();
   });
-
 });

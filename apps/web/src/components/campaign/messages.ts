@@ -19,7 +19,8 @@ import type { Frame } from "@campaignfoundry/CampaignOrchestration/html-element"
 // --- Identity ---
 
 /** `briefId` */
-export const briefId = "Brief ID can only use small letters, numbers and dashes — try something like summer-spark.";
+export const briefId =
+  "Brief ID can only use small letters, numbers and dashes — try something like summer-spark.";
 /** `briefId.duplicate` */
 export function briefIdDuplicate(conflictingId: string): string {
   return `A brief called ${conflictingId} already exists — pick a different Brief ID.`;
@@ -99,7 +100,8 @@ export const productLogoLabel = "Logo";
 export const productRemove = "Remove";
 export const productUploadErrorFallback = "Upload failed";
 /** `product-N-id` */
-export const productId = "Product ID can only use small letters, numbers and dashes — try something like acrobat-pro.";
+export const productId =
+  "Product ID can only use small letters, numbers and dashes — try something like acrobat-pro.";
 /** `product-N-id.duplicate` */
 export function productIdDuplicate(id: string): string {
   return `Two products share the ID ${id} — give this one its own.`;
@@ -107,7 +109,8 @@ export function productIdDuplicate(id: string): string {
 /** `product-N-name` */
 export const productName = "This product has no name yet — type one in.";
 /** `product-N-color` */
-export const productColor = "That colour is not one we can read — pick it with the swatch, or type one like #1473E6.";
+export const productColor =
+  "That colour is not one we can read — pick it with the swatch, or type one like #1473E6.";
 /** `product-N-logo` */
 export const productLogo = "No logo yet — upload one with the Logo button.";
 
@@ -125,13 +128,15 @@ export const logoUpload = "Upload";
 // --- Treatments ---
 
 /** `treatment-N-id` */
-export const treatmentId = "Treatment ID can only use small letters, numbers and dashes — try something like bold-hero.";
+export const treatmentId =
+  "Treatment ID can only use small letters, numbers and dashes — try something like bold-hero.";
 /** `treatment-N-id.duplicate` */
 export function treatmentIdDuplicate(id: string): string {
   return `Two treatments share the ID ${id} — give this one its own.`;
 }
 /** `treatment-N-layout` */
-export const treatmentLayout = "That layout is not one of the choices — pick one in the Layout panel.";
+export const treatmentLayout =
+  "That layout is not one of the choices — pick one in the Layout panel.";
 /** `treatment-N-tone` */
 export const treatmentTone = "That tone is not one of the choices — pick one in the Tone panel.";
 
@@ -146,9 +151,11 @@ export function minDistance(maxDistance: number): string {
   return `Min distance can be 0 to ${maxDistance} right now — move the Min distance slider back into that range.`;
 }
 /** `perProduct` */
-export const perProduct = "Coverage per product needs a whole number — set it with the stepper, or leave it blank.";
+export const perProduct =
+  "Coverage per product needs a whole number — set it with the stepper, or leave it blank.";
 /** `perRatio` */
-export const perRatio = "Coverage per ratio needs a whole number — set it with the stepper, or leave it blank.";
+export const perRatio =
+  "Coverage per ratio needs a whole number — set it with the stepper, or leave it blank.";
 /** `perRatio.exceeds` */
 export function perRatioExceeds(drawableCount: number, floor: number, count: number): string {
   return `${drawableCount} ratios at ${floor} each need more creatives than your Count of ${count} — raise Count, or lower Coverage per ratio.`;
@@ -176,7 +183,8 @@ export const layout = "No layout picked — tap at least one layout card; you ca
 /** `tone` */
 export const tone = "No tone picked — tap at least one tone card; Bold and Subtle can both be on.";
 /** `anchor` */
-export const anchor = "No anchor picked — tap at least one anchor card; Top, Middle and Bottom can all be on.";
+export const anchor =
+  "No anchor picked — tap at least one anchor card; Top, Middle and Bottom can all be on.";
 /** `anchor.propConflict` (R-D4) */
 export const anchorPropConflict =
   "A layer in this template already fixes its own anchor — clear it before picking anchor cards here; you can't set both.";
@@ -229,13 +237,13 @@ export const addPhotoPlatform = "Add a photo platform";
 export const turnOnStillImages = "Turn on Still images";
 export const shapesFromPlatforms = "from your platforms";
 
-
 // --- Motion ---
 
 /** `motion` */
 export const motion = "No video style picked — tap at least one video card.";
 /** `motion.kindUnknown` — the video-style list holds a kind the picker never offered (a loaded brief can). */
-export const motionKindUnknown = "That video style is not one of the choices — pick again in the Video styles panel.";
+export const motionKindUnknown =
+  "That video style is not one of the choices — pick again in the Video styles panel.";
 /** `duration` */
 export const duration = "No clip length yet — add one with the stepper, like 6 seconds.";
 /** `duration.range` */
@@ -305,7 +313,8 @@ export function hintMinDistance(max: number): string {
   return `How different any two creatives must be — 0 means any two can match, ${max} means they differ in everything`;
 }
 /** `hint.seed` */
-export const hintSeed = "Optional — keep the same number to get the same set of creatives every time";
+export const hintSeed =
+  "Optional — keep the same number to get the same set of creatives every time";
 /** `hint.perRatio` */
 export const hintPerRatio = "Optional — make sure every shape gets at least this many";
 /** `hint.perProduct` */
@@ -569,7 +578,11 @@ export function previewCaption(ratioLabel: string, platformLabel: string): strin
  * words — `MOTION_KIND_META`'s display labels, never a raw kind id (D18) — so the
  * reading is not the only carrier of the meaning.
  */
-export function previewCaptionMotion(ratioLabel: string, platformLabel: string, styleLabel: string): string {
+export function previewCaptionMotion(
+  ratioLabel: string,
+  platformLabel: string,
+  styleLabel: string,
+): string {
   return `${ratioLabel} · ${platformLabel} · ${styleLabel}`;
 }
 /**
@@ -578,7 +591,11 @@ export function previewCaptionMotion(ratioLabel: string, platformLabel: string, 
  * says the delivered video animates. A display label via `TEXT_EFFECT_META`,
  * never a raw kind id (D18).
  */
-export function previewCaptionTextEffect(ratioLabel: string, platformLabel: string, effectLabel: string): string {
+export function previewCaptionTextEffect(
+  ratioLabel: string,
+  platformLabel: string,
+  effectLabel: string,
+): string {
   return `${ratioLabel} · ${platformLabel} · ${effectLabel}`;
 }
 /** The preview's step readout, e.g. "2 / 6". */
@@ -590,7 +607,8 @@ export function previewStep(step: number, total: number): string {
  * the missing field, never "add a product" (the Products step already shows
  * one stub) and never a fabricated placeholder creative (D26).
  */
-export const previewNeedsProductId = "The first product has no ID yet — name it on the Products step to see its preview.";
+export const previewNeedsProductId =
+  "The first product has no ID yet — name it on the Products step to see its preview.";
 
 // --- The preview rail (R7) ---
 
@@ -626,7 +644,8 @@ export const generate = "Generate";
  * the route it names is where the editor lives. D35: "press Apply to run" is gone —
  * that verb no longer exists.
  */
-export const generateNoBrief = "Nothing is ready to run yet — open the Brief editor and save a brief first.";
+export const generateNoBrief =
+  "Nothing is ready to run yet — open the Brief editor and save a brief first.";
 
 /* ── The three-way Generate question (D35) ── */
 
@@ -717,7 +736,8 @@ export const stepSubtitleIdentity = "Name the campaign and say who it is for.";
 export const stepSubtitleCopy = "Write the one line you want people to remember.";
 export const stepSubtitleProducts = "Add what you are advertising, with its colour and logo.";
 export const stepSubtitleTreatments = "Choose the looks each product gets.";
-export const stepSubtitleLayout = "Set the type every creative inherits — the preview shows the result.";
+export const stepSubtitleLayout =
+  "Set the type every creative inherits — the preview shows the result.";
 export const stepSubtitlePolicy = "Say how many ads you want, and how much they should differ.";
 export const stepSubtitleOutput = "Pick where the ads run, and whether they move.";
 export const stepSubtitleReview = "Last look, then send it to the pipeline.";
@@ -780,7 +800,12 @@ const SEG_BAR_STATE: Record<SegBarState, string> = {
  * everything a visitor with sight reads off the heading above it: where the step
  * sits in the walk, what it is called, and where it stands.
  */
-export function segBarSegment(position: number, total: number, label: string, state: SegBarState): string {
+export function segBarSegment(
+  position: number,
+  total: number,
+  label: string,
+  state: SegBarState,
+): string {
   return `Step ${position} of ${total}: ${label}, ${SEG_BAR_STATE[state]}`;
 }
 
@@ -985,7 +1010,8 @@ export const createSectionStartFrom = "Start from";
 export const createSectionStartFromHint = "Begin blank, or pick an existing campaign to copy from.";
 /** `03` — the mode panel's section: one design, or a set of variations. */
 export const createSectionMode = "Mode";
-export const createSectionModeHint = "Classic makes one design; Randomized makes a set of variations.";
+export const createSectionModeHint =
+  "Classic makes one design; Randomized makes a set of variations.";
 
 /* ── A campaign listing that failed (D83 / F-A) ──────────────────────────── */
 
@@ -1062,7 +1088,8 @@ export const modeTileTagBrief = "Uniform";
 export const modeTileTagVariation = "Varied";
 /** The mode tile's one-sentence body: what the mode produces. */
 export const modeTileBlurbBrief = "One design for the whole set — every creative matches.";
-export const modeTileBlurbVariation = "A set of creatives, each a different take on the same brief.";
+export const modeTileBlurbVariation =
+  "A set of creatives, each a different take on the same brief.";
 /** The mode tile's preview panel caption, in its bottom-right corner. */
 export const modeTileCaptionBrief = "one design";
 export const modeTileCaptionVariation = "six variations";
@@ -1217,16 +1244,11 @@ export function templateOcclusionNote(
   effect: "hide" | "mute" | "overlap",
 ): string {
   const below =
-    belowName.toLowerCase() === "static text" ||
-    belowName.toLowerCase() === "animated text"
+    belowName.toLowerCase() === "static text" || belowName.toLowerCase() === "animated text"
       ? "the headline"
       : `the ${belowName.toLowerCase()}`;
   const verb =
-    effect === "hide"
-      ? "hide it"
-      : effect === "mute"
-        ? "mute it"
-        : "overlap where it sits";
+    effect === "hide" ? "hide it" : effect === "mute" ? "mute it" : "overlap where it sits";
   return `the ${aboveName.toLowerCase()} layer now sits above ${below} and will ${verb}`;
 }
 
@@ -1236,8 +1258,7 @@ export function reviewTemplateLayers(count: number): string {
 }
 
 /** The Template step's subtitle. */
-export const stepSubtitleTemplate =
-  "Choose what every creative is made of — add or remove layers.";
+export const stepSubtitleTemplate = "Choose what every creative is made of — add or remove layers.";
 
 /** Accessible name for the video preview's scrub range control (VE-D5). */
 export const previewScrubLabel = "Scrub preview";
@@ -1339,10 +1360,7 @@ const FRAME_FIELD_WORDS: Readonly<Record<FrameNumberField, string>> = {
 };
 
 /** A frame input's label; `field` is the frame's own key, named here in words. */
-export function htmlElementFrameLabel(
-  position: number,
-  field: FrameNumberField,
-): string {
+export function htmlElementFrameLabel(position: number, field: FrameNumberField): string {
   return `Element ${position} ${FRAME_FIELD_WORDS[field]}`;
 }
 
@@ -1406,11 +1424,7 @@ export function weightKb(bytes: number): string {
 }
 
 /** The meter's sentence: what the markup weighs, against which placement. */
-export function htmlWeightMeterText(
-  bytes: number,
-  maxBytes: number,
-  profileLabel: string,
-): string {
+export function htmlWeightMeterText(bytes: number, maxBytes: number, profileLabel: string): string {
   return `${weightKb(bytes)} KB of ${weightKb(maxBytes)} KB for ${profileLabel}.`;
 }
 
@@ -1425,4 +1439,3 @@ export const htmlWeightFallbackNote =
 export function htmlWeightOverage(overBytes: number): string {
   return `Over budget by ${weightKb(overBytes)} KB.`;
 }
-

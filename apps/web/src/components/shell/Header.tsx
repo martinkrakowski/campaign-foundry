@@ -5,7 +5,16 @@ import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { cn } from "@/lib/cn";
-import { Button, DialogBody, DialogFoot, DialogHead, DialogShell, Eyebrow, IconButton, ThemeToggle } from "@/components/ui";
+import {
+  Button,
+  DialogBody,
+  DialogFoot,
+  DialogHead,
+  DialogShell,
+  Eyebrow,
+  IconButton,
+  ThemeToggle,
+} from "@/components/ui";
 import {
   confirmCancel,
   generate,
@@ -117,7 +126,9 @@ function DraftRunDialog({
             onClick={runThisDraft}
             className="flex w-full flex-col items-start rounded-lg border border-border px-4 py-3 text-left transition-colors hover:bg-surface-2"
           >
-            <span className="text-[13px] font-medium text-text-primary">{generateDraftRunThis}</span>
+            <span className="text-[13px] font-medium text-text-primary">
+              {generateDraftRunThis}
+            </span>
             <span className="text-[11px] text-text-muted">{generateDraftRunThisHint}</span>
           </button>
           <button
@@ -125,7 +136,9 @@ function DraftRunDialog({
             onClick={() => void saveAndRun()}
             className="flex w-full flex-col items-start rounded-lg border border-border px-4 py-3 text-left transition-colors hover:bg-surface-2"
           >
-            <span className="text-[13px] font-medium text-text-primary">{generateDraftSaveRun}</span>
+            <span className="text-[13px] font-medium text-text-primary">
+              {generateDraftSaveRun}
+            </span>
             <span className="text-[11px] text-text-muted">{generateDraftSaveRunHint}</span>
           </button>
         </div>
@@ -154,7 +167,10 @@ export function Header() {
   // A refused "Run this draft" (GB-D3): the section the editor named, plus the
   // editor's refusal itself captured at press time. Spent one commit later — see
   // the effect below for why the refusal cannot run inside the press.
-  const [pendingRefusal, setPendingRefusal] = useState<{ blocked: SectionId; refuse: () => boolean } | null>(null);
+  const [pendingRefusal, setPendingRefusal] = useState<{
+    blocked: SectionId;
+    refuse: () => boolean;
+  } | null>(null);
   const { guardedPush, guardedAction, isDirty, draftRun } = useGuardedNavigation();
   const router = useRouter();
   const { briefApplied, execute, telemetryOpen, toggleTelemetry } = useRun();
@@ -212,12 +228,9 @@ export function Header() {
   // (attempted → reveal → focus) to the effect above. The refusal itself arrives from
   // the dialog — the handoff prop it renders from — so it is the editor's own, captured
   // at press time.
-  const refuseDraftRun = useCallback(
-    (blocked: SectionId, refuse: () => boolean) => {
-      setPendingRefusal({ blocked, refuse });
-    },
-    [],
-  );
+  const refuseDraftRun = useCallback((blocked: SectionId, refuse: () => boolean) => {
+    setPendingRefusal({ blocked, refuse });
+  }, []);
 
   const handleGenerate = useCallback(() => {
     // D35: while the editor is mounted and its on-screen draft differs from the shell
@@ -334,8 +347,19 @@ export function Header() {
           aria-expanded={menuOpen}
           className="lg:hidden"
         >
-          <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+          <svg
+            className="h-6 w-6"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+            aria-hidden
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M4 6h16M4 12h16M4 18h16"
+            />
           </svg>
         </IconButton>
       </div>

@@ -18,7 +18,10 @@ import { DISPLAY_SIZE_VALUES } from "@campaignfoundry/CampaignOrchestration/disp
 import { RATIO_VALUES } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import { ANCHOR_VALUES } from "@campaignfoundry/CampaignOrchestration/variation-defaults";
 import { TEXT_EFFECT_VALUES } from "@campaignfoundry/CampaignOrchestration/creative-style";
-import { CAMPAIGN_TYPES, DEFAULT_CAMPAIGN_TYPE } from "@campaignfoundry/CampaignOrchestration/campaign-types";
+import {
+  CAMPAIGN_TYPES,
+  DEFAULT_CAMPAIGN_TYPE,
+} from "@campaignfoundry/CampaignOrchestration/campaign-types";
 import { CREATIVE_TYPES } from "@campaignfoundry/CampaignOrchestration/creative-types";
 
 describe("display names", () => {
@@ -143,10 +146,26 @@ describe("the display-name rule reaches the messages a user reads", () => {
   test("no validator message leaks a raw platform id, format or ratio", async () => {
     const { validateOutput, validatePolicy } = await import("../validate");
     const { initialEditorState } = await import("../editor-state");
-    const raw = ["instagram-feed", "instagram-reel", "tiktok", "youtube-short", "static", "motion", "9:16", "1:1", "16:9", "image-text", "image-html"];
+    const raw = [
+      "instagram-feed",
+      "instagram-reel",
+      "tiktok",
+      "youtube-short",
+      "static",
+      "motion",
+      "9:16",
+      "1:1",
+      "16:9",
+      "image-text",
+      "image-html",
+    ];
 
     // a platform that packages none of the requested formats, and a format no platform takes
-    const incompatible = { ...initialEditorState("variation"), formats: ["motion"], platforms: ["instagram-feed"] };
+    const incompatible = {
+      ...initialEditorState("variation"),
+      formats: ["motion"],
+      platforms: ["instagram-feed"],
+    };
     // a motion-only brief whose chosen shapes cannot be drawn
     const narrowed = {
       ...initialEditorState("variation"),
@@ -157,7 +176,11 @@ describe("the display-name rule reaches the messages a user reads", () => {
     };
     // an image-text draft requesting html: the out-of-type message must name the
     // type in words too (X14 fix2)
-    const outOfType = { ...initialEditorState("variation"), formats: ["html"], platforms: ["google-display-html"] };
+    const outOfType = {
+      ...initialEditorState("variation"),
+      formats: ["html"],
+      platforms: ["google-display-html"],
+    };
     const shown = [
       ...Object.values(validateOutput(incompatible as never)),
       ...Object.values(validatePolicy(narrowed as never)),

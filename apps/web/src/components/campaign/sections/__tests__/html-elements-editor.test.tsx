@@ -2,9 +2,7 @@ import { describe, test, expect, vi } from "vitest";
 import { useReducer } from "react";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import {
-  CANONICAL_TEMPLATES,
-} from "@campaignfoundry/CampaignOrchestration/creative-templates";
+import { CANONICAL_TEMPLATES } from "@campaignfoundry/CampaignOrchestration/creative-templates";
 import { assembleHtml } from "@campaignfoundry/CampaignOrchestration/markup-assembler";
 import type { BriefTemplate } from "@campaignfoundry/CampaignOrchestration/brief-template";
 import type { HtmlElement } from "@campaignfoundry/CampaignOrchestration/html-element";
@@ -70,12 +68,10 @@ const three = () => withElements(text, button, image);
  * Every editor test reaches its controls through here or through an accessible
  * name, so a query can never pass on a control belonging to another layer.
  */
-const addGroup = () =>
-  within(screen.getByRole("group", { name: messages.htmlElementAddLabel }));
+const addGroup = () => within(screen.getByRole("group", { name: messages.htmlElementAddLabel }));
 
 /** A form control's live value — the property the user's own typing writes. */
-const valueOf = (control: HTMLElement): string =>
-  (control as HTMLInputElement).value;
+const valueOf = (control: HTMLElement): string => (control as HTMLInputElement).value;
 
 function Harness({ initial }: { initial: EditorState }) {
   const [state, dispatch] = useReducer(editorReducer, initial);
@@ -90,15 +86,10 @@ function Harness({ initial }: { initial: EditorState }) {
  */
 function FrameHarness({ initial }: { initial: EditorState }) {
   const [state, dispatch] = useReducer(editorReducer, initial);
-  const elements =
-    state.template.layers.find((layer) => layer.id === "html")?.elements ?? [];
+  const elements = state.template.layers.find((layer) => layer.id === "html")?.elements ?? [];
   return (
     <>
-      <HtmlElementsEditor
-        layerId="html"
-        elements={elements}
-        dispatch={dispatch}
-      />
+      <HtmlElementsEditor layerId="html" elements={elements} dispatch={dispatch} />
       <span data-testid="stored-frame-x">{String(elements[0]?.frame.x)}</span>
     </>
   );
@@ -128,23 +119,13 @@ describe("HtmlElementsEditor — where it appears (HL5a)", () => {
   });
 
   test("a template with no html layer offers no element editing at all", () => {
-    render(
-      <TemplateSection
-        state={initialEditorState()}
-        dispatch={vi.fn()}
-        errors={{}}
-      />,
-    );
-    expect(
-      screen.queryByRole("group", { name: messages.htmlElementAddLabel }),
-    ).toBeNull();
+    render(<TemplateSection state={initialEditorState()} dispatch={vi.fn()} errors={{}} />);
+    expect(screen.queryByRole("group", { name: messages.htmlElementAddLabel })).toBeNull();
     expect(screen.queryByText(messages.htmlElementsEmpty)).toBeNull();
   });
 
   test("an html layer holding nothing says so, and still offers the three adds", () => {
-    render(
-      <HtmlElementsEditor layerId="html" elements={[]} dispatch={vi.fn()} />,
-    );
+    render(<HtmlElementsEditor layerId="html" elements={[]} dispatch={vi.fn()} />);
     expect(screen.getByText(messages.htmlElementsEmpty)).toBeTruthy();
     expect(
       addGroup()
@@ -157,9 +138,7 @@ describe("HtmlElementsEditor — where it appears (HL5a)", () => {
 describe("HtmlElementsEditor — the add offer (HL5a, D18)", () => {
   test("offers exactly the element kinds, each named by its raw id with the words in the description", () => {
     render(<TemplateSection state={htmlState()} dispatch={vi.fn()} errors={{}} />);
-    const group = within(
-      screen.getByRole("group", { name: messages.htmlElementAddLabel }),
-    );
+    const group = within(screen.getByRole("group", { name: messages.htmlElementAddLabel }));
     for (const [kind, label] of [
       ["text", "Text"],
       ["button", "Button"],
@@ -171,8 +150,7 @@ describe("HtmlElementsEditor — the add offer (HL5a, D18)", () => {
       });
       expect(control.textContent).toBe(label);
       expect(
-        document.getElementById(control.getAttribute("aria-describedby") ?? "")
-          ?.textContent,
+        document.getElementById(control.getAttribute("aria-describedby") ?? "")?.textContent,
       ).toBe(messages.htmlElementAddDescription(label));
     }
     expect(group.getAllByRole("button")).toHaveLength(3);
@@ -181,9 +159,7 @@ describe("HtmlElementsEditor — the add offer (HL5a, D18)", () => {
   test("an add dispatches addHtmlElement with the layer id and the kind", async () => {
     const user = userEvent.setup();
     const dispatch = vi.fn();
-    render(
-      <HtmlElementsEditor layerId="html" elements={[]} dispatch={dispatch} />,
-    );
+    render(<HtmlElementsEditor layerId="html" elements={[]} dispatch={dispatch} />);
     await user.click(
       addGroup().getByRole("button", {
         name: "button",
@@ -201,28 +177,23 @@ describe("HtmlElementsEditor — the add offer (HL5a, D18)", () => {
     const user = userEvent.setup();
     render(<Harness initial={htmlState()} />);
     await user.click(
-      within(
-        screen.getByRole("group", { name: messages.htmlElementAddLabel }),
-      ).getByRole("button", {
-        name: "text",
-        description: messages.htmlElementAddDescription("Text"),
-      }),
+      within(screen.getByRole("group", { name: messages.htmlElementAddLabel })).getByRole(
+        "button",
+        {
+          name: "text",
+          description: messages.htmlElementAddDescription("Text"),
+        },
+      ),
     );
     expect(screen.queryByText(messages.htmlElementsEmpty)).toBeNull();
-    expect(
-      screen.getByRole("textbox", { name: messages.htmlElementTextLabel(1) }),
-    ).toBeTruthy();
+    expect(screen.getByRole("textbox", { name: messages.htmlElementTextLabel(1) })).toBeTruthy();
   });
 });
 
 describe("HtmlElementsEditor — one element's controls (HL5a)", () => {
   test("a text and a button element carry a copy input; an image carries none", () => {
     render(
-      <HtmlElementsEditor
-        layerId="html"
-        elements={[text, button, image]}
-        dispatch={vi.fn()}
-      />,
+      <HtmlElementsEditor layerId="html" elements={[text, button, image]} dispatch={vi.fn()} />,
     );
     expect(
       valueOf(
@@ -231,24 +202,14 @@ describe("HtmlElementsEditor — one element's controls (HL5a)", () => {
         }),
       ),
     ).toBe("Stay wild");
-    expect(
-      screen.getByRole("textbox", { name: messages.htmlElementTextLabel(2) }),
-    ).toBeTruthy();
+    expect(screen.getByRole("textbox", { name: messages.htmlElementTextLabel(2) })).toBeTruthy();
     // Absent, never present-and-disabled (DESIGN.md §1.5).
-    expect(
-      screen.queryByRole("textbox", { name: messages.htmlElementTextLabel(3) }),
-    ).toBeNull();
+    expect(screen.queryByRole("textbox", { name: messages.htmlElementTextLabel(3) })).toBeNull();
     expect(screen.getAllByRole("textbox")).toHaveLength(2);
   });
 
   test("every frame field and the anchor carry a control, each with an accessible name", () => {
-    render(
-      <HtmlElementsEditor
-        layerId="html"
-        elements={[text]}
-        dispatch={vi.fn()}
-      />,
-    );
+    render(<HtmlElementsEditor layerId="html" elements={[text]} dispatch={vi.fn()} />);
     for (const field of ["x", "y", "w", "h"] as const) {
       const input = screen.getByRole("spinbutton", {
         name: messages.htmlElementFrameLabel(1, field),
@@ -264,30 +225,15 @@ describe("HtmlElementsEditor — one element's controls (HL5a)", () => {
     });
     expect(valueOf(select)).toBe("middle");
     expect(
-      Array.from((select as HTMLSelectElement).options).map(
-        (option) => option.textContent,
-      ),
+      Array.from((select as HTMLSelectElement).options).map((option) => option.textContent),
     ).toEqual(["Top", "Middle", "Bottom"]);
   });
 
   test("a frame input is named by what the field means, never by its schema key", () => {
-    render(
-      <HtmlElementsEditor
-        layerId="html"
-        elements={[text]}
-        dispatch={vi.fn()}
-      />,
-    );
-    const words = [
-      "horizontal position",
-      "vertical position",
-      "width",
-      "height",
-    ];
+    render(<HtmlElementsEditor layerId="html" elements={[text]} dispatch={vi.fn()} />);
+    const words = ["horizontal position", "vertical position", "width", "height"];
     for (const word of words) {
-      expect(
-        screen.getByRole("spinbutton", { name: `Element 1 ${word}` }),
-      ).toBeTruthy();
+      expect(screen.getByRole("spinbutton", { name: `Element 1 ${word}` })).toBeTruthy();
     }
     // The keys are for code: `x` on a label reads as a letter, not a place.
     for (const field of ["x", "y", "w", "h"] as const) {
@@ -313,10 +259,9 @@ describe("HtmlElementsEditor — one element's controls (HL5a)", () => {
         dispatch={dispatch}
       />,
     );
-    fireEvent.change(
-      screen.getByRole("textbox", { name: messages.htmlElementTextLabel(1) }),
-      { target: { value: "Go" } },
-    );
+    fireEvent.change(screen.getByRole("textbox", { name: messages.htmlElementTextLabel(1) }), {
+      target: { value: "Go" },
+    });
     expect(dispatch).toHaveBeenCalledWith({
       type: "setHtmlElementText",
       layerId: "html",
@@ -327,13 +272,7 @@ describe("HtmlElementsEditor — one element's controls (HL5a)", () => {
 
   test("each frame field dispatches setHtmlElementFrame with the field it names", () => {
     const dispatch = vi.fn();
-    render(
-      <HtmlElementsEditor
-        layerId="html"
-        elements={[text]}
-        dispatch={dispatch}
-      />,
-    );
+    render(<HtmlElementsEditor layerId="html" elements={[text]} dispatch={dispatch} />);
     for (const [field, value] of [
       ["x", "0.4"],
       ["y", "0.5"],
@@ -358,13 +297,7 @@ describe("HtmlElementsEditor — one element's controls (HL5a)", () => {
   test("the anchor select dispatches setHtmlElementFrame with the anchor chosen", async () => {
     const user = userEvent.setup();
     const dispatch = vi.fn();
-    render(
-      <HtmlElementsEditor
-        layerId="html"
-        elements={[text]}
-        dispatch={dispatch}
-      />,
-    );
+    render(<HtmlElementsEditor layerId="html" elements={[text]} dispatch={dispatch} />);
     await user.selectOptions(
       screen.getByRole("combobox", { name: messages.htmlElementAnchorLabel(1) }),
       "top",
@@ -381,11 +314,7 @@ describe("HtmlElementsEditor — one element's controls (HL5a)", () => {
 describe("HtmlElementsEditor — move and remove (HL5a)", () => {
   test("the first element offers no up and the last offers no down — absent, never disabled", () => {
     render(
-      <HtmlElementsEditor
-        layerId="html"
-        elements={[text, button, image]}
-        dispatch={vi.fn()}
-      />,
+      <HtmlElementsEditor layerId="html" elements={[text, button, image]} dispatch={vi.fn()} />,
     );
     const up = (position: number) =>
       screen.queryByRole("button", {
@@ -405,19 +334,11 @@ describe("HtmlElementsEditor — move and remove (HL5a)", () => {
     expect(up(3)).toBeTruthy();
     // Nothing anywhere in the editor is disabled: a control that cannot act is
     // not rendered (DESIGN.md §1.5).
-    expect(
-      screen.getAllByRole("button").filter((b) => b.hasAttribute("disabled")),
-    ).toEqual([]);
+    expect(screen.getAllByRole("button").filter((b) => b.hasAttribute("disabled"))).toEqual([]);
   });
 
   test("a single element offers neither move control, and always offers remove", () => {
-    render(
-      <HtmlElementsEditor
-        layerId="html"
-        elements={[text]}
-        dispatch={vi.fn()}
-      />,
-    );
+    render(<HtmlElementsEditor layerId="html" elements={[text]} dispatch={vi.fn()} />);
     expect(
       screen.queryByRole("button", {
         description: messages.htmlElementMoveUpDescription(1),
@@ -440,11 +361,7 @@ describe("HtmlElementsEditor — move and remove (HL5a)", () => {
     const user = userEvent.setup();
     const dispatch = vi.fn();
     render(
-      <HtmlElementsEditor
-        layerId="html"
-        elements={[text, button, image]}
-        dispatch={dispatch}
-      />,
+      <HtmlElementsEditor layerId="html" elements={[text, button, image]} dispatch={dispatch} />,
     );
     await user.click(
       screen.getByRole("button", {
@@ -484,21 +401,14 @@ describe("HtmlElementsEditor — move and remove (HL5a)", () => {
   });
 
   test("a move control's description is the sr-only span it points at", () => {
-    render(
-      <HtmlElementsEditor
-        layerId="html"
-        elements={[text, button]}
-        dispatch={vi.fn()}
-      />,
-    );
+    render(<HtmlElementsEditor layerId="html" elements={[text, button]} dispatch={vi.fn()} />);
     const move = screen.getByRole("button", {
       name: messages.htmlElementName(2),
       description: messages.htmlElementMoveUpDescription(2),
     });
-    expect(
-      document.getElementById(move.getAttribute("aria-describedby") ?? "")
-        ?.textContent,
-    ).toBe(messages.htmlElementMoveUpDescription(2));
+    expect(document.getElementById(move.getAttribute("aria-describedby") ?? "")?.textContent).toBe(
+      messages.htmlElementMoveUpDescription(2),
+    );
   });
 
   test("reordering through the real reducer re-renders the rows in the new order", async () => {
@@ -523,8 +433,7 @@ describe("HtmlElementsEditor — move and remove (HL5a)", () => {
 
 describe("HtmlElementsEditor — a frame value is typed one digit at a time (HL5a)", () => {
   /** The frame's `x` in the state the reducer holds — the value a Save would write. */
-  const storedX = () =>
-    document.querySelector('[data-testid="stored-frame-x"]')?.textContent;
+  const storedX = () => document.querySelector('[data-testid="stored-frame-x"]')?.textContent;
 
   const xInput = () =>
     screen.getByRole("spinbutton", {
@@ -628,10 +537,7 @@ describe("HtmlElementsEditor — user text never reaches the DOM as markup (HL-D
 
 describe("HtmlWeightMeter — the live weight of the html unit (HL5c, HL-D6)", () => {
   /** The element editor's state, aimed at one html placement at one size. */
-  const meterWith = (
-    elements: HtmlElement[],
-    over: Partial<EditorState> = {},
-  ): EditorState => ({
+  const meterWith = (elements: HtmlElement[], over: Partial<EditorState> = {}): EditorState => ({
     ...withElements(...elements),
     platforms: ["google-display-html"],
     sizes: ["300x250"],
@@ -648,20 +554,10 @@ describe("HtmlWeightMeter — the live weight of the html unit (HL5c, HL-D6)", (
     }).byteLength;
 
   test("the meter reads the measured weight against the placement's own budget", () => {
-    render(
-      <TemplateSection
-        state={meterWith([text])}
-        dispatch={vi.fn()}
-        errors={{}}
-      />,
-    );
+    render(<TemplateSection state={meterWith([text])} dispatch={vi.fn()} errors={{}} />);
     expect(
       screen.getByText(
-        messages.htmlWeightMeterText(
-          assembledBytes([text]),
-          150 * 1024,
-          "Google Display (HTML5)",
-        ),
+        messages.htmlWeightMeterText(assembledBytes([text]), 150 * 1024, "Google Display (HTML5)"),
       ),
     ).toBeTruthy();
     // The fallback sentence: its bytes join the same budget at packaging.
@@ -674,9 +570,7 @@ describe("HtmlWeightMeter — the live weight of the html unit (HL5c, HL-D6)", (
       text: "A".repeat(200_000),
       frame,
     };
-    render(
-      <TemplateSection state={meterWith([big])} dispatch={vi.fn()} errors={{}} />,
-    );
+    render(<TemplateSection state={meterWith([big])} dispatch={vi.fn()} errors={{}} />);
     expect(
       screen.getByText(messages.htmlWeightOverage(assembledBytes([big]) - 150 * 1024)),
     ).toBeTruthy();
@@ -685,13 +579,7 @@ describe("HtmlWeightMeter — the live weight of the html unit (HL5c, HL-D6)", (
   test("no meter without an html profile", () => {
     // The default draft selects the static platforms — no html budget exists
     // to read (HL-D6), so the meter shows nothing rather than a made-up number.
-    render(
-      <TemplateSection
-        state={withElements(text)}
-        dispatch={vi.fn()}
-        errors={{}}
-      />,
-    );
+    render(<TemplateSection state={withElements(text)} dispatch={vi.fn()} errors={{}} />);
     expect(screen.queryByText(/KB of/)).toBeNull();
     expect(screen.queryByText(messages.htmlWeightFallbackNote)).toBeNull();
   });
@@ -733,9 +621,7 @@ describe("HtmlWeightMeter — the live weight of the html unit (HL5c, HL-D6)", (
       (el) =>
         el.tagName !== "INPUT" &&
         Array.from(el.childNodes).some(
-          (node) =>
-            node.nodeType === 3 &&
-            (node.textContent ?? "").includes("onerror"),
+          (node) => node.nodeType === 3 && (node.textContent ?? "").includes("onerror"),
         ),
     );
     expect(offenders).toEqual([]);
@@ -751,14 +637,11 @@ describe("HtmlElementsEditor — style overrides (HL5e)", () => {
 
   function StyleHarness({ initial }: { initial: EditorState }) {
     const [state, dispatch] = useReducer(editorReducer, initial);
-    const elements =
-      state.template.layers.find((layer) => layer.id === "html")?.elements ?? [];
+    const elements = state.template.layers.find((layer) => layer.id === "html")?.elements ?? [];
     return (
       <>
         <HtmlElementsEditor layerId="html" elements={elements} dispatch={dispatch} />
-        <span data-testid="stored-style">
-          {JSON.stringify(elements[0]?.style ?? null)}
-        </span>
+        <span data-testid="stored-style">{JSON.stringify(elements[0]?.style ?? null)}</span>
       </>
     );
   }
@@ -831,9 +714,8 @@ describe("HtmlElementsEditor — style overrides (HL5e)", () => {
     render(<StyleHarness initial={withElements(styled)} />);
     const r = row(1);
     expect(
-      (
-        r.getByRole("combobox", { name: messages.htmlElementWeightLabel(1) }) as HTMLSelectElement
-      ).value,
+      (r.getByRole("combobox", { name: messages.htmlElementWeightLabel(1) }) as HTMLSelectElement)
+        .value,
     ).toBe("400");
     await user.selectOptions(
       r.getByRole("combobox", { name: messages.htmlElementFamilyLabel(1) }),

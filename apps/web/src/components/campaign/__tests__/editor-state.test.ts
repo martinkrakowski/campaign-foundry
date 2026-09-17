@@ -1,9 +1,5 @@
 import { describe, test, expect, beforeEach, vi, afterEach } from "vitest";
-import type {
-  CampaignBrief,
-  CampaignType,
-  CopyPool,
-} from "@campaignfoundry/CampaignOrchestration";
+import type { CampaignBrief, CampaignType, CopyPool } from "@campaignfoundry/CampaignOrchestration";
 import { DEFAULT_CAMPAIGN_TYPE } from "@campaignfoundry/CampaignOrchestration/campaign-types";
 import {
   templateFromCanonical,
@@ -88,15 +84,11 @@ const savedBrief = (over: Partial<CampaignBrief> = {}): CampaignBrief =>
     targetRegion: "DE",
     targetAudience: "a",
     campaignMessage: "Hi",
-    products: [
-      { id: "alpha", name: "A", primaryColor: "#1473E6", logoPath: "l.png" },
-    ],
+    products: [{ id: "alpha", name: "A", primaryColor: "#1473E6", logoPath: "l.png" }],
     // The brief's own type when the fixture names one, never the default blindly
     // (L3a): every produced brief carries its canonical template, layer list
     // materialised from the canonical library, never hand-written.
-    template: templateFromCanonical(
-      (over.type ?? DEFAULT_CAMPAIGN_TYPE) as CampaignType,
-    ),
+    template: templateFromCanonical((over.type ?? DEFAULT_CAMPAIGN_TYPE) as CampaignType),
     ...over,
   }) as CampaignBrief;
 
@@ -135,26 +127,20 @@ describe("value helpers", () => {
   test("assetFileName substitutes placeholders for an empty stem or product id", () => {
     expect(assetFileName("!!!.png", "alpha")).toBe("alpha-logo.png");
     expect(assetFileName("mark.png", "")).toBe("product-mark.png");
-    expect(assetFileName(`${"z".repeat(70)}.png`, "alpha")).toBe(
-      `alpha-${"z".repeat(58)}.png`,
-    );
+    expect(assetFileName(`${"z".repeat(70)}.png`, "alpha")).toBe(`alpha-${"z".repeat(58)}.png`);
   });
 
   test("approvedHeadlines counts only approved entries", () => {
     expect(approvedHeadlines(null)).toBe(0);
     expect(approvedHeadlines(pool([]))).toBe(0);
-    expect(approvedHeadlines(pool(["approved", "pending", "approved"]))).toBe(
-      2,
-    );
+    expect(approvedHeadlines(pool(["approved", "pending", "approved"]))).toBe(2);
   });
 });
 
 describe("fileToBase64", () => {
   test("strips the data-URL prefix", async () => {
     const file = new File(["hello"], "a.png", { type: "image/png" });
-    await expect(fileToBase64(file)).resolves.toBe(
-      Buffer.from("hello").toString("base64"),
-    );
+    await expect(fileToBase64(file)).resolves.toBe(Buffer.from("hello").toString("base64"));
   });
 
   test("returns the raw result when there is no comma, and empty for a non-string result", async () => {
@@ -195,9 +181,7 @@ describe("fileToBase64", () => {
       error: unknown = null;
     }
     vi.stubGlobal("FileReader", SilentReader);
-    await expect(fileToBase64(new File([""], "a.png"))).rejects.toThrow(
-      "read failed",
-    );
+    await expect(fileToBase64(new File([""], "a.png"))).rejects.toThrow("read failed");
     vi.unstubAllGlobals();
   });
 });
@@ -221,9 +205,7 @@ describe("initialEditorState", () => {
 
 describe("editorReducer — identity and copy", () => {
   test("setMode switches mode", () => {
-    expect(reduce(base(), { type: "setMode", mode: "variation" }).mode).toBe(
-      "variation",
-    );
+    expect(reduce(base(), { type: "setMode", mode: "variation" }).mode).toBe("variation");
   });
 
   test("patching campaignName on a new draft derives briefId via slugify", () => {
@@ -279,9 +261,7 @@ describe("editorReducer — identity and copy", () => {
 
   test("patch with the same briefId keeps the pool", () => {
     const seeded = { ...base(), briefId: "same", pool: pool(["approved"]) };
-    expect(
-      reduce(seeded, { type: "patch", patch: { briefId: "same" } }).pool,
-    ).not.toBeNull();
+    expect(reduce(seeded, { type: "patch", patch: { briefId: "same" } }).pool).not.toBeNull();
   });
 });
 
@@ -332,9 +312,7 @@ describe("editorReducer — products", () => {
       key: added.products[1].key,
     });
     expect(removed.products).toHaveLength(1);
-    expect(removed.products.map((p) => p.key)).not.toContain(
-      added.products[1].key,
-    );
+    expect(removed.products.map((p) => p.key)).not.toContain(added.products[1].key);
   });
 
   test("addProduct picks the next unused swatch from SWATCH_PALETTE and wraps around", () => {
@@ -352,11 +330,7 @@ describe("editorReducer — products", () => {
 
 describe("editorReducer — treatments", () => {
   test("add, patch the matching index, and remove", () => {
-    const added = reduce(
-      base(),
-      { type: "addTreatment" },
-      { type: "addTreatment" },
-    );
+    const added = reduce(base(), { type: "addTreatment" }, { type: "addTreatment" });
     expect(added.treatments).toHaveLength(2);
     expect(added.treatments[0]).toEqual({
       id: "",
@@ -381,8 +355,7 @@ describe("editorReducer — treatments", () => {
 describe("editorReducer — variation axes", () => {
   test("setVariation writes the named numeric field", () => {
     expect(
-      reduce(base(), { type: "setVariation", field: "seed", value: "42" })
-        .variation.seed,
+      reduce(base(), { type: "setVariation", field: "seed", value: "42" }).variation.seed,
     ).toBe("42");
   });
 
@@ -429,9 +402,7 @@ describe("editorReducer — variation axes", () => {
   test("toggleHeadline flips the flag", () => {
     const on = reduce(base(), { type: "toggleHeadline" });
     expect(on.variation.headline).toBe(true);
-    expect(reduce(on, { type: "toggleHeadline" }).variation.headline).toBe(
-      false,
-    );
+    expect(reduce(on, { type: "toggleHeadline" }).variation.headline).toBe(false);
   });
 
   test("togglePlatform removes and restores in canonical order", () => {
@@ -443,10 +414,9 @@ describe("editorReducer — variation axes", () => {
     // outputExplicit is reserved for briefs that declared `output` on load; a bare
     // toggle no longer sets it, so a toggle back to the default round-trips clean.
     expect(off.outputExplicit).toBe(false);
-    expect(
-      reduce(off, { type: "togglePlatform", value: STATIC_PLATFORMS[1] })
-        .platforms,
-    ).toEqual([...STATIC_PLATFORMS]);
+    expect(reduce(off, { type: "togglePlatform", value: STATIC_PLATFORMS[1] }).platforms).toEqual([
+      ...STATIC_PLATFORMS,
+    ]);
   });
 
   test("togglePlatform orders motion platforms after the static ones", () => {
@@ -456,9 +426,10 @@ describe("editorReducer — variation axes", () => {
       { type: "togglePlatform", value: "linkedin" },
     );
     expect(state.platforms).toEqual(["instagram-feed", "linkedin", "tiktok"]);
-    expect(
-      reduce(state, { type: "togglePlatform", value: "linkedin" }).platforms,
-    ).toEqual(["instagram-feed", "tiktok"]);
+    expect(reduce(state, { type: "togglePlatform", value: "linkedin" }).platforms).toEqual([
+      "instagram-feed",
+      "tiktok",
+    ]);
   });
 });
 
@@ -466,36 +437,25 @@ describe("editorReducer — motion, duration and formats", () => {
   test("toggleMotion adds then removes", () => {
     const on = reduce(base(), { type: "toggleMotion", value: "ken-burns-in" });
     expect(on.motion).toEqual(["ken-burns-in"]);
-    expect(
-      reduce(on, { type: "toggleMotion", value: "ken-burns-in" }).motion,
-    ).toEqual([]);
+    expect(reduce(on, { type: "toggleMotion", value: "ken-burns-in" }).motion).toEqual([]);
   });
 
   test("duration is appended, written by index and removed by index", () => {
     // each Add offers a length the list does not already hold — the planner
     // de-duplicates this axis, so a repeat would draw nothing. The first offer is
     // the domain's DEFAULT_DURATION_SEC; the next free second is the smallest in range.
-    const added = reduce(
-      base(),
-      { type: "addDuration" },
-      { type: "addDuration" },
-    );
+    const added = reduce(base(), { type: "addDuration" }, { type: "addDuration" });
     expect(added.duration).toEqual([DEFAULT_DURATION_SEC, 2]);
     const set = reduce(added, { type: "setDuration", index: 1, value: 8 });
     expect(set.duration).toEqual([DEFAULT_DURATION_SEC, 8]);
-    expect(reduce(set, { type: "removeDuration", index: 0 }).duration).toEqual([
-      8,
-    ]);
+    expect(reduce(set, { type: "removeDuration", index: 0 }).duration).toEqual([8]);
   });
 
   test("Add duration never offers a length already in the list", () => {
     let state = base();
-    for (let i = 0; i < 8; i += 1)
-      state = reduce(state, { type: "addDuration" });
+    for (let i = 0; i < 8; i += 1) state = reduce(state, { type: "addDuration" });
     expect(new Set(state.duration).size).toBe(state.duration.length);
-    expect(
-      state.duration.every((s) => Number.isInteger(s) && s >= 2 && s <= 30),
-    ).toBe(true);
+    expect(state.duration.every((s) => Number.isInteger(s) && s >= 2 && s <= 30)).toBe(true);
   });
 
   test("Add duration is a no-op once every length is taken", () => {
@@ -509,9 +469,7 @@ describe("editorReducer — motion, duration and formats", () => {
     expect(on.formats).toEqual(["static", "motion"]);
     // see togglePlatform: toggling never sets outputExplicit on its own
     expect(on.outputExplicit).toBe(false);
-    expect(
-      reduce(on, { type: "toggleFormat", value: "motion" }).formats,
-    ).toEqual(["static"]);
+    expect(reduce(on, { type: "toggleFormat", value: "motion" }).formats).toEqual(["static"]);
   });
 });
 
@@ -528,10 +486,7 @@ describe("editorReducer — pool and capabilities", () => {
   });
 
   test("an empty pool drops the headline axis and records that it was dropped", () => {
-    const state = reduce(
-      { ...base(), briefId: "camp" },
-      { type: "toggleHeadline" },
-    );
+    const state = reduce({ ...base(), briefId: "camp" }, { type: "toggleHeadline" });
     const next = reduce(state, {
       type: "setPool",
       briefId: "camp",
@@ -542,10 +497,7 @@ describe("editorReducer — pool and capabilities", () => {
   });
 
   test("a pool with approved copy keeps the axis and clears the dropped flag", () => {
-    const state = reduce(
-      { ...base(), briefId: "camp" },
-      { type: "toggleHeadline" },
-    );
+    const state = reduce({ ...base(), briefId: "camp" }, { type: "toggleHeadline" });
     const next = reduce(state, {
       type: "setPool",
       briefId: "camp",
@@ -575,10 +527,7 @@ describe("editorReducer — pool and capabilities", () => {
   });
 
   test("loadPool for current brief updates pool without touching variation", () => {
-    const state = reduce(
-      { ...base(), briefId: "camp" },
-      { type: "toggleHeadline" },
-    );
+    const state = reduce({ ...base(), briefId: "camp" }, { type: "toggleHeadline" });
     expect(state.variation.headline).toBe(true);
     const next = reduce(state, {
       type: "loadPool",
@@ -676,9 +625,9 @@ describe("editorReducer — load, apply, save, discard", () => {
       file: "camp.yaml",
       revision: "r1",
     });
-    expect(
-      next.source.kind === "file" && next.source.savedSnapshot?.campaignMessage,
-    ).toBe("Changed");
+    expect(next.source.kind === "file" && next.source.savedSnapshot?.campaignMessage).toBe(
+      "Changed",
+    );
   });
 
   test("save with an entry adopts the fresh identity and revision without replacing the draft", () => {
@@ -822,9 +771,7 @@ describe("toBrief", () => {
     const classicMotion = toBrief(filled({ formats: ["static", "motion"] }));
     expect(classicMotion.output?.formats ?? []).not.toContain("motion");
     expect(classicMotion).not.toHaveProperty("output");
-    const variationMotion = toBrief(
-      filled({ mode: "variation", formats: ["static", "motion"] }),
-    );
+    const variationMotion = toBrief(filled({ mode: "variation", formats: ["static", "motion"] }));
     expect(variationMotion.output).toEqual({
       formats: ["static", "motion"],
       platforms: [...STATIC_PLATFORMS],
@@ -857,9 +804,7 @@ describe("toBrief", () => {
   });
 
   test("localizedMessage is emitted only when it is non-blank after trimming", () => {
-    expect(toBrief(filled({ localizedMessage: "   " }))).not.toHaveProperty(
-      "localizedMessage",
-    );
+    expect(toBrief(filled({ localizedMessage: "   " }))).not.toHaveProperty("localizedMessage");
     expect(toBrief(filled({ localizedMessage: " Hallo " }))).toMatchObject({
       localizedMessage: "Hallo",
     });
@@ -910,8 +855,7 @@ describe("toBrief", () => {
   test("an unparseable count degrades to zero", () => {
     const state = filled({ mode: "variation" });
     expect(
-      toBrief({ ...state, variation: { ...state.variation, count: "" } })
-        .variation?.count,
+      toBrief({ ...state, variation: { ...state.variation, count: "" } }).variation?.count,
     ).toBe(0);
   });
 
@@ -971,9 +915,7 @@ describe("fromBrief", () => {
   });
 
   test("with an entry the source records file, id and revision", () => {
-    expect(
-      fromBrief(savedBrief(), { file: "camp.yaml", revision: "r1" }).source,
-    ).toMatchObject({
+    expect(fromBrief(savedBrief(), { file: "camp.yaml", revision: "r1" }).source).toMatchObject({
       kind: "file",
       file: "camp.yaml",
       loadedId: "camp",
@@ -1002,18 +944,16 @@ describe("fromBrief", () => {
   });
 
   test("a freshly opened brief with a null scalar is not dirty", () => {
-    const state = fromBrief(
-      savedBrief({ targetAudience: null as unknown as string }),
-      { file: "camp.yaml" },
-    );
+    const state = fromBrief(savedBrief({ targetAudience: null as unknown as string }), {
+      file: "camp.yaml",
+    });
     expect(isDirtySinceSave(state)).toBe(false);
   });
 
   test("a freshly opened brief with a null localizedMessage is not dirty", () => {
-    const state = fromBrief(
-      savedBrief({ localizedMessage: null as unknown as string }),
-      { file: "camp.yaml" },
-    );
+    const state = fromBrief(savedBrief({ localizedMessage: null as unknown as string }), {
+      file: "camp.yaml",
+    });
     expect(isDirtySinceSave(state)).toBe(false);
   });
 
@@ -1034,9 +974,7 @@ describe("fromBrief", () => {
     const state = fromBrief(
       {
         ...brief,
-        products: [
-          { ...brief.products[0], inputAsset: null as unknown as string },
-        ],
+        products: [{ ...brief.products[0], inputAsset: null as unknown as string }],
       },
       { file: "camp.yaml" },
     );
@@ -1072,9 +1010,7 @@ describe("fromBrief", () => {
     const state = fromBrief(
       {
         ...brief,
-        products: [
-          { ...brief.products[0], inputAsset: "assets/inputs/bg.png" },
-        ],
+        products: [{ ...brief.products[0], inputAsset: "assets/inputs/bg.png" }],
       },
       { file: "camp.yaml" },
     );
@@ -1088,9 +1024,7 @@ describe("fromBrief", () => {
       savedBrief({
         mode: "variation",
         localizedMessage: "Hallo",
-        treatments: [
-          { id: "bold-bottom", layout: "headline-bottom", tone: "bold" },
-        ],
+        treatments: [{ id: "bold-bottom", layout: "headline-bottom", tone: "bold" }],
         output: { formats: ["static", "motion"], platforms: ["linkedin"] },
       } as Partial<CampaignBrief>),
     );
@@ -1153,9 +1087,7 @@ describe("per-layer props survive the editor (L3b, D134)", () => {
     const canonical = templateFromCanonical(type);
     return {
       ...canonical,
-      layers: canonical.layers.map((layer) =>
-        layer.kind === kind ? { ...layer, props } : layer,
-      ),
+      layers: canonical.layers.map((layer) => (layer.kind === kind ? { ...layer, props } : layer)),
     };
   };
 
@@ -1164,13 +1096,11 @@ describe("per-layer props survive the editor (L3b, D134)", () => {
     const state = fromBrief(savedBrief({ template }), { file: "camp.yaml" });
     const emitted = toBrief(state);
     expect(emitted.template).toEqual(template);
-    expect(
-      emitted.template.layers.find((layer) => layer.kind === "logo")?.props,
-    ).toEqual({ width: 0.2 });
+    expect(emitted.template.layers.find((layer) => layer.kind === "logo")?.props).toEqual({
+      width: 0.2,
+    });
     // The held layer is the same data the brief carried — never re-derived.
-    expect(
-      emitted.template.layers.find((layer) => layer.kind === "image")?.props,
-    ).toBeUndefined();
+    expect(emitted.template.layers.find((layer) => layer.kind === "image")?.props).toBeUndefined();
   });
 
   test("a stored draft carrying props round-trips through the real storage path", () => {
@@ -1199,9 +1129,7 @@ describe("per-layer props survive the editor (L3b, D134)", () => {
     };
     saveDraftToStorage(state);
     expect(() => loadDraftFromStorage(state)).not.toThrow();
-    expect(loadDraftFromStorage(state)?.template).toEqual(
-      templateFromCanonical("short-video"),
-    );
+    expect(loadDraftFromStorage(state)?.template).toEqual(templateFromCanonical("short-video"));
   });
 });
 
@@ -1233,9 +1161,7 @@ describe("dirty tracking", () => {
     const saved = reduce(loaded, { type: "save" });
     expect(isDirtySinceSave(saved)).toBe(false);
     expect(
-      isDirtySinceSave(
-        reduce(saved, { type: "patch", patch: { campaignMessage: "Changed" } }),
-      ),
+      isDirtySinceSave(reduce(saved, { type: "patch", patch: { campaignMessage: "Changed" } })),
     ).toBe(true);
   });
 
@@ -1297,10 +1223,7 @@ describe("draft storage", () => {
     const legacyVariation: Record<string, unknown> = { ...state.variation };
     delete legacyVariation.ratio;
     const legacyDraft = { ...state, variation: legacyVariation };
-    localStorage.setItem(
-      getDraftKey(state),
-      JSON.stringify({ state: legacyDraft, timestamp: 1 }),
-    );
+    localStorage.setItem(getDraftKey(state), JSON.stringify({ state: legacyDraft, timestamp: 1 }));
 
     const restored = loadDraftFromStorage(state);
     expect(restored).not.toBeNull();
@@ -1314,10 +1237,7 @@ describe("draft storage", () => {
     const state = { ...base(), briefId: "camp", campaignMessage: "hi" };
     const legacy: Record<string, unknown> = { ...state };
     delete legacy.headlineAxisDropped;
-    localStorage.setItem(
-      getDraftKey(state),
-      JSON.stringify({ state: legacy, timestamp: 1 }),
-    );
+    localStorage.setItem(getDraftKey(state), JSON.stringify({ state: legacy, timestamp: 1 }));
 
     const restored = loadDraftFromStorage(state);
     expect(restored?.headlineAxisDropped).toBe(false);
@@ -1337,17 +1257,12 @@ describe("draft storage", () => {
     };
     const legacy: Record<string, unknown> = { ...state };
     delete legacy.template;
-    localStorage.setItem(
-      getDraftKey(state),
-      JSON.stringify({ state: legacy, timestamp: 1 }),
-    );
+    localStorage.setItem(getDraftKey(state), JSON.stringify({ state: legacy, timestamp: 1 }));
 
     const restored = loadDraftFromStorage(state);
     expect(restored?.template).toEqual(templateFromCanonical("short-video"));
     // And exactly what normalizeDraftState restored is what a save re-emits.
-    expect(toBrief(restored as EditorState).template).toEqual(
-      templateFromCanonical("short-video"),
-    );
+    expect(toBrief(restored as EditorState).template).toEqual(templateFromCanonical("short-video"));
   });
 
   test("a draft saved with a template keeps it verbatim through the real storage round-trip (L3a)", () => {
@@ -1364,9 +1279,7 @@ describe("draft storage", () => {
     saveDraftToStorage(state);
     const restored = loadDraftFromStorage(state);
     expect(restored).not.toBeNull();
-    expect(restored?.template).not.toEqual(
-      templateFromCanonical("paid-social"),
-    );
+    expect(restored?.template).not.toEqual(templateFromCanonical("paid-social"));
     expect(restored?.template).toEqual(template);
     expect(toBrief(restored as EditorState).template).toEqual(template);
   });
@@ -1438,9 +1351,7 @@ describe("draft storage", () => {
     ]) {
       store(corrupt);
       expect(() => loadDraftFromStorage(state)).not.toThrow();
-      expect(loadDraftFromStorage(state)?.template).toEqual(
-        templateFromCanonical("short-video"),
-      );
+      expect(loadDraftFromStorage(state)?.template).toEqual(templateFromCanonical("short-video"));
     }
   });
 
@@ -1483,7 +1394,8 @@ describe("draft storage", () => {
     }
   });
 
-  test("a stored template with an obeying non-canonical layer order is kept verbatim (L3a, L8)", () => {    // Authored layer order that satisfies the type's ordering constraints (D128)
+  test("a stored template with an obeying non-canonical layer order is kept verbatim (L3a, L8)", () => {
+    // Authored layer order that satisfies the type's ordering constraints (D128)
     // must survive save → load → save intact rather than be restored to the canonical order.
     const canonical = templateFromCanonical("paid-social");
     // Swap accent (index 2) and static-text (index 3): obeys shade directly above image and logo above image.
@@ -1548,15 +1460,9 @@ describe("draft storage", () => {
     expect(movedTextUp.occlusionNotice).toBeNull();
 
     // 4. Moving layer to its own index or out of bounds is a no-op
-    expect(editorReducer(initial, { type: "moveLayer", from: 2, to: 2 })).toBe(
-      initial,
-    );
-    expect(editorReducer(initial, { type: "moveLayer", from: -1, to: 2 })).toBe(
-      initial,
-    );
-    expect(editorReducer(initial, { type: "moveLayer", from: 2, to: 99 })).toBe(
-      initial,
-    );
+    expect(editorReducer(initial, { type: "moveLayer", from: 2, to: 2 })).toBe(initial);
+    expect(editorReducer(initial, { type: "moveLayer", from: -1, to: 2 })).toBe(initial);
+    expect(editorReducer(initial, { type: "moveLayer", from: 2, to: 99 })).toBe(initial);
 
     // 5. removing an unrelated layer keeps the occlusion notice (L8o-fix4)
     const afterRemoveUnrelated = editorReducer(movedToOcclusion, {
@@ -1586,8 +1492,7 @@ describe("draft storage", () => {
           canonicalVideo.layers[1]!, // shade (2) — sits above animated-text
         ],
       },
-      occlusionNotice:
-        "the shade layer now sits above the headline and will mute it",
+      occlusionNotice: "the shade layer now sits above the headline and will mute it",
     };
 
     // 1. Adding an unrelated layer (video) produces no notice
@@ -1675,9 +1580,7 @@ describe("draft storage", () => {
         below: "static-text",
         behavior: "local",
       }),
-    ).toBe(
-      "the logo layer now sits above the headline and will overlap where it sits",
-    );
+    ).toBe("the logo layer now sits above the headline and will overlap where it sits");
   });
 
   test("occlusionNotice never survives a round-trip (D135)", () => {
@@ -1685,8 +1588,7 @@ describe("draft storage", () => {
     const state: EditorState = {
       ...base(),
       briefId: "camp",
-      occlusionNotice:
-        "the accent layer now sits above the headline and will mute it",
+      occlusionNotice: "the accent layer now sits above the headline and will mute it",
     };
     saveDraftToStorage(state);
     const restored = loadDraftFromStorage(state);
@@ -1719,10 +1621,7 @@ describe("draft storage", () => {
       variation: { ...state.variation, ratio: ["9:16"] },
       formats: ["motion"],
     };
-    localStorage.setItem(
-      getDraftKey(state),
-      JSON.stringify({ state: draft, timestamp: 1 }),
-    );
+    localStorage.setItem(getDraftKey(state), JSON.stringify({ state: draft, timestamp: 1 }));
 
     const restored = loadDraftFromStorage(state);
     expect(restored?.variation.ratio).toEqual(["9:16"]);
@@ -1733,20 +1632,14 @@ describe("draft storage", () => {
     const state = { ...base(), briefId: "camp" };
     const legacy: Record<string, unknown> = { ...state };
     delete legacy.mode;
-    localStorage.setItem(
-      getDraftKey(state),
-      JSON.stringify({ state: legacy, timestamp: 1 }),
-    );
+    localStorage.setItem(getDraftKey(state), JSON.stringify({ state: legacy, timestamp: 1 }));
     expect(loadDraftFromStorage(state)?.mode).toBe("brief");
   });
 
   test("a variation value that is present but not an object falls back to the default shape", () => {
     const state = { ...base(), briefId: "camp" };
     const corrupt = { ...state, variation: null };
-    localStorage.setItem(
-      getDraftKey(state),
-      JSON.stringify({ state: corrupt, timestamp: 1 }),
-    );
+    localStorage.setItem(getDraftKey(state), JSON.stringify({ state: corrupt, timestamp: 1 }));
     expect(loadDraftFromStorage(state)?.variation).toEqual(base().variation);
   });
 
@@ -1759,10 +1652,7 @@ describe("draft storage", () => {
       products: [null, "not-a-product", { ...state.products[0], key: 7 }],
       nextProductKey: 8,
     };
-    localStorage.setItem(
-      getDraftKey(state),
-      JSON.stringify({ state: draft, timestamp: 1 }),
-    );
+    localStorage.setItem(getDraftKey(state), JSON.stringify({ state: draft, timestamp: 1 }));
 
     const restored = loadDraftFromStorage(state);
     expect(restored).not.toBeNull();
@@ -1802,22 +1692,18 @@ describe("draft storage", () => {
       formats: "motion",
       variation: { ...state.variation, ratio: "9:16", layout: 42 },
     };
-    localStorage.setItem(
-      getDraftKey(state),
-      JSON.stringify({ state: corrupt, timestamp: 1 }),
-    );
+    localStorage.setItem(getDraftKey(state), JSON.stringify({ state: corrupt, timestamp: 1 }));
     const restored = loadDraftFromStorage(state) as EditorState;
     expect(restored.variation.ratio).toEqual([...RATIO_OPTIONS]);
     expect(restored.variation.layout).toEqual([...LAYOUT_OPTIONS]);
     expect(restored.formats).toEqual(["static"]);
     // toggleOrdered runs `.includes` and `.filter` on the list — the failure the
     // unrepaired string would have produced on the user's next click.
-    expect(() =>
-      reduce(restored, { type: "toggleRatio", value: "1:1" }),
-    ).not.toThrow();
-    expect(
-      reduce(restored, { type: "toggleRatio", value: "1:1" }).variation.ratio,
-    ).toEqual(["9:16", "16:9"]);
+    expect(() => reduce(restored, { type: "toggleRatio", value: "1:1" })).not.toThrow();
+    expect(reduce(restored, { type: "toggleRatio", value: "1:1" }).variation.ratio).toEqual([
+      "9:16",
+      "16:9",
+    ]);
   });
 
   test("every other repaired field takes its default when the draft's value is not its type", () => {
@@ -1833,10 +1719,7 @@ describe("draft storage", () => {
       // 7, not 12: the default is "12", so a coerced String(12) would pass by accident
       variation: { ...state.variation, headline: "yes", count: 7 },
     };
-    localStorage.setItem(
-      getDraftKey(state),
-      JSON.stringify({ state: corrupt, timestamp: 1 }),
-    );
+    localStorage.setItem(getDraftKey(state), JSON.stringify({ state: corrupt, timestamp: 1 }));
     const restored = loadDraftFromStorage(state) as EditorState;
     expect(restored.source.kind).toBe("new");
     expect(restored.products).toHaveLength(1);
@@ -1905,17 +1788,11 @@ describe("canPlan", () => {
     expect(canPlan({ ...ready(), briefId: "" })).toBe(false);
     expect(canPlan({ ...ready(), products: [] })).toBe(false);
     const noCount = ready();
-    expect(
-      canPlan({ ...noCount, variation: { ...noCount.variation, count: "0" } }),
-    ).toBe(false);
+    expect(canPlan({ ...noCount, variation: { ...noCount.variation, count: "0" } })).toBe(false);
     // X18: a draft the shared parser refuses (blank, or non-numeric) is the
     // `undefined` arm of canPlan's parse — not a plan-enabled count of zero.
-    expect(
-      canPlan({ ...noCount, variation: { ...noCount.variation, count: "" } }),
-    ).toBe(false);
-    expect(
-      canPlan({ ...noCount, variation: { ...noCount.variation, count: "1e5" } }),
-    ).toBe(true);
+    expect(canPlan({ ...noCount, variation: { ...noCount.variation, count: "" } })).toBe(false);
+    expect(canPlan({ ...noCount, variation: { ...noCount.variation, count: "1e5" } })).toBe(true);
   });
 
   test("is false when an optional policy draft is one the parser refuses (X18)", () => {
@@ -1924,15 +1801,9 @@ describe("canPlan", () => {
     // estimate a policy the user is not looking at. Blank is the opposite of
     // refused — it means "unset", exactly the key the saved brief omits.
     const s = ready();
-    expect(
-      canPlan({ ...s, variation: { ...s.variation, seed: "12abc" } }),
-    ).toBe(false);
-    expect(
-      canPlan({ ...s, variation: { ...s.variation, seed: "" } }),
-    ).toBe(true);
-    expect(
-      canPlan({ ...s, variation: { ...s.variation, perProduct: "42.0" } }),
-    ).toBe(false);
+    expect(canPlan({ ...s, variation: { ...s.variation, seed: "12abc" } })).toBe(false);
+    expect(canPlan({ ...s, variation: { ...s.variation, seed: "" } })).toBe(true);
+    expect(canPlan({ ...s, variation: { ...s.variation, perProduct: "42.0" } })).toBe(false);
   });
 });
 
@@ -1952,9 +1823,7 @@ describe("variation policy round-trip", () => {
     targetRegion: "DE",
     targetAudience: "a",
     campaignMessage: "Hi",
-    products: [
-      { id: "alpha", name: "A", primaryColor: "#1473E6", logoPath: "l.png" },
-    ],
+    products: [{ id: "alpha", name: "A", primaryColor: "#1473E6", logoPath: "l.png" }],
     mode: "variation",
     variation: {
       count: 40,
@@ -2062,9 +1931,7 @@ describe("the anchor axis (T4)", () => {
   test("a fresh draft sits on the derived top/bottom pair — the absent axis' own behaviour", () => {
     expect(initialEditorState().variation.anchor).toEqual(["top", "bottom"]);
     // The absent axis writes no key: a fresh draft round-trips anchor-free.
-    expect(
-      toBrief(initialEditorState("variation")).variation?.axes,
-    ).not.toHaveProperty("anchor");
+    expect(toBrief(initialEditorState("variation")).variation?.axes).not.toHaveProperty("anchor");
   });
 
   test("toggleAnchor with the min-one guard: the last value cannot be deselected", () => {
@@ -2086,11 +1953,7 @@ describe("the anchor axis (T4)", () => {
     });
     expect(on.variation.anchor).toEqual(["top", "middle", "bottom"]);
     expect(on.anchorExplicit).toBe(true);
-    expect(toBrief(on).variation?.axes?.anchor).toEqual([
-      "top",
-      "middle",
-      "bottom",
-    ]);
+    expect(toBrief(on).variation?.axes?.anchor).toEqual(["top", "middle", "bottom"]);
     // A lock also writes the key.
     const locked = reduce(initialEditorState("variation"), {
       type: "toggleAnchor",
@@ -2171,20 +2034,16 @@ describe("the anchor axis (T4)", () => {
     expect(state.anchorExplicit).toBe(true);
     expect(toBrief(state).variation?.axes?.anchor).toEqual(["top", "bottom"]);
     // …while an absent axis loads as the derived pair with the flag off.
-    const absent = fromBrief(
-      savedBrief({ mode: "variation", variation: { count: 4 } }),
-      { file: "camp.yaml" },
-    );
+    const absent = fromBrief(savedBrief({ mode: "variation", variation: { count: 4 } }), {
+      file: "camp.yaml",
+    });
     expect(absent.variation.anchor).toEqual(["top", "bottom"]);
     expect(absent.anchorExplicit).toBe(false);
     expect(toBrief(absent).variation?.axes).not.toHaveProperty("anchor");
   });
 
   test("normalizeDraftState infers the flag from the data for pre-T4 drafts", () => {
-    const legacy = normalizeDraftState({ mode: "variation" } as Record<
-      string,
-      unknown
-    >);
+    const legacy = normalizeDraftState({ mode: "variation" } as Record<string, unknown>);
     expect(legacy.variation.anchor).toEqual(["top", "bottom"]);
     expect(legacy.anchorExplicit).toBe(false);
     const authored = normalizeDraftState({
@@ -2209,10 +2068,7 @@ describe("the anchor axis (T4)", () => {
     );
     expect(restored.anchorExplicit).toBe(true);
     expect(restored.variation.anchor).toEqual(["top", "bottom"]);
-    expect(toBrief(restored).variation?.axes?.anchor).toEqual([
-      "top",
-      "bottom",
-    ]);
+    expect(toBrief(restored).variation?.axes?.anchor).toEqual(["top", "bottom"]);
   });
 
   test("a restored draft's anchor list is filtered to the axis vocabulary (#169 pattern)", () => {
@@ -2248,17 +2104,15 @@ describe("the anchor axis (T4)", () => {
     );
     expect(locked).toBe(36);
     // Three values triple the anchor factor.
-    const three = axisProductSize(
-      reduce(randomized(), { type: "toggleAnchor", value: "middle" }),
-    );
+    const three = axisProductSize(reduce(randomized(), { type: "toggleAnchor", value: "middle" }));
     expect(three).toBe(108);
     // The explicit derived pair — latched by the toggle, never collapsed to the
     // absent key — doubles the space: the anchor is drawn independently of
     // layout, while the absent axis derives it per variant.
-    const lockedPair = reduce(
-      reduce(randomized(), { type: "toggleAnchor", value: "bottom" }),
-      { type: "toggleAnchor", value: "bottom" },
-    );
+    const lockedPair = reduce(reduce(randomized(), { type: "toggleAnchor", value: "bottom" }), {
+      type: "toggleAnchor",
+      value: "bottom",
+    });
     expect(lockedPair.variation.anchor).toEqual(["top", "bottom"]);
     expect(lockedPair.anchorExplicit).toBe(true);
     expect(axisProductSize(lockedPair)).toBe(72);
@@ -2293,9 +2147,9 @@ describe("restore", () => {
 
   test("takes the draft's verdict when this session has none", () => {
     const draft = { ...base(), capabilities: { motion: true } };
-    expect(
-      reduce(base(), { type: "restore", state: draft }).capabilities,
-    ).toEqual({ motion: true });
+    expect(reduce(base(), { type: "restore", state: draft }).capabilities).toEqual({
+      motion: true,
+    });
   });
 });
 
@@ -2303,9 +2157,7 @@ describe("isPristine", () => {
   test("is true for a freshly opened editor and false once anything is typed", () => {
     expect(isPristine(initialEditorState())).toBe(true);
     expect(isPristine(initialEditorState("variation"))).toBe(true);
-    expect(
-      isPristine(reduce(base(), { type: "patch", patch: { briefId: "x" } })),
-    ).toBe(false);
+    expect(isPristine(reduce(base(), { type: "patch", patch: { briefId: "x" } }))).toBe(false);
   });
 });
 
@@ -2346,9 +2198,7 @@ describe("deterministic product keys (D16)", () => {
     };
     const raw = { ...state, nextProductKey: undefined };
     delete (raw as Record<string, unknown>).nextProductKey;
-    const normalized = normalizeDraftState(
-      raw as unknown as Record<string, unknown>,
-    );
+    const normalized = normalizeDraftState(raw as unknown as Record<string, unknown>);
     expect(normalized.nextProductKey).toBe(6);
   });
 
@@ -2358,9 +2208,7 @@ describe("deterministic product keys (D16)", () => {
       products: [emptyProduct(1)],
       nextProductKey: 42,
     };
-    const normalized = normalizeDraftState(
-      state as unknown as Record<string, unknown>,
-    );
+    const normalized = normalizeDraftState(state as unknown as Record<string, unknown>);
     expect(normalized.nextProductKey).toBe(42);
   });
 
@@ -2376,9 +2224,7 @@ describe("deterministic product keys (D16)", () => {
       ],
       nextProductKey: 3,
     };
-    const normalized = normalizeDraftState(
-      state as unknown as Record<string, unknown>,
-    );
+    const normalized = normalizeDraftState(state as unknown as Record<string, unknown>);
     expect(normalized.nextProductKey).toBe(6);
   });
 
@@ -2409,17 +2255,13 @@ describe("deterministic product keys (D16)", () => {
         { ...emptyProduct(1), id: "c", key: "not-a-number" },
       ],
     };
-    const normalized = normalizeDraftState(
-      raw as unknown as Record<string, unknown>,
-    );
+    const normalized = normalizeDraftState(raw as unknown as Record<string, unknown>);
     expect(normalized.products.map((p) => p.key)).toEqual([1, 2, 3]);
   });
 
   test("a restored draft with no products gets nextProductKey = 1", () => {
     const raw = { products: [] as never[], nextProductKey: undefined };
-    const normalized = normalizeDraftState(
-      raw as unknown as Record<string, unknown>,
-    );
+    const normalized = normalizeDraftState(raw as unknown as Record<string, unknown>);
     expect(normalized.nextProductKey).toBe(1);
   });
 
@@ -2451,9 +2293,7 @@ describe("deterministic product keys (D16)", () => {
 
   test("a legacy restored draft without campaignName backfills campaignName from briefId", () => {
     const raw = { briefId: "legacy-brief-slug", products: [] as never[] };
-    const normalized = normalizeDraftState(
-      raw as unknown as Record<string, unknown>,
-    );
+    const normalized = normalizeDraftState(raw as unknown as Record<string, unknown>);
     expect(normalized.campaignName).toBe("legacy-brief-slug");
     expect(normalized.briefId).toBe("legacy-brief-slug");
   });
@@ -2464,9 +2304,7 @@ describe("deterministic product keys (D16)", () => {
       campaignName: "My Campaign",
       products: [] as never[],
     };
-    const normalized = normalizeDraftState(
-      raw as unknown as Record<string, unknown>,
-    );
+    const normalized = normalizeDraftState(raw as unknown as Record<string, unknown>);
     expect(normalized.campaignName).toBe("My Campaign");
     expect(normalized.briefId).toBe("my-slug");
   });
@@ -2519,20 +2357,17 @@ describe("whole-corpus round-trip", () => {
   const briefDir = path.join(process.cwd(), "briefs");
   const files = fs.readdirSync(briefDir).filter((f) => f.endsWith(".yaml"));
 
-  test.each(files)(
-    "%s round-trips fromBrief → toBrief → serialise byte-for-byte",
-    (file) => {
-      const filePath = path.join(briefDir, file);
-      const yamlText = fs.readFileSync(filePath, "utf-8");
-      const parsed = load(yamlText) as CampaignBrief;
-      const entry = { file, revision: undefined as unknown as undefined };
-      const state = fromBrief(parsed, entry);
-      const roundTrippedBrief = toBrief(state);
-      const originalSerialised = dumpBrief(parsed);
-      const roundTrippedSerialised = dumpBrief(roundTrippedBrief);
-      expect(roundTrippedSerialised).toBe(originalSerialised);
-    },
-  );
+  test.each(files)("%s round-trips fromBrief → toBrief → serialise byte-for-byte", (file) => {
+    const filePath = path.join(briefDir, file);
+    const yamlText = fs.readFileSync(filePath, "utf-8");
+    const parsed = load(yamlText) as CampaignBrief;
+    const entry = { file, revision: undefined as unknown as undefined };
+    const state = fromBrief(parsed, entry);
+    const roundTrippedBrief = toBrief(state);
+    const originalSerialised = dumpBrief(parsed);
+    const roundTrippedSerialised = dumpBrief(roundTrippedBrief);
+    expect(roundTrippedSerialised).toBe(originalSerialised);
+  });
 });
 
 describe("mode fidelity across a load → save round trip", () => {
@@ -2717,25 +2552,22 @@ describe("the count clamp and its one-time notice", () => {
 
   test("the last background and the last palette shift hold, like every other axis", () => {
     let s = variation();
-    for (const option of BACKGROUND_OPTIONS.filter((o) =>
-      s.variation.background.includes(o),
-    ).slice(0, -1)) {
+    for (const option of BACKGROUND_OPTIONS.filter((o) => s.variation.background.includes(o)).slice(
+      0,
+      -1,
+    )) {
       s = editorReducer(s, { type: "toggleBackground", value: option });
     }
     const lastBackground = s.variation.background;
     expect(lastBackground.length).toBe(1);
-    expect(
-      editorReducer(s, { type: "toggleBackground", value: lastBackground[0] }),
-    ).toBe(s);
+    expect(editorReducer(s, { type: "toggleBackground", value: lastBackground[0] })).toBe(s);
 
     for (const shift of s.variation.paletteShift.slice(0, -1)) {
       s = editorReducer(s, { type: "togglePalette", value: shift });
     }
     const lastShift = s.variation.paletteShift;
     expect(lastShift.length).toBe(1);
-    expect(
-      editorReducer(s, { type: "togglePalette", value: lastShift[0] }),
-    ).toBe(s);
+    expect(editorReducer(s, { type: "togglePalette", value: lastShift[0] })).toBe(s);
   });
 });
 
@@ -2785,9 +2617,7 @@ describe("a campaign name the slug throws away is still work", () => {
       patch: { campaignName: "!!!" },
     });
     expect(typed.briefId).toBe("");
-    expect(JSON.stringify(toBrief(typed))).toBe(
-      JSON.stringify(toBrief(initialEditorState())),
-    );
+    expect(JSON.stringify(toBrief(typed))).toBe(JSON.stringify(toBrief(initialEditorState())));
     expect(isPristine(typed)).toBe(false);
   });
 
@@ -2798,9 +2628,7 @@ describe("a campaign name the slug throws away is still work", () => {
 
 describe("L4.1 Whole-corpus round-trip tests (D7)", () => {
   const briefsDir = path.resolve(__dirname, "../../../../../../briefs");
-  const yamlFiles = fs
-    .readdirSync(briefsDir)
-    .filter((f) => f.endsWith(".yaml"));
+  const yamlFiles = fs.readdirSync(briefsDir).filter((f) => f.endsWith(".yaml"));
 
   test("discovers all corpus YAML files on disk", () => {
     expect(yamlFiles.length).toBeGreaterThanOrEqual(7);
@@ -2999,9 +2827,7 @@ describe("motionPackagedRatios", () => {
 
   test("a display profile contributes no motion ratio", () => {
     expect(Array.from(motionPackagedRatios(["google-display"]))).toEqual([]);
-    expect(
-      Array.from(motionPackagedRatios(["google-display", "tiktok"])),
-    ).toEqual(["9:16"]);
+    expect(Array.from(motionPackagedRatios(["google-display", "tiktok"]))).toEqual(["9:16"]);
   });
 });
 
@@ -3041,8 +2867,7 @@ describe("a draft written before the override flags existed", () => {
     // the user turned an override off deliberately; the data still differs, and that is
     // not the restore's business to second-guess
     expect(
-      legacy({ formats: ["static", "motion"], formatsOverridden: false })
-        .formatsOverridden,
+      legacy({ formats: ["static", "motion"], formatsOverridden: false }).formatsOverridden,
     ).toBe(false);
   });
 });
@@ -3079,17 +2904,11 @@ describe("the output remedies do what their labels say", () => {
       mode: "variation" as const,
       duration: [6],
     };
-    expect(
-      editorReducer(base, { type: "addDuration", value: 12 }).duration,
-    ).toEqual([6, 12]);
+    expect(editorReducer(base, { type: "addDuration", value: 12 }).duration).toEqual([6, 12]);
     // a second already on the reel would be a no-op for the planner, so fall back
-    expect(
-      editorReducer(base, { type: "addDuration", value: 6 }).duration,
-    ).not.toEqual([6, 6]);
+    expect(editorReducer(base, { type: "addDuration", value: 6 }).duration).not.toEqual([6, 6]);
     // and with no second named at all, the old behaviour stands
-    expect(editorReducer(base, { type: "addDuration" }).duration.length).toBe(
-      2,
-    );
+    expect(editorReducer(base, { type: "addDuration" }).duration.length).toBe(2);
   });
 
   test("an override flag lifts when the selection returns to what the platforms derive", () => {
@@ -3178,8 +2997,7 @@ describe("copy timeline (E5.1)", () => {
     return state;
   };
 
-  const texts = (state: EditorState): string[] =>
-    state.timeline.beats.map((beat) => beat.text);
+  const texts = (state: EditorState): string[] => state.timeline.beats.map((beat) => beat.text);
 
   // A corpus-style motion brief that round-trips byte-for-byte once a timeline is
   // added — mirrors briefs/sample-motion.yaml's full axis set plus `copy.timeline`.
@@ -3298,12 +3116,8 @@ describe("copy timeline (E5.1)", () => {
         type: "setKeyBeat",
         index: 1,
       });
-      expect(editorReducer(state, { type: "moveBeat", from: 2, to: 2 })).toBe(
-        state,
-      );
-      expect(editorReducer(state, { type: "removeBeat", index: 4 })).toBe(
-        state,
-      );
+      expect(editorReducer(state, { type: "moveBeat", from: 2, to: 2 })).toBe(state);
+      expect(editorReducer(state, { type: "removeBeat", index: 4 })).toBe(state);
     });
 
     test("an out-of-range move source is a no-op, never an injected undefined beat", () => {
@@ -3311,9 +3125,7 @@ describe("copy timeline (E5.1)", () => {
       const moved = editorReducer(state, { type: "moveBeat", from: 4, to: 0 });
       expect(moved).toBe(state);
       expect(
-        moved.timeline.beats.every(
-          (beat) => beat.text !== undefined && beat.weight !== undefined,
-        ),
+        moved.timeline.beats.every((beat) => beat.text !== undefined && beat.weight !== undefined),
       ).toBe(true);
     });
 
@@ -3328,15 +3140,12 @@ describe("copy timeline (E5.1)", () => {
         const moved = editorReducer(state, { type: "moveBeat", from: 0, to });
         expect(moved).toBe(state);
       }
-      expect(state.timeline.keyBeat).toBeLessThanOrEqual(
-        state.timeline.beats.length,
-      );
+      expect(state.timeline.keyBeat).toBeLessThanOrEqual(state.timeline.beats.length);
     });
 
     test("addBeat refuses past the domain's beat ceiling", () => {
       let state = motionState();
-      for (let i = 0; i < MAX_BEATS; i += 1)
-        state = reduce(state, { type: "addBeat" });
+      for (let i = 0; i < MAX_BEATS; i += 1) state = reduce(state, { type: "addBeat" });
       expect(state.timeline.beats).toHaveLength(MAX_BEATS);
       // The parser rejects more, so the editor must not build a draft Save cannot take.
       expect(editorReducer(state, { type: "addBeat" })).toBe(state);
@@ -3345,23 +3154,18 @@ describe("copy timeline (E5.1)", () => {
     test("setBeatWeight refuses a weight the parser would reject", () => {
       const state = named(["One", "Two", "Three"]);
       for (const weight of [0, -1, 1.5, MAX_WEIGHT + 1, Number.NaN]) {
-        expect(
-          editorReducer(state, { type: "setBeatWeight", index: 1, weight }),
-        ).toBe(state);
+        expect(editorReducer(state, { type: "setBeatWeight", index: 1, weight })).toBe(state);
       }
       // The bounds themselves are accepted.
       expect(
-        reduce(state, { type: "setBeatWeight", index: 1, weight: 1 }).timeline
-          .beats[1]?.weight,
+        reduce(state, { type: "setBeatWeight", index: 1, weight: 1 }).timeline.beats[1]?.weight,
       ).toBe(1);
       expect(
-        reduce(state, { type: "setBeatWeight", index: 1, weight: MAX_WEIGHT })
-          .timeline.beats[1]?.weight,
+        reduce(state, { type: "setBeatWeight", index: 1, weight: MAX_WEIGHT }).timeline.beats[1]
+          ?.weight,
       ).toBe(MAX_WEIGHT);
       // An index outside the list is a no-op too, like the move and remove cases.
-      expect(
-        editorReducer(state, { type: "setBeatWeight", index: 7, weight: 2 }),
-      ).toBe(state);
+      expect(editorReducer(state, { type: "setBeatWeight", index: 7, weight: 2 })).toBe(state);
     });
 
     test("setKeyBeat refuses an index no beat occupies", () => {
@@ -3369,9 +3173,7 @@ describe("copy timeline (E5.1)", () => {
       for (const index of [3, 9, -1, 0.5]) {
         expect(editorReducer(state, { type: "setKeyBeat", index })).toBe(state);
       }
-      expect(
-        reduce(state, { type: "setKeyBeat", index: 2 }).timeline.keyBeat,
-      ).toBe(3);
+      expect(reduce(state, { type: "setKeyBeat", index: 2 }).timeline.keyBeat).toBe(3);
     });
   });
 
@@ -3507,9 +3309,7 @@ describe("copy timeline (E5.1)", () => {
           expect(state.timeline.keyBeat).toBe(1);
         } else {
           expect(state.timeline.keyBeat).toBeGreaterThanOrEqual(1);
-          expect(state.timeline.keyBeat).toBeLessThanOrEqual(
-            state.timeline.beats.length,
-          );
+          expect(state.timeline.keyBeat).toBeLessThanOrEqual(state.timeline.beats.length);
         }
       }
       // And the draft that comes out of this is structurally sound for the running
@@ -3626,17 +3426,13 @@ describe("copy timeline (E5.1)", () => {
       const state = fromBrief(sceneBrief());
       const added = reduce(state, { type: "addBeat" });
       expect(added.timeline.beats[3].background).toBeUndefined();
-      expect(added.timeline.beats[0].background).toBe(
-        "assets/inputs/sunset.png",
-      );
+      expect(added.timeline.beats[0].background).toBe("assets/inputs/sunset.png");
       const edited = reduce(state, {
         type: "setBeatText",
         index: 0,
         text: "Stay wet.",
       });
-      expect(edited.timeline.beats[0].background).toBe(
-        "assets/inputs/sunset.png",
-      );
+      expect(edited.timeline.beats[0].background).toBe("assets/inputs/sunset.png");
       const moved = reduce(state, { type: "moveBeat", from: 0, to: 2 });
       expect(moved.timeline.beats.map((beat) => beat.background)).toEqual([
         "assets/inputs/studio.png",
@@ -3737,9 +3533,7 @@ describe("copy timeline (E5.1)", () => {
         index: 0,
         text: "Hook",
       });
-      expect(toBrief(authored).copy?.timeline?.beats).toEqual([
-        { text: "Hook", weight: 1 },
-      ]);
+      expect(toBrief(authored).copy?.timeline?.beats).toEqual([{ text: "Hook", weight: 1 }]);
     });
 
     test("Video off drops the timeline from the brief but keeps the beats in the draft", () => {
@@ -3765,9 +3559,7 @@ describe("copy timeline (E5.1)", () => {
       const classic = reduce(authored, { type: "setMode", mode: "brief" });
       expect(toBrief(classic).copy).toBeUndefined();
       const back = reduce(classic, { type: "setMode", mode: "variation" });
-      expect(toBrief(back).copy?.timeline?.beats).toEqual([
-        { text: "Hook", weight: 1 },
-      ]);
+      expect(toBrief(back).copy?.timeline?.beats).toEqual([{ text: "Hook", weight: 1 }]);
     });
 
     test("a timeline cannot combine with axes.headline: pool://copy", () => {
@@ -3811,9 +3603,7 @@ describe("copy timeline (E5.1)", () => {
           keyBeat: 1,
         },
       });
-      expect(restored.timeline.beats[0].background).toBe(
-        "assets/inputs/a.png",
-      );
+      expect(restored.timeline.beats[0].background).toBe("assets/inputs/a.png");
       expect(restored.timeline.beats[1]).not.toHaveProperty("background");
       expect(restored.timeline.beats[2]).not.toHaveProperty("background");
       expect(restored.timeline.beats[3]).not.toHaveProperty("background");
@@ -3871,8 +3661,7 @@ describe("copy timeline (E5.1)", () => {
 });
 
 describe("the brief style block round-trips (T5/D58)", () => {
-  const styledBrief = (style: Style): CampaignBrief =>
-    savedBrief({ style }) as CampaignBrief;
+  const styledBrief = (style: Style): CampaignBrief => savedBrief({ style }) as CampaignBrief;
 
   test("a hand-authored YAML style survives load → save verbatim", () => {
     const style: Style = {
@@ -3941,9 +3730,7 @@ describe("the brief style block round-trips (T5/D58)", () => {
         align: "diagonal", // not in the vocabulary → dropped
       },
     };
-    const state = normalizeDraftState(
-      raw as unknown as Record<string, unknown>,
-    );
+    const state = normalizeDraftState(raw as unknown as Record<string, unknown>);
     expect(state.style).toEqual({});
     expect(state.styleExplicit).toBe(false);
   });
@@ -3956,9 +3743,7 @@ describe("the brief style block round-trips (T5/D58)", () => {
       style: { fontFamily: "Lora", sizeScale: 0.08, bogus: true },
     };
     delete (raw as { styleExplicit?: boolean }).styleExplicit;
-    const state = normalizeDraftState(
-      raw as unknown as Record<string, unknown>,
-    );
+    const state = normalizeDraftState(raw as unknown as Record<string, unknown>);
     expect(state.style).toEqual({ fontFamily: "Lora", sizeScale: 0.08 });
     expect(state.styleExplicit).toBe(true); // diverges → authored
   });
@@ -3973,9 +3758,7 @@ describe("the brief style block round-trips (T5/D58)", () => {
         fontWeight: 400,
       },
     };
-    const state = normalizeDraftState(
-      raw as unknown as Record<string, unknown>,
-    );
+    const state = normalizeDraftState(raw as unknown as Record<string, unknown>);
     expect(state.style).toEqual({
       lineHeight: 1.6,
       letterSpacing: -0.02,
@@ -3986,9 +3769,7 @@ describe("the brief style block round-trips (T5/D58)", () => {
 
   test("a non-object style in a restored draft repairs to empty", () => {
     const raw = { ...base(), style: "Lora" };
-    const state = normalizeDraftState(
-      raw as unknown as Record<string, unknown>,
-    );
+    const state = normalizeDraftState(raw as unknown as Record<string, unknown>);
     expect(state.style).toEqual({});
   });
 
@@ -3998,9 +3779,7 @@ describe("the brief style block round-trips (T5/D58)", () => {
       style: { fontFamily: "Inter" },
       styleExplicit: true,
     };
-    const state = normalizeDraftState(
-      raw as unknown as Record<string, unknown>,
-    );
+    const state = normalizeDraftState(raw as unknown as Record<string, unknown>);
     expect(state.styleExplicit).toBe(true);
     expect(toBrief(state).style).toEqual({ fontFamily: "Inter" });
   });
@@ -4045,9 +3824,7 @@ describe("the brief style block round-trips (T5/D58)", () => {
       style: { textEffect: "spin", fontFamily: "Lora" }, // not a kind → dropped
     };
     delete (raw as { styleExplicit?: boolean }).styleExplicit;
-    const state = normalizeDraftState(
-      raw as unknown as Record<string, unknown>,
-    );
+    const state = normalizeDraftState(raw as unknown as Record<string, unknown>);
     expect(state.style).toEqual({ fontFamily: "Lora" });
     const valid = normalizeDraftState({
       ...base(),
@@ -4136,19 +3913,14 @@ describe("dirty-on-load over the corpus (B2)", () => {
   const briefsDir = path.resolve(__dirname, "../../../../../../briefs");
   const briefFiles = fs
     .readdirSync(briefsDir)
-    .filter((f) =>
-      [".yaml", ".yml", ".json"].includes(path.extname(f).toLowerCase()),
-    );
+    .filter((f) => [".yaml", ".yml", ".json"].includes(path.extname(f).toLowerCase()));
   const parseBriefFile = (filename: string): CampaignBrief => {
     const raw = fs.readFileSync(path.join(briefsDir, filename), "utf8");
     return path.extname(filename).toLowerCase() === ".json"
       ? (JSON.parse(raw) as CampaignBrief)
       : (load(raw) as CampaignBrief);
   };
-  const reloaded = (
-    state: EditorState,
-    snapshot: CampaignBrief,
-  ): EditorState => ({
+  const reloaded = (state: EditorState, snapshot: CampaignBrief): EditorState => ({
     ...state,
     source:
       state.source.kind === "file"
@@ -4166,14 +3938,11 @@ describe("dirty-on-load over the corpus (B2)", () => {
     expect(briefFiles.length).toBeGreaterThanOrEqual(8);
   });
 
-  test.each(briefFiles)(
-    "a freshly loaded %s reads clean with zero edits",
-    (filename) => {
-      const state = fromBrief(parseBriefFile(filename), { file: filename });
-      expect(state.source.kind).toBe("file");
-      expect(isDirtySinceSave(state)).toBe(false);
-    },
-  );
+  test.each(briefFiles)("a freshly loaded %s reads clean with zero edits", (filename) => {
+    const state = fromBrief(parseBriefFile(filename), { file: filename });
+    expect(state.source.kind).toBe("file");
+    expect(isDirtySinceSave(state)).toBe(false);
+  });
 
   test("a brief whose file declares localizedMessage reads clean — the sharpest key-order case", () => {
     // The files declare `localizedMessage` fifth; `toBrief` appends it near the
@@ -4181,9 +3950,7 @@ describe("dirty-on-load over the corpus (B2)", () => {
     // the instant it opened.
     const brief = parseBriefFile("sample-campaign.yaml");
     expect(brief.localizedMessage).toBeTruthy();
-    expect(
-      isDirtySinceSave(fromBrief(brief, { file: "sample-campaign.yaml" })),
-    ).toBe(false);
+    expect(isDirtySinceSave(fromBrief(brief, { file: "sample-campaign.yaml" }))).toBe(false);
   });
 
   test.each(briefFiles)("a real edit to %s still reads dirty", (filename) => {
@@ -4203,11 +3970,7 @@ describe("dirty-on-load over the corpus (B2)", () => {
     expect(brief.products.length).toBeGreaterThanOrEqual(2);
     const swapped: CampaignBrief = {
       ...brief,
-      products: [
-        brief.products[1],
-        brief.products[0],
-        ...brief.products.slice(2),
-      ],
+      products: [brief.products[1], brief.products[0], ...brief.products.slice(2)],
     };
     expect(isDirtySinceSave(reloaded(state, swapped))).toBe(true);
   });
@@ -4501,11 +4264,7 @@ describe("the campaign type preset (T2 / D108–D112)", () => {
     );
     expect(display.mode).toBe("brief");
     expect(display.formats).toEqual(["static"]);
-    expect(display.platforms).toEqual([
-      "google-display",
-      "meta-audience-network",
-      "display-web",
-    ]);
+    expect(display.platforms).toEqual(["google-display", "meta-audience-network", "display-web"]);
     const brief = toBrief(display);
     expect(brief.type).toBe("display-ad");
     expect(brief.output?.sizes).toEqual([...DISPLAY_SIZE_VALUES]);
@@ -4543,9 +4302,7 @@ describe("the campaign type preset (T2 / D108–D112)", () => {
 
   test("a pre-T2 draft carries no type and normalises to the default (D112)", () => {
     // What the previous build wrote: a state with no type keys at all.
-    const stored: Record<string, unknown> = JSON.parse(
-      JSON.stringify(initialEditorState()),
-    );
+    const stored: Record<string, unknown> = JSON.parse(JSON.stringify(initialEditorState()));
     delete stored.type;
     delete stored.typeExplicit;
     const restored = normalizeDraftState(stored);
@@ -4557,10 +4314,7 @@ describe("the campaign type preset (T2 / D108–D112)", () => {
   test("a draft with an out-of-vocabulary type falls back to the default", () => {
     // "display-ad" joined the vocabulary in A5 (D117), so the out-of-vocab
     // example is a type that is still outside it.
-    const raw = JSON.parse(JSON.stringify(initialEditorState())) as Record<
-      string,
-      unknown
-    >;
+    const raw = JSON.parse(JSON.stringify(initialEditorState())) as Record<string, unknown>;
     raw.type = "banner";
     raw.typeExplicit = true;
     const restored = normalizeDraftState(raw);
@@ -4599,10 +4353,7 @@ describe("display platforms (D116)", () => {
       value: "google-display",
     });
     expect(on.platforms).toEqual([...STATIC_PLATFORMS, "google-display"]);
-    expect(toBrief(on).output?.platforms).toEqual([
-      ...STATIC_PLATFORMS,
-      "google-display",
-    ]);
+    expect(toBrief(on).output?.platforms).toEqual([...STATIC_PLATFORMS, "google-display"]);
     expect(toBrief(on).output?.sizes).toEqual([...DISPLAY_SIZE_VALUES]);
   });
 
@@ -4624,9 +4375,7 @@ describe("display platforms (D116)", () => {
       }),
     );
     const serialised = toBrief(declared);
-    expect(JSON.stringify(serialised.output)).toBe(
-      JSON.stringify(SOCIAL_ONLY_OUTPUT),
-    );
+    expect(JSON.stringify(serialised.output)).toBe(JSON.stringify(SOCIAL_ONLY_OUTPUT));
     expect(serialised.output).not.toHaveProperty("sizes");
   });
 
@@ -4698,10 +4447,7 @@ describe("display platforms (D116)", () => {
   });
 
   test("normalizeDraftState defaults sizes for drafts saved before the field existed", () => {
-    const raw = JSON.parse(JSON.stringify(initialEditorState())) as Record<
-      string,
-      unknown
-    >;
+    const raw = JSON.parse(JSON.stringify(initialEditorState())) as Record<string, unknown>;
     delete raw.sizes;
     raw.platforms = ["google-display"];
     raw.formats = ["static"];
@@ -4710,10 +4456,7 @@ describe("display platforms (D116)", () => {
   });
 
   test("a draft's stored size list is filtered to the vocabulary, subset otherwise believed", () => {
-    const raw = JSON.parse(JSON.stringify(initialEditorState())) as Record<
-      string,
-      unknown
-    >;
+    const raw = JSON.parse(JSON.stringify(initialEditorState())) as Record<string, unknown>;
     raw.platforms = ["google-display"];
     raw.sizes = ["728x90", "999x999"];
     const restored = normalizeDraftState(raw);
@@ -4840,9 +4583,7 @@ describe("canonical layer defaults (X16)", () => {
     patch: Record<string, unknown>,
   ): BriefTemplate => ({
     ...template,
-    layers: template.layers.map((layer) =>
-      layer.id === id ? { ...layer, ...patch } : layer,
-    ),
+    layers: template.layers.map((layer) => (layer.id === id ? { ...layer, ...patch } : layer)),
   });
 
   /**
@@ -4850,9 +4591,7 @@ describe("canonical layer defaults (X16)", () => {
    * it, so the pinned id is the library's own, spelled out rather than derived
    * — the same fixture `editor-state.html-elements.test.ts` uses.
    */
-  const htmlTemplate = (
-    htmlPatch: Record<string, unknown> = {},
-  ): BriefTemplate => {
+  const htmlTemplate = (htmlPatch: Record<string, unknown> = {}): BriefTemplate => {
     const canonical = CANONICAL_TEMPLATES["image-html"];
     return {
       id: "canonical-image-html",
@@ -4866,11 +4605,9 @@ describe("canonical layer defaults (X16)", () => {
   };
 
   test("a loaded brief whose image layer carries enabled: true is not dirty", () => {
-    const template = withLayer(
-      templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
-      "image",
-      { enabled: true },
-    );
+    const template = withLayer(templateFromCanonical(DEFAULT_CAMPAIGN_TYPE), "image", {
+      enabled: true,
+    });
     const state = fromBrief(savedBrief({ template }), { file: "camp.yaml" });
     expect(isDirtySinceSave(state)).toBe(false);
   });
@@ -4880,11 +4617,9 @@ describe("canonical layer defaults (X16)", () => {
     // switch it off (MP-D4). Shade is the layer the Template section actually
     // offers a toggle for; loading it with the explicit default is the same
     // round trip the image case names.
-    const template = withLayer(
-      templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
-      "shade",
-      { enabled: true },
-    );
+    const template = withLayer(templateFromCanonical(DEFAULT_CAMPAIGN_TYPE), "shade", {
+      enabled: true,
+    });
     const state = fromBrief(savedBrief({ template }), { file: "camp.yaml" });
     expect(isDirtySinceSave(state)).toBe(false);
     const off = reduce(state, {
@@ -4920,15 +4655,15 @@ describe("canonical layer defaults (X16)", () => {
   });
 
   test("canonicalTemplate leaves enabled: false and a non-empty elements list alone", () => {
-    const off = withLayer(
-      templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
-      "shade",
-      { enabled: false },
-    );
+    const off = withLayer(templateFromCanonical(DEFAULT_CAMPAIGN_TYPE), "shade", {
+      enabled: false,
+    });
     expect(canonicalTemplate(off)).toEqual(off);
-    expect(
-      canonicalTemplate(off).layers.find((layer) => layer.id === "shade"),
-    ).toEqual({ id: "shade", kind: "shade", enabled: false });
+    expect(canonicalTemplate(off).layers.find((layer) => layer.id === "shade")).toEqual({
+      id: "shade",
+      kind: "shade",
+      enabled: false,
+    });
 
     const populated = htmlTemplate({
       elements: [
@@ -4941,8 +4676,7 @@ describe("canonical layer defaults (X16)", () => {
     });
     expect(canonicalTemplate(populated)).toEqual(populated);
     expect(
-      canonicalTemplate(populated).layers.find((layer) => layer.id === "html")
-        ?.elements,
+      canonicalTemplate(populated).layers.find((layer) => layer.id === "html")?.elements,
     ).toHaveLength(1);
 
     // Already-canonical input keeps the same object — the load path should not
@@ -4953,17 +4687,16 @@ describe("canonical layer defaults (X16)", () => {
     expect(canonicalBrief(brief)).toBe(brief);
 
     const both = htmlTemplate({ enabled: true, elements: [] });
-    expect(
-      canonicalTemplate(both).layers.find((layer) => layer.id === "html"),
-    ).toEqual({ id: "html", kind: "html" });
+    expect(canonicalTemplate(both).layers.find((layer) => layer.id === "html")).toEqual({
+      id: "html",
+      kind: "html",
+    });
   });
 
   test("a restored draft whose snapshot still carries enabled: true is not dirty", () => {
-    const template = withLayer(
-      templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
-      "image",
-      { enabled: true },
-    );
+    const template = withLayer(templateFromCanonical(DEFAULT_CAMPAIGN_TYPE), "image", {
+      enabled: true,
+    });
     const rawBrief = savedBrief({ template });
     const restored = normalizeDraftState({
       ...fromBrief(rawBrief, { file: "camp.yaml" }),
@@ -4976,16 +4709,16 @@ describe("canonical layer defaults (X16)", () => {
         revision: undefined,
       },
     });
-    expect(
-      "enabled" in restored.template.layers.find((layer) => layer.id === "image")!,
-    ).toBe(false);
+    expect("enabled" in restored.template.layers.find((layer) => layer.id === "image")!).toBe(
+      false,
+    );
     expect(
       restored.source.kind === "file" &&
         restored.source.savedSnapshot !== null &&
-        !("enabled" in
-          restored.source.savedSnapshot.template.layers.find(
-            (layer) => layer.id === "image",
-          )!),
+        !(
+          "enabled" in
+          restored.source.savedSnapshot.template.layers.find((layer) => layer.id === "image")!
+        ),
     ).toBe(true);
     expect(isDirtySinceSave(restored)).toBe(false);
 
@@ -4999,9 +4732,7 @@ describe("canonical layer defaults (X16)", () => {
       },
     });
     expect(noSnapshot.source.kind).toBe("file");
-    expect(
-      noSnapshot.source.kind === "file" && noSnapshot.source.savedSnapshot,
-    ).toBeNull();
+    expect(noSnapshot.source.kind === "file" && noSnapshot.source.savedSnapshot).toBeNull();
   });
 
   /**
@@ -5011,9 +4742,7 @@ describe("canonical layer defaults (X16)", () => {
    * the snapshot to fromBrief → canonicalBrief) must not throw or drop the
    * file association.
    */
-  const storedFileDraft = (
-    savedSnapshot: unknown,
-  ): Record<string, unknown> => ({
+  const storedFileDraft = (savedSnapshot: unknown): Record<string, unknown> => ({
     campaignName: "Recover me",
     briefId: "camp",
     source: {
@@ -5030,9 +4759,7 @@ describe("canonical layer defaults (X16)", () => {
     const restored = normalizeDraftState(storedFileDraft(snapshot));
     expect(restored.campaignName).toBe("Recover me");
     expect(restored.briefId).toBe("camp");
-    expect(
-      restored.source.kind === "file" && restored.source.savedSnapshot,
-    ).toBe(snapshot);
+    expect(restored.source.kind === "file" && restored.source.savedSnapshot).toBe(snapshot);
   });
 
   test("a stored draft whose snapshot layers is not an array keeps the draft and the snapshot", () => {
@@ -5046,9 +4773,7 @@ describe("canonical layer defaults (X16)", () => {
     const restored = normalizeDraftState(storedFileDraft(snapshot));
     expect(restored.campaignName).toBe("Recover me");
     expect(restored.briefId).toBe("camp");
-    expect(
-      restored.source.kind === "file" && restored.source.savedSnapshot,
-    ).toBe(snapshot);
+    expect(restored.source.kind === "file" && restored.source.savedSnapshot).toBe(snapshot);
   });
 
   test("a stored draft whose snapshot layers contain null keeps the draft and the snapshot", () => {
@@ -5062,9 +4787,7 @@ describe("canonical layer defaults (X16)", () => {
     const restored = normalizeDraftState(storedFileDraft(snapshot));
     expect(restored.campaignName).toBe("Recover me");
     expect(restored.briefId).toBe("camp");
-    expect(
-      restored.source.kind === "file" && restored.source.savedSnapshot,
-    ).toBe(snapshot);
+    expect(restored.source.kind === "file" && restored.source.savedSnapshot).toBe(snapshot);
   });
 
   test("canonicalBrief returns the same object for each malformed template shape", () => {
@@ -5103,9 +4826,7 @@ describe("canonical layer defaults (X16)", () => {
     const restored = normalizeDraftState(storedFileDraft(snapshot));
     expect(restored.campaignName).toBe("Recover me");
     expect(restored.briefId).toBe("camp");
-    expect(
-      restored.source.kind === "file" && restored.source.savedSnapshot,
-    ).toBe(snapshot);
+    expect(restored.source.kind === "file" && restored.source.savedSnapshot).toBe(snapshot);
   });
 
   test("a stored draft whose snapshot products is not an array keeps the draft and the snapshot", () => {
@@ -5113,9 +4834,7 @@ describe("canonical layer defaults (X16)", () => {
     const restored = normalizeDraftState(storedFileDraft(snapshot));
     expect(restored.campaignName).toBe("Recover me");
     expect(restored.briefId).toBe("camp");
-    expect(
-      restored.source.kind === "file" && restored.source.savedSnapshot,
-    ).toBe(snapshot);
+    expect(restored.source.kind === "file" && restored.source.savedSnapshot).toBe(snapshot);
   });
 
   test("a stored draft whose snapshot products contain null keeps the draft and the snapshot", () => {
@@ -5123,18 +4842,14 @@ describe("canonical layer defaults (X16)", () => {
     const restored = normalizeDraftState(storedFileDraft(snapshot));
     expect(restored.campaignName).toBe("Recover me");
     expect(restored.briefId).toBe("camp");
-    expect(
-      restored.source.kind === "file" && restored.source.savedSnapshot,
-    ).toBe(snapshot);
+    expect(restored.source.kind === "file" && restored.source.savedSnapshot).toBe(snapshot);
   });
 
   test("a stored draft whose snapshot is not an object keeps the draft and the snapshot", () => {
     const restored = normalizeDraftState(storedFileDraft("x"));
     expect(restored.campaignName).toBe("Recover me");
     expect(restored.briefId).toBe("camp");
-    expect(
-      restored.source.kind === "file" && restored.source.savedSnapshot,
-    ).toBe("x");
+    expect(restored.source.kind === "file" && restored.source.savedSnapshot).toBe("x");
   });
 
   test("canonicalBrief returns the same object for each malformed products shape", () => {
@@ -5163,9 +4878,7 @@ describe("canonical layer defaults (X16)", () => {
     expect(() => reduce(restored, { type: "discard" })).not.toThrow();
     const discarded = reduce(restored, { type: "discard" });
     expect(discarded.source.kind).toBe("file");
-    expect(
-      discarded.source.kind === "file" && discarded.source.file,
-    ).toBe("camp.yaml");
+    expect(discarded.source.kind === "file" && discarded.source.file).toBe("camp.yaml");
   });
 
   test("discard of a restored draft whose snapshot products contain null keeps the file", () => {
@@ -5174,9 +4887,7 @@ describe("canonical layer defaults (X16)", () => {
     expect(() => reduce(restored, { type: "discard" })).not.toThrow();
     const discarded = reduce(restored, { type: "discard" });
     expect(discarded.source.kind).toBe("file");
-    expect(
-      discarded.source.kind === "file" && discarded.source.file,
-    ).toBe("camp.yaml");
+    expect(discarded.source.kind === "file" && discarded.source.file).toBe("camp.yaml");
   });
 
   test("discard of a restored draft whose snapshot is not an object keeps the file", () => {
@@ -5184,9 +4895,7 @@ describe("canonical layer defaults (X16)", () => {
     expect(() => reduce(restored, { type: "discard" })).not.toThrow();
     const discarded = reduce(restored, { type: "discard" });
     expect(discarded.source.kind).toBe("file");
-    expect(
-      discarded.source.kind === "file" && discarded.source.file,
-    ).toBe("camp.yaml");
+    expect(discarded.source.kind === "file" && discarded.source.file).toBe("camp.yaml");
   });
 
   test("discard of a restored draft whose snapshot template is null keeps the file", () => {
@@ -5195,9 +4904,7 @@ describe("canonical layer defaults (X16)", () => {
     expect(() => reduce(restored, { type: "discard" })).not.toThrow();
     const discarded = reduce(restored, { type: "discard" });
     expect(discarded.source.kind).toBe("file");
-    expect(
-      discarded.source.kind === "file" && discarded.source.file,
-    ).toBe("camp.yaml");
+    expect(discarded.source.kind === "file" && discarded.source.file).toBe("camp.yaml");
   });
 
   test("discard of a restored draft whose snapshot layers is not an array keeps the file", () => {
@@ -5212,9 +4919,7 @@ describe("canonical layer defaults (X16)", () => {
     expect(() => reduce(restored, { type: "discard" })).not.toThrow();
     const discarded = reduce(restored, { type: "discard" });
     expect(discarded.source.kind).toBe("file");
-    expect(
-      discarded.source.kind === "file" && discarded.source.file,
-    ).toBe("camp.yaml");
+    expect(discarded.source.kind === "file" && discarded.source.file).toBe("camp.yaml");
   });
 
   test("discard of a restored draft whose snapshot layers contain null keeps the file", () => {
@@ -5229,19 +4934,13 @@ describe("canonical layer defaults (X16)", () => {
     expect(() => reduce(restored, { type: "discard" })).not.toThrow();
     const discarded = reduce(restored, { type: "discard" });
     expect(discarded.source.kind).toBe("file");
-    expect(
-      discarded.source.kind === "file" && discarded.source.file,
-    ).toBe("camp.yaml");
+    expect(discarded.source.kind === "file" && discarded.source.file).toBe("camp.yaml");
   });
 
   test("save and apply carrying a server brief with enabled: true do not leave the draft dirty", () => {
     const loaded = fromBrief(savedBrief(), { file: "camp.yaml" });
     const server = savedBrief({
-      template: withLayer(
-        templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
-        "image",
-        { enabled: true },
-      ),
+      template: withLayer(templateFromCanonical(DEFAULT_CAMPAIGN_TYPE), "image", { enabled: true }),
     });
     const saved = reduce(loaded, { type: "save", saved: server });
     expect(isDirtySinceSave(saved)).toBe(false);

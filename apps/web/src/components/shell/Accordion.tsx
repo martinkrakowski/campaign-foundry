@@ -29,7 +29,12 @@ export function Accordion({ title, aside, defaultOpen = true, children }: Accord
             viewBox="0 0 24 24"
             aria-hidden
           >
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" />
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2.5}
+              d="M19 9l-7 7-7-7"
+            />
           </svg>
           <span className="text-[13px] font-bold">{title}</span>
         </button>

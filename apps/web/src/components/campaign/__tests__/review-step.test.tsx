@@ -56,7 +56,9 @@ describe("ReviewStep — summary rows", () => {
     const user = userEvent.setup();
     const { onEdit } = renderRows(classic);
     for (const section of sectionOrder("brief")) {
-      await user.click(screen.getByRole("button", { name: messages.reviewEditLabel(SECTION_TITLES[section]) }));
+      await user.click(
+        screen.getByRole("button", { name: messages.reviewEditLabel(SECTION_TITLES[section]) }),
+      );
       expect(onEdit).toHaveBeenCalledWith(section);
     }
   });
@@ -97,7 +99,14 @@ describe("ReviewStep — summary rows", () => {
   test("the template row speaks the authored type in display labels, the size in derived px (T7/D55)", () => {
     const styled = renderRows({
       ...classic,
-      style: { fontFamily: "Lora", fontWeight: 700, sizeScale: 0.08, lineHeight: 1.4, letterSpacing: 0.05, align: "left" },
+      style: {
+        fontFamily: "Lora",
+        fontWeight: 700,
+        sizeScale: 0.08,
+        lineHeight: 1.4,
+        letterSpacing: 0.05,
+        align: "left",
+      },
     });
     // linkedin's own ratio is 1:1 (1080 px across): 0.08 → 86 px, derived (D55).
     expect(row("layout")?.textContent).toContain(messages.reviewStyleFamily("Lora"));
@@ -142,7 +151,10 @@ describe("ReviewStep — summary rows", () => {
   });
 
   test("an empty formats or platforms list draws no output row rather than a blank one", () => {
-    const emptyFormats = renderRows({ ...classic, output: { formats: [], platforms: ["linkedin"] } });
+    const emptyFormats = renderRows({
+      ...classic,
+      output: { formats: [], platforms: ["linkedin"] },
+    });
     expect(row("output")).toBeNull();
     emptyFormats.unmount();
     renderRows({ ...classic, output: { formats: ["static"], platforms: [] } });
@@ -211,17 +223,35 @@ describe("ReviewStep — the preview (D26)", () => {
 
   test("no platform picked yet: the caption says so instead of inventing one", () => {
     renderRows({ ...classic, output: undefined });
-    expect(screen.getByText(messages.previewCaption("Square", messages.previewNoPlatform))).toBeTruthy();
+    expect(
+      screen.getByText(messages.previewCaption("Square", messages.previewNoPlatform)),
+    ).toBeTruthy();
   });
 
   test("a non-procedural background axis adds the stand-in suffix to the figure's caption (D52)", () => {
-    renderRows({ ...classic, variation: { count: 2, axes: { background: { source: ["genai"] } } } as CampaignBrief["variation"] });
-    expect(document.querySelector("figcaption")?.textContent).toContain(messages.previewFrameStandInBackground);
+    renderRows({
+      ...classic,
+      variation: {
+        count: 2,
+        axes: { background: { source: ["genai"] } },
+      } as CampaignBrief["variation"],
+    });
+    expect(document.querySelector("figcaption")?.textContent).toContain(
+      messages.previewFrameStandInBackground,
+    );
   });
 
   test("a procedural background axis carries no stand-in claim — the frame is the real background", () => {
-    renderRows({ ...classic, variation: { count: 2, axes: { background: { source: ["procedural"] } } } as CampaignBrief["variation"] });
-    expect(document.querySelector("figcaption")?.textContent).not.toContain(messages.previewFrameStandInBackground);
+    renderRows({
+      ...classic,
+      variation: {
+        count: 2,
+        axes: { background: { source: ["procedural"] } },
+      } as CampaignBrief["variation"],
+    });
+    expect(document.querySelector("figcaption")?.textContent).not.toContain(
+      messages.previewFrameStandInBackground,
+    );
   });
 
   test("a motion brief previews the axis's own motion kind", () => {

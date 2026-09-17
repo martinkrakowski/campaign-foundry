@@ -25,7 +25,10 @@ export interface PreviewFrameState {
 export function briefBackgroundIsStandIn(brief: CampaignBrief): boolean {
   const axes = brief.variation?.axes as { background?: { source?: unknown } } | undefined;
   const sources = axes?.background?.source;
-  return Array.isArray(sources) && sources.some((source) => source === "genai" || source === "asset-pool");
+  return (
+    Array.isArray(sources) &&
+    sources.some((source) => source === "genai" || source === "asset-pool")
+  );
 }
 
 /**
@@ -57,7 +60,10 @@ export function briefBackgroundIsStandIn(brief: CampaignBrief): boolean {
 export function previewFetchKey(brief: CampaignBrief, productId: string | undefined): string {
   const product = brief.products.find((candidate) => candidate.id === productId);
   return JSON.stringify({
-    product: product === undefined ? undefined : { primaryColor: product.primaryColor, logoPath: product.logoPath },
+    product:
+      product === undefined
+        ? undefined
+        : { primaryColor: product.primaryColor, logoPath: product.logoPath },
     message: brief.localizedMessage ?? brief.campaignMessage,
     style: brief.style,
     template: brief.template,
@@ -133,7 +139,8 @@ export function usePreviewFrame(
   // an unchanged look. `request.brief` below is still whichever `brief`
   // reference is CURRENT when a fetch actually does fire — the key only
   // decides whether to fire, never what a firing request sends.
-  const briefFetchKey = brief === undefined || cell === undefined ? undefined : previewFetchKey(brief, cell.productId);
+  const briefFetchKey =
+    brief === undefined || cell === undefined ? undefined : previewFetchKey(brief, cell.productId);
   // FI1's identity axis, same value the identity fingerprint below reads:
   // a not-yet-saved draft's live slug (`brief.id`) is NOT a switch of
   // creative (`identityKey`, the stable `tempId`, covers it) — but a real

@@ -14,13 +14,7 @@ describe("MotionKindPanel", () => {
   test("renders motion kind card and dispatches toggle", async () => {
     const user = userEvent.setup();
     const onToggle = vi.fn();
-    render(
-      <MotionKindPanel
-        kind="ken-burns-in"
-        selected={true}
-        onToggle={onToggle}
-      />,
-    );
+    render(<MotionKindPanel kind="ken-burns-in" selected={true} onToggle={onToggle} />);
 
     const button = screen.getByRole("button", { name: "ken-burns-in" });
     expect(button).toBeTruthy();
@@ -33,15 +27,12 @@ describe("MotionKindPanel", () => {
 
   test("respects disabled prop", () => {
     render(
-      <MotionKindPanel
-        kind="accent-wipe"
-        selected={false}
-        onToggle={vi.fn()}
-        disabled={true}
-      />,
+      <MotionKindPanel kind="accent-wipe" selected={false} onToggle={vi.fn()} disabled={true} />,
     );
 
-    expect((screen.getByRole("button", { name: "accent-wipe" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(
+      (screen.getByRole("button", { name: "accent-wipe" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
     expect(screen.getByText("soft fade beneath band")).toBeTruthy();
   });
 });

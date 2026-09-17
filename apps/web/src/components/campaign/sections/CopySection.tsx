@@ -6,7 +6,11 @@ import { Button, Eyebrow, Input } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import * as messages from "@/components/campaign/messages";
 import type { EditorState, EditorAction } from "@/components/campaign/editor-state";
-import { MAX_HEADLINE_LENGTH, type FieldErrors, type FieldWarnings } from "@/components/campaign/validate";
+import {
+  MAX_HEADLINE_LENGTH,
+  type FieldErrors,
+  type FieldWarnings,
+} from "@/components/campaign/validate";
 import { SectionShell, Field } from "./IdentitySection";
 import { TimelineSection } from "@/components/campaign/TimelineSection";
 import { getPool } from "@/lib/briefs-api";
@@ -51,16 +55,23 @@ export function CopySection({
     <SectionShell
       id="copy"
       title="2 · Copy"
-      errorCount={Object.keys(errors).filter((k) => k.startsWith("copy") || k === "campaignMessage" || k === "localizedMessage").length}
+      errorCount={
+        Object.keys(errors).filter(
+          (k) => k.startsWith("copy") || k === "campaignMessage" || k === "localizedMessage",
+        ).length
+      }
     >
-      <Field fieldKey="campaignMessage" label={messages.headlineLabel} error={errors.campaignMessage} warning={warnings.campaignMessage}>
+      <Field
+        fieldKey="campaignMessage"
+        label={messages.headlineLabel}
+        error={errors.campaignMessage}
+        warning={warnings.campaignMessage}
+      >
         {(control) => (
           <div className="space-y-3">
             {suggestions.length > 0 ? (
               <div className="space-y-1.5">
-                <Eyebrow>
-                  {messages.headlineSuggestionsLabel}
-                </Eyebrow>
+                <Eyebrow>{messages.headlineSuggestionsLabel}</Eyebrow>
                 <div className="flex flex-col gap-2">
                   {suggestions.map((entry) => {
                     const isSelected = state.campaignMessage === entry.text;
@@ -70,7 +81,9 @@ export function CopySection({
                         type="button"
                         aria-label={entry.text}
                         aria-pressed={isSelected}
-                        onClick={() => dispatch({ type: "patch", patch: { campaignMessage: entry.text } })}
+                        onClick={() =>
+                          dispatch({ type: "patch", patch: { campaignMessage: entry.text } })
+                        }
                         className={cn(
                           "flex items-center gap-3 rounded-md border-[1.5px] px-3.5 py-2.5 text-left transition-all",
                           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary focus-visible:ring-offset-2",
@@ -87,11 +100,26 @@ export function CopySection({
                             isSelected ? "text-brand-primary" : "text-text-muted",
                           )}
                         >
-                          <svg viewBox="0 0 16 16" className="size-4" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
-                            <path d="M8 1v3M8 12v3M1 8h3M12 8h3M3 3l2.5 2.5M10.5 10.5L13 13M3 13l2.5-2.5M10.5 5.5L13 3" strokeLinecap="round" />
+                          <svg
+                            viewBox="0 0 16 16"
+                            className="size-4"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="1.5"
+                            aria-hidden="true"
+                          >
+                            <path
+                              d="M8 1v3M8 12v3M1 8h3M12 8h3M3 3l2.5 2.5M10.5 10.5L13 13M3 13l2.5-2.5M10.5 5.5L13 3"
+                              strokeLinecap="round"
+                            />
                           </svg>
                         </span>
-                        <span className={cn("min-w-0 flex-1 text-[13px] font-medium leading-tight", isSelected ? "text-text-emphasis" : "text-text-primary")}>
+                        <span
+                          className={cn(
+                            "min-w-0 flex-1 text-[13px] font-medium leading-tight",
+                            isSelected ? "text-text-emphasis" : "text-text-primary",
+                          )}
+                        >
                           {entry.text}
                         </span>
                         <span className="ml-auto shrink-0 font-mono text-[10px] text-text-muted">
@@ -110,13 +138,17 @@ export function CopySection({
                 aria-label={messages.headlineLabel}
                 value={state.campaignMessage}
                 placeholder={messages.headlinePlaceholder}
-                onChange={(e) => dispatch({ type: "patch", patch: { campaignMessage: e.target.value } })}
+                onChange={(e) =>
+                  dispatch({ type: "patch", patch: { campaignMessage: e.target.value } })
+                }
                 invalid={Boolean(errors.campaignMessage)}
               />
               <div className="flex justify-end text-[11px]">
                 <span
                   className={cn(
-                    state.campaignMessage.length > MAX_HEADLINE_LENGTH ? "text-error font-medium" : "text-text-muted",
+                    state.campaignMessage.length > MAX_HEADLINE_LENGTH
+                      ? "text-error font-medium"
+                      : "text-text-muted",
                   )}
                 >
                   {messages.headlineCounter(state.campaignMessage.length, MAX_HEADLINE_LENGTH)}
@@ -127,8 +159,12 @@ export function CopySection({
         )}
       </Field>
 
-
-      <Field fieldKey="localizedMessage" label={messages.localizedHeadlineLabel} error={errors.localizedMessage} warning={warnings.localizedMessage}>
+      <Field
+        fieldKey="localizedMessage"
+        label={messages.localizedHeadlineLabel}
+        error={errors.localizedMessage}
+        warning={warnings.localizedMessage}
+      >
         <Input
           aria-label={messages.localizedHeadlineLabel}
           value={state.localizedMessage}

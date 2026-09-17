@@ -209,7 +209,13 @@ describe("previewRailKey — the memo boundary's identity axis (Qodo, caught in 
     // the identityKey branch instead of the brief.id fallback the bug is
     // about. `initialEditorState` defaults to a fresh, unsaved draft
     // (`source.kind === "new"`), which is the wrong shape for this fixture.
-    state.source = { kind: "file", file: "twin.yaml", loadedId: "twin", savedSnapshot: null, revision: undefined };
+    state.source = {
+      kind: "file",
+      file: "twin.yaml",
+      loadedId: "twin",
+      savedSnapshot: null,
+      revision: undefined,
+    };
     return previewDockProps(state, 0, 6)!;
   };
 
@@ -239,7 +245,9 @@ describe("previewRailKey — the memo boundary's identity axis (Qodo, caught in 
     const briefB = { ...briefA, id: "renamed-live-slug" };
     // identityKey is present, so it — not the live slug — is the axis: a
     // rename must not move this key (FI1's contract, preserved through CC1).
-    expect(previewRailKey(rawRailProps, briefA, "p1")).toBe(previewRailKey(rawRailProps, briefB, "p1"));
+    expect(previewRailKey(rawRailProps, briefA, "p1")).toBe(
+      previewRailKey(rawRailProps, briefB, "p1"),
+    );
   });
 
   test("null rawRailProps (nothing to draw) never computes a key", () => {
@@ -260,9 +268,17 @@ describe("previewRailKey — the memo boundary's identity axis (Qodo, caught in 
   test("moves when the first product's id changes even though its colour and logo stay put", () => {
     const rawRailPropsFor = (productId: string) => {
       const state = initialEditorState("variation");
-      state.products = [{ ...namedProduct(1), id: productId, primaryColor: "#1473E6", logoPath: "a.png" }];
+      state.products = [
+        { ...namedProduct(1), id: productId, primaryColor: "#1473E6", logoPath: "a.png" },
+      ];
       state.campaignName = "twin";
-      state.source = { kind: "file", file: "twin.yaml", loadedId: "twin", savedSnapshot: null, revision: undefined };
+      state.source = {
+        kind: "file",
+        file: "twin.yaml",
+        loadedId: "twin",
+        savedSnapshot: null,
+        revision: undefined,
+      };
       return previewDockProps(state, 0, 6)!;
     };
     const briefWithProduct = (productId: string): CampaignBrief => ({
