@@ -105,9 +105,10 @@ import { StepHeader } from "@/components/campaign/StepHeader";
 import { StepFooter } from "@/components/campaign/StepFooter";
 import { SECTION_TITLES, sectionOrder, LayoutSection, type SectionId } from "./sections";
 import { ReviewStep } from "./ReviewStep";
-import { PreviewDock, PreviewRailEmptyState } from "./PreviewDock";
+import { PreviewDock, PreviewRailEmptyState, type PlayheadState } from "./PreviewDock";
 import { previewDockProps, previewRailKey } from "./preview-props";
 import { useMinInlineSize, PREVIEW_RAIL_MIN_INLINE_PX } from "@/lib/use-min-inline-size";
+import { DEFAULT_DURATION_SEC } from "@campaignfoundry/CampaignOrchestration/variation-defaults";
 import * as messages from "./messages";
 import type { CampaignMode } from "@/components/campaign/editor-state";
 
@@ -187,6 +188,97 @@ const STEP_SUBTITLES: Record<StepId, string> = {
 
 function stepTitle(step: StepId): string {
   return step === "review" ? "Review" : SECTION_TITLES[step];
+}
+
+/* ── The playhead (CC5) ───────────────────────────────────────────────────── */
+
+/**
+ * The editor's playhead: the ONE owner of the live and committed seconds.
+ *
+ * Before CC5 the pair was a `useState` inside `PreviewDock` (`PreviewDock.tsx:240`),
+ * which made a second surface — the timeline tape — unable to draw the same second
+ * without a second copy of it, and a second copy desyncs the preview (D146's risk,
+ * the plan's §0 C1). So the state moves up here, where the rail's dock and the
+ * tape are both in scope, and `PreviewDock` receives it (VE-D5: scrub is ephemeral
+ * component state, never an editor action — no reducer is involved anywhere below).
+ *
+ * **Why this is its own component rather than two `useState`s in `BriefEditor`'s
+ * body.** The live second moves on every pointermove. `BriefEditor` is the largest
+ * component in the app, `renderStepCard` builds the whole step form inline, and NO
+ * section is `memo`-wrapped — so a `setScrubSec` in `BriefEditor`'s own body would
+ * re-render the entire editor tree per frame of a drag, re-opening the cost defect
+ * CC2 closed, through a new component (the plan's §4 acceptance (b)).
+ *
+ * The fix is React's own element-identity bailout, not a new primitive: the main
+ * column arrives here as `children` — an element object `BriefEditor` built on ITS
+ * last render — so when this component re-renders for a second that moved,
+ * `children` is referentially identical, `oldProps === newProps` holds for that
+ * child, and React skips the subtree entirely. `BriefEditor` itself does not
+ * re-render at all, because the state it would have owned is not its own.
+ *
+ * The surfaces that DO draw the second are the `rail` render prop, which is
+ * re-invoked because it must be.
+ *
+ * This differs from the plan's §5, which puts the pair in `BriefEditor`'s body;
+ * ownership is still singular, still in this file, and every literal §5 makes
+ * load-bearing survives — the `useState` pair, `onScrubLive` as a bare setter
+ * (already stable) and `handleScrubCommit` as a `useCallback` with an empty
+ * dependency list, writing BOTH seconds so the thumb does not jump back.
+ *
+ * TS2's section host (D146) lives inside the main column, which is a bailed-out
+ * element here — so it will need either a second slot on this component or a
+ * subscription. That is TS2's problem, deliberately not solved early.
+ */
+export function PlayheadHost({
+  durationSec,
+  children,
+  rail,
+}: {
+  /** The previewed clip length. A change to it re-clamps both seconds. */
+  durationSec: number;
+  /** The main column — passed as an element so it can bail out of a scrub. */
+  children: ReactNode;
+  /** The surfaces that draw the playhead, re-invoked on every scrub. */
+  rail: (playhead: PlayheadState) => ReactNode;
+}): ReactNode {
+  const [scrubSec, setScrubSec] = useState(0);
+  const [committedSec, setCommittedSec] = useState(0);
+
+  /**
+   * A commit moves BOTH seconds. Writing only the committed one would let a
+   * ±1 s nudge or a ruler click move the frame while the thumb stayed where the
+   * finger left it. Empty dependency list: both setters are stable, so this
+   * function is allocated once — an inline arrow here would hand the
+   * `memo`-wrapped dock and tape a fresh prop on every keystroke and defeat the
+   * memo boundary CC1/CC2 built (the plan's §5; review caught exactly this in an
+   * earlier draft).
+   */
+  const handleScrubCommit = useCallback((sec: number) => {
+    setScrubSec(sec);
+    setCommittedSec(sec);
+  }, []);
+
+  // The clamp lives with the owner, so no surface can clamp it differently and a
+  // shortened duration axis cannot leave a stale second addressing a frame the
+  // clip no longer has (`preview-dock`'s own shrink test, moved here with it).
+  // `Math.max(0, durationSec)` guards a zero/negative axis: the ceiling can never
+  // be below the floor.
+  const ceiling = Math.max(0, durationSec);
+  const playhead: PlayheadState = {
+    durationSec,
+    scrubSec: Math.min(Math.max(0, scrubSec), ceiling),
+    committedSec: Math.min(Math.max(0, committedSec), ceiling),
+    // A `useState` setter is already referentially stable — no wrapper needed.
+    onScrubLive: setScrubSec,
+    onScrubCommit: handleScrubCommit,
+  };
+
+  return (
+    <>
+      {children}
+      {rail(playhead)}
+    </>
+  );
 }
 
 /**
@@ -646,6 +738,12 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   // through. The YAML view below reads the live `draftBrief` instead, on
   // purpose: memoising it here would go stale (D61).
   const previewBrief = useMemo(() => draftBrief, [previewKey]);
+  // CC5 — the previewed clip length, derived ONCE and from the same brief object
+  // the dock itself receives, so the range's `max`, the playhead's clamp and the
+  // frame request can never disagree about how long the clip is. Duration is part
+  // of `previewFetchKey`'s content fingerprint, so `previewBrief` moves whenever
+  // the axis does.
+  const previewDurationSec = previewBrief.variation?.axes?.duration?.[0] ?? DEFAULT_DURATION_SEC;
   // CC2 — the JS-side mirror of the row's own `@container(min-width:56rem)`
   // query (§6 question 1): the CSS hides the rail below the breakpoint, but
   // the element stays mounted and would keep fetching without this. Observes
@@ -1601,6 +1699,141 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
     );
   }
 
+  /**
+   * The preview rail, as `PlayheadHost`'s own slot (CC5).
+   *
+   * It is a function rather than an element because it is the half of the row
+   * that MUST re-render when a second moves — the dock's thumb and (for a motion
+   * draft) the tape's diamond follow the live value. The main column is handed to
+   * the host as `children` for the opposite reason: it must NOT.
+   */
+  const railSlot = (playhead: PlayheadState): ReactNode => (
+    <>
+      {/* D43/D44/D61/D141 — the preview rail: one right-hand slot, a sibling of the
+        main column — never inside `renderStepCard`, which renders two live copies
+        during a step change and whose `transform` traps overlays (M7). `sticky
+        top-0 self-start` resolves against the shell's own scrollport; never
+        `fixed`. D141 amends D43 ("the dock mounts in Guided only and is suppressed
+        on the Review step", `r7-preview-panel.md:39`): the COUNT invariant survives
+        — exactly one composed preview on screen — but the Guided-only clause is
+        DROPPED. The rail now appears in every presentation (Guided, Everything,
+        and a future `studio`, D137/D141) and on every step except Review and
+        Layout. Review and Layout still exclude it because each carries its own
+        frame (`ReviewStep`, `LayoutSection` with `preview`, D63) — but that
+        exclusion is only a STEP concept, and only Guided has a step cursor
+        (`stepIndex` is stale everywhere else, see `railCursorIndex` above); a
+        presentation with no steps (Everything today; `studio`'s own Layout
+        arrangement tomorrow, once SE0 exists — see the note beside
+        `railCursorIndex`) has nothing to exclude by step and always shows the
+        rail. Visibility is still the row's CSS container query (§6 question 1);
+        `isRailWideEnough` (CC2) is its JS-side mirror, gating the FETCH — the rail
+        still mounts below the breakpoint (so a resize above it does not pay a
+        fresh debounce), it just does not feed the frame a `brief` while hidden. */}
+      {presentation !== "guided" ||
+      (steps[stepIndex] !== "review" && steps[stepIndex] !== "layout") ? (
+        <aside
+          role="complementary"
+          aria-label={messages.previewLegend}
+          className="sticky top-0 hidden max-h-screen w-64 shrink-0 self-start flex-col gap-3 overflow-y-auto border-l border-border bg-surface p-4 [@container(min-width:56rem)]:flex"
+        >
+          {/* The segmented switcher (D61): an eye for the preview, code for the
+            YAML view — exclusive, never side by side. The glyphs are decoration;
+            the names are on the buttons. */}
+          <div
+            role="group"
+            aria-label={messages.previewRailViews}
+            className="flex shrink-0 items-center gap-1"
+          >
+            <button
+              type="button"
+              aria-pressed={railView === "preview"}
+              aria-label={messages.previewRailPreviewView}
+              onClick={() => chooseRailView("preview")}
+              className={cn(
+                "rounded-md p-1.5 transition-colors",
+                railView === "preview"
+                  ? "bg-surface-2 text-text-emphasis"
+                  : "text-text-muted hover:bg-surface-2 hover:text-text-primary",
+              )}
+            >
+              <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true" className="size-4">
+                <path
+                  d="M2 12s3.5-6.5 10-6.5S22 12 22 12s-3.5 6.5-10 6.5S2 12 2 12Z"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                />
+                <circle
+                  cx="12"
+                  cy="12"
+                  r="2.75"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                />
+              </svg>
+            </button>
+            <button
+              type="button"
+              aria-pressed={railView === "yaml"}
+              aria-label={messages.previewRailYamlView}
+              onClick={() => chooseRailView("yaml")}
+              className={cn(
+                "rounded-md p-1.5 transition-colors",
+                railView === "yaml"
+                  ? "bg-surface-2 text-text-emphasis"
+                  : "text-text-muted hover:bg-surface-2 hover:text-text-primary",
+              )}
+            >
+              <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true" className="size-4">
+                <path
+                  d="m8 7-5 5 5 5M16 7l5 5-5 5M13.5 5l-3 14"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </button>
+          </div>
+          {railView === "preview" ? (
+            railProps !== null ? (
+              // CC2 — below the breakpoint, `brief` is withheld: `usePreviewFrame`
+              // (inside `PreviewDock` → `PreviewFrame`) treats an undefined brief
+              // exactly like an unspecified look and never builds a request, so a
+              // rail nobody can see never reaches the network.
+              <PreviewDock
+                {...railProps}
+                brief={isRailWideEnough ? previewBrief : undefined}
+                playhead={playhead}
+              />
+            ) : (
+              // D142 — the empty state before the first product has an id: names
+              // the missing field, never "add a product" (the Products step
+              // already shows a stub) and never a fabricated placeholder creative.
+              <PreviewRailEmptyState
+                campaignName={state.campaignName}
+                step={railCursorIndex !== undefined ? railCursorIndex + 1 : undefined}
+                stepCount={railCursorCount}
+              />
+            )
+          ) : (
+            <pre className="overflow-auto text-[11px] text-text-primary">
+              {/* Real YAML, because that is what the label promises and what the
+                save path writes — a JSON body under a `</>`-YAML name showed a
+                format the pipeline never reads (CodeRabbit, PR #174). Always the
+                LIVE `draftBrief`, never the memoised `previewBrief`: this is the
+                rail's read-only SECOND view (D61) and must never lag the preview's
+                own memo boundary (CC1/CC2 mutation (c)). */}
+              {dump(draftBrief)}
+            </pre>
+          )}
+        </aside>
+      ) : null}
+    </>
+  );
+
   return (
     // No h-full / inner overflow: like every other view, this one flows and the
     // shell's main container is the scroller. The action bar and the preview rail
@@ -1610,310 +1843,200 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
           so the rail's own width can never lie to a viewport breakpoint. */}
       <div ref={railContainerRef} className="flex items-start [container-type:inline-size]">
         <SectionModeContext.Provider value={state.mode}>
-          {/* Main content */}
-          <div
-            className="mx-auto flex w-full max-w-5xl flex-col gap-6 p-4 sm:p-8 pb-24"
-            onBlurCapture={handleMainBlur}
-            onClickCapture={touchSectionFromEvent}
-          >
-            {/* Header with selector, status chip, and the presentation toggle.
-              In Guided the chip moves out of this row — the StepHeader announces the
-              step's own status — so this row only ever holds one of the two. */}
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <BriefSelector
-                  briefs={briefs}
-                  currentId={state.source.kind === "file" ? state.source.loadedId : undefined}
-                  onSelect={loadBrief}
-                  onCreateNew={createNew}
-                />
-                {presentation === "everything" ? <StatusChip state={state} /> : null}
-              </div>
-              <div
-                role="group"
-                aria-label={messages.presentationLabel}
-                // Always visible. It is the only control that returns to Guided, and the
-                // choice persists — hiding it in Everything made Guided unreachable for
-                // good, including across a reload. jsdom applies no CSS, so the suite
-                // could still find the button and the tests passed regardless.
-                className="flex shrink-0 items-center gap-1"
-              >
-                <button
-                  type="button"
-                  aria-pressed={presentation === "guided"}
-                  onClick={() => choosePresentation("guided")}
-                  className={cn(
-                    "rounded-md px-3 py-1.5 text-[12px] font-semibold transition-colors",
-                    presentation === "guided"
-                      ? "bg-surface-2 text-text-emphasis"
-                      : "text-text-muted hover:bg-surface-2 hover:text-text-primary",
-                  )}
+          <PlayheadHost durationSec={previewDurationSec} rail={railSlot}>
+            {/* Main content */}
+            <div
+              className="mx-auto flex w-full max-w-5xl flex-col gap-6 p-4 sm:p-8 pb-24"
+              onBlurCapture={handleMainBlur}
+              onClickCapture={touchSectionFromEvent}
+            >
+              {/* Header with selector, status chip, and the presentation toggle.
+                In Guided the chip moves out of this row — the StepHeader announces the
+                step's own status — so this row only ever holds one of the two. */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <BriefSelector
+                    briefs={briefs}
+                    currentId={state.source.kind === "file" ? state.source.loadedId : undefined}
+                    onSelect={loadBrief}
+                    onCreateNew={createNew}
+                  />
+                  {presentation === "everything" ? <StatusChip state={state} /> : null}
+                </div>
+                <div
+                  role="group"
+                  aria-label={messages.presentationLabel}
+                  // Always visible. It is the only control that returns to Guided, and the
+                  // choice persists — hiding it in Everything made Guided unreachable for
+                  // good, including across a reload. jsdom applies no CSS, so the suite
+                  // could still find the button and the tests passed regardless.
+                  className="flex shrink-0 items-center gap-1"
                 >
-                  {messages.presentationGuided}
-                </button>
-                <button
-                  type="button"
-                  aria-pressed={presentation === "everything"}
-                  onClick={() => choosePresentation("everything")}
-                  className={cn(
-                    "rounded-md px-3 py-1.5 text-[12px] font-semibold transition-colors",
-                    presentation === "everything"
-                      ? "bg-surface-2 text-text-emphasis"
-                      : "text-text-muted hover:bg-surface-2 hover:text-text-primary",
-                  )}
-                >
-                  {messages.presentationEverything}
-                </button>
+                  <button
+                    type="button"
+                    aria-pressed={presentation === "guided"}
+                    onClick={() => choosePresentation("guided")}
+                    className={cn(
+                      "rounded-md px-3 py-1.5 text-[12px] font-semibold transition-colors",
+                      presentation === "guided"
+                        ? "bg-surface-2 text-text-emphasis"
+                        : "text-text-muted hover:bg-surface-2 hover:text-text-primary",
+                    )}
+                  >
+                    {messages.presentationGuided}
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={presentation === "everything"}
+                    onClick={() => choosePresentation("everything")}
+                    className={cn(
+                      "rounded-md px-3 py-1.5 text-[12px] font-semibold transition-colors",
+                      presentation === "everything"
+                        ? "bg-surface-2 text-text-emphasis"
+                        : "text-text-muted hover:bg-surface-2 hover:text-text-primary",
+                    )}
+                  >
+                    {messages.presentationEverything}
+                  </button>
+                </div>
               </div>
-            </div>
 
-            {/* Sections: the whole stack (Everything) or one step (Guided) */}
-            {presentation === "guided" ? (
-              <div className="space-y-4">
-                {/* W7.1 — the walk, above the sticky step head: the segbar scrolls away
-                  with the page while the head stays, and the two never fight for the
-                  same pixel. */}
-                <SegBar
-                  segments={segments}
-                  index={stepIndex}
-                  maxVisited={maxVisited}
-                  onSelect={go}
-                />
-                <div className="space-y-8">
-                  <StepHeader
-                    step={stepIndex + 1}
-                    total={steps.length}
-                    title={stepTitle(steps[stepIndex])}
-                    subtitle={STEP_SUBTITLES[steps[stepIndex]]}
-                    state={state}
-                    headingRef={stepHeadingRef}
+              {/* Sections: the whole stack (Everything) or one step (Guided) */}
+              {presentation === "guided" ? (
+                <div className="space-y-4">
+                  {/* W7.1 — the walk, above the sticky step head: the segbar scrolls away
+                    with the page while the head stays, and the two never fight for the
+                    same pixel. */}
+                  <SegBar
+                    segments={segments}
+                    index={stepIndex}
+                    maxVisited={maxVisited}
+                    onSelect={go}
                   />
-                  {/* W7.2 — the two cards of a step change. The arriving one is keyed on
-                    the step, because a CSS animation only replays on a fresh node;
-                    the leaving one is out of flow for the same breath, so the pair
-                    slide past each other instead of reflowing down the column. */}
-                  <div className="relative" data-testid="step-card" {...swipe}>
-                    {exiting ? (
+                  <div className="space-y-8">
+                    <StepHeader
+                      step={stepIndex + 1}
+                      total={steps.length}
+                      title={stepTitle(steps[stepIndex])}
+                      subtitle={STEP_SUBTITLES[steps[stepIndex]]}
+                      state={state}
+                      headingRef={stepHeadingRef}
+                    />
+                    {/* W7.2 — the two cards of a step change. The arriving one is keyed on
+                      the step, because a CSS animation only replays on a fresh node;
+                      the leaving one is out of flow for the same breath, so the pair
+                      slide past each other instead of reflowing down the column. */}
+                    <div className="relative" data-testid="step-card" {...swipe}>
+                      {exiting ? (
+                        <div
+                          key={`exit-${exiting.index}`}
+                          // Inert as well as hidden: an `aria-hidden` box full of live
+                          // controls is a trap, and this one has a whole section's worth
+                          // of them for as long as it is on screen. `pointer-events-none`
+                          // is the same promise to an engine that has no `inert`.
+                          aria-hidden="true"
+                          inert
+                          className={cn(
+                            "pointer-events-none absolute inset-x-0 top-0",
+                            exiting.direction === 1 ? "step-exit-l" : "step-exit-r",
+                          )}
+                        >
+                          {renderStepCard(steps[exiting.index])}
+                        </div>
+                      ) : null}
                       <div
-                        key={`exit-${exiting.index}`}
-                        // Inert as well as hidden: an `aria-hidden` box full of live
-                        // controls is a trap, and this one has a whole section's worth
-                        // of them for as long as it is on screen. `pointer-events-none`
-                        // is the same promise to an engine that has no `inert`.
-                        aria-hidden="true"
-                        inert
-                        className={cn(
-                          "pointer-events-none absolute inset-x-0 top-0",
-                          exiting.direction === 1 ? "step-exit-l" : "step-exit-r",
-                        )}
+                        key={stepIndex}
+                        className={direction === 1 ? "step-enter-r" : "step-enter-l"}
                       >
-                        {renderStepCard(steps[exiting.index])}
+                        {renderStepCard(steps[stepIndex])}
                       </div>
-                    ) : null}
-                    <div
-                      key={stepIndex}
-                      className={direction === 1 ? "step-enter-r" : "step-enter-l"}
-                    >
-                      {renderStepCard(steps[stepIndex])}
                     </div>
+                    <StepFooter
+                      statusText={stepFooterStatus}
+                      onBack={stepIndex > 0 ? () => go(stepIndex - 1) : undefined}
+                      onNext={steps[stepIndex] === "review" ? undefined : () => handleNext()}
+                      // The last section step, not a named one: `output` is last in classic
+                      // but randomized puts `policy` after it, so keying on the id promised
+                      // a launch and delivered the Variation Policy step.
+                      nextLabel={
+                        stepIndex === steps.length - 2 ? messages.stepNextReview : undefined
+                      }
+                      nudgeKey={nudgeKey}
+                      readyKey={readyKey}
+                    />
+                    {/* D38 — the surface stands on every guided step, Review included: a
+                      refusal spoken from the Review bar names sections on steps the user
+                      is about to be bounced to, and it must still be on screen there. */}
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                      {statusSurface}
+                    </div>
+                    {/* W8.2 — Guided placement: the verbs stand on the Review step. The
+                      status surface above is the step's own, so the bar carries only
+                      the verbs (D38) — one status line, not two. */}
+                    {steps[stepIndex] === "review" ? actionBar(false) : null}
                   </div>
-                  <StepFooter
-                    statusText={stepFooterStatus}
-                    onBack={stepIndex > 0 ? () => go(stepIndex - 1) : undefined}
-                    onNext={steps[stepIndex] === "review" ? undefined : () => handleNext()}
-                    // The last section step, not a named one: `output` is last in classic
-                    // but randomized puts `policy` after it, so keying on the id promised
-                    // a launch and delivered the Variation Policy step.
-                    nextLabel={stepIndex === steps.length - 2 ? messages.stepNextReview : undefined}
-                    nudgeKey={nudgeKey}
-                    readyKey={readyKey}
-                  />
-                  {/* D38 — the surface stands on every guided step, Review included: a
-                    refusal spoken from the Review bar names sections on steps the user
-                    is about to be bounced to, and it must still be on screen there. */}
-                  <div className="flex flex-wrap items-center gap-x-3 gap-y-2">{statusSurface}</div>
-                  {/* W8.2 — Guided placement: the verbs stand on the Review step. The
-                    status surface above is the step's own, so the bar carries only
-                    the verbs (D38) — one status line, not two. */}
-                  {steps[stepIndex] === "review" ? actionBar(false) : null}
                 </div>
-              </div>
-            ) : (
-              <div className="space-y-8">
-                <div>
-                  <IdentitySection
-                    state={state}
-                    dispatch={dispatch}
-                    errors={sectionErrorsVisible("identity")}
-                  />
-                </div>
-                <div>
-                  <CopySection
-                    state={state}
-                    dispatch={dispatch}
-                    errors={sectionErrorsVisible("copy")}
-                    warnings={warnings.copy}
-                    onOpenPool={() => setPoolDrawerOpen(true)}
-                  />
-                </div>
-                <div>
-                  <ProductsSection
-                    state={state}
-                    dispatch={dispatch}
-                    errors={sectionErrorsVisible("products")}
-                    onChooseFromBin={setAssetPickerKey}
-                  />
-                </div>
-                <div>
-                  {state.mode === "brief" ? (
-                    <TreatmentsSection
+              ) : (
+                <div className="space-y-8">
+                  <div>
+                    <IdentitySection
                       state={state}
                       dispatch={dispatch}
-                      errors={sectionErrorsVisible("treatments")}
+                      errors={sectionErrorsVisible("identity")}
                     />
-                  ) : null}
-                </div>
-                {/* The layer list (L5): the offer is the boundary's own (D124). */}
-                <TemplateSection
-                  state={state}
-                  dispatch={dispatch}
-                  errors={sectionErrorsVisible("template")}
-                />
-                {/* The template view (T7): the type block, no frame — the Everything
-                    stack has no composed preview surface by design (D43 keeps the
-                    preview Guided-only), so the step-scoped frame stays a step's. */}
-                <LayoutSection
-                  state={state}
-                  dispatch={dispatch}
-                  errors={sectionErrorsVisible("layout")}
-                />
-                <OutputSection
-                  state={state}
-                  dispatch={dispatch}
-                  errors={{ ...sectionErrorsVisible("output"), ...sectionErrorsVisible("motion") }}
-                />
-              </div>
-            )}
-          </div>
-
-          {/* D43/D44/D61/D141 — the preview rail: one right-hand slot, a sibling of the
-            main column — never inside `renderStepCard`, which renders two live copies
-            during a step change and whose `transform` traps overlays (M7). `sticky
-            top-0 self-start` resolves against the shell's own scrollport; never
-            `fixed`. D141 amends D43 ("the dock mounts in Guided only and is suppressed
-            on the Review step", `r7-preview-panel.md:39`): the COUNT invariant survives
-            — exactly one composed preview on screen — but the Guided-only clause is
-            DROPPED. The rail now appears in every presentation (Guided, Everything,
-            and a future `studio`, D137/D141) and on every step except Review and
-            Layout. Review and Layout still exclude it because each carries its own
-            frame (`ReviewStep`, `LayoutSection` with `preview`, D63) — but that
-            exclusion is only a STEP concept, and only Guided has a step cursor
-            (`stepIndex` is stale everywhere else, see `railCursorIndex` above); a
-            presentation with no steps (Everything today; `studio`'s own Layout
-            arrangement tomorrow, once SE0 exists — see the note beside
-            `railCursorIndex`) has nothing to exclude by step and always shows the
-            rail. Visibility is still the row's CSS container query (§6 question 1);
-            `isRailWideEnough` (CC2) is its JS-side mirror, gating the FETCH — the rail
-            still mounts below the breakpoint (so a resize above it does not pay a
-            fresh debounce), it just does not feed the frame a `brief` while hidden. */}
-          {presentation !== "guided" ||
-          (steps[stepIndex] !== "review" && steps[stepIndex] !== "layout") ? (
-            <aside
-              role="complementary"
-              aria-label={messages.previewLegend}
-              className="sticky top-0 hidden max-h-screen w-64 shrink-0 self-start flex-col gap-3 overflow-y-auto border-l border-border bg-surface p-4 [@container(min-width:56rem)]:flex"
-            >
-              {/* The segmented switcher (D61): an eye for the preview, code for the
-                YAML view — exclusive, never side by side. The glyphs are decoration;
-                the names are on the buttons. */}
-              <div
-                role="group"
-                aria-label={messages.previewRailViews}
-                className="flex shrink-0 items-center gap-1"
-              >
-                <button
-                  type="button"
-                  aria-pressed={railView === "preview"}
-                  aria-label={messages.previewRailPreviewView}
-                  onClick={() => chooseRailView("preview")}
-                  className={cn(
-                    "rounded-md p-1.5 transition-colors",
-                    railView === "preview"
-                      ? "bg-surface-2 text-text-emphasis"
-                      : "text-text-muted hover:bg-surface-2 hover:text-text-primary",
-                  )}
-                >
-                  <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true" className="size-4">
-                    <path
-                      d="M2 12s3.5-6.5 10-6.5S22 12 22 12s-3.5 6.5-10 6.5S2 12 2 12Z"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth={2}
+                  </div>
+                  <div>
+                    <CopySection
+                      state={state}
+                      dispatch={dispatch}
+                      errors={sectionErrorsVisible("copy")}
+                      warnings={warnings.copy}
+                      onOpenPool={() => setPoolDrawerOpen(true)}
                     />
-                    <circle
-                      cx="12"
-                      cy="12"
-                      r="2.75"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth={2}
+                  </div>
+                  <div>
+                    <ProductsSection
+                      state={state}
+                      dispatch={dispatch}
+                      errors={sectionErrorsVisible("products")}
+                      onChooseFromBin={setAssetPickerKey}
                     />
-                  </svg>
-                </button>
-                <button
-                  type="button"
-                  aria-pressed={railView === "yaml"}
-                  aria-label={messages.previewRailYamlView}
-                  onClick={() => chooseRailView("yaml")}
-                  className={cn(
-                    "rounded-md p-1.5 transition-colors",
-                    railView === "yaml"
-                      ? "bg-surface-2 text-text-emphasis"
-                      : "text-text-muted hover:bg-surface-2 hover:text-text-primary",
-                  )}
-                >
-                  <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true" className="size-4">
-                    <path
-                      d="m8 7-5 5 5 5M16 7l5 5-5 5M13.5 5l-3 14"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth={2}
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                </button>
-              </div>
-              {railView === "preview" ? (
-                railProps !== null ? (
-                  // CC2 — below the breakpoint, `brief` is withheld: `usePreviewFrame`
-                  // (inside `PreviewDock` → `PreviewFrame`) treats an undefined brief
-                  // exactly like an unspecified look and never builds a request, so a
-                  // rail nobody can see never reaches the network.
-                  <PreviewDock {...railProps} brief={isRailWideEnough ? previewBrief : undefined} />
-                ) : (
-                  // D142 — the empty state before the first product has an id: names
-                  // the missing field, never "add a product" (the Products step
-                  // already shows a stub) and never a fabricated placeholder creative.
-                  <PreviewRailEmptyState
-                    campaignName={state.campaignName}
-                    step={railCursorIndex !== undefined ? railCursorIndex + 1 : undefined}
-                    stepCount={railCursorCount}
+                  </div>
+                  <div>
+                    {state.mode === "brief" ? (
+                      <TreatmentsSection
+                        state={state}
+                        dispatch={dispatch}
+                        errors={sectionErrorsVisible("treatments")}
+                      />
+                    ) : null}
+                  </div>
+                  {/* The layer list (L5): the offer is the boundary's own (D124). */}
+                  <TemplateSection
+                    state={state}
+                    dispatch={dispatch}
+                    errors={sectionErrorsVisible("template")}
                   />
-                )
-              ) : (
-                <pre className="overflow-auto text-[11px] text-text-primary">
-                  {/* Real YAML, because that is what the label promises and what the
-                    save path writes — a JSON body under a `</>`-YAML name showed a
-                    format the pipeline never reads (CodeRabbit, PR #174). Always the
-                    LIVE `draftBrief`, never the memoised `previewBrief`: this is the
-                    rail's read-only SECOND view (D61) and must never lag the preview's
-                    own memo boundary (CC1/CC2 mutation (c)). */}
-                  {dump(draftBrief)}
-                </pre>
+                  {/* The template view (T7): the type block, no frame — the Everything
+                      stack has no composed preview surface by design (D43 keeps the
+                      preview Guided-only), so the step-scoped frame stays a step's. */}
+                  <LayoutSection
+                    state={state}
+                    dispatch={dispatch}
+                    errors={sectionErrorsVisible("layout")}
+                  />
+                  <OutputSection
+                    state={state}
+                    dispatch={dispatch}
+                    errors={{
+                      ...sectionErrorsVisible("output"),
+                      ...sectionErrorsVisible("motion"),
+                    }}
+                  />
+                </div>
               )}
-            </aside>
-          ) : null}
+            </div>
+          </PlayheadHost>
         </SectionModeContext.Provider>
       </div>
 

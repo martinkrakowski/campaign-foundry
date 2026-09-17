@@ -7,6 +7,16 @@ import type {
   ToneOption,
 } from "./CreativePreview";
 import type { PreviewShowcaseProps } from "./PreviewDock";
+
+/**
+ * Everything the dock needs that is derived from the DRAFT — i.e. the whole of
+ * `PreviewShowcaseProps` except the playhead, which is not a property of the
+ * document at all but ephemeral editor state the host owns (CC5, VE-D5/D139).
+ * Keeping it out of this shape is what lets the rail memo key (`previewRailKey`)
+ * stay a fingerprint of the BRIEF: a second that moved on a pointermove must
+ * never look like a changed creative.
+ */
+export type PreviewDockLook = Omit<PreviewShowcaseProps, "playhead">;
 import { anchorAxisActive, briefStyle, isDefaultOutput, type EditorState } from "./editor-state";
 import { previewFetchKey } from "@/lib/preview-frame";
 
@@ -126,7 +136,7 @@ export function previewDockProps(
    */
   stepIndex?: number,
   stepCount?: number,
-): PreviewShowcaseProps | null {
+): PreviewDockLook | null {
   const look = previewLook(state);
   if (look === null) return null;
   return {
@@ -172,7 +182,7 @@ export function previewDockProps(
  * therefore folded into the key directly, not only through the lookup.
  */
 export function previewRailKey(
-  rawRailProps: PreviewShowcaseProps | null,
+  rawRailProps: PreviewDockLook | null,
   brief: CampaignBrief,
   productId: string,
 ): string | null {

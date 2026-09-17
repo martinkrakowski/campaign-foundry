@@ -5,7 +5,7 @@ import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { DEFAULT_CAMPAIGN_TYPE } from "@campaignfoundry/CampaignOrchestration/campaign-types";
 import { templateFromCanonical } from "@campaignfoundry/CampaignOrchestration/brief-template";
 import { PreviewFrame } from "../PreviewFrame";
-import { PreviewDock } from "../PreviewDock";
+import { PreviewDock, type PlayheadState } from "../PreviewDock";
 import { previewDockProps, previewRailKey } from "../preview-props";
 import { editorReducer, initialEditorState, toBrief, type EditorState } from "../editor-state";
 import { PREVIEW_FRAME_DEBOUNCE_MS } from "@/lib/preview-frame";
@@ -45,6 +45,19 @@ const renderFrame = (props: Partial<Parameters<typeof PreviewFrame>[0]> = {}) =>
 afterEach(() => {
   vi.useRealTimers();
 });
+
+/**
+ * CC5 — these tests are about the FRAME's own memo/identity boundary, not the
+ * playhead. A still playhead at 0 is exactly what `PlayheadHost` hands the dock
+ * before anybody scrubs, and none of the assertions below moves it.
+ */
+const restingPlayhead: PlayheadState = {
+  durationSec: 6,
+  scrubSec: 0,
+  committedSec: 0,
+  onScrubLive: () => {},
+  onScrubCommit: () => {},
+};
 
 describe("PreviewFrame (D52)", () => {
   test("renders the SVG placeholder synchronously — no frame, no empty box", () => {
@@ -210,7 +223,7 @@ describe("renaming a fresh draft must not blank the preview frame", () => {
 
     const dock = (next: typeof state) => {
       const props = previewDockProps(next, 0, 6)!;
-      return <PreviewDock {...props} brief={toBrief(next)} />;
+      return <PreviewDock {...props} brief={toBrief(next)} playhead={restingPlayhead} />;
     };
 
     const view = render(dock(state));
@@ -254,7 +267,7 @@ function MemoDock({
   const railProps = useMemo(() => rawRailProps, [previewKey]);
   const previewBrief = useMemo(() => brief, [previewKey]);
   if (railProps === null) return null;
-  return <PreviewDock {...railProps} brief={previewBrief} />;
+  return <PreviewDock {...railProps} brief={previewBrief} playhead={restingPlayhead} />;
 }
 
 describe("the rail's memo must not hide a switch of creative from usePreviewFrame (Qodo, caught in review)", () => {

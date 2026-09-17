@@ -2,6 +2,7 @@ import { describe, test, expect, vi } from "vitest";
 import { render, fireEvent, act } from "@testing-library/react";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { PREVIEW_FRAME_DEBOUNCE_MS } from "@/lib/preview-frame";
+import { DEFAULT_DURATION_SEC } from "@campaignfoundry/CampaignOrchestration/variation-defaults";
 import {
   PreviewDock,
   PreviewPicture,
@@ -9,7 +10,28 @@ import {
   derivePreviewRatio,
   derivePreviewSpec,
 } from "../PreviewDock";
+import type { PreviewDockLook } from "../preview-props";
+import { PlayheadHost } from "../BriefEditor";
 import * as messages from "../messages";
+
+/**
+ * CC5 — the dock no longer owns the playhead, so a test that drives the scrub
+ * must mount the real owner, not a fixture of one: `PlayheadHost` is the
+ * shipped component `BriefEditor` uses, and every assertion below about live
+ * vs committed seconds therefore exercises the pair that actually ships.
+ *
+ * `durationSec` defaults to the same derivation the dock used to make for
+ * itself (`brief.variation.axes.duration[0]`, else the default), so every test
+ * written before the lift still drives a range with the same `max`.
+ */
+const Dock = ({ durationSec, ...look }: PreviewDockLook & { readonly durationSec?: number }) => (
+  <PlayheadHost
+    durationSec={durationSec ?? look.brief?.variation?.axes?.duration?.[0] ?? DEFAULT_DURATION_SEC}
+    rail={(playhead) => <PreviewDock {...look} playhead={playhead} />}
+  >
+    {null}
+  </PlayheadHost>
+);
 
 const showcase = {
   campaignName: "Summer Launch",
@@ -96,7 +118,7 @@ describe("PreviewPicture", () => {
 describe("PreviewDock", () => {
   test("an explicit display spec mounts the leaderboard, not the platform's social ratio", () => {
     const { container } = render(
-      <PreviewDock {...showcase} platformId="instagram-story" spec={{ size: "728x90" }} />,
+      <Dock {...showcase} platformId="instagram-story" spec={{ size: "728x90" }} />,
     );
     const svg = container.querySelector("svg")!;
     expect(svg.getAttribute("viewBox")).toBe("0 0 728 90");
@@ -105,30 +127,26 @@ describe("PreviewDock", () => {
   });
 
   test("derives the ratio once, at its own call site: the platform wins over the shape chips", () => {
-    const { container } = render(
-      <PreviewDock {...showcase} platformId="instagram-story" ratio="1:1" />,
-    );
+    const { container } = render(<Dock {...showcase} platformId="instagram-story" ratio="1:1" />);
     const svg = container.querySelector("svg")!;
     expect(svg.getAttribute("viewBox")).toBe("0 0 1080 1920");
   });
 
   test("names the platform and ratio as display labels, never raw values", () => {
-    const { container } = render(
-      <PreviewDock {...showcase} platformId="instagram-story" ratio="1:1" />,
-    );
+    const { container } = render(<Dock {...showcase} platformId="instagram-story" ratio="1:1" />);
     expect(container.textContent).toContain("Tall · Instagram Story");
     expect(container.textContent).not.toContain("9:16");
     expect(container.textContent).not.toContain("instagram-story");
   });
 
   test("says so when no platform is picked yet", () => {
-    const { container } = render(<PreviewDock {...showcase} />);
+    const { container } = render(<Dock {...showcase} />);
     expect(container.textContent).toContain("Square · no platform yet");
   });
 
   test("a moving creative names its video style in the caption, in words (D50)", () => {
     const { container } = render(
-      <PreviewDock {...showcase} platformId="instagram-story" motion="ken-burns-in" />,
+      <Dock {...showcase} platformId="instagram-story" motion="ken-burns-in" />,
     );
     expect(container.textContent).toContain(
       messages.previewCaptionMotion("Tall", "Instagram Story", "slow zoom in"),
@@ -141,7 +159,7 @@ describe("PreviewDock", () => {
     // The frame is the effect's rest pose — the name in words is what says the
     // delivered video animates; the raw kind id never renders (D18).
     const { container } = render(
-      <PreviewDock {...showcase} platformId="instagram-story" style={{ textEffect: "rise-in" }} />,
+      <Dock {...showcase} platformId="instagram-story" style={{ textEffect: "rise-in" }} />,
     );
     expect(container.textContent).toContain(
       messages.previewCaptionMotion("Tall", "Instagram Story", "Rise in"),
@@ -151,7 +169,7 @@ describe("PreviewDock", () => {
 
   test("a moving creative whose template carries an effect names both styles (T6)", () => {
     const { container } = render(
-      <PreviewDock
+      <Dock
         {...showcase}
         platformId="instagram-story"
         motion="ken-burns-in"
@@ -164,16 +182,14 @@ describe("PreviewDock", () => {
   });
 
   test("shows the campaign name, headline and step readout", () => {
-    const { container } = render(<PreviewDock {...showcase} platformId="linkedin" />);
+    const { container } = render(<Dock {...showcase} platformId="linkedin" />);
     expect(container.textContent).toContain("Summer Launch");
     expect(container.textContent).toContain("Stay wild. Stay hydrated.");
     expect(container.textContent).toContain(messages.previewStep(2, 6));
   });
 
   test("the legend renders through Eyebrow as a p on the token", () => {
-    const { container } = render(
-      <PreviewDock {...showcase} platformId="instagram-story" ratio="1:1" />,
-    );
+    const { container } = render(<Dock {...showcase} platformId="instagram-story" ratio="1:1" />);
     const legend = container.querySelector("p")!;
     expect(legend.textContent).toBe(messages.previewLegend);
     expect(legend.className).toContain("tracking-eyebrow");
@@ -181,7 +197,7 @@ describe("PreviewDock", () => {
   });
 
   test("a headline-less brief shows name and step only", () => {
-    const { container } = render(<PreviewDock {...showcase} headline={undefined} />);
+    const { container } = render(<Dock {...showcase} headline={undefined} />);
     expect(container.textContent).toContain("Summer Launch");
     expect(container.textContent).not.toContain("Stay wild");
   });
@@ -193,9 +209,7 @@ describe("PreviewDock", () => {
    * `previewStep(undefined, undefined)`.
    */
   test("omits the step readout when the caller has no cursor to give it (D141)", () => {
-    const { container } = render(
-      <PreviewDock {...showcase} step={undefined} stepCount={undefined} />,
-    );
+    const { container } = render(<Dock {...showcase} step={undefined} stepCount={undefined} />);
     expect(container.textContent).toContain("Summer Launch");
     expect(container.textContent).toContain("Stay wild. Stay hydrated.");
     expect(container.textContent).not.toContain(" / ");
@@ -235,7 +249,7 @@ describe("PreviewDock — the stand-in caption (D52)", () => {
 
   test("a generated or pooled background axis says the background is a stand-in, in words — never a raw axis id", () => {
     const { container } = render(
-      <PreviewDock {...showcase} platformId="linkedin" brief={briefWithAxis(["genai"])} />,
+      <Dock {...showcase} platformId="linkedin" brief={briefWithAxis(["genai"])} />,
     );
     expect(container.textContent).toContain(messages.previewFrameStandInBackground);
     expect(container.textContent).not.toContain("genai");
@@ -244,20 +258,20 @@ describe("PreviewDock — the stand-in caption (D52)", () => {
 
   test("a procedural brief gets no label — the frame IS the real background", () => {
     const { container } = render(
-      <PreviewDock {...showcase} platformId="linkedin" brief={briefWithAxis(["procedural"])} />,
+      <Dock {...showcase} platformId="linkedin" brief={briefWithAxis(["procedural"])} />,
     );
     expect(container.textContent).not.toContain(messages.previewFrameStandInBackground);
   });
 
   test("without the brief's projection, no stand-in claim is made either way", () => {
-    const { container } = render(<PreviewDock {...showcase} platformId="linkedin" />);
+    const { container } = render(<Dock {...showcase} platformId="linkedin" />);
     expect(container.textContent).not.toContain(messages.previewFrameStandInBackground);
   });
 });
 
 describe("PreviewDock — scrub control (VE-D5, VE-D6)", () => {
   test("renders a range control when motion is present", () => {
-    const { container } = render(<PreviewDock {...showcase} motion="ken-burns-in" />);
+    const { container } = render(<Dock {...showcase} motion="ken-burns-in" />);
     const slider = container.querySelector('input[type="range"]');
     expect(slider).not.toBeNull();
     expect(slider?.getAttribute("aria-label")).toBe(messages.previewScrubLabel);
@@ -266,14 +280,14 @@ describe("PreviewDock — scrub control (VE-D5, VE-D6)", () => {
   });
 
   test("the range control is absent when the brief renders no motion", () => {
-    const { container } = render(<PreviewDock {...showcase} motion={undefined} />);
+    const { container } = render(<Dock {...showcase} motion={undefined} />);
     const slider = container.querySelector('input[type="range"]');
     expect(slider).toBeNull();
   });
 
   test("the scrub control never autoplays", async () => {
     vi.useFakeTimers();
-    const { container } = render(<PreviewDock {...showcase} motion="ken-burns-in" />);
+    const { container } = render(<Dock {...showcase} motion="ken-burns-in" />);
     const slider = container.querySelector('input[type="range"]') as HTMLInputElement;
     expect(slider).not.toBeNull();
     const initialVal = slider.value;
@@ -285,7 +299,7 @@ describe("PreviewDock — scrub control (VE-D5, VE-D6)", () => {
   });
 
   test("scrubbing dispatches no EditorAction and maintains local component state", () => {
-    const { container } = render(<PreviewDock {...showcase} motion="ken-burns-in" />);
+    const { container } = render(<Dock {...showcase} motion="ken-burns-in" />);
     const slider = container.querySelector('input[type="range"]') as HTMLInputElement;
     expect(slider).not.toBeNull();
     fireEvent.change(slider, { target: { value: "3" } });
@@ -293,7 +307,7 @@ describe("PreviewDock — scrub control (VE-D5, VE-D6)", () => {
   });
 
   test("committing the scrub position on pointerUp and keyUp updates the committed scrub time", () => {
-    const { container } = render(<PreviewDock {...showcase} motion="ken-burns-in" />);
+    const { container } = render(<Dock {...showcase} motion="ken-burns-in" />);
     const slider = container.querySelector('input[type="range"]') as HTMLInputElement;
     expect(slider).not.toBeNull();
     fireEvent.change(slider, { target: { value: "2.5" } });
@@ -335,7 +349,7 @@ describe("PreviewDock — scrub control (VE-D5, VE-D6)", () => {
       }) as unknown as CampaignBrief;
 
     const { container, rerender } = render(
-      <PreviewDock {...showcase} motion="ken-burns-in" brief={briefWithDuration(10)} />,
+      <Dock {...showcase} motion="ken-burns-in" brief={briefWithDuration(10)} />,
     );
 
     await act(async () => {
@@ -357,7 +371,7 @@ describe("PreviewDock — scrub control (VE-D5, VE-D6)", () => {
     expect(container.querySelector("img")).not.toBeNull();
 
     // Re-render with a shorter duration (5s)
-    rerender(<PreviewDock {...showcase} motion="ken-burns-in" brief={briefWithDuration(5)} />);
+    rerender(<Dock {...showcase} motion="ken-burns-in" brief={briefWithDuration(5)} />);
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(PREVIEW_FRAME_DEBOUNCE_MS);
