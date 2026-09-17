@@ -1,113 +1,121 @@
-# Creatives as a list — from a drawn set to an authored one
+# Creatives as a list — from two volume mechanisms to one addressable one
 
-**Date:** 2026-09-17 · **Status:** draft, for the owner's approval. **Nothing dispatched.**
+**Date:** 2026-09-17 · **Revised:** 2026-09-17 after an adversarial review that blocked the first draft.
+**Status:** **decision document. Not dispatchable. Eleven decisions open.** Nothing dispatched.
 **Verified against:** `origin/main` at `78dc964a`.
-**Source:** the owner's flow of 2026-09-17 — *"if user elects to generate a campaign with 2 variations (i.e. creatives), then 2 items appear in the left sidebar representing each of those creatives / configurations. User should be able to add and delete the creatives."*
-**Supersedes:** SG-D1's *"count in the wizard"* framing (`2026-09-17_wireframe-gap.md`). **Does not touch** CC3, SG1, the template modal or the timeline — none of them depend on how variants are stored.
+**Source:** the owner's flow of 2026-09-17 — *"if user elects to generate a campaign with 2 variations (i.e. creatives), then 2 items appear in the left sidebar … User should be able to add and delete the creatives."*
+
+> **Revision note.** The first draft was blocked for the same failure that blocked the first
+> `creative-first-chrome` draft: claims about the system that did not survive contact with it. Four
+> were false — they are retracted in §0 rather than quietly edited, because the argument they
+> supported was wrong, not just imprecise. The corrected reading makes the case for the change
+> **stronger** and the scope **larger**.
 
 ---
 
-## 1. What the document is today
+## 0. Retractions
 
-A brief describes a **space of creatives**, not the creatives themselves. The operator declares axes as *sets*; a count, a seed and a distance constraint tell the planner how to draw from them. `briefs/sample-motion.yaml`:
+| First draft claimed | Tree says | Consequence |
+|---|---|---|
+| *"CC3 (shipped)"* | `TemplateSection.tsx` still owns the stack; `premise CC3` still stands; `feat/rail-layers` is **PR #474, unmerged** | CC1/CC2 shipped. CC3 did not. |
+| *"One-creative motions have to pretend to be a degenerate space"* | `social-post` and `display-ad` are **`mode: "brief"`** (`campaign-types.ts:43,78`) — classic, driven by named `treatments`. Only `paid-social` and `short-video` are `variation` | **§2 argued from a product that does not exist.** The degenerate-space complaint is true of *variation mode only* |
+| *"every axis a `readonly string[]`"* | `CampaignBrief.ts:83-102` — `paletteShift: number[]`, `duration: number[]`, `headline: string` (a pool ref), `background: { source?: string[] }` | The entry sketch must know which of these are copied onto a creative |
+| *"Touches none of the layout work in flight"* | The source requirement is a **left-sidebar list** — the column SG3 wants, the `BriefEditor.tsx` four lanes are serialised on, and the preview path CC1 just re-keyed (`preview-props.ts` uses `products[0]` and `firstOf(state.variation.layout)`) | A *schema-only* change could ignore chrome. **This plan's source cannot.** |
+
+---
+
+## 1. What the document is today — **two** mechanisms, not one
+
+### 1.1 Classic (`mode: "brief"`) — a cartesian over a named list
+
+`GenerateCampaignUseCase.use-case.ts:282-283`, immediately **after** the variation early-return:
+
+```js
+if (brief.mode === "variation") return this.executeVariation(brief, options, log);
+
+// 3-7. Generate every creative: one per (product × canvas × treatment), where the
+// canvas is a social ratio (as today) or a display size from `output.sizes` (D113).
+```
+
+`treatments` is a list of `{ id, layout, tone }` (`Treatment.vo.ts:25`). Volume is `products × canvases × treatments`, **plus each requested `output.sizes` entry**. Exhaustive, no sampling, no distance constraint.
+
+**This is already list-shaped**, and it is how IAB display fan-out works. `social-post` and `display-ad` both use it.
+
+### 1.2 Variation (`mode: "variation"`) — a sampled draw over axes
 
 ```yaml
 variation:
   count: 8
   seed: 3
   minDistance: 2
-  coverage:
-    perProduct: 1
-    perRatio: 1
   axes:
     layout: [headline-top, headline-bottom]
     tone: [bold, subtle]
-    background:
-      source: [procedural]
     paletteShift: [0, 0.1]
-    motion: [ken-burns-in, headline-rise]
-    duration: [6]
 ```
 
-The type is `CampaignBrief.ts:75` — `variation?: { count?, seed?, minDistance?, coverage?, axes? }`, every axis a `readonly string[]`.
+The planner samples `count` points under a Hamming constraint. `Variant` (`Variant.ts:13`) is plan-time only — **the variation path never reads `output.sizes`**, and `Variant` has no `size` field. `paid-social` and `short-video` use it; classic cannot run motion at all.
 
-A concrete creative is a **`Variant`** — `{ index, seed, productId, aspectRatio, layout, tone, backgroundSource, paletteShift, headline?, anchor?, motion?, durationSec? }` (`entities/Variant.ts:13`).
+### 1.3 The actual gap the owner's flow exposes
 
-**`Variant` is never written to disk.** It is derived at run time: the planner takes the axes, enumerates or samples the product space, filters pairs closer than `minDistance`, honours `coverage`, and emits `count` of them. That is the guarantee D123 leans on — *"a run is a function of one document and a seed"*. Same brief, same seed, same creatives, forever.
+Neither mechanism gives you an **addressable creative**.
 
-The older `brief` mode is the same document read differently: `treatments` (a list of `{id, layout, tone}`) crossed with products and canvases, exhaustively, no draw.
+- A **treatment** is shared across every product and canvas. It is a *rule*, not an ad — editing it changes many creatives at once.
+- A **variant** is ephemeral and identified by `productId + index`; `index` is a position in a draw.
 
-### 1.1 What that shape is good at, and what it fights
-
-| The document is good at | The document fights |
-|---|---|
-| *"Explore this space and give me 8 spread-out options."* | *"I want exactly these three ads."* |
-| Reproducibility — a seed replays a campaign byte-for-byte | Editing **one** creative. There is nowhere to put the edit: the axes describe all of them |
-| Compactness — nine axes describe hundreds of creatives | Expressing a single creative, which becomes a set of one-element lists |
-| Machine-side optimisation | Naming, reordering or deleting an individual creative — `Variant` has no identity beyond `index`, and `index` is a position in a draw |
-
-**The second column is the owner's flow.** A sidebar list of creatives you click into, edit, add to and delete from is a list of *authored* things. Today's document has no place to store one.
+So *"click creative 2 and edit it"* has **no referent in either model.** That — not a nine-axis tax — is why the owner's flow cannot be stored today.
 
 ---
 
-## 2. The marketing case — why 1 and why 100
+## 2. The marketing case, corrected
 
-The current document implicitly assumes one marketing motion: *generate a spread, pick winners*. That is genuinely how paid social works, and it is the wrong shape for at least three other motions this product already claims to serve. The four campaign types are not four sizes of the same job.
+The first draft argued one-creative motions are badly served. **They are not**: a classic brief with one product, one ratio and no treatments already yields exactly one creative. The honest case is different and narrower.
 
-### 2.1 One creative
+### 2.1 Why one creative
 
-**Organic social (`social-post`).** A brand posts *one* thing. There is no A/B test on a feed post — it goes out, it is the brand's voice that day. Asking an operator to express that as `count: 1` with nine single-element axes and a seed is asking them to describe a set that happens to have one member. They are not exploring a space; they are making an ad.
+Organic social posts one thing; a brand or launch asset is singular and gets art direction and sign-off; `short-video` costs real compute per unit; client approval presents three routes, not forty draws.
 
-**Brand and launch moments.** A hero asset gets art direction, legal review and a sign-off. It is *the* creative. Its value is that it is singular, and a document that cannot name it cannot carry that.
+**The gap is addressability, not expression.** You can already *produce* one creative. You cannot *point at it*, name it, or hand-edit it without changing others — because the thing you edit is a treatment or an axis set.
 
-**Client approval.** Agencies present a small number of concepts. "Here are three routes" is a deliverable; "here are 40 draws from a space" is a different conversation, and usually a worse one.
+### 2.2 Why a hundred — and there are **two** engines, both of which must survive
 
-**Expensive formats (`short-video`).** Motion costs real compute and real money per unit — this repo's own estimate panel exists to say so. At high unit cost the operator wants deliberate choices, not volume.
+| Motion | Volume comes from | Engine today |
+|---|---|---|
+| Paid social — delivery optimisation needs creative volume as a targeting input; the platform picks winners per audience slice and cannot learn from two | **Sampling a space** | the variation draw |
+| Programmatic display — one idea across every IAB size | **`products × canvases × output.sizes × treatments`** | **the classic cartesian** |
+| Organic social at scale — one idea across products and ratios | **`products × canvases × treatments`** | **the classic cartesian** |
+| Fatigue rotation | a deep well | either |
 
-### 2.2 A hundred creatives
+**The first draft's error, restated because it is the whole finding:** it used programmatic display and localisation to argue for keeping *the draw*. **The draw has never produced a display size.** The cartesian does. And the draft then retired `treatments` — deleting the mechanism it claimed to protect.
 
-**Paid social, where volume *is* the strategy (`paid-social`).** Meta and TikTok delivery optimisation needs creative volume to learn from: the platform decides which creative wins per audience slice, and it cannot do that with two. Creative volume is a targeting input, not laziness. This is exactly what the axes-and-draw model was built for and it should not be lost.
+### 2.3 What that means for the change
 
-**Programmatic display (`display-ad`).** Volume comes from *placements*, not concepts — every IAB size, every market. One idea becomes forty assets because the inventory demands forty shapes. The operator is not exploring; they are fanning out mechanically.
+An authored list is the right home for *addressability*. It is **not**, by itself, a volume mechanism. So the change needs **both** engines demoted into generators that write entries:
 
-**Localisation.** N markets × M languages, one concept. Volume is a property of the footprint.
+- **A fan** — *"this concept × these products × these canvases (ratios **and** `output.sizes`)"* — the replacement for `treatments`.
+- **A draw** — *"add 20 spread across these axes"* — the replacement for `variation.count`.
 
-**Fatigue and rotation.** A long-running campaign burns its audience on a creative in weeks; the answer is a deep well to rotate through. Volume is a schedule.
-
-### 2.3 Why this argues for the change rather than against it
-
-These are not points on a dial from 1 to 100 — **they are different jobs, and today only the second is well served.** The one-creative motions have to pretend to be a degenerate space, and the operator pays for a draw they did not want.
-
-An authored list serves both directions honestly:
-
-- **One** is one item. Nothing to configure away.
-- **A hundred** is still the draw's job — but as an **authoring action** that *fills the list*, not a run-time computation that replaces it. "Add 40 variations across these axes" produces 40 items the operator can then inspect, reorder, delete three of, and hand-edit two of.
-
-That last part is what neither model does today. The draw gives you volume you cannot touch; a hand-built list gives you control that does not scale. **The owner's flow asks for both, and the only way to have both is to make the list the document and the draw a generator that writes into it.**
+**A fan is not a nice-to-have (CL-D7). Treatments cannot die before it exists.** Losing "explore" is a UX risk; losing the cartesian is a domain deletion.
 
 ---
 
 ## 3. The proposed document change
 
-### 3.1 The shape
+### 3.1 The entry must round-trip a planned variant
 
-Creatives become **persisted, identified, individually-editable entries**. Sketch, deliberately not final:
+An entry is `Variant` **plus** a stable id, **plus** `size` for display, **minus** `index`:
 
 ```yaml
-id: trail-blaze-2026
-targetRegion: DE
-campaignMessage: Ignite the trail.
-products: [ … unchanged … ]
-template: { … unchanged: pinned ref + materialised layers … }
-
+schemaVersion: 2          # D133 — bumped; see CL-D12
 creatives:
-  - id: hero-bottle-square          # stable identity, not a draw index
+  - id: hero-bottle-square          # SAFE_ID_PATTERN, unique in the list
     productId: blaze-bottle
     aspectRatio: "1:1"
     layout: headline-bottom
     tone: bold
     backgroundSource: procedural
-    paletteShift: 0
+    paletteShift: 0                 # number, not string
+    seed: 918273                    # CL-D6 — persisted, not punted
   - id: story-pack-tall
     productId: blaze-pack
     aspectRatio: "9:16"
@@ -115,70 +123,96 @@ creatives:
     tone: subtle
     backgroundSource: procedural
     paletteShift: 0.1
+    headline: "Stay wild. Stay hydrated."   # the DRAWN text, or the ad is unreproducible
     motion: ken-burns-in
-    durationSec: 6
+    durationSec: 6                  # number
+    seed: 445566
+  - id: leaderboard-bottle
+    productId: blaze-bottle
+    size: "728x90"                  # display cell — absent from Variant today
+    layout: headline-bottom
+    tone: bold
+    seed: 112233
 ```
 
-Each entry is close to today's `Variant` **plus a stable `id`** and **minus `index`/`seed`** — because position stops being meaning and reproducibility stops needing a seed.
+**Why each addition is load-bearing:** without the drawn `headline`, a `pool://copy` ad cannot be reproduced. Without `seed`, background generation is non-deterministic (`renderVariant` sets `cellContext.seed = variant.seed`). Without `size`, display cells are inexpressible — and they are 100% of `display-ad`'s volume.
 
-### 3.2 What each existing concept becomes
+### 3.2 Reproducibility — the claim, corrected
 
-| Today | Proposed |
-|---|---|
-| `variation.axes.*` (sets) | **An authoring input, not document state.** Used by the *Add variations* action to write entries; not stored as the description of the campaign |
-| `variation.count` | **The length of `creatives`.** Derived, never set. Adding an entry is how it grows |
-| `variation.seed` | **Retires as a run input.** It exists to make a draw replayable; an authored list is already exact. May survive *inside* an entry if a per-creative generator needs one |
-| `variation.minDistance` | **Retires from the document.** There is no pair-wise constraint to enforce on a list the operator wrote — you simply do not add two identical entries. It may survive as an *option on the Add-variations action* ("spread these out"), which is where it is genuinely useful |
-| `variation.coverage` | Same: an option on the generator, not a property of the campaign |
-| `treatments` (classic) | **Retires.** Already dying with `mode` (SG-D1) |
-| `Variant` | **Becomes the persisted entry.** Stops being derived |
-| The planner | **Becomes a generator invoked by the editor**, not a stage of the run |
+The first draft said *"a function of the document alone."* **It is not.** Today a variation run is *(brief, seed, planner version, compositor, pools, genAI)*. After the change it is *(brief, compositor, pools, genAI)* — **stronger against planner drift, not absolute.** And D123's sentence is about materialised template layers, not about freezing a draw.
 
-### 3.3 What this buys
-
-- **The sidebar list is the document.** Clicking entry 2 loads entry 2; there is a place for the edit to live. No synthesis layer between what is stored and what is shown.
-- **Reproducibility gets stronger, not weaker.** Today a run is a function of *(document, seed, planner version)* — and a planner change can move the output of an unchanged brief. An explicit list makes the run a function of the document alone.
-- **`minDistance` stops needing a name.** The owner asked for a more descriptive one and a floor of 1. Under this model the control leaves the document and becomes an option on *Add variations*, where "how different should these be from each other?" is finally a question about the thing in front of you.
-- **One creative is expressible without pretending.**
-
-### 3.4 What it costs — stated plainly
-
-- **Brief size.** Nine axes describing 100 creatives is a few lines; 100 entries is 100 stanzas. D123 already accepted this trade once for template layers (*"materialising the layers costs brief size and buys reproducibility"*), so the precedent and the reasoning both exist — but this is a larger instance of it.
-- **Migration.** Every existing brief carries `variation.axes`. They must keep opening and keep rendering. The planner's draw becomes the reader for the old shape, which means **the draw code does not get deleted** — it gets demoted.
-- **`policyHash` and the run path.** `variation` participates in hashing and in `regenerateOnly` keying. Both need rework, and the regenerate-rejected flow keys on a variant identity that is currently an index.
-- **The estimate.** `EstimatePanel` branches on `mode` and reads `count`; it becomes a list length.
-- **Loss of "explore".** A drawn space invites discovery — *"show me 8 I would not have thought of"*. A list does not, unless the generator is good and reachable. **This is the real risk of the change**, and it is why the draw must survive as an authoring action rather than be deleted.
+`Variant` is also **already on disk**, in the report: assets carry `variantIndex` and `attempt`. The missing link is *report → brief*, not *"the concrete creative never exists."*
 
 ---
 
-## 4. Decisions needed
+## 4. Decisions — eleven, none defaulted
 
 | ID | Question | Recommendation |
 |---|---|---|
-| **CL-D1** | **Does the draw survive?** (a) No — axes, count, seed, minDistance and the planner all retire. (b) Yes, demoted to an *Add variations* authoring action that writes entries. | **(b).** (a) deletes the one thing the product is unusually good at — and §2.2's motions are real. Demotion keeps the machinery, moves it to where the operator can see what it did, and makes every old brief readable through it. |
-| **CL-D2** | **Is the minimum one creative, and is deleting the last refused?** | **Yes and yes.** A campaign with zero creatives has nothing to render. The owner's *"minimum should be 1"* is structural under this model, not a slider bound. |
-| **CL-D3** | **Where does a creative's identity come from?** (a) An operator-visible `id` like a product's. (b) An opaque generated key. | **(a).** Products already work this way, the YAML stays human-readable, and a generated entry can seed a readable default the operator may rename. |
-| **CL-D4** | **Do old briefs migrate on write, or keep both shapes?** | **Read both, write the new one; never rewrite a brief the operator did not save.** Migrating on open would silently rewrite hundreds of lines of someone's campaign. |
-| **CL-D5** | **Does an entry own its own template/style, or does the campaign?** | **Campaign-level for now.** The wireframe shows one template panel and one layer stack; per-creative overrides are a much larger change and should not ride along on this one. |
-| **CL-D6** | **What happens to `seed`?** | **Retires as a run input; may live inside an entry** if a per-creative image generation needs determinism. Not decided here — it depends on whether background generation stays seeded per variant. |
+| **CL-D1** | Does the draw survive? | **Yes, demoted — and axes persist as a *recipe*.** If axes are dialog ephemera, the next *"give me 20 more"* starts blank, which is a worse explore-loss than a buried button. Store the last generator config on the campaign, **unused at run time**. |
+| **CL-D2** | Minimum one creative? | **Yes; refuse deleting the last.** Also unspecified and needed: `emptyProduct(1)` exists, `emptyCreative` does not — the create dialog must mint the first entry. And: what happens to entries referencing a deleted product. |
+| **CL-D3** | Entry identity | **Operator-visible id, inheriting `SAFE_ID_PATTERN` and 64-char limit** (ids become filesystem segments), **unique across the list** the way treatments already are. A default from product+ratio+layout is fine; a silent collision on the second `headline-bottom` is not. |
+| **CL-D4** | Migration | **Read both, write new, never rewrite on open.** Specify the open path: **materialise in memory via the planner** so the sidebar is not empty. Until save, planner version can still move what the operator sees — **say so, or the reproducibility claim is false for unmigrated briefs.** CLI `generate` on an old file must keep drawing: **two run paths until samples migrate.** |
+| **CL-D5** | Per-entry template/style? | **Campaign-level for now** — but then *"click creative 2"* loads only product/ratio/layout/tone/motion. **Say that explicitly**, or the owner will expect per-creative layers. And `previewLook` + the rail fetch key must take the selected entry — `editor-state` + `preview-props.ts` + CC1's key. **Not independent of chrome.** |
+| **CL-D6** | Seed | **Stamp it: every entry carries a seed; retire it as a policy field.** Punting it un-earns §3.2 entirely. Opaque is fine; absent is not. |
+| **CL-D7** | **Cartesian fan** *(new — the blocker)* | **Required, and specified here, not deferred.** *Add: this concept × these products × these canvases (ratios and `output.sizes`)*. It is the replacement for `treatments`. **Without it, `display-ad` and `social-post` get strictly worse.** |
+| **CL-D8** | **Re-roll / HITL** *(new)* | Today `replan` draws a different point for the same index, the brief does not change, and the report records `attempt`. If the list is the document: does re-roll **mutate the entry** (then a run writes the brief), **re-render in place** (useful for genAI, useless for "give me a different one"), or **append a sibling**? A run must not write the brief unless stamped. |
+| **CL-D9** | **Asset identity** *(new)* | Does `id` replace `variantIndex` in paths, reports and `regenerateOnly`? Today it is `${productId}/v${variantIndex}` (`GeneratedAsset.ts:29`). Changing it rewrites reports, goldens, merge and the regenerate flow. |
+| **CL-D10** | **Occupied-set planning** *(new)* | `PlanCapacity` plans a *fresh* set. Appending 8 to a list of 3 must distance against the occupants. `conflicts()` already takes pairs; the use case does not. Also: append vs replace vs fill-to-N. |
+| **CL-D11** | **Per-entry vs campaign fields** *(new)* | Which fields live where. Note the Identity step's ratio chips write `variation.ratio` — **wrong if ratio is per-creative.** |
+| **CL-D12** | **`schemaVersion`** *(new)* | **Bump it.** `CampaignBrief.ts:21` already versions shape for exactly this class of change. "Read both, write new" without a bump is how you get two shapes and no way to tell which you hold. |
+
+**SG-D1 is not stamped.** The owner gave reasoning that implies retiring `mode`; they never stamped it, and this plan previously treated the inference as settled. **If Classic survives, there are two list-shaped concepts** (treatments-cartesian vs creatives-points) and this plan got simpler by assuming the other decision. Do not supersede SG-D1 here.
 
 ---
 
-## 5. What this plan does not do
+## 5. Costs — understated in the first draft
 
-- **It does not touch the layout work.** CC3 (shipped), SG1, SG4, the template modal and the timeline are all independent of how variants are stored.
-- **It does not redesign the generator's UI.** *Add variations* needs its own spec — that is where the renamed distance control and the coverage options land.
-- **It does not decide per-creative templates or styles** (CL-D5 defers it).
-- **It does not delete the planner.** CL-D1(b) demotes it; `PlanCapacity`, `PlanVariationsUseCase` and the exhaustive/greedy search all keep earning their place as the generator behind *Add variations*.
+| Cost | Why it is larger |
+|---|---|
+| **Brief size** | 100 entries carrying drawn headline text, seed, motion and size is far larger than the 6-field sketch. D123's precedent is real but this is a bigger instance. |
+| **`policyHash`** | Hashes `count/seed/axes/coverage/minDistance` with conditional spreading so old goldens stay put. Hashing a **list** is a new payload: **every existing `policyHash` golden moves on first write-migration.** `copyHash` is unaffected — say so. |
+| **Estimate** | Not "list length". `VariationEstimate` also carries `genaiCalls`, `frames`, `sceneBackgrounds`, `feasible`; a mixed stills+clips list still needs those. `classicAdCount` disappears with treatments — or must be re-derived. |
+| **Asset identity** | See CL-D9 — paths, reports, goldens, merge, `regenerateOnly`. |
+| **Preview cost** | Selecting creative 2 is a **look change ⇒ `/preview-frame`**. Naively, on a 100-entry list, that is precisely the cost CC1 just paid to remove. **Selection must join `previewFetchKey`**, not brief identity. |
+| **`PlanCapacity`** | Still needed, but the question becomes *"can I add N against this occupied set?"* — and DESIGN.md's feasibility copy is written about shortfall vs `count`. |
+| **Goldens / samples** | `briefs/sample-motion.yaml` **is** the document in §1. Migrating samples is its own lane; unmigrated ones must keep parsing **and** keep generating. |
 
 ---
 
-## 6. Premise
+## 6. Sequencing — two options, and the first draft implied the wrong one
+
+§5 of the first draft deferred the generator UI while CL-D1 kept the draw. **That is a sequencing trap:** shipping the list without a reachable generator *is* the explore-loss, and without CL-D7's fan it is also a domain deletion.
+
+| Option | Shape | Trade |
+|---|---|---|
+| **(1) Schema-first** | Domain schema → run-from-list → editor selection → **fan + draw in the same wave** | What the first draft implied. **Not scoped**, and the largest thing on the table |
+| **(2) View-first** *(recommended)* | Sidebar lists the **current plan's** variants; select and preview; **persistence is a second PR** | Delivers the owner's screenshot without freezing a draw, and gives click-to-edit a place to write **before** changing the document. The document change then lands with real usage behind it |
+
+**(2) is recommended and was not offered in the first draft.** It is also the only option that does not require CL-D7–D12 answered up front.
+
+---
+
+## 7. What this plan does not do
+
+- **It does not claim independence from the chrome work.** Retracted — see §0. The sidebar list contends with SG3 and with `BriefEditor.tsx`.
+- **It does not retire `treatments`.** That waits on SG-D1 being stamped **and** CL-D7 shipping.
+- **It does not decide per-creative templates** (CL-D5 defers, explicitly).
+- **It does not delete the planner.** Demoted, twice: as a draw *and* as a fan.
+- **It is not dispatchable.** It has decisions and no lanes. An implementation plan follows whichever of §6's options the owner picks.
+
+---
+
+## 8. Premise
 
 ```premise CL0
 # The brief has no `creatives` list; variation is still axes + count. Flips when the
 # document gains the list. Probes the TYPE, not the YAML samples: a brief file that
 # happens to omit `variation` would make a sample-based fence pass on an unchanged
-# schema. Measured: ~30 ms.
+# schema. Measured: ~23 ms.
+#
+# This fence does NOT guard the claims in this document. Four of them were false in
+# the first draft and no fence caught them, because a premise checks a precondition,
+# not an argument. That is a limit of fences, recorded here rather than papered over.
 ! grep -qn 'creatives' packages/CampaignOrchestration/src/domain/entities/CampaignBrief.ts
 ```
