@@ -146,6 +146,58 @@ describe("CreateCampaignDialog", () => {
     }
   });
 
+  test("nothing in the dialog is warning-coloured when nothing is wrong", async () => {
+    const user = userEvent.setup();
+    renderDialog();
+    const dialog = await openDialog(user);
+
+    // An empty dialog would satisfy "nothing is amber" vacuously, so the tiles
+    // are counted first: the assertion below is about four tiles that exist.
+    const group = within(dialog).getByRole("group", { name: messages.createTypeLabel });
+    expect(within(group).getAllByRole("button")).toHaveLength(CAMPAIGN_TYPES.length);
+
+    // `text-warning` is the kit's refusal colour. Nothing is refused here, so
+    // the offender's own text is printed by the failure — on the unfixed tile
+    // it is the tile's accessibility mirror, painted.
+    const painted = Array.from(dialog.querySelectorAll("*"))
+      .filter((element) => element.classList.contains("text-warning"))
+      .map((element) => element.textContent);
+    expect(painted).toEqual([]);
+  });
+
+  test("each tile's spoken description is an sr-only span, not a painted one", async () => {
+    const user = userEvent.setup();
+    renderDialog();
+    const dialog = await openDialog(user);
+
+    for (const type of CAMPAIGN_TYPES) {
+      const tile = within(dialog).getByRole("button", { name: type });
+      // One id, not a join: this tile carries a mirror and no gate reason.
+      const ids = (tile.getAttribute("aria-describedby") ?? "").split(/\s+/).filter(Boolean);
+      expect(ids).toHaveLength(1);
+      const target = document.getElementById(ids[0] as string);
+      // An absent target must read as a failure, never as an empty pass.
+      expect(target).not.toBeNull();
+      // The facts are still there — deleting the text to silence the amber
+      // would be a regression, and this is the half that catches it.
+      expect(target?.textContent).toContain(typeDisplayName(type));
+      expect(target?.textContent).toContain(
+        messages.typeTileGives(
+          CAMPAIGN_TYPE_PRESETS[type].platforms.length,
+          messages.joinList(
+            CAMPAIGN_TYPE_PRESETS[type].formats.map((format) => formatDisplayName(format)),
+          ),
+        ),
+      );
+      // happy-dom computes nothing from stylesheets, so "not visible" is
+      // asserted as the class contract the house already uses for this
+      // (world-map.test.tsx:329, swatch-picker.test.tsx:65) — `toBeVisible()`
+      // here would assert nothing at all.
+      expect(target?.classList.contains("sr-only")).toBe(true);
+      expect(target?.classList.contains("text-warning")).toBe(false);
+    }
+  });
+
   test("the display-ad tile's description names the display placements (A5/D116)", async () => {
     const user = userEvent.setup();
     renderDialog();

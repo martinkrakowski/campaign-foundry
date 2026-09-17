@@ -1,0 +1,108 @@
+{
+  "version": 1,
+  "lane": "TILE",
+  "mutations": [
+    {
+      "file": "apps/web/src/components/shell/CreateCampaignDialog.tsx",
+      "before": "                          srDescription={typeTileDescription(option)}",
+      "after": "                          description={typeTileDescription(option)}",
+      "because": "Put the accessibility mirror back into the gate-reason slot — the defect exactly as the owner saw it: every campaign-type tile paints a warning-coloured copy of its own words with nothing refused.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/shell/__tests__/CreateCampaignDialog.test.tsx",
+        "-t",
+        "nothing in the dialog is warning-coloured when nothing is wrong"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/ui/src/option-tile.tsx",
+      "before": "          <span id={srDescriptionId} className=\"sr-only\">",
+      "after": "          <span id={srDescriptionId} className=\"text-[11px] leading-snug text-warning\">",
+      "because": "Paint the spoken mirror after all: the new slot exists and resolves, but renders visibly in the refusal colour — the same amber, arrived at through the fix instead of around it. This is the mutation that makes the class-contract assertion non-vacuous, since happy-dom computes no styles and only the class distinguishes the two.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/shell/__tests__/CreateCampaignDialog.test.tsx",
+        "-t",
+        "nothing in the dialog is warning-coloured when nothing is wrong"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/ui/src/option-tile.tsx",
+      "before": "        {srDescription === undefined ? null : (\n          // `sr-only` is absolutely positioned, so it joins no flex row and\n          // costs the tile no gap — the house idiom (chip-group.tsx:97,\n          // swatch-picker.tsx:171, world-map.tsx:166).\n          <span id={srDescriptionId} className=\"sr-only\">\n            {srDescription}\n          </span>\n        )}",
+      "after": "        {null}",
+      "because": "Delete the spoken text to silence the amber — the regression the brief names, which a naive \"no warning text\" assertion would pass. aria-describedby still names an id, and the id now resolves to nothing: the second half of the contract is what catches it.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/shell/__tests__/CreateCampaignDialog.test.tsx",
+        "-t",
+        "each tile's spoken description is an sr-only span, not a painted one"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/ui/src/option-tile.tsx",
+      "before": "    srDescription === undefined ? null : srDescriptionId,",
+      "after": "    null,",
+      "because": "Drop the mirror's id from the join: the sr-only span still renders with its facts, but nothing points at it, so assistive technology hears the tile's name and nothing else — a silent accessibility regression that leaves the screen looking correct.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/shell/__tests__/CreateCampaignDialog.test.tsx",
+        "-t",
+        "each tile's spoken description is an sr-only span, not a painted one"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/ui/src/option-tile.tsx",
+      "before": "          <span id={srDescriptionId} className=\"sr-only\">",
+      "after": "          <span id={srDescriptionId} className=\"text-[11px] leading-snug text-warning\">",
+      "because": "The same repaint again, held against the kit's own test rather than the dialog's: a tile given only a mirror and no gate reason must paint nothing at all, so the amber appears inside the button and the tile-level assertion is what catches it.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "packages/ui/src/__tests__/option-tile.test.tsx",
+        "-t",
+        "a spoken mirror alone is announced from an sr-only span and paints nothing"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/ui/src/option-tile.tsx",
+      "before": "          <span id={descriptionId} className=\"text-[11px] leading-snug text-warning\">",
+      "after": "          <span id={descriptionId} className=\"text-[11px] leading-snug text-text-secondary\">",
+      "because": "Neutralise the kit's refusal colour — the over-correction this lane must not ship. A genuine gate reason would stop reading as a refusal and become ordinary prose beside the blurb.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "packages/ui/src/__tests__/option-tile.test.tsx",
+        "-t",
+        "a gate reason and a spoken mirror co-exist: two ids, one painted, one not"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

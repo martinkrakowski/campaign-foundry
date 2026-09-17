@@ -76,6 +76,63 @@ describe("OptionTile", () => {
     expect(screen.getByText("needs a source").getAttribute("aria-hidden")).toBeNull();
   });
 
+  test("a spoken mirror alone is announced from an sr-only span and paints nothing", () => {
+    render(
+      <OptionTile
+        value="brief"
+        name="Classic"
+        blurb="One design, repeated."
+        srDescription="Classic, one design repeated."
+        selected={false}
+        onToggle={vi.fn()}
+      >
+        <span />
+      </OptionTile>,
+    );
+    const button = screen.getByRole("button", { name: "brief" });
+    const describedBy = button.getAttribute("aria-describedby") as string;
+    // One slot, one bare id — `getElementById` must still resolve it.
+    expect(describedBy).toBeTruthy();
+    expect(describedBy.includes(" ")).toBe(false);
+    const target = document.getElementById(describedBy);
+    // An absent target is a failure, not an empty pass.
+    expect(target).not.toBeNull();
+    expect(target?.textContent).toBe("Classic, one design repeated.");
+    // happy-dom computes nothing from stylesheets, so invisibility is asserted
+    // as the class contract — the house idiom for exactly this
+    // (world-map.test.tsx:329, swatch-picker.test.tsx:65). `toBeVisible()` on an
+    // `sr-only` node in this environment asserts nothing.
+    expect(target?.classList.contains("sr-only")).toBe(true);
+    expect(button.querySelectorAll(".text-warning")).toHaveLength(0);
+  });
+
+  test("a gate reason and a spoken mirror co-exist: two ids, one painted, one not", () => {
+    render(
+      <OptionTile
+        value="motion"
+        name="Motion"
+        description="needs a source"
+        srDescription="Motion, one design animated."
+        selected={false}
+        onToggle={vi.fn()}
+      >
+        <span />
+      </OptionTile>,
+    );
+    const button = screen.getByRole("button", { name: "motion" });
+    const ids = (button.getAttribute("aria-describedby") ?? "").split(/\s+/).filter(Boolean);
+    expect(ids).toHaveLength(2);
+    const [gate, spoken] = ids.map((id) => document.getElementById(id));
+    // DOM order is announcement order is visual order: the refusal, then the mirror.
+    expect(gate?.textContent).toBe("needs a source");
+    expect(spoken?.textContent).toBe("Motion, one design animated.");
+    // The kit's refusal colour is unchanged, and it stays off the mirror.
+    expect(gate?.classList.contains("text-warning")).toBe(true);
+    expect(gate?.classList.contains("sr-only")).toBe(false);
+    expect(spoken?.classList.contains("sr-only")).toBe(true);
+    expect(spoken?.classList.contains("text-warning")).toBe(false);
+  });
+
   test("without a description nothing points anywhere", () => {
     render(
       <OptionTile value="variation" name="Randomized" selected={false} onToggle={vi.fn()}>

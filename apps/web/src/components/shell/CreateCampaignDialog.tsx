@@ -124,8 +124,12 @@ function typeTileBlurb(type: CampaignType): string {
 /**
  * What assistive tech hears: `tag`/`blurb`/`meta` are aria-hidden, so the
  * display name, the gives line, the display placements (display-ad), and the
- * D110 sentence (short-video) go through `description` → `aria-describedby`.
+ * D110 sentence (short-video) go through `srDescription` → `aria-describedby`.
  * Same formatters as the visible text.
+ *
+ * `srDescription`, not `description`: the tile paints `description` in the
+ * refusal colour, so routing this mirror through it put a warning-toned copy of
+ * every tile's own words on screen with nothing refused.
  */
 function typeTileDescription(type: CampaignType): string {
   const preset = CAMPAIGN_TYPE_PRESETS[type];
@@ -380,7 +384,7 @@ export function CreateCampaignDialog() {
                               ? messages.typeTileRunsAs(modeDisplayName("variation"))
                               : undefined
                           }
-                          description={typeTileDescription(option)}
+                          srDescription={typeTileDescription(option)}
                           selected={type === option}
                           onToggle={(value) => setType(value as CampaignType)}
                         >
