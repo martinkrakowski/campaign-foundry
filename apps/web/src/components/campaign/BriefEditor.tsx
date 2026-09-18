@@ -66,6 +66,7 @@ import {
   PolicySection,
   TemplateSection,
 } from "@/components/campaign/sections";
+import { ValidationView } from "@/components/campaign/ValidationView";
 import { StatusChip } from "@/components/campaign/StatusChip";
 import { StatusLine } from "@/components/campaign/StatusLine";
 import {
@@ -132,24 +133,30 @@ import type { CampaignMode, EditorState } from "@/components/campaign/editor-sta
  * preview-only, and D61's "the rail's read-only second view" is superseded — the
  * rail has no second view any more.
  *
- * **Two positions, and the third is deliberately absent.** SG-D13 grows this
- * control to `editor │ yaml │ validate`, but the validation view is **SG10 and is
- * not dispatched**. A third segment wired to nothing is a surface that exists,
- * looks live and shows nothing, so it is not shipped here. What IS shipped is the
- * shape that makes SG10 additive rather than a rewrite: the control renders by
- * mapping `COLUMN_VIEWS`, and every per-view fact is a `Record<ColumnView, …>` —
- * so adding `"validate"` to the union is a **typecheck failure** until a label, a
- * glyph and a panel exist for it. The type is what refuses the wired-to-nothing
- * segment; `sg4.json`'s fifth mutation is that refusal, observed.
+ * **Three positions since SG10 (SG-D13).** SG4 shipped two on purpose: the third
+ * needs the validation view, and a segment wired to nothing is a surface that
+ * exists, looks live and shows nothing. What SG4 shipped instead was the shape
+ * that made this lane additive rather than a rewrite — the control renders by
+ * mapping `COLUMN_VIEWS`, and every per-view fact is a `Record<ColumnView, …>`, so
+ * adding `"validate"` to the union was a **typecheck failure** until a label, a
+ * glyph and a panel existed for it. The type refused the wired-to-nothing segment
+ * until the view arrived, which is exactly what `sg4.json`'s fifth mutation
+ * recorded; the member below is that mutation's `after`, now shipped, so that
+ * entry's before-text no longer occurs in this file (reported by SG10).
  */
-type ColumnView = "editor" | "yaml";
+type ColumnView = "editor" | "yaml" | "validate";
 
 /**
  * The positions, in the order they are offered. The control is rendered from this
- * list rather than from two hand-written buttons, so a third position is one entry
- * plus the records below — and the count test reads the DOM, not this array.
+ * list rather than from hand-written buttons, so a position is one entry plus the
+ * records below — and the count test reads the DOM, not this array.
+ *
+ * `validate` is LAST, and not because it is newest: the order is the order of
+ * commitment. `editor` is the document being written, `yaml` is what will be sent,
+ * and `validate` is the verdict on it — the segment the operator reaches when the
+ * other two are done, sitting next to the toolbar verb that shares its handler.
  */
-const COLUMN_VIEWS: readonly ColumnView[] = ["editor", "yaml"];
+const COLUMN_VIEWS: readonly ColumnView[] = ["editor", "yaml", "validate"];
 
 /**
  * The key is NEW, not the rail's old one (`cf:preview-rail-view`), and nothing
@@ -196,6 +203,7 @@ function persistColumnView(next: ColumnView): void {
 const COLUMN_VIEW_LABEL: Record<ColumnView, string> = {
   editor: messages.columnEditorView,
   yaml: messages.columnYamlView,
+  validate: messages.columnValidateView,
 };
 
 /**
@@ -222,6 +230,23 @@ const COLUMN_VIEW_GLYPH: Record<ColumnView, ReactNode> = {
     <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true" className="size-4">
       <path
         d="m8 7-5 5 5 5M16 7l5 5-5 5M13.5 5l-3 14"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  ),
+  // SG10 — a checked document, not a bare tick and not a warning triangle. The
+  // segment shows a VERDICT ON THIS BRIEF, and it shows it whether the verdict is
+  // clean or not, so a glyph that already means "problem" would announce a failure
+  // on a passing document. The `editor` segment's page-of-lines is the shared
+  // motif; this one is that page with the check applied to it.
+  validate: (
+    <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true" className="size-4">
+      <path
+        d="M4 6h10M4 12h6M4 18h5m4.5-1.5 2.5 2.5 5-5"
         fill="none"
         stroke="currentColor"
         strokeWidth={2}
@@ -1458,7 +1483,18 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   // reveals the errors — pressing it is how a user asks "what is wrong?". So the verbs
   // stay live, and an invalid draft is answered: attempted, every error shown, the
   // status sentence refusing, and the view scrolled to the first problem.
-  const refuseInvalid = (): boolean => {
+  //
+  // SG10 made this a `useCallback`, and the reason is `columnPanels` rather than
+  // anything about this function. The validation view's refresh is `handleValidate`
+  // (SG-D14), `handleValidate` calls this, and `columnPanels` is a `useMemo` whose
+  // dependency list is load-bearing and measured. A plain per-render closure named
+  // in that list would miss the memo on EVERY render and quietly turn it back into
+  // the object literal it replaced — 13 renders of the form per keystroke instead of
+  // 7, and worse, a stale subtree is what a missing dep looks like. Wrapped, both
+  // functions change identity only when `state`/`existingIds` do, which the memo
+  // already names. `setAttempted` is a `useState` setter and stable by construction,
+  // so it is not listed; `blockedAt` and `reveal` are.
+  const refuseInvalid = useCallback((): boolean => {
     setAttempted(true);
     if (blockedAt === null) return false;
     // H2: the press that bounces unmounts its own button, so focus would drop to
@@ -1468,7 +1504,7 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
     // the step handoff from fighting it.
     reveal(blockedAt, true);
     return true;
-  };
+  }, [blockedAt, reveal]);
 
   /**
    * D35: Save writes the file and commits the brief to the shell — the one act, told
@@ -1687,16 +1723,29 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
    * here" signal both verbs already treat it as; carrying a second, quieter variant of
    * `refuseInvalid` for this one caller would be two refusal paths that can disagree.
    *
-   * SG10 adds one line here: revealing the `validate` column view, which is SG-D12's
-   * second half. The view does not exist yet (SG4 shipped two positions on purpose),
-   * so there is nothing to reveal — and SG-D14's refresh icon lives in that view, so
-   * it arrives with it.
+   * **SG10 added the last line: revealing the `validate` column view** (SG-D12's
+   * second half — *"Validate runs the validation and reveals the validation view"*).
+   * It sits AFTER the early return, not before it, and that is the considered order:
+   * on an invalid draft `refuseInvalid` has already flipped the column back to the
+   * form, scrolled to the first blocking section and handed it focus (H2), and a
+   * flip to `validate` before that call would simply be overwritten by it — the same
+   * screen, one extra `localStorage` write. So a refused press lands the operator on
+   * the problem, exactly as it did before SG10, and a clean press lands them on the
+   * verdict. The view is one segment away in either case, and it is live, so it
+   * shows the same errors the refusal just revealed inline.
+   *
+   * **This handler is also SG-D14's refresh control**, passed into the view and
+   * placed in the log panel's `actions` slot. Not a second, quieter validate: the
+   * paragraph above refuses a duplicate `refuseInvalid` for one caller, and the same
+   * argument refuses a duplicate snapshot-taker. One writer of `validatedState`,
+   * reachable from two places.
    */
-  const handleValidate = () => {
+  const handleValidate = useCallback(() => {
     refuseInvalid();
     if (getTotalErrorCount(errors) > 0) return;
     setValidatedState(state);
-  };
+    chooseColumnView("validate");
+  }, [refuseInvalid, errors, state, chooseColumnView]);
 
   /**
    * SG-D22 — the run, and its target.
@@ -2061,8 +2110,51 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
           {dump(draftBrief)}
         </pre>
       ),
+      /* SG10 (SG-D13/SG-D14) — the verdict on the document, collected in one
+        place, wearing LP1's log-panel chrome.
+
+        **`errors` and NOT `visibleErrors`.** The owner asked for "all errors …
+        including the ones that were inlined"; `visibleErrors` is the touch-gated
+        subset (L1.1) and would hide the errors of fields nobody has visited, so
+        an untouched invalid draft would read as clean here while the toolbar
+        refused to validate it. The INLINE renders above keep the gated set —
+        they are what the gating is for, and not one of them is removed: this view
+        collects, it does not relocate.
+
+        **It is handed `errors` itself, not a result computed here.** The view is
+        a live projection (`ValidationView`'s own docstring carries the argument);
+        this record is the memo that lets it be one without re-rendering the form.
+
+        `isValidationFresh` is spelled out rather than hoisted into a local: the
+        run slot below reads it too, and that call site is `sg9.json`'s second
+        mutation anchor — hoisting would silently retire another lane's replay. */
+      validate: (
+        <ValidationView
+          errors={errors}
+          mode={state.mode}
+          validated={isValidationFresh(validatedState, state)}
+          onRevealSection={reveal}
+          onRevalidate={handleValidate}
+        />
+      ),
     }),
-    [state, dispatch, visibleErrors, warnings.copy, draftBrief],
+    // SG10 appended four. Every one of them changes identity only when `state` or
+    // `existingIds` does — `errors` is memoised on exactly that pair, `reveal` is a
+    // `useCallback` over stable values, and `handleValidate` is one over `errors`
+    // and `state` — so the measured counts above hold: `state` was already named,
+    // and nothing here is a fresh-per-render closure. `validatedState` is the one
+    // genuinely new input, and it moves once per Validate press.
+    [
+      state,
+      dispatch,
+      visibleErrors,
+      warnings.copy,
+      draftBrief,
+      errors,
+      validatedState,
+      reveal,
+      handleValidate,
+    ],
   );
 
   // M3 — the route's id names no brief. The empty state answers where the user

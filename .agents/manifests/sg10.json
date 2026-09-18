@@ -1,0 +1,91 @@
+{
+  "version": 1,
+  "lane": "SG10",
+  "mutations": [
+    {
+      "file": "apps/web/src/components/campaign/BriefEditor.tsx",
+      "before": "                    onClick={() => chooseColumnView(view)}",
+      "after": "                    onClick={() => (view === \"validate\" ? handleValidate() : chooseColumnView(view))}",
+      "because": "Red fault 3, in the form a reader would actually reach it. The owner's sentence is \"clicking validate runs the validation and reveals the validation screen\", and the segment is LITERALLY LABELLED `validate` — so wiring that segment to the validate action reads as obeying the requirement rather than as changing anything, and it even deletes the need for a separate reveal in `handleValidate`. What it destroys is the distinction the whole gate is built on: `validateState` is pure and synchronous, so whether a document is valid was always knowable without a press (SG-D20's reasoning, §8.4) — the snapshot exists to record that the OPERATOR looked, immediately before a press that spends GenAI credits. Under this mutation a tab click IS that consent: on any clean brief, flipping to the third segment stores `validatedState`, `Generate` appears on a document nobody approved, and the Validate verb becomes unreachable for it. Nothing that presses the verb notices — the flip still happens, the confirm still opens, the POST still carries the right brief, and every `validate`-view test that starts from an INVALID fixture is if anything more red for an unrelated reason. Caught by the arrival test, which asserts the NEGATIVE on a clean, loaded, error-free brief after navigating to the view — Generate ABSENT, Validate present, zero generate calls — and then asserts the positive through the refresh press, so it cannot pass by the view being broken either.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx",
+        "-t",
+        "arriving at the view validates nothing — the refresh press is what opens the gate"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/ValidationView.tsx",
+      "before": "  const entries = useMemo(() => toEntries(errors, mode), [errors, mode]);",
+      "after": "  const entries = useMemo(() => toEntries(errors, mode), [mode]);",
+      "because": "Red fault 4 — the snapshot, in its most likely real-world form: a missing dependency rather than a deliberate `useState`. Dropping `errors` from the list looks like a tidy-up (the rows only change when the sections do, surely) and the file goes on compiling, rendering and reading correctly on arrival — the memo is computed once with the true errors, so the view MOUNTS with exactly the right rows. Every other assertion in the lane still passes: the two-section collection test, the both-places test, the exact-row-shape test and both clean-document states all read the view at or near its first render. What it silently removes is the property the design is chosen for — `validateState` is pure and there is no server endpoint, so the view renders the live value precisely so that an operator who fixes a field sees it go without pressing anything. Under the mutation the fixed error stays on screen until a refresh, and SG-D14's button stops being a gate control and becomes a staleness repair for staleness this component invented. Caught by the live test, which makes the edit in the SIDEBAR's policy panel — outside this column, so the view never unmounts — and then asserts it is the SAME panel node and the row is gone; a test that navigated away to fix the field would remount the view and pass on the mutant.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx",
+        "-t",
+        "fixing an error with the view open removes it, with no refresh press"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/BriefEditor.tsx",
+      "before": "          errors={errors}\n          mode={state.mode}",
+      "after": "          errors={visibleErrors}\n          mode={state.mode}",
+      "because": "The gated set, handed to the one surface that must not have it — and it is the CONSISTENT-looking edit, not a careless one. Every other panel in this record receives the touch-gated errors (`sectionErrorsVisible` wraps `visibleErrors` for all seven sections), `visibleErrors` is already in the memo's dependency list, and L1.1's gating exists for a good reason: a form must not shout at a field the operator has not reached yet. So passing it here reads as bringing the new panel into line. What it breaks is the owner's actual requirement — \"dump all errors in there including the ones that were inlined\" — because `visibleErrors` is by construction a SUBSET. A freshly loaded invalid brief has touched nothing and attempted nothing, so the collected view would report a clean document while the toolbar refuses to validate the same one: two surfaces disagreeing about the document in front of the operator, which is exactly what one collected list exists to end. It survives every test that presses Validate first (`attempted` makes the two sets equal) — which is most natural ways to write this suite. Caught by the collection test, which navigates straight to the view on a loaded two-section-invalid brief and presses nothing at all before reading it.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx",
+        "-t",
+        "every error the document has is collected here, across sections"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/sections/PolicySection.tsx",
+      "before": "            error={errors.count}",
+      "after": "            error={undefined}",
+      "because": "Red fault 2's other half, and the mutation is the move the owner explicitly did NOT ask for: with every error now collected in one place, removing the field's own copy looks like deleting a duplicate. It is the tidiest-looking diff in this lane — one prop, one line, and the error is still reported to the operator, just somewhere else. What it costs is the thing inline errors are for: the message sits beside the control that fixes it, and a validation view that MOVED the errors instead of ALSO collecting them makes every correction a navigation. The owner's phrasing is exact — \"including the ones that were inlined\" — so the inline render is part of the requirement rather than a legacy of it. Nothing in the validation view notices: the row is still there, still labelled `[Variation Policy]`, still counted, and the view's own tests are all green. Caught by the both-places test, which reads the one message in the panel AND in the sidebar's policy Field in a single moment (the sidebar is outside this column, so the switch does not hide it) and asserts the two nodes are distinct — an assertion that a round-trip test, or one that only checked the view, could not make.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx",
+        "-t",
+        "an error shown in the view is ALSO shown inline, in its own field"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/ValidationView.tsx",
+      "before": "          validated ? messages.validationCleanValidated : messages.validationCleanUnvalidated",
+      "after": "          messages.validationCleanValidated",
+      "because": "Red fault 5 — \"no problems found\" and \"nobody has looked yet\" collapsed into one sentence, which this repo's route docs name as its recurring defect. The mutation is defensible on its face: the view is LIVE, so when it has no rows the document genuinely has no problems, and whether the gate is open is the toolbar's business — the verb beside it already says `Validate` or `Generate`. That argument is why the `validated` prop looks like a redundant input rather than the point. What it loses is the only place the two facts are distinguishable in words: an operator who has just opened a clean brief reads \"This document is validated\", which is false, and which contradicts the Validate verb sitting a few pixels below it. A view that tells the operator they are done while the gate is shut is worse than one that says nothing. It passes every other test in the lane, including the one that presses refresh, because after a press the mutant's string is the true one. Caught by the clean-document test, which asserts each sentence present while the other is ABSENT, on both sides of the press — the absence half is what separates the two states.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx",
+        "-t",
+        "a clean document reads as clean, and says whether it has been validated"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
