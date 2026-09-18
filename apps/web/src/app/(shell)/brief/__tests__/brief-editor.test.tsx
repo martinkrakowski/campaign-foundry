@@ -2689,7 +2689,10 @@ describe("BriefPage — the editor is one scrolling column (SG1 / SG-D2)", () =>
       expect(document.getElementById(section)).toBeTruthy();
     }
     // No walk: no segbar landmark, no step card, no Next/Back, no step heading.
-    expect(screen.queryByRole("navigation", { name: messages.segBarLabel })).toBeNull();
+    // "Steps" is a literal for the same reason `Next`/`Back` are below:
+    // `messages.segBarLabel` is deleted with the `SegBar` that spoke it, and the
+    // claim is that no landmark by that name exists at all.
+    expect(screen.queryByRole("navigation", { name: "Steps" })).toBeNull();
     expect(document.querySelector('[data-testid="step-card"]')).toBeNull();
     // Literals, because `messages.stepNext`/`stepBack` are deleted with the footer
     // that spoke them — the point is that no control by those names exists at all.
@@ -2715,7 +2718,7 @@ describe("BriefPage — the editor is one scrolling column (SG1 / SG-D2)", () =>
 
     expect(document.getElementById("identity")).toBeTruthy();
     expect(document.getElementById("products")).toBeTruthy();
-    expect(screen.queryByRole("navigation", { name: messages.segBarLabel })).toBeNull();
+    expect(screen.queryByRole("navigation", { name: "Steps" })).toBeNull();
     // Untouched: the editor neither read it nor rewrote it.
     expect(localStorage.getItem("cf:presentation")).toBe("guided");
   });

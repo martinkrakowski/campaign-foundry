@@ -2343,11 +2343,13 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
                 the way back, which it is. The way back is this control: `editor`
                 is a live button in both views, and every `reveal` flips here too.
 
-                It is NOT the kit's `SegBar`: that control's props are
-                `{ index, maxVisited, issues }` — the retired wizard's walk
-                vocabulary — and a view has no furthest-reached and no per-view
-                issue count. Wearing it would have carried the walk back into the
-                thing that replaced it. */}
+                It is not the kit's old `SegBar`, which has since been deleted —
+                orphaned the moment SG1 retired the wizard, and swept away once
+                nothing rendered it. Recorded because the reason it was not reused
+                is the reason it could not survive: its props were
+                `{ index, maxVisited, issues }`, the walk's vocabulary, and a view
+                has no furthest-reached and no per-view issue count. Wearing it
+                would have carried the walk back into the thing that replaced it. */}
               <div
                 role="group"
                 aria-label={messages.columnViews}

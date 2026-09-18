@@ -21,7 +21,6 @@ const allowlist: Record<string, string> = {
   "section-outline.tsx":
     "renders the editor's section vocabulary; a kit-shaped component with a feature's data model, not yet untangled.",
   "confirm-dialog.tsx": "default labels from the editor messages module.",
-  "seg-bar.tsx": "default labels from the editor messages module.",
   "theme-toggle.tsx": "default labels from the editor messages module.",
 };
 
