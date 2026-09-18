@@ -12,6 +12,7 @@ import { CommandBar } from "@/components/shell/CommandBar";
 import { TelemetryDrawer } from "@/components/shell/TelemetryDrawer";
 import { BriefPicker } from "@/components/shell/BriefPicker";
 import { CreateCampaignDialog } from "@/components/shell/CreateCampaignDialog";
+import { TemplateLibrary } from "@/components/shell/TemplateLibrary";
 
 /**
  * The primary application shell: persistent header, brief/asset sidebar, the
@@ -44,11 +45,15 @@ export default function ShellLayout({ children }: { children: ReactNode }) {
                 </main>
               </div>
             </div>
-            {/* The two shell overlays share this layer: the picker closes before the
+            {/* The shell overlays share this layer: the picker closes before the
               create dialog opens (F22 — two DialogShells at one layer stack two
-              scrims and two key handlers). */}
+              scrims and two key handlers). Each renders null while closed, so
+              exactly one `[role=dialog]` is ever in the document — the template
+              library's detail view is a swap of its own body, not a fourth
+              entry here (T6). */}
             <BriefPicker />
             <CreateCampaignDialog />
+            <TemplateLibrary />
           </EditorPanelsProvider>
         </CreateCampaignProvider>
       </EditorDirtyProvider>

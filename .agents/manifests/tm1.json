@@ -1,0 +1,176 @@
+{
+  "version": 1,
+  "lane": "TM1",
+  "mutations": [
+    {
+      "file": "apps/web/src/lib/templates-api.ts",
+      "before": "  if (!res.ok) {\n    throw new TemplatesApiError(errorFrom(data, `Request failed (HTTP ${res.status})`), res.status);\n  }",
+      "after": "  if (!res.ok) {\n    return { templates: [] };\n  }",
+      "because": "The repo's recurring defect, on the side of the wire where it had not been closed yet. `templates.get.ts` refuses it in its own doc comment -- \"a store read failure is a 500, never an empty list -- an empty answer reads as 'no templates yet' to the library page\" -- and a client that answers `[]` for that 500 restores the exact ambiguity one layer up. It is the SHAPE `briefs-api` already ships (`listBriefs` returns `[]` for a malformed body), so it is what a lane following that file's pattern would write, and it looks harmless: the modal renders, nothing throws, and a reviewer sees the honest empty state. Caught only by the test that drives BOTH a 500 and an empty library over the same component and requires the rendered text to DIFFER -- either single-state test would stay green, because each one alone is satisfied by whichever message is shown for both.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/shell/__tests__/TemplateLibrary.test.tsx",
+        "-t",
+        "DIFFERENT text"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/lib/templates-api.ts",
+      "before": "    const known = latest.get(template.id);\n    if (known === undefined || template.version > known.version) {\n      latest.set(template.id, template);\n    }",
+      "after": "    const known = latest.get(template.id);\n    if (known === undefined) {\n      latest.set(template.id, template);\n    }",
+      "because": "T-D2's collapse, kept but decided by ARRIVAL ORDER instead of by the version -- first wins. This is the interesting half of T3 rather than the obvious one: a lane that forgot to collapse at all shows three cards and is caught by a count, but this still shows exactly ONE card per id, so every count-based assertion stays green and the grid looks right. What moves is which record the card names: `listTemplates` flattens a per-id map and nothing promises the store emits versions ascending, so the card can chip v2 of a library whose latest is v3 -- and `Use this template` would then pin the wrong version, silently, which is the guarantee D123 exists for. Caught by the chip reading the HIGHEST version over a deliberately non-monotonic fixture (v2, v3, v1); a fixture in ascending order would have made the assertion vacuous.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/shell/__tests__/TemplateLibrary.test.tsx",
+        "-t",
+        "chipped at the latest"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/shell/TemplateLibrary.tsx",
+      "before": "        });\n\n  return (\n    <>\n",
+      "after": "        });\n\n  useEffect(() => onRenderPreview(), []);\n\n  return (\n    <>\n",
+      "because": "T-D4 undone in the one line a lane would actually write: the detail view fetches its composite on mount, so the *Render preview* button is decoration and browsing the library spends the owner's GenAI credits. It is the shape every other preview surface in this app has -- `usePreviewFrame` fires from exactly such an effect -- which is why it is the plausible mistake rather than a contrived one, and why the hook could not be reused here at all. Nothing looks wrong: the frame appears, faster, and every rendering assertion in the file stays green because the detail view draws MORE, not less. It is invisible to a render count too; only a count of NETWORK CALLS to `/campaigns/preview-frame` can see it. The sibling test presses the button and requires exactly one call, so the zero cannot be a component that never fetches at all.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/shell/__tests__/TemplateLibrary.test.tsx",
+        "-t",
+        "issues ZERO"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/lib/templates-api.ts",
+      "before": "  const candidate = {\n    id: template.id,\n    version: template.version,",
+      "after": "  const candidate = {\n    id: template.id,\n    version: 1,",
+      "because": "The pin that carries the id and forgets the version -- D123's whole guarantee, deleted. `isBriefTemplate` requires a positive integer version and nothing more, so the record still passes the guard, still pins, and still renders a correct-looking template: the layers, the unit and the creative type are all the ones the operator chose. Only the number is wrong, and it is wrong in the direction that makes a running campaign follow the library forward, which is the failure the decision exists to prevent. `1` rather than a deleted field because that is what a pin which fell back to `templateFromCanonical` actually resolves to -- the canonical library ships v1 -- so this is also the vacuity check on the test: a fixture pinning v1 would pass through this unchanged, which is why the fixture is v3.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/shell/__tests__/TemplateLibrary.test.tsx",
+        "-t",
+        "onto the campaign"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/shell/TemplateLibrary.tsx",
+      "before": "      ) : (\n        <TemplateDetail\n          template={shown}\n          // `shown` is only defined when `entries` is, so the history is read\n          // from the loaded list — never a fetch, and never a fallback that no\n          // state can reach.\n          versions={versionsOf(entries as CreativeTemplate[], shown.id)}\n          briefs={briefs}\n          pinned={pinnable}\n          canRender={pinnable !== null && product !== undefined}\n          frame={frame}\n          rendering={rendering}\n          renderFailed={renderFailed}\n          onBack={back}\n          backRef={(node) => {\n            if (node === null || !pendingFocusBack.current) return;\n            pendingFocusBack.current = false;\n            node.focus();\n          }}\n          onClose={closeTemplateLibrary}\n          onSelectVersion={(version) => openDetail({ ...shown, version })}\n          onRenderPreview={renderPreview}\n          onUseTemplate={useTemplate}\n        />\n      )}",
+      "after": "      ) : (\n        <DialogShell open onClose={closeTemplateLibrary} ariaLabel=\"Template detail\">\n          <TemplateDetail\n            template={shown}\n            // `shown` is only defined when `entries` is, so the history is read\n            // from the loaded list — never a fetch, and never a fallback that no\n            // state can reach.\n            versions={versionsOf(entries as CreativeTemplate[], shown.id)}\n            briefs={briefs}\n            pinned={pinnable}\n            canRender={pinnable !== null && product !== undefined}\n            frame={frame}\n            rendering={rendering}\n            renderFailed={renderFailed}\n            onBack={back}\n            backRef={(node) => {\n              if (node === null || !pendingFocusBack.current) return;\n              pendingFocusBack.current = false;\n              node.focus();\n            }}\n            onClose={closeTemplateLibrary}\n            onSelectVersion={(version) => openDetail({ ...shown, version })}\n            onRenderPreview={renderPreview}\n            onUseTemplate={useTemplate}\n          />\n        </DialogShell>\n      )}",
+      "because": "T6/F22: the detail view hosted in a `DialogShell` of its own. This is the reading of the owner's 3b a lane would reach for -- \"the detail view is within the modal\" -- and it is written in the parent, where `DialogShell` is already imported, so the mutation cannot fail on module resolution rather than on the assertion. On screen it is nearly invisible: one scrim over another, the same body, every control working. What breaks is the two things a shell owns -- `BriefPicker` records both -- two `aria-modal` regions at one layer, and two Escape handlers, so `Escape` dismisses the detail view and leaves the listing standing under it. No rendering assertion can see it, and no focus assertion either, because the inner trap takes focus and hands it back. Caught only by a COUNT of mounted `[role=dialog]`, taken in the listing, in the detail view, and after Back -- the listing and post-Back counts rule out a component that renders no shell at all.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/shell/__tests__/TemplateLibrary.test.tsx",
+        "-t",
+        "in the listing AND in the detail view"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/shell/TemplateLibrary.tsx",
+      "before": "    renderAbort.current?.abort();\n    const controller = new AbortController();\n    renderAbort.current = controller;\n    setRendering(true)",
+      "after": "    const controller = new AbortController();\n    setRendering(true)",
+      "because": "The reviewed defect itself, restored: the controller is constructed and never held, which is what `new AbortController().signal` inline amounted to. Nothing can abort the request. It looks completely correct -- a signal IS passed, every other preview surface in this app passes one, and the happy path is untouched -- and the cost only appears when the modal closes with a composite in flight: the settle lands on a gone component. Caught by the test that reads the SIGNAL the component handed to the request and requires `aborted === true` after the close, which is unsatisfiable when the controller is thrown away. A test that only checked \"no crash after unmount\" would stay green, because an unguarded React state set after unmount warns rather than throws.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/shell/__tests__/TemplateLibrary.test.tsx",
+        "-t",
+        "closing mid-flight"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/shell/TemplateLibrary.tsx",
+      "before": "        // Identity, not arrival order: this settle paints only if it is still\n        // the request the component is waiting for.\n        if (renderAbort.current !== controller) return;\n        setFrame(next.dataUrl);",
+      "after": "        setFrame(next.dataUrl);",
+      "because": "The other half of the same review finding, and the half an abort-only fix would have shipped: the abort stays, the ORDERING test goes. This is the shape the bug actually had -- a `.then` that paints whatever arrives -- and it is invisible whenever responses come back in the order they were asked for, which is almost always. Aborting is not enough on its own: an aborted fetch whose response was already sent still resolves, so the older composite can paint a frame for the version the operator has left. Caught only by a test that controls WHEN each request settles and makes the FIRST settle LAST, then requires the painted frame to be the second one's bytes. The two mutations are separate because a fix that held the controller but dropped the identity test would pass the other's test.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/shell/__tests__/TemplateLibrary.test.tsx",
+        "-t",
+        "settling LAST does not paint"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/shell/TemplateLibrary.tsx",
+      "before": "          {pinned === null ? (\n            <p className=\"mr-auto text-[11px] text-text-muted\">\n              This template cannot be used for a campaign yet — only the built-in ones can, for now.\n            </p>\n          ) : (\n            <Button size=\"sm\" onClick={() => onUseTemplate(pinned)}>\n              Use this template\n            </Button>\n          )}",
+      "after": "          {pinned === null ? (\n            <p className=\"mr-auto text-[11px] text-text-muted\">\n              This template cannot be used for a campaign yet — only the built-in ones can, for now.\n            </p>\n          ) : null}\n          <Button\n            size=\"sm\"\n            onClick={() => onUseTemplate(pinned as BriefTemplate)}\n            disabled={pinned === null}\n          >\n            Use this template\n          </Button>",
+      "because": "The disposition review rejected on #478: the verb renders `disabled` instead of being absent. It is the reflex reading of DESIGN.md's own gating rule and it is wrong for a specific reason -- that rule covers a state that can CHANGE (the draft gets fixed, ffmpeg gets installed), and a template outside the canonical set can never become usable, so this control could never come alive. It also brought the false `istanbul ignore` with it: the guard it excused was described as unreachable \"because the button only renders for a pinnable record\", which the footer contradicted. Caught by requiring the verb's ABSENCE; a test that only asserted `disabled === true` would have passed the defect, which is exactly what the original suite did.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/shell/__tests__/TemplateLibrary.test.tsx",
+        "-t",
+        "offers no verb at all"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/shell/TemplateLibrary.tsx",
+      "before": "                    <MiniChip tone=\"neutral\">{String(index + 1)}</MiniChip>\n                    <span className=\"truncate\">{layerKindDisplayName(layer.kind)}</span>",
+      "after": "                    <MiniChip tone=\"neutral\">{layer.kind}</MiniChip>\n                    <span className=\"truncate\">{layerKindDisplayName(layer.kind)}</span>",
+      "because": "D18 / DESIGN.md §6.4 undone in the smallest way: the chip carries `layer.kind`, the editor's own vocabulary, on a screen an operator reads. `static-text` and `image-text` are not words anybody outside this repository has, and the row already carries the display name beside it -- so the defect is not a blank or a crash but a row that says the same thing twice, once in schema. Nothing about the layout moves and the display name is still right there, so every `getByText` on the label stays green. Caught by an assertion on the row's WHOLE text plus an explicit refusal of the raw tokens anywhere in the list.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/shell/__tests__/TemplateLibrary.test.tsx",
+        "-t",
+        "read-only, in the record"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/shell/TemplateLibrary.tsx",
+      "before": "              This template cannot be used for a campaign yet — only the built-in ones can, for now.",
+      "after": "              This record is not one a brief can pin: only a canonical template is\n              representable as a pinned reference today.",
+      "because": "The copy review rejected, restored verbatim: \"This record is not one a brief can pin: only a canonical template is representable as a pinned reference today\" -- three domain terms in one sentence for a reader who has none of them (DESIGN.md §6.3). It is the sentence a lane writes when it explains the constraint to the reviewer instead of to the operator, and it is grammatical, accurate and useless. No structural assertion can see it: the paragraph renders in the same place with the same role. Caught by the test that takes the rendered sentence and refuses `record`, `canonical`, `representable`, `pinned reference` and `brief` inside it.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/shell/__tests__/TemplateLibrary.test.tsx",
+        "-t",
+        "operator words"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

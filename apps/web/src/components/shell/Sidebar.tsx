@@ -30,9 +30,9 @@ export function Sidebar() {
 export function BrowseBriefsButton({ onActivate }: { onActivate?: () => void }) {
   const { openBriefPicker } = useRun();
   const { guardedAction } = useGuardedNavigation();
-  const { openCreateDialog } = useCreateCampaign();
+  const { openCreateDialog, openTemplateLibrary } = useCreateCampaign();
   return (
-    <div className="flex shrink-0 gap-2 border-t border-border p-3">
+    <div className="flex shrink-0 flex-wrap gap-2 border-t border-border p-3">
       <button
         type="button"
         onClick={() => {
@@ -65,6 +65,31 @@ export function BrowseBriefsButton({ onActivate }: { onActivate?: () => void }) 
           />
         </svg>
         Browse briefs
+      </button>
+      {/*
+        TM4 — the library's entry point, in the left column the owner's
+        wireframe puts it in. No dirty guard: opening the library navigates
+        nowhere and writes nothing (the pin is a deliberate press inside it),
+        so there is no unsaved work to ask about — unlike Create new, which
+        publishes a seed and pushes a route.
+      */}
+      <button
+        type="button"
+        onClick={() => {
+          onActivate?.();
+          openTemplateLibrary();
+        }}
+        className="flex w-full items-center justify-center gap-2 rounded-lg border border-border-control bg-surface-2 px-3 py-2 text-[12px] font-medium text-text-primary transition-colors hover:bg-border-hover"
+      >
+        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M4 6h16M4 12h16M4 18h10"
+          />
+        </svg>
+        Browse templates
       </button>
     </div>
   );
