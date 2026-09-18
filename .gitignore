@@ -44,5 +44,11 @@ SYNC-MIGRATION-REPORT.md
 !/briefs/sample-*
 /assets/inputs/*/
 
+# Orchestration lane briefs — per-session working notes handed to implementer
+# lanes. Operator data like /briefs and /assets/inputs, not repo content: they
+# name worktree paths and SHAs that are meaningless outside the session that
+# wrote them. The durable record of a lane is its PR body and the plan doc.
+.agents/briefs/
+
 # Keep per-template env examples tracked
 !.env.*.example
