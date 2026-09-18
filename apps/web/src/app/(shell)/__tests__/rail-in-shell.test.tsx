@@ -645,16 +645,25 @@ describe("§5 — the cost contract, re-measured with the rail across the bounda
     expect(rail().querySelector("pre")).toBeNull();
     expect(within(rail()).queryByRole("button", { name: messages.columnYamlView })).toBeNull();
     expect(within(rail()).queryByRole("button", { name: messages.columnEditorView })).toBeNull();
+    // SG10 brought the validation position, so it joins the negatives: a segment
+    // that leaked into the rail would be a second switcher whichever one it was.
+    expect(within(rail()).queryByRole("button", { name: messages.columnValidateView })).toBeNull();
 
-    // The switch exists — outside the rail. Without this the four negatives above
-    // would all hold on a build that shipped no switcher at all.
+    // The switch exists — outside the rail. Without this the five negatives above
+    // would all hold on a build that shipped no switcher at all. Two positions:
+    // SG10 added `validate` and SG10-b took `yaml` off to the action bar's `⋯`
+    // (the owner's "tuck it in as a menu item"). The position COUNT is pinned in
+    // `brief-editor.test.tsx`, where the control lives — this number is here only
+    // so the liveness check keeps meaning "the whole switch is out here".
     const views = screen.getByRole("group", { name: messages.columnViews });
     expect(rail().contains(views)).toBe(false);
     expect(within(views).getAllByRole("button")).toHaveLength(2);
 
-    // And the rail still holds the composed frame while the column swaps.
-    fireEvent.click(within(views).getByRole("button", { name: messages.columnYamlView }));
-    await waitFor(() => expect(screen.getByTestId("column-yaml")).toBeTruthy());
+    // And the rail still holds the composed frame while the column swaps. Driven
+    // through the `validate` segment: the swap is what this asserts, and that is
+    // the position the switcher still has.
+    fireEvent.click(within(views).getByRole("button", { name: messages.columnValidateView }));
+    await waitFor(() => expect(screen.getByTestId("column-validate")).toBeTruthy());
     expect(mountedFrameCount()).toBe(1);
     expect(within(rail()).getAllByTestId("preview-frame")).toHaveLength(1);
   });

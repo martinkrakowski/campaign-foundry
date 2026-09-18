@@ -79,6 +79,21 @@ const saveVia = async (user: ReturnType<typeof userEvent.setup>, item: "Save" | 
   await user.click(await screen.findByText(messages.editorSaveAs));
 };
 
+/**
+ * SG10-b: the YAML view left the segmented control for the action bar's `⋯`.
+ *
+ * The owner's reason is what the view is — *"the yaml view displays the code
+ * configuration for the creative and is only intended for importing and exporting
+ * the configuration"* — so it is a utility, not a co-equal way of looking at the
+ * brief, and it no longer has a segment. Every test below that used to press a
+ * `yaml` segment goes through this instead: the ROUTE changed, and none of what
+ * those tests assert about the view did.
+ */
+const openYaml = async (user: ReturnType<typeof userEvent.setup>) => {
+  await user.click(screen.getByText("⋯"));
+  await user.click(await screen.findByText(messages.editorYamlItem));
+};
+
 /** Shows the brief the shell would run, so a test can assert Save retargeted the run. */
 const RunBriefProbe = () => {
   const { brief } = useRun();
@@ -3165,7 +3180,7 @@ describe("BriefPage — the preview rail (R7)", () => {
    * and the rail is asserted to hold no `<pre>` of its own — so this cannot pass
    * by finding the YAML in the wrong column.
    */
-  test("selecting `yaml` swaps the middle column and leaves the rail's preview mounted (SG-D4, D43)", async () => {
+  test("the `⋯` menu's YAML item swaps the middle column and leaves the rail's preview mounted (SG-D4, D43)", async () => {
     const user = userEvent.setup();
     routes({ list: () => json({ briefs: [okEntry] }) });
     renderWithRun(<Editor id="ok" />);
@@ -3175,13 +3190,13 @@ describe("BriefPage — the preview rail (R7)", () => {
     // The switch is over the column, not in the rail.
     expect(preview().contains(views())).toBe(false);
     const editorBtn = () => viewButton(messages.columnEditorView);
-    const yamlBtn = () => viewButton(messages.columnYamlView);
     expect(editorBtn().getAttribute("aria-pressed")).toBe("true");
-    expect(yamlBtn().getAttribute("aria-pressed")).toBe("false");
+    // SG10-b: and YAML is not one of its positions any more — the door is the menu.
+    expect(within(views()).queryByRole("button", { name: messages.columnYamlView })).toBeNull();
     // The form is the column's content to begin with.
     expect(document.getElementById("identity")).toBeTruthy();
 
-    await user.click(yamlBtn());
+    await openYaml(user);
 
     // (a) The COLUMN swapped: the document is on screen where the form was, and
     //     the form is gone from the tree — exclusive, never side by side.
@@ -3190,8 +3205,14 @@ describe("BriefPage — the preview rail (R7)", () => {
     expect(screen.queryByLabelText(messages.targetAudienceLabel)).toBeNull();
     // Real YAML, not a JSON body under a YAML name (CodeRabbit, PR #174).
     expect(columnYaml().textContent).not.toMatch(/"targetRegion":/);
-    expect(editorBtn().getAttribute("aria-pressed")).toBe("false");
-    expect(yamlBtn().getAttribute("aria-pressed")).toBe("true");
+    // SG10-b's stated decision: the column is showing a view the switcher does not
+    // offer, so NO segment reports itself pressed. Leaving `editor` pressed here
+    // would have the control claim the form is on screen while the document is.
+    expect(
+      within(views())
+        .getAllByRole("button")
+        .map((b) => b.getAttribute("aria-pressed")),
+    ).toEqual(["false", "false"]);
 
     // (b) The RAIL was left alone: still exactly one composed frame, still the
     //     rail's, and the rail has no YAML of its own to have swapped to.
@@ -3208,14 +3229,22 @@ describe("BriefPage — the preview rail (R7)", () => {
   });
 
   /**
-   * **SG4's fifth red fault: exactly two positions.**
+   * **SG4's fifth red fault, as SG10-b leaves it: exactly two positions, and the
+   * second one is `validate`.**
    *
-   * SG-D13 grows this control to `editor │ yaml │ validate`, but the validation
-   * view is SG10 and is not dispatched. A third segment wired to nothing is a
-   * surface that exists, looks live and shows nothing — so the count is pinned
-   * here, and `validate` cannot arrive by accident before the view it reveals.
+   * The count has always done the same job — the control offers these positions,
+   * in this order, and nothing has crept in. What moved is which views deserve one.
+   * SG4 shipped `editor │ yaml` and withheld `validate` until the view existed;
+   * SG-D13 grew it to three; the owner then took `yaml` back out, because it is a
+   * utility for importing and exporting the configuration rather than a way of
+   * looking at the brief, and a segment beside `editor` said otherwise.
+   *
+   * So the number is two again for a completely different reason, and BOTH halves
+   * are pinned here: `validate` is present, `yaml` is absent, and the absence is
+   * asserted by name so a re-added segment fails rather than merely changing a
+   * count. The menu route that replaces it is asserted in its own test.
    */
-  test("the switch offers exactly two positions — `validate` is SG10's and is not here", async () => {
+  test("the switch offers exactly two positions — `validate`, and no `yaml` (SG10-b)", async () => {
     const user = userEvent.setup();
     routes({ list: () => json({ briefs: [okEntry] }) });
     renderWithRun(<Editor id="ok" />);
@@ -3225,8 +3254,42 @@ describe("BriefPage — the preview rail (R7)", () => {
     expect(buttons).toHaveLength(2);
     expect(buttons.map((b) => b.getAttribute("aria-label"))).toEqual([
       messages.columnEditorView,
-      messages.columnYamlView,
+      messages.columnValidateView,
     ]);
+    expect(within(views()).queryByRole("button", { name: messages.columnYamlView })).toBeNull();
+  });
+
+  /**
+   * **SG10-b: the YAML view is reachable, and the way back is the switcher.**
+   *
+   * Moving a view off a control it was on is the kind of change that can quietly
+   * strand it: the segment goes, the menu item is forgotten or wired to a second
+   * writer, and the view survives only in the type. So the ROUTE is asserted — the
+   * item is in the `⋯`, it opens the view — and so is the return trip, which is the
+   * other half of tucking a view into a menu: from the YAML view the switcher's
+   * `editor` segment is a live button, so the operator is never somewhere the
+   * visible controls cannot leave.
+   *
+   * And the flip PERSISTS, because it goes through `chooseColumnView`. A menu item
+   * wired to a bare `setColumnView` would look identical on screen and send the
+   * operator's next reload back to the form — the desync `sg4.json`'s seventh
+   * mutation records for the reveal path, now reachable from a second door.
+   */
+  test("the `⋯` menu opens the YAML view, the switcher brings the form back, and the choice persists", async () => {
+    const user = userEvent.setup();
+    routes({ list: () => json({ briefs: [okEntry] }) });
+    renderWithRun(<Editor id="ok" />);
+    await adopt(user, "ok");
+
+    await openYaml(user);
+    expect(columnYaml().textContent).toMatch(/targetRegion: /);
+    expect(localStorage.getItem("cf:editor-column-view")).toBe("yaml");
+
+    // The way back, from a control that is on screen in this view.
+    await user.click(viewButton(messages.columnEditorView));
+    expect(document.getElementById("identity")).toBeTruthy();
+    expect(screen.queryByTestId("column-yaml")).toBeNull();
+    expect(viewButton(messages.columnEditorView).getAttribute("aria-pressed")).toBe("true");
   });
 
   /**
@@ -3251,7 +3314,7 @@ describe("BriefPage — the preview rail (R7)", () => {
     await adopt(user, "ok");
 
     await user.type(screen.getByLabelText(messages.localizedHeadlineLabel), "  ja  ");
-    await user.click(viewButton(messages.columnYamlView));
+    await openYaml(user);
 
     const yaml = columnYaml().textContent ?? "";
     // What `Save` sends: trimmed, unquoted.
@@ -3277,7 +3340,7 @@ describe("BriefPage — the preview rail (R7)", () => {
     // wrongly-shared memo would fail to reflect.
     await user.type(screen.getByLabelText(messages.targetAudienceLabel), " plus more");
 
-    await user.click(viewButton(messages.columnYamlView));
+    await openYaml(user);
     expect(columnYaml().textContent).toMatch(/targetAudience: a plus more/);
   });
 
@@ -3301,7 +3364,7 @@ describe("BriefPage — the preview rail (R7)", () => {
     renderWithRun(<Editor id="ok" />);
     await adopt(user, "ok");
 
-    await user.click(viewButton(messages.columnYamlView));
+    await openYaml(user);
     expect(document.getElementById("layout")).toBeNull();
     scroller.mockClear();
 
@@ -3343,7 +3406,7 @@ describe("BriefPage — the preview rail (R7)", () => {
     await adopt(user, "ok");
 
     // The operator's own choice, remembered as it always was.
-    await user.click(viewButton(messages.columnYamlView));
+    await openYaml(user);
     expect(localStorage.getItem("cf:editor-column-view")).toBe("yaml");
 
     // A reveal, through the same `reveal` the refusal and the ErrorStrip chips use.
@@ -3428,7 +3491,7 @@ describe("BriefPage — the preview rail (R7)", () => {
     // to do with the switch.
     expect(before).toBeGreaterThan(0);
 
-    await user.click(viewButton(messages.columnYamlView));
+    await openYaml(user);
     await outlastDebounce();
     expect(previewFetchCalls(calls).length).toBe(before);
 
@@ -3500,7 +3563,7 @@ describe("BriefPage — the preview rail (R7)", () => {
     routes({ list: () => json({ briefs: [okEntry] }) });
     const first = renderWithRun(<Editor id="ok" />);
     await adopt(user, "ok");
-    await user.click(viewButton(messages.columnYamlView));
+    await openYaml(user);
     expect(columnYaml().textContent).toMatch(/targetRegion: /);
     first.unmount();
 
@@ -3509,7 +3572,17 @@ describe("BriefPage — the preview rail (R7)", () => {
     renderWithRun(<Editor id="ok" />);
     await waitFor(() => expect(columnYaml().textContent).toMatch(/^id: ok$/m));
     expect(screen.queryByLabelText("Campaign Name")).toBeNull();
-    expect(viewButton(messages.columnYamlView).getAttribute("aria-pressed")).toBe("true");
+    // SG10-b: a stored `"yaml"` still restores the YAML view, even though `yaml`
+    // is no longer one of the switcher's positions — which is exactly the bug the
+    // split between `COLUMN_VIEWS` and the total label record exists to prevent.
+    // `isColumnView` reading the switcher's list would strand this operator on the
+    // form, as a silent consequence of moving a menu item. And the control says so
+    // honestly: neither of its two positions reports itself pressed.
+    expect(
+      within(views())
+        .getAllByRole("button")
+        .map((b) => b.getAttribute("aria-pressed")),
+    ).toEqual(["false", "false"]);
 
     // ...and the form is one press away, with the loaded brief in it.
     await user.click(viewButton(messages.columnEditorView));
@@ -3547,7 +3620,7 @@ describe("BriefPage — the preview rail (R7)", () => {
     renderWithRun(<Editor id="ok" />);
     await adopt(user, "ok");
 
-    await user.click(viewButton(messages.columnYamlView));
+    await openYaml(user);
     expect(columnYaml().textContent).toMatch(/targetRegion: /);
     spy.mockRestore();
   });
@@ -3674,10 +3747,9 @@ describe("BriefPage — the Layout section (T7)", () => {
 
     await user.click(screen.getByRole("button", { name: "Lora" }));
 
-    // The projection is on screen in the COLUMN's YAML view (SG-D4): the switch
-    // moved out of the rail and onto the column it controls.
-    const views = screen.getByRole("group", { name: messages.columnViews });
-    await user.click(within(views).getByRole("button", { name: messages.columnYamlView }));
+    // The projection is on screen in the COLUMN's YAML view (SG-D4). SG10-b moved
+    // its door from the switcher to the action bar's `⋯`; the view is the same one.
+    await openYaml(user);
     expect(screen.getByTestId("column-yaml").textContent).toMatch(/fontFamily: Lora/);
   });
 });
@@ -3791,6 +3863,19 @@ describe("BriefPage — the run slot: Validate → Generate (SG9)", () => {
     await user.click(slot(messages.editorValidate) as HTMLElement);
     expect(slot(messages.generate)).not.toBeNull();
 
+    // SG10: a clean Validate now REVEALS the validation view (SG-D12), which is the
+    // second half of the verb and was not reachable while SG9 stood alone. So the
+    // form is no longer the column's content and the operator goes back to it to
+    // edit — one press on a segment that, as the test above pins, touches nothing.
+    // The gate survives that navigation, which is asserted here rather than assumed.
+    expect(screen.getByTestId("column-validate")).toBeTruthy();
+    await user.click(
+      within(screen.getByRole("group", { name: messages.columnViews })).getByRole("button", {
+        name: messages.columnEditorView,
+      }),
+    );
+    expect(slot(messages.generate)).not.toBeNull();
+
     // The owner's requirement, verbatim: "any updates to the editor will hide the
     // generate button (after a prior validation) and surface the validate button."
     await user.type(screen.getByLabelText("Headline"), "!");
@@ -3805,12 +3890,17 @@ describe("BriefPage — the run slot: Validate → Generate (SG9)", () => {
     renderWithRun(<Editor id="camp" />);
     await waitForEditorReady();
 
-    // Red fault 3, in the form SG9 can express it: the `validate` position of the
-    // switch is SG10's, so the reachable navigations are the two SG4 shipped. Neither
-    // may take a snapshot — a gate that fires on a tab click is not a consent step.
+    // Red fault 3. SG9 could only reach the two positions SG4 shipped; SG10 brings
+    // the third, and it is the one the fault is actually about — a segment named
+    // `validate` is the navigation a reader most expects to validate. None of the
+    // three may take a snapshot: a gate that fires on a tab click is not a consent
+    // step, and `Generate` would then stand on a document nobody approved.
     const views = screen.getByRole("group", { name: messages.columnViews });
-    await user.click(within(views).getByRole("button", { name: messages.columnYamlView }));
+    await openYaml(user);
     expect(slot(messages.generate)).toBeNull();
+    await user.click(within(views).getByRole("button", { name: messages.columnValidateView }));
+    expect(slot(messages.generate)).toBeNull();
+    expect(slot(messages.editorValidate)).not.toBeNull();
     await user.click(within(views).getByRole("button", { name: messages.columnEditorView }));
     expect(slot(messages.generate)).toBeNull();
     expect(slot(messages.editorValidate)).not.toBeNull();
@@ -3918,6 +4008,425 @@ describe("BriefPage — the run slot: Validate → Generate (SG9)", () => {
 
     expect(slot(messages.generate)).toBeNull();
     expect(generateCalls(calls)).toEqual([]);
+  });
+});
+
+/**
+ * SG10 — the validation view: the third position of the switch, every error the
+ * document has collected into LP1's log panel, and SG-D14's refresh.
+ *
+ * **Why the fixtures below are what they are.** The view and the form are
+ * exclusive — selecting `validate` unmounts the column's sections — so a test that
+ * wanted to see an error in the view AND inline at the same moment could not use a
+ * field in the column at all. `policy` is the one section that renders in the
+ * SIDEBAR (`BriefEditor.tsx`'s published panels, variation mode only), outside this
+ * column and unaffected by the switch. That is what makes "in both places" a
+ * simultaneous reading rather than a round trip, and it is also what makes the
+ * live-view test non-vacuous: the edit that fixes the error happens while the view
+ * is still MOUNTED, so a stored result cannot pass by being re-initialised on a
+ * remount.
+ */
+describe("BriefPage — the validation view (SG10 / SG-D13, SG-D14)", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    localStorage.setItem("cf:brief-picked", "1");
+  });
+
+  const adopt = async (id: string) =>
+    waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(id),
+    );
+
+  const views = () => screen.getByRole("group", { name: messages.columnViews });
+  const viewButton = (name: string) => within(views()).getByRole("button", { name });
+  /** The view's own marker, so no assertion below can be satisfied by another surface. */
+  const panel = () => screen.getByTestId("column-validate");
+  const refresh = () => within(panel()).getByRole("button", { name: messages.validationRefresh });
+  const bar = () => screen.getByTestId("action-bar");
+  const slot = (name: string) => within(bar()).queryByRole("button", { name });
+  /** The policy panel the shell publishes into the sidebar — outside this column. */
+  const policySidebar = () => document.querySelector('[data-section="policy"]') as HTMLElement;
+
+  /**
+   * A variation draft failing TWO different sections: `count: 0` fails Variation
+   * Policy and the empty output block fails Output. Red fault 2 needs two, so a
+   * view that happened to render only the first bucket cannot pass.
+   */
+  const twoBadSections = {
+    file: "bad.yaml",
+    revision: "r1",
+    brief: {
+      ...brief("bad"),
+      mode: "variation",
+      variation: {
+        count: 0,
+        axes: {
+          layout: ["headline-top"],
+          tone: ["bold"],
+          background: { source: ["procedural"] },
+          paletteShift: [0],
+        },
+      },
+      output: { formats: [], platforms: [] },
+    },
+  };
+
+  /**
+   * A brief whose look is fully specified, so the rail ACTUALLY fetches a frame.
+   * Borrowed from the rail describe for the same reason it exists there: a brief
+   * that never fetches would make "zero calls before" and "zero calls after" agree
+   * for a reason that has nothing to do with the view (CC1/CC2, red fault 6).
+   */
+  const fetchable = {
+    file: "fetch.yaml",
+    revision: "r1",
+    brief: {
+      ...brief("fetch"),
+      output: { formats: ["static"], platforms: ["linkedin"] },
+      treatments: [{ id: "t1", layout: "headline-bottom" as const, tone: "bold" as const }],
+    },
+  };
+
+  const frameCalls = (calls: readonly { url: string }[]) =>
+    calls.filter((c) => c.url.includes("/campaigns/preview-frame"));
+  const generateCallsIn = (calls: readonly { url: string }[]) =>
+    calls.filter((c) => c.url.includes("/campaigns/generate"));
+
+  /**
+   * **Red fault 1: the switch swaps the MIDDLE column, and the rail is untouched.**
+   *
+   * SG4's invariant, which this lane must not break by adding a position to the
+   * control. Asserted by MOUNT COUNT, not by CSS: happy-dom applies no stylesheet,
+   * and the viewport gate hides the rail without unmounting it, so "visible" would
+   * be meaningless here and "mounted" is the fact D43 is about.
+   */
+  test("selecting `validate` swaps the middle column and leaves the rail's frame mounted", async () => {
+    const user = userEvent.setup();
+    routes({ list: () => json({ briefs: [fetchable] }) });
+    renderWithRun(<Editor id="fetch" />);
+    await adopt("fetch");
+    const frames = () => document.querySelectorAll('[data-testid="preview-frame"]').length;
+    await waitFor(() => expect(frames()).toBe(1));
+    expect(document.getElementById("identity")).toBeTruthy();
+
+    await user.click(viewButton(messages.columnValidateView));
+
+    // (a) The column swapped: the view is up, the form and the YAML are both out
+    //     of the tree — exclusive, never side by side.
+    expect(panel()).toBeTruthy();
+    expect(document.getElementById("identity")).toBeNull();
+    expect(screen.queryByTestId("column-yaml")).toBeNull();
+    expect(viewButton(messages.columnValidateView).getAttribute("aria-pressed")).toBe("true");
+    expect(viewButton(messages.columnEditorView).getAttribute("aria-pressed")).toBe("false");
+
+    // (b) The rail was left alone, and the view is not inside it.
+    expect(frames()).toBe(1);
+    const rail = screen.getByRole("complementary", { name: messages.previewLegend });
+    expect(rail.contains(panel())).toBe(false);
+
+    // And back: the form returns, the count never moved.
+    await user.click(viewButton(messages.columnEditorView));
+    expect(document.getElementById("identity")).toBeTruthy();
+    expect(screen.queryByTestId("column-validate")).toBeNull();
+    expect(frames()).toBe(1);
+  });
+
+  /**
+   * **Red fault 2, first half: every error, from every section.**
+   *
+   * The owner's phrase is "dump all errors in there". Two different sections fail
+   * here, and both must be present — a view that rendered one bucket, or the first
+   * error of each, passes a one-error test and fails this one.
+   *
+   * Scoped to the panel throughout: the same messages are reachable elsewhere in
+   * the document (the sidebar, the status line), and an unscoped `getByText` would
+   * be satisfied by those and pin nothing about this view.
+   */
+  test("every error the document has is collected here, across sections", async () => {
+    const user = userEvent.setup();
+    routes({ list: () => json({ briefs: [twoBadSections] }) });
+    renderWithRun(<Editor id="bad" />);
+    await adopt("bad");
+
+    await user.click(viewButton(messages.columnValidateView));
+
+    // Variation Policy's, and Output's two — labelled by the one SECTION_TITLES
+    // vocabulary, never by the raw bucket key.
+    expect(within(panel()).getByText(messages.count)).toBeTruthy();
+    expect(within(panel()).getByText(messages.formats)).toBeTruthy();
+    expect(within(panel()).getByText(messages.platforms)).toBeTruthy();
+    expect(within(panel()).getAllByText("[Variation Policy]").length).toBeGreaterThan(0);
+    expect(within(panel()).getAllByText("[Output]").length).toBeGreaterThan(0);
+  });
+
+  /**
+   * **The view takes the UNGATED errors, and this is the only case that can show
+   * it.** Every fixture loaded by route arrives with `attempted` already true —
+   * `BriefEditor.tsx` sets it on adoption, because a loaded brief's errors are the
+   * file's rather than the operator's — so on those briefs `visibleErrors` and
+   * `errors` are the same object and no assertion can tell them apart. The blank
+   * `/brief/new` draft is where they diverge: nothing attempted, nothing touched,
+   * so the gated set is EMPTY while the document fails three sections.
+   *
+   * That is also the operator flow this view is most useful for — start a campaign,
+   * open the validation segment, see what is still missing — and the one the gated
+   * set would silently break: the collected list would read clean while the toolbar
+   * refused to validate the very same draft.
+   *
+   * The inline absence is asserted FIRST, while the form is still on screen, so the
+   * test states both halves: L1.1's gating is untouched (no field is shouting at a
+   * value nobody has typed), and the view reports the errors anyway.
+   */
+  test("a never-attempted draft reports its errors here, with no field showing one yet", async () => {
+    const user = userEvent.setup();
+    routes({});
+    renderWithRun(<NewEditor />);
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
+    );
+
+    // L1.1: the user has been nowhere and attempted nothing, so no field is marked.
+    expect(screen.queryByText(messages.briefId)).toBeNull();
+    expect(
+      within(document.getElementById("identity") as HTMLElement).queryByText(messages.briefId),
+    ).toBeNull();
+
+    await user.click(viewButton(messages.columnValidateView));
+
+    // The collected list is not the gated one: it reports the document, not the walk.
+    expect(within(panel()).getByText(messages.briefId)).toBeTruthy();
+    expect(within(panel()).getByText(messages.campaignMessage)).toBeTruthy();
+    expect(within(panel()).queryByText(messages.validationCleanUnvalidated)).toBeNull();
+  });
+
+  /**
+   * **Red fault 2, second half: the inlined errors stay inlined.**
+   *
+   * The owner asked for the errors to be collected here *as well*, not moved here.
+   * So this asserts the same message twice in one reading: once in the view, once
+   * in the field's own `Field` in the sidebar's Variation Policy panel. Deleting
+   * `error={errors.count}` from `PolicySection` turns this red while the view goes
+   * on looking perfect — which is the direction the fault is written to catch.
+   *
+   * `Validate` is pressed first because the inline render is touch-gated (L1.1) and
+   * the view's is not: the view takes the FULL `errors`, so it shows what the form
+   * has not revealed yet. Pressing the verb is how an operator asks "what is wrong",
+   * and it sets `attempted`, which is what puts the inline error on screen.
+   */
+  test("an error shown in the view is ALSO shown inline, in its own field", async () => {
+    const user = userEvent.setup();
+    Element.prototype.scrollIntoView = vi.fn();
+    routes({ list: () => json({ briefs: [twoBadSections] }) });
+    renderWithRun(<Editor id="bad" />);
+    await adopt("bad");
+    await waitFor(() => expect(policySidebar()).toBeTruthy());
+
+    await user.click(slot(messages.editorValidate) as HTMLElement);
+    await user.click(viewButton(messages.columnValidateView));
+
+    // Both, at the same moment — the sidebar is outside this column, so the switch
+    // did not hide it. Two distinct nodes carrying the one message.
+    const inView = within(panel()).getByText(messages.count);
+    const inField = within(policySidebar()).getByText(messages.count);
+    expect(inView).toBeTruthy();
+    expect(inField).toBeTruthy();
+    expect(inView).not.toBe(inField);
+    expect(panel().contains(inField)).toBe(false);
+  });
+
+  /**
+   * **Red fault 3: arriving does not validate.** The one assertion in this lane
+   * that must not be vacuous.
+   *
+   * The gate records that the operator LOOKED, before a press spends GenAI credits.
+   * `validateState` is pure and synchronous, so "is this document valid" was always
+   * knowable without anyone pressing anything — which is exactly why navigating to
+   * the segment must not take the snapshot. If it did, consent would fire on a tab
+   * click and `Generate` would appear on a document nobody approved.
+   *
+   * The document here is CLEAN, which is what makes the negative meaningful: there
+   * is nothing to refuse, so the only thing keeping `Generate` off the screen is
+   * that nobody has pressed. And the positive is asserted right after, so the test
+   * cannot pass by the view being broken: the very same press through the refresh
+   * icon DOES open the gate.
+   */
+  test("arriving at the view validates nothing — the refresh press is what opens the gate", async () => {
+    const user = userEvent.setup();
+    const calls = routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
+    renderWithRun(<Editor id="camp" />);
+    await waitForEditorReady();
+
+    await user.click(viewButton(messages.columnValidateView));
+
+    // Navigated, rendered, read — and the gate is still shut.
+    expect(panel()).toBeTruthy();
+    expect(slot(messages.generate)).toBeNull();
+    expect(slot(messages.editorValidate)).not.toBeNull();
+    // The clean-but-unvalidated sentence, which is the same fact stated for a reader.
+    expect(within(panel()).getByText(messages.validationCleanUnvalidated)).toBeTruthy();
+    expect(generateCallsIn(calls)).toEqual([]);
+
+    // SG-D14: the refresh IS the Validate action, so the press that was missing is
+    // available without leaving the view — and it is what makes Generate appear.
+    await user.click(refresh());
+
+    expect(slot(messages.generate)).not.toBeNull();
+    expect(slot(messages.editorValidate)).toBeNull();
+    // Still nothing ran: the gate is consent to ASK, not the run.
+    expect(generateCallsIn(calls)).toEqual([]);
+  });
+
+  /**
+   * **Red fault 5: clean is not the same fact as unvalidated.**
+   *
+   * Collapsing those two is this repo's recurring defect. The view is live, so the
+   * FINDING ("no problems") is true in both states; what changes across the press is
+   * what the gate knows. Asserted in both directions — each sentence present while
+   * the other is absent — so a component that shipped one string for both states
+   * fails whichever half it dropped.
+   */
+  test("a clean document reads as clean, and says whether it has been validated", async () => {
+    const user = userEvent.setup();
+    routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
+    renderWithRun(<Editor id="camp" />);
+    await waitForEditorReady();
+    await user.click(viewButton(messages.columnValidateView));
+
+    expect(within(panel()).getByText(messages.validationCleanUnvalidated)).toBeTruthy();
+    expect(within(panel()).queryByText(messages.validationCleanValidated)).toBeNull();
+
+    await user.click(refresh());
+
+    expect(within(panel()).getByText(messages.validationCleanValidated)).toBeTruthy();
+    expect(within(panel()).queryByText(messages.validationCleanUnvalidated)).toBeNull();
+  });
+
+  /**
+   * **Red fault 4: the view is live, not a snapshot.**
+   *
+   * The edit is made in the SIDEBAR's Variation Policy panel, which is published
+   * into the shell and is therefore outside this column — so the view stays MOUNTED
+   * across the fix. That is the whole difficulty of this assertion: the obvious
+   * version (jump to the section through a chip, fix it, come back) unmounts the
+   * view on the way out, and a component holding a `useState`/`useRef` snapshot
+   * re-initialises on the remount and passes it. Here nothing remounts, so a stored
+   * result keeps showing the error it captured and the test goes red.
+   *
+   * The refresh icon is deliberately NOT pressed between the edit and the assertion.
+   */
+  test("fixing an error with the view open removes it, with no refresh press", async () => {
+    const user = userEvent.setup();
+    routes({ list: () => json({ briefs: [twoBadSections] }) });
+    renderWithRun(<Editor id="bad" />);
+    await adopt("bad");
+    await waitFor(() => expect(policySidebar()).toBeTruthy());
+
+    await user.click(viewButton(messages.columnValidateView));
+    expect(within(panel()).getByText(messages.count)).toBeTruthy();
+    const panelNode = panel();
+
+    // The Count slider lives in the sidebar, which the switch does not hide.
+    fireEvent.change(within(policySidebar()).getByLabelText("Count"), { target: { value: "4" } });
+
+    // Same panel element, still mounted, and the error is gone from it — the view
+    // re-read `validateState` because that is all it ever renders.
+    expect(panel()).toBe(panelNode);
+    expect(within(panel()).queryByText(messages.count)).toBeNull();
+    // The document is still invalid for another reason, so this is not "the panel
+    // emptied": Output's errors are untouched and still listed.
+    expect(within(panel()).getByText(messages.formats)).toBeTruthy();
+  });
+
+  /**
+   * **Red fault 6: opening the view is not a fetch.**
+   *
+   * CC1/CC2's contract, which this lane sits inside. Counted as NETWORK CALLS, not
+   * renders: the view's arrival must not make the compositor draw anything, and the
+   * rail is not in this column's subtree so it must not be disturbed either. The
+   * fixture is a brief that genuinely fetches, so the "after" count being equal to
+   * the "before" count is a real statement rather than two zeroes agreeing.
+   */
+  test("opening the view issues no /preview-frame call of its own", async () => {
+    const user = userEvent.setup();
+    const calls = routes({ list: () => json({ briefs: [fetchable] }) });
+    renderWithRun(<Editor id="fetch" />);
+    await adopt("fetch");
+    await waitFor(() => expect(frameCalls(calls).length).toBeGreaterThan(0));
+    const before = frameCalls(calls).length;
+
+    await user.click(viewButton(messages.columnValidateView));
+    expect(panel()).toBeTruthy();
+    await user.click(viewButton(messages.columnEditorView));
+    await user.click(viewButton(messages.columnValidateView));
+
+    expect(frameCalls(calls).length).toBe(before);
+  });
+
+  /**
+   * **The rows reach their sections.**
+   *
+   * A `LogPanelEntry.message` is a `string` rendered into a bare `<span>`, so a row
+   * cannot itself be a control without changing LP1's type — which this lane
+   * consumes rather than edits. The reveal affordance is therefore the editor's
+   * existing one, `ErrorStrip`'s per-section chips, wired to the same `reveal` the
+   * action bar's strip uses: it flips the column back to the form (the sections do
+   * not exist while the view is up) and then scrolls.
+   */
+  test("a section chip in the view reveals its section in the form", async () => {
+    const scroller = vi.fn();
+    Element.prototype.scrollIntoView = scroller;
+    const user = userEvent.setup();
+    routes({ list: () => json({ briefs: [twoBadSections] }) });
+    renderWithRun(<Editor id="bad" />);
+    await adopt("bad");
+    await user.click(viewButton(messages.columnValidateView));
+
+    const jumps = within(panel()).getByRole("group", { name: messages.validationJumps });
+    const outputChip = within(jumps)
+      .getAllByRole("button")
+      .find((b) => /Output/.test(b.textContent ?? ""));
+    expect(outputChip).toBeTruthy();
+    await user.click(outputChip as HTMLElement);
+
+    // The flip happened first, or the scroll would have found nothing and returned
+    // in silence — a surface that looks live and moves nowhere.
+    expect(viewButton(messages.columnEditorView).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.queryByTestId("column-validate")).toBeNull();
+    expect(document.getElementById("output")).toBeTruthy();
+    expect(scroller).toHaveBeenCalled();
+  });
+
+  /**
+   * **SG-D21/D26: no row invents a time or a stage.**
+   *
+   * `TelemetryDrawer` maps a run entry's clock into `meta` and its stage into
+   * `label`; a validation error has neither, because no run produced it. A row that
+   * filled those columns anyway would make the panel's Copy control emit a log
+   * claiming a run that never happened.
+   *
+   * Asserted as the row's EXACT text rather than as the absence of a few strings: an
+   * empty `<span>` and a stray separator both leave `not.toContain(…)` green while
+   * putting a column on the row that the data does not have. `[Output]` twice is the
+   * two Output errors, in `validateState`'s own order within the bucket.
+   */
+  test("a row is `[Section] message` and nothing else — no clock, no stage", async () => {
+    const user = userEvent.setup();
+    routes({ list: () => json({ briefs: [twoBadSections] }) });
+    renderWithRun(<Editor id="bad" />);
+    await adopt("bad");
+    await user.click(viewButton(messages.columnValidateView));
+
+    const rows = [...panel().querySelectorAll("[class*='text-text-primary']")].map(
+      (el) => el.parentElement?.textContent,
+    );
+    // Walk order, not `validateState`'s key order: `sectionOrder("variation")`
+    // reaches Output before Variation Policy, and the bucket order would have put
+    // Policy first — M1's bounce, in list form.
+    expect(rows).toEqual([
+      `[Output] ${messages.formats}`,
+      `[Output] ${messages.platforms}`,
+      `[Variation Policy] ${messages.count}`,
+    ]);
   });
 });
 

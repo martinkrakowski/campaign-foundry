@@ -631,6 +631,59 @@ export const columnViews = "Editor views";
 export const columnEditorView = "Show the editor";
 /** The second segment: the document the pipeline reads, as the projection writes it. */
 export const columnYamlView = "Show the YAML view";
+/**
+ * SG10 — the third segment (SG-D13), the one SG4 deliberately withheld until the
+ * view existed. Spelled like its two siblings ("Show the …") because the three are
+ * read in a row by anything announcing the group, and a segment that broke the
+ * pattern would sound like a different kind of control.
+ */
+export const columnValidateView = "Show the validation";
+
+// --- The validation view (SG10 / SG-D13, SG-D14) ---
+
+/**
+ * The panel's heading. Not "Validation errors": the panel is what the operator
+ * reads when the document is CLEAN as well, and a heading that names only the
+ * failure would make a passing document look like an empty error list.
+ */
+export const validationViewTitle = "Validation";
+
+/**
+ * The refresh control's accessible name (SG-D14). It names the ACT — re-running
+ * the validation — and not the icon, because an icon-only control has no text of
+ * its own; and it is the same verb the toolbar's `Validate` carries, because it is
+ * literally the same handler.
+ */
+export const validationRefresh = "Re-run the validation";
+
+/** The Copy control's resting name, matching the drawer's phrasing for its own log. */
+export const validationCopy = "Copy the validation report to clipboard";
+
+/**
+ * Clean, and the operator has said so — `isValidationFresh` holds, so the toolbar
+ * is offering Generate.
+ *
+ * The pair below is red fault 5: "no problems" and "nobody has looked yet" are two
+ * different facts and this repo has collapsed them before. Both sentences open with
+ * the same finding (the view is LIVE, so it always reports the current document) and
+ * differ on what the gate knows — which is the half a live view cannot show on its
+ * own.
+ */
+export const validationCleanValidated = "No problems found. This document is validated.";
+
+/** Clean, but nobody has pressed Validate — the gate is shut and Generate is absent. */
+export const validationCleanUnvalidated =
+  "No problems found. Press Re-run the validation to validate this document.";
+
+/**
+ * The jump chips' group label. The rows of the panel are plain text — a
+ * `LogPanelEntry.message` is a `string` rendered in a bare `<span>`, so a row
+ * cannot BE a control without changing LP1's type, which this lane consumes
+ * rather than edits. The per-section chips are the reveal affordance the editor
+ * already has (F6's `JumpStrip` via `ErrorStrip`), so the view wears that rather
+ * than inventing a second navigation concept.
+ */
+export const validationJumps = "Jump to a section with errors";
 
 // --- The column resizer (SG2) ---
 
@@ -705,6 +758,19 @@ export const briefNotFoundNew = "Start a new brief";
 export const editorSave = "Save";
 /** The copy verb, in the overflow (⋯): the same, under a new id. */
 export const editorSaveAs = "Save as…";
+/**
+ * SG10-b — the overflow item that opens the YAML view, which used to be a segment
+ * of the switcher. It is the only item in the `⋯` that is a navigation rather than
+ * a write, so it sits first.
+ *
+ * Named for what the view IS rather than for the act of opening it ("Show the
+ * YAML view" is the switcher's old aria-label, and it reads as an instruction in a
+ * menu of nouns-and-verbs). The owner's sentence is the definition: *"the yaml view
+ * displays the code configuration for the creative and is only intended for
+ * importing and exporting the configuration"* — so the item names the
+ * configuration, and leads with the word an operator scans for.
+ */
+export const editorYamlItem = "YAML configuration";
 /**
  * D40: the exit verb. It leaves the editor for the grid, prompting through the dirty
  * guard when there is unsaved work — the prompt the user's report asked for.
