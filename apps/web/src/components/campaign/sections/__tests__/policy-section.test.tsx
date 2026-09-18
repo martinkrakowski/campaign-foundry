@@ -127,6 +127,9 @@ describe("PolicySection — the policy numbers", () => {
 
     const readout = screen.getByRole("spinbutton", { name: "Min distance" });
     expect(readout.getAttribute("aria-valuemax")).toBe(String(maxMinDistance(s)));
+    // SL-D6 — the stepper's own floor, announced. Below 1 two creatives could be
+    // identical, so the control cannot be driven there at all.
+    expect(readout.getAttribute("aria-valuemin")).toBe("1");
     expect(readout.textContent).toBe("2");
 
     await user.click(screen.getByRole("button", { name: "Increase Min distance" }));
@@ -156,10 +159,14 @@ describe("PolicySection — the policy numbers", () => {
     );
     expect(screen.getByRole("spinbutton", { name: "Min distance" }).textContent).toBe("Auto (1)");
     await user.click(screen.getByRole("button", { name: "Increase Min distance" }));
+    // SL-D6 — "1", not "0". Stepping up out of Auto lands on the stepper's `min`,
+    // so while that was 0 a single press on "+" was the whole operator-reachable
+    // route to the duplicate-creatives setting, and it read as a no-op: "Auto (1)"
+    // became the number 0.
     expect(dispatch).toHaveBeenCalledWith({
       type: "setVariation",
       field: "minDistance",
-      value: "0",
+      value: "1",
     });
   });
 

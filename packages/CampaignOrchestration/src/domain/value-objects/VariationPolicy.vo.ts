@@ -200,10 +200,16 @@ export class VariationPolicy {
       if (axis === "motion" || axis === "durationSec") return motionEnabled;
       return true;
     }).length;
+    // SL-D6: the lower bound is 1, not 0. At 0 the searches would accept two
+    // variants at the same point in the space, so a plan could quietly contain
+    // duplicate creatives; 1 is also what an absent field has always meant, so
+    // the bound refuses only an *explicit* 0. The brief loader
+    // (`apps/api/server/lib/load-brief.ts`) reads a stored 0 as 1 rather than
+    // refusing the document — a 0 reaching here is a caller that skipped it.
     const minDistanceResult = requireInteger(
       variation.minDistance ?? 1,
       "minDistance",
-      0,
+      1,
       activeAxes,
     );
     if (!minDistanceResult.success) return minDistanceResult;

@@ -296,6 +296,9 @@ describe("VariationPolicy.fromBrief", () => {
     [{ count: 1.5 }, /count/],
     [{ count: Number.POSITIVE_INFINITY }, /count/],
     [{ count: Number.NaN }, /count/],
+    // SL-D6 — an explicit 0 is refused, the same as a negative one: Hamming 0 is
+    // the same point in the axis space, so it would license duplicate creatives.
+    [{ count: 1, minDistance: 0 }, /minDistance/],
     [{ count: 1, minDistance: -1 }, /minDistance/],
     [{ count: 1, minDistance: 7 }, /minDistance/],
     [{ count: 1, minDistance: 1.5 }, /minDistance/],
@@ -322,7 +325,9 @@ describe("VariationPolicy.fromBrief", () => {
   });
 
   test.each([
-    [{ count: 1, minDistance: 0 }, "minDistance", 0],
+    // 1 is the boundary now, not 0 (SL-D6); an ABSENT minDistance still means 1,
+    // so the bound refuses only a value the author wrote down.
+    [{ count: 1, minDistance: 1 }, "minDistance", 1],
     [{ count: 1, minDistance: 6 }, "minDistance", 6],
     [{ count: 1, seed: 0 }, "seed", 0],
     [{ count: 1, seed: 0xffffffff }, "seed", 0xffffffff],

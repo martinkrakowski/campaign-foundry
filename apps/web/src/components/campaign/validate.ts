@@ -310,7 +310,9 @@ export function validatePolicy(state: EditorState): FieldErrors {
     errors.seed = messages.seed;
   }
   const maxDistance = maxMinDistance(state);
-  if (!isOptionalIntegerInRange(state.variation.minDistance, 0, maxDistance)) {
+  // SL-D6: 1 is the floor, not 0 — at 0 two creatives may be identical, and the
+  // planner refuses the policy outright. Unset still means the planner's own 1.
+  if (!isOptionalIntegerInRange(state.variation.minDistance, 1, maxDistance)) {
     errors.minDistance = messages.minDistance(maxDistance);
   }
   if (!isOptionalIntegerAtLeast(state.variation.perProduct, 0)) {

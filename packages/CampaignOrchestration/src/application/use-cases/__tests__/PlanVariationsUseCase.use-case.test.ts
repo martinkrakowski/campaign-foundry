@@ -116,10 +116,12 @@ describe("PlanVariationsUseCase.plan", () => {
     if (!result.success) return;
     expect(result.value.copyHash).toBe(hashCopy(input, nodeCryptoPolicyHasher));
 
-    // An axis-only change moves policyHash but not copyHash.
+    // An axis-only change moves policyHash but not copyHash. (This was
+    // `minDistance: 0`, which SL-D6 now refuses; a palette-shift axis is in any
+    // case what the sentence above claims to be testing.)
     const differentAxis = planner().plan({
       ...input,
-      variation: { ...input.variation, minDistance: 0 },
+      variation: { ...input.variation, axes: { paletteShift: [0, 0.1] } },
     });
     expect(differentAxis.success).toBe(true);
     if (differentAxis.success) {
@@ -570,7 +572,7 @@ describe("PlanVariationsUseCase.replan", () => {
 
   test("replan still post-checks coverage and exhausts when the occupant cannot satisfy it", () => {
     const policyResult = VariationPolicy.fromBrief(
-      brief({ variation: { count: 2, seed: 7, minDistance: 0, coverage: { perProduct: 1 } } }),
+      brief({ variation: { count: 2, seed: 7, minDistance: 1, coverage: { perProduct: 1 } } }),
       {},
       nodeCryptoPolicyHasher,
     );
@@ -600,6 +602,69 @@ describe("PlanVariationsUseCase.replan", () => {
       policy: policyResult.value,
       briefId: "golden",
     };
+    const result = planner().replan(plan, 0, 1);
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.error.message).toMatch(/exhausted 64 draws/);
+  });
+
+  /**
+   * SL-D6, the half of the floor that lives on the random-draw path.
+   *
+   * `meetsMinDistance` is a module-private function reached only through `plan`
+   * and `replan`, and `VariationPolicy.fromBrief` now refuses a policy below 1 —
+   * so the policy is built at 1 and lowered by hand, which is precisely the case
+   * the floor exists for: a distance the search must not honour, however it
+   * arrived. The space is deliberately a SINGLE point (one product, one ratio,
+   * one value on every treatment axis), so every draw returns the occupant's own
+   * combination and Hamming distance is always 0. Coverage is left at its default
+   * of zero, so the distance check is the only thing that can refuse a draw —
+   * without that, `firstUnmetCoverage` would exhaust the draws for its own
+   * reasons and the test would pass on an unfloored `meetsMinDistance` too.
+   */
+  test("a policy that slipped through at 0 still refuses a replacement at the same point", () => {
+    const onePoint = brief({
+      variation: {
+        count: 1,
+        seed: 7,
+        minDistance: 1,
+        axes: {
+          layout: ["headline-top"],
+          tone: ["bold"],
+          background: { source: ["procedural"] },
+          paletteShift: [0],
+        },
+      },
+      products: [product("alpha")],
+    });
+    const built = VariationPolicy.fromBrief(onePoint, { ratios: ["1:1"] }, nodeCryptoPolicyHasher);
+    expect(built.success).toBe(true);
+    if (!built.success) return;
+    expect(built.value.axisProductSize).toBe(1);
+    expect(built.value.coverage).toEqual({ perProduct: 0, perRatio: 0 });
+    const slipped: VariationPolicy = { ...built.value, minDistance: 0 };
+
+    const only = (index: number): Variant => ({
+      index,
+      seed: index,
+      productId: "alpha",
+      aspectRatio: "1:1",
+      layout: "headline-top",
+      tone: "bold",
+      backgroundSource: "procedural",
+      paletteShift: 0,
+    });
+    const plan: VariationPlan = {
+      policyHash: slipped.policyHash,
+      copyHash: "copy-hash",
+      seed: slipped.seed,
+      variants: [only(0), only(1)],
+      estimate: { creatives: 2, axisProductSize: 1, feasible: true, genaiCalls: 0 },
+      policy: slipped,
+      briefId: "golden",
+    };
+
+    // Unfloored, `hamming(candidate, other) >= 0` holds for the identical point,
+    // so the very first draw is accepted and `replan` succeeds with a duplicate.
     const result = planner().replan(plan, 0, 1);
     expect(result.success).toBe(false);
     if (!result.success) expect(result.error.message).toMatch(/exhausted 64 draws/);
@@ -1008,7 +1073,12 @@ describe("PlanVariationsUseCase headline axis", () => {
  * The mechanism: `DISTANCE_AXES` names every axis `enumerateAxes` varies, so Hamming 0
  * means *the same point in the space*. At `minDistance >= 1` no duplicate can ever be
  * accepted, so `axisProductSize` accepted variants out of a space of `axisProductSize`
- * is necessarily the whole space exactly once. At `minDistance 0` that argument is gone.
+ * is necessarily the whole space exactly once.
+ *
+ * SL-D6 closes the one hole in that argument: `minDistance 0` used to be settable, and
+ * removed the premise. It is now refused by `VariationPolicy.fromBrief`, and floored in
+ * both searches besides — see `meetsMinDistance` below and `conflicts` in
+ * `PlanCapacity.test.ts` — so `minDistance >= 1` is no longer an assumption.
  */
 describe("PlanVariationsUseCase.plan at count = axisProductSize (SG-D7)", () => {
   /** The 24-combination default × five palette shifts: 120 points. */
@@ -1065,24 +1135,25 @@ describe("PlanVariationsUseCase.plan at count = axisProductSize (SG-D7)", () => 
     expect(drawn).toEqual(new Set(space.map(point)));
   });
 
-  test("at the ceiling with minDistance 0 it samples instead: the same point can repeat", () => {
-    // minDistance 0 is operator-reachable — the Advanced stepper's `min={0}` and
-    // `validate.ts`'s `isOptionalIntegerInRange(minDistance, 0, maxDistance)` both
-    // accept it. `meetsMinDistance` then admits Hamming 0, so a draw with replacement
-    // fills every slot and "count at maximum" quietly stops meaning every combination.
-    //
-    // This records what the planner does today, not what it should do. SG-D7 hands the
-    // owner the choice; the fix is a floor of 1 in both `meetsMinDistance` and
-    // `conflicts` (either one alone leaves the other search degenerate), and taking it
-    // inverts this assertion — at which point this test becomes the enumerate case.
-    const policy = policyAt(0);
+  test("minDistance 0 is no longer reachable at the ceiling — the policy refuses it (SL-D6)", () => {
+    // This test previously recorded the defect: at 0 `meetsMinDistance` admitted
+    // Hamming 0, the draw sampled WITH REPLACEMENT, and "count at maximum" quietly
+    // stopped meaning every combination — 83 distinct of 120. SG-D7 handed the owner
+    // the choice and the answer was "the minimum should be 1", so the assertion is
+    // inverted: the brief is refused rather than silently sampled.
+    const policy = policyAt(1);
     expect(policy.axisProductSize).toBe(120);
+    const refused = VariationPolicy.fromBrief(
+      ceilingBrief(0, policy.axisProductSize),
+      {},
+      nodeCryptoPolicyHasher,
+    );
+    expect(refused.success).toBe(false);
+    if (!refused.success) expect(refused.error.message).toBe("Invalid minDistance.");
+    // …and the planner surfaces that refusal rather than planning at 0.
     const result = planner().plan(ceilingBrief(0, policy.axisProductSize));
-    expect(result.success).toBe(true);
-    if (!result.success) return;
-    const { variants } = result.value;
-    expect(variants).toHaveLength(policy.axisProductSize);
-    expect(new Set(variants.map(point)).size).toBeLessThan(variants.length);
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.error.message).toMatch(/minDistance/);
   });
 
   test("above EXHAUSTIVE_MAX_SPACE an operator can still ask for a ceiling that cannot enumerate", () => {

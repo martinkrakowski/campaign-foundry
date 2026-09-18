@@ -1864,6 +1864,30 @@ describe("parseBrief v2 fields", () => {
     ).toEqual(["static"]);
   });
 
+  /**
+   * SL-D6 — the stored-document decision. `minDistance: 0` was legal to write
+   * until today and is now below the planner's floor, so this boundary has to
+   * choose: refuse the document, or read it as 1.
+   *
+   * It reads it as 1. Refusing would not reach the operator as an error they can
+   * act on — `FsBriefStore.listBriefs` catches a parse failure and warns the file
+   * out of the listing, so the campaign would disappear from the picker with no
+   * way to open it and fix the field (pinned in `fs-brief-store.test.ts`). And 1
+   * is not an invented value: it is what an ABSENT `minDistance` has always meant.
+   */
+  test("reads a stored minDistance of 0 as 1 rather than refusing the document", () => {
+    const parsed = parseBrief({ ...valid, variation: { count: 4, minDistance: 0 } });
+    expect(parsed.variation?.minDistance).toBe(1);
+    // Only 0 is rewritten — every other value is carried through untouched.
+    expect(
+      parseBrief({ ...valid, variation: { count: 4, minDistance: 2 } }).variation?.minDistance,
+    ).toBe(2);
+    // …and a negative one is still refused outright, not clamped.
+    expect(() => parseBrief({ ...valid, variation: { count: 4, minDistance: -1 } })).toThrow(
+      /variation\.minDistance/,
+    );
+  });
+
   test.each([
     ["an invalid mode", { ...valid, mode: "random" }, /mode/],
     ["a non-string mode", { ...valid, mode: 1 }, /mode/],

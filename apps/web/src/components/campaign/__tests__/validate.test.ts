@@ -460,8 +460,14 @@ describe("validatePolicy", () => {
   });
 
   test("minDistance is bounded by the number of active axes", () => {
+    expect(validatePolicy(randomized({ minDistance: "1" })).minDistance).toBeUndefined();
     expect(validatePolicy(randomized({ minDistance: "6" })).minDistance).toBeUndefined();
     expect(validatePolicy(randomized({ minDistance: "7" })).minDistance).toBe(
+      messages.minDistance(6),
+    );
+    // SL-D6 — 0 is below the floor now, not merely the bottom of the range. The
+    // planner refuses it outright, so the editor must refuse it before Save.
+    expect(validatePolicy(randomized({ minDistance: "0" })).minDistance).toBe(
       messages.minDistance(6),
     );
     expect(validatePolicy(randomized({ minDistance: "-1" })).minDistance).toBe(

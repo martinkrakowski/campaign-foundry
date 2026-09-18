@@ -80,6 +80,33 @@ describe("FsBriefStore", () => {
     expect(list[1].revision).toBe(hashBytes(Buffer.from(yamlB, "utf8")));
   });
 
+  /**
+   * SL-D6, the reason the loader clamps instead of refusing. The `catch` above
+   * (`listBriefs` warns and skips) is what makes a refusal invisible: a stored
+   * `minDistance: 0` would drop the operator's campaign out of the picker
+   * entirely, and they could not open it to fix the field. So the assertion is
+   * that the brief is STILL LISTED, carrying 1 — and that the next Save migrates
+   * the document, so the clamp is a one-time read-repair rather than a warning
+   * the operator gets forever. `patchBriefYaml` diffs the on-disk 0 against the
+   * parsed 1 and writes the path, which is what makes that true; asserting the
+   * FILE TEXT is what makes it measured rather than reasoned.
+   */
+  test("a stored minDistance of 0 still lists, carrying 1, and Save migrates it (SL-D6)", async () => {
+    const yaml =
+      "id: camp-zero\ntargetRegion: US\ntargetAudience: dev\ncampaignMessage: Z\n" +
+      "mode: variation\nproducts:\n  - id: p1\nvariation:\n  count: 2\n  minDistance: 0\n";
+    writeFileSync(join(dir, "camp-zero.yaml"), yaml);
+
+    const list = await store.listBriefs();
+    expect(list.map((entry) => entry.brief.id)).toEqual(["camp-zero"]);
+    expect(list[0].brief.variation?.minDistance).toBe(1);
+
+    await store.rewriteBrief(list[0].brief);
+    const migrated = readFileSync(join(dir, "camp-zero.yaml"), "utf8");
+    expect(migrated).toMatch(/minDistance: 1/);
+    expect(migrated).not.toMatch(/minDistance: 0/);
+  });
+
   test("findBriefById finds brief by domain id and findBriefFileById returns file key", async () => {
     await store.createBrief(minimalBrief);
     const found = await store.findBriefById("test-camp");

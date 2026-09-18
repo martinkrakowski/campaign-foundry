@@ -1,0 +1,91 @@
+{
+  "version": 1,
+  "lane": "SL0",
+  "mutations": [
+    {
+      "file": "packages/CampaignOrchestration/src/application/use-cases/PlanCapacity.ts",
+      "before": "  return distance < Math.max(1, minDistance);",
+      "after": "  return distance < minDistance;",
+      "because": "HALF THE FIX, and the half a reader would leave behind. `meetsMinDistance` is where `minDistance` is spelled out in prose, in the class doc-comment, and in the shortfall message; `conflicts` is a two-line predicate in a capacity file whose other callers (`capacityAt`, `lineBound`) are about counting, not accepting. Flooring the obvious one and leaving this reads as complete — and the suite AGREES: every plan at the default distance is unaffected, because at `minDistance 1` `Math.max(1, 1)` is 1 and this predicate is byte-for-byte what it was. What it destroys is the load-bearing path. `exhaustiveAccept` is not a fallback in name only: at `count = axisProductSize` the 3 x count random budget cannot fill the space, so EVERY ceiling plan comes out of the greedy. Unfloored, `distance < 0` is false for every pair, `fits` accepts unconditionally, and `ranked.find(fits)` returns `order[0]` on every iteration — the plan is `count` copies of one combination. SG-D7 measured that collapse as 1 distinct of 120, worse than the 83 of 120 the lane was opened to fix, and it would ship behind a green gate. Caught by asserting the DISTINCT COUNT rather than the row count: a run that repeats one point still returns `count` rows, so a length assertion cannot tell the two apart. Replayed here at 24 points, where the mutant yields 1.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/application/use-cases/__tests__/PlanCapacity.test.ts",
+        "-t",
+        "a policy that slipped through at 0 still yields distinct points, never one repeated"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/application/use-cases/PlanVariationsUseCase.use-case.ts",
+      "before": "  const floor = Math.max(1, minDistance);\n  return accepted.every((variant) => hamming(candidate, variant) >= floor);",
+      "after": "  return accepted.every((variant) => hamming(candidate, variant) >= minDistance);",
+      "because": "The converse tidy-up, and the more tempting one of the two. `VariationPolicy.fromBrief` now refuses `minDistance` below 1, so a reader can argue — correctly, for every path that starts at a brief — that this floor is unreachable, and deleting unreachable code is a virtue. The local variable makes it look gratuitous besides. Nothing in the suite objects: `plan` cannot be handed a sub-1 policy any more, so the whole SG-D7 ceiling describe, every golden, every shortfall case is identical under the mutant. What it gives up is that the floor is the INVARIANT and the parser bound is merely the contract — and the two are about to come apart, because SL-D8 demotes `minDistance` to a generator control and the global bound moves with it. A policy object reaching the search below 1 (constructed, restored, or handed over by a relaxed parser) would then let `replan` fill a slot with a variant identical to one already in the plan: the operator presses re-roll on a duplicate and gets the same creative back, forever. Caught by driving `replan` with a policy lowered to 0 by hand over a ONE-POINT space, where every draw is the occupant's own combination — so the distance check is the only thing that can refuse, and refusing is the whole assertion. Coverage is pinned at its zero default in the same test precisely so `firstUnmetCoverage` cannot exhaust the draws for reasons of its own and make the assertion pass on the mutant.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/application/use-cases/__tests__/PlanVariationsUseCase.use-case.test.ts",
+        "-t",
+        "a policy that slipped through at 0 still refuses a replacement at the same point"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/VariationPolicy.vo.ts",
+      "before": "      \"minDistance\",\n      1,\n      activeAxes,",
+      "after": "      \"minDistance\",\n      0,\n      activeAxes,",
+      "because": "The bound put back, by the argument that the two floors have already made it redundant. `Math.max(1, ..)` in both searches means a policy at 0 now BEHAVES as 1 wherever it is used, so refusing it at the parser looks like belt-and-braces on a value that can no longer do harm — and the sibling bounds in this same block are all 0 (`seed`, `coverage.perProduct`, `coverage.perRatio`), so 1 reads as the odd one out. It is invisible to the planner's own tests: every plan built at 0 would now enumerate correctly, because the searches floor it. What it loses is the owner's actual instruction — *the minimum should be 1* — as a stated contract rather than a silently-corrected input. A brief authored by hand or POSTed by a client would go on carrying `minDistance: 0`, be accepted, be hashed into a `policyHash` that claims a distance the plan never used, and read back to its author as a setting that does something. Silent coercion at the domain boundary is how a field comes to mean two things at once. Caught by the boundary table, which asserts the REFUSAL and not merely the resulting distance — the accepted-boundary table beside it moved from 0 to 1 in the same change, so the two halves cannot both be satisfied by a coercion. The `-t` filter selects the whole `rejects invalid` table (25 cases); only the `minDistance: 0` row turns red.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/VariationPolicy.vo.test.ts",
+        "-t",
+        "rejects invalid"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/load-brief.ts",
+      "before": "    if (value.minDistance === 0) value.minDistance = 1;",
+      "after": "    assertFiniteIntegerAtLeast(value.minDistance, \"variation.minDistance\", 1);",
+      "because": "THE DECISION, reversed in the direction that looks stricter and therefore safer. Every other rule in this file refuses — its own doc-comment says the audio block is 'the same refuse at load tier as every other structural rule in this file, never warn-and-continue' — so a clamp is the anomaly, and raising the assert's floor to 1 both deletes a line and makes the boundary consistent with its neighbours. It is the edit a reviewer would ASK for. What it does is make the operator's campaign disappear. `FsBriefStore.listBriefs` wraps each parse in `try { .. } catch { console.warn('[briefs] skipped ..') }`, so the refusal never becomes an error anyone sees: the brief is simply absent from the picker, and there is no route by which the operator can open it and correct the field. Measured under exactly this mutation, in the shape that throws: the listing came back `[]` where it had held `camp-zero`, with the only trace a server log line. Clamping costs nothing against that — 0 never meant anything an operator asked for, and 1 is precisely what an ABSENT `minDistance` has always meant, so the loader reads the field as its own documented default. Caught at the STORE, not at the parser: the assertion is that the brief is still listed and carries 1, which is the claim the decision actually rests on. A `parseBrief` unit test alone would have reported the refusal as a tidy thrown error and never shown the vanishing.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/fs-brief-store.test.ts",
+        "-t",
+        "a stored minDistance of 0 still lists"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/sections/PolicySection.tsx",
+      "before": "              aria-label=\"Min distance\"\n              min={1}",
+      "after": "              aria-label=\"Min distance\"\n              min={0}",
+      "because": "The control left where it was, on the reasoning that the layers behind it now refuse 0 anyway — `validate.ts` errors, `VariationPolicy.fromBrief` errors, and the searches floor — so the stepper's `min` is decoration and lowering it costs nothing but an extra step of travel. The three `min={0}` steppers on either side of it in this same file (Coverage per product, Coverage per ratio) make 0 look like the house style, and for those two it genuinely is: a coverage floor of zero means 'no floor' and is correct. What this misses is that `min` is not only a bound, it is where `allowUnset` LANDS: `Stepper.step` sends `String(min)` when the value is unset. So while `min` was 0, one press of '+' from 'Auto (1)' dispatched the string '0' — the entire operator-reachable route into duplicate creatives was a single click on a control that had just been showing the number 1, and it read as a no-op. Under the mutant that press is restored and the editor immediately paints a validation error on a field the operator has only stepped up, which is the confusing half of the bug rather than the dangerous half. Caught by asserting the DISPATCHED VALUE out of unset, not the rendered bound: an `aria-valuemin` check alone would pass on a stepper that still emitted '0' if `step` were written differently, and the value is what reaches the brief.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/sections/__tests__/policy-section.test.tsx",
+        "-t",
+        "an unset min distance reads as the planner's default, and stepping up sets it"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

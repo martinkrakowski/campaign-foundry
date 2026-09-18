@@ -148,7 +148,7 @@ export const count = "Count is empty — set it to 1 or more with the Count slid
 export const seed = "Seed needs a whole number — press Random, or leave it blank.";
 /** `minDistance` */
 export function minDistance(maxDistance: number): string {
-  return `Min distance can be 0 to ${maxDistance} right now — move the Min distance slider back into that range.`;
+  return `Min distance can be 1 to ${maxDistance} right now — move the Min distance slider back into that range.`;
 }
 /** `perProduct` */
 export const perProduct =
@@ -310,7 +310,7 @@ export function hintCount(axisMax: number): string {
 }
 /** `hint.minDistance` */
 export function hintMinDistance(max: number): string {
-  return `How different any two creatives must be — 0 means any two can match, ${max} means they differ in everything`;
+  return `How different any two creatives must be — 1 means no two are the same, ${max} means they differ in everything`;
 }
 /** `hint.seed` */
 export const hintSeed =

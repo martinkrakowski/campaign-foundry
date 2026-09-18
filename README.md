@@ -312,8 +312,10 @@ output:
   mixes PNGs and clips — `axisProductSize` counts it once per base combination
   (base × (|motion| × |duration| + 1)), never per duration; `motion` and
   `durationSec` are Hamming axes, and
-  `minDistance` is bounded by the axes the brief activates (6 for a static
-  brief, 8 once motion is on). With `output.platforms` set, clips are drawn
+  `minDistance` runs from **1** to the axes the brief activates (6 for a static
+  brief, 8 once motion is on) — 1 is the floor because Hamming 0 is *the same
+  point in the space*, so anything lower would let a plan repeat a creative; an
+  omitted `minDistance` already meant 1, and a stored `0` is read as 1. With `output.platforms` set, clips are drawn
   only for the ratios of the requested *motion* platforms (`instagram-reel` →
   9:16 only; a 1:1 clip could not be packaged anywhere) — other ratios stay
   stills. Static briefs draw exactly as before — goldens and `policyHash` are
