@@ -3048,6 +3048,16 @@ describe("BriefPage — the preview rail (R7)", () => {
   };
 
   const preview = () => screen.getByRole("complementary", { name: messages.previewLegend });
+  /**
+   * SG4 — the view switch, which is the MIDDLE column's and not the rail's. It is
+   * located by its own group so every assertion below can say which surface it
+   * scoped to: a bare `screen.getByText(/targetRegion/)` would be satisfied by the
+   * YAML in either column and would pass on the exact defect this lane guards.
+   */
+  const views = () => screen.getByRole("group", { name: messages.columnViews });
+  const viewButton = (name: string) => within(views()).getByRole("button", { name });
+  /** The column's YAML panel, by the marker the panel itself carries. */
+  const columnYaml = () => screen.getByTestId("column-yaml");
   // The rail describe's brief carries an output block, so the caption names a platform.
   const okEntry = {
     file: "ok.yaml",
@@ -3179,28 +3189,115 @@ describe("BriefPage — the preview rail (R7)", () => {
     expect(mountedFrameCount()).toBe(0);
   });
 
-  test("the two views are exclusive: the eye shows the preview, the code glyph shows the YAML (D61)", async () => {
+  /**
+   * **SG4's first red fault: the switch controls the MIDDLE column.**
+   *
+   * The easy mistake in this lane is to move the control and leave it wired to
+   * the rail — the buttons in their new home, the swap still happening in the old
+   * one. So this drives both surfaces at once: the column must swap, and the
+   * rail's composed frame must still be MOUNTED afterwards (D43's count, which is
+   * about mounting and not CSS visibility — the viewport gate hides the rail
+   * without unmounting it, and happy-dom applies no CSS at all).
+   *
+   * Every read is scoped. `columnYaml()` is the column's own panel marker, the
+   * frame count is taken over the whole document and then again inside the rail,
+   * and the rail is asserted to hold no `<pre>` of its own — so this cannot pass
+   * by finding the YAML in the wrong column.
+   */
+  test("selecting `yaml` swaps the middle column and leaves the rail's preview mounted (SG-D4, D43)", async () => {
     const user = userEvent.setup();
     routes({ list: () => json({ briefs: [okEntry] }) });
     renderWithRun(<Editor id="ok" />);
     await adopt(user, "ok");
-    const rail = preview();
-    const eye = () => within(rail).getByRole("button", { name: messages.previewRailPreviewView });
-    const code = () => within(rail).getByRole("button", { name: messages.previewRailYamlView });
-    expect(eye().getAttribute("aria-pressed")).toBe("true");
-    expect(code().getAttribute("aria-pressed")).toBe("false");
+    await waitFor(() => expect(mountedFrameCount()).toBe(1));
 
-    await user.click(code());
-    // One slot, one view: the YAML replaced the preview — never side by side.
-    expect(within(rail).getByText(/targetRegion: /)).toBeTruthy();
-    expect(within(rail).queryByText(/"targetRegion":/)).toBeNull();
-    expect(within(rail).queryByText(messages.previewLegend)).toBeNull();
-    expect(eye().getAttribute("aria-pressed")).toBe("false");
-    expect(code().getAttribute("aria-pressed")).toBe("true");
+    // The switch is over the column, not in the rail.
+    expect(preview().contains(views())).toBe(false);
+    const editorBtn = () => viewButton(messages.columnEditorView);
+    const yamlBtn = () => viewButton(messages.columnYamlView);
+    expect(editorBtn().getAttribute("aria-pressed")).toBe("true");
+    expect(yamlBtn().getAttribute("aria-pressed")).toBe("false");
+    // The form is the column's content to begin with.
+    expect(document.getElementById("identity")).toBeTruthy();
 
-    await user.click(eye());
-    expect(within(rail).getByText(messages.previewLegend)).toBeTruthy();
-    expect(within(rail).queryByText(/targetRegion: /)).toBeNull();
+    await user.click(yamlBtn());
+
+    // (a) The COLUMN swapped: the document is on screen where the form was, and
+    //     the form is gone from the tree — exclusive, never side by side.
+    expect(columnYaml().textContent).toMatch(/targetRegion: /);
+    expect(document.getElementById("identity")).toBeNull();
+    expect(screen.queryByLabelText(messages.targetAudienceLabel)).toBeNull();
+    // Real YAML, not a JSON body under a YAML name (CodeRabbit, PR #174).
+    expect(columnYaml().textContent).not.toMatch(/"targetRegion":/);
+    expect(editorBtn().getAttribute("aria-pressed")).toBe("false");
+    expect(yamlBtn().getAttribute("aria-pressed")).toBe("true");
+
+    // (b) The RAIL was left alone: still exactly one composed frame, still the
+    //     rail's, and the rail has no YAML of its own to have swapped to.
+    expect(mountedFrameCount()).toBe(1);
+    expect(preview().querySelectorAll('[data-testid="preview-frame"]').length).toBe(1);
+    expect(preview().querySelector("pre")).toBeNull();
+    expect(within(preview()).getByText(messages.previewLegend)).toBeTruthy();
+
+    // And back: the form returns, the count never moved.
+    await user.click(editorBtn());
+    expect(document.getElementById("identity")).toBeTruthy();
+    expect(screen.queryByTestId("column-yaml")).toBeNull();
+    expect(mountedFrameCount()).toBe(1);
+  });
+
+  /**
+   * **SG4's fifth red fault: exactly two positions.**
+   *
+   * SG-D13 grows this control to `editor │ yaml │ validate`, but the validation
+   * view is SG10 and is not dispatched. A third segment wired to nothing is a
+   * surface that exists, looks live and shows nothing — so the count is pinned
+   * here, and `validate` cannot arrive by accident before the view it reveals.
+   */
+  test("the switch offers exactly two positions — `validate` is SG10's and is not here", async () => {
+    const user = userEvent.setup();
+    routes({ list: () => json({ briefs: [okEntry] }) });
+    renderWithRun(<Editor id="ok" />);
+    await adopt(user, "ok");
+
+    const buttons = within(views()).getAllByRole("button");
+    expect(buttons).toHaveLength(2);
+    expect(buttons.map((b) => b.getAttribute("aria-label"))).toEqual([
+      messages.columnEditorView,
+      messages.columnYamlView,
+    ]);
+  });
+
+  /**
+   * **SG4's third red fault: the YAML view shows the PROJECTION.**
+   *
+   * `toBrief(state)` is what `Save` sends. Rendering `state` instead would put a
+   * value on screen that never reached the document — the defect the deleted
+   * Review step existed to catch (SG-D8).
+   *
+   * The probe is a field where the two actually DISAGREE, which is what keeps
+   * this from being a tautology: `editor-state.ts`'s `toBrief` trims
+   * `localizedMessage` on the way out, while `CopySection` writes the raw input
+   * into `state`. So a padded value is `"  ja  "` in `state` and `"ja"` in the
+   * projection, and js-yaml quotes the padded one (`localizedMessage: '  ja  '`)
+   * — two spellings that cannot be confused. Both are asserted: the projection's
+   * present, the state's absent.
+   */
+  test("the YAML view renders the projection, not the editor state (SG-D8)", async () => {
+    const user = userEvent.setup();
+    routes({ list: () => json({ briefs: [okEntry] }) });
+    renderWithRun(<Editor id="ok" />);
+    await adopt(user, "ok");
+
+    await user.type(screen.getByLabelText(messages.localizedHeadlineLabel), "  ja  ");
+    await user.click(viewButton(messages.columnYamlView));
+
+    const yaml = columnYaml().textContent ?? "";
+    // What `Save` sends: trimmed, unquoted.
+    expect(yaml).toMatch(/localizedMessage: ja\n/);
+    // What `state` holds and the document does NOT: js-yaml quotes a padded
+    // string, so the state spelling is unmistakable — and must not be here.
+    expect(yaml).not.toContain("'  ja  '");
   });
 
   /**
@@ -3219,9 +3316,45 @@ describe("BriefPage — the preview rail (R7)", () => {
     // wrongly-shared memo would fail to reflect.
     await user.type(screen.getByLabelText(messages.targetAudienceLabel), " plus more");
 
-    const rail = preview();
-    await user.click(within(rail).getByRole("button", { name: messages.previewRailYamlView }));
-    expect(within(rail).getByText(/targetAudience: a plus more/)).toBeTruthy();
+    await user.click(viewButton(messages.columnYamlView));
+    expect(columnYaml().textContent).toMatch(/targetAudience: a plus more/);
+  });
+
+  /**
+   * **SG4 — a reveal must make the sections exist before it scrolls.**
+   *
+   * In the `yaml` view the whole form is unmounted, so `revealSection`'s
+   * `target?.scrollIntoView` finds nothing and returns in silence. The action bar
+   * is NOT hidden by the switch, so without the flip in `reveal` an operator
+   * could press Save on an invalid draft while the document is up and be told
+   * nothing, on a surface that looks perfectly live.
+   *
+   * Driven through the Sections outline, whose rows call the same `reveal`: the
+   * row is published into the shell and stays reachable in both views.
+   */
+  test("a reveal from the `yaml` view flips back to the editor and then scrolls (SG4)", async () => {
+    const scroller = vi.fn();
+    Element.prototype.scrollIntoView = scroller;
+    const user = userEvent.setup();
+    routes({ list: () => json({ briefs: [okEntry] }) });
+    renderWithRun(<Editor id="ok" />);
+    await adopt(user, "ok");
+
+    await user.click(viewButton(messages.columnYamlView));
+    expect(document.getElementById("layout")).toBeNull();
+    scroller.mockClear();
+
+    await user.click(await screen.findByRole("button", { name: "Layout" }));
+
+    // The view flipped...
+    expect(viewButton(messages.columnEditorView).getAttribute("aria-pressed")).toBe("true");
+    // ...and the scroll landed on the section itself, not on nothing. A flip
+    // without `flushSync` would have scrolled against the YAML `<pre>` and this
+    // would hold no section element at all.
+    const section = document.getElementById("layout") as HTMLElement;
+    expect(section).toBeTruthy();
+    expect(scroller.mock.instances).toContain(section);
+    expect(document.activeElement).toBe(section);
   });
 
   /** POST calls to the preview-frame route specifically — never conflated with
@@ -3256,30 +3389,50 @@ describe("BriefPage — the preview rail (R7)", () => {
     expect(previewFetchCalls(calls).length).toBe(before);
   });
 
-  test("zero /preview-frame calls while the YAML view is showing, even for an edit that would otherwise refetch", async () => {
+  /**
+   * **SG4's fourth red fault, and a property that CHANGED — declared, not hidden.**
+   *
+   * The test this replaces asserted *"zero `/preview-frame` calls while the YAML
+   * view is showing, even for an edit that would otherwise refetch"*. That held
+   * for one reason only: the YAML view was the RAIL's, so selecting it unmounted
+   * `PreviewDock` and there was nothing left to fetch. With the switch on the
+   * middle column the rail keeps previewing while the document is on screen —
+   * which is the point of putting them in two columns — so a headline edit under
+   * `yaml` refetches exactly as it does under `editor`. **The old property is gone
+   * and is recorded in the PR body as what the move cost.**
+   *
+   * What must still hold, and is asserted here, is that the SWITCH ITSELF costs
+   * nothing: CC1/CC2's contract is about the rail not re-fetching for changes it
+   * does not care about, and a view the rail does not read is the purest such
+   * change. This is the assertion the wired-to-the-rail defect fails — gating the
+   * rail's body on the column's view unmounts the dock on `yaml` and remounts it
+   * on `editor`, and a remount pays a fresh request.
+   */
+  test("flipping the view switch issues zero /preview-frame calls — the rail does not read it (CC2)", async () => {
     const user = userEvent.setup();
     const calls = routes({ list: () => json({ briefs: [fetchableEntry] }) });
     renderWithRun(<Editor id="fetch" />);
     await adopt(user, "fetch");
     await outlastDebounce();
-    expect(previewFetchCalls(calls).length).toBeGreaterThan(0); // the mount's own fetch actually happened
-
-    await user.click(within(preview()).getByRole("button", { name: messages.previewRailYamlView }));
     const before = previewFetchCalls(calls).length;
+    // The mount's own (legitimate) fetch actually happened — without this the
+    // "no more calls" assertion below could agree for a reason that has nothing
+    // to do with the switch.
+    expect(before).toBeGreaterThan(0);
 
-    // The headline (`campaignMessage`) rides the compositor's `message` field
-    // (`PreviewCreativeFrameUseCase.buildCompositeRequest`) — an edit that
-    // WOULD refetch in the preview view (proved by the sibling test below,
-    // which makes the same edit there). While the rail's mounted body is the
-    // YAML `<pre>`, `PreviewDock` (and the `usePreviewFrame` inside it) is not
-    // mounted at all, so nothing can fetch regardless of what changes.
-    await user.type(screen.getByLabelText(messages.headlineLabel), "!");
+    await user.click(viewButton(messages.columnYamlView));
     await outlastDebounce();
-
     expect(previewFetchCalls(calls).length).toBe(before);
+
+    await user.click(viewButton(messages.columnEditorView));
+    await outlastDebounce();
+    expect(previewFetchCalls(calls).length).toBe(before);
+    // And the rail was there throughout — a rail that had unmounted would also
+    // have issued no calls, which is the vacuous way to pass this.
+    expect(mountedFrameCount()).toBe(1);
   });
 
-  test("editing the headline in the PREVIEW view does refetch — the sibling proof that the YAML test above is not vacuous", async () => {
+  test("editing the headline in the preview does refetch — the sibling proof that the counts above are not vacuous", async () => {
     const user = userEvent.setup();
     const calls = routes({ list: () => json({ briefs: [fetchableEntry] }) });
     renderWithRun(<Editor id="fetch" />);
@@ -3321,27 +3474,44 @@ describe("BriefPage — the preview rail (R7)", () => {
     }
   });
 
-  test("the rail remembers its last view across a remount", async () => {
+  /**
+   * The column remembers its last view, as the rail's switcher always did — and
+   * this test says out loud what that now means, because the stakes moved with the
+   * control. The rail's remembered view chose the content of a side panel; this
+   * one chooses whether the operator arrives at the FORM or at a read-only
+   * document. A returning `yaml` choice means there is no Campaign Name field to
+   * greet them with, which is why the load is confirmed through the projection
+   * here rather than through a field: the field is legitimately absent.
+   *
+   * It is recorded rather than quietly changed. Persistence is the behaviour of the
+   * control this lane moved, and dropping it would be an undeclared change in the
+   * other direction; the PR body flags the landing for the owner.
+   */
+  test("the column remembers its last view across a remount, form and all", async () => {
     const user = userEvent.setup();
     routes({ list: () => json({ briefs: [okEntry] }) });
     const first = renderWithRun(<Editor id="ok" />);
     await adopt(user, "ok");
-    await user.click(within(preview()).getByRole("button", { name: messages.previewRailYamlView }));
-    expect(within(preview()).getByText(/targetRegion: /)).toBeTruthy();
+    await user.click(viewButton(messages.columnYamlView));
+    expect(columnYaml().textContent).toMatch(/targetRegion: /);
     first.unmount();
 
-    // A fresh editor reads the last choice before anything renders.
+    // A fresh editor reads the last choice on mount: the brief loads (its id is in
+    // the projection) and the document, not the form, is what is on screen.
     renderWithRun(<Editor id="ok" />);
-    await waitFor(() =>
-      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("ok"),
-    );
-    expect(within(preview()).getByText(/targetRegion: /)).toBeTruthy();
+    await waitFor(() => expect(columnYaml().textContent).toMatch(/^id: ok$/m));
+    expect(screen.queryByLabelText("Campaign Name")).toBeNull();
+    expect(viewButton(messages.columnYamlView).getAttribute("aria-pressed")).toBe("true");
+
+    // ...and the form is one press away, with the loaded brief in it.
+    await user.click(viewButton(messages.columnEditorView));
+    expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("ok");
   });
 
-  test("broken rail-view storage falls back to the preview view", async () => {
+  test("broken column-view storage falls back to the editor view", async () => {
     const realGet = globalThis.localStorage.getItem.bind(globalThis.localStorage);
     const spy = vi.spyOn(globalThis.localStorage, "getItem").mockImplementation((key: string) => {
-      if (key === "cf:preview-rail-view") throw new Error("storage gone");
+      if (key === "cf:editor-column-view") throw new Error("storage gone");
       return realGet(key);
     });
     const user = userEvent.setup();
@@ -3349,19 +3519,19 @@ describe("BriefPage — the preview rail (R7)", () => {
     renderWithRun(<Editor id="ok" />);
     await adopt(user, "ok");
 
-    // A blocked store reads as the preview view, the same fallback as an absent key.
-    // Awaited for the same reason as the frame count above: the published rail
-    // catches up with the loaded brief one commit later.
-    await waitFor(() => expect(within(preview()).getByText(messages.previewLegend)).toBeTruthy());
+    // A blocked store reads as the editor view, the same fallback as an absent key —
+    // and the form, not the document, is what an operator lands on.
+    expect(screen.queryByTestId("column-yaml")).toBeNull();
+    expect(viewButton(messages.columnEditorView).getAttribute("aria-pressed")).toBe("true");
     spy.mockRestore();
   });
 
-  test("a rail choice that cannot reach storage does not break the switcher", async () => {
+  test("a view choice that cannot reach storage does not break the switch", async () => {
     const realSet = globalThis.localStorage.setItem.bind(globalThis.localStorage);
     const spy = vi
       .spyOn(globalThis.localStorage, "setItem")
       .mockImplementation((key: string, value: string) => {
-        if (key === "cf:preview-rail-view") throw new Error("storage gone");
+        if (key === "cf:editor-column-view") throw new Error("storage gone");
         return realSet(key, value);
       });
     const user = userEvent.setup();
@@ -3369,8 +3539,8 @@ describe("BriefPage — the preview rail (R7)", () => {
     renderWithRun(<Editor id="ok" />);
     await adopt(user, "ok");
 
-    await user.click(within(preview()).getByRole("button", { name: messages.previewRailYamlView }));
-    expect(within(preview()).getByText(/targetRegion: /)).toBeTruthy();
+    await user.click(viewButton(messages.columnYamlView));
+    expect(columnYaml().textContent).toMatch(/targetRegion: /);
     spy.mockRestore();
   });
 
@@ -3496,11 +3666,11 @@ describe("BriefPage — the Layout section (T7)", () => {
 
     await user.click(screen.getByRole("button", { name: "Lora" }));
 
-    // The projection is on screen in the rail's YAML view, which the rail now
-    // serves unconditionally (SG1 removed the per-step suppression).
-    const rail = screen.getByRole("complementary", { name: messages.previewLegend });
-    await user.click(within(rail).getByRole("button", { name: messages.previewRailYamlView }));
-    expect(within(rail).getByText(/fontFamily: Lora/)).toBeTruthy();
+    // The projection is on screen in the COLUMN's YAML view (SG-D4): the switch
+    // moved out of the rail and onto the column it controls.
+    const views = screen.getByRole("group", { name: messages.columnViews });
+    await user.click(within(views).getByRole("button", { name: messages.columnYamlView }));
+    expect(screen.getByTestId("column-yaml").textContent).toMatch(/fontFamily: Lora/);
   });
 });
 

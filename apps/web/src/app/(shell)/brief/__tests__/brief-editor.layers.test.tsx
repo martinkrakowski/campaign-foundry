@@ -175,11 +175,18 @@ const mountEditor = async (briefs?: readonly unknown[]) => {
   await settle();
 };
 
-/** The rail's YAML projection, as text — the serialised brief, byte for byte. */
-const railYaml = async (user: ReturnType<typeof userEvent.setup>) => {
-  await user.click(within(rail()).getByRole("button", { name: messages.previewRailYamlView }));
-  const yaml = within(rail()).getByText(/schemaVersion/).textContent ?? "";
-  await user.click(within(rail()).getByRole("button", { name: messages.previewRailPreviewView }));
+/**
+ * SG4 — the view switch is the MIDDLE column's now, not the rail's, so the YAML
+ * is read there. The switch is found by its group, which is the control's own
+ * landmark and is not inside the rail.
+ */
+const viewSwitch = () => screen.getByRole("group", { name: messages.columnViews });
+
+/** The column's YAML projection, as text — the serialised brief, byte for byte. */
+const columnYaml = async (user: ReturnType<typeof userEvent.setup>) => {
+  await user.click(within(viewSwitch()).getByRole("button", { name: messages.columnYamlView }));
+  const yaml = screen.getByTestId("column-yaml").textContent ?? "";
+  await user.click(within(viewSwitch()).getByRole("button", { name: messages.columnEditorView }));
   return yaml;
 };
 
@@ -228,12 +235,17 @@ describe("the layer stack exists exactly once in the tree (CC3, plan §4.6)", ()
     const user = userEvent.setup();
     await mountEditor();
 
-    // D61's switcher is exclusive between the composed preview and the YAML —
-    // the layers are neither, and the only stack in the tree must not vanish
-    // behind a read-only view.
-    await user.click(within(rail()).getByRole("button", { name: messages.previewRailYamlView }));
+    // SG4 — the switch moved to the middle column and it must not reach into the
+    // rail: the only layer stack in the tree lives there, so a switch that swapped
+    // the rail as well as the column would hide the layers behind a read-only view
+    // of the document. The stack is counted while `yaml` is showing, and the
+    // switch's own group is asserted to be OUTSIDE the rail, so this cannot pass
+    // by finding a second control that happens to sit in the right place.
+    expect(rail().contains(viewSwitch())).toBe(false);
+    await user.click(within(viewSwitch()).getByRole("button", { name: messages.columnYamlView }));
+    expect(screen.getByTestId("column-yaml")).toBeTruthy();
     expect(mountedStackCount()).toBe(1);
-    await user.click(within(rail()).getByRole("button", { name: messages.previewRailPreviewView }));
+    await user.click(within(viewSwitch()).getByRole("button", { name: messages.columnEditorView }));
 
     // And with no product id there is no creative to compose (D142) — but the
     // template is real either way. A stack that disappeared here would be a
@@ -263,7 +275,7 @@ describe("picking a layer changes no document byte (CC3, D139)", () => {
     );
     await settle();
 
-    const before = await railYaml(user);
+    const before = await columnYaml(user);
     // A real projection, not an empty string: an assertion that two blanks are
     // equal would pass whatever the click did.
     expect(before).toContain("schemaVersion");
@@ -271,7 +283,7 @@ describe("picking a layer changes no document byte (CC3, D139)", () => {
 
     await user.click(pick("accent", "Accent"));
     expect(pick("accent", "Accent").getAttribute("aria-pressed")).toBe("true");
-    expect(await railYaml(user)).toBe(before);
+    expect(await columnYaml(user)).toBe(before);
 
     // The guard asks only about unsaved work, so its silence IS the dirty flag
     // (D67): a selection that had reached `EditorState` would open this dialog.
@@ -336,14 +348,14 @@ describe("picking a layer changes no document byte (CC3, D139)", () => {
     );
     await settle();
 
-    const before = await railYaml(user);
+    const before = await columnYaml(user);
     await user.click(
       within(rail()).getByRole("button", {
         name: "accent",
         description: messages.templateDisableDescription("Accent"),
       }),
     );
-    expect(await railYaml(user)).not.toBe(before);
+    expect(await columnYaml(user)).not.toBe(before);
     await user.click(screen.getByRole("button", { name: /Create new/ }));
     expect(await screen.findByRole("dialog", { name: messages.confirmDialogTitle })).toBeTruthy();
   });

@@ -609,21 +609,43 @@ describe("§5 — the cost contract, re-measured with the rail across the bounda
     expect(within(rail()).getAllByTestId("preview-frame")).toHaveLength(1);
   });
 
-  test("the rail's YAML view still reads the LIVE draft across the push (D61, CC1 mutation (c))", async () => {
-    // The push happens in an effect, so a dependency missed in `railSlot`'s
-    // `useCallback` list would leave the rail showing a draft one keystroke stale
-    // — invisible to every count above, because a stale subtree re-renders less,
-    // not more.
+  /**
+   * **SG4 — this test used to drive the RAIL's YAML view, and the rail has none.**
+   *
+   * It read: *"the rail's YAML view still reads the LIVE draft across the push"*,
+   * and it was the proof for `rs.json`'s eighth mutation — dropping `draftBrief`
+   * from `railSlot`'s `useCallback` list, which would have left the rail showing a
+   * draft one keystroke stale. SG-D4 moves the one switch onto the middle column,
+   * so the rail stops reading `draftBrief` at all: that dependency is gone from
+   * the list legitimately, and **`rs.json` #8 is now the shipped code rather than
+   * a mutation of it.** That is reported in the PR body, not re-authored here.
+   *
+   * What replaces it is the decision itself, pinned at the shell level where the
+   * rail is actually placed: the rail carries NO view switcher and no document
+   * view. The wireframe draws one switch; two would be two controls with one
+   * vocabulary competing for the same corner (the plan's M1). The live-draft
+   * property it used to guard is asserted for the column, in
+   * `brief-editor.test.tsx` — the column reads `draftBrief` directly in render,
+   * with no `useCallback` list to miss it.
+   */
+  test("the rail carries no view switcher and no document view — the one switch is the column's (SG-D4)", async () => {
     await mountShellWithEditor();
-    fireEvent.click(within(rail()).getByRole("button", { name: messages.previewRailYamlView }));
-    // The YAML is one text node with real newlines in it, so it is read as text
-    // rather than queried: `getByText` normalises whitespace and would collapse
-    // the document into one line.
-    const yaml = () => rail().querySelector("pre")?.textContent ?? "";
-    expect(yaml()).toContain("targetAudience: a\n");
 
-    const audience = screen.getByLabelText("Target Audience") as HTMLInputElement;
-    fireEvent.change(audience, { target: { value: "edited audience" } });
-    await waitFor(() => expect(yaml()).toContain("targetAudience: edited audience"));
+    expect(within(rail()).queryByRole("group", { name: messages.columnViews })).toBeNull();
+    expect(rail().querySelector("pre")).toBeNull();
+    expect(within(rail()).queryByRole("button", { name: messages.columnYamlView })).toBeNull();
+    expect(within(rail()).queryByRole("button", { name: messages.columnEditorView })).toBeNull();
+
+    // The switch exists — outside the rail. Without this the four negatives above
+    // would all hold on a build that shipped no switcher at all.
+    const views = screen.getByRole("group", { name: messages.columnViews });
+    expect(rail().contains(views)).toBe(false);
+    expect(within(views).getAllByRole("button")).toHaveLength(2);
+
+    // And the rail still holds the composed frame while the column swaps.
+    fireEvent.click(within(views).getByRole("button", { name: messages.columnYamlView }));
+    await waitFor(() => expect(screen.getByTestId("column-yaml")).toBeTruthy());
+    expect(mountedFrameCount()).toBe(1);
+    expect(within(rail()).getAllByTestId("preview-frame")).toHaveLength(1);
   });
 });

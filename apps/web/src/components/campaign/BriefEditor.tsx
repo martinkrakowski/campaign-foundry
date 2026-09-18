@@ -10,6 +10,9 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
+// SG4 — the reveal flips the column view and then scrolls, and the scroll needs a
+// DOM that already has the section in it. See `reveal`.
+import { flushSync } from "react-dom";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { Button, Input, OverflowMenu, ConfirmDialog, useDialogFocusTrap } from "@/components/ui";
 import { useRun } from "@/lib/run-context";
@@ -117,33 +120,119 @@ import type { CampaignMode } from "@/components/campaign/editor-state";
  * returning operator's `localStorage` simply stops meaning anything.
  */
 
-/** The two views the preview rail switches between (D61) — exclusive, never side by side. */
-type RailView = "preview" | "yaml";
-
-const RAIL_VIEW_KEY = "cf:preview-rail-view";
+/* ── The middle column's views (SG-D4) ───────────────────────────────────── */
 
 /**
- * The one rail view the editor reads or writes, closed over two values — the same
- * guarded pair the presentation reads, so a private-mode store can neither throw
- * nor leave the two controls disagreeing about the last choice.
+ * SG4 — the views the MIDDLE column switches between, exclusive, never side by
+ * side.
+ *
+ * This pair used to be `RailView = "preview" | "yaml"` and the switcher that
+ * drove it lived inside the rail, so the control changed what the RAIL showed
+ * (D61). The owner's wireframe puts one switch over the middle column, annotated
+ * *"Controls middle content area"*, and **SG-D4 stamps it**: the switch lives
+ * within the middle content panel. So the state moved here, the rail became
+ * preview-only, and D61's "the rail's read-only second view" is superseded — the
+ * rail has no second view any more.
+ *
+ * **Two positions, and the third is deliberately absent.** SG-D13 grows this
+ * control to `editor │ yaml │ validate`, but the validation view is **SG10 and is
+ * not dispatched**. A third segment wired to nothing is a surface that exists,
+ * looks live and shows nothing, so it is not shipped here. What IS shipped is the
+ * shape that makes SG10 additive rather than a rewrite: the control renders by
+ * mapping `COLUMN_VIEWS`, and every per-view fact is a `Record<ColumnView, …>` —
+ * so adding `"validate"` to the union is a **typecheck failure** until a label, a
+ * glyph and a panel exist for it. The type is what refuses the wired-to-nothing
+ * segment; `sg4.json`'s fifth mutation is that refusal, observed.
  */
-function readRailView(): RailView {
+type ColumnView = "editor" | "yaml";
+
+/**
+ * The positions, in the order they are offered. The control is rendered from this
+ * list rather than from two hand-written buttons, so a third position is one entry
+ * plus the records below — and the count test reads the DOM, not this array.
+ */
+const COLUMN_VIEWS: readonly ColumnView[] = ["editor", "yaml"];
+
+/**
+ * The key is NEW, not the rail's old one (`cf:preview-rail-view`), and nothing
+ * migrates it. The old key's values were `"preview" | "yaml"` and named a rail
+ * view; a returning operator whose store holds `"yaml"` under the old name must
+ * not have this column open on YAML with the form hidden on their first render,
+ * which is exactly what reusing the key would do. An orphaned value simply stops
+ * meaning anything, the way `cf:presentation` does since SG1.
+ */
+const COLUMN_VIEW_KEY = "cf:editor-column-view";
+
+/** A stored string is only a view if it is one of the offered positions. */
+function isColumnView(value: unknown): value is ColumnView {
+  return COLUMN_VIEWS.includes(value as ColumnView);
+}
+
+/**
+ * The one column view the editor reads or writes, closed over two values — a
+ * private-mode store can neither throw nor leave the control disagreeing with
+ * what is on screen.
+ */
+function readColumnView(): ColumnView {
   try {
-    const stored = window.localStorage.getItem(RAIL_VIEW_KEY);
-    if (stored === "preview" || stored === "yaml") return stored;
-    return "preview";
+    const stored = window.localStorage.getItem(COLUMN_VIEW_KEY);
+    if (isColumnView(stored)) return stored;
+    return "editor";
   } catch {
-    return "preview";
+    return "editor";
   }
 }
 
-function persistRailView(next: RailView): void {
+function persistColumnView(next: ColumnView): void {
   try {
-    window.localStorage.setItem(RAIL_VIEW_KEY, next);
+    window.localStorage.setItem(COLUMN_VIEW_KEY, next);
   } catch {
     // Storage unavailable in this context; the switch still works for the tab.
   }
 }
+
+/**
+ * The accessible name of each position — the names are ON the buttons, the glyphs
+ * below are decoration. A `Record` and not a `switch`: see `ColumnView`.
+ */
+const COLUMN_VIEW_LABEL: Record<ColumnView, string> = {
+  editor: messages.columnEditorView,
+  yaml: messages.columnYamlView,
+};
+
+/**
+ * The glyph of each position, `aria-hidden` because the button already has a name.
+ *
+ * The eye that used to mark the rail's preview segment is NOT reused for `editor`:
+ * an eye means "look at the composed creative", and this position is the brief's
+ * form. It gets a form glyph; `yaml` keeps the `</>` it has always had, which is
+ * the one piece of the old control a returning operator will recognise.
+ */
+const COLUMN_VIEW_GLYPH: Record<ColumnView, ReactNode> = {
+  editor: (
+    <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true" className="size-4">
+      <path
+        d="M4 6h16M4 12h10M4 18h7"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={2}
+        strokeLinecap="round"
+      />
+    </svg>
+  ),
+  yaml: (
+    <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true" className="size-4">
+      <path
+        d="m8 7-5 5 5 5M16 7l5 5-5 5M13.5 5l-3 14"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  ),
+};
 
 /* ── The playhead (CC5) ───────────────────────────────────────────────────── */
 
@@ -334,18 +423,18 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
     dialogRef: saveAsDialogRef,
     initialFocusRef: saveAsFieldRef,
   });
-  // D61 — the rail remembers its last view, the way the presentation remembers itself.
-  // "preview" on the FIRST render, always: the server has no storage, so reading it
+  // SG4 — the column remembers its last view, the way the rail's switcher used to.
+  // "editor" on the FIRST render, always: the server has no storage, so reading it
   // in the initializer renders one view there and the other here, and hydration
   // mismatches — the trap Disclosure documents. The remembered view applies on mount.
-  const [railView, setRailView] = useState<RailView>("preview");
+  const [columnView, setColumnView] = useState<ColumnView>("editor");
   useEffect(() => {
-    const stored = readRailView();
-    if (stored !== "preview") setRailView(stored);
+    const stored = readColumnView();
+    if (stored !== "editor") setColumnView(stored);
   }, []);
-  const chooseRailView = useCallback((next: RailView) => {
-    setRailView(next);
-    persistRailView(next);
+  const chooseColumnView = useCallback((next: ColumnView) => {
+    setColumnView(next);
+    persistColumnView(next);
   }, []);
   const [poolDrawerOpen, setPoolDrawerOpen] = useState(false);
   // M7 — which product opened the Asset Bin. The drawer itself renders at this
@@ -966,6 +1055,22 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
    */
   const reveal = useCallback(
     (section: string, focus = false) => {
+      // SG4 — a reveal must first make the sections exist. In the `yaml` view the
+      // whole form is UNMOUNTED, so `revealSection`'s `target?.scrollIntoView`
+      // finds nothing and returns in silence: pressing Save on an invalid draft,
+      // or an ErrorStrip chip in the action bar (which the switch does not hide),
+      // would name a section and move nowhere — a surface that looks live and does
+      // nothing, which is the defect class this editor keeps paying for. So the
+      // view flips first.
+      //
+      // `flushSync`, not a pending-reveal marker: the scroll has to happen against
+      // a DOM that already has the section in it, and inside an event handler a
+      // plain `setColumnView` is batched, so the two lines below would still run
+      // against the YAML `<pre>`. SG1 deleted exactly such a marker (W6.2's
+      // `pendingReveal` plus its layout effect) and re-adding it would restore the
+      // machinery for one case. A flip to the view already showing is React's own
+      // no-op — the state is identity-equal, so nothing re-renders.
+      flushSync(() => setColumnView("editor"));
       const host = section === MOTION_ERROR_KEY ? MOTION_HOST_SECTION : section;
       revealSection(section);
       if (focus) focusSection(host);
@@ -1133,127 +1238,74 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
    * Every value the body reads is therefore named below; a missing one leaves the
    * rail showing a stale draft, which no render count can see — a stale subtree
    * re-renders LESS, not more. The react-hooks lint plugin is not wired into this
-   * project's eslint config, so the list is maintained by hand, by
-   * `rail-in-shell.test.tsx`'s live-YAML assertion, and by `rs.json`'s mutation
-   * that drops one entry from it.
+   * project's eslint config, so the list is maintained by hand.
+   *
+   * **SG4 narrowed what can go wrong here.** The proof used to be
+   * `rail-in-shell.test.tsx`'s live-YAML assertion, which drove the rail's own
+   * YAML view and watched it follow a keystroke; the rail has no YAML view now, so
+   * every value below is memoised on a fingerprint and there is no live value in
+   * the list to miss. The remaining entries are still hand-maintained and still
+   * guarded by `rs.json`'s other mutations (the fetch gate, the layer-stack memo,
+   * the width gate) — none of which this lane touches.
    */
   const railSlot = useCallback(
     (playhead: PlayheadState): ReactNode => (
       <div className="flex flex-1 flex-col gap-3 overflow-y-auto p-4">
-        {/* The segmented switcher (D61): an eye for the preview, code for the
-          YAML view — exclusive, never side by side. The glyphs are decoration;
-          the names are on the buttons. */}
-        <div
-          role="group"
-          aria-label={messages.previewRailViews}
-          className="flex shrink-0 items-center gap-1"
-        >
-          <button
-            type="button"
-            aria-pressed={railView === "preview"}
-            aria-label={messages.previewRailPreviewView}
-            onClick={() => chooseRailView("preview")}
-            className={cn(
-              "rounded-md p-1.5 transition-colors",
-              railView === "preview"
-                ? "bg-surface-2 text-text-emphasis"
-                : "text-text-muted hover:bg-surface-2 hover:text-text-primary",
-            )}
-          >
-            <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true" className="size-4">
-              <path
-                d="M2 12s3.5-6.5 10-6.5S22 12 22 12s-3.5 6.5-10 6.5S2 12 2 12Z"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={2}
-              />
-              <circle cx="12" cy="12" r="2.75" fill="none" stroke="currentColor" strokeWidth={2} />
-            </svg>
-          </button>
-          <button
-            type="button"
-            aria-pressed={railView === "yaml"}
-            aria-label={messages.previewRailYamlView}
-            onClick={() => chooseRailView("yaml")}
-            className={cn(
-              "rounded-md p-1.5 transition-colors",
-              railView === "yaml"
-                ? "bg-surface-2 text-text-emphasis"
-                : "text-text-muted hover:bg-surface-2 hover:text-text-primary",
-            )}
-          >
-            <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true" className="size-4">
-              <path
-                d="m8 7-5 5 5 5M16 7l5 5-5 5M13.5 5l-3 14"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={2}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-          </button>
-        </div>
-        {railView === "preview" ? (
-          railProps !== null ? (
-            // CC2 — below the breakpoint, `brief` is withheld: `usePreviewFrame`
-            // (inside `PreviewDock` → `PreviewFrame`) treats an undefined brief
-            // exactly like an unspecified look and never builds a request, so a
-            // rail nobody can see never reaches the network.
-            <>
-              <PreviewDock
-                {...railProps}
-                brief={isRailWideEnough ? previewBrief : undefined}
-                playhead={playhead}
+        {/* SG4 — the rail is PREVIEW-ONLY. Its segmented switcher (D61, an eye
+          and a `</>`) and the YAML `<pre>` it revealed are both gone: SG-D4 puts
+          the one switch over the middle column, the wireframe draws exactly one,
+          and shipping a second here would be two controls with one vocabulary
+          competing for the same corner (the plan's M1). What the rail lost, and
+          what it gained, is declared in the PR body — not silently absorbed. */}
+        {railProps !== null ? (
+          // CC2 — below the breakpoint, `brief` is withheld: `usePreviewFrame`
+          // (inside `PreviewDock` → `PreviewFrame`) treats an undefined brief
+          // exactly like an unspecified look and never builds a request, so a
+          // rail nobody can see never reaches the network.
+          <>
+            <PreviewDock
+              {...railProps}
+              brief={isRailWideEnough ? previewBrief : undefined}
+              playhead={playhead}
+              host="rail"
+            />
+            {/* TS1 — the time surface, under the creative it belongs to. It
+              mounts ONLY for a moving draft: a still brief has no seconds to
+              draw, and a tape over a static creative would invite a scrub
+              that means nothing. `hasMotion` is the rail's own look, so the
+              tape and the dock's range appear and disappear together. */}
+            {railProps.motion !== undefined ? (
+              <TimelineTape
+                durationSec={playhead.durationSec}
+                beats={tapeBeats}
+                shortestDurationSec={shortestDurationSec}
+                scrubSec={playhead.scrubSec}
+                committedSec={playhead.committedSec}
+                selectedBeatIndex={selectedBeatIndex}
+                onScrubLive={playhead.onScrubLive}
+                onScrubCommit={playhead.onScrubCommit}
+                onSelectBeat={setSelectedBeatIndex}
                 host="rail"
               />
-              {/* TS1 — the time surface, under the creative it belongs to. It
-                mounts ONLY for a moving draft: a still brief has no seconds to
-                draw, and a tape over a static creative would invite a scrub
-                that means nothing. `hasMotion` is the rail's own look, so the
-                tape and the dock's range appear and disappear together. */}
-              {railProps.motion !== undefined ? (
-                <TimelineTape
-                  durationSec={playhead.durationSec}
-                  beats={tapeBeats}
-                  shortestDurationSec={shortestDurationSec}
-                  scrubSec={playhead.scrubSec}
-                  committedSec={playhead.committedSec}
-                  selectedBeatIndex={selectedBeatIndex}
-                  onScrubLive={playhead.onScrubLive}
-                  onScrubCommit={playhead.onScrubCommit}
-                  onSelectBeat={setSelectedBeatIndex}
-                  host="rail"
-                />
-              ) : null}
-            </>
-          ) : (
-            // D142 — the empty state before the first product has an id: names
-            // the missing field, never "add a product" (the Products section
-            // already shows a stub) and never a fabricated placeholder creative.
-            <PreviewRailEmptyState campaignName={state.campaignName} />
-          )
+            ) : null}
+          </>
         ) : (
-          <pre className="overflow-auto text-[11px] text-text-primary">
-            {/* Real YAML, because that is what the label promises and what the
-              save path writes — a JSON body under a `</>`-YAML name showed a
-              format the pipeline never reads (CodeRabbit, PR #174). Always the
-              LIVE `draftBrief`, never the memoised `previewBrief`: this is the
-              rail's read-only SECOND view (D61) and must never lag the preview's
-              own memo boundary (CC1/CC2 mutation (c)). */}
-            {dump(draftBrief)}
-          </pre>
+          // D142 — the empty state before the first product has an id: names
+          // the missing field, never "add a product" (the Products section
+          // already shows a stub) and never a fabricated placeholder creative.
+          <PreviewRailEmptyState campaignName={state.campaignName} />
         )}
         {/* CC3 — the layers container under the creative, which is where the
-          owner's diagram puts it. Outside the view switcher on purpose: the
-          switcher is exclusive between the composed PREVIEW and the YAML
-          projection (D61), and a list of controls is neither — hiding the
-          only layer stack in the tree behind a read-only view would make it
-          unreachable while that view is up. Outside the `railProps !== null`
-          branch for the same kind of reason: the template is real whether or
-          not the first product has an id yet (D142 is about the preview), and
-          answering "no layers" because the preview has nothing to draw would
-          be a failure dressed as an empty result. */}
+          owner's diagram puts it. It used to be outside the rail's own view
+          switcher on purpose, so a read-only view could not hide the only layer
+          stack in the tree; SG4 removes that switcher altogether, so the stack is
+          simply the rail's second surface and nothing can hide it. It stays
+          outside the `railProps !== null` branch for the reason that always
+          applied: the template is real whether or not the first product has an id
+          yet (D142 is about the preview), and answering "no layers" because the
+          preview has nothing to draw would be a failure dressed as an empty
+          result. The middle column's `yaml` view cannot reach it either — that
+          switch swaps the COLUMN, and the rail is not in its subtree. */}
         <LayerStack
           {...layerStack}
           dispatch={dispatch}
@@ -1263,9 +1315,6 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
       </div>
     ),
     [
-      // The rail's own view state and its switcher.
-      railView,
-      chooseRailView,
       // The preview: memoised on the content fingerprint (CC1), plus the gate
       // that withholds `brief` while the column is CSS-hidden (CC2).
       railProps,
@@ -1280,12 +1329,17 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
       dispatch,
       pickedLayerId,
       pickLayer,
-      // The YAML view reads the LIVE draft, never the memoised preview brief
-      // (D61, CC1 mutation (c)) — so it is a dependency and the rail is
-      // republished on every keystroke, which is the point.
-      draftBrief,
       // D142's empty state names the campaign.
       state.campaignName,
+      // SG4 — `railView`, `chooseRailView` and `draftBrief` were all here and are
+      // all gone, because the rail no longer reads any of them. `draftBrief` is
+      // the consequential one: it was the LIVE projection, so the rail was
+      // republished on every keystroke by design. With the YAML view moved to the
+      // middle column, every value the rail reads is memoised on a fingerprint,
+      // so a look-preserving keystroke now republishes NOTHING — one fewer shell
+      // render each. `rs.json`'s eighth mutation dropped `draftBrief` from this
+      // list to prove the rail could go stale; after this lane that mutation IS
+      // the correct list, which is reported rather than re-authored.
     ],
   );
 
@@ -1786,6 +1840,118 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
     );
   }
 
+  /**
+   * SG4 — what the middle column shows, one entry per position of the switcher.
+   *
+   * **A `Record<ColumnView, ReactNode>` and not a ternary, on purpose.** SG-D13
+   * grows the control to `editor │ yaml │ validate` and SG10 is the lane that
+   * brings the validation view. With a ternary, adding `"validate"` to the union
+   * compiles and renders a third segment over an unchanged `editor` panel — the
+   * wired-to-nothing surface this lane refuses to ship. With this record it is a
+   * **typecheck failure** until a panel exists, so the third position cannot
+   * arrive before the view it shows. SG10 adds one key here, one label, one glyph
+   * and one entry in `COLUMN_VIEWS`; nothing reshapes.
+   *
+   * Only the SELECTED entry is rendered — the others are elements that were
+   * built and never mounted, which costs an object and no DOM. That is what keeps
+   * D43's count at exactly one composed frame in both positions: in `yaml` the
+   * whole form (`LayoutSection` included) is out of the tree, and the rail still
+   * holds the only frame.
+   */
+  const columnPanels: Record<ColumnView, ReactNode> = {
+    /* SG1 — the sections, in the one scrolling column the editor now is. This is
+      the `everything` stack unchanged: `identity`, `copy`, `products`,
+      `treatments` (brief mode only), `template`, `layout` and `output`, each
+      where it already was. `policy` is the one section that has never been here —
+      it renders as the sidebar accordion published above, which is where
+      `everything` always put it. SG4 moved this block under the `editor` key and
+      changed nothing inside it. */
+    editor: (
+      <div className="space-y-8">
+        <div>
+          <IdentitySection
+            state={state}
+            dispatch={dispatch}
+            errors={sectionErrorsVisible("identity")}
+          />
+        </div>
+        <div>
+          <CopySection
+            state={state}
+            dispatch={dispatch}
+            errors={sectionErrorsVisible("copy")}
+            warnings={warnings.copy}
+            onOpenPool={() => setPoolDrawerOpen(true)}
+          />
+        </div>
+        <div>
+          <ProductsSection
+            state={state}
+            dispatch={dispatch}
+            errors={sectionErrorsVisible("products")}
+            onChooseFromBin={setAssetPickerKey}
+          />
+        </div>
+        <div>
+          {state.mode === "brief" ? (
+            <TreatmentsSection
+              state={state}
+              dispatch={dispatch}
+              errors={sectionErrorsVisible("treatments")}
+            />
+          ) : null}
+        </div>
+        {/* The layer list (L5): the offer is the boundary's own (D124). */}
+        <TemplateSection
+          state={state}
+          dispatch={dispatch}
+          errors={sectionErrorsVisible("template")}
+        />
+        {/* The template view (T7): the type block and NO frame. This is the
+            half of D43's one-composed-frame invariant that lives in the
+            column: the rail holds the only composed preview, so `preview`
+            must not be passed here. It is not a leftover of D43's original
+            "Guided-only" clause — D141 dropped that — the frame the Layout
+            STEP carried went with the step, and adding one back here would
+            put a second composed frame in the tree. */}
+        <LayoutSection state={state} dispatch={dispatch} errors={sectionErrorsVisible("layout")} />
+        <OutputSection
+          state={state}
+          dispatch={dispatch}
+          errors={{
+            ...sectionErrorsVisible("output"),
+            ...sectionErrorsVisible("motion"),
+          }}
+        />
+      </div>
+    ),
+    /* SG-D4 — the document, as the pipeline reads it.
+
+      Real YAML, because that is what the label promises and what the save path
+      writes: a JSON body under a `</>`-YAML name showed a format the pipeline
+      never reads (CodeRabbit, PR #174).
+
+      **`draftBrief` — the PROJECTION — and never `state`.** `draftBrief` is
+      `toBrief(state)`, the exact object `Save` sends, so what is on screen is the
+      document. Rendering `state` here would show a field the projection drops or
+      normalises (`localizedMessage` is trimmed on the way out, `mode`/`type`/
+      `output` are emitted only when they say something) as though it had reached
+      the document — a view of the brief that can disagree with the brief, which
+      is the defect the deleted Review step existed to catch (SG-D8).
+
+      And never the memoised `previewBrief`: that is fingerprinted on the LOOK
+      (CC1/CC2), so a keystroke the compositor does not care about would leave
+      this one edit stale. */
+    yaml: (
+      <pre
+        data-testid="column-yaml"
+        className="overflow-auto rounded-xl border border-border bg-surface p-4 text-[11px] text-text-primary"
+      >
+        {dump(draftBrief)}
+      </pre>
+    ),
+  };
+
   return (
     // No h-full / inner overflow: like every other view, this one flows and the
     // shell's main container is the scroller. The action bar stays put with
@@ -1811,7 +1977,8 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
             {/* SG1 — the header row: the brief selector and the draft's status
               chip. The presentation toggle stood on the right of it and is gone
               with `guided`; the chip is no longer conditional, because there is
-              no longer a StepHeader anywhere else announcing the same status. */}
+              no longer a StepHeader anywhere else announcing the same status.
+              SG-D4 gives the corner it vacated to the view switch. */}
             <div className="flex items-center gap-4">
               <BriefSelector
                 briefs={briefs}
@@ -1820,75 +1987,48 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
                 onCreateNew={createNew}
               />
               <StatusChip state={state} />
+              {/* SG-D4 — the switch that controls THIS column, over the column it
+                controls, which is where the owner's wireframe draws it
+                ("Controls middle content area"). It is rendered from
+                `COLUMN_VIEWS` rather than written out segment by segment, so
+                SG10's `validate` is an entry rather than a rewrite — and the
+                names are on the buttons, the glyphs are decoration.
+
+                It is NOT the kit's `SegBar`: that control's props are
+                `{ index, maxVisited, issues }` — the retired wizard's walk
+                vocabulary — and a view has no furthest-reached and no per-view
+                issue count. Wearing it would have carried the walk back into the
+                thing that replaced it. */}
+              <div
+                role="group"
+                aria-label={messages.columnViews}
+                className="ml-auto flex shrink-0 items-center gap-1"
+              >
+                {COLUMN_VIEWS.map((view) => (
+                  <button
+                    key={view}
+                    type="button"
+                    aria-pressed={columnView === view}
+                    aria-label={COLUMN_VIEW_LABEL[view]}
+                    onClick={() => chooseColumnView(view)}
+                    className={cn(
+                      "rounded-md p-1.5 transition-colors",
+                      columnView === view
+                        ? "bg-surface-2 text-text-emphasis"
+                        : "text-text-muted hover:bg-surface-2 hover:text-text-primary",
+                    )}
+                  >
+                    {COLUMN_VIEW_GLYPH[view]}
+                  </button>
+                ))}
+              </div>
             </div>
 
-            {/* SG1 — the sections, in the one scrolling column the editor now is.
-              This is the `everything` stack unchanged: `identity`, `copy`,
-              `products`, `treatments` (brief mode only), `template`, `layout` and
-              `output`, each where it already was. `policy` is the one section that
-              has never been here — it renders as the sidebar accordion published
-              above, which is where `everything` always put it. */}
-            <div className="space-y-8">
-              <div>
-                <IdentitySection
-                  state={state}
-                  dispatch={dispatch}
-                  errors={sectionErrorsVisible("identity")}
-                />
-              </div>
-              <div>
-                <CopySection
-                  state={state}
-                  dispatch={dispatch}
-                  errors={sectionErrorsVisible("copy")}
-                  warnings={warnings.copy}
-                  onOpenPool={() => setPoolDrawerOpen(true)}
-                />
-              </div>
-              <div>
-                <ProductsSection
-                  state={state}
-                  dispatch={dispatch}
-                  errors={sectionErrorsVisible("products")}
-                  onChooseFromBin={setAssetPickerKey}
-                />
-              </div>
-              <div>
-                {state.mode === "brief" ? (
-                  <TreatmentsSection
-                    state={state}
-                    dispatch={dispatch}
-                    errors={sectionErrorsVisible("treatments")}
-                  />
-                ) : null}
-              </div>
-              {/* The layer list (L5): the offer is the boundary's own (D124). */}
-              <TemplateSection
-                state={state}
-                dispatch={dispatch}
-                errors={sectionErrorsVisible("template")}
-              />
-              {/* The template view (T7): the type block and NO frame. This is the
-                  half of D43's one-composed-frame invariant that lives in the
-                  column: the rail holds the only composed preview, so `preview`
-                  must not be passed here. It is not a leftover of D43's original
-                  "Guided-only" clause — D141 dropped that — the frame the Layout
-                  STEP carried went with the step, and adding one back here would
-                  put a second composed frame in the tree. */}
-              <LayoutSection
-                state={state}
-                dispatch={dispatch}
-                errors={sectionErrorsVisible("layout")}
-              />
-              <OutputSection
-                state={state}
-                dispatch={dispatch}
-                errors={{
-                  ...sectionErrorsVisible("output"),
-                  ...sectionErrorsVisible("motion"),
-                }}
-              />
-            </div>
+            {/* One position, one panel — exclusive, never side by side. The rail
+              beside this column is untouched by the switch: it is not in this
+              subtree, it keeps the only composed frame, and it goes on drawing
+              the creative while the document is on screen here. */}
+            {columnPanels[columnView]}
           </div>
         </SectionModeContext.Provider>
       </div>
