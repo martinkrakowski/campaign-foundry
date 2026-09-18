@@ -2,13 +2,16 @@
 
 import { type ReactNode } from "react";
 import { usePathname } from "next/navigation";
+import { Panel, PanelGroup } from "react-resizable-panels";
 import { RunProvider, useRun } from "@/lib/run-context";
+import { RAIL_VIEWPORT_MIN_PX, useViewportMinWidth } from "@/lib/use-viewport-min-width";
 import { EditorDirtyProvider } from "@/lib/editor-dirty-context";
 import { CreateCampaignProvider } from "@/lib/create-campaign-context";
 import { EditorPanelsProvider, useEditorPanels } from "@/lib/editor-panels-context";
 import { Header } from "@/components/shell/Header";
 import { Sidebar } from "@/components/shell/Sidebar";
 import { SidebarShell } from "@/components/shell/SidebarShell";
+import { ColumnResizeHandle } from "@/components/shell/ColumnResizeHandle";
 import { CommandBar } from "@/components/shell/CommandBar";
 import { TelemetryDrawer } from "@/components/shell/TelemetryDrawer";
 import { BriefPicker } from "@/components/shell/BriefPicker";
@@ -37,14 +40,7 @@ export default function ShellLayout({ children }: { children: ReactNode }) {
               <Header />
               <div className="relative z-0 flex flex-1 gap-4 overflow-hidden bg-background p-4">
                 <Sidebar />
-                {/* min-w-0: let this flex child shrink below its content's intrinsic width,
-                  so a wide child (e.g. the compliance table's min-width) scrolls inside
-                  its own container instead of stretching the whole column past the viewport. */}
-                <main className="relative flex h-full min-w-0 flex-1 flex-col">
-                  <div className="relative flex-1 overflow-auto rounded-xl">{children}</div>
-                  <TelemetrySlot showOrchestrator={showOrchestrator} />
-                </main>
-                <EditorRailSlot />
+                <EditorColumns showOrchestrator={showOrchestrator}>{children}</EditorColumns>
               </div>
             </div>
             {/* The shell overlays share this layer: the picker closes before the
@@ -63,8 +59,57 @@ export default function ShellLayout({ children }: { children: ReactNode }) {
   );
 }
 
+/** The default split, in percent of the resizable region (SG2). See {@link EditorColumns}. */
+const RAIL_DEFAULT_SIZE = 35;
+/** Neither column may be dragged away: the rail's floor and the main column's. */
+const RAIL_MIN_SIZE = 25;
+const MAIN_MIN_SIZE = 50;
+
 /**
- * The shell row's right-hand column — the editor's preview rail (RS2).
+ * The two resizable columns of the shell row: `<main>` and, when a view
+ * publishes one, the preview rail — with the draggable separator between them
+ * (SG2, the owner's wireframe).
+ *
+ * **The group is these two columns and nothing else, which is a correctness
+ * requirement and not tidiness.** `react-resizable-panels` converts pointer
+ * movement into a percentage of the GROUP's own width, while a panel's rendered
+ * width is that percentage of the space the group has left to distribute. Put
+ * the left sidebar (320px) and the row's two 16px gaps inside the group and
+ * those two denominators stop matching: at 1280px the divider would travel 72px
+ * for every 100px of pointer movement, drifting further from the cursor the
+ * longer the drag. So the group is a flex CHILD of the row beside `Sidebar`,
+ * which also keeps the left sidebar fixed at 320px, as the wireframe has it —
+ * the handle is between the middle and right columns only.
+ *
+ * **The handle is the row's gap, not an addition to it.** `PanelGroup` carries no
+ * `gap`, and the 16px handle sits exactly where the row's `gap-4` used to be, so
+ * the rhythm of the three columns is unchanged.
+ *
+ * **Nothing is persisted (SG-D3).** No `autoSaveId`: the split resets on reload,
+ * matching D147's reasoning for timeline zoom. A pane width is not a property of
+ * the campaign, and persisting it surprises the second operator to open the same
+ * brief.
+ *
+ * **Why the sizes are percentages.** The library has no pixel unit (v2 removed
+ * it), so `RAIL_DEFAULT_SIZE` is 35% of the resizable region — 320px at the
+ * 1280px viewport this was drawn for, proportionally wider on a larger screen.
+ * The bounds are the load-bearing half and they are exact: `minSize` on both
+ * panels means dragging to either extreme stops at a usable column instead of
+ * collapsing one, which is what keeps the resizer from becoming a way to hide
+ * the surface it exists to size.
+ *
+ * `main`'s own `defaultSize` follows the rail's presence so the two always total
+ * 100: the library normalises a layout that does not, and says so on the console.
+ *
+ * **The rail slot, and why the structure does not branch on it.** RS2's rail is
+ * presence-gated, so its `Panel` mounts and unmounts under a group that stays
+ * put. `order` is explicit on both panels for that reason. What must NOT vary is
+ * the shape above `{children}`: swapping `<main>` between a group child and a row
+ * child would remount the whole view on the commit after the editor publishes its
+ * rail — and the editor republishes from an effect, so that remount would publish
+ * again, with no fixed point.
+ *
+ * The comments RS2 left on this slot are its own and still hold:
  *
  * **Presence-gated, never route-gated (RS-D3).** The owner asked to "reveal it
  * based on view"; this is that, expressed as content. `CommandBar` above is the
@@ -88,9 +133,67 @@ export default function ShellLayout({ children }: { children: ReactNode }) {
  * gap at the cost of diverging from that seam; it is not worth it unless the
  * arrival reads as a jump.
  */
-function EditorRailSlot(): ReactNode {
+function EditorColumns({
+  children,
+  showOrchestrator,
+}: {
+  children: ReactNode;
+  showOrchestrator: boolean;
+}): ReactNode {
   const { rail } = useEditorPanels();
-  return rail === null ? null : <SidebarShell label={rail.label}>{rail.content}</SidebarShell>;
+  // The same JS mirror of `lg:` the rail itself uses (RS2/RS-D4), asked here for
+  // the handle's interactivity: one number for the CSS that stops the paint and
+  // the script that stops the gesture, or the handle is live while invisible.
+  const canResize = useViewportMinWidth(RAIL_VIEWPORT_MIN_PX);
+
+  return (
+    <PanelGroup direction="horizontal" className="min-w-0 flex-1">
+      {/* min-w-0: let this flex child shrink below its content's intrinsic width,
+        so a wide child (e.g. the compliance table's min-width) scrolls inside
+        its own container instead of stretching the whole column past the viewport. */}
+      <Panel
+        tagName="main"
+        id="shell-main-column"
+        order={1}
+        defaultSize={rail === null ? 100 : 100 - RAIL_DEFAULT_SIZE}
+        minSize={MAIN_MIN_SIZE}
+        className="relative flex h-full min-w-0 flex-col"
+      >
+        <div className="relative flex-1 overflow-auto rounded-xl">{children}</div>
+        <TelemetrySlot showOrchestrator={showOrchestrator} />
+      </Panel>
+      {rail === null ? null : (
+        <>
+          <ColumnResizeHandle enabled={canResize} />
+          {/* `hidden lg:flex` on the PANEL, beside the same gate on the aside inside
+            it. Not a duplicate: the aside's gate hides the rail, and this one stops
+            the panel RESERVING ITS WIDTH — a panel holding a `display: none` aside is
+            a 35% strip of nothing, which is the invisible-surface defect this lane is
+            written against. `display: none` leaves the flex row, so `main`'s
+            flex-grow then takes the whole width, exactly as it did before the rail.
+
+            `[&>aside]:w-full` is how the rail fills the column it is being handed.
+            It has to come from OUT HERE: `SidebarShell`'s `w-[320px]` is the fixed
+            width both columns of the shell row wear from one definition (RS1/RS-D2),
+            and `rail-in-shell.test.tsx` asserts the two asides' class strings are
+            identical — so a width prop on the shell would break that invariant even
+            if this lane owned the file. The child combinator is load-bearing: it
+            gives the rule a type selector, so it outranks `w-[320px]` on specificity
+            (0,1,1 against 0,1,0) rather than on whatever order Tailwind emits. `*:`
+            would tie and lose. */}
+          <Panel
+            id="shell-rail-column"
+            order={2}
+            defaultSize={RAIL_DEFAULT_SIZE}
+            minSize={RAIL_MIN_SIZE}
+            className="hidden lg:flex [&>aside]:w-full"
+          >
+            <SidebarShell label={rail.label}>{rail.content}</SidebarShell>
+          </Panel>
+        </>
+      )}
+    </PanelGroup>
+  );
 }
 
 /**

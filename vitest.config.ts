@@ -40,6 +40,20 @@ export default defineConfig({
         resolve: {
           alias: { "@": webSrc },
           dedupe: ["react", "react-dom"],
+          // SG2 — resolve the BROWSER half of a package's `exports` map, which is
+          // what the browser build ships and therefore the only build these tests
+          // should be measuring. Vitest runs a project in Vite's SSR environment,
+          // so without this the `node` condition wins.
+          //
+          // It went unnoticed until a dependency shipped genuinely different
+          // builds. `react-resizable-panels` is one: its node build is the
+          // server-render half — every layout effect is stripped, so `Panel`
+          // never registers with its group. Panels then render at their
+          // `defaultSize` and NOTHING else works: no `aria-valuenow`, no keydown
+          // listener on the handle, no bounds. A keyboard-resize test would have
+          // been measuring a component that cannot resize, and it would have
+          // "passed" the moment it asserted anything weaker than a moved split.
+          conditions: ["browser"],
         },
         test: {
           name: "web",

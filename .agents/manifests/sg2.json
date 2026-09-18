@@ -1,0 +1,108 @@
+{
+  "version": 1,
+  "lane": "SG2",
+  "mutations": [
+    {
+      "file": "apps/web/src/components/shell/ColumnResizeHandle.tsx",
+      "before": "    <PanelResizeHandle\n      aria-label={COLUMN_RESIZE_LABEL}\n      aria-orientation=\"vertical\"\n      disabled={!enabled}\n      tabIndex={enabled ? 0 : -1}\n      className=\"group hidden w-4 shrink-0 cursor-col-resize items-center justify-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background lg:flex\"\n    >\n      <span\n        aria-hidden=\"true\"\n        className=\"h-10 w-1 rounded-full bg-border transition-colors duration-fast group-hover:bg-border-hover group-data-[resize-handle-state=drag]:bg-brand-primary\"\n      />\n    </PanelResizeHandle>",
+      "after": "    <div\n      role=\"separator\"\n      aria-orientation=\"vertical\"\n      aria-label={COLUMN_RESIZE_LABEL}\n      tabIndex={enabled ? 0 : -1}\n      className=\"group hidden w-4 shrink-0 cursor-col-resize items-center justify-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background lg:flex\"\n    >\n      <span\n        aria-hidden=\"true\"\n        className=\"h-10 w-1 rounded-full bg-border transition-colors duration-fast group-hover:bg-border-hover group-data-[resize-handle-state=drag]:bg-brand-primary\"\n      />\n    </div>",
+      "because": "SG-D17's decision, undone -- the resizer becomes the hand-rolled separator the decision rejected. This is the plausible simplification and not a straw man: it is a `role=\"separator\"` with the same accessible name, the same `aria-orientation`, the same focus ring and the same 16px hit area, it is focusable and it is a tab stop, so it LOOKS like the same control and every query that finds a separator still finds one. What leaves with the library is the part nobody can see in the markup: the keydown listener, the pivot arithmetic, `aria-controls`, and `aria-valuemin`/`aria-valuenow`. A keyboard user gets a focus ring on a strip that does nothing, and a screen-reader user is told nothing about where the divider sits. Caught only because the test reads the panels' sizes BEFORE and AFTER an arrow key rather than asserting the handle exists -- the assertion this lane was warned would be vacuous.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/__tests__/column-resizer.test.tsx",
+        "-t",
+        "arrow keys move the split"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/app/(shell)/layout.tsx",
+      "before": "            defaultSize={RAIL_DEFAULT_SIZE}\n            minSize={RAIL_MIN_SIZE}\n",
+      "after": "            defaultSize={RAIL_DEFAULT_SIZE}\n",
+      "because": "The bound the whole lane turns on, removed from the side it protects. `defaultSize` reads like the size of the column and `minSize` like a second opinion about it, so dropping one of the two looks like removing a duplicate -- and at rest the layout is identical: 65/35, the same default, every geometry assertion in the suite green. The cost only appears at the extreme, and it is the defect SG-D3 names: without a floor the rail can be dragged (or `End`ed) to 0% and the resizer becomes a way to hide, by accident and with no way back except a reload, the very surface it exists to size. Caught by the test that drives BOTH extremes and asserts the two floors, which is why `End` is in it and not only a nudge: a test that dragged a little would agree with a panel that has no bound at all.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/__tests__/column-resizer.test.tsx",
+        "-t",
+        "dragging the rail to the far edge"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/shell/ColumnResizeHandle.tsx",
+      "before": "      tabIndex={enabled ? 0 : -1}\n",
+      "after": "      tabIndex={0}\n",
+      "because": "The exact misconception this component's comment exists to refuse: that `disabled` is enough. It is not -- the library defaults `tabIndex` to 0 and passes whatever it is handed straight through to the element, so a `disabled` handle is still a tab stop. And the mutation is the tempting tidy-up, because everything it leaves behind is genuinely working: `disabled` still stops the keydown and pointer registration, `hidden lg:flex` still hides the strip and still stops it reserving width, and in a real browser `display: none` would even keep it out of the tab order -- so nothing is visibly wrong at any width. What remains is the narrow case the rail's own gate creates: the rail is `hidden lg:flex`, hidden but MOUNTED below 1024px, so at 1000px a keyboard user tabs out of the main column into a 16px separator that cannot be seen and resizes a column nobody is looking at. Caught by a `userEvent.tab()` walk, which honours real tabbability -- `handle.focus()` would report success in both directions, since happy-dom focuses a `tabIndex={-1}` element quite happily.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/__tests__/column-resizer.test.tsx",
+        "-t",
+        "it is not a tab stop below the breakpoint"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/app/(shell)/layout.tsx",
+      "before": "      {rail === null ? null : (\n        <>\n          <ColumnResizeHandle enabled={canResize} />\n",
+      "after": "      <ColumnResizeHandle enabled={canResize} />\n      {rail === null ? null : (\n        <>\n",
+      "because": "The handle is lifted out of the presence gate and left mounted whether or not there is a rail to resize -- the plausible edit, because a handle that belongs to the ROW reads like part of the row's chrome, and hoisting it out of the conditional makes the JSX shorter and the fragment nearly redundant. Nothing looks wrong on the route this lane was drawn for: the editor publishes a rail, so the handle has a second panel and works exactly as before. It is every OTHER route that pays -- the grid, compliance, export -- where the group has one panel and the handle is an orphan: a 16px strip with a focus ring that tabs into the middle of the page and moves nothing, since there is no panel on its far side to pivot against. The invisible-surface class again, and invisible to every assertion that looks at the resizer while a rail is present. Caught by counting separators through the transition, with the rail ABSENT first -- the half of the test that has nothing to look at is the half that finds this.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/__tests__/column-resizer.test.tsx",
+        "-t",
+        "leaves no orphan handle"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/app/(shell)/layout.tsx",
+      "before": "    <PanelGroup direction=\"horizontal\" className=\"min-w-0 flex-1\">",
+      "after": "    <PanelGroup direction=\"horizontal\" autoSaveId=\"cf:shell-columns\" className=\"min-w-0 flex-1\">",
+      "because": "SG-D3 reversed by adding the one prop the decision says not to add, and it is the most likely edit anyone makes to this line: the library documents `autoSaveId` as the way to keep a layout, remembering a width feels like a courtesy, and the key even looks like the `cf:` keys the shell already writes. It is wrong for D147's reason: a pane width is not a property of the campaign, so a width one operator dragged is restored for the next operator to open the same brief, who never chose it and has no control that says where it came from. Everything about the live session stays identical -- the same default, the same bounds, the same keyboard -- so only a REMOUNT can see it. The test's 300ms wait is what makes it visible at all: the library debounces the write by 100ms, so without that wait the mutation would be applied, save nothing, and the claim would pass while being about nothing -- the vacuity this lane was warned about, in its exact form.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/__tests__/column-resizer.test.tsx",
+        "-t",
+        "a remount starts at the default split"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "vitest.config.ts",
+      "before": "          conditions: [\"browser\"],\n",
+      "after": "          conditions: [\"module\"],\n",
+      "because": "The line that decides whether this lane's suite measures the component or a stub of it, and the first thing a reader would delete as unexplained config. `react-resizable-panels` ships genuinely different builds behind its `exports` map, and Vitest runs a project in Vite's SSR environment -- so with the `browser` condition gone the `node` build wins, and that build is the server-render half with every layout effect stripped out. `Panel` never registers with its group: the panels render at their `defaultSize`, which means the DEFAULT SPLIT IS STILL CORRECT and the markup still contains a `role=\"separator\"` with the right name -- but there is no `aria-valuenow`, no keydown listener, and no bound, so the component cannot resize at all. This mutation is in the manifest because it is the vacuity trap for the whole file rather than for one assertion: the suite was first run against exactly this stub, and it is the reason every claim here reads a MOVED split instead of a rendered one. Caught by the keyboard test, the assertion that asks the layout to change.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/__tests__/column-resizer.test.tsx",
+        "-t",
+        "arrow keys move the split"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
