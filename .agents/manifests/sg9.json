@@ -1,0 +1,91 @@
+{
+  "version": 1,
+  "lane": "SG9",
+  "mutations": [
+    {
+      "file": "apps/web/src/components/campaign/editor-state.ts",
+      "before": "  return validatedState === state;",
+      "after": "  return validatedState !== null && valuesEqual(toBrief(validatedState), toBrief(state));",
+      "because": "§8.4's REJECTED key, spelled the way a reader would actually spell it. This is not a random break: the file's own `isDirtySinceApply` two functions above is `!valuesEqual(toBrief(state), state.appliedSnapshot)`, so 'compare the projections, like the neighbouring freshness check does' is the idiomatic refactor in this exact file, and the brief's first draft proposed it. Nothing looks wrong under it: every ordinary edit moves the projection too, so the slot still flips on every keystroke a test types, the confirm still runs, and the whole SG9 component describe stays green. What it loses is the only case the two keys disagree on -- `toBrief` DROPS and NARROWS on the way out, so turning Video on in a classic draft is invisible to the projection (`serialisedFormats` strips motion when `mode === \"brief\"`, D99) while `validateState` gains two errors. The editor would then report 'still validated', leave Generate live on a document that had just become invalid, and spend GenAI credits on a brief the operator never approved -- the most expensive direction this bug can fail in. Caught by the unit test, which asserts all three halves in one place: the projections ARE equal, the error counts are NOT (0 -> 2), and the gate is nevertheless closed. A test that only typed into a field could not tell the two keys apart at all.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/editor-state.validation-gate.test.ts",
+        "-t",
+        "an edit that changes validity while leaving the PROJECTION byte-identical still closes the gate"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/BriefEditor.tsx",
+      "before": "      {isValidationFresh(validatedState, state) ? (",
+      "after": "      {getTotalErrorCount(errors) === 0 ? (",
+      "because": "The owner's sentence, misread -- and it is the misreading, not a typo. *\"If the campaign brief has not been validated then a validate button is displayed instead\"* reads naturally as 'if the brief is not VALID', and `errors` is already computed one screen up for exactly that question, so this version is shorter, needs no state at all, and deletes a hook. It is the version the brief had to argue against twice. What it destroys is the whole point: `validateState` is pure and synchronous, so 'is it valid' was always known -- the gate exists to record that the OPERATOR has looked, before a press spends money (SG-D20, red fault 3). Under this mutation Generate is on screen the moment a clean brief finishes loading, having been validated by nobody, and the Validate verb becomes unreachable on any document that would pass. Nothing in the suite that presses Validate first would notice: the flip still happens, the confirm still opens, the POST still carries the right brief, and 'an edit hides Generate' still passes for an edit that breaks the draft. Caught by the arrival test, which asserts the NEGATIVE on a clean, loaded, error-free brief -- Validate present and Generate ABSENT -- which is the only assertion that can separate consent from computability.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx",
+        "-t",
+        "a clean loaded brief offers Validate, never Generate"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/BriefEditor.tsx",
+      "before": "    void execute(draftBrief);",
+      "after": "    void execute();",
+      "because": "SG-D22's money, removed in one argument. `execute()` is how the header called it for the whole life of D32 -- the shell's committed brief is 'the brief' -- so dropping the argument reads as removing a redundant one rather than as changing the target. And on the common path it IS redundant: a loaded brief was committed to the shell by its own load (`setRunBrief(match.brief)`), so the shell and the screen agree and the POST is identical. That is precisely why this is the dangerous edit and not an obvious one. Where it diverges is where credits are actually at risk: a brief that has never been saved, whose id the shell does not hold (the shell holds the blank brief), so the run would POST an EMPTY campaign -- or, with a last-opened pointer restored from `cf:brief`, the PREVIOUS campaign, which is the defect D37 exists to prevent. Every test that validates and runs a loaded brief stays green. Caught by the never-saved test, which asserts the POSTed body's id is `fresh` -- the draft that was on screen -- and not merely that a POST happened.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx",
+        "-t",
+        "a never-saved brief is still runnable, and running it writes nothing"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/BriefEditor.tsx",
+      "before": "    refuseInvalid();\n    if (getTotalErrorCount(errors) > 0) return;\n    setValidatedState(state);",
+      "after": "    refuseInvalid();\n    setValidatedState(state);",
+      "because": "The line deleted, and the reason a reader would delete it: `refuseInvalid()` RETURNS a boolean and `handleSave` right below uses it as the gate (`if (refuseInvalid()) return null;`), so the second check looks like a duplicate of the first. Today it very nearly is -- `blockedAt` and `errors` come from the same `validateState`, and its `capabilities: null` override changes nothing because `validateState` never reads capabilities -- which is exactly what makes this the plausible tidy-up rather than an obvious break. What it removes is the gate's own verdict: `blockedAt` is SAVE's question, deliberately narrowed to structural validity so a video brief stays savable on a host with no ffmpeg (D7), and a run gate that inherits Save's narrowing would follow it anywhere it ever widens. Under the mutation pressing Validate on a half-filled brief still reveals every error, still speaks the refusal, still scrolls to Copy -- everything LOOKS like a refusal -- and then quietly stores the snapshot, so Generate appears on a brief the server would reject and the operator is charged for a run that cannot finish. Caught by the refusal test's last three assertions, which check that the SLOT did not change (Generate absent, Validate present) rather than only that the refusal was spoken.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx",
+        "-t",
+        "Validate on an invalid draft refuses out loud and leaves the gate shut"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/editor-state.ts",
+      "before": "      if (action.mode === state.mode) return state;",
+      "after": "      if (action.mode === state.mode) return { ...state };",
+      "because": "The reducer property the gate is built on, removed. §8.4's second premise is that a refused or no-op action stays IDENTITY-EQUAL, and this is the line that makes it true for `setMode`; `{ ...state }` is the shape every other case in this switch returns, so spreading here reads as consistency rather than as a change. It is invisible by every ordinary measure -- the state's VALUES are identical, so the form, the projection, the validation, the dirty flag and the estimate all agree, and a `toEqual` on state would pass -- which is the whole reason §8.4 wrote the premise down instead of assuming it. What it costs is the operator's validation: pressing the mode that is already selected, which changed nothing, would send them back to Validate and demand the consent step again. That is the failure a boolean `isValidated` flag would have had by construction, and reference equality is how this design avoids it. Caught by the unit test, which asserts the reducer returned the SAME OBJECT (`toBe`) before asserting the gate stayed fresh -- a `toEqual` there would pass on the mutant.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/editor-state.validation-gate.test.ts",
+        "-t",
+        "a no-op action the reducer refuses does NOT cost a good validation"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
