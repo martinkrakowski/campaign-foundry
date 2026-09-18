@@ -175,11 +175,18 @@ const mountEditor = async (briefs?: readonly unknown[]) => {
   await settle();
 };
 
-/** The rail's YAML projection, as text — the serialised brief, byte for byte. */
-const railYaml = async (user: ReturnType<typeof userEvent.setup>) => {
-  await user.click(within(rail()).getByRole("button", { name: messages.previewRailYamlView }));
-  const yaml = within(rail()).getByText(/schemaVersion/).textContent ?? "";
-  await user.click(within(rail()).getByRole("button", { name: messages.previewRailPreviewView }));
+/**
+ * SG4 — the view switch is the MIDDLE column's now, not the rail's, so the YAML
+ * is read there. The switch is found by its group, which is the control's own
+ * landmark and is not inside the rail.
+ */
+const viewSwitch = () => screen.getByRole("group", { name: messages.columnViews });
+
+/** The column's YAML projection, as text — the serialised brief, byte for byte. */
+const columnYaml = async (user: ReturnType<typeof userEvent.setup>) => {
+  await user.click(within(viewSwitch()).getByRole("button", { name: messages.columnYamlView }));
+  const yaml = screen.getByTestId("column-yaml").textContent ?? "";
+  await user.click(within(viewSwitch()).getByRole("button", { name: messages.columnEditorView }));
   return yaml;
 };
 
@@ -228,12 +235,17 @@ describe("the layer stack exists exactly once in the tree (CC3, plan §4.6)", ()
     const user = userEvent.setup();
     await mountEditor();
 
-    // D61's switcher is exclusive between the composed preview and the YAML —
-    // the layers are neither, and the only stack in the tree must not vanish
-    // behind a read-only view.
-    await user.click(within(rail()).getByRole("button", { name: messages.previewRailYamlView }));
+    // SG4 — the switch moved to the middle column and it must not reach into the
+    // rail: the only layer stack in the tree lives there, so a switch that swapped
+    // the rail as well as the column would hide the layers behind a read-only view
+    // of the document. The stack is counted while `yaml` is showing, and the
+    // switch's own group is asserted to be OUTSIDE the rail, so this cannot pass
+    // by finding a second control that happens to sit in the right place.
+    expect(rail().contains(viewSwitch())).toBe(false);
+    await user.click(within(viewSwitch()).getByRole("button", { name: messages.columnYamlView }));
+    expect(screen.getByTestId("column-yaml")).toBeTruthy();
     expect(mountedStackCount()).toBe(1);
-    await user.click(within(rail()).getByRole("button", { name: messages.previewRailPreviewView }));
+    await user.click(within(viewSwitch()).getByRole("button", { name: messages.columnEditorView }));
 
     // And with no product id there is no creative to compose (D142) — but the
     // template is real either way. A stack that disappeared here would be a
@@ -263,7 +275,7 @@ describe("picking a layer changes no document byte (CC3, D139)", () => {
     );
     await settle();
 
-    const before = await railYaml(user);
+    const before = await columnYaml(user);
     // A real projection, not an empty string: an assertion that two blanks are
     // equal would pass whatever the click did.
     expect(before).toContain("schemaVersion");
@@ -271,7 +283,7 @@ describe("picking a layer changes no document byte (CC3, D139)", () => {
 
     await user.click(pick("accent", "Accent"));
     expect(pick("accent", "Accent").getAttribute("aria-pressed")).toBe("true");
-    expect(await railYaml(user)).toBe(before);
+    expect(await columnYaml(user)).toBe(before);
 
     // The guard asks only about unsaved work, so its silence IS the dirty flag
     // (D67): a selection that had reached `EditorState` would open this dialog.
@@ -336,14 +348,14 @@ describe("picking a layer changes no document byte (CC3, D139)", () => {
     );
     await settle();
 
-    const before = await railYaml(user);
+    const before = await columnYaml(user);
     await user.click(
       within(rail()).getByRole("button", {
         name: "accent",
         description: messages.templateDisableDescription("Accent"),
       }),
     );
-    expect(await railYaml(user)).not.toBe(before);
+    expect(await columnYaml(user)).not.toBe(before);
     await user.click(screen.getByRole("button", { name: /Create new/ }));
     expect(await screen.findByRole("dialog", { name: messages.confirmDialogTitle })).toBeTruthy();
   });
@@ -475,7 +487,7 @@ describe("the stack lives inside CC1/CC2's cost contract (CC3, C3)", () => {
     ).toBeTruthy();
   });
 
-  test("picking a layer redraws the stack and costs the form exactly one commit — the accepted cost, stated", async () => {
+  test("picking a layer redraws the stack and costs the form nothing at all", async () => {
     const user = userEvent.setup();
     await mountEditor();
     const stackBefore = stackRenders.count;
@@ -485,16 +497,24 @@ describe("the stack lives inside CC1/CC2's cost contract (CC3, C3)", () => {
     // The stack must redraw: the row is pressed now.
     expect(stackRenders.count).toBeGreaterThan(stackBefore);
     /**
-     * And the form commits ONCE — not zero, and, since RS2, still not two.
+     * And the form commits ZERO times.
      *
-     * The selection is `BriefEditor`'s own `useState` because CC4's sheet is a
-     * sibling of the step card (D44) and has to read it, so the state cannot
-     * live under the memo boundary the way the playhead's does. That makes a
-     * pick a commit of the editor, exactly like a press on any other control,
-     * and this number is here to say so rather than to hide it: the cost
-     * contract is about the PER-KEYSTROKE path (C3), where the assertions above
-     * hold at zero. A count above one would be a cascade — two commits for one
-     * gesture — and is what this pins.
+     * **This number CHANGED, from one to zero, and it is declared rather than
+     * relaxed.** The selection is `BriefEditor`'s own `useState` because CC4's
+     * sheet is a sibling of the column (D44) and has to read it, so the state
+     * cannot live under a memo boundary the way the playhead's does — a pick is
+     * therefore still a commit of `BriefEditor` itself, exactly as it was. What
+     * changed is what that commit costs: SG4's review remediation memoised
+     * `columnPanels`, and `pickedLayerId` is not one of its inputs, so the record
+     * survives the render, `{columnPanels[columnView]}` hands React the identical
+     * element, and the form's subtree is not reconciled at all. The gesture now
+     * redraws the surface it touched and nothing else.
+     *
+     * Zero rather than one is why this assertion is still exact. It used to read
+     * `toBe(1)` to pin a CASCADE — two commits for one gesture — with the one
+     * commit named as the accepted cost. Zero pins strictly more: it goes red both
+     * for a cascade and for the loss of the memo above it (`sg4.json`'s eighth
+     * mutation is the other half of that guard, in the playhead file).
      *
      * **RS2 nearly made it two, and this is the test that said so.** The rail is
      * published through `EditorPanelsContext`, and `pickedLayerId` is one of the
@@ -502,8 +522,9 @@ describe("the stack lives inside CC1/CC2's cost contract (CC3, C3)", () => {
      * the slots, publishing re-rendered the publisher: gesture → render →
      * effect → `setRail` → context change → render. The setters are a separate
      * context now (`useEditorPanelPublisher`), so the editor subscribes to
-     * nothing it publishes into, and the number is the one it always was.
+     * nothing it publishes into. That fix is what makes zero reachable here; both
+     * commits would have had to bail, and only one of them could.
      */
-    expect(formRenders.count).toBe(1);
+    expect(formRenders.count).toBe(0);
   });
 });

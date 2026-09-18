@@ -438,6 +438,53 @@ describe("TS1 — the tape in the rail (plan §4 acceptance (e), §5)", () => {
     expect(tapeRenders.count).toBe(before);
   });
 
+  /**
+   * **SG4 — `columnPanels` is memoised, and this is the number that says so.**
+   *
+   * Review proposed a `useMemo` on the middle column's panel record and the
+   * reflex answer was "a dependency list of everything it reads buys nothing".
+   * Measured, the reflex was wrong: without the memo this count is 12 for the
+   * gesture below and 13 for one look-preserving keystroke; with it, 0 and 7.
+   *
+   * The saving is not a `memo` boundary — no section is `memo`-wrapped, and the
+   * two components that are (`PreviewDock`, `TimelineTape`) never receive the
+   * record. It is React's same-element bailout: `{columnPanels[columnView]}` is
+   * rendered directly from the record, so a render whose inputs are unchanged
+   * hands React the identical element and the whole form subtree is skipped.
+   *
+   * The gesture is the tape's beat selection on purpose. `selectedBeatIndex` is
+   * ephemeral rail state (D139): it is not a dependency of the record, and the
+   * tape lives in the published rail rather than under the column's
+   * `onClickCapture`, so pressing it cannot touch a section and cannot move
+   * `visibleErrors` either. It is therefore a render of `BriefEditor` with no new
+   * input at all — the purest case the memo exists for. Dropping the memo (or a
+   * future `useEditorHistory` handing back a fresh `dispatch` per render, which
+   * would disable it silently) turns this count non-zero; nothing else does.
+   */
+  test("a gesture the form's inputs do not move re-renders no section at all (SG4)", async () => {
+    await mountScrubbing();
+    expect(formRenders.count).toBeGreaterThan(0);
+    formRenders.count = 0;
+
+    fireEvent.click(screen.getByRole("button", { name: messages.tapeBeatName(2) }));
+    await settle();
+
+    expect(formRenders.count).toBe(0);
+  });
+
+  test("a keystroke DOES re-render the form — the sibling proof that the count above is not vacuous", async () => {
+    await mountScrubbing();
+    formRenders.count = 0;
+
+    const audience = screen.getByLabelText("Target Audience") as HTMLInputElement;
+    audience.focus();
+    fireEvent.change(audience, { target: { value: "a new audience" } });
+    await settle();
+
+    // The memo is keyed on `state`, so an edit must pay for the form it changed.
+    expect(formRenders.count).toBeGreaterThan(0);
+  });
+
   test("a scrub DOES re-render the tape — the sibling proof that the test above is not vacuous", async () => {
     await mountScrubbing();
     const before = tapeRenders.count;

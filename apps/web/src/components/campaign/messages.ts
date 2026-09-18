@@ -606,14 +606,27 @@ export function previewCaptionTextEffect(
 export const previewNeedsProductId =
   "The first product has no ID yet — name it on the Products step to see its preview.";
 
-// --- The preview rail (R7) ---
+// --- The middle column's views (SG-D4) ---
 
-/** The rail switcher's group label. */
-export const previewRailViews = "Preview views";
-/** The eye segment: the composed preview. */
-export const previewRailPreviewView = "Show the preview";
-/** The code segment: the brief as the pipeline reads it. */
-export const previewRailYamlView = "Show the YAML view";
+/**
+ * SG4 — the switcher's group label. It used to read "Preview views" and sat
+ * inside the rail, naming what the RAIL showed; SG-D4 moves the one switch onto
+ * the middle column, so the name had to move with it or the control would
+ * announce the wrong surface to a screen reader. The rail is preview-only now
+ * and has no switcher to label.
+ *
+ * Review proposed "Column view selector" and it is declined on §6.3 (no jargon):
+ * "column" and "selector" are words for the app's own layout and widgets, not for
+ * anything the operator has a name for — this string is read aloud, and what a
+ * screen-reader user needs is the surface it controls. "Editor views" is also the
+ * one-word edit to the name it replaced ("Preview views"), which is what keeps the
+ * lineage legible to a returning operator.
+ */
+export const columnViews = "Editor views";
+/** The first segment: the brief's form, which is what the column normally is. */
+export const columnEditorView = "Show the editor";
+/** The second segment: the document the pipeline reads, as the projection writes it. */
+export const columnYamlView = "Show the YAML view";
 
 // --- The column resizer (SG2) ---
 

@@ -1,0 +1,142 @@
+{
+  "version": 1,
+  "lane": "SG4",
+  "mutations": [
+    {
+      "file": "apps/web/src/components/campaign/BriefEditor.tsx",
+      "before": "            {columnPanels[columnView]}",
+      "after": "            {columnPanels.editor}",
+      "because": "The lane's whole claim, on the column side: the switch is over the middle column, so it must CHANGE the middle column. This is the shape the half-migration takes when the buttons are moved and the swap is not -- and it is the plausible version, not a random deletion, because `columnPanels.editor` is what the column rendered for its entire life before this lane and reads as the safe default. Nothing looks wrong: the control renders, both segments are live, `aria-pressed` still tracks the choice and moves on every press (the state and the persistence are untouched), the rail still draws its creative, and every `getByRole`/`getByLabelText` in the suite that looks for a FIELD still finds one -- because the form never left. Only the thing the owner asked for is missing. Caught by the swap half of the fault-1 test, which reads the column's own panel marker (`data-testid=\"column-yaml\"`) rather than searching the document for YAML text: a `screen.getByText(/targetRegion/)` would be satisfied by the projection in any column and would pass here.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx",
+        "-t",
+        "selecting `yaml` swaps the middle column and leaves the rail's preview mounted"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/BriefEditor.tsx",
+      "before": "    setRail({\n      label: messages.previewLegend,\n      // `PlayheadHost` is mounted INSIDE the published subtree, not around the\n      // editor's column: the seconds move on every pointermove, and publishing a\n      // playhead-dependent element per frame would write context per frame.\n      // Keeping the state below the publish point means a scrub writes none.\n      content: <PlayheadHost durationSec={previewDurationSec} rail={railSlot} />,\n    });\n  }, [railSlot, previewDurationSec, setRail, unknownId, failedRouteId]);",
+      "after": "    if (columnView === \"yaml\") {\n      setRail(null);\n      return;\n    }\n    setRail({\n      label: messages.previewLegend,\n      // `PlayheadHost` is mounted INSIDE the published subtree, not around the\n      // editor's column: the seconds move on every pointermove, and publishing a\n      // playhead-dependent element per frame would write context per frame.\n      // Keeping the state below the publish point means a scrub writes none.\n      content: <PlayheadHost durationSec={previewDurationSec} rail={railSlot} />,\n    });\n  }, [columnView, railSlot, previewDurationSec, setRail, unknownId, failedRouteId]);",
+      "because": "The SAME claim from the other side, and the one the brief names as this lane's easy mistake: the control is moved onto the column and left wired to the rail, so choosing the document still takes the preview away. It is the most plausible defect in the diff, because it is what the code DID: before this lane `yaml` unmounted `PreviewDock` and put a `<pre>` in its place, so 'the YAML replaces the creative' is the behaviour a reader is carrying forward, and RS-D3 ('presence of the value is what reveals the column') makes `setRail(null)` the idiomatic way to spell it. It is two edits rather than one on purpose, and that is itself the finding: `columnView` is NOT in this effect's dependency list, so gating the body alone changes NOTHING -- the effect never re-runs, the published element is identity-stable, the shell re-renders nothing, and the switch would appear to work. The dependency has to be added for the defect to exist at all, which is why the anchor spans both. Every network proof stays green under it (a rail that is gone fetches nothing, exactly like a rail that is quiet) and so does every test that never presses `yaml`. Caught by the rail half of the fault-1 test, by a count of MOUNTS (`data-testid=\"preview-frame\"`, present in both branches `PreviewFrame` renders): the viewport gate hides the rail without unmounting it and happy-dom applies no CSS, so a visible-node count could not tell 'the rail went' from 'the rail is narrow'. It also reddens the fault-4 flip test, where the remount pays a fresh request.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx",
+        "-t",
+        "selecting `yaml` swaps the middle column and leaves the rail's preview mounted"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/BriefEditor.tsx",
+      "before": "          <LayoutSection\n            state={state}\n            dispatch={dispatch}\n            errors={sectionErrorsVisible(\"layout\")}\n          />",
+      "after": "          <LayoutSection\n            state={state}\n            dispatch={dispatch}\n            errors={sectionErrorsVisible(\"layout\")}\n            preview\n          />",
+      "because": "**Re-anchored, not re-recorded.** Remediation wrapped `columnPanels` in a `useMemo` (review item 2, accepted on a measurement), which re-indented this whole record body by two spaces and pushed this element past `printWidth: 100`, so prettier split it across five lines. The recorded one-line before-text hit 0 occurrences and Rule 2 would have refused it forever. Same element, same place, same claim: the prop that is omitted is still the prop that is omitted. D43's one-composed-frame invariant, broken the way this lane newly makes easy. The count is now a property of the `editor` PANEL rather than of the column's body, so the omitted `preview` prop that holds it has moved -- and `preview` is `LayoutSection`'s own documented capability (T7/D63), so adding it reads as restoring something rather than breaking something. Nothing looks wrong: two real creatives, both correct, both fed the same projection, and a SECOND frame satisfies every `getByRole`/`getByTestId` in the suite that looks for one. Caught only by a count of MOUNTS, and only in the `editor` position -- in `yaml` the whole panel is out of the tree, so a second frame there is invisible by construction, which is why the fault-1 test counts in BOTH positions and not just the one on screen at the end. **Lineage, declared:** this is the same mutation as `sg1.json` #0, whose anchor is dead on `origin/main` at 31518cc5 (0 occurrences -- RS2's own diff re-indented that block before this lane touched it, verified by a scan on a clean tree). Re-anchoring it here overwrites no live verdict; it re-states an invariant this lane moved the guard for.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx",
+        "-t",
+        "selecting `yaml` swaps the middle column and leaves the rail's preview mounted"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/BriefEditor.tsx",
+      "before": "          {dump(draftBrief)}",
+      "after": "          {dump(state)}",
+      "because": "**Re-anchored, not re-recorded.** The `useMemo` wrap around `columnPanels` re-indented this line by two spaces; the recorded before-text hit 0 occurrences and Rule 2 would have refused it forever. The claim is untouched. The projection, replaced by the editor state -- the defect the deleted Review step existed to catch (SG-D8). It is the plausible mistake for a view of 'the brief': `state` IS the editor's own object, it is the nearer name in scope, and every field the operator typed is in it. What it loses is the only thing this panel is for: `toBrief(state)` drops, trims and gates on the way out, so a value that never reached the document would be on screen as though it had. A test asserting mere PRESENCE of a field would stay green through this -- both objects carry `targetRegion`, `campaignMessage`, `products` -- and so would every other test in the file, because nothing else reads the panel's text. Caught by probing a field where the two provably DISAGREE: `toBrief` trims `localizedMessage` (`editor-state.ts`) while `CopySection` writes the raw input, so a padded `\"  ja  \"` is `localizedMessage: ja` in the projection and `localizedMessage: '  ja  '` in the state -- js-yaml quotes a padded string, so the two spellings cannot be confused. Both halves are asserted, the projection's present and the state's ABSENT, so the failure names a line rather than merely missing one.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx",
+        "-t",
+        "the YAML view renders the projection, not the editor state"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/BriefEditor.tsx",
+      "before": "type ColumnView = \"editor\" | \"yaml\";\n\n/**\n * The positions, in the order they are offered. The control is rendered from this\n * list rather than from two hand-written buttons, so a third position is one entry\n * plus the records below — and the count test reads the DOM, not this array.\n */\nconst COLUMN_VIEWS: readonly ColumnView[] = [\"editor\", \"yaml\"];",
+      "after": "type ColumnView = \"editor\" | \"yaml\" | \"validate\";\n\n/**\n * The positions, in the order they are offered. The control is rendered from this\n * list rather than from two hand-written buttons, so a third position is one entry\n * plus the records below — and the count test reads the DOM, not this array.\n */\nconst COLUMN_VIEWS: readonly ColumnView[] = [\"editor\", \"yaml\", \"validate\"];",
+      "because": "`validate` arriving before the view it shows -- SG-D13's third position wired to nothing, which is precisely the defect that cost this project two days: a surface that exists, looks live and shows nothing. It is the plausible mistake because SG-D13 is stamped and says the control has three positions, so growing the list reads as implementing a decision rather than shipping an empty segment. **This mutation is caught TWICE, by two different gates, and that is the point of the structure.** `typecheck` refuses it outright -- `COLUMN_VIEW_LABEL`, `COLUMN_VIEW_GLYPH` and `columnPanels` are each a `Record<ColumnView, ...>`, so the union cannot grow until a label, a glyph and a PANEL exist; that is the guarantee that lets SG10 add its position without reshaping anything. And because vitest does not typecheck, the runtime gate answers too: the control renders a third button whose `aria-label` is `undefined`, so it has no accessible name and no panel behind it, and the count assertion reads 3 where it requires 2. A test that merely looked for the two buttons it expects would pass on all three.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx",
+        "-t",
+        "the switch offers exactly two positions"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/BriefEditor.tsx",
+      "before": "      flushSync(() => chooseColumnView(\"editor\"));",
+      "after": "      // SG1 — a reveal is a scroll and nothing else.",
+      "because": "**Re-anchored, not re-recorded.** Remediation changed this line's callee from `setColumnView` to `chooseColumnView` (see the seventh mutation, which IS that change stated as a claim), so the recorded before-text hit 0 occurrences and Rule 2 would have refused it forever. The anchor is the same line at the same place and the claim below is untouched — deleting the flip is still deleting the flip. The gap this lane would otherwise have introduced, and the reason it is a gap rather than a nicety. In the `yaml` view the whole form is unmounted, so `revealSection`'s `target?.scrollIntoView` finds nothing and returns in SILENCE (`scroll-to-section.ts` -- optional chaining, no throw, no log). The action bar is not hidden by the switch, so its Save and its ErrorStrip chips stay pressable while the document is up: without this line a refused Save names a section, moves nowhere, and says nothing -- a surface that looks perfectly live. Deleting it is the plausible tidy-up, because `reveal`'s own docblock says a reveal 'is now a scroll and nothing else' (SG1 deleted W6.2's deferred half) and a view flip inside it reads as machinery that was removed on purpose. Every test that never enters the `yaml` view stays green, which is almost all of them: in `editor` the flip is React's own no-op, so the two lines below behave identically with and without it. Caught by the one test that reveals FROM `yaml`, which asserts the scroll landed on the section ELEMENT (`scroller.mock.instances`) and not merely that something scrolled -- a weaker assertion would pass on a scroll against the YAML `<pre>`, which is exactly what a flip without `flushSync` produces.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx",
+        "-t",
+        "a reveal from the `yaml` view flips back to the editor and then scrolls"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/BriefEditor.tsx",
+      "before": "      flushSync(() => chooseColumnView(\"editor\"));",
+      "after": "      flushSync(() => setColumnView(\"editor\"));",
+      "because": "**Remediation's own defect, stated as a claim rather than as prose in a PR body.** This is the line exactly as the lane shipped it: the reveal changed the view and did not change what was remembered. It is not a hypothetical -- it was the code, and it is the most plausible spelling there is, because `setColumnView` is the setter in scope, the flip is a system correction rather than a choice, and the sixth mutation's own docblock calls a reveal 'a scroll and nothing else'. Nothing looks wrong: the flip happens, `flushSync` still commits it before the scroll, the section exists, the scroll lands on it, focus lands on it, and the sixth mutation's test passes UNCHANGED under this -- which is the point of recording it separately. What it leaves behind is state and storage disagreeing with nothing recording which is intended, and the disagreement is not cosmetic: a reveal fires because there is an error to fix, so the next load returns the operator to the remembered `yaml` -- a read-only document with no form -- still holding the error they were sent to correct. Caught by asserting BOTH halves: the stored string (`cf:editor-column-view` is `editor`, not `yaml`) and then the remount that spends it (the Campaign Name field is back and `column-yaml` is gone). The stored string alone would be an implementation detail; the remount alone could not name which write was missing.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx",
+        "-t",
+        "a reveal from the `yaml` view persists the flip"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/BriefEditor.tsx",
+      "before": "    [state, dispatch, visibleErrors, warnings.copy, draftBrief],",
+      "after": "    [state, dispatch, sectionErrorsVisible, warnings.copy, draftBrief],",
+      "because": "**Remediation's own addition, and the one way to defeat it that leaves no trace.** Review item 2 asked for a `useMemo` on `columnPanels`; it was accepted on a measurement (12 section renders for a gesture that moves none of the record's inputs, 0 with the memo; 13 vs 7 for a look-preserving keystroke) and this is the mutation that makes the memo evidence rather than decoration. The edit is a single dependency, and it is the plausible one: `sectionErrorsVisible` is the function the panels actually CALL, so \"name what you call, not the value behind it\" reads as completing the list, and a reviewer with no react-hooks plugin to argue with (it is not wired into this project's eslint config) would write exactly this. Nothing is stale afterwards -- `sectionErrorsVisible` reads `visibleErrors` and nothing else, so the errors on screen are identical -- and nothing looks wrong: the form is correct, the document is correct, the rail is correct, every field assertion in the suite still passes. What it destroys is the memo: the closure is freshly allocated on every render, so the list can never compare equal, the record is rebuilt every time, the element handed to `{columnPanels[columnView]}` is never `===` its predecessor, and React's same-element bailout stops firing. Caught by a COUNT and only by a count, through the tape's beat selection -- ephemeral rail state (D139) that is not a dependency of the record and whose control sits outside the column's `onClickCapture`, so it cannot touch a section or move `visibleErrors` and the render therefore has no new input at all. Observed 0 -> 6. A test that asserted the form still rendered correctly would pass on all of it.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.playhead.test.tsx",
+        "-t",
+        "a gesture the form's inputs do not move re-renders no section at all"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
