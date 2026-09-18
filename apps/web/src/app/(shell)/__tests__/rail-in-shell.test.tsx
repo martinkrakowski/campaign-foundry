@@ -276,7 +276,7 @@ describe("RS-D3 — the column is revealed by content, never by the route", () =
     expect(rail()).toBeTruthy();
   });
 
-  test("the rail is present on /brief/new when the editor is, and goes when it unmounts", async () => {
+  test("the rail is present on /brief/new when the editor is, and goes when the editor does", async () => {
     nextMock().nav.pathname = "/brief/new";
     const view = render(
       <ShellLayout>
@@ -285,10 +285,48 @@ describe("RS-D3 — the column is revealed by content, never by the route", () =
     );
     await waitFor(() => expect(maybeRail()).not.toBeNull());
 
-    // Unmounting the view clears the slot: a stale rail would be a preview of a
-    // brief nobody is editing any more.
-    view.unmount();
+    /**
+     * The shell STAYS MOUNTED and only the page swaps — which is what a client
+     * navigation from `/brief/x` to `/grid` actually is, and the only shape in
+     * which `BriefEditor`'s `setRail(null)` cleanup is load-bearing.
+     *
+     * This test used to call `view.unmount()`, and that could not fail: it tore
+     * down `EditorPanelsProvider` along with the editor, so the aside went away
+     * because the state holding it was gone, not because the editor had cleared
+     * its slot. Deleting the cleanup left it green — and left the whole web
+     * project green. Caught in review; `rs.json` now carries the deletion, and
+     * the defect it hides is a stale rail beside the grid whose `LayerStack`
+     * dispatches into an unmounted reducer.
+     */
+    view.rerender(
+      <ShellLayout>
+        <div>grid</div>
+      </ShellLayout>,
+    );
+    expect(screen.getByText("grid")).toBeTruthy();
     expect(maybeRail()).toBeNull();
+  });
+
+  test("a route whose brief does not exist publishes no rail beside the M3 message", async () => {
+    // The other half of the same gate (`:setRail(null)` on the not-found and
+    // failed-listing branches). The order is what makes it a real test: the
+    // editor mounts on the blank draft and publishes a rail, and only when the
+    // listing comes back WITHOUT this id does `unknownId` become non-null — so a
+    // gate that merely `return`ed would leave that first rail on screen beside
+    // "no such brief", previewing a draft the page is not offering to edit.
+    nextMock().nav.pathname = "/brief/nope";
+    routes();
+    render(
+      <ShellLayout>
+        <BriefEditor briefId="nope" />
+      </ShellLayout>,
+    );
+    await waitFor(() => expect(screen.getByText(messages.briefNotFound("nope"))).toBeTruthy());
+    await settle();
+    expect(maybeRail()).toBeNull();
+    // Absent, not merely hidden: the slot is empty, so there is no second
+    // complementary column in the row at all.
+    expect(document.querySelectorAll("aside")).toHaveLength(1);
   });
 
   test("the rail's landmark carries its own name, so two complementary columns are distinguishable", async () => {
@@ -514,10 +552,18 @@ describe("§5 — the cost contract, re-measured with the rail across the bounda
     await mountShellWithEditor();
     formRenders.count = 0;
     const audience = await keystroke();
-    // Without this, (1) and (2) would both pass on an editor that ignored the
-    // event entirely — the vacuous shape §5 names, and the shape the manifest's
-    // reducer mutation produces.
-    expect(formRenders.count).toBeGreaterThan(0);
+    // EXACTLY one, not "more than none". Two things ride on the number:
+    //
+    // - `> 0` is the liveness half — without it, (1) and (2) would both pass on
+    //   an editor that ignored the event entirely, which is the vacuous shape §5
+    //   names and the shape the manifest's handler mutation produces;
+    // - `=== 1` is the publisher-cycle guard. Merging the setters back onto the
+    //   slot context makes the editor a subscriber of its own publication, so a
+    //   keystroke costs two commits instead of one. `toBeGreaterThan(0)` stayed
+    //   green through exactly that (caught in review), which left the structural
+    //   fix guarded only in another lane's file and only through the test outlet.
+    //   `rs.json` carries the merge-back.
+    expect(formRenders.count).toBe(1);
     // The edit also reached the draft: a count that rose while the field stayed
     // empty would be a render for some other reason.
     expect(audience.value).toContain("a new audience");

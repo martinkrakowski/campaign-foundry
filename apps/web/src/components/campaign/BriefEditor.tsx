@@ -1122,11 +1122,20 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
    *
    * **`useCallback`, and its dependency list is load-bearing.** This closure is
    * published through context from an effect, so a fresh identity per render would
-   * write context on every render and — since `BriefEditor` consumes that same
-   * context — loop. Every value the body reads is therefore named below; a missing
-   * one leaves the rail showing a stale draft instead. The react-hooks lint plugin
-   * is not wired into this project's eslint config, so this list is maintained by
-   * hand and by `rail-in-shell.test.tsx`'s liveness assertions.
+   * write context on every render — one extra shell render per keystroke, for a
+   * rail whose content did not change. It is no longer a LOOP: the editor reads
+   * the setters from a context of their own (`useEditorPanelPublisher`, `:290`)
+   * and subscribes to nothing it publishes into, which is what a mutation replay
+   * forced (see the comment on `EditorPanelPublisherContext` — while the two
+   * shared a context this list was the difference between a defeated `memo` and a
+   * livelock).
+   *
+   * Every value the body reads is therefore named below; a missing one leaves the
+   * rail showing a stale draft, which no render count can see — a stale subtree
+   * re-renders LESS, not more. The react-hooks lint plugin is not wired into this
+   * project's eslint config, so the list is maintained by hand, by
+   * `rail-in-shell.test.tsx`'s live-YAML assertion, and by `rs.json`'s mutation
+   * that drops one entry from it.
    */
   const railSlot = useCallback(
     (playhead: PlayheadState): ReactNode => (

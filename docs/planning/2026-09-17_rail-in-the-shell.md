@@ -113,6 +113,47 @@ rail's own `@container` query, and it is removed with it.
   published rail subtree (§5) — a sibling of `<main>`, not an ancestor. So TS2
   needs the subscription this plan already anticipated, not a query container.
 
+### 4.3 Stale mutation anchors — what this lane could re-anchor, and what it could not
+
+**Audited against both trees** (`git show origin/main:<file>` versus HEAD), because
+"three anchors are stale" turned out to be wrong in both directions.
+
+**Six are this lane's.** Three had their text only MOVED and are re-anchored in
+place, with the mutation, its `because` and its command untouched: `cc1#1` (the
+`<PreviewDock>` block, two columns right, into the `useCallback`), `cc3#0`
+(`<TemplateSection>`) and `sg1#0` (`<LayoutSection>`), both two columns left where
+the main column lost a nesting level.
+
+**Three could not be re-anchored, and the gate proves why.** `cc1#3`
+(`PREVIEW_RAIL_MIN_INLINE_PX = 896`) and `cc1#4` (`initialMinInlineSizeSeed`) are
+deleted code; `sg1#3`'s `railSlot` is reshaped AND its own assertion no longer
+moves, because the gate it mutates now hides an aside the *shell* publishes.
+
+The mechanism, worth recording because it is not obvious and it decided the
+outcome: `runMutation` refuses a mutation whose before-text has zero occurrences
+(Rule 2), and `verify-manifests.sh` replays a manifest **whole** when any part of
+it changed. So **a manifest that carries one claim about deleted code can never
+pass a replay again** — and therefore re-anchoring a *different* entry in it turns
+the gate red. Measured: with `cc1#1` and `sg1#0` re-anchored, `cc3.json` replayed
+9 of 9 and `rs.json` 15 of 15, while `cc1.json` and `sg1.json` were refused
+outright. The only ways past that are deleting another lane's claims (destroying
+the evidence they are) or re-pointing them at code they never saw (asserting a
+verdict nobody observed).
+
+**So:** `cc3.json` keeps its re-anchor and replays green. `cc1.json` and
+`sg1.json` are left exactly as they were on `main`, and the three properties are
+carried by `rs.json`'s own mutations instead — #12 (the mount gated on the
+viewport, D43's count), #13 (the JS mirror moved alone) and #14 (the
+server-prerender guard removed) — each saying in its `because` why it is this
+lane's claim and not cc1's or sg1's.
+
+**Repo-level, not this lane's to fix:** the same audit found **~45 anchors already
+stale before this branch** (`hl1`, `hl3`–`hl5c`, `k1a`, `s1`–`s5`, `v4`, `w2`,
+`w3`, `x2`–`x31`, `ve1`, `ve2`, `ve5b1`…). Stale anchors in shipped manifests are
+the repo's steady state, and `verify-manifests.sh` will never surface them,
+because it only replays what a diff touched. Deciding a policy — retire, re-anchor
+or archive — wants one sweep with the owner, not six lanes each guessing.
+
 ---
 
 ## 5. The one risk: CC1/CC2's cost contract was measured in the old position
@@ -198,6 +239,25 @@ liveness.
    Worth stating plainly, because it is the second time in this lane that a
    green assertion was the wrong assertion: **the mutation replay is what found
    both, and neither was visible from reading the test.**
+
+4. **And a third time, found in review: the unmount test could not fail.** It
+   called `view.unmount()`, which tears down `EditorPanelsProvider` along with
+   the editor — so the aside went away because the state holding it was gone, not
+   because `BriefEditor` had cleared its slot. Deleting
+   `useEffect(() => () => setRail(null), [])` left it green **and left the whole
+   web project green**. The property it claimed to guard is a CLIENT NAVIGATION
+   off `/brief`, where the shell persists and only the page swaps; the test now
+   keeps the shell mounted and rerenders the child, which is that shape, and
+   `rs.json` carries the deletion. The adjacent M3/D83 branch (`setRail(null)` on
+   not-found and failed-listing) was executed but unasserted, and has a test and
+   a mutation of its own now.
+
+   **Five vacuous or mis-aimed assertions in one lane, four of them mine.** The
+   pattern is worth naming: every one of them was about a *mechanism the test
+   could not reach* — a provider torn down with its subtree, a click that
+   re-rendered what the keystroke was supposed to, a fetch key the memo does not
+   feed, a render count read as "more than none". None was visible from reading
+   the test; each needed the mutation run.
 
 ---
 

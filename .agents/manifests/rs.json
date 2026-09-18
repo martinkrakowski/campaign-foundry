@@ -136,6 +136,96 @@
         "the rail's YAML view still reads the LIVE draft"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/BriefEditor.tsx",
+      "before": "  useEffect(() => () => setRail(null), []);\n",
+      "after": "  // the shell clears it\n",
+      "because": "The rail must be cleared when the EDITOR goes, not when the provider does. Deleting this cleanup leaves a stale rail beside the grid after a client navigation off /brief — the shell persists and only the page swaps — and its LayerStack then dispatches into an unmounted reducer. Caught in review as a vacuous assertion, not by this manifest: the test called `view.unmount()`, which tore down `EditorPanelsProvider` too, so the aside vanished because the state holding it was gone. That deletion left the whole web project green (136 files, 2421 tests). The test now keeps the shell mounted and swaps the child, which is the shape a navigation actually has.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "apps/web/src/app/(shell)/__tests__/rail-in-shell.test.tsx",
+        "-t",
+        "goes when the editor does"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/BriefEditor.tsx",
+      "before": "    if (unknownId !== null || failedRouteId !== null) {\n      setRail(null);\n      return;\n    }",
+      "after": "    if (unknownId !== null || failedRouteId !== null) {\n      return;\n    }",
+      "because": "The M3/D83 half of the same gate, and the order is what makes it a real claim: the editor mounts on the blank draft and publishes a rail, and only when the listing comes back WITHOUT this id does `unknownId` become non-null. A gate that merely returned early would leave that first rail on screen beside \"no such brief\", previewing a draft the page is not offering to edit. Flagged in review as executed-but-unasserted; it has a test now.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "apps/web/src/app/(shell)/__tests__/rail-in-shell.test.tsx",
+        "-t",
+        "does not exist publishes no rail"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/lib/editor-panels-context.tsx",
+      "before": "export function useEditorPanelPublisher(): EditorPanelPublisher {\n  const context = useContext(EditorPanelPublisherContext);",
+      "after": "export function useEditorPanelPublisher(): EditorPanelPublisher {\n  const context = useContext(EditorPanelPublisherContext);\n  useContext(EditorPanelsContext);",
+      "because": "The structural fix, merged back in one line: the publisher subscribing to the slots again. It is the whole cycle — gesture, render, effect, setRail, context change, render — so a keystroke costs two editor commits instead of one, and with an unmemoised value in railSlot's hand-maintained dependency list it is the livelock that span a worker for 22 minutes. `toBeGreaterThan(0)` stayed green through this (caught in review), which left the fix guarded only in another lane's file and only through the test outlet; the liveness assertion is pinned to exactly one commit now, measured through the shell.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "apps/web/src/app/(shell)/__tests__/rail-in-shell.test.tsx",
+        "-t",
+        "the form's own render count DOES rise"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/BriefEditor.tsx",
+      "before": "  const railSlot = useCallback(\n    (playhead: PlayheadState): ReactNode => (",
+      "after": "  const railSlot = useCallback(\n    (playhead: PlayheadState): ReactNode =>\n      !isRailWideEnough ? null : (",
+      "because": "D43's count invariant, and sg1#3's property carried into the new shape: `isRailWideEnough` sits right there looking like the condition that belongs on the mount, and the rail is CSS-hidden below the breakpoint anyway — so gating the mount too reads as a tidy-up. It is not: the rail must stay mounted so a resize above the gate pays no fresh debounce, and the proof is a count of MOUNTS. sg1's own anchor cannot be re-pointed here (the gate now hides an aside the shell publishes, so its aside-presence assertion no longer moves), which is why this lane carries the property instead of re-authoring that lane's claim.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "apps/web/src/app/(shell)/__tests__/rail-in-shell.test.tsx",
+        "-t",
+        "the landmark is there at 1024"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/lib/use-viewport-min-width.ts",
+      "before": "export const RAIL_VIEWPORT_MIN_PX = 1024;",
+      "after": "export const RAIL_VIEWPORT_MIN_PX = 896;",
+      "because": "cc1#3's property, inherited: the JS mirror moving alone. Its own anchor (`PREVIEW_RAIL_MIN_INLINE_PX = 896`) is deleted code and cannot be re-pointed, so this lane carries the claim rather than re-authoring cc1's. 896 is the number the container mirror actually held, which is what makes this the real regression and not an arbitrary edit: the test derives the breakpoint from the `@media` rule the shipped class string compiles to, so the CSS that stops the paint and the JS that stops the fetch cannot part company.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "apps/web/src/app/(shell)/__tests__/rail-in-shell.test.tsx",
+        "-t",
+        "the compiled gate is a viewport @media"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/lib/use-viewport-min-width.ts",
+      "before": "  if (typeof window === \"undefined\") return false;\n  return window.innerWidth >= minPx;",
+      "after": "  return window.innerWidth >= minPx;",
+      "because": "cc1#4's property, inherited — same reason: `initialMinInlineSizeSeed` is deleted code. A `\"use client\"` component is still PRERENDERED ON THE SERVER at Next build time and a useState initializer runs there, where there is no window at all. This exact guard's absence broke `yarn build` once (`ReferenceError: window is not defined` prerendering /brief/new), and no browser test would see it — which is why the assertion stubs `window` away rather than trusting the DOM environment.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "apps/web/src/lib/__tests__/use-viewport-min-width.test.tsx",
+        "-t",
+        "with no window at all"
+      ],
+      "verdict": "caught"
     }
   ]
 }
