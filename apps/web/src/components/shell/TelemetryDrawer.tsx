@@ -1,15 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { useRun, type LogLevel } from "@/lib/run-context";
+import { useMemo, useState } from "react";
+import { useRun } from "@/lib/run-context";
 import { cn } from "@/lib/cn";
-import { Eyebrow, IconButton, Skeleton } from "@/components/ui";
-
-const LEVEL_COLOR: Record<LogLevel, string> = {
-  info: "text-info",
-  warn: "text-warning",
-  error: "text-error",
-};
+import { IconButton, LogPanel, type LogPanelEntry } from "@/components/ui";
 
 const formatTime = (iso: string): string => {
   const d = new Date(iso);
@@ -24,6 +18,15 @@ interface TelemetryDrawerProps {
 /**
  * Floating telemetry log drawer. Renders the `log[]` returned by the last run
  * (the live-streaming variant is a follow-up — see the plan).
+ *
+ * **The chrome is `LogPanel` now** (LP1 / SG-D21), shared with the validation
+ * view. What stayed here is everything that is *this instance* rather than
+ * *a log panel*: the run binding and the `LogEntry` mapping, the floating
+ * position, the expand/collapse height, the drawer's element id, and the
+ * `inert` behaviour below. What left is the header row, the Copy control and
+ * the scrolling monospace body with its empty and loading states — which the
+ * validation view needs identically and which could not be reused while this
+ * file read `useRun()` two lines from the top.
  */
 /** The drawer's element id, so the control that opens it can name it. */
 export const TELEMETRY_DRAWER_ID = "telemetry-drawer";
@@ -31,36 +34,40 @@ export const TELEMETRY_DRAWER_ID = "telemetry-drawer";
 export function TelemetryDrawer({ open, onClose }: TelemetryDrawerProps) {
   const { log, loading } = useRun();
   const [expanded, setExpanded] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Clear any pending "Copied" reset on unmount (avoids a setState-after-unmount).
-  useEffect(
-    () => () => {
-      if (copiedTimer.current) clearTimeout(copiedTimer.current);
-    },
-    [],
+  /**
+   * A run entry's two leading columns, in the panel's vocabulary: the formatted
+   * clock time is the dim `meta`, the stage is the bracketed `label`. Mapped
+   * here rather than in the panel because `LogEntry` is the app's run shape and
+   * the panel is domain-free — this function is the seam that lets the
+   * validation view hand the same panel a section and a field message instead.
+   */
+  const entries = useMemo<LogPanelEntry[]>(
+    () =>
+      log.map((entry) => ({
+        meta: formatTime(entry.timestamp),
+        label: entry.stage,
+        message: entry.message,
+        level: entry.level,
+      })),
+    [log],
   );
 
-  const copyLog = async () => {
-    if (!navigator.clipboard) return;
-    const text = log.map((e) => `${formatTime(e.timestamp)} [${e.stage}] ${e.message}`).join("\n");
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(true);
-      // Reset the prior timer so rapid clicks don't flip "Copied" back early.
-      if (copiedTimer.current) clearTimeout(copiedTimer.current);
-      copiedTimer.current = setTimeout(() => setCopied(false), 1500);
-    } catch {
-      // clipboard unavailable (e.g. insecure context) — skip silently.
-    }
-  };
-
   return (
-    <div
+    <LogPanel
       id={TELEMETRY_DRAWER_ID}
+      title="System Telemetry Stream"
+      entries={entries}
+      loading={loading}
+      loadingMessage="Waiting for the run to report…"
+      emptyMessage="[SYSTEM] Ready to orchestrate pipeline…"
+      // Stated in both states, matching the brief-id copy button. Dropping the
+      // label to let the text name the control is not safe as a general rule
+      // here — inside a <label>, the computed name comes out as the field's text
+      // instead — so both copy controls name their copied state explicitly.
+      copyLabel="Copy telemetry to clipboard"
       className={cn(
-        "absolute bottom-24 left-1/2 z-10 flex w-full max-w-[800px] -translate-x-1/2 flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-2xl transition-all duration-300",
+        "absolute bottom-24 left-1/2 z-10 w-full max-w-[800px] -translate-x-1/2 shadow-2xl transition-all duration-300",
         open ? "opacity-100" : "h-0 opacity-0",
         open && (expanded ? "top-2" : "h-48"),
       )}
@@ -69,23 +76,8 @@ export function TelemetryDrawer({ open, onClose }: TelemetryDrawerProps) {
       // buttons from the tab order and pointer events while closed; aria-hidden alone
       // wouldn't.
       inert={!open}
-    >
-      <div className="flex h-10 shrink-0 items-center justify-between border-b border-border bg-surface-2 px-4">
-        <Eyebrow>System Telemetry Stream</Eyebrow>
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={copyLog}
-            disabled={log.length === 0}
-            className="font-mono text-[10px] uppercase tracking-wider text-text-muted transition-colors hover:text-text-emphasis disabled:opacity-40"
-            // Stated in both states, matching the brief-id copy button. Dropping the
-            // label to let the text name the control is not safe as a general rule
-            // here — inside a <label>, the computed name comes out as the field's text
-            // instead — so both copy controls name their copied state explicitly.
-            aria-label={copied ? "Copied ✓" : "Copy telemetry to clipboard"}
-          >
-            {copied ? "Copied ✓" : "Copy"}
-          </button>
+      actions={
+        <>
           <IconButton
             label={expanded ? "Collapse telemetry" : "Expand telemetry"}
             onClick={() => setExpanded((v) => !v)}
@@ -130,38 +122,8 @@ export function TelemetryDrawer({ open, onClose }: TelemetryDrawerProps) {
               />
             </svg>
           </IconButton>
-        </div>
-      </div>
-      {/* The log panel is a surface, not a black terminal. A ground painted `#000000`
-          in both themes cannot carry theme text: `text-text-primary` is near-black in
-          the light theme, which measured 1.18:1 — invisible — and the state colours are
-          darker still. `surface-2` is the panel-on-a-panel token, and the skeletons are
-          lifted to `border` so they do not vanish into it. */}
-      <div className="flex-1 overflow-y-auto bg-surface-2 p-4 font-mono text-[11px] leading-5">
-        {log.length === 0 ? (
-          // A run is in flight but has not spoken yet: the wait is announced by the
-          // status sentence, and the skeleton only stands in for the lines to come.
-          loading ? (
-            <div className="space-y-2">
-              <p role="status" className="text-text-muted">
-                Waiting for the run to report…
-              </p>
-              <Skeleton className="h-3 w-3/4 bg-border" />
-              <Skeleton className="h-3 w-1/2 bg-border" />
-            </div>
-          ) : (
-            <div className="text-text-muted">[SYSTEM] Ready to orchestrate pipeline…</div>
-          )
-        ) : (
-          log.map((entry, i) => (
-            <div key={i}>
-              <span className="text-text-muted">{formatTime(entry.timestamp)}</span>{" "}
-              <span className={cn("font-semibold", LEVEL_COLOR[entry.level])}>[{entry.stage}]</span>{" "}
-              <span className="text-text-primary">{entry.message}</span>
-            </div>
-          ))
-        )}
-      </div>
-    </div>
+        </>
+      }
+    />
   );
 }
