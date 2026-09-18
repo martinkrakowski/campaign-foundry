@@ -311,6 +311,7 @@ __metadata:
     postcss: "npm:^8.4.0"
     react: "npm:^19.0.0"
     react-dom: "npm:^19.0.0"
+    react-resizable-panels: "npm:^2.1.4"
     tailwind-merge: "npm:^2.5.0"
     tailwindcss: "npm:^3.4.0"
     typescript: "npm:^5.5.4"
@@ -6069,6 +6070,16 @@ __metadata:
   version: 17.0.2
   resolution: "react-is@npm:17.0.2"
   checksum: 10c0/2bdb6b93fbb1820b024b496042cce405c57e2f85e777c9aabd55f9b26d145408f9f74f5934676ffdc46f3dcff656d78413a6e43968e7b3f92eea35b3052e9053
+  languageName: node
+  linkType: hard
+
+"react-resizable-panels@npm:^2.1.4":
+  version: 2.1.9
+  resolution: "react-resizable-panels@npm:2.1.9"
+  peerDependencies:
+    react: ^16.14.0 || ^17.0.0 || ^18.0.0 || ^19.0.0 || ^19.0.0-rc
+    react-dom: ^16.14.0 || ^17.0.0 || ^18.0.0 || ^19.0.0 || ^19.0.0-rc
+  checksum: 10c0/bb8691a21b75142607d2503c1db84da8fe17acbde64cadbd06745e036a52f78de8c589faccef476559d69a61a95ddc30342fc8f6df59d7855a26a9dbba03dbcf
   languageName: node
   linkType: hard
 

@@ -346,17 +346,32 @@ describe("RS-D1 — the rail is a column of the shell row, full height", () => {
   test("it is a sibling of <main> and of the left sidebar, not a descendant of either", async () => {
     await mountShellWithEditor();
     const aside = rail();
-    const row = aside.parentElement as HTMLElement;
     const main = document.querySelector("main") as HTMLElement;
     const left = document.querySelectorAll("aside")[0];
+    const row = left.parentElement as HTMLElement;
 
-    expect(main.parentElement).toBe(row);
+    /**
+     * SG2 put the resizable pair inside a `PanelGroup`, so the rail's aside and
+     * `<main>` are siblings ONE level below the row rather than in it — and the
+     * group is the row's flex child, beside the left sidebar. The claim is
+     * unchanged and is asserted the same way: the rail is not in `main`'s
+     * scroller, and every box between it and the row is a full-height flex
+     * child, which is what "the rail is a column of the shell row" means. Only
+     * the depth moved; SG2's own suite covers why the group is there.
+     */
+    const railColumn = aside.parentElement as HTMLElement;
+    const group = main.parentElement as HTMLElement;
+    expect(railColumn.parentElement).toBe(group);
+    expect(group.parentElement).toBe(row);
     expect(left.parentElement).toBe(row);
     // The position that matters: inside `main`'s scroller — where the rail used
     // to live, three levels down — `h-full` means "as tall as the scrolled
     // content", so the column could never be browser height.
     expect(main.contains(aside)).toBe(false);
-    expect([...row.children]).toEqual([left, main, aside]);
+    expect([...row.children]).toEqual([left, group]);
+    // Left to right, and nothing else between them: the handle is the only thing
+    // SG2 added to the row, and it sits between the two columns.
+    expect([...group.children]).toEqual([main, screen.getByRole("separator"), railColumn]);
   });
 
   test("its box is the row's height, and it does not pin itself against a scrollport", async () => {
