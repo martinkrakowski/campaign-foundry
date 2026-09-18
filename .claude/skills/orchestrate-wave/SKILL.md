@@ -533,6 +533,19 @@ locked decision; or a seat runs out of credit.
   is still diff-scoped**, so the rest of this rule stands: touching a manifest still arms its full
   replay.
 
+  **The same check now asks the second question, added 2026-09-18: does the `command`'s `-t` still
+  select a test?** `vitest -t` is a REGEX, and a pattern that matches nothing skips every test and
+  **exits 0**, which `mutate:verify` reads as `survived`. That is worse than a dead anchor — a dead
+  anchor refuses, this one answers, confidently and wrongly. It did so twice: a title's `(X30)`
+  pasted into the pattern, where the parentheses are a capture group and not two literal characters
+  (182 tests skipped, exit 0, "survived"), and three `sg4` entries after SG10 renamed the test they
+  name. The check proves a pattern live from the test file's syntax where it can (no spawn) and
+  escalates the rest — a `test.each` title formatted per case, a title that is an expression — to
+  `vitest list`, so it condemns nothing it has not seen vitest refuse. Cost on 2026-09-18: 212
+  patterns, 207 proved by syntax, 5 listed, ~8s all in. **When you write a `-t`, verify it selects
+  before you record it** (`yarn vitest list <file> -t '<pattern>'` prints the tests it picks, or
+  nothing), and escape the metacharacters in a title you are copying.
+
   A mutation whose subject was *deleted* can carry **`"retired": "<why>"`** with a required reason,
   skipped by both the check and the replay. Retiring is a claim: an unexplained one is
   indistinguishable from abandoning a test that was catching something, and retiring a mutation that

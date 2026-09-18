@@ -31,6 +31,10 @@ const io = (over: Partial<AnchorCliIo> = {}): AnchorCliIo & { logs: string[] } =
     listManifests: async () => ["d/m.json"],
     deps: {
       readText: async (path) => (path.endsWith(".json") ? manifestText : "const gate = true;\n"),
+      listTests: async () => {
+        throw new Error("no listing was expected");
+      },
+      now: () => 0,
     },
     ...over,
   };
@@ -44,9 +48,41 @@ describe("runAnchorCli", () => {
   });
 
   test("fails, non-zero, on a dead anchor", async () => {
-    const cli = io({ deps: { readText: async (p) => (p.endsWith(".json") ? manifestText : "") } });
+    const cli = io({
+      deps: {
+        readText: async (p) => (p.endsWith(".json") ? manifestText : ""),
+        listTests: async () => [],
+        now: () => 0,
+      },
+    });
     expect(await runAnchorCli(cli)).toBe(1);
     expect(cli.logs.join("\n")).toContain("DEAD ANCHOR  d/m.json#0");
+  });
+
+  test("fails, non-zero, on a -t pattern that selects nothing — both checks are one gate", async () => {
+    const dead = JSON.stringify({
+      version: 1,
+      lane: "W4",
+      mutations: [
+        {
+          file: "src/target.ts",
+          before: "const gate = true;",
+          after: "const gate = false;",
+          because: "the guard must red",
+          command: ["yarn", "vitest", "run", "src/__tests__/t.test.ts", "-t", "renamed away"],
+          verdict: "caught",
+        },
+      ],
+    });
+    const cli = io({
+      deps: {
+        readText: async (p) => (p.endsWith(".json") ? dead : "const gate = true;\n"),
+        listTests: async () => [],
+        now: () => 0,
+      },
+    });
+    expect(await runAnchorCli(cli)).toBe(1);
+    expect(cli.logs.join("\n")).toContain("DEAD -t PATTERN  d/m.json#0");
   });
 
   test("walks the whole directory, never a diff — that is the hole it exists to close", async () => {
