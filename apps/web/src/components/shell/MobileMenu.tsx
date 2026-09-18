@@ -8,6 +8,8 @@ import { Eyebrow } from "@/components/ui";
 import { dialogHoldsFocus } from "@/components/ui/dialog-shell";
 import { SidebarContent, BrowseBriefsButton } from "./Sidebar";
 import { useGuardedNavigation } from "@/lib/use-guarded-navigation";
+import { useEditorPanels } from "@/lib/editor-panels-context";
+import { useMobileRail } from "@/lib/mobile-rail-context";
 
 interface NavTab {
   href: string;
@@ -31,6 +33,20 @@ export function MobileMenu({ open, onClose, tabs }: MobileMenuProps) {
   const { guardedPush } = useGuardedNavigation();
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
+  /**
+   * SG11 — the third panel's entry. Read from context rather than taken as a
+   * prop: `Header.tsx` renders this component and SG9 is about to rewrite that
+   * file, so a prop would mean two lanes editing it for a value this one can
+   * ask for. A portal escapes the DOM, not React context, so both resolve
+   * normally from inside `createPortal`.
+   *
+   * **Both hooks sit above the `if (!open) return null` below**, and that is not
+   * style: a hook after an early return runs on some renders and not others, and
+   * React fails the component outright rather than degrading. That exact mistake
+   * cost SG4's remediation a whole gate round.
+   */
+  const { rail } = useEditorPanels();
+  const { openRail } = useMobileRail();
 
   const handleTabClick = (e: React.MouseEvent, href: string) => {
     // A modified or non-primary click is the browser's to handle — new tab, new window,
@@ -154,6 +170,32 @@ export function MobileMenu({ open, onClose, tabs }: MobileMenuProps) {
         </nav>
 
         <SidebarContent onNavigate={onClose} />
+
+        {/* SG11 — the way to the third panel. The route tabs above and
+            `SidebarContent` already covered two of the owner's three; the rail
+            had no path at any width below `lg`, where `SidebarShell` is
+            `hidden`.
+
+            `rail === null` renders nothing — no heading, no dead entry. `rail`
+            is null on every route with no editor mounted, and an entry that
+            opens an empty panel is the invisible-surface defect again.
+
+            It closes the menu on the way, so the panel it opens is not left
+            underneath this dialog. */}
+        {rail === null ? null : (
+          <nav className="flex flex-col border-t border-border p-2">
+            <button
+              type="button"
+              onClick={() => {
+                openRail();
+                onClose();
+              }}
+              className="rounded-lg px-3 py-3 text-left text-[15px] font-medium text-text-muted transition-colors hover:bg-surface hover:text-text-emphasis"
+            >
+              {rail.label}
+            </button>
+          </nav>
+        )}
       </div>
 
       {/* Pinned footer: open the brief picker (closing the menu first so it's visible). */}

@@ -7,6 +7,7 @@ import tailwindConfig from "../../../../tailwind.config";
 import { json, nextMock } from "@/__tests__/helpers";
 import { API } from "@/lib/run-context";
 import { RAIL_VIEWPORT_MIN_PX } from "@/lib/use-viewport-min-width";
+import { useMobileRail } from "@/lib/mobile-rail-context";
 import { templateFromCanonical } from "@campaignfoundry/CampaignOrchestration/brief-template";
 import { DEFAULT_CAMPAIGN_TYPE } from "@campaignfoundry/CampaignOrchestration/campaign-types";
 import * as messages from "@/components/campaign/messages";
@@ -203,7 +204,16 @@ const mountShellWithEditor = async () => {
   await settle();
   // The mount's own fetch actually happened: a zero here would make every "no
   // further calls" assertion below vacuous.
-  expect(frameCalls(calls).length).toBeGreaterThan(0);
+  //
+  // `waitFor`, not a bare assertion after `settle()`: this one FLAKED in CI
+  // (run 35307163168, `expected 0 to be greater than 0`) while passing on a
+  // second run of the identical commit and locally. `settle()` is a fixed 400ms,
+  // and on a loaded runner the mount's fetch had not been issued inside it. The
+  // condition here becomes true rather than starting true, which is exactly what
+  // `waitFor` is for — and note the contrast with the vacuity trap: waiting on
+  // an ALREADY-true condition resolves on the first tick and proves nothing,
+  // which is why the "no further calls" assertions below stay bare.
+  await waitFor(() => expect(frameCalls(calls).length).toBeGreaterThan(0));
   return calls;
 };
 
@@ -647,5 +657,191 @@ describe("§5 — the cost contract, re-measured with the rail across the bounda
     await waitFor(() => expect(screen.getByTestId("column-yaml")).toBeTruthy());
     expect(mountedFrameCount()).toBe(1);
     expect(within(rail()).getAllByTestId("preview-frame")).toHaveLength(1);
+  });
+});
+
+/**
+ * SG11 — the owner's requirement: *"The three panels should always be
+ * accessible. For mobile and tablet views the hamburger menu should allow user
+ * to navigate to each panel."*
+ *
+ * Two of the three already surfaced in `MobileMenu` before this lane: the route
+ * tabs, and the left panels via `SidebarContent` (shared with the desktop
+ * `Sidebar`, so they cannot drift). The rail was the one with no path at any
+ * width below `lg`.
+ *
+ * **The invariant these tests exist to protect** is that the rail is rendered in
+ * exactly ONE place. `rail` holds rendered elements, so a second site means a
+ * second mount: every `id` inside the rail duplicated, the `aria-controls` pairs
+ * it builds broken, and two composed frames where §4.6 allows one. So every
+ * assertion here is a count, not a presence check.
+ */
+describe("SG11 — the rail is reachable below the breakpoint, and still rendered once", () => {
+  /**
+   * Mounting BELOW the breakpoint, which `mountShellWithEditor` cannot do.
+   *
+   * That helper asserts the mount's own `/preview-frame` call happened, to keep
+   * its later "no further calls" assertions honest. At this width there IS no
+   * such call — CC2's gate withholds the brief from the dock below `lg`, which
+   * is a contract this file asserts a few describes up ("the rail mounts but
+   * nothing fetches"). So the guard is dropped here rather than worked around,
+   * and nothing in this describe counts fetches; it counts MOUNTS.
+   */
+  const mountNarrow = async () => {
+    routes();
+    render(
+      <ShellLayout>
+        <BriefEditor briefId="clip" />
+      </ShellLayout>,
+    );
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("clip"),
+    );
+    await waitFor(() => expect(maybeRail()).not.toBeNull());
+    await settle();
+  };
+
+  const openMenu = async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Open menu" }));
+    await waitFor(() => expect(screen.getByRole("dialog", { name: "Menu" })).toBeTruthy());
+  };
+
+  const railEntry = () =>
+    within(screen.getByRole("dialog", { name: "Menu" })).getByRole("button", {
+      name: messages.previewLegend,
+    });
+
+  test("the hamburger offers the rail, and choosing it shows the rail's content", async () => {
+    setViewport(RAIL_VIEWPORT_MIN_PX - 24);
+    await mountNarrow();
+    await openMenu();
+
+    // All three: the route tabs, the left panels, and — this lane — the rail.
+    const menu = screen.getByRole("dialog", { name: "Menu" });
+    expect(within(menu).getAllByRole("link").length).toBeGreaterThan(0);
+    fireEvent.click(railEntry());
+
+    // The menu stands aside rather than holding the panel it opened.
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Menu" })).toBeNull());
+    const panel = screen.getByRole("dialog", { name: messages.previewLegend });
+    expect(within(panel).getByTestId("preview-frame")).toBeTruthy();
+  });
+
+  test("exactly one composed frame is mounted while the panel is open (D43 / §4.6)", async () => {
+    setViewport(RAIL_VIEWPORT_MIN_PX - 24);
+    await mountNarrow();
+    expect(mountedFrameCount()).toBe(1);
+
+    await openMenu();
+    fireEvent.click(railEntry());
+    await waitFor(() =>
+      expect(screen.getByRole("dialog", { name: messages.previewLegend })).toBeTruthy(),
+    );
+
+    // The load-bearing count. Rendering the slot in the overlay WITHOUT the
+    // shell column standing down reads as working — the panel shows the rail,
+    // every control in it responds — and silently mounts the editor's composed
+    // frame twice. Only a count says so.
+    expect(mountedFrameCount()).toBe(1);
+  });
+
+  test("closing the panel hands the rail back to the shell column, still once", async () => {
+    setViewport(RAIL_VIEWPORT_MIN_PX - 24);
+    await mountNarrow();
+    await openMenu();
+    fireEvent.click(railEntry());
+    const panel = await waitFor(() => screen.getByRole("dialog", { name: messages.previewLegend }));
+
+    fireEvent.click(within(panel).getByRole("button", { name: `Close ${messages.previewLegend}` }));
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: messages.previewLegend })).toBeNull(),
+    );
+    expect(maybeRail()).not.toBeNull();
+    expect(mountedFrameCount()).toBe(1);
+  });
+
+  test("growing past the breakpoint closes the panel, so the two sites cannot both hold it", async () => {
+    setViewport(RAIL_VIEWPORT_MIN_PX - 24);
+    await mountNarrow();
+    await openMenu();
+    fireEvent.click(railEntry());
+    await waitFor(() =>
+      expect(screen.getByRole("dialog", { name: messages.previewLegend })).toBeTruthy(),
+    );
+
+    // Derived from the viewport rather than left to whoever opened it: a stale
+    // request plus a widened window would otherwise leave the shell column
+    // rendering the rail AND the overlay still up — two mounts, at the one width
+    // where a reader would not think to look.
+    setViewport(RAIL_VIEWPORT_MIN_PX);
+    fireEvent(window, new Event("resize"));
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: messages.previewLegend })).toBeNull(),
+    );
+    expect(mountedFrameCount()).toBe(1);
+    expect(maybeRail()).not.toBeNull();
+  });
+
+  test("a route that publishes no rail offers no entry, and no empty panel", async () => {
+    setViewport(RAIL_VIEWPORT_MIN_PX - 24);
+    render(
+      <ShellLayout>
+        <div>a view with no editor</div>
+      </ShellLayout>,
+    );
+    await openMenu();
+
+    // An entry that opens an empty panel is the 256px-empty-strip defect in a
+    // new place, and `rail` is null on every route with no editor mounted.
+    expect(
+      within(screen.getByRole("dialog", { name: "Menu" })).queryByRole("button", {
+        name: messages.previewLegend,
+      }),
+    ).toBeNull();
+  });
+
+  test("at and above the breakpoint the rail stays in the row and no panel exists", async () => {
+    setViewport(RAIL_VIEWPORT_MIN_PX);
+    await mountShellWithEditor();
+
+    expect(maybeRail()).not.toBeNull();
+    expect(screen.queryByRole("dialog", { name: messages.previewLegend })).toBeNull();
+    expect(mountedFrameCount()).toBe(1);
+  });
+
+  test("Escape closes the panel, and any other key leaves it alone", async () => {
+    setViewport(RAIL_VIEWPORT_MIN_PX - 24);
+    await mountNarrow();
+    await openMenu();
+    fireEvent.click(railEntry());
+    await waitFor(() =>
+      expect(screen.getByRole("dialog", { name: messages.previewLegend })).toBeTruthy(),
+    );
+
+    // A key that is not Escape must not dismiss a panel the operator asked for.
+    fireEvent.keyDown(window, { key: "a" });
+    expect(screen.getByRole("dialog", { name: messages.previewLegend })).toBeTruthy();
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: messages.previewLegend })).toBeNull(),
+    );
+    // And the rail goes back to its column rather than vanishing with the panel.
+    expect(maybeRail()).not.toBeNull();
+    expect(mountedFrameCount()).toBe(1);
+  });
+
+  test("the hook refuses to run outside its provider", () => {
+    const Probe = () => {
+      useMobileRail();
+      return null;
+    };
+    // Deliberately a throw and not a default value: the two render sites are
+    // mutually exclusive only because one provider decides for both, so a
+    // component that reads this outside it would silently get `open: false` and
+    // the rail would be unreachable with nothing to show why.
+    const quiet = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(() => render(<Probe />)).toThrow(/MobileRailProvider/);
+    quiet.mockRestore();
   });
 });
