@@ -261,7 +261,7 @@ export const durationDuplicate = "Two clip lengths are the same — remove one o
  * continuous story now, and the run verb is Generate, wherever it lives.
  */
 export function statusApplied(briefId: string): string {
-  return `Saved — press Generate in the top bar to make ${briefId}.`;
+  return `Saved — press Validate, then Generate, to make ${briefId}.`;
 }
 /** `status.applyRefusal` — committed, but the host cannot run video (its own string, not the field error). */
 export const statusApplyRefusal =
@@ -362,10 +362,14 @@ export function statusNotApplied(errorCount: number): SectionSentence {
   };
 }
 
-export const statusReady = "Ready — Save to keep it, or press Generate in the top bar to run it.";
+// SG-D10 moved the run verb out of the top header and into this bar, so the three
+// sentences that named its old home name the slot beside them instead — and they name
+// Validate first, because SG-D11 puts that verb in the slot until the document has
+// validated clean.
+export const statusReady = "Ready — Save to keep it, or press Validate to check it first.";
 
 export function statusLoaded(briefId: string): string {
-  return `Loaded ${briefId} — press Generate in the top bar to run it.`;
+  return `Loaded ${briefId} — press Validate, then Generate, to run it.`;
 }
 
 /** Join list items the way a sentence reads them: "a", "a and b", "a, b and c". */
@@ -648,48 +652,39 @@ export const themeToLight = "Switch to the light theme";
 /** The theme toggle's name while the app is light. */
 export const themeToDark = "Switch to the dark theme";
 
-// --- Header (W5) ---
+// --- The editor's run slot (SG-D10 … SG-D12, SG-D22) ---
 
 /**
- * The header's run verb (D32). It runs the committed brief and takes the user to the
- * grid; it is never disabled, so everything it refuses to do it says here. When the
- * editor is mounted with an unsaved draft, the press opens the three-way question
- * (`generateDraftTitle` below) instead.
+ * The run verb. SG-D10 took it out of the top header — the owner's retraction of a
+ * placement made in error — and put it in the editor's own action bar, following the
+ * grid toolbar's pattern (`CommandBar`): never disabled, and a credit-spending
+ * confirm before it runs.
+ *
+ * SG-D11: it shares one slot with `editorValidate`, and only one of the two is ever
+ * on screen. Generate renders exactly while the stored validation is fresh, so the
+ * slot is never a dead button — it changes verb.
  */
 export const generate = "Generate";
 /**
- * `header.generate` with nothing committed to run. The remedy is a saved brief, and
- * the route it names is where the editor lives. D35: "press Apply to run" is gone —
- * that verb no longer exists.
+ * SG-D11's other verb, in the same slot: shown until the operator has seen this
+ * document validate clean. Pressing it is the consent step, not a computation —
+ * `validateState` is pure and synchronous and there is no server validation, so
+ * nothing is being "run"; what the press records is that the operator looked.
  */
-export const generateNoBrief =
-  "Nothing is ready to run yet — open the Brief editor and save a brief first.";
-
-/* ── The three-way Generate question (D35) ── */
-
-/**
- * While the editor is mounted and its on-screen draft differs from the shell's
- * committed brief, Generate asks which brief to run. Three answers, exactly one
- * prompt: this question replaces the dirty guard's prompt for the whole gesture
- * (the lane's "never the guard's and the confirm's"), so the choices navigate
- * without a second question.
- */
-export const generateDraftTitle = "Run the brief you are editing?";
-export const generateDraftRunThis = "Run this draft";
-export const generateDraftRunThisHint = "Run what is on screen without writing it to disk.";
-export const generateDraftSaveRun = "Save and run";
-export const generateDraftSaveRunHint = "Write the brief to disk, then run the saved file.";
+export const editorValidate = "Validate";
 export const confirmCancel = "Cancel";
+
+/* ── Generate's credit-spending confirm (SG-D10, after CommandBar.tsx:164) ── */
+
 /**
- * "Run this draft" pressed while the draft would not pass validation (GB-D3 — the
- * verb is never disabled, so the press is the question and this is the answer). The
- * D2 shape — what is missing, then the one thing to do — naming the first section
- * that stands in the way; the editor has already revealed it and handed it focus.
- * The label comes from the one section vocabulary (`SECTION_TITLES`) at the call site.
+ * The grid toolbar's confirm is the reason its run verb is safe, so the editor's
+ * copies it rather than running on a single click. SG8 adds the pre-flight figures
+ * (creatives, layers, platforms) to this dialog; this lane ships the warning without
+ * them, because a count the editor guesses is worse than none.
  */
-export function generateDraftBlocked(sectionLabel: string): string {
-  return `${sectionLabel} still needs attention before this draft can run — fix what is marked there.`;
-}
+export const generateConfirmTitle = "Run the entire pipeline?";
+export const generateConfirmPrompt =
+  "This makes every creative the brief asks for and may consume GenAI quota/credits. It runs the brief exactly as it appears here.";
 
 /* ── The brief routes (D37) ── */
 

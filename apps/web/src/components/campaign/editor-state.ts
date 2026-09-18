@@ -2509,6 +2509,35 @@ export function isDirtySinceApply(state: EditorState): boolean {
   return !valuesEqual(toBrief(state), state.appliedSnapshot);
 }
 
+/**
+ * SG-D15 / §8.4 — is the stored validation still the document on screen?
+ *
+ * **Reference equality on `state`, and it lives here rather than inline in the
+ * editor so the decision has one home and one test.** Validation is a pure
+ * synchronous function of `state` (`validateState`), so it is fresh exactly while
+ * `state` is unchanged. Two properties of `reduceEditor` make that exact rather
+ * than approximate: a real change returns a new object (any edit flips this), and
+ * a refused or no-op action deliberately stays identity-equal (`:745`'s
+ * `return state.countNotice === null ? state : …`, `:1159`'s same-mode flip), so a
+ * rejected keystroke does not invalidate a good validation — nothing changed.
+ *
+ * **Never re-key this onto `toBrief(state)`**, however much it looks like
+ * `isDirtySinceApply` above. `toBrief` is what Save sends, so it DROPS and
+ * NARROWS on the way out: `serialisedFormats` strips `motion` from a classic
+ * brief, `sizes` is the authored subset. So adding Video to a classic draft leaves
+ * the projection byte-identical while `validateState` gains two errors — a
+ * projection-keyed gate would report "still validated" and leave Generate
+ * standing on a document that had just become invalid, spending GenAI credits on
+ * a brief the operator never approved. `editor-state.validation-gate.test.ts`
+ * pins that case; it is the one assertion that fails under the rewrite.
+ *
+ * **Not a boolean flag** (§8.4): a flag must be cleared by every writer that can
+ * invalidate it, and the writer that forgets is the bug.
+ */
+export function isValidationFresh(validatedState: EditorState | null, state: EditorState): boolean {
+  return validatedState === state;
+}
+
 export function draftKeyFor(id: string): string {
   return `cf:draft:${id}`;
 }

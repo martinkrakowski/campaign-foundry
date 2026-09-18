@@ -17,7 +17,6 @@ import {
   type Asset,
 } from "@/lib/run-context";
 import { json, jobOk, mockPipelineApi, EMPTY_REPORT, renderWithRun } from "@/__tests__/helpers";
-import { Header } from "@/components/shell/Header";
 import { CommandBar } from "@/components/shell/CommandBar";
 
 const wrapper = ({ children }: { children: ReactNode }) =>
@@ -2252,7 +2251,24 @@ describe("RunProvider — a second Generate does not lose the campaign (C4)", ()
     );
   };
 
-  test("Header Generate and CommandBar Execute fired in one tick leave one run and show its result", async () => {
+  /**
+   * SG9 — this pressed the HEADER's Generate against the bar's Execute. SG-D10 took the
+   * header verb out, so the second presser is a bare `execute()` from the provider's own
+   * hook: what the test measures is the PROVIDER's token discipline (two POSTs in one
+   * tick, one adopted run), and that was never a property of which button fired it. The
+   * two real run verbs left in the app — the bar's Execute and the editor's Generate —
+   * live in two different routes and cannot be pressed in the same tick anyway.
+   */
+  const RunNow = () => {
+    const { execute } = useRun();
+    return (
+      <button type="button" onClick={() => void execute()}>
+        run now
+      </button>
+    );
+  };
+
+  test("a second run verb fired in the same tick leaves one run and shows its result", async () => {
     const user = userEvent.setup();
     // Both POSTs are held so the two run verbs fire while both are in flight — the
     // exact state a double press creates. The real server serializes them: the first
@@ -2271,25 +2287,23 @@ describe("RunProvider — a second Generate does not lose the campaign (C4)", ()
     renderWithRun(
       <>
         <ApplyBrief />
-        <Header />
+        <RunNow />
         <CommandBar onToggleTelemetry={() => {}} />
       </>,
     );
     await user.click(screen.getByRole("button", { name: "apply" }));
     // The bar's Execute opens its confirm; the verb that actually runs is the dialog's
-    // Generate — which, like the header's, is never disabled by loading. Both stay
-    // pressable while a run is in flight: exactly how a campaign gets pressed twice.
+    // Generate — never disabled by loading. Both stay pressable while a run is in
+    // flight: exactly how a campaign gets pressed twice.
     await user.click(screen.getByRole("button", { name: /Execute/ }));
-    const headerGenerate = within(screen.getByRole("banner")).getByRole("button", {
-      name: "Generate",
-    });
+    const secondPress = screen.getByRole("button", { name: "run now" });
     const dialogGenerate = within(
       screen.getByRole("dialog", { name: "Confirm pipeline action" }),
     ).getByText("Generate");
     // One tick: both presses dispatch in the same synchronous burst, before React can
     // flush the first press's loading state or either POST can answer.
     act(() => {
-      headerGenerate.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      secondPress.dispatchEvent(new MouseEvent("click", { bubbles: true }));
       dialogGenerate.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
     expect(postAnswers.length).toBe(2); // both presses really did ask the server

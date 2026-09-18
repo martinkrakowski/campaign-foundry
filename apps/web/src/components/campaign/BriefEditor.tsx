@@ -8,7 +8,6 @@ import {
   useRef,
   useLayoutEffect,
   type ReactNode,
-  type RefObject,
 } from "react";
 // SG4 — the reveal flips the column view and then scrolls, and the scroll needs a
 // DOM that already has the section in it. See `reveal`.
@@ -38,8 +37,8 @@ import {
   isDirtySinceSave,
   isDirtySinceApply,
   isPristine,
+  isValidationFresh,
   valuesEqual,
-  canonicalBrief,
   getDraftKey,
   saveDraftToStorage,
   loadDraftFromStorage,
@@ -73,10 +72,9 @@ import {
   ErrorStrip,
   MOTION_ERROR_KEY,
   MOTION_HOST_SECTION,
-  sectionForErrorBucket,
 } from "@/components/campaign/ErrorStrip";
 import { ErrorPill } from "@/components/ui";
-import { useEditorDirty, type DraftRunHandoff } from "@/lib/editor-dirty-context";
+import { useEditorDirty } from "@/lib/editor-dirty-context";
 import { useCreateCampaign } from "@/lib/create-campaign-context";
 import { takeSeed } from "@/lib/create-campaign";
 import { FloatingBar } from "@/components/shell/FloatingBar";
@@ -101,7 +99,7 @@ import { DEFAULT_DURATION_SEC } from "@campaignfoundry/CampaignOrchestration/var
 import { resolveTimeline } from "@campaignfoundry/CampaignOrchestration/copy-timeline";
 import { TimelineTape, beatUnderFloor } from "@/components/campaign/TimelineTape";
 import * as messages from "./messages";
-import type { CampaignMode } from "@/components/campaign/editor-state";
+import type { CampaignMode, EditorState } from "@/components/campaign/editor-state";
 
 /* ── The editor's one presentation (SG-D2) ────────────────────────────────── */
 
@@ -371,10 +369,10 @@ export function PlayheadHost({
  */
 export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   const blank = routeId === undefined;
-  const { brief: runBrief, setBrief: setRunBrief } = useRun();
+  const { setBrief: setRunBrief, execute } = useRun();
   const router = useRouter();
   const { guardedPush, guardedAction } = useGuardedNavigation();
-  const { setDirty, setDraftRun } = useEditorDirty();
+  const { setDirty } = useEditorDirty();
   const { openCreateDialog, seedVersion } = useCreateCampaign();
   const { setPanels, setTopPanels, setRail } = useEditorPanelPublisher();
   // VE1 — history lives in the hook, never in `EditorState` (R6): `state` is the
@@ -465,6 +463,25 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
       setTouchedSections((prev) => (prev.has(section) ? prev : new Set([...prev, section])));
   }, []);
   const [attempted, setAttempted] = useState(false);
+  /**
+   * SG-D15 / §8.4 — the validation the operator has seen, held as the `state` object
+   * it was taken from. `null` until Validate is pressed; the gate is
+   * `isValidationFresh(validatedState, state)`.
+   *
+   * **Ephemeral and client-local, deliberately** (SG9's persistence row, the same
+   * class as D139/D147): a reload clears it, and that is correct — the consent this
+   * records is "the operator looked at THIS document a moment ago", which a new page
+   * load cannot inherit.
+   *
+   * Two hooks, and both must stay ABOVE the M3/D83 early returns below. A hook under
+   * a conditional `return` is skipped on the renders that answer "no such brief" or
+   * a failed listing, and React fails the component outright — `columnPanels` carries
+   * the same warning for the same reason, and it cost seventeen tests when it was
+   * learned.
+   */
+  const [validatedState, setValidatedState] = useState<EditorState | null>(null);
+  /** Generate's credit-spending confirm (SG-D10, after `CommandBar.tsx:164`). */
+  const [runConfirmOpen, setRunConfirmOpen] = useState(false);
 
   // Load briefs on mount and set up focus listener
   useEffect(() => {
@@ -909,17 +926,11 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   // `hidden lg:flex` still hides without unmounting, so the rail would keep
   // fetching frames nobody can see without this.
   const isRailWideEnough = useViewportMinWidth(RAIL_VIEWPORT_MIN_PX);
-  /**
-   * D35 — whether Generate's default target (the shell's brief) and the screen
-   * disagree. A pristine editor holds the blank template, not a draft anybody is
-   * editing, so it never counts as differing — otherwise a freshly mounted editor
-   * (or a reverted one) would offer to run an empty form over a perfectly good
-   * committed brief.
-   */
-  const draftDiffers = useMemo(
-    () => !isPristine(state) && !valuesEqual(draftBrief, canonicalBrief(runBrief)),
-    [state, draftBrief, runBrief],
-  );
+  // SG9 — `draftDiffers` is gone with the D35 handoff it published. It asked whether
+  // Generate's default target (the shell's committed brief) and the screen disagreed,
+  // which was a question only a Generate living OUTSIDE the editor had to ask. The
+  // editor's own Generate hands `draftBrief` to `execute` as the target, so the two
+  // can never disagree and there is nothing left to compare.
 
   // Mount, window focus, the post-save refresh and the failure state's retry all
   // funnel through loadBriefs, and their answers can land out of order. Stamp each
@@ -1638,50 +1649,75 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   };
 
   /**
-   * D35 — the run-without-write handoff. The freshest draft and save path ride refs
-   * assigned every render, so the published handoff never goes stale while the user
-   * keeps typing; the publish effect runs only on a differs-flip, so keystrokes never
-   * churn every provider consumer. While the handoff stands, Generate asks the
-   * three-way question (Header.tsx) — which replaces the guard's prompt for the whole
-   * gesture, exactly one question either way.
+   * SG-D12 / SG-D20 — the Validate verb's action, and the only thing that opens the
+   * gate. It stores the CURRENT `state` object as the validation snapshot, so
+   * `isValidationFresh` answers true until the next real edit.
+   *
+   * **Nothing is computed here, and that is the point.** `validateState` is pure and
+   * synchronous and there is no server validation endpoint (`apps/api/src` has none),
+   * so the errors were already known before the press. What the press records is
+   * operator consent — "I have seen this document clean" — which is why arriving
+   * anywhere, switching a view, or a re-render must never take the snapshot. Only
+   * this handler does.
+   *
+   * **Errors refuse the gate rather than sitting dead** (D3's surviving half, kept by
+   * SG-D11): `refuseInvalid` marks the attempt, reveals every error, hands focus to
+   * the first blocking section, and `StatusLine` speaks the count. The gate's own
+   * verdict is the FULL `errors` and not `refuseInvalid`'s return value, which reads
+   * `blockedAt` — Save's question, narrowed to structural validity with
+   * `capabilities: null` so a video brief stays SAVABLE on a host with no ffmpeg (D7).
+   * The two agree today because `validateState` never reads `capabilities` at all; a
+   * gate keyed on Save's verdict would silently follow it if that ever changed, and
+   * this one is about RUNNING.
+   *
+   * **A capability refusal is NOT in `errors`, so it does not close this gate — a
+   * finding, not a decision taken here.** `motionUnavailableReason` is deliberately
+   * outside `validateState` (D7: "gates are never red", `validate.ts:453-457`), so a
+   * video brief on a host with no ffmpeg validates clean and Generate appears, even
+   * though `messages.statusApplyRefusal` already tells the operator "Generate will
+   * wait until it is set up". Nothing in SG9 made that worse — the header's Generate
+   * ran such a brief too — and no stamped decision covers it, so it is reported
+   * rather than fixed by invention. SG8's pre-flight is where the figures (and this
+   * refusal) belong.
+   *
+   * SG10 adds one line here: revealing the `validate` column view. The view does not
+   * exist yet (SG4 shipped two positions on purpose), so there is nothing to reveal.
    */
-  const draftRunDraftRef = useRef<CampaignBrief | null>(null);
-  const draftRunSaveRef = useRef<(() => Promise<CampaignBrief | null>) | undefined>(undefined);
-  const draftRunBlockedRef = useRef<SectionId | null>(null);
-  const draftRunRefuseRef = useRef<(() => boolean) | undefined>(undefined);
-  draftRunDraftRef.current = draftDiffers ? draftBrief : null;
-  // `blockedAt` keys validateState's buckets, and motion is one of them without being
-  // a section — the refusal that reads this hands it to `reveal`, which folds motion
-  // into its host. Publish the same mapped section, from the one mapping helper.
-  draftRunBlockedRef.current = sectionForErrorBucket(blockedAt);
-  draftRunRefuseRef.current = refuseInvalid;
-  draftRunSaveRef.current = handleSave;
-  useEffect(() => {
-    if (!draftDiffers) {
-      setDraftRun(null);
-      return;
-    }
-    const handoff: DraftRunHandoff = {
-      // Assigned every render: null exactly when `!draftDiffers`, which is when this
-      // effect's other branch unpublishes the handoff — so while the handoff stands
-      // the ref always holds the freshest draft. The cast only restates that
-      // invariant for the type, the same way `saveAndRun`'s does below; the dialog
-      // that reads it has no null branch to guard, because none exists.
-      draftRef: draftRunDraftRef as Readonly<RefObject<CampaignBrief>>,
-      // The editor's own verdict, on the same ref-and-refresh cadence as the draft:
-      // a plain `blocked` would go stale the moment the user fixed the field it
-      // named, because this effect only runs on a differs-flip.
-      blockedRef: draftRunBlockedRef,
-      // Assigned every render before any handoff can be published — the same cast
-      // restating the invariant as the two refs above.
-      refuseInvalid: () => (draftRunRefuseRef.current as () => boolean)(),
-      // Assigned every render before any handoff can be published, so the cast only
-      // restates the invariant — the call itself is always the freshest save.
-      saveAndRun: () => (draftRunSaveRef.current as () => Promise<CampaignBrief | null>)(),
-    };
-    setDraftRun(handoff);
-    return () => setDraftRun(null);
-  }, [draftDiffers, setDraftRun]);
+  const handleValidate = () => {
+    refuseInvalid();
+    if (getTotalErrorCount(errors) > 0) return;
+    setValidatedState(state);
+  };
+
+  /**
+   * SG-D22 — the run, and its target.
+   *
+   * `execute(draftBrief)` — the PROJECTION, handed in explicitly. A bare `execute()`
+   * runs the shell's committed brief, which is what made D35 ask "which brief?" from
+   * the header; passing the target makes the run byte-identical to the document the
+   * gate validated, by construction rather than by inference about what the shell
+   * happens to hold. That is SG-D22's second form ("it applies and runs as one
+   * gesture") and it keeps GB-D3's run-without-write: a brief that was never written
+   * to disk is still runnable, which is the capability that retiring "Apply to run"
+   * depended on.
+   *
+   * **It does NOT call `setRunBrief`.** `setBrief` persists `cf:brief` as the
+   * last-opened POINTER (D37, `run-context.tsx:679`), so committing a never-saved
+   * draft's id there would send a later reload to a brief that has no file (M3's
+   * "no such brief"). The run records its own producer instead —
+   * `CommittedRun.target` (R6) — which is exactly why that pairing exists.
+   *
+   * **The confirm is the whole gesture's consent, so the dirty guard is not asked.**
+   * This is D35's own resolution, inherited: a deliberate credit-spending question
+   * replaces the guard's prompt for the gesture, because "one prompt, never two"
+   * (DESIGN.md §5) outranks asking about a draft the operator just chose to run. The
+   * draft is not lost either way — L1 autosaves it under its own key.
+   */
+  const runValidatedBrief = () => {
+    setRunConfirmOpen(false);
+    void execute(draftBrief);
+    router.push("/grid");
+  };
 
   // The Save-as field speaks the same rule as the briefId field (messages.briefId),
   // evaluated on the *trimmed* value so the verdict matches what Save would send.
@@ -1766,8 +1802,14 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
         {messages.editorCancel}
       </Button>
       <Button
-        /* D3: never a dead primary button — pressing an invalid brief sets
-           `attempted`, reveals every error and speaks the refusal. */
+        /* D3: never a dead verb — pressing an invalid brief sets `attempted`,
+           reveals every error and speaks the refusal.
+           SG-D10: `secondary`, where this was the bar's one primary. The run slot
+           below is the emphasised verb now, the way `CommandBar`'s Execute is the
+           only filled pill on the grid toolbar; two primaries side by side would
+           say the bar has two most-important verbs, and running costs money while
+           saving does not. Nothing else about Save changed. */
+        variant="secondary"
         disabled={saving}
         isLoading={saving}
         onClick={() => void handleSave()}
@@ -1784,6 +1826,33 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
           { label: messages.editorRevert, onSelect: handleRevert },
         ]}
       />
+      {/*
+        SG-D10/SG-D11 — ONE slot, TWO verbs, and never a disabled Generate.
+        The owner named the grid toolbar as the pattern (`CommandBar.tsx:167`), and
+        this follows its substance: the run verb is the bar's rightmost and only
+        emphasised control, it is never disabled for being invalid, and it asks a
+        credit-spending confirm before it spends anything. It wears the kit `Button`
+        rather than CommandBar's hand-rolled pill because it stands in a bar built
+        from kit buttons — copying the pill's markup here would make this bar the
+        only place in the app with both.
+
+        D3 / DESIGN.md §5 is NOT reversed by this (SG-D11): D3's promise is that the
+        operator never faces a dead button, and the slot keeps it — it always offers a
+        live verb, it just changes which one. `DESIGN.md §5` is updated in this PR to
+        say so.
+
+        The gate is `isValidationFresh`, and nothing else may be added to this
+        condition. An `errors.length === 0` belt-and-braces term here would look
+        prudent and would hide the very defect §8.4 exists to prevent: under a
+        projection-keyed rewrite the invalidating edit would still hide Generate via
+        the error count, and the test that pins SG-D15 would pass. */}
+      {isValidationFresh(validatedState, state) ? (
+        <Button aria-haspopup="dialog" onClick={() => setRunConfirmOpen(true)}>
+          {messages.generate}
+        </Button>
+      ) : (
+        <Button onClick={handleValidate}>{messages.editorValidate}</Button>
+      )}
     </>
   );
 
@@ -2183,6 +2252,21 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
           action?.();
         }}
         onClose={() => setPendingReplace(null)}
+      />
+
+      {/* SG-D10 — Generate's credit-spending confirm, the half of the grid toolbar's
+           pattern that makes its run verb safe (`CommandBar.tsx:164-176`). Escape,
+           Cancel and the backdrop all answer "do not run"; the kit's DialogShell
+           carries all three and restores focus to the verb. SG8 adds the pre-flight
+           figures to this dialog's copy. */}
+      <ConfirmDialog
+        open={runConfirmOpen}
+        title={messages.generateConfirmTitle}
+        message={messages.generateConfirmPrompt}
+        confirmLabel={messages.generate}
+        cancelLabel={messages.confirmCancel}
+        onConfirm={runValidatedBrief}
+        onClose={() => setRunConfirmOpen(false)}
       />
 
       {/* D9 — the Save-as overwrite decision. The confirm is what sends
