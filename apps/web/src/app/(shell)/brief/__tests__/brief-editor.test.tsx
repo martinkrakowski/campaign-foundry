@@ -2178,6 +2178,14 @@ describe("BriefPage — capabilities and motion", () => {
     // plus at most one more for the dirty-flag effect (`setDirty` in a context that
     // outlives the route) — never a third for a validation mirror that has no reason
     // to exist as its own commit.
+    //
+    // **This bound no longer discriminates the mirror, and the test below is why
+    // it stays anyway.** The shipped cost of this toggle is now one commit, not
+    // two, so `x30.json`'s revert lands at two and fits inside the budget — it
+    // was replayed here and SURVIVED. What the bound still pins is the ceiling
+    // for a gesture measured through a click, past a debounce, on a loaded
+    // runner; the mirror's own claim is re-asserted exactly, and amplified, in
+    // the test that follows.
     expect(commits).toBeLessThanOrEqual(2);
     // This click also changed the previewed motion kind, re-keying the fetch
     // (CC2) and scheduling another debounced request — settle it too before
@@ -2187,6 +2195,76 @@ describe("BriefPage — capabilities and motion", () => {
     commits = 0;
     await user.click(screen.getByRole("button", { name: "ken-burns-out" }));
     expect(commits).toBeLessThanOrEqual(2);
+  });
+
+  /**
+   * **X30's claim again, amplified — because the budget above can no longer see
+   * the defect it was written for.**
+   *
+   * Measured on `origin/main` at 180042e1: the revert `x30.json` carries (the
+   * `useMemo` triple back to a `useState` triple written from a `[state, briefs]`
+   * effect) costs exactly ONE extra commit per dispatch, and the editor's shipped
+   * cost for a dispatch is now ONE — so the mutation lands at two, inside
+   * `toBeLessThanOrEqual(2)`, and the test above stays green on it. The commit
+   * that budget had slack for is gone, and not because anything regressed: RS2
+   * (#481) split the panel SETTERS onto a context of their own, so publishing no
+   * longer re-enters the publisher and a dispatch stopped paying a second commit
+   * for the publish it schedules. Verified rather than inferred — applying that
+   * merge-back to today's tree takes the test above from 1 commit to 2, exactly
+   * as this mutation does. (X30's own comment attributes the budget's second
+   * commit to the dirty-flag effect; that attribution does not hold today.
+   * Reverting X32's ref guard, and separately restoring the pre-X32
+   * `return () => setDirty(false)` cleanup, each leave this gesture at one
+   * commit: `setDirty` with the value the context already holds is a bail-out,
+   * and a cleanup-then-body pair from the same effect batches into one commit.)
+   *
+   * Three dispatches counted as ONE number is what discriminates: the mirror's
+   * cost scales with the gesture count (3 against 6) while a stray commit does
+   * not, so the claim survives without a budget to hide inside.
+   *
+   * **And the window needs no `settle()`, which is what lets the number be
+   * exact.** The three edits are synchronous `fireEvent`s with no `await` between
+   * them, so nothing asynchronous can interleave — no timer, no settled promise,
+   * and in particular not the rail's debounced frame request — the thing the test
+   * above settles past twice, for the reason its own comment records. This draft
+   * never issues one at all (asserted below, so the premise is pinned rather than
+   * assumed).
+   *
+   * The FIRST edit is the warm-up and is deliberately outside the window: it
+   * crosses pristine → dirty, a genuine one-off (measured at 5 commits, with and
+   * without the mutation alike).
+   */
+  test("three keystrokes cost the editor three commits — one each, no validation mirror (X30)", async () => {
+    const calls = routes({});
+    let commits = 0;
+    renderWithRun(
+      <Profiler
+        id="x30-mirror"
+        onRender={() => {
+          commits += 1;
+        }}
+      >
+        <NewEditor />
+      </Profiler>,
+    );
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
+    );
+    const audience = screen.getByLabelText(messages.targetAudienceLabel) as HTMLInputElement;
+    fireEvent.change(audience, { target: { value: "a" } });
+
+    commits = 0;
+    fireEvent.change(audience, { target: { value: "ab" } });
+    fireEvent.change(audience, { target: { value: "abc" } });
+    fireEvent.change(audience, { target: { value: "abcd" } });
+
+    expect(commits).toBe(3);
+    // The edits reached the draft: three commits of an editor that ignored the
+    // events would be three commits of nothing.
+    expect(audience.value).toBe("abcd");
+    // The premise the exact number rests on: nothing asynchronous was in flight
+    // that could have committed inside the window.
+    expect(calls.filter((c) => c.url.includes("/campaigns/preview-frame"))).toEqual([]);
   });
 
   /**

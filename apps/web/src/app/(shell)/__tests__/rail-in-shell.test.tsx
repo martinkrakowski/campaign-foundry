@@ -12,6 +12,7 @@ import { templateFromCanonical } from "@campaignfoundry/CampaignOrchestration/br
 import { DEFAULT_CAMPAIGN_TYPE } from "@campaignfoundry/CampaignOrchestration/campaign-types";
 import * as messages from "@/components/campaign/messages";
 import { BriefEditor } from "@/components/campaign/BriefEditor";
+import type { EditorState } from "@/components/campaign/editor-state";
 import type { LayerStackProps } from "@/components/campaign/LayerStack";
 import type { TimelineTapeProps } from "@/components/campaign/TimelineTape";
 import type { PreviewShowcaseProps } from "@/components/campaign/PreviewDock";
@@ -42,6 +43,76 @@ vi.mock("@/components/campaign/sections", async (importOriginal) => {
   // One always-mounted section, deliberately: counting every section would turn
   // one commit into "one commit x however many sections this mode renders".
   return { ...actual, IdentitySection: counted(actual.IdentitySection) };
+});
+
+/**
+ * **Renders of `BriefEditor` ITSELF, which is not what `formRenders` counts any
+ * more.**
+ *
+ * `formRenders` counts entries into `IdentitySection`, and since SG4 (#483) that
+ * section is reached through `columnPanels` — a `useMemo` inside `BriefEditor`,
+ * rendered as `{columnPanels[columnView]}`. When the record survives a render
+ * React is handed the identical element and the whole form subtree is skipped, so
+ * a render of the editor that moves none of that memo's inputs costs `formRenders`
+ * NOTHING. That is what the memo is FOR (SG4 measured 13 entries to 7 across one
+ * keystroke) and it is why this second counter has to exist: the publisher-cycle
+ * defect (`rs.json` #12) is exactly such a render — the editor subscribing to its
+ * own publication commits again with the same `state`, so `columnPanels` bails out
+ * and `formRenders` stays at 1 while the editor has run twice.
+ *
+ * `StatusChip` is the instrument because `BriefEditor` renders it DIRECTLY in its
+ * own JSX (`:2326`), outside the memoised record and behind no `memo` of its own,
+ * so it is entered exactly once per render of the editor. The `counted()` wrapper
+ * is the one the sections mock above already uses.
+ *
+ * Not a `React.Profiler`, and that was measured rather than assumed: a Profiler
+ * around `<BriefEditor>` reports ONE commit for this keystroke whether or not the
+ * publisher subscribes, because the Profiler fiber itself bails out on a
+ * context-driven re-render of its child and React then never calls its `onRender`.
+ * The editor's render function ran twice in that same window (instrumented
+ * directly). X30's Profiler in `brief-editor.test.tsx` does see this defect,
+ * through a click rather than a `change` — but a counter that can miss the render
+ * it is pointed at is not the one this guard should rest on.
+ */
+const editorRenders = vi.hoisted(() => ({ count: 0 }));
+
+/**
+ * **Why the counter THROWS rather than only failing an assertion afterwards.**
+ *
+ * The defect this count guards has a runaway form, and it is measured, not feared:
+ * the publisher subscribing to its own slots, plus one unmemoised value in
+ * `railSlot`'s hand-maintained dependency list, is publish → render → publish with
+ * no fixed point — and `act()` flushes that cascade synchronously, so it starves
+ * vitest's own timer and spins the worker instead of failing the test (22 minutes
+ * at 100% CPU on the run that found it, where the assertion would have failed in
+ * 14 seconds). An assertion that only reads the number afterwards is never
+ * reached. Throwing from inside the render is what turns the cascade back into a
+ * test failure.
+ *
+ * 40 is a tripwire, not a budget — the numbers themselves are asserted by the
+ * tests, and this only has to sit above every legitimate total and below a
+ * runaway. Measured, with the counter reset per test: mount through
+ * `mountShellWithEditor` is 5 renders of the editor, a keystroke is 1, a
+ * five-frame scrub is 0, and the heaviest whole test in this file totals 10. A
+ * cascade reaches 40 in milliseconds, so the slack costs nothing.
+ */
+const EDITOR_RENDER_CEILING = 40;
+
+vi.mock("@/components/campaign/StatusChip", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/components/campaign/StatusChip")>();
+  return {
+    ...actual,
+    StatusChip: function CountedStatusChip(props: { state: EditorState }) {
+      editorRenders.count += 1;
+      if (editorRenders.count > EDITOR_RENDER_CEILING) {
+        throw new Error(
+          `the editor rendered more than ${EDITOR_RENDER_CEILING} times in one window — ` +
+            "a publish that re-enters the publisher has no fixed point (rs.json #12)",
+        );
+      }
+      return createElement(actual.StatusChip, props);
+    },
+  };
 });
 
 /**
@@ -248,6 +319,7 @@ beforeEach(() => {
   localStorage.setItem("cf:brief-picked", "1");
   setViewport(1280);
   formRenders.count = 0;
+  editorRenders.count = 0;
   stackRenders.count = 0;
   tapeRenders.count = 0;
   dockRenders.count = 0;
@@ -582,16 +654,57 @@ describe("§5 — the cost contract, re-measured with the rail across the bounda
     // - `> 0` is the liveness half — without it, (1) and (2) would both pass on
     //   an editor that ignored the event entirely, which is the vacuous shape §5
     //   names and the shape the manifest's handler mutation produces;
-    // - `=== 1` is the publisher-cycle guard. Merging the setters back onto the
-    //   slot context makes the editor a subscriber of its own publication, so a
-    //   keystroke costs two commits instead of one. `toBeGreaterThan(0)` stayed
-    //   green through exactly that (caught in review), which left the structural
-    //   fix guarded only in another lane's file and only through the test outlet.
-    //   `rs.json` carries the merge-back.
+    // - `=== 1` pins the memo boundary the form now sits behind: `columnPanels`
+    //   (SG4) hands React the identical element when its inputs have not moved,
+    //   so a second entry here means an input that should be stable is not.
+    //
+    // **What `=== 1` here does NOT guard any more, and the note is the point.**
+    // It used to be the publisher-cycle guard too — merging the setters back onto
+    // the slot context makes the editor a subscriber of its own publication, so a
+    // keystroke costs two renders instead of one. Since SG4 (#483) put
+    // `columnPanels` behind a `useMemo`, that second render arrives with the same
+    // `state`, the record survives, and this counter never sees it: `rs.json` #12
+    // was replayed against this assertion and SURVIVED. The editor's own render
+    // count is what catches it, in the test below. SG4 re-declared this same
+    // effect where it changed a number (`brief-editor.layers`, 1 to 0) and
+    // re-anchored `cc3.json`; this claim is the one it disarmed silently.
     expect(formRenders.count).toBe(1);
     // The edit also reached the draft: a count that rose while the field stayed
     // empty would be a render for some other reason.
     expect(audience.value).toContain("a new audience");
+  });
+
+  /**
+   * **(3b) The publisher-cycle guard, on the count that can still see it.**
+   *
+   * The editor must not subscribe to what it publishes. One keystroke is one
+   * render of `BriefEditor`: the reducer's. Merge the setters back onto the slot
+   * context (`rs.json` #12) and the same keystroke is two — gesture → render →
+   * publish effect → `setPanels` → context change → render — and with one
+   * unmemoised value in `railSlot`'s hand-maintained dependency list that second
+   * render publishes again, which is the cascade with no fixed point.
+   *
+   * Measured through the shell, and exact rather than a bound, for the reason in
+   * the counter's own comment: the rail's debounced frame commit lands in the
+   * rail's subtree, which `EditorRailSlot` mounts as a sibling of `<main>` — the
+   * editor does not re-render for it, so there is no stray commit to leave slack
+   * for. A budget with slack is what let this defect back through X30's
+   * `toBeLessThanOrEqual(2)` in `brief-editor.test.tsx`, where the number the
+   * budget was sized for is exactly the one this split removed.
+   */
+  test("(3b) and the editor itself renders exactly once — the publisher subscribes to nothing", async () => {
+    await mountShellWithEditor();
+    editorRenders.count = 0;
+    formRenders.count = 0;
+    const audience = await keystroke();
+
+    expect(editorRenders.count).toBe(1);
+    // Liveness, same reason as (3)'s: a keystroke the editor ignored would render
+    // it zero times and pass an assertion that only bounded the number from above.
+    expect(audience.value).toContain("a new audience");
+    // And that one render drew the form behind the memo, so "exactly one" cannot
+    // be one render that reconciled nothing.
+    expect(formRenders.count).toBe(1);
   });
 
   test("a scrub still redraws the rail's surfaces, and still leaves the form alone", async () => {
