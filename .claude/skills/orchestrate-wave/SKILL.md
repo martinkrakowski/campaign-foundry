@@ -518,11 +518,26 @@ locked decision; or a seat runs out of credit.
   against `MANIFEST_DIFF_BASE` (named, not cited by line: a line number in a rule about anchors
   rotting is the joke writing itself) — so editing one for an unrelated reason pulls it into the replay set and every
   anchor in it must then resolve. On 2026-09-17 lane TS1 re-anchored two entries in `cc1.json` and
-  turned its third — stale since X1's formatter run — into a red gate. The corollary is worse than
-  the inconvenience: a manifest nobody touches is **never checked again**, so its evidence rots in
-  silence. An audit that day found **45 stale anchors across 29 manifests**. Before editing a
-  manifest, check that all of its anchors still resolve, and treat a stale one as a finding rather
-  than a chore you inherited.
+  turned its third — stale since X1's formatter run — into a red gate.
+
+  **The corollary used to be worse than the inconvenience, and was fixed on 2026-09-18.** A manifest
+  nobody touched was never checked again, so its evidence rotted in silence: a full audit found
+  **57 dead anchors across 34 of 93 manifests — 12% of all 468 mutation claims**, three manifests
+  dead outright. (An earlier partial count said 45 across 29; the measured figure is 57.) Repairing
+  them exposed **three mutations recorded `caught` that actually survived** — one live on `main` the
+  whole time, invisible because a dead sibling made its manifest refuse to replay at all.
+
+  **`yarn mutate:anchors` now checks every anchor in every manifest** — a string count, no build, no
+  tests, all 94 in under a second — and runs ahead of the replay in `verify-manifests.sh`, so a dead
+  anchor costs one second instead of twenty minutes. Anchors no longer rot in silence. **The replay
+  is still diff-scoped**, so the rest of this rule stands: touching a manifest still arms its full
+  replay.
+
+  A mutation whose subject was *deleted* can carry **`"retired": "<why>"`** with a required reason,
+  skipped by both the check and the replay. Retiring is a claim: an unexplained one is
+  indistinguishable from abandoning a test that was catching something, and retiring a mutation that
+  *survives* is `verdict: "survived"` with a coat of paint. Re-anchor when the code moved; retire
+  only when it is gone.
 
 - **Before `git reset --hard`, save the diff.** `git diff > /tmp/<name>.patch` (and
   `git diff --cached` if anything is staged) first. A hard reset silently destroys uncommitted work,
