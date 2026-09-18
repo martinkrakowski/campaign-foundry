@@ -4090,6 +4090,46 @@ describe("BriefPage — the validation view (SG10 / SG-D13, SG-D14)", () => {
   });
 
   /**
+   * **The view takes the UNGATED errors, and this is the only case that can show
+   * it.** Every fixture loaded by route arrives with `attempted` already true —
+   * `BriefEditor.tsx` sets it on adoption, because a loaded brief's errors are the
+   * file's rather than the operator's — so on those briefs `visibleErrors` and
+   * `errors` are the same object and no assertion can tell them apart. The blank
+   * `/brief/new` draft is where they diverge: nothing attempted, nothing touched,
+   * so the gated set is EMPTY while the document fails three sections.
+   *
+   * That is also the operator flow this view is most useful for — start a campaign,
+   * open the validation segment, see what is still missing — and the one the gated
+   * set would silently break: the collected list would read clean while the toolbar
+   * refused to validate the very same draft.
+   *
+   * The inline absence is asserted FIRST, while the form is still on screen, so the
+   * test states both halves: L1.1's gating is untouched (no field is shouting at a
+   * value nobody has typed), and the view reports the errors anyway.
+   */
+  test("a never-attempted draft reports its errors here, with no field showing one yet", async () => {
+    const user = userEvent.setup();
+    routes({});
+    renderWithRun(<NewEditor />);
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
+    );
+
+    // L1.1: the user has been nowhere and attempted nothing, so no field is marked.
+    expect(screen.queryByText(messages.briefId)).toBeNull();
+    expect(
+      within(document.getElementById("identity") as HTMLElement).queryByText(messages.briefId),
+    ).toBeNull();
+
+    await user.click(viewButton(messages.columnValidateView));
+
+    // The collected list is not the gated one: it reports the document, not the walk.
+    expect(within(panel()).getByText(messages.briefId)).toBeTruthy();
+    expect(within(panel()).getByText(messages.campaignMessage)).toBeTruthy();
+    expect(within(panel()).queryByText(messages.validationCleanUnvalidated)).toBeNull();
+  });
+
+  /**
    * **Red fault 2, second half: the inlined errors stay inlined.**
    *
    * The owner asked for the errors to be collected here *as well*, not moved here.

@@ -40,7 +40,7 @@
       "file": "apps/web/src/components/campaign/BriefEditor.tsx",
       "before": "          errors={errors}\n          mode={state.mode}",
       "after": "          errors={visibleErrors}\n          mode={state.mode}",
-      "because": "The gated set, handed to the one surface that must not have it — and it is the CONSISTENT-looking edit, not a careless one. Every other panel in this record receives the touch-gated errors (`sectionErrorsVisible` wraps `visibleErrors` for all seven sections), `visibleErrors` is already in the memo's dependency list, and L1.1's gating exists for a good reason: a form must not shout at a field the operator has not reached yet. So passing it here reads as bringing the new panel into line. What it breaks is the owner's actual requirement — \"dump all errors in there including the ones that were inlined\" — because `visibleErrors` is by construction a SUBSET. A freshly loaded invalid brief has touched nothing and attempted nothing, so the collected view would report a clean document while the toolbar refuses to validate the same one: two surfaces disagreeing about the document in front of the operator, which is exactly what one collected list exists to end. It survives every test that presses Validate first (`attempted` makes the two sets equal) — which is most natural ways to write this suite. Caught by the collection test, which navigates straight to the view on a loaded two-section-invalid brief and presses nothing at all before reading it.",
+      "because": "The gated set, handed to the one surface that must not have it — and it is the CONSISTENT-looking edit, not a careless one. Every other panel in this record receives the touch-gated errors (`sectionErrorsVisible` wraps `visibleErrors` for all seven sections), `visibleErrors` is already in the memo's dependency list, and L1.1's gating exists for a good reason: a form must not shout at a field the operator has not reached yet. So passing it here reads as bringing the new panel into line. What it breaks is the owner's actual requirement — \"dump all errors in there including the ones that were inlined\" — because `visibleErrors` is by construction a SUBSET, and the collected view would then report a clean document while the toolbar refused to validate the same one: two surfaces disagreeing about the document in front of the operator. It is nearly invisible, and the reason is worth recording because it cost this lane a replay: `BriefEditor` sets `attempted` on route adoption (a loaded brief's errors are the FILE's, not the operator's), so on every fixture loaded by route the two sets are the same object and NOTHING can tell them apart — the first version of this manifest claimed a loaded two-section-invalid brief would catch it, and the replay observed 'survived'. The blank `/brief/new` draft is the only place they diverge, and it is also the flow the view is most useful in. Caught by the never-attempted test, which asserts the inline absence first (L1.1 untouched, no field shouting) and then finds the same errors in the view.",
       "command": [
         "yarn",
         "vitest",
@@ -49,7 +49,7 @@
         "web",
         "apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx",
         "-t",
-        "every error the document has is collected here, across sections"
+        "a never-attempted draft reports its errors here, with no field showing one yet"
       ],
       "verdict": "caught"
     },
