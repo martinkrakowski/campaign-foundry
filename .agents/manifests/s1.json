@@ -76,9 +76,9 @@
     },
     {
       "file": "tools/wave-status/lib/collect.ts",
-      "before": "  return corpus.skipped > 0 ? { ...status, prs: { skipped: corpus.skipped } } : status;",
-      "after": "  return status;",
-      "because": "A corpus with rows missing is not one any face may read as whole. Drop the gap from the status and a lane whose PR was in an unreadable row is indistinguishable from a lane with no PR, which is the page's 'no PR' claim returning by the back door.",
+      "before": "  return corpus.skipped > 0 ? { ...withBacklog, prs: { skipped: corpus.skipped } } : withBacklog;",
+      "after": "  return withBacklog;",
+      "because": "A corpus with rows missing is not one any face may read as whole. Drop the gap from the status and a lane whose PR was in an unreadable row is indistinguishable from a lane with no PR, which is the page's 'no PR' claim returning by the back door. (Re-anchored by ANCHORS: S5 inserted the backlog step, renaming the value returned here from `status` to `withBacklog`; The semantic edit is the same one; the after-text is that edit re-expressed against the current shape, not a new claim.)",
       "command": ["yarn", "vitest", "run", "tools/wave-status/__tests__/collect.test.ts"],
       "verdict": "caught"
     },
@@ -116,9 +116,9 @@
     },
     {
       "file": "tools/wave-status/lib/render.ts",
-      "before": "  if (status.prs === undefined) return body;",
-      "after": "  if (status.prs !== undefined) return body;",
-      "because": "The terminal face owes the same honesty: with rows missing every PR cell prints an em dash, and an em dash is read as absence. Say the read was short instead.",
+      "before": "  if (status.prs !== undefined) {",
+      "after": "  if (status.prs === undefined) {",
+      "because": "The terminal face owes the same honesty: with rows missing every PR cell prints an em dash, and an em dash is read as absence. Say the read was short instead. (Re-anchored by ANCHORS: S5 turned the early return into a block that appends the note; The semantic edit is the same one; the after-text is that edit re-expressed against the current shape, not a new claim.)",
       "command": ["yarn", "vitest", "run", "tools/wave-status/lib/__tests__/render.test.ts"],
       "verdict": "caught"
     }

@@ -108,9 +108,9 @@
     },
     {
       "file": "tools/wave-status/lib/backlog.ts",
-      "before": "    if (err !== null && typeof err === \"object\" && \"code\" in err && (err as { code: unknown }).code === \"ENOENT\") {\n      return { state: \"absent\" };\n    }\n    return { state: \"unknown\" };",
+      "before": "    if (\n      err !== null &&\n      typeof err === \"object\" &&\n      \"code\" in err &&\n      (err as { code: unknown }).code === \"ENOENT\"\n    ) {\n      return { state: \"absent\" };\n    }\n    return { state: \"unknown\" };",
       "after": "    return { state: \"absent\" };",
-      "because": "When an artifact exists but cannot be read due to file permissions or disk errors, reporting absent misrepresents a readable filesystem failure as a missing file. The backlog unit tests assert that non-ENOENT read failures result in state: unknown.",
+      "because": "When an artifact exists but cannot be read due to file permissions or disk errors, reporting absent misrepresents a readable filesystem failure as a missing file. The backlog unit tests assert that non-ENOENT read failures result in state: unknown. (Re-anchored by ANCHORS: the recorded text was reformatted or moved, not changed — the mutation, its claim and its command are untouched.)",
       "command": [
         "yarn",
         "vitest",
@@ -173,9 +173,9 @@
     },
     {
       "file": "tools/wave-status/lib/render.ts",
-      "before": "      const reasonText = p.reason !== undefined && p.reason !== \"\" ? ` — ${sanitize(p.reason)}` : \"\";",
+      "before": "const reasonText =\n        p.reason !== undefined && p.reason !== \"\" ? ` — ${sanitize(p.reason)}` : \"\";",
       "after": "      const reasonText = p.reason !== undefined && p.reason !== \"\" ? ` — ${p.reason}` : \"\";",
-      "because": "Artifact premise failure reasons can carry terminal control sequences from subprocess output into the operator console; leaving them unsanitized allows bytes from disk to reprogram the terminal. The render test asserts that reason strings in terminal output have control bytes stripped.",
+      "because": "Artifact premise failure reasons can carry terminal control sequences from subprocess output into the operator console; leaving them unsanitized allows bytes from disk to reprogram the terminal. The render test asserts that reason strings in terminal output have control bytes stripped. (Re-anchored by ANCHORS: the recorded text was reformatted or moved, not changed — the mutation, its claim and its command are untouched.)",
       "command": [
         "yarn",
         "vitest",

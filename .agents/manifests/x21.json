@@ -4,9 +4,9 @@
   "mutations": [
     {
       "file": "apps/api/server/routes/output/[...path].get.ts",
-      "before": "  if (!st.isFile()) {\n    // Directories (the root itself, or any folder under it) are not downloadable creatives;\n    // streaming one would fail with EISDIR after the 200 headers were already set.\n    setResponseStatus(event, 404);\n    return { error: \"Not found\" };\n  }",
+      "before": "  if (!st.isFile()) {\n    // Directories (the root itself, or any folder under it) are not downloadable creatives;\n    // streaming one would fail with EISDIR after the 200 headers were already set.\n    await handle.close();\n    setResponseStatus(event, 404);\n    return { error: \"Not found\" };\n  }",
       "after": "  // mutated: isFile guard dropped — directories 200 with a stale content-length and EISDIR on read",
-      "because": "stat() succeeds on directories, so without the isFile guard GET /output/ (an existing root) sets 200 headers with the directory's size before the stream fails with EISDIR.",
+      "because": "stat() succeeds on directories, so without the isFile guard GET /output/ (an existing root) sets 200 headers with the directory's size before the stream fails with EISDIR. (Re-anchored by ANCHORS: the route now opens the file and fstats the handle, so the guard closes the handle before answering; The semantic edit is the same one; the after-text is that edit re-expressed against the current shape, not a new claim.)",
       "command": [
         "yarn",
         "vitest",
@@ -21,9 +21,9 @@
     },
     {
       "file": "apps/api/server/routes/output/[...path].get.ts",
-      "before": "  if (!st.isFile()) {\n    // Directories (the root itself, or any folder under it) are not downloadable creatives;\n    // streaming one would fail with EISDIR after the 200 headers were already set.\n    setResponseStatus(event, 404);\n    return { error: \"Not found\" };\n  }",
+      "before": "  if (!st.isFile()) {\n    // Directories (the root itself, or any folder under it) are not downloadable creatives;\n    // streaming one would fail with EISDIR after the 200 headers were already set.\n    await handle.close();\n    setResponseStatus(event, 404);\n    return { error: \"Not found\" };\n  }",
       "after": "  // mutated: isFile guard dropped — directories 200 with a stale content-length and EISDIR on read",
-      "because": "A folder under the root (e.g. output/reports) must 404 as a non-downloadable path; without the guard it answers 200 with a directory's content-length.",
+      "because": "A folder under the root (e.g. output/reports) must 404 as a non-downloadable path; without the guard it answers 200 with a directory's content-length. (Re-anchored by ANCHORS: the route now opens the file and fstats the handle, so the guard closes the handle before answering; The semantic edit is the same one; the after-text is that edit re-expressed against the current shape, not a new claim.)",
       "command": [
         "yarn",
         "vitest",

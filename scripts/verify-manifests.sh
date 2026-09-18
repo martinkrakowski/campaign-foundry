@@ -1,5 +1,5 @@
 #!/bin/sh
-# Replay every mutation manifest this change touches.
+# Check every anchor in every manifest, then replay the manifests this change touches.
 #
 # A manifest records the mutations a lane claims its tests catch. Replaying it
 # is what makes the claim evidence rather than a report: two seats stated
@@ -26,6 +26,33 @@ MANIFEST_DIR=".agents/manifests"
 if [ ! -d "$MANIFEST_DIR" ]; then
   echo "verify-manifests: no $MANIFEST_DIR directory; nothing to replay"
   exit 0
+fi
+
+# ---------------------------------------------------------------------------
+# First, the cheap half: is every anchor still live — in EVERY manifest?
+#
+# The replay below is diff-scoped by necessity (each mutation runs a real
+# suite). That scoping is also a hole, and it was wide open: a lane that
+# reformats one source file breaks anchors in manifests its diff never names,
+# and `runMutation` refuses zero-occurrence before-text permanently (Rule 2),
+# so those claims are not merely unchecked — they can never replay again. On
+# 58b6739f, 57 of 468 anchors across 34 manifests were in that state behind a
+# green gate.
+#
+# Asking "does this before-text still appear exactly once?" costs a string
+# count, so it is affordable over all 93 every time — under a second, which is
+# the only reason it can be unscoped. It runs BEFORE the replay: a dead anchor
+# should be reported in a second rather than after minutes of suites.
+#
+# Explicit `if !` rather than leaning on `set -e`: every failure in this file
+# is loud and named, because a gate that fails quietly has stopped being one.
+# ---------------------------------------------------------------------------
+if ! yarn mutate:anchors "$MANIFEST_DIR"; then
+  echo "verify-manifests: a mutation anchor no longer resolves — see above." >&2
+  echo "verify-manifests: re-anchor it if the code moved, or retire it with a reason" >&2
+  echo "verify-manifests: (\"retired\": \"<why>\") if the code is gone. Never re-point a" >&2
+  echo "verify-manifests: mutation at different code to make a replay pass." >&2
+  exit 1
 fi
 
 # The base to diff against, in order of how well it describes "what this change

@@ -40,6 +40,15 @@ export async function replayManifest(
   try {
     const checks: MutationCheck[] = [];
     for (const [index, mutation] of manifest.mutations.entries()) {
+      // A retired claim is not run, and not silently dropped either. Its subject
+      // is gone, so `runMutation` would refuse it (Rule 2) and — because a
+      // manifest replays WHOLE — take every live claim in the file down with it.
+      // Recording it as a check keeps the withdrawal in the output, where a
+      // reader sees it every time rather than only if they open the JSON.
+      if (mutation.retired !== undefined) {
+        checks.push({ mutation, status: "retired" });
+        continue;
+      }
       const baseline = await deps.execute(mutation.command);
       if (baseline.launchError !== undefined) {
         checks.push({ mutation, status: "launch-failure", launchError: baseline.launchError });
@@ -107,26 +116,48 @@ export function formatChecks(lane: string, checks: readonly MutationCheck[]): st
         `  error: ${check.launchError}`,
         `  The command never ran, so there is no exit code to read either way.`,
       );
+    } else if (check.status === "retired") {
+      lines.push(
+        `RETIRED  ${check.mutation.file}`,
+        `  reason: ${check.mutation.retired}`,
+        `  This claim was withdrawn and was not run. It is printed every replay`,
+        `  so the withdrawal stays as visible as the claims that remain.`,
+      );
     }
   }
   const bad = checks.filter((c) => c.status === "mismatch").length;
+  const retired = checks.filter((c) => c.status === "retired").length;
   const blocked = checks.filter(
     (c) => c.status === "red-baseline" || c.status === "launch-failure",
   ).length;
+  // Retired entries were never run, so counting them in "N mutation(s) re-run"
+  // would report work that did not happen — the exact overstatement this tool
+  // exists to stop.
+  const ran = checks.length - retired;
   if (blocked > 0) {
+    lines.push(`${lane}: ${blocked} of ${ran} mutation(s) could not be checked — see above.`);
+  } else if (ran === 0) {
+    // Not "every verdict reproduced": nothing ran. A manifest with nothing left
+    // to run is a finding about the manifest, and saying it plainly is the
+    // difference between a gate and a green light.
     lines.push(
-      `${lane}: ${blocked} of ${checks.length} mutation(s) could not be checked — see above.`,
+      `${lane}: all ${checks.length} mutation(s) are retired — this manifest now runs nothing.`,
     );
   } else {
     lines.push(
       bad === 0
-        ? `${lane}: ${checks.length} mutation(s) re-run, every verdict reproduced.`
-        : `${lane}: ${bad} of ${checks.length} mutation(s) did not reproduce.`,
+        ? `${lane}: ${ran} mutation(s) re-run, every verdict reproduced.`
+        : `${lane}: ${bad} of ${ran} mutation(s) did not reproduce.`,
     );
+  }
+  if (retired > 0) {
+    lines.push(`${lane}: ${retired} mutation(s) retired with a stated reason, not run.`);
   }
   return lines.join("\n");
 }
 
 export function exitCodeFor(checks: readonly MutationCheck[]): number {
-  return checks.every((c) => c.status === "verified") ? EXIT_VERIFIED : EXIT_MISMATCH;
+  return checks.every((c) => c.status === "verified" || c.status === "retired")
+    ? EXIT_VERIFIED
+    : EXIT_MISMATCH;
 }

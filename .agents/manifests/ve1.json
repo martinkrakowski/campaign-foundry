@@ -38,9 +38,9 @@
     },
     {
       "file": "apps/web/src/components/campaign/editor-history.ts",
-      "before": "  \"apply\",\n  \"save\",",
-      "after": "  \"apply\",",
-      "because": "Make save undoable: the save receipt is a server answer (R4), and an undo step over it would present a draft revert that also implies an unsent write — the revision guard then lies about what has been saved.",
+      "before": "[\"setCapabilities\", \"loadPool\", \"apply\", \"save\"]",
+      "after": "[\"setCapabilities\", \"loadPool\", \"apply\"]",
+      "because": "Make save undoable: the save receipt is a server answer (R4), and an undo step over it would present a draft revert that also implies an unsent write — the revision guard then lies about what has been saved. (Re-anchored by ANCHORS: the recorded text was reformatted or moved, not changed — the after-text is re-wrapped the same way, and the edit it encodes, the claim and the command are untouched.)",
       "command": [
         "yarn",
         "vitest",
@@ -72,9 +72,9 @@
     },
     {
       "file": "apps/web/src/components/campaign/editor-history.ts",
-      "before": "  \"loadPool\",\n  \"apply\",",
+      "before": "\"loadPool\", \"apply\",",
       "after": "  \"loadPool\",\n  \"setPool\",\n  \"apply\",",
-      "because": "Move setPool to the non-undoable side of the line: the lane's stated decision is that setPool IS a draft edit (it writes variation.headline), and an undo that could not step back over the dropped headline is the observable half of that decision.",
+      "because": "Move setPool to the non-undoable side of the line: the lane's stated decision is that setPool IS a draft edit (it writes variation.headline), and an undo that could not step back over the dropped headline is the observable half of that decision. (Re-anchored by ANCHORS: the recorded text was reformatted or moved, not changed — the mutation, its claim and its command are untouched.)",
       "command": [
         "yarn",
         "vitest",

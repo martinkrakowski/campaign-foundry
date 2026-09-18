@@ -72,9 +72,9 @@
     },
     {
       "file": "packages/CampaignOrchestration/src/domain/value-objects/brief-template.ts",
-      "before": "  for (const budget of rules.sharedBudgets) {\n    const used = budget.kinds.reduce(\n      (sum, kind) => sum + (counts.get(kind) ?? 0),\n      0,\n    );\n    if (used > budget.max) return false;\n  }\n  return rules.required",
+      "before": "  for (const budget of rules.sharedBudgets) {\n    const used = budget.kinds.reduce((sum, kind) => sum + (counts.get(kind) ?? 0), 0);\n    if (used > budget.max) return false;\n  }\n  return rules.required",
       "after": "  return rules.required",
-      "because": "Shared budgets are the other half of D124's declared cardinality: without them a static-text beside an animated-text passes the guard where the API refuses, and the compositor draws one headline block where the draft names two.",
+      "because": "Shared budgets are the other half of D124's declared cardinality: without them a static-text beside an animated-text passes the guard where the API refuses, and the compositor draws one headline block where the draft names two. (Re-anchored by ANCHORS: the recorded text was reformatted or moved, not changed — the mutation, its claim and its command are untouched.)",
       "command": [
         "yarn",
         "vitest",

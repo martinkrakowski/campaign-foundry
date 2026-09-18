@@ -19,9 +19,9 @@
     },
     {
       "file": "tools/sweep/lib/sweep.ts",
-      "before": "else if (found.isResolved) problems.push(`${id}: already resolved — a class member must be open`);",
+      "before": "else if (found.isResolved)\n      problems.push(`${id}: already resolved — a class member must be open`);",
       "after": "else if (false) problems.push(`${id}: already resolved — a class member must be open`);",
-      "because": "Hazard two, restored: a thread resolved without being addressed looks handled and is not, so the sweep would resolve a member it never disposed and the refusal that sends the class back to the operator disappears. The guardrail's fetchOnly gh throws on the write the unchecked id reaches, so the refusal test fails for the right reason.",
+      "because": "Hazard two, restored: a thread resolved without being addressed looks handled and is not, so the sweep would resolve a member it never disposed and the refusal that sends the class back to the operator disappears. The guardrail's fetchOnly gh throws on the write the unchecked id reaches, so the refusal test fails for the right reason. (Re-anchored by ANCHORS: the recorded text was reformatted or moved, not changed — the mutation, its claim and its command are untouched.)",
       "command": [
         "yarn",
         "vitest",
@@ -169,9 +169,9 @@
     },
     {
       "file": "tools/sweep/lib/sweep.ts",
-      "before": "    cursor = pageInfo?.hasNextPage && pageInfo.endCursor ? pageInfo.endCursor : null;",
-      "after": "    cursor = null;",
-      "because": "Truncating thread retrieval at page one silently excludes threads past the 100-thread boundary, falsely reporting open threads as nonexistent. Caught by the multi-page fetch test asserting threads on subsequent pages are accumulated and recognized.",
+      "before": "    if (!pageInfo.hasNextPage) break;",
+      "after": "    break;",
+      "because": "Truncating thread retrieval at page one silently excludes threads past the 100-thread boundary, falsely reporting open threads as nonexistent. Caught by the multi-page fetch test asserting threads on subsequent pages are accumulated and recognized. (Re-anchored by ANCHORS: X13 (#389) rewrote the page loop so the cursor is read after an explicit `hasNextPage` break instead of a ternary, and truncating at page one is now that break taken unconditionally; The semantic edit is the same one; the after-text is that edit re-expressed against the current shape, not a new claim.)",
       "command": [
         "yarn",
         "vitest",

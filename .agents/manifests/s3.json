@@ -30,9 +30,9 @@
     },
     {
       "file": "tools/wave-status/lib/collect.ts",
-      "before": "    ...(fact.unresolvedThreads === undefined\n      ? {}\n      : { unresolvedThreads: fact.unresolvedThreads }),",
+      "before": "...(fact.unresolvedThreads === undefined ? {} : { unresolvedThreads: fact.unresolvedThreads }),",
       "after": "    ...(false ? { unresolvedThreads: fact.unresolvedThreads } : {}),",
-      "because": "Drops the thread state from the observation between the corpus and the row: the counts are still collected and then thrown away, so every consumer sees the pre-S3 shape again and a PR with unresolved threads reads as needing nothing with CI green. The thread assertions on a collected row — the lane's headline defect — fail.",
+      "because": "Drops the thread state from the observation between the corpus and the row: the counts are still collected and then thrown away, so every consumer sees the pre-S3 shape again and a PR with unresolved threads reads as needing nothing with CI green. The thread assertions on a collected row — the lane's headline defect — fail. (Re-anchored by ANCHORS: the recorded text was reformatted or moved, not changed — the mutation, its claim and its command are untouched.)",
       "command": [
         "yarn",
         "vitest",

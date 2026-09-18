@@ -19,9 +19,9 @@
     },
     {
       "file": "packages/CampaignOrchestration/src/domain/value-objects/html-element.ts",
-      "before": "      value < 0 ||\n      value > 1",
+      "before": "value < 0 || value > 1",
       "after": "      value < 0 ||\n      value > 1.5",
-      "because": "A frame fraction is canvas-relative, so [0, 1] is the contract, not a near-enough guess. Widening the ceiling to 1.5 admits 1.4, and the renderer would place an element at a fraction no canvas has.",
+      "because": "A frame fraction is canvas-relative, so [0, 1] is the contract, not a near-enough guess. Widening the ceiling to 1.5 admits 1.4, and the renderer would place an element at a fraction no canvas has. (Re-anchored by ANCHORS: the recorded text was reformatted or moved, not changed — the mutation, its claim and its command are untouched.)",
       "command": [
         "yarn",
         "vitest",
@@ -49,9 +49,9 @@
     },
     {
       "file": "packages/CampaignOrchestration/src/domain/value-objects/html-element.ts",
-      "before": "  text: { allowed: [\"kind\", \"text\", \"frame\"], required: [\"text\"] },",
-      "after": "  text: { allowed: [\"kind\", \"text\", \"frame\"], required: [] },",
-      "because": "The field table is what makes copy required for the kinds that cannot render without it, not a branch beside it. Empty the text row's required list and a text element with no copy passes the boundary and reaches HL2 as an element that draws nothing.",
+      "before": "  text: { allowed: [\"kind\", \"text\", \"style\", \"frame\"], required: [\"text\"] },",
+      "after": "  text: { allowed: [\"kind\", \"text\", \"style\", \"frame\"], required: [] },",
+      "because": "The field table is what makes copy required for the kinds that cannot render without it, not a branch beside it. Empty the text row's required list and a text element with no copy passes the boundary and reaches HL2 as an element that draws nothing. (Re-anchored by ANCHORS: HL5e added `\"style\"` to the allowed list, which the after-text mirrors so the mutation still empties `required` and nothing else; The semantic edit is the same one; the after-text is that edit re-expressed against the current shape, not a new claim.)",
       "command": [
         "yarn",
         "vitest",
@@ -64,9 +64,9 @@
     },
     {
       "file": "packages/CampaignOrchestration/src/domain/value-objects/html-element.ts",
-      "before": "  button: { allowed: [\"kind\", \"text\", \"frame\"], required: [\"text\"] },",
-      "after": "  button: { allowed: [\"kind\", \"text\", \"frame\"], required: [] },",
-      "because": "button is the second kind that cannot mean anything without its label, and it gets the requirement from the same table. Empty the button row's required list and a blank button passes both boundaries.",
+      "before": "  button: { allowed: [\"kind\", \"text\", \"style\", \"frame\"], required: [\"text\"] },",
+      "after": "  button: { allowed: [\"kind\", \"text\", \"style\", \"frame\"], required: [] },",
+      "because": "button is the second kind that cannot mean anything without its label, and it gets the requirement from the same table. Empty the button row's required list and a blank button passes both boundaries. (Re-anchored by ANCHORS: HL5e added `\"style\"` to the allowed list, which the after-text mirrors so the mutation still empties `required` and nothing else; The semantic edit is the same one; the after-text is that edit re-expressed against the current shape, not a new claim.)",
       "command": [
         "yarn",
         "vitest",
@@ -79,9 +79,9 @@
     },
     {
       "file": "packages/CampaignOrchestration/src/domain/value-objects/brief-template.ts",
-      "before": "  return (\n    layerElementsProblem(rec.kind as LayerKind, rec.elements) === undefined\n  );",
-      "after": "  return true;",
-      "because": "A validator no boundary calls is a vocabulary nothing enforces. Drop the call from the per-layer guard and a malformed element passes `isBriefTemplate` even though `layerElementsProblem` still refuses it in isolation — the two boundaries would drift exactly as D134's props check exists to prevent.",
+      "before": "  if (layerElementsProblem(rec.kind as LayerKind, rec.elements) !== undefined) {\n    return false;\n  }",
+      "after": "  // mutated: the elements check dropped from the per-layer guard",
+      "because": "A validator no boundary calls is a vocabulary nothing enforces. Drop the call from the per-layer guard and a malformed element passes `isBriefTemplate` even though `layerElementsProblem` still refuses it in isolation — the two boundaries would drift exactly as D134's props check exists to prevent. (Re-anchored by ANCHORS: K1 added the tracks check after this one, so the elements check became a guard clause instead of the tail return; The semantic edit is the same one; the after-text is that edit re-expressed against the current shape, not a new claim.)",
       "command": [
         "yarn",
         "vitest",

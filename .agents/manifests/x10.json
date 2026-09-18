@@ -38,9 +38,9 @@
     },
     {
       "file": "packages/CampaignOrchestration/src/domain/value-objects/markup-assembler.ts",
-      "before": "        const buttonStyle = `${baseStyle} background-color: ${brandColor}; border-radius: ${radius}px; color: #ffffff; font-family: ${resolvedStyle.fontFamily}, sans-serif; font-weight: ${resolvedStyle.fontWeight}; font-size: ${fontSize}px; text-align: center; display: flex; align-items: center; justify-content: center; border: none; padding: 0; overflow: hidden; ${cursor}`;",
-      "after": "        const buttonStyle = `${baseStyle} background-color: ${brandColor}; border-radius: ${radius}px; color: #ffffff; font-family: ${resolvedStyle.fontFamily}, sans-serif; font-weight: ${resolvedStyle.fontWeight}; font-size: ${fontSize}px; text-align: center; display: flex; align-items: center; justify-content: center; border: none; padding: 0; ${cursor}`;",
-      "because": "assembleHtml must give button elements overflow: hidden so that button text does not overflow its element frame, matching the canvas renderer.",
+      "before": "        const buttonStyle = `${baseStyle} background-color: ${brandColor}; border-radius: ${radius}px; color: #ffffff; font-family: ${font.fontFamily}, sans-serif; font-weight: ${font.fontWeight}; font-size: ${fontSize}px; text-align: center; display: flex; align-items: center; justify-content: center; border: none; padding: 0; overflow: hidden; ${cursor}`;",
+      "after": "        const buttonStyle = `${baseStyle} background-color: ${brandColor}; border-radius: ${radius}px; color: #ffffff; font-family: ${font.fontFamily}, sans-serif; font-weight: ${font.fontWeight}; font-size: ${fontSize}px; text-align: center; display: flex; align-items: center; justify-content: center; border: none; padding: 0; ${cursor}`;",
+      "because": "assembleHtml must give button elements overflow: hidden so that button text does not overflow its element frame, matching the canvas renderer. (Re-anchored by ANCHORS: HL5e renamed `resolvedStyle` to `font`, which the after-text mirrors so the mutation still removes only `overflow: hidden`; The semantic edit is the same one; the after-text is that edit re-expressed against the current shape, not a new claim.)",
       "command": [
         "yarn",
         "vitest",

@@ -75,7 +75,8 @@
         "web",
         "apps/web/src/components/campaign/__tests__/preview-dock.test.tsx"
       ],
-      "verdict": "caught"
+      "verdict": "caught",
+      "retired": "Retired by ANCHORS: the invariant moved to another owner, and this is worth naming. TS1 (#469) lifted the clamp out of `PreviewDock` — its header now states both seconds arrive ALREADY CLAMPED, so two surfaces cannot clamp the same value differently — and `clampedCommittedSec` no longer exists. The current source is this mutation's AFTER-text verbatim, so re-anchoring it would produce a mutation that changes nothing and 'passes' by proving nothing. That the clamp is now pinned where it lives, and not here, is a finding for whoever owns the playhead, not something this lane can repair from a manifest."
     },
     {
       "file": "packages/CampaignOrchestration/src/application/use-cases/PreviewCreativeFrameUseCase.use-case.ts",

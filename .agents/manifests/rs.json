@@ -6,7 +6,7 @@
       "file": "apps/web/src/components/shell/SidebarShell.tsx",
       "before": "      {...(label === undefined ? {} : { role: \"complementary\", \"aria-label\": label })}",
       "after": "      {...{ role: \"complementary\", \"aria-label\": label }}",
-      "because": "RS1's red fault: the LEFT sidebar's rendered markup must be unchanged by the extraction. Applying the landmark attributes unconditionally is the plausible tidy-up (\"why the ternary?\") and it rewrites the left sidebar's accessibility tree — a second complementary landmark with an empty name — while every class-string assertion stays green. Caught by the attribute-list assertion, which is there because a class check alone cannot see an added role.",
+      "because": "RS1's red fault: the LEFT sidebar's rendered markup must be unchanged by the extraction. Applying the landmark attributes unconditionally is the plausible tidy-up (\"why the ternary?\") and it rewrites the left sidebar's accessibility tree \u2014 a second complementary landmark with an empty name \u2014 while every class-string assertion stays green. Caught by the attribute-list assertion, which is there because a class check alone cannot see an added role.",
       "command": [
         "yarn",
         "vitest",
@@ -21,7 +21,7 @@
       "file": "apps/web/src/components/shell/SidebarShell.tsx",
       "before": "      className=\"relative z-10 hidden h-full w-[320px] shrink-0 flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-2xl lg:flex\"",
       "after": "      className=\"relative z-10 hidden h-full w-[320px] shrink-0 flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-2xl [@container(min-width:56rem)]:flex\"",
-      "because": "The whole lane, reverted: a container query instead of the viewport breakpoint. This is the defect that hid the rail for two days — the container is viewport minus 368px, so 56rem resolves to 1264px of viewport while the left sidebar appears at 1024px. The mutation compiles to a real @container rule (it did ship), so nothing crashes and nothing looks wrong in happy-dom, which applies no CSS of its own; the test compiles the shipped class string with the project's Tailwind config and finds no viewport @media at all.",
+      "because": "The whole lane, reverted: a container query instead of the viewport breakpoint. This is the defect that hid the rail for two days \u2014 the container is viewport minus 368px, so 56rem resolves to 1264px of viewport while the left sidebar appears at 1024px. The mutation compiles to a real @container rule (it did ship), so nothing crashes and nothing looks wrong in happy-dom, which applies no CSS of its own; the test compiles the shipped class string with the project's Tailwind config and finds no viewport @media at all.",
       "command": [
         "yarn",
         "vitest",
@@ -36,7 +36,7 @@
       "file": "apps/web/src/app/(shell)/layout.tsx",
       "before": "  return rail === null ? null : <SidebarShell label={rail.label}>{rail.content}</SidebarShell>;",
       "after": "  return usePathname().startsWith(\"/brief\") ? (\n    <SidebarShell label={rail?.label ?? \"Preview\"}>{rail?.content}</SidebarShell>\n  ) : null;",
-      "because": "RS-D3's rejected alternative, written out: a route check instead of a presence check, following CommandBar's own precedent in this very file. It is right about the route and wrong about the content, which is the empty 256px strip that shipped — and it is invisible to every test that mounts an editor, because on those the route and the content agree. Caught only by the test that puts the shell on /brief/new with nothing published.",
+      "because": "RS-D3's rejected alternative, written out: a route check instead of a presence check, following CommandBar's own precedent in this very file. It is right about the route and wrong about the content, which is the empty 256px strip that shipped \u2014 and it is invisible to every test that mounts an editor, because on those the route and the content agree. Caught only by the test that puts the shell on /brief/new with nothing published.",
       "command": [
         "yarn",
         "vitest",
@@ -45,13 +45,14 @@
         "-t",
         "on /brief/new with no editor mounted"
       ],
-      "verdict": "caught"
+      "verdict": "caught",
+      "retired": "Retired by ANCHORS: `EditorRailSlot` is deleted code. SG2 (#482) moved the shell onto `react-resizable-panels`, so the rail is a `<Panel>` gated on `showRailColumn` inside the `<PanelGroup>` and the component this mutation rewrites no longer exists anywhere in the tree. Its after-text names a component and a JSX shape that are gone; re-expressing it against the panel gate would be authoring a new mutation against code RS never saw, not re-anchoring this one."
     },
     {
       "file": "apps/web/src/app/(shell)/layout.tsx",
       "before": "                  <TelemetrySlot showOrchestrator={showOrchestrator} />\n                </main>\n                <EditorRailSlot />",
       "after": "                  <TelemetrySlot showOrchestrator={showOrchestrator} />\n                  <EditorRailSlot />\n                </main>",
-      "because": "RS-D1 undone by one line of indentation: the rail back inside <main>. It renders, it is reachable, every query for its landmark and its contents still finds it — and it can never be full height again, because inside main's scroller `h-full` means \"as tall as the scrolled content\". This is the class of mistake that is invisible to a rendering assertion and needs a structural one.",
+      "because": "RS-D1 undone by one line of indentation: the rail back inside <main>. It renders, it is reachable, every query for its landmark and its contents still finds it \u2014 and it can never be full height again, because inside main's scroller `h-full` means \"as tall as the scrolled content\". This is the class of mistake that is invisible to a rendering assertion and needs a structural one.",
       "command": [
         "yarn",
         "vitest",
@@ -60,13 +61,14 @@
         "-t",
         "it is a sibling of <main> and of the left sidebar"
       ],
-      "verdict": "caught"
+      "verdict": "caught",
+      "retired": "Retired by ANCHORS: same deletion. The `<main>`/`<EditorRailSlot>` sibling pair this mutation re-nests was replaced by two sibling `<Panel>`s under a `<PanelGroup>` (SG2, #482); `<main>` is now a `tagName` on a panel and there is no `<EditorRailSlot />` to move inside it. The structural claim \u2014 the rail is a sibling of main, never a child \u2014 survives as a test; this mutation's text cannot be pointed at the new shape without inventing the edit."
     },
     {
       "file": "apps/web/src/lib/preview-frame.ts",
       "before": "    message: brief.localizedMessage ?? brief.campaignMessage,",
       "after": "    message: brief.localizedMessage ?? brief.campaignMessage,\n    audience: brief.targetAudience,",
-      "because": "§5 assertion (1), aimed at the guard that actually holds it: CC1's fetch key is a CONTENT fingerprint, and widening it to a field no frame request reads ('include the whole brief, to be safe') costs a GenAI call per keystroke. Re-aimed after the first attempt survived: feeding the dock the live `draftBrief` instead of the memoised one defeats the memo and re-renders it, but issues no request, because `usePreviewFrame` keys on this fingerprint and not on its component's renders — the same asymmetry CC1's own review recorded, and a reminder that the fetch assertion pins the KEY while assertion (2) pins the memo.",
+      "because": "\u00a75 assertion (1), aimed at the guard that actually holds it: CC1's fetch key is a CONTENT fingerprint, and widening it to a field no frame request reads ('include the whole brief, to be safe') costs a GenAI call per keystroke. Re-aimed after the first attempt survived: feeding the dock the live `draftBrief` instead of the memoised one defeats the memo and re-renders it, but issues no request, because `usePreviewFrame` keys on this fingerprint and not on its component's renders \u2014 the same asymmetry CC1's own review recorded, and a reminder that the fetch assertion pins the KEY while assertion (2) pins the memo.",
       "command": [
         "yarn",
         "vitest",
@@ -79,9 +81,9 @@
     },
     {
       "file": "apps/web/src/components/campaign/BriefEditor.tsx",
-      "before": "                brief={isRailWideEnough ? previewBrief : undefined}",
+      "before": "brief={isRailWideEnough ? previewBrief : undefined}",
       "after": "                brief={previewBrief}",
-      "because": "CC2's C3, which RS-D4 would have deleted along with the container query: the gate that hides the rail (`hidden lg:flex`) does not unmount it, so without a JS mirror of that breakpoint a rail nobody can see keeps asking the route for frames. The container mirror retired with the container query; the mirror's JOB survived the move, and this mutation is what says so.",
+      "because": "CC2's C3, which RS-D4 would have deleted along with the container query: the gate that hides the rail (`hidden lg:flex`) does not unmount it, so without a JS mirror of that breakpoint a rail nobody can see keeps asking the route for frames. The container mirror retired with the container query; the mirror's JOB survived the move, and this mutation is what says so. (Re-anchored by ANCHORS: the recorded text was reformatted or moved, not changed \u2014 the mutation, its claim and its command are untouched.)",
       "command": [
         "yarn",
         "vitest",
@@ -96,7 +98,7 @@
       "file": "apps/web/src/components/campaign/BriefEditor.tsx",
       "before": "  const layerStack = useMemo(() => rawLayerStackProps, [layerStackFingerprint]);",
       "after": "  const layerStack = rawLayerStackProps;",
-      "because": "§5 assertion (2): a fresh props object per render defeats the `memo`-wrapped stack while every fetch assertion stays green — the exact regression shape of #469, now re-measured with the stack's element pushed across a context boundary. `memo` compares props at a stable position, which is why the push does not by itself defeat it; a fresh object does. This mutation also found the publisher-subscribes cycle: while the setters shared a context with the slots it did not fail here in 0.98s, it span a worker at 100% CPU for 22 minutes (§5.1), which is why they are two contexts now.",
+      "because": "\u00a75 assertion (2): a fresh props object per render defeats the `memo`-wrapped stack while every fetch assertion stays green \u2014 the exact regression shape of #469, now re-measured with the stack's element pushed across a context boundary. `memo` compares props at a stable position, which is why the push does not by itself defeat it; a fresh object does. This mutation also found the publisher-subscribes cycle: while the setters shared a context with the slots it did not fail here in 0.98s, it span a worker at 100% CPU for 22 minutes (\u00a75.1), which is why they are two contexts now.",
       "command": [
         "yarn",
         "vitest",
@@ -111,7 +113,7 @@
       "file": "apps/web/src/components/campaign/sections/IdentitySection.tsx",
       "before": "          onChange={(e) => dispatch({ type: \"patch\", patch: { targetAudience: e.target.value } })}",
       "after": "          onChange={() => undefined}",
-      "because": "§5 assertion (3), the liveness half, and the reason it exists: a field whose handler does nothing leaves the editor ignoring the keystroke entirely — and assertions (1) and (2) BOTH stay green on it (zero frame requests, no re-render of the stack, the tape or the dock), which is the vacuous proof §5 warns about. Re-aimed after the first attempt (a reducer that returns the same state) survived: the helper clicked the field before typing, and the editor's own click capture re-rendered the form, so the count rose for the gesture rather than for the edit. The click is gone from the helper; this mutation is what found it.",
+      "because": "\u00a75 assertion (3), the liveness half, and the reason it exists: a field whose handler does nothing leaves the editor ignoring the keystroke entirely \u2014 and assertions (1) and (2) BOTH stay green on it (zero frame requests, no re-render of the stack, the tape or the dock), which is the vacuous proof \u00a75 warns about. Re-aimed after the first attempt (a reducer that returns the same state) survived: the helper clicked the field before typing, and the editor's own click capture re-rendered the form, so the count rose for the gesture rather than for the edit. The click is gone from the helper; this mutation is what found it.",
       "command": [
         "yarn",
         "vitest",
@@ -124,9 +126,9 @@
     },
     {
       "file": "apps/web/src/components/campaign/BriefEditor.tsx",
-      "before": "      // The YAML view reads the LIVE draft, never the memoised preview brief\n      // (D61, CC1 mutation (c)) — so it is a dependency and the rail is\n      // republished on every keystroke, which is the point.\n      draftBrief,",
-      "after": "      // The YAML view reads the LIVE draft, never the memoised preview brief\n      // (D61, CC1 mutation (c)) — so it is a dependency and the rail is\n      // republished on every keystroke, which is the point.",
-      "because": "The risk the published shape introduces, in its most plausible form: a dependency \"tidied\" out of `railSlot`'s hand-maintained list (the react-hooks lint plugin is not wired into this project's eslint config). The rail then stops being republished for an edit that changes no look, and its YAML view shows a draft one keystroke stale. No render count and no fetch count can see it — a stale subtree re-renders LESS, not more — so every §5 assertion stays green.",
+      "before": "      // The YAML view reads the LIVE draft, never the memoised preview brief\n      // (D61, CC1 mutation (c)) \u2014 so it is a dependency and the rail is\n      // republished on every keystroke, which is the point.\n      draftBrief,",
+      "after": "      // The YAML view reads the LIVE draft, never the memoised preview brief\n      // (D61, CC1 mutation (c)) \u2014 so it is a dependency and the rail is\n      // republished on every keystroke, which is the point.",
+      "because": "The risk the published shape introduces, in its most plausible form: a dependency \"tidied\" out of `railSlot`'s hand-maintained list (the react-hooks lint plugin is not wired into this project's eslint config). The rail then stops being republished for an edit that changes no look, and its YAML view shows a draft one keystroke stale. No render count and no fetch count can see it \u2014 a stale subtree re-renders LESS, not more \u2014 so every \u00a75 assertion stays green.",
       "command": [
         "yarn",
         "vitest",
@@ -135,13 +137,14 @@
         "-t",
         "the rail's YAML view still reads the LIVE draft"
       ],
-      "verdict": "caught"
+      "verdict": "caught",
+      "retired": "Retired by ANCHORS: the rail has had no YAML view since SG4. The rail is preview-only \u2014 its segmented switcher and the YAML `<pre>` it revealed were both removed, and BriefEditor.tsx says so where this comment used to be. The mutation deletes `draftBrief` from a dependency list to make a YAML view one keystroke stale; with no such view its subject is gone, not moved. SG4's remediation flagged this as a schema decision rather than re-authoring another lane's verdict, and this is that decision."
     },
     {
       "file": "apps/web/src/components/campaign/BriefEditor.tsx",
       "before": "  useEffect(() => () => setRail(null), []);\n",
       "after": "  // the shell clears it\n",
-      "because": "The rail must be cleared when the EDITOR goes, not when the provider does. Deleting this cleanup leaves a stale rail beside the grid after a client navigation off /brief — the shell persists and only the page swaps — and its LayerStack then dispatches into an unmounted reducer. Caught in review as a vacuous assertion, not by this manifest: the test called `view.unmount()`, which tore down `EditorPanelsProvider` too, so the aside vanished because the state holding it was gone. That deletion left the whole web project green (136 files, 2421 tests). The test now keeps the shell mounted and swaps the child, which is the shape a navigation actually has.",
+      "because": "The rail must be cleared when the EDITOR goes, not when the provider does. Deleting this cleanup leaves a stale rail beside the grid after a client navigation off /brief \u2014 the shell persists and only the page swaps \u2014 and its LayerStack then dispatches into an unmounted reducer. Caught in review as a vacuous assertion, not by this manifest: the test called `view.unmount()`, which tore down `EditorPanelsProvider` too, so the aside vanished because the state holding it was gone. That deletion left the whole web project green (136 files, 2421 tests). The test now keeps the shell mounted and swaps the child, which is the shape a navigation actually has.",
       "command": [
         "yarn",
         "vitest",
@@ -171,14 +174,16 @@
       "file": "apps/web/src/lib/editor-panels-context.tsx",
       "before": "export function useEditorPanelPublisher(): EditorPanelPublisher {\n  const context = useContext(EditorPanelPublisherContext);",
       "after": "export function useEditorPanelPublisher(): EditorPanelPublisher {\n  const context = useContext(EditorPanelPublisherContext);\n  useContext(EditorPanelsContext);",
-      "because": "The structural fix, merged back in one line: the publisher subscribing to the slots again. It is the whole cycle — gesture, render, effect, setRail, context change, render — so a keystroke costs two editor commits instead of one, and with an unmemoised value in railSlot's hand-maintained dependency list it is the livelock that span a worker for 22 minutes. `toBeGreaterThan(0)` stayed green through this (caught in review), which left the fix guarded only in another lane's file and only through the test outlet; the liveness assertion is pinned to exactly one commit now, measured through the shell.",
+      "because": "The structural fix, merged back in one line: the publisher subscribing to the slots again. It is the whole cycle \u2014 gesture, render, effect, setRail, context change, render \u2014 so a keystroke costs two editor commits instead of one, and with an unmemoised value in railSlot's hand-maintained dependency list it is the livelock that span a worker for 22 minutes. `toBeGreaterThan(0)` stayed green through this (caught in review), which left the fix guarded only in another lane's file and only through the test outlet; the liveness assertion is pinned to exactly one commit now, measured through the shell.\n\nRE-POINTED by ANCHORS after #494. Recorded `caught`, observed SURVIVING the moment this manifest could replay again \u2014 and the claim never stopped being true. SG4 (#483) moved the sections behind a `columnPanels` memo, so `formRenders` (which this command's test reads) now counts inside it: the cycle's extra render arrives with the same `state`, React gets the identical element, the subtree is never reconciled, and the editor runs TWICE while the count still reads 1. Nobody re-baselined the number; what it measured moved under it. #494 counts through `StatusChip`, rendered outside the memo, and adds a tripwire so the runaway fails in 3s instead of spinning for 22 minutes.\n\nThe `-t` pattern omits the title's `(3b)` prefix on purpose: `vitest -t` is a REGEX, so those parentheses are a capture group and the full title matches NOTHING \u2014 every test skips, vitest exits 0, and `mutate:verify` reads that as `survived`. I made exactly that mistake re-pointing this, and separately pointed the wrong entry by trusting a 1-based index against a 0-based array. Both were caught by replaying rather than reasoning.",
       "command": [
         "yarn",
         "vitest",
         "run",
+        "--project",
+        "web",
         "apps/web/src/app/(shell)/__tests__/rail-in-shell.test.tsx",
         "-t",
-        "the form's own render count DOES rise"
+        "the editor itself renders exactly once"
       ],
       "verdict": "caught"
     },
@@ -186,7 +191,7 @@
       "file": "apps/web/src/components/campaign/BriefEditor.tsx",
       "before": "  const railSlot = useCallback(\n    (playhead: PlayheadState): ReactNode => (",
       "after": "  const railSlot = useCallback(\n    (playhead: PlayheadState): ReactNode =>\n      !isRailWideEnough ? null : (",
-      "because": "D43's count invariant, and sg1#3's property carried into the new shape: `isRailWideEnough` sits right there looking like the condition that belongs on the mount, and the rail is CSS-hidden below the breakpoint anyway — so gating the mount too reads as a tidy-up. It is not: the rail must stay mounted so a resize above the gate pays no fresh debounce, and the proof is a count of MOUNTS. sg1's own anchor cannot be re-pointed here (the gate now hides an aside the shell publishes, so its aside-presence assertion no longer moves), which is why this lane carries the property instead of re-authoring that lane's claim.",
+      "because": "D43's count invariant, and sg1#3's property carried into the new shape: `isRailWideEnough` sits right there looking like the condition that belongs on the mount, and the rail is CSS-hidden below the breakpoint anyway \u2014 so gating the mount too reads as a tidy-up. It is not: the rail must stay mounted so a resize above the gate pays no fresh debounce, and the proof is a count of MOUNTS. sg1's own anchor cannot be re-pointed here (the gate now hides an aside the shell publishes, so its aside-presence assertion no longer moves), which is why this lane carries the property instead of re-authoring that lane's claim.",
       "command": [
         "yarn",
         "vitest",
@@ -216,7 +221,7 @@
       "file": "apps/web/src/lib/use-viewport-min-width.ts",
       "before": "  if (typeof window === \"undefined\") return false;\n  return window.innerWidth >= minPx;",
       "after": "  return window.innerWidth >= minPx;",
-      "because": "cc1#4's property, inherited — same reason: `initialMinInlineSizeSeed` is deleted code. A `\"use client\"` component is still PRERENDERED ON THE SERVER at Next build time and a useState initializer runs there, where there is no window at all. This exact guard's absence broke `yarn build` once (`ReferenceError: window is not defined` prerendering /brief/new), and no browser test would see it — which is why the assertion stubs `window` away rather than trusting the DOM environment.",
+      "because": "cc1#4's property, inherited \u2014 same reason: `initialMinInlineSizeSeed` is deleted code. A `\"use client\"` component is still PRERENDERED ON THE SERVER at Next build time and a useState initializer runs there, where there is no window at all. This exact guard's absence broke `yarn build` once (`ReferenceError: window is not defined` prerendering /brief/new), and no browser test would see it \u2014 which is why the assertion stubs `window` away rather than trusting the DOM environment.",
       "command": [
         "yarn",
         "vitest",

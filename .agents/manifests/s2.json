@@ -16,7 +16,8 @@
       "after": "        if (loggedLanes.has(`${lane}-quiet`)) continue;",
       "because": "A lane with both a log and events must keep exactly the row the log loop built. A guard that never fires pushes a second row without the log, the observed map key collides, and the log row is overwritten by the event row — the log lane loses its tail and EXIT marker to its own events, and the probe runs twice.",
       "command": ["yarn", "vitest", "run", "tools/wave-status/__tests__/collect.test.ts"],
-      "verdict": "caught"
+      "verdict": "caught",
+      "retired": "Retired by ANCHORS: the two-loop shape is deleted. X35 (#438) made every lane an event names get exactly one row, with `<lane>.log` attaching to it inside that single loop, so there is no log loop, no `loggedLanes` set, and no second row a dedup guard could prevent. The defect this mutation reintroduces is now impossible by construction rather than prevented by a check, which is the honest reason the check cannot be mutated."
     },
     {
       "file": "tools/wave-status/lib/collect.ts",
@@ -36,25 +37,25 @@
     },
     {
       "file": "tools/wave-status/lib/collect.ts",
-      "before": "        const obs = await buildObservation(deps, dir, entries, lane, worktrees);\n        const reportedPr = reportedPrByLane.get(lane);\n        lanes.add(lane);\n        if (reportedPr !== undefined) reportedPrs.add(reportedPr);\n        rows.push({ wave, lane, reportedPr, obs });",
-      "after": "        const obs = await buildObservation(deps, dir, entries, lane, worktrees);\n        const reportedPr = reportedPrByLane.get(lane);\n        rows.push({ wave, lane, reportedPr, obs });",
-      "because": "The row is only half of 'shows its PR': the event-only lane must also claim its reported head for the check-runs sweep. Drop the claim and the PR still joins by number but its checks come back none forever — CI state on the page becomes a guess that happens to look like an answer.",
+      "before": "        const reportedPr = reportedPrByLane.get(lane);\n        lanes.add(lane);\n        if (reportedPr !== undefined) reportedPrs.add(reportedPr);\n        const obs = await buildObservation(deps, dir, entries, lane, worktrees, log);\n        rows.push({ wave, lane, reportedPr, obs });",
+      "after": "        const reportedPr = reportedPrByLane.get(lane);\n        const obs = await buildObservation(deps, dir, entries, lane, worktrees, log);\n        rows.push({ wave, lane, reportedPr, obs });",
+      "because": "The row is only half of 'shows its PR': the event-only lane must also claim its reported head for the check-runs sweep. Drop the claim and the PR still joins by number but its checks come back none forever — CI state on the page becomes a guess that happens to look like an answer. (Re-anchored by ANCHORS: X35 folded the log lookup into the one event loop, so the observation is built after the claims and takes the log; The semantic edit is the same one; the after-text is that edit re-expressed against the current shape, not a new claim.)",
       "command": ["yarn", "vitest", "run", "tools/wave-status/__tests__/collect.test.ts"],
       "verdict": "caught"
     },
     {
       "file": "tools/wave-status/lib/collect.ts",
-      "before": "        if (reportedPr !== undefined) reportedPrs.add(reportedPr);\n        rows.push({ wave, lane, reportedPr, obs });",
-      "after": "        if (reportedPr !== undefined) reportedPrs.add(reportedPr);\n        void obs;",
-      "because": "The premise's own claim, mutated: remove the second push and rows again have exactly one source. The event-only lane is back to being merged as { alive: false } with no probe behind it and no PR in front of it — the invisible lane this lane exists to retire.",
+      "before": "        if (reportedPr !== undefined) reportedPrs.add(reportedPr);\n        const obs = await buildObservation(deps, dir, entries, lane, worktrees, log);\n        rows.push({ wave, lane, reportedPr, obs });",
+      "after": "        if (reportedPr !== undefined) reportedPrs.add(reportedPr);\n        const obs = await buildObservation(deps, dir, entries, lane, worktrees, log);\n        void obs;",
+      "because": "The premise's own claim, mutated: remove the second push and rows again have exactly one source. The event-only lane is back to being merged as { alive: false } with no probe behind it and no PR in front of it — the invisible lane this lane exists to retire. (Re-anchored by ANCHORS: X35 folded the log lookup into the one event loop, so the observation is now built between the claim and the push; The semantic edit is the same one; the after-text is that edit re-expressed against the current shape, not a new claim.)",
       "command": ["yarn", "vitest", "run", "tools/wave-status/__tests__/collect.test.ts"],
       "verdict": "caught"
     },
     {
       "file": "tools/wave-status/lib/collect.ts",
-      "before": "        const obs = await buildObservation(deps, dir, entries, lane, worktrees);",
+      "before": "        const obs = await buildObservation(deps, dir, entries, lane, worktrees, log);",
       "after": "        let alive = false;\n        try {\n          alive = (await deps.pgrep(pgrepPattern(lane, worktrees))) > 0;\n        } catch {\n          alive = false;\n        }\n        const obs: Omit<LaneObservation, \"pr\"> = { alive };",
-      "because": "The remediation itself, mutated: put the event-only row back to its own inline build of obs:{alive} — the shape that shipped. The probe and the PR join survive, the gate lookup does not, so a lane dispatched through the Agent tool loses its gate exit and its coverage while gate-<lane>.log sits beside its events. S2's subject matter, one field further in: a second row source that copies the observation instead of sharing it drifts.",
+      "because": "The remediation itself, mutated: put the event-only row back to its own inline build of obs:{alive} — the shape that shipped. The probe and the PR join survive, the gate lookup does not, so a lane dispatched through the Agent tool loses its gate exit and its coverage while gate-<lane>.log sits beside its events. S2's subject matter, one field further in: a second row source that copies the observation instead of sharing it drifts. (Re-anchored by ANCHORS: X35 folded the log lookup into the one event loop, so `buildObservation` now takes the log it found; The semantic edit is the same one; the after-text is that edit re-expressed against the current shape, not a new claim.)",
       "command": ["yarn", "vitest", "run", "tools/wave-status/__tests__/collect.test.ts"],
       "verdict": "caught"
     }

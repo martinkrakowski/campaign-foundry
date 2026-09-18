@@ -4,9 +4,9 @@
   "mutations": [
     {
       "file": "tools/wave-status/public/index.html",
-      "before": "                  `<td class=\"c-state\">${stateCell(lane)}</td>` +\n                  `<td class=\"c-lane\"><button type=\"button\" class=\"key\" tabindex=\"0\">${key}</button></td>` +",
-      "after": "                  `<td class=\"c-lane\"><button type=\"button\" class=\"key\" tabindex=\"0\">${key}</button></td>` +\n                  `<td class=\"c-state\">${stateCell(lane)}</td>` +",
-      "because": "If the state cell trails the lane name instead of leading the row, every state is still rendered and every assertion about its text still passes — but the reader has to scan again to find it, which is the defect the column exists to remove. Order is the deliverable, so the order is pinned.",
+      "before": "                  `<td class=\"c-state\">${stateCell(lane, nowMs)}</td>` +\n                  `<td class=\"c-lane\"><button type=\"button\" class=\"key\" tabindex=\"0\">${key}</button></td>` +",
+      "after": "                  `<td class=\"c-lane\"><button type=\"button\" class=\"key\" tabindex=\"0\">${key}</button></td>` +\n                  `<td class=\"c-state\">${stateCell(lane, nowMs)}</td>` +",
+      "because": "If the state cell trails the lane name instead of leading the row, every state is still rendered and every assertion about its text still passes — but the reader has to scan again to find it, which is the defect the column exists to remove. Order is the deliverable, so the order is pinned. (Re-anchored by ANCHORS: `stateCell` gained the `nowMs` argument; The semantic edit is the same one; the after-text is that edit re-expressed against the current shape, not a new claim.)",
       "command": ["yarn", "vitest", "run", "tools/wave-status/__tests__/page.test.ts"],
       "verdict": "caught"
     },
@@ -44,17 +44,17 @@
     },
     {
       "file": "tools/wave-status/lib/lane-state.ts",
-      "before": "  if (derived.pr.state === \"open\" && (derived.pr.checks === \"pending\" || derived.pr.checks === \"none\")) {",
-      "after": "  if (derived.pr.state === \"open\" && derived.pr.checks === \"pending\") {",
-      "because": "An open PR whose checks read none is every PR for its first few seconds — waiting on a CI run that has not started, which is what blocked already means. Drop \"none\" from the arm and the module answers a different word than the page for an input the types permit: the exact divergence the input-space parity test was rewritten to catch, so it is caught here and not by the state list that missed it the first time.",
+      "before": "    if (derived.pr.checks === \"pending\" || derived.pr.checks === \"none\") {",
+      "after": "    if (derived.pr.checks === \"pending\") {",
+      "because": "An open PR whose checks read none is every PR for its first few seconds — waiting on a CI run that has not started, which is what blocked already means. Drop \"none\" from the arm and the module answers a different word than the page for an input the types permit: the exact divergence the input-space parity test was rewritten to catch, so it is caught here and not by the state list that missed it the first time. (Re-anchored by ANCHORS: S3 lifted `state === \"open\"` into an enclosing block so the thread count could be read first; The semantic edit is the same one; the after-text is that edit re-expressed against the current shape, not a new claim.)",
       "command": ["yarn", "vitest", "run", "tools/wave-status/lib/__tests__/lane-state.test.ts", "tools/wave-status/__tests__/page.test.ts"],
       "verdict": "caught"
     },
     {
       "file": "tools/wave-status/public/index.html",
-      "before": "        if (derived.pr.state === \"open\" && (derived.pr.checks === \"pending\" || derived.pr.checks === \"none\")) return \"blocked\";",
-      "after": "        if (derived.pr.state === \"open\" && derived.pr.checks === \"pending\") return \"blocked\";",
-      "because": "The same rule with the same word removed from the copy instead of the original: the page falls through to \"unknown\" and the module still says \"blocked\". Two implementations of one rule only stay joined if the seam is tested from both sides, and the parity test reads both — which side drifts must not decide whether the drift is seen.",
+      "before": "          if (derived.pr.checks === \"pending\" || derived.pr.checks === \"none\") return \"blocked\";",
+      "after": "        if (derived.pr.checks === \"pending\") return \"blocked\";",
+      "because": "The same rule with the same word removed from the copy instead of the original: the page falls through to \"unknown\" and the module still says \"blocked\". Two implementations of one rule only stay joined if the seam is tested from both sides, and the parity test reads both — which side drifts must not decide whether the drift is seen. (Re-anchored by ANCHORS: S3 lifted `state === \"open\"` into an enclosing block on the page side too; The semantic edit is the same one; the after-text is that edit re-expressed against the current shape, not a new claim.)",
       "command": ["yarn", "vitest", "run", "tools/wave-status/__tests__/page.test.ts"],
       "verdict": "caught"
     }

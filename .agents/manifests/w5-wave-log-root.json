@@ -31,7 +31,8 @@
         "-t",
         "wave1-shaped"
       ],
-      "verdict": "caught"
+      "verdict": "caught",
+      "retired": "Retired by ANCHORS: the file is gone. `.claude/skills/orchestrate-wave/scripts/dispatch-lane.sh` was deleted in #468 (\"delete the launcher that killed the lanes it started\"), so there is no file to read, let alone text to find. The legacy-root resolution this mutation pinned lives in `tools/wave-status` and is still exercised by the other mutations in this manifest."
     }
   ]
 }

@@ -19,9 +19,9 @@
     },
     {
       "file": "apps/web/src/components/campaign/BriefEditor.tsx",
-      "before": "            <PreviewDock\n              {...railProps}\n              brief={isRailWideEnough ? previewBrief : undefined}\n              playhead={playhead}\n              host=\"rail\"\n            />",
-      "after": "            <PreviewDock {...railProps} brief={previewBrief} playhead={playhead} host=\"rail\" />",
-      "because": "isRailWideEnough is the JS-side mirror of the row's own CSS container query (CC2): below 56rem the rail is CSS-hidden but stays mounted, and withholding `brief` is the only thing that stops usePreviewFrame from building a request there. Feeding the dock `previewBrief` unconditionally lets a rail nobody can see keep fetching. Caught by a CALL COUNT (\"nothing fetches below the breakpoint\"), not a mount count — the rail's own mount is unaffected by this mutation.",
+      "before": "              brief={isRailWideEnough ? previewBrief : undefined}",
+      "after": "              brief={previewBrief}",
+      "because": "isRailWideEnough is the JS-side mirror of the row's own CSS container query (CC2): below 56rem the rail is CSS-hidden but stays mounted, and withholding `brief` is the only thing that stops usePreviewFrame from building a request there. Feeding the dock `previewBrief` unconditionally lets a rail nobody can see keep fetching. Caught by a CALL COUNT (\"nothing fetches below the breakpoint\"), not a mount count — the rail's own mount is unaffected by this mutation. (Re-anchored by ANCHORS: CE1 added the layer-selection props to this element, so the anchor is narrowed to the `brief` prop the claim is about; The semantic edit is the same one; the after-text is that edit re-expressed against the current shape, not a new claim.)",
       "command": [
         "yarn",
         "vitest",
@@ -60,7 +60,8 @@
         "web",
         "apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx"
       ],
-      "verdict": "caught"
+      "verdict": "caught",
+      "retired": "Retired by ANCHORS: `PREVIEW_RAIL_MIN_INLINE_PX` is deleted code. RS2 (#481) replaced the container-query mirror with a viewport gate and `use-min-inline-size.ts` says so in its own header. There is no text to re-anchor to, and re-pointing this at `RAIL_VIEWPORT_MIN_PX` would be asserting a verdict against code CC1 never saw. The property is carried instead by rs.json#12, which states in its own `because` that it is this lane's claim and not CC1's."
     },
     {
       "file": "apps/web/src/lib/use-min-inline-size.ts",
@@ -75,7 +76,8 @@
         "web",
         "apps/web/src/lib/__tests__/use-min-inline-size.test.tsx"
       ],
-      "verdict": "caught"
+      "verdict": "caught",
+      "retired": "Retired by ANCHORS: `initialMinInlineSizeSeed` is deleted code, removed with the container mirror by RS2 (#481). The server-prerender guard it pinned is carried instead by rs.json#14, written against `use-viewport-min-width.ts` and stating there that it is that lane's claim."
     },
     {
       "file": "apps/web/src/components/campaign/preview-props.ts",

@@ -4,9 +4,9 @@
   "mutations": [
     {
       "file": "packages/CampaignOrchestration/src/domain/value-objects/tracks.ts",
-      "before": "    if (seen !== undefined && seen.has(stop.t)) {",
+      "before": "    if (seenT.has(stop.t)) {",
       "after": "    if (false) {",
-      "because": "K-D9's only refusal is a duplicate t on one track's same clock. Disabling the check lets two stops at the exact same t on the same clock through, which K-D9 refuses.",
+      "because": "K-D9's only refusal is a duplicate t on one track's same clock. Disabling the check lets two stops at the exact same t on the same clock through, which K-D9 refuses. (Re-anchored by ANCHORS: K1b made a track single-clock, so the per-clock map became one `seenT` set and the duplicate-`t` refusal this mutation disables reads from it directly; The semantic edit is the same one; the after-text is that edit re-expressed against the current shape, not a new claim.)",
       "command": [
         "yarn",
         "vitest",
@@ -30,7 +30,8 @@
         "node",
         "packages/CampaignOrchestration/src/domain/value-objects/__tests__/tracks.test.ts"
       ],
-      "verdict": "caught"
+      "verdict": "caught",
+      "retired": "Retired by ANCHORS: a later decision reversed the claim. K1b made a track SINGLE-clock — two clocks on one property are now two tracks — so the per-clock `seenTByClock` map this mutation collapses is exactly the `seenT` set the module ships today. The mutant is the current code, and a cross-clock duplicate inside one track is no longer legal for this mutation to defend. The surviving half of K-D9, that a duplicate `t` is refused at all, is still pinned by k1a.json#0."
     },
     {
       "file": "packages/shared/src/infrastructure/brief-yaml.ts",
