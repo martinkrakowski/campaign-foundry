@@ -485,7 +485,7 @@ describe("the stack lives inside CC1/CC2's cost contract (CC3, C3)", () => {
     // The stack must redraw: the row is pressed now.
     expect(stackRenders.count).toBeGreaterThan(stackBefore);
     /**
-     * And the form commits ONCE — not zero.
+     * And the form commits ONCE — not zero, and, since RS2, still not two.
      *
      * The selection is `BriefEditor`'s own `useState` because CC4's sheet is a
      * sibling of the step card (D44) and has to read it, so the state cannot
@@ -495,6 +495,14 @@ describe("the stack lives inside CC1/CC2's cost contract (CC3, C3)", () => {
      * contract is about the PER-KEYSTROKE path (C3), where the assertions above
      * hold at zero. A count above one would be a cascade — two commits for one
      * gesture — and is what this pins.
+     *
+     * **RS2 nearly made it two, and this is the test that said so.** The rail is
+     * published through `EditorPanelsContext`, and `pickedLayerId` is one of the
+     * values the rail reads — so while the setters lived on the same context as
+     * the slots, publishing re-rendered the publisher: gesture → render →
+     * effect → `setRail` → context change → render. The setters are a separate
+     * context now (`useEditorPanelPublisher`), so the editor subscribes to
+     * nothing it publishes into, and the number is the one it always was.
      */
     expect(formRenders.count).toBe(1);
   });

@@ -10,13 +10,26 @@ import type { PlayheadState } from "../PreviewDock";
  * The lane's cost criterion (the plan's §4 acceptance (b)) is not "it looks
  * smooth": a second that moves on every pointermove must not re-render the
  * editor's step form. `BriefEditor` has no memo boundary of its own —
- * `renderStepCard` builds the form inline and no section is `memo`-wrapped — so
- * the mechanism that makes this true is the one asserted here: the main column
- * reaches this component as an ELEMENT (`children`), so when a scrub re-renders
- * the host, React sees `oldProps === newProps` for that child and skips the
- * subtree. `brief-editor.playhead.test.tsx` pins the same property through the
- * real editor; this file pins the mechanism in isolation, where a failure names
- * its own cause.
+ * `renderStepCard` builds the form inline and no section is `memo`-wrapped.
+ *
+ * **RS2 changed the mechanism that makes this true, and this file says how.**
+ * This component used to take the editor's main column as `children` and rely on
+ * React's element-identity bailout to skip it during a scrub, which is what the
+ * first test below asserted. The rail is a shell column now, published through
+ * `useEditorPanels`, so this component is mounted inside the rail's own aside and
+ * the form is not in its subtree at all. **What stops being true:** "the main
+ * column is an element prop of the playhead's owner and bails out per frame."
+ * **What replaces it:** the form cannot re-render for a scrub because it is not
+ * under the owner — a stronger form of the same property, and the reason
+ * `children` is gone rather than kept for tests. The measurement did not move:
+ * `brief-editor.playhead.test.tsx` counts the form's renders across a five-frame
+ * drag through the editor that ships and expects zero, and
+ * `rail-in-shell.test.tsx` re-proves it in the published shape.
+ *
+ * What this file still owns is the other half — that the rail slot IS re-invoked
+ * per frame (a bail that froze the thumb would satisfy "the form did not
+ * re-render" perfectly), and the identity contract the `memo`-wrapped dock
+ * depends on.
  */
 
 /** Counts its own renders, so "did this subtree re-render" is a number. */
@@ -25,9 +38,8 @@ function Counter({ label, onRender }: { label: string; onRender: () => void }): 
   return <span data-testid={label} />;
 }
 
-describe("PlayheadHost — the element-identity bailout (CC5, plan §4 (b))", () => {
-  test("a scrub re-renders the rail slot and NOT the children element", () => {
-    let mainRenders = 0;
+describe("PlayheadHost — the rail redraws per frame (CC5, plan §4 (b))", () => {
+  test("a scrub re-invokes the rail slot once per frame, and a commit too", () => {
     let railRenders = 0;
     let live: PlayheadState | undefined;
 
@@ -38,21 +50,18 @@ describe("PlayheadHost — the element-identity bailout (CC5, plan §4 (b))", ()
           live = playhead;
           return <Counter label="rail" onRender={() => (railRenders += 1)} />;
         }}
-      >
-        <Counter label="main" onRender={() => (mainRenders += 1)} />
-      </PlayheadHost>,
+      />,
     );
 
-    expect(mainRenders).toBe(1);
     expect(railRenders).toBe(1);
 
     // One pointermove's worth of live value.
     act(() => live!.onScrubLive(2));
     expect(live!.scrubSec).toBe(2);
     // The rail must redraw — the thumb and the diamond follow the live second.
+    // This is the liveness half: without it, "nothing else re-rendered" would be
+    // satisfied by a surface that had stopped following the drag.
     expect(railRenders).toBe(2);
-    // The main column must not. This is the whole cost criterion.
-    expect(mainRenders).toBe(1);
 
     // A whole drag, not one event: the property has to hold per frame.
     act(() => {
@@ -65,11 +74,11 @@ describe("PlayheadHost — the element-identity bailout (CC5, plan §4 (b))", ()
       live!.onScrubLive(5);
     });
     expect(railRenders).toBe(5);
-    expect(mainRenders).toBe(1);
 
-    // A commit is a state change too, and must not wake the form either.
-    act(() => live!.onScrubCommit(5));
-    expect(mainRenders).toBe(1);
+    // A commit is a state change too, and the surfaces follow it as well.
+    act(() => live!.onScrubCommit(4));
+    expect(live!.committedSec).toBe(4);
+    expect(railRenders).toBe(6);
   });
 
   test("a re-render that changes no second hands the surfaces the SAME playhead object", () => {
@@ -94,17 +103,14 @@ describe("PlayheadHost — the element-identity bailout (CC5, plan §4 (b))", ()
               seen.push(playhead);
               return null;
             }}
-          >
-            {null}
-          </PlayheadHost>
+          />
         </>
       );
     }
     render(<Outer />);
     // Index-free: the clamp effect's same-value write costs one extra render
-    // pass at mount, which the children-bailout test above cannot see (its child
-    // bails on identical props while `rail()` is still called). What matters is
-    // the object across the edit, not how many times the slot was invoked.
+    // pass at mount. What matters is the object across the edit, not how many
+    // times the slot was invoked.
     const atMount = seen.length;
     const before = seen[atMount - 1];
     fireEvent.click(screen.getByRole("button", { name: "unrelated" }));
@@ -130,9 +136,7 @@ describe("PlayheadHost — the element-identity bailout (CC5, plan §4 (b))", ()
           seen.push(playhead);
           return null;
         }}
-      >
-        {null}
-      </PlayheadHost>,
+      />,
     );
     act(() => live!.onScrubLive(1));
     act(() => live!.onScrubCommit(2));
@@ -155,9 +159,7 @@ describe("PlayheadHost — the element-identity bailout (CC5, plan §4 (b))", ()
           live = playhead;
           return null;
         }}
-      >
-        {null}
-      </PlayheadHost>,
+      />,
     );
     act(() => live!.onScrubLive(4));
     expect(live!.scrubSec).toBe(4);
@@ -192,9 +194,7 @@ describe("PlayheadHost — the clamp lives with the owner", () => {
             </button>
           </>
         )}
-      >
-        {null}
-      </PlayheadHost>
+      />
     );
   }
 
@@ -237,9 +237,7 @@ describe("PlayheadHost — the clamp lives with the owner", () => {
           live = playhead;
           return null;
         }}
-      >
-        {null}
-      </PlayheadHost>,
+      />,
     );
     act(() => live!.onScrubCommit(4));
     // `Math.max(0, durationSec)` is what keeps the ceiling from falling below the
@@ -257,9 +255,7 @@ describe("PlayheadHost — the clamp lives with the owner", () => {
           live = playhead;
           return null;
         }}
-      >
-        {null}
-      </PlayheadHost>,
+      />,
     );
     act(() => live!.onScrubLive(-3));
     expect(live!.scrubSec).toBe(0);

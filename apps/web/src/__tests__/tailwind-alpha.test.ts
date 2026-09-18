@@ -106,23 +106,18 @@ describe("divide-border-control (the ModelSelector row boundary)", () => {
   });
 });
 
-// R7 §6 question 1: the preview rail's visibility is a CONTAINER query on the editor
-// row, not a viewport breakpoint. Tailwind 3.4 has no container-query variants built
-// in, but its arbitrary variants accept any at-rule — this proves the variant the
-// rail ships actually emits a real `@container` rule, since a class that compiles to
-// nothing would look identical to one that works.
-describe("Tailwind container query variant (the preview rail)", () => {
-  it("emits a real @container rule for the rail visibility variant", async () => {
-    const css = await generateCss(["[@container(min-width:56rem)]:flex"]);
-    expect(css).toContain("@container(min-width:56rem)");
-    expect(css).toContain("display: flex");
-  });
-
-  it("emits container-type for the row that hosts the query", async () => {
-    const css = await generateCss(["[container-type:inline-size]"]);
-    expect(css).toContain("container-type: inline-size");
-  });
-});
+// RS2 retired the two compile tests that stood here: `[@container(min-width:56rem)]:flex`
+// emits a real `@container` rule, and `[container-type:inline-size]` emits a real
+// `container-type`. Both classes are gone from the tree — the preview rail wears the
+// shell's `lg:` viewport gate now, and the editor row's `container-type` went with its
+// only consumer — so the tests would have compiled strings no component writes, which
+// proves nothing about what ships. **What stops being true:** nothing about the app; what
+// those two proved was that Tailwind 3.4's arbitrary variants carry an at-rule through,
+// and no shipped class relies on that any more. The property that replaced them is the
+// one that matters for the rail — that its gate emits a VIEWPORT `@media` at 1024px, a
+// container query emits none, and the JS mirror equals that number — and it is compiled
+// the same way, from the shipped class string, in
+// `apps/web/src/app/(shell)/__tests__/rail-in-shell.test.tsx`.
 
 // A class-string assertion cannot tell a generated utility from a dead one.
 // `/18` is not on Tailwind's default opacity scale, so it emits nothing

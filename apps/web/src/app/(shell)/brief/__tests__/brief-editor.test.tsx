@@ -26,7 +26,6 @@ import {
 } from "@/components/campaign/editor-state";
 import { sectionOrder, SECTION_TITLES } from "@/components/campaign/sections";
 import { BriefEditor } from "@/components/campaign/BriefEditor";
-import { PREVIEW_RAIL_MIN_INLINE_PX } from "@/lib/use-min-inline-size";
 import NewBriefPage from "../new/page";
 import { Header } from "@/components/shell/Header";
 
@@ -3083,15 +3082,22 @@ describe("BriefPage — the preview rail (R7)", () => {
     await adopt(user, "ok");
 
     // getByRole — never getAllByRole(...)[0] (D48): the landmark is the one named slot.
-    const rail = preview();
-    // The dock's own words live inside the landmark: the caption names the platform
-    // as a display label.
-    expect(within(rail).getByText("Square · LinkedIn")).toBeTruthy();
-    // D44: the rail is a sibling of the column, never inside it — the column is the
-    // scroller and the rail is `sticky` against the shell's own scrollport.
+    // Awaited, because since RS2 the rail is PUBLISHED into the shell from an
+    // effect (`setRail`) rather than rendered inline: it arrives one commit after
+    // the state it describes, exactly as the left bar's `panels` always have. The
+    // lag is a property of the seam, not a race — it settles in one tick, and
+    // nothing here polls for longer than the shell takes to place the column.
+    await waitFor(() =>
+      // The dock's own words live inside the landmark: the caption names the
+      // platform as a display label.
+      expect(within(preview()).getByText("Square · LinkedIn")).toBeTruthy(),
+    );
+    // The rail is a sibling of the column, never inside it — the column is the
+    // scroller, and since RS2 the rail is not in the editor's subtree at all (its
+    // position in the shell row is asserted in `rail-in-shell.test.tsx`).
     const column = document.getElementById("identity")?.closest("div.max-w-5xl") as HTMLElement;
     expect(column).toBeTruthy();
-    expect(column.contains(rail)).toBe(false);
+    expect(column.contains(preview())).toBe(false);
   });
 
   /** A mount count, not a visible-SVG count (R7/CC1): the container query hides
@@ -3127,7 +3133,10 @@ describe("BriefPage — the preview rail (R7)", () => {
     // Every section is on screen at once, Layout included — so this count is taken
     // over the whole editor, not over one step's worth of it.
     expect(document.getElementById("layout")).toBeTruthy();
-    expect(mountedFrameCount()).toBe(1);
+    // Awaited: since RS2 the rail is published from an effect, so it reflects the
+    // LOADED brief one commit after the field does — until then it is still
+    // showing the blank draft, which has no product id and therefore no frame.
+    await waitFor(() => expect(mountedFrameCount()).toBe(1));
     const rail = preview();
     expect(rail.querySelectorAll('[data-testid="preview-frame"]').length).toBe(1);
   });
@@ -3341,7 +3350,9 @@ describe("BriefPage — the preview rail (R7)", () => {
     await adopt(user, "ok");
 
     // A blocked store reads as the preview view, the same fallback as an absent key.
-    expect(within(preview()).getByText(messages.previewLegend)).toBeTruthy();
+    // Awaited for the same reason as the frame count above: the published rail
+    // catches up with the loaded brief one commit later.
+    await waitFor(() => expect(within(preview()).getByText(messages.previewLegend)).toBeTruthy());
     spy.mockRestore();
   });
 
@@ -3363,52 +3374,29 @@ describe("BriefPage — the preview rail (R7)", () => {
     spy.mockRestore();
   });
 
-  test("the rail pins inside the shell's scrollport and never leaves the page (D44)", async () => {
-    const user = userEvent.setup();
-    routes({ list: () => json({ briefs: [okEntry] }) });
-    const { container } = renderWithRun(<Editor id="ok" />);
-    await adopt(user, "ok");
-
-    const rail = preview();
-    const root = container.firstElementChild as HTMLElement;
-    expect(root.contains(rail)).toBe(true);
-    // Pinning the D44 decision the way the action bar's test pins its own: happy-dom
-    // performs no layout, but `sticky` against the shell's scroller is the decision,
-    // and `fixed` — the viewport pin that covers the sidebar — is the regression.
-    expect(rail.className).toMatch(/\bsticky\b/);
-    expect(rail.className).not.toMatch(/\bfixed\b/);
-    // §6 question 1, wiring half: the rail reads the editor ROW's width, not the
-    // viewport's, and the row is the query container. The compile test in
-    // tailwind-alpha.test.ts proves the variant emits a real @container rule; the
-    // browser matrix in the R7 plan §4 records the layout half the suite cannot.
-    expect(root.querySelector('[class*="container-type"]')).not.toBeNull();
-    expect(rail.className).toContain("[@container(min-width:56rem)]:flex");
-  });
-
   /**
-   * CC2's own gap, closed on review: the CSS breakpoint (this class) and its
-   * JS mirror (`PREVIEW_RAIL_MIN_INLINE_PX`, `use-min-inline-size.ts`) were
-   * asserted independently — this test and the hook's own unit test each
-   * checked their own side, so changing 56rem to 64rem, or 896 to 1024,
-   * left every test green while the rail's visibility and its fetch gate
-   * quietly disagreed. This DERIVES one from the other instead of
-   * restating both, so either drifting alone fails exactly this test.
+   * **Two tests moved out of this file with RS2, and neither was dropped.**
+   *
+   * "the rail pins inside the shell's scrollport and never leaves the page
+   * (D44)" asserted `sticky` and not `fixed`, plus `[container-type:inline-size]`
+   * on the editor row and the rail's own `[@container(min-width:56rem)]:flex`
+   * gate. All of those spellings retired: the rail is a column of the SHELL row
+   * now, a sibling of `<main>` and of the left sidebar, so it does not pin against
+   * a scrollport at all — it is as tall as the row, which is what D44 was reaching
+   * for from inside a scroller and could never have. `root.contains(rail)` is
+   * false by design here, and that is the change in one line.
+   *
+   * "the CSS breakpoint and its JS mirror cannot drift apart silently" derived the
+   * JS constant from the `56rem` in the rail's class string, so neither could move
+   * alone. That property is load-bearing and is NOT dropped — it is stronger now:
+   * the replacement compiles the shipped class string with the project's real
+   * Tailwind config and reads the `min-width` out of the emitted `@media` rule, so
+   * the mirror is derived from the CSS that actually ships rather than from a
+   * substring of a class name.
+   *
+   * Both, and the 1024/1023 boundary itself, are in
+   * `apps/web/src/app/(shell)/__tests__/rail-in-shell.test.tsx`.
    */
-  test("the CSS breakpoint and its JS mirror cannot drift apart silently", async () => {
-    const user = userEvent.setup();
-    routes({ list: () => json({ briefs: [okEntry] }) });
-    renderWithRun(<Editor id="ok" />);
-    await adopt(user, "ok");
-
-    const rail = preview();
-    const match = rail.className.match(/@container\(min-width:(\d+)rem\)/);
-    expect(match).not.toBeNull();
-    const rem = Number(match![1]);
-    // 16px root — the same assumption `PREVIEW_RAIL_MIN_INLINE_PX`'s own
-    // comment names, so this multiplication is not a second, independent
-    // guess at the root size.
-    expect(rem * 16).toBe(PREVIEW_RAIL_MIN_INLINE_PX);
-  });
 });
 
 describe("BriefPage — the Layout section (T7)", () => {

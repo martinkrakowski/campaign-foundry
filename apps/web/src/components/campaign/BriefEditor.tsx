@@ -78,7 +78,7 @@ import { useCreateCampaign } from "@/lib/create-campaign-context";
 import { takeSeed } from "@/lib/create-campaign";
 import { FloatingBar } from "@/components/shell/FloatingBar";
 import { SectionModeContext } from "@/components/campaign/SectionModeContext";
-import { useEditorPanels } from "@/lib/editor-panels-context";
+import { useEditorPanelPublisher } from "@/lib/editor-panels-context";
 import { Accordion } from "@/components/shell/Accordion";
 import { revealSection } from "@/lib/scroll-to-section";
 import { cn } from "@/lib/cn";
@@ -93,7 +93,7 @@ import { PreviewDock, PreviewRailEmptyState, type PlayheadState } from "./Previe
 import { previewDockProps, previewRailKey } from "./preview-props";
 import { LayerStack } from "./LayerStack";
 import { layerStackKey, layerStackProps } from "./layer-stack-props";
-import { useMinInlineSize, PREVIEW_RAIL_MIN_INLINE_PX } from "@/lib/use-min-inline-size";
+import { useViewportMinWidth, RAIL_VIEWPORT_MIN_PX } from "@/lib/use-viewport-min-width";
 import { DEFAULT_DURATION_SEC } from "@campaignfoundry/CampaignOrchestration/variation-defaults";
 import { resolveTimeline } from "@campaignfoundry/CampaignOrchestration/copy-timeline";
 import { TimelineTape, beatUnderFloor } from "@/components/campaign/TimelineTape";
@@ -164,35 +164,40 @@ function persistRailView(next: RailView): void {
  * re-render the entire editor tree per frame of a drag, re-opening the cost defect
  * CC2 closed, through a new component (the plan's §4 acceptance (b)).
  *
- * The fix is React's own element-identity bailout, not a new primitive: the main
- * column arrives here as `children` — an element object `BriefEditor` built on ITS
- * last render — so when this component re-renders for a second that moved,
- * `children` is referentially identical, `oldProps === newProps` holds for that
- * child, and React skips the subtree entirely. `BriefEditor` itself does not
- * re-render at all, because the state it would have owned is not its own.
+ * **RS2 changed how that is true, and made it structural.** This component used to
+ * take the main column as `children` and rely on React's element-identity bailout
+ * to skip it during a scrub. The rail now lives in the shell row, published through
+ * `useEditorPanels`, so this component is mounted INSIDE the rail's own aside and
+ * the editor's form is not in its subtree at all: a second that moves re-renders
+ * this component and the surfaces it draws, and there is nothing else under it to
+ * skip. `children` is gone with the reason for it. The property is unchanged and
+ * still measured where it matters — `brief-editor.playhead.test.tsx` counts the
+ * form's renders across a five-frame drag and expects zero.
  *
- * The surfaces that DO draw the second are the `rail` render prop, which is
- * re-invoked because it must be.
+ * **Why the seconds moved in here rather than staying wrapped around the column.**
+ * Publishing a playhead-dependent element through `setRail` on every frame would
+ * write context state per pointermove, so every frame would re-render the shell's
+ * columns and place a fresh rail — per frame of a drag, for a second that only the
+ * rail draws. Keeping the state below the publish point means a scrub writes no
+ * context at all. Nothing in the main column reads the playhead today, which is
+ * what makes this possible.
  *
- * This differs from the plan's §5, which puts the pair in `BriefEditor`'s body;
- * ownership is still singular, still in this file, and every literal §5 makes
- * load-bearing survives — the `useState` pair, `onScrubLive` as a bare setter
- * (already stable) and `handleScrubCommit` as a `useCallback` with an empty
- * dependency list, writing BOTH seconds so the thumb does not jump back.
+ * Every literal the plan's §5 makes load-bearing survives: the `useState` pair,
+ * `onScrubLive` as a bare setter (already stable) and `handleScrubCommit` as a
+ * `useCallback` with an empty dependency list, writing BOTH seconds so the thumb
+ * does not jump back.
  *
- * TS2's section host (D146) lives inside the main column, which is a bailed-out
- * element here — so it will need either a second slot on this component or a
- * subscription. That is TS2's problem, deliberately not solved early.
+ * TS2's section host (D146) draws the same second under the Copy form, which is in
+ * `<main>` — a sibling of this subtree, not a descendant. So it needs a
+ * subscription (the plan already said "its own slot or a subscription"); a second
+ * `useState` pair would desync the preview, which is the risk D146 names.
  */
 export function PlayheadHost({
   durationSec,
-  children,
   rail,
 }: {
   /** The previewed clip length. A change to it re-clamps both seconds. */
   durationSec: number;
-  /** The main column — passed as an element so it can bail out of a scrub. */
-  children: ReactNode;
   /** The surfaces that draw the playhead, re-invoked on every scrub. */
   rail: (playhead: PlayheadState) => ReactNode;
 }): ReactNode {
@@ -241,9 +246,9 @@ export function PlayheadHost({
    * ONE object per distinct playhead, not one per render.
    *
    * `PreviewDock` is `memo`-wrapped and takes this whole object as a prop, so a
-   * fresh literal here would fail its shallow compare on every render — and
-   * `PlayheadHost` re-renders whenever `BriefEditor` does, which is every
-   * keystroke. That silently re-opens the half of CC1/CC2's contract that is
+   * fresh literal here would fail its shallow compare on every render — and this
+   * component re-renders whenever `BriefEditor` republishes the rail, which is
+   * every keystroke. That silently re-opens the half of CC1/CC2's contract that is
    * about RE-RENDERS rather than fetches ("lets this bail on a re-render for a
    * keystroke the look does not change, exactly as it already skips a network
    * fetch for one"). The fetch-count proofs never saw it, because
@@ -263,12 +268,7 @@ export function PlayheadHost({
     [durationSec, ceiling, scrubSec, committedSec, handleScrubCommit],
   );
 
-  return (
-    <>
-      {children}
-      {rail(playhead)}
-    </>
-  );
+  return rail(playhead);
 }
 
 /**
@@ -287,7 +287,7 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   const { guardedPush, guardedAction } = useGuardedNavigation();
   const { setDirty, setDraftRun } = useEditorDirty();
   const { openCreateDialog, seedVersion } = useCreateCampaign();
-  const { setPanels, setTopPanels } = useEditorPanels();
+  const { setPanels, setTopPanels, setRail } = useEditorPanelPublisher();
   // VE1 — history lives in the hook, never in `EditorState` (R6): `state` is the
   // present draft, so persistence and the stored-draft diff see exactly what they
   // saw before, and `dispatch` is a drop-in for the reducer's. The keyboard
@@ -814,12 +814,12 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   }, [openBriefKey]);
   /** Stable across every render: a fresh arrow would defeat the `memo` above. */
   const pickLayer = useCallback((id: string) => setPickedLayerId(id), []);
-  // CC2 — the JS-side mirror of the row's own `@container(min-width:56rem)`
-  // query (§6 question 1): the CSS hides the rail below the breakpoint, but
-  // the element stays mounted and would keep fetching without this. Observes
-  // the SAME row the CSS container query reads.
-  const railContainerRef = useRef<HTMLDivElement | null>(null);
-  const isRailWideEnough = useMinInlineSize(railContainerRef, PREVIEW_RAIL_MIN_INLINE_PX);
+  // CC2 — the JS-side mirror of the gate that hides the rail, now the shell's
+  // own VIEWPORT breakpoint (RS2) rather than a container query on a row the
+  // rail no longer lives in. The mirror itself does not retire with the query:
+  // `hidden lg:flex` still hides without unmounting, so the rail would keep
+  // fetching frames nobody can see without this.
+  const isRailWideEnough = useViewportMinWidth(RAIL_VIEWPORT_MIN_PX);
   /**
    * D35 — whether Generate's default target (the shell's brief) and the screen
    * disagree. A pristine editor holds the blank template, not a draft anybody is
@@ -1080,6 +1080,249 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
     // sectionErrors only reads what `errors` already covers.
   }, [state, errors, policyErrors, setPanels, touchSectionFromEvent, unknownId, failedRouteId]);
   useEffect(() => () => setPanels(null), []);
+
+  /**
+   * The preview rail's BODY — `PlayheadHost`'s own slot (CC5), published up to
+   * the shell row where it wears `SidebarShell` (RS2). The container is no longer
+   * written here: the aside, its width, its border and its `lg:` gate are the
+   * shell's one definition, shared with the left sidebar. What is left is the
+   * scrolling body, spelled the way the left sidebar spells its own.
+   *
+   * **What retired with the move, and why none of it was a tidy-up.** The old
+   * container was `sticky top-0 max-h-screen self-start` three levels inside
+   * `main`'s scroller — the best a box in there can do, and never browser-height,
+   * because `h-full` in a scroller means "as tall as the scrolled content". It was
+   * `w-64` with a `border-l` where the left column is `w-[320px]` with panel
+   * chrome. And its gate was `[@container(min-width:56rem)]` against a container
+   * of `viewport − 368px`, so it appeared at 1264px of viewport while the left
+   * sidebar appeared at 1024px: that 240px band is why the rail was invisible on
+   * the owner's screen for two days while every merge landed correctly, and it is
+   * deleted here rather than re-numbered.
+   *
+   * It is a function rather than an element because it is the half of the row that
+   * MUST re-render when a second moves — the dock's thumb and (for a motion draft)
+   * the tape's diamond follow the live value.
+   *
+   * D43/D44/D61/D141 — the rail used to be gated. D141 already amended D43 ("the
+   * dock mounts in Guided only and is suppressed on the Review step",
+   * `r7-preview-panel.md:39`) down to "every presentation, every step except
+   * Review and Layout", because those two carried a composed frame of their own
+   * (`ReviewStep`, and `LayoutSection` with `preview`, D63). SG1 removes the rest
+   * of the gate: that exclusion was only ever a STEP concept, and there is no step
+   * cursor any more.
+   *
+   * What must survive the simplification is D43's COUNT invariant — exactly one
+   * composed frame — and it does, for a reason and not by luck: Review is deleted,
+   * and the column's `LayoutSection` is rendered WITHOUT `preview`, so the rail
+   * holds the only one. Re-introducing either would break it silently, which is
+   * why the proof is a count of MOUNTS: `isRailWideEnough` (CC2) is the JS mirror
+   * of the shell's viewport gate and gates only the FETCH — the rail still mounts
+   * below the breakpoint, so a resize above it pays no fresh debounce, and a count
+   * of what is VISIBLE would read zero while one is mounted.
+   *
+   * **`useCallback`, and its dependency list is load-bearing.** This closure is
+   * published through context from an effect, so a fresh identity per render would
+   * write context on every render — one extra shell render per keystroke, for a
+   * rail whose content did not change. It is no longer a LOOP: the editor reads
+   * the setters from a context of their own (`useEditorPanelPublisher`, `:290`)
+   * and subscribes to nothing it publishes into, which is what a mutation replay
+   * forced (see the comment on `EditorPanelPublisherContext` — while the two
+   * shared a context this list was the difference between a defeated `memo` and a
+   * livelock).
+   *
+   * Every value the body reads is therefore named below; a missing one leaves the
+   * rail showing a stale draft, which no render count can see — a stale subtree
+   * re-renders LESS, not more. The react-hooks lint plugin is not wired into this
+   * project's eslint config, so the list is maintained by hand, by
+   * `rail-in-shell.test.tsx`'s live-YAML assertion, and by `rs.json`'s mutation
+   * that drops one entry from it.
+   */
+  const railSlot = useCallback(
+    (playhead: PlayheadState): ReactNode => (
+      <div className="flex flex-1 flex-col gap-3 overflow-y-auto p-4">
+        {/* The segmented switcher (D61): an eye for the preview, code for the
+          YAML view — exclusive, never side by side. The glyphs are decoration;
+          the names are on the buttons. */}
+        <div
+          role="group"
+          aria-label={messages.previewRailViews}
+          className="flex shrink-0 items-center gap-1"
+        >
+          <button
+            type="button"
+            aria-pressed={railView === "preview"}
+            aria-label={messages.previewRailPreviewView}
+            onClick={() => chooseRailView("preview")}
+            className={cn(
+              "rounded-md p-1.5 transition-colors",
+              railView === "preview"
+                ? "bg-surface-2 text-text-emphasis"
+                : "text-text-muted hover:bg-surface-2 hover:text-text-primary",
+            )}
+          >
+            <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true" className="size-4">
+              <path
+                d="M2 12s3.5-6.5 10-6.5S22 12 22 12s-3.5 6.5-10 6.5S2 12 2 12Z"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+              />
+              <circle cx="12" cy="12" r="2.75" fill="none" stroke="currentColor" strokeWidth={2} />
+            </svg>
+          </button>
+          <button
+            type="button"
+            aria-pressed={railView === "yaml"}
+            aria-label={messages.previewRailYamlView}
+            onClick={() => chooseRailView("yaml")}
+            className={cn(
+              "rounded-md p-1.5 transition-colors",
+              railView === "yaml"
+                ? "bg-surface-2 text-text-emphasis"
+                : "text-text-muted hover:bg-surface-2 hover:text-text-primary",
+            )}
+          >
+            <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true" className="size-4">
+              <path
+                d="m8 7-5 5 5 5M16 7l5 5-5 5M13.5 5l-3 14"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
+        </div>
+        {railView === "preview" ? (
+          railProps !== null ? (
+            // CC2 — below the breakpoint, `brief` is withheld: `usePreviewFrame`
+            // (inside `PreviewDock` → `PreviewFrame`) treats an undefined brief
+            // exactly like an unspecified look and never builds a request, so a
+            // rail nobody can see never reaches the network.
+            <>
+              <PreviewDock
+                {...railProps}
+                brief={isRailWideEnough ? previewBrief : undefined}
+                playhead={playhead}
+                host="rail"
+              />
+              {/* TS1 — the time surface, under the creative it belongs to. It
+                mounts ONLY for a moving draft: a still brief has no seconds to
+                draw, and a tape over a static creative would invite a scrub
+                that means nothing. `hasMotion` is the rail's own look, so the
+                tape and the dock's range appear and disappear together. */}
+              {railProps.motion !== undefined ? (
+                <TimelineTape
+                  durationSec={playhead.durationSec}
+                  beats={tapeBeats}
+                  shortestDurationSec={shortestDurationSec}
+                  scrubSec={playhead.scrubSec}
+                  committedSec={playhead.committedSec}
+                  selectedBeatIndex={selectedBeatIndex}
+                  onScrubLive={playhead.onScrubLive}
+                  onScrubCommit={playhead.onScrubCommit}
+                  onSelectBeat={setSelectedBeatIndex}
+                  host="rail"
+                />
+              ) : null}
+            </>
+          ) : (
+            // D142 — the empty state before the first product has an id: names
+            // the missing field, never "add a product" (the Products section
+            // already shows a stub) and never a fabricated placeholder creative.
+            <PreviewRailEmptyState campaignName={state.campaignName} />
+          )
+        ) : (
+          <pre className="overflow-auto text-[11px] text-text-primary">
+            {/* Real YAML, because that is what the label promises and what the
+              save path writes — a JSON body under a `</>`-YAML name showed a
+              format the pipeline never reads (CodeRabbit, PR #174). Always the
+              LIVE `draftBrief`, never the memoised `previewBrief`: this is the
+              rail's read-only SECOND view (D61) and must never lag the preview's
+              own memo boundary (CC1/CC2 mutation (c)). */}
+            {dump(draftBrief)}
+          </pre>
+        )}
+        {/* CC3 — the layers container under the creative, which is where the
+          owner's diagram puts it. Outside the view switcher on purpose: the
+          switcher is exclusive between the composed PREVIEW and the YAML
+          projection (D61), and a list of controls is neither — hiding the
+          only layer stack in the tree behind a read-only view would make it
+          unreachable while that view is up. Outside the `railProps !== null`
+          branch for the same kind of reason: the template is real whether or
+          not the first product has an id yet (D142 is about the preview), and
+          answering "no layers" because the preview has nothing to draw would
+          be a failure dressed as an empty result. */}
+        <LayerStack
+          {...layerStack}
+          dispatch={dispatch}
+          selectedLayerId={pickedLayerId}
+          onSelectLayer={pickLayer}
+        />
+      </div>
+    ),
+    [
+      // The rail's own view state and its switcher.
+      railView,
+      chooseRailView,
+      // The preview: memoised on the content fingerprint (CC1), plus the gate
+      // that withholds `brief` while the column is CSS-hidden (CC2).
+      railProps,
+      previewBrief,
+      isRailWideEnough,
+      // The tape (TS1) and its ephemeral selection (D139).
+      tapeBeats,
+      shortestDurationSec,
+      selectedBeatIndex,
+      // The layer stack (CC3): props memoised on their own fingerprint.
+      layerStack,
+      dispatch,
+      pickedLayerId,
+      pickLayer,
+      // The YAML view reads the LIVE draft, never the memoised preview brief
+      // (D61, CC1 mutation (c)) — so it is a dependency and the rail is
+      // republished on every keystroke, which is the point.
+      draftBrief,
+      // D142's empty state names the campaign.
+      state.campaignName,
+    ],
+  );
+
+  /**
+   * RS2 — publish the preview rail into the shell's right-hand column, through the
+   * same seam the left bar's panels already use. The shell places it and knows
+   * nothing else about it: presence of this value is what reveals the column
+   * (RS-D3), so the aside cannot exist as an empty 256px strip on a route that
+   * happens to match while publishing nothing — which is the defect that shipped.
+   *
+   * The M3/D83 gate is the panels effect's, for the same reason: when the editor is
+   * showing "no such brief" or the failed-listing silence there is no draft to
+   * preview, and a rail beside that message would be a surface with nothing in it.
+   *
+   * `railSlot` is a `useCallback`, so this effect fires when the rail's content
+   * changes and not once per render. The publisher does not subscribe to the slots
+   * it writes (`useEditorPanelPublisher` is a context of its own), so a publish
+   * cannot re-enter this component — which is what keeps an unmemoised value in
+   * `railSlot`'s dependency list a defeated `memo` (caught by a render count)
+   * rather than a publish loop with no fixed point. That distinction was measured,
+   * not assumed: see the comment on `EditorPanelPublisherContext`.
+   */
+  useEffect(() => {
+    if (unknownId !== null || failedRouteId !== null) {
+      setRail(null);
+      return;
+    }
+    setRail({
+      label: messages.previewLegend,
+      // `PlayheadHost` is mounted INSIDE the published subtree, not around the
+      // editor's column: the seconds move on every pointermove, and publishing a
+      // playhead-dependent element per frame would write context per frame.
+      // Keeping the state below the publish point means a scrub writes none.
+      content: <PlayheadHost durationSec={previewDurationSec} rail={railSlot} />,
+    });
+  }, [railSlot, previewDurationSec, setRail, unknownId, failedRouteId]);
+  useEffect(() => () => setRail(null), []);
 
   /**
    * Every path that replaces the draft goes through the same D14 confirmation — now
@@ -1543,261 +1786,110 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
     );
   }
 
-  /**
-   * The preview rail, as `PlayheadHost`'s own slot (CC5) — one right-hand slot,
-   * a sibling of the main column. `sticky top-0 self-start` resolves against the
-   * shell's own scrollport; never `fixed`.
-   *
-   * It is a function rather than an element because it is the half of the row
-   * that MUST re-render when a second moves — the dock's thumb and (for a motion
-   * draft) the tape's diamond follow the live value. The main column is handed to
-   * the host as `children` for the opposite reason: it must NOT.
-   *
-   * D43/D44/D61/D141 — the rail used to be gated. D141 already amended D43 ("the
-   * dock mounts in Guided only and is suppressed on the Review step",
-   * `r7-preview-panel.md:39`) down to "every presentation, every step except
-   * Review and Layout", because those two carried a composed frame of their own
-   * (`ReviewStep`, and `LayoutSection` with `preview`, D63). SG1 removes the rest
-   * of the gate: that exclusion was only ever a STEP concept, and there is no step
-   * cursor any more.
-   *
-   * What must survive the simplification is D43's COUNT invariant — exactly one
-   * composed frame — and it does, for a reason and not by luck: Review is deleted,
-   * and the column's `LayoutSection` is rendered WITHOUT `preview`, so the rail
-   * holds the only one. Re-introducing either would break it silently, which is
-   * why the proof is a count of MOUNTS: `isRailWideEnough` (CC2) is the JS mirror
-   * of the row's container query (§6 question 1) and gates only the FETCH — the
-   * rail still mounts below the breakpoint, so a resize above it pays no fresh
-   * debounce, and a count of what is VISIBLE would read zero while one is mounted.
-   */
-  const railSlot = (playhead: PlayheadState): ReactNode => (
-    <aside
-      role="complementary"
-      aria-label={messages.previewLegend}
-      className="sticky top-0 hidden max-h-screen w-64 shrink-0 self-start flex-col gap-3 overflow-y-auto border-l border-border bg-surface p-4 [@container(min-width:56rem)]:flex"
-    >
-      {/* The segmented switcher (D61): an eye for the preview, code for the
-        YAML view — exclusive, never side by side. The glyphs are decoration;
-        the names are on the buttons. */}
-      <div
-        role="group"
-        aria-label={messages.previewRailViews}
-        className="flex shrink-0 items-center gap-1"
-      >
-        <button
-          type="button"
-          aria-pressed={railView === "preview"}
-          aria-label={messages.previewRailPreviewView}
-          onClick={() => chooseRailView("preview")}
-          className={cn(
-            "rounded-md p-1.5 transition-colors",
-            railView === "preview"
-              ? "bg-surface-2 text-text-emphasis"
-              : "text-text-muted hover:bg-surface-2 hover:text-text-primary",
-          )}
-        >
-          <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true" className="size-4">
-            <path
-              d="M2 12s3.5-6.5 10-6.5S22 12 22 12s-3.5 6.5-10 6.5S2 12 2 12Z"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={2}
-            />
-            <circle cx="12" cy="12" r="2.75" fill="none" stroke="currentColor" strokeWidth={2} />
-          </svg>
-        </button>
-        <button
-          type="button"
-          aria-pressed={railView === "yaml"}
-          aria-label={messages.previewRailYamlView}
-          onClick={() => chooseRailView("yaml")}
-          className={cn(
-            "rounded-md p-1.5 transition-colors",
-            railView === "yaml"
-              ? "bg-surface-2 text-text-emphasis"
-              : "text-text-muted hover:bg-surface-2 hover:text-text-primary",
-          )}
-        >
-          <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true" className="size-4">
-            <path
-              d="m8 7-5 5 5 5M16 7l5 5-5 5M13.5 5l-3 14"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={2}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
-        </button>
-      </div>
-      {railView === "preview" ? (
-        railProps !== null ? (
-          // CC2 — below the breakpoint, `brief` is withheld: `usePreviewFrame`
-          // (inside `PreviewDock` → `PreviewFrame`) treats an undefined brief
-          // exactly like an unspecified look and never builds a request, so a
-          // rail nobody can see never reaches the network.
-          <>
-            <PreviewDock
-              {...railProps}
-              brief={isRailWideEnough ? previewBrief : undefined}
-              playhead={playhead}
-              host="rail"
-            />
-            {/* TS1 — the time surface, under the creative it belongs to. It
-              mounts ONLY for a moving draft: a still brief has no seconds to
-              draw, and a tape over a static creative would invite a scrub
-              that means nothing. `hasMotion` is the rail's own look, so the
-              tape and the dock's range appear and disappear together. */}
-            {railProps.motion !== undefined ? (
-              <TimelineTape
-                durationSec={playhead.durationSec}
-                beats={tapeBeats}
-                shortestDurationSec={shortestDurationSec}
-                scrubSec={playhead.scrubSec}
-                committedSec={playhead.committedSec}
-                selectedBeatIndex={selectedBeatIndex}
-                onScrubLive={playhead.onScrubLive}
-                onScrubCommit={playhead.onScrubCommit}
-                onSelectBeat={setSelectedBeatIndex}
-                host="rail"
-              />
-            ) : null}
-          </>
-        ) : (
-          // D142 — the empty state before the first product has an id: names
-          // the missing field, never "add a product" (the Products section
-          // already shows a stub) and never a fabricated placeholder creative.
-          <PreviewRailEmptyState campaignName={state.campaignName} />
-        )
-      ) : (
-        <pre className="overflow-auto text-[11px] text-text-primary">
-          {/* Real YAML, because that is what the label promises and what the
-            save path writes — a JSON body under a `</>`-YAML name showed a
-            format the pipeline never reads (CodeRabbit, PR #174). Always the
-            LIVE `draftBrief`, never the memoised `previewBrief`: this is the
-            rail's read-only SECOND view (D61) and must never lag the preview's
-            own memo boundary (CC1/CC2 mutation (c)). */}
-          {dump(draftBrief)}
-        </pre>
-      )}
-      {/* CC3 — the layers container under the creative, which is where the
-        owner's diagram puts it. Outside the view switcher on purpose: the
-        switcher is exclusive between the composed PREVIEW and the YAML
-        projection (D61), and a list of controls is neither — hiding the
-        only layer stack in the tree behind a read-only view would make it
-        unreachable while that view is up. Outside the `railProps !== null`
-        branch for the same kind of reason: the template is real whether or
-        not the first product has an id yet (D142 is about the preview), and
-        answering "no layers" because the preview has nothing to draw would
-        be a failure dressed as an empty result. */}
-      <LayerStack
-        {...layerStack}
-        dispatch={dispatch}
-        selectedLayerId={pickedLayerId}
-        onSelectLayer={pickLayer}
-      />
-    </aside>
-  );
-
   return (
     // No h-full / inner overflow: like every other view, this one flows and the
-    // shell's main container is the scroller. The action bar and the preview rail
-    // stay put with `sticky`, which is scoped to that container — never the viewport.
+    // shell's main container is the scroller. The action bar stays put with
+    // `sticky`, which is scoped to that container — never the viewport.
     <div className="flex flex-col">
-      {/* §6 question 1 — the row is the query container the rail's visibility reads,
-          so the rail's own width can never lie to a viewport breakpoint. */}
-      <div ref={railContainerRef} className="flex items-start [container-type:inline-size]">
+      {/* RS2 — the row that used to hold the main column AND the rail, with
+          `[container-type:inline-size]` on it so the rail's own container query
+          could read its width. The rail is a shell column now and the query is
+          gone, so the container-type went with its only consumer; the row itself
+          stays as the column's flex host. TS2's narrow host (D146) draws the tape
+          under Copy, inside this column — it needs the seconds, not a query
+          container, and its own gate has to be the shell's viewport breakpoint or
+          the two hosts stop being complements of each other, which is the class of
+          defect this lane exists to delete. */}
+      <div className="flex items-start">
         <SectionModeContext.Provider value={state.mode}>
-          <PlayheadHost durationSec={previewDurationSec} rail={railSlot}>
-            {/* Main content */}
-            <div
-              className="mx-auto flex w-full max-w-5xl flex-col gap-6 p-4 sm:p-8 pb-24"
-              onBlurCapture={handleMainBlur}
-              onClickCapture={touchSectionFromEvent}
-            >
-              {/* SG1 — the header row: the brief selector and the draft's status
-                chip. The presentation toggle stood on the right of it and is gone
-                with `guided`; the chip is no longer conditional, because there is
-                no longer a StepHeader anywhere else announcing the same status. */}
-              <div className="flex items-center gap-4">
-                <BriefSelector
-                  briefs={briefs}
-                  currentId={state.source.kind === "file" ? state.source.loadedId : undefined}
-                  onSelect={loadBrief}
-                  onCreateNew={createNew}
-                />
-                <StatusChip state={state} />
-              </div>
-
-              {/* SG1 — the sections, in the one scrolling column the editor now is.
-                This is the `everything` stack unchanged: `identity`, `copy`,
-                `products`, `treatments` (brief mode only), `template`, `layout` and
-                `output`, each where it already was. `policy` is the one section that
-                has never been here — it renders as the sidebar accordion published
-                above, which is where `everything` always put it. */}
-              <div className="space-y-8">
-                <div>
-                  <IdentitySection
-                    state={state}
-                    dispatch={dispatch}
-                    errors={sectionErrorsVisible("identity")}
-                  />
-                </div>
-                <div>
-                  <CopySection
-                    state={state}
-                    dispatch={dispatch}
-                    errors={sectionErrorsVisible("copy")}
-                    warnings={warnings.copy}
-                    onOpenPool={() => setPoolDrawerOpen(true)}
-                  />
-                </div>
-                <div>
-                  <ProductsSection
-                    state={state}
-                    dispatch={dispatch}
-                    errors={sectionErrorsVisible("products")}
-                    onChooseFromBin={setAssetPickerKey}
-                  />
-                </div>
-                <div>
-                  {state.mode === "brief" ? (
-                    <TreatmentsSection
-                      state={state}
-                      dispatch={dispatch}
-                      errors={sectionErrorsVisible("treatments")}
-                    />
-                  ) : null}
-                </div>
-                {/* The layer list (L5): the offer is the boundary's own (D124). */}
-                <TemplateSection
-                  state={state}
-                  dispatch={dispatch}
-                  errors={sectionErrorsVisible("template")}
-                />
-                {/* The template view (T7): the type block and NO frame. This is the
-                    half of D43's one-composed-frame invariant that lives in the
-                    column: the rail holds the only composed preview, so `preview`
-                    must not be passed here. It is not a leftover of D43's original
-                    "Guided-only" clause — D141 dropped that — the frame the Layout
-                    STEP carried went with the step, and adding one back here would
-                    put a second composed frame in the tree. */}
-                <LayoutSection
-                  state={state}
-                  dispatch={dispatch}
-                  errors={sectionErrorsVisible("layout")}
-                />
-                <OutputSection
-                  state={state}
-                  dispatch={dispatch}
-                  errors={{
-                    ...sectionErrorsVisible("output"),
-                    ...sectionErrorsVisible("motion"),
-                  }}
-                />
-              </div>
+          {/* Main content */}
+          <div
+            className="mx-auto flex w-full max-w-5xl flex-col gap-6 p-4 sm:p-8 pb-24"
+            onBlurCapture={handleMainBlur}
+            onClickCapture={touchSectionFromEvent}
+          >
+            {/* SG1 — the header row: the brief selector and the draft's status
+              chip. The presentation toggle stood on the right of it and is gone
+              with `guided`; the chip is no longer conditional, because there is
+              no longer a StepHeader anywhere else announcing the same status. */}
+            <div className="flex items-center gap-4">
+              <BriefSelector
+                briefs={briefs}
+                currentId={state.source.kind === "file" ? state.source.loadedId : undefined}
+                onSelect={loadBrief}
+                onCreateNew={createNew}
+              />
+              <StatusChip state={state} />
             </div>
-          </PlayheadHost>
+
+            {/* SG1 — the sections, in the one scrolling column the editor now is.
+              This is the `everything` stack unchanged: `identity`, `copy`,
+              `products`, `treatments` (brief mode only), `template`, `layout` and
+              `output`, each where it already was. `policy` is the one section that
+              has never been here — it renders as the sidebar accordion published
+              above, which is where `everything` always put it. */}
+            <div className="space-y-8">
+              <div>
+                <IdentitySection
+                  state={state}
+                  dispatch={dispatch}
+                  errors={sectionErrorsVisible("identity")}
+                />
+              </div>
+              <div>
+                <CopySection
+                  state={state}
+                  dispatch={dispatch}
+                  errors={sectionErrorsVisible("copy")}
+                  warnings={warnings.copy}
+                  onOpenPool={() => setPoolDrawerOpen(true)}
+                />
+              </div>
+              <div>
+                <ProductsSection
+                  state={state}
+                  dispatch={dispatch}
+                  errors={sectionErrorsVisible("products")}
+                  onChooseFromBin={setAssetPickerKey}
+                />
+              </div>
+              <div>
+                {state.mode === "brief" ? (
+                  <TreatmentsSection
+                    state={state}
+                    dispatch={dispatch}
+                    errors={sectionErrorsVisible("treatments")}
+                  />
+                ) : null}
+              </div>
+              {/* The layer list (L5): the offer is the boundary's own (D124). */}
+              <TemplateSection
+                state={state}
+                dispatch={dispatch}
+                errors={sectionErrorsVisible("template")}
+              />
+              {/* The template view (T7): the type block and NO frame. This is the
+                  half of D43's one-composed-frame invariant that lives in the
+                  column: the rail holds the only composed preview, so `preview`
+                  must not be passed here. It is not a leftover of D43's original
+                  "Guided-only" clause — D141 dropped that — the frame the Layout
+                  STEP carried went with the step, and adding one back here would
+                  put a second composed frame in the tree. */}
+              <LayoutSection
+                state={state}
+                dispatch={dispatch}
+                errors={sectionErrorsVisible("layout")}
+              />
+              <OutputSection
+                state={state}
+                dispatch={dispatch}
+                errors={{
+                  ...sectionErrorsVisible("output"),
+                  ...sectionErrorsVisible("motion"),
+                }}
+              />
+            </div>
+          </div>
         </SectionModeContext.Provider>
       </div>
 

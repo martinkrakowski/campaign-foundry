@@ -18,7 +18,7 @@ import * as messages from "@/components/campaign/messages";
 import { Accordion } from "../Accordion";
 import { Sidebar, BrowseBriefsButton, SidebarContent } from "../Sidebar";
 import { CreateCampaignDialog } from "../CreateCampaignDialog";
-import { useEditorPanels } from "@/lib/editor-panels-context";
+import { useEditorPanelPublisher } from "@/lib/editor-panels-context";
 import { useRun } from "@/lib/run-context";
 import { blankBrief } from "@/components/campaign/editor-state";
 import { Header } from "../Header";
@@ -246,7 +246,7 @@ describe("Sidebar — editor panels", () => {
 
   test("places the panels an editor publishes, after Project Bin", () => {
     const Publish = () => {
-      const { setPanels } = useEditorPanels();
+      const { setPanels } = useEditorPanelPublisher();
       useEffect(() => {
         setPanels(<p>policy lives here</p>);
         return () => setPanels(null);

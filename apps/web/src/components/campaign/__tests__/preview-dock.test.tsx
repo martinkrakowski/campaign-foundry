@@ -47,9 +47,7 @@ const Dock = ({
       onPlayhead?.(playhead);
       return <PreviewDock {...look} playhead={playhead} host={host} />;
     }}
-  >
-    {null}
-  </PlayheadHost>
+  />
 );
 
 const showcase = {
