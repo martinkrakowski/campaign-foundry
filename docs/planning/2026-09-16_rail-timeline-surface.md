@@ -697,7 +697,7 @@ Until (3) and (4) this is the HTML sketch with tokens. Until (2) it is a picture
 
 | ID | Question | Blocks | Notes |
 |---|---|---|---|
-| **D146** | Section host under `56rem`, or rail-only? | TS2 | **Adopted 2026-09-17: section host.** The risk it retires: a tape living only in a CSS-hidden rail answers the mobile brief on paper and not on a phone. |
+| **D146** | Section host under `56rem`, or rail-only? | TS2 | **Adopted 2026-09-17: section host.** **Gate amended by RS2 — see `2026-09-17_rail-in-the-shell.md` §4.2: "under `56rem`" becomes the shell's VIEWPORT breakpoint.** The rail's container query retired with the rail's move into the shell row, and a container query on the editor row cannot be the complement of a viewport gate on a shell column — a narrow viewport would show two tapes or none. TS2 is not dispatched, so this is a spec edit, not rework. The risk it retires: a tape living only in a CSS-hidden rail answers the mobile brief on paper and not on a phone. |
 | **D147** | Zoom persistence | TS1 | **Adopted 2026-09-17: ephemeral, fit on load.** Zoom is not a property of the campaign; persisting it would surprise a second operator on the same brief. |
 | **TS-Q1** | Does the video lane show the *key beat* as a tick on the filmstrip, or is the existing poster-frame toggle in the form enough? | none | Recommended: form only in TS1. A tick is decoration that would need a stable name if it became a control. |
 

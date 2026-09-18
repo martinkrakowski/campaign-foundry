@@ -61,12 +61,57 @@ That is how Variation Policy already reaches the left sidebar. **Nothing new has
 | Thing | Fate |
 |---|---|
 | `[@container(min-width:56rem)]` on the aside | retires (RS-D4) |
-| `PREVIEW_RAIL_MIN_INLINE_PX`, `useMinInlineSize` | retire — and their tests, which is a claim the lane must state |
-| `[container-type:inline-size]` on the editor row | **loses its only consumer.** Keep it **only** if TS2's narrow host needs it; otherwise remove. The lane must check rather than assume |
+| `PREVIEW_RAIL_MIN_INLINE_PX`, `useMinInlineSize` | retire — and their tests, which is a claim the lane must state. **Amended as implemented, see §4.1: the CONTAINER mirror retires; the mirror's job does not** |
+| `[container-type:inline-size]` on the editor row | **loses its only consumer.** Keep it **only** if TS2's narrow host needs it; otherwise remove. The lane must check rather than assume. **Checked and removed, see §4.2** |
 | `w-64` | → `w-[320px]` |
 | `border-l` | → the shared panel chrome |
 | **SG2's resizer bound** | changes meaning: "must not drag below the container threshold" becomes a width bound in a shell row. SG2 has not been dispatched, so this is a spec edit, not rework |
 | CC3's `LayerStack`, TS1's `TimelineTape`, `PreviewDock`, `playhead` | **ride along as children** — but see §5 |
+
+### 4.1 RS-D4 was half right: the container mirror retires, its JOB does not
+
+**Correction recorded rather than implemented around.** RS-D4's reason for retiring
+`PREVIEW_RAIL_MIN_INLINE_PX`/`useMinInlineSize` was that they "exist **only** to
+mirror" the container query, so "with a viewport gate they have nothing to mirror."
+The first half is right and the second does not follow, and the mechanism is in the
+hook's own doc comment: the mirror exists so a caller can *"stop the WORK, not only
+hide the result"* (CC2's finding C3 — the rail *"still mounts and fetches while
+hidden"*).
+
+The new gate is still CSS-only visibility. `hidden lg:flex` hides without
+unmounting — §7's own red fault 5 says so, and D43's mount count depends on it — so
+below 1024px a rail nobody can see would go back to asking the route for a frame on
+every look change. Deleting the mirror with the query, and its test with it, would
+have lost CC2's contract silently on exactly the screens it was written for.
+
+**What shipped:** the *container* mirror retires — the 896px constant, the
+`ResizeObserver`, and the editor row it observed, none of which exist any more. A
+viewport mirror replaces it (`use-viewport-min-width.ts`,
+`RAIL_VIEWPORT_MIN_PX = 1024`), and the two representations are no longer a matter
+of comment discipline: the test compiles the rail's shipped class string and reads
+the `min-width` out of the emitted `@media` rule, so either side drifting alone
+fails. `rs.json` carries the mutation.
+
+### 4.2 `[container-type:inline-size]` — checked, and removed
+
+**Grepped, not assumed.** The class had exactly one consumer in the tree, the
+rail's own `@container` query, and it is removed with it.
+
+- `useInlineWidth` (`use-min-inline-size.ts`) — TS1's tape fit — **does not need
+  it.** It observes the tape's own scroll container with a `ResizeObserver`, which
+  reads a box and not a query container.
+- **TS2's narrow host does not need it either, and must not use one.** D146 spells
+  the host as "at `≥56rem` it mounts in the rail … under `56rem` the tape mounts
+  under `TimelineSection`", i.e. against the same container query. The two hosts
+  have to be *complements* of each other or a narrow viewport shows two tapes or
+  none — and a container query on the editor row cannot be the complement of a
+  viewport gate on the shell column, which is precisely the 240px band this lane
+  deletes. **TS2's gate is therefore a spec edit, like SG2's: it becomes the
+  shell's viewport breakpoint.** TS2 is not dispatched, so this costs nothing now,
+  and it is recorded here rather than left for the lane to rediscover.
+- The tape under Copy will still need the *seconds*, which now live inside the
+  published rail subtree (§5) — a sibling of `<main>`, not an ancestor. So TS2
+  needs the subscription this plan already anticipated, not a query container.
 
 ---
 
@@ -85,6 +130,74 @@ Pushing the rail's children through `setPanels` means **rendered elements cross 
 - the form's own render count still rises (liveness — so the assertion cannot pass on an editor that ignored the event).
 
 **If the push defeats the boundary, that is a finding: report it and stop.** Do not widen the memo, do not memoise `panels` by deep-compare, and do not accept "it looks smooth."
+
+### 5.1 Measured: the boundary holds, and the one cost it does add is bounded at one commit
+
+**The push does not defeat the memo boundary.** `memo` compares PROPS at a stable
+position, not element identity, so an element built in `BriefEditor`'s render and
+mounted in the shell's aside still bails when its props are referentially equal.
+All three assertions hold in the published shape, each shown red first
+(`rs.json`): zero `/preview-frame` calls for a look-preserving keystroke, no
+re-render of the layer stack, the tape or the dock, and a rising form count as
+liveness.
+
+**Two things the move DID change, both measured:**
+
+1. **The playhead's seconds moved into the published subtree.** Publishing a
+   playhead-dependent element through `setRail` on every pointermove would write
+   context per frame — and `BriefEditor` is itself a consumer of that context, so
+   every frame would re-render the whole editor: CC2's defect through a new door.
+   `PlayheadHost` is therefore mounted *inside* the rail rather than wrapped around
+   the editor's column, which is possible because nothing in the main column reads
+   the playhead. A drag writes no context at all; five frames leave the form's
+   counter at zero. `PlayheadHost`'s `children` prop — the element-identity bailout
+   the main column used to rely on — is gone with the reason for it, and the
+   property it provided is now structural: the form is not in the playhead owner's
+   subtree at all.
+2. **The publisher must not subscribe to its own publication — found by mutation,
+   fixed at the cause.** With the setters on the same context as the slots,
+   publishing re-rendered the publisher: gesture → editor render → effect →
+   `setRail` → context change → editor render. Two consequences, one measured as a
+   cost and one as a hang:
+
+   - a gesture that changes something the rail reads cost the editor an extra
+     commit (a layer pick went 1 → 2);
+   - **`railSlot`'s dependency list is maintained by hand** (the react-hooks lint
+     plugin is not wired into this project's eslint config), and one unmemoised
+     value in it closed the cycle with no fixed point. `rs.json`'s mutation
+     dropping `layerStack`'s `useMemo` — a cost regression of exactly the #469
+     shape — **spun a worker at 100% CPU for 22 minutes** instead of failing a
+     render-count assertion. A livelock is a worse failure mode than the defect it
+     replaced.
+
+   **Fixed by splitting the context**: `useEditorPanels` reads the slots, a second
+   context (`useEditorPanelPublisher`) carries the setters and is allocated once
+   for the life of the provider. The editor subscribes to nothing it publishes
+   into, so a publish cannot re-enter it. The same mutation now fails in **0.98 s
+   with `expected 7 to be 5`**, the layer pick is back to **one** commit, and the
+   extra commit the left bar's `panels` channel has paid since X32 is gone too.
+   This is not a widened memo and not a deep compare: it is the publisher no
+   longer being one of its own subscribers.
+
+3. **Two of §5's own mutations were mis-aimed, and the replay said so.** Both
+   assertions passed, and both would have passed on a defect:
+
+   - **(1) zero fetches.** Feeding the dock the live `draftBrief` instead of the
+     memoised one *survived*: it defeats the memo and re-renders the dock, but
+     issues no request, because `usePreviewFrame` keys on a content fingerprint
+     and not on its component's renders. The assertion pins `previewFetchKey`,
+     so the mutation now widens that key with a field no request reads — the
+     "include the whole brief, to be safe" change — and it goes red.
+   - **(3) the form's count rises.** A reducer that dropped the edit *survived*,
+     because the helper clicked the field before typing and the editor's own
+     click capture re-rendered the form: the count rose for the gesture, not for
+     the edit. The click is gone; the mutation is now the field's handler doing
+     nothing, and (1) and (2) stay green on it — the vacuous shape, demonstrated
+     rather than described.
+
+   Worth stating plainly, because it is the second time in this lane that a
+   green assertion was the wrong assertion: **the mutation replay is what found
+   both, and neither was visible from reading the test.**
 
 ---
 
@@ -131,10 +244,11 @@ sidebar's rendered `<aside>` carries exactly that class and no other attribute
 (`SidebarShell.test.tsx`), asserted as a literal so it cannot drift with the
 component it checks.
 
-```premise RS2
-# The rail is still container-gated inside the editor. Flips when it moves to the
-# shell with a viewport gate. Probes BriefEditor for the container query rather
-# than the layout for an aside -- the layout already has one (the left sidebar),
-# so an aside-count fence would never flip. Measured: ~20 ms.
-grep -q '@container(min-width:56rem)' apps/web/src/components/campaign/BriefEditor.tsx
-```
+**`premise RS2` retired: RS2 shipped in the same PR as RS1.** The container query
+is gone from `BriefEditor.tsx` — the string the fence probed appears nowhere in
+the tree — so it would report the lane stale rather than live. What replaced it is
+stronger than a grep either way: `rail-in-shell.test.tsx` compiles the rail's own
+class string with the project's Tailwind config and asserts the gate is a viewport
+`@media` at exactly `RAIL_VIEWPORT_MIN_PX`, that no `@container` rule is emitted at
+all, and that the landmark is in the accessibility tree at 1024px and out of it at
+1023px while staying mounted.

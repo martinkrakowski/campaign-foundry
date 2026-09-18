@@ -5,9 +5,10 @@ import { usePathname } from "next/navigation";
 import { RunProvider, useRun } from "@/lib/run-context";
 import { EditorDirtyProvider } from "@/lib/editor-dirty-context";
 import { CreateCampaignProvider } from "@/lib/create-campaign-context";
-import { EditorPanelsProvider } from "@/lib/editor-panels-context";
+import { EditorPanelsProvider, useEditorPanels } from "@/lib/editor-panels-context";
 import { Header } from "@/components/shell/Header";
 import { Sidebar } from "@/components/shell/Sidebar";
+import { SidebarShell } from "@/components/shell/SidebarShell";
 import { CommandBar } from "@/components/shell/CommandBar";
 import { TelemetryDrawer } from "@/components/shell/TelemetryDrawer";
 import { BriefPicker } from "@/components/shell/BriefPicker";
@@ -43,6 +44,7 @@ export default function ShellLayout({ children }: { children: ReactNode }) {
                   <div className="relative flex-1 overflow-auto rounded-xl">{children}</div>
                   <TelemetrySlot showOrchestrator={showOrchestrator} />
                 </main>
+                <EditorRailSlot />
               </div>
             </div>
             {/* The shell overlays share this layer: the picker closes before the
@@ -59,6 +61,36 @@ export default function ShellLayout({ children }: { children: ReactNode }) {
       </EditorDirtyProvider>
     </RunProvider>
   );
+}
+
+/**
+ * The shell row's right-hand column — the editor's preview rail (RS2).
+ *
+ * **Presence-gated, never route-gated (RS-D3).** The owner asked to "reveal it
+ * based on view"; this is that, expressed as content. `CommandBar` above is the
+ * route-gated precedent (`showOrchestrator`) and it is a genuine alternative,
+ * rejected for a decisive reason rather than overlooked: a route check can be
+ * right about the route and wrong about the content, which is exactly the empty
+ * 256px strip that shipped. Presence cannot be. The shell therefore carries no
+ * route list, and a later view that publishes a rail needs no edit here.
+ *
+ * **Why here and not inside the editor.** This is a sibling of `<main>` and of
+ * the left `Sidebar`, which is the only position in the tree that can be
+ * browser-height: the rail used to live three levels inside `main`'s scroller,
+ * where `h-full` means "as tall as the scrolled content" and `sticky
+ * max-h-screen` was the best it could do. It wears the same `SidebarShell` as
+ * the left column, so the `w-64`/`border-l`/container-query divergence that hid
+ * it for two days cannot come back one class at a time.
+ *
+ * The panel is one commit behind the editor's mount, because `setRail` is
+ * published from an effect — the same seam and the same timing the left bar's
+ * `panels` have had in production. `useLayoutEffect` would close the one-frame
+ * gap at the cost of diverging from that seam; it is not worth it unless the
+ * arrival reads as a jump.
+ */
+function EditorRailSlot(): ReactNode {
+  const { rail } = useEditorPanels();
+  return rail === null ? null : <SidebarShell label={rail.label}>{rail.content}</SidebarShell>;
 }
 
 /**
