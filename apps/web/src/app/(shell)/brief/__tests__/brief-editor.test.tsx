@@ -2212,11 +2212,13 @@ describe("BriefPage — capabilities and motion", () => {
    * for the publish it schedules. Verified rather than inferred — applying that
    * merge-back to today's tree takes the test above from 1 commit to 2, exactly
    * as this mutation does. (X30's own comment attributes the budget's second
-   * commit to the dirty-flag effect; that attribution does not hold today.
-   * Reverting X32's ref guard, and separately restoring the pre-X32
-   * `return () => setDirty(false)` cleanup, each leave this gesture at one
-   * commit: `setDirty` with the value the context already holds is a bail-out,
-   * and a cleanup-then-body pair from the same effect batches into one commit.)
+   * commit to the dirty-flag effect; that attribution does not hold, and X32
+   * already reported as much — its note below records that reverting the ref
+   * guard alone moves no count, because React batches a cleanup-then-body pair
+   * from the same effect. Re-measured here: reverting that guard, and separately
+   * restoring the pre-X32 `return () => setDirty(false)` cleanup, each leave this
+   * gesture at one commit — `setDirty` with the value the context already holds
+   * is a bail-out either way.)
    *
    * Three dispatches counted as ONE number is what discriminates: the mirror's
    * cost scales with the gesture count (3 against 6) while a stray commit does
@@ -2252,6 +2254,12 @@ describe("BriefPage — capabilities and motion", () => {
     );
     const audience = screen.getByLabelText(messages.targetAudienceLabel) as HTMLInputElement;
     fireEvent.change(audience, { target: { value: "a" } });
+    // One drained tick before the window opens, so "nothing can interleave" is
+    // true of everything the MOUNT and the warm-up scheduled as well — the
+    // capabilities read and the brief listing both resolve into editor state, and
+    // `waitFor` above can succeed on a render before they land. Not a tolerance:
+    // the window stays exact, this only makes sure it starts empty.
+    await act(async () => {});
 
     commits = 0;
     fireEvent.change(audience, { target: { value: "ab" } });

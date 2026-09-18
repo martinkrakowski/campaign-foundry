@@ -65,14 +65,17 @@ vi.mock("@/components/campaign/sections", async (importOriginal) => {
  * so it is entered exactly once per render of the editor. The `counted()` wrapper
  * is the one the sections mock above already uses.
  *
- * Not a `React.Profiler`, and that was measured rather than assumed: a Profiler
- * around `<BriefEditor>` reports ONE commit for this keystroke whether or not the
- * publisher subscribes, because the Profiler fiber itself bails out on a
- * context-driven re-render of its child and React then never calls its `onRender`.
- * The editor's render function ran twice in that same window (instrumented
- * directly). X30's Profiler in `brief-editor.test.tsx` does see this defect,
- * through a click rather than a `change` — but a counter that can miss the render
- * it is pointed at is not the one this guard should rest on.
+ * **Not a `React.Profiler`, and that was measured rather than assumed.** A
+ * Profiler around `<BriefEditor>` reports ONE commit for this keystroke whether
+ * or not the publisher subscribes, while the editor's render function runs twice
+ * (instrumented directly to check). It is lazy context propagation, in
+ * react-dom 19.2.7: `attemptEarlyBailoutIfNoScheduledUpdate`'s Profiler case sets
+ * the fiber's Update flag only when `renderLanes & childLanes` is already
+ * non-zero, and a context-only consumer's lanes are marked afterwards, by
+ * `propagateParentContextChanges` inside `bailoutOnAlreadyFinishedWork` — so the
+ * flag is never set and `onRender` is never called for a render its own child
+ * did. Worth knowing beyond this file: every Profiler-based render count in this
+ * repo is blind to a purely context-driven render of a descendant.
  */
 const editorRenders = vi.hoisted(() => ({ count: 0 }));
 
