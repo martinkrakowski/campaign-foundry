@@ -1801,69 +1801,6 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
     </FloatingBar>
   );
 
-  // M3 — the route's id names no brief. The empty state answers where the user
-  // landed, naming the id the URL carried (that is the fact being reported) and
-  // giving the two ways out. No draft is created, nothing is released in the shell,
-  // and nothing is published into the sidebar: this page is not an editor.
-  if (unknownId !== null) {
-    return (
-      <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 p-4 pb-24 sm:p-8">
-        <div role="alert" className="rounded-xl border border-border bg-surface p-6">
-          <p className="text-[13px] text-text-primary">{messages.briefNotFound(unknownId)}</p>
-          <div className="mt-4 flex gap-4 text-[13px] font-medium text-brand-primary">
-            <Link href="/grid" className="underline hover:text-text-emphasis">
-              {messages.briefNotFoundGrid}
-            </Link>
-            <Link
-              href="/brief/new"
-              className="underline hover:text-text-emphasis"
-              onClick={(e) => {
-                // A modified or non-primary click is the browser's to handle — new tab, new
-                // window, download. Only a plain activation is ours to route through the guard.
-                if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
-                // W1 (D66/D67): the door is the create dialog, not a direct
-                // navigation — and the guard asks first. No editor is mounted here
-                // (M3), so the guard is silent and the dialog opens at once.
-                e.preventDefault();
-                guardedAction(openCreateDialog);
-              }}
-            >
-              {messages.briefNotFoundNew}
-            </Link>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // D83/F-A — the listing failed, not the campaign. Same chrome as the not-found
-  // state (`role="alert"`, no sidebar panels — the gates above), but the copy
-  // names the real fact and the way out is the truth: the read failed, so retry
-  // it here. Never "start a new brief" — that remedy invites a duplicate of a
-  // campaign that may be fine. The in-page retry is the way out that works
-  // without leaving the page: window focus re-runs the listing, but never fires
-  // for a user sitting on this screen reading the last answer.
-  if (failedRouteId !== null) {
-    return (
-      <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 p-4 pb-24 sm:p-8">
-        <div role="alert" className="rounded-xl border border-border bg-surface p-6">
-          <p className="text-[13px] text-text-primary">{messages.briefListFailed(failedRouteId)}</p>
-          <div className="mt-4 flex items-center gap-4">
-            <Button variant="secondary" onClick={() => void loadBriefs()}>
-              {messages.briefListFailedRetry}
-            </Button>
-            <Link
-              href="/grid"
-              className="text-[13px] font-medium text-brand-primary underline hover:text-text-emphasis"
-            >
-              {messages.briefNotFoundGrid}
-            </Link>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   /**
    * SG4 — what the middle column shows, one entry per position of the switcher.
    *
@@ -1881,6 +1818,17 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
    * D43's count at exactly one composed frame in both positions: in `yaml` the
    * whole form (`LayoutSection` included) is out of the tree, and the rail still
    * holds the only frame.
+   *
+   * **It sits ABOVE the M3 and D83 early returns, and that placement is not
+   * cosmetic.** This used to be a plain object literal built after them, which was
+   * free to live anywhere. It is a hook now, so below a conditional `return` it
+   * would be SKIPPED on the renders that answer "no such brief" or the failed
+   * listing — the hook order would differ between renders and React would fail the
+   * component outright. That is not a theory: the first draft of this change left
+   * it where the literal was, and it took out seventeen tests, every one of them a
+   * route that early-returns, each rendering an empty document rather than an
+   * error. Building the panels for a route with no editor costs one memo miss on
+   * a render that throws them away; moving a hook under a branch costs the page.
    *
    * **`useMemo`, and the dependency list is load-bearing — measured, not assumed.**
    * Review proposed this and the reflex answer was "a list of every value it reads
@@ -2038,6 +1986,69 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
     }),
     [state, dispatch, visibleErrors, warnings.copy, draftBrief],
   );
+
+  // M3 — the route's id names no brief. The empty state answers where the user
+  // landed, naming the id the URL carried (that is the fact being reported) and
+  // giving the two ways out. No draft is created, nothing is released in the shell,
+  // and nothing is published into the sidebar: this page is not an editor.
+  if (unknownId !== null) {
+    return (
+      <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 p-4 pb-24 sm:p-8">
+        <div role="alert" className="rounded-xl border border-border bg-surface p-6">
+          <p className="text-[13px] text-text-primary">{messages.briefNotFound(unknownId)}</p>
+          <div className="mt-4 flex gap-4 text-[13px] font-medium text-brand-primary">
+            <Link href="/grid" className="underline hover:text-text-emphasis">
+              {messages.briefNotFoundGrid}
+            </Link>
+            <Link
+              href="/brief/new"
+              className="underline hover:text-text-emphasis"
+              onClick={(e) => {
+                // A modified or non-primary click is the browser's to handle — new tab, new
+                // window, download. Only a plain activation is ours to route through the guard.
+                if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                // W1 (D66/D67): the door is the create dialog, not a direct
+                // navigation — and the guard asks first. No editor is mounted here
+                // (M3), so the guard is silent and the dialog opens at once.
+                e.preventDefault();
+                guardedAction(openCreateDialog);
+              }}
+            >
+              {messages.briefNotFoundNew}
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // D83/F-A — the listing failed, not the campaign. Same chrome as the not-found
+  // state (`role="alert"`, no sidebar panels — the gates above), but the copy
+  // names the real fact and the way out is the truth: the read failed, so retry
+  // it here. Never "start a new brief" — that remedy invites a duplicate of a
+  // campaign that may be fine. The in-page retry is the way out that works
+  // without leaving the page: window focus re-runs the listing, but never fires
+  // for a user sitting on this screen reading the last answer.
+  if (failedRouteId !== null) {
+    return (
+      <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 p-4 pb-24 sm:p-8">
+        <div role="alert" className="rounded-xl border border-border bg-surface p-6">
+          <p className="text-[13px] text-text-primary">{messages.briefListFailed(failedRouteId)}</p>
+          <div className="mt-4 flex items-center gap-4">
+            <Button variant="secondary" onClick={() => void loadBriefs()}>
+              {messages.briefListFailedRetry}
+            </Button>
+            <Link
+              href="/grid"
+              className="text-[13px] font-medium text-brand-primary underline hover:text-text-emphasis"
+            >
+              {messages.briefNotFoundGrid}
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     // No h-full / inner overflow: like every other view, this one flows and the

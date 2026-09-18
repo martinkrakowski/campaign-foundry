@@ -487,7 +487,7 @@ describe("the stack lives inside CC1/CC2's cost contract (CC3, C3)", () => {
     ).toBeTruthy();
   });
 
-  test("picking a layer redraws the stack and costs the form exactly one commit — the accepted cost, stated", async () => {
+  test("picking a layer redraws the stack and costs the form nothing at all", async () => {
     const user = userEvent.setup();
     await mountEditor();
     const stackBefore = stackRenders.count;
@@ -497,16 +497,24 @@ describe("the stack lives inside CC1/CC2's cost contract (CC3, C3)", () => {
     // The stack must redraw: the row is pressed now.
     expect(stackRenders.count).toBeGreaterThan(stackBefore);
     /**
-     * And the form commits ONCE — not zero, and, since RS2, still not two.
+     * And the form commits ZERO times.
      *
-     * The selection is `BriefEditor`'s own `useState` because CC4's sheet is a
-     * sibling of the step card (D44) and has to read it, so the state cannot
-     * live under the memo boundary the way the playhead's does. That makes a
-     * pick a commit of the editor, exactly like a press on any other control,
-     * and this number is here to say so rather than to hide it: the cost
-     * contract is about the PER-KEYSTROKE path (C3), where the assertions above
-     * hold at zero. A count above one would be a cascade — two commits for one
-     * gesture — and is what this pins.
+     * **This number CHANGED, from one to zero, and it is declared rather than
+     * relaxed.** The selection is `BriefEditor`'s own `useState` because CC4's
+     * sheet is a sibling of the column (D44) and has to read it, so the state
+     * cannot live under a memo boundary the way the playhead's does — a pick is
+     * therefore still a commit of `BriefEditor` itself, exactly as it was. What
+     * changed is what that commit costs: SG4's review remediation memoised
+     * `columnPanels`, and `pickedLayerId` is not one of its inputs, so the record
+     * survives the render, `{columnPanels[columnView]}` hands React the identical
+     * element, and the form's subtree is not reconciled at all. The gesture now
+     * redraws the surface it touched and nothing else.
+     *
+     * Zero rather than one is why this assertion is still exact. It used to read
+     * `toBe(1)` to pin a CASCADE — two commits for one gesture — with the one
+     * commit named as the accepted cost. Zero pins strictly more: it goes red both
+     * for a cascade and for the loss of the memo above it (`sg4.json`'s eighth
+     * mutation is the other half of that guard, in the playhead file).
      *
      * **RS2 nearly made it two, and this is the test that said so.** The rail is
      * published through `EditorPanelsContext`, and `pickedLayerId` is one of the
@@ -514,8 +522,9 @@ describe("the stack lives inside CC1/CC2's cost contract (CC3, C3)", () => {
      * the slots, publishing re-rendered the publisher: gesture → render →
      * effect → `setRail` → context change → render. The setters are a separate
      * context now (`useEditorPanelPublisher`), so the editor subscribes to
-     * nothing it publishes into, and the number is the one it always was.
+     * nothing it publishes into. That fix is what makes zero reachable here; both
+     * commits would have had to bail, and only one of them could.
      */
-    expect(formRenders.count).toBe(1);
+    expect(formRenders.count).toBe(0);
   });
 });
