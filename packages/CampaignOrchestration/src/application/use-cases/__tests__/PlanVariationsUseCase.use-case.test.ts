@@ -10,6 +10,7 @@ import type { VariationPlan } from "../../../domain/value-objects/VariationPlan.
 import { MOTION_KINDS } from "../../../domain/value-objects/MotionKind.vo.js";
 import { hashCopy, VariationPolicy } from "../../../domain/value-objects/VariationPolicy.vo.js";
 import { nodeCryptoPolicyHasher } from "../../../infrastructure/index.js";
+import { EXHAUSTIVE_MAX_SPACE, enumerateAxes } from "../PlanCapacity.js";
 import { PlanVariationsUseCase } from "../PlanVariationsUseCase.use-case.js";
 
 const product = (id: string): Product => ({
@@ -994,5 +995,129 @@ describe("PlanVariationsUseCase headline axis", () => {
     if (!result.success) return;
     expect(headlines).toContain(result.value.variants[1].headline);
     expectDistanceHeld(result.value);
+  });
+});
+
+/**
+ * SG-D7: what `count = axisProductSize` actually means, since the editor clamps the
+ * count slider to that ceiling (`editor-state.ts:734`) and SG-D1 retires `mode` on the
+ * strength of "count at maximum" meaning *every combination*. `executeVariation`
+ * (`GenerateCampaignUseCase.use-case.ts:543`) passes `plan.variants` straight through,
+ * so this is the planner's property.
+ *
+ * The mechanism: `DISTANCE_AXES` names every axis `enumerateAxes` varies, so Hamming 0
+ * means *the same point in the space*. At `minDistance >= 1` no duplicate can ever be
+ * accepted, so `axisProductSize` accepted variants out of a space of `axisProductSize`
+ * is necessarily the whole space exactly once. At `minDistance 0` that argument is gone.
+ */
+describe("PlanVariationsUseCase.plan at count = axisProductSize (SG-D7)", () => {
+  /** The 24-combination default × five palette shifts: 120 points. */
+  const spread = { paletteShift: [0, 0.1, 0.2, 0.3, 0.4] } as const;
+
+  const ceilingBrief = (minDistance: number, count: number): CampaignBrief =>
+    brief({ variation: { count, seed: 7, minDistance, axes: { ...spread } } });
+
+  const policyAt = (minDistance: number): VariationPolicy => {
+    const result = VariationPolicy.fromBrief(
+      ceilingBrief(minDistance, 1),
+      {},
+      nodeCryptoPolicyHasher,
+    );
+    if (!result.success) throw result.error;
+    return result.value;
+  };
+
+  /** The point a variant occupies, over exactly the axes `enumerateAxes` varies. */
+  const point = (axes: Partial<Variant>): string =>
+    JSON.stringify([
+      axes.productId,
+      axes.aspectRatio,
+      axes.layout,
+      axes.tone,
+      axes.backgroundSource,
+      axes.paletteShift,
+      axes.headline,
+      axes.anchor,
+      axes.motion,
+      axes.durationSec,
+    ]);
+
+  test("the ceiling is the enumerable space, not a larger number", () => {
+    const policy = policyAt(1);
+    // 2 products × 3 ratios × 2 layouts × 2 tones × 1 background × 5 palette shifts.
+    expect(policy.axisProductSize).toBe(120);
+    expect(enumerateAxes(policy)).toHaveLength(policy.axisProductSize);
+  });
+
+  test("at the ceiling with minDistance 1 the plan is the whole space, each point exactly once", () => {
+    const policy = policyAt(1);
+    const space = enumerateAxes(policy);
+    const result = planner().plan(ceilingBrief(1, policy.axisProductSize));
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    const { variants } = result.value;
+    expect(variants).toHaveLength(space.length);
+    // Exactly once, in both directions: as many distinct points as variants, and the
+    // set of points drawn is the set of points the space contains. A sample to the
+    // same size would repeat a point and so miss another.
+    const drawn = new Set(variants.map(point));
+    expect(drawn.size).toBe(variants.length);
+    expect(drawn).toEqual(new Set(space.map(point)));
+  });
+
+  test("at the ceiling with minDistance 0 it samples instead: the same point can repeat", () => {
+    // minDistance 0 is operator-reachable — the Advanced stepper's `min={0}` and
+    // `validate.ts`'s `isOptionalIntegerInRange(minDistance, 0, maxDistance)` both
+    // accept it. `meetsMinDistance` then admits Hamming 0, so a draw with replacement
+    // fills every slot and "count at maximum" quietly stops meaning every combination.
+    //
+    // This records what the planner does today, not what it should do. SG-D7 hands the
+    // owner the choice; the fix is a floor of 1 in both `meetsMinDistance` and
+    // `conflicts` (either one alone leaves the other search degenerate), and taking it
+    // inverts this assertion — at which point this test becomes the enumerate case.
+    const policy = policyAt(0);
+    expect(policy.axisProductSize).toBe(120);
+    const result = planner().plan(ceilingBrief(0, policy.axisProductSize));
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    const { variants } = result.value;
+    expect(variants).toHaveLength(policy.axisProductSize);
+    expect(new Set(variants.map(point)).size).toBeLessThan(variants.length);
+  });
+
+  test("above EXHAUSTIVE_MAX_SPACE an operator can still ask for a ceiling that cannot enumerate", () => {
+    // The enumerate-exactly-once guarantee above rests on the exhaustive search at
+    // `PlanVariationsUseCase.use-case.ts:112-116`, which is skipped when the space is
+    // larger than `EXHAUSTIVE_MAX_SPACE`. This brief is ordinary editor input — three
+    // background sources, ten palette shifts, a six-text copy pool — and clears the
+    // limit, and the policy accepts `count` at its ceiling, so `plan` reaches the
+    // shortfall branch rather than enumerating. The branch's outcome above the limit
+    // is already covered by "a space too large to search exhaustively still gets an
+    // honest bound on shortfall" (:780); a run at this ceiling takes ~6s, too slow
+    // to commit, and is recorded in the PR body instead.
+    const axes = {
+      background: { source: ["procedural", "asset-pool", "genai"] },
+      paletteShift: [0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45],
+      headline: "pool://copy",
+    };
+    const input = { headlines: ["a", "b", "c", "d", "e", "f"] };
+    const wide = (count: number): CampaignBrief =>
+      brief({
+        variation: { count, seed: 7, minDistance: 1, axes },
+        output: { formats: ["static"] },
+      });
+    const sized = VariationPolicy.fromBrief(wide(1), input, nodeCryptoPolicyHasher);
+    expect(sized.success).toBe(true);
+    if (!sized.success) return;
+    expect(enumerateAxes(sized.value)).toHaveLength(sized.value.axisProductSize);
+    expect(sized.value.axisProductSize).toBeGreaterThan(EXHAUSTIVE_MAX_SPACE);
+    const atCeiling = VariationPolicy.fromBrief(
+      wide(sized.value.axisProductSize),
+      input,
+      nodeCryptoPolicyHasher,
+    );
+    expect(atCeiling.success).toBe(true);
+    if (!atCeiling.success) return;
+    expect(atCeiling.value.count).toBe(sized.value.axisProductSize);
   });
 });
