@@ -21,7 +21,8 @@ export interface AnchorCliIo {
 
 /**
  * Asks of EVERY manifest, not only the ones a change touched: does each live
- * mutation's before-text still appear exactly once in its file?
+ * mutation's before-text still appear exactly once in its file, and does each
+ * `-t` pattern still select a test?
  *
  * The diff-scoped question is the one `verify-manifests.sh` already asks, and
  * it is the reason 57 anchors across 34 manifests were dead here with a green
@@ -51,11 +52,12 @@ export async function runAnchorCli(io: AnchorCliIo): Promise<number> {
   return anchorExitCode(report);
 }
 
-/* istanbul ignore next -- CLI entry: the real directory listing and the entry guard. runAnchorCli()
-   and every branch it feeds are covered directly in tests. */
+/* istanbul ignore next -- CLI entry: the real directory listing, the real `vitest list` spawn and
+   the entry guard. runAnchorCli() and every branch it feeds are covered directly in tests. */
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const { readdir, readFile } = await import("node:fs/promises");
   const { join } = await import("node:path");
+  const { execFile } = await import("node:child_process");
   runAnchorCli({
     argv: process.argv.slice(2),
     log: (text) => console.log(text),
@@ -65,7 +67,32 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
         .filter((name) => name.endsWith(".json"))
         .sort()
         .map((name) => join(dir, name)),
-    deps: { readText: (path) => readFile(path, "utf8") },
+    deps: {
+      readText: (path) => readFile(path, "utf8"),
+      now: () => performance.now(),
+      // `vitest list` collects without running: it prints one line per selected
+      // test and nothing at all when `-t` selects none. A non-zero exit means
+      // the collection itself failed, and that is reported as a fault rather
+      // than read as "no tests" — a check that cannot look must not pass.
+      listTests: (command) =>
+        new Promise((resolve, reject) => {
+          const [bin, ...rest] = command;
+          execFile(
+            bin as string,
+            rest,
+            { env: { ...process.env, NO_COLOR: "1" }, maxBuffer: 32 * 1024 * 1024 },
+            (error, stdout, stderr) => {
+              if (error !== null) {
+                reject(
+                  new Error(`\`${command.join(" ")}\` failed: ${stderr.trim() || error.message}`),
+                );
+                return;
+              }
+              resolve(stdout.split("\n").filter((line) => line.trim() !== ""));
+            },
+          );
+        }),
+    },
   })
     .then((code) => {
       process.exitCode = code;
