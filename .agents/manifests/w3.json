@@ -12,9 +12,9 @@
     },
     {
       "file": "tools/wave-status/public/index.html",
-      "before": "        for (const state of NEEDS_HUMAN) attention += counts[state] ?? 0;",
-      "after": "        for (const state of LANE_STATE_ORDER) attention += counts[state] ?? 0;",
-      "because": "'How many need me' is the needs-a-human subset, not every lane: sum the full order and the lead number becomes the lane count, so a campaign of 11 where 6 need a human reads 11. The command monitor's headline answer is the one this mutation corrupts, and it is caught by the same fixture the rows are counted on.",
+      "before": "        for (const lane of lanes) {\n          if (laneNeedsHuman(lane, nowMs)) attention += 1;\n        }",
+      "after": "        for (const lane of lanes) {\n          attention += 1;\n        }",
+      "because": "'How many need me' is the needs-a-human subset, not every lane: sum the full order and the lead number becomes the lane count, so a campaign of 11 where 6 need a human reads 11. The command monitor's headline answer is the one this mutation corrupts, and it is caught by the same fixture the rows are counted on. (Re-anchored by ANCHORS: the headline is now summed per lane through `laneNeedsHuman` instead of over a counts map, so counting every lane is that predicate dropped; The semantic edit is the same one; the after-text is that edit re-expressed against the current shape, not a new claim.)",
       "command": ["yarn", "vitest", "run", "tools/wave-status/__tests__/page.test.ts"],
       "verdict": "caught"
     },

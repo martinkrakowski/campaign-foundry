@@ -45,7 +45,8 @@
         "-t",
         "on /brief/new with no editor mounted"
       ],
-      "verdict": "caught"
+      "verdict": "caught",
+      "retired": "Retired by ANCHORS: `EditorRailSlot` is deleted code. SG2 (#482) moved the shell onto `react-resizable-panels`, so the rail is a `<Panel>` gated on `showRailColumn` inside the `<PanelGroup>` and the component this mutation rewrites no longer exists anywhere in the tree. Its after-text names a component and a JSX shape that are gone; re-expressing it against the panel gate would be authoring a new mutation against code RS never saw, not re-anchoring this one."
     },
     {
       "file": "apps/web/src/app/(shell)/layout.tsx",
@@ -60,7 +61,8 @@
         "-t",
         "it is a sibling of <main> and of the left sidebar"
       ],
-      "verdict": "caught"
+      "verdict": "caught",
+      "retired": "Retired by ANCHORS: same deletion. The `<main>`/`<EditorRailSlot>` sibling pair this mutation re-nests was replaced by two sibling `<Panel>`s under a `<PanelGroup>` (SG2, #482); `<main>` is now a `tagName` on a panel and there is no `<EditorRailSlot />` to move inside it. The structural claim — the rail is a sibling of main, never a child — survives as a test; this mutation's text cannot be pointed at the new shape without inventing the edit."
     },
     {
       "file": "apps/web/src/lib/preview-frame.ts",
@@ -79,9 +81,9 @@
     },
     {
       "file": "apps/web/src/components/campaign/BriefEditor.tsx",
-      "before": "                brief={isRailWideEnough ? previewBrief : undefined}",
+      "before": "brief={isRailWideEnough ? previewBrief : undefined}",
       "after": "                brief={previewBrief}",
-      "because": "CC2's C3, which RS-D4 would have deleted along with the container query: the gate that hides the rail (`hidden lg:flex`) does not unmount it, so without a JS mirror of that breakpoint a rail nobody can see keeps asking the route for frames. The container mirror retired with the container query; the mirror's JOB survived the move, and this mutation is what says so.",
+      "because": "CC2's C3, which RS-D4 would have deleted along with the container query: the gate that hides the rail (`hidden lg:flex`) does not unmount it, so without a JS mirror of that breakpoint a rail nobody can see keeps asking the route for frames. The container mirror retired with the container query; the mirror's JOB survived the move, and this mutation is what says so. (Re-anchored by ANCHORS: the recorded text was reformatted or moved, not changed — the mutation, its claim and its command are untouched.)",
       "command": [
         "yarn",
         "vitest",
@@ -135,7 +137,8 @@
         "-t",
         "the rail's YAML view still reads the LIVE draft"
       ],
-      "verdict": "caught"
+      "verdict": "caught",
+      "retired": "Retired by ANCHORS: the rail has had no YAML view since SG4. The rail is preview-only — its segmented switcher and the YAML `<pre>` it revealed were both removed, and BriefEditor.tsx says so where this comment used to be. The mutation deletes `draftBrief` from a dependency list to make a YAML view one keystroke stale; with no such view its subject is gone, not moved. SG4's remediation flagged this as a schema decision rather than re-authoring another lane's verdict, and this is that decision."
     },
     {
       "file": "apps/web/src/components/campaign/BriefEditor.tsx",

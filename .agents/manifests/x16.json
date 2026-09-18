@@ -22,9 +22,9 @@
     },
     {
       "file": "apps/web/src/components/campaign/editor-state.ts",
-      "before": "  const dropElements =\n    Array.isArray(layer.elements) && layer.elements.length === 0;",
+      "before": "const dropElements = Array.isArray(layer.elements) && layer.elements.length === 0;",
       "after": "  const dropElements = false;",
-      "because": "An empty elements list is the absent key (HL5a). If the canonicaliser stops mapping elements: [] to absent, a loaded empty list survives in the snapshot, add-then-remove deletes the key, and a brief the user returned to its loaded state still reads dirty.",
+      "because": "An empty elements list is the absent key (HL5a). If the canonicaliser stops mapping elements: [] to absent, a loaded empty list survives in the snapshot, add-then-remove deletes the key, and a brief the user returned to its loaded state still reads dirty. (Re-anchored by ANCHORS: the recorded text was reformatted or moved, not changed — the mutation, its claim and its command are untouched.)",
       "command": [
         "yarn",
         "vitest",
@@ -40,9 +40,9 @@
     },
     {
       "file": "apps/web/src/components/campaign/editor-state.ts",
-      "before": "  if (!isBriefTemplate(brief.template)) return brief;\n  const template = canonicalTemplate(brief.template);",
+      "before": "  if (!isBriefTemplate(brief.template)) return canonicalNullScalars(brief);\n  const template = canonicalTemplate(brief.template);",
       "after": "  const template = canonicalTemplate(brief.template);",
-      "because": "canonicalBrief is the one guard: a template that fails isBriefTemplate must be returned unchanged, so discard (and every other fromBrief caller) cannot throw on a stored null / non-array / null-entry snapshot. Removing the check reopens the throw.",
+      "because": "canonicalBrief is the one guard: a template that fails isBriefTemplate must be returned unchanged, so discard (and every other fromBrief caller) cannot throw on a stored null / non-array / null-entry snapshot. Removing the check reopens the throw. (Re-anchored by ANCHORS: X17 changed the guard's early return from `brief` to `canonicalNullScalars(brief)`; The semantic edit is the same one; the after-text is that edit re-expressed against the current shape, not a new claim.)",
       "command": [
         "yarn",
         "vitest",

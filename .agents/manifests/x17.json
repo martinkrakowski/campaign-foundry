@@ -40,9 +40,9 @@
     },
     {
       "file": "apps/web/src/components/campaign/editor-state.ts",
-      "before": "const REQUIRED_BRIEF_STRINGS = [\n  \"targetRegion\",\n  \"targetAudience\",\n  \"campaignMessage\",\n] as const;",
-      "after": "const REQUIRED_BRIEF_STRINGS = [\n  \"targetRegion\",\n  \"campaignMessage\",\n] as const;",
-      "because": "canonicalBrief must map a null targetAudience to \"\" so the snapshot matches toBrief. Leaving the raw null in the snapshot makes a freshly opened file read dirty only because null became \"\".",
+      "before": "const REQUIRED_BRIEF_STRINGS = [\"targetRegion\", \"targetAudience\", \"campaignMessage\"] as const;",
+      "after": "const REQUIRED_BRIEF_STRINGS = [\"targetRegion\", \"campaignMessage\"] as const;",
+      "because": "canonicalBrief must map a null targetAudience to \"\" so the snapshot matches toBrief. Leaving the raw null in the snapshot makes a freshly opened file read dirty only because null became \"\". (Re-anchored by ANCHORS: the recorded text was reformatted or moved, not changed — the after-text is re-wrapped the same way, and the edit it encodes, the claim and the command are untouched.)",
       "command": [
         "yarn",
         "vitest",

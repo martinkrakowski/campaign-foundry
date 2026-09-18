@@ -19,9 +19,9 @@
     },
     {
       "file": "tools/wave-status/server.ts",
-      "before": "    for (const watcher of watchers) watcher.close();\n    server.close();",
+      "before": "    shutdown();\n    server.close();",
       "after": "    server.close();",
-      "because": "When port binding fails after watchers are opened during startup, startServer must close them in cleanup. If watchers are not closed, resources leak and the cleanup test catches it.",
+      "because": "When port binding fails after watchers are opened during startup, startServer must close them in cleanup. If watchers are not closed, resources leak and the cleanup test catches it. (Re-anchored by ANCHORS: the watcher loop became the named `shutdown()`; The semantic edit is the same one; the after-text is that edit re-expressed against the current shape, not a new claim.)",
       "command": [
         "yarn",
         "vitest",

@@ -49,9 +49,9 @@
     },
     {
       "file": "packages/CampaignOrchestration/src/domain/value-objects/brief-template.ts",
-      "before": "  shade: [\"alpha\"],",
-      "after": "  shade: [\"alpha\", \"alt\"],",
-      "because": "X2 adds alt where a layer can mean it, not everywhere: a shade is decoration with nothing to describe. Give shade the key and the vocabulary stops saying anything about which kinds carry an image — the drift D134's per-kind table exists to prevent.",
+      "before": "  shade: [],",
+      "after": "  shade: [\"alt\"],",
+      "because": "X2 adds alt where a layer can mean it, not everywhere: a shade is decoration with nothing to describe. Give shade the key and the vocabulary stops saying anything about which kinds carry an image — the drift D134's per-kind table exists to prevent. (Re-anchored by ANCHORS: C4b (#427) withdrew `alpha` from shade's props, so giving shade a key it must not carry is now adding `alt` to an empty list; The semantic edit is the same one; the after-text is that edit re-expressed against the current shape, not a new claim.)",
       "command": [
         "yarn",
         "vitest",

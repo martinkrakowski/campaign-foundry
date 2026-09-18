@@ -4,9 +4,9 @@
   "mutations": [
     {
       "file": "apps/web/src/components/campaign/sections/OutputSection.tsx",
-      "before": "            onChange={(e) => dispatch({ type: \"patch\", patch: { clickDestination: e.target.value } })}",
+      "before": "            onChange={(e) =>\n              dispatch({ type: \"patch\", patch: { clickDestination: e.target.value } })\n            }",
       "after": "            onChange={() => {}}",
-      "because": "The destination input must dispatch a patch carrying what the operator typed, or the serialised brief never carries the click destination (HL-D3).",
+      "because": "The destination input must dispatch a patch carrying what the operator typed, or the serialised brief never carries the click destination (HL-D3). (Re-anchored by ANCHORS: the recorded text was reformatted or moved, not changed — the after-text is re-wrapped the same way, and the edit it encodes, the claim and the command are untouched.)",
       "command": [
         "yarn",
         "vitest",

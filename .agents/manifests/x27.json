@@ -21,9 +21,9 @@
     },
     {
       "file": "tools/arch-inventory/lib/inventory.ts",
-      "before": "  const stale = declared.filter((entry) => !present.has(fileForEntry(entry, template, manifest.scope))).sort();",
+      "before": "  const stale = declared\n    .filter((entry) => !present.has(fileForEntry(entry, template, manifest.scope)))\n    .sort();",
       "after": "  const stale = declared.filter(() => false).sort();",
-      "because": "Treat a stale entry as fine: a declared module whose file was deleted or renamed keeps a green gate and a manifest that lies about the code, so the stale-entry test must die.",
+      "because": "Treat a stale entry as fine: a declared module whose file was deleted or renamed keeps a green gate and a manifest that lies about the code, so the stale-entry test must die. (Re-anchored by ANCHORS: the recorded text was reformatted or moved, not changed — the mutation, its claim and its command are untouched.)",
       "command": [
         "yarn",
         "vitest",
