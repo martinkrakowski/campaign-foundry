@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "lane": "SG6'",
+  "mutations": [
+    {
+      "file": "apps/web/src/components/campaign/TimelineSection.tsx",
+      "before": "  const dropped = beats.length > 0 && !canSerializeTimeline(state);",
+      "after": "  const dropped = beats.length > 0;",
+      "because": "Red fault 2, and the edit a reader would actually make. The panel only ever renders in Randomized (CopySection gates it on the mode), so `!canSerializeTimeline(state)` looks like a condition that has already been checked upstream — and with it gone the notice is still WORDED correctly, because the ternary below still names Video or the headline pool from the live state. Every positive assertion in this lane survives: both route tests still find their sentence, the empty-sequence test still finds silence (the count conjunct is untouched), and the authoring test still saves a brief with no `copy`. What is destroyed is the only thing that makes it a notice rather than a caption: on the draft this suite opens — Video on, pool off, two beats that DO reach the file — the line now says the sequence is not saved while it is being saved every time. A panel that always says the work is being lost is a panel an operator learns to stop reading, which is the state this lane started from with the sentence added. Caught by the first test's opening assertion, which is the false-positive half made in the same moment as the save that proves the beats DID reach the document — `notice()` null, then a PUT whose `copy.timeline.beats` are the two authored texts.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.timeline-drop.test.tsx",
+        "-t",
+        "turning Video off names Output, and the brief that saves has no sequence"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/TimelineSection.tsx",
+      "before": "  const dropped = beats.length > 0 && !canSerializeTimeline(state);",
+      "after": "  const dropped = !canSerializeTimeline(state);",
+      "because": "The other conjunct, dropped as a redundancy — and it reads like one, because `toBrief` checks the beat count itself and this line is not the projection. It costs nothing that any route test can see: with beats authored the two expressions agree exactly, so both §3.1 and §3.2 stay green, the save assertions are untouched, and the sentence is still the right one whenever there is anything to lose. What it breaks is the state an operator is in MOST of the time — a still-only Randomized draft with an empty sequence, where the panel would now announce that a sequence that does not exist will not be saved. That is the worst possible place for this notice to be wrong: it is the first thing a new draft shows, it is unactionable (there is nothing to keep), and it trains the reader to ignore the line before they ever author a beat. Caught by the empty-sequence test, which turns Video off on a draft carrying no `copy` at all and asserts the panel is silent WHILE still offering a first beat — so it cannot pass by the panel having disappeared.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.timeline-drop.test.tsx",
+        "-t",
+        "an empty sequence in a still-only draft says nothing"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/TimelineSection.tsx",
+      "before": "          {state.formats.includes(\"motion\")\n            ? messages.timelineDroppedHeadlinePool\n            : messages.timelineDroppedNoVideo}",
+      "after": "          {state.variation.headline\n            ? messages.timelineDroppedHeadlinePool\n            : messages.timelineDroppedNoVideo}",
+      "because": "The cause named by the condition that is TRUE rather than by the condition that is unmet — and this is the version a reviewer would ask for, because `state.variation.headline` is the thing the second sentence is about and reading `formats.includes(\"motion\")` to decide whether to talk about the pool is genuinely odd on first sight. It is right on every single-cause route, which is every route this lane reproduces separately: §3.1 (Video off, pool off) still reads \"turn Video on in Output\", §3.2 (Video on, pool on) still reads \"turn the pool off in Variation Policy\". The two differ only where BOTH conditions are unmet — Video off with the pool on, which is reachable and is precisely the state where the advice matters most: the mutant sends the operator to Variation Policy, they switch the pool off, and the sequence STILL does not save, because Video was the other reason and nothing ever said so. The shipped order is the one that is monotone: it names Video first, and when Video is back on it names the pool, so following the sentence always ends with the beats in the file. Caught by the both-unmet test, which is written as the operator's walk — pool on with Video already off, then each remedy taken in turn — and asserts the ABSENT sentence at every step, which is the half a test of the shown string alone would miss.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.timeline-drop.test.tsx",
+        "-t",
+        "with both conditions unmet the panel names Video first, then the pool, then nothing"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/TimelineSection.tsx",
+      "before": "        <p role=\"status\" className=\"text-[11px] text-text-muted\">",
+      "after": "        <p className=\"text-[11px] text-text-muted\">",
+      "because": "The role deleted as decoration. Nothing visible changes — the sentence is in the same place, in the same muted type, and every `getByText` in this file still finds it — so the diff reads as removing an attribute that a paragraph does not need. What it removes is the half of the design that is not visual: the line appears in response to a control the operator pressed somewhere ELSE (a card in Output, a switch in the sidebar's Variation Policy), which is exactly the case a live region exists for. Without it a screen-reader user presses the switch, hears nothing, and the beats are silently dropped for them in the literal sense — the defect this lane was opened to fix, surviving for the users least able to notice it by eye. It is also the attribute `ModePanel.tsx:243` chose for the identical situation, so the mutant quietly breaks the precedent the lane was told to follow. Caught by the §3.1 test's assertion on the found element's own `role`, made in the same breath as the save that proves the drop is real.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.timeline-drop.test.tsx",
+        "-t",
+        "turning Video off names Output, and the brief that saves has no sequence"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

@@ -1094,6 +1094,25 @@ export const worldMapRegionHint = "The region shapes the generated backgrounds a
 export const modeDroppedVideo =
   "Switching to Classic turned Video off — switch back to Randomized to turn it on again.";
 
+/* ── SG6′ — the copy sequence the projection will not write (H1) ──────────── */
+
+/**
+ * Said in a `role="status"` line inside the copy-sequence panel while the draft
+ * holds beats `toBrief` will not write. Two of `canSerializeTimeline`'s three
+ * conditions are reachable with the panel on screen, and they are cleared by two
+ * different controls in two different sections — so the notice names the one
+ * that is actually unmet rather than offering both remedies and making the
+ * operator work out which is theirs. Muted and a status, never an error: the
+ * beats are still in the draft, the draft is still valid, and Save still takes
+ * it — what was missing was anyone saying the beats would not be in the file.
+ */
+export const timelineDroppedNoVideo =
+  "This sequence is not saved while Video is off — turn Video on in Output to save it.";
+
+/** The second condition: the headline pool, switched on in Variation Policy. */
+export const timelineDroppedHeadlinePool =
+  "This sequence is not saved while the headline pool is on — turn the pool off in Variation Policy to save it.";
+
 // T3 — the two-field create
 
 /**

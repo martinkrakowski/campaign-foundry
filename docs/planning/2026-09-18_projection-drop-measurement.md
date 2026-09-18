@@ -334,13 +334,14 @@ it stays. **Do not build a second notice for a control that a stamped decision d
 the mapping-that-detects-nothing failure in a different costume. **M2 is the action item**, not a
 notice.
 
-```premise SG6
-# H1: no component in the tree reads the projection's timeline gate, so no control
-# can tell the operator their authored beats will not be saved. This flips the
-# moment SG6' wires `canSerializeTimeline` into TimelineSection.tsx.
-# Greps source, not a build — measured ~40 ms, well inside the 10s budget.
-! grep -rqn 'canSerializeTimeline' apps/web/src --include='*.tsx' --exclude-dir=__tests__
-```
+**`premise SG6` retired — SG6′ shipped in this PR.** The fence grepped for the absence of
+`canSerializeTimeline` from every `.tsx` in the tree, and §8 named the day it would fail: *"the day
+a component reads `canSerializeTimeline`, which is the day SG6′ ships."* `TimelineSection.tsx` now
+imports it and gates a `role="status"` line on `beats.length > 0 && !canSerializeTimeline(state)`,
+so the probe is false by construction and the fence is retired in the same commit that closed it —
+the repo's rule, and the one W4 was late on. What replaces it is not another grep but the lane's
+own tests: the notice's presence is asserted in the same moment as the saved brief's missing
+`copy`, so it cannot drift from the projection it reports.
 
 ---
 
