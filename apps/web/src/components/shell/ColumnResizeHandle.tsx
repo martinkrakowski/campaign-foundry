@@ -2,12 +2,15 @@
 
 import { type ReactNode } from "react";
 import { PanelResizeHandle } from "react-resizable-panels";
+import { previewColumnResize } from "@/components/campaign/messages";
 
 /**
- * The separator's accessible name, exported so a test names it by derivation
- * rather than by restating the string.
+ * The separator's accessible name, bound to the one place operator-facing copy
+ * lives (D2) and re-exported so a test names the control by derivation rather
+ * than by restating the string. An alias, never a second copy of the words: the
+ * catalogue is what `messages.test.ts` scans.
  */
-export const COLUMN_RESIZE_LABEL = "Resize the preview column";
+export const COLUMN_RESIZE_LABEL = previewColumnResize;
 
 /**
  * The drag handle between the shell row's middle column and its right-hand rail
@@ -46,6 +49,16 @@ export const COLUMN_RESIZE_LABEL = "Resize the preview column";
  * and `aria-hidden` is unnecessary because `display: none` is already out of the
  * accessibility tree.
  *
+ * **`aria-orientation` is ours, not the library's.** `PanelResizeHandle` sets
+ * `role="separator"` and keeps `aria-controls`/`aria-valuemin`/`aria-valuenow`
+ * current, but it never writes an orientation — there is no `aria-orientation`
+ * anywhere in the package. `role="separator"` DEFAULTS to `horizontal`, and this
+ * separator divides two side-by-side columns and moves on Left/Right, so the
+ * default is the wrong axis: left alone the control reports the opposite of how
+ * it behaves. Spelled out here rather than derived from the group's
+ * `direction="horizontal"`, which names the axis the panels are laid out along
+ * — the perpendicular of the divider's own.
+ *
  * The grip is a child rather than a border on the handle itself, so the hit area
  * is the full 16px of the row's gap while the visible line stays 4px — the
  * wireframe's proportion. Styling is this repo's tokens (DESIGN.md §4.8's
@@ -55,6 +68,7 @@ export function ColumnResizeHandle({ enabled }: { enabled: boolean }): ReactNode
   return (
     <PanelResizeHandle
       aria-label={COLUMN_RESIZE_LABEL}
+      aria-orientation="vertical"
       disabled={!enabled}
       tabIndex={enabled ? 0 : -1}
       className="group hidden w-4 shrink-0 cursor-col-resize items-center justify-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background lg:flex"

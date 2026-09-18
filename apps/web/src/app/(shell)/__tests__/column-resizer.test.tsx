@@ -123,6 +123,12 @@ describe("red fault 1 — a keyboard user resizes the column", () => {
     // dragging something that never says where it is.
     expect(separator.getAttribute("aria-controls")).toBe(mainColumn().id);
     expect(Number(separator.getAttribute("aria-valuenow"))).toBe(65);
+    // And the axis it divides. The library writes no `aria-orientation` at all
+    // (there is none in the package), and `role="separator"` defaults to
+    // `horizontal` — so without this the control reports the opposite of the way
+    // it moves. Read off the element, which also proves the attribute survives
+    // the library's own prop spread.
+    expect(separator.getAttribute("aria-orientation")).toBe("vertical");
     expect(sizeOf(mainColumn())).toBe(65);
     expect(sizeOf(railColumn())).toBe(35);
 
@@ -202,13 +208,20 @@ describe("red fault 3 — below the breakpoint the handle is not a surface at al
       ]),
     );
 
-    /** A fresh element per read: happy-dom caches a computed style per element. */
+    /**
+     * A fresh element per read: happy-dom caches a computed style per element,
+     * so reusing one would answer the first viewport for every later width.
+     * Read while it is still attached — a detached element resolves no rules —
+     * then taken out again, so the reads do not pile up in the body.
+     */
     const displayAt = (width: number, className: string) => {
       setViewport(width);
       const probe = document.createElement("div");
       probe.className = className;
       document.body.appendChild(probe);
-      return window.getComputedStyle(probe).display;
+      const display = window.getComputedStyle(probe).display;
+      probe.remove();
+      return display;
     };
 
     expect(displayAt(RAIL_VIEWPORT_MIN_PX, separator.className)).toBe("flex");

@@ -615,6 +615,15 @@ export const previewRailPreviewView = "Show the preview";
 /** The code segment: the brief as the pipeline reads it. */
 export const previewRailYamlView = "Show the YAML view";
 
+// --- The column resizer (SG2) ---
+
+/**
+ * The separator between the shell row's middle column and the preview rail. It
+ * names the ACTION and the column it moves, because that is all a keyboard user
+ * has: the control is a 4px line with no visible label of its own.
+ */
+export const previewColumnResize = "Resize the preview column";
+
 // --- Theme (W3) ---
 
 /**
