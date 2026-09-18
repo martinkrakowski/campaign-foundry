@@ -122,13 +122,14 @@ Pushing the rail's children through `setPanels` means **rendered elements cross 
 
 ## 9. Premises
 
-```premise RS1
-# The aside chrome is still inline in Sidebar.tsx, not a shared component.
-# Probes the CLASS STRING, not the word "aside": the file will always contain
-# `</aside>` after extraction if the shell component lives here too, which a
-# tag-based fence would read as "not done". Measured: ~5 ms.
-grep -q 'hidden h-full w-\[320px\] shrink-0 flex-col overflow-hidden rounded-xl' apps/web/src/components/shell/Sidebar.tsx
-```
+**`premise RS1` retired: RS1 shipped.** The chrome is `SidebarShell`
+(`apps/web/src/components/shell/SidebarShell.tsx`), worn by `Sidebar` and — the
+point of the extraction — by the right-hand column, so the class string the fence
+probed is no longer in `Sidebar.tsx` and the fence would report the lane stale
+rather than live. The property it guarded is now a test, not a grep: the left
+sidebar's rendered `<aside>` carries exactly that class and no other attribute
+(`SidebarShell.test.tsx`), asserted as a literal so it cannot drift with the
+component it checks.
 
 ```premise RS2
 # The rail is still container-gated inside the editor. Flips when it moves to the

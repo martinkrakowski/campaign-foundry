@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { Accordion } from "./Accordion";
+import { SidebarShell } from "./SidebarShell";
 import { useEditorPanels, usePanelSink } from "@/lib/editor-panels-context";
 import { useRun } from "@/lib/run-context";
 import { useCreateCampaign } from "@/lib/create-campaign-context";
@@ -13,13 +14,18 @@ import { AssetPickerDrawer } from "@/components/campaign/AssetPickerDrawer";
 /**
  * Floating left panel: the campaign brief (read-only) and the project asset bin.
  * Hidden below `lg` — on smaller screens its contents surface in the mobile menu.
+ *
+ * RS1 — the `<aside>` chrome moved to `SidebarShell` and is worn, not written
+ * here. The rendered markup is unchanged (`SidebarShell.test.tsx` pins the class
+ * string and the attribute list); what changes is that the right-hand column can
+ * now wear the same container instead of a second, drifting definition of it.
  */
 export function Sidebar() {
   return (
-    <aside className="relative z-10 hidden h-full w-[320px] shrink-0 flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-2xl lg:flex">
+    <SidebarShell>
       <SidebarContent />
       <BrowseBriefsButton />
-    </aside>
+    </SidebarShell>
   );
 }
 
