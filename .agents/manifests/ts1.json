@@ -109,8 +109,8 @@
     },
     {
       "file": "apps/web/src/components/campaign/BriefEditor.tsx",
-      "before": "                {railProps.motion !== undefined ? (",
-      "after": "                {railProps.motion === undefined || railProps.motion !== undefined ? (",
+      "before": "            {railProps.motion !== undefined ? (",
+      "after": "            {railProps.motion === undefined || railProps.motion !== undefined ? (",
       "because": "The plan's §4 acceptance (e), second half: a brief without motion must not mount the tape. A still creative has no seconds to draw, and a tape over one invites a scrub that means nothing and a playhead that addresses a frame index the encoder never produces. The mutation is written as a tautology rather than as a deleted guard so that ONLY the still-brief path moves -- every motion test stays green, which is the point: this is caught by a test that asserts an ABSENCE on a draft that has no motion, and by nothing else in the suite.",
       "command": [
         "yarn",

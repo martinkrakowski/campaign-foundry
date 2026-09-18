@@ -11,7 +11,6 @@ import { templateFromCanonical } from "@campaignfoundry/CampaignOrchestration/br
 import { DEFAULT_CAMPAIGN_TYPE } from "@campaignfoundry/CampaignOrchestration/campaign-types";
 import * as messages from "@/components/campaign/messages";
 import { BriefEditor } from "@/components/campaign/BriefEditor";
-import { sectionOrder } from "@/components/campaign/sections";
 import type { LayerStackProps } from "@/components/campaign/LayerStack";
 
 /**
@@ -49,7 +48,17 @@ vi.mock("@/components/campaign/LayerStack", async (importOriginal) => {
   return { ...actual, LayerStack: Counting };
 });
 
-/** Renders of the editor's form sections, so "the form woke up" is a number too. */
+/**
+ * Commits of the editor's form, so "the form woke up" is a number too.
+ *
+ * SG1 — this counts ONE section (`IdentitySection`), deliberately. It used to
+ * count every section, which was the same thing while `guided` mounted exactly
+ * one of them at a time: one commit, one render. The column mounts all of them,
+ * so the aggregate would be "one commit" × "however many sections this mode
+ * renders" and the exact-count assertion below would read 6 or 7 and mean 1.
+ * Counting a single always-mounted section keeps the number a COMMIT count,
+ * which is what the cost contract is about.
+ */
 const formRenders = vi.hoisted(() => ({ count: 0 }));
 
 vi.mock("@/components/campaign/sections", async (importOriginal) => {
@@ -62,13 +71,6 @@ vi.mock("@/components/campaign/sections", async (importOriginal) => {
   return {
     ...actual,
     IdentitySection: counted(actual.IdentitySection),
-    CopySection: counted(actual.CopySection),
-    ProductsSection: counted(actual.ProductsSection),
-    TreatmentsSection: counted(actual.TreatmentsSection),
-    TemplateSection: counted(actual.TemplateSection),
-    LayoutSection: counted(actual.LayoutSection),
-    OutputSection: counted(actual.OutputSection),
-    PolicySection: counted(actual.PolicySection),
   };
 });
 
@@ -190,56 +192,36 @@ const pick = (id: string, name: string) =>
 beforeEach(() => {
   localStorage.clear();
   localStorage.setItem("cf:brief-picked", "1");
-  localStorage.setItem("cf:presentation", "guided");
   stackRenders.count = 0;
   formRenders.count = 0;
 });
 
 describe("the layer stack exists exactly once in the tree (CC3, plan §4.6)", () => {
-  test("it is mounted in the rail, and the Template step points at it instead of holding one", async () => {
-    const user = userEvent.setup();
+  /**
+   * SG1 — this test used to WALK to the Template step first, because the step
+   * card was the one place a second stack could be mounted at all. The column
+   * mounts every section at once, so the count is taken over the whole editor
+   * with no navigation: a section that still rendered a stack of its own shows
+   * up here immediately. (The two tests this replaces were the guided walk and
+   * its Everything twin; they asserted the same count twice.)
+   */
+  test("it is mounted in the rail, and the Template section points at it instead of holding one", async () => {
     await mountEditor();
 
-    // Walk to the step that used to own the stack — the one place a second copy
-    // would be, and the only step on which a leftover in `renderStepCard` is
-    // mounted at all.
-    const steps = [...sectionOrder("brief"), "review"];
-    await user.click(
-      within(screen.getByRole("navigation", { name: messages.segBarLabel })).getAllByRole("button")[
-        steps.indexOf("template")
-      ],
-    );
-    await waitFor(() =>
-      expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Template"),
-    );
+    // The Template section is on screen from the start now.
+    expect(document.getElementById("template")).toBeTruthy();
 
     // One stack, by the structural count and by the marker.
     expect(mountedStackCount()).toBe(1);
     expect(markedStackCount()).toBe(1);
-    // And it is in the rail, not in the walk's card (D44 — the card renders two
-    // live copies during a step change and its transform traps overlays).
+    // And it is in the rail, not in the column (D44).
     const group = screen.getByRole("group", { name: messages.templateAddLabel });
     expect(rail().contains(group)).toBe(true);
-    expect(screen.getByTestId("step-card").contains(group)).toBe(false);
-    // The step still says where its controls went: a step gone quiet reads as a
-    // failure, and the html element editor is still the step's to host until
-    // CC4's sheet takes it.
+    expect((document.getElementById("template") as HTMLElement).contains(group)).toBe(false);
+    // The section still says where its controls went: a section gone quiet reads
+    // as a failure, and the html element editor is still the section's to host
+    // until CC4's sheet takes it.
     expect(screen.getByText(messages.templateStackInRail)).toBeTruthy();
-  });
-
-  test("one stack in Everything too, where every section is mounted at once", async () => {
-    const user = userEvent.setup();
-    await mountEditor();
-    await user.click(screen.getByRole("button", { name: messages.presentationEverything }));
-    await waitFor(() => expect(document.getElementById("template")).toBeTruthy());
-
-    // Everything mounts the Template section and the rail simultaneously, so a
-    // section that still rendered a stack shows up here without any walking.
-    expect(mountedStackCount()).toBe(1);
-    expect(markedStackCount()).toBe(1);
-    expect(rail().contains(screen.getByRole("group", { name: messages.templateAddLabel }))).toBe(
-      true,
-    );
   });
 
   test("the stack is there while the YAML view is up, and while the preview has nothing to draw", async () => {
@@ -256,15 +238,6 @@ describe("the layer stack exists exactly once in the tree (CC3, plan §4.6)", ()
     // And with no product id there is no creative to compose (D142) — but the
     // template is real either way. A stack that disappeared here would be a
     // failure presented as an empty result.
-    const steps = [...sectionOrder("brief"), "review"];
-    await user.click(
-      within(screen.getByRole("navigation", { name: messages.segBarLabel })).getAllByRole("button")[
-        steps.indexOf("products")
-      ],
-    );
-    await waitFor(() =>
-      expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Products"),
-    );
     await user.click(screen.getAllByRole("button", { name: messages.productRemove })[0]);
     await waitFor(() =>
       expect(within(rail()).getByText(messages.previewNeedsProductId)).toBeTruthy(),

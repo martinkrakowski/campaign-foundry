@@ -58,8 +58,6 @@ const showcase = {
   primaryColor: "#1473E6",
   layout: "headline-bottom" as const,
   tone: "bold" as const,
-  step: 2,
-  stepCount: 6,
 };
 
 describe("derivePreviewRatio", () => {
@@ -200,11 +198,10 @@ describe("PreviewDock", () => {
     );
   });
 
-  test("shows the campaign name, headline and step readout", () => {
+  test("shows the campaign name and the headline", () => {
     const { container } = render(<Dock {...showcase} platformId="linkedin" />);
     expect(container.textContent).toContain("Summer Launch");
     expect(container.textContent).toContain("Stay wild. Stay hydrated.");
-    expect(container.textContent).toContain(messages.previewStep(2, 6));
   });
 
   test("the legend renders through Eyebrow as a p on the token", () => {
@@ -215,41 +212,20 @@ describe("PreviewDock", () => {
     expect(legend.className).not.toContain("tracking-widest");
   });
 
-  test("a headline-less brief shows name and step only", () => {
+  test("a headline-less brief shows the name alone", () => {
     const { container } = render(<Dock {...showcase} headline={undefined} />);
     expect(container.textContent).toContain("Summer Launch");
     expect(container.textContent).not.toContain("Stay wild");
   });
-
-  /**
-   * D141 — Everything (and any future presentation with no step concept) has
-   * no cursor to show. The caller omits `step`/`stepCount` rather than
-   * passing a stale position, and the readout must disappear, never render
-   * `previewStep(undefined, undefined)`.
-   */
-  test("omits the step readout when the caller has no cursor to give it (D141)", () => {
-    const { container } = render(<Dock {...showcase} step={undefined} stepCount={undefined} />);
-    expect(container.textContent).toContain("Summer Launch");
-    expect(container.textContent).toContain("Stay wild. Stay hydrated.");
-    expect(container.textContent).not.toContain(" / ");
-  });
 });
 
 describe("PreviewRailEmptyState (D142)", () => {
-  test("names the missing product id, shows the campaign name and (when given) the step readout", () => {
-    const { container } = render(
-      <PreviewRailEmptyState campaignName="Summer Launch" step={2} stepCount={6} />,
-    );
+  test("names the missing product id and shows the campaign name", () => {
+    const { container } = render(<PreviewRailEmptyState campaignName="Summer Launch" />);
     expect(container.textContent).toContain(messages.previewNeedsProductId);
     expect(container.textContent).toContain("Summer Launch");
-    expect(container.textContent).toContain(messages.previewStep(2, 6));
     // D142/D26: never invents a creative — no composed-frame marker at all.
     expect(container.querySelector('[data-testid="preview-frame"]')).toBeNull();
-  });
-
-  test("omits the step readout when no cursor is given (Everything, D141)", () => {
-    const { container } = render(<PreviewRailEmptyState campaignName="Summer Launch" />);
-    expect(container.textContent).not.toContain(" / ");
   });
 });
 

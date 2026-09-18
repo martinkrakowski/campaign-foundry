@@ -152,29 +152,44 @@ describe("W6.7 error bucket ↔ section totality", () => {
     }
   });
 
-  // W6.7's stated criterion, in both directions: adding a section with no step, or a
-  // step that is neither a section nor the declared `review`, must fail here.
+  /**
+   * W6.7's criterion, restated for the one column (SG1).
+   *
+   * It used to read "every section has a step, and every step but `review` is a
+   * section", which was the vocabulary the wizard imposed: a step list of
+   * `[...sectionOrder(mode), "review"]`. There are no steps and no `review`, so
+   * the drift this guards against is now between the ORDER a mode renders and
+   * the TITLES every surface reads — and it still runs in both directions: a
+   * section added to an order without a title, or a title with no place in
+   * either order, fails here.
+   */
   test.each(["brief", "variation"] as const)(
-    "%s: every section has a step, and every step but review is a section",
+    "%s: every section in the order has a title, and no order invents an id",
     (mode) => {
       const sections = sectionOrder(mode);
-      const steps = [...sections, "review"];
-
-      for (const section of sections) expect(steps).toContain(section);
-      for (const step of steps) {
-        if (step === "review") continue;
-        expect(sections).toContain(step as SectionId);
-        expect(SECTION_TITLES).toHaveProperty(step);
+      // No duplicates: an id twice in one order would render one section twice.
+      expect(sections).toHaveLength(new Set(sections).size);
+      for (const section of sections) {
+        expect(SECTION_TITLES).toHaveProperty(section);
+        expect(SECTION_BY_ERROR_KEY[section]).toBe(section);
       }
-      expect(steps).toHaveLength(sections.length + 1);
     },
   );
 
+  test("every declared section belongs to at least one mode's order", () => {
+    // The other direction: a title with no order to render it is a section the
+    // editor can never show, and an outline row that scrolls to nothing.
+    const rendered = new Set([...sectionOrder("brief"), ...sectionOrder("variation")]);
+    for (const id of Object.keys(SECTION_TITLES) as SectionId[]) {
+      expect(rendered.has(id)).toBe(true);
+    }
+  });
+
   test("motion's host is a section that exists in every mode, so the chip is always reachable", () => {
-    // The property that actually matters. A motion chip reveals its *host*, and in
-    // Guided that means switching to the host's step — so a host absent from a mode's
-    // section order would leave the chip pointing at a step that does not exist, and
-    // clicking it would do nothing at all in that mode.
+    // The property that actually matters. A motion chip reveals its *host*, so a
+    // host absent from a mode's section order would leave the chip pointing at a
+    // section that is not rendered in that mode, and clicking it would scroll
+    // nowhere at all.
     for (const mode of ["brief", "variation"] as const) {
       expect(sectionOrder(mode)).toContain(MOTION_HOST_SECTION);
     }

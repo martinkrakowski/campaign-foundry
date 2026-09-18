@@ -126,28 +126,13 @@ export function previewIdentityKey(state: EditorState): string | undefined {
  * `PreviewDock`, in product code, so no test fixture is the only definition of it.
  * The look itself is `previewLook`, shared with the Layout step's frame.
  */
-export function previewDockProps(
-  state: EditorState,
-  /**
-   * The guided walk's cursor. D141: `everything` (and any future
-   * presentation with no step concept) has no cursor to show —
-   * `stepIndex` is stale outside guided — so the CALLER omits both
-   * arguments there rather than passing a stale position; a bare step
-   * readout is never guessed from a number that no longer means anything.
-   */
-  stepIndex?: number,
-  stepCount?: number,
-): PreviewDockLook | null {
+export function previewDockProps(state: EditorState): PreviewDockLook | null {
   const look = previewLook(state);
   if (look === null) return null;
   return {
     campaignName: state.campaignName,
     ...look,
     identityKey: previewIdentityKey(state),
-    // The wizard readout (M2): where the walk stands, not a position in the creative set.
-    ...(stepIndex !== undefined && stepCount !== undefined
-      ? { step: stepIndex + 1, stepCount }
-      : {}),
   };
 }
 

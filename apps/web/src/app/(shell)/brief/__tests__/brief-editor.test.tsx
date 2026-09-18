@@ -13,7 +13,6 @@ import { API, useRun } from "@/lib/run-context";
 import { useEditorDirty } from "@/lib/editor-dirty-context";
 import { CreateCampaignProvider } from "@/lib/create-campaign-context";
 import { CREATE_SEED_KEY, createCampaign, takeSeed } from "@/lib/create-campaign";
-import { stashStep } from "@/lib/use-step-navigation";
 import { CreateCampaignDialog } from "@/components/shell/CreateCampaignDialog";
 import { BrowseBriefsButton } from "@/components/shell/Sidebar";
 import type { BriefEntry } from "@/lib/briefs-api";
@@ -252,10 +251,6 @@ describe("BriefPage — data flow", () => {
   beforeEach(() => {
     localStorage.clear();
     localStorage.setItem("cf:brief-picked", "1");
-    // W6: the editor's default presentation is Guided, but everything this suite
-    // describes (stacked sections, sidebar policy) is the Everything presentation —
-    // so seed it, and let the Guided tests below override per-test.
-    localStorage.setItem("cf:presentation", "everything");
   });
 
   test("loads the brief list on mount and again when the window regains focus", async () => {
@@ -1926,7 +1921,6 @@ describe("BriefPage — capabilities and motion", () => {
   beforeEach(() => {
     localStorage.clear();
     localStorage.setItem("cf:brief-picked", "1");
-    localStorage.setItem("cf:presentation", "everything");
   });
 
   const motionToggle = () => screen.getByRole("button", { name: "motion" }) as HTMLButtonElement;
@@ -2459,7 +2453,6 @@ describe("BriefPage — capabilities and motion", () => {
       // either side.
       localStorage.clear();
       localStorage.setItem("cf:brief-picked", "1");
-      localStorage.setItem("cf:presentation", "everything");
       const user = userEvent.setup();
       const calls = routes({});
       const view = renderWithRun(<NewEditor />);
@@ -2673,8 +2666,9 @@ describe("BriefPage — capabilities and motion", () => {
     routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
     renderWithRun(<Editor id="camp" />);
     const row = await screen.findByRole("button", { name: "Identity" });
-    // Delete the target first: the row then has nothing to hand focus to, which is the
-    // branch a real page reaches when a section is unmounted (guided mode, later).
+    // Delete the target first: the row then has nothing to hand focus to. No
+    // presentation unmounts a section any more (SG1), so the branch is reached
+    // by removing the node — `focusSection` must still not throw.
     document.querySelectorAll('#identity, [data-section="identity"]').forEach((el) => el.remove());
     await user.click(row);
     expect(document.querySelector('#identity, [data-section="identity"]')).toBeNull();
@@ -2684,278 +2678,94 @@ describe("BriefPage — capabilities and motion", () => {
   });
 });
 
-describe("BriefPage — guided presentation (W6)", () => {
+describe("BriefPage — the editor is one scrolling column (SG1 / SG-D2)", () => {
   beforeEach(() => {
     localStorage.clear();
     localStorage.setItem("cf:brief-picked", "1");
-    localStorage.setItem("cf:presentation", "guided");
   });
 
-  // A classic brief that meets every step, so Next can walk all the way to Review.
+  /** A classic brief with every section filled in. */
   const complete = (id: string) => ({
     ...brief(id),
     output: { formats: ["static"], platforms: ["linkedin"] },
   });
 
   // D37: adopting a brief IS arriving at its route — wait for the route's brief to land.
-  // D37: adopting a brief IS arriving at its route — wait for the route's brief to
-  // land, and for the first step's validation to have settled: the ready ring fires
-  // once the loaded brief's first step became complete, and its remount is the
-  // exact window in which a click on Next is lost (L2). Waiting here drains that
-  // cascade before any test clicks.
   const adopt = async (_user: ReturnType<typeof userEvent.setup>, id: string) => {
     await waitFor(() =>
       expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(id),
     );
-    await waitFor(() => expect(document.querySelector(".animate-ready-ring")).toBeTruthy());
   };
 
-  const stepHeading = () => screen.getByRole("heading", { level: 1 });
-  const next = () => screen.getByRole("button", { name: messages.stepNext });
-  const back = () => screen.getByRole("button", { name: messages.stepBack });
-  const footerStatus = () =>
-    (document.querySelector('footer [role="status"]') as HTMLElement | null)?.textContent;
-
-  test("guided shows one section at a time, with the StepHeader in place of the row's chip", async () => {
-    // No stored choice: the default is Guided. (This describe's beforeEach seeds
-    // "guided", so drop the key to exercise the unset fallback.)
-    localStorage.removeItem("cf:presentation");
+  /**
+   * SG-D2, and the fact the whole lane rests on: `everything` already rendered
+   * every section in one column, so retiring `guided` is a deletion and not a
+   * rebuild. This is the positive form of the test the wizard's own suite
+   * carried ("guided shows one section at a time"): every section is mounted at
+   * once, there is no step chrome, and no presentation to choose.
+   */
+  test("every section is mounted at once, with no step chrome and no presentation toggle", async () => {
     const user = userEvent.setup();
     routes({ list: () => json({ briefs: [entry("ok", "r1")] }) });
     renderWithRun(<Editor id="ok" />);
     await adopt(user, "ok");
 
-    // Only the Identity step is mounted; the rest of the stack is not in the DOM.
-    expect(stepHeading().textContent).toBe("Identity");
+    for (const section of sectionOrder("brief")) {
+      expect(document.getElementById(section)).toBeTruthy();
+    }
+    // No walk: no segbar landmark, no step card, no Next/Back, no step heading.
+    expect(screen.queryByRole("navigation", { name: messages.segBarLabel })).toBeNull();
+    expect(document.querySelector('[data-testid="step-card"]')).toBeNull();
+    // Literals, because `messages.stepNext`/`stepBack` are deleted with the footer
+    // that spoke them — the point is that no control by those names exists at all.
+    expect(screen.queryByRole("button", { name: "Next" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Back" })).toBeNull();
+    expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
+    // The status chip is unconditional now: the StepHeader that used to announce
+    // the step's own status is gone, so this row is the only place it is said.
+    expect(screen.getByText("Saved")).toBeTruthy();
+  });
+
+  /**
+   * The presentation is no longer a choice, and `cf:presentation` is no longer a
+   * key. A stale value from a returning operator's storage must not resurrect a
+   * wizard that no longer exists — and nothing may write the key either.
+   */
+  test("a stale cf:presentation value changes nothing, and nothing writes the key", async () => {
+    const user = userEvent.setup();
+    localStorage.setItem("cf:presentation", "guided");
+    routes({ list: () => json({ briefs: [entry("ok", "r1")] }) });
+    renderWithRun(<Editor id="ok" />);
+    await adopt(user, "ok");
+
     expect(document.getElementById("identity")).toBeTruthy();
-    expect(document.getElementById("products")).toBeNull();
-
-    // First step: no Back, Next present, both verbs live.
-    expect(screen.queryByRole("button", { name: messages.stepBack })).toBeNull();
-    expect(next()).toBeTruthy();
-
-    // The status chip moved into the StepHeader, and the toggle mirrors the mode.
-    expect(screen.getByRole("group", { name: messages.presentationLabel })).toBeTruthy();
-    expect(
-      screen
-        .getByRole("button", { name: messages.presentationGuided })
-        .getAttribute("aria-pressed"),
-    ).toBe("true");
-    expect(footerStatus()).toBe(messages.statusStepReady);
+    expect(document.getElementById("products")).toBeTruthy();
+    expect(screen.queryByRole("navigation", { name: messages.segBarLabel })).toBeNull();
+    // Untouched: the editor neither read it nor rewrote it.
+    expect(localStorage.getItem("cf:presentation")).toBe("guided");
   });
 
-  test("broken presentation storage falls back to Guided", async () => {
-    // Storage that throws is the same fallback as an absent key: a read that reaches
-    // storage but has nothing valid to give is indistinguishable from one that cannot
-    // reach it. The suite's localStorage is the in-memory stand-in from vitest.setup,
-    // so spy on that object, not on the Web platform's Storage.prototype. The picker
-    // (adopt) still needs real reads for its own keys, so only trip the probe key.
-    const realGet = globalThis.localStorage.getItem.bind(globalThis.localStorage);
-    const spy = vi.spyOn(globalThis.localStorage, "getItem").mockImplementation((key: string) => {
-      if (key === "cf:presentation") throw new Error("storage gone");
-      return realGet(key);
-    });
+  /**
+   * M7 — the Asset Bin drawer lives at the editor's root, not inside the section
+   * that offers it. The original reason was the guided step card's permanent
+   * transform, which made it the containing block for `fixed` descendants and
+   * trapped the drawer's viewport-covering scrim; the card is gone, but a section
+   * can still acquire a transform, so the placement is still the fix and still
+   * worth pinning. happy-dom applies no layout, so this is the structural half —
+   * the visual half is verified in a browser.
+   */
+  test("the Asset Bin drawer mounts outside the section that offers it (M7)", async () => {
     const user = userEvent.setup();
     routes({ list: () => json({ briefs: [entry("ok", "r1")] }) });
     renderWithRun(<Editor id="ok" />);
     await adopt(user, "ok");
-    expect(stepHeading().textContent).toBe("Identity");
-    spy.mockRestore();
-  });
-
-  test("a refused Next keeps the step, reveals its errors and replays the nudge", async () => {
-    const user = userEvent.setup();
-    routes({ list: () => json({ briefs: [entry("ok", "r1")] }) });
-    renderWithRun(<Editor id="ok" />);
-    await adopt(user, "ok");
-
-    // Identity is the step that stands in the way: an empty region is an error the
-    // loaded brief does not carry until the field is cleared.
-    await user.clear(screen.getByLabelText("Target Region"));
-    await user.click(next());
-
-    // Still on Identity, now speaking what it needs: the footer says the first error.
-    expect(stepHeading().textContent).toBe("Identity");
-    expect(footerStatus()).toBe(messages.targetRegion);
-    // The refused Next replayed the one-shot nudge on the Next label. (W7.4 owns the
-    // keyframe now, and named it with the rest of the one-shots.)
-    const label = next().querySelector("span");
-    expect(label?.className).toContain("animate-nudge");
-  });
-
-  test("the wizard stays on Review across the route change a save causes (H5)", async () => {
-    // The user's original report: "Clicking on the last wizard screen takes user back
-    // to the first slide, with no indication as to why." R6 retired the verb they
-    // pressed; the bounce survived on the SUCCESS path. A save that renames the route
-    // (a first save, or Save as…) moves /brief/new or /brief/{id} to a different
-    // segment, so Next unmounts one page component and mounts another — and the step
-    // cursor, plain useState, is rebuilt from zero.
-    const user = userEvent.setup();
-    let listed: BriefEntry[] = [entry("ok", "r1")];
-    routes({
-      list: () => json({ briefs: listed }),
-      post: (_url, body) => {
-        const stored = { file: "copy.yaml", brief: body as never, revision: "rev-copy" };
-        listed = [...listed, stored];
-        return json(stored, 201);
-      },
-    });
-    const view = renderWithRun(<Editor id="ok" />);
-    await adopt(user, "ok");
-
-    await user.click(next());
-    await waitFor(() => expect(stepHeading().textContent).toBe("Copy"));
-    await user.click(next());
-    await waitFor(() => expect(stepHeading().textContent).toBe("Products"));
-    await user.click(next());
-    await waitFor(() => expect(stepHeading().textContent).toBe("Treatments"));
-    await user.click(next());
-    await waitFor(() => expect(stepHeading().textContent).toBe("Template"));
-    await user.click(next());
-    await waitFor(() => expect(stepHeading().textContent).toBe("Layout"));
-    await user.click(next());
-    await waitFor(() => expect(stepHeading().textContent).toBe("Output"));
-    await user.click(screen.getByRole("button", { name: messages.stepNextReview }));
-    await waitFor(() => expect(stepHeading().textContent).toBe("Review"));
-
-    await saveVia(user, "Save as");
-    await user.type(screen.getByLabelText("New brief id"), "copy");
-    await user.click(
-      within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
-    );
-    await waitFor(() => expect(nextMock().router.replace).toHaveBeenCalledWith("/brief/copy"));
-
-    // Next answers that replace by swapping the segment: the old page unmounts and the
-    // new one mounts in its place. Simulated here, because the test renders pages.
-    view.unmount();
-    renderWithRun(<Editor id="copy" />);
-
-    // They pressed Save on the last screen; they should still be looking at it.
-    await waitFor(() =>
-      expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Review"),
-    );
-  });
-
-  test("walk to Review: each Next lands on the next step and hands the step heading focus", async () => {
-    const user = userEvent.setup();
-    routes({ list: () => json({ briefs: [entry("ok", "r1")] }) });
-    renderWithRun(<Editor id="ok" />);
-    await adopt(user, "ok");
-
-    // Identity (step 1 of 8) -> Copy; the heading is the focus handoff target.
-    await user.click(next());
-    await waitFor(() => expect(stepHeading().textContent).toBe("Copy"));
-    expect(document.activeElement).toBe(stepHeading());
-    expect(back()).toBeTruthy();
-
-    await user.click(next());
-    await waitFor(() => expect(stepHeading().textContent).toBe("Products"));
-    await user.click(next());
-    await waitFor(() => expect(stepHeading().textContent).toBe("Treatments"));
-    await user.click(next());
-    await waitFor(() => expect(stepHeading().textContent).toBe("Template"));
-    await user.click(next());
-    await waitFor(() => expect(stepHeading().textContent).toBe("Layout"));
-    await user.click(next());
-    await waitFor(() => expect(stepHeading().textContent).toBe("Output"));
-
-    // The last section step's Next says what it leads to. (Corrected for D35: the
-    // label was "Review & launch", promising a launch the review step does not carry.)
-    const finish = screen.getByRole("button", { name: messages.stepNextReview });
-    expect(finish.textContent).toBe(messages.stepNextReview);
-    await user.click(finish);
-    await waitFor(() => expect(stepHeading().textContent).toBe("Review"));
-
-    // Review: no Next — this is the last look, already on screen.
-    expect(screen.queryByRole("button", { name: messages.stepNext })).toBeNull();
-    expect(back()).toBeTruthy();
-    expect(screen.getByText(messages.stepReviewIntro)).toBeTruthy();
-    expect(footerStatus()).toBe(messages.statusStepReview);
-  });
-
-  test("variation walks to the Policy step, and the Copy step can open the headline pool", async () => {
-    const user = userEvent.setup();
-    const randomizedBrief = {
-      ...complete("rand"),
-      mode: "variation" as const,
-      variation: {
-        count: 8,
-        seed: 3,
-        minDistance: 2,
-        coverage: { perProduct: 1, perRatio: 1 },
-        axes: {
-          layout: ["headline-top", "headline-bottom"],
-          tone: ["bold", "subtle"],
-          background: { source: ["procedural"] },
-          paletteShift: [0, 0.1],
-        },
-      },
-    };
-    routes({
-      list: () => json({ briefs: [{ file: "rand.yaml", revision: "r1", brief: randomizedBrief }] }),
-    });
-    renderWithRun(<Editor id="rand" />);
-    await adopt(user, "rand");
-
-    // Identity -> Copy.
-    await user.click(next());
-    await waitFor(() => expect(stepHeading().textContent).toBe("Copy"));
-
-    // On the Copy step (variation) the headline pool is one click away.
-    await user.click(screen.getByRole("button", { name: new RegExp(messages.moreIdeas) }));
-    expect(screen.getByRole("heading", { level: 3, name: "Headline Pool" })).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: /Close/ }));
-
-    // Copy -> Products -> Template -> Layout -> Output: the variation order
-    // skips treatments, the Template step (L5) carries the layer list, and the
-    // Layout step (T7) carries the type — both before Output.
-    await user.click(next());
-    await waitFor(() => expect(stepHeading().textContent).toBe("Products"));
-    await user.click(next());
-    await waitFor(() => expect(stepHeading().textContent).toBe("Template"));
-    await user.click(next());
-    await waitFor(() => expect(stepHeading().textContent).toBe("Layout"));
-    await user.click(next());
-    await waitFor(() => expect(stepHeading().textContent).toBe("Output"));
-    // Corrected: this asserted that Output's Next reads "Review & launch" in
-    // randomized mode, which pinned the defect — Output is the last section step in
-    // *classic* only, and here it is followed by Variation Policy. The launch label
-    // belongs to whichever step is actually last.
-    expect(screen.queryByRole("button", { name: messages.stepNextReview })).toBeNull();
-    await user.click(next());
-    await waitFor(() => expect(stepHeading().textContent).toBe("Variation Policy"));
-    expect(footerStatus()).toBe(messages.statusStepReady);
-
-    // Policy *is* last here, so it is the step that offers the launch.
-    await user.click(screen.getByRole("button", { name: messages.stepNextReview }));
-    await waitFor(() => expect(stepHeading().textContent).toBe("Review"));
-  });
-
-  test("the Asset Bin drawer is hoisted out of the step card (M7)", async () => {
-    const user = userEvent.setup();
-    routes({ list: () => json({ briefs: [entry("ok", "r1")] }) });
-    renderWithRun(<Editor id="ok" />);
-    await adopt(user, "ok");
-
-    // Identity -> Copy -> Products, where the bin is one click away per product.
-    await user.click(next());
-    await waitFor(() => expect(stepHeading().textContent).toBe("Copy"));
-    await user.click(next());
-    await waitFor(() => expect(stepHeading().textContent).toBe("Products"));
 
     await user.click(screen.getAllByRole("button", { name: messages.logoChooseFromBin })[0]);
     const drawer = await screen.findByRole("dialog", { name: "Asset Bin" });
 
-    // M7's structural fact: the step card carries a permanent non-`none` transform
-    // (the walk's animation container), which makes it the CONTAINING BLOCK for
-    // `fixed` descendants — a drawer nested inside it would be trapped in the card.
-    // The drawer's node therefore lives outside it, at the editor's root.
-    const stepCard = document.querySelector('[data-testid="step-card"]');
-    expect(stepCard).toBeTruthy();
-    expect(stepCard!.contains(drawer)).toBe(false);
-    // happy-dom applies no layout, so "the scrim covers the viewport" is not
-    // provable here — the visual half of M7 is verified in a browser. This test
-    // pins the structural half the fix consists of.
+    const products = document.getElementById("products") as HTMLElement;
+    expect(products).toBeTruthy();
+    expect(products.contains(drawer)).toBe(false);
   });
 
   test("picking an asset in the hoisted bin still fills the product's logo", async () => {
@@ -2981,11 +2791,6 @@ describe("BriefPage — guided presentation (W6)", () => {
     renderWithRun(<Editor id="ok" />);
     await adopt(user, "ok");
 
-    await user.click(next());
-    await waitFor(() => expect(stepHeading().textContent).toBe("Copy"));
-    await user.click(next());
-    await waitFor(() => expect(stepHeading().textContent).toBe("Products"));
-
     await user.click(screen.getAllByRole("button", { name: messages.logoChooseFromBin })[0]);
     await screen.findByRole("dialog", { name: "Asset Bin" });
     await user.click(await screen.findByRole("button", { name: "Choose brand-logo.png" }));
@@ -3002,46 +2807,18 @@ describe("BriefPage — guided presentation (W6)", () => {
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Asset Bin" })).toBeNull());
   });
 
-  test("the presentation toggle stays reachable from Everything", async () => {
-    const user = userEvent.setup();
-    routes({ list: () => json({ briefs: [entry("ok", "r1")] }) });
-    renderWithRun(<Editor id="ok" />);
-    await adopt(user, "ok");
-
-    await user.click(screen.getByRole("button", { name: messages.presentationEverything }));
-
-    // The group used to carry `hidden` in this presentation, and the choice persists —
-    // so Guided became unreachable for good, including across a reload. jsdom applies
-    // no CSS, so a role query still found the button and every test passed; the class
-    // is the only thing that can be asserted here.
-    const group = screen.getByRole("group", { name: messages.presentationLabel });
-    expect(group.className).not.toContain("hidden");
-    await user.click(screen.getByRole("button", { name: messages.presentationGuided }));
-    expect(
-      screen
-        .getByRole("button", { name: messages.presentationGuided })
-        .getAttribute("aria-pressed"),
-    ).toBe("true");
-  });
-
-  test("Back returns to the previous step, and disappears again on the first", async () => {
-    const user = userEvent.setup();
-    routes({ list: () => json({ briefs: [entry("ok", "r1")] }) });
-    renderWithRun(<Editor id="ok" />);
-    await adopt(user, "ok");
-
-    await user.click(next());
-    await waitFor(() => expect(stepHeading().textContent).toBe("Copy"));
-    await user.click(back());
-    await waitFor(() => expect(stepHeading().textContent).toBe("Identity"));
-    expect(screen.queryByRole("button", { name: messages.stepBack })).toBeNull();
-  });
-
-  test("an unmounted ErrorStrip chip switches the step first, then scrolls — and leaves focus alone", async () => {
+  /**
+   * SG1's reveal contract: `reveal(section)` can no longer change a step, so it
+   * must scroll the column — and stay scroll-only. This replaces the guided test
+   * that asserted the opposite mechanism ("switches the step FIRST, then
+   * scrolls"): the chip's section is already mounted, so the scroll is
+   * synchronous and the deferred `pendingReveal` marker is gone.
+   */
+  test("an ErrorStrip chip scrolls its section in the column, and leaves focus alone", async () => {
     const user = userEvent.setup();
     const scroller = vi.fn();
     Element.prototype.scrollIntoView = scroller;
-    // Products is invalid, so its chip is visible from the identity step.
+    // Products is invalid, so its chip is in the action bar's strip.
     const brokenProducts = {
       file: "prod.yaml",
       revision: "r1",
@@ -3054,96 +2831,31 @@ describe("BriefPage — guided presentation (W6)", () => {
     renderWithRun(<Editor id="prod" />);
     await adopt(user, "prod");
 
-    // Corrected for W8.2: the action bar (and the ErrorStrip inside it) stands on the
-    // Review step in Guided — it is no longer mounted on every step — so the chip is
-    // met from Review, reached by the segbar's own name for it, never by position.
-    const segbar = within(screen.getByRole("navigation", { name: messages.segBarLabel }));
-    await user.click(segbar.getByRole("button", { name: /: Review, / }));
-    await waitFor(() => expect(stepHeading().textContent).toBe("Review"));
-
     const chip = Array.from(document.querySelectorAll<HTMLElement>("button.rounded-full")).find(
       (b) => /Products/.test(b.textContent ?? ""),
     ) as HTMLElement;
     expect(chip).toBeTruthy();
-    await user.click(chip);
-
-    // The step switched to Products (the section was unmounted at click time)…
-    await waitFor(() => expect(stepHeading().textContent).toBe("Products"));
-    expect(document.getElementById("products")).toBeTruthy();
-    // …and the deferred scroll found it once it existed — once, not repeatedly.
-    // `toHaveBeenCalled()` alone is this repo's known decorative assertion.
-    expect(scroller).toHaveBeenCalledTimes(1);
-    // The reveal stayed scroll-only: nothing grabbed focus for itself. (Corrected
-    // alongside the placement: the chip unmounts with the Review card it stands on,
-    // so focus falls to the body — the invariant is that neither the section nor the
-    // step heading took it.)
-    await waitFor(() => expect(document.activeElement).not.toBe(stepHeading()));
-    expect(document.activeElement).not.toBe(document.getElementById("products"));
-  });
-
-  test("an outline row on another step switches the step and hands the section focus", async () => {
-    const user = userEvent.setup();
-    const scroller = vi.fn();
-    Element.prototype.scrollIntoView = scroller;
-    routes({ list: () => json({ briefs: [entry("ok", "r1")] }) });
-    renderWithRun(<Editor id="ok" />);
-    await adopt(user, "ok");
-
-    // The complete brief leaves the StatusLine link-free, so the outline's row is the
-    // only button named exactly "Products".
-    const row = await screen.findByRole("button", { name: "Products" });
-    await user.click(row);
-
-    await waitFor(() => expect(stepHeading().textContent).toBe("Products"));
     const section = document.getElementById("products") as HTMLElement;
     expect(section).toBeTruthy();
-    expect(scroller).toHaveBeenCalled();
-    // The outline's activation asked for focus — the section takes it, not the heading.
-    expect(document.activeElement).toBe(section);
+    scroller.mockClear();
+    await user.click(chip);
+
+    // The scroll ran on the section itself, once — not repeatedly, and not on a
+    // step change. (`toHaveBeenCalled()` alone is this repo's known decorative
+    // assertion, so the count and the receiver are both named.)
+    expect(scroller).toHaveBeenCalledTimes(1);
+    expect(scroller.mock.instances[0]).toBe(section);
+    // The reveal stayed scroll-only: nothing grabbed focus for itself.
+    expect(document.activeElement).not.toBe(section);
   });
 
-  test("the toggle switches and persists the presentation, and restores the row's chip", async () => {
-    const user = userEvent.setup();
-    routes({ list: () => json({ briefs: [entry("ok", "r1")] }) });
-    renderWithRun(<Editor id="ok" />);
-    await adopt(user, "ok");
-    expect(
-      screen
-        .queryByRole("button", { name: messages.presentationGuided })
-        ?.getAttribute("aria-pressed"),
-    ).toBe("true");
-
-    await user.click(screen.getByRole("button", { name: messages.presentationEverything }));
-    await waitFor(() => expect(document.getElementById("products")).toBeTruthy());
-    // Everything stacks the sections and moves the status chip back into the header row.
-    expect(document.getElementById("identity")).toBeTruthy();
-    expect(screen.getByRole("group", { name: messages.presentationLabel })).toBeTruthy();
-    expect(localStorage.getItem("cf:presentation")).toBe("everything");
-
-    await user.click(screen.getByRole("button", { name: messages.presentationGuided }));
-    await waitFor(() => expect(document.getElementById("products")).toBeNull());
-    expect(stepHeading().textContent).toBe("Identity");
-  });
-
-  test("a presentation write that cannot reach storage does not break the toggle", async () => {
-    const realSet = globalThis.localStorage.setItem.bind(globalThis.localStorage);
-    const spy = vi
-      .spyOn(globalThis.localStorage, "setItem")
-      .mockImplementation((key: string, value: string) => {
-        if (key === "cf:presentation") throw new Error("storage gone");
-        return realSet(key, value);
-      });
-    const user = userEvent.setup();
-    routes({ list: () => json({ briefs: [entry("ok", "r1")] }) });
-    renderWithRun(<Editor id="ok" />);
-    await adopt(user, "ok");
-
-    await user.click(screen.getByRole("button", { name: messages.presentationEverything }));
-    await waitFor(() => expect(document.getElementById("products")).toBeTruthy());
-    spy.mockRestore();
-  });
-
-  test("the policy sidebar renders only for Everything; Guided keeps it on its step", async () => {
+  /**
+   * The sidebar's Variation Policy accordion. `policy` is the one section the
+   * column has never rendered: in `everything` it lived here, and the gate used
+   * to read `mode === "variation" && presentation === "everything"` because the
+   * Guided walk had a policy STEP. With the step gone the gate is the mode alone.
+   */
+  test("the policy sidebar renders for a variation brief, and not for a classic one", async () => {
     const user = userEvent.setup();
     const randomizedBrief = {
       ...complete("rand"),
@@ -3159,368 +2871,46 @@ describe("BriefPage — guided presentation (W6)", () => {
       },
     };
     routes({
-      list: () => json({ briefs: [{ file: "rand.yaml", revision: "r1", brief: randomizedBrief }] }),
+      list: () =>
+        json({
+          briefs: [
+            { file: "rand.yaml", revision: "r1", brief: randomizedBrief },
+            entry("ok", "r2"),
+          ],
+        }),
     });
     renderWithRun(<Editor id="rand" />);
     await adopt(user, "rand");
 
-    // Guided: no policy panel in the sidebar — policy is a step (reached after Output).
-    // The sidebar panel is the element carrying data-section="policy" (its own capture
-    // for touched-section tracking); the outline row names the section elsewhere.
-    expect(document.querySelector('[data-section="policy"]')).toBeNull();
-    await user.click(screen.getByRole("button", { name: messages.presentationEverything }));
+    // The sidebar panel is the element carrying data-section="policy" (its own
+    // capture for touched-section tracking); the outline row names it elsewhere.
     await waitFor(() => expect(document.querySelector('[data-section="policy"]')).toBeTruthy());
+
+    // Classic has no policy at all — `sectionOrder("brief")` omits it, so the
+    // panel disappears with the mode rather than moving anywhere.
+    await user.click(screen.getByRole("button", { name: "brief" }));
+    await waitFor(() => expect(document.querySelector('[data-section="policy"]')).toBeNull());
   });
 });
 
-describe("BriefPage — the walk's chrome and gestures (W7)", () => {
+describe("BriefPage — the refusal, in the one column (D3 / D38 / M1 / H2)", () => {
   beforeEach(() => {
     localStorage.clear();
     localStorage.setItem("cf:brief-picked", "1");
-    localStorage.setItem("cf:presentation", "guided");
   });
 
   // D37: adopting a brief IS arriving at its route — wait for the route's brief to land.
-  // D37: adopting a brief IS arriving at its route — wait for the route's brief to
-  // land, and for the first step's validation to have settled: the ready ring fires
-  // once the loaded brief's first step became complete, and its remount is the
-  // exact window in which a click on Next is lost (L2). Waiting here drains that
-  // cascade before any test clicks.
   const adopt = async (_user: ReturnType<typeof userEvent.setup>, id: string) => {
     await waitFor(() =>
       expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(id),
     );
-    await waitFor(() => expect(document.querySelector(".animate-ready-ring")).toBeTruthy());
   };
-
-  const stepHeading = () => screen.getByRole("heading", { level: 1 });
-  const next = () => screen.getByRole("button", { name: messages.stepNext });
-  const segbar = () => within(screen.getByRole("navigation", { name: messages.segBarLabel }));
-  const segments = () => segbar().getAllByRole("button");
-  const card = () => screen.getByTestId("step-card");
-  /** The walk's length, derived from the one list the editor derives it from (W6.1). */
-  const walkLength = sectionOrder("brief").length + 1;
-
-  /** The step-card animation classes on screen right now (W7.2). */
-  const cardMotion = () =>
-    Array.from(document.querySelectorAll("[class]"))
-      .flatMap((element) => Array.from(element.classList))
-      .filter((token) => /^step-(enter|exit)-/.test(token))
-      .sort();
-
-  test("the segbar names one segment per step, and any segment navigates", async () => {
-    const user = userEvent.setup();
-    routes({ list: () => json({ briefs: [entry("ok", "r1")] }) });
-    renderWithRun(<Editor id="ok" />);
-    await adopt(user, "ok");
-
-    // As long as the step list for this mode — never a number the segbar knows: it
-    // maps the list the cursor already walks (W6.1), and the count follows it.
-    expect(segments()).toHaveLength(walkLength);
-    expect(segments()[0].getAttribute("aria-current")).toBe("step");
-    expect(segments()[0].getAttribute("aria-label")).toBe(
-      messages.segBarSegment(1, walkLength, "Identity", "current"),
-    );
-
-    // The review step, from the first step, without having walked there: no lock
-    // (D21). A segment is never disabled, so it never needs a reason off-screen.
-    await user.click(segments()[sectionOrder("brief").length]);
-    await waitFor(() => expect(stepHeading().textContent).toBe("Review"));
-    expect(segments()[sectionOrder("brief").length].getAttribute("aria-current")).toBe("step");
-  });
-
-  test("a segment for a step with something to fix says so, and still navigates", async () => {
-    const user = userEvent.setup();
-    routes({ list: () => json({ briefs: [entry("ok", "r1")] }) });
-    renderWithRun(<Editor id="ok" />);
-    await adopt(user, "ok");
-    // Identity is the step with the problem: the region field was emptied.
-    await user.clear(screen.getByLabelText("Target Region"));
-
-    // Walk by the segbar: Next would refuse (W6), and a segment is not a gate.
-    await user.click(segments()[1]);
-    await waitFor(() => expect(stepHeading().textContent).toBe("Copy"));
-    expect(segments()[0].getAttribute("aria-label")).toBe(
-      messages.segBarSegment(1, walkLength, "Identity", "issues"),
-    );
-
-    // …and the step behind it still answers a click, straight back to the problem.
-    await user.click(segments()[0]);
-    await waitFor(() => expect(stepHeading().textContent).toBe("Identity"));
-  });
-
-  test("the arrow keys walk, and stop walking inside a text field", async () => {
-    const user = userEvent.setup();
-    routes({ list: () => json({ briefs: [entry("ok", "r1")] }) });
-    renderWithRun(<Editor id="ok" />);
-    await adopt(user, "ok");
-
-    // A left arrow in a text field moves the caret. The walk listens on the window,
-    // so an unsuppressed listener would turn the page out from under the typing.
-    const name = screen.getByLabelText("Campaign Name");
-    await user.click(name);
-    await user.keyboard("{ArrowLeft}{ArrowRight}");
-    expect(stepHeading().textContent).toBe("Identity");
-    expect(document.activeElement).toBe(name);
-
-    // Nothing is disabled for the field's sake: the caret is what moved, and the
-    // moment focus leaves the field the keys are the walk's again.
-    await user.click(stepHeading());
-    await user.keyboard("{ArrowRight}{ArrowRight}");
-    await waitFor(() => expect(stepHeading().textContent).toBe("Products"));
-    await user.keyboard("{ArrowLeft}");
-    await waitFor(() => expect(stepHeading().textContent).toBe("Copy"));
-  });
-
-  test("the arrow keys stay out of an open dialog", async () => {
-    const user = userEvent.setup();
-    routes({ list: () => json({ briefs: [entry("ok", "r1")] }) });
-    renderWithRun(<Editor id="ok" />);
-    await adopt(user, "ok");
-
-    // Corrected for W8.2: the bar (and the Save verb it carries) stands on the Review
-    // step in Guided, so the dialog is opened from there.
-    await user.click(segments()[walkLength - 1]);
-    await waitFor(() => expect(stepHeading().textContent).toBe("Review"));
-
-    // The save-as dialog, open: every overlay in the app mounts on open, so one in
-    // the DOM is one on screen. The key is aimed at the dialog itself, not at its
-    // field, so what stops the walk is the overlay — not the typing rule.
-    await saveVia(user, "Save as");
-    const dialog = document.querySelector('[role="dialog"][aria-modal="true"]') as HTMLElement;
-    expect(dialog).toBeTruthy();
-    fireEvent.keyDown(dialog, { key: "ArrowRight" });
-    expect(stepHeading().textContent).toBe("Review");
-  });
-
-  test("a swipe across the step card walks; a tap does not", async () => {
-    const user = userEvent.setup();
-    routes({ list: () => json({ briefs: [entry("ok", "r1")] }) });
-    renderWithRun(<Editor id="ok" />);
-    await adopt(user, "ok");
-
-    // 12px of drift is not a gesture anyone made on purpose.
-    fireEvent.touchStart(card(), { changedTouches: [{ clientX: 200, clientY: 300 }] });
-    fireEvent.touchEnd(card(), { changedTouches: [{ clientX: 188, clientY: 302 }] });
-    await waitFor(() => expect(stepHeading().textContent).toBe("Identity"));
-
-    // Dragging left pulls the next step in, the way a page turn does.
-    fireEvent.touchStart(card(), { changedTouches: [{ clientX: 200, clientY: 300 }] });
-    fireEvent.touchEnd(card(), { changedTouches: [{ clientX: 80, clientY: 310 }] });
-    await waitFor(() => expect(stepHeading().textContent).toBe("Copy"));
-
-    // …and back again.
-    fireEvent.touchStart(card(), { changedTouches: [{ clientX: 80, clientY: 300 }] });
-    fireEvent.touchEnd(card(), { changedTouches: [{ clientX: 260, clientY: 305 }] });
-    await waitFor(() => expect(stepHeading().textContent).toBe("Identity"));
-  });
-
-  test("a step change slides the arriving card in and takes the leaving card out of flow", async () => {
-    const user = userEvent.setup();
-    routes({ list: () => json({ briefs: [entry("ok", "r1")] }) });
-    renderWithRun(<Editor id="ok" />);
-    await adopt(user, "ok");
-
-    await user.click(next());
-    // The leaving card is absolutely positioned for exactly as long as it is on
-    // screen — held out of the column so the arriving card does not reflow past it.
-    const leaving = document.querySelector(".step-exit-l");
-    expect(leaving).toBeTruthy();
-    expect(leaving?.className).toContain("absolute");
-    expect(leaving?.getAttribute("aria-hidden")).toBe("true");
-    expect(leaving?.hasAttribute("inert")).toBe(true);
-    expect(document.querySelector(".step-enter-r")).toBeTruthy();
-    // …and the pair the walk wears is a pair `globals.css` names in its
-    // reduced-motion block: there is no third card animation a preference could miss.
-    expect(cardMotion()).toEqual(["step-enter-r", "step-exit-l"]);
-
-    // One transition later the copy is gone: a second set of every field in the
-    // section is a trap for a screen reader and for any query by label.
-    await waitFor(() => expect(document.querySelector(".step-exit-l")).toBeNull());
-    expect(document.getElementById("identity")).toBeNull();
-  });
-
-  test("going back slides the other way", async () => {
-    const user = userEvent.setup();
-    routes({ list: () => json({ briefs: [entry("ok", "r1")] }) });
-    renderWithRun(<Editor id="ok" />);
-    await adopt(user, "ok");
-
-    await user.click(next());
-    await waitFor(() => expect(stepHeading().textContent).toBe("Copy"));
-    await waitFor(() => expect(document.querySelector(".step-exit-l")).toBeNull());
-
-    await user.click(screen.getByRole("button", { name: messages.stepBack }));
-    expect(document.querySelector(".step-exit-r")).toBeTruthy();
-    expect(document.querySelector(".step-enter-l")).toBeTruthy();
-    await waitFor(() => expect(stepHeading().textContent).toBe("Identity"));
-  });
-
-  test("a step that becomes complete rings the Next button once", async () => {
-    const user = userEvent.setup();
-    routes({ list: () => json({ briefs: [entry("ok", "r1")] }) });
-    renderWithRun(<Editor id="ok" />);
-    await adopt(user, "ok");
-    // The loaded brief makes the first step complete, so the ring has fired once —
-    // the step the visitor is standing on has become one they can leave.
-    const opening = document.querySelector(".animate-ready-ring");
-    expect(opening).toBeTruthy();
-
-    // Break it, and fix it: a second transition on the same step is a second ring.
-    await user.clear(screen.getByLabelText("Target Audience"));
-    await user.type(screen.getByLabelText("Target Audience"), "b");
-    expect(document.querySelector(".animate-ready-ring")).not.toBe(opening);
-    const rung = document.querySelector(".animate-ready-ring");
-
-    // Still complete, several keystrokes later: the ring is a one-shot, keyed on the
-    // transitions — so it has not been replayed. The node is the same node.
-    await user.type(screen.getByLabelText("Campaign Name"), "xyz");
-    expect(document.querySelector(".animate-ready-ring")).toBe(rung);
-  });
-
-  test("walking onto a step that was already complete does not ring for it", async () => {
-    const user = userEvent.setup();
-    routes({ list: () => json({ briefs: [entry("ok", "r1")] }) });
-    renderWithRun(<Editor id="ok" />);
-    await adopt(user, "ok");
-    await waitFor(() => expect(document.querySelector(".animate-ready-ring")).toBeTruthy());
-
-    // Copy was finished long before the visitor got here: the ring is for a step
-    // that became complete, not one that already was.
-    await user.click(screen.getByRole("button", { name: messages.stepNext }));
-    await waitFor(() => expect(stepHeading().textContent).toBe("Copy"));
-    expect(document.querySelector(".animate-ready-ring")).toBeNull();
-  });
-});
-
-describe("BriefPage — the review step (W8)", () => {
-  beforeEach(() => {
-    localStorage.clear();
-    localStorage.setItem("cf:brief-picked", "1");
-    localStorage.setItem("cf:presentation", "guided");
-  });
-
-  // D37: adopting a brief IS arriving at its route — wait for the route's brief to land.
-  // D37: adopting a brief IS arriving at its route — wait for the route's brief to
-  // land, and for the first step's validation to have settled: the ready ring fires
-  // once the loaded brief's first step became complete, and its remount is the
-  // exact window in which a click on Next is lost (L2). Waiting here drains that
-  // cascade before any test clicks.
-  const adopt = async (_user: ReturnType<typeof userEvent.setup>, id: string) => {
-    await waitFor(() =>
-      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(id),
-    );
-    await waitFor(() => expect(document.querySelector(".animate-ready-ring")).toBeTruthy());
-  };
-
-  const stepHeading = () => screen.getByRole("heading", { level: 1 });
-  const segments = () =>
-    within(screen.getByRole("navigation", { name: messages.segBarLabel })).getAllByRole("button");
-  // The review step is the walk's last, derived from the one list — never a number.
-  const reviewIndex = sectionOrder("brief").length;
-  const toReview = async (user: ReturnType<typeof userEvent.setup>) => {
-    await user.click(segments()[reviewIndex]);
-    await waitFor(() => expect(stepHeading().textContent).toBe("Review"));
-  };
-  const row = (section: string) => document.querySelector(`[data-review-row="${section}"]`);
-
-  /** A classic brief carrying treatments, output and a style block, so every row can show. */
-  const fullEntry = {
-    file: "full.yaml",
-    revision: "r1",
-    brief: {
-      ...brief("full"),
-      treatments: [{ id: "bold-hero", layout: "headline-top", tone: "bold" }],
-      output: { formats: ["static"], platforms: ["linkedin"] },
-      style: { fontFamily: "Lora", fontWeight: 700 },
-    },
-  };
-
-  test("every summary row's Edit reaches its section — the step switches and the section scrolls", async () => {
-    const user = userEvent.setup();
-    const scroller = vi.fn();
-    Element.prototype.scrollIntoView = scroller;
-    routes({ list: () => json({ briefs: [fullEntry] }) });
-    renderWithRun(<Editor id="full" />);
-    await adopt(user, "full");
-    await toReview(user);
-
-    // One row per section the projection carries — and the rows speak display
-    // names (D18), never the raw ids the brief file spells.
-    for (const section of sectionOrder("brief")) {
-      expect(row(section)).not.toBeNull();
-    }
-    const outputRow = row("output") as HTMLElement;
-    expect(outputRow.textContent).toContain("Still images");
-    expect(outputRow.textContent).toContain("LinkedIn");
-    expect(outputRow.textContent).not.toContain("linkedin");
-    // Exactly ONE composed preview on screen at Review (D43): the figure's. The count
-    // is the assertion — a dock that failed to stay suppressed on Review would make
-    // it two, and this test would catch it. The page carries other svg chrome, so the
-    // creatives are picked by what they draw: the brief's own headline.
-    const headlineCreatives = Array.from(document.querySelectorAll("svg")).filter((el) =>
-      el.textContent?.includes("Hi"),
-    );
-    expect(headlineCreatives).toHaveLength(1);
-
-    // Each Edit hands its section to W6's reveal: the step switches, and the
-    // deferred scroll finds the section once it has mounted.
-    for (const section of sectionOrder("brief")) {
-      const scrollsBefore = scroller.mock.calls.length;
-      await user.click(
-        screen.getByRole("button", { name: messages.reviewEditLabel(SECTION_TITLES[section]) }),
-      );
-      await waitFor(() => expect(stepHeading().textContent).toBe(SECTION_TITLES[section]));
-      expect(scroller.mock.calls.length).toBeGreaterThan(scrollsBefore);
-      // …and back to Review for the next row.
-      await user.click(segments()[reviewIndex]);
-      await waitFor(() => expect(stepHeading().textContent).toBe("Review"));
-    }
-  });
-
-  // Corrected for D35: Save carries the refusal now that "Apply to run" is retired.
-  test("Save's refusal marks every failing section and reveals the first", async () => {
-    const user = userEvent.setup();
-    routes({});
-    renderWithRun(<NewEditor />);
-    await waitFor(() =>
-      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
-    );
-
-    // A blank draft fails Identity, Copy and Products — but nothing is marked yet
-    // (D1): the user has been nowhere and has attempted nothing.
-    await toReview(user);
-    expect(screen.queryByText(messages.briefId)).toBeNull();
-
-    // D3: Save is never disabled — pressing it is how the user asks what is wrong.
-    await saveVia(user, "Save");
-
-    // The first failing section is the one revealed…
-    await waitFor(() => expect(stepHeading().textContent).toBe("Identity"));
-    // (The footer's status sentence speaks the first error too, so scope the
-    // "marked" assertions to the sections themselves.)
-    expect(
-      within(document.getElementById("identity") as HTMLElement).getByText(messages.briefId),
-    ).toBeTruthy();
-    // …and every failing section is marked, not only the first: Products' own
-    // error is on screen the moment the walk reaches it, untouched.
-    await user.click(segments()[sectionOrder("brief").indexOf("products")]);
-    await waitFor(() => expect(stepHeading().textContent).toBe("Products"));
-    // The argument tracks the classic floor this lane moved (2 → 1) — it is not
-    // exported by validate.ts, so the literal restates it. If the floor moves
-    // again, this assertion moving with it is the point: it pins the wording.
-    expect(
-      within(document.getElementById("products") as HTMLElement).getByText(
-        messages.products(1, "Classic"),
-      ),
-    ).toBeTruthy();
-  });
 
   /**
    * A variation draft failing both Output and Variation Policy is the case that
    * exposes the bucket-order bounce (M1): `validateState`'s key order puts `policy`
-   * before `output`, but the walk reaches Output first — so the old first-key
-   * bounce landed the user on Policy, a step they would not have walked to yet.
+   * before `output`, but `sectionOrder` reaches Output first — so the old first-key
+   * bounce revealed Policy, a section the user reads last.
    */
   const brokenOutputAndPolicy = {
     file: "op.yaml",
@@ -3541,61 +2931,8 @@ describe("BriefPage — the review step (W8)", () => {
     },
   };
 
-  test("a refused Save bounces to the first failing step in walk order, not the first error bucket (M1)", async () => {
-    const user = userEvent.setup();
-    routes({ list: () => json({ briefs: [brokenOutputAndPolicy] }) });
-    renderWithRun(<Editor id="op" />);
-    await adopt(user, "op");
-    await toReview(user);
-
-    await saveVia(user, "Save");
-
-    // Output precedes Variation Policy in sectionOrder — the walk's order, which
-    // the bounce follows. validateState's key order alone would have chosen Policy.
-    await waitFor(() => expect(stepHeading().textContent).toBe("Output"));
-    expect(stepHeading().textContent).not.toBe("Variation Policy");
-  });
-
-  test("a refused Save speaks its refusal on the step it lands on (D38)", async () => {
-    const user = userEvent.setup();
-    routes({});
-    renderWithRun(<NewEditor />);
-    await waitFor(() =>
-      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
-    );
-    await toReview(user);
-
-    await saveVia(user, "Save");
-
-    // The bounce lands on Identity — and the refusal sentence is on screen THERE.
-    // The status surface used to live only in the Review-step bar, which the same
-    // React commit that produced the refusal unmounted: the user landed on a step
-    // with no message and no verb anywhere on the page.
-    await waitFor(() => expect(stepHeading().textContent).toBe("Identity"));
-    const refusal = screen
-      .getAllByRole("status")
-      .find((el) => el.textContent.startsWith("Not saved yet —"));
-    expect(refusal).toBeTruthy();
-  });
-
-  test("a refused Save leaves focus on the revealed section, never the body (H2)", async () => {
-    const user = userEvent.setup();
-    routes({ list: () => json({ briefs: [brokenOutputAndPolicy] }) });
-    renderWithRun(<Editor id="op" />);
-    await adopt(user, "op");
-    await toReview(user);
-
-    await saveVia(user, "Save");
-
-    // The pressed verb is unmounted by the bounce, so focus used to drop to
-    // document.body — no landing point for a keyboard or screen-reader user. The
-    // refusal now hands focus to the revealed section, the same target the
-    // outline's activation uses.
-    await waitFor(() => expect(stepHeading().textContent).toBe("Output"));
-    expect(document.activeElement).toBe(document.getElementById("output"));
-  });
-
-  test("Review renders exactly one status surface (D38)", async () => {
+  // Corrected for D35: Save carries the refusal now that "Apply to run" is retired.
+  test("Save's refusal marks every failing section at once", async () => {
     const user = userEvent.setup();
     routes({});
     renderWithRun(<NewEditor />);
@@ -3603,62 +2940,98 @@ describe("BriefPage — the review step (W8)", () => {
       expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
     );
 
-    // Refuse from Review, land on Identity, then walk back to Review with every
-    // error now marked — the surface must appear once, not once per placement.
-    await toReview(user);
-    await saveVia(user, "Save");
-    await waitFor(() => expect(stepHeading().textContent).toBe("Identity"));
-    await user.click(segments()[sectionOrder("brief").length]);
-    await waitFor(() => expect(stepHeading().textContent).toBe("Review"));
+    // A blank draft fails Identity, Copy and Products — but nothing is marked yet
+    // (D1): the user has been nowhere and has attempted nothing.
+    expect(screen.queryByText(messages.briefId)).toBeNull();
 
-    // One StatusLine speaking the refusal…
-    const refusals = screen
-      .getAllByRole("status")
-      .filter((el) => el.textContent.startsWith("Not saved yet —"));
-    expect(refusals).toHaveLength(1);
-    // …and one ErrorStrip chip per failing section (the footer's own status
-    // sentence and the segbar never match these selectors).
+    // D3: Save is never disabled — pressing it is how the user asks what is wrong.
+    await saveVia(user, "Save");
+
+    // Every failing section is marked, not only the first — and in one column the
+    // user can see all of them without navigating anywhere. (The footer's status
+    // sentence speaks the first error too, so the assertions are scoped to the
+    // sections themselves.)
+    await waitFor(() =>
+      expect(
+        within(document.getElementById("identity") as HTMLElement).getByText(messages.briefId),
+      ).toBeTruthy(),
+    );
+    // The argument tracks the classic floor a previous lane moved (2 → 1) — it is
+    // not exported by validate.ts, so the literal restates it. If the floor moves
+    // again, this assertion moving with it is the point: it pins the wording.
+    expect(
+      within(document.getElementById("products") as HTMLElement).getByText(
+        messages.products(1, "Classic"),
+      ),
+    ).toBeTruthy();
+  });
+
+  test("a refused Save reveals the first failing section in sectionOrder, not the first error bucket (M1)", async () => {
+    const user = userEvent.setup();
+    Element.prototype.scrollIntoView = vi.fn();
+    routes({ list: () => json({ briefs: [brokenOutputAndPolicy] }) });
+    renderWithRun(<Editor id="op" />);
+    await adopt(user, "op");
+
+    await saveVia(user, "Save");
+
+    // Output precedes Variation Policy in sectionOrder, which the bounce follows;
+    // validateState's key order alone would have chosen Policy. The revealed
+    // section is the one that takes focus (H2), so that is what names the choice.
+    await waitFor(() => expect(document.activeElement).toBe(document.getElementById("output")));
+    expect(document.activeElement).not.toBe(document.querySelector('[data-section="policy"]'));
+  });
+
+  test("a refused Save speaks its refusal, and exactly once (D38)", async () => {
+    const user = userEvent.setup();
+    routes({});
+    renderWithRun(<NewEditor />);
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
+    );
+
+    await saveVia(user, "Save");
+
+    // One StatusLine speaking the refusal. There used to be two possible mounts of
+    // the status surface (every guided step, and the foot of the Everything stack)
+    // and the bar chose between them with a flag; there is one now, so "once" is
+    // structural rather than a rule the flag had to keep.
+    await waitFor(() =>
+      expect(
+        screen.getAllByRole("status").filter((el) => el.textContent.startsWith("Not saved yet —")),
+      ).toHaveLength(1),
+    );
+    // …and one ErrorStrip chip per failing section.
     const identityChips = Array.from(document.querySelectorAll("button.rounded-full")).filter((b) =>
       /Identity/.test(b.textContent ?? ""),
     );
     expect(identityChips).toHaveLength(1);
   });
 
-  test("a row whose field the projection omits disappears", async () => {
+  test("a refused Save leaves focus on the revealed section, never the body (H2)", async () => {
     const user = userEvent.setup();
     Element.prototype.scrollIntoView = vi.fn();
-    routes({ list: () => json({ briefs: [fullEntry] }) });
-    const first = renderWithRun(<Editor id="full" />);
-    await adopt(user, "full");
-    await toReview(user);
-    // Treatments are in the projection, so the row is there.
-    expect(row("treatments")).not.toBeNull();
-    first.unmount();
+    routes({ list: () => json({ briefs: [brokenOutputAndPolicy] }) });
+    renderWithRun(<Editor id="op" />);
+    await adopt(user, "op");
 
-    // A classic brief without treatments: toBrief omits the field, and its row
-    // goes with it — Review shows what will actually be submitted.
-    routes({ list: () => json({ briefs: [entry("plain", "r1")] }) });
-    renderWithRun(<Editor id="plain" />);
-    await adopt(user, "plain");
-    await toReview(user);
-    expect(row("identity")).not.toBeNull();
-    expect(row("treatments")).toBeNull();
+    await saveVia(user, "Save");
+
+    // The refusal hands focus to the revealed section, the same target the
+    // outline's activation uses — never `document.body`.
+    await waitFor(() => expect(document.activeElement).toBe(document.getElementById("output")));
+    expect(document.activeElement).not.toBe(document.body);
   });
 
-  test("the action bar stands on Review in Guided and returns to the foot in Everything", async () => {
+  test("the action bar stands at the foot of the column, on arrival", async () => {
     const user = userEvent.setup();
     routes({ list: () => json({ briefs: [entry("ok", "r1")] }) });
     renderWithRun(<Editor id="ok" />);
     await adopt(user, "ok");
 
-    // Guided keeps the verbs on the step that performs them — not on Identity.
-    expect(screen.queryByTestId("action-bar")).toBeNull();
-    await toReview(user);
-    expect(screen.getByTestId("action-bar")).toBeTruthy();
-
-    // Everything mounts the same bar back at the foot of the whole stack.
-    await user.click(screen.getByRole("button", { name: messages.presentationEverything }));
-    await waitFor(() => expect(screen.getByTestId("action-bar")).toBeTruthy());
+    // One placement, unconditional: the verbs used to wait on the Review step in
+    // Guided, so an editor could be on screen with no Save anywhere.
+    expect(screen.getAllByTestId("action-bar")).toHaveLength(1);
   });
 });
 
@@ -3666,22 +3039,15 @@ describe("BriefPage — the preview rail (R7)", () => {
   beforeEach(() => {
     localStorage.clear();
     localStorage.setItem("cf:brief-picked", "1");
-    localStorage.setItem("cf:presentation", "guided");
   });
 
-  // D37: adopting a brief IS arriving at its route — and the first step's validation
-  // must have settled before the walk is driven (the same gate the guided suite uses).
+  // D37: adopting a brief IS arriving at its route — wait for the route's brief to land.
   const adopt = async (_user: ReturnType<typeof userEvent.setup>, id: string) => {
     await waitFor(() =>
       expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(id),
     );
-    await waitFor(() => expect(document.querySelector(".animate-ready-ring")).toBeTruthy());
   };
 
-  const stepHeading = () => screen.getByRole("heading", { level: 1 });
-  const segments = () =>
-    within(screen.getByRole("navigation", { name: messages.segBarLabel })).getAllByRole("button");
-  const reviewIndex = sectionOrder("brief").length;
   const preview = () => screen.getByRole("complementary", { name: messages.previewLegend });
   // The rail describe's brief carries an output block, so the caption names a platform.
   const okEntry = {
@@ -3710,7 +3076,7 @@ describe("BriefPage — the preview rail (R7)", () => {
     },
   };
 
-  test("the rail mounts beside the column on a guided step, found by its landmark (R7.3)", async () => {
+  test("the rail mounts beside the column, found by its landmark (R7.3)", async () => {
     const user = userEvent.setup();
     routes({ list: () => json({ briefs: [okEntry] }) });
     renderWithRun(<Editor id="ok" />);
@@ -3719,12 +3085,13 @@ describe("BriefPage — the preview rail (R7)", () => {
     // getByRole — never getAllByRole(...)[0] (D48): the landmark is the one named slot.
     const rail = preview();
     // The dock's own words live inside the landmark: the caption names the platform
-    // as a display label, and the step readout is the walk's cursor.
+    // as a display label.
     expect(within(rail).getByText("Square · LinkedIn")).toBeTruthy();
-    expect(within(rail).getByText(messages.previewStep(1, 8))).toBeTruthy();
-    // D44: the rail is a sibling of the walk's card — never a copy inside it, where a
-    // step change would render two live copies and the card's transform would trap it.
-    expect(screen.getByTestId("step-card").contains(rail)).toBe(false);
+    // D44: the rail is a sibling of the column, never inside it — the column is the
+    // scroller and the rail is `sticky` against the shell's own scrollport.
+    const column = document.getElementById("identity")?.closest("div.max-w-5xl") as HTMLElement;
+    expect(column).toBeTruthy();
+    expect(column.contains(rail)).toBe(false);
   });
 
   /** A mount count, not a visible-SVG count (R7/CC1): the container query hides
@@ -3735,41 +3102,46 @@ describe("BriefPage — the preview rail (R7)", () => {
    *  distinguish the two by rendering either — a marker is the only honest way. */
   const mountedFrameCount = () => document.querySelectorAll('[data-testid="preview-frame"]').length;
 
-  test("the rail is suppressed on Review — exactly one composed preview is on screen (D43/D141)", async () => {
+  /**
+   * D43's invariant, in the form SG1 leaves it in: EXACTLY ONE composed frame is
+   * mounted in the whole editor, and it is the rail's.
+   *
+   * The gate this replaces (`presentation !== "guided" || step is not
+   * review/layout`) existed because two other surfaces carried a frame of their
+   * own — Review's figure and the Layout STEP's `preview`. Both are gone, so the
+   * gate is gone; the count is what has to survive, and it is asserted by MOUNT
+   * (the container query hides the rail without unmounting it, and happy-dom
+   * applies no CSS at all, so a visible-node count would be the wrong question).
+   *
+   * The two ways to break it are both one prop away: pass `preview` to the
+   * column's `LayoutSection`, or restore a Review surface. Either reads as
+   * harmless — every other rendering assertion in this file stays green, because
+   * a SECOND frame satisfies every query that looks for one.
+   */
+  test("exactly one composed frame is mounted in the editor, and it is the rail's (D43)", async () => {
     const user = userEvent.setup();
     routes({ list: () => json({ briefs: [okEntry] }) });
     renderWithRun(<Editor id="ok" />);
     await adopt(user, "ok");
-    await user.click(segments()[reviewIndex]);
-    await waitFor(() => expect(stepHeading().textContent).toBe("Review"));
 
-    // D141 amends D43's "Guided only" clause away, but Review's own exclusion
-    // is untouched: the step still carries its own frame (`ReviewStep`), so
-    // the rail must not ALSO mount one — the COUNT invariant D43 protects.
-    expect(screen.queryByRole("complementary", { name: messages.previewLegend })).toBeNull();
+    // Every section is on screen at once, Layout included — so this count is taken
+    // over the whole editor, not over one step's worth of it.
+    expect(document.getElementById("layout")).toBeTruthy();
     expect(mountedFrameCount()).toBe(1);
+    const rail = preview();
+    expect(rail.querySelectorAll('[data-testid="preview-frame"]').length).toBe(1);
   });
 
-  test("the rail now appears in Everything too — the Guided-only clause D141 drops (D43/D141)", async () => {
+  test("the rail carries no step readout — there is no cursor to read (SG1)", async () => {
     const user = userEvent.setup();
     routes({ list: () => json({ briefs: [okEntry] }) });
     renderWithRun(<Editor id="ok" />);
     await adopt(user, "ok");
 
-    await user.click(screen.getByRole("button", { name: messages.presentationEverything }));
-    await waitFor(() => expect(document.getElementById("products")).toBeTruthy());
-
-    // The clause this test used to pin ("absent in Everything") is exactly the
-    // one D141 drops: the rail now mounts here too. The COUNT invariant still
-    // holds — `LayoutSection` also renders inline in Everything, but with its
-    // own `preview` prop omitted (defaults false), so this rail's frame is the
-    // only composed preview on screen.
-    const rail = screen.getByRole("complementary", { name: messages.previewLegend });
-    expect(rail).toBeTruthy();
-    expect(mountedFrameCount()).toBe(1);
-    // Everything has no step cursor — `stepIndex` is stale outside Guided — so
-    // the rail's own step readout must not show a guided cursor here (D141).
-    expect(within(rail).queryByText(/ \/ /)).toBeNull();
+    // M2's "1 / 8" readout went with the walk. `previewStep` is deleted, so this
+    // asserts the shape it had rather than the message: nothing in the rail reads
+    // as a position in a walk.
+    expect(within(preview()).queryByText(/ \/ /)).toBeNull();
   });
 
   test("a brief with nothing to draw shows the rail's empty state, not no rail (D142)", async () => {
@@ -3780,42 +3152,20 @@ describe("BriefPage — the preview rail (R7)", () => {
     expect(preview()).toBeTruthy();
 
     // The zero-product state is reached the way a user reaches it — removing every
-    // product on the Products step. (A loaded file without products is seeded with one
-    // placeholder, so a product-less brief fixture would never reach the null branch.)
-    await user.click(segments()[2]);
-    await waitFor(() => expect(stepHeading().textContent).toBe("Products"));
+    // product in the Products section. (A loaded file without products is seeded with
+    // one placeholder, so a product-less brief fixture would never reach the null
+    // branch.)
     await user.click(screen.getAllByRole("button", { name: messages.productRemove })[0]);
     await user.click(screen.getAllByRole("button", { name: messages.productRemove })[0]);
 
     // D142 — the pre-D142 behaviour this test used to pin was "no rail at
     // all"; now the landmark STAYS and names the missing PRODUCT ID, never
-    // "add a product" (the Products step already shows a stub — the removal
+    // "add a product" (the Products section already shows a stub — the removal
     // above leaves exactly one, freshly blank) and never a fabricated
     // placeholder creative (D26).
     await waitFor(() => {
       const rail = screen.getByRole("complementary", { name: messages.previewLegend });
       expect(within(rail).getByText(messages.previewNeedsProductId)).toBeTruthy();
-    });
-    expect(mountedFrameCount()).toBe(0);
-  });
-
-  test("the empty state in Everything also names the missing id, and still has no step cursor (D142/D141)", async () => {
-    const user = userEvent.setup();
-    routes({ list: () => json({ briefs: [okEntry] }) });
-    renderWithRun(<Editor id="ok" />);
-    await adopt(user, "ok");
-
-    await user.click(screen.getByRole("button", { name: messages.presentationEverything }));
-    await waitFor(() => expect(document.getElementById("products")).toBeTruthy());
-    await user.click(screen.getAllByRole("button", { name: messages.productRemove })[0]);
-    await user.click(screen.getAllByRole("button", { name: messages.productRemove })[0]);
-
-    await waitFor(() => {
-      const rail = screen.getByRole("complementary", { name: messages.previewLegend });
-      expect(within(rail).getByText(messages.previewNeedsProductId)).toBeTruthy();
-      // D141 — no step cursor outside Guided, whether the rail shows the
-      // dock or (D142) the empty state.
-      expect(within(rail).queryByText(/ \/ /)).toBeNull();
     });
     expect(mountedFrameCount()).toBe(0);
   });
@@ -3914,8 +3264,6 @@ describe("BriefPage — the preview rail (R7)", () => {
     // which makes the same edit there). While the rail's mounted body is the
     // YAML `<pre>`, `PreviewDock` (and the `usePreviewFrame` inside it) is not
     // mounted at all, so nothing can fetch regardless of what changes.
-    await user.click(segments()[1]);
-    await waitFor(() => expect(screen.getByLabelText(messages.headlineLabel)).toBeTruthy());
     await user.type(screen.getByLabelText(messages.headlineLabel), "!");
     await outlastDebounce();
 
@@ -3931,8 +3279,6 @@ describe("BriefPage — the preview rail (R7)", () => {
     const before = previewFetchCalls(calls).length;
     expect(before).toBeGreaterThan(0);
 
-    await user.click(segments()[1]);
-    await waitFor(() => expect(screen.getByLabelText(messages.headlineLabel)).toBeTruthy());
     await user.type(screen.getByLabelText(messages.headlineLabel), "!");
     await outlastDebounce();
 
@@ -4065,29 +3411,19 @@ describe("BriefPage — the preview rail (R7)", () => {
   });
 });
 
-describe("BriefPage — the Layout step (T7)", () => {
+describe("BriefPage — the Layout section (T7)", () => {
   beforeEach(() => {
     localStorage.clear();
     localStorage.setItem("cf:brief-picked", "1");
-    localStorage.setItem("cf:presentation", "guided");
   });
 
-  // D37: adopting a brief IS arriving at its route — and the first step's validation
-  // must have settled before the walk is driven (the same gate the guided suite uses).
+  // D37: adopting a brief IS arriving at its route — wait for the route's brief to land.
   const adopt = async (_user: ReturnType<typeof userEvent.setup>, id: string) => {
     await waitFor(() =>
       expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(id),
     );
-    await waitFor(() => expect(document.querySelector(".animate-ready-ring")).toBeTruthy());
   };
 
-  const stepHeading = () => screen.getByRole("heading", { level: 1 });
-  const next = () => screen.getByRole("button", { name: messages.stepNext });
-  const back = () => screen.getByRole("button", { name: messages.stepBack });
-  const seg = (name: RegExp) =>
-    within(screen.getByRole("navigation", { name: messages.segBarLabel })).getByRole("button", {
-      name,
-    });
   const okEntry = {
     file: "ok.yaml",
     revision: "r1",
@@ -4111,87 +3447,69 @@ describe("BriefPage — the Layout step (T7)", () => {
     },
   };
 
-  test("the classic walk carries the Layout step after the Template step, and Next/Back traverse it", async () => {
+  /**
+   * T7's ordering claim, made against the column's DOM rather than against a
+   * walk. The two tests this replaces drove Next/Back between the Template,
+   * Layout and Output STEPS; the sections are all mounted now, so the order is
+   * the document order — and `sectionOrder` is still the one list that decides
+   * it, in both modes.
+   */
+  const renderedOrder = () => {
+    const ids = sectionOrder("brief").concat(sectionOrder("variation"));
+    return Array.from(document.querySelectorAll<HTMLElement>("section[id]"))
+      .map((el) => el.id)
+      .filter((id) => ids.includes(id as (typeof ids)[number]));
+  };
+
+  test("the classic column carries Layout between Template and Output (T7)", async () => {
     const user = userEvent.setup();
     routes({ list: () => json({ briefs: [okEntry] }) });
     renderWithRun(<Editor id="ok" />);
     await adopt(user, "ok");
 
-    await user.click(seg(/: Layout,/));
-    await waitFor(() => expect(stepHeading().textContent).toBe("Layout"));
-    // Layout's neighbours: the Template step (L5) before it, Output after.
-    await user.click(back());
-    await waitFor(() => expect(stepHeading().textContent).toBe("Template"));
-    await user.click(next());
-    await waitFor(() => expect(stepHeading().textContent).toBe("Layout"));
-    await user.click(next());
-    await waitFor(() => expect(stepHeading().textContent).toBe("Output"));
+    const order = renderedOrder();
+    expect(order.indexOf("layout")).toBe(order.indexOf("template") + 1);
+    expect(order.indexOf("output")).toBe(order.indexOf("layout") + 1);
   });
 
-  test("randomized places the Layout step between the Template step and Output (T7)", async () => {
+  test("randomized places Layout between Template and Output too (T7)", async () => {
     const user = userEvent.setup();
     routes({ list: () => json({ briefs: [randEntry] }) });
     renderWithRun(<Editor id="rand" />);
     await adopt(user, "rand");
 
-    await user.click(seg(/: Layout,/));
-    await waitFor(() => expect(stepHeading().textContent).toBe("Layout"));
-    await user.click(back());
-    await waitFor(() => expect(stepHeading().textContent).toBe("Template"));
-    await user.click(next());
-    await waitFor(() => expect(stepHeading().textContent).toBe("Layout"));
-    await user.click(next());
-    await waitFor(() => expect(stepHeading().textContent).toBe("Output"));
+    const order = renderedOrder();
+    expect(order.indexOf("layout")).toBe(order.indexOf("template") + 1);
+    expect(order.indexOf("output")).toBe(order.indexOf("layout") + 1);
   });
 
-  test("the Sections outline reaches the Layout step (D25/GB-D18)", async () => {
+  test("the Sections outline reaches the Layout section (D25/GB-D18)", async () => {
     const user = userEvent.setup();
+    const scroller = vi.fn();
+    Element.prototype.scrollIntoView = scroller;
     routes({ list: () => json({ briefs: [okEntry] }) });
     renderWithRun(<Editor id="ok" />);
     await adopt(user, "ok");
 
     const row = await screen.findByRole("button", { name: "Layout" });
     await user.click(row);
-    await waitFor(() => expect(stepHeading().textContent).toBe("Layout"));
+    // The outline's activation scrolls AND hands focus (W4.2) — the section is
+    // already mounted, so both happen in the same commit.
+    const section = document.getElementById("layout") as HTMLElement;
+    expect(scroller.mock.instances).toContain(section);
+    expect(document.activeElement).toBe(section);
   });
 
-  // D141 amends D43's "Guided only" clause away, but the Layout exclusion is
-  // untouched: it is the one exclusion that survives in EVERY presentation
-  // (Everything already renders `LayoutSection` with `preview` omitted, and a
-  // future `studio` must follow the same pattern — see `BriefEditor.tsx`'s
-  // rail comment beside `railCursorIndex`), because the step always carries
-  // its own frame — one slot is still the whole rule (D43's count invariant).
-  test("the rail is suppressed on the Layout step — exactly one composed preview is on screen (D43/D63/D141)", async () => {
+  test("a style choice made in the Layout section reaches the brief the save would send (D58)", async () => {
     const user = userEvent.setup();
     routes({ list: () => json({ briefs: [okEntry] }) });
     renderWithRun(<Editor id="ok" />);
     await adopt(user, "ok");
 
-    await user.click(seg(/: Layout,/));
-    await waitFor(() => expect(stepHeading().textContent).toBe("Layout"));
-
-    // No rail: the step carries its own frame, and one slot is the whole rule.
-    expect(screen.queryByRole("complementary", { name: messages.previewLegend })).toBeNull();
-    // Counted, as the rail tests count — the creatives are picked by what they draw.
-    const headlineCreatives = Array.from(document.querySelectorAll("svg")).filter((el) =>
-      el.textContent?.includes("Hi"),
-    );
-    expect(headlineCreatives).toHaveLength(1);
-  });
-
-  test("a style choice made on the Layout step reaches the brief the save would send (D58)", async () => {
-    const user = userEvent.setup();
-    routes({ list: () => json({ briefs: [okEntry] }) });
-    renderWithRun(<Editor id="ok" />);
-    await adopt(user, "ok");
-
-    await user.click(seg(/: Layout,/));
-    await waitFor(() => expect(stepHeading().textContent).toBe("Layout"));
     await user.click(screen.getByRole("button", { name: "Lora" }));
 
-    // The projection is on screen in the rail's YAML view — a step the rail serves,
-    // since the Layout step itself carries the frame (D43).
-    await user.click(seg(/: Output,/));
+    // The projection is on screen in the rail's YAML view, which the rail now
+    // serves unconditionally (SG1 removed the per-step suppression).
     const rail = screen.getByRole("complementary", { name: messages.previewLegend });
     await user.click(within(rail).getByRole("button", { name: messages.previewRailYamlView }));
     expect(within(rail).getByText(/fontFamily: Lora/)).toBeTruthy();
@@ -4202,7 +3520,6 @@ describe("BriefPage — Generate's three-way question (D35)", () => {
   beforeEach(() => {
     localStorage.clear();
     localStorage.setItem("cf:brief-picked", "1");
-    localStorage.setItem("cf:presentation", "everything");
   });
 
   /**
@@ -4409,7 +3726,6 @@ describe("the route is the source of truth (D37)", () => {
   beforeEach(() => {
     localStorage.clear();
     localStorage.setItem("cf:brief-picked", "1");
-    localStorage.setItem("cf:presentation", "everything");
   });
 
   test("/brief/{id} loads that brief, and the shell follows what the URL named", async () => {
@@ -4526,8 +3842,6 @@ describe("the create seed (W1)", () => {
   beforeEach(() => {
     localStorage.clear();
     localStorage.setItem("cf:brief-picked", "1");
-    // Guided default: the step walk is what "lands on Identity" means (D98).
-    localStorage.removeItem("cf:presentation");
   });
 
   const fillDialog = async (
@@ -4542,7 +3856,6 @@ describe("the create seed (W1)", () => {
     nextMock().nav.pathname = "/brief/new";
     // Everything presentation: every section stays mounted, so the applied values
     // are assertable directly — the landing claim has its own tests below.
-    localStorage.setItem("cf:presentation", "everything");
     const user = userEvent.setup();
     routes({});
     renderWithRun(
@@ -4588,62 +3901,6 @@ describe("the create seed (W1)", () => {
     expect(screen.queryAllByRole("dialog", { name: "Unsaved edits" })).toHaveLength(0);
   });
 
-  test("an in-place seed moves the cursor even in the everything presentation (D98)", async () => {
-    nextMock().nav.pathname = "/brief/new";
-    // Everything mode renders no step walk — the segbar and the arrow keys are
-    // guided-only, so the cursor's only mover there is the seed effect itself. A
-    // landing baton (the dialog's cross-route branch, spent at mount) puts the
-    // cursor on Copy; the in-place create walks it back to Identity, with no
-    // heading on screen to focus — which is exactly what the handoff guard
-    // allows for. Identity is sectionOrder[0], so "lands on Identity" is true by
-    // default in the stack: switch to Guided so the walk is on screen and a
-    // restored go(copy) fails.
-    localStorage.setItem("cf:presentation", "everything");
-    stashStep("copy");
-    const user = userEvent.setup();
-    routes({});
-    renderWithRun(
-      <>
-        <BrowseBriefsButton />
-        <NewEditor />
-      </>,
-    );
-    await waitFor(() =>
-      expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
-        "",
-      ),
-    );
-    await user.click(screen.getByRole("button", { name: messages.presentationGuided }));
-    expect(screen.getByRole("button", { name: /: Copy, current step/ })).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: messages.presentationEverything }));
-
-    await user.type(screen.getByLabelText(messages.campaignNameLabel), "typed");
-
-    await user.click(screen.getByRole("button", { name: /Create new/ }));
-    const prompt = await screen.findByRole("dialog", { name: "Unsaved edits" });
-    await user.click(within(prompt).getByRole("button", { name: "Leave" }));
-    await fillDialog(
-      user,
-      within(await screen.findByRole("dialog", { name: messages.createCampaignTitle })),
-    );
-
-    await waitFor(() =>
-      expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
-        "Summer Spark",
-      ),
-    );
-    // D97 — and no half-answers rode along: the Identity fields wait for the step
-    // the landing is on.
-    expect((screen.getByLabelText("Target Region") as HTMLInputElement).value).toBe("");
-    expect((screen.getByLabelText(messages.targetAudienceLabel) as HTMLInputElement).value).toBe(
-      "",
-    );
-    expect(screen.queryAllByRole("dialog", { name: "Unsaved edits" })).toHaveLength(0);
-    await user.click(screen.getByRole("button", { name: messages.presentationGuided }));
-    expect(screen.getByRole("button", { name: /: Identity, current step/ })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /: Copy, current step/ })).toBeNull();
-  });
-
   test("an in-place seed lands on Identity with the name applied (D98)", async () => {
     nextMock().nav.pathname = "/brief/new";
     const user = userEvent.setup();
@@ -4669,13 +3926,12 @@ describe("the create seed (W1)", () => {
       within(await screen.findByRole("dialog", { name: messages.createCampaignTitle })),
     );
 
-    // D98 — the cursor sits on Identity (guided: the Identity section is what is
-    // mounted), BEFORE Copy: region and audience are unanswered and both are
-    // required by `validateIdentity`, so the seed lands the user there.
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: /: Identity, current step/ })).toBeTruthy(),
-    );
-    expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
+    // D98 — "lands on Identity" is true by construction since SG1: Identity is
+    // the first section of the one column, so there is no cursor to place and no
+    // way to arrive one step past two empty required fields. What is left to
+    // assert is that the seed APPLIED and spent its key.
+    await waitFor(() => expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull());
+    expect(document.getElementById("identity")).toBeTruthy();
     // The seed rode a patch action, so the slug was derived in the reducer (F18) —
     // the Identity readout shows it; the dialog never did.
     expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
@@ -4710,14 +3966,18 @@ describe("the create seed (W1)", () => {
     );
 
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: /: Identity, current step/ })).toBeTruthy(),
+      expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
+        "Summer Spark",
+      ),
     );
-    // Never both: in place the editor's seed effect moved the cursor, so a stashed
-    // baton would survive unspent and move the NEXT mount's cursor.
+    // `takeSeed` spends the companion baton as well as the seed. SG1 removed the
+    // baton's only APPLIER (the step cursor), so a leftover can no longer move
+    // anything — but it is still written on the cross-route create path, and a key
+    // that is written and never cleared is a leak this pin catches.
     expect(localStorage.getItem("cf:step-handoff")).toBeNull();
   });
 
-  test("after a refused Next, an in-place seed arrives with nothing red — attempted is reset", async () => {
+  test("after a refused Save, an in-place seed arrives with nothing red — attempted is reset", async () => {
     nextMock().nav.pathname = "/brief/new";
     const user = userEvent.setup();
     routes({});
@@ -4733,8 +3993,10 @@ describe("the create seed (W1)", () => {
       ),
     );
     await user.type(screen.getByLabelText(messages.campaignNameLabel), "typed");
-    // A refused Next sets attempted: every error shows and the status refuses.
-    await user.click(screen.getByRole("button", { name: messages.stepNext }));
+    // A refused Save sets attempted: every error shows and the status refuses.
+    // (It was a refused Next before SG1 — the wizard's own gesture; Save is the
+    // verb that carries the refusal now, and it is the same `attempted` flag.)
+    await saveVia(user, "Save");
     expect(await screen.findByText(/Not saved yet/)).toBeTruthy();
 
     await user.click(screen.getByRole("button", { name: /Create new/ }));
@@ -4745,39 +4007,37 @@ describe("the create seed (W1)", () => {
       within(await screen.findByRole("dialog", { name: messages.createCampaignTitle })),
     );
 
-    // D98 — validateIdentity refuses Next, so the cursor never left Identity and
-    // go(identity) is a no-op on this path. The arrival is not red: the seed
-    // reset attempted/touched (L1.1).
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: /: Identity, current step/ })).toBeTruthy(),
-    );
-    expect(screen.queryByText(/Not saved yet/)).toBeNull();
+    // The arrival is not red: the seed reset attempted/touched (L1.1).
+    await waitFor(() => expect(screen.queryByText(/Not saved yet/)).toBeNull());
     expect(screen.getByText(/New brief — fill/)).toBeTruthy();
   });
 
-  test("a seed created elsewhere is applied on mount and lands on Identity (D98)", async () => {
+  test("a seed created elsewhere is applied on mount, and both batons are spent", async () => {
     routes({});
     // What the dialog's Create does from another route (verified in its own suite):
     // publish the seed, stash the landing step, then push.
     await act(async () => {
       await createCampaign({ name: "Summer Spark", type: "social-post" });
     });
-    stashStep("identity");
+    localStorage.setItem("cf:step-handoff", "identity");
 
     nextMock().nav.pathname = "/brief/new";
     renderWithRun(<NewEditor />);
-    // The mount spent both batons by a read: no seed key, no leftover step baton.
+    // The APPLIED field, never only the spent key: the landing itself stopped
+    // being a claim when SG1 deleted the cursor, so the seed's effect on the
+    // draft is the whole assertion.
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: /: Identity, current step/ })).toBeTruthy(),
+      expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
+        "Summer Spark",
+      ),
     );
     expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
-    expect(localStorage.getItem("cf:step-handoff")).toBeNull();
-    // The applied field, not only the spent key — a take-then-skip would keep this
-    // test green on Identity alone, because stashStep("identity") is what landed
-    // us here.
-    expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
-      "Summer Spark",
-    );
+    // NOT the step baton. `takeSeed` spends that only for a REFUSED seed (its own
+    // suite pins both directions); an accepted one leaves it, because it used to
+    // be H5's to apply. SG1 deleted the applier, so a cross-route create now
+    // leaves `cf:step-handoff` behind — a dead key nothing reads. Asserting it
+    // were null here would be asserting a fix this lane has not made.
+    expect(localStorage.getItem("cf:step-handoff")).toBe("identity");
   });
 
   test("a paid-social seed sets the editor's mode and the Randomized section list", async () => {
@@ -4787,15 +4047,13 @@ describe("the create seed (W1)", () => {
     await act(async () => {
       await createCampaign({ name: "Summer Spark", type: "paid-social" });
     });
-    stashStep("identity");
 
     nextMock().nav.pathname = "/brief/new";
     renderWithRun(<NewEditor />);
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: /: Identity, current step/ })).toBeTruthy(),
-    );
-    expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
-      "Summer Spark",
+      expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
+        "Summer Spark",
+      ),
     );
     expect(screen.getByRole("button", { name: "variation" }).getAttribute("aria-pressed")).toBe(
       "true",
@@ -4803,7 +4061,11 @@ describe("the create seed (W1)", () => {
     expect(screen.getByRole("button", { name: "brief" }).getAttribute("aria-pressed")).toBe(
       "false",
     );
-    expect(screen.getByRole("button", { name: "Variation Policy" })).toBeTruthy();
+    // Two controls carry this name now: the Sections outline's row and the
+    // sidebar accordion, which the mode publishes on its own since SG1 dropped
+    // the `presentation` term from its gate. The claim is about the mode's
+    // section LIST, so the count is what it is and Treatments is the discriminator.
+    expect(screen.getAllByRole("button", { name: "Variation Policy" }).length).toBeGreaterThan(0);
     expect(screen.queryByRole("button", { name: "Treatments" })).toBeNull();
   });
 
@@ -4855,18 +4117,13 @@ describe("the create seed (W1)", () => {
     nextMock().nav.pathname = "/brief/new";
     renderWithRun(<NewEditor />);
 
-    // Landing, not the spent key: cf:step-handoff is gone either way (the
-    // navigation hook spends it by applying it). Identity is also first-paint
-    // default, but render() flushes that effect, so a leftover baton has already
-    // moved the cursor to Copy before this waits.
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: /: Identity, current step/ })).toBeTruthy(),
-    );
-    expect(screen.queryByRole("button", { name: /: Copy, current step/ })).toBeNull();
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Identity");
+    // SG1 — the "lands on Identity" half of this test is retired with the cursor:
+    // a leftover baton has nothing to move. What remains, and is the defect the
+    // test was written for, is that the refused seed SPENDS the companion baton
+    // rather than leaving it behind.
+    await waitFor(() => expect(localStorage.getItem("cf:step-handoff")).toBeNull());
 
-    // Discard: no name, region or audience seeded. Assertable only once Identity
-    // is the mounted step — Copy does not render these fields.
+    // Discard: no name, region or audience seeded.
     expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe("");
     expect((screen.getByLabelText(messages.targetRegionLabel) as HTMLInputElement).value).toBe("");
     expect((screen.getByLabelText(messages.targetAudienceLabel) as HTMLInputElement).value).toBe(
@@ -4878,8 +4135,7 @@ describe("the create seed (W1)", () => {
     routes({});
     // What the previously deployed build wrote: the two-field seed. It is
     // refused whole — no name seeded, the mode stays Classic — and the
-    // companion baton is spent, so the editor lands on Identity instead of a
-    // leftover "copy" moving it one step past two empty required fields (D98).
+    // companion baton is spent rather than left behind.
     localStorage.setItem(
       CREATE_SEED_KEY,
       JSON.stringify({ name: "Summer Spark", mode: "variation" }),
@@ -4887,10 +4143,7 @@ describe("the create seed (W1)", () => {
     localStorage.setItem("cf:step-handoff", "copy");
     nextMock().nav.pathname = "/brief/new";
     renderWithRun(<NewEditor />);
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: /: Identity, current step/ })).toBeTruthy(),
-    );
-    expect(screen.queryByRole("button", { name: /: Copy, current step/ })).toBeNull();
+    await waitFor(() => expect(screen.getByLabelText(messages.campaignNameLabel)).toBeTruthy());
     expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe("");
     expect(screen.getByRole("button", { name: "brief" }).getAttribute("aria-pressed")).toBe("true");
     expect(screen.getByRole("button", { name: "variation" }).getAttribute("aria-pressed")).toBe(
@@ -4902,8 +4155,6 @@ describe("the create seed (W1)", () => {
   });
 
   test("a paid-social seed is applied once — a platform toggled off stays off (D109)", async () => {
-    // Everything presentation: the Output section's platform toggles are mounted.
-    localStorage.setItem("cf:presentation", "everything");
     routes({});
     localStorage.setItem(
       CREATE_SEED_KEY,
@@ -4929,13 +4180,10 @@ describe("the create seed (W1)", () => {
     expect(screen.getByRole("button", { name: "tiktok" }).getAttribute("aria-pressed")).toBe(
       "false",
     );
-    // A presentation switch remounts the sections — the preset does not re-apply.
-    await user.click(screen.getByRole("button", { name: messages.presentationGuided }));
-    await user.click(screen.getByRole("button", { name: messages.presentationEverything }));
-    expect(screen.getByRole("button", { name: "tiktok" }).getAttribute("aria-pressed")).toBe(
-      "false",
-    );
-    // And neither does a full remount (the reload case): the seed was spent by
+    // The remount this used to force with a presentation switch is gone with the
+    // toggle — and the full remount below is the stronger form of the same
+    // question anyway (the reload case), so nothing it proved is lost.
+    // A full remount does not re-apply the preset: the seed was spent by
     // its one read, so the user's toggled-off platform survives the return.
     view.unmount();
     renderWithRun(<NewEditor />);
@@ -4993,7 +4241,6 @@ describe("the abandoned-draft two-way (W3 / F19)", () => {
   beforeEach(() => {
     localStorage.clear();
     localStorage.setItem("cf:brief-picked", "1");
-    localStorage.removeItem("cf:presentation");
   });
 
   const fillDialog = async (
@@ -5115,7 +4362,6 @@ describe("a failed listing is its own state (D83 / F-A)", () => {
   beforeEach(() => {
     localStorage.clear();
     localStorage.setItem("cf:brief-picked", "1");
-    localStorage.setItem("cf:presentation", "everything");
   });
 
   test("a rejected listBriefs on a named route renders the failure state, not the not-found state", async () => {
@@ -5401,7 +4647,6 @@ describe("the pre-type draft (T2 / D112)", () => {
   beforeEach(() => {
     localStorage.clear();
     localStorage.setItem("cf:brief-picked", "1");
-    localStorage.removeItem("cf:presentation");
   });
 
   test("a draft saved before the type existed restores with the default (D112)", async () => {
@@ -5438,7 +4683,6 @@ describe("VE1 — undo and redo in the editor", () => {
   beforeEach(() => {
     localStorage.clear();
     localStorage.setItem("cf:brief-picked", "1");
-    localStorage.setItem("cf:presentation", "everything");
   });
 
   const nameField = () => screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement;

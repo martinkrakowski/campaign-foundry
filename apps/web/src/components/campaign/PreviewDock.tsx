@@ -143,15 +143,6 @@ export interface PreviewShowcaseProps extends Omit<CreativePreviewProps, "classN
    * the frame so a re-slug of `brief.id` is not a switch of creative.
    */
   readonly identityKey?: string;
-  /**
-   * The wizard's current step, 1-based (`stepIndex + 1`) — where the walk
-   * stands, never a position in the creative set (M2). Optional: D141 —
-   * `everything` (and any future presentation with no step concept) has no
-   * cursor to show, and the caller omits both fields rather than passing a
-   * stale one.
-   */
-  readonly step?: number;
-  readonly stepCount?: number;
 }
 
 /** The product colour the preview was drawn in, as a chip. Token rule aside: `--c`. */
@@ -200,16 +191,15 @@ function PreviewCaption({
 export interface PreviewIdentityProps {
   readonly campaignName: string;
   readonly headline?: string;
-  readonly step?: number;
-  readonly stepCount?: number;
 }
 
 /**
- * The brief's own words: campaign name, headline, and the step readout. The
- * step readout is itself optional (D141): `everything` has no step cursor to
- * show (`stepIndex` is stale outside guided), so a caller that omits `step`/
- * `stepCount` gets no readout rather than a guessed or stale one — never
- * `previewStep(undefined, undefined)`.
+ * The brief's own words: campaign name and headline.
+ *
+ * SG1 — the M2 step readout ("Step 3 of 8") is gone. D141 had already made it
+ * optional because `everything` had no cursor to show; retiring `guided` leaves
+ * no caller that can supply one, so the field, the readout and `previewStep`
+ * are removed rather than left as a branch nothing in the app can take.
  */
 export function PreviewIdentity(props: PreviewIdentityProps): ReactNode {
   return (
@@ -217,11 +207,6 @@ export function PreviewIdentity(props: PreviewIdentityProps): ReactNode {
       <p className="truncate font-semibold text-[13px] text-text-primary">{props.campaignName}</p>
       {props.headline !== undefined && props.headline.length > 0 ? (
         <p className="truncate text-[12px] text-text-muted">{props.headline}</p>
-      ) : null}
-      {props.step !== undefined && props.stepCount !== undefined ? (
-        <p className="font-mono text-[11px] text-text-muted">
-          {messages.previewStep(props.step, props.stepCount)}
-        </p>
       ) : null}
     </div>
   );
@@ -276,7 +261,7 @@ export function PreviewPicture(props: {
  * D142 — the rail's content before the first product has an id: names the
  * missing field, invents nothing (D26). Shares `PreviewIdentity`'s shape
  * with `PreviewDock` so the two never visually disagree about the campaign
- * name or the walk's cursor when one replaces the other.
+ * name when one replaces the other.
  */
 export function PreviewRailEmptyState(props: PreviewIdentityProps): ReactNode {
   return (
@@ -290,7 +275,7 @@ export function PreviewRailEmptyState(props: PreviewIdentityProps): ReactNode {
 
 /**
  * The preview itself (D26): the creative at its own ratio, the caption under it,
- * and the brief's name, headline and step beside it — the outgoing creative stays
+ * and the brief's name and headline beside it — the outgoing creative stays
  * in the corner of the eye while the brief is edited. Props come from the one
  * exported derivation (`previewDockProps`, D45); the complementary landmark, the
  * sticky positioning and the container-query visibility belong to the host rail

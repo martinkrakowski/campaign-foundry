@@ -236,11 +236,6 @@ describe("template messages (L5)", () => {
     );
   });
 
-  test("reviewTemplateLayers formats one and many", () => {
-    expect(messages.reviewTemplateLayers(1)).toBe("1 layer");
-    expect(messages.reviewTemplateLayers(3)).toBe("3 layers");
-  });
-
   test("templateOcclusionNote formats all occlusion effects and target layers (D135)", () => {
     expect(messages.templateOcclusionNote("Shade", "Static text", "mute")).toBe(
       "the shade layer now sits above the headline and will mute it",

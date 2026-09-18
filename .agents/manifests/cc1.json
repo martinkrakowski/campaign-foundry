@@ -19,8 +19,8 @@
     },
     {
       "file": "apps/web/src/components/campaign/BriefEditor.tsx",
-      "before": "                <PreviewDock\n                  {...railProps}\n                  brief={isRailWideEnough ? previewBrief : undefined}\n                  playhead={playhead}\n                  host=\"rail\"\n                />",
-      "after": "                <PreviewDock {...railProps} brief={previewBrief} playhead={playhead} host=\"rail\" />",
+      "before": "            <PreviewDock\n              {...railProps}\n              brief={isRailWideEnough ? previewBrief : undefined}\n              playhead={playhead}\n              host=\"rail\"\n            />",
+      "after": "            <PreviewDock {...railProps} brief={previewBrief} playhead={playhead} host=\"rail\" />",
       "because": "isRailWideEnough is the JS-side mirror of the row's own CSS container query (CC2): below 56rem the rail is CSS-hidden but stays mounted, and withholding `brief` is the only thing that stops usePreviewFrame from building a request there. Feeding the dock `previewBrief` unconditionally lets a rail nobody can see keep fetching. Caught by a CALL COUNT (\"nothing fetches below the breakpoint\"), not a mount count — the rail's own mount is unaffected by this mutation.",
       "command": [
         "yarn",
@@ -34,8 +34,8 @@
     },
     {
       "file": "apps/web/src/components/campaign/BriefEditor.tsx",
-      "before": "              {dump(draftBrief)}",
-      "after": "              {dump(previewBrief)}",
+      "before": "          {dump(draftBrief)}",
+      "after": "          {dump(previewBrief)}",
       "because": "previewBrief is deliberately memoised on a narrower key than draftBrief (CC1/CC2's memo boundary) so the preview dock and its fetch can bail out on a look-preserving keystroke. The YAML view is the rail's read-only SECOND view (D61) and must stay live: feeding it the memoised previewBrief instead of the live draftBrief makes it go stale on exactly the fields the memo key ignores (e.g. targetAudience). Caught by a staleness ASSERTION on rendered content, not a call count or a mount count.",
       "command": [
         "yarn",
