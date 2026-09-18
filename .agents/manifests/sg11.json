@@ -8,7 +8,16 @@
       "after": "  const showRailColumn = rail !== null;",
       "because": "The whole invariant of the lane, removed in the shape a reader would remove it: `railSummoned` looks like a redundant extra condition, because the rail's column is `hidden lg:flex` anyway and the overlay is `lg:hidden`, so at no width are BOTH visible. Visibility is not the claim. `rail` holds rendered ELEMENTS, so a second site that renders the slot MOUNTS the editor's composed frame a second time -- every `id` inside the rail duplicated, the `aria-controls`/`aria-labelledby` pairs it builds pointing at two elements each, and two `/preview-frame` consumers where SS4.6 allows one. Under this mutation the panel still opens, still shows the rail, and every control in it still works; nothing about the screen says anything is wrong. It is caught only by a count of MOUNTS (`data-testid=\"preview-frame\"`), which is why SG11's assertions are counts and not presence checks.",
       "verdict": "caught",
-      "command": "yarn vitest run --project web apps/web/src/app/(shell)/__tests__/rail-in-shell.test.tsx -t exactly one composed frame is mounted while the panel is open"
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/__tests__/rail-in-shell.test.tsx",
+        "-t",
+        "exactly one composed frame is mounted while the panel is open"
+      ]
     },
     {
       "file": "apps/web/src/lib/mobile-rail-context.tsx",
@@ -16,7 +25,16 @@
       "after": "    () => ({ open: requested, openRail, closeRail }),",
       "because": "The mutual exclusion moved from derived to remembered. `requested` is only ever set from `MobileMenu`, which is `lg:hidden`, so a reader can reasonably conclude the viewport term is belt-and-braces -- it cannot be requested at a width where it would be wrong. But the request OUTLIVES the width it was made at: summon the panel at 400px, rotate the tablet or widen the window past `lg`, and the shell column now renders the rail while the overlay is still holding it. Two mounts, at the one transition nobody thinks to test, and self-inflicted by the operator's own gesture rather than by any code path a reviewer would read. Deriving `open` from the viewport makes it impossible instead of unlikely.",
       "verdict": "caught",
-      "command": "yarn vitest run --project web apps/web/src/app/(shell)/__tests__/rail-in-shell.test.tsx -t growing past the breakpoint closes the panel"
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/__tests__/rail-in-shell.test.tsx",
+        "-t",
+        "growing past the breakpoint closes the panel"
+      ]
     }
   ]
 }
