@@ -184,7 +184,11 @@ const viewSwitch = () => screen.getByRole("group", { name: messages.columnViews 
 
 /** The column's YAML projection, as text — the serialised brief, byte for byte. */
 const columnYaml = async (user: ReturnType<typeof userEvent.setup>) => {
-  await user.click(within(viewSwitch()).getByRole("button", { name: messages.columnYamlView }));
+  // SG10-b: the YAML view is reached from the action bar's `⋯` now, not from a
+  // segment of the switcher — the owner's "tuck it in as a menu item". The view,
+  // and everything these tests read off it, is unchanged.
+  await user.click(screen.getByText("⋯"));
+  await user.click(await screen.findByText(messages.editorYamlItem));
   const yaml = screen.getByTestId("column-yaml").textContent ?? "";
   await user.click(within(viewSwitch()).getByRole("button", { name: messages.columnEditorView }));
   return yaml;
@@ -242,7 +246,8 @@ describe("the layer stack exists exactly once in the tree (CC3, plan §4.6)", ()
     // switch's own group is asserted to be OUTSIDE the rail, so this cannot pass
     // by finding a second control that happens to sit in the right place.
     expect(rail().contains(viewSwitch())).toBe(false);
-    await user.click(within(viewSwitch()).getByRole("button", { name: messages.columnYamlView }));
+    await user.click(screen.getByText("⋯"));
+    await user.click(await screen.findByText(messages.editorYamlItem));
     expect(screen.getByTestId("column-yaml")).toBeTruthy();
     expect(mountedStackCount()).toBe(1);
     await user.click(within(viewSwitch()).getByRole("button", { name: messages.columnEditorView }));

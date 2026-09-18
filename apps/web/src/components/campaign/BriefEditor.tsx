@@ -133,30 +133,59 @@ import type { CampaignMode, EditorState } from "@/components/campaign/editor-sta
  * preview-only, and D61's "the rail's read-only second view" is superseded — the
  * rail has no second view any more.
  *
- * **Three positions since SG10 (SG-D13).** SG4 shipped two on purpose: the third
- * needs the validation view, and a segment wired to nothing is a surface that
- * exists, looks live and shows nothing. What SG4 shipped instead was the shape
- * that made this lane additive rather than a rewrite — the control renders by
- * mapping `COLUMN_VIEWS`, and every per-view fact is a `Record<ColumnView, …>`, so
- * adding `"validate"` to the union was a **typecheck failure** until a label, a
- * glyph and a panel existed for it. The type refused the wired-to-nothing segment
- * until the view arrived, which is exactly what `sg4.json`'s fifth mutation
- * recorded; the member below is that mutation's `after`, now shipped, so that
- * entry's before-text no longer occurs in this file (reported by SG10).
+ * **The union is what the column can SHOW. It is not what the switcher offers** —
+ * `COLUMN_VIEWS` below is that, and since SG10-b the two differ. Keep the two
+ * questions apart when editing here: adding a member means the column gains a view
+ * (and the typechecker will demand a label, a glyph and a panel for it); adding it
+ * to `COLUMN_VIEWS` means the segmented control gains a position.
+ *
+ * **SG10 added `validate` (SG-D13).** SG4 shipped this union at two members on
+ * purpose: the third needs the validation view, and a segment wired to nothing is a
+ * surface that exists, looks live and shows nothing. What SG4 shipped instead was
+ * the shape that made SG10 additive rather than a rewrite — every per-view fact is
+ * a `Record<ColumnView, …>`, so adding `"validate"` was a **typecheck failure**
+ * until a label, a glyph and a panel existed for it. The type refused the
+ * wired-to-nothing segment until the view arrived, which is what `sg4.json`'s fifth
+ * mutation recorded; the member below is that mutation's `after`, now shipped, so
+ * that entry's before-text no longer occurs in this file (reported by SG10).
  */
 type ColumnView = "editor" | "yaml" | "validate";
 
 /**
- * The positions, in the order they are offered. The control is rendered from this
- * list rather than from hand-written buttons, so a position is one entry plus the
- * records below — and the count test reads the DOM, not this array.
+ * The accessible name of each view — every view, not only the switched ones. The
+ * names are ON the buttons, the glyphs below are decoration. A `Record` and not a
+ * `switch`: see `ColumnView`.
  *
- * `validate` is LAST, and not because it is newest: the order is the order of
- * commitment. `editor` is the document being written, `yaml` is what will be sent,
- * and `validate` is the verdict on it — the segment the operator reaches when the
- * other two are done, sitting next to the toolbar verb that shares its handler.
+ * This is the TOTAL vocabulary, and being total is what it is for: the typechecker
+ * refuses a new union member until it has a name here, and the two lookups below
+ * (`isColumnView`, and the switcher's own render) both read it rather than each
+ * restating which views exist. `yaml` keeps its entry after SG10-b took it off the
+ * switcher — that entry is not leftover, it is what names the overflow-menu item's
+ * destination and what keeps a stored `"yaml"` a valid view.
  */
-const COLUMN_VIEWS: readonly ColumnView[] = ["editor", "yaml", "validate"];
+const COLUMN_VIEW_LABEL: Record<ColumnView, string> = {
+  editor: messages.columnEditorView,
+  yaml: messages.columnYamlView,
+  validate: messages.columnValidateView,
+};
+
+/**
+ * The positions the SWITCHER offers, in the order it offers them — a SUBSET of the
+ * views the column can show, which is the distinction this lane learned the hard
+ * way and the reason the two are now separate declarations.
+ *
+ * **`yaml` is deliberately not here.** The owner: *"The yaml view displays the code
+ * configuration for the creative and is only intended for importing and exporting
+ * the configuration … tuck it in as a menu item in the three-dots menu."* It is a
+ * utility, not a co-equal way of looking at the brief, and a segment beside `editor`
+ * gave it the billing of one. So it moved to the action bar's `⋯`, and SG-D13's
+ * three-position control settles at two.
+ *
+ * The column can still SHOW it (`columnPanels` renders all three, `ColumnView` still
+ * names it, a stored `"yaml"` still restores) — only the switcher stopped offering
+ * it. Nothing about the view changed; where it is reached from did.
+ */
+const COLUMN_VIEWS: readonly ColumnView[] = ["editor", "validate"];
 
 /**
  * The key is NEW, not the rail's old one (`cf:preview-rail-view`), and nothing
@@ -168,9 +197,22 @@ const COLUMN_VIEWS: readonly ColumnView[] = ["editor", "yaml", "validate"];
  */
 const COLUMN_VIEW_KEY = "cf:editor-column-view";
 
-/** A stored string is only a view if it is one of the offered positions. */
+/**
+ * A stored string is only a view if it is one the column can SHOW — which is no
+ * longer the same set as the positions the switcher offers.
+ *
+ * It reads the label record rather than `COLUMN_VIEWS`, and that is the whole point
+ * of the split: an operator who left the column on YAML, through the menu, must
+ * come back to YAML. Reading the switcher's list here would silently send them to
+ * the form instead, and would do it as a *consequence* of moving a menu item —
+ * a persistence bug with no line of persistence code in the diff.
+ *
+ * Reading the RECORD and not a second array is what stops that from drifting back:
+ * `Record<ColumnView, string>` is total by type, so a future view is accepted from
+ * storage the moment it is named, with nothing to remember.
+ */
 function isColumnView(value: unknown): value is ColumnView {
-  return COLUMN_VIEWS.includes(value as ColumnView);
+  return typeof value === "string" && Object.hasOwn(COLUMN_VIEW_LABEL, value);
 }
 
 /**
@@ -197,17 +239,15 @@ function persistColumnView(next: ColumnView): void {
 }
 
 /**
- * The accessible name of each position — the names are ON the buttons, the glyphs
- * below are decoration. A `Record` and not a `switch`: see `ColumnView`.
- */
-const COLUMN_VIEW_LABEL: Record<ColumnView, string> = {
-  editor: messages.columnEditorView,
-  yaml: messages.columnYamlView,
-  validate: messages.columnValidateView,
-};
-
-/**
- * The glyph of each position, `aria-hidden` because the button already has a name.
+ * The glyph of each view, `aria-hidden` because the button already has a name.
+ *
+ * Still `Record<ColumnView, …>` and not narrowed to `COLUMN_VIEWS`, so `yaml`'s
+ * `</>` survives its move to the menu with nothing rendering it today. Narrowing
+ * this to the switcher's subset would buy one deleted constant and give up SG4's
+ * property — that a new view cannot reach the column without the typechecker
+ * naming every per-view fact it is missing — which is the thing that made SG10 an
+ * addition rather than a rewrite. The glyph is also what the menu item would wear
+ * if the `⋯` ever grows icons.
  *
  * The eye that used to mark the rail's preview segment is NOT reused for `editor`:
  * an eye means "look at the composed creative", and this position is the brief's
@@ -1880,6 +1920,25 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
       <OverflowMenu
         label="More actions"
         items={[
+          /* SG10-b — the YAML view's door, moved here from the segmented control.
+            The owner's reason is what it IS: "the yaml view displays the code
+            configuration for the creative and is only intended for importing and
+            exporting the configuration". A utility, then — and a segment beside
+            `editor` gave it the billing of a way of looking at the brief.
+
+            FIRST in the list, and the order is not arbitrary: this is a
+            navigation and the two below it are writes, one of them destructive.
+            A view tucked under Revert is a view an operator finds by reading
+            past the button they are afraid of.
+
+            `chooseColumnView` and NOT a bare `setColumnView`. There is exactly
+            one writer of the view state and its storage, and any second writer
+            is the bug — the invariant `reveal` carries for the same reason, and
+            the one `sg4.json`'s seventh mutation records. Reached from a menu
+            instead of a segment, the flip must still PERSIST, or the operator
+            who left the column on YAML through this item comes back to the form
+            after a reload. */
+          { label: messages.editorYamlItem, onSelect: () => chooseColumnView("yaml") },
           { label: messages.editorSaveAs, onSelect: () => setSaveAsId("") },
           { label: messages.editorRevert, onSelect: handleRevert },
         ]}
@@ -2261,6 +2320,19 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
                 `COLUMN_VIEWS` rather than written out segment by segment, so
                 SG10's `validate` is an entry rather than a rewrite — and the
                 names are on the buttons, the glyphs are decoration.
+
+                **What it shows while the YAML view is up: nothing pressed.**
+                `aria-pressed={columnView === view}` is false for both positions
+                then, and that is the deliberate answer rather than the one that
+                fell out. The alternatives were to leave `editor` pressed, or to
+                fold `yaml` into `editor`'s state — and both make the control
+                state, in the one attribute a screen reader reads for it, that the
+                form is on screen when the document is. A segmented control that
+                is silently wrong about the current view is worse than one that
+                admits the current view is not among its positions; "none of these"
+                is TRUE, and it is also the reading that makes `editor` look like
+                the way back, which it is. The way back is this control: `editor`
+                is a live button in both views, and every `reveal` flips here too.
 
                 It is NOT the kit's `SegBar`: that control's props are
                 `{ index, maxVisited, issues }` — the retired wizard's walk

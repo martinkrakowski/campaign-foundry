@@ -759,6 +759,19 @@ export const editorSave = "Save";
 /** The copy verb, in the overflow (⋯): the same, under a new id. */
 export const editorSaveAs = "Save as…";
 /**
+ * SG10-b — the overflow item that opens the YAML view, which used to be a segment
+ * of the switcher. It is the only item in the `⋯` that is a navigation rather than
+ * a write, so it sits first.
+ *
+ * Named for what the view IS rather than for the act of opening it ("Show the
+ * YAML view" is the switcher's old aria-label, and it reads as an instruction in a
+ * menu of nouns-and-verbs). The owner's sentence is the definition: *"the yaml view
+ * displays the code configuration for the creative and is only intended for
+ * importing and exporting the configuration"* — so the item names the
+ * configuration, and leads with the word an operator scans for.
+ */
+export const editorYamlItem = "YAML configuration";
+/**
  * D40: the exit verb. It leaves the editor for the grid, prompting through the dirty
  * guard when there is unsaved work — the prompt the user's report asked for.
  */
