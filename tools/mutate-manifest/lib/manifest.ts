@@ -41,7 +41,30 @@ function parseMutation(raw: unknown, index: number): ManifestMutation {
     because: requireString(raw["because"], `${at}.because`),
     command: command as readonly string[],
     verdict: "caught",
+    ...parseRetired(raw["retired"], at),
   };
+}
+
+/**
+ * Retirement is a claim, so it must be argued.
+ *
+ * `retired` is the reason itself rather than a flag beside one: there is then
+ * no shape in which a retirement can exist without an argument for it. A bare
+ * `true` — the thing a hurried hand reaches for — is refused by construction,
+ * and so is an empty or whitespace-only string. That guard is the whole point:
+ * an unexplained retirement looks exactly like abandoning a test that was
+ * catching something, and the two must not be spellable the same way.
+ */
+function parseRetired(raw: unknown, at: string): { retired?: string } {
+  if (raw === undefined) return {};
+  if (typeof raw !== "string" || raw.trim() === "") {
+    throw new ManifestError(
+      `${at}.retired must be a non-empty reason string. Retiring a mutation withdraws a claim ` +
+        `the suite no longer makes, and an unexplained withdrawal is indistinguishable from ` +
+        `abandoning a test that was catching something real.`,
+    );
+  }
+  return { retired: raw };
 }
 
 export function parseManifest(text: string): Manifest {

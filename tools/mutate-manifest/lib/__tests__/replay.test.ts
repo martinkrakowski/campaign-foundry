@@ -128,6 +128,78 @@ describe("replayManifest", () => {
   });
 });
 
+describe("a retired claim", () => {
+  const retired = (): Manifest =>
+    manifest({ retired: "the rail has had no YAML view since SG4; the subject is deleted" });
+
+  test("is not run at all — no baseline, no mutation, no command", async () => {
+    const execute = vi.fn(async () => ({ exitCode: 0, stdout: "", stderr: "" }));
+    const writeFileBuffer = vi.fn(async (_p: string, _b: Buffer) => undefined);
+    const checks = await replayManifest(
+      retired(),
+      { ...deps({ exitCode: 1 }), execute, writeFileBuffer },
+      scratch(),
+    );
+    expect(checks[0]).toMatchObject({ status: "retired" });
+    expect(execute).not.toHaveBeenCalled();
+    expect(writeFileBuffer).not.toHaveBeenCalled();
+  });
+
+  test("does not fail the replay — that is the point of retiring it", async () => {
+    const checks = await replayManifest(retired(), deps({ exitCode: 1 }), scratch());
+    expect(exitCodeFor(checks)).toBe(EXIT_VERIFIED);
+  });
+
+  test("is printed with its reason, never silently dropped", async () => {
+    const text = formatChecks(
+      "W4",
+      await replayManifest(retired(), deps({ exitCode: 1 }), scratch()),
+    );
+    expect(text).toContain("RETIRED  target.ts");
+    expect(text).toContain("reason: the rail has had no YAML view since SG4");
+    expect(text).toContain("W4: 1 mutation(s) retired with a stated reason, not run.");
+  });
+
+  test("is not counted as re-run, so the summary never overstates the work", async () => {
+    const both: Manifest = {
+      ...manifest(),
+      mutations: [...manifest().mutations, ...retired().mutations],
+    };
+    const text = formatChecks("W4", await replayManifest(both, deps({ exitCode: 1 }), scratch()));
+    expect(text).toContain("W4: 1 mutation(s) re-run, every verdict reproduced.");
+    expect(text).toContain("W4: 1 mutation(s) retired with a stated reason, not run.");
+  });
+
+  test("a manifest with nothing left to run says so, instead of reporting a green replay", async () => {
+    const text = formatChecks(
+      "W4",
+      await replayManifest(retired(), deps({ exitCode: 1 }), scratch()),
+    );
+    expect(text).toContain("W4: all 1 mutation(s) are retired — this manifest now runs nothing.");
+    expect(text).not.toContain("every verdict reproduced");
+  });
+
+  test("never hides a live mutation that failed beside it", async () => {
+    const both: Manifest = {
+      ...manifest(),
+      mutations: [...manifest().mutations, ...retired().mutations],
+    };
+    const checks = await replayManifest(both, deps({ exitCode: 0 }), scratch());
+    expect(formatChecks("W4", checks)).toContain("W4: 1 of 1 mutation(s) did not reproduce.");
+    expect(exitCodeFor(checks)).toBe(EXIT_MISMATCH);
+  });
+
+  test("never hides a blocked mutation beside it either", async () => {
+    const both: Manifest = {
+      ...manifest(),
+      mutations: [...manifest().mutations, ...retired().mutations],
+    };
+    const checks = await replayManifest(both, deps({ exitCode: 1 }, { exitCode: 1 }), scratch());
+    expect(formatChecks("W4", checks)).toContain("W4: 1 of 1 mutation(s) could not be checked");
+    expect(exitCodeFor(checks)).toBe(EXIT_MISMATCH);
+  });
+});
+
 describe("formatChecks", () => {
   test("says plainly when every verdict reproduced", async () => {
     const checks = await replayManifest(manifest(), deps({ exitCode: 1 }), scratch());

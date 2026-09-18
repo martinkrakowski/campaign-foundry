@@ -66,6 +66,30 @@ describe("parseManifest", () => {
     expect(() => withMutation({ after: "x" })).toThrow(/nothing is mutated/);
   });
 
+  test("accepts a retirement that states its reason", () => {
+    expect(withMutation({ retired: "the subject was deleted in #468" })).toEqual({
+      ...good,
+      mutations: [{ ...mutation, retired: "the subject was deleted in #468" }],
+    });
+  });
+
+  test("leaves `retired` off a live mutation rather than carrying an empty one", () => {
+    expect(parse()).toEqual(good);
+    expect(Object.keys((parse() as typeof good).mutations[0]!)).not.toContain("retired");
+  });
+
+  test("refuses a retirement with no reason — a bare flag, or an empty one", () => {
+    for (const bad of [true, "", "   \n ", 1, null, {}]) {
+      expect(() => withMutation({ retired: bad })).toThrow(/must be a non-empty reason string/);
+    }
+  });
+
+  test("says why an unexplained retirement is refused, not merely that it is", () => {
+    expect(() => withMutation({ retired: true })).toThrow(
+      /indistinguishable from abandoning a test that was catching something real/,
+    );
+  });
+
   test("refuses an empty file, before, after or because", () => {
     for (const field of ["file", "before", "after", "because"] as const) {
       expect(() => withMutation({ [field]: "" })).toThrow(

@@ -119,10 +119,18 @@ jobs:
       # Replaying it is what makes the claim evidence rather than a report: two
       # seats this week stated verdicts they had never observed, one quoting
       # failure messages from a suite whose own log showed it had not started.
-      # Only manifests this change touches are replayed — each mutation runs a
+      # Only manifests this change touches are REPLAYED — each mutation runs a
       # real test command, so replaying all of them every time would grow
       # without bound. A claim is checked when it is made.
-      - name: Replay changed mutation manifests
+      #
+      # That scoping left a hole, and the same script now closes it: before any
+      # replay it checks the ANCHORS of every manifest in the directory, touched
+      # or not. A mutation's before-text must still appear exactly once in its
+      # file, because `runMutation` refuses anything else (Rule 2) — so an
+      # anchor broken by someone else's reformat makes that claim permanently
+      # unrunnable, and being diff-scoped is exactly why nothing ever said so.
+      # It is a string count over ~93 files: under a second, no build, no suite.
+      - name: Check every anchor, replay changed mutation manifests
         env:
           # On a push, origin/main IS the pushed commit, so diffing against it
           # finds nothing and every manifest is skipped in silence. The pre-push
