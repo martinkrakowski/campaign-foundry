@@ -83,7 +83,7 @@ dispatch ledger before the build pipeline.**
 | Lane | Owns | Depends on | Ships |
 |---|---|---|---|
 | **SG1** | `BriefEditor.tsx`, `editor-state.ts`, `sections/index.ts` | SG-D2, **SG-D8** | **Retire `guided`.** *Rewritten 2026-09-17: this lane used to ADD a `studio` presentation. SG-D2 makes that unnecessary — with `guided` deprecated there is one layout, so `studio` never needs to exist and **D137 dissolves with it**.* The lane removes the step cursor, the stepper nav and the guided-only gates, leaves `everything`'s single scrolling column as the editor, and rehomes `review` per SG-D8. `Presentation` collapses from a union to nothing. |
-| **SG2** | a new resizer component, `BriefEditor.tsx` row | SG1, SG-D3 | **The column resizer.** Pointer + **keyboard** (arrow keys, `role="separator"` with `aria-valuenow`), bounded so the right column cannot be dragged below its container-query threshold. |
+| **SG2** ✅ shipped (`#482`) | `(shell)/layout.tsx`, `ColumnResizeHandle.tsx`, `apps/web/package.json`, `vitest.config.ts` | SG-D3, SG-D17 | **The column resizer.** Pointer + **keyboard** (arrow keys, `role="separator"` with `aria-valuenow`), bounded by `minSize` on both panels so neither column can be collapsed. *Revised 2026-09-17: it does **not** touch `BriefEditor.tsx` — RS2 moved the rail into the shell row first, so the handle sits between `<main>` and the rail there. Its old bound (“not below the right column's container-query threshold”) is **obsolete with the container query RS2 deleted**; the bound that stands is the two `minSize` floors. It no longer depends on SG1.* |
 | ~~SG3~~ | — | — | **Superseded by `2026-09-17_template-library-modal.md`** (TM1–TM4). SG-D5 made Template a modal, not a panel, so the panel lane no longer exists. The one piece worth keeping from it: **SeedID must be _moved_, not duplicated** — `premise SG3` still guards that and stays. |
 | **SG4** | `BriefEditor.tsx`, `PreviewDock.tsx` | SG-D4 | **`Visual │ Yaml` over the middle column**, with presentation kept as a separate control. |
 | *(existing)* | — | SG1 | **SE0–SE5** (layer stack + inspector) and **TL1–TL7** (time surface) from `2026-09-16_studio-editor.md`, now unblocked on SG-D6. |
@@ -108,7 +108,7 @@ dispatch ledger before the build pipeline.**
 Shared gate: CI, which runs every step. Per the repo's rule, each lane names the fault that must turn it **red**:
 
 - **SG1** — `grep -rn '"studio"' apps/web/src` returns the union member and its guard; a draft without motion or an oversized template is **not** offered `studio`; selecting it persists under `cf:presentation` and survives reload; **it is never selected without a click**. Reverting the offer-guard makes a test fail.
-- **SG2** — a keyboard-only user can resize the column (arrow keys move it, `aria-valuenow` changes); dragging to the extreme **cannot** push the right column below the `@container(min-width:56rem)` threshold, so the resizer can never silently hide the surface it exists to size. Removing the bound makes a test fail.
+- **SG2** ✅ — a keyboard-only user can resize the column (arrow keys move it, `aria-valuenow` changes); dragging to either extreme **cannot** collapse either column, so the resizer can never silently hide the surface it exists to size. Removing either `minSize` makes a test fail. *The threshold this criterion used to name — `@container(min-width:56rem)` — no longer exists: RS2 deleted the container query, so the bound is the two `minSize` floors (rail 25%, main 50%). Below `lg` the handle is additionally not interactive at all — `display: none` for the width, `tabIndex={-1}` for the tab order, `disabled` for the keyboard — because the rail there is hidden but still mounted.*
 - **SG3** — SeedID appears **once** in the DOM. A test asserts exactly one control with that accessible name — the fault this prevents is duplicating rather than moving it.
 - **SG4** — the YAML switcher toggles the **middle** column; presentation still toggles independently; a test drives both and asserts they do not interfere.
 
@@ -133,13 +133,15 @@ Shared gate: CI, which runs every step. Per the repo's rule, each lane names the
 ! grep -rqn '"studio"' apps/web/src --include='*.ts' --include='*.tsx'
 ```
 
-```premise SG2
-# No column resizer exists. The mechanism, not the word: the probe looks for a
-# separator role, because `resize` alone matches a window listener and a comment
-# that are both already present and would make this fence pass on a tree that
-# has no resizer at all. Measured: ~40 ms.
-! grep -rqn 'role="separator"' apps/web/src --include='*.tsx'
-```
+**`premise SG2` retired: SG2 shipped.** The fence probed for the absence of
+`role="separator"` in `apps/web/src`, and `PanelResizeHandle` now renders exactly
+that between the middle column and the rail — so the fence reports the lane stale
+rather than live, which is the fence working, not failing. What replaced it is
+stronger than a grep: `column-resizer.test.tsx` drives the arrow keys and asserts
+the split actually moves (`data-panel-size` 65/35 → 55/45, `aria-valuenow` 65 →
+55), which a `role="separator"` grep cannot distinguish from a hand-rolled div
+that resizes nothing — and `sg2.json`'s first mutation swaps in precisely that
+div and shows the suite go red.
 
 ```premise SG3
 # The SeedID CONTROL exists exactly once today, under Variation Policy -> Advanced
@@ -275,4 +277,4 @@ The rail is gated on `@container(min-width:56rem)` — **measured at 1264px of v
 
 **Red fault for SG11:** at a viewport below 1264px a test reaches the **layer stack** and the **preview** through the control and asserts both render; removing either position makes it fail. And **exactly one stack stays mounted** — the §4.6 invariant must survive being reachable from two places, which is the trap this lane could introduce.
 
-**SG2 is revised** by SG-D17: it wraps `PanelResizeHandle` rather than writing pointer and keyboard handling. Its bound still stands — the resizer must not be able to drag the right panel below its own threshold.
+**SG2 is revised** by SG-D17: it wraps `PanelResizeHandle` rather than writing pointer and keyboard handling. **Shipped in `#482`.** Its bound stands in a new form: the "own threshold" it named was the container query, which RS2 deleted, so the floors are `minSize` on both panels (rail 25%, main 50%). Two consequences worth recording. **The group holds only the two resizable columns, not the left sidebar** — the library converts pointer travel into a percentage of the *group's* width while a panel renders as a percentage of what the group has left to distribute, so enclosing the 320px sidebar and the row's gaps would make the divider lag the cursor (~72px per 100px at 1280px). **And the sizes are percentages, not pixels** — v2 removed the pixel unit, so the rail's 35% is ~320px at 1280px and proportionally wider on a larger screen.
