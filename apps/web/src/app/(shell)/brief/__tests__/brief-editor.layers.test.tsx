@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeEach, vi } from "vitest";
 import { createElement, memo, useState, type ComponentType } from "react";
-import { screen, waitFor, within, fireEvent } from "@testing-library/react";
+import { screen, waitFor, within, fireEvent, cleanup } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithRun as renderWithShell, json, nextMock } from "@/__tests__/helpers";
 import { API } from "@/lib/run-context";
@@ -531,5 +531,212 @@ describe("the stack lives inside CC1/CC2's cost contract (CC3, C3)", () => {
      * commits would have had to bail, and only one of them could.
      */
     expect(formRenders.count).toBe(0);
+  });
+});
+
+/**
+ * CE1 — the creative itself as a way in to a layer, measured through the editor
+ * that ships, because the claim is about two surfaces agreeing.
+ *
+ * The regions' own behaviour is `preview-hit-regions.test.tsx`'s. What only
+ * this file can see is that **there is one selection, reached two ways**: the
+ * region and the row are handed the same `pickedLayerId` and the same
+ * `pickLayer`, so a click on the creative lights the row and a click on the row
+ * lights the region. A second selection concept would pass every component-level
+ * assertion and fail here.
+ *
+ * The fixture is an `image-html` template, because an html element's `frame` is
+ * the only DECLARED geometry in the vocabulary — every other layer's position
+ * is decided by a layout engine (`anchorFirstY` over a measured span and type
+ * size, and the logo's snap against that measured block), so none of them is
+ * hit-testable and all of them stay reachable through the list. The canonical
+ * `image-text` brief the rest of this file uses therefore has no regions at
+ * all, which is asserted below rather than assumed.
+ */
+const htmlElementBrief = {
+  schemaVersion: 1,
+  template: {
+    id: "canonical-image-html",
+    version: 1,
+    creativeType: "image-html",
+    unit: "standard-web",
+    layers: [
+      { id: "image", kind: "image" },
+      {
+        id: "html",
+        kind: "html",
+        elements: [
+          { kind: "text", text: "Hello", frame: { x: 0.1, y: 0.2, w: 0.5, h: 0.3, anchor: "top" } },
+        ],
+      },
+    ],
+  },
+  id: "layers",
+  mode: "brief",
+  targetRegion: "DE",
+  targetAudience: "a",
+  campaignMessage: "Hi",
+  products: [{ id: "alpha", name: "A", primaryColor: "#1473E6", logoPath: "a.png" }],
+  treatments: [{ id: "t1", layout: "headline-bottom" as const, tone: "bold" as const }],
+  output: { formats: ["html"], platforms: ["linkedin"] },
+};
+
+/** The region drawn over the creative — named by the raw layer id, like every control in the stack (D18). */
+const region = () =>
+  within(rail()).getByRole("button", {
+    name: "html",
+    description: messages.previewRegionDescription("HTML", "Text"),
+  });
+
+/** Mounts the html fixture and waits for the REAL frame: the regions ride it, never the placeholder. */
+const mountWithFrame = async () => {
+  await mountEditor([htmlElementBrief]);
+  await waitFor(() => expect(rail().querySelector("img")).not.toBeNull());
+};
+
+/** `/preview-frame` calls only — the network count red fault 3 is about. */
+const frameCallCount = () =>
+  vi.mocked(globalThis.fetch).mock.calls.filter(([url]) => String(url).includes("/preview-frame"))
+    .length;
+
+describe("the creative and the list are one selection (CE1)", () => {
+  test("clicking the creative lights the row — read off the rendered list, not a spy", async () => {
+    const user = userEvent.setup();
+    await mountWithFrame();
+    expect(pick("html", "HTML").getAttribute("aria-pressed")).toBe("false");
+
+    await user.click(region());
+
+    expect(pick("html", "HTML").getAttribute("aria-pressed")).toBe("true");
+    expect(region().getAttribute("aria-pressed")).toBe("true");
+  });
+
+  test("clicking the row lights the region — the list's own path is unchanged", async () => {
+    const user = userEvent.setup();
+    await mountWithFrame();
+
+    await user.click(pick("html", "HTML"));
+
+    expect(region().getAttribute("aria-pressed")).toBe("true");
+    expect(pick("html", "HTML").getAttribute("aria-pressed")).toBe("true");
+  });
+
+  /**
+   * The two paths produce the IDENTICAL state, and neither breaks the other: a
+   * pick made on the canvas is moved by a row, and a pick made on a row is
+   * moved by the canvas. A second selection concept would leave one of the two
+   * surfaces showing the stale layer here.
+   */
+  test("the two paths agree in both directions", async () => {
+    const user = userEvent.setup();
+    await mountWithFrame();
+
+    await user.click(region());
+    expect(pick("html", "HTML").getAttribute("aria-pressed")).toBe("true");
+    expect(pick("image", "Image").getAttribute("aria-pressed")).toBe("false");
+
+    // The row moves the pick the canvas made.
+    await user.click(pick("image", "Image"));
+    expect(pick("image", "Image").getAttribute("aria-pressed")).toBe("true");
+    expect(region().getAttribute("aria-pressed")).toBe("false");
+
+    // And the canvas moves the pick the row made.
+    await user.click(region());
+    expect(region().getAttribute("aria-pressed")).toBe("true");
+    expect(pick("image", "Image").getAttribute("aria-pressed")).toBe("false");
+  });
+
+  /**
+   * Red fault 3 — a click is not a document change, so it asks the route for
+   * nothing. `/preview-frame` is credit-free (D52 wires the procedural
+   * generator directly), so this is about responsiveness rather than money:
+   * re-fetching a frame because somebody selected something would be a plain
+   * regression of CC1/CC2's contract.
+   */
+  test("selecting on the canvas issues zero preview-frame calls", async () => {
+    const user = userEvent.setup();
+    await mountWithFrame();
+    const before = frameCallCount();
+    // A zero here would make the assertion below vacuous: the frame is painted,
+    // so the route HAS been asked, and what follows must add nothing.
+    expect(before).toBeGreaterThan(0);
+
+    await user.click(region());
+    await settle();
+
+    expect(frameCallCount()).toBe(before);
+    // And the painted frame is still there — "no calls" must not mean "no frame".
+    expect(rail().querySelector("img")).not.toBeNull();
+    expect(pick("html", "HTML").getAttribute("aria-pressed")).toBe("true");
+  });
+
+  /**
+   * Red fault 4 — D139: the pick is ephemeral state owned by the host. It is
+   * not a field of `EditorState`, not a byte of the brief, and not a key in
+   * `localStorage`; a remount starts with nothing picked.
+   */
+  test("a canvas pick persists nothing — a remount has no layer picked", async () => {
+    const user = userEvent.setup();
+    await mountWithFrame();
+    // Read through the Storage interface, not `Object.keys`: the suite's
+    // in-memory storage is a plain object whose own keys are its METHODS, so
+    // `Object.keys` would compare the same six names before and after and
+    // notice nothing at all.
+    const storedKeys = () =>
+      Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i)).sort();
+    const keysBefore = storedKeys();
+    // The sentinel `beforeEach` writes is in there — a snapshot that read as
+    // empty would make the comparison below true for the wrong reason.
+    expect(keysBefore).toContain("cf:brief-picked");
+
+    await user.click(region());
+    expect(pick("html", "HTML").getAttribute("aria-pressed")).toBe("true");
+    expect(storedKeys()).toEqual(keysBefore);
+
+    cleanup();
+    await mountWithFrame();
+    expect(pick("html", "HTML").getAttribute("aria-pressed")).toBe("false");
+    expect(region().getAttribute("aria-pressed")).toBe("false");
+  });
+
+  /**
+   * Red fault 5 — a click region over an image is invisible to a keyboard, so
+   * these are real `<button>`s: focusable, named, and activated by the key a
+   * button is activated by. The layer list remains the primary accessible path
+   * and is asserted to still work above; this is the additional affordance
+   * being reachable rather than mouse-only.
+   */
+  test("a keyboard user reaches the same behaviour: focus the region, press Enter", async () => {
+    const user = userEvent.setup();
+    await mountWithFrame();
+
+    region().focus();
+    expect(document.activeElement).toBe(region());
+    await user.keyboard("{Enter}");
+
+    expect(pick("html", "HTML").getAttribute("aria-pressed")).toBe("true");
+  });
+
+  /**
+   * The exclusion, through the editor: the canonical `image-text` brief the
+   * rest of this file uses declares no frames, so there is nothing over its
+   * creative to click — and the list is still the way to every one of its
+   * layers. A region that appeared here would be a hit box invented for a
+   * layer whose drawn position this side cannot know.
+   */
+  test("a template that declares no frames puts no regions over the creative", async () => {
+    const user = userEvent.setup();
+    await mountEditor();
+    await waitFor(() => expect(rail().querySelector("img")).not.toBeNull());
+
+    expect(
+      within(rail()).queryAllByRole("button", {
+        description: messages.previewRegionDescription("HTML", "Text"),
+      }),
+    ).toEqual([]);
+
+    // And the list still reaches the layers it always did.
+    await user.click(pick("accent", "Accent"));
+    expect(pick("accent", "Accent").getAttribute("aria-pressed")).toBe("true");
   });
 });

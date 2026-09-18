@@ -143,6 +143,18 @@ export interface PreviewShowcaseProps extends Omit<CreativePreviewProps, "classN
    * the frame so a re-slug of `brief.id` is not a switch of creative.
    */
   readonly identityKey?: string;
+  /**
+   * CE1 — the picked layer (D139) and the editor's own `pickLayer`, passed
+   * straight through to the frame. They are the SAME pair `LayerStack` is
+   * handed, on purpose: clicking the creative and clicking the row are one
+   * selection reached two ways, and a second selection concept here would be
+   * the defect. Both are absent for every caller that is not the editor's rail.
+   *
+   * `onSelectLayer` must be referentially stable — this dock is `memo`-wrapped,
+   * and an inline arrow would defeat that boundary for every keystroke (#469).
+   */
+  readonly selectedLayerId?: string | null;
+  readonly onSelectLayer?: (id: string) => void;
 }
 
 /** The product colour the preview was drawn in, as a chip. Token rule aside: `--c`. */
@@ -317,6 +329,8 @@ function PreviewDockImpl(props: PreviewShowcaseProps): ReactNode {
         atSec={hasMotion ? committedSec : undefined}
         spec={spec}
         identityKey={props.identityKey}
+        selectedLayerId={props.selectedLayerId}
+        onSelectLayer={props.onSelectLayer}
         className="block h-auto w-full"
       />
       {/* Owner's decision, 2026-09-17: in the rail the tape's "Playhead" is the

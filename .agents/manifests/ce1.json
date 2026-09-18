@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "lane": "CE1",
+  "mutations": [
+    {
+      "file": "apps/web/src/components/campaign/PreviewHitRegions.tsx",
+      "before": "    left: `${frame.x * 100}%`,\n    top: `${frame.y * 100}%`,",
+      "after": "    left: `${frame.y * 100}%`,\n    top: `${frame.x * 100}%`,",
+      "because": "The mapping's axes transposed — the one arithmetic error this lane can actually make, and the one that hides best. A hit region is `frame` restated as percentages of the image box; swapping which fraction feeds `left` and which feeds `top` is invisible on any square frame and on any frame whose x happens to equal its y, which is exactly what a hand-written fixture tends to be. Every region still renders, still carries the layer's name, still reports the right layer when clicked, and still costs no fetch — the lane's headline behaviour is completely unharmed. It is wrong only in WHERE the operator has to click, which no assertion about selection can see. So the mapping is pinned axis for axis on a frame whose four fractions are all different, in `hitRegionStyle`'s own suite and again on the rendered buttons.",
+      "verdict": "caught",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/preview-hit-regions.test.tsx",
+        "-t",
+        "the axes do not commute"
+      ]
+    },
+    {
+      "file": "apps/web/src/components/campaign/PreviewHitRegions.tsx",
+      "before": "    .filter((layer) => layer.kind === \"html\" && layer.enabled !== false)",
+      "after": "    .filter((layer) => layer.kind === \"html\")",
+      "because": "The hit region outliving the thing it is a region for. `enabled: false` is not a style: X9's rule is that a disabled layer renders exactly what the same template WITHOUT that layer renders, so the compositor draws nothing in that box at all. Dropping the term reads like tidying a redundant condition — the layer is still in the template, its elements still declare frames, and the editor still lists it — and it produces an invisible button over bare canvas that selects a layer nothing on screen shows. The gesture even 'works': the row lights up. It is caught only by asking what a DISABLED layer declares, which is why the exclusion has a test of its own rather than being described in a comment.",
+      "verdict": "caught",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/preview-hit-regions.test.tsx",
+        "-t",
+        "a disabled html layer is not drawn"
+      ]
+    },
+    {
+      "file": "apps/web/src/components/campaign/PreviewHitRegions.tsx",
+      "before": "              onClick={() => onSelectLayer(region.layerId)}",
+      "after": "              onClick={() => onSelectLayer(`${region.layerId}-${region.elementIndex}`)}",
+      "because": "The second selection concept, in the shape someone would actually introduce it: an element is a finer thing than a layer, so reporting the element rather than its layer looks like more precision, not less. Under it the canvas keeps its own selection perfectly — the clicked region goes pressed, a second click moves it, nothing throws — and the list below simply never lights up, because no row is named `html-0`. That is precisely the divergence the lane exists to prevent: one selection reached two ways, or two selections that agree until they do not. No component-level assertion can see it (the callback IS called, with a plausible id); only the editor, where the region and the row are handed the same `pickedLayerId`, can say the two surfaces agree.",
+      "verdict": "caught",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.layers.test.tsx",
+        "-t",
+        "clicking the creative lights the row"
+      ]
+    }
+  ]
+}
