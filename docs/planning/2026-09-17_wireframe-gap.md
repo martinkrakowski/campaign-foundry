@@ -1,7 +1,7 @@
 # The wireframe gap — what the owner drew, and what the editor actually is
 
 **Date:** 2026-09-17 · **Revised:** 2026-09-17 (owner stamped SG-D1, SG-D2, SG-D4, SG-D5; SG-D6 dissolved; SG-D8 raised)
-**Status:** **one decision open — SG-D7.** §8.4 answered by the owner 2026-09-17. SG-D8 stamped; SG-D9 answered then partly superseded; SG-D10–SG-D14 recorded from the owner's run-gate correction (§8). CC3 dispatched; TS1 merged as `#469`.
+**Status:** **one decision open — SG-D7.** §8.4 and §9 answered by the owner 2026-09-17. SG-D8 stamped; SG-D9 answered then partly superseded; SG-D10–SG-D14 recorded from the owner's run-gate correction (§8). CC3 dispatched; TS1 merged as `#469`.
 **Verified against:** `origin/main` at `4876aa31`.
 **Source:** the owner's annotated wireframe of the campaign editor (two images, 2026-09-17), read against the shipped DOM of `/brief/new` captured from the owner's own browser the same day.
 **Related:** `2026-09-16_studio-editor.md` (D137–D140, SE0–SE5, TL1–TL7 — **drafted, never dispatched**), `2026-09-16_creative-first-chrome.md` (D141–D145, CC1 shipped), `2026-09-16_rail-timeline-surface.md` (TS1, in PR #469, **unmerged**), `DESIGN.md` §3 shell anatomy.
@@ -236,3 +236,43 @@ Reference equality is sufficient and needs no fingerprint, no hash and no flag. 
 | **SG10** | the validation view | SG-D12–SG-D14, SG5 | **The validation view** — every error including the ones shown inline, each row a control that reveals its field, plus the refresh. Reached by `validate` on the segmented control **and** by pressing `Validate`. |
 
 **Order.** **SG9 ‖ SG10** (disjoint: one is the toolbar, one is a new view), both after **SG1** retires `guided`.
+
+---
+
+## 9. Panel access at every width (owner, 2026-09-17)
+
+**STAMPED: all three panels must be reachable at every width.** This settles the narrow-width regression CC3 declared and Qodo independently found on #474.
+
+### 9.1 What was wrong
+
+The rail is gated on `@container(min-width:56rem)` — **measured at 1264px of viewport**, because the container is `viewport − 368px`. CC3 made the rail the only home for the layer stack (§4.6's one-stack invariant), so below that width there was **no layer editing at all**. `MobileMenu.tsx:9` already shares `SidebarContent`, so the **left** panel has a narrow-width home; the **right** panel never had one.
+
+### 9.2 What hexagen does, and what we take from it
+
+`~/Projects/hexagen-monaco/apps/web/features/manifest-generation/ManifestPreview.tsx:100` states its own rule:
+
+> *"Desktop (md+) shows the resizable YAML column; below md it's hidden and the YAML lives in the mobile overlay, so the PanelGroup is desktop-only."*
+
+| Width | hexagen |
+|---|---|
+| md+ | `PanelGroup` + `ManifestResizeHandle` |
+| below md | panel `md:hidden`; content moves to a full-screen overlay opened by a **dedicated floating button** (`fixed bottom-16 right-4`, `aria-controls`) |
+
+**Taken: the principle** — the same content, relocated rather than removed, with an explicit control.
+**Not taken: the floating button.** Two reasons: this editor's action bar already occupies `sticky bottom-6`, so a floating toggle contends for that corner; and with three panels it means three floating controls.
+
+| ID | Decision |
+|---|---|
+| **SG-D16** | **Below the breakpoint, the segmented control carries the panels.** SG-D13 already gives the middle column `editor │ yaml │ validate`; below the breakpoint it also offers the left and right panels. One control, one tap, already in the design, no new pattern, no corner contention. The hamburger keeps the **route tabs** — it does not become a menu of menus. |
+| **SG-D17** | **The resizer is `react-resizable-panels`.** hexagen ships `^2.1.4`; `PanelResizeHandle` is already a focusable `role="separator"` and keyboard-resizable, which **is** SG2's acceptance criterion — so the keyboard contract comes from the library rather than from us. **This is a new dependency and is called out as one.** |
+| **SG-D18** | **CC3 (#474) merges with the gap, and SG11 repairs it next.** The regression is real, recorded, bounded to <1264px, and short-lived. Shipping the layers panel at desktop width is worth more than holding it; **SG11 is dispatched before any further middle-column work.** |
+
+### 9.3 Lanes
+
+| Lane | Owns | Depends on | Ships |
+|---|---|---|---|
+| **SG11** | the segmented control, `MobileMenu.tsx` | SG-D16 | **Panel access below the breakpoint.** The left and right panels become positions on the segmented control; the right panel's content is shared the way `SidebarContent` already is, so one definition serves both widths. |
+
+**Red fault for SG11:** at a viewport below 1264px a test reaches the **layer stack** and the **preview** through the control and asserts both render; removing either position makes it fail. And **exactly one stack stays mounted** — the §4.6 invariant must survive being reachable from two places, which is the trap this lane could introduce.
+
+**SG2 is revised** by SG-D17: it wraps `PanelResizeHandle` rather than writing pointer and keyboard handling. Its bound still stands — the resizer must not be able to drag the right panel below its own threshold.
