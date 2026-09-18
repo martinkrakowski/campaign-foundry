@@ -4,6 +4,7 @@ import { vi, type Mock } from "vitest";
 import { API, RunProvider, type Asset } from "@/lib/run-context";
 import { EditorDirtyProvider } from "@/lib/editor-dirty-context";
 import { EditorPanelsProvider, EditorPanelsOutlet } from "@/lib/editor-panels-context";
+import { MobileRailProvider } from "@/lib/mobile-rail-context";
 import { templateFromCanonical } from "@campaignfoundry/CampaignOrchestration/brief-template";
 import { DEFAULT_CAMPAIGN_TYPE } from "@campaignfoundry/CampaignOrchestration/campaign-types";
 
@@ -39,7 +40,17 @@ export const ShellProviders = ({ children }: { children: ReactNode }) =>
       null,
       // The outlet stands in for the sidebar: an editor publishes its mode chooser and
       // policy panel there, so a test that renders only the editor must still place them.
-      createElement(EditorPanelsProvider, null, children, createElement(EditorPanelsOutlet)),
+      createElement(
+        EditorPanelsProvider,
+        null,
+        // SG11 — inside the panels provider, as in `(shell)/layout.tsx`: the mobile
+        // menu's entry to the rail reads both, so a test rendering `Header` (which
+        // renders `MobileMenu`) needs this one too. Both providers throw outside
+        // themselves rather than defaulting, which is why it belongs here and not
+        // behind an optional read — a context that quietly defaults hides exactly
+        // the wiring bug it would be papering over.
+        createElement(MobileRailProvider, null, children, createElement(EditorPanelsOutlet)),
+      ),
     ),
   );
 

@@ -1,13 +1,15 @@
 "use client";
 
-import { type ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 import { usePathname } from "next/navigation";
+import { Eyebrow } from "@/components/ui";
 import { Panel, PanelGroup } from "react-resizable-panels";
 import { RunProvider, useRun } from "@/lib/run-context";
 import { RAIL_VIEWPORT_MIN_PX, useViewportMinWidth } from "@/lib/use-viewport-min-width";
 import { EditorDirtyProvider } from "@/lib/editor-dirty-context";
 import { CreateCampaignProvider } from "@/lib/create-campaign-context";
 import { EditorPanelsProvider, useEditorPanels } from "@/lib/editor-panels-context";
+import { MobileRailProvider, useMobileRail } from "@/lib/mobile-rail-context";
 import { Header } from "@/components/shell/Header";
 import { Sidebar } from "@/components/shell/Sidebar";
 import { SidebarShell } from "@/components/shell/SidebarShell";
@@ -36,22 +38,29 @@ export default function ShellLayout({ children }: { children: ReactNode }) {
             the guard so every entry point can ask (D67) and then open the dialog. */}
         <CreateCampaignProvider>
           <EditorPanelsProvider>
-            <div className="flex h-full flex-col">
-              <Header />
-              <div className="relative z-0 flex flex-1 gap-4 overflow-hidden bg-background p-4">
-                <Sidebar />
-                <EditorColumns showOrchestrator={showOrchestrator}>{children}</EditorColumns>
+            {/* SG11 — whether the rail has been summoned below `lg`. Inside the
+                panels provider because the overlay reads the same slot the shell
+                column does, and above `Header` because the control that opens it
+                is in the mobile menu. */}
+            <MobileRailProvider>
+              <div className="flex h-full flex-col">
+                <Header />
+                <div className="relative z-0 flex flex-1 gap-4 overflow-hidden bg-background p-4">
+                  <Sidebar />
+                  <EditorColumns showOrchestrator={showOrchestrator}>{children}</EditorColumns>
+                </div>
               </div>
-            </div>
-            {/* The shell overlays share this layer: the picker closes before the
-              create dialog opens (F22 — two DialogShells at one layer stack two
-              scrims and two key handlers). Each renders null while closed, so
-              exactly one `[role=dialog]` is ever in the document — the template
-              library's detail view is a swap of its own body, not a fourth
-              entry here (T6). */}
-            <BriefPicker />
-            <CreateCampaignDialog />
-            <TemplateLibrary />
+              <MobileRailOverlay />
+              {/* The shell overlays share this layer: the picker closes before the
+                create dialog opens (F22 — two DialogShells at one layer stack two
+                scrims and two key handlers). Each renders null while closed, so
+                exactly one `[role=dialog]` is ever in the document — the template
+                library's detail view is a swap of its own body, not a fourth
+                entry here (T6). */}
+              <BriefPicker />
+              <CreateCampaignDialog />
+              <TemplateLibrary />
+            </MobileRailProvider>
           </EditorPanelsProvider>
         </CreateCampaignProvider>
       </EditorDirtyProvider>
@@ -145,6 +154,23 @@ function EditorColumns({
   // the handle's interactivity: one number for the CSS that stops the paint and
   // the script that stops the gesture, or the handle is live while invisible.
   const canResize = useViewportMinWidth(RAIL_VIEWPORT_MIN_PX);
+  const { open: railSummoned } = useMobileRail();
+
+  /**
+   * **SG11 — while the rail is summoned below `lg`, the overlay renders it and
+   * this column does not.** `rail` holds rendered ELEMENTS, so two sites
+   * rendering the slot means two mounts: every `id` inside the rail duplicated,
+   * the `aria-controls` pairs it builds broken, and two composed frames where
+   * §4.6 allows one. The two conditions are therefore complements —
+   * `MobileRailProvider` forces `open` false at and above `lg`, so this column
+   * owns the rail on desktop and the overlay owns it when summoned, never both.
+   *
+   * Default state is unchanged: `railSummoned` is false until the operator asks
+   * from the mobile menu, so below `lg` the rail is still mounted here and still
+   * hidden by `hidden lg:flex` — which is what RS2's "hidden, never unmounted"
+   * and CC2's "mounts but nothing fetches" contracts pin, both untouched.
+   */
+  const showRailColumn = rail !== null && !railSummoned;
 
   return (
     <PanelGroup direction="horizontal" className="min-w-0 flex-1">
@@ -162,7 +188,7 @@ function EditorColumns({
         <div className="relative flex-1 overflow-auto rounded-xl">{children}</div>
         <TelemetrySlot showOrchestrator={showOrchestrator} />
       </Panel>
-      {rail === null ? null : (
+      {!showRailColumn ? null : (
         <>
           <ColumnResizeHandle enabled={canResize} />
           {/* `hidden lg:flex` on the PANEL, beside the same gate on the aside inside
@@ -193,6 +219,83 @@ function EditorColumns({
         </>
       )}
     </PanelGroup>
+  );
+}
+
+/**
+ * The preview rail, full-screen, below the `lg` breakpoint (SG11).
+ *
+ * The owner asked that **all three panels stay reachable** and that the
+ * hamburger be the way to each: *"For mobile and tablet views the hamburger menu
+ * should allow user to navigate to each panel."* The route tabs and the left
+ * panels already surfaced in `MobileMenu` (`SidebarContent` is shared with the
+ * desktop `Sidebar`, so they cannot drift); the rail was the one with no path at
+ * all, because `SidebarShell` is `hidden lg:flex`.
+ *
+ * **A full-screen panel rather than a section inside the menu's scroller.** The
+ * rail carries the layer stack, the timeline and the preview; at 400px wide,
+ * nested inside a menu that is itself a scrolling dialog, it would be a scroller
+ * in a scroller. "Navigate to" is better served by arriving somewhere.
+ *
+ * **It renders the same slot the shell column renders, never a copy** — see
+ * `EditorColumns`. `MobileRailProvider` keeps the two mutually exclusive.
+ *
+ * Its own dialog semantics are deliberately light: this is a panel the operator
+ * summoned, not a modal asking anything, so it takes `role="dialog"` with a name
+ * and an Escape handler but does **not** set `aria-modal` or trap focus — F22's
+ * "exactly one `aria-modal` at a time" invariant belongs to `DialogShell`, and
+ * claiming it here would make this the second one whenever the create dialog is
+ * also up.
+ */
+function MobileRailOverlay(): ReactNode {
+  const { rail } = useEditorPanels();
+  const { open, closeRail } = useMobileRail();
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") closeRail();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, closeRail]);
+
+  // `rail === null` renders nothing at all, heading included: a chrome-only
+  // panel over an empty slot is the 256px empty strip in a new place.
+  if (!open || rail === null) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-[70] flex flex-col bg-background lg:hidden"
+      role="dialog"
+      aria-label={rail.label}
+    >
+      <div className="flex h-14 shrink-0 items-center justify-between border-b border-border px-4">
+        <Eyebrow>{rail.label}</Eyebrow>
+        <button
+          type="button"
+          onClick={closeRail}
+          aria-label={`Close ${rail.label}`}
+          className="text-text-muted transition-colors hover:text-text-emphasis"
+        >
+          <svg
+            className="h-6 w-6"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+            aria-hidden
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M6 18L18 6M6 6l12 12"
+            />
+          </svg>
+        </button>
+      </div>
+      <div className="flex flex-1 flex-col gap-3 overflow-y-auto p-4">{rail.content}</div>
+    </div>
   );
 }
 
