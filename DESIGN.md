@@ -549,7 +549,7 @@ a string on the way to YAML; that is not a reason to render a text box. Ask what
 | The field is… | Control | In this app |
 | --- | --- | --- |
 | a bounded count, where the ceiling matters | **Slider** + readout | `variation.count`, bounded by `axisProductSize` — the editor cannot author a count the planner will refuse |
-| a small bounded integer, often optional | **Stepper** (`allowUnset`) | `minDistance` (0…active axes, "Auto (1)"), `coverage.perProduct` / `perRatio` ("No floor") |
+| a small bounded integer, often optional | **Stepper** (`allowUnset`) | `minDistance` (1…active axes, "Auto (1)"), `coverage.perProduct` / `perRatio` ("No floor") |
 | a set drawn from a fixed vocabulary | **Toggle chips** (or **AxisCard** + `CreativeGlyph` when the choice is visual) | background, palette shift, formats, platforms, motion kinds (chips); layout, tone (cards) |
 | an opaque value that is either automatic or exact | **Input + an action** | `variation.seed` — *Pick* fills one, *Clear* returns to automatic |
 | free text | **Input** | ids, region, audience, messages |

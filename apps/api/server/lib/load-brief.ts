@@ -584,6 +584,26 @@ function validateVariation(value: unknown, capabilities: Capabilities): void {
   }
   if (value.minDistance !== undefined) {
     assertFiniteIntegerAtLeast(value.minDistance, "variation.minDistance", 0);
+    // SL-D6 — a stored `minDistance: 0` is READ AS 1, not refused.
+    //
+    // 1 is the lowest distance the planner will honour (`VariationPolicy.vo.ts`):
+    // below it two variants may occupy the same point in the axis space, so the
+    // run yields duplicate creatives. But a `minDistance: 0` document was legal
+    // to write until today, and refusing one here does not surface as an error
+    // the operator can act on — `FsBriefStore.listBriefs` catches a parse failure
+    // and `console.warn`s the file out of the listing, so the campaign would
+    // simply VANISH from the picker, with no way to open it and fix the field.
+    // Clamping keeps the document loadable and costs nothing real: 0 never meant
+    // anything an operator asked for, and 1 is exactly what an ABSENT
+    // `minDistance` has always meant, so this reads the field as the default
+    // rather than inventing a value.
+    //
+    // Written onto the record, not onto a temporary — `parseBrief` returns this
+    // same record as the `CampaignBrief` (as `validateTimeline` does for its own
+    // defaults). The editor therefore shows Min distance 1, and the next Save
+    // patches `variation.minDistance: 1` into the YAML (`patchBriefYaml` diffs
+    // the on-disk 0 against this 1), so the document migrates itself once.
+    if (value.minDistance === 0) value.minDistance = 1;
   }
   if (value.coverage !== undefined) {
     validateCoverage(value.coverage);

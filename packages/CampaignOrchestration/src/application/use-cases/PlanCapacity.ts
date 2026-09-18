@@ -66,12 +66,25 @@ export function enumerateAxes(policy: VariationPolicy): Axes[] {
   return out;
 }
 
+/**
+ * Two points conflict when they are closer than the requested distance — never
+ * closer than **one** axis, whatever the caller asks for (SL-D6). `DISTANCE_AXES`
+ * names every axis `enumerateAxes` varies, so Hamming 0 means *the same point*:
+ * a search that admitted it would pick the same combination again and again.
+ *
+ * Unfloored at 0 this predicate is constantly `false`, so `exhaustiveAccept`'s
+ * `fits` accepts everything and its greedy returns `order[0]` `count` times —
+ * measured at the ceiling as **1 distinct of 120**. Its twin in the random draw
+ * is `meetsMinDistance` (`PlanVariationsUseCase.use-case.ts`), floored the same
+ * way; flooring either alone leaves the other search degenerate, so the two
+ * floors are one rule written at the two places the search actually asks.
+ */
 export function conflicts(a: Axes, b: Axes, minDistance: number): boolean {
   let distance = 0;
   for (const axis of DISTANCE_AXES) {
     if ((a as Variant)[axis] !== (b as Variant)[axis]) distance += 1;
   }
-  return distance < minDistance;
+  return distance < Math.max(1, minDistance);
 }
 
 /** No two points differing in a single axis can both be chosen, so at most N / (largest axis). */

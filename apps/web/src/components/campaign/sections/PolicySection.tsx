@@ -416,9 +416,13 @@ export function PolicySection({
             error={errors.minDistance}
             hint={`How many axes any two creatives must differ in — up to ${maxMinDistance(state)}, the active axes`}
           >
+            {/* SL-D6: the floor is 1, not 0 — at 0 two creatives may come out
+                identical, and the planner refuses the policy. `allowUnset` still
+                steps below it to "Auto (1)", which is the same number by another
+                name, so nothing an operator could reach is lost. */}
             <Stepper
               aria-label="Min distance"
-              min={0}
+              min={1}
               max={maxMinDistance(state)}
               value={state.variation.minDistance}
               invalid={Boolean(errors.minDistance)}

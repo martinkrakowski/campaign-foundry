@@ -231,12 +231,22 @@ function hamming(a: Variant, b: Variant): number {
   return distance;
 }
 
+/**
+ * The random draw's acceptance test, floored at one axis (SL-D6). `DISTANCE_AXES`
+ * names every axis `drawAxes` varies, so Hamming 0 means *the same point*: at an
+ * unfloored 0 the draw samples **with replacement** and `count = axisProductSize`
+ * stops meaning "every combination" — measured 83 distinct of 120. The floor is
+ * the invariant, not the bound: `VariationPolicy.fromBrief` refuses a policy
+ * below 1, and this says the search would refuse it anyway. Its twin on the
+ * exhaustive path is `conflicts` (`PlanCapacity.ts`) — see the note there.
+ */
 function meetsMinDistance(
   candidate: Variant,
   accepted: readonly Variant[],
   minDistance: number,
 ): boolean {
-  return accepted.every((variant) => hamming(candidate, variant) >= minDistance);
+  const floor = Math.max(1, minDistance);
+  return accepted.every((variant) => hamming(candidate, variant) >= floor);
 }
 
 function countBy<T>(items: readonly T[], pred: (item: T) => boolean): number {

@@ -120,6 +120,15 @@ describe("conflicts / lineBound", () => {
     expect(conflicts(a, b, 1)).toBe(false);
   });
 
+  test("a requested distance below 1 is floored: a point always conflicts with itself (SL-D6)", () => {
+    const [a, b] = enumerateAxes(tight(8, 2));
+    // Unfloored, `distance < 0` is false for every pair and the predicate is a
+    // constant `false` — which is what turns the exhaustive greedy degenerate.
+    expect(conflicts(a, a, 0)).toBe(true);
+    // The floor raises 0 to 1 and no further: distinct points still fit.
+    expect(conflicts(a, b, 0)).toBe(false);
+  });
+
   test("the line bound divides the space by its largest axis", () => {
     const policy = tight(8, 2);
     expect(lineBound(enumerateAxes(policy), policy)).toBe(8); // 24 / 3 palettes
@@ -233,6 +242,36 @@ describe("exhaustiveAccept", () => {
     expect(exhaustiveAccept(space, policy, "tight", noNeeds)).toEqual(
       exhaustiveAccept(space, policy, "tight", noNeeds),
     );
+  });
+
+  /**
+   * SL-D6, the half of the floor that lives on the exhaustive path.
+   *
+   * `VariationPolicy.fromBrief` now refuses `minDistance` below 1, so this policy
+   * is built at 1 and lowered by hand — exactly the shape the floor exists to
+   * survive: a policy object that reached the search carrying a distance the
+   * search must not honour. The distinction matters because `exhaustiveAccept` is
+   * the load-bearing path at the ceiling (the 3 × count random budget cannot fill
+   * a full space), so a floor applied only in `meetsMinDistance` leaves THIS
+   * search reading 0, where `conflicts` is constantly false, `fits` accepts
+   * everything, and the greedy hands back `order[0]` `count` times.
+   *
+   * Asserting the distinct COUNT rather than "no duplicates adjacent" is what
+   * separates the two: a run that repeats one point still returns `count` rows.
+   */
+  test("a policy that slipped through at 0 still yields distinct points, never one repeated", () => {
+    const honest = tight(24, 1);
+    const space = enumerateAxes(honest);
+    expect(space).toHaveLength(24);
+    const slipped: VariationPolicy = { ...honest, minDistance: 0 };
+
+    const chosen = exhaustiveAccept(space, slipped, "tight", noNeeds);
+    expect(chosen).toHaveLength(24);
+    const point = (axes: Axes): string =>
+      JSON.stringify([axes.productId, axes.layout, axes.tone, axes.paletteShift]);
+    // The whole space, once each — not 24 copies of `order[0]`.
+    expect(new Set(chosen.map(point)).size).toBe(24);
+    expect(new Set(chosen.map(point))).toEqual(new Set(space.map(point)));
   });
 });
 
