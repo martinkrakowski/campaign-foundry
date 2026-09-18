@@ -145,15 +145,19 @@ describe("axisProductSize", () => {
     );
   });
 
-  test("a mixed brief keeps every ratio and adds the still slot", () => {
+  test("a mixed brief carries motion only at the ratios its platforms package it for", () => {
     const mixed = valid({
       formats: ["static", "motion"],
       platforms: ["instagram-feed", "instagram-reel"],
       motion: ["ken-burns-in", "ken-burns-out"],
       duration: [4, 6],
     });
-    // 2 kinds × 2 durations + 1 still = 5 on the motion axis, and all three ratios
-    expect(axisProductSize(mixed)).toBe(2 * 3 * 2 * 2 * 1 * 3 * 5);
+    // Three ratios are kept, but only instagram-reel's 9:16 packages motion:
+    // 9:16 carries 2 kinds × 2 durations + 1 still = 5, while 1:1 and 16:9 carry
+    // one still each — 5 + 1 + 1 = 7 slots per base combination, not 3 × 5 = 15.
+    // Multiplying the motion factor across every ratio claimed a ceiling the
+    // planner's enumerator never produces, and `count` is clamped to it.
+    expect(axisProductSize(mixed)).toBe(2 * 7 * 2 * 2 * 1 * 3);
   });
 
   test("unknown platform ids and a motion format with no kinds do not collapse it to zero", () => {

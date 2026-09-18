@@ -323,20 +323,41 @@ export class VariationPolicy {
         ),
       );
     }
-    // A mixed plan adds exactly one still slot per base combination — the still
-    // carries no duration, so it is not multiplied by |duration|. The anchor
-    // axis multiplies only when the brief carries it (D57): absent means
-    // derived from `layout`, which adds no new combination.
+    // Slots one base combination yields, summed over the ratios — NOT a single
+    // motion factor multiplied across every ratio. `enumerateAxes` draws motion
+    // only where `motionRatios` says the requested platforms package it, so a
+    // ratio outside that set carries exactly one still and nothing else: the
+    // clip it would otherwise need can be packaged nowhere. A mixed plan adds
+    // that one still per base combination at its motion ratios too — the still
+    // carries no duration, so it is not multiplied by |duration|.
+    //
+    // Multiplying across every ratio over-counted a mixed plan (SG-D7 measured
+    // 48 against the enumerator's 32 on a three-ratio brief whose platforms
+    // package motion at one). `count` is clamped to this number, so the
+    // over-count made the count slider's own maximum unplannable.
+    //
+    // Motion-only and static-only are unmoved: a motion-only brief's `ratios`
+    // are already narrowed to `motionRatios` above, so every term is the motion
+    // factor, and a static brief's every term is 1.
+    const ratioSlots = ratios.reduce(
+      (total, ratio) =>
+        total +
+        (motionEnabled && motionRatios.includes(ratio)
+          ? motion.length * duration.length + (mixStatic ? 1 : 0)
+          : 1),
+      0,
+    );
+    // The anchor axis multiplies only when the brief carries it (D57): absent
+    // means derived from `layout`, which adds no new combination.
     const axisProductSize =
       productIds.length *
-      ratios.length *
+      ratioSlots *
       layout.length *
       tone.length *
       backgroundSource.length *
       paletteShift.length *
       Math.max(1, headline.length) *
-      Math.max(1, anchor.length) *
-      (motionEnabled ? motion.length * duration.length + (mixStatic ? 1 : 0) : 1);
+      Math.max(1, anchor.length);
 
     const policyHash = hashPolicy(
       {
