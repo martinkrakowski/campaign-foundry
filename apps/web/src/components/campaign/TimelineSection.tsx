@@ -8,6 +8,7 @@ import {
   addBeatBlockedBy,
   approvedHeadlineTexts,
   asCopyTimeline,
+  canSerializeTimeline,
   timelineDurations,
   MAX_WEIGHT,
   MIN_DWELL_SEC,
@@ -33,6 +34,14 @@ import {
  * render from the current duration axis. The floor can be breached by narrowing that axis
  * with every control still enabled, so detection cannot live in the add path alone. What
  * the editor guarantees is detection plus refusal to run (D7/D11) — not prevention.
+ *
+ * The third is SG6′, added later: the panel says when the beats it is collecting will
+ * not reach the file. `CopySection` renders it on `mode === "variation"` alone, while
+ * `toBrief` writes `copy.timeline` on `canSerializeTimeline` and a non-empty list — so
+ * before this line an operator could author a sequence, watch `validate.ts` check its
+ * weights, save, and find the block absent with nothing having said so. The notice reads
+ * the projection's OWN predicate rather than restating its conditions, so it cannot drift
+ * from what `toBrief` does; the sentence below it is chosen by which condition is unmet.
  */
 export function TimelineSection({
   state,
@@ -55,6 +64,10 @@ export function TimelineSection({
   // wording — so it describes and invalidates the weight stepper alone. The prohibited
   // terms warning is the only message about the text, and describes the text input.
   const uid = useId();
+  // SG6′: the projection's own gate, not a copy of its conditions — a rule restated here
+  // would go stale the day `toBrief`'s rule changes and this one does not. An empty
+  // sequence is "no timeline" rather than a dropped one, so the count is part of the gate.
+  const dropped = beats.length > 0 && !canSerializeTimeline(state);
 
   return (
     <fieldset className="mt-4 space-y-2 border-t border-border pt-3">
@@ -62,6 +75,20 @@ export function TimelineSection({
       <p className="text-[11px] text-text-muted">
         {beats.length === 0 ? messages.timelineEmpty : messages.timelineHelp}
       </p>
+
+      {/* SG6′: the drop is not silent. Muted and a status, like `modeDroppedVideo` — the
+          beats are kept, the draft is valid and Save still takes it; the sentence says
+          what will not be in the file and which control puts it back. The mode condition
+          is not among them: `CopySection` renders this panel only in Randomized, so with
+          the panel on screen the unmet condition is Video or the headline pool, and
+          naming the wrong section is worse than naming neither. */}
+      {dropped ? (
+        <p role="status" className="text-[11px] text-text-muted">
+          {state.formats.includes("motion")
+            ? messages.timelineDroppedHeadlinePool
+            : messages.timelineDroppedNoVideo}
+        </p>
+      ) : null}
 
       {beats.length > 0 ? (
         <ol className="space-y-2">
