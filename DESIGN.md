@@ -410,15 +410,22 @@ Skeletal by design — patterns to extend, not a library.
 - **StatusLine** (L1.3) — `role="status"`, progressive sentence that updates as the brief is
   filled in: *New brief — fill Identity, Copy, Products and Output to make it runnable* →
   *Almost there — fill Products to make it runnable* → *Ready — Save to keep it, or press
-  Generate in the top bar to run it* → *Saved — press Generate in the top bar to make
-  ${briefId}*. Refusal sentence on Save with errors.
-- **The verb model (D35/D40, amends UE-D3).** The editor's bar is *Cancel · Save · ⋯*
-  (*Save as…* and *Revert* behind the overflow). *Apply to run* is retired — it named an
-  implementation detail of "the shell needs a brief to run", and every persist path already
-  committed it. Run-without-write survives on the **Generate** side: while the editor is
-  mounted and its on-screen draft differs from the shell's brief, Generate asks
-  *Run this draft · Save and run · Cancel* — the three-way **replaces** the dirty guard's
-  prompt for the whole gesture, so any path meets exactly one question. *Cancel* leaves the
+  Validate to check it first* → *Saved — press Validate, then Generate, to make
+  ${briefId}*. Refusal sentence on Save with errors. The sentences name **Validate**
+  because that is the verb in the bar's slot until the document has validated clean
+  (SG-D11); they used to name "Generate in the top bar", which SG-D10 emptied.
+- **The verb model (D35/D40, amends UE-D3; the run slot per SG-D10–SG-D12/SG-D22).** The
+  editor's bar is *Cancel · Save · ⋯ · (Validate | Generate)* (*Save as…* and *Revert*
+  behind the overflow). *Apply to run* is retired — it named an implementation detail of
+  "the shell needs a brief to run", and every persist path already committed it.
+  Run-without-write survives on the **Generate** side, now by construction rather than by
+  a question: the editor's Generate hands `execute` the on-screen projection as its target,
+  so a brief that has never touched disk is still runnable and running it writes nothing.
+  D35's three-way (*Run this draft · Save and run · Cancel*) is therefore **gone** — it
+  existed because a Generate outside the editor could not know which of two briefs to run,
+  and there is only one now. Generate opens a credit-spending confirm (the grid toolbar's
+  pattern, `CommandBar`), and that confirm **replaces** the dirty guard's prompt for the
+  whole gesture, so any path meets exactly one question. *Cancel* leaves the
   editor for the grid through the dirty guard; *Revert* keeps the destructive meaning,
   confirms first through the same `confirmReplace` every other replace path uses, and does
   not fight the autosave (the recovery copy is rewritten with the reverted state, or purged
@@ -498,14 +505,27 @@ for 2 products. No AI image calls.* The planner's own vocabulary (`axisProductSi
 `genaiCalls`, `feasible`) never reaches the screen.
 
 **Nothing is disabled for being invalid.** Pressing a primary verb is how a user asks what is
-wrong, and a dead button cannot answer. Save, Save as… and Generate stay live; an invalid draft is
-answered by revealing every error, saying the refusal in the status line, and scrolling to the
-first problem. Only work in flight (`saving`) disables a control.
+wrong, and a dead button cannot answer. Save, Save as…, Validate and Generate stay live; an
+invalid draft is answered by revealing every error, saying the refusal in the status line, and
+scrolling to the first problem. Only work in flight (`saving`) disables a control.
 
+**One slot, two verbs — and still never a dead button (SG-D11, refining D3).** The rule above
+used to read "Generate is never disabled", and `Header.tsx` cited it. Generate is **gated by
+validation** now (SG-D15): it renders only while the stored validation snapshot is still the
+`state` on screen, and **Validate** stands in its place otherwise. This is **not** a reversal
+of D3 and needs no superseding decision — D3's promise is that the operator never faces a
+control that sits dead, and the slot keeps that promise exactly. What changes is which verb is
+offered, never whether one is. Validate is not disabled either: pressing it on an invalid draft
+reveals every error, speaks the count and scrolls to the first problem, which is D3's own
+answer-out-loud shape. The snapshot is taken **only** by pressing Validate — arriving at a view
+never takes it, because the gate records operator consent before spending GenAI credits, not
+computability. It is keyed on the `state` reference, never on `toBrief(state)`: the projection
+drops and narrows on the way out, so an edit that breaks the document can leave it identical.
+The snapshot is client-local and ephemeral — a reload clears it.
 
 **Status feedback.** Anything that changes state the user cannot see from where they are
-says so in a `role="status"` line next to the control — *"Saved — Generate in the top bar
-will run "clip""*. Success is `text-success`, a refusal `text-error`.
+says so in a `role="status"` line next to the control — *"Saved — press Validate, then
+Generate, to make "clip""*. Success is `text-success`, a refusal `text-error`.
 
 **Capability gating.** When the host cannot do something (no ffmpeg → no motion) the control
 is disabled *and the reason is shown*, quoting the probe. A brief that declares the thing

@@ -24,7 +24,7 @@ import {
   initialEditorState,
   saveDraftToStorage,
 } from "@/components/campaign/editor-state";
-import { sectionOrder, SECTION_TITLES } from "@/components/campaign/sections";
+import { sectionOrder } from "@/components/campaign/sections";
 import { BriefEditor } from "@/components/campaign/BriefEditor";
 import NewBriefPage from "../new/page";
 import { Header } from "@/components/shell/Header";
@@ -1046,50 +1046,11 @@ describe("BriefPage — data flow", () => {
     expect((logos[0] as HTMLInputElement).value).toBe("assets/inputs/copy/a.png");
   });
 
-  /**
-   * Corrected for D35: "Apply to run" is retired. The capability it carried — running
-   * a brief that was never written to disk — moves to Generate's three-way question,
-   * so this is now the proof that a NEW, NEVER-SAVED brief stays runnable (retiring
-   * Apply without it would have made a brand-new brief unrunnable — a regression,
-   * not a simplification), and that running it writes nothing.
-   */
-  test("a new, never-saved brief is runnable: Generate's 'Run this draft' POSTs the on-screen draft with zero writes", async () => {
-    const user = userEvent.setup();
-    const calls = routes({});
-    renderWithRun(
-      <>
-        <Header />
-        <NewEditor />
-      </>,
-    );
-    await waitFor(() =>
-      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
-    );
-    await fillValidDraft(user, "fresh");
-
-    // The editor publishes the differing draft; Generate asks instead of running the
-    // previous campaign silently.
-    await user.click(screen.getByRole("button", { name: "Generate" }));
-    const dialog = await screen.findByRole("dialog", { name: messages.generateDraftTitle });
-    // Exactly one prompt: the guard's "Unsaved edits" is nowhere behind the question.
-    expect(screen.queryByRole("dialog", { name: "Unsaved edits" })).toBeNull();
-
-    await user.click(
-      within(dialog).getByRole("button", { name: new RegExp(`^${messages.generateDraftRunThis}`) }),
-    );
-
-    // The on-screen draft was POSTed — not the shell's (empty) brief...
-    const generatePost = await waitFor(() => {
-      const call = calls.find((c) => c.url.includes("/campaigns/generate"));
-      expect(call).toBeTruthy();
-      return call!;
-    });
-    expect((generatePost.body as { id?: string }).id).toBe("fresh");
-    // ...and zero brief writes left the page: run-without-write.
-    expect(calls.filter((c) => c.method !== "GET" && c.url.includes("/campaigns/briefs"))).toEqual(
-      [],
-    );
-  });
+  // SG9 — "a new, never-saved brief is runnable with zero writes" did NOT go away with
+  // D35's three-way question that used to carry it; it MOVED, to the SG9 describe below,
+  // where the run verb now lives. The capability is the reason "Apply to run" could be
+  // retired at all, so it is still asserted end to end — fill, Validate, Generate, one
+  // POST of the on-screen draft, zero brief writes.
 
   test("arriving on the blank route lets go of the campaign being left", async () => {
     routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
@@ -3721,65 +3682,223 @@ describe("BriefPage — the Layout section (T7)", () => {
   });
 });
 
-describe("BriefPage — Generate's three-way question (D35)", () => {
+describe("BriefPage — the run slot: Validate → Generate (SG9)", () => {
   beforeEach(() => {
     localStorage.clear();
     localStorage.setItem("cf:brief-picked", "1");
   });
 
   /**
-   * The real editor and the real header, mounted together — the D35 question is a
-   * contract between the two, so neither a mock handoff nor a mock editor can prove
-   * it. While the editor's on-screen draft differs from the shell's brief, Generate
-   * must ask; while it does not, Generate must behave exactly as it always has.
+   * SG-D10 put the run verb in the editor's OWN action bar, so these tests mount the
+   * editor alone — there is no header verb left for the gesture to depend on. The
+   * header is still rendered in a couple of them, and only to prove the absence.
    */
-  const EditorAndHeader = ({ id = "camp" }: { id?: string }) => (
-    <>
-      <Header />
-      <Editor id={id} />
-    </>
-  );
+  const bar = () => screen.getByTestId("action-bar");
+  const slot = (name: string) => within(bar()).queryByRole("button", { name });
+  const confirm = () => screen.getByRole("dialog", { name: messages.generateConfirmTitle });
+  const generateCalls = (calls: readonly { url: string }[]) =>
+    calls.filter((c) => c.url.includes("/campaigns/generate"));
 
-  test("Generate from a dirty editor asks the three-way, one prompt, and 'Run this draft' never runs the previous campaign", async () => {
+  test("a clean loaded brief offers Validate, never Generate — arriving does not validate", async () => {
+    const calls = routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
+    renderWithRun(<Editor id="camp" />);
+    await waitForEditorReady();
+
+    // SG-D11: one slot, two verbs. The document here is CLEAN and loaded — there is
+    // nothing to fix — and Generate is still absent, because the gate records that the
+    // operator LOOKED, not that the document is computably valid (SG-D20, red fault 3).
+    expect(slot(messages.editorValidate)).not.toBeNull();
+    expect(slot(messages.generate)).toBeNull();
+    expect(generateCalls(calls)).toEqual([]);
+  });
+
+  test("Validate opens the gate, and Generate's confirm runs the brief on screen", async () => {
     const user = userEvent.setup();
     const calls = routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
-    renderWithRun(<EditorAndHeader />);
-    await waitFor(() =>
-      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"),
-    );
+    renderWithRun(<Editor id="camp" />);
+    await waitForEditorReady();
 
-    // Edit the loaded brief: the shell still holds camp, the screen holds camp+edit.
-    await user.type(screen.getByLabelText("Headline"), " edited");
+    await user.click(slot(messages.editorValidate) as HTMLElement);
 
-    await user.click(screen.getByRole("button", { name: "Generate" }));
-    const dialog = await screen.findByRole("dialog", { name: messages.generateDraftTitle });
-    // Exactly one prompt on this path: the guard's "Unsaved edits" is nowhere.
+    // SG-D12/SG-D15: the snapshot is this `state`, so the verb flips.
+    expect(slot(messages.generate)).not.toBeNull();
+    expect(slot(messages.editorValidate)).toBeNull();
+    // Nothing ran yet — the gate is consent to ASK, not the run.
+    expect(generateCalls(calls)).toEqual([]);
+
+    // SG-D10: the credit-spending confirm, the half of `CommandBar`'s pattern that
+    // makes its run verb safe. The press opens it and spends nothing.
+    await user.click(slot(messages.generate) as HTMLElement);
+    expect(confirm()).toBeTruthy();
+    expect(generateCalls(calls)).toEqual([]);
+    // And exactly one prompt: the dirty guard is not stacked behind it (DESIGN.md §5).
     expect(screen.queryByRole("dialog", { name: "Unsaved edits" })).toBeNull();
 
-    await user.click(
-      within(dialog).getByRole("button", { name: new RegExp(`^${messages.generateDraftRunThis}`) }),
-    );
+    await user.click(within(confirm()).getByRole("button", { name: messages.generate }));
 
-    // The ON-SCREEN draft was POSTed — never the shell's previous campaign.
-    const generatePost = await waitFor(() => {
-      const call = calls.find((c) => c.url.includes("/campaigns/generate"));
+    // SG-D22: the POST carries the projection that was validated, never the shell's
+    // idea of the current brief — and the gesture ends on the grid, where the run is.
+    const post = await waitFor(() => {
+      const call = generateCalls(calls)[0];
       expect(call).toBeTruthy();
-      return call!;
+      return call as { body?: { id?: string } };
     });
-    expect((generatePost.body as { campaignMessage?: string }).campaignMessage).toBe("Hi edited");
-    // run-without-write: no brief write left the page
-    expect(calls.filter((c) => c.method !== "GET" && c.url.includes("/campaigns/briefs"))).toEqual(
-      [],
-    );
+    expect(post.body?.id).toBe("camp");
     expect(nextMock().router.push).toHaveBeenCalledWith("/grid");
   });
 
-  test("a reload at /brief/new applies no brief — Generate must not run the last one", async () => {
+  test("Cancel on the confirm runs nothing — the question is the whole gesture's consent", async () => {
+    const user = userEvent.setup();
+    const calls = routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
+    renderWithRun(<Editor id="camp" />);
+    await waitForEditorReady();
+    await user.click(slot(messages.editorValidate) as HTMLElement);
+    await user.click(slot(messages.generate) as HTMLElement);
+
+    await user.click(within(confirm()).getByRole("button", { name: messages.confirmCancel }));
+
+    expect(screen.queryByRole("dialog", { name: messages.generateConfirmTitle })).toBeNull();
+    expect(generateCalls(calls)).toEqual([]);
+    expect(nextMock().router.push).not.toHaveBeenCalled();
+    // A refused confirm changes nothing at all: the gate is still open, so the verb
+    // the user pressed is still the verb on screen.
+    expect(slot(messages.generate)).not.toBeNull();
+  });
+
+  test("Escape answers the confirm as a cancel — nothing runs (DESIGN §7)", async () => {
+    const user = userEvent.setup();
+    const calls = routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
+    renderWithRun(<Editor id="camp" />);
+    await waitForEditorReady();
+    await user.click(slot(messages.editorValidate) as HTMLElement);
+    await user.click(slot(messages.generate) as HTMLElement);
+
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    expect(screen.queryByRole("dialog", { name: messages.generateConfirmTitle })).toBeNull();
+    expect(generateCalls(calls)).toEqual([]);
+    expect(nextMock().router.push).not.toHaveBeenCalled();
+    // As with Cancel: a dismissed question changes nothing, so the gate is still open
+    // and the verb the user pressed is still the verb on screen.
+    expect(slot(messages.generate)).not.toBeNull();
+  });
+
+  test("an edit after a validation takes Generate away and brings Validate back (SG-D15)", async () => {
+    const user = userEvent.setup();
+    routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
+    renderWithRun(<Editor id="camp" />);
+    await waitForEditorReady();
+    await user.click(slot(messages.editorValidate) as HTMLElement);
+    expect(slot(messages.generate)).not.toBeNull();
+
+    // The owner's requirement, verbatim: "any updates to the editor will hide the
+    // generate button (after a prior validation) and surface the validate button."
+    await user.type(screen.getByLabelText("Headline"), "!");
+
+    expect(slot(messages.generate)).toBeNull();
+    expect(slot(messages.editorValidate)).not.toBeNull();
+  });
+
+  test("switching the column view does not open the gate — only pressing Validate does", async () => {
+    const user = userEvent.setup();
+    routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
+    renderWithRun(<Editor id="camp" />);
+    await waitForEditorReady();
+
+    // Red fault 3, in the form SG9 can express it: the `validate` position of the
+    // switch is SG10's, so the reachable navigations are the two SG4 shipped. Neither
+    // may take a snapshot — a gate that fires on a tab click is not a consent step.
+    const views = screen.getByRole("group", { name: messages.columnViews });
+    await user.click(within(views).getByRole("button", { name: messages.columnYamlView }));
+    expect(slot(messages.generate)).toBeNull();
+    await user.click(within(views).getByRole("button", { name: messages.columnEditorView }));
+    expect(slot(messages.generate)).toBeNull();
+    expect(slot(messages.editorValidate)).not.toBeNull();
+  });
+
+  test("an action the reducer refuses does not invalidate a good validation (§8.4)", async () => {
+    const user = userEvent.setup();
+    routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
+    renderWithRun(<Editor id="camp" />);
+    await waitForEditorReady();
+    await user.click(slot(messages.editorValidate) as HTMLElement);
+    expect(slot(messages.generate)).not.toBeNull();
+
+    // A flip to the mode that is already selected changed nothing, and the reducer
+    // says so by staying identity-equal (`editor-state.ts` `setMode`, ":1159"). A
+    // rejected gesture must therefore NOT cost the operator their validation — which
+    // is the property reference equality gives for free and a boolean flag would have
+    // to remember. Making that path return a fresh object turns this red.
+    await user.click(screen.getByText("Classic"));
+
+    expect(slot(messages.generate)).not.toBeNull();
+    expect(slot(messages.editorValidate)).toBeNull();
+  });
+
+  test("Validate on an invalid draft refuses out loud and leaves the gate shut", async () => {
+    const user = userEvent.setup();
+    Element.prototype.scrollIntoView = vi.fn();
+    const calls = routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
+    renderWithRun(<Editor id="camp" />);
+    await waitForEditorReady();
+
+    // Copy blocks an empty headline. (Campaign Name is readOnly on a loaded brief, so
+    // the headline is the field that can carry the invalidity here.)
+    await user.clear(screen.getByLabelText("Headline"));
+    await user.click(slot(messages.editorValidate) as HTMLElement);
+
+    // D3's surviving half (SG-D11): the verb is never disabled, so the press answers —
+    // every error shown, the count spoken, and the first blocking section revealed with
+    // focus on it, exactly the landing Save's refusal gives (H2).
+    expect(
+      screen.getAllByRole("status").some((el) => el.textContent?.startsWith("Not saved yet —")),
+    ).toBe(true);
+    expect(document.activeElement).toBe(document.getElementById("copy"));
+    // And the money: the gate stayed shut, so no press can reach a run.
+    expect(slot(messages.generate)).toBeNull();
+    expect(slot(messages.editorValidate)).not.toBeNull();
+    expect(generateCalls(calls)).toEqual([]);
+  });
+
+  test("a never-saved brief is still runnable, and running it writes nothing", async () => {
+    const user = userEvent.setup();
+    const calls = routes({});
+    renderWithRun(<NewEditor />);
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
+    );
+    await fillValidDraft(user, "fresh");
+
+    // The capability D35 preserved when "Apply to run" was retired: a brand-new brief
+    // that has never touched disk must still be runnable, or retiring that verb was a
+    // regression. SG-D22's second form keeps it — `execute(draftBrief)` runs the
+    // projection the gate validated, with no write and no commit to the shell (D37's
+    // `cf:brief` is a last-opened POINTER, so committing an id with no file would send
+    // a later reload to M3's "no such brief").
+    await user.click(slot(messages.editorValidate) as HTMLElement);
+    await user.click(slot(messages.generate) as HTMLElement);
+    await user.click(within(confirm()).getByRole("button", { name: messages.generate }));
+
+    const post = await waitFor(() => {
+      const call = generateCalls(calls)[0];
+      expect(call).toBeTruthy();
+      return call as { body?: { id?: string } };
+    });
+    expect(post.body?.id).toBe("fresh");
+    // Zero brief writes left the page: run-without-write.
+    expect(calls.filter((c) => c.method !== "GET" && c.url.includes("/campaigns/briefs"))).toEqual(
+      [],
+    );
+  });
+
+  test("the blank route can run nothing, and the header offers no way around it (D37)", async () => {
     // D37 keeps `cf:brief` as a *last-opened* record so the bare /brief route can hand
     // the visitor back. It is a pointer, not an application: arriving at the blank
-    // route released the campaign. The provider restores that record on mount, and
-    // provider effects run AFTER their children's — so the release must still win, or
-    // Generate here would spend image-generation credits on the previous brief.
+    // route released the campaign. The header used to be where that mattered — its
+    // Generate would otherwise have spent credits on the previous brief — and with the
+    // verb gone the invariant is pinned where the verb now is: the blank route's draft
+    // is empty, so the slot offers Validate, the press refuses, and the header carries
+    // no run verb to reach past it.
     const user = userEvent.setup();
     localStorage.setItem("cf:brief", JSON.stringify(brief("camp")));
     const calls = routes({});
@@ -3791,139 +3910,14 @@ describe("BriefPage — Generate's three-way question (D35)", () => {
     );
     await waitFor(() => expect(screen.getByLabelText("Campaign Name")).toBeTruthy());
 
-    await user.click(screen.getByRole("button", { name: "Generate" }));
-
-    expect(screen.getByText(messages.generateNoBrief)).toBeTruthy();
-    expect(calls.filter((c) => c.url.includes("/campaigns/generate"))).toEqual([]);
-  });
-
-  test("'Save and run' writes, then runs what was written", async () => {
-    const user = userEvent.setup();
-    const calls = routes({
-      list: () => json({ briefs: [entry("camp", "r1")] }),
-      // the real PUT stores and returns the parsed body it was sent
-      put: (_url, body) => json({ file: "camp.yaml", brief: body, revision: "r2" }),
-    });
-    renderWithRun(<EditorAndHeader />);
-    await waitFor(() =>
-      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"),
-    );
-
-    await user.type(screen.getByLabelText("Headline"), " edited");
-    await user.click(screen.getByRole("button", { name: "Generate" }));
-    const dialog = await screen.findByRole("dialog", { name: messages.generateDraftTitle });
-    await user.click(
-      within(dialog).getByRole("button", { name: new RegExp(`^${messages.generateDraftSaveRun}`) }),
-    );
-
-    // The write went through the editor's own save path (conditional PUT with the
-    // load-time revision), and the run carried the brief as the server stored it.
-    const generatePost = await waitFor(() => {
-      const call = calls.find((c) => c.url.includes("/campaigns/generate"));
-      expect(call).toBeTruthy();
-      return call!;
-    });
-    expect((generatePost.body as { campaignMessage?: string }).campaignMessage).toBe("Hi edited");
-    const put = calls.find((c) => c.method === "PUT");
-    expect(put?.url).toContain("revision=r1");
-    expect(nextMock().router.push).toHaveBeenCalledWith("/grid");
-  });
-
-  test("'Run this draft' on an invalid draft refuses: no run charged, the section named, the editor reveals it", async () => {
-    const user = userEvent.setup();
-    Element.prototype.scrollIntoView = vi.fn();
-    const calls = routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
-    renderWithRun(<EditorAndHeader />);
-    await waitFor(() =>
-      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"),
-    );
-
-    // Differ AND be invalid: edit the headline, then clear it — Copy blocks an empty
-    // headline, and the draft still differs from the shell's committed brief.
-    // (Campaign Name is readOnly on a loaded brief, so the headline is the field
-    // that can carry the invalidity here.)
-    await user.type(screen.getByLabelText("Headline"), " edited");
-    await user.clear(screen.getByLabelText("Headline"));
-
-    await user.click(screen.getByRole("button", { name: "Generate" }));
-    const dialog = await screen.findByRole("dialog", { name: messages.generateDraftTitle });
-    await user.click(
-      within(dialog).getByRole("button", { name: new RegExp(`^${messages.generateDraftRunThis}`) }),
-    );
-
-    // The money: pressing with a half-filled brief must never start the pipeline —
-    // the server would refuse it and the user would be charged anyway.
-    expect(calls.filter((c) => c.url.includes("/campaigns/generate"))).toEqual([]);
-    expect(nextMock().router.push).not.toHaveBeenCalled();
-
-    // The refusal names the first blocking section (GB-D3: the press answers — the
-    // verb is never disabled)…
-    await waitFor(() =>
-      expect(
-        screen
-          .getAllByRole("status")
-          .some((el) => el.textContent === messages.generateDraftBlocked(SECTION_TITLES.copy)),
-      ).toBe(true),
-    );
-    // …the editor's own refusal spoke too (attempted → the status sentence refuses)…
     expect(
-      screen.getAllByRole("status").some((el) => el.textContent.startsWith("Not saved yet —")),
-    ).toBe(true);
-    // …and the reveal is real: the user is sent to the blocking section, with focus
-    // on it — the same landing Save's refusal gives (H2).
-    expect(document.activeElement).toBe(document.getElementById("copy"));
-  });
+      within(screen.getByRole("banner")).queryByRole("button", { name: "Generate" }),
+    ).toBeNull();
+    expect(slot(messages.generate)).toBeNull();
+    await user.click(slot(messages.editorValidate) as HTMLElement);
 
-  test("'Save and run' on an invalid draft inherits the refusal through the save path", async () => {
-    const user = userEvent.setup();
-    Element.prototype.scrollIntoView = vi.fn();
-    const calls = routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
-    renderWithRun(<EditorAndHeader />);
-    await waitFor(() =>
-      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"),
-    );
-
-    await user.type(screen.getByLabelText("Headline"), " edited");
-    await user.clear(screen.getByLabelText("Headline"));
-
-    await user.click(screen.getByRole("button", { name: "Generate" }));
-    const dialog = await screen.findByRole("dialog", { name: messages.generateDraftTitle });
-    await user.click(
-      within(dialog).getByRole("button", { name: new RegExp(`^${messages.generateDraftSaveRun}`) }),
-    );
-
-    // The save path's own `refuseInvalid` gates it — nothing is written, nothing
-    // runs, and the editor has already bounced to Copy with the refusal on screen;
-    // the header carries no gate of its own to disagree with.
-    await waitFor(() =>
-      expect(
-        screen.getAllByRole("status").some((el) => el.textContent.startsWith("Not saved yet —")),
-      ).toBe(true),
-    );
-    expect(writes(calls)).toEqual([]);
-    expect(calls.filter((c) => c.url.includes("/campaigns/generate"))).toEqual([]);
-    expect(document.activeElement).toBe(document.getElementById("copy"));
-  });
-
-  test("Generate from a clean editor runs the committed brief without asking", async () => {
-    const user = userEvent.setup();
-    const calls = routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
-    renderWithRun(<EditorAndHeader />);
-    await waitFor(() =>
-      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"),
-    );
-
-    // No edits: the draft matches the shell brief, so there is no question to ask.
-    await user.click(screen.getByRole("button", { name: "Generate" }));
-
-    expect(screen.queryByRole("dialog", { name: messages.generateDraftTitle })).toBeNull();
-    expect(screen.queryByRole("dialog", { name: "Unsaved edits" })).toBeNull();
-    const generatePost = await waitFor(() => {
-      const call = calls.find((c) => c.url.includes("/campaigns/generate"));
-      expect(call).toBeTruthy();
-      return call!;
-    });
-    expect((generatePost.body as { id?: string }).id).toBe("camp");
+    expect(slot(messages.generate)).toBeNull();
+    expect(generateCalls(calls)).toEqual([]);
   });
 });
 
