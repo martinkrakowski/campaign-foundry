@@ -614,6 +614,13 @@ export const previewNeedsProductId =
  * the middle column, so the name had to move with it or the control would
  * announce the wrong surface to a screen reader. The rail is preview-only now
  * and has no switcher to label.
+ *
+ * Review proposed "Column view selector" and it is declined on §6.3 (no jargon):
+ * "column" and "selector" are words for the app's own layout and widgets, not for
+ * anything the operator has a name for — this string is read aloud, and what a
+ * screen-reader user needs is the surface it controls. "Editor views" is also the
+ * one-word edit to the name it replaced ("Preview views"), which is what keeps the
+ * lineage legible to a returning operator.
  */
 export const columnViews = "Editor views";
 /** The first segment: the brief's form, which is what the column normally is. */

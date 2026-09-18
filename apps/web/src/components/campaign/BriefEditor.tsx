@@ -1070,12 +1070,36 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
       // `pendingReveal` plus its layout effect) and re-adding it would restore the
       // machinery for one case. A flip to the view already showing is React's own
       // no-op — the state is identity-equal, so nothing re-renders.
-      flushSync(() => setColumnView("editor"));
+      //
+      // `chooseColumnView` and NOT a bare `setColumnView`, so the flip PERSISTS.
+      // This is the whole of it: a reveal fires because there is an error to fix —
+      // a refused Save, or an ErrorStrip chip — and it lands the operator on the
+      // form. A bare setter would leave the remembered view saying `yaml`, so the
+      // reload they make after fixing nothing returns them to a read-only document
+      // with no form, still holding the error they were sent here to correct. The
+      // stranding is the reason; the invariant is the guard: storage names the view
+      // the column is SHOWING, there is exactly one function that writes both, and
+      // any second writer is the bug. Recorded by `sg4.json`'s seventh mutation,
+      // which is this line with the setter back.
+      //
+      // Not gated on `columnView !== "editor"`, deliberately. The gate would put
+      // `columnView` in this callback's dependency list, so `reveal` — and through
+      // it `outlineActivate` — would change identity on every flip and re-fire the
+      // topPanels effect, writing context for a view the outline does not read. A
+      // redundant `setItem("editor")` costs one synchronous store write; a context
+      // republish costs a shell render. Do not "optimize" this back.
+      flushSync(() => chooseColumnView("editor"));
       const host = section === MOTION_ERROR_KEY ? MOTION_HOST_SECTION : section;
       revealSection(section);
       if (focus) focusSection(host);
     },
-    [focusSection],
+    // `chooseColumnView` is a component-scope `useCallback` (`:435`), so it is
+    // named here even though its own list is empty and its identity is in fact
+    // stable. `setColumnView` and `persistColumnView` are NOT named, and that is
+    // the same rule rather than an exception: a `useState` setter and a
+    // module-scope function are stable by construction, so listing them would pad
+    // this list with values that can never change and bury the ones that can.
+    [focusSection, chooseColumnView],
   );
 
   /** The outline's rows crawl their section into view and hand it focus (W4.2). */
@@ -1857,100 +1881,163 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
    * D43's count at exactly one composed frame in both positions: in `yaml` the
    * whole form (`LayoutSection` included) is out of the tree, and the rail still
    * holds the only frame.
+   *
+   * **`useMemo`, and the dependency list is load-bearing — measured, not assumed.**
+   * Review proposed this and the reflex answer was "a list of every value it reads
+   * buys nothing". The reflex was wrong, and the numbers are why it is written down
+   * here rather than argued again: counting entries into the section components
+   * across one look-preserving keystroke, the form renders **13 times without this
+   * memo and 7 with it**, and for a gesture that changes nothing this record reads
+   * (opening the headline pool, which flips `poolDrawerOpen` alone) it is **12
+   * without and 0 with**. Mount is 27 against 21.
+   *
+   * The saving is NOT a `memo` boundary — nothing here is `memo`-wrapped, and the
+   * two components that are (`PreviewDock`, `TimelineTape`) live in the rail and
+   * never receive this object; their counts are 0 across that keystroke either way.
+   * It is React's same-element bailout: `{columnPanels[columnView]}` below renders
+   * this record's entry directly, so when the record survives a render the element
+   * is `===` what was there before and the subtree is not reconciled at all. A
+   * keystroke commits more than one render of this component — the reducer's own,
+   * and then the one that follows `setDirty`'s context write (`:681`, a context
+   * this component consumes at `:377`) — and only the first has new inputs. Without
+   * the memo the whole form re-rendered for the second one as well.
+   *
+   * **A missing dependency here does not show up as a slow form. It shows up as a
+   * STALE one**, silently: sections drawn from an older `state`, which no render
+   * count can see, because a stale subtree re-renders LESS rather than more (the
+   * same warning `railSlot` carries, for the same reason — the react-hooks lint
+   * plugin is not wired into this project's eslint config, so this list is
+   * maintained by hand). So every value the two panels read is named. `warnings.copy`
+   * and `draftBrief` are both themselves memoised on `state` and would be covered by
+   * it, and they are listed anyway because the repo's rule is to name what you read
+   * rather than to reason about what implies it. `sectionErrorsVisible` is a fresh
+   * closure per render and is deliberately NOT listed: it reads `visibleErrors` and
+   * nothing else, which IS listed — so naming the closure instead would make this
+   * memo miss on every render and quietly turn it back into the literal it replaced.
+   * `dispatch` comes from `useEditorHistory` and is stable today — the 7 above is the
+   * proof; a future hook that returned a fresh one per render would disable this memo
+   * without breaking anything visible, which is what the render count in
+   * `brief-editor.playhead.test.tsx` is there to catch.
    */
-  const columnPanels: Record<ColumnView, ReactNode> = {
-    /* SG1 — the sections, in the one scrolling column the editor now is. This is
-      the `everything` stack unchanged: `identity`, `copy`, `products`,
-      `treatments` (brief mode only), `template`, `layout` and `output`, each
-      where it already was. `policy` is the one section that has never been here —
-      it renders as the sidebar accordion published above, which is where
-      `everything` always put it. SG4 moved this block under the `editor` key and
-      changed nothing inside it. */
-    editor: (
-      <div className="space-y-8">
-        <div>
-          <IdentitySection
-            state={state}
-            dispatch={dispatch}
-            errors={sectionErrorsVisible("identity")}
-          />
-        </div>
-        <div>
-          <CopySection
-            state={state}
-            dispatch={dispatch}
-            errors={sectionErrorsVisible("copy")}
-            warnings={warnings.copy}
-            onOpenPool={() => setPoolDrawerOpen(true)}
-          />
-        </div>
-        <div>
-          <ProductsSection
-            state={state}
-            dispatch={dispatch}
-            errors={sectionErrorsVisible("products")}
-            onChooseFromBin={setAssetPickerKey}
-          />
-        </div>
-        <div>
-          {state.mode === "brief" ? (
-            <TreatmentsSection
+  const columnPanels: Record<ColumnView, ReactNode> = useMemo(
+    () => ({
+      /* SG1 — the sections, in the one scrolling column the editor now is. This is
+        the `everything` stack unchanged: `identity`, `copy`, `products`,
+        `treatments` (brief mode only), `template`, `layout` and `output`, each
+        where it already was. `policy` is the one section that has never been here —
+        it renders as the sidebar accordion published above, which is where
+        `everything` always put it. SG4 moved this block under the `editor` key and
+        changed nothing inside it. */
+      editor: (
+        <div className="space-y-8">
+          <div>
+            <IdentitySection
               state={state}
               dispatch={dispatch}
-              errors={sectionErrorsVisible("treatments")}
+              errors={sectionErrorsVisible("identity")}
             />
-          ) : null}
+          </div>
+          <div>
+            <CopySection
+              state={state}
+              dispatch={dispatch}
+              errors={sectionErrorsVisible("copy")}
+              warnings={warnings.copy}
+              onOpenPool={() => setPoolDrawerOpen(true)}
+            />
+          </div>
+          <div>
+            <ProductsSection
+              state={state}
+              dispatch={dispatch}
+              errors={sectionErrorsVisible("products")}
+              onChooseFromBin={setAssetPickerKey}
+            />
+          </div>
+          <div>
+            {state.mode === "brief" ? (
+              <TreatmentsSection
+                state={state}
+                dispatch={dispatch}
+                errors={sectionErrorsVisible("treatments")}
+              />
+            ) : null}
+          </div>
+          {/* The layer list (L5): the offer is the boundary's own (D124). */}
+          <TemplateSection
+            state={state}
+            dispatch={dispatch}
+            errors={sectionErrorsVisible("template")}
+          />
+          {/* The template view (T7): the type block and NO frame. This is the
+              half of D43's one-composed-frame invariant that lives in the
+              column: the rail holds the only composed preview, so `preview`
+              must not be passed here. It is not a leftover of D43's original
+              "Guided-only" clause — D141 dropped that — the frame the Layout
+              STEP carried went with the step, and adding one back here would
+              put a second composed frame in the tree. */}
+          <LayoutSection
+            state={state}
+            dispatch={dispatch}
+            errors={sectionErrorsVisible("layout")}
+          />
+          <OutputSection
+            state={state}
+            dispatch={dispatch}
+            errors={{
+              ...sectionErrorsVisible("output"),
+              ...sectionErrorsVisible("motion"),
+            }}
+          />
         </div>
-        {/* The layer list (L5): the offer is the boundary's own (D124). */}
-        <TemplateSection
-          state={state}
-          dispatch={dispatch}
-          errors={sectionErrorsVisible("template")}
-        />
-        {/* The template view (T7): the type block and NO frame. This is the
-            half of D43's one-composed-frame invariant that lives in the
-            column: the rail holds the only composed preview, so `preview`
-            must not be passed here. It is not a leftover of D43's original
-            "Guided-only" clause — D141 dropped that — the frame the Layout
-            STEP carried went with the step, and adding one back here would
-            put a second composed frame in the tree. */}
-        <LayoutSection state={state} dispatch={dispatch} errors={sectionErrorsVisible("layout")} />
-        <OutputSection
-          state={state}
-          dispatch={dispatch}
-          errors={{
-            ...sectionErrorsVisible("output"),
-            ...sectionErrorsVisible("motion"),
-          }}
-        />
-      </div>
-    ),
-    /* SG-D4 — the document, as the pipeline reads it.
+      ),
+      /* SG-D4 — the document, as the pipeline reads it.
 
-      Real YAML, because that is what the label promises and what the save path
-      writes: a JSON body under a `</>`-YAML name showed a format the pipeline
-      never reads (CodeRabbit, PR #174).
+        Real YAML, because that is what the label promises and what the save path
+        writes: a JSON body under a `</>`-YAML name showed a format the pipeline
+        never reads (CodeRabbit, PR #174).
 
-      **`draftBrief` — the PROJECTION — and never `state`.** `draftBrief` is
-      `toBrief(state)`, the exact object `Save` sends, so what is on screen is the
-      document. Rendering `state` here would show a field the projection drops or
-      normalises (`localizedMessage` is trimmed on the way out, `mode`/`type`/
-      `output` are emitted only when they say something) as though it had reached
-      the document — a view of the brief that can disagree with the brief, which
-      is the defect the deleted Review step existed to catch (SG-D8).
+        **`draftBrief` — the PROJECTION — and never `state`.** `draftBrief` is
+        `toBrief(state)`, the exact object `Save` sends, so what is on screen is the
+        document. Rendering `state` here would show a field the projection drops or
+        normalises (`localizedMessage` is trimmed on the way out, `mode`/`type`/
+        `output` are emitted only when they say something) as though it had reached
+        the document — a view of the brief that can disagree with the brief, which
+        is the defect the deleted Review step existed to catch (SG-D8).
 
-      And never the memoised `previewBrief`: that is fingerprinted on the LOOK
-      (CC1/CC2), so a keystroke the compositor does not care about would leave
-      this one edit stale. */
-    yaml: (
-      <pre
-        data-testid="column-yaml"
-        className="overflow-auto rounded-xl border border-border bg-surface p-4 text-[11px] text-text-primary"
-      >
-        {dump(draftBrief)}
-      </pre>
-    ),
-  };
+        And never the memoised `previewBrief`: that is fingerprinted on the LOOK
+        (CC1/CC2), so a keystroke the compositor does not care about would leave
+        this one edit stale.
+
+        **No `role` and no `aria-label`, and that is the considered answer** —
+        review proposed `role="region"` plus a name, so the reasoning is recorded
+        here rather than re-argued. This `<pre>` has no height bound and the
+        shell's own container is the scroller (`(shell)/layout.tsx:44`), so
+        `overflow-auto` can never engage vertically; the only overflow it can have
+        is horizontal, for a token js-yaml cannot fold at its 80-column default.
+        And the pane is `<main>`'s ONLY content in this position, so a `region`
+        landmark around it would name the same box twice and add a level to
+        landmark navigation that leads nowhere. The repo names a read-only pane in
+        exactly one circumstance and for a reason that does not apply here:
+        `SidebarShell` sets `role="complementary"` + `aria-label` because there are
+        TWO complementary landmarks in one row that a screen-reader user has to
+        tell apart (`SidebarShell.tsx:34`). Every other scrollable pane in the app
+        — `TelemetryDrawer.tsx:140`'s mono log is the closest sibling to this one —
+        carries neither a role nor a `tabIndex`, and inventing a named landmark for
+        this one pane would be a third pattern. What announces the pane is the
+        control that revealed it: the switch's `yaml` segment is a button with a
+        name and `aria-pressed="true"` while this is on screen. */
+      yaml: (
+        <pre
+          data-testid="column-yaml"
+          className="overflow-auto rounded-xl border border-border bg-surface p-4 text-[11px] text-text-primary"
+        >
+          {dump(draftBrief)}
+        </pre>
+      ),
+    }),
+    [state, dispatch, visibleErrors, warnings.copy, draftBrief],
+  );
 
   return (
     // No h-full / inner overflow: like every other view, this one flows and the

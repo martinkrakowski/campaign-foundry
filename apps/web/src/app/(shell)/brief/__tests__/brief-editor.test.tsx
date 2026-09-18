@@ -3357,6 +3357,53 @@ describe("BriefPage — the preview rail (R7)", () => {
     expect(document.activeElement).toBe(section);
   });
 
+  /**
+   * **SG4 — the reveal's flip is REMEMBERED, and the reload is the proof.**
+   *
+   * The flip above and the persistence here are one fix, split into two tests
+   * because they fail for different reasons. A bare `setColumnView` inside
+   * `reveal` passes the test above completely — the view flips, the section
+   * exists, the scroll lands — and still leaves storage saying `yaml`.
+   *
+   * That divergence is not a cosmetic desync, which is why it is pinned rather
+   * than documented. A reveal fires precisely BECAUSE there is an error to fix: a
+   * refused Save, or an ErrorStrip chip. So the operator is put on the form to
+   * correct something, and the next load takes them back to a read-only document
+   * with no form in it, still holding that error. Both halves are asserted — the
+   * stored string, and then the remount that spends it — because the stored
+   * string alone is an implementation detail and the remount alone cannot say
+   * WHICH write was missing.
+   */
+  test("a reveal from the `yaml` view persists the flip, so a reload lands on the form (SG4)", async () => {
+    Element.prototype.scrollIntoView = vi.fn();
+    const user = userEvent.setup();
+    routes({ list: () => json({ briefs: [okEntry] }) });
+    const first = renderWithRun(<Editor id="ok" />);
+    await adopt(user, "ok");
+
+    // The operator's own choice, remembered as it always was.
+    await user.click(viewButton(messages.columnYamlView));
+    expect(localStorage.getItem("cf:editor-column-view")).toBe("yaml");
+
+    // A reveal, through the same `reveal` the refusal and the ErrorStrip chips use.
+    await user.click(await screen.findByRole("button", { name: "Layout" }));
+    expect(viewButton(messages.columnEditorView).getAttribute("aria-pressed")).toBe("true");
+
+    // (a) Storage names the view the column is SHOWING — one writer, no divergence.
+    expect(localStorage.getItem("cf:editor-column-view")).toBe("editor");
+
+    // (b) And that is what the next load spends: the form, with the loaded brief in
+    //     it, and no document standing between the operator and the error they came
+    //     back to fix.
+    first.unmount();
+    renderWithRun(<Editor id="ok" />);
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("ok"),
+    );
+    expect(screen.queryByTestId("column-yaml")).toBeNull();
+    expect(viewButton(messages.columnEditorView).getAttribute("aria-pressed")).toBe("true");
+  });
+
   /** POST calls to the preview-frame route specifically — never conflated with
    *  the plan-debounce's own POST or any other traffic `routes()` records. */
   const previewFetchCalls = (calls: readonly { url: string; method: string }[]) =>
