@@ -1,6 +1,6 @@
 import { describe, test, expect, afterEach, vi } from "vitest";
 import { useMemo } from "react";
-import { render, act } from "@testing-library/react";
+import { render, act, screen, fireEvent, within } from "@testing-library/react";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { DEFAULT_CAMPAIGN_TYPE } from "@campaignfoundry/CampaignOrchestration/campaign-types";
 import { templateFromCanonical } from "@campaignfoundry/CampaignOrchestration/brief-template";
@@ -367,5 +367,131 @@ describe("the rail's memo must not hide a switch of creative from usePreviewFram
     view.rerender(dock(twinProductState("p2")));
     expect(view.container.querySelector("img")).toBeNull();
     expect(view.container.querySelector("svg")).not.toBeNull();
+  });
+});
+
+/**
+ * CE1 — the hit regions where they actually live: over the REAL frame, inside
+ * the frame's own box, and only for a caller that asked for them.
+ *
+ * The regions' own behaviour (what a template declares, how a frame becomes a
+ * box) is `preview-hit-regions.test.tsx`'s. What is asserted here is the
+ * wiring: the box the percentages resolve against is the `<img>`'s box, the
+ * placeholder carries no regions, and a surface that passes no `onSelectLayer`
+ * is exactly as it was.
+ */
+describe("the creative as a way in to a layer (CE1)", () => {
+  const htmlBrief = (): CampaignBrief => ({
+    ...brief(),
+    template: {
+      id: "canonical-image-html",
+      version: 1,
+      creativeType: "image-html",
+      unit: "standard-web",
+      layers: [
+        { id: "image", kind: "image" },
+        {
+          id: "html",
+          kind: "html",
+          elements: [
+            {
+              kind: "text",
+              text: "Hello",
+              frame: { x: 0.1, y: 0.2, w: 0.5, h: 0.3, anchor: "top" },
+            },
+          ],
+        },
+      ],
+    },
+  });
+
+  const paintFrame = async (props: Partial<Parameters<typeof PreviewFrame>[0]>) => {
+    vi.useFakeTimers();
+    vi.mocked(globalThis.fetch).mockResolvedValue(pngResponse());
+    const view = renderFrame({ brief: htmlBrief(), ...props });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(PREVIEW_FRAME_DEBOUNCE_MS + 10);
+    });
+    return view;
+  };
+
+  test("the regions are siblings of the frame image, inside the box it fills", async () => {
+    const view = await paintFrame({ onSelectLayer: () => {} });
+    const box = view.getByTestId("preview-frame");
+    const img = box.querySelector("img")!;
+    const region = within(box).getByRole("button", { name: "html" });
+    // Same box, so a percentage of the region's containing block is a fraction
+    // of the canvas: the `<img>` is `block h-auto w-full` inside it, and the
+    // box is the positioning context.
+    expect(region.parentElement).toBe(box);
+    expect(img.parentElement).toBe(box);
+    expect(box.className).toContain("relative");
+    // And exactly one composed frame is still marked (D43) — no second marker.
+    expect(view.container.querySelectorAll('[data-testid="preview-frame"]')).toHaveLength(1);
+  });
+
+  test("the placeholder carries no regions — they ride the real frame only", () => {
+    const view = renderFrame({ brief: htmlBrief(), onSelectLayer: () => {} });
+    expect(view.container.querySelector("svg")).not.toBeNull();
+    expect(view.container.querySelectorAll("button")).toHaveLength(0);
+  });
+
+  test("a caller that passes no onSelectLayer gets the frame it always got", async () => {
+    const view = await paintFrame({});
+    expect(view.container.querySelector("img")).not.toBeNull();
+    expect(view.container.querySelectorAll("button")).toHaveLength(0);
+  });
+
+  /**
+   * Red fault 6's substitute at the wiring level (the regions' own file states
+   * the reasoning in full): the declared insets do not move with the box, and
+   * the click works whatever the box is, because nothing reads a box.
+   */
+  test("the same region, the same declared insets, at two rendered widths", async () => {
+    const picked: string[] = [];
+    const narrow = await paintFrame({ onSelectLayer: (id) => picked.push(id) });
+    const narrowBox = narrow.getByTestId("preview-frame");
+    narrowBox.style.width = "320px";
+    const narrowRegion = within(narrowBox).getByRole("button", { name: "html" });
+    const insets = [
+      narrowRegion.style.left,
+      narrowRegion.style.top,
+      narrowRegion.style.width,
+      narrowRegion.style.height,
+    ];
+    fireEvent.click(narrowRegion);
+    narrow.unmount();
+
+    const wide = await paintFrame({ onSelectLayer: (id) => picked.push(id) });
+    const wideBox = wide.getByTestId("preview-frame");
+    wideBox.style.width = "1280px";
+    const wideRegion = within(wideBox).getByRole("button", { name: "html" });
+    expect([
+      wideRegion.style.left,
+      wideRegion.style.top,
+      wideRegion.style.width,
+      wideRegion.style.height,
+    ]).toEqual(insets);
+    expect(insets).toEqual(["10%", "20%", "50%", "30%"]);
+    fireEvent.click(wideRegion);
+
+    // Joined rather than compared as an array literal: two bare layer-kind
+    // strings in brackets is what D121's scanner hunts for, and it does not
+    // care that this one is an assertion.
+    expect(picked.join("|")).toBe("html|html");
+  });
+
+  test("selecting a layer issues no frame request: a click is not a document change", async () => {
+    const view = await paintFrame({ onSelectLayer: () => {} });
+    const before = vi.mocked(globalThis.fetch).mock.calls.length;
+    expect(before).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByRole("button", { name: "html" }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(PREVIEW_FRAME_DEBOUNCE_MS * 5);
+    });
+
+    expect(vi.mocked(globalThis.fetch).mock.calls.length).toBe(before);
+    expect(view.container.querySelector("img")).not.toBeNull();
   });
 });

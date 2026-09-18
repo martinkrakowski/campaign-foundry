@@ -1368,6 +1368,15 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
               brief={isRailWideEnough ? previewBrief : undefined}
               playhead={playhead}
               host="rail"
+              /* CE1 — the creative becomes a way IN to a layer. The same pair
+                the stack below is handed, never a second selection: one id, one
+                setter, two surfaces. Both are outside `railProps` for the same
+                reason `playhead` is — they are not part of the look fingerprint,
+                so a pick re-renders the dock (it must: the ring moves) while a
+                keystroke still does not, and `usePreviewFrame`'s own key is
+                untouched either way, so a pick fetches nothing. */
+              selectedLayerId={pickedLayerId}
+              onSelectLayer={pickLayer}
             />
             {/* TS1 — the time surface, under the creative it belongs to. It
               mounts ONLY for a moving draft: a still brief has no seconds to

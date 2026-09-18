@@ -1188,6 +1188,17 @@ export function layerSelectDescription(name: string): string {
 }
 
 /**
+ * A hit region on the creative itself (CE1): the same D18 contract again — the
+ * region's accessible name is the raw layer id, and these are the words that
+ * say which layer it is and which of that layer's elements sits here. It reads
+ * "Pick" for the same reason the row's does: the two controls are one selection
+ * reached two ways, and neither writes a document byte (D139).
+ */
+export function previewRegionDescription(layerName: string, elementName: string): string {
+  return `Pick ${layerName} — its ${elementName} element`;
+}
+
+/**
  * The Template step, after CC3 moved the stack into the creative rail: the step
  * says where its controls went rather than going quiet. The stack itself is
  * mounted exactly once (the plan's §4.6), so this is a pointer, never a second
