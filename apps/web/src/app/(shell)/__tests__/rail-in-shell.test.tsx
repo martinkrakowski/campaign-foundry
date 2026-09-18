@@ -7,6 +7,7 @@ import tailwindConfig from "../../../../tailwind.config";
 import { json, nextMock } from "@/__tests__/helpers";
 import { API } from "@/lib/run-context";
 import { RAIL_VIEWPORT_MIN_PX } from "@/lib/use-viewport-min-width";
+import { useMobileRail } from "@/lib/mobile-rail-context";
 import { templateFromCanonical } from "@campaignfoundry/CampaignOrchestration/brief-template";
 import { DEFAULT_CAMPAIGN_TYPE } from "@campaignfoundry/CampaignOrchestration/campaign-types";
 import * as messages from "@/components/campaign/messages";
@@ -806,5 +807,41 @@ describe("SG11 — the rail is reachable below the breakpoint, and still rendere
     expect(maybeRail()).not.toBeNull();
     expect(screen.queryByRole("dialog", { name: messages.previewLegend })).toBeNull();
     expect(mountedFrameCount()).toBe(1);
+  });
+
+  test("Escape closes the panel, and any other key leaves it alone", async () => {
+    setViewport(RAIL_VIEWPORT_MIN_PX - 24);
+    await mountNarrow();
+    await openMenu();
+    fireEvent.click(railEntry());
+    await waitFor(() =>
+      expect(screen.getByRole("dialog", { name: messages.previewLegend })).toBeTruthy(),
+    );
+
+    // A key that is not Escape must not dismiss a panel the operator asked for.
+    fireEvent.keyDown(window, { key: "a" });
+    expect(screen.getByRole("dialog", { name: messages.previewLegend })).toBeTruthy();
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: messages.previewLegend })).toBeNull(),
+    );
+    // And the rail goes back to its column rather than vanishing with the panel.
+    expect(maybeRail()).not.toBeNull();
+    expect(mountedFrameCount()).toBe(1);
+  });
+
+  test("the hook refuses to run outside its provider", () => {
+    const Probe = () => {
+      useMobileRail();
+      return null;
+    };
+    // Deliberately a throw and not a default value: the two render sites are
+    // mutually exclusive only because one provider decides for both, so a
+    // component that reads this outside it would silently get `open: false` and
+    // the rail would be unreachable with nothing to show why.
+    const quiet = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(() => render(<Probe />)).toThrow(/MobileRailProvider/);
+    quiet.mockRestore();
   });
 });
