@@ -22,7 +22,12 @@ import { listBriefs, type BriefEntry } from "@/lib/briefs-api";
 import { fetchPreviewFrame } from "@/lib/preview-frame";
 import { useCreateCampaign } from "@/lib/create-campaign-context";
 import { useRun } from "@/lib/run-context";
-import { creativeTypeDisplayName, layerKindDisplayName } from "@/components/campaign/display-names";
+import {
+  creativeTypeDisplayName,
+  layerKindDisplayName,
+  ratioDisplayName,
+  unitDisplayName,
+} from "@/components/campaign/display-names";
 
 /**
  * One layer kind's band in the miniature. A Record over the whole vocabulary,
@@ -167,6 +172,21 @@ export function TemplateLibrary() {
    * the detail view's own Back control, exactly as Back hands it to the card.
    */
   const pendingFocusBack = useRef(false);
+  /**
+   * The in-flight composite's controller (review on #478, found by both
+   * reviewers). It has to be HELD: `new AbortController().signal` passed inline
+   * drops the controller on the same line, so nothing can ever abort the
+   * request — and the damage is not only a dangling fetch. Switch version while
+   * a render is in flight and the older response can resolve *second*, painting
+   * a frame for the record you are no longer looking at; close the modal
+   * mid-flight and the settle sets state after unmount.
+   *
+   * The ref is also the identity test: a settled request whose controller is no
+   * longer the current one has been superseded and must not paint. Aborting
+   * alone would not be enough — a mock (or a server that already sent) still
+   * resolves — so ordering is decided by identity, not by the abort.
+   */
+  const renderAbort = useRef<AbortController | null>(null);
 
   // (Re)load the library each time the modal opens, and parse defensively: an
   // API failure must surface as an error state, never as a misleading empty
@@ -207,6 +227,10 @@ export function TemplateLibrary() {
     })();
     return () => {
       active = false;
+      // A close (or an unmount) while a composite is in flight: abort it, and
+      // drop the controller so its settle cannot set state on a gone component.
+      renderAbort.current?.abort();
+      renderAbort.current = null;
     };
   }, [templateLibraryOpen]);
 
@@ -227,7 +251,14 @@ export function TemplateLibrary() {
         );
 
   const openDetail = (template: CreativeTemplate) => {
+    // A composite still in flight belongs to the record being left — the
+    // version chips switch through here too. Abort it and drop the controller,
+    // so a late settle neither paints a stale frame nor leaves the button
+    // spinning for a request nobody is waiting on.
+    renderAbort.current?.abort();
+    renderAbort.current = null;
     setFrame(null);
+    setRendering(false);
     setRenderFailed(false);
     pendingFocusBack.current = true;
     setDetail({ id: template.id, version: template.version });
@@ -258,8 +289,13 @@ export function TemplateLibrary() {
    * supply one.
    */
   const renderPreview = () => {
-    /* istanbul ignore next -- the button only renders when both are present */
+    /* istanbul ignore next -- unreachable: the verb is `disabled` unless both are present, and a disabled button dispatches no click. Disabled and not absent is deliberate here: a campaign without a product is a precondition the operator CAN fix, which DESIGN.md §5 answers with a disabled control and the reason beside it. */
     if (pinnable === null || product === undefined) return;
+    // Supersede any earlier request before issuing this one: a second press
+    // must not leave two composites racing to paint the same box.
+    renderAbort.current?.abort();
+    const controller = new AbortController();
+    renderAbort.current = controller;
     setRendering(true);
     setRenderFailed(false);
     setFrame(null);
@@ -271,13 +307,20 @@ export function TemplateLibrary() {
         layout: PREVIEW_LAYOUT,
         tone: PREVIEW_TONE,
       },
-      new AbortController().signal,
+      controller.signal,
     )
       .then((next) => {
+        // Identity, not arrival order: this settle paints only if it is still
+        // the request the component is waiting for.
+        if (renderAbort.current !== controller) return;
         setFrame(next.dataUrl);
         setRendering(false);
       })
       .catch(() => {
+        // Same test on the failure path — an ABORTED fetch rejects, and a
+        // superseded request must not report a failure the operator's current
+        // look never had.
+        if (renderAbort.current !== controller) return;
         setRenderFailed(true);
         setRendering(false);
       });
@@ -294,11 +337,18 @@ export function TemplateLibrary() {
    * and not on the draft — stated in the PR as a known gap, and the reason is
    * that carrying a pin into `EditorState` means the create seed and a reducer
    * action, which is the editor's lane and not this one's.
+   *
+   * The pinned reference arrives as a PARAMETER rather than being read off
+   * `pinnable` here, and that is the review fix from #478 rather than a style
+   * choice. The verb used to render `disabled` for an unpinnable record while a
+   * guard in this function carried `istanbul ignore next -- the button only
+   * renders for a pinnable record` — a claim the footer contradicted, excusing
+   * coverage on a branch whose reachability it described backwards. The footer
+   * now renders the verb only where there is something to pin, so the fact is
+   * carried by the type and there is no branch left to excuse or to mis-explain.
    */
-  const useTemplate = () => {
-    /* istanbul ignore next -- the button only renders for a pinnable record */
-    if (pinnable === null) return;
-    setBrief({ ...brief, template: pinnable });
+  const useTemplate = (pinned: BriefTemplate) => {
+    setBrief({ ...brief, template: pinned });
     closeTemplateLibrary();
   };
 
@@ -399,7 +449,7 @@ export function TemplateLibrary() {
                                 {template.name}
                               </span>
                               <span className="mt-1 flex items-center gap-1">
-                                <MiniChip tone="neutral">{template.unit}</MiniChip>
+                                <MiniChip tone="neutral">{unitDisplayName(template.unit)}</MiniChip>
                                 <MiniChip tone="info">{`v${template.version}`}</MiniChip>
                               </span>
                             </span>
@@ -421,7 +471,7 @@ export function TemplateLibrary() {
           // state can reach.
           versions={versionsOf(entries as CreativeTemplate[], shown.id)}
           briefs={briefs}
-          pinnable={pinnable !== null}
+          pinned={pinnable}
           canRender={pinnable !== null && product !== undefined}
           frame={frame}
           rendering={rendering}
@@ -450,7 +500,7 @@ function TemplateDetail({
   template,
   versions,
   briefs,
-  pinnable,
+  pinned,
   canRender,
   frame,
   rendering,
@@ -465,7 +515,8 @@ function TemplateDetail({
   readonly template: CreativeTemplate;
   readonly versions: readonly CreativeTemplate[];
   readonly briefs: readonly BriefEntry[] | null;
-  readonly pinnable: boolean;
+  /** The record as a brief's pinned reference, or `null` when it cannot be one. */
+  readonly pinned: BriefTemplate | null;
   readonly canRender: boolean;
   readonly frame: string | null;
   readonly rendering: boolean;
@@ -475,7 +526,7 @@ function TemplateDetail({
   readonly onClose: () => void;
   readonly onSelectVersion: (version: number) => void;
   readonly onRenderPreview: () => void;
-  readonly onUseTemplate: () => void;
+  readonly onUseTemplate: (pinned: BriefTemplate) => void;
 }): ReactNode {
   // T-D5 — provenance is the PINNED CAMPAIGN's, and it is labelled as such. A
   // template is ownerless (D123): presenting its own fields as "brief details"
@@ -502,7 +553,7 @@ function TemplateDetail({
     <>
       <DialogHead
         title={template.name}
-        description={`${creativeTypeDisplayName(template.creativeType)} · ${template.unit} · v${template.version}`}
+        description={`${creativeTypeDisplayName(template.creativeType)} · ${unitDisplayName(template.unit)} · v${template.version}`}
         onClose={onClose}
         actions={
           // A plain button, not the `Button` kit: `ButtonProps` does not declare
@@ -536,8 +587,8 @@ function TemplateDetail({
                 {/* T-D4, said out loud: the cost is the operator's to spend. */}
                 <p className="text-center text-[10px] text-text-muted">
                   {canRender
-                    ? "Nothing is rendered until you ask — a preview composites the creative."
-                    : "A preview needs an open campaign with a product, and a record this brief can pin."}
+                    ? "Nothing happens until you ask — a preview builds the real creative."
+                    : "A preview needs a campaign with a product open, and a template that campaign can use."}
                 </p>
                 {renderFailed ? (
                   <p className="text-center text-[11px] text-error">Could not render a preview.</p>
@@ -547,8 +598,18 @@ function TemplateDetail({
               <>
                 {/* The frame IS the creative — decorative to the reader, named by the caption. */}
                 <img src={frame} alt="" className="w-full rounded" data-testid="template-preview" />
+                {/*
+                  The caption used to read "Rendered at 1:1, headline-top ·
+                  bold" — a raw ratio id and two raw axis values, which is the
+                  same D18 / DESIGN.md §6.4 breach as the layer chip. The shape
+                  goes through `ratioDisplayName`; the layout and tone have no
+                  display names in this app, so they are not named at all
+                  rather than shown raw — "one representative look" is the fact
+                  the operator needs, and inventing two labels here would put a
+                  second vocabulary beside the domain's.
+                */}
                 <p className="text-center text-[10px] text-text-muted">
-                  Rendered at 1:1, headline-top · bold — one representative look.
+                  {`A ${ratioDisplayName(PREVIEW_CANVAS.ratio).toLowerCase()} preview — one representative look, not every shape this template can make.`}
                 </p>
               </>
             )}
@@ -559,12 +620,23 @@ function TemplateDetail({
               <h3 className="mb-1 text-[12px] font-semibold text-text-emphasis">Layers</h3>
               {/* Read-only, and bottom-first because array position is z-order (D128). */}
               <ol className="space-y-1" data-testid="template-layers">
-                {template.layers.map((layer) => (
+                {template.layers.map((layer, index) => (
                   <li
                     key={layer.id}
                     className="flex items-center gap-2 text-[12px] text-text-primary"
                   >
-                    <MiniChip tone="neutral">{layer.kind}</MiniChip>
+                    {/*
+                      The chip used to carry `layer.kind` — the domain token,
+                      beside its own display name, so the row said the same
+                      thing twice and one of the two was the editor's internal
+                      vocabulary (D18, DESIGN.md §6.4: display names for
+                      values, never raw keys). It now carries the layer's
+                      position in the stack, counted from the bottom, which is
+                      real information the row did not have: array position IS
+                      z-order (D128), so 1 is the layer everything else is
+                      drawn over.
+                    */}
+                    <MiniChip tone="neutral">{String(index + 1)}</MiniChip>
                     <span className="truncate">{layerKindDisplayName(layer.kind)}</span>
                   </li>
                 ))}
@@ -610,15 +682,27 @@ function TemplateDetail({
       </DialogBody>
       <DialogFoot>
         <div className="flex items-center justify-end gap-2">
-          {pinnable ? null : (
+          {/*
+            Absent, not disabled — and the distinction is the rule, not a
+            preference. DESIGN.md §5 keeps a verb live because "pressing a
+            primary verb is how a user asks what is wrong", and its capability
+            gating disables a control *and shows the reason* when the host
+            cannot do the thing. Both are about a state that can CHANGE: the
+            draft gets fixed, ffmpeg gets installed. This template can never
+            become usable — the limit is in the shape a brief may carry, not in
+            anything on screen — so a verb here would be permanently dead, and
+            a control that can never become live is worse than one that is not
+            there. The sentence carries the whole answer instead.
+          */}
+          {pinned === null ? (
             <p className="mr-auto text-[11px] text-text-muted">
-              This record is not one a brief can pin: only a canonical template is representable as
-              a pinned reference today.
+              This template cannot be used for a campaign yet — only the built-in ones can, for now.
             </p>
+          ) : (
+            <Button size="sm" onClick={() => onUseTemplate(pinned)}>
+              Use this template
+            </Button>
           )}
-          <Button size="sm" onClick={onUseTemplate} disabled={!pinnable}>
-            Use this template
-          </Button>
         </div>
       </DialogFoot>
     </>

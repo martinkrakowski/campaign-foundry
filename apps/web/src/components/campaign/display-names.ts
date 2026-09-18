@@ -9,6 +9,7 @@ import {
   DISPLAY_SIZE_VALUES,
   type DisplaySize,
 } from "@campaignfoundry/CampaignOrchestration/display-sizes";
+import type { AdvertisingUnit } from "@campaignfoundry/CampaignOrchestration/advertising-units";
 import { ANCHOR_VALUES } from "@campaignfoundry/CampaignOrchestration/variation-defaults";
 import {
   ALIGN_VALUES,
@@ -222,6 +223,21 @@ const CREATIVE_TYPE_LABELS: Record<CreativeType, string> = {
 
 export function creativeTypeDisplayName(type: CreativeType): string {
   return CREATIVE_TYPE_LABELS[type];
+}
+
+/**
+ * Display labels for the advertising units (TM1) — keyed by the domain's own
+ * union, so a second unit is a compile error rather than a raw id on screen
+ * (D18). The template library shows a unit on every card and in the detail
+ * head; `"standard-web"` is `advertising-units.ts`'s vocabulary, not words to
+ * put in front of an operator.
+ */
+const UNIT_LABELS: Record<AdvertisingUnit, string> = {
+  "standard-web": "Web & social",
+};
+
+export function unitDisplayName(unit: AdvertisingUnit): string {
+  return UNIT_LABELS[unit];
 }
 
 /**
