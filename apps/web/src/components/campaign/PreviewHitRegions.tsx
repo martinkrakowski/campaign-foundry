@@ -42,6 +42,14 @@ import * as messages from "./messages";
  *
  * Selection is D139 ephemeral state owned by the host: this component reads a
  * picked id and reports a click, and stores nothing.
+ *
+ * One window worth naming, so it is not filed later as hit-region drift: the
+ * regions read the LIVE template while the `<img>` holds the last FETCHED
+ * frame, so for the `PREVIEW_FRAME_DEBOUNCE_MS` after an operator moves an
+ * element's frame, the region has moved and the raster has not. It closes
+ * itself when the next frame lands, and it is the same 300 ms the caption and
+ * the layer list already live with; the alternative — regions lagging the
+ * document — would make a just-edited frame unclickable where it now is.
  */
 
 /** One clickable region: an html element's declared frame, and the layer it belongs to. */
