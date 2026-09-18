@@ -27,7 +27,13 @@ const REPO_BRIEFS = join(
   "briefs",
 );
 
-const YAML_FIXTURES = ["anchors-merge.yaml", "comments.yaml", "doc-start.yaml", "scalars.yaml"];
+const YAML_FIXTURES = [
+  "anchors-merge.yaml",
+  "comments.yaml",
+  "doc-start.yaml",
+  "occupancy.yaml",
+  "scalars.yaml",
+];
 
 let dir: string;
 let store: FsBriefStore;
@@ -320,5 +326,59 @@ describe("the brief boundary keeps the D15 authoring leniency in the listing (D6
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("list-region.yaml"));
     warn.mockRestore();
     expect(vi.isMockFunction(console.warn)).toBe(false);
+  });
+});
+
+/**
+ * SL1 — occupancy in the document (SL-D2 option (a), SL-D3).
+ *
+ * `occupancy.yaml` is in YAML_FIXTURES above, so the byte-for-byte sweep
+ * already covers "a brief WITH occupancy round-trips unchanged". These add the
+ * two halves that sweep cannot see: that a brief WITHOUT occupancy does not
+ * acquire one, and that the block survives an edit to a neighbouring field
+ * rather than being rewritten or dropped.
+ */
+describe("SL1 occupancy survives a save, and its absence survives one too", () => {
+  test("a brief written before occupancy existed does not acquire the key on save", async () => {
+    // comments.yaml has a `variation` block and no occupancy — the pre-SL1
+    // document every existing campaign is. Change a field far from it and
+    // save: the loader must not have materialised `nextIndex: count`.
+    const path = copy("comments.yaml");
+    const brief = loadBrief(path);
+    expect(brief.variation?.occupancy).toBeUndefined();
+    await store.rewriteBrief({ ...brief, campaignMessage: "Edited elsewhere." });
+    const text = readFileSync(path, "utf8");
+    expect(text).toContain("campaignMessage: Edited elsewhere.");
+    expect(text).not.toContain("occupancy");
+    expect(text).not.toContain("nextIndex");
+    expect(text).not.toContain("tombstoned");
+    expect(loadBrief(path).variation?.occupancy).toBeUndefined();
+  });
+
+  test("occupancy survives an edit to a neighbouring field, tombstones and comments intact", async () => {
+    const path = copy("occupancy.yaml");
+    const brief = loadBrief(path);
+    expect(brief.variation?.occupancy).toEqual({ nextIndex: 13, tombstoned: [3, 7] });
+    await store.rewriteBrief({ ...brief, campaignMessage: "Edited." });
+    const text = readFileSync(path, "utf8");
+    expect(text).toContain("campaignMessage: Edited.");
+    expect(text).toContain("nextIndex: 13 # monotonic");
+    expect(text).toContain("tombstoned: [3, 7] # deleted");
+    expect(loadBrief(path).variation?.occupancy).toEqual({ nextIndex: 13, tombstoned: [3, 7] });
+  });
+
+  test("a new tombstone is written into the existing block and the cursor still only rises", async () => {
+    const path = copy("occupancy.yaml");
+    const brief = loadBrief(path);
+    const occupancy = { nextIndex: 14, tombstoned: [3, 7, 9] };
+    await store.rewriteBrief({
+      ...brief,
+      variation: { ...brief.variation, occupancy },
+    } as CampaignBrief);
+    const reloaded = loadBrief(path);
+    expect(reloaded.variation?.occupancy).toEqual(occupancy);
+    // The deleted slots are still deleted — a save never resurrects one.
+    expect(reloaded.variation?.occupancy?.tombstoned).toContain(3);
+    expect(reloaded.variation?.occupancy?.tombstoned).toContain(7);
   });
 });

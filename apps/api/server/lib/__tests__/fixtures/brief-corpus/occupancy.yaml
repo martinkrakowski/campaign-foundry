@@ -1,0 +1,41 @@
+# Corpus fixture — a brief that carries occupancy (SL1, SL-D2/SL-D3).
+# Slots 0..12 were allocated; 3 and 7 were deleted and must never come back.
+
+schemaVersion: 1
+template:
+  id: canonical-image-text
+  version: 1
+  creativeType: image-text
+  unit: standard-web
+  layers:
+    - id: image
+      kind: image
+    - id: shade
+      kind: shade
+    - id: accent
+      kind: accent
+    - id: static-text
+      kind: static-text
+    - id: logo
+      kind: logo
+campaignMessage: Eleven creatives, thirteen slots.
+targetAudience: Trail runners, 25-40
+targetRegion: DE
+id: corpus-occupancy
+mode: variation
+variation:
+  count: 11 # the recipe's target cardinality (SL-D5)
+  occupancy:
+    nextIndex: 13 # monotonic — the next add takes slot 13, never 3 or 7
+    tombstoned: [3, 7] # deleted; live is 0..12 minus these
+  axes:
+    layout: [headline-top, headline-bottom]
+    tone: [bold, subtle]
+
+products:
+  - id: hydra-bottle
+    name: Hydra Bottle
+    primaryColor: "#1473E6"
+    logoPath: assets/inputs/hydra-logo.png
+
+# Trailing comment at EOF

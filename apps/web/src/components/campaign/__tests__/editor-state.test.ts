@@ -5056,3 +5056,103 @@ describe("the audio block survives the editor untouched (VE3a, D11)", () => {
     expect("audio" in toBrief(base())).toBe(false);
   });
 });
+
+/**
+ * SL1 — `variation.occupancy` survives the editor untouched, the `audio`
+ * block's rule (VE3a, D11) applied to the slot record.
+ *
+ * This lane adds no control for it. It has to be state all the same:
+ * `toBrief` rebuilds `variation` key by key, and `patchBriefYaml`'s
+ * `patchNode` deletes every key the rebuilt object no longer names. Without
+ * the pass-through, opening a campaign with occupancy and pressing Save would
+ * strip the block from the YAML and resurrect every deleted creative.
+ */
+describe("the occupancy block survives the editor untouched (SL1, SL-D2/SL-D3)", () => {
+  const occupancy = () => ({ nextIndex: 13, tombstoned: [3, 7] });
+
+  /**
+   * A variation brief that is already a fixed point of the editor — loaded and
+   * re-emitted once — so `isDirtySinceSave` measures the occupancy block and
+   * not the axis defaults a hand-written fixture would omit.
+   */
+  const variationBrief = (over: Record<string, unknown> = {}): CampaignBrief => {
+    const seed = savedBrief({
+      mode: "variation",
+      variation: { count: 11 },
+    } as Partial<CampaignBrief>);
+    const canonical = toBrief(fromBrief(seed, { file: "camp.yaml" }));
+    return {
+      ...canonical,
+      variation: { ...canonical.variation, ...over },
+    } as CampaignBrief;
+  };
+
+  test("a loaded brief with occupancy round-trips and opens clean", () => {
+    const brief = variationBrief({ occupancy: occupancy() });
+    const state = fromBrief(brief, { file: "camp.yaml" });
+    expect(state.variation.occupancy).toEqual(occupancy());
+    expect(toBrief(state).variation?.occupancy).toEqual(occupancy());
+    expect(isDirtySinceSave(state)).toBe(false);
+  });
+
+  test("an edit to another field keeps occupancy byte-for-byte through save", () => {
+    const brief = variationBrief({ occupancy: occupancy() });
+    const loaded = fromBrief(brief, { file: "camp.yaml" });
+    const edited = reduce(loaded, { type: "patch", patch: { campaignMessage: "New copy" } });
+    const emitted = toBrief(edited);
+    expect(JSON.stringify(emitted.variation?.occupancy)).toBe(JSON.stringify(occupancy()));
+  });
+
+  test("a brief without occupancy never grows the key", () => {
+    // The back-compat property at the editor boundary: the first save of every
+    // existing campaign must not add a block the file never had.
+    const brief = variationBrief();
+    const state = fromBrief(brief, { file: "camp.yaml" });
+    expect(state.variation.occupancy).toBeUndefined();
+    const emitted = toBrief(state);
+    expect(emitted.variation?.occupancy).toBeUndefined();
+    expect("occupancy" in (emitted.variation ?? {})).toBe(false);
+    expect(JSON.stringify(emitted)).not.toContain("occupancy");
+  });
+
+  test("discard restores the saved brief with its occupancy intact", () => {
+    const brief = variationBrief({ occupancy: occupancy() });
+    const loaded = fromBrief(brief, { file: "camp.yaml" });
+    const edited = reduce(loaded, { type: "patch", patch: { campaignMessage: "scratch" } });
+    const discarded = reduce(edited, { type: "discard" });
+    expect(discarded.variation.occupancy).toEqual(occupancy());
+    expect(toBrief(discarded).variation?.occupancy).toEqual(occupancy());
+  });
+
+  test("normalizeDraftState keeps a well-formed occupancy and drops every other shape without throwing", () => {
+    const keep = normalizeDraftState({
+      variation: { ...initialEditorState("variation").variation, occupancy: occupancy() },
+    });
+    expect(keep?.variation.occupancy).toEqual(occupancy());
+    // `tombstoned` is optional in the stored shape and stays optional here.
+    expect(
+      normalizeDraftState({
+        variation: { ...initialEditorState("variation").variation, occupancy: { nextIndex: 4 } },
+      })?.variation.occupancy,
+    ).toEqual({ nextIndex: 4 });
+    for (const bad of [
+      undefined,
+      null,
+      "x",
+      [],
+      {},
+      { nextIndex: -1 },
+      { nextIndex: 1.5 },
+      { nextIndex: "13" },
+      { nextIndex: 13, tombstoned: 3 },
+      { nextIndex: 13, tombstoned: [-1] },
+      { nextIndex: 13, tombstoned: [1.5] },
+      { nextIndex: 13, tombstoned: ["3"] },
+    ]) {
+      const state = normalizeDraftState({
+        variation: { ...initialEditorState("variation").variation, occupancy: bad },
+      });
+      expect(state?.variation.occupancy).toBeUndefined();
+    }
+  });
+});
