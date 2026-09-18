@@ -1680,8 +1680,17 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
    * rather than fixed by invention. SG8's pre-flight is where the figures (and this
    * refusal) belong.
    *
-   * SG10 adds one line here: revealing the `validate` column view. The view does not
-   * exist yet (SG4 shipped two positions on purpose), so there is nothing to reveal.
+   * **A clean Validate still flips `attempted`, and that is intended.** `refuseInvalid`
+   * is called unconditionally — exactly as `handleSave` calls it — so from the first
+   * press onward a field that later goes wrong shows its error at once rather than
+   * waiting for a blur (L1.1's touch gating). Pressing a verb IS the "I have been
+   * here" signal both verbs already treat it as; carrying a second, quieter variant of
+   * `refuseInvalid` for this one caller would be two refusal paths that can disagree.
+   *
+   * SG10 adds one line here: revealing the `validate` column view, which is SG-D12's
+   * second half. The view does not exist yet (SG4 shipped two positions on purpose),
+   * so there is nothing to reveal — and SG-D14's refresh icon lives in that view, so
+   * it arrives with it.
    */
   const handleValidate = () => {
     refuseInvalid();

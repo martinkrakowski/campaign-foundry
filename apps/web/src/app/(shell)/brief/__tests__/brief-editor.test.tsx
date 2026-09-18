@@ -3778,6 +3778,9 @@ describe("BriefPage — the run slot: Validate → Generate (SG9)", () => {
     expect(screen.queryByRole("dialog", { name: messages.generateConfirmTitle })).toBeNull();
     expect(generateCalls(calls)).toEqual([]);
     expect(nextMock().router.push).not.toHaveBeenCalled();
+    // As with Cancel: a dismissed question changes nothing, so the gate is still open
+    // and the verb the user pressed is still the verb on screen.
+    expect(slot(messages.generate)).not.toBeNull();
   });
 
   test("an edit after a validation takes Generate away and brings Validate back (SG-D15)", async () => {
