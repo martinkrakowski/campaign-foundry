@@ -645,12 +645,18 @@ describe("§5 — the cost contract, re-measured with the rail across the bounda
     expect(rail().querySelector("pre")).toBeNull();
     expect(within(rail()).queryByRole("button", { name: messages.columnYamlView })).toBeNull();
     expect(within(rail()).queryByRole("button", { name: messages.columnEditorView })).toBeNull();
+    // SG10 brought the third position, so it joins the negatives: a segment that
+    // leaked into the rail would be a second switcher whichever one it was.
+    expect(within(rail()).queryByRole("button", { name: messages.columnValidateView })).toBeNull();
 
-    // The switch exists — outside the rail. Without this the four negatives above
-    // would all hold on a build that shipped no switcher at all.
+    // The switch exists — outside the rail. Without this the five negatives above
+    // would all hold on a build that shipped no switcher at all. Three since SG10
+    // (SG-D13); the position COUNT is pinned in `brief-editor.test.tsx`, where the
+    // control lives — this number is here only so the liveness check keeps meaning
+    // "the whole switch is out here", not "some of it is".
     const views = screen.getByRole("group", { name: messages.columnViews });
     expect(rail().contains(views)).toBe(false);
-    expect(within(views).getAllByRole("button")).toHaveLength(2);
+    expect(within(views).getAllByRole("button")).toHaveLength(3);
 
     // And the rail still holds the composed frame while the column swaps.
     fireEvent.click(within(views).getByRole("button", { name: messages.columnYamlView }));
