@@ -6,7 +6,7 @@
       "file": "apps/web/src/components/campaign/BriefEditor.tsx",
       "before": "<LayoutSection\n            state={state}\n            dispatch={dispatch}\n            errors={sectionErrorsVisible(\"layout\")}\n          />",
       "after": "                <LayoutSection\n                  state={state}\n                  dispatch={dispatch}\n                  errors={sectionErrorsVisible(\"layout\")}\n                  preview\n                />",
-      "because": "D43's one-composed-frame invariant, broken the way this lane makes it easy to break. The guard that used to hold it (`presentation !== \"guided\" || the step is not review/layout`) existed because two other surfaces carried a frame of their own -- Review's figure and the Layout STEP's `preview`. SG1 deletes Review and the steps, so the guard goes, and what keeps the count at one is now a single omitted prop on ONE line of the column. Adding it back is the most plausible thing a later lane does: `preview` is LayoutSection's own documented capability (T7/D63), it reads as restoring something the wizard had, and D141's comment used to say the exclusion survived \"in every presentation\". Nothing looks wrong: two real creatives, both correct, both fed the same projection, every `getByRole`/`getByText` in the suite satisfied -- a SECOND frame passes every query that looks for one. It is caught only by a count of MOUNTS (`data-testid=\"preview-frame\"`, CC1's marker, present in both branches PreviewFrame can render), because the rail's container query hides without unmounting and happy-dom applies no CSS at all, so a visible-node count would be the wrong question. (Re-anchored by ANCHORS: the recorded text was reformatted or moved, not changed — the mutation, its claim and its command are untouched.)",
+      "because": "D43's one-composed-frame invariant, broken the way this lane makes it easy to break. The guard that used to hold it (`presentation !== \"guided\" || the step is not review/layout`) existed because two other surfaces carried a frame of their own -- Review's figure and the Layout STEP's `preview`. SG1 deletes Review and the steps, so the guard goes, and what keeps the count at one is now a single omitted prop on ONE line of the column. Adding it back is the most plausible thing a later lane does: `preview` is LayoutSection's own documented capability (T7/D63), it reads as restoring something the wizard had, and D141's comment used to say the exclusion survived \"in every presentation\". Nothing looks wrong: two real creatives, both correct, both fed the same projection, every `getByRole`/`getByText` in the suite satisfied -- a SECOND frame passes every query that looks for one. It is caught only by a count of MOUNTS (`data-testid=\"preview-frame\"`, CC1's marker, present in both branches PreviewFrame can render), because the rail's container query hides without unmounting and happy-dom applies no CSS at all, so a visible-node count would be the wrong question. (Re-anchored by ANCHORS: the recorded text was reformatted or moved, not changed \u2014 the mutation, its claim and its command are untouched.)",
       "command": [
         "yarn",
         "vitest",
@@ -17,7 +17,8 @@
         "-t",
         "exactly one composed frame is mounted"
       ],
-      "verdict": "caught"
+      "verdict": "caught",
+      "retired": "Retired by the orchestrator, NOT because it survives but because it is a verified duplicate. `sg4.json` #2 is the SAME mutation \u2014 same file, same `<LayoutSection>` block, the same bare `preview` prop appended \u2014 and it is `caught`, replaying green against SG4's own test. So D43's one-composed-frame claim remains enforced; what died here is this manifest's route to it, after SG4 and SG10 reshaped the test this entry's `command` named. Two anchors for one claim is one anchor to rot. Checked before retiring: the two `after` texts were compared literally, and sg4#2's verdict was read from its own replay rather than assumed. If sg4#2 is ever retired or re-pointed, this claim loses its last guard and must be re-instated here."
     },
     {
       "file": "apps/web/src/components/campaign/BriefEditor.tsx",
@@ -69,7 +70,7 @@
         "nothing fetches below the breakpoint, though the rail still mounts"
       ],
       "verdict": "caught",
-      "retired": "Retired by ANCHORS: the subject is reshaped and, as SG4's remediation and the rail-in-the-shell plan both recorded, its own assertion no longer moves. `railSlot` is a `useCallback` returning a `<div>`; the `<aside>` this mutation gates is published by the shell, so an aside-presence assertion cannot see the gate any more. The property — the rail stays MOUNTED below the breakpoint so a resize pays no fresh debounce — is carried instead by rs.json#12, which says in its own `because` that it carries it rather than re-authoring this one."
+      "retired": "Retired by ANCHORS: the subject is reshaped and, as SG4's remediation and the rail-in-the-shell plan both recorded, its own assertion no longer moves. `railSlot` is a `useCallback` returning a `<div>`; the `<aside>` this mutation gates is published by the shell, so an aside-presence assertion cannot see the gate any more. The property \u2014 the rail stays MOUNTED below the breakpoint so a resize pays no fresh debounce \u2014 is carried instead by rs.json#12, which says in its own `because` that it carries it rather than re-authoring this one."
     },
     {
       "file": "apps/web/src/components/campaign/BriefEditor.tsx",
