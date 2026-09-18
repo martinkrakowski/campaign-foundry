@@ -1,0 +1,108 @@
+{
+  "version": 1,
+  "lane": "SL1",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/load-brief.ts",
+      "before": "    if (slot >= nextIndex) {\n      throw new Error(\n        `Campaign brief field \"variation.occupancy.tombstoned\" names slot ${slot}, which \"variation.occupancy.nextIndex\" (${nextIndex}) never allocated.`,\n      );\n    }\n    if (seen.has(slot)) {",
+      "after": "    if (seen.has(slot)) {",
+      "because": "Drop the refusal of a tombstone at or above `nextIndex`. That slot was never allocated, and with the tombstone encoding it is this schema's form of the \"cursor sits below a live slot\" fault (a live-index list would spell it `nextIndex` below the highest live index). Accepting it lets a document claim a delete of a creative the run never made, so occupancy and the cursor disagree about how many slots the campaign ever had.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/load-brief.test.ts",
+        "-t",
+        "refuses a tombstone above the cursor, naming the field"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/load-brief.ts",
+      "before": "    if (seen.has(slot)) {\n      throw new Error(\n        `Campaign brief field \"variation.occupancy.tombstoned\" lists slot ${slot} more than once.`,\n      );\n    }\n    seen.add(slot);",
+      "after": "    seen.add(slot);",
+      "because": "Drop the duplicate-tombstone refusal. A slot listed twice is a document that cannot be reasoned about by counting \u2014 |live| is no longer nextIndex - |tombstoned| \u2014 so any consumer that sizes the set from the two numbers is silently off by the number of repeats.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/load-brief.test.ts",
+        "-t",
+        "refuses a duplicate tombstone, naming the field"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/load-brief.ts",
+      "before": "  if (value.occupancy !== undefined) {\n    validateOccupancy(value.occupancy);\n  }",
+      "after": "  if (value.occupancy !== undefined) {\n    validateOccupancy(value.occupancy);\n  } else if (value.count !== undefined) {\n    value.occupancy = { nextIndex: value.count, tombstoned: [] };\n  }",
+      "because": "Make the loader materialise the derived default onto the record, the way SL-D6's `minDistance` clamp deliberately does a few lines above. It is the inverse of what occupancy needs: `parseBrief` returns this same record as the brief, so the editor would hold a block the file never had and the next Save would patch `occupancy` into the YAML \u2014 every existing campaign's document churning on first write, and a pre-SL1 brief no longer round-tripping unchanged.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/load-brief.test.ts",
+        "-t",
+        "a brief with no occupancy does not acquire one"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/editor-state.ts",
+      "before": "      ...(state.variation.occupancy !== undefined ? { occupancy: state.variation.occupancy } : {}),\n      axes,",
+      "after": "      axes,",
+      "because": "Stop writing occupancy back out of the editor. `toBrief` rebuilds `variation` key by key and `patchBriefYaml`'s `patchNode` then deletes every key the rebuilt object no longer names, so the operator's first Save of a campaign with occupancy would strip the block from their YAML \u2014 and with it every tombstone, resurrecting each deleted creative on the next run.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/editor-state.test.ts",
+        "-t",
+        "an edit to another field keeps occupancy byte-for-byte through save"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/VariationPolicy.vo.ts",
+      "before": "    if (!tombstoned.includes(index)) liveIndices.push(index);",
+      "after": "    liveIndices.push(index);",
+      "because": "Let a tombstoned index back into the live set. This is the recreate-on-delete bug restated at the schema level: the document still records the delete, but the resolved occupancy hands every caller the deleted slot as live, so SL2 would plan it and overwrite the tombstoned asset path.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/VariationPolicy.vo.test.ts",
+        "-t",
+        "a tombstoned index is never in the live set, for every tombstone shape"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/VariationPolicy.vo.ts",
+      "before": "        ...(anchor.length > 0 ? { anchor } : {}),",
+      "after": "        ...(anchor.length > 0 ? { anchor } : {}),\n        ...(variation.occupancy !== undefined ? { occupancy } : {}),",
+      "because": "Fold occupancy into `policyHash` by the same conditional spread the anchor and headline axes use. The hash pins the draw POLICY so a selective re-roll is refused when the recipe moved underneath it; occupancy is the drawn set's state. Folded in, every delete moves the hash and refuses a re-roll of each SURVIVING creative \u2014 the exact property this plan exists to deliver. No golden can see this (none carries occupancy), and the whole policy-hash-stability suite stays green under it, so it needs its own claim.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/VariationPolicy.vo.test.ts",
+        "-t",
+        "occupancy never reaches policyHash"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

@@ -3215,3 +3215,140 @@ describe("parseBrief copy.timeline (E4.1 – E4.3)", () => {
     });
   });
 });
+
+/**
+ * SL1 — `variation.occupancy`, the brief's record of which slots exist
+ * (SL-D2 option (a), SL-D3). The encoding is the monotonic cursor plus the
+ * deleted indices, so the live set is `[0, nextIndex)` minus `tombstoned`.
+ *
+ * The loader validates and NEVER defaults. An absent block means the derived
+ * status quo — every slot `0..count-1` live, `nextIndex === count` — resolved
+ * in `VariationPolicy.vo.ts`, not materialised here: writing it onto the
+ * record (the shape SL-D6's `minDistance` clamp above deliberately uses) would
+ * hand the editor a block the file never had and churn every existing
+ * campaign's YAML on its first save.
+ */
+describe("parseBrief variation.occupancy (SL1, SL-D2/SL-D3)", () => {
+  const withOccupancy = (occupancy: unknown) => ({
+    ...valid,
+    variation: { count: 4, occupancy },
+  });
+
+  test("a well-formed block is carried through untouched", () => {
+    const parsed = parseBrief(withOccupancy({ nextIndex: 13, tombstoned: [3, 7] }));
+    expect(parsed.variation?.occupancy).toEqual({ nextIndex: 13, tombstoned: [3, 7] });
+  });
+
+  test("tombstoned is optional and means none deleted", () => {
+    expect(parseBrief(withOccupancy({ nextIndex: 4 })).variation?.occupancy).toEqual({
+      nextIndex: 4,
+    });
+  });
+
+  test("a brief with no occupancy does not acquire one", () => {
+    // The back-compat property, at the parse boundary: no key in, no key out —
+    // not `{ nextIndex: 4, tombstoned: [] }`, which the next save would write.
+    const parsed = parseBrief({ ...valid, variation: { count: 4 } });
+    expect(parsed.variation?.occupancy).toBeUndefined();
+    expect("occupancy" in (parsed.variation ?? {})).toBe(false);
+    expect(JSON.stringify(parsed)).not.toContain("occupancy");
+  });
+
+  test("the cursor may sit above every live slot, which a bare live list could not say", () => {
+    // Slot 12 was the newest and was deleted: live is 0..11 and the next add
+    // must still take 13, never 12. `nextIndex` is what records that.
+    const parsed = parseBrief(withOccupancy({ nextIndex: 13, tombstoned: [12] }));
+    expect(parsed.variation?.occupancy).toEqual({ nextIndex: 13, tombstoned: [12] });
+  });
+
+  test.each([
+    ["a non-object occupancy", "x", /"variation.occupancy" must be an object/],
+    ["an array occupancy", [], /"variation.occupancy" must be an object/],
+    ["a null occupancy", null, /"variation.occupancy" must be an object/],
+    [
+      "an occupancy with no nextIndex",
+      { tombstoned: [1] },
+      /"variation.occupancy.nextIndex" is required/,
+    ],
+    [
+      "a negative nextIndex",
+      { nextIndex: -1 },
+      /"variation.occupancy.nextIndex" must be a finite integer/,
+    ],
+    [
+      "a non-integer nextIndex",
+      { nextIndex: 2.5 },
+      /"variation.occupancy.nextIndex" must be a finite integer/,
+    ],
+    [
+      "a non-number nextIndex",
+      { nextIndex: "13" },
+      /"variation.occupancy.nextIndex" must be a finite integer/,
+    ],
+    [
+      "a non-array tombstoned",
+      { nextIndex: 13, tombstoned: 3 },
+      /"variation.occupancy.tombstoned" must be an array/,
+    ],
+    [
+      "a negative tombstone",
+      { nextIndex: 13, tombstoned: [-1] },
+      /"variation.occupancy.tombstoned" must be a finite integer/,
+    ],
+    [
+      "a non-integer tombstone",
+      { nextIndex: 13, tombstoned: [1.5] },
+      /"variation.occupancy.tombstoned" must be a finite integer/,
+    ],
+    [
+      "a tombstone at the cursor",
+      { nextIndex: 13, tombstoned: [13] },
+      /names slot 13, which "variation.occupancy.nextIndex" \(13\) never allocated/,
+    ],
+    [
+      "a tombstone above the cursor",
+      { nextIndex: 4, tombstoned: [9] },
+      /names slot 9, which "variation.occupancy.nextIndex" \(4\) never allocated/,
+    ],
+    [
+      "a duplicate tombstone",
+      { nextIndex: 13, tombstoned: [3, 7, 3] },
+      /lists slot 3 more than once/,
+    ],
+    [
+      "a mistyped tombstoned key",
+      { nextIndex: 13, tombstones: [3] },
+      /"variation.occupancy" has unknown property "tombstones"/,
+    ],
+    [
+      "an unknown key",
+      { nextIndex: 13, tombstoned: [3], live: [0, 1] },
+      /"variation.occupancy" has unknown property "live"/,
+    ],
+  ])("refuses %s, naming the field", (_label, occupancy, pattern) => {
+    expect(() => parseBrief(withOccupancy(occupancy))).toThrow(pattern);
+  });
+
+  /**
+   * The tombstone encoding's one failure mode a live-index list does not have:
+   * a mistyped key is a SILENT RESURRECTION — `tombstones: [7]` ignored means
+   * creative 7 comes back on the next run. Hence the strict key check above;
+   * this pins the consequence it prevents rather than only the message.
+   */
+  test("a mistyped tombstone key is refused rather than silently resurrecting the creative", () => {
+    expect(() => parseBrief(withOccupancy({ nextIndex: 13, tombstones: [7] }))).toThrow(
+      /unknown property/,
+    );
+  });
+
+  test("a fully-tombstoned range and a zero cursor are coherent documents, not schema faults", () => {
+    // What a RUN does with an empty occupancy is the planner's question (SL2).
+    // The schema's job is to express it, so neither is refused here.
+    expect(
+      parseBrief(withOccupancy({ nextIndex: 2, tombstoned: [0, 1] })).variation?.occupancy,
+    ).toEqual({ nextIndex: 2, tombstoned: [0, 1] });
+    expect(
+      parseBrief(withOccupancy({ nextIndex: 0, tombstoned: [] })).variation?.occupancy,
+    ).toEqual({ nextIndex: 0, tombstoned: [] });
+  });
+});

@@ -5,6 +5,7 @@ import type { Style } from "../value-objects/creative-style.js";
 import type { CampaignType } from "../value-objects/campaign-types.js";
 import type { DisplaySize } from "../value-objects/display-sizes.js";
 import type { BriefTemplate } from "../value-objects/brief-template.js";
+import type { AuthoredOccupancy } from "../value-objects/variation-defaults.js";
 import type { Product } from "./Product.js";
 
 /**
@@ -76,6 +77,19 @@ export interface CampaignBrief {
     readonly count?: number;
     readonly seed?: number;
     readonly minDistance?: number;
+    /**
+     * Which variation slots exist (SL-D2, SL-D3). A creative's identity is its
+     * slot — `productId` + `index` (`Variant.ts:10`) — and a deleted index is
+     * never reissued, so occupancy is NOT derivable from `count`: it needs the
+     * monotonic `nextIndex` plus the indices that were deleted.
+     *
+     * Absent means the status quo, derived and never stored: every slot
+     * `0..count-1` is live and `nextIndex === count`. A brief written before
+     * this block existed therefore loads and plans exactly as it did, and
+     * nothing on the save path grows the key (see `resolveOccupancy` in
+     * `VariationPolicy.vo.ts` — the default is computed, never written back).
+     */
+    readonly occupancy?: AuthoredOccupancy;
     readonly coverage?: {
       readonly perProduct?: number;
       readonly perRatio?: number;

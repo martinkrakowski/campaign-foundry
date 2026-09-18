@@ -45,6 +45,7 @@ import {
   MAX_DURATION_SEC,
   MIN_DURATION_SEC,
   ANCHOR_VALUES,
+  type AuthoredOccupancy,
 } from "@campaignfoundry/CampaignOrchestration/variation-defaults";
 import { MOTION_KINDS } from "@campaignfoundry/CampaignOrchestration/motion-kinds";
 import {
@@ -384,6 +385,22 @@ export interface EditorState {
     background: string[];
     paletteShift: number[];
     headline: boolean;
+    /**
+     * Which slots exist (SL-D2/SL-D3), carried VERBATIM. No control in this
+     * lane authors, edits or clears it — SL3/SL4 own the sidebar gestures —
+     * and it exists here only so a load → save does not silently delete it.
+     *
+     * It has to be state rather than nothing: `toBrief` rebuilds `variation`
+     * key by key, and `patchBriefYaml`'s `patchNode` then `deleteIn`s every
+     * key the rebuilt object no longer names. Without this field an operator
+     * who opened a campaign with occupancy and pressed Save would have the
+     * block dropped from their YAML, resurrecting every deleted creative on
+     * the next run. The `audio` block (VE3a, D11) is preserved for exactly
+     * this reason and by exactly this route.
+     *
+     * Absent stays absent — a pre-SL1 brief never grows the key.
+     */
+    occupancy?: AuthoredOccupancy;
   };
   motion: string[];
   duration: number[];
@@ -2248,6 +2265,11 @@ export function toBrief(state: EditorState): CampaignBrief {
       ...(seed !== undefined ? { seed } : {}),
       ...(minDistance !== undefined ? { minDistance } : {}),
       ...(coverage !== undefined ? { coverage } : {}),
+      // SL1: written back exactly as it was loaded, and only when it was
+      // loaded. Conditional, like `seed` and `minDistance` above: a brief
+      // that carried no occupancy must serialise without the key, or every
+      // existing campaign's YAML churns on its first save.
+      ...(state.variation.occupancy !== undefined ? { occupancy: state.variation.occupancy } : {}),
       axes,
     },
     ...(copy !== undefined ? { copy } : {}),
@@ -2417,6 +2439,10 @@ export function fromBrief(
           : String(variation.minDistance),
       perProduct: coverage ? num(coverage.perProduct) : variation ? "" : "1",
       perRatio: coverage ? num(coverage.perRatio) : variation ? "" : "1",
+      // SL1: the loaded block travels across untouched, and its absence is the
+      // absence of the key — never a derived `{ nextIndex: count }`, which the
+      // next Save would write into a document that never had one.
+      ...(variation?.occupancy !== undefined ? { occupancy: variation.occupancy } : {}),
       layout: list(axes?.layout, [...LAYOUT_OPTIONS]),
       tone: list(axes?.tone, [...TONE_OPTIONS]),
       anchor: list(axes?.anchor, [...DERIVED_ANCHOR_OPTIONS]),
@@ -2753,6 +2779,37 @@ function normalizeStyleDraft(value: unknown): Style {
 }
 
 /**
+ * Rebuild a persisted `variation.occupancy` block (SL1), the sibling
+ * normalizers' discard-when-unusable rule: a draft comes from localStorage and
+ * may have been hand-edited, so it is proved structurally before it is carried
+ * into a save.
+ *
+ * Structural only, deliberately — `nextIndex` a non-negative integer and, when
+ * present, `tombstoned` an array of non-negative integers. The *semantic*
+ * refusals (a tombstone at or above `nextIndex`, a duplicate, an unknown key)
+ * belong to `parseBrief` at the API boundary, which re-validates every save;
+ * duplicating them here would give the two boundaries a second chance to
+ * drift. What this must guarantee is only that recovery never throws and never
+ * saves a shape the loader would reject outright.
+ */
+function normalizeOccupancyDraft(value: unknown): AuthoredOccupancy | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  const raw = value as Record<string, unknown>;
+  const nextIndex = raw.nextIndex;
+  if (typeof nextIndex !== "number" || !Number.isInteger(nextIndex) || nextIndex < 0) {
+    return undefined;
+  }
+  if (raw.tombstoned === undefined) return { nextIndex };
+  if (
+    !Array.isArray(raw.tombstoned) ||
+    !raw.tombstoned.every((slot) => typeof slot === "number" && Number.isInteger(slot) && slot >= 0)
+  ) {
+    return undefined;
+  }
+  return { nextIndex, tombstoned: [...(raw.tombstoned as number[])] };
+}
+
+/**
  * Rebuild a persisted `audio` block with the same repair-first,
  * discard-only-when-unusable rigor as the sibling normalizers: a stored value
  * survives only when it satisfies the domain's FULL audio contract —
@@ -2825,6 +2882,7 @@ export function normalizeDraftState(raw: Record<string, unknown>): EditorState {
     ANCHOR_OPTIONS.includes(value),
   );
   const anchor = anchorSelection.length > 0 ? anchorSelection : [...initial.variation.anchor];
+  const occupancy = normalizeOccupancyDraft(v.occupancy);
   const variation: EditorState["variation"] = {
     count: str(v.count, initial.variation.count),
     seed: str(v.seed, initial.variation.seed),
@@ -2838,6 +2896,7 @@ export function normalizeDraftState(raw: Record<string, unknown>): EditorState {
     background: list(v.background, initial.variation.background),
     paletteShift: list(v.paletteShift, initial.variation.paletteShift),
     headline: typeof v.headline === "boolean" ? v.headline : initial.variation.headline,
+    ...(occupancy !== undefined ? { occupancy } : {}),
   };
   // A persisted array can hold anything: `list` only proves it is an array, so an
   // entry that is not a usable object (a `null` from a hand-edited draft, a bare

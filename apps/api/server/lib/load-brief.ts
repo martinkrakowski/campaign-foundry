@@ -123,7 +123,18 @@ function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
 
-function assertFiniteIntegerAtLeast(value: unknown, field: string, min: number): void {
+/**
+ * An assertion signature, not a plain `void` check (the shape `assertSafeId`
+ * above already uses): a caller that needs the narrowed `number` afterwards —
+ * `validateOccupancy` compares each tombstone against `nextIndex` — gets it
+ * from the same one refusal, with no cast and no second guard whose else-branch
+ * nothing could ever reach.
+ */
+function assertFiniteIntegerAtLeast(
+  value: unknown,
+  field: string,
+  min: number,
+): asserts value is number {
   if (!isFiniteInteger(value) || value < min) {
     throw new Error(`Campaign brief field "${field}" must be a finite integer >= ${min}.`);
   }
@@ -608,8 +619,72 @@ function validateVariation(value: unknown, capabilities: Capabilities): void {
   if (value.coverage !== undefined) {
     validateCoverage(value.coverage);
   }
+  if (value.occupancy !== undefined) {
+    validateOccupancy(value.occupancy);
+  }
   if (value.axes !== undefined) {
     validateAxes(value.axes, capabilities);
+  }
+}
+
+const OCCUPANCY_KEYS = ["nextIndex", "tombstoned"] as const;
+
+/**
+ * `variation.occupancy` — which slots exist (SL-D2/SL-D3). Validated, never
+ * defaulted: unlike SL-D6's `minDistance` clamp a few lines above, this
+ * validator MUST NOT write onto the record. An absent block means the derived
+ * status quo (`nextIndex = count`, nothing tombstoned — resolved in
+ * `VariationPolicy.vo.ts`), and materialising that here would hand the editor
+ * an occupancy block the file never had, which the next Save would patch into
+ * the YAML: every existing campaign's document would churn on first write.
+ * Absence is the value.
+ *
+ * Strict about its own keys. The tombstone encoding's one failure mode worse
+ * than a live list's is a mistyped key — `tombstones:` plural, silently
+ * ignored, quietly resurrects a deleted creative — so `assertNoUnknownKeys`
+ * closes it, the way `audio` and `style` close theirs.
+ *
+ * A tombstone at or above `nextIndex` names a slot that was never allocated.
+ * That is this encoding's form of the "cursor below a slot that exists" fault
+ * (a live-index list would spell it `nextIndex` below the highest live index);
+ * with tombstones the live set is `[0, nextIndex)` minus the deleted ones, so
+ * a live index at or above the cursor is unrepresentable by construction and
+ * the refusal moves to the tombstone.
+ *
+ * `nextIndex: 0` and a fully-tombstoned range (no live slot at all) are
+ * coherent documents and are NOT refused here; what a run does with an empty
+ * occupancy is the planner's question (SL2), not the schema's.
+ */
+function validateOccupancy(value: unknown): void {
+  if (!isPlainObject(value)) {
+    throw new Error('Campaign brief field "variation.occupancy" must be an object.');
+  }
+  assertNoUnknownKeys(value, OCCUPANCY_KEYS, "variation.occupancy");
+  if (value.nextIndex === undefined) {
+    throw new Error(
+      'Campaign brief field "variation.occupancy.nextIndex" is required when "variation.occupancy" is present.',
+    );
+  }
+  assertFiniteIntegerAtLeast(value.nextIndex, "variation.occupancy.nextIndex", 0);
+  const nextIndex = value.nextIndex;
+  if (value.tombstoned === undefined) return;
+  if (!Array.isArray(value.tombstoned)) {
+    throw new Error('Campaign brief field "variation.occupancy.tombstoned" must be an array.');
+  }
+  const seen = new Set<number>();
+  for (const slot of value.tombstoned as readonly unknown[]) {
+    assertFiniteIntegerAtLeast(slot, "variation.occupancy.tombstoned", 0);
+    if (slot >= nextIndex) {
+      throw new Error(
+        `Campaign brief field "variation.occupancy.tombstoned" names slot ${slot}, which "variation.occupancy.nextIndex" (${nextIndex}) never allocated.`,
+      );
+    }
+    if (seen.has(slot)) {
+      throw new Error(
+        `Campaign brief field "variation.occupancy.tombstoned" lists slot ${slot} more than once.`,
+      );
+    }
+    seen.add(slot);
   }
 }
 

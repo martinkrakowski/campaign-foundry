@@ -16,6 +16,7 @@ import {
   MAX_DURATION_SEC,
   MIN_DURATION_SEC,
   type AnchorKind,
+  type AuthoredOccupancy,
   type BackgroundAxisSource,
 } from "./variation-defaults.js";
 
@@ -31,6 +32,7 @@ export {
   MIN_DURATION_SEC,
   ANCHOR_VALUES,
   type AnchorKind,
+  type AuthoredOccupancy,
   type BackgroundAxisSource,
 } from "./variation-defaults.js";
 
@@ -77,6 +79,39 @@ export interface VariationCoverage {
 }
 
 /**
+ * Occupancy as the brief writes it (SL-D2, option (a)): the monotonic
+ * allocation cursor plus the slots that were deleted.
+ *
+ * **Why tombstones and not a list of live indices.** Both encodings carry the
+ * same information once `nextIndex` is present, so the choice is a document
+ * one, and the brief is YAML an operator reads and a human diffs:
+ *
+ * - The common shape is "twelve slots, one deleted". As tombstones that is
+ *   `nextIndex: 12` + `tombstoned: [7]` — two lines that name the gesture.
+ *   As a live list it is `[0,1,2,3,4,5,6,8,9,10,11]`, where the reader has to
+ *   hunt for the gap, and which restates `count` in the overwhelmingly common
+ *   no-deletes case.
+ * - A delete diffs as one appended entry; an add diffs as `nextIndex + 1`
+ *   alone. A live list has to change in two places for an add, and the two can
+ *   disagree.
+ * - `{ nextIndex: 13, tombstoned: [12] }` — live `0..11` after the newest slot
+ *   was deleted — is the state a live list *cannot* express without
+ *   `nextIndex` anyway, which is why `nextIndex` is required either way.
+ *
+ * The cost is that a mistyped key (`tombstones`, plural) would silently
+ * resurrect a deleted creative, so the loader refuses unknown keys inside the
+ * block rather than tolerating them.
+ */
+export interface VariationOccupancy {
+  /** The next index to allocate. Monotonic (SL-D3): a tombstoned index is never reissued. */
+  readonly nextIndex: number;
+  /** The live slots, ascending — `[0, nextIndex)` minus the tombstoned ones. */
+  readonly liveIndices: readonly number[];
+  /** The deleted slots, ascending. Each one is below `nextIndex` and absent from `liveIndices`. */
+  readonly tombstoned: readonly number[];
+}
+
+/**
  * VariationPolicy — resolved draw policy for a variation-mode brief.
  *
  * `policyHash` is sha256-hex of the canonical JSON of every field except itself
@@ -112,6 +147,20 @@ export class VariationPolicy {
     readonly mixStatic: boolean,
     /** Ratios a motion slot may be drawn for (every ratio unless `output.platforms` narrows it). */
     readonly motionRatios: readonly AspectRatioValue[],
+    /**
+     * Which slots exist (SL-D2/SL-D3). Resolved, never optional here: a brief
+     * with no `variation.occupancy` block gets the derived status quo —
+     * `nextIndex = count`, no tombstones, live `0..count-1` — so every caller
+     * reads one shape and the pre-SL1 brief is the `tombstoned: []` case.
+     *
+     * Deliberately **not** in `policyHash`: the hash pins the draw policy so a
+     * selective re-roll is refused when the recipe moved underneath it, and
+     * occupancy is the drawn set's state, not the recipe. Folding it in would
+     * move the hash on every delete and refuse a re-roll of each SURVIVING
+     * slot — the exact property this plan exists to deliver (§7's first line:
+     * deleting a creative leaves the others byte-identical).
+     */
+    readonly occupancy: VariationOccupancy,
   ) {}
 
   /**
@@ -135,6 +184,10 @@ export class VariationPolicy {
     const countResult = requireInteger(variation.count, "count", 1);
     if (!countResult.success) return countResult;
     const count = countResult.value;
+
+    const occupancyResult = resolveOccupancy(variation.occupancy, count);
+    if (!occupancyResult.success) return occupancyResult;
+    const occupancy = occupancyResult.value;
 
     const seedResult = requireInteger(variation.seed ?? seedFrom(brief.id), "seed", 0, UINT32_MAX);
     if (!seedResult.success) return seedResult;
@@ -331,9 +384,65 @@ export class VariationPolicy {
         motionEnabled,
         mixStatic,
         motionRatios,
+        occupancy,
       ),
     );
   }
+}
+
+/**
+ * Resolve `variation.occupancy` into the shape every caller reads.
+ *
+ * Absent → the derived status quo (SL1's back-compat property): `nextIndex`
+ * is `count`, nothing is tombstoned, and the live slots are `0..count-1`.
+ * This is computed here and **never written back onto the brief** — a stored
+ * brief that carried no occupancy must still carry none after a save, or
+ * every existing campaign's YAML churns on first write.
+ *
+ * The checks mirror the loader's (`apps/api/server/lib/load-brief.ts`) rather
+ * than trusting it: the domain is reachable from callers that never parsed a
+ * file. A tombstone at or above `nextIndex` names a slot that was never
+ * allocated, which is the tombstone encoding's form of "the cursor sits below
+ * a slot that exists" — with a live list that fault reads as `nextIndex`
+ * below the highest live index.
+ */
+function resolveOccupancy(
+  occupancy: AuthoredOccupancy | undefined,
+  count: number,
+): Result<VariationOccupancy, Error> {
+  if (occupancy === undefined) {
+    return ok({
+      nextIndex: count,
+      liveIndices: Array.from({ length: count }, (_unused, index) => index),
+      tombstoned: [],
+    });
+  }
+  const nextIndexResult = requireInteger(occupancy.nextIndex, "occupancy.nextIndex", 0);
+  if (!nextIndexResult.success) return nextIndexResult;
+  const nextIndex = nextIndexResult.value;
+  const tombstoned: number[] = [];
+  for (const slot of occupancy.tombstoned ?? []) {
+    if (!Number.isInteger(slot) || slot < 0) {
+      return err(new Error(`Invalid occupancy.tombstoned: ${JSON.stringify(slot)}.`));
+    }
+    if (slot >= nextIndex) {
+      return err(
+        new Error(
+          `Invalid occupancy.tombstoned: slot ${slot} was never allocated (occupancy.nextIndex is ${nextIndex}).`,
+        ),
+      );
+    }
+    if (tombstoned.includes(slot)) {
+      return err(new Error(`Invalid occupancy.tombstoned: slot ${slot} is listed twice.`));
+    }
+    tombstoned.push(slot);
+  }
+  tombstoned.sort((a, b) => a - b);
+  const liveIndices: number[] = [];
+  for (let index = 0; index < nextIndex; index += 1) {
+    if (!tombstoned.includes(index)) liveIndices.push(index);
+  }
+  return ok({ nextIndex, liveIndices, tombstoned });
 }
 
 function unique<T>(values: readonly T[]): T[] {

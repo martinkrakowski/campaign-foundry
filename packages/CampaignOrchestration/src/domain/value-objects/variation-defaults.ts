@@ -30,6 +30,22 @@ export const HEADLINE_POOL_REF = "pool://copy";
 export const ANCHOR_VALUES = ["top", "middle", "bottom"] as const;
 export type AnchorKind = (typeof ANCHOR_VALUES)[number];
 
+/**
+ * `variation.occupancy` exactly as a brief AUTHORS it (SL-D2): the monotonic
+ * allocation cursor, plus the slots that were deleted. It lives in this leaf so
+ * the entity, the planner's VO and the editor all read one declaration and
+ * cannot drift — the resolved form, with the live slots computed, is
+ * `VariationOccupancy` in `VariationPolicy.vo.ts`.
+ *
+ * `tombstoned` is optional and means `[]`; `nextIndex` is not, because it is
+ * the whole point of the block. Absent occupancy is the pre-SL1 brief and is
+ * never stored: see `resolveOccupancy`.
+ */
+export interface AuthoredOccupancy {
+  readonly nextIndex: number;
+  readonly tombstoned?: readonly number[];
+}
+
 export const DEFAULT_BACKGROUND_SOURCES: readonly BackgroundAxisSource[] = ["procedural"];
 export const DEFAULT_PALETTE_SHIFT: readonly number[] = [0];
 /**

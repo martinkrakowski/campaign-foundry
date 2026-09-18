@@ -964,3 +964,146 @@ describe("policyHash is unmoved by the copyHash addition (X33, §35)", () => {
     }
   });
 });
+
+/**
+ * SL1 — occupancy resolution (SL-D2 option (a), SL-D3).
+ *
+ * The brief stores `nextIndex` plus the deleted slots; the VO resolves that
+ * into the shape every caller reads, and computes the pre-SL1 default rather
+ * than anyone storing it.
+ */
+describe("VariationPolicy occupancy", () => {
+  const occupied = (over: Record<string, unknown>) =>
+    brief({ variation: { count: 4, ...over } } as Partial<CampaignBrief>);
+
+  test("a brief with no occupancy derives the status quo: every slot 0..count-1 live", () => {
+    const result = fromBrief(brief({ variation: { count: 5 } }));
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.occupancy).toEqual({
+      nextIndex: 5,
+      liveIndices: [0, 1, 2, 3, 4],
+      tombstoned: [],
+    });
+  });
+
+  test("a block that omits tombstoned means nothing deleted, and the cursor still rules the live set", () => {
+    // The block is written by a campaign that has never had a delete: the
+    // cursor alone says how many slots exist, and it need not equal `count`.
+    const result = fromBrief(occupied({ occupancy: { nextIndex: 6 } }));
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.occupancy).toEqual({
+      nextIndex: 6,
+      liveIndices: [0, 1, 2, 3, 4, 5],
+      tombstoned: [],
+    });
+    expect(result.value.count).toBe(4);
+  });
+
+  test("tombstoned slots are removed from the live set and the cursor is kept", () => {
+    const result = fromBrief(occupied({ occupancy: { nextIndex: 13, tombstoned: [3, 7] } }));
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.occupancy.nextIndex).toBe(13);
+    expect(result.value.occupancy.tombstoned).toEqual([3, 7]);
+    expect(result.value.occupancy.liveIndices).toEqual([0, 1, 2, 4, 5, 6, 8, 9, 10, 11, 12]);
+  });
+
+  test("occupancy is independent of count — they diverge the moment a slot is deleted", () => {
+    // SL-D5: `count` is the recipe's target cardinality, occupancy is what exists.
+    const result = fromBrief(occupied({ occupancy: { nextIndex: 13, tombstoned: [3, 7] } }));
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.count).toBe(4);
+    expect(result.value.occupancy.liveIndices).toHaveLength(11);
+  });
+
+  test("the cursor sits above every live slot when the newest one was deleted", () => {
+    // SL-D3, the monotonic property the schema has to be able to express:
+    // slot 12 is gone, live is 0..11, and the next allocation is still 13.
+    const result = fromBrief(occupied({ occupancy: { nextIndex: 13, tombstoned: [12] } }));
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    const { nextIndex, liveIndices, tombstoned } = result.value.occupancy;
+    expect(nextIndex).toBe(13);
+    expect(liveIndices).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+    expect(Math.max(...liveIndices)).toBeLessThan(nextIndex);
+    // The whole of SL-D3 in one line: a tombstoned slot is never live.
+    for (const slot of tombstoned) expect(liveIndices).not.toContain(slot);
+  });
+
+  test("a tombstoned index is never in the live set, for every tombstone shape", () => {
+    for (const tombstoned of [[0], [0, 1, 2], [5], [0, 12], [1, 3, 5, 7, 9, 11]]) {
+      const result = fromBrief(occupied({ occupancy: { nextIndex: 13, tombstoned } }));
+      expect(result.success).toBe(true);
+      if (!result.success) return;
+      const live = result.value.occupancy.liveIndices;
+      for (const slot of tombstoned) expect(live).not.toContain(slot);
+      expect(live).toHaveLength(13 - tombstoned.length);
+      // Live is exactly [0, nextIndex) minus the tombstones — nothing above the cursor.
+      for (const slot of live) expect(slot).toBeLessThan(13);
+    }
+  });
+
+  test("an out-of-order tombstone list is normalised ascending", () => {
+    const result = fromBrief(occupied({ occupancy: { nextIndex: 13, tombstoned: [7, 3, 11] } }));
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.occupancy.tombstoned).toEqual([3, 7, 11]);
+  });
+
+  test.each([
+    ["a negative nextIndex", { nextIndex: -1 }, /occupancy\.nextIndex/],
+    ["a non-integer nextIndex", { nextIndex: 2.5 }, /occupancy\.nextIndex/],
+    ["a negative tombstone", { nextIndex: 5, tombstoned: [-1] }, /occupancy\.tombstoned/],
+    ["a non-integer tombstone", { nextIndex: 5, tombstoned: [1.5] }, /occupancy\.tombstoned/],
+    [
+      "a tombstone the cursor never allocated",
+      { nextIndex: 5, tombstoned: [5] },
+      /slot 5 was never allocated/,
+    ],
+    ["a duplicate tombstone", { nextIndex: 5, tombstoned: [1, 1] }, /slot 1 is listed twice/],
+  ])("refuses %s", (_label, occupancy, pattern) => {
+    // Defense in depth: the domain is reachable from callers that never parsed
+    // a file, so it repeats the loader's refusals rather than trusting them.
+    const result = fromBrief(occupied({ occupancy }));
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.error.message).toMatch(pattern);
+  });
+
+  /**
+   * Occupancy must NOT reach `policyHash`.
+   *
+   * The hash pins the draw POLICY so a selective re-roll is refused when the
+   * recipe moved underneath it. Occupancy is the drawn set's state. Fold it in
+   * and every delete moves the hash, which would refuse a re-roll of each
+   * SURVIVING creative — the exact property this plan exists to deliver
+   * (§7: deleting a creative leaves the others byte-identical).
+   *
+   * The existing golden-hash tests cannot see this: no golden carries
+   * occupancy, so a conditional spread of the block into the payload would
+   * leave every one of them green.
+   */
+  test("occupancy never reaches policyHash, so a delete cannot invalidate a survivor's re-roll", () => {
+    const none = fromBrief(brief({ variation: { count: 12 } }));
+    const full = fromBrief(
+      brief({ variation: { count: 12, occupancy: { nextIndex: 12, tombstoned: [] } } }),
+    );
+    const afterDelete = fromBrief(
+      brief({ variation: { count: 12, occupancy: { nextIndex: 12, tombstoned: [7] } } }),
+    );
+    const afterAdd = fromBrief(
+      brief({ variation: { count: 12, occupancy: { nextIndex: 40, tombstoned: [7, 9] } } }),
+    );
+    for (const result of [none, full, afterDelete, afterAdd]) expect(result.success).toBe(true);
+    if (!none.success || !full.success || !afterDelete.success || !afterAdd.success) return;
+    expect(full.value.policyHash).toBe(none.value.policyHash);
+    expect(afterDelete.value.policyHash).toBe(none.value.policyHash);
+    expect(afterAdd.value.policyHash).toBe(none.value.policyHash);
+    // …while the resolved occupancy itself really did differ, so the equality
+    // above is not four identical inputs agreeing with themselves.
+    expect(afterDelete.value.occupancy.liveIndices).not.toEqual(full.value.occupancy.liveIndices);
+    expect(afterAdd.value.occupancy.nextIndex).not.toBe(full.value.occupancy.nextIndex);
+  });
+});
