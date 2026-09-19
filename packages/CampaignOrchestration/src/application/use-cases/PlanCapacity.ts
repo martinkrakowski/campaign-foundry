@@ -206,21 +206,72 @@ export function maximumIndependentSet(
 }
 
 /**
- * The most variants this space can hold pairwise at least `minDistance` apart:
- * exact for small spaces, otherwise the line bound (a true upper bound either way).
+ * Why an exact maximum was not available. The two are not the same kind of event
+ * and must not be read as one:
  *
- * "Either way" is a claim `lineBound` only now earns: while it divided by a motion
- * pseudo-axis it returned numbers *below* the exact maximum this same function
- * computes one branch up, so the bounded branch contradicted the exact one.
+ * - `space-too-large` is a DESIGN limit. Past `EXACT_CAPACITY_MAX_SPACE` the bitset
+ *   search is not attempted at all, and every such space reports a bound. That is
+ *   the intended, permanent behaviour for a big brief.
+ * - `budget-exhausted` is a CLIFF. The search started, ran out of steps and did not
+ *   close — so the same call would have been exact with a larger budget, and *is*
+ *   exact for a slightly smaller space. Nothing in `{ max, exact }` says which of
+ *   the two happened, or that the second one is a step limit away from answering.
  */
-export function capacityAt(
+export type InexactCapacityReason = "space-too-large" | "budget-exhausted";
+
+/**
+ * Raised by `exactCapacityAt` when no exact maximum is available.
+ *
+ * It exists because the fallback is not merely approximate, it is *specifically*
+ * `lineBound(space)` — so a caller that wanted an exact maximum in order to check
+ * the bound against it gets handed the bound, compares it with itself and passes.
+ * Measured on #502's own 56-point mixed space: at the production budget `capacityAt`
+ * reports `{ max: 28, exact: false }` with `lineBound === 28`, while the true
+ * maximum is 24. `bound >= max` reads 28 >= 28 and is vacuously true.
+ */
+export class InexactCapacityError extends Error {
+  readonly reason: InexactCapacityReason;
+  /** The number `capacityAt` returns instead — always `lineBound(space)`. */
+  readonly bound: number;
+  readonly spaceSize: number;
+  readonly stepLimit: number;
+
+  constructor(reason: InexactCapacityReason, bound: number, spaceSize: number, stepLimit: number) {
+    super(
+      reason === "space-too-large"
+        ? `No exact capacity for a space of ${spaceSize} points: past EXACT_CAPACITY_MAX_SPACE ` +
+            `(${EXACT_CAPACITY_MAX_SPACE}) the exact search is not attempted. The line bound is ` +
+            `${bound} — ask capacityAt for it, and never compare it against itself.`
+        : `No exact capacity for a space of ${spaceSize} points: the branch and bound did not ` +
+            `close within ${stepLimit} steps. The line bound is ${bound} — a larger step limit ` +
+            `would answer exactly, and comparing the bound against this fallback compares it ` +
+            `against itself.`,
+    );
+    this.name = "InexactCapacityError";
+    this.reason = reason;
+    this.bound = bound;
+    this.spaceSize = spaceSize;
+    this.stepLimit = stepLimit;
+  }
+}
+
+/** Either an exact maximum, or the bound together with the reason it is only a bound. */
+type CapacityOutcome =
+  | { readonly kind: "exact"; readonly max: number }
+  | { readonly kind: "inexact"; readonly bound: number; readonly reason: InexactCapacityReason };
+
+/**
+ * The one computation behind both `capacityAt` and `exactCapacityAt`, so the
+ * degrading caller and the refusing one cannot disagree about what happened.
+ */
+function capacityOutcome(
   space: readonly Axes[],
   policy: VariationPolicy,
-  stepLimit: number = EXACT_CAPACITY_STEP_LIMIT,
-): { max: number; exact: boolean } {
-  if (policy.minDistance <= 1) return { max: space.length, exact: true };
-  const bound = lineBound(space);
-  if (space.length > EXACT_CAPACITY_MAX_SPACE) return { max: bound, exact: false };
+  stepLimit: number,
+): CapacityOutcome {
+  if (policy.minDistance <= 1) return { kind: "exact", max: space.length };
+  if (space.length > EXACT_CAPACITY_MAX_SPACE)
+    return { kind: "inexact", bound: lineBound(space), reason: "space-too-large" };
   const adjacency = space.map((a, i) => {
     let bits = 0n;
     space.forEach((b, j) => {
@@ -229,7 +280,62 @@ export function capacityAt(
     return bits;
   });
   const exact = maximumIndependentSet(adjacency, stepLimit);
-  return exact === undefined ? { max: bound, exact: false } : { max: exact, exact: true };
+  return exact === undefined
+    ? { kind: "inexact", bound: lineBound(space), reason: "budget-exhausted" }
+    : { kind: "exact", max: exact };
+}
+
+/**
+ * The most variants this space can hold pairwise at least `minDistance` apart:
+ * exact for small spaces, otherwise the line bound (a true upper bound either way).
+ *
+ * "Either way" is a claim `lineBound` only now earns: while it divided by a motion
+ * pseudo-axis it returned numbers *below* the exact maximum this same function
+ * computes one branch up, so the bounded branch contradicted the exact one.
+ *
+ * **This function degrades, and it has to**: `shortfallMessage` must name a ceiling
+ * for whatever brief an operator actually wrote, and a loose ceiling is a far better
+ * answer there than a thrown error. The price is that `exact: false` is easy to
+ * ignore and the number it hides is `lineBound(space)` itself — so a caller that
+ * wants the maximum as an ORACLE must use `exactCapacityAt`, which refuses rather
+ * than handing back the very number the oracle was meant to check.
+ */
+export function capacityAt(
+  space: readonly Axes[],
+  policy: VariationPolicy,
+  stepLimit: number = EXACT_CAPACITY_STEP_LIMIT,
+): { max: number; exact: boolean } {
+  const outcome = capacityOutcome(space, policy, stepLimit);
+  return outcome.kind === "exact"
+    ? { max: outcome.max, exact: true }
+    : { max: outcome.bound, exact: false };
+}
+
+/**
+ * The exact maximum, or nothing at all.
+ *
+ * The same computation as `capacityAt` with the opposite failure mode: where that
+ * one silently substitutes `lineBound(space)`, this one throws `InexactCapacityError`
+ * naming which limit was hit, what the bound would have been, and — for the
+ * exhausted case — that a larger budget would answer.
+ *
+ * Use it wherever the number is a CLAIM ABOUT THE SPACE rather than a sentence for
+ * an operator. The measured case it exists for: #502's 56-point mixed space exhausts
+ * the production budget and falls back to 28, which is exactly `lineBound(space)`, so
+ * `expect(lineBound(space)).toBeGreaterThanOrEqual(capacityAt(space, policy).max)`
+ * asserts 28 >= 28 and passes without ever computing the maximum it claims to bound
+ * (24, at a five-million-step budget). Nothing in `{ max, exact }` makes that loud.
+ * A throw does.
+ */
+export function exactCapacityAt(
+  space: readonly Axes[],
+  policy: VariationPolicy,
+  stepLimit: number = EXACT_CAPACITY_STEP_LIMIT,
+): number {
+  const outcome = capacityOutcome(space, policy, stepLimit);
+  if (outcome.kind === "inexact")
+    throw new InexactCapacityError(outcome.reason, outcome.bound, space.length, stepLimit);
+  return outcome.max;
 }
 
 /** A candidate satisfies a coverage need when every fixed axis of the need matches. */

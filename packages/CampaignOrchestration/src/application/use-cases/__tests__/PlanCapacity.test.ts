@@ -10,6 +10,7 @@ import {
   capacityAt,
   conflicts,
   enumerateAxes,
+  exactCapacityAt,
   exhaustiveAccept,
   lineBound,
   matchesNeed,
@@ -165,13 +166,14 @@ describe("conflicts / lineBound", () => {
     const divisorForm = Math.floor(space.length / 5);
     // The production step budget exhausts on this 56-point space and falls back to
     // the bound, which would compare the bound against itself; five million closes
-    // the branch and bound in about 136ms.
-    const exact = capacityAt(space, mixed, 5_000_000);
-    expect(exact.exact).toBe(true);
+    // the branch and bound in about 136ms. `exactCapacityAt` is what makes that a
+    // rule rather than a precaution: it throws on the fallback instead of returning
+    // it, so this line cannot quietly become 28 >= 28 again.
+    const exact = exactCapacityAt(space, mixed, 5_000_000);
     // The old form was not a bound at all: it sat under the true maximum.
-    expect(divisorForm).toBeLessThan(exact.max);
+    expect(divisorForm).toBeLessThan(exact);
     // The new one is a bound, and covers the exact maximum.
-    expect(lineBound(space)).toBeGreaterThanOrEqual(exact.max);
+    expect(lineBound(space)).toBeGreaterThanOrEqual(exact);
   });
 });
 

@@ -1,0 +1,111 @@
+{
+  "version": 1,
+  "lane": "gate",
+  "mutations": [
+    {
+      "file": "packages/CampaignOrchestration/src/application/use-cases/PlanCapacity.ts",
+      "before": "  const outcome = capacityOutcome(space, policy, stepLimit);\n  if (outcome.kind === \"inexact\")\n    throw new InexactCapacityError(outcome.reason, outcome.bound, space.length, stepLimit);\n  return outcome.max;",
+      "after": "  const outcome = capacityOutcome(space, policy, stepLimit);\n  if (outcome.kind === \"inexact\") return outcome.bound;\n  return outcome.max;",
+      "because": "The defect itself, in the one place this lane exists to close: `exactCapacityAt` hands back the bound instead of refusing. That is precisely what `capacityAt` already does, so under this mutation the two functions are one function and the seam is gone. It is chosen because it is the shape a later reader is most likely to 'simplify' into — a throw for something the sibling returns happily looks redundant until you know what the fallback number IS. On the 56-point mixed space the fallback is 28 and `lineBound` is 28, so an oracle reading through the mutated function compares the bound against itself and passes; the test instead asks for the refusal by type and by reason and goes red on the un-thrown error. Note what the test does NOT do: assert merely that something threw. A function that always threw would satisfy that, so the same test also runs the call with a five-million-step budget and pins the answer at 24 — a number strictly below the bound, which only a real search can produce.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "packages/CampaignOrchestration/src/application/use-cases/__tests__/exact-capacity.test.ts",
+        "-t",
+        "asking for an exact capacity on that same space is refused, not answered with the bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/application/use-cases/PlanCapacity.ts",
+      "before": "  const outcome = capacityOutcome(space, policy, stepLimit);\n  return outcome.kind === \"exact\"\n    ? { max: outcome.max, exact: true }\n    : { max: outcome.bound, exact: false };",
+      "after": "  return { max: exactCapacityAt(space, policy, stepLimit), exact: true };",
+      "because": "The over-correction this lane was explicitly told not to make: turning the legitimate degradation into a refusal. A space past EXACT_CAPACITY_MAX_SPACE has ALWAYS reported the line bound with `exact: false`, and it must keep doing so — `shortfallMessage` has to name a ceiling for whatever brief an operator actually wrote, and a thrown error there is a worse answer than a loose number. Under the mutation `capacityAt` inherits `exactCapacityAt`'s refusal and the 216-point static space throws instead of reporting `{ max: lineBound(space), exact: false }`. A lane that closed the oracle hole by making the single function strict would pass every assertion about exactness and break the operator-facing path, which is the direction this test is here to forbid.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "packages/CampaignOrchestration/src/application/use-cases/__tests__/exact-capacity.test.ts",
+        "-t",
+        "a space past the size limit still reports the line bound with exact false"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/application/use-cases/PlanCapacity.ts",
+      "before": "    ? { kind: \"inexact\", bound: lineBound(space), reason: \"budget-exhausted\" }",
+      "after": "    ? { kind: \"inexact\", bound: lineBound(space), reason: \"space-too-large\" }",
+      "because": "Checking the negative. The refusal is not the whole claim — WHICH limit was hit is the actionable half, because a step budget is a cliff the caller steps back from with a larger limit and a size limit is permanent. Collapsing the two reasons leaves a function that still refuses, still carries a bound, still names a space size, and still throws an InexactCapacityError: every coarse assertion about the refusal stays green. Only the assertion that the exhausted 56-point space reports `budget-exhausted` goes red. Without this mutation the reason field would be decoration that no test could tell from a constant.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "packages/CampaignOrchestration/src/application/use-cases/__tests__/exact-capacity.test.ts",
+        "-t",
+        "asking for an exact capacity on that same space is refused, not answered with the bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/control-bytes/lib/scan.ts",
+      "before": "  if (byte === 0x7f) return true;\n  if (byte > 0x1f) return false;\n  return !ALLOWED_CONTROL_BYTES.includes(byte);",
+      "after": "  if (byte === 0x7f) return true;\n  if (byte >= 0x1f) return false;\n  return !ALLOWED_CONTROL_BYTES.includes(byte);",
+      "because": "One byte off at the boundary — 0x1f, US, walks through. This is the mutation a range check invites and the one a spot-check of NUL and ESC would never find: the check would still fail on the byte that started all this, still pass the whole tree, still refuse CR, and quietly admit the top of the C0 block forever. The test does not spot-check. It walks every byte from 0x00 to 0x1f individually and asserts the verdict for each against the tab/newline rule, then pins 0x7f, and pins 0x20, 0x7e and 0x80 as text on the other side of both boundaries. So the mutated predicate goes red on exactly one byte, and says which.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "tools/control-bytes/lib/__tests__/scan.test.ts",
+        "-t",
+        "every byte from 0x00 to 0x1f and DEL is decided, one at a time"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/control-bytes/lib/scan.ts",
+      "before": "  if (dot <= 0) return false;\n  return SCANNED_EXTENSIONS.includes(base.slice(dot + 1));",
+      "after": "  return dot > 0 || base.length > 0;",
+      "because": "The scope turned into a denylist-by-omission: every listed file is scanned, binaries included. This is the failure mode that makes a new gate hated rather than trusted — the tree carries four .ttf fonts and eleven .png images whose bytes are control bytes by the thousand, so the mutated check reports tens of thousands of offences on an untouched tree and the next lane's first move is to delete the gate. The test names the real files: Inter-Bold.ttf, reuse-bg.png, yarn.lock, and an extensionless path, and asserts each is out of scope. An allowlist fails the other way, which is the direction chosen on purpose: a new text extension goes unscanned until it is added to a list a reader can see.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "tools/control-bytes/lib/__tests__/scan.test.ts",
+        "-t",
+        "binaries and extensionless files are not"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/control-bytes/lib/scan.ts",
+      "before": "    if (isForbiddenControlByte(byte))\n      offences.push({ path, line, column: index - lineStart + 1, byte });",
+      "after": "    if (isForbiddenControlByte(byte) || (byte === 0x5c && bytes[index + 1] === 0x78))\n      offences.push({ path, line, column: index - lineStart + 1, byte });",
+      "because": "The wrong question, asked the way it is actually asked by mistake: match the two characters backslash-x in the source rather than the byte on disk. It is the plausible reading of 'find the \\x00 that got into PlanCapacity.ts', and it inverts the check — the raw byte that survived six gates carries no backslash at all, while tools/wave-status/lib/__tests__/render.test.ts:508 deliberately writes \\x00 and \\x1b as ESCAPES to build a sanitizer fixture and would be condemned for it. Under the mutation `yarn lint:bytes` fails on that legitimate test file. The unit test goes red on the smallest version of the same thing: a literal written as an escape, which must scan clean, sitting next to the raw form of the same character, which must not.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "tools/control-bytes/lib/__tests__/scan.test.ts",
+        "-t",
+        "the same literal written as an escape is not"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/control-bytes/cli.ts",
+      "before": "  if (files.length === 0) {\n    io.logError(\n      `control-bytes: the listing produced no text files to scan — refusing to report ` +\n        `that as nothing to check`,\n    );\n    return EXIT_UNUSABLE;\n  }",
+      "after": "  if (files.length === 0) {\n    io.log(`control-bytes: scanned 0 text files. OK`);\n    return 0;\n  }",
+      "because": "The fail-open this lane exists to forbid, inside this lane's own tool. Without the guard a listing that produced nothing prints `control-bytes: scanned 0 text files ... no raw C0 control bytes. OK` and exits 0, which a CI step reads as green — a wrong working directory, a sparse checkout or a future change to how the file list is obtained would silence the gate exactly the way `verify-manifests.sh`'s own header warns about. The repo precedent does not transfer: `anchors-cli` returns 0 on an empty manifest directory and is right to, because that directory can legitimately hold nothing. This repo's text-file set cannot — it is 919 files. The test names the distinction and asserts exit 2 with the refusal on stderr, so deleting the guard turns a pass into a failure rather than the other way round.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "tools/control-bytes/__tests__/cli.test.ts",
+        "-t",
+        "an empty listing is refused rather than reported as a pass it did not make"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

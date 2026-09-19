@@ -11,6 +11,7 @@ import {
   EXACT_CAPACITY_MAX_SPACE,
   capacityAt,
   enumerateAxes,
+  exactCapacityAt,
   lineBound,
   shortfallMessage,
   type Axes,
@@ -67,6 +68,10 @@ const reelOnly: PlanInput = { motionRatios: ["9:16"] };
  * `capacityAt`'s production step budget exhausts on the 56-point mixed space and
  * falls back to the bound, which would make the oracle compare the bound against
  * itself. Measured: the branch and bound closes it in 136ms at five million.
+ *
+ * The oracle below reads that maximum through `exactCapacityAt`, which throws
+ * rather than substituting the bound — so if this budget ever stops sufficing the
+ * suite goes red instead of quietly passing on 28 >= 28.
  */
 const EXACT_ORACLE_STEPS = 5_000_000;
 
@@ -236,11 +241,10 @@ describe("the bound is a bound", () => {
     expect(space.length).toBeLessThanOrEqual(EXACT_CAPACITY_MAX_SPACE);
     expect(space.length).toBe(policy.axisProductSize);
 
-    const exact = capacityAt(space, policy, EXACT_ORACLE_STEPS);
-    expect(exact.exact).toBe(true);
-    expect(lineBound(space)).toBeGreaterThanOrEqual(exact.max);
+    const exact = exactCapacityAt(space, policy, EXACT_ORACLE_STEPS);
+    expect(lineBound(space)).toBeGreaterThanOrEqual(exact);
     // And the shape of the old error: below it, on every one of these.
-    expect(divisorForm(policy, space)).toBeLessThan(exact.max);
+    expect(divisorForm(policy, space)).toBeLessThan(exact);
   });
 });
 
@@ -305,10 +309,9 @@ describe("a plan with only full lines keeps the number it had", () => {
       reelOnly,
     );
     const space = enumerateAxes(policy);
-    const exact = capacityAt(space, policy);
-    expect(exact.exact).toBe(true);
-    expect(divisorForm(policy, space)).toBeLessThan(exact.max);
+    const exact = exactCapacityAt(space, policy);
+    expect(divisorForm(policy, space)).toBeLessThan(exact);
     // Tight here: the bound is exactly what the space holds.
-    expect(lineBound(space)).toBe(exact.max);
+    expect(lineBound(space)).toBe(exact);
   });
 });
