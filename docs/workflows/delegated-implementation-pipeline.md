@@ -135,7 +135,10 @@ lane=feat/e1-web; wt=../wt-e1-web
 gh pr list --head "$lane" --json number,url,isDraft --jq '.[] | "#\(.number) \(.url)"'
 
 # 2. Is it green? The gate's exit code is the answer; the lane's summary is not.
-(cd "$wt" && yarn build && yarn typecheck && yarn lint && yarn lint:arch && yarn test:cov)
+#    `lint:bytes` is the byte-level half of source hygiene: no other gate here
+#    looks at raw bytes, and a raw \x00 in a string literal once passed all of
+#    the rest. It is ~150ms, so it costs nothing to keep in this line.
+(cd "$wt" && yarn build && yarn typecheck && yarn lint && yarn lint:arch && yarn lint:bytes && yarn test:cov)
 echo "gate exit: $?"
 
 # 3. What actually changed, and is the tree clean?
