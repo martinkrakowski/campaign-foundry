@@ -48,6 +48,8 @@ import {
   slugify,
   asCopyTimeline,
   timelineDurations,
+  draftOccupancy,
+  canAddCreative,
 } from "@/components/campaign/editor-state";
 import { useEditorHistory, useHistoryKeys } from "@/components/campaign/editor-history";
 import {
@@ -872,6 +874,34 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
    */
   const [selectedCreative, setSelectedCreative] = useState<PlannedCreative | null>(null);
   /**
+   * **SL4 — the two gestures, and the three values the list needs to offer them
+   * honestly.**
+   *
+   * Both handlers dispatch and nothing else: the reducer owns the constraint
+   * (add advances `nextIndex`, delete appends a tombstone, neither touches
+   * `count`), and neither of them touches the selection. Deleting the selected
+   * creative retires the selection through SL3's own reconciliation — the rows
+   * the section renders are filtered by the draft's tombstones, so the slot is
+   * gone from them in the same commit and D139's rule fires there. One
+   * mechanism, already asserted, rather than a second one here that could
+   * disagree with it.
+   *
+   * `occupancy` is memoised on the two things it reads. A fresh object per
+   * render would be harmless in the JSX below but not in a dependency array,
+   * and this way the panels effect (which already depends on the whole `state`)
+   * is the only thing that moves.
+   */
+  const occupancy = useMemo(
+    () => draftOccupancy(state),
+    [state.variation.occupancy, state.variation.count],
+  );
+  const canAdd = canAddCreative(state);
+  const addCreative = useCallback(() => dispatch({ type: "addCreative" }), [dispatch]);
+  const deleteCreative = useCallback(
+    (index: number) => dispatch({ type: "deleteCreative", index }),
+    [dispatch],
+  );
+  /**
    * D139's second retirement, the one `CreativesSection` cannot see: the
    * document underneath changed. Slot numbers are shared across briefs by
    * construction — every variation plan starts at 0 — so "the slot still
@@ -1339,7 +1369,14 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
           <Accordion title="Estimate">
             <EstimateFromPlan state={state} />
           </Accordion>
-          <CreativesSection selected={selectedCreative} onSelect={setSelectedCreative} />
+          <CreativesSection
+            selected={selectedCreative}
+            onSelect={setSelectedCreative}
+            occupancy={occupancy}
+            canAdd={canAdd}
+            onAdd={addCreative}
+            onDelete={deleteCreative}
+          />
         </VariationPlanProvider>
       </>,
     );
@@ -1353,6 +1390,10 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
     unknownId,
     failedRouteId,
     selectedCreative,
+    occupancy,
+    canAdd,
+    addCreative,
+    deleteCreative,
   ]);
   useEffect(() => () => setPanels(null), []);
 

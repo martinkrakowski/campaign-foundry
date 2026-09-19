@@ -1,0 +1,171 @@
+{
+  "version": 1,
+  "lane": "SL4",
+  "mutations": [
+    {
+      "file": "apps/web/src/components/campaign/editor-state.ts",
+      "before": "          occupancy: authoredOccupancy(nextIndex + 1, tombstoned),",
+      "after": "          count: String(nextIndex + 1),\n          occupancy: authoredOccupancy(nextIndex + 1, tombstoned),",
+      "because": "Raise `count` along with the cursor, which is the reading almost everyone arrives at first: the operator asked for one more creative, so the number of creatives goes up. It is the exact thing SL2's allocation gate is written against. With `allocated === count` again, the exhaustive fallback re-opens on the very gesture it guards, and the search — which answers \"choose count points from scratch\" — is free to move every creative the operator already has in order to fit one more. Nothing on screen looks wrong; the whole set quietly re-draws.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "apps/web/src/components/campaign/__tests__/editor-state.creative-slots.test.ts",
+        "-t",
+        "count is the recipe's target cardinality and stays where the operator put it"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/editor-state.ts",
+      "before": "          occupancy: authoredOccupancy(\n            nextIndex,\n            [...tombstoned, action.index].sort((a, b) => a - b),\n          ),",
+      "after": "          count: String(Math.max(1, liveIndices.length - 1)),\n          occupancy: authoredOccupancy(\n            nextIndex,\n            [...tombstoned, action.index].sort((a, b) => a - b),\n          ),",
+      "because": "The mirror image, and the one that reads as tidying up: the operator deleted a creative, so the brief should ask for one fewer. It strands a brief whose plan came from the exhaustive search — `allocated` stays at the cursor while `count` drops, the two stop being equal, and the search that was the only way to plan this brief is closed on the next run. A brief that planned fine before the delete is then refused, and the refusal names a shortfall the operator never caused.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "apps/web/src/components/campaign/__tests__/editor-state.creative-slots.test.ts",
+        "-t",
+        "count is the recipe's target cardinality and stays where the operator put it"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/editor-state.ts",
+      "before": "      const { nextIndex, tombstoned } = draftOccupancy(state);\n      return {\n        ...state,\n        // `count` is untouched, on purpose. See the action's own comment.\n        variation: {\n          ...state.variation,\n          occupancy: authoredOccupancy(nextIndex + 1, tombstoned),\n        },\n      };",
+      "after": "      const { nextIndex, tombstoned } = draftOccupancy(state);\n      const reused = tombstoned[0];\n      return {\n        ...state,\n        variation: {\n          ...state.variation,\n          occupancy:\n            reused === undefined\n              ? authoredOccupancy(nextIndex + 1, tombstoned)\n              : authoredOccupancy(\n                  nextIndex,\n                  tombstoned.filter((slot) => slot !== reused),\n                ),\n        },\n      };",
+      "because": "Fill the hole instead of allocating above it — the thrifty reading, and it even looks like it respects the cursor. It reissues a deleted slot, which is precisely the recreate-on-delete defect the whole plan exists to remove (SL-D3): the operator deleted the creative at slot 1 because they did not want it, and the next Add hands them the same seed, the same `…/v1.png` and — with the axes replayed — a very similar picture, presented as a new creative. \"One more row appeared\" is true under this mutation, which is why the anchor asserts the new slot IS the old cursor and why its fixture starts with a hole in it.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "apps/web/src/components/campaign/__tests__/editor-state.creative-slots.test.ts",
+        "-t",
+        "the new slot is the old nextIndex, never a tombstoned one, and nothing else moves"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/editor-state.ts",
+      "before": "      if (liveIndices.length <= 1) return state;",
+      "after": "      if (liveIndices.length <= 0) return state;",
+      "because": "Let the last creative be deleted. It is one character and it reads as the obvious bound. What it produces is a brief that plans to nothing: the list has no rows, so the section renders no chrome at all — and the ADD control lives inside that section, so the operator's only way back is ⌘Z, which nothing on screen tells them about. The floor is also the owner's own words about the other cardinality: \"The minimum should be 1.\"",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "apps/web/src/components/campaign/__tests__/editor-state.creative-slots.test.ts",
+        "-t",
+        "the last creative cannot be deleted"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/editor-state.ts",
+      "before": "      if (!liveIndices.includes(action.index)) return state;",
+      "after": "      if (action.index < 0) return state;",
+      "because": "Guard the index the way most reducers here guard one — a bounds check — instead of asking whether the slot is actually live. It admits three things a bounds check cannot see: a slot at or above the cursor that was never allocated, a fractional index, and, the plausible one, a slot that is ALREADY tombstoned. The last arrives for free from a double-click on a delete, and it writes `tombstoned: [1, 1]` into the brief — a duplicate the domain refuses outright (`resolveOccupancy`), so the next plan fails on a document the editor itself authored. `liveIndices` answers all three with one question.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "apps/web/src/components/campaign/__tests__/editor-state.creative-slots.test.ts",
+        "-t",
+        "a slot that is not live cannot be deleted"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/editor-state.ts",
+      "before": "      if (!canAddCreative(state)) return state;",
+      "after": "      if (false) return state;",
+      "because": "Trust the disabled button and drop the reducer's ceiling. The control is disabled at the ceiling, so nothing in the UI can reach this — until a restored localStorage draft does, which is the path `setBeatWeight`'s bounds exist for. The reducer is the contract: an occupancy above `axisProductSize` is a brief the planner refuses outright, and the editor's own count slider is bounded by the same number for the same reason.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "apps/web/src/components/campaign/__tests__/editor-state.creative-slots.test.ts",
+        "-t",
+        "add is refused when the axes cannot produce another creative"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/editor-state.ts",
+      "before": "      ...(state.variation.occupancy !== undefined ? { occupancy: state.variation.occupancy } : {}),",
+      "after": "      occupancy: state.variation.occupancy ?? { nextIndex: parsePolicyInteger(state.variation.count) ?? 0 },",
+      "because": "Write the block always, deriving it from `count` when it is absent — which looks like an improvement, since the domain derives exactly that. It is SL1's back-compat property, broken: every campaign saved before SL1 grows an `occupancy` key on its first save, so every existing brief's YAML churns under a gesture the operator did not make. The resolution belongs in the reader, never in the writer.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.creatives.test.tsx",
+        "-t",
+        "a brief that never had occupancy saves without acquiring one"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/CreativesPanel.tsx",
+      "before": "  const visible = rows.filter((variant) => !occupancy.tombstoned.includes(variant.index));",
+      "after": "  const visible = rows;",
+      "because": "Let the deleted row stand until the planner answers. Every assertion made after the debounce still passes — the row does go, eventually — and in between the operator has a row for a creative the document no longer has: clickable, loadable into the rail, and indistinguishable from one that exists. It also takes the selection with it, because this filter is what feeds SL3's retirement rule. Caught only by asserting BEFORE the settle, which is why fault 1's test does.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.creatives.test.tsx",
+        "-t",
+        "the row goes at once, the request carries a tombstone, and count is untouched"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/CreativesPanel.tsx",
+      "before": "                onClick={() => onDelete(variant.index)}",
+      "after": "                onClick={() => onDelete(rows.indexOf(variant))}",
+      "because": "Delete by the row's position instead of by the slot it names. With a hole in the list the two differ — the second row of `0, 2` is position 1 and slot 2 — so pressing the delete on \"Creative 3\" tombstones slot 1, which is already tombstoned, and the reducer refuses: the row simply does not go away. Worse in the other direction, on a list with no hole yet, it deletes the right creative by coincidence and stops the moment the operator makes one. This is the same position-for-slot confusion SL3's row LABEL had to refuse.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.creatives.test.tsx",
+        "-t",
+        "the row goes at once, the request carries a tombstone, and count is untouched"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/CreativesPanel.tsx",
+      "before": "  const deletable = occupancy.liveIndices.length > 1;",
+      "after": "  const deletable = true;",
+      "because": "Offer the delete on every row and let the reducer refuse the last one. The gesture is still safe — the document cannot lose its last creative — but the operator presses a control that does nothing and is told nothing, which is the offered-then-refused defect DESIGN.md §1.5 names and the reason `LayerStack` withholds the remove on a required layer instead of disabling it. The note explaining the floor goes with it.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.creatives.test.tsx",
+        "-t",
+        "the last remaining creative carries no delete control, and the panel says why"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/CreativesPanel.tsx",
+      "before": "  const drawing = plan === null && occupancy.liveIndices.length > visible.length;",
+      "after": "  const drawing = occupancy.liveIndices.length > visible.length;",
+      "because": "Key the pending line on the shortfall alone. It still appears exactly when an add is in flight, so the add test cannot tell the difference — but a shortfall also exists whenever the ANSWER carries fewer slots than the document does, and then the line says a creative is being made while nothing is being made and nothing ever will be. A pending notice that never comes down is worse than none.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.creatives.test.tsx",
+        "-t",
+        "it does not survive a re-plan that drops the slot"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

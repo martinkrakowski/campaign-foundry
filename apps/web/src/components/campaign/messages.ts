@@ -460,6 +460,57 @@ export function creativeRowSummary(parts: {
     .join(" · ");
 }
 
+// --- Adding and deleting creatives (SL4) ---
+
+/**
+ * The row's delete control. Names the SLOT, like the row itself, so the
+ * accessible name of the control and of the thing it destroys agree — and so
+ * "Delete Creative 3" never means the third row.
+ */
+export function creativeDeleteLabel(index: number): string {
+  return `Delete ${creativeRowLabel(index)}`;
+}
+
+/** The control that allocates one more slot. */
+export const creativeAdd = "Add creative";
+
+/**
+ * **What the operator is told about delete, and it is the one thing about this
+ * gesture that is not obvious.** ⌘Z takes a delete back exactly — the same slot,
+ * the same seed, the same picture — because the tombstone is a draft edit like
+ * any other. Adding a creative afterwards is NOT that: a slot is never reused
+ * (SL-D3), so the new creative lands at a new index and gets a picture of its
+ * own. Saying so here is why the gesture needs no confirm dialog.
+ */
+export const creativeGesturesNote =
+  "Deleting leaves every other creative exactly as it is, and ⌘Z brings it back. Adding one after a delete makes a NEW creative, not the old one — it takes its own place in the set, so it will not look the same.";
+
+/**
+ * Why the one remaining creative carries no delete control (the
+ * `templateRequiredNote` pattern: say why a control is absent rather than offer
+ * one that refuses). A campaign with nothing in it is not a campaign, and the
+ * owner asked for exactly this floor: *"The minimum should be 1."*
+ */
+export const creativeDeleteLastNote =
+  "A campaign makes at least one creative, so the last one cannot be deleted.";
+
+/**
+ * Why Add is refused: the selected options cannot produce another creative
+ * distinct from the ones that exist. The count slider is bounded by the same
+ * ceiling, so this is the sentence the count clamp tells, aimed at the other
+ * cardinality — and it says it the way `countHelp` does, in what the operator
+ * picked rather than in the axes it multiplies.
+ */
+export const creativeAddBlocked =
+  "Nothing else you could make would be different from the creatives you already have — pick more options to add another.";
+
+/**
+ * The list while a newly allocated slot is still being worked out. The row
+ * itself cannot appear yet: a creative nothing has drawn has no look, and this
+ * list has never invented one (D26/D142). It says the slot is coming instead.
+ */
+export const creativeDrawing = "Making the new creative…";
+
 // --- The Sections outline (D25) ---
 
 /** The sidebar group's legend above the numbered rows. */

@@ -550,6 +550,25 @@ export type EditorAction =
   | { type: "toggleBackground"; value: string }
   | { type: "togglePalette"; value: number }
   | { type: "toggleHeadline" }
+  /**
+   * **SL4 — allocate one more slot. It advances `nextIndex` and NOTHING else.**
+   *
+   * Not `count`: `count` is the recipe's target cardinality (SL-D5) and
+   * occupancy is what exists, and an add that raised `count` too would make the
+   * two equal again and re-open the exhaustive search on the very gesture the
+   * allocation gate guards (`PlanVariationsUseCase.use-case.ts:161-177`). The
+   * divergence is the feature.
+   */
+  | { type: "addCreative" }
+  /**
+   * **SL4 — delete one slot. It appends a tombstone and NOTHING else.**
+   *
+   * `index` is the SLOT the planner named, never a row position: monotonic
+   * slots are the whole point (SL-D3), so the third creative of three stays
+   * slot 2 when the second is deleted. Lowering `count` here would strand a
+   * brief whose plan came from the exhaustive search — see `addCreative`.
+   */
+  | { type: "deleteCreative"; index: number }
   | { type: "setStyle"; patch: Partial<Style> }
   | { type: "toggleMotion"; value: string }
   | { type: "setDuration"; index: number; value: number }
@@ -759,6 +778,67 @@ export function axisProductSize(state: EditorState): number {
     // the absent axis derives top/bottom from `layout`, adding no combination.
     (anchorAxisActive(state) ? Math.max(1, state.variation.anchor.length) : 1)
   );
+}
+
+/** The draft's occupancy, resolved: which slots were allocated and which still exist. */
+export interface DraftOccupancy {
+  /** The allocation cursor. Every slot ever issued is below it; the next one is it. */
+  readonly nextIndex: number;
+  /** The deleted slots, ascending. Still drawn by the planner, never emitted. */
+  readonly tombstoned: readonly number[];
+  /** The slots that exist — `[0, nextIndex)` minus the tombstones. */
+  readonly liveIndices: readonly number[];
+}
+
+/**
+ * **The editor's mirror of the domain's `resolveOccupancy`** (`VariationPolicy.vo.ts`),
+ * and the one place the gestures and the sidebar agree about what exists.
+ *
+ * The absent key is the pre-SL1 brief, and it resolves exactly as the domain
+ * resolves it: `nextIndex` is `count`, nothing is tombstoned, and the live slots
+ * are `0..count-1`. **The resolution is never written back on its own** — only a
+ * gesture materialises the block — which is SL1's back-compat property: a brief
+ * that carried no occupancy still saves without one.
+ *
+ * `count` is read through `parsePolicyInteger`, the same parser `toBrief` sends
+ * to the planner, so a blank or refused count resolves to zero slots here and to
+ * zero slots there rather than to two different numbers.
+ */
+export function draftOccupancy(state: EditorState): DraftOccupancy {
+  const authored = state.variation.occupancy;
+  const nextIndex = authored?.nextIndex ?? parsePolicyInteger(state.variation.count) ?? 0;
+  const tombstoned = authored?.tombstoned ?? [];
+  const liveIndices: number[] = [];
+  for (let index = 0; index < nextIndex; index += 1) {
+    if (!tombstoned.includes(index)) liveIndices.push(index);
+  }
+  return { nextIndex, tombstoned, liveIndices };
+}
+
+/**
+ * Whether one more slot can be allocated — `withCountClamp`'s principle applied
+ * to the other cardinality: **the editor must not author an occupancy the
+ * planner will refuse**. The draw fills every allocated slot, so `nextIndex`
+ * is bounded by `axisProductSize` exactly as `count` is
+ * (`PlanVariationsUseCase.use-case.ts:86`).
+ *
+ * It is a CEILING, not a guarantee. Once a slot has been added, `allocated`
+ * exceeds `count` and SL2 closes the exhaustive fallback deliberately, so a
+ * tight space can still refuse an add that fits under this bound. The refusal
+ * is loud and names the shortfall, and ⌘Z takes the add back.
+ */
+export function canAddCreative(state: EditorState): boolean {
+  return draftOccupancy(state).nextIndex < axisProductSize(state);
+}
+
+/**
+ * The block as a brief authors it: `tombstoned` is omitted when empty, the way
+ * the domain spells "nothing is deleted" and the way every other optional key in
+ * `toBrief` is written. An added slot on a brief that has never had a delete
+ * therefore serialises as a bare `occupancy: { nextIndex: n }`.
+ */
+function authoredOccupancy(nextIndex: number, tombstoned: readonly number[]): AuthoredOccupancy {
+  return tombstoned.length === 0 ? { nextIndex } : { nextIndex, tombstoned: [...tombstoned] };
 }
 
 /**
@@ -1717,6 +1797,45 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
         ...state,
         variation: { ...state.variation, headline: !state.variation.headline },
       };
+    case "addCreative": {
+      // The ceiling, refused in the reducer and not only in the control: the
+      // Advanced stepper's count is bounded the same way, and a restored draft
+      // must not be able to smuggle an unplannable allocation past a disabled
+      // button (`setBeatWeight`'s discipline).
+      if (!canAddCreative(state)) return state;
+      const { nextIndex, tombstoned } = draftOccupancy(state);
+      return {
+        ...state,
+        // `count` is untouched, on purpose. See the action's own comment.
+        variation: {
+          ...state.variation,
+          occupancy: authoredOccupancy(nextIndex + 1, tombstoned),
+        },
+      };
+    }
+    case "deleteCreative": {
+      const { nextIndex, tombstoned, liveIndices } = draftOccupancy(state);
+      // Min-one (D6's guard, the shape `toggleLayout` uses): the last creative
+      // cannot be deleted. A brief with nothing live plans to nothing, so the
+      // list — and the Add control inside it — would vanish with the last row
+      // and leave the operator no way back but ⌘Z. The control is not offered
+      // on that row either (DESIGN.md §1.5); this is the contract behind it.
+      if (liveIndices.length <= 1) return state;
+      // A slot that is not live cannot be deleted: not allocated, not a whole
+      // number, or already tombstoned. `liveIndices` answers all three at once,
+      // and a duplicate tombstone is a brief the domain refuses outright.
+      if (!liveIndices.includes(action.index)) return state;
+      return {
+        ...state,
+        variation: {
+          ...state.variation,
+          occupancy: authoredOccupancy(
+            nextIndex,
+            [...tombstoned, action.index].sort((a, b) => a - b),
+          ),
+        },
+      };
+    }
     case "setStyle": {
       // The domain's own validator is the contract here, the way `setBeatWeight`'s
       // bounds are: a patch that would leave the block outside the Style VO's
