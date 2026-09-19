@@ -27,6 +27,7 @@ import {
   initialEditorState,
   editorReducer,
   approvedHeadlines,
+  isDefaultOutput,
   toBrief,
   fromBrief,
   isDirtySinceSave,
@@ -4461,6 +4462,79 @@ describe("display platforms (D116)", () => {
     raw.sizes = ["728x90", "999x999"];
     const restored = normalizeDraftState(raw);
     expect(restored.sizes).toEqual(["728x90"]);
+  });
+
+  /**
+   * M1 — `isDefaultOutput` decides whether `toBrief` DROPS the output block, so
+   * every field the block carries has to be one it reads. `sizes` was not, and a
+   * draft holding display sizes with otherwise-default formats and platforms
+   * serialised as "default": the sizes never reached the document.
+   *
+   * No gesture reaches that combination today — `togglePlatform` filters the
+   * sizes on remove, `applyPreset` re-derives them, and a loaded `output` sets
+   * `outputExplicit` — so these tests build the state directly. That is the
+   * point: the predicate must be right on the state itself, not because a
+   * distant filter happens to keep it out of reach. The `toggleSize` action the
+   * `sizes` field's own doc comment says "no UI asks for yet" is what would put
+   * it in reach.
+   */
+  describe("the default-output predicate reads every field the block carries", () => {
+    test("a draft holding display sizes with otherwise-default output emits the block, sizes included", () => {
+      const withSizes: EditorState = { ...base(), sizes: ["728x90"] };
+      // Everything else is exactly the absent-key default: the sizes are the
+      // only divergence, so they are the only reason the block must be written.
+      expect(withSizes.formats).toEqual(["static"]);
+      expect(withSizes.platforms).toEqual([...STATIC_PLATFORMS]);
+      expect(withSizes.outputExplicit).toBe(false);
+
+      expect(isDefaultOutput(withSizes)).toBe(false);
+      const output = toBrief(withSizes).output;
+      expect(output).toBeDefined();
+      expect(output?.sizes).toEqual(["728x90"]);
+      expect(output?.formats).toEqual(["static"]);
+      expect(output?.platforms).toEqual([...STATIC_PLATFORMS]);
+    });
+
+    test("a variation draft holding display sizes emits them too", () => {
+      const withSizes: EditorState = {
+        ...initialEditorState("variation"),
+        sizes: ["300x250", "728x90"],
+      };
+      expect(isDefaultOutput(withSizes)).toBe(false);
+      expect(toBrief(withSizes).output?.sizes).toEqual(["300x250", "728x90"]);
+    });
+
+    test("a genuinely default draft still omits output in both modes", () => {
+      // The false-positive half: a term that is always true would satisfy the
+      // case above and grow an output block on every classic brief ever saved.
+      for (const state of [initialEditorState("brief"), initialEditorState("variation")]) {
+        expect(state.sizes).toEqual([]);
+        expect(isDefaultOutput(state)).toBe(true);
+        expect(toBrief(state)).not.toHaveProperty("output");
+      }
+    });
+
+    test("a brief that omitted output loads, saves and still omits it", () => {
+      const stored = savedBrief();
+      expect(stored).not.toHaveProperty("output");
+      const loaded = fromBrief(stored, { file: "camp.yaml" });
+      expect(loaded.sizes).toEqual([]);
+      expect(loaded.outputExplicit).toBe(false);
+      expect(toBrief(loaded)).not.toHaveProperty("output");
+      // No existing document grows a block on first save, so a freshly loaded
+      // file is still clean — the merge gate the corpus round-trip protects.
+      expect(isDirtySinceSave(loaded)).toBe(false);
+    });
+
+    test("toggling a display platform on then off serialises byte-identically to never touching it", () => {
+      // The reachable path the fix must leave exactly as it was: the predicate
+      // gained a term, and the round-trip through google-display is unmoved.
+      const before = toBrief(base());
+      const on = reduce(base(), { type: "togglePlatform", value: "google-display" });
+      const off = reduce(on, { type: "togglePlatform", value: "google-display" });
+      expect(off.sizes).toEqual([]);
+      expect(JSON.stringify(toBrief(off))).toBe(JSON.stringify(before));
+    });
   });
 
   describe("schemaVersion in editor-state (D133)", () => {

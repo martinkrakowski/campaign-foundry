@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "lane": "DFLT",
+  "mutations": [
+    {
+      "file": "apps/web/src/components/campaign/editor-state.ts",
+      "before": "    formats[0] === \"static\" &&\n    state.sizes.length === 0 &&\n",
+      "after": "    formats[0] === \"static\" &&\n",
+      "because": "Revert M1: isDefaultOutput stops consulting state.sizes, so a draft carrying display sizes with otherwise-default formats and platforms reads as the absent-key default again and toBrief drops the whole output block — the authored sizes never reach the saved document.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/editor-state.test.ts",
+        "-t",
+        "a draft holding display sizes with otherwise-default output emits the block, sizes included"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/editor-state.ts",
+      "before": "    state.sizes.length === 0 &&",
+      "after": "    state.sizes.length !== 0 &&",
+      "because": "The false-positive half: invert the new term so a genuinely default draft — no sizes at all — is no longer the default. Every classic brief that has always omitted output starts emitting one. A term that was merely always-true would satisfy the sizes test above and break exactly this.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/editor-state.test.ts",
+        "-t",
+        "a genuinely default draft still omits output in both modes"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/editor-state.ts",
+      "before": "    state.sizes.length === 0 &&",
+      "after": "    state.sizes.length !== 0 &&",
+      "because": "The same inversion read as a round-trip fault: a brief on disk that never declared output loads, saves, and now grows a block it never had — the merge gate the whole-corpus round-trip exists to hold, and the reason a freshly loaded file would read as dirty.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/editor-state.test.ts",
+        "-t",
+        "a brief that omitted output loads, saves and still omits it"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/VariationPolicy.vo.ts",
+      "before": "        ...(motionEnabled ? { duration, mixStatic, motion, motionRatios } : {}),",
+      "after": "        ...{ duration, mixStatic, motion, motionRatios },",
+      "because": "Make the policy hash cover motionRatios unconditionally. motionRatios is the one policy field derived from output.platforms, and it is exactly why the new output block could have moved policyHash: absent output means every ratio may carry a clip, the three static profiles package motion at none. With the conditional gone the two projections hash differently and the stability claim this lane makes about policyHash is false — so the assertion is not a tautology about a hasher that answers the same thing twice.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/default-output-policy-hash.test.ts",
+        "-t",
+        "the pre-M1 projection and the post-M1 one resolve the same policyHash"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
