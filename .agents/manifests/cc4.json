@@ -1,0 +1,108 @@
+{
+  "version": 1,
+  "lane": "CC4",
+  "mutations": [
+    {
+      "file": "apps/web/src/components/campaign/editor-state.ts",
+      "before": "        i === index ? canonicalLayer(next as unknown as CreativeTemplateLayer) : existing,",
+      "after": "        i === index ? (next as unknown as CreativeTemplateLayer) : existing,",
+      "because": "The claim a reader is most likely to think is redundant, named in the brief: `canonicalLayer` already exists (`editor-state.ts:1140`, `canonicalTemplate`'s own caller) and does nothing for `props` today — it only owns `enabled` and `elements`. So this call looks like it cannot possibly matter to `setLayerProps`, which never touches either field. It is caught anyway, because it is NOT the seam this action's byte-identical claim runs on for props (that is this action's own `next.props = props` / `delete next.props` branch, mutated separately below) — it is the seam that keeps a layer canonical on every OTHER field a future lane teaches `canonicalLayer` about, and on a layer that arrives already non-canonical. `fromBrief`/`normalizeDraftState` already canonicalise everything that loads through them, so an ordinary fixture built via either path would never show this call doing anything — the mutation would survive on it. The test therefore builds an `EditorState` by hand, bypassing both, with `accent.enabled: true` still standing; `setLayerProps` never writes `enabled`, so a resulting layer with `enabled` gone is `canonicalLayer`'s doing and nothing else's.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/editor-state.layer-props.test.ts",
+        "-t",
+        "a layer that arrived non-canonical is canonicalised by this action too, on a field it never touched"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/LayerPropsSheet.tsx",
+      "before": "      data-testid=\"layer-props-sheet\"",
+      "after": "      aria-modal=\"true\"\n      data-testid=\"layer-props-sheet\"",
+      "because": "The lane's own acceptance criterion, broken the one way that looks like polish: `aria-modal=\"true\"` reads as marking the sheet properly accessible, and every visible control still renders and still works under mouse and keyboard testing that does not touch `⌘Z`. `editor-history.ts`'s `useHistoryKeys` keys off exactly this attribute, document-wide, regardless of where the keystroke lands — so the moment the sheet is open, undo silently stops answering anywhere in the editor. Caught by the end-to-end proof: open the sheet, edit a geometry prop through it, press `⌘Z`, and require the edit to actually revert (via the column's own YAML projection) rather than merely asserting the attribute's absence in isolation — a reader could otherwise dismiss that as a style nitpick with no behavioural stake.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.layers.test.tsx",
+        "-t",
+        "a geometry edit made through the sheet is undoable, with no \\[aria-modal\\] anywhere"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/editor-history.ts",
+      "before": "    case \"setLayerProps\":\n      return `setLayerProps:${action.layerId}:${Object.keys(action.patch).sort().join(\",\")}`;",
+      "after": "    case \"setLayerProps\":\n      return null;",
+      "because": "Red fault 4, in the shape a lane actually ships it: the coalesce key quietly answers `null` for every `setLayerProps` dispatch instead of naming the layer and field set. Every other property stays green — the prop still commits, still undoes, still clears byte-identically — because `null` is a legal return from `coalesceKeyOf` (it is what every non-typed action already returns) and `historyReducer` treats it exactly like `setLayerEnabled`'s toggle: a real edit, just never coalesced. Nothing about a single edit's own undo distinguishes this from the correct key. Caught only by a RUN: four commits to one field must revert in one `⌘Z`, at both the hook level (`editor-history.test.tsx`, which owns this property) and through the mounted editor (`brief-editor.layers.test.tsx`'s red fault 4, which proves the sheet's own inputs are what is driving the dispatches).",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/editor-history.test.tsx",
+        "-t",
+        "a live run of commits to ONE field is a single undo step, not one per commit"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/editor-state.ts",
+      "before": "      if (layerPropsProblem(layer.kind, props) !== undefined) return state;",
+      "after": "      if (false && layerPropsProblem(layer.kind, props) !== undefined) return state;",
+      "because": "The domain's own field table (D134), disconnected: every kind now accepts every field, silently. The sheet itself never sends a mismatched field — its controls are gated per kind — so this is invisible to every path a manual click-through would take, and it is exactly the shape a hand-restored draft or a future caller could otherwise smuggle through (`accent.props.width`, a `logo`-only field, or an `anchor` value outside `ANCHOR_VALUES`). Caught by dispatching the mismatched field directly and requiring the SAME state object back — the `setLayerEnabled`/`setHtmlElementStyle` no-op contract this action mirrors.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/editor-state.layer-props.test.ts",
+        "-t",
+        "a field the kind does not carry refuses the whole dispatch"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/editor-state.ts",
+      "before": "      if (overridden) next.props = props;\n      else delete next.props;",
+      "after": "      next.props = props;",
+      "because": "X16's exact failure, reintroduced: clearing every override leaves `props: {}` on the layer instead of dropping the key, which LOOKS identical in the sheet (every field reads back at its brief default) and is a real, different brief on disk — a loaded snapshot with no `props` key now saves with an empty one, which is not the shape it was opened with. Every control still round-trips VALUES correctly, so a test that only re-read the props object after a set-then-clear would miss this if it accepted `{}` as equivalent to absent. Caught by asserting the exact key is gone (`\"props\" in layer === false`) and, separately, by `toBrief` deep-equality against the ORIGINAL brief rather than a re-derived one — the pair the brief's acceptance names.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/editor-state.layer-props.test.ts",
+        "-t",
+        "a single prop: the layer, and the whole serialised brief, return exactly as loaded"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/BriefEditor.tsx",
+      "before": "        onClose={() => setPickedLayerId(null)}",
+      "after": "        onClose={() => {}}",
+      "because": "The mount site's own wiring, unplugged: the sheet still opens on a pick, every field inside it still works, and the Close button still renders and still calls `onClose` — it is `onClose` itself that no longer does anything, so the sheet becomes impossible to dismiss by any means this lane's own contract offers (no backdrop, no focus trap, and now no working close either). A screenshot or a click-through that never tries to close it would not notice. Caught by requiring the sheet to actually unmount, and the layer's row to actually un-press, after the header's own close control is pressed.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.layers.test.tsx",
+        "-t",
+        "closing the sheet clears the SAME pick"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

@@ -15,8 +15,13 @@ import {
 } from "@campaignfoundry/CampaignOrchestration/campaign-types";
 import {
   isBriefTemplate,
+  layerPropsProblem,
   templateFromCanonical,
+  type AccentProps,
   type BriefTemplate,
+  type ImageProps,
+  type LogoProps,
+  type TextProps,
 } from "@campaignfoundry/CampaignOrchestration/brief-template";
 // The html layer's element vocabulary (HL1): the kinds an element may be, the
 // frame it positions itself with, and the leaf's own values — never restated
@@ -471,6 +476,17 @@ export interface EditorState {
   capabilities: { motion: boolean; reason?: string } | null;
 }
 
+/**
+ * The full geometry-props vocabulary across every layer kind (D134), combined
+ * so a `setLayerProps` patch can name any one kind's fields without a union of
+ * per-kind action shapes. `layerPropsProblem` is the boundary that refuses a
+ * field the DISPATCHED layer's own kind does not carry — this type only says
+ * what a patch may contain in principle, exported so `LayerPropsSheet` (the
+ * only caller) can type the patches it builds without re-deriving the same
+ * intersection.
+ */
+export type LayerPropsPatch = Partial<AccentProps & LogoProps & TextProps & ImageProps>;
+
 export type EditorAction =
   | { type: "setMode"; mode: CampaignMode }
   | { type: "applyPreset"; campaignType: CampaignType }
@@ -508,6 +524,17 @@ export type EditorAction =
   // switching a layer off writes `enabled: false` and switching it back on
   // removes the field — the canonical form every template already carries.
   | { type: "setLayerEnabled"; id: string; enabled: boolean }
+  // The layer's own geometry overrides (D134, `studio-editor.md` SE2): a patch
+  // across every kind's props vocabulary, because a control only ever names
+  // the fields its own layer's kind carries — `layerPropsProblem` refuses
+  // anything else at this boundary, the way `setHtmlElementStyle` refuses an
+  // out-of-vocabulary font value. A field set to `undefined` clears that one
+  // override; the reducer drops the whole `props` block once none are left.
+  | {
+      type: "setLayerProps";
+      layerId: string;
+      patch: LayerPropsPatch;
+    }
   // The `html` layer's elements (HL5a, HL-D1): the second vocabulary, nested
   // inside the first, so every action names the layer it edits and the index
   // inside that layer's list. Each one is a no-op — the SAME state object — when
@@ -1024,6 +1051,38 @@ function withEnabled(layer: CreativeTemplateLayer, value: boolean): CreativeTemp
 }
 
 /**
+ * Whether `next` (a layer's merged `props`, or the empty object standing in
+ * for absence) already equals `prior` — field for field, in both directions —
+ * so a dispatch that would leave the layer exactly as it loaded, the absent
+ * block included, writes no history entry (the `setHtmlElementFrame` /
+ * `setHtmlElementStyle` rule for "already the state asked for").
+ */
+function shallowRecordEqual(
+  prior: Record<string, unknown> | undefined,
+  next: Record<string, unknown>,
+): boolean {
+  const priorKeys = Object.keys(prior ?? {});
+  const nextKeys = Object.keys(next);
+  if (priorKeys.length !== nextKeys.length) return false;
+  return nextKeys.every(
+    (key) => (prior as Record<string, unknown> | undefined)?.[key] === next[key],
+  );
+}
+
+/**
+ * A layer prop's numeric value, clamped into [0, 1] — the `clampedFrame` rule,
+ * so a value the box shows but the domain refuses (1.5) is corrected in front
+ * of the user rather than turning the whole keystroke into a no-op, matching
+ * `FrameNumberInput`'s own contract for the same shape of field. A value that
+ * is not yet a finite number (nothing parsed, or a half-typed draft) leaves
+ * the field exactly as it was — `undefined` here reads as "no change", the
+ * same non-answer a caller that never named the field gives.
+ */
+function clampedGeometryProp(value: number): number | undefined {
+  return Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : undefined;
+}
+
+/**
  * Where a new element sits (HL5a), per kind: fractions of the canvas (D130), so
  * the element the editor adds is one both renderers can already place. Keyed by
  * the kind vocabulary, so a fourth kind is a compile error rather than a frame
@@ -1521,6 +1580,46 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
           layers: nextLayers,
         },
       };
+    }
+    case "setLayerProps": {
+      const index = state.template.layers.findIndex((layer) => layer.id === action.layerId);
+      if (index === -1) return state;
+      const layer = state.template.layers[index]!;
+      const props: Record<string, unknown> = { ...layer.props };
+      for (const [field, rawValue] of Object.entries(action.patch)) {
+        if (rawValue === undefined) {
+          delete props[field];
+          continue;
+        }
+        if (typeof rawValue === "number") {
+          const clamped = clampedGeometryProp(rawValue);
+          if (clamped !== undefined) props[field] = clamped;
+          continue;
+        }
+        props[field] = rawValue;
+      }
+      // The domain's own field table (D134): a field this layer's kind does not
+      // carry, or a value outside its vocabulary (an `anchor` this select could
+      // not have produced, an `alt` that is not a string), refuses the whole
+      // dispatch — the `setHtmlElementStyle` rule, so a hand-restored draft
+      // cannot smuggle one in through this action either.
+      if (layerPropsProblem(layer.kind, props) !== undefined) return state;
+      // Already the props asked for — the absent block included: no edit, so
+      // no history entry either.
+      if (shallowRecordEqual(layer.props as unknown as Record<string, unknown> | undefined, props))
+        return state;
+      const overridden = Object.keys(props).length > 0;
+      const next: Record<string, unknown> = { ...layer };
+      if (overridden) next.props = props;
+      else delete next.props;
+      const nextLayers = state.template.layers.map((existing, i) =>
+        // `canonicalLayer` (D129, HL5a) is called here, not extended: it already
+        // owns `enabled` and `elements`, and running its result through this
+        // action keeps the layer canonical on every field a future lane teaches
+        // it about `props`, not only the one this action just touched.
+        i === index ? canonicalLayer(next as unknown as CreativeTemplateLayer) : existing,
+      );
+      return { ...state, template: { ...state.template, layers: nextLayers } };
     }
     case "addHtmlElement": {
       const edit = htmlElementEdit(state, action.layerId);

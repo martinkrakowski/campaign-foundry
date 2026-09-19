@@ -1370,6 +1370,37 @@ export function templateOcclusionNote(
 /** Accessible name for the video preview's scrub range control (VE-D5). */
 export const previewScrubLabel = "Scrub preview";
 
+/* ── The layer sheet (CC4, D134, closes SE2's hosting half) ──────────────── */
+
+/**
+ * The sheet's own accessible name (D18): the raw layer id, the same word the
+ * rail's row and the creative's hit region already carry — never a display
+ * name, which would say the kind and answer for nothing when a template holds
+ * two of the same one.
+ */
+export function layerSheetTitle(layerId: string): string {
+  return `Layer ${layerId}`;
+}
+
+/** Said when a layer kind carries no geometry overrides at all (D134's table). */
+export const layerPropsNone = "This layer has no properties to set here.";
+
+export const layerPropSolidHeightLabel = "Solid band height";
+export const layerPropFadeHeightLabel = "Fade height";
+export const layerPropWidthLabel = "Logo width";
+export const layerPropMarginLabel = "Logo edge margin";
+export const layerPropAnchorLabel = "Headline anchor";
+export const layerPropTypeFloorLabel = "Autofit floor";
+export const layerPropAltLabel = "Image alt text";
+
+/** The face a prop's control shows while the layer carries no override for it. */
+export const layerPropDefault = "Brief default";
+
+/** A field's reset control: returns that ONE prop to the brief default (D134). */
+export function layerPropResetLabel(fieldLabel: string): string {
+  return `Reset ${fieldLabel} to the brief default`;
+}
+
 /* ── The click destination (HL5b, HL-D3) ─────────────────────────────────── */
 
 /** The destination input's label. */

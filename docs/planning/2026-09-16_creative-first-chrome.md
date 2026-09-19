@@ -157,14 +157,22 @@ Three things this lane found, recorded here rather than folded into the code:
    asserted as exactly one (`brief-editor.layers.test.tsx`). The per-keystroke
    path, which is what C3 is about, stays at zero stack re-renders.
 
-```premise CC4
-# The html element editor is still mounted inline in the stack row, so no sheet hosts
-# it. Counting its non-test mount sites is the mechanism: the component itself plus
-# the stack row is two today, and CC4's sheet is necessarily a third. This is the
-# SHEET's fence; the reducer-action half of CC4 is SE2's fence in the studio plan,
-# and the two are not duplicated here.
-test "$(grep -rl 'HtmlElementsEditor' apps/web/src/components/campaign | grep -vc '__tests__')" -le 2
-```
+**`premise CC4` retired: CC4 shipped.** The sheet is
+`apps/web/src/components/campaign/LayerPropsSheet.tsx`, mounted as a sibling of
+the step card at `BriefEditor`'s own root (never inside `renderStepCard` or
+`TemplateSection`), reading CC3's own `pickedLayerId` rather than a second
+selection. It hosts `HtmlElementsEditor` for the selected `html` layer, which
+is the third non-test mount site the fence's own comment anticipated ("CC4's
+sheet is necessarily a third") — the component itself, `TemplateSection`'s
+existing inline copy (left in place; the plan's own `TemplateSection.tsx`
+comment says it stays until the sheet exists, not that the sheet must replace
+it), and this sheet. Ships `setLayerProps`, keyed for undo by
+`setLayerProps:<layerId>:<sorted patch keys>` (the `setHtmlElementFrame`
+rule, `editor-history.ts:coalesceKeyOf`), and carries no `aria-modal` —
+`editor-history.ts`'s `useHistoryKeys` keys undo's suspension on exactly that
+attribute, so a sheet that never sets it keeps `⌘Z` live while it is open.
+
+**One correction to this row's own text, found while shipping it: `canonicalLayer` does not make the byte-identical claim true on its own.** The row says `setLayerProps` ships "the `canonicalLayer` duty from `studio-editor.md` §9.1", and CC4's brief read that as "call it, do not extend it". Verified against the code: `canonicalLayer` (`editor-state.ts`) canonicalises `enabled` and `elements` only — it has never touched `props`, and this lane does not add that. What actually makes a set-then-clear byte-identical for `props` is `setLayerProps`'s own canonical-form discipline (deleting a cleared field, and dropping the whole `props` key once none are left — the same shape `setHtmlElementStyle` already holds for an element's `style`), proved directly against `toBrief` in `editor-state.layer-props.test.ts`. `setLayerProps` still calls `canonicalLayer` on every write, both because the brief says to and because it keeps a non-canonical layer (one that arrived with an explicit `enabled: true`, say) canonical on a field this action never touched — a real property, pinned by the same test file, just not the byte-identical one. **`premise SE2`, in `docs/planning/2026-09-16_studio-editor.md`, is NOT retired by this lane** — its own probe checks `canonicalLayer`'s body for the word `props`, and this lane deliberately leaves that body untouched (CC4's own scope table: "Does not touch: `canonicalLayer` itself"). Teaching `canonicalLayer` to drop `props: {}` and a prop equal to its kind's `CREATIVE_GEOMETRY` default — SE2's full duty — is left for whichever lane picks that fence up next.
 
 ## 5a. Renaming a fresh draft blanked the preview frame — fixed (FI1)
 

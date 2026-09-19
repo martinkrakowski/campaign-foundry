@@ -93,6 +93,7 @@ const EMPTY_FIELD_KEYS: ReadonlySet<string> = new Set<string>();
 import { cn } from "@/lib/cn";
 import { BriefSelector } from "@/components/campaign/BriefSelector";
 import { HeadlinePoolDrawer } from "@/components/campaign/HeadlinePoolDrawer";
+import { LayerPropsSheet } from "@/components/campaign/LayerPropsSheet";
 import { AssetPickerDrawer } from "@/components/campaign/AssetPickerDrawer";
 import { ModePanel } from "@/components/campaign/ModePanel";
 import { SectionOutline } from "@/components/ui/section-outline";
@@ -2594,6 +2595,20 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
         dispatch={dispatch}
         open={poolDrawerOpen}
         onClose={() => setPoolDrawerOpen(false)}
+      />
+
+      {/* CC4 — the layer sheet, hoisted to the editor's root for the same reason
+           the headline pool drawer and the Asset Bin are: the step card below is
+           a transformed element (its own containing block for any `fixed`
+           descendant), so a sheet mounted inside it — or inside `TemplateSection`
+           — could never cover the viewport. It reads CC3's own selection
+           (`pickedLayerId`) rather than introducing a second one, and closing it
+           clears that same state — there is nothing else for "closed" to mean. */}
+      <LayerPropsSheet
+        state={state}
+        dispatch={dispatch}
+        layerId={pickedLayerId}
+        onClose={() => setPickedLayerId(null)}
       />
 
       {/* M7 — the Asset Bin drawer, hoisted to the editor's root beside the headline
