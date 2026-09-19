@@ -1,0 +1,96 @@
+{
+  "version": 1,
+  "lane": "SL3",
+  "mutations": [
+    {
+      "file": "apps/web/src/components/campaign/CreativesPanel.tsx",
+      "before": "        ? plan.variants.filter((v): v is PlannedCreative => typeof v.index === \"number\")",
+      "after": "        ? plan.variants.map((v, i) => ({ ...v, index: i }) as PlannedCreative)",
+      "because": "Number the rows by their position in the answer instead of by the slot the planner named. This is the plausible implementation — the array is already in emitted order, so `map` with the loop counter reads as tidier than a type guard — and it is wrong in the exact way SL-D1 exists to prevent. With slots 0 and 2 it renders \"Creative 1\" and \"Creative 2\": the operator's third creative is relabelled the moment the second is deleted, which is the compaction the whole plan was written to remove, reintroduced in the one surface that shows creatives to a human. It also makes a variant the route sent with no index into a row, which a row keyed on position cannot help doing.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.creatives.test.tsx",
+        "-t",
+        "the request carries the occupancy, and the rows are the emitted slots"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/preview-props.ts",
+      "before": "    headline: variant?.headline ?? state.campaignMessage,",
+      "after": "    headline: state.campaignMessage,",
+      "because": "Stop the selected slot's own drawn copy from reaching the look. The list still lists, the row still highlights and every network assertion stays green — the rail simply keeps drawing the brief's campaign message for whichever creative is clicked, which is the owner's 2b (\"clicking the creative loads the creative\") delivered as a highlight and nothing more. A pooled headline is a property of the creative, not of the brief, so this is the one field that can only come from the variant.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.creatives.test.tsx",
+        "-t",
+        "the rail composes the clicked slot's own look, not the first value of each axis"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/CreativesPanel.tsx",
+      "before": "  if (rows.length === 0) return null;",
+      "after": "  if (plan === null) return null;",
+      "because": "Gate the panel on \"a plan has answered\" rather than on \"there are creatives to list\". It is the reading that sounds right — the list belongs to the plan, so show it once the plan is in — and it is the invisible-surface defect this project keeps hitting: a randomized brief the planner REFUSES has a plan (`kind: \"infeasible\"`) and no creatives, so the operator gets a \"Creatives\" heading over an empty box, directly beside the sentence explaining that the plan cannot be produced. The classic-brief case survives this mutation by accident, which is why the refusal case is the anchor.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.creatives.test.tsx",
+        "-t",
+        "a randomized brief the planner refuses: no list, no heading, and the refusal is shown"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/CreativesPanel.tsx",
+      "before": "    if (JSON.stringify(fresh) !== selectedFingerprint) onSelect(fresh);",
+      "after": "    return;",
+      "because": "Keep the selection pointing at the object it was handed when it was clicked, and re-point it only when the slot disappears. The slot still exists, so nothing retires and nothing looks broken — but the operator edits an axis with a row selected, the planner redraws that slot, and from then on the ROW shows the new draw while the RAIL composes the old one. Two surfaces disagreeing about the same creative, with neither obviously the stale one. The retirement half of this effect is the intuitive one; this half is the half that is easy to leave out.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.creatives.test.tsx",
+        "-t",
+        "a re-plan that redraws the selected slot moves the rail with the row"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/CreativesPanel.tsx",
+      "before": "    if (fresh === null) {\n      onSelect(null);\n      return;\n    }",
+      "after": "    if (fresh === null) {\n      return;\n    }",
+      "because": "Leave a selection standing when the plan stops emitting its slot. D139's rule for the layer pick, dropped: the rail goes on composing a creative that is no longer in the plan and no longer has a row to un-highlight, so the preview shows something the operator cannot navigate to and cannot clear. Reachable by lowering `count`, by a re-plan that drops the slot, and by SL4's delete when it lands.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.creatives.test.tsx",
+        "-t",
+        "it does not survive a re-plan that drops the slot"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/BriefEditor.tsx",
+      "before": "        <VariationPlanProvider state={state}>\n          <Accordion title=\"Estimate\">\n            <EstimateFromPlan state={state} />\n          </Accordion>\n          <CreativesSection selected={selectedCreative} onSelect={setSelectedCreative} />\n        </VariationPlanProvider>",
+      "after": "        <VariationPlanProvider state={state}>\n          <Accordion title=\"Estimate\">\n            <EstimateFromPlan state={state} />\n          </Accordion>\n        </VariationPlanProvider>\n        <VariationPlanProvider state={state}>\n          <CreativesSection selected={selectedCreative} onSelect={setSelectedCreative} />\n        </VariationPlanProvider>",
+      "because": "Give each surface a provider of its own. Every rendered assertion in this lane stays green — both panels show exactly what they showed — and the editor quietly asks `/campaigns/plan` twice per keystroke instead of once. That is the cost regression the lane was told to avoid, and it is invisible to everything except a call count: the editor's existing contract about this class of call (a look-preserving keystroke issues zero `/preview-frame` calls) is asserted the same way, for the same reason.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.creatives.test.tsx",
+        "-t",
+        "the editor asks the planner ONCE per draft"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
