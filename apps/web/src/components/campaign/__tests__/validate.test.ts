@@ -171,6 +171,22 @@ describe("axisProductSize", () => {
     expect(axisProductSize(noKinds)).toBeGreaterThan(0);
   });
 
+  test("with no drawable ratio the floor is one notional ratio, motion factor and all", () => {
+    // A motion-only draft whose platforms package nothing: the domain refuses this
+    // brief outright, so there is no ceiling to mirror — but the slider still needs
+    // a bound, and `withCountClamp` fires on the toggle that empties the selection
+    // and never reverses. Pinned with a motion factor above 1, where dropping the
+    // floor to a bare 1 would be visible: 2 kinds × 2 durations = 4, × 24 axes.
+    const stranded = valid({
+      formats: ["motion"],
+      platforms: ["myspace"],
+      motion: ["ken-burns-in", "ken-burns-out"],
+      duration: [4, 6],
+    });
+    expect(drawableRatios(stranded)).toEqual([]);
+    expect(axisProductSize(stranded)).toBe(2 * 4 * 2 * 2 * 1 * 3);
+  });
+
   test("the headline axis multiplies by the approved pool", () => {
     const base = valid();
     const pooled = {

@@ -730,17 +730,26 @@ export function axisProductSize(state: EditorState): number {
   // one still and nothing else. Multiplying one motion factor across every ratio
   // over-counted a mixed brief's ceiling, and since this bounds the count
   // slider, the slider's own maximum was a count the planner then refused.
-  const ratioSlots = drawableRatios(state).reduce(
-    (total, ratio) =>
-      total +
-      (motionEnabled && packaged.has(ratio)
-        ? state.motion.length * Math.max(1, state.duration.length) + (mixStatic ? 1 : 0)
-        : 1),
-    0,
-  );
+  const motionSlots = motionEnabled
+    ? state.motion.length * Math.max(1, state.duration.length) + (mixStatic ? 1 : 0)
+    : 1;
+  const drawable = drawableRatios(state);
+  // No drawable ratio is not a plan — the domain refuses the brief outright — but
+  // the slider still needs a bound, and this floor has always been "one notional
+  // ratio" carrying the motion factor. Kept exactly as it was: the count clamp
+  // (`withCountClamp`) fires on the toggle that empties the selection and does not
+  // reverse when the ratio comes back, so lowering this floor would silently eat a
+  // count the user had already authored.
+  const ratioSlots =
+    drawable.length === 0
+      ? motionSlots
+      : drawable.reduce(
+          (total, ratio) => total + (motionEnabled && packaged.has(ratio) ? motionSlots : 1),
+          0,
+        );
   return (
     Math.max(1, state.products.filter((product) => product.id.length > 0).length) *
-    Math.max(1, ratioSlots) *
+    ratioSlots *
     Math.max(1, state.variation.layout.length) *
     Math.max(1, state.variation.tone.length) *
     Math.max(1, state.variation.background.length) *
