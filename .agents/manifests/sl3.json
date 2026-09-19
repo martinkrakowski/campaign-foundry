@@ -79,8 +79,8 @@
     },
     {
       "file": "apps/web/src/components/campaign/BriefEditor.tsx",
-      "before": "        <VariationPlanProvider state={state}>\n          <Accordion title=\"Estimate\">\n            <EstimateFromPlan state={state} />\n          </Accordion>\n          <CreativesSection selected={selectedCreative} onSelect={setSelectedCreative} />\n        </VariationPlanProvider>",
-      "after": "        <VariationPlanProvider state={state}>\n          <Accordion title=\"Estimate\">\n            <EstimateFromPlan state={state} />\n          </Accordion>\n        </VariationPlanProvider>\n        <VariationPlanProvider state={state}>\n          <CreativesSection selected={selectedCreative} onSelect={setSelectedCreative} />\n        </VariationPlanProvider>",
+      "before": "        <VariationPlanProvider state={state}>\n          <Accordion title=\"Estimate\">\n            <EstimateFromPlan state={state} />\n          </Accordion>\n          <CreativesSection\n            selected={selectedCreative}\n            onSelect={setSelectedCreative}\n            occupancy={occupancy}\n            canAdd={canAdd}\n            onAdd={addCreative}\n            onDelete={deleteCreative}\n          />\n        </VariationPlanProvider>",
+      "after": "        <VariationPlanProvider state={state}>\n          <Accordion title=\"Estimate\">\n            <EstimateFromPlan state={state} />\n          </Accordion>\n        </VariationPlanProvider>\n        <VariationPlanProvider state={state}>\n          <CreativesSection\n            selected={selectedCreative}\n            onSelect={setSelectedCreative}\n            occupancy={occupancy}\n            canAdd={canAdd}\n            onAdd={addCreative}\n            onDelete={deleteCreative}\n          />\n        </VariationPlanProvider>",
       "because": "Give each surface a provider of its own. Every rendered assertion in this lane stays green — both panels show exactly what they showed — and the editor quietly asks `/campaigns/plan` twice per keystroke instead of once. That is the cost regression the lane was told to avoid, and it is invisible to everything except a call count: the editor's existing contract about this class of call (a look-preserving keystroke issues zero `/preview-frame` calls) is asserted the same way, for the same reason.",
       "command": [
         "yarn",
@@ -94,8 +94,8 @@
     },
     {
       "file": "apps/web/src/components/campaign/BriefEditor.tsx",
-      "before": "          <CreativesSection selected={selectedCreative} onSelect={setSelectedCreative} />",
-      "after": "          <CreativesSection\n            selected={selectedCreative}\n            onSelect={(variant) => {\n              setSelectedCreative(variant);\n              setDirty(false);\n            }}\n          />",
+      "before": "          <CreativesSection\n            selected={selectedCreative}\n            onSelect={setSelectedCreative}\n            occupancy={occupancy}\n            canAdd={canAdd}\n            onAdd={addCreative}\n            onDelete={deleteCreative}\n          />",
+      "after": "          <CreativesSection\n            selected={selectedCreative}\n            onSelect={(variant) => {\n              setSelectedCreative(variant);\n              setDirty(false);\n            }}\n            occupancy={occupancy}\n            canAdd={canAdd}\n            onAdd={addCreative}\n            onDelete={deleteCreative}\n          />",
       "because": "Take the OTHER reading of the owner's sentence — \"before loading a new creative on user-click, the current creative should be saved/preserved\" as an instruction to commit the draft on the click. It loses no text, so every field still holds what the operator typed and the whole suite except one assertion stays green; what it does is quietly settle an unsaved draft under a gesture made to look at a picture, and clear the guard that is supposed to ask before the operator navigates away. This mutation is the reason fault 3's test asserts the edit is still UNSAVED and not merely still there: the value alone cannot tell the two readings apart.",
       "command": [
         "yarn",

@@ -24,7 +24,15 @@ describe("CreativesPanel — a row with nothing to show but its slot", () => {
    * empty line where the axes and the headline would go.
    */
   test("renders the slot and no empty lines", () => {
-    render(<CreativesPanel rows={[variant({ index: 4 })]} selected={null} onSelect={() => {}} />);
+    render(
+      <CreativesPanel
+        rows={[variant({ index: 4 })]}
+        selected={null}
+        onSelect={() => {}}
+        onDelete={() => {}}
+        deletable={false}
+      />,
+    );
 
     const row = screen.getByRole("button", { name: messages.creativeRowLabel(4) });
     // The whole row is the label: no summary line, no headline line, nothing
@@ -39,10 +47,12 @@ describe("CreativesPanel — a row with nothing to show but its slot", () => {
         rows={[variant({ index: 0, headline: "", layout: "headline-top" })]}
         selected={0}
         onSelect={() => {}}
+        onDelete={() => {}}
+        deletable={false}
       />,
     );
 
-    const row = screen.getByRole("button", { name: /Creative 1/ });
+    const row = screen.getByRole("button", { name: /^Creative 1/ });
     expect(row.textContent).toBe(`${messages.creativeRowLabel(0)}headline-top`);
     expect(row.getAttribute("aria-pressed")).toBe("true");
   });
