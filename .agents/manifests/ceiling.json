@@ -34,8 +34,8 @@
     },
     {
       "file": "apps/web/src/components/campaign/editor-state.ts",
-      "before": "  const ratioSlots = drawableRatios(state).reduce(\n    (total, ratio) =>\n      total +\n      (motionEnabled && packaged.has(ratio)\n        ? state.motion.length * Math.max(1, state.duration.length) + (mixStatic ? 1 : 0)\n        : 1),\n    0,\n  );",
-      "after": "  void packaged;\n  const ratioSlots =\n    Math.max(1, drawableRatios(state).length) *\n    (motionEnabled\n      ? state.motion.length * Math.max(1, state.duration.length) + (mixStatic ? 1 : 0)\n      : 1);",
+      "before": "          (total, ratio) => total + (motionEnabled && packaged.has(ratio) ? motionSlots : 1),",
+      "after": "          (total, ratio) => total + (void ratio, motionSlots),",
       "because": "Reverts the EDITOR's half alone, leaving the domain correct — the drift that actually recurs here, since the two sites are two implementations of one quantity and the editor's copy is what bounds the count slider. Nothing in the domain's own suite can see this. The parity test drives both from a single `EditorState`: the domain is handed the brief `toBrief` writes with the `motionRatios` the API's `motionRatiosFor` derives from that brief's platforms, so the two are compared by construction rather than against literals updated together. All three mixed shapes go red (144 vs 96, 360 vs 168, 144 vs 96) while static-only and motion-only stay green — which is also the evidence that those two were already right.",
       "command": [
         "yarn",
