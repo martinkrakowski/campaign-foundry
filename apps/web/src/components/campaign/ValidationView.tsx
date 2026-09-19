@@ -26,7 +26,7 @@ export interface ValidationViewProps {
   readonly errors: Record<string, FieldErrors>;
   /** Orders the rows the way the operator walks the brief (M1). */
   readonly mode: "brief" | "variation";
-  /** `isValidationFresh(validatedState, state)` — the GATE, not the finding. */
+  /** `isValidationFresh(validation, state, existingIds)` — the GATE, not the finding. */
   readonly validated: boolean;
   /** The editor's own `reveal`: flips back to the form and scrolls the section. */
   readonly onRevealSection: (section: string) => void;
@@ -97,7 +97,7 @@ function toEntries(
  *
  * **What the refresh control actually refreshes is the GATE, not the list.**
  * SG-D14 asks for a refresh icon and it is wired to `handleValidate` — the same
- * handler the toolbar's `Validate` verb uses, the only writer of `validatedState`
+ * handler the toolbar's `Validate` verb uses, the only writer of `validation`
  * (SG-D12/SG-D15, §8.4). Pressing it is what makes `Generate` appear. Two
  * consequences worth stating rather than discovering:
  *

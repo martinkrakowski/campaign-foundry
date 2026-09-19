@@ -1,0 +1,125 @@
+{
+  "version": 1,
+  "lane": "GATE2",
+  "mutations": [
+    {
+      "file": "apps/web/src/components/campaign/BriefEditor.tsx",
+      "before": "          aria-haspopup={runRefusal === undefined ? \"dialog\" : undefined}\n          disabled={runRefusal !== undefined}\n",
+      "after": "          aria-haspopup=\"dialog\"\n",
+      "because": "The lane reverted -- this is the run slot exactly as it stood before it, and the revert a reader makes while tidying, because the two props read as belt-and-braces around a boolean that is undefined almost always. D7 is why it is not: `motionUnavailableReason` is deliberately outside `validateState` (a missing codec is a property of this computer, not of the document), so the brief validates CLEAN on a host with no ffmpeg and nothing else in the slot is left to refuse the run. Under the mutation Generate is live on that host, the confirm opens, and the POST spends GenAI credits on a campaign the machine cannot finish -- while `status.applyRefusal` on the same screen says \"Generate will wait until it is set up\". The whole suite stays green apart from the one test written for it: every other run-slot test uses a host WITH motion, where `runRefusal` is undefined and this line changes nothing at all. Caught by the capability test, which asserts the button is present AND disabled AND that pressing it opens no confirm and issues no generate call -- the last pair is what separates a `disabled` attribute from a refusal that holds.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx",
+        "-t",
+        "a motion brief on a host that cannot make video validates clean and refuses to run"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/BriefEditor.tsx",
+      "before": "      {validationStands ? (",
+      "after": "      {validationStands && runRefusal === undefined ? (",
+      "because": "The cheap way to make the sentence true, and the one that looks TIDIER than what shipped: fold the capability into the slot's own condition instead of nesting a second ternary inside the fresh branch. One line, no nesting, and Generate is still never offered on a host that cannot run it -- so the refusal half of the capability test still passes. What it destroys is the answer: the slot falls back to Validate, so the operator presses Validate, the press succeeds, the document is clean, and the slot shows Validate again. A verb that does nothing visible, forever, with no statement anywhere that the host is the problem -- D3's dead button in its worst form, one that looks alive. It also silently reverses which question the gate asks: freshness is about the DOCUMENT, and a capability verdict landing would now change the verb the operator sees for a document nobody edited. Caught by the same test's second half, which asserts Generate is PRESENT and Validate is ABSENT -- the assertions that say the gate opened and the refusal is about running, not about looking again.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx",
+        "-t",
+        "a motion brief on a host that cannot make video validates clean and refuses to run"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/BriefEditor.tsx",
+      "before": "  const applyRefusal = applied || validationStands ? runRefusal : undefined;",
+      "after": "  const applyRefusal = applied ? runRefusal : undefined;",
+      "because": "The pre-lane spelling, restored -- and it is restored by anyone who reads `applyRefusal` as \"the refusal Save owes after committing\", which is exactly what its name and its docstring said for D35's whole life. It survives almost everything: a LOADED brief is committed (`fromBrief` sets `appliedSnapshot`), so the reason is on screen in every existing motion test and in the first half of this lane's own capability test. The case it loses is the one a real operator reaches -- edit a loaded motion draft, press Validate -- where `applied` is false, Generate is disabled, and the status line goes back to saying `status.loaded` (\"press Validate, then Generate\"): a disabled verb beside a sentence telling the operator to press it, with the reason nowhere on the page. Disabling a control is only honest while the reason is shown (DESIGN.md's capability rule), so this mutation does not soften the fix, it makes it worse than the defect. Caught by the edited-draft test, which types one character before validating and asserts the sentence is the refusal and NOT `status.loaded`.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx",
+        "-t",
+        "an edited draft that has just been validated still says why Generate waits"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/editor-state.ts",
+      "before": "  return sameIdSet(validation.existingIds, existingIds);",
+      "after": "  return true;",
+      "because": "SG-D15 as it stood: freshness is the `state` reference and nothing else, which section 8.4 argued was EXACT. The argument is airtight about the document and silent about the second argument `validateState` is given, and that silence is the defect -- `existingIds` comes from the brief listing, which refetches on window focus, so the errors can move while `state` does not. Under the mutation every document-keyed test in the repo still passes, including all four of section 8.4's own, because not one of them changes the listing: the projection case, the refused-action case and the real-edit case are all decided before this line is reached. What it restores is a gate that reports \"still validated\" over a validation that has stopped holding -- the likely shape being an id that was unique when it was judged and is taken by the time Generate is pressed, so the operator is charged for a run the API then refuses. Caught by the listing test, which moves ONLY the listing and asserts the slot goes back to Validate.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx",
+        "-t",
+        "a validation is closed by a listing that takes the id out from under it"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/editor-state.ts",
+      "before": "function sameIdSet(a: readonly string[], b: readonly string[]): boolean {\n  if (a.length !== b.length) return false;\n  const left = [...a].sort();\n  const right = [...b].sort();\n  return left.every((id, index) => id === right[index]);\n}",
+      "after": "function sameIdSet(a: readonly string[], b: readonly string[]): boolean {\n  return a === b;\n}",
+      "because": "The consistent spelling, and the reason it is wrong is the whole subtlety of this half: the document is compared BY REFERENCE one line above, for very good reasons section 8.4 spends a page on, so comparing the ids the same way looks like the same decision applied twice. `existingIds` is `briefs.map(...)`, a new array on every render and a new one again after every refetch, so reference equality here answers \"stale\" always -- Generate would appear for the render of the Validate press and be gone on the next one, which no assertion made immediately after a click can see. The stale-gate test above passes under it, and so does every test that presses Validate and then Generate synchronously. That is the trade this lane was warned about: a gate that never goes stale because it never stays fresh. Caught by the unchanged-refetch test, which dispatches a real focus event, waits for the second listing to land, and asserts Generate is still the verb.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx",
+        "-t",
+        "a listing refetch that changed nothing leaves Generate standing"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/editor-state.ts",
+      "before": "  const left = [...a].sort();\n  const right = [...b].sort();\n  return left.every((id, index) => id === right[index]);",
+      "after": "  return a.every((id, index) => id === b[index]);",
+      "because": "The copies dropped as waste -- `.sort()` mutates, so `[...a]` looks like defensive cloning someone added out of habit, and with the clones gone the sort has nothing to protect and goes too. Positional comparison of two lists with the same contents is right in every test that builds both lists itself, which is every test in this file. The listing is not positional, though: it is the set of ids that exist, and the API is free to return them in whatever order it stored or sorted them in. Under the mutation a refetch that returned the same briefs in a different order reads as a changed listing and takes the operator's validation away -- the constant-reset failure, arriving by a route the crude `a === b` mutation does not cover. Caught by the unit test's reorder assertion, which passes the same two ids swapped and requires the validation to stand.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/editor-state.validation-gate.test.ts",
+        "-t",
+        "a listing refetch that changed nothing leaves a good validation standing"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/editor-state.ts",
+      "before": "      return valuesEqual(state.capabilities, action.capabilities)\n        ? state\n        : { ...state, capabilities: action.capabilities };",
+      "after": "      return { ...state, capabilities: action.capabilities };",
+      "because": "The reducer case as it stood on main, and the shape every unguarded case in this file has: take the action's payload, spread it in, return. Nothing about it looks like a gate. It is one, because the validation gate is keyed on the `state` REFERENCE and this dispatch fires on every window focus -- the capability probe is refetched alongside the brief listing -- so an unguarded spread manufactures a new `state` for a verdict that has not changed since the page loaded, and the operator who alt-tabs away and back finds Generate replaced by Validate for no reason they can see. It also makes this lane's other half untestable through the UI: any test of \"a listing refetch that changed nothing leaves Generate standing\" would be measuring the capabilities dispatch instead. Every existing test passes under the mutation -- an extra render is invisible to all of them. Caught by the unchanged-refetch test, whose focus event fires both refetches at once.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx",
+        "-t",
+        "a listing refetch that changed nothing leaves Generate standing"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

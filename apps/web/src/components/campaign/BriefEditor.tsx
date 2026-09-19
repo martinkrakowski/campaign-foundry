@@ -50,6 +50,7 @@ import {
   timelineDurations,
   draftOccupancy,
   canAddCreative,
+  type ValidationSnapshot,
 } from "@/components/campaign/editor-state";
 import { useEditorHistory, useHistoryKeys } from "@/components/campaign/editor-history";
 import {
@@ -534,9 +535,10 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   }, []);
   const [attempted, setAttempted] = useState(false);
   /**
-   * SG-D15 / §8.4 — the validation the operator has seen, held as the `state` object
-   * it was taken from. `null` until Validate is pressed; the gate is
-   * `isValidationFresh(validatedState, state)`.
+   * SG-D15 / §8.4 — the validation the operator has seen, held as the two things it
+   * was computed from: the `state` object, and the brief ids it was judged against.
+   * `null` until Validate is pressed; the gate is `isValidationFresh(validation,
+   * state, existingIds)`.
    *
    * **Ephemeral and client-local, deliberately** (SG9's persistence row, the same
    * class as D139/D147): a reload clears it, and that is correct — the consent this
@@ -549,7 +551,7 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
    * the same warning for the same reason, and it cost seventeen tests when it was
    * learned.
    */
-  const [validatedState, setValidatedState] = useState<EditorState | null>(null);
+  const [validation, setValidation] = useState<ValidationSnapshot | null>(null);
   /** Generate's credit-spending confirm (SG-D10, after `CommandBar.tsx:164`). */
   const [runConfirmOpen, setRunConfirmOpen] = useState(false);
 
@@ -748,8 +750,12 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
    * (`sg9.json`'s second mutation) rather than the decision staying duplicated,
    * because a third reader of the gate — the run refusal below — would have made
    * three copies of one condition that must never disagree.
+   *
+   * It is handed `existingIds` — the same list `errors` above was computed with, on
+   * the same render — because that is the other thing the validation read, and the
+   * listing refetches itself on every window focus without the document moving.
    */
-  const validationStands = isValidationFresh(validatedState, state);
+  const validationStands = isValidationFresh(validation, state, existingIds);
 
   // Publish dirty state (X32). `isPristine`/`isDirtySinceSave` are pure functions of
   // `state`, so most renders recompute the exact same boolean this effect already
@@ -1874,8 +1880,9 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
 
   /**
    * SG-D12 / SG-D20 — the Validate verb's action, and the only thing that opens the
-   * gate. It stores the CURRENT `state` object as the validation snapshot, so
-   * `isValidationFresh` answers true until the next real edit.
+   * gate. It stores the CURRENT `state` object AND the id list it was judged against
+   * as the validation snapshot, so `isValidationFresh` answers true until the next
+   * real edit — or until the listing those ids came from moves under it.
    *
    * **Nothing is computed here, and that is the point.** `validateState` is pure and
    * synchronous and there is no server validation endpoint (`apps/api/src` has none),
@@ -1925,15 +1932,20 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
    * **This handler is also SG-D14's refresh control**, passed into the view and
    * placed in the log panel's `actions` slot. Not a second, quieter validate: the
    * paragraph above refuses a duplicate `refuseInvalid` for one caller, and the same
-   * argument refuses a duplicate snapshot-taker. One writer of `validatedState`,
+   * argument refuses a duplicate snapshot-taker. One writer of `validation`,
    * reachable from two places.
+   *
+   * `existingIds` is stored alongside `state`, not derived later: it is the list
+   * `errors` was computed from on THIS render, so the snapshot records what was
+   * actually judged rather than what the listing happens to hold when the gate is
+   * next read.
    */
   const handleValidate = useCallback(() => {
     refuseInvalid();
     if (getTotalErrorCount(errors) > 0) return;
-    setValidatedState(state);
+    setValidation({ state, existingIds });
     chooseColumnView("validate");
-  }, [refuseInvalid, errors, state, chooseColumnView]);
+  }, [refuseInvalid, errors, state, existingIds, chooseColumnView]);
 
   /**
    * SG-D22 — the run, and its target.

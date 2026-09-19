@@ -4221,6 +4221,85 @@ describe("BriefPage — the run slot: Validate → Generate (SG9)", () => {
     // still gated on `applied` alone.
     expect(editorStatuses()[0]!.textContent).not.toBe(messages.statusLoaded("clip"));
   });
+
+  /**
+   * SG-D15's key covered ONE of `validateState`'s two arguments.
+   *
+   * `errors` is `validateState(state, existingIds)`, and `existingIds` comes from the
+   * brief listing, which refetches itself on every window focus. So the errors could
+   * change while `state` did not — and the gate, keyed on `state` alone, went on
+   * reporting the validation fresh. The live case is this one: an id that was free
+   * when the operator validated is taken by the time they press Generate, and the
+   * editor offers a run of a brief the API would refuse, having charged for it.
+   */
+  test("a validation is closed by a listing that takes the id out from under it", async () => {
+    const user = userEvent.setup();
+    let listed: readonly ReturnType<typeof entry>[] = [];
+    routes({ list: () => json({ briefs: listed }) });
+    renderWithRun(<NewEditor />);
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
+    );
+    await fillValidDraft(user, "fresh");
+
+    await user.click(slot(messages.editorValidate) as HTMLElement);
+    expect(slot(messages.generate)).not.toBeNull();
+
+    // Someone else saved `fresh` while this operator was away. The refetch on focus
+    // brings it back, `validateIdentity` now calls the id a duplicate — and the
+    // DOCUMENT has not moved by one byte.
+    listed = [entry("fresh", "r1")];
+    window.dispatchEvent(new Event("focus"));
+
+    await waitFor(() => expect(slot(messages.generate)).toBeNull());
+    expect(slot(messages.editorValidate)).not.toBeNull();
+  });
+
+  /**
+   * The inverse, and the one a fix for the test above will skip: `existingIds` is
+   * `briefs.map(…)`, a NEW array after every refetch, so a freshness key that read it
+   * by identity would shut the gate on every focus — and on every render in between.
+   * That trades a stale gate for one that resets constantly, which is the same verb
+   * unreachable for a different reason.
+   */
+  test("a listing refetch that changed nothing leaves Generate standing", async () => {
+    const user = userEvent.setup();
+    let lists = 0;
+    let listed: readonly ReturnType<typeof entry>[] = [entry("other", "r1")];
+    routes({
+      list: () => {
+        lists += 1;
+        // A NEW array of NEW objects each time, exactly as a real refetch answers —
+        // identical content, nothing shared by reference with the last answer.
+        return json({ briefs: listed.map((e) => ({ ...e })) });
+      },
+    });
+    renderWithRun(<NewEditor />);
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
+    );
+    await waitFor(() => expect(lists).toBe(1));
+    await fillValidDraft(user, "fresh");
+
+    await user.click(slot(messages.editorValidate) as HTMLElement);
+    expect(slot(messages.generate)).not.toBeNull();
+
+    window.dispatchEvent(new Event("focus"));
+    await waitFor(() => expect(lists).toBe(2));
+
+    // The listing answered, the arrays are different objects, and the operator's
+    // consent survives it: still Generate, and no Validate to press again.
+    expect(slot(messages.generate)).not.toBeNull();
+    expect(slot(messages.editorValidate)).toBeNull();
+
+    // And the absence above is not simply a focus whose answer never arrived. The
+    // SAME gesture, with a listing that really did move, closes the gate — so the
+    // refetch demonstrably reaches the component, and "nothing changed" is what the
+    // assertions above measured rather than "nothing happened yet".
+    listed = [entry("other", "r1"), entry("fresh", "r1")];
+    window.dispatchEvent(new Event("focus"));
+    await waitFor(() => expect(slot(messages.generate)).toBeNull());
+  });
 });
 
 /**

@@ -521,7 +521,11 @@ answer-out-loud shape. The snapshot is taken **only** by pressing Validate — a
 never takes it, because the gate records operator consent before spending GenAI credits, not
 computability. It is keyed on the `state` reference, never on `toBrief(state)`: the projection
 drops and narrows on the way out, so an edit that breaks the document can leave it identical.
-The snapshot is client-local and ephemeral — a reload clears it.
+**It is keyed on the brief listing too** — validation reads `validateState(state, existingIds)`,
+and the listing refetches itself on window focus, so a snapshot of the document alone reported
+a validation fresh after an id it had judged free was taken. The listing half is compared by
+value as a set (a refetch hands back a new array of the same ids), the document half by
+reference. The snapshot is client-local and ephemeral — a reload clears it.
 
 **The one Generate that is disabled is the one this host cannot run.** D3's rule is that
 nothing is disabled for being *invalid*; a capability is not invalidity (D7), and the
