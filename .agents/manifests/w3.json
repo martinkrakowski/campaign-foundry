@@ -3,52 +3,20 @@
   "lane": "W3",
   "mutations": [
     {
-      "file": "tools/wave-status/public/index.html",
-      "before": "      function waveMeta(lanes, nowMs) {\n        const counts = laneStateCountsOf(lanes, nowMs);",
-      "after": "      function waveMeta(lanes, nowMs) {\n        const counts = {};",
-      "because": "The header's whole claim is that it counts the derived state the rows lead with. Stop sourcing its counts from laneStateCountsOf and the band reverts to an empty breakdown over rows that still say 2 running / 1 failed / 1 merged — the exact disagreement with the rows the lane was written to remove, caught here and not by a header-only assertion that shares the wrong basis.",
-      "command": ["yarn", "vitest", "run", "tools/wave-status/__tests__/page.test.ts"],
-      "verdict": "caught"
-    },
-    {
-      "file": "tools/wave-status/public/index.html",
-      "before": "        for (const lane of lanes) {\n          if (laneNeedsHuman(lane, nowMs)) attention += 1;\n        }",
-      "after": "        for (const lane of lanes) {\n          attention += 1;\n        }",
-      "because": "'How many need me' is the needs-a-human subset, not every lane: sum the full order and the lead number becomes the lane count, so a campaign of 11 where 6 need a human reads 11. The command monitor's headline answer is the one this mutation corrupts, and it is caught by the same fixture the rows are counted on. (Re-anchored by ANCHORS: the headline is now summed per lane through `laneNeedsHuman` instead of over a counts map, so counting every lane is that predicate dropped; The semantic edit is the same one; the after-text is that edit re-expressed against the current shape, not a new claim.)",
-      "command": ["yarn", "vitest", "run", "tools/wave-status/__tests__/page.test.ts"],
-      "verdict": "caught"
-    },
-    {
-      "file": "tools/wave-status/public/index.html",
-      "before": "      const NEEDS_HUMAN = [\"running\", \"stalled\", \"conflict\", \"failed\"];",
-      "after": "      const NEEDS_HUMAN = [\"running\", \"conflict\", \"failed\"];",
-      "because": "Hide inactive must leave exactly running, stalled, conflicted or failed. Drop a state from the page's copy of the set and the page hides stalled lanes while the module (and so the test's expectation) still counts them as needing a human — the two copies of one policy parting ways, caught on the same seam the derivation is held to.",
-      "command": ["yarn", "vitest", "run", "tools/wave-status/__tests__/page.test.ts"],
-      "verdict": "caught"
-    },
-    {
-      "file": "tools/wave-status/lib/lane-state.ts",
-      "before": "  for (const lane of lanes) counts[laneState(lane, nowMs)] += 1;",
-      "after": "  for (const lane of lanes) counts[\"merged\"] += 1;",
-      "because": "laneStateCounts is the tiebreaker the page's own counts are measured against, and it is the module half of 'counts and rows come from one computation'. Bucket every lane into one state and it stops being a tally of laneState, so the fixture's real per-state numbers no longer match what either the page or the unit test derive.",
-      "command": ["yarn", "vitest", "run", "tools/wave-status/lib/__tests__/lane-state.test.ts", "tools/wave-status/__tests__/page.test.ts"],
-      "verdict": "caught"
-    },
-    {
-      "file": "tools/wave-status/lib/lane-state.ts",
-      "before": "export const NEEDS_HUMAN_STATES: readonly LaneState[] = [\n  \"conflict\",\n  \"failed\",\n  \"stalled\",\n  \"running\",\n];",
-      "after": "export const NEEDS_HUMAN_STATES: readonly LaneState[] = [\n  \"conflict\",\n  \"failed\",\n  \"running\",\n];",
-      "because": "The same set with the same state removed from the original instead of the copy: the module says stalled lanes no longer need a human while the page still keeps them, so the lead count and the hidden set both disagree with the reference. Two copies of one rule stay joined only if the seam is read from both sides, and the tests read it through the module.",
-      "command": ["yarn", "vitest", "run", "tools/wave-status/__tests__/page.test.ts"],
-      "verdict": "caught"
-    },
-    {
-      "file": "tools/wave-status/public/index.html",
-      "before": "        if (textMatches.length === 0) return `No lanes match “${esc(query)}”`;",
-      "after": "        if (query.trim() !== \"\") return `No lanes match “${esc(query)}”`;",
-      "because": "The empty row is the page's answer to 'where did my lanes go', and the branch it chose that answer on used to be the presence of a query rather than the absence of a match: put the test back on `query` and a search that matched only merged, ready, blocked, vanished or unknown lanes is reported as *not found* when it was found and hidden — a confidently wrong answer whose remedy (the switch that hid them) the reader is never told. Caught by the empty row's exact wording for all three cases: hidden, unmatched, and a wave with no lanes at all.",
-      "command": ["yarn", "vitest", "run", "tools/wave-status/__tests__/page.test.ts"],
+      "file": "apps/web/src/lib/use-latest-only.ts",
+      "before": "    isCurrent: (token: number) => token === round.current,",
+      "after": "    isCurrent: () => true,",
+      "because": "The helper's whole contract: a token stops being current once a newer round begins. Answering `true` unconditionally makes every stale answer installable again — and because both sites now share this definition, that single line would silently re-open the defect in BOTH of them, which is the cost of centralising and the reason it needs its own guard. The drawer's own guard is asserted separately by `l10.json#5`, which W3 re-anchored rather than duplicated.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "apps/web/src/lib/__tests__/use-latest-only.test.tsx",
+        "-t",
+        "stays current until a new round begins"
+      ],
       "verdict": "caught"
     }
-  ]
+  ],
+  "note": "Deliberately does NOT re-assert the drawer's staleness guard: `l10.json#5` already carries that claim and W3 re-anchored it to the shared token. The mutation swapping `current()` for `begin()` in `apply` was measured and does NOT red — the load guards with a `cancelled` flag and never checks its own token — so it is recorded in the helper's doc comment rather than as a mutation that cannot fail."
 }

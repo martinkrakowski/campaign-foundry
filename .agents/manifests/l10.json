@@ -22,7 +22,7 @@
       "file": "apps/api/server/routes/campaigns/pools/[briefId].patch.ts",
       "before": "      if (!isErrno(error, \"ECONFLICT\")) throw error;",
       "after": "      if (false) throw error;",
-      "because": "Every write failure becomes a 409 with the pool's current revision, so a disk error is reported to HITL as 'someone else edited this' \u2014 the route would claim a conflict it never detected. The 500-vs-409 split is what the read-only-directory test pins.",
+      "because": "Every write failure becomes a 409 with the pool's current revision, so a disk error is reported to HITL as 'someone else edited this' — the route would claim a conflict it never detected. The 500-vs-409 split is what the read-only-directory test pins.",
       "command": [
         "yarn",
         "vitest",
@@ -37,7 +37,7 @@
       "file": "apps/api/server/routes/campaigns/pools/[briefId].get.ts",
       "before": "  return { pool: stored.pool, revision: stored.revision };",
       "after": "  return { pool: stored.pool };",
-      "because": "GET stops handing out the revision, so no caller can ever send one and the conditional write on the port is unreachable from the web client \u2014 the revision would exist on the port and nowhere else.",
+      "because": "GET stops handing out the revision, so no caller can ever send one and the conditional write on the port is unreachable from the web client — the revision would exist on the port and nowhere else.",
       "command": [
         "yarn",
         "vitest",
@@ -81,9 +81,9 @@
     },
     {
       "file": "apps/web/src/components/campaign/HeadlinePoolDrawer.tsx",
-      "before": "      if (loadGeneration.current !== generation) return false;",
+      "before": "      if (!loadRound.isCurrent(token)) return false;",
       "after": "      if (false) return false;",
-      "because": "A late write installs its revision whatever happened while it was in flight, so one that lands after a reopen \u2014 or after the reload a brief switch starts \u2014 overwrites the revision that load installed with a stale one, and the next edit is refused against bytes that are already gone.",
+      "because": "A late write installs its revision whatever happened while it was in flight, so one that lands after a reopen — or after the reload a brief switch starts — overwrites the revision that load installed with a stale one, and the next edit is refused against bytes that are already gone.\n\nRE-ANCHORED by W3 (2026-09-19). The guard moved from a hand-rolled `loadGeneration.current !== generation` to the shared `useLatestOnly` token — same comparison, same claim, one definition. Re-anchored rather than re-pointed: the mutation still deletes the same guard and still asserts the same consequence.",
       "command": [
         "yarn",
         "vitest",
@@ -128,7 +128,7 @@
       "file": "apps/api/server/lib/ports/fs-pool-store.ts",
       "before": "    return { pool, revision: hashBytes(bytes) };",
       "after": "    return { pool, revision: hashBytes(Buffer.from(raw, \"utf8\")) };",
-      "because": "readPool's revision goes back to being the digest of a re-encoding of the decoded text instead of the stored bytes. For a file whose bytes are not valid UTF-8 \u2014 the only file where the round-trip is not the identity \u2014 it then disagrees with the digest writePool's guard computes, and a hand-edited pool is reported as a conflict no write can clear.",
+      "because": "readPool's revision goes back to being the digest of a re-encoding of the decoded text instead of the stored bytes. For a file whose bytes are not valid UTF-8 — the only file where the round-trip is not the identity — it then disagrees with the digest writePool's guard computes, and a hand-edited pool is reported as a conflict no write can clear.",
       "command": [
         "yarn",
         "vitest",
