@@ -131,9 +131,16 @@ the status:
 
 ```bash
 gh pr list --head "<branch>" --json number,url --jq '.[] | "#\(.number) \(.url)"'   # empty ⇒ stuck
+git -C "<worktree>" rev-list --count origin/main..HEAD                             # 0 ⇒ it wrote nothing
 (cd "<worktree>" && yarn build && yarn typecheck && yarn lint && yarn lint:arch && yarn sync:check && yarn test:cov && yarn lint:bytes)
 git -C "<worktree>" status --porcelain=v1 -b && git -C "<worktree>" diff --stat origin/main...HEAD
 ```
+
+**Run the commit count first, and do not skip it because the seat said `SUCCESS`.** A seat's own
+verdict is not evidence of work: on 2026-09-19 an agy lane reported `EXIT 0` *and*
+`"status":"SUCCESS"` after six minutes and 643 k tokens, having made **zero commits** — it launched
+the test suite as its first act and narrated waiting for it. `cast.md` carries the detail. Zero
+commits is a stuck lane no matter how the run describes itself.
 **The gate is a subset of CI, and the difference is named.** `ci.yml` runs **three** steps the seven
 commands above do not. The first is the one that bites most quietly:
 
