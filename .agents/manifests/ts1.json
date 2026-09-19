@@ -109,9 +109,9 @@
     },
     {
       "file": "apps/web/src/components/campaign/BriefEditor.tsx",
-      "before": "            {railProps.motion !== undefined ? (",
-      "after": "            {railProps.motion === undefined || railProps.motion !== undefined ? (",
-      "because": "The plan's §4 acceptance (e), second half: a brief without motion must not mount the tape. A still creative has no seconds to draw, and a tape over one invites a scrub that means nothing and a playhead that addresses a frame index the encoder never produces. The mutation is written as a tautology rather than as a deleted guard so that ONLY the still-brief path moves -- every motion test stays green, which is the point: this is caught by a test that asserts an ABSENCE on a draft that has no motion, and by nothing else in the suite.",
+      "before": "            {railProps.motion !== undefined && isRailWideEnough ? (",
+      "after": "            {(railProps.motion === undefined || railProps.motion !== undefined) && isRailWideEnough ? (",
+      "because": "The plan's §4 acceptance (e), second half: a brief without motion must not mount the tape. A still creative has no seconds to draw, and a tape over one invites a scrub that means nothing and a playhead that addresses a frame index the encoder never produces. The mutation is written as a tautology rather than as a deleted guard so that ONLY the still-brief path moves -- every motion test stays green, which is the point: this is caught by a test that asserts an ABSENCE on a draft that has no motion, and by nothing else in the suite.\n\nRE-ANCHORED by TS2 (2026-09-19). The condition gained `&& isRailWideEnough`, because the rail is CSS-hidden below its gate rather than unmounted and the new section host would otherwise make a SECOND tape. The claim is untouched: the mutation still neutralises the MOTION half alone and leaves the width half intact, so what reds is still a still-brief asserting an absence — not the width invariant, which TS2 pins separately.",
       "command": [
         "yarn",
         "vitest",

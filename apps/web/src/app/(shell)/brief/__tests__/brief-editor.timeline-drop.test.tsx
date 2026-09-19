@@ -447,4 +447,48 @@ describe("SG6′ — the copy sequence says when it will not be saved", () => {
     await user.click(screen.getByRole("button", { name: messages.timelineBeatSceneClearLabel(1) }));
     await waitFor(() => expect(chip().textContent).toBe(messages.timelineBeatSceneNone));
   });
+
+  /**
+   * TS2 — D146's section host, and the lane's acceptance in one sentence:
+   * **exactly one tape is mounted, at either width.**
+   *
+   * The rail owns the tape wherever the rail is shown. Below
+   * `RAIL_VIEWPORT_MIN_PX` there is no rail, so the sequence being authored had
+   * no playhead at all — the gap this closes. Counting `[data-tape-host]` rather
+   * than asserting a component pins the thing that actually breaks: two tapes,
+   * two playhead sliders, one second.
+   */
+  describe("the section host (TS2)", () => {
+    const tapes = () => Array.from(document.querySelectorAll("[data-tape-host]"));
+    const atWidth = (px: number) => {
+      const original = window.innerWidth;
+      Object.defineProperty(window, "innerWidth", { value: px, configurable: true });
+      return () =>
+        Object.defineProperty(window, "innerWidth", { value: original, configurable: true });
+    };
+
+    test("wide: the rail hosts it, and the section does not", async () => {
+      const restore = atWidth(1440);
+      try {
+        await open(sequencedBrief);
+        await waitFor(() => expect(tapes().length).toBeGreaterThan(0));
+        expect(tapes()).toHaveLength(1);
+        expect(tapes()[0]?.getAttribute("data-tape-host")).toBe("rail");
+      } finally {
+        restore();
+      }
+    });
+
+    test("narrow: the section hosts it, still exactly one", async () => {
+      const restore = atWidth(500);
+      try {
+        await open(sequencedBrief);
+        await waitFor(() => expect(tapes().length).toBeGreaterThan(0));
+        expect(tapes()).toHaveLength(1);
+        expect(tapes()[0]?.getAttribute("data-tape-host")).toBe("section");
+      } finally {
+        restore();
+      }
+    });
+  });
 });

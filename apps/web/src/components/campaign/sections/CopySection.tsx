@@ -22,6 +22,7 @@ export function CopySection({
   warnings = {},
   onOpenPool,
   onChooseScene,
+  sectionPlayhead,
 }: {
   state: EditorState;
   dispatch: Dispatch<EditorAction>;
@@ -31,6 +32,12 @@ export function CopySection({
   /** TL2 — open the Asset Bin for one beat. Threaded, like `onOpenPool`: the
    * drawer lives at `BriefEditor`s root (M7), not under a transformed card. */
   onChooseScene?: (index: number) => void;
+  /** TS2 — the committed second, for the narrow-width tape host. */
+  sectionPlayhead?: {
+    durationSec: number;
+    committedSec: number;
+    commit: (sec: number) => void;
+  } | null;
 }) {
   const { briefId, pool } = state;
 
@@ -197,6 +204,7 @@ export function CopySection({
             errors={errors}
             warnings={warnings}
             onChooseScene={onChooseScene}
+            sectionPlayhead={sectionPlayhead}
           />
         </div>
       ) : null}

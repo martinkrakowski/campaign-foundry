@@ -356,6 +356,38 @@ const COLUMN_VIEW_GLYPH: Record<ColumnView, ReactNode> = {
  * subscription (the plan already said "its own slot or a subscription"); a second
  * `useState` pair would desync the preview, which is the risk D146 names.
  */
+/**
+ * TS2 — publishes the COMMITTED second (and its setter) out of `PlayheadHost`'s
+ * subtree, so a surface in the step form can draw the same playhead.
+ *
+ * Why only the committed one. `scrubSec` moves on every pointermove, and
+ * `brief-editor.playhead.test.tsx` pins that a drag re-renders the step form
+ * ZERO times — the property CC1/CC2 built. Publishing the live second would
+ * re-render the form per frame and break it. A commit happens once per gesture,
+ * so the section host follows the committed second and the live diamond stays a
+ * rail affordance (the owner's option A, 2026-09-19).
+ *
+ * A component rather than an effect inside `railSlot`, because `railSlot` is a
+ * render function: calling a setter from it would be a write during render.
+ */
+function PlayheadPublisher({
+  playhead,
+  onPublish,
+}: {
+  readonly playhead: PlayheadState;
+  readonly onPublish: (value: {
+    durationSec: number;
+    committedSec: number;
+    commit: (sec: number) => void;
+  }) => void;
+}): ReactNode {
+  const { durationSec, committedSec, onScrubCommit } = playhead;
+  useEffect(() => {
+    onPublish({ durationSec, committedSec, commit: onScrubCommit });
+  }, [durationSec, committedSec, onScrubCommit, onPublish]);
+  return null;
+}
+
 export function PlayheadHost({
   durationSec,
   rail,
@@ -568,6 +600,16 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   const [validation, setValidation] = useState<ValidationSnapshot | null>(null);
   /** Generate's credit-spending confirm (SG-D10, after `CommandBar.tsx:164`). */
   const [runConfirmOpen, setRunConfirmOpen] = useState(false);
+  /**
+   * TS2 — the committed second, published out of `PlayheadHost` by
+   * `PlayheadPublisher`. Only the committed one: see that component for why the
+   * live second stays in the rail.
+   */
+  const [sectionPlayhead, setSectionPlayhead] = useState<{
+    durationSec: number;
+    committedSec: number;
+    commit: (sec: number) => void;
+  } | null>(null);
   /**
    * SG8 — what the run is about to produce. Derived, never counted here:
    * `preflightFigures` reads `classicAdCount` for a classic brief and the
@@ -1544,6 +1586,7 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   const railSlot = useCallback(
     (playhead: PlayheadState): ReactNode => (
       <div className="flex flex-1 flex-col gap-3 overflow-y-auto p-4">
+        <PlayheadPublisher playhead={playhead} onPublish={setSectionPlayhead} />
         {/* SG4 — the rail is PREVIEW-ONLY. Its segmented switcher (D61, an eye
           and a `</>`) and the YAML `<pre>` it revealed are both gone: SG-D4 puts
           the one switch over the middle column, the wireframe draws exactly one,
@@ -1576,7 +1619,14 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
               draw, and a tape over a static creative would invite a scrub
               that means nothing. `hasMotion` is the rail's own look, so the
               tape and the dock's range appear and disappear together. */}
-            {railProps.motion !== undefined ? (
+            {/* TS2 — `isRailWideEnough` as well as the motion look. The rail is
+                CSS-hidden below its gate (`hidden lg:flex`), not unmounted, so
+                without this the rail's tape stays in the DOM and the section
+                host makes a SECOND one: two playhead sliders over one second.
+                The lane's acceptance is exactly one tape at either width, and
+                it caught this. Same JS mirror the rail already uses to withhold
+                `brief` from the dock (CC2). */}
+            {railProps.motion !== undefined && isRailWideEnough ? (
               <TimelineTape
                 durationSec={playhead.durationSec}
                 beats={tapeBeats}
@@ -2311,6 +2361,7 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
               warnings={warnings.copy}
               onOpenPool={() => setPoolDrawerOpen(true)}
               onChooseScene={(index) => setAssetTarget({ kind: "beat", index })}
+              sectionPlayhead={sectionPlayhead}
             />
           </div>
           <div>
