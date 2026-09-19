@@ -198,6 +198,90 @@ describe("PreviewFrame (D52)", () => {
     expect(body.cell.durationSec).toBe(6);
     expect(body.cell.atSec).toBe(2);
   });
+
+  test("the cell request names the product by identity, never by its colour (MP1)", async () => {
+    vi.useFakeTimers();
+    vi.mocked(globalThis.fetch).mockResolvedValue(pngResponse());
+    const twoProdBrief = brief({
+      products: [
+        { id: "alpha", name: "A", primaryColor: "#1473E6", logoPath: "a.png" },
+        { id: "beta", name: "B", primaryColor: "#E61414", logoPath: "b.png" },
+      ],
+    });
+
+    // 1. Matched by explicit productId prop
+    const view1 = render(
+      <PreviewFrame
+        brief={twoProdBrief}
+        productId="beta"
+        layout="headline-bottom"
+        tone="bold"
+        primaryColor="#E61414"
+        className="block h-auto w-full"
+      />,
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(PREVIEW_FRAME_DEBOUNCE_MS);
+    });
+    const body1 = JSON.parse(
+      (vi.mocked(globalThis.fetch).mock.calls[0][1] as RequestInit).body as string,
+    );
+    expect(body1.cell.productId).toBe("beta");
+    view1.unmount();
+    vi.mocked(globalThis.fetch).mockClear();
+
+    // 2. No productId: the brief's FIRST product, exactly as before this lane.
+    // Not "whichever product wears this colour" — identity is never inferred
+    // from appearance. See case 3 for why that distinction is load-bearing.
+    const view2 = render(
+      <PreviewFrame
+        brief={twoProdBrief}
+        layout="headline-bottom"
+        tone="bold"
+        primaryColor="#E61414"
+        className="block h-auto w-full"
+      />,
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(PREVIEW_FRAME_DEBOUNCE_MS);
+    });
+    const body2 = JSON.parse(
+      (vi.mocked(globalThis.fetch).mock.calls[0][1] as RequestInit).body as string,
+    );
+    expect(body2.cell.productId).toBe("alpha");
+    view2.unmount();
+    vi.mocked(globalThis.fetch).mockClear();
+
+    // 3. Two products, ONE brand colour. This is the case that decides whether
+    // the cell resolves identity or appearance: a colour lookup cannot tell
+    // these two apart and would answer with the first, so asking for `gamma`
+    // must still reach the server as `gamma` — the right logo, not merely the
+    // right colour.
+    const sharedColourBrief = brief({
+      products: [
+        { id: "delta", name: "D", primaryColor: "#1473E6", logoPath: "d.png" },
+        { id: "gamma", name: "G", primaryColor: "#1473E6", logoPath: "g.png" },
+      ],
+    });
+    const view3 = render(
+      <PreviewFrame
+        brief={sharedColourBrief}
+        productId="gamma"
+        layout="headline-bottom"
+        tone="bold"
+        primaryColor="#1473E6"
+        className="block h-auto w-full"
+      />,
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(PREVIEW_FRAME_DEBOUNCE_MS);
+    });
+    const body3 = JSON.parse(
+      (vi.mocked(globalThis.fetch).mock.calls[0][1] as RequestInit).body as string,
+    );
+    expect(body3.cell.productId).toBe("gamma");
+    view3.unmount();
+  });
 });
 
 describe("renaming a fresh draft must not blank the preview frame", () => {
@@ -273,6 +357,63 @@ function MemoDock({
     <PreviewDock {...railProps} brief={previewBrief} playhead={restingPlayhead} host="section" />
   );
 }
+
+describe("the rail carries the slot's product all the way to the request (MP1)", () => {
+  /**
+   * The chain, not a link of it: `previewLook` resolves the slot's product,
+   * `previewDockProps` spreads it, `PreviewDock` forwards it and `PreviewFrame`
+   * puts it in the cell. Every one of those four can be individually correct
+   * while the rail still asks for the wrong product, because a prop nobody
+   * passes is indistinguishable from a prop that does not exist — the dock did
+   * not forward it at first, and the frame covered for it by finding a product
+   * whose COLOUR matched, which agrees with the client only by coincidence.
+   *
+   * So this asserts the one thing no single-component test can: that selecting
+   * the second product's slot makes the SERVER hear about the second product.
+   */
+  const twoProductState = (): EditorState => {
+    let state = initialEditorState("variation");
+    state = editorReducer(state, {
+      type: "setProduct",
+      key: state.products[0]!.key,
+      patch: { id: "alpha", name: "A", primaryColor: "#1473E6", logoPath: "a.png" },
+    });
+    // `setProduct` only patches an EXISTING row — the second product has to be
+    // minted first, and its key comes from the reducer, never from a guess.
+    state = editorReducer(state, { type: "addProduct" });
+    state = editorReducer(state, {
+      type: "setProduct",
+      key: state.products[1]!.key,
+      patch: { id: "beta", name: "B", primaryColor: "#E61414", logoPath: "b.png" },
+    });
+    state.campaignName = "two";
+    return state;
+  };
+
+  test("selecting the second product's slot sends that product's id, not the first's", async () => {
+    vi.useFakeTimers();
+    vi.mocked(globalThis.fetch).mockResolvedValue(pngResponse());
+    const state = twoProductState();
+    // The slot the operator clicked: drawn for `beta`.
+    const rawRailProps = previewDockProps(state, {
+      productId: "beta",
+      layout: "headline-bottom",
+      tone: "bold",
+    });
+    const brief = toBrief(state);
+    const previewKey = previewRailKey(rawRailProps, brief, rawRailProps?.productId ?? "");
+    render(<MemoDock rawRailProps={rawRailProps} brief={brief} previewKey={previewKey} />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(PREVIEW_FRAME_DEBOUNCE_MS + 10);
+    });
+    const body = JSON.parse(
+      (vi.mocked(globalThis.fetch).mock.calls[0][1] as RequestInit).body as string,
+    );
+    expect(body.cell.productId).toBe("beta");
+    // And the client drew the same product it asked the server for (D45).
+    expect(rawRailProps?.primaryColor).toBe("#E61414");
+  });
+});
 
 describe("the rail's memo must not hide a switch of creative from usePreviewFrame (Qodo, caught in review)", () => {
   /**

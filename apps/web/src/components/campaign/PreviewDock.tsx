@@ -106,6 +106,15 @@ export type SurfaceHost = "rail" | "section";
 export interface PreviewShowcaseProps extends Omit<CreativePreviewProps, "className"> {
   readonly campaignName: string;
   /**
+   * MP1 — the product the look resolved, forwarded so the server's cell names
+   * the SAME product the client drew. Without it reaching the frame there is no
+   * identity to agree on and the cell has to infer one from `primaryColor`,
+   * which is the D45 split wearing a disguise: two products may share a brand
+   * colour, and the frame would then be composited for the wrong one — right
+   * colour, wrong logo, wrong product in the markup.
+   */
+  readonly productId?: string;
+  /**
    * CC5 — the dock draws and writes the playhead; it no longer owns it. Before
    * this lift the pair lived in a `useState` here, which made a second surface
    * (the timeline tape) unable to show the same second without a second copy of
@@ -318,6 +327,7 @@ function PreviewDockImpl(props: PreviewShowcaseProps): ReactNode {
       <Eyebrow as="p">{messages.previewLegend}</Eyebrow>
       <PreviewFrame
         brief={props.brief}
+        productId={props.productId}
         layout={props.layout}
         tone={props.tone}
         anchor={props.anchor}

@@ -940,7 +940,11 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   // every keystroke (for the YAML view, `draftDiffers`, Save, Review) — this
   // key is a SECOND, narrower fingerprint over the same object, an accepted
   // extra cost of the memo boundary, not a replacement for it.
-  const previewKey = previewRailKey(rawRailProps, draftBrief, state.products[0]?.id ?? "");
+  const previewKey = previewRailKey(
+    rawRailProps,
+    draftBrief,
+    rawRailProps?.productId ?? state.products[0]?.id ?? "",
+  );
   const railProps = useMemo(() => rawRailProps, [previewKey]);
   // The rail's own `brief` prop, stabilised on the SAME key — a look-preserving
   // keystroke feeds `PreviewDock` (and the fetch inside it) the identical

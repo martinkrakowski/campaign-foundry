@@ -158,6 +158,31 @@ describe("previewDockProps", () => {
     state.styleExplicit = false;
     expect(previewDockProps(state)!.style).toEqual({ fontFamily: "Lora", align: "left" });
   });
+
+  test("a selected slot's productId determines the look's primaryColor and productId (MP1)", () => {
+    const state = initialEditorState("variation");
+    state.products = [namedProduct(1, "#1473E6"), namedProduct(2, "#E61414")];
+
+    // No variant selection -> falls back to products[0]
+    const defaultProps = previewDockProps(state)!;
+    expect(defaultProps.primaryColor).toBe("#1473E6");
+    expect(defaultProps.productId).toBe("p1");
+
+    // Slot naming product 2
+    const slotProps = previewDockProps(state, { productId: "p2" })!;
+    expect(slotProps.primaryColor).toBe("#E61414");
+    expect(slotProps.productId).toBe("p2");
+
+    // Slot naming nonexistent product falls back to products[0]
+    const missingProps = previewDockProps(state, { productId: "p99" })!;
+    expect(missingProps.primaryColor).toBe("#1473E6");
+    expect(missingProps.productId).toBe("p1");
+
+    // Slot with undefined productId falls back to products[0]
+    const undefinedProps = previewDockProps(state, { productId: undefined })!;
+    expect(undefinedProps.primaryColor).toBe("#1473E6");
+    expect(undefinedProps.productId).toBe("p1");
+  });
 });
 
 describe("previewRailKey — the memo boundary's identity axis (Qodo, caught in review)", () => {

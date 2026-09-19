@@ -152,6 +152,7 @@ export function LayoutSection({
         {/* T1b: the frame is the REAL composited creative, the SVG until it arrives. */}
         <PreviewFrame
           brief={brief}
+          productId={look.productId}
           layout={look.layout}
           tone={look.tone}
           anchor={look.anchor}

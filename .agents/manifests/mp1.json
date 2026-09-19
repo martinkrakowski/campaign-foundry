@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "lane": "MP1",
+  "mutations": [
+    {
+      "file": "apps/web/src/components/campaign/preview-props.ts",
+      "before": "  const matchedProduct =\n    variant?.productId !== undefined\n      ? state.products.find((p) => p.id === variant.productId)\n      : undefined;\n  const product = matchedProduct ?? state.products[0];",
+      "after": "  const product = state.products[0];",
+      "because": "Revert site 1 so that previewLook ignores the selected slot's productId and unconditionally falls back to state.products[0]. In a multi-product variation brief, selecting a slot planned for the second product leaves the preview displaying the first product's primaryColor instead of the second product's brand colour. Caught by asserting that selecting the slot previews the second product's rendered primaryColor.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.creatives.test.tsx",
+        "-t",
+        "selecting a slot whose productId is the second product previews the second product primaryColor"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/PreviewDock.tsx",
+      "before": "        productId={props.productId}\n        layout={props.layout}",
+      "after": "        layout={props.layout}",
+      "because": "The dock is the only path from the resolved look to the frame in production. Without this forward `PreviewFrame` receives no `productId` at all — the prop exists, but nothing outside a test ever passes it — and the cell has to infer a product from `primaryColor`, which agrees with the client only by coincidence and picks the wrong product outright when two share a brand colour. Every other site in this lane can be correct while the rail still asks the server for the first product; this mutation is what says the chain is joined, and the test it runs is the only one that observes the whole chain rather than a link of it.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "apps/web/src/components/campaign/__tests__/preview-frame.test.tsx",
+        "-t",
+        "sends that product"
+      ],
+      "verdict": "caught"
+    }
+  ],
+  "note": "Two mutations because the lane has two independent failure modes and one test each. #0 is the resolution itself (does the look pick the slot's own product). #1 is the wiring (does that product reach the request) — a real defect found in review: the dock never forwarded the prop, and the frame masked it by matching a product whose colour equalled the one being drawn. Identity-by-appearance was removed with it; a caller that does not know the product now gets the brief's first product, exactly as before this lane."
+}

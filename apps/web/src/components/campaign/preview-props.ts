@@ -17,7 +17,9 @@ import type { PreviewShowcaseProps } from "./PreviewDock";
  * stay a fingerprint of the BRIEF: a second that moved on a pointermove must
  * never look like a changed creative.
  */
-export type PreviewDockLook = Omit<PreviewShowcaseProps, "playhead" | "host">;
+export type PreviewDockLook = Omit<PreviewShowcaseProps, "playhead" | "host"> & {
+  readonly productId?: string;
+};
 import { anchorAxisActive, briefStyle, isDefaultOutput, type EditorState } from "./editor-state";
 import { previewFetchKey } from "@/lib/preview-frame";
 
@@ -63,32 +65,37 @@ export interface PreviewLook {
   readonly anchor: AnchorOption | undefined;
   readonly motion: MotionKind | undefined;
   readonly primaryColor: string;
+  readonly productId: string;
   readonly headline: string;
   readonly style: CreativePreviewProps["style"];
   readonly platformId: string | undefined;
 }
 
 /**
- * SL3 — the slot the operator clicked in the sidebar's creatives list, as much of
+ * SL3/MP1 — the slot the operator clicked in the sidebar's creatives list, as much of
  * it as the look can honestly wear.
  *
  * Only the axes the look itself carries are here. `aspectRatio` is NOT: the ratio
  * is derived once by the caller (`derivePreviewRatio`, `PreviewDock.tsx:28`) and
- * `PreviewLook` has never held one. Nor is `productId`: the frame's cell builds
- * its product in `PreviewFrame.tsx`, so overriding the colour here alone would
- * make the client-composed preview and the server-rendered frame disagree about
- * which product they are drawing — exactly the D45 split this derivation exists
- * to prevent. Both are recorded gaps, not oversights.
+ * `PreviewLook` has never held one. `productId` is carried (MP1): the look resolves
+ * the slot's own product colour, and the server frame's cell in `PreviewFrame.tsx`
+ * agrees with it — preventing the D45 split where preview and render show different
+ * products.
  */
 export interface SelectedVariantLook {
   readonly layout?: string;
   readonly tone?: string;
   readonly motion?: string;
   readonly headline?: string;
+  readonly productId?: string;
 }
 
 export function previewLook(state: EditorState, variant?: SelectedVariantLook): PreviewLook | null {
-  const product = state.products[0];
+  const matchedProduct =
+    variant?.productId !== undefined
+      ? state.products.find((p) => p.id === variant.productId)
+      : undefined;
+  const product = matchedProduct ?? state.products[0];
   if (product === undefined || product.id.length === 0) return null;
   const treatment = state.mode === "brief" ? state.treatments[0] : undefined;
   const layout: LayoutOption | undefined =
@@ -128,6 +135,7 @@ export function previewLook(state: EditorState, variant?: SelectedVariantLook): 
     // (`plan.post.ts:67`), so this never turns a static draft into a moving one.
     motion: (variant?.motion as MotionKind | undefined) ?? motion,
     primaryColor: product.primaryColor,
+    productId: product.id,
     // The drawn copy line, when the slot has one — a pooled headline is a
     // property of the creative, not of the brief, so it can only come from here.
     headline: variant?.headline ?? state.campaignMessage,

@@ -27,6 +27,7 @@ import { usePreviewFrame } from "@/lib/preview-frame";
  */
 export function PreviewFrame({
   brief,
+  productId,
   layout,
   tone,
   anchor,
@@ -44,6 +45,7 @@ export function PreviewFrame({
   className,
 }: {
   readonly brief?: CampaignBrief;
+  readonly productId?: string;
   readonly layout?: LayoutOption;
   readonly tone?: ToneOption;
   readonly anchor?: AnchorOption;
@@ -83,7 +85,18 @@ export function PreviewFrame({
   // so a leaderboard preview requests the real frame too, not only the social
   // family. The memo keys on the spec's own family value.
   const cell = useMemo<PreviewCellSelection | undefined>(() => {
-    const product = brief?.products[0];
+    // Identity, never appearance. An earlier draft fell back to finding a
+    // product whose `primaryColor` matched the one being drawn; that agrees
+    // with the client only by coincidence, and two products sharing a brand
+    // colour would send the server the wrong product's id — the right colour
+    // over the wrong logo, which is the D45 split this lane exists to close.
+    // Every caller that knows the product now passes it; one that does not gets
+    // the brief's first product, exactly as before this lane.
+    const matchedProduct =
+      productId !== undefined
+        ? brief?.products.find((candidate) => candidate.id === productId)
+        : undefined;
+    const product = matchedProduct ?? brief?.products?.[0];
     if (
       product === undefined ||
       product.id.length === 0 ||
@@ -101,7 +114,7 @@ export function PreviewFrame({
       ...(anchor !== undefined ? { anchor } : {}),
       ...(hasMotion ? { motion, durationSec, atSec } : {}),
     };
-  }, [brief, layout, tone, anchor, canvas, motion, durationSec, atSec]);
+  }, [brief, productId, layout, tone, anchor, canvas, motion, durationSec, atSec]);
   const { frame } = usePreviewFrame(brief, cell, identityKey);
 
   if (frame !== null) {
