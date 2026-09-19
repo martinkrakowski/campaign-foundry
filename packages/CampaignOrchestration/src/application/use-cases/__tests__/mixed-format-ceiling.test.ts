@@ -1,5 +1,6 @@
 import { describe, test, expect } from "vitest";
 import type { CampaignBrief } from "../../../domain/entities/CampaignBrief.js";
+import type { AspectRatioValue } from "../../../domain/value-objects/aspect-ratios.js";
 import {
   VariationPolicy,
   type PlanInput,
@@ -93,16 +94,21 @@ describe("a mixed static+motion ceiling is the space the enumerator produces", (
 
   test("the ceiling tracks how many of the requested ratios package motion", () => {
     // Widening motionRatios widens the ceiling, by the enumerator both times.
-    for (const motionRatios of [["9:16"], ["9:16", "1:1"], ["1:1", "9:16", "16:9"]]) {
+    const widening: ReadonlyArray<readonly AspectRatioValue[]> = [
+      ["9:16"],
+      ["9:16", "1:1"],
+      ["1:1", "9:16", "16:9"],
+    ];
+    for (const motionRatios of widening) {
       const policy = policyOf(mixedBrief(4), { motionRatios });
       expect(policy.axisProductSize).toBe(enumerateAxes(policy).length);
     }
     expect(policyOf(mixedBrief(4), { motionRatios: ["9:16"] }).axisProductSize).toBe(32);
     expect(policyOf(mixedBrief(4), { motionRatios: ["9:16", "1:1"] }).axisProductSize).toBe(40);
     // Every requested ratio packaged is the one case the old arithmetic got right.
-    expect(
-      policyOf(mixedBrief(4), { motionRatios: ["1:1", "9:16", "16:9"] }).axisProductSize,
-    ).toBe(48);
+    expect(policyOf(mixedBrief(4), { motionRatios: ["1:1", "9:16", "16:9"] }).axisProductSize).toBe(
+      48,
+    );
   });
 
   test("a wider motion axis is counted per packaged ratio, not per ratio", () => {
@@ -175,14 +181,17 @@ describe("count at the ceiling plans, end to end (SG-D7's property, on a mixed b
 
   test("a mixed brief plans at count = axisProductSize and draws the space exactly once", () => {
     const ceiling = policyOf(mixedBrief(1), PARTIAL_MOTION).axisProductSize;
-    expect(ceiling).toBe(32);
 
+    // Asserted BEFORE the ceiling's own value, deliberately: the property is
+    // "whatever the ceiling says, that count plans", so a wrong ceiling has to
+    // break the plan here rather than be caught by a literal further down. An
+    // over-counted ceiling is refused outright, which is the reported bug.
     const result = planner().plan(brief(mixedBrief(ceiling)), PARTIAL_MOTION);
-    // The whole point of the ceiling: the count the slider's own maximum offers
-    // is a count the planner accepts. At 48 this was refused outright.
     expect(result.success).toBe(true);
     if (!result.success) return;
     expect(result.value.variants).toHaveLength(ceiling);
+    // And the ceiling is the measured space, not merely self-consistent.
+    expect(ceiling).toBe(32);
 
     // Exactly once: every drawn variant is a distinct point of the space.
     const key = (variant: Record<string, unknown>) =>
