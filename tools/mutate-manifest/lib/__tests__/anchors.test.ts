@@ -53,6 +53,16 @@ const fs = (
   };
 };
 
+/**
+ * A listing where the FILE registers a test but the PATTERN selects none of it —
+ * a genuinely dead pattern. The two listings have to be answered separately:
+ * `checkAnchors` asks again without `-t` precisely so that "the pattern picks
+ * nothing" and "this file registers nothing here" stop being the same answer. A
+ * stub returning `[]` to both says the latter, which is a different finding.
+ */
+const selectsNothing = async (command: readonly string[]): Promise<readonly string[]> =>
+  command.includes("-t") ? [] : ["src/__tests__/target.test.ts > the editor > a case"];
+
 const EMPTY: Omit<AnchorReport, "faults" | "manifests" | "mutations" | "retired"> = {
   patterns: 0,
   proved: 0,
@@ -235,7 +245,7 @@ describe("checkAnchors — the -t pattern", () => {
           "src/target.ts": source,
           "src/__tests__/target.test.ts": suite,
         },
-        { listTests: async () => [] },
+        { listTests: selectsNothing },
       ),
     );
     expect(report.faults).toEqual([
@@ -267,7 +277,7 @@ describe("checkAnchors — the -t pattern", () => {
           "src/target.ts": source,
           "src/__tests__/target.test.ts": `test(${JSON.stringify(title)}, () => {});`,
         },
-        { listTests: async () => [] },
+        { listTests: selectsNothing },
       ),
     );
     expect(report).toMatchObject({ proved: 0, confirmed: 1 });

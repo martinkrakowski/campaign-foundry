@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "lane": "TG1",
+  "mutations": [
+    {
+      "file": "tools/mutate-manifest/lib/anchors.ts",
+      "before": "        registered.length === 0\n          ? {",
+      "after": "        registered.length !== 0\n          ? {",
+      "because": "The whole lane is one discrimination: an empty `-t` listing means either the pattern selects nothing (a finding — a replay would report `survived` without running a test) or the file registers nothing in this environment (not a finding — the check could not look). Inverting the test swaps the two verdicts, so a genuinely dead pattern is excused as an environment problem and an environment problem is reported as a dead pattern. That is worse than the behaviour before this lane, because it now sounds specific. The guard is the pair of tests that pin each direction, and they must disagree with each other for the pair to mean anything: with this mutation the dead-pattern case stops logging `DEAD -t PATTERN` and the unlistable case stops logging the environment detail.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "tools/mutate-manifest/__tests__/anchors-cli.test.ts",
+        "-t",
+        "selects nothing"
+      ],
+      "verdict": "caught"
+    }
+  ],
+  "note": "The `-t` pattern is deliberately the bare substring `selects nothing` rather than the full title: the title ends `— both checks are one gate`, whose em dash is fine but whose neighbours in this file include parenthesised suffixes, and this repo has twice shipped a pattern whose parentheses were read as capture groups and matched nothing. Verified before writing: this pattern selects exactly one test. It is also the discriminating one — it is the half of the pair that must keep saying DEAD, so it reds under the mutation while the sibling unlistable test reds from the other side."
+}

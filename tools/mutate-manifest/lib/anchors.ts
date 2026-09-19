@@ -1,5 +1,5 @@
 import { countOccurrences } from "../../mutate/lib/mutate.js";
-import { listingCommand, parseVitestCommand, provable } from "./commands.js";
+import { listingCommand, parseVitestCommand, provable, unselectedListing } from "./commands.js";
 import { ManifestError, parseManifest } from "./manifest.js";
 import { testNames } from "./test-names.js";
 import type { ManifestMutation } from "./types.js";
@@ -274,9 +274,45 @@ export async function checkAnchors(
       }
       confirmMs += deps.now() - started;
       confirmed++;
-      if (listed.length === 0) {
-        faults.push({ kind: "dead-pattern", manifest, index, mutation, pattern });
+      if (listed.length !== 0) continue;
+      // Empty. That is two different things wearing the same face: the pattern
+      // selects nothing (a finding — the replay would report "survived" without
+      // running a test), or this file registers nothing HERE (not a finding —
+      // the check could not look). Ask once more without the selector; the cost
+      // is paid only on this path, so a clean run still lists once per pattern.
+      const registeredStarted = deps.now();
+      let registered: readonly string[];
+      try {
+        registered = await deps.listTests(unselectedListing(listing));
+      } catch (error) {
+        confirmMs += deps.now() - registeredStarted;
+        faults.push({
+          kind: "unlistable",
+          manifest,
+          index,
+          mutation,
+          pattern,
+          detail: message(error),
+        });
+        continue;
       }
+      confirmMs += deps.now() - registeredStarted;
+      faults.push(
+        registered.length === 0
+          ? {
+              kind: "unlistable",
+              manifest,
+              index,
+              mutation,
+              pattern,
+              detail:
+                "the file registers no tests in this environment, so the listing cannot say " +
+                "whether the pattern selects one — check the install before the manifest " +
+                "(a `--mode=skip-build` worktree skips postinstall, and tests gated on what " +
+                "postinstall fetches then never register)",
+            }
+          : { kind: "dead-pattern", manifest, index, mutation, pattern },
+      );
     }
   }
 
