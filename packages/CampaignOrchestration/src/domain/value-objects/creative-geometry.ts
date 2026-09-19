@@ -14,7 +14,14 @@
  * `drawLegacy` — its output is byte-pinned by the platform goldens — and every
  * literal there must equal the value below. The timeline draw path and the
  * `prepare`/`fitText` helpers read this object directly.
+ *
+ * CE2 adds the other half of the same job: not a fraction each drawer scales
+ * by, but the one box a whole KIND of layer occupies — see
+ * {@link GROUND_LAYER_KINDS} at the foot of the file. The import is type-only,
+ * so the leaf still has no runtime dependency at all.
  */
+import type { LayerKind } from "./layer-kinds.js";
+
 export const CREATIVE_GEOMETRY = {
   /**
    * Headline type size: a fraction of the canvas WIDTH (`fitText`'s own
@@ -70,3 +77,57 @@ export const CREATIVE_GEOMETRY = {
     scaleAmplitude: 0.12,
   },
 } as const;
+
+/**
+ * A rect in canvas fractions: `Frame` (D130) minus the vertical `anchor`, which
+ * is a placement instruction for copy rather than part of the box. Declared
+ * here so a consumer that only needs "where is this box" does not have to
+ * invent an anchor value to say it; every `Frame` is already one of these.
+ */
+export interface CanvasRect {
+  readonly x: number;
+  readonly y: number;
+  readonly w: number;
+  readonly h: number;
+}
+
+/**
+ * The GROUND kinds (CE2): the layer kinds whose drawer is `paintBackground`.
+ *
+ * Both entries dispatch to that one drawer in the compositor's `LAYER_DRAWERS`
+ * table — `image` for a still's picture, `video` for a clip's — and it paints
+ * through `drawGroundImage`, whose call is
+ * `ctx.drawImage(image, 0, 0, width, height)`. So a ground layer's box is the
+ * canvas itself: {@link FULL_CANVAS_RECT}, exactly, with no fraction left to
+ * get wrong. The ken-burns poses scale ABOUT THE CENTRE between
+ * `1 + KEN_BURNS_ZOOM` and `1` and never below 1, so neither synthesised
+ * ground motion uncovers a corner. A hand-authored `scale` track (K4) can go
+ * below 1, and the rect stays this one anyway: the rect is the layer's DRAW
+ * rect, and a pose transform is not geometry — the same class as the window
+ * `PreviewHitRegions` already names, where a region and the last fetched
+ * raster disagree for one debounce.
+ *
+ * The set lives here rather than in the web, and
+ * `NodeCanvasCompositor.ground-kinds.test.ts` pins it against `LAYER_DRAWERS`
+ * itself: give `video` a drawer of its own, or point a third kind at
+ * `paintBackground`, and that test fails rather than a hit region silently
+ * claiming a canvas it no longer covers. That guard is the whole reason this is
+ * an export and not a two-element array inside a component — the same reason
+ * the fractions above are here, stated by this file's own opening paragraph.
+ *
+ * `shade` is NOT a member, though `paintShade` also fills
+ * `(0, 0, width, height)`: it fills with a gradient that starts at
+ * `rgba(0, 0, 0, 0)` and reaches at most `0.7`, so it owns no pixel anywhere —
+ * it is a veil over the ground rather than something standing in the ground's
+ * place. What that means for hit testing is the web's decision (see
+ * `PreviewHitRegions.tsx`), not this leaf's.
+ */
+export const GROUND_LAYER_KINDS: readonly LayerKind[] = ["image", "video"];
+
+/** Whether a layer kind's drawer paints the whole canvas — see {@link GROUND_LAYER_KINDS}. */
+export function isGroundLayerKind(kind: LayerKind): boolean {
+  return GROUND_LAYER_KINDS.includes(kind);
+}
+
+/** The canvas itself, in the fraction units every frame in this vocabulary speaks. */
+export const FULL_CANVAS_RECT: CanvasRect = { x: 0, y: 0, w: 1, h: 1 };

@@ -588,9 +588,25 @@ const region = () =>
     description: messages.previewRegionDescription("HTML", "Text"),
   });
 
+/**
+ * A whole-layer region over the creative (CE2) — the ground kinds' own way in,
+ * named by the raw layer id exactly as the element region and the row are.
+ */
+const wholeRegion = (id: string, name: string) =>
+  within(rail()).getByRole("button", {
+    name: id,
+    description: messages.previewWholeLayerRegionDescription(name),
+  });
+
 /** Mounts the html fixture and waits for the REAL frame: the regions ride it, never the placeholder. */
 const mountWithFrame = async () => {
   await mountEditor([htmlElementBrief]);
+  await waitFor(() => expect(rail().querySelector("img")).not.toBeNull());
+};
+
+/** Mounts the DEFAULT fixture — canonical `image-text`, the social-post preset — and waits for its frame. */
+const mountDefaultWithFrame = async () => {
+  await mountEditor();
   await waitFor(() => expect(rail().querySelector("img")).not.toBeNull());
 };
 
@@ -718,25 +734,123 @@ describe("the creative and the list are one selection (CE1)", () => {
   });
 
   /**
-   * The exclusion, through the editor: the canonical `image-text` brief the
-   * rest of this file uses declares no frames, so there is nothing over its
-   * creative to click — and the list is still the way to every one of its
-   * layers. A region that appeared here would be a hit box invented for a
-   * layer whose drawn position this side cannot know.
+   * The element exclusion, through the editor: the canonical `image-text`
+   * brief the rest of this file uses carries no `html` layer at all, so there
+   * is no ELEMENT region over its creative. Its ground layer has one — that is
+   * CE2's own block below — and the element vocabulary is untouched by it.
    */
-  test("a template that declares no frames puts no regions over the creative", async () => {
-    const user = userEvent.setup();
-    await mountEditor();
-    await waitFor(() => expect(rail().querySelector("img")).not.toBeNull());
+  test("a template that declares no element frames puts no element region over the creative", async () => {
+    await mountDefaultWithFrame();
 
     expect(
       within(rail()).queryAllByRole("button", {
         description: messages.previewRegionDescription("HTML", "Text"),
       }),
     ).toEqual([]);
+  });
+});
 
-    // And the list still reaches the layers it always did.
+/**
+ * CE2 — the same claim, on the template a new campaign actually gets.
+ *
+ * CE1 built the regions out of an element's DECLARED frame, which is the right
+ * geometry and reaches almost nothing: only an `html` layer may carry elements,
+ * and the social-post preset resolves to canonical `image-text`, which has no
+ * `html` layer. So the feature was inert on every new campaign — an operator
+ * clicked the creative and nothing happened.
+ *
+ * The extension is the one CE1 named: the GROUND kinds (`image`, `video`) are
+ * drawn by `paintBackground` at `(0, 0, width, height)`, so a region over the
+ * whole canvas is that layer's own draw rect rather than a guess. Nothing else
+ * gains one — see `preview-hit-regions.test.tsx` for the exclusions and why.
+ *
+ * These tests run the DEFAULT fixture (`layerBrief`, `templateFromCanonical`
+ * of `DEFAULT_CAMPAIGN_TYPE`) deliberately: the lane's whole premise is that
+ * the campaign nobody configured is the one that has to work.
+ */
+describe("the default template is clickable (CE2)", () => {
+  test("a default campaign has a region over its creative, and clicking it lights the image row", async () => {
+    const user = userEvent.setup();
+    await mountDefaultWithFrame();
+    expect(pick("image", "Image").getAttribute("aria-pressed")).toBe("false");
+
+    await user.click(wholeRegion("image", "Image"));
+
+    expect(pick("image", "Image").getAttribute("aria-pressed")).toBe("true");
+    expect(wholeRegion("image", "Image").getAttribute("aria-pressed")).toBe("true");
+  });
+
+  test("the default creative and its list agree in both directions", async () => {
+    const user = userEvent.setup();
+    await mountDefaultWithFrame();
+
+    await user.click(wholeRegion("image", "Image"));
+    expect(pick("image", "Image").getAttribute("aria-pressed")).toBe("true");
+
+    // The row moves the pick the canvas made — onto a layer with no region of
+    // its own, which must leave the canvas showing nothing picked.
     await user.click(pick("accent", "Accent"));
     expect(pick("accent", "Accent").getAttribute("aria-pressed")).toBe("true");
+    expect(wholeRegion("image", "Image").getAttribute("aria-pressed")).toBe("false");
+
+    // And the canvas moves the pick the row made.
+    await user.click(wholeRegion("image", "Image"));
+    expect(wholeRegion("image", "Image").getAttribute("aria-pressed")).toBe("true");
+    expect(pick("accent", "Accent").getAttribute("aria-pressed")).toBe("false");
+  });
+
+  /** CE1's cost assertion, on the default path: a click is not a document change. */
+  test("selecting the default creative issues zero preview-frame calls", async () => {
+    const user = userEvent.setup();
+    await mountDefaultWithFrame();
+    const before = frameCallCount();
+    // A zero here would make the assertion below vacuous.
+    expect(before).toBeGreaterThan(0);
+
+    await user.click(wholeRegion("image", "Image"));
+    await settle();
+
+    expect(frameCallCount()).toBe(before);
+    expect(rail().querySelector("img")).not.toBeNull();
+    expect(pick("image", "Image").getAttribute("aria-pressed")).toBe("true");
+  });
+
+  /** CE1's keyboard affordance, on the default path: a real button, focused and pressed. */
+  test("a keyboard user reaches the default creative's region and presses it", async () => {
+    const user = userEvent.setup();
+    await mountDefaultWithFrame();
+
+    wholeRegion("image", "Image").focus();
+    expect(document.activeElement).toBe(wholeRegion("image", "Image"));
+    await user.keyboard("{Enter}");
+
+    expect(pick("image", "Image").getAttribute("aria-pressed")).toBe("true");
+  });
+
+  /**
+   * The exclusions, through the editor. The canonical `image-text` template
+   * carries every frameless kind CE2 declined — `shade`, `accent`,
+   * `static-text`, `logo` — and not one of them gains a region; the list stays
+   * their only way in, and is asserted still to work.
+   */
+  test("the frameless kinds stay list-only: no region is invented for shade, accent, text or logo", async () => {
+    const user = userEvent.setup();
+    await mountDefaultWithFrame();
+
+    for (const [id, name] of [
+      ["shade", "Shade"],
+      ["accent", "Accent"],
+      ["static-text", "Static text"],
+      ["logo", "Logo"],
+    ] as const) {
+      expect(
+        within(rail()).queryAllByRole("button", {
+          description: messages.previewWholeLayerRegionDescription(name),
+        }),
+      ).toEqual([]);
+      // The row is still there, and still picks.
+      await user.click(pick(id, name));
+      expect(pick(id, name).getAttribute("aria-pressed")).toBe("true");
+    }
   });
 });

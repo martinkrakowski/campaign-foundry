@@ -1189,6 +1189,17 @@ export function previewRegionDescription(layerName: string, elementName: string)
 }
 
 /**
+ * A hit region that IS a whole layer (CE2): the ground kinds — the picture and
+ * the clip — occupy the entire canvas, so their region has no element to name
+ * and says instead how much of the creative it covers. Same D18 contract as the
+ * row and as the element region above: the accessible name is the raw layer id,
+ * and these are the words beside it.
+ */
+export function previewWholeLayerRegionDescription(layerName: string): string {
+  return `Pick ${layerName} — the whole creative`;
+}
+
+/**
  * The Template step, after CC3 moved the stack into the creative rail: the step
  * says where its controls went rather than going quiet. The stack itself is
  * mounted exactly once (the plan's §4.6), so this is a pointer, never a second
