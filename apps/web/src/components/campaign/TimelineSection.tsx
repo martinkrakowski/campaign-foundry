@@ -1,8 +1,10 @@
 "use client";
 
-import { useId, type Dispatch } from "react";
+import { useId, useMemo, useState, type Dispatch } from "react";
 import { Button, Input, Stepper } from "@/components/ui";
 import { cn } from "@/lib/cn";
+import { TimelineTape, beatUnderFloor } from "@/components/campaign/TimelineTape";
+import { useViewportMinWidth, RAIL_VIEWPORT_MIN_PX } from "@/lib/use-viewport-min-width";
 import * as messages from "@/components/campaign/messages";
 import {
   addBeatBlockedBy,
@@ -49,6 +51,7 @@ export function TimelineSection({
   errors = {},
   warnings = {},
   onChooseScene,
+  sectionPlayhead,
 }: {
   state: EditorState;
   dispatch: Dispatch<EditorAction>;
@@ -57,6 +60,16 @@ export function TimelineSection({
   /** TL2 — open the Asset Bin for one beat. Absent disables the chip: a
    * surface with no picker must not offer a gesture that does nothing. */
   onChooseScene?: (index: number) => void;
+  /**
+   * TS2 — the committed second, published out of `PlayheadHost`. Absent means
+   * no playhead has been published yet (a still draft, or before the rail's
+   * first render), and the tape simply does not appear.
+   */
+  sectionPlayhead?: {
+    durationSec: number;
+    committedSec: number;
+    commit: (sec: number) => void;
+  } | null;
 }) {
   const beats = state.timeline.beats;
   const blocked = addBeatBlockedBy(state);
@@ -72,6 +85,41 @@ export function TimelineSection({
   // would go stale the day `toBrief`'s rule changes and this one does not. An empty
   // sequence is "no timeline" rather than a dropped one, so the count is part of the gate.
   const dropped = beats.length > 0 && !canSerializeTimeline(state);
+
+  const railShown = useViewportMinWidth(RAIL_VIEWPORT_MIN_PX);
+  const [selectedBeatIndex, setSelectedBeatIndex] = useState<number | null>(null);
+  // No `??` fallbacks: the duration rides the published playhead, and
+  // `durations` is non-empty by construction (`timelineDurations` always yields
+  // at least the clip). A fallback here would be an unreachable branch.
+  const tapeDuration = sectionPlayhead?.durationSec ?? 0;
+  const shortestSec = Math.min(...durations);
+  const tapeBeats = useMemo(
+    () =>
+      resolveTimeline(asCopyTimeline(state.timeline), tapeDuration).map((beat) => ({
+        text: beat.text,
+        startT: beat.startT,
+        endT: beat.endT,
+        underFloor: beatUnderFloor((beat.endT - beat.startT) * shortestSec),
+      })),
+    [state.timeline, tapeDuration, shortestSec],
+  );
+  const sectionTape =
+    railShown || sectionPlayhead == null || beats.length === 0 ? null : (
+      <TimelineTape
+        durationSec={tapeDuration}
+        beats={tapeBeats}
+        shortestDurationSec={shortestSec}
+        // Both seconds are the committed one: with no live scrub in this host
+        // the diamond sits where the frame is, which is the whole of option A.
+        scrubSec={sectionPlayhead.committedSec}
+        committedSec={sectionPlayhead.committedSec}
+        selectedBeatIndex={selectedBeatIndex}
+        onScrubLive={sectionPlayhead.commit}
+        onScrubCommit={sectionPlayhead.commit}
+        onSelectBeat={setSelectedBeatIndex}
+        host="section"
+      />
+    );
 
   return (
     <fieldset className="mt-4 space-y-2 border-t border-border pt-3">
@@ -93,6 +141,18 @@ export function TimelineSection({
             : messages.timelineDroppedNoVideo}
         </p>
       ) : null}
+
+      {/* TS2 — D146's section host. The rail owns the tape wherever the rail is
+          shown; below its viewport gate there is no rail, so the sequence the
+          operator is authoring would otherwise have no playhead at all. Exactly
+          one tape is mounted either way, which is the lane's acceptance.
+
+          It follows the COMMITTED second, never the live one: a drag must not
+          re-render the step form (`brief-editor.playhead.test.tsx`), and this
+          panel is inside it. Scrubbing here commits straight away — the gesture
+          is a click on the ruler rather than a drag, which is the owner's
+          option A. */}
+      {sectionTape}
 
       {beats.length > 0 ? (
         <ol className="space-y-2">

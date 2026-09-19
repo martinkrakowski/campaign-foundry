@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "lane": "TS2",
+  "mutations": [
+    {
+      "file": "apps/web/src/components/campaign/BriefEditor.tsx",
+      "before": "            {railProps.motion !== undefined && isRailWideEnough ? (",
+      "after": "            {railProps.motion !== undefined ? (",
+      "because": "The lane's acceptance is EXACTLY ONE tape at either width, and this is the half that is easy to miss. The rail is CSS-hidden below its gate (`hidden lg:flex`), not unmounted, so its tape stays in the DOM; without the JS mirror the section host makes a second one and the operator gets two playhead sliders over one second. This is not hypothetical — the acceptance test failed exactly this way on the first run, before the mirror was added. It is the same `isRailWideEnough` the rail already uses to withhold `brief` from the dock (CC2).",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.timeline-drop.test.tsx",
+        "-t",
+        "narrow: the section hosts it"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/TimelineSection.tsx",
+      "before": "    railShown || sectionPlayhead == null || beats.length === 0 ? null : (",
+      "after": "    sectionPlayhead == null || beats.length === 0 ? null : (",
+      "because": "The other half of the same invariant, from the other side: drop the section's own width gate and BOTH hosts render wherever the rail is shown. The two conditions are deliberately not one — the rail decides whether it draws a tape, the section decides whether it draws one, and each must answer for itself or a future change to either silently produces the pair. The test that reds is the WIDE one, which asserts the single tape is the rail's.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.timeline-drop.test.tsx",
+        "-t",
+        "wide: the rail hosts it"
+      ],
+      "verdict": "caught"
+    }
+  ],
+  "note": "No mutation on the committed-vs-live choice, because there is nothing to mutate: the section host is handed `committedSec` for both seconds, so a live second cannot reach it by construction rather than by a guard. The property that protects — a drag re-rendering the step form zero times — is already pinned by `brief-editor.playhead.test.tsx` and needs no second assertion here."
+}
