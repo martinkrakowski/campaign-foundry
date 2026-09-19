@@ -27,6 +27,7 @@ import { usePreviewFrame } from "@/lib/preview-frame";
  */
 export function PreviewFrame({
   brief,
+  productId,
   layout,
   tone,
   anchor,
@@ -44,6 +45,7 @@ export function PreviewFrame({
   className,
 }: {
   readonly brief?: CampaignBrief;
+  readonly productId?: string;
   readonly layout?: LayoutOption;
   readonly tone?: ToneOption;
   readonly anchor?: AnchorOption;
@@ -83,7 +85,12 @@ export function PreviewFrame({
   // so a leaderboard preview requests the real frame too, not only the social
   // family. The memo keys on the spec's own family value.
   const cell = useMemo<PreviewCellSelection | undefined>(() => {
-    const product = brief?.products[0];
+    const matchedProduct =
+      (productId !== undefined
+        ? brief?.products.find((candidate) => candidate.id === productId)
+        : undefined) ??
+      brief?.products.find((candidate) => candidate.primaryColor === primaryColor);
+    const product = matchedProduct ?? brief?.products?.[0];
     if (
       product === undefined ||
       product.id.length === 0 ||
@@ -101,7 +108,7 @@ export function PreviewFrame({
       ...(anchor !== undefined ? { anchor } : {}),
       ...(hasMotion ? { motion, durationSec, atSec } : {}),
     };
-  }, [brief, layout, tone, anchor, canvas, motion, durationSec, atSec]);
+  }, [brief, productId, primaryColor, layout, tone, anchor, canvas, motion, durationSec, atSec]);
   const { frame } = usePreviewFrame(brief, cell, identityKey);
 
   if (frame !== null) {

@@ -198,6 +198,57 @@ describe("PreviewFrame (D52)", () => {
     expect(body.cell.durationSec).toBe(6);
     expect(body.cell.atSec).toBe(2);
   });
+
+  test("the cell request carries the selected product id matching productId or primaryColor (MP1)", async () => {
+    vi.useFakeTimers();
+    vi.mocked(globalThis.fetch).mockResolvedValue(pngResponse());
+    const twoProdBrief = brief({
+      products: [
+        { id: "alpha", name: "A", primaryColor: "#1473E6", logoPath: "a.png" },
+        { id: "beta", name: "B", primaryColor: "#E61414", logoPath: "b.png" },
+      ],
+    });
+
+    // 1. Matched by explicit productId prop
+    const view1 = render(
+      <PreviewFrame
+        brief={twoProdBrief}
+        productId="beta"
+        layout="headline-bottom"
+        tone="bold"
+        primaryColor="#E61414"
+        className="block h-auto w-full"
+      />,
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(PREVIEW_FRAME_DEBOUNCE_MS);
+    });
+    const body1 = JSON.parse(
+      (vi.mocked(globalThis.fetch).mock.calls[0][1] as RequestInit).body as string,
+    );
+    expect(body1.cell.productId).toBe("beta");
+    view1.unmount();
+    vi.mocked(globalThis.fetch).mockClear();
+
+    // 2. Matched by primaryColor when productId prop is absent
+    const view2 = render(
+      <PreviewFrame
+        brief={twoProdBrief}
+        layout="headline-bottom"
+        tone="bold"
+        primaryColor="#E61414"
+        className="block h-auto w-full"
+      />,
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(PREVIEW_FRAME_DEBOUNCE_MS);
+    });
+    const body2 = JSON.parse(
+      (vi.mocked(globalThis.fetch).mock.calls[0][1] as RequestInit).body as string,
+    );
+    expect(body2.cell.productId).toBe("beta");
+    view2.unmount();
+  });
 });
 
 describe("renaming a fresh draft must not blank the preview frame", () => {

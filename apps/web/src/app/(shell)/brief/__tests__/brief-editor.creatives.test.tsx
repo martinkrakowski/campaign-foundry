@@ -79,6 +79,30 @@ const holeyBrief = {
   },
 };
 
+/**
+ * A variation brief with two products: used to assert that selecting a creative
+ * drawn for the second product previews in the second product's brand colour (MP1).
+ */
+const twoProductBrief = {
+  ...base,
+  id: "two-product",
+  mode: "variation",
+  products: [
+    { id: "alpha", name: "A", primaryColor: "#1473E6", logoPath: "a.png" },
+    { id: "beta", name: "B", primaryColor: "#E61414", logoPath: "b.png" },
+  ],
+  variation: {
+    count: 4,
+    occupancy: { nextIndex: 4, tombstoned: [] },
+    axes: {
+      layout: ["headline-top", "headline-bottom"],
+      tone: ["bold", "subtle"],
+      background: { source: ["procedural"] },
+      paletteShift: [0],
+    },
+  },
+};
+
 /** The same brief with no plan at all: classic mode. */
 const classicBrief = {
   ...base,
@@ -137,6 +161,18 @@ const drawn = (index: number) => ({
  * here exactly as it is absent from the real route's body.
  */
 const EMITTED = [drawn(0), drawn(2)];
+
+const twoProductVariants = [
+  { ...drawn(0), index: 0, productId: "alpha", headline: "AlphaCreative" },
+  { ...drawn(1), index: 1, productId: "beta", headline: "BetaCreative" },
+  {
+    ...drawn(2),
+    index: 2,
+    productId: undefined as unknown as string,
+    headline: "NoProductCreative",
+  },
+  { ...drawn(3), index: 3, productId: "stale-product", headline: "StaleProductCreative" },
+];
 
 /**
  * The emitted slots of whatever brief the request carried — the planner's own
@@ -286,6 +322,10 @@ const rail = () => screen.getByRole("complementary", { name: messages.previewLeg
  * rendered state fed by the selected slot's look.
  */
 const railShows = (text: string) => within(rail()).queryAllByText(text).length;
+const railSwatchColor = () => {
+  const swatch = rail().querySelector<HTMLElement>("span.rounded-full");
+  return swatch?.style.getPropertyValue("--c");
+};
 
 const DirtyProbe = () => {
   const { isDirty } = useEditorDirty();
@@ -422,6 +462,97 @@ describe("(2) clicking a row loads that creative", () => {
     expect(planCalls(calls).length).toBe(plansBefore);
     expect(frameCalls(calls).length).toBe(framesBefore);
     expect(row(2).getAttribute("aria-pressed")).toBe("true");
+  });
+
+  test("selecting a slot whose productId is the second product previews the second product primaryColor", async () => {
+    const user = userEvent.setup();
+    await mount("two-product", {
+      briefs: [twoProductBrief],
+      plan: () => json(okPlan(twoProductVariants)),
+    });
+
+    // Before selection: default preview uses products[0]
+    expect(railSwatchColor()?.toLowerCase()).toBe("#1473e6");
+
+    // Selecting slot 1 (drawn for Product B "beta")
+    await user.click(row(1));
+    await settle();
+
+    // Assert rendered colour, not a prop
+    expect(railSwatchColor()?.toLowerCase()).toBe("#e61414");
+  });
+
+  test("the composed frame agrees with the client preview product", async () => {
+    const user = userEvent.setup();
+    const calls = await mount("two-product", {
+      briefs: [twoProductBrief],
+      plan: () => json(okPlan(twoProductVariants)),
+    });
+
+    await user.click(row(1));
+    await settle();
+
+    // The composed frame request must name the second product ("beta")
+    expect(lastCell(calls).productId).toBe("beta");
+    expect(railSwatchColor()?.toLowerCase()).toBe("#e61414");
+  });
+
+  test("switching between two slots of different products re-fetches", async () => {
+    const user = userEvent.setup();
+    const calls = await mount("two-product", {
+      briefs: [twoProductBrief],
+      plan: () => json(okPlan(twoProductVariants)),
+    });
+
+    const framesBefore = frameCalls(calls).length;
+
+    // Click slot 1 (product "beta")
+    await user.click(row(1));
+    await settle();
+    const framesAfterBeta = frameCalls(calls).length;
+    expect(framesAfterBeta).toBe(framesBefore + 1);
+    expect(lastCell(calls).productId).toBe("beta");
+
+    // Switch to slot 0 (product "alpha")
+    await user.click(row(0));
+    await settle();
+    const framesAfterAlpha = frameCalls(calls).length;
+    expect(framesAfterAlpha).toBe(framesAfterBeta + 1);
+    expect(lastCell(calls).productId).toBe("alpha");
+
+    // Switch back to slot 1 (product "beta")
+    await user.click(row(1));
+    await settle();
+    expect(frameCalls(calls).length).toBe(framesAfterAlpha + 1);
+    expect(lastCell(calls).productId).toBe("beta");
+  });
+
+  test("a slot naming no product falls back to products 0 and renders", async () => {
+    const user = userEvent.setup();
+    const calls = await mount("two-product", {
+      briefs: [twoProductBrief],
+      plan: () => json(okPlan(twoProductVariants)),
+    });
+
+    // First select slot 1 (product "beta")
+    await user.click(row(1));
+    await settle();
+    expect(railSwatchColor()?.toLowerCase()).toBe("#e61414");
+    expect(lastCell(calls).productId).toBe("beta");
+
+    // Click slot 2 (names no product) — must fall back to products[0]
+    await user.click(row(2));
+    await settle();
+    expect(railShows("NoProductCreative")).toBeGreaterThan(0);
+    expect(railSwatchColor()?.toLowerCase()).toBe("#1473e6");
+    expect(lastCell(calls).productId).toBe("alpha");
+
+    // Click slot 3 (names a product the brief does not have) — must fall back to products[0]
+    await user.click(row(3));
+    await settle();
+    expect(railShows("StaleProductCreative")).toBeGreaterThan(0);
+    expect(railSwatchColor()?.toLowerCase()).toBe("#1473e6");
+    expect(lastCell(calls).productId).toBe("alpha");
   });
 });
 

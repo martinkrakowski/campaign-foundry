@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "lane": "MP1",
+  "mutations": [
+    {
+      "file": "apps/web/src/components/campaign/preview-props.ts",
+      "before": "  const matchedProduct =\n    variant?.productId !== undefined\n      ? state.products.find((p) => p.id === variant.productId)\n      : undefined;\n  const product = matchedProduct ?? state.products[0];",
+      "after": "  const product = state.products[0];",
+      "because": "Revert site 1 so that previewLook ignores the selected slot's productId and unconditionally falls back to state.products[0]. In a multi-product variation brief, selecting a slot planned for the second product leaves the preview displaying the first product's primaryColor instead of the second product's brand colour. Caught by asserting that selecting the slot previews the second product's rendered primaryColor.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.creatives.test.tsx",
+        "-t",
+        "selecting a slot whose productId is the second product previews the second product primaryColor"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
