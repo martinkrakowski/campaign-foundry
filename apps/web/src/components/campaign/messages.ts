@@ -1624,3 +1624,30 @@ export function tapeTick(seconds: number): string {
 export const timelineBeatSceneLabel = (n: number) => `Beat ${n} scene`;
 export const timelineBeatSceneClearLabel = (n: number) => `Clear beat ${n} scene`;
 export const timelineBeatSceneNone = "Creative ground";
+
+/**
+ * SG8 — the pre-flight figures, prepended to the Generate confirm's prompt.
+ *
+ * A sentence, not a table, because `ConfirmDialog` takes one `message`: the
+ * dialog is the surface SG-D10 already shipped and this lane adds figures to its
+ * copy rather than building a second one.
+ */
+export const generatePreflight = (f: {
+  creatives: number;
+  layers: number;
+  platforms: readonly string[];
+}): string =>
+  `${f.creatives} ${f.creatives === 1 ? "creative" : "creatives"} · ` +
+  `${f.layers} ${f.layers === 1 ? "layer" : "layers"} · ` +
+  `${f.platforms.length === 0 ? "no platforms selected" : f.platforms.join(", ")}`;
+
+/**
+ * Shown in place of the figures when this surface cannot answer them.
+ *
+ * It names where the number IS rather than only that it is missing. For a
+ * Randomized draft the count is the planner's, and the planner's answer reaches
+ * the Estimate panel and not this dialog — so the honest sentence points at the
+ * panel instead of showing a zero, which would be a claim about the run.
+ */
+export const generatePreflightUnknown =
+  "The deliverables count for a Randomized brief is in the Estimate panel — this confirm does not repeat it.";

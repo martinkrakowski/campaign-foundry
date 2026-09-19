@@ -43,6 +43,10 @@ const forbidden = [
  * join-the-ids regression is invisible to the gate.
  */
 const SAMPLE_ARGS = {
+  // SG8 — an object formatter, so the scanner needs a shape to call it with.
+  // Plural forms are exercised here; the singular branches are pinned by
+  // derive.preflight and the confirm tests.
+  generatePreflight: [{ creatives: 12, layers: 4, platforms: ["Instagram Feed", "LinkedIn"] }],
   // sceneBackgrounds: true so the VE5b2 clause's own string is scanned too — the
   // no-flag case is already covered by every other estimateSentence caller.
   estimateSentence: [
