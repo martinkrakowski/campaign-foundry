@@ -84,6 +84,49 @@ export const CREATIVE_GEOMETRY = {
  * here so a consumer that only needs "where is this box" does not have to
  * invent an anchor value to say it; every `Frame` is already one of these.
  */
+
+/**
+ * The prop → default pairing, named once (SE2).
+ *
+ * Which `CREATIVE_GEOMETRY` constant a given layer kind's prop overrides. It
+ * was written inline at each compositor call site and nowhere else, so the
+ * editor had no way to ask "is this prop already the default?" without
+ * restating the pairing — and a second statement of it is a second geometry,
+ * which is the thing `CREATIVE_GEOMETRY` exists to prevent.
+ *
+ * **Only the MERGED quantities appear here**, and the omissions are deliberate:
+ * `static-text`/`animated-text`'s `anchor` and `shade`'s `alpha` each shadow a
+ * variation axis (the anchor axis, the tone axis), and which of the prop or the
+ * axis wins is an open owner decision (C4's reduced scope). They have no default
+ * to be equal to, so they are never dropped as redundant. `image`'s `alt` is not
+ * a geometry at all.
+ */
+export const LAYER_PROP_DEFAULTS = {
+  accent: {
+    solidHeight: CREATIVE_GEOMETRY.accentSolidHeightFraction,
+    fadeHeight: CREATIVE_GEOMETRY.accentFadeHeightFraction,
+  },
+  logo: {
+    width: CREATIVE_GEOMETRY.logoWidthFraction,
+    margin: CREATIVE_GEOMETRY.logoMarginFraction,
+  },
+  "static-text": { typeFloor: CREATIVE_GEOMETRY.headlineTypeFloorFraction },
+  "animated-text": { typeFloor: CREATIVE_GEOMETRY.headlineTypeFloorFraction },
+} as const satisfies Readonly<Record<string, Readonly<Record<string, number>>>>;
+
+/**
+ * The default this prop overrides, or `undefined` when it overrides none.
+ *
+ * The one question both the compositor's merge and the editor's canonicaliser
+ * ask, so neither spells the pairing itself.
+ */
+export function layerPropDefault(kind: string, field: string): number | undefined {
+  const forKind = (
+    LAYER_PROP_DEFAULTS as Readonly<Record<string, Readonly<Record<string, number>>>>
+  )[kind];
+  return forKind === undefined ? undefined : forKind[field];
+}
+
 export interface CanvasRect {
   readonly x: number;
   readonly y: number;

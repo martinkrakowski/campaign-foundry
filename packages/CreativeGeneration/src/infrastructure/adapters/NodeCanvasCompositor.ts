@@ -40,7 +40,10 @@ import {
   htmlTextFirstLineOffset,
   htmlElementFont,
 } from "@campaignfoundry/CampaignOrchestration";
-import { CREATIVE_GEOMETRY } from "@campaignfoundry/CampaignOrchestration/creative-geometry";
+import {
+  CREATIVE_GEOMETRY,
+  LAYER_PROP_DEFAULTS,
+} from "@campaignfoundry/CampaignOrchestration/creative-geometry";
 import { hexToRgb, wrapText } from "./canvas-util.js";
 import { registerBundledFonts } from "../fonts.js";
 import { resolveAssetPath } from "../safe-path.js";
@@ -532,7 +535,7 @@ export class NodeCanvasCompositor implements CompositorPort {
     // prop over the `CREATIVE_GEOMETRY` default, resolved once because the
     // text-kind budget is one (D124) and `fitText` reads it off `LayoutSource`.
     const headlineTypeFloor = mergeGeometry(
-      CREATIVE_GEOMETRY.headlineTypeFloorFraction,
+      LAYER_PROP_DEFAULTS["static-text"].typeFloor,
       textProps.typeFloor,
     );
 
@@ -552,12 +555,12 @@ export class NodeCanvasCompositor implements CompositorPort {
           ?.props ?? {}) as LogoProps;
         const target =
           scaleBasis(canvas, width, height) *
-          mergeGeometry(CREATIVE_GEOMETRY.logoWidthFraction, logoProps.width);
+          mergeGeometry(LAYER_PROP_DEFAULTS.logo.width, logoProps.width);
         const scale = target / image.width;
         const logoH = image.height * scale;
         const margin =
           widthTermBasis(canvas, width, height) *
-          mergeGeometry(CREATIVE_GEOMETRY.logoMarginFraction, logoProps.margin);
+          mergeGeometry(LAYER_PROP_DEFAULTS.logo.margin, logoProps.margin);
         // Inset offset lives here so every still — and later every motion frame —
         // reuses the same logo geometry (`t` does not move the logo). Same additive
         // form as the pre-inset anchors so a no-op clamp stays bit-identical.
@@ -1324,9 +1327,9 @@ function paintAccent(c: LayerDrawContext): void {
   const [ar, ag, ab] = hexToRgb(prepared.brandColor);
   const accentProps = (layer.props ?? {}) as AccentProps;
   const solidH =
-    height * mergeGeometry(CREATIVE_GEOMETRY.accentSolidHeightFraction, accentProps.solidHeight);
+    height * mergeGeometry(LAYER_PROP_DEFAULTS.accent.solidHeight, accentProps.solidHeight);
   const fadeH =
-    height * mergeGeometry(CREATIVE_GEOMETRY.accentFadeHeightFraction, accentProps.fadeHeight);
+    height * mergeGeometry(LAYER_PROP_DEFAULTS.accent.fadeHeight, accentProps.fadeHeight);
   const wipe = accentWipeFraction(motion, eased);
   ctx.fillStyle = `rgb(${ar}, ${ag}, ${ab})`;
   if (top) {

@@ -4,9 +4,9 @@
   "mutations": [
     {
       "file": "packages/CreativeGeneration/src/infrastructure/adapters/NodeCanvasCompositor.ts",
-      "before": "  const solidH =\n    height * mergeGeometry(CREATIVE_GEOMETRY.accentSolidHeightFraction, accentProps.solidHeight);",
+      "before": "  const solidH =\n    height * mergeGeometry(LAYER_PROP_DEFAULTS.accent.solidHeight, accentProps.solidHeight);",
       "after": "  const solidH =\n    height * CREATIVE_GEOMETRY.accentSolidHeightFraction;",
-      "because": "Revert the accent solid band back to reading the CREATIVE_GEOMETRY constant directly: a template that sets accent.solidHeight to paint a taller band gets the same band it would with no prop at all — R-D3's promise (each drawer reads ONE merged value) broken exactly at the accent layer.",
+      "because": "Revert the accent solid band back to reading the CREATIVE_GEOMETRY constant directly: a template that sets accent.solidHeight to paint a taller band gets the same band it would with no prop at all — R-D3's promise (each drawer reads ONE merged value) broken exactly at the accent layer.\n\nRE-ANCHORED by SE2 (2026-09-19). The pairing this merge reads moved into the domain as `LAYER_PROP_DEFAULTS`, so the editor's canonicaliser and this compositor ask one source which constant a prop overrides — restating it here would have been a second geometry. The VALUES are unchanged (the map is built from the same `CREATIVE_GEOMETRY` constants) and the byte goldens pin that; this mutation still neutralises the override and lets the default win, which is the claim it has always made.",
       "command": [
         "yarn",
         "vitest",
@@ -21,9 +21,9 @@
     },
     {
       "file": "packages/CreativeGeneration/src/infrastructure/adapters/NodeCanvasCompositor.ts",
-      "before": "  const fadeH =\n    height * mergeGeometry(CREATIVE_GEOMETRY.accentFadeHeightFraction, accentProps.fadeHeight);",
+      "before": "  const fadeH =\n    height * mergeGeometry(LAYER_PROP_DEFAULTS.accent.fadeHeight, accentProps.fadeHeight);",
       "after": "  const fadeH =\n    height * CREATIVE_GEOMETRY.accentFadeHeightFraction;",
-      "because": "Revert the accent fade band back to the constant: a template that sets accent.fadeHeight to extend the fade's footprint upward gets the pre-merge footprint instead — the fade prop stops moving any pixel.",
+      "because": "Revert the accent fade band back to the constant: a template that sets accent.fadeHeight to extend the fade's footprint upward gets the pre-merge footprint instead — the fade prop stops moving any pixel.\n\nRE-ANCHORED by SE2 (2026-09-19). The pairing this merge reads moved into the domain as `LAYER_PROP_DEFAULTS`, so the editor's canonicaliser and this compositor ask one source which constant a prop overrides — restating it here would have been a second geometry. The VALUES are unchanged (the map is built from the same `CREATIVE_GEOMETRY` constants) and the byte goldens pin that; this mutation still neutralises the override and lets the default win, which is the claim it has always made.",
       "command": [
         "yarn",
         "vitest",
@@ -38,9 +38,9 @@
     },
     {
       "file": "packages/CreativeGeneration/src/infrastructure/adapters/NodeCanvasCompositor.ts",
-      "before": "          mergeGeometry(CREATIVE_GEOMETRY.logoWidthFraction, logoProps.width);",
+      "before": "          mergeGeometry(LAYER_PROP_DEFAULTS.logo.width, logoProps.width);",
       "after": "          CREATIVE_GEOMETRY.logoWidthFraction;",
-      "because": "Revert the logo's target width back to the constant: a template that sets logo.width to paint a wider logo gets the default span instead — the width prop stops widening the drawn footprint.",
+      "because": "Revert the logo's target width back to the constant: a template that sets logo.width to paint a wider logo gets the default span instead — the width prop stops widening the drawn footprint.\n\nRE-ANCHORED by SE2 (2026-09-19). The pairing this merge reads moved into the domain as `LAYER_PROP_DEFAULTS`, so the editor's canonicaliser and this compositor ask one source which constant a prop overrides — restating it here would have been a second geometry. The VALUES are unchanged (the map is built from the same `CREATIVE_GEOMETRY` constants) and the byte goldens pin that; this mutation still neutralises the override and lets the default win, which is the claim it has always made.",
       "command": [
         "yarn",
         "vitest",
@@ -55,9 +55,9 @@
     },
     {
       "file": "packages/CreativeGeneration/src/infrastructure/adapters/NodeCanvasCompositor.ts",
-      "before": "          mergeGeometry(CREATIVE_GEOMETRY.logoMarginFraction, logoProps.margin);",
+      "before": "          mergeGeometry(LAYER_PROP_DEFAULTS.logo.margin, logoProps.margin);",
       "after": "          CREATIVE_GEOMETRY.logoMarginFraction;",
-      "because": "Revert the logo's edge margin back to the constant: a template that sets logo.margin to pull the corner logo inward keeps the default margin instead — the corner never moves.",
+      "because": "Revert the logo's edge margin back to the constant: a template that sets logo.margin to pull the corner logo inward keeps the default margin instead — the corner never moves.\n\nRE-ANCHORED by SE2 (2026-09-19). The pairing this merge reads moved into the domain as `LAYER_PROP_DEFAULTS`, so the editor's canonicaliser and this compositor ask one source which constant a prop overrides — restating it here would have been a second geometry. The VALUES are unchanged (the map is built from the same `CREATIVE_GEOMETRY` constants) and the byte goldens pin that; this mutation still neutralises the override and lets the default win, which is the claim it has always made.",
       "command": [
         "yarn",
         "vitest",
