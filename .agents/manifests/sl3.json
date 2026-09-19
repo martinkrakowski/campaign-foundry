@@ -91,6 +91,36 @@
         "the editor asks the planner ONCE per draft"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/BriefEditor.tsx",
+      "before": "          <CreativesSection selected={selectedCreative} onSelect={setSelectedCreative} />",
+      "after": "          <CreativesSection\n            selected={selectedCreative}\n            onSelect={(variant) => {\n              setSelectedCreative(variant);\n              setDirty(false);\n            }}\n          />",
+      "because": "Take the OTHER reading of the owner's sentence — \"before loading a new creative on user-click, the current creative should be saved/preserved\" as an instruction to commit the draft on the click. It loses no text, so every field still holds what the operator typed and the whole suite except one assertion stays green; what it does is quietly settle an unsaved draft under a gesture made to look at a picture, and clear the guard that is supposed to ask before the operator navigates away. This mutation is the reason fault 3's test asserts the edit is still UNSAVED and not merely still there: the value alone cannot tell the two readings apart.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.creatives.test.tsx",
+        "-t",
+        "an edit made before the switch is still there after switching away and back, and still unsaved"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/preview-props.ts",
+      "before": "    layout: (variant?.layout as LayoutOption | undefined) ?? layout,\n    tone: (variant?.tone as ToneOption | undefined) ?? tone,",
+      "after": "    layout,\n    tone,",
+      "because": "Let the selected slot move the headline the page draws but not the axes the SERVER composites. It is the half of the override that no DOM assertion can see: the rail's picture is a PNG the compositor returns, so with this in place the caption says the right creative while the frame beside it is still drawn at the head of each axis list — `headline-top`/`bold` for every row. Caught only by reading the `/campaigns/preview-frame` request body, which is why fault 2's test asserts the cell and not just the text.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.creatives.test.tsx",
+        "-t",
+        "the rail composes the clicked slot's own look, not the first value of each axis"
+      ],
+      "verdict": "caught"
     }
   ]
 }

@@ -179,8 +179,20 @@ type Call = { url: string; method: string; body?: Record<string, unknown> };
 
 const planCalls = (calls: readonly Call[]) =>
   calls.filter((c) => c.url.includes("/campaigns/plan"));
-const frameCalls = (calls: readonly { url: string; method: string }[]) =>
+const frameCalls = (calls: readonly Call[]) =>
   calls.filter((c) => c.url.includes("/campaigns/preview-frame"));
+/**
+ * The cell the LAST frame request asked the server to composite
+ * (`fetchPreviewFrame` posts `{ brief, cell }`, `preview-frame.ts:104`).
+ *
+ * The rail's picture is server-rendered, so what it "shows" for the selected
+ * creative is settled by the request that drew it, not by the DOM: the
+ * composed SVG is a placeholder that the returned PNG replaces. Reading the
+ * body is therefore the honest form of the claim for `layout` and `tone`,
+ * which — unlike the headline — reach the compositor rather than the page.
+ */
+const lastCell = (calls: readonly Call[]) =>
+  (frameCalls(calls).at(-1)?.body?.cell ?? {}) as Record<string, unknown>;
 /** Calls that actually WROTE something — a plan and a frame persist nothing. */
 const writes = (calls: readonly { url: string; method: string }[]) =>
   calls.filter(
@@ -280,11 +292,15 @@ describe("(1) the list shows the planned creatives, and a tombstoned slot is not
 describe("(2) clicking a row loads that creative", () => {
   test("the rail composes the clicked slot's own look, not the first value of each axis", async () => {
     const user = userEvent.setup();
-    await mount();
+    const calls = await mount();
 
     // Before any click: no slot is loaded, so the rail draws the BRIEF's own
-    // words and the draft's first-of-each-axis look.
+    // words and the draft's first-of-each-axis look — `headline-top`/`bold`,
+    // the head of each axis list on `holeyBrief`.
     expect(railShows("Hi")).toBeGreaterThan(0);
+    expect(lastCell(calls).layout).toBe("headline-top");
+    expect(lastCell(calls).tone).toBe("bold");
+    const framesBefore = frameCalls(calls).length;
 
     await user.click(row(2));
     await settle();
@@ -293,6 +309,13 @@ describe("(2) clicking a row loads that creative", () => {
     // slot 2's own headline, and the brief's words are gone from it.
     expect(railShows("Twocreative")).toBeGreaterThan(0);
     expect(railShows("Hi")).toBe(0);
+    // And the picture itself moved. The headline is drawn on the page, but
+    // `layout` and `tone` are the SERVER's to composite, so the claim about
+    // them is a claim about the request: exactly one new frame, asking for slot
+    // 2's own axes rather than the head of each axis list.
+    expect(frameCalls(calls).length).toBe(framesBefore + 1);
+    expect(lastCell(calls).layout).toBe("headline-bottom");
+    expect(lastCell(calls).tone).toBe("minimal");
     // And the row says it is the one selected.
     expect(row(2).getAttribute("aria-pressed")).toBe("true");
     expect(row(0).getAttribute("aria-pressed")).toBe("false");
@@ -336,8 +359,16 @@ describe("(3) nothing is lost by switching", () => {
    * save. The draft is the same object before and after the click. This test is
    * what makes that claim checkable — if selection ever became a document
    * change, or ever reloaded the draft from anywhere, the edit would be gone.
+   *
+   * **And it discriminates against the OTHER reading of the owner's sentence**
+   * — an implicit Save on click. That reading loses no text, so the field's
+   * value alone cannot tell the two apart; what tells them apart is that the
+   * unsaved edit is still UNSAVED afterwards. A click that quietly committed
+   * the draft would leave the operator's work on disk under a gesture they made
+   * to look at a picture, and would clear the guard that is supposed to ask
+   * before they navigate away.
    */
-  test("an edit made before the switch is still there after switching away and back", async () => {
+  test("an edit made before the switch is still there after switching away and back, and still unsaved", async () => {
     const user = userEvent.setup();
     await mount();
 
@@ -345,6 +376,7 @@ describe("(3) nothing is lost by switching", () => {
     await user.clear(audience);
     await user.type(audience, "cyclists");
     expect(audience.value).toBe("cyclists");
+    expect(screen.getByTestId("dirty-probe").textContent).toBe("dirty");
 
     await user.click(row(2));
     await settle();
@@ -352,6 +384,9 @@ describe("(3) nothing is lost by switching", () => {
     await settle();
 
     expect((screen.getByLabelText("Target Audience") as HTMLInputElement).value).toBe("cyclists");
+    // Still unsaved — the switch preserved the work by not touching it, which
+    // is a different thing from having saved it for the operator.
+    expect(screen.getByTestId("dirty-probe").textContent).toBe("dirty");
     // The positive half: the switch really happened, so the survival above is
     // not the survival of a click that did nothing.
     expect(row(0).getAttribute("aria-pressed")).toBe("true");
