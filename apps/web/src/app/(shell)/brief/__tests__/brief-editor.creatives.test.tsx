@@ -9,6 +9,7 @@ import { templateFromCanonical } from "@campaignfoundry/CampaignOrchestration/br
 import { DEFAULT_CAMPAIGN_TYPE } from "@campaignfoundry/CampaignOrchestration/campaign-types";
 import * as messages from "@/components/campaign/messages";
 import { BriefEditor } from "@/components/campaign/BriefEditor";
+import type { LayoutOption, ToneOption } from "@/components/campaign/CreativePreview";
 
 /**
  * **SL3 — the creatives list in the left sidebar, through the editor that ships.**
@@ -71,7 +72,7 @@ const holeyBrief = {
     occupancy: { nextIndex: 3, tombstoned: [1] },
     axes: {
       layout: ["headline-top", "headline-bottom"],
-      tone: ["bold", "minimal"],
+      tone: ["bold", "subtle"],
       background: { source: ["procedural"] },
       paletteShift: [0],
     },
@@ -98,14 +99,29 @@ delete denseBrief.variation.occupancy;
  * One slot's draw. Adjacent slots are given DIFFERENT layouts, tones and
  * headlines on purpose: property 2 asserts the rail's rendered content, so the
  * slots have to be distinguishable by something the preview actually draws.
+ *
+ * `satisfies` against the EDITOR's vocabulary, not the wire type: `PlanVariant`
+ * types `tone` as `string` because the route body may carry anything, and
+ * `okPlan` widens to `readonly unknown[]` so a test can post a malformed plan on
+ * purpose. Between the two there was nothing left to reject a tone the product
+ * cannot draw — `tone: "minimal"` sat here, and `CreativeGlyph` resolves it as
+ * `HEAVY["minimal"]`, i.e. `undefined`, which renders as the light variant. The
+ * comment above said the tones differ; they did, but by an undefined lookup
+ * rather than by the second tone. This annotation is what makes that sentence
+ * true, and it is the guard: put "minimal" back and `yarn typecheck` fails.
  */
 const DRAWS = [
   { aspectRatio: "1:1", layout: "headline-top", tone: "bold", headline: "Zerocreative" },
   { aspectRatio: "1:1", layout: "headline-top", tone: "bold", headline: "Onecreative" },
-  { aspectRatio: "9:16", layout: "headline-bottom", tone: "minimal", headline: "Twocreative" },
+  { aspectRatio: "9:16", layout: "headline-bottom", tone: "subtle", headline: "Twocreative" },
   { aspectRatio: "1:1", layout: "headline-top", tone: "bold", headline: "Threecreative" },
-  { aspectRatio: "9:16", layout: "headline-bottom", tone: "minimal", headline: "Fourcreative" },
-];
+  { aspectRatio: "9:16", layout: "headline-bottom", tone: "subtle", headline: "Fourcreative" },
+] satisfies readonly {
+  readonly aspectRatio: string;
+  readonly layout: LayoutOption;
+  readonly tone: ToneOption;
+  readonly headline: string;
+}[];
 const drawn = (index: number) => ({
   index,
   productId: "alpha",
@@ -373,7 +389,7 @@ describe("(2) clicking a row loads that creative", () => {
     // 2's own axes rather than the head of each axis list.
     expect(frameCalls(calls).length).toBe(framesBefore + 1);
     expect(lastCell(calls).layout).toBe("headline-bottom");
-    expect(lastCell(calls).tone).toBe("minimal");
+    expect(lastCell(calls).tone).toBe("subtle");
     // And the row says it is the one selected.
     expect(row(2).getAttribute("aria-pressed")).toBe("true");
     expect(row(0).getAttribute("aria-pressed")).toBe("false");
