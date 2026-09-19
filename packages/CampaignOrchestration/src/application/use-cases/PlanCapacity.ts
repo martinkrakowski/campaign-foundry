@@ -131,10 +131,18 @@ export function conflicts(a: Axes, b: Axes, minDistance: number): boolean {
  *
  * So the divisor erred **low** — it was never an upper bound for a brief with a
  * motion axis, and `shortfallMessage` quoted it to the operator as one, naming a
- * ceiling well under what the same brief plans. Counting lines errs in neither
- * direction: it is an upper bound by the argument above, and it returns exactly
- * the old number wherever the old number was one — a static brief, and a motion
- * brief whose block is a single slot, both of which have only full lines.
+ * ceiling well under what the same brief plans.
+ *
+ * Counting lines cannot err that way: it is an upper bound by the argument above.
+ * It stays **loose high**, which is what a line bound has always been — 56 on the
+ * mixed brief whose greedy reaches 52, much as the static brief this suite
+ * already trusts reports 72 against a greedy 55. That is why `capacityAt` marks
+ * it `exact: false` and `shortfallMessage` says "no more than" rather than "at
+ * most". Tightening it further is a different algorithm, not a different formula.
+ * What changes here is only that the number is now a ceiling rather than a floor
+ * wearing a ceiling's sentence — and it returns exactly the old number wherever
+ * the old number was one: a static brief, and a motion brief whose block is a
+ * single slot, both of which have only full lines.
  *
  * `policy` is no longer a parameter on purpose. Every axis size the divisor read
  * off it is a restatement of what `enumerateAxes` already laid down, and the two
