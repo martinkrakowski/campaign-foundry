@@ -145,15 +145,19 @@ describe("axisProductSize", () => {
     );
   });
 
-  test("a mixed brief keeps every ratio and adds the still slot", () => {
+  test("a mixed brief carries motion only at the ratios its platforms package it for", () => {
     const mixed = valid({
       formats: ["static", "motion"],
       platforms: ["instagram-feed", "instagram-reel"],
       motion: ["ken-burns-in", "ken-burns-out"],
       duration: [4, 6],
     });
-    // 2 kinds × 2 durations + 1 still = 5 on the motion axis, and all three ratios
-    expect(axisProductSize(mixed)).toBe(2 * 3 * 2 * 2 * 1 * 3 * 5);
+    // Three ratios are kept, but only instagram-reel's 9:16 packages motion:
+    // 9:16 carries 2 kinds × 2 durations + 1 still = 5, while 1:1 and 16:9 carry
+    // one still each — 5 + 1 + 1 = 7 slots per base combination, not 3 × 5 = 15.
+    // Multiplying the motion factor across every ratio claimed a ceiling the
+    // planner's enumerator never produces, and `count` is clamped to it.
+    expect(axisProductSize(mixed)).toBe(2 * 7 * 2 * 2 * 1 * 3);
   });
 
   test("unknown platform ids and a motion format with no kinds do not collapse it to zero", () => {
@@ -165,6 +169,22 @@ describe("axisProductSize", () => {
     expect(axisProductSize(unknown)).toBeGreaterThan(0);
     const noKinds = valid({ formats: ["motion"], platforms: ["instagram-reel"], motion: [] });
     expect(axisProductSize(noKinds)).toBeGreaterThan(0);
+  });
+
+  test("with no drawable ratio the floor is one notional ratio, motion factor and all", () => {
+    // A motion-only draft whose platforms package nothing: the domain refuses this
+    // brief outright, so there is no ceiling to mirror — but the slider still needs
+    // a bound, and `withCountClamp` fires on the toggle that empties the selection
+    // and never reverses. Pinned with a motion factor above 1, where dropping the
+    // floor to a bare 1 would be visible: 2 kinds × 2 durations = 4, × 24 axes.
+    const stranded = valid({
+      formats: ["motion"],
+      platforms: ["myspace"],
+      motion: ["ken-burns-in", "ken-burns-out"],
+      duration: [4, 6],
+    });
+    expect(drawableRatios(stranded)).toEqual([]);
+    expect(axisProductSize(stranded)).toBe(2 * 4 * 2 * 2 * 1 * 3);
   });
 
   test("the headline axis multiplies by the approved pool", () => {

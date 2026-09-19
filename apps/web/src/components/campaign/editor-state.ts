@@ -724,9 +724,32 @@ export function drawableRatios(state: EditorState): string[] {
 export function axisProductSize(state: EditorState): number {
   const motionEnabled = state.formats.includes("motion") && state.motion.length > 0;
   const mixStatic = motionEnabled && state.formats.includes("static");
+  const packaged = motionPackagedRatios(state);
+  // The domain's `ratioSlots`, term for term: motion is drawn only at the ratios
+  // the requested platforms package it for, so a ratio outside that set carries
+  // one still and nothing else. Multiplying one motion factor across every ratio
+  // over-counted a mixed brief's ceiling, and since this bounds the count
+  // slider, the slider's own maximum was a count the planner then refused.
+  const motionSlots = motionEnabled
+    ? state.motion.length * Math.max(1, state.duration.length) + (mixStatic ? 1 : 0)
+    : 1;
+  const drawable = drawableRatios(state);
+  // No drawable ratio is not a plan — the domain refuses the brief outright — but
+  // the slider still needs a bound, and this floor has always been "one notional
+  // ratio" carrying the motion factor. Kept exactly as it was: the count clamp
+  // (`withCountClamp`) fires on the toggle that empties the selection and does not
+  // reverse when the ratio comes back, so lowering this floor would silently eat a
+  // count the user had already authored.
+  const ratioSlots =
+    drawable.length === 0
+      ? motionSlots
+      : drawable.reduce(
+          (total, ratio) => total + (motionEnabled && packaged.has(ratio) ? motionSlots : 1),
+          0,
+        );
   return (
     Math.max(1, state.products.filter((product) => product.id.length > 0).length) *
-    Math.max(1, drawableRatios(state).length) *
+    ratioSlots *
     Math.max(1, state.variation.layout.length) *
     Math.max(1, state.variation.tone.length) *
     Math.max(1, state.variation.background.length) *
@@ -734,10 +757,7 @@ export function axisProductSize(state: EditorState): number {
     Math.max(1, state.variation.headline ? approvedHeadlines(state.pool) : 1) *
     // The anchor axis (T4) multiplies only when the saved brief will carry it:
     // the absent axis derives top/bottom from `layout`, adding no combination.
-    (anchorAxisActive(state) ? Math.max(1, state.variation.anchor.length) : 1) *
-    (motionEnabled
-      ? state.motion.length * Math.max(1, state.duration.length) + (mixStatic ? 1 : 0)
-      : 1)
+    (anchorAxisActive(state) ? Math.max(1, state.variation.anchor.length) : 1)
   );
 }
 

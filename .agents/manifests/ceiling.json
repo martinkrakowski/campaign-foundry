@@ -1,0 +1,96 @@
+{
+  "version": 1,
+  "lane": "ceiling",
+  "mutations": [
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/VariationPolicy.vo.ts",
+      "before": "    const ratioSlots = ratios.reduce(\n      (total, ratio) =>\n        total +\n        (motionEnabled && motionRatios.includes(ratio)\n          ? motion.length * duration.length + (mixStatic ? 1 : 0)\n          : 1),\n      0,\n    );",
+      "after": "    const ratioSlots =\n      ratios.length * (motionEnabled ? motion.length * duration.length + (mixStatic ? 1 : 0) : 1);",
+      "because": "The defect itself, restored: one motion factor multiplied across EVERY requested ratio rather than summed per ratio. `enumerateAxes` draws motion only where `motionRatios` says the requested platforms package it, so this claims slots that do not exist — on the reported brief it reports 48 against a space of 32, which is exactly what SG-D7 measured from the outside. It is invisible to arithmetic-only assertions that were written against the same wrong formula, so the test counts the space instead: it enumerates the policy and compares the ceiling against `space.length`. Reverting the arithmetic cannot be absorbed by a stale literal because nothing on the expected side is hand-written.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "packages/CampaignOrchestration/src/application/use-cases/__tests__/mixed-format-ceiling.test.ts",
+        "-t",
+        "ceiling equals the counted space"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/VariationPolicy.vo.ts",
+      "before": "    const ratioSlots = ratios.reduce(\n      (total, ratio) =>\n        total +\n        (motionEnabled && motionRatios.includes(ratio)\n          ? motion.length * duration.length + (mixStatic ? 1 : 0)\n          : 1),\n      0,\n    );",
+      "after": "    const ratioSlots =\n      ratios.length * (motionEnabled ? motion.length * duration.length + (mixStatic ? 1 : 0) : 1);",
+      "because": "The same revert, measured against the property rather than the number: `count` is clamped to this ceiling and 'give me every combination' is count-at-maximum, so the ceiling is only worth anything while that count actually plans. The test asserts the PLAN before it asserts the ceiling's value, deliberately — a wrong ceiling has to break `plan()` rather than be caught by a literal further down. Over-counted, the planner refuses the count outright (`expected false to be true`), which is the user-visible bug: the count slider's own maximum is unplannable.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "packages/CampaignOrchestration/src/application/use-cases/__tests__/mixed-format-ceiling.test.ts",
+        "-t",
+        "plans at count = axisProductSize and draws the space exactly once"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/editor-state.ts",
+      "before": "          (total, ratio) => total + (motionEnabled && packaged.has(ratio) ? motionSlots : 1),",
+      "after": "          (total, ratio) => total + (void ratio, motionSlots),",
+      "because": "Reverts the EDITOR's half alone, leaving the domain correct — the drift that actually recurs here, since the two sites are two implementations of one quantity and the editor's copy is what bounds the count slider. Nothing in the domain's own suite can see this. The parity test drives both from a single `EditorState`: the domain is handed the brief `toBrief` writes with the `motionRatios` the API's `motionRatiosFor` derives from that brief's platforms, so the two are compared by construction rather than against literals updated together. All three mixed shapes go red (144 vs 96, 360 vs 168, 144 vs 96) while static-only and motion-only stay green — which is also the evidence that those two were already right.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "apps/web/src/components/campaign/__tests__/ceiling-parity.test.ts",
+        "-t",
+        "the two ceilings agree"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/VariationPolicy.vo.ts",
+      "before": "        (motionEnabled && motionRatios.includes(ratio)",
+      "after": "        (motionEnabled && mixStatic && motionRatios.includes(ratio)",
+      "because": "The fix must not move a ceiling that was already right, and a motion-only brief's was: its `ratios` are narrowed to `motionRatios` upstream, so every term of the sum is already the motion factor. This mutation restricts the motion factor to mixed plans, which leaves the mixed case correct and silently collapses motion-only to one slot per ratio — 8 against a space of 32. It is the surgical opposite of the first mutation: the mixed assertions stay GREEN under it, so only the motion-only pin can catch it. A single motion kind at a single duration would not have caught it either (the factor is 1 there), which is why the pinned case carries two kinds and two durations.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "packages/CampaignOrchestration/src/application/use-cases/__tests__/mixed-format-ceiling.test.ts",
+        "-t",
+        "a motion-only brief with several kinds and durations is unchanged"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/VariationPolicy.vo.ts",
+      "before": "          ? motion.length * duration.length + (mixStatic ? 1 : 0)\n          : 1),",
+      "after": "          ? motion.length * duration.length + (mixStatic ? 1 : 0)\n          : 2),",
+      "because": "The other half of 'already-right ceilings do not move': a static brief takes the still branch at every ratio, so the still term is the whole of its ceiling. Counting a still ratio twice doubles a static-only brief from 24 to 48 — a brief with no motion axis at all, whose ceiling this change had no business touching. The static-only case is compared against its enumerated space and against the pre-motion golden 24, so neither a formula change nor a drift in the enumerator can move it unnoticed.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "packages/CampaignOrchestration/src/application/use-cases/__tests__/mixed-format-ceiling.test.ts",
+        "-t",
+        "a static-only brief"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/editor-state.ts",
+      "before": "    drawable.length === 0\n      ? motionSlots",
+      "after": "    drawable.length === 0\n      ? 1",
+      "because": "The per-ratio sum replaced `Math.max(1, drawableRatios.length)`, and a sum over no ratios is 0 — so the floor an empty ratio selection has always had (one notional ratio carrying the motion factor) is the one thing this refactor could drop silently. Nothing plans in that state, since the domain refuses a motion-only brief whose platforms package no ratio, so no ceiling there is 'right' and no domain test can see it. What makes it matter is the clamp: `withCountClamp` fires on the toggle that empties the selection and does NOT reverse when the ratio comes back, so a lower floor permanently eats a count the user had already authored. Pinned with two kinds and two durations, where the motion factor is 4 rather than 1 — the single-kind case the neighbouring test already covers would have stayed green at 24 either way.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "apps/web/src/components/campaign/__tests__/validate.test.ts",
+        "-t",
+        "the floor is one notional ratio"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
