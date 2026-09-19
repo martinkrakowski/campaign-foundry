@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "lane": "linebound",
+  "mutations": [
+    {
+      "file": "packages/CampaignOrchestration/src/application/use-cases/PlanCapacity.ts",
+      "before": "  const coordinates = space.map((point) =>\n    DISTANCE_AXES.map((axis) => JSON.stringify((point as Variant)[axis] ?? null)),\n  );\n  return Math.min(\n    ...DISTANCE_AXES.map((_axis, index) => {\n      const lines = new Set<string>();\n      for (const point of coordinates) {\n        // Blanking one coordinate collapses a line to a single key: the number of\n        // distinct keys IS the number of lines along that axis.\n        lines.add(point.map((value, other) => (other === index ? \"*\" : value)).join(\" \"));\n      }\n      return lines.size;\n    }),\n  );",
+      "after": "  const values = (axis: string): ReadonlySet<string> =>\n    new Set(space.map((point) => JSON.stringify((point as Variant)[axis] ?? null)));\n  const mixStatic = values(\"motion\").has(\"null\") && values(\"motion\").size > 1;\n  const kinds = values(\"motion\").size - (values(\"motion\").has(\"null\") ? 1 : 0);\n  const durations = values(\"durationSec\").size - (values(\"durationSec\").has(\"null\") ? 1 : 0);\n  const block = kinds === 0 ? 1 : kinds * durations + (mixStatic ? 1 : 0);\n  const largestAxis = Math.max(\n    ...DISTANCE_AXES.filter((axis) => axis !== \"motion\" && axis !== \"durationSec\").map(\n      (axis) => values(axis).size,\n    ),\n    block,\n  );\n  return Math.floor(space.length / largestAxis);",
+      "because": "The defect itself, restored — the divisor this lane replaced, stated off the space rather than off the policy so it fits the new signature, and reproducing the old number exactly on every shape the suite touches (33 / 11 / 10 / 8 / 72 / 8). It folds |motion| x |duration| + mixStatic into one pseudo-axis, which is not a Hamming line: two clips sharing neither kind nor duration differ in TWO axes, and so do a still and a clip. So it claims a ceiling BELOW what the space holds, and `shortfallMessage` quotes that ceiling to the operator as a maximum. The test does not compare arithmetic against arithmetic: it asks the planner. On the reported mixed brief it seats 40 variants pairwise at Hamming 2 while the restored divisor reports 33, so the assertion that the quoted ceiling covers the plan is what goes red. That is the whole of #499's third site, made visible from the outside.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "packages/CampaignOrchestration/src/application/use-cases/__tests__/mixed-line-bound.test.ts",
+        "-t",
+        "the refusal that should not happen"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/application/use-cases/PlanCapacity.ts",
+      "before": "  return Math.min(\n    ...DISTANCE_AXES.map((_axis, index) => {",
+      "after": "  return Math.max(\n    ...DISTANCE_AXES.map((_axis, index) => {",
+      "because": "The opposite error to the one this lane fixed, and the one a fix in this direction is most likely to introduce: raising the bound until it stops bounding. Each axis contributes a line count that is a valid ceiling on its own, so the SMALLEST is the bound; taking the largest picks whichever axis never varies, whose lines are single points, and returns the whole space. The bound then admits every request, including the impossible one — and the refusal an operator needs is the one this test pins: the whole 168-point space demanded at minDistance 2, which cannot be seated because every point has a neighbour one axis away. Under the mutation the shortfall offers `lower count to 168` for a count of 168, so the ceiling it names is no longer below the request and the assertion goes red. A fix that only ever moved numbers upward would pass every other test in this file.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "packages/CampaignOrchestration/src/application/use-cases/__tests__/mixed-line-bound.test.ts",
+        "-t",
+        "the refusal that must still happen"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/application/use-cases/PlanCapacity.ts",
+      "before": "      return lines.size;\n    }),\n  );\n}",
+      "after": "      return lines.size;\n    }),\n  ) - 1;\n}",
+      "because": "A number that was already right must not move, and this is the smallest way to move one. It is chosen because it slips past the refusal tests: at 55 rather than 56 the mixed brief's plan of 40 is still covered and the impossible count of 168 is still refused below, so both of them stay green. Observed, running the whole file rather than reasoning about it: 4 failed, 4 passed — the unchanged pins (72 and 8), the motion-only shape that moved (15 against an exact 16), and the soundness oracle on that same shape. Those pins compare against a local copy of the old divisor rather than a literal, so they assert the property — a static brief and the single-slot motion fixture the suite has been pinned on since SL-D6 come out at exactly the number they came out at before this lane, 72 and 8. Without them a fix is free to shift every bound by a constant and keep every soundness assertion satisfied.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "packages/CampaignOrchestration/src/application/use-cases/__tests__/mixed-line-bound.test.ts",
+        "-t",
+        "a static brief is unmoved"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/application/use-cases/PlanCapacity.ts",
+      "before": "                  if (!canMotion || policy.mixStatic) out.push(base);",
+      "after": "                  if (!canMotion) out.push(base);",
+      "because": "The bound has to be read off what `enumerateAxes` actually produces, not off a second description of it — that second description is exactly what drifted at #499's two sites. This drops the still slot a mixed plan carries at its packaged ratio, so the enumerator stops producing the space the ceiling arithmetic describes: 144 points against an `axisProductSize` of 168. Every shape in this test asserts `space.length === policy.axisProductSize` before it asserts anything about capacity, which is the one thing the three sites can agree on by construction, so the three mixed and motion shapes go red on the space itself rather than on a ceiling. A suite that compared the bound against a hand-written number would not notice the enumerator had moved underneath it.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "packages/CampaignOrchestration/src/application/use-cases/__tests__/mixed-line-bound.test.ts",
+        "-t",
+        "it covers the exact maximum"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

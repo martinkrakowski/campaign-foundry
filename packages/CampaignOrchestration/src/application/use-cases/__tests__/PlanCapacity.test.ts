@@ -129,12 +129,27 @@ describe("conflicts / lineBound", () => {
     expect(conflicts(a, b, 0)).toBe(false);
   });
 
-  test("the line bound divides the space by its largest axis", () => {
+  test("the line bound counts the lines along the axis with fewest of them", () => {
     const policy = tight(8, 2);
-    expect(lineBound(enumerateAxes(policy), policy)).toBe(8); // 24 / 3 palettes
+    // Every line is full in this space, so counting lines and dividing by the
+    // largest axis agree: 24 points, 3 palette shifts, 8 palette lines.
+    expect(lineBound(enumerateAxes(policy))).toBe(8);
   });
 
-  test("in a mixed plan the still slot counts as one more value on the motion axis", () => {
+  /**
+   * Corrected, as #499 corrected `validate.test.ts`: this test pinned the defect.
+   *
+   * It asserted `floor(space.length / 5)` — the old divisor, which folded
+   * `2 kinds × 2 durations + 1 still` into a single five-valued "motion axis".
+   * Those five slots are not a line. A still and a clip differ in `motion` AND
+   * `durationSec`; so do two clips sharing neither kind nor duration. At
+   * `minDistance 2` several of them can be chosen, so dividing by five claimed a
+   * ceiling *below* what the space holds — 11 against an exact maximum of 24.
+   *
+   * Nothing here is a hand-written ceiling: the expectation is the exact maximum
+   * `capacityAt` computes by branch and bound over the enumerated space.
+   */
+  test("a mixed plan holds more than the old motion-block divisor allowed", () => {
     const mixed = policyOf(
       {
         variation: {
@@ -147,8 +162,16 @@ describe("conflicts / lineBound", () => {
       { motionRatios: ["9:16"] },
     );
     const space = enumerateAxes(mixed);
-    // motion axis = 2 kinds × 2 durations + 1 still = 5, the largest axis here
-    expect(lineBound(space, mixed)).toBe(Math.floor(space.length / 5));
+    const divisorForm = Math.floor(space.length / 5);
+    // The production step budget exhausts on this 56-point space and falls back to
+    // the bound, which would compare the bound against itself; five million closes
+    // the branch and bound in about 136ms.
+    const exact = capacityAt(space, mixed, 5_000_000);
+    expect(exact.exact).toBe(true);
+    // The old form was not a bound at all: it sat under the true maximum.
+    expect(divisorForm).toBeLessThan(exact.max);
+    // The new one is a bound, and covers the exact maximum.
+    expect(lineBound(space)).toBeGreaterThanOrEqual(exact.max);
   });
 });
 
@@ -186,7 +209,7 @@ describe("capacityAt", () => {
     });
     const space = enumerateAxes(policy);
     expect(space.length).toBeGreaterThan(EXACT_CAPACITY_MAX_SPACE);
-    expect(capacityAt(space, policy)).toEqual({ max: lineBound(space, policy), exact: false });
+    expect(capacityAt(space, policy)).toEqual({ max: lineBound(space), exact: false });
   });
 
   test("an exhausted search falls back to the bound", () => {

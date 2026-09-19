@@ -102,22 +102,70 @@ export function conflicts(a: Axes, b: Axes, minDistance: number): boolean {
   return distance < Math.max(1, minDistance);
 }
 
-/** No two points differing in a single axis can both be chosen, so at most N / (largest axis). */
-export function lineBound(space: readonly Axes[], policy: VariationPolicy): number {
-  const largestAxis = Math.max(
-    policy.productIds.length,
-    policy.ratios.length,
-    policy.layout.length,
-    policy.tone.length,
-    policy.backgroundSource.length,
-    policy.paletteShift.length,
-    Math.max(1, policy.headline.length),
-    Math.max(1, policy.anchor.length),
-    policy.motionEnabled
-      ? policy.motion.length * policy.duration.length + (policy.mixStatic ? 1 : 0)
-      : 1,
+/**
+ * A true upper bound on what the space can hold: the number of **lines** along
+ * whichever axis has the fewest of them.
+ *
+ * A *line* is a set of points agreeing on every axis but one. Any two of its
+ * members are Hamming 1 apart, so `conflicts` refuses the pair at every
+ * `minDistance >= 2` — at most one point per line, therefore at most (number of
+ * lines) points altogether. That argument runs for each axis independently, so
+ * the smallest line count over `DISTANCE_AXES` is the bound.
+ *
+ * The lines are COUNTED from the enumerated space rather than divided out of it,
+ * and that is the whole of the fix. `space.length / (largest axis)` is the same
+ * number only when every line is FULL, and no brief carrying motion guarantees
+ * that — the old divisor folded `|motion| × |duration| + mixStatic` into one
+ * pseudo-axis, and a motion block is not a line:
+ *
+ * - `motion` and `durationSec` are two axes. `(kind1, 4s)` and `(kind2, 6s)`
+ *   differ in **two**, so both may be chosen at `minDistance 2`. Measured on a
+ *   motion-only brief with two kinds and two durations: bounded at 8 where the
+ *   exact maximum is 16.
+ * - a still and a clip on the same base also differ in two (`motion` and
+ *   `durationSec` are both absent on a still), so `mixStatic` broke it even at
+ *   one kind and one duration — bounded at 10 where the exact maximum is 12.
+ * - and `motionRatios` makes a mixed plan's blocks unequal across ratios
+ *   (#499's third site), where the over-division got worst: a three-ratio brief
+ *   packaging motion at one was bounded at 33 while the planner seats 52.
+ *
+ * So the divisor erred **low** — it was never an upper bound for a brief with a
+ * motion axis, and `shortfallMessage` quoted it to the operator as one, naming a
+ * ceiling well under what the same brief plans.
+ *
+ * Counting lines cannot err that way: it is an upper bound by the argument above.
+ * It stays **loose high**, which is what a line bound has always been — 56 on the
+ * mixed brief whose greedy reaches 52, much as the static brief this suite
+ * already trusts reports 72 against a greedy 55. That is why `capacityAt` marks
+ * it `exact: false` and `shortfallMessage` says "no more than" rather than "at
+ * most". Tightening it further is a different algorithm, not a different formula.
+ * What changes here is only that the number is now a ceiling rather than a floor
+ * wearing a ceiling's sentence — and it returns exactly the old number wherever
+ * the old number was one: a static brief, and a motion brief whose block is a
+ * single slot, both of which have only full lines.
+ *
+ * `policy` is no longer a parameter on purpose. Every axis size the divisor read
+ * off it is a restatement of what `enumerateAxes` already laid down, and the two
+ * restatements are what drifted; the space is the only input left.
+ */
+export function lineBound(space: readonly Axes[]): number {
+  // `?? null` so an absent axis (a still's `motion`) is one value rather than the
+  // `undefined` `JSON.stringify` drops, and quoting keeps it distinct from the
+  // literal string "null".
+  const coordinates = space.map((point) =>
+    DISTANCE_AXES.map((axis) => JSON.stringify((point as Variant)[axis] ?? null)),
   );
-  return Math.floor(space.length / largestAxis);
+  return Math.min(
+    ...DISTANCE_AXES.map((_axis, index) => {
+      const lines = new Set<string>();
+      for (const point of coordinates) {
+        // Blanking one coordinate collapses a line to a single key: the number of
+        // distinct keys IS the number of lines along that axis.
+        lines.add(point.map((value, other) => (other === index ? "*" : value)).join(" "));
+      }
+      return lines.size;
+    }),
+  );
 }
 
 /**
@@ -160,6 +208,10 @@ export function maximumIndependentSet(
 /**
  * The most variants this space can hold pairwise at least `minDistance` apart:
  * exact for small spaces, otherwise the line bound (a true upper bound either way).
+ *
+ * "Either way" is a claim `lineBound` only now earns: while it divided by a motion
+ * pseudo-axis it returned numbers *below* the exact maximum this same function
+ * computes one branch up, so the bounded branch contradicted the exact one.
  */
 export function capacityAt(
   space: readonly Axes[],
@@ -167,7 +219,7 @@ export function capacityAt(
   stepLimit: number = EXACT_CAPACITY_STEP_LIMIT,
 ): { max: number; exact: boolean } {
   if (policy.minDistance <= 1) return { max: space.length, exact: true };
-  const bound = lineBound(space, policy);
+  const bound = lineBound(space);
   if (space.length > EXACT_CAPACITY_MAX_SPACE) return { max: bound, exact: false };
   const adjacency = space.map((a, i) => {
     let bits = 0n;
