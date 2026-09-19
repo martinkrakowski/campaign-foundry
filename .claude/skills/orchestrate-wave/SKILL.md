@@ -131,10 +131,10 @@ the status:
 
 ```bash
 gh pr list --head "<branch>" --json number,url --jq '.[] | "#\(.number) \(.url)"'   # empty ⇒ stuck
-(cd "<worktree>" && yarn build && yarn typecheck && yarn lint && yarn lint:arch && yarn sync:check && yarn test:cov)
+(cd "<worktree>" && yarn build && yarn typecheck && yarn lint && yarn lint:arch && yarn sync:check && yarn test:cov && yarn lint:bytes)
 git -C "<worktree>" status --porcelain=v1 -b && git -C "<worktree>" diff --stat origin/main...HEAD
 ```
-**The gate is a subset of CI, and the difference is named.** `ci.yml` runs **three** steps the six
+**The gate is a subset of CI, and the difference is named.** `ci.yml` runs **three** steps the seven
 commands above do not. The first is the one that bites most quietly:
 
 **`yarn install --immutable`.** The local gate never runs it, so a lane that adds a workspace
@@ -143,6 +143,14 @@ and useless. **Say in the brief whether a lane may add a dependency**, and if it
 regenerated `yarn.lock` travels with it. The never-edit rule means *do not hand-edit* the lockfile,
 not that a dependency can never be added; `.architecture/manifest.yaml` is where to check whether the
 edge is already sanctioned before assuming it is not.
+
+**`yarn lint:bytes`** is in the gate above rather than in this list, deliberately. It scans ~920
+files for raw C0 control bytes in about 100 ms, and it exists because a raw `\x00` inside a string
+literal once survived `build`, `typecheck`, `lint`, `format:check` and 6,103 tests — nothing else in
+the gate set looks at bytes, and it was caught only because a mutation anchor stopped matching.
+Unlike `install --immutable` it is cheap and runnable locally, so a lane should meet it before CI
+does. **Note it is NOT inside `yarn typecheck`** — that chain type-checks the tool, it does not run
+the scan; `yarn typecheck` on a tree containing a raw NUL exits 0, measured.
 
 The other two: `check:env` (a conditional no-op here — no such script exists) and the
 **Nitro route-scan guard**, which runs `nitro prepare` and fails if a `*.test.ts` file has been
