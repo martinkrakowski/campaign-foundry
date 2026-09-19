@@ -1,7 +1,8 @@
 import { describe, test, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import * as messages from "../messages";
-import { EstimatePanel } from "../EstimatePanel";
+import { EstimatePanel as PanelOnly } from "../EstimatePanel";
+import { useVariationPlan } from "../variation-plan";
 import { classicAdCount } from "../derive";
 import {
   initialEditorState,
@@ -13,6 +14,22 @@ import { API } from "@/lib/run-context";
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+
+/**
+ * SL3 — the panel as its HOST mounts it.
+ *
+ * `EstimatePanel` no longer asks the planner itself: the request moved to
+ * `useVariationPlan` so the sidebar's creatives list can read the same answer
+ * instead of issuing a second `/campaigns/plan` per keystroke, and `BriefEditor`
+ * calls the hook once and passes the result down. This wrapper is that host, so
+ * every test below still drives the real request through the real panel and
+ * keeps meaning what it meant — the debounce, the abort on unmount, the re-plan
+ * on a dependency change and the degradation are all still asserted end to end,
+ * now over the pair rather than over one component that was both.
+ */
+const EstimatePanel = ({ state }: { state: EditorState }) => (
+  <PanelOnly state={state} plan={useVariationPlan(state)} />
+);
 
 /** A state canPlan() accepts: variation mode, an id, a product, count >= 1. */
 const planReady = (): EditorState => {

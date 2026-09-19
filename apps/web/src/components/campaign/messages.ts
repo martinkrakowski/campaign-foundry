@@ -422,6 +422,44 @@ export const estimateWorking = "Working out what you will get…";
 /** The planner could not be reached; the brief is unaffected. */
 export const estimateUnavailable = "Cannot work out the estimate right now.";
 
+// --- The creatives list (SL3) ---
+
+/**
+ * The sidebar accordion's title, and the list's own accessible name. The panel
+ * appears only when the plan has creatives in it, so this string never heads an
+ * empty box — a classic brief and a fresh draft show no chrome at all.
+ */
+export const creativesLegend = "Creatives";
+
+/**
+ * One row's name. **The number is the SLOT, one-based for reading — never the
+ * row's position.** Since SL2 a slot is monotonic and holey: delete the second
+ * creative of three and the third keeps its index, its seed, its axes and its
+ * `…/v2.png`. Numbering by position would renumber it to 2 on a delete, which is
+ * precisely the durable identity this plan exists to give the sidebar.
+ */
+export function creativeRowLabel(index: number): string {
+  return `Creative ${index + 1}`;
+}
+
+/**
+ * The row's second line: the drawn look, in the same words the Layout and Tone
+ * axis cards use for the same values (`PolicySection`'s `AxisCards` show the raw
+ * option). Parts the plan did not send are simply absent — a static plan carries
+ * no motion, a brief with no copy pool no headline — and an empty summary
+ * renders nothing rather than an empty line.
+ */
+export function creativeRowSummary(parts: {
+  readonly aspectRatio?: string;
+  readonly layout?: string;
+  readonly tone?: string;
+  readonly motion?: string;
+}): string {
+  return [parts.aspectRatio, parts.layout, parts.tone, parts.motion]
+    .filter((part): part is string => typeof part === "string" && part.length > 0)
+    .join(" · ");
+}
+
 // --- The Sections outline (D25) ---
 
 /** The sidebar group's legend above the numbered rows. */

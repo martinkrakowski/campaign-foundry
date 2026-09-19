@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import type { EditorState } from "@/components/campaign/editor-state";
-import { canPlan, toBrief, PLAN_DEBOUNCE_MS } from "@/components/campaign/editor-state";
-import { planCampaign, type PlanResult, type PlanVariant } from "@/lib/briefs-api";
+import { canPlan } from "@/components/campaign/editor-state";
+import type { PlanResult, PlanVariant } from "@/lib/briefs-api";
+import { useVariationPlanResult } from "@/components/campaign/variation-plan";
 import { Eyebrow } from "@/components/ui";
 import { ratioDisplayName } from "@/components/campaign/display-names";
 import { RATIO_VALUES } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
@@ -30,11 +30,21 @@ function ratioSplit(variants: readonly PlanVariant[]): { label: string; count: n
  * deliverables count is derived locally from products × ratios × treatments. The
  * planner's vocabulary never reaches the screen either way (D6).
  */
-export function EstimatePanel({ state }: { state: EditorState }) {
+export function EstimatePanel({ state, plan }: { state: EditorState; plan: PlanResult | null }) {
   if (state.mode === "brief") {
     return <ClassicEstimate state={state} />;
   }
-  return <VariationEstimate state={state} />;
+  return <VariationEstimate state={state} plan={plan} />;
+}
+
+/**
+ * The panel as the sidebar mounts it: the same component, reading the editor's
+ * one plan out of the provider it is published inside. The plan stays an
+ * explicit prop on `EstimatePanel` so the component is still testable against a
+ * plan a test hands it directly, rather than only against a fetch.
+ */
+export function EstimateFromPlan({ state }: { state: EditorState }) {
+  return <EstimatePanel state={state} plan={useVariationPlanResult()} />;
 }
 
 /**
@@ -80,57 +90,18 @@ function ClassicEstimate({ state }: { state: EditorState }) {
 }
 
 /**
- * Randomized: ask the planner, debounced, and degrade rather than hang on a failed or
- * unreachable endpoint. The estimate appears once the draft is plannable (canPlan).
+ * Randomized: read the editor's one plan and degrade rather than hang on a failed
+ * or unreachable endpoint. The estimate appears once the draft is plannable (canPlan).
+ *
+ * SL3 — the request itself moved to `useVariationPlan`, unchanged, because the
+ * sidebar's creatives list reads the same answer and a second `/campaigns/plan`
+ * per keystroke would be a cost regression. The host calls the hook once and
+ * passes the result down; `ready` stays here because it is what tells "not
+ * plannable yet" (`null` because there is nothing to ask) apart from "asking"
+ * (`null` because a request is in flight), and the two say different sentences.
  */
-function VariationEstimate({ state }: { state: EditorState }) {
-  const [plan, setPlan] = useState<PlanResult | null>(null);
+function VariationEstimate({ state, plan }: { state: EditorState; plan: PlanResult | null }) {
   const ready = canPlan(state);
-
-  useEffect(() => {
-    if (!ready) {
-      setPlan(null);
-      return;
-    }
-    let cancelled = false;
-    const controller = new AbortController();
-    setPlan(null);
-    const timer = window.setTimeout(() => {
-      void planCampaign(toBrief(state), controller.signal)
-        .then((result) => {
-          if (cancelled) return;
-          setPlan(result);
-        })
-        .catch((err: unknown) => {
-          if (cancelled) return;
-          // An abort is this effect cleaning up after itself, not a failure.
-          if (err instanceof Error && err.name === "AbortError") return;
-          // Mirror planCampaign's own degradation. setPlan(null) would render
-          // "Estimating…" forever — the very symptom this catch exists to prevent.
-          setPlan({ kind: "unavailable" });
-        });
-    }, PLAN_DEBOUNCE_MS);
-    return () => {
-      cancelled = true;
-      controller.abort();
-      window.clearTimeout(timer);
-    };
-  }, [
-    ready,
-    state.briefId,
-    state.mode,
-    state.products,
-    state.variation,
-    state.targetRegion,
-    state.targetAudience,
-    state.campaignMessage,
-    state.localizedMessage,
-    state.platforms,
-    state.pool,
-    state.formats,
-    state.motion,
-    state.duration,
-  ]);
 
   return (
     <div className="rounded-lg border border-border bg-surface p-4">
