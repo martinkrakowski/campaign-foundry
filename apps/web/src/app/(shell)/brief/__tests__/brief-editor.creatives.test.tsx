@@ -473,4 +473,50 @@ describe("the selection is ephemeral and host-owned (D139)", () => {
     // Back to the brief's own words — no slot is loaded.
     expect(railShows("Hi")).toBeGreaterThan(0);
   });
+
+  /**
+   * The other thing a re-plan can do to a selected slot: KEEP it and redraw it.
+   * It happens whenever the operator edits an axis with a row selected. The row
+   * shows the new draw off the fresh plan; the rail composes off the selection.
+   * If the selection is not re-pointed at the fresh object, the two surfaces
+   * disagree about the same creative — the row says one headline, the preview
+   * draws another, and neither is obviously the stale one.
+   */
+  test("a re-plan that redraws the selected slot moves the rail with the row", async () => {
+    const user = userEvent.setup();
+    await mount();
+    await user.click(row(2));
+    await settle();
+    expect(railShows("Twocreative")).toBeGreaterThan(0);
+
+    // Slot 2 survives, drawn differently.
+    const redrawn = { ...EMITTED[1]!, headline: "Tworedrawn", layout: "headline-top" };
+    vi.mocked(globalThis.fetch).mockImplementation((url) => {
+      const u = String(url);
+      if (u.includes("/campaigns/plan")) {
+        return Promise.resolve(json(okPlan([EMITTED[0]!, redrawn])));
+      }
+      if (u.includes("/campaigns/preview-frame")) {
+        return Promise.resolve(
+          new Response(new Uint8Array([137, 80, 78, 71]), {
+            status: 200,
+            headers: { "content-type": "image/png", "x-preview-frame-cache-key": "k".repeat(64) },
+          }),
+        );
+      }
+      if (u === `${API}/campaigns/capabilities`) return Promise.resolve(json({ motion: true }));
+      return Promise.resolve(json({ briefs: [] }));
+    });
+    const audience = screen.getByLabelText("Target Audience") as HTMLInputElement;
+    await user.clear(audience);
+    await user.type(audience, "z");
+    await settle();
+
+    // The slot is still selected — it did not retire, because it still exists…
+    expect(row(2).getAttribute("aria-pressed")).toBe("true");
+    expect(row(2).textContent).toContain("Tworedrawn");
+    // …and the rail followed it rather than holding the draw it was handed.
+    expect(railShows("Tworedrawn")).toBeGreaterThan(0);
+    expect(railShows("Twocreative")).toBe(0);
+  });
 });
