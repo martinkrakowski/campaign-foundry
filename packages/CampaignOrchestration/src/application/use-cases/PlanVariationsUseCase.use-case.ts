@@ -22,6 +22,16 @@ import {
 
 const REPLAN_MAX_DRAWS = 64;
 
+/**
+ * The draws one slot is guaranteed before the planner may call it impossible.
+ *
+ * Deliberately the same number as `REPLAN_MAX_DRAWS`, and for the same reason:
+ * re-roll already asks "how many draws does ONE slot get against the occupants
+ * it must clear?" and answers 64. An appended slot asks the identical question,
+ * so it gets the identical answer rather than a second, tuned constant.
+ */
+const PER_SLOT_MIN_DRAWS = REPLAN_MAX_DRAWS;
+
 interface AxisDraw {
   readonly productId?: string;
   readonly aspectRatio?: AspectRatioValue;
@@ -120,11 +130,34 @@ export class PlanVariationsUseCase {
     let cursor = 0;
     let drawn = 0;
     let turn = 0;
+    /** Draws spent on the slot at `cursor`, reset each time one is accepted. */
+    let slotDraws = 0;
 
-    const remaining = (): boolean => cursor < allocated && drawn < budget;
+    // The shared pool `allocated × 3` is spent in order, so an APPENDED slot —
+    // the last one allocated, and the most constrained, since it must clear every
+    // occupant before it — inherits whatever the replay of the operator's
+    // existing slots left behind. Often that is nothing. And because the
+    // exhaustive fallback below is deliberately closed once a slot has been added
+    // (re-choosing would move creatives the operator already has), the starvation
+    // surfaces as "this brief cannot fit" when the truth is "this draw ran out of
+    // turns". Measured over a 4–20 × 12-seed × 2-distance sweep: 42 briefs whose
+    // dense plan succeeds refuse on a single add, and 27 of those place fine
+    // given more turns at the new slot.
+    //
+    // So an appended slot gets a FLOOR of its own draws, and the floor applies
+    // ONLY at `cursor >= policy.count`. Below that the loop is the old loop,
+    // instruction for instruction: a brief with no add has `allocated === count`,
+    // never reaches the condition, and keeps its exact draw sequence — including
+    // whether it falls through to the exhaustive search, which several plans rely
+    // on to be reproducible. Widening the floor to every slot would let the
+    // random draw reach plans the fallback used to serve, quietly changing them.
+    const remaining = (): boolean =>
+      cursor < allocated &&
+      (drawn < budget || (cursor >= policy.count && slotDraws < PER_SLOT_MIN_DRAWS));
 
     const addCandidate = (fixed: AxisDraw): void => {
       drawn += 1;
+      slotDraws += 1;
       const axes = drawAxes(rng, policy, fixed);
       const index = cursor;
       const variant: Variant = {
@@ -137,6 +170,7 @@ export class PlanVariationsUseCase {
       if (meetsMinDistance(variant, history, policy.minDistance)) {
         history.push(variant);
         cursor += 1;
+        slotDraws = 0;
       }
     };
 

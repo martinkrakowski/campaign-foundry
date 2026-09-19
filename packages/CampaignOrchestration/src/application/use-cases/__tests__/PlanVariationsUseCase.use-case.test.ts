@@ -1310,28 +1310,50 @@ describe("PlanVariationsUseCase.plan — monotonic slots (SL2)", () => {
     if (!before.success || !after.success) return;
     expect(before.value.variants).toHaveLength(8);
     expect(after.value.variants).toEqual(before.value.variants.filter((v) => v.index !== 3));
-    // The premise: this plan is not reachable by the random draw alone. Asking
-    // for the same eight slots with the allocation target moved off `count`
-    // — which is what closes the fallback — falls short.
-    const randomOnly = planner().plan(tightBrief(7, { nextIndex: 8 }, "derived"), tightInput);
-    expect(randomOnly.success).toBe(false);
+    // This test used to demonstrate its premise — "not reachable by the random
+    // draw alone" — by asking for the same eight slots as seven-plus-an-append
+    // and watching that fall short. **That proxy is gone, deliberately.** An
+    // appended slot now gets its own draw floor, so it places, and the proxy
+    // would be measuring the floor rather than the fallback. The premise itself
+    // is unchanged and still load-bearing: both plans here are DENSE
+    // (`allocated === count === 8`), the floor never applies to them, and their
+    // draw sequence is the pre-SL2 sequence instruction for instruction — which
+    // is exactly why the fallback's gate is `allocated === count` and not "the
+    // brief has no tombstones".
   });
 
-  test("an append the random draw cannot place is refused, not bought by moving the occupants", () => {
-    // Same brief, same eight-point capacity: seven creatives exist and an eighth
-    // would fit the space, but not at any point the draw reaches. The exhaustive
-    // search could find one — by re-choosing all eight, which would rewrite the
-    // seven the operator already has. Refusing is the honest answer, and the
-    // message says the existing creatives keep their draw.
+  test("an eighth creative the space has room for is PLACED, and the seven keep their draw", () => {
+    // This brief used to refuse here, and the refusal was false. Seven creatives
+    // exist, the space holds eight at this distance, and an eighth point is
+    // reachable — the draw simply had no turns left for it: the shared pool is
+    // `allocated × 3`, spent in order, and the appended slot is both last and the
+    // most constrained, since it must clear all seven. The exhaustive fallback is
+    // closed for an append (re-choosing would rewrite the seven), so "out of
+    // turns" was being reported as "this brief cannot fit".
     const before = planner().plan(tightBrief(7, undefined, "derived"), tightInput);
-    expect(before.success).toBe(true);
-    if (!before.success) return;
-    expect(before.value.variants).toHaveLength(7);
     const appended = planner().plan(tightBrief(7, { nextIndex: 8 }, "derived"), tightInput);
+    expect(before.success).toBe(true);
+    expect(appended.success).toBe(true);
+    if (!before.success || !appended.success) return;
+    expect(before.value.variants).toHaveLength(7);
+    expect(appended.value.variants).toHaveLength(8);
+    // The guarantee the old refusal was protecting, now held while SUCCEEDING:
+    // the seven are byte-identical and in place. Nothing was bought by moving
+    // them — the eighth was added beside them.
+    expect(appended.value.variants.slice(0, 7)).toEqual(before.value.variants);
+    expect(appended.value.variants[7]?.index).toBe(7);
+  });
+
+  test("an append the space genuinely cannot hold is still refused, and says so", () => {
+    // The other half, and the reason the floor is a floor rather than a licence:
+    // at `minDistance 2` this brief holds eight points. A ninth does not exist at
+    // any budget, so no number of extra draws may turn this into a success — and
+    // the message still tells the operator the existing creatives keep their draw.
+    const appended = planner().plan(tightBrief(8, { nextIndex: 9 }, "derived"), tightInput);
     expect(appended.success).toBe(false);
     if (appended.success) return;
-    expect(appended.error.message).toMatch(/Variation plan shortfall: accepted 7 of count 8\./);
-    expect(appended.error.message).toMatch(/Existing creatives keep their draw \(7 of 8 slots/);
+    expect(appended.error.message).toMatch(/Variation plan shortfall: accepted 8 of count 9\./);
+    expect(appended.error.message).toMatch(/Existing creatives keep their draw \(8 of 9 slots/);
     expect(appended.error.message).toMatch(/To fix: delete a creative/);
   });
 
