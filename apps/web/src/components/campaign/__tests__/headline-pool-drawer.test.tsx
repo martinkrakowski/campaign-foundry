@@ -1,5 +1,5 @@
 import { describe, test, expect, vi, beforeEach } from "vitest";
-import { useReducer } from "react";
+import { useReducer, useState } from "react";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HeadlinePoolDrawer } from "../HeadlinePoolDrawer";
@@ -259,6 +259,82 @@ describe("HeadlinePoolDrawer", () => {
         entries: [{ id: "a", status: "rejected" }],
       });
     });
+  });
+
+  /**
+   * W3 — the staleness guard, which had no test before this lane.
+   *
+   * A write captures the load's round when it sets off. If a LATER load starts
+   * before the write answers — a reopen, or the brief switch this test uses —
+   * that load has already said what is stored now, so the write's answer
+   * describes bytes that are gone and must install nothing: not its revision
+   * (which would block the next edit with something the store cannot match) and
+   * not its pool.
+   *
+   * The observable is the edit box: `PoolEntryRow` only clears the draft when
+   * `onEdit` resolves true, so a refused write leaves the input on screen.
+   */
+  test("a write that lands after a newer load installs nothing (W3)", async () => {
+    const user = userEvent.setup();
+    let releasePatch: (() => void) | undefined;
+    const patched = new Promise<void>((resolve) => {
+      releasePatch = resolve;
+    });
+    // Each load answers with its OWN revision, so "which load won" is readable
+    // off the next write's URL. Without that the assertion cannot discriminate:
+    // `rev-stale` is what the write RESPONDS with, and never appears in a request.
+    let load = 0;
+    const calls = routes({
+      get: () => json({ pool: { entries: [entry("a")] }, revision: `rev-load-${++load}` }),
+      patch: async () => {
+        await patched;
+        return json({ pool: { entries: [entry("a", "approved")] }, revision: "rev-stale" });
+      },
+    });
+
+    const Switchable = () => {
+      const [s, dispatch] = useReducer(editorReducer, state());
+      const [id, setId] = useState("camp");
+      return (
+        <>
+          <button onClick={() => setId("other")}>switch brief</button>
+          <HeadlinePoolDrawer
+            state={{ ...s, briefId: id }}
+            dispatch={dispatch}
+            open
+            onClose={vi.fn()}
+          />
+        </>
+      );
+    };
+    render(<Switchable />);
+    await screen.findByText("headline a");
+
+    // A write sets off and is held mid-flight.
+    await user.click(screen.getByLabelText("Edit a"));
+    await user.clear(screen.getByLabelText("Edit a"));
+    await user.type(screen.getByLabelText("Edit a"), "rewritten");
+    await user.click(screen.getByLabelText("Save a"));
+    await waitFor(() => expect(calls.some((c) => c.method === "PATCH")).toBe(true));
+
+    // A newer load begins while it is still in flight.
+    await user.click(screen.getByText("switch brief"));
+    await waitFor(() => expect(calls.filter((c) => c.method === "GET").length).toBeGreaterThan(1));
+
+    // Now let the stale write answer.
+    releasePatch?.();
+    await waitFor(() => expect(screen.getByLabelText("Approve a")).toBeTruthy());
+
+    // The discriminating assertion: the NEXT write must guard against what the
+    // second load said is stored (`rev-load-2`), never against the revision the
+    // stale write answered with. Drop the guard and `setRevision("rev-stale")`
+    // runs, this write carries `rev-stale`, and the store refuses every retry —
+    // the state the guard exists to prevent.
+    await user.click(screen.getByLabelText("Approve a"));
+    await waitFor(() => expect(calls.filter((c) => c.method === "PATCH").length).toBe(2));
+    const second = calls.filter((c) => c.method === "PATCH")[1]!;
+    expect(second.url).toContain("revision=rev-load-2");
+    expect(second.url).not.toContain("rev-stale");
   });
 
   test("a write carries the revision the pool was read at, and adopts the one it answered with", async () => {

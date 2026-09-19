@@ -16,6 +16,7 @@ import {
   type StoredPool,
 } from "@/lib/briefs-api";
 import { HEADLINE_POOL_REF } from "@/components/campaign/editor-state";
+import { useLatestOnly } from "@/lib/use-latest-only";
 
 function PoolEntryRow({
   entry,
@@ -130,11 +131,11 @@ export function HeadlinePoolDrawer({
    * later load describes bytes that are no longer the ones stored, and adopting
    * it would block the next edit with a revision nothing can match.
    */
-  const loadGeneration = useRef(0);
+  const loadRound = useLatestOnly();
 
   useEffect(() => {
     if (!open) return;
-    loadGeneration.current += 1;
+    loadRound.begin();
     let cancelled = false;
     const controller = new AbortController();
     setLoading(true);
@@ -164,7 +165,7 @@ export function HeadlinePoolDrawer({
     // reducer already drops a mismatched pool, but the local error and unavailable
     // states would otherwise surface the old brief's failure in the new drawer.
     const forBrief = briefId;
-    const generation = loadGeneration.current;
+    const token = loadRound.current();
     setBusy(true);
     setError(undefined);
     try {
@@ -172,7 +173,7 @@ export function HeadlinePoolDrawer({
       // A load that began after this write — a reopen, or the switch to another
       // brief that reloads — has already answered "what is stored now"; this
       // answer is about bytes that are gone, so it installs nothing at all.
-      if (loadGeneration.current !== generation) return false;
+      if (!loadRound.isCurrent(token)) return false;
       // The write answers with the revision it produced, so the next one guards
       // against what is stored now rather than what was loaded.
       setRevision(stored.revision);

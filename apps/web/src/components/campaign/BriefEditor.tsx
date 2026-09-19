@@ -87,6 +87,7 @@ import { SectionModeContext } from "@/components/campaign/SectionModeContext";
 import { useEditorPanelPublisher } from "@/lib/editor-panels-context";
 import { Accordion } from "@/components/shell/Accordion";
 import { revealField, revealSection } from "@/lib/scroll-to-section";
+import { useLatestOnly } from "@/lib/use-latest-only";
 
 /** Stable identity, so a valid draft's `blocked` memo never churns its consumers. */
 const EMPTY_FIELD_KEYS: ReadonlySet<string> = new Set<string>();
@@ -567,6 +568,14 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
     return () => window.removeEventListener("focus", handleFocus);
   }, []);
 
+  /**
+   * W3 — the capability probe's staleness token. A ref rather than the counter
+   * that used to live inside the effect below: the effect runs once (`[]`), so
+   * the lifetime is identical, and sharing one definition with
+   * `HeadlinePoolDrawer` is the point of the lane.
+   */
+  const capabilityRound = useLatestOnly();
+
   // Capabilities from the API's boot probe. Nitro does not await the ffmpeg probe,
   // so the route may answer `{ motion: false, reason: "not probed" }` for the first
   // moments after boot — that snapshot is retried, never taken as the verdict, and
@@ -576,11 +585,12 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
     let retries = 0;
     let timer: ReturnType<typeof setTimeout> | undefined;
     // Mount and focus requests overlap, and responses can land out of order. Stamp
-    // each round so a slow older answer cannot replace a newer verdict.
-    let generation = 0;
+    // each round so a slow older answer cannot replace a newer verdict. The token
+    // is `useLatestOnly`'s (W3) rather than a counter local to this effect: the
+    // rule is one the app relies on in two places and is now defined once.
     const load = async (round: number) => {
       const capabilities = await getCapabilities();
-      if (cancelled || round !== generation || capabilities === null) return;
+      if (cancelled || !capabilityRound.isCurrent(round) || capabilities === null) return;
       if (isTransientCapabilities(capabilities)) {
         // Still probing. Retry, and if it never settles leave capabilities unknown
         // rather than committing a snapshot we know is transient — "not probed" is
@@ -594,12 +604,11 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
       }
       dispatch({ type: "setCapabilities", capabilities });
     };
-    void load(generation);
+    void load(capabilityRound.begin());
     const handleFocus = () => {
       retries = 0;
-      generation += 1;
       clearTimeout(timer);
-      void load(generation);
+      void load(capabilityRound.begin());
     };
     window.addEventListener("focus", handleFocus);
     return () => {
