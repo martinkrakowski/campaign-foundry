@@ -45,7 +45,9 @@ import {
   MAX_DURATION_SEC,
   MIN_DURATION_SEC,
   ANCHOR_VALUES,
+  POLICY_INTEGERS,
   type AuthoredOccupancy,
+  type PolicyIntegerRule,
 } from "@campaignfoundry/CampaignOrchestration/variation-defaults";
 import { MOTION_KINDS } from "@campaignfoundry/CampaignOrchestration/motion-kinds";
 import {
@@ -2273,6 +2275,43 @@ function isNamedBackground(background: unknown): background is string {
   return typeof background === "string" && background !== "";
 }
 
+/**
+ * **M3: one optional policy key, written exactly when the draft says something
+ * the absent key does not** — and the rule for "what does absent mean here" is
+ * read from `POLICY_INTEGERS`, the same table `VariationPolicy.fromBrief`
+ * resolves the brief with. The five integers still disagree, deliberately, but
+ * they now disagree in one declaration instead of in five `??`s spread across
+ * two packages, and a change to either side has to move the row.
+ *
+ * Two ways a key is dropped:
+ *
+ * - The draft does not parse (blank, `42.0`, `12abc`). X18's rule: a refused
+ *   optional draft is the key the brief omits anyway, so the save and the plan
+ *   preview both see the field the user is actually looking at.
+ * - The parsed value is exactly the rule's own default AND the rule says the
+ *   editor omits it (`omitWhenDefault`). Only the `coverage` pair says so:
+ *   `perProduct: 0` inside the block says what an absent block already says,
+ *   and writing it would grow the document for nothing. `minDistance: 1` is NOT
+ *   dropped — it is a top-level key an operator authored, and dropping a stored
+ *   1 on save would rewrite every document that carries one.
+ *
+ * What it deliberately does NOT do is drop a value merely because it is
+ * *unusable*. The previous coverage rule was `> 0`, which silently swallowed a
+ * NEGATIVE floor — a draft `validatePolicy` refuses and the API's loader refuses
+ * — and handed the plan preview a legal `coverage` of 0 instead. A value that is
+ * not the default is written, and the refusal travels with it.
+ */
+function policyKey<R extends PolicyIntegerRule>(
+  rule: R,
+  parsed: number | undefined,
+): Partial<Record<R["key"], number>> {
+  if (parsed === undefined) return {};
+  if (rule.omitWhenDefault && rule.absent.kind === "default" && parsed === rule.absent.value) {
+    return {};
+  }
+  return { [rule.key]: parsed } as Record<R["key"], number>;
+}
+
 export function toBrief(state: EditorState): CampaignBrief {
   // D99: a classic brief cannot request the motion format — the run paths
   // refuse the combination every time, because the classic product × ratio ×
@@ -2374,17 +2413,27 @@ export function toBrief(state: EditorState): CampaignBrief {
   }
   // X18: every policy integer goes through the validator's own parser, so a
   // draft that passes validation saves exactly the number it was validated as.
-  const count = parsePolicyInteger(state.variation.count) ?? 0;
+  //
+  // M3: and every one of them then goes through `POLICY_INTEGERS` — the same
+  // table `VariationPolicy.fromBrief` resolves absence and bounds from — so
+  // "what does an omitted key mean here" is answered once, in the domain, for
+  // both sides. `count` is the exception the table itself declares: its rule is
+  // `absent: { kind: "required" }`, so there is no key to omit and no default to
+  // substitute. A blank or refused count therefore serialises as one below the
+  // floor, a value BOTH `validatePolicy` and the domain refuse — the refusal
+  // travels with the brief instead of being laundered into a legal number.
+  const count = parsePolicyInteger(state.variation.count) ?? POLICY_INTEGERS.count.min - 1;
   const seed = parsePolicyInteger(state.variation.seed);
   const minDistance = parsePolicyInteger(state.variation.minDistance);
   const perProduct = parsePolicyInteger(state.variation.perProduct);
   const perRatio = parsePolicyInteger(state.variation.perRatio);
-  // Build the object first and drop it when nothing survives: blank inputs parse to
-  // undefined, which is neither > 0 nor === 0, and would otherwise emit an empty
-  // `coverage: {}`.
+  // Build the object first and drop it when nothing survives: a blank input
+  // parses to undefined and a floor equal to the rule's own default says exactly
+  // what the absent block says, so neither is written and an all-default
+  // `coverage: {}` is never emitted.
   const coverageFields = {
-    ...(perProduct !== undefined && perProduct > 0 ? { perProduct } : {}),
-    ...(perRatio !== undefined && perRatio > 0 ? { perRatio } : {}),
+    ...policyKey(POLICY_INTEGERS.perProduct, perProduct),
+    ...policyKey(POLICY_INTEGERS.perRatio, perRatio),
   };
   const coverage =
     Object.keys(coverageFields).length > 0
@@ -2418,8 +2467,8 @@ export function toBrief(state: EditorState): CampaignBrief {
     ...withLocalized,
     variation: {
       count,
-      ...(seed !== undefined ? { seed } : {}),
-      ...(minDistance !== undefined ? { minDistance } : {}),
+      ...policyKey(POLICY_INTEGERS.seed, seed),
+      ...policyKey(POLICY_INTEGERS.minDistance, minDistance),
       ...(coverage !== undefined ? { coverage } : {}),
       // SL1: written back exactly as it was loaded, and only when it was
       // loaded. Conditional, like `seed` and `minDistance` above: a brief

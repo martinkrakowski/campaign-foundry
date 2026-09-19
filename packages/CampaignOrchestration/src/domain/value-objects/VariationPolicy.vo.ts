@@ -15,9 +15,13 @@ import {
   DEFAULT_PALETTE_SHIFT,
   MAX_DURATION_SEC,
   MIN_DURATION_SEC,
+  POLICY_INTEGERS,
+  POLICY_MAX_ACTIVE_AXES,
   type AnchorKind,
   type AuthoredOccupancy,
   type BackgroundAxisSource,
+  type PolicyIntegerAbsence,
+  type PolicyIntegerRule,
 } from "./variation-defaults.js";
 
 export {
@@ -31,9 +35,15 @@ export {
   MAX_DURATION_SEC,
   MIN_DURATION_SEC,
   ANCHOR_VALUES,
+  POLICY_INTEGERS,
+  POLICY_MAX_ACTIVE_AXES,
+  UINT32_MAX,
   type AnchorKind,
   type AuthoredOccupancy,
   type BackgroundAxisSource,
+  type PolicyIntegerAbsence,
+  type PolicyIntegerName,
+  type PolicyIntegerRule,
 } from "./variation-defaults.js";
 
 /** Digest function injected into policy hashing to keep domain free of platform crypto builtins. */
@@ -52,8 +62,6 @@ export const DISTANCE_AXES = [
   "durationSec",
   "anchor",
 ] as const;
-
-const UINT32_MAX = 0xffffffff;
 
 /**
  * Plan-time inputs resolved by the caller (the domain never reads files or the
@@ -177,11 +185,14 @@ export class VariationPolicy {
     const hashFn = hasher;
 
     const variation = brief.variation;
-    if (variation === undefined || variation.count === undefined) {
-      return err(new Error('Variation policy requires "count".'));
+    // The `count` rule's `absent: { kind: "required" }` is what refuses a brief
+    // with no count; a brief with no `variation` block at all has no count
+    // either, so it takes the same refusal through the same message.
+    if (variation === undefined) {
+      return err(new Error(requiredMessage(POLICY_INTEGERS.count)));
     }
 
-    const countResult = requireInteger(variation.count, "count", 1);
+    const countResult = resolvePolicyInteger(variation.count, POLICY_INTEGERS.count);
     if (!countResult.success) return countResult;
     const count = countResult.value;
 
@@ -189,20 +200,22 @@ export class VariationPolicy {
     if (!occupancyResult.success) return occupancyResult;
     const occupancy = occupancyResult.value;
 
-    const seedResult = requireInteger(variation.seed ?? seedFrom(brief.id), "seed", 0, UINT32_MAX);
+    // `seed`'s absence is `derived`, and this is the caller the table means: the
+    // domain, not the editor, is where a brief with no seed gets one.
+    const seedResult = resolvePolicyInteger(variation.seed, POLICY_INTEGERS.seed, {
+      derived: seedFrom(brief.id),
+    });
     if (!seedResult.success) return seedResult;
     const seed = seedResult.value;
 
-    const perProductResult = requireInteger(
-      variation.coverage?.perProduct ?? 0,
-      "coverage.perProduct",
-      0,
+    const perProductResult = resolvePolicyInteger(
+      variation.coverage?.perProduct,
+      POLICY_INTEGERS.perProduct,
     );
     if (!perProductResult.success) return perProductResult;
-    const perRatioResult = requireInteger(
-      variation.coverage?.perRatio ?? 0,
-      "coverage.perRatio",
-      0,
+    const perRatioResult = resolvePolicyInteger(
+      variation.coverage?.perRatio,
+      POLICY_INTEGERS.perRatio,
     );
     if (!perRatioResult.success) return perRatioResult;
     const coverage: VariationCoverage = {
@@ -253,17 +266,15 @@ export class VariationPolicy {
       if (axis === "motion" || axis === "durationSec") return motionEnabled;
       return true;
     }).length;
-    // SL-D6: the lower bound is 1, not 0. At 0 the searches would accept two
-    // variants at the same point in the space, so a plan could quietly contain
-    // duplicate creatives; 1 is also what an absent field has always meant, so
-    // the bound refuses only an *explicit* 0. The brief loader
-    // (`apps/api/server/lib/load-brief.ts`) reads a stored 0 as 1 rather than
-    // refusing the document — a 0 reaching here is a caller that skipped it.
-    const minDistanceResult = requireInteger(
-      variation.minDistance ?? 1,
-      "minDistance",
-      1,
-      activeAxes,
+    // SL-D6 lives in the table now (`POLICY_INTEGERS.minDistance`): the lower
+    // bound is 1, not 0, and an absent field means 1 — so the bound refuses only
+    // an *explicit* 0. The upper bound is this brief's own active-axis count,
+    // which is the one part of the rule no table can hold, so the rule says
+    // `POLICY_MAX_ACTIVE_AXES` and the number is supplied here.
+    const minDistanceResult = resolvePolicyInteger(
+      variation.minDistance,
+      POLICY_INTEGERS.minDistance,
+      { activeAxes },
     );
     if (!minDistanceResult.success) return minDistanceResult;
     const minDistance = minDistanceResult.value;
@@ -468,6 +479,35 @@ function resolveOccupancy(
 
 function unique<T>(values: readonly T[]): T[] {
   return [...new Set(values)];
+}
+
+/** The refusal an `absent: { kind: "required" }` rule produces, and the only place it is spelled. */
+function requiredMessage(rule: PolicyIntegerRule): string {
+  return `Variation policy requires ${JSON.stringify(rule.field)}.`;
+}
+
+/**
+ * **The single site that resolves a policy integer** (M3). Absence and bounds
+ * both come from `POLICY_INTEGERS`, so the five fields can no longer disagree
+ * by accident — the disagreements that remain are the ones the table declares,
+ * and changing one means editing the row rather than one of five `??`s.
+ *
+ * `derived` is the value an `absent: { kind: "derived" }` rule means (only the
+ * caller can compute it — `seed` is `seedFrom(brief.id)`); `activeAxes` is the
+ * number a `POLICY_MAX_ACTIVE_AXES` bound stands for. A `derived` rule whose
+ * caller supplies nothing has no value to resolve to, so it takes the same
+ * refusal a required key does rather than silently becoming a bound.
+ */
+function resolvePolicyInteger(
+  authored: number | undefined,
+  rule: PolicyIntegerRule,
+  supplied: { readonly derived?: number; readonly activeAxes?: number } = {},
+): Result<number, Error> {
+  const absent: PolicyIntegerAbsence = rule.absent;
+  const value = authored ?? (absent.kind === "default" ? absent.value : supplied.derived);
+  if (value === undefined) return err(new Error(requiredMessage(rule)));
+  const max = rule.max === POLICY_MAX_ACTIVE_AXES ? supplied.activeAxes : rule.max;
+  return requireInteger(value, rule.field, rule.min, max);
 }
 
 function requireInteger(
