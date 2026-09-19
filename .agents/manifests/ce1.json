@@ -21,9 +21,9 @@
     },
     {
       "file": "apps/web/src/components/campaign/PreviewHitRegions.tsx",
-      "before": "    .filter((layer) => layer.kind === \"html\" && layer.enabled !== false)",
-      "after": "    .filter((layer) => layer.kind === \"html\")",
-      "because": "The hit region outliving the thing it is a region for. `enabled: false` is not a style: X9's rule is that a disabled layer renders exactly what the same template WITHOUT that layer renders, so the compositor draws nothing in that box at all. Dropping the term reads like tidying a redundant condition — the layer is still in the template, its elements still declare frames, and the editor still lists it — and it produces an invisible button over bare canvas that selects a layer nothing on screen shows. The gesture even 'works': the row lights up. It is caught only by asking what a DISABLED layer declares, which is why the exclusion has a test of its own rather than being described in a comment.",
+      "before": "  return template.layers\n    .filter((layer) => layer.enabled !== false)\n",
+      "after": "  return template.layers\n",
+      "because": "The hit region outliving the thing it is a region for. `enabled: false` is not a style: X9's rule is that a disabled layer renders exactly what the same template WITHOUT that layer renders, so the compositor draws nothing in that box at all. Dropping the term reads like tidying a redundant condition — the layer is still in the template, its elements still declare frames, and the editor still lists it — and it produces an invisible button over bare canvas that selects a layer nothing on screen shows. The gesture even 'works': the row lights up. It is caught only by asking what a DISABLED layer declares, which is why the exclusion has a test of its own rather than being described in a comment. (Re-anchored by CE2: the `enabled !== false` term was hoisted out of the html-only filter so it governs the ground kinds' whole-canvas regions too. Same claim, same test, one term instead of two — dropping it now makes EVERY disabled layer clickable, so the mutation is strictly stronger than the one CE1 ran.)",
       "verdict": "caught",
       "command": [
         "yarn",
