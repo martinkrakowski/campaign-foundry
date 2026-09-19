@@ -160,6 +160,34 @@ describe("LayerPropsSheet — Escape dismisses (nothing to roll back)", () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
+  test("a non-Escape key does nothing", () => {
+    const onClose = vi.fn();
+    render(
+      <Harness
+        initial={{ ...initialEditorState(), template: textTemplate() }}
+        layerId="accent"
+        onClose={onClose}
+      />,
+    );
+    fireEvent.keyDown(window, { key: "a" });
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  test("a keydown already prevented (by another handler) is left alone", () => {
+    const onClose = vi.fn();
+    render(
+      <Harness
+        initial={{ ...initialEditorState(), template: textTemplate() }}
+        layerId="accent"
+        onClose={onClose}
+      />,
+    );
+    const event = new KeyboardEvent("keydown", { key: "Escape", cancelable: true, bubbles: true });
+    event.preventDefault();
+    window.dispatchEvent(event);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
   test("the header's own close control also calls onClose", async () => {
     const user = userEvent.setup();
     const onClose = vi.fn();
@@ -282,6 +310,22 @@ describe("LayerPropsSheet — committing and clearing a geometry prop (D134, X16
     ).toBe(0.2);
   });
 
+  test("an emptied box and a half-typed non-number commit nothing (the FrameNumberInput contract)", () => {
+    const dispatch = vi.fn();
+    render(
+      <LayerPropsSheet
+        state={{ ...initialEditorState(), template: textTemplate() }}
+        dispatch={dispatch}
+        layerId="accent"
+        onClose={vi.fn()}
+      />,
+    );
+    const input = screen.getByLabelText(messages.layerPropSolidHeightLabel);
+    fireEvent.change(input, { target: { value: "" } });
+    fireEvent.change(input, { target: { value: "1e" } });
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
   test("a Reset control appears once overridden, and clears the override on click", async () => {
     const user = userEvent.setup();
     render(
@@ -335,6 +379,52 @@ describe("LayerPropsSheet — committing and clearing a geometry prop (D134, X16
     const imageLayer = () => latest!.template.layers.find((l) => l.id === "image")!;
     expect(imageLayer().props).toEqual({ alt: "" });
     expect("props" in imageLayer()).toBe(true);
+  });
+
+  test("the alt field's Reset control clears the override entirely", async () => {
+    const user = userEvent.setup();
+    let latest: EditorState | undefined;
+    render(
+      <StateHarness
+        initial={{ ...initialEditorState(), template: textTemplate() }}
+        layerId="image"
+        onClose={vi.fn()}
+        onState={(s) => {
+          latest = s;
+        }}
+      />,
+    );
+    const input = screen.getByLabelText(messages.layerPropAltLabel);
+    fireEvent.change(input, { target: { value: "A logo" } });
+    const imageLayer = () => latest!.template.layers.find((l) => l.id === "image")!;
+    expect(imageLayer().props).toEqual({ alt: "A logo" });
+    await user.click(
+      screen.getByRole("button", {
+        name: messages.layerPropResetLabel(messages.layerPropAltLabel),
+      }),
+    );
+    expect("props" in imageLayer()).toBe(false);
+  });
+
+  test("choosing an anchor commits it, and choosing 'brief default' clears the override", async () => {
+    const user = userEvent.setup();
+    let latest: EditorState | undefined;
+    render(
+      <StateHarness
+        initial={{ ...initialEditorState(), template: textTemplate() }}
+        layerId="static-text"
+        onClose={vi.fn()}
+        onState={(s) => {
+          latest = s;
+        }}
+      />,
+    );
+    const textLayer = () => latest!.template.layers.find((l) => l.id === "static-text")!;
+    const select = screen.getByRole("combobox");
+    await user.selectOptions(select, "top");
+    expect(textLayer().props).toEqual({ anchor: "top" });
+    await user.selectOptions(select, messages.layerPropDefault);
+    expect("props" in textLayer()).toBe(false);
   });
 });
 

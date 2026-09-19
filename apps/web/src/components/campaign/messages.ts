@@ -1390,7 +1390,7 @@ export const layerPropFadeHeightLabel = "Fade height";
 export const layerPropWidthLabel = "Logo width";
 export const layerPropMarginLabel = "Logo edge margin";
 export const layerPropAnchorLabel = "Headline anchor";
-export const layerPropTypeFloorLabel = "Autofit floor";
+export const layerPropTypeFloorLabel = "Autofit minimum";
 export const layerPropAltLabel = "Image alt text";
 
 /** The face a prop's control shows while the layer carries no override for it. */
