@@ -565,6 +565,15 @@ export type EditorAction =
   | { type: "moveBeat"; from: number; to: number }
   | { type: "setBeatText"; index: number; text: string }
   | { type: "setBeatWeight"; index: number; weight: number }
+  /**
+   * TL2 — attach or clear a beat's own scene. `background` absent (or blank)
+   * CLEARS it, and clearing deletes the key rather than writing
+   * `background: undefined`: `toBrief` spreads the draft, and an explicit
+   * `undefined` is not the same as an absent key once it reaches `canonicalJson`
+   * — X33's `hashCopy` serialises `copy.timeline` in full, so the two would hash
+   * differently for a beat the operator has left in the same state.
+   */
+  | { type: "setBeatBackground"; index: number; background?: string }
   | { type: "setKeyBeat"; index: number }
   | { type: "setTransition"; transition: "cut" | "fade" }
   | {
@@ -1782,6 +1791,35 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
           ),
         },
       };
+    case "setBeatBackground": {
+      // Same contract discipline as `setBeatWeight` below: an out-of-range index
+      // is a no-op rather than a beat invented at the end of the list.
+      if (!isBeatIndex(action.index, state.timeline.beats.length)) return state;
+      // An EMPTY string is a clear. The line is `isNamedBackground`'s, reused
+      // rather than restated, because it is the rule `toBrief` serialises by: a
+      // reducer with its own idea of "named" would let the draft hold a value
+      // the brief then drops. Note it is `!== ""`, not a trim — a whitespace-only
+      // path is a name to both. Nothing reachable produces one (the chip writes
+      // the Asset Bin's own path), and inventing a trim HERE would be the
+      // disagreement this comment exists to prevent.
+      const named = isNamedBackground(action.background) ? action.background : undefined;
+      return {
+        ...state,
+        timeline: {
+          ...state.timeline,
+          beats: state.timeline.beats.map((beat, index) => {
+            if (index !== action.index) return beat;
+            if (named === undefined) {
+              // Delete the key. `{ ...beat, background: undefined }` would leave an
+              // own property whose presence `canonicalJson` can see.
+              const { background: _dropped, ...rest } = beat;
+              return rest;
+            }
+            return { ...beat, background: named };
+          }),
+        },
+      };
+    }
     case "setBeatWeight":
       // The Stepper bounds this, but the reducer is the contract: a weight outside
       // [1, MAX_WEIGHT], or a fraction, serialises straight into a brief the parser

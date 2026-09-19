@@ -21,12 +21,16 @@ export function CopySection({
   errors,
   warnings = {},
   onOpenPool,
+  onChooseScene,
 }: {
   state: EditorState;
   dispatch: Dispatch<EditorAction>;
   errors: FieldErrors;
   warnings?: FieldWarnings;
   onOpenPool?: () => void;
+  /** TL2 — open the Asset Bin for one beat. Threaded, like `onOpenPool`: the
+   * drawer lives at `BriefEditor`s root (M7), not under a transformed card. */
+  onChooseScene?: (index: number) => void;
 }) {
   const { briefId, pool } = state;
 
@@ -187,7 +191,13 @@ export function CopySection({
           Randomized brief can render motion, so a classic draft never offers a sequence. */}
       {state.mode === "variation" ? (
         <div data-slot="copy-timeline">
-          <TimelineSection state={state} dispatch={dispatch} errors={errors} warnings={warnings} />
+          <TimelineSection
+            state={state}
+            dispatch={dispatch}
+            errors={errors}
+            warnings={warnings}
+            onChooseScene={onChooseScene}
+          />
         </div>
       ) : null}
     </SectionShell>

@@ -134,6 +134,11 @@ const routes = (brief: Record<string, unknown>): Saved[] => {
     if (method === "GET" && u === `${API}/campaigns/capabilities`) {
       return Promise.resolve(json({ motion: true }));
     }
+    if (u.includes("/campaigns/assets")) {
+      return Promise.resolve(
+        json({ assets: [{ name: "dusk.png", size: 2048, type: "image/png" }] }),
+      );
+    }
     if (method === "GET" && u.startsWith(`${API}/campaigns/briefs`)) {
       return Promise.resolve(
         json({ briefs: [{ file: "clip.yaml", revision: `r${revision}`, brief }] }),
@@ -412,5 +417,34 @@ describe("SG6′ — the copy sequence says when it will not be saved", () => {
     // panel says, which is the whole of the claim being made about the card.
     await user.click(videoCard());
     expect(await screen.findByText(messages.timelineDroppedNoVideo)).toBeTruthy();
+  });
+
+  /**
+   * TL2 — a beat's own scene, attached from the same hoisted Asset Bin the
+   * product logo uses. The drawer is keyed on a discriminated `assetTarget`
+   * rather than a product key, because a bare `number | null` cannot say whether
+   * 0 means "product 0" or "beat 0" — and a wrong guess is a silent write to the
+   * other one, which is why this asserts where the pick did NOT land as well.
+   */
+  test("picking an asset for a beat sets that beat's scene, and clearing restores the ground", async () => {
+    const user = userEvent.setup();
+    await open(sequencedBrief);
+
+    const chip = () => screen.getByRole("button", { name: messages.timelineBeatSceneLabel(1) });
+    expect(chip().textContent).toBe(messages.timelineBeatSceneNone);
+
+    await user.click(chip());
+    await screen.findByRole("dialog", { name: "Asset Bin" });
+    await user.click(await screen.findByRole("button", { name: "Choose dusk.png" }));
+
+    await waitFor(() => expect(chip().textContent).toBe("dusk.png"));
+    // It landed on the BEAT, not on a product — the branch it must not have taken.
+    const logos = screen
+      .getAllByLabelText("Logo Path")
+      .filter((el) => el.tagName === "INPUT" && el.getAttribute("type") !== "file");
+    expect((logos[0] as HTMLInputElement).value).not.toContain("dusk.png");
+
+    await user.click(screen.getByRole("button", { name: messages.timelineBeatSceneClearLabel(1) }));
+    await waitFor(() => expect(chip().textContent).toBe(messages.timelineBeatSceneNone));
   });
 });

@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "lane": "TL2",
+  "mutations": [
+    {
+      "file": "apps/web/src/components/campaign/validate.ts",
+      "before": "  if (\n    scenesProblem({\n      beats: beats.map((beat) => ({\n        text: beat.text,\n        weight: beat.weight,\n        // Spread, never `background: beat.background` — an explicit `undefined`\n        // key is a different object to `canonicalJson`, and this mapping must not\n        // be the place that difference is introduced.\n        ...(beat.background !== undefined ? { background: beat.background } : {}),\n      })),\n      transition: state.timeline.transition,\n      keyBeat,\n    }) !== undefined\n  ) {",
+      "after": "  if (beats.filter((b) => b.background !== undefined).length > MAX_SCENES) {",
+      "because": "The lane's central requirement: the scene cap is the DOMAIN's rule, called, not counted again in the editor. This replaces the call with the naive local count a reader reaches for, and it is wrong in the two ways `scenesProblem` is careful about — repeats of one scene are ONE scene, and beats naming none spend nothing. A timeline whose six beats all name the same background spends one scene and must be accepted; the count sees six and refuses. This surface previously re-implemented the Set/flatMap under a comment promising it counted 'the same way the domain counts them', which is a promise a copy can only keep until one of them changes.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "apps/web/src/components/campaign/__tests__/editor-state.beat-scenes.test.ts",
+        "-t",
+        "repeats are one scene"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/editor-state.ts",
+      "before": "              const { background: _dropped, ...rest } = beat;\n              return rest;",
+      "after": "              return { ...beat, background: undefined };",
+      "because": "Clearing must DELETE the key, never write `background: undefined`. The two are the same to `?.` and to a shallow equal, and different to `canonicalJson` — and X33's `hashCopy` serialises `copy.timeline` in full, so the wrong spelling moves `copyHash` for a beat nobody changed and a selective re-roll pinned to the persisted report is refused for it. The observable is the DRAFT, not the projection: `toBrief` already spreads through `isNamedBackground`, so a projected brief looks identical either way — which is why the first draft of this mutation pointed at the byte-identical test and did not reproduce. It points at the draft's own-property assertion instead.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "apps/web/src/components/campaign/__tests__/editor-state.beat-scenes.test.ts",
+        "-t",
+        "deletes the key rather than writing undefined"
+      ],
+      "verdict": "caught"
+    }
+  ],
+  "note": "Both mutations were rewritten after the first pair failed to reproduce. #0's `after` had ANDed the naive count in FRONT of the call, so the repeats case still returned undefined and nothing went red; it now replaces the condition. #1 had pointed at the byte-identical projection test, which cannot see the difference because `toBrief` guards with `isNamedBackground`; it now points at the draft assertion. Recording a mutation that cannot fail is the defect the -t liveness gate exists to catch, and verify-manifests caught this one."
+}
