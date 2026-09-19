@@ -76,6 +76,21 @@
         "a static-only brief"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/editor-state.ts",
+      "before": "    drawable.length === 0\n      ? motionSlots",
+      "after": "    drawable.length === 0\n      ? 1",
+      "because": "The per-ratio sum replaced `Math.max(1, drawableRatios.length)`, and a sum over no ratios is 0 — so the floor an empty ratio selection has always had (one notional ratio carrying the motion factor) is the one thing this refactor could drop silently. Nothing plans in that state, since the domain refuses a motion-only brief whose platforms package no ratio, so no ceiling there is 'right' and no domain test can see it. What makes it matter is the clamp: `withCountClamp` fires on the toggle that empties the selection and does NOT reverse when the ratio comes back, so a lower floor permanently eats a count the user had already authored. Pinned with two kinds and two durations, where the motion factor is 4 rather than 1 — the single-kind case the neighbouring test already covers would have stayed green at 24 either way.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "apps/web/src/components/campaign/__tests__/validate.test.ts",
+        "-t",
+        "the floor is one notional ratio"
+      ],
+      "verdict": "caught"
     }
   ]
 }
