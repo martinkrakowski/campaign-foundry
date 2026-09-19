@@ -50,6 +50,7 @@ import {
   timelineDurations,
   draftOccupancy,
   canAddCreative,
+  type ValidationSnapshot,
 } from "@/components/campaign/editor-state";
 import { useEditorHistory, useHistoryKeys } from "@/components/campaign/editor-history";
 import {
@@ -534,9 +535,10 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   }, []);
   const [attempted, setAttempted] = useState(false);
   /**
-   * SG-D15 / §8.4 — the validation the operator has seen, held as the `state` object
-   * it was taken from. `null` until Validate is pressed; the gate is
-   * `isValidationFresh(validatedState, state)`.
+   * SG-D15 / §8.4 — the validation the operator has seen, held as the two things it
+   * was computed from: the `state` object, and the brief ids it was judged against.
+   * `null` until Validate is pressed; the gate is `isValidationFresh(validation,
+   * state, existingIds)`.
    *
    * **Ephemeral and client-local, deliberately** (SG9's persistence row, the same
    * class as D139/D147): a reload clears it, and that is correct — the consent this
@@ -549,7 +551,7 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
    * the same warning for the same reason, and it cost seventeen tests when it was
    * learned.
    */
-  const [validatedState, setValidatedState] = useState<EditorState | null>(null);
+  const [validation, setValidation] = useState<ValidationSnapshot | null>(null);
   /** Generate's credit-spending confirm (SG-D10, after `CommandBar.tsx:164`). */
   const [runConfirmOpen, setRunConfirmOpen] = useState(false);
 
@@ -741,6 +743,19 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
         .sort((a, b) => walkIndex(a) - walkIndex(b))[0] ?? null
     );
   }, [state, existingIds]);
+
+  /**
+   * SG-D15's gate, computed ONCE. It used to be spelled out at each of its two call
+   * sites so a mutation anchor could sit on the JSX line; the anchor moved here
+   * (`sg9.json`'s second mutation) rather than the decision staying duplicated,
+   * because a third reader of the gate — the run refusal below — would have made
+   * three copies of one condition that must never disagree.
+   *
+   * It is handed `existingIds` — the same list `errors` above was computed with, on
+   * the same render — because that is the other thing the validation read, and the
+   * listing refetches itself on every window focus without the document moving.
+   */
+  const validationStands = isValidationFresh(validation, state, existingIds);
 
   // Publish dirty state (X32). `isPristine`/`isDirtySinceSave` are pure functions of
   // `state`, so most renders recompute the exact same boolean this effect already
@@ -1158,7 +1173,26 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   // it would leave the page claiming motion is unavailable after that stopped being
   // true. Save and load both set the snapshot, so both surface it.
   const applied = state.appliedSnapshot !== null && !isDirtySinceApply(state);
-  const applyRefusal = applied ? motionUnavailableReason(state) : undefined;
+  /**
+   * D7's THIRD question — *runnable* — asked where it is answered, at the run verb.
+   *
+   * D7 keeps a capability out of `validateState`: a codec is a property of this
+   * computer right now, not of the document, and a brief must not be called invalid
+   * because a host lacks ffmpeg (*persistable* stays true, Save stays offered). But
+   * the same row says *"Runnable = fully valid including capabilities"*, and
+   * `statusApplyRefusal` has been promising the operator "Generate will wait until it
+   * is set up" while Generate ran anyway. This is the half of D7 that was stated and
+   * never wired: the gate closes on the capability WITHOUT the document becoming
+   * invalid, which is why it is read here and not added to `errors`.
+   */
+  const runRefusal = motionUnavailableReason(state);
+  /**
+   * The reason is shown, which is what makes disabling it honest (DESIGN.md's
+   * capability rule: *disabled and the reason is shown*). It was previously spoken
+   * only once the draft was committed, so a never-saved draft that had just been
+   * validated showed a Generate that would not run and said nothing about why.
+   */
+  const applyRefusal = applied || validationStands ? runRefusal : undefined;
   // Committing changes state the user cannot see from here — the pipeline lives in the
   // top bar — so say plainly what happened and what runs it. Without this, a save
   // looked like it did nothing at all.
@@ -1846,8 +1880,9 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
 
   /**
    * SG-D12 / SG-D20 — the Validate verb's action, and the only thing that opens the
-   * gate. It stores the CURRENT `state` object as the validation snapshot, so
-   * `isValidationFresh` answers true until the next real edit.
+   * gate. It stores the CURRENT `state` object AND the id list it was judged against
+   * as the validation snapshot, so `isValidationFresh` answers true until the next
+   * real edit — or until the listing those ids came from moves under it.
    *
    * **Nothing is computed here, and that is the point.** `validateState` is pure and
    * synchronous and there is no server validation endpoint (`apps/api/src` has none),
@@ -1866,15 +1901,15 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
    * gate keyed on Save's verdict would silently follow it if that ever changed, and
    * this one is about RUNNING.
    *
-   * **A capability refusal is NOT in `errors`, so it does not close this gate — a
-   * finding, not a decision taken here.** `motionUnavailableReason` is deliberately
-   * outside `validateState` (D7: "gates are never red", `validate.ts:453-457`), so a
-   * video brief on a host with no ffmpeg validates clean and Generate appears, even
-   * though `messages.statusApplyRefusal` already tells the operator "Generate will
-   * wait until it is set up". Nothing in SG9 made that worse — the header's Generate
-   * ran such a brief too — and no stamped decision covers it, so it is reported
-   * rather than fixed by invention. SG8's pre-flight is where the figures (and this
-   * refusal) belong.
+   * **A capability refusal is still NOT in `errors`, and it still does not close THIS
+   * gate — it closes the RUN.** `motionUnavailableReason` is deliberately outside
+   * `validateState` (D7: "gates are never red", `validate.ts:453-457`), so a video
+   * brief on a host with no ffmpeg validates clean here and the snapshot is taken:
+   * the operator has looked at the document, and the document is fine. What SG9
+   * reported and this lane fixed is the NEXT step — `statusApplyRefusal` told the
+   * operator "Generate will wait until it is set up" while Generate ran anyway. The
+   * run slot now reads `runRefusal` inside the fresh branch (D7's *runnable*), so the
+   * sentence is true without a host's missing codec ever making a document invalid.
    *
    * **A clean Validate still flips `attempted`, and that is intended.** `refuseInvalid`
    * is called unconditionally — exactly as `handleSave` calls it — so from the first
@@ -1897,15 +1932,20 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
    * **This handler is also SG-D14's refresh control**, passed into the view and
    * placed in the log panel's `actions` slot. Not a second, quieter validate: the
    * paragraph above refuses a duplicate `refuseInvalid` for one caller, and the same
-   * argument refuses a duplicate snapshot-taker. One writer of `validatedState`,
+   * argument refuses a duplicate snapshot-taker. One writer of `validation`,
    * reachable from two places.
+   *
+   * `existingIds` is stored alongside `state`, not derived later: it is the list
+   * `errors` was computed from on THIS render, so the snapshot records what was
+   * actually judged rather than what the listing happens to hold when the gate is
+   * next read.
    */
   const handleValidate = useCallback(() => {
     refuseInvalid();
     if (getTotalErrorCount(errors) > 0) return;
-    setValidatedState(state);
+    setValidation({ state, existingIds });
     chooseColumnView("validate");
-  }, [refuseInvalid, errors, state, chooseColumnView]);
+  }, [refuseInvalid, errors, state, existingIds, chooseColumnView]);
 
   /**
    * SG-D22 — the run, and its target.
@@ -2064,7 +2104,7 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
         ]}
       />
       {/*
-        SG-D10/SG-D11 — ONE slot, TWO verbs, and never a disabled Generate.
+        SG-D10/SG-D11 — ONE slot, TWO verbs, and never disabled for being INVALID.
         The owner named the grid toolbar as the pattern (`CommandBar.tsx:167`), and
         this follows its substance: the run verb is the bar's rightmost and only
         emphasised control, it is never disabled for being invalid, and it asks a
@@ -2078,13 +2118,30 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
         live verb, it just changes which one. `DESIGN.md §5` is updated in this PR to
         say so.
 
-        The gate is `isValidationFresh`, and nothing else may be added to this
-        condition. An `errors.length === 0` belt-and-braces term here would look
-        prudent and would hide the very defect §8.4 exists to prevent: under a
-        projection-keyed rewrite the invalidating edit would still hide Generate via
-        the error count, and the test that pins SG-D15 would pass. */}
-      {isValidationFresh(validatedState, state) ? (
-        <Button aria-haspopup="dialog" onClick={() => setRunConfirmOpen(true)}>
+        **The one disabled Generate is the CAPABILITY refusal, and it is a different
+        rule.** D3 forbids disabling for invalidity, because a dead button cannot
+        answer "what is wrong"; DESIGN.md's capability paragraph requires the opposite
+        for a host that cannot do the thing — *the control is disabled and the reason
+        is shown*, exactly as the Video format card already is. Here the reason is
+        already on screen beside it (`applyRefusal` above puts `statusApplyRefusal` in
+        the status line), so nothing is left unanswered by the press that cannot
+        happen. `statusApplyRefusal` says "Generate will wait until it is set up" —
+        this branch is that sentence being true. The document is NOT invalid: `errors`
+        is untouched, Save stays offered, and `validationStands` is still true.
+
+        The freshness gate itself is `validationStands`, and nothing else may be added
+        to it. An `errors.length === 0` belt-and-braces term would look prudent and
+        would hide the very defect §8.4 exists to prevent: under a projection-keyed
+        rewrite the invalidating edit would still hide Generate via the error count,
+        and the test that pins SG-D15 would pass. The capability term below is not
+        that term — it sits INSIDE the fresh branch, so a stale validation still shows
+        Validate whatever the host can do. */}
+      {validationStands ? (
+        <Button
+          aria-haspopup={runRefusal === undefined ? "dialog" : undefined}
+          disabled={runRefusal !== undefined}
+          onClick={() => setRunConfirmOpen(true)}
+        >
           {messages.generate}
         </Button>
       ) : (
@@ -2304,14 +2361,16 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
         a live projection (`ValidationView`'s own docstring carries the argument);
         this record is the memo that lets it be one without re-rendering the form.
 
-        `isValidationFresh` is spelled out rather than hoisted into a local: the
-        run slot below reads it too, and that call site is `sg9.json`'s second
-        mutation anchor — hoisting would silently retire another lane's replay. */
+        `validationStands` is the hoisted gate, read here and by the run slot. It
+        used to be spelled out at both sites so `sg9.json`'s second mutation could
+        anchor on the JSX line; that anchor was MOVED to the hoisted line in the same
+        commit that hoisted it, which is what re-anchoring is for — a silent hoist
+        would have retired another lane's replay. */
       validate: (
         <ValidationView
           errors={errors}
           mode={state.mode}
-          validated={isValidationFresh(validatedState, state)}
+          validated={validationStands}
           onRevealSection={reveal}
           onRevalidate={handleValidate}
         />
@@ -2321,8 +2380,9 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
     // `existingIds` does — `errors` is memoised on exactly that pair, `reveal` is a
     // `useCallback` over stable values, and `handleValidate` is one over `errors`
     // and `state` — so the measured counts above hold: `state` was already named,
-    // and nothing here is a fresh-per-render closure. `validatedState` is the one
-    // genuinely new input, and it moves once per Validate press.
+    // and nothing here is a fresh-per-render closure. `validationStands` is the one
+    // genuinely new input, and it is a BOOLEAN derived from the snapshot, so it moves
+    // at most twice per Validate press rather than on every snapshot identity.
     [
       state,
       dispatch,
@@ -2330,7 +2390,7 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
       warnings.copy,
       draftBrief,
       errors,
-      validatedState,
+      validationStands,
       reveal,
       handleValidate,
     ],

@@ -2119,7 +2119,17 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
       };
     }
     case "setCapabilities":
-      return { ...state, capabilities: action.capabilities };
+      // Identity-equal when the verdict has not moved, exactly as every other
+      // refused or no-op action in this reducer is (§8.4's second property, which
+      // the gate above inherits). This is the probe's answer, refetched on EVERY
+      // window focus, and it almost always says what it said last time — so without
+      // this guard a focus produced a new `state` object for no change at all, and
+      // the validation gate, keyed on the `state` reference, shut on every
+      // alt-tab: the operator came back to the editor and had to press Validate
+      // again. A fresh object here is a claim that something changed.
+      return valuesEqual(state.capabilities, action.capabilities)
+        ? state
+        : { ...state, capabilities: action.capabilities };
   }
 }
 
@@ -2741,16 +2751,34 @@ export function isDirtySinceApply(state: EditorState): boolean {
 }
 
 /**
- * SG-D15 / §8.4 — is the stored validation still the document on screen?
+ * SG-D15 / §8.4 — what a Validate press records.
+ *
+ * **Both arguments `validateState` was given, not just the first.** §8.4 keyed
+ * freshness on the `state` reference alone and called that exact. It was exact
+ * about the document and silent about the rest: `validateState(state,
+ * existingIds)` also reads the brief listing, and the listing moves on its own —
+ * a window-focus refresh refetches it while nothing on screen changes. So the
+ * validation could stop holding (an id that was free when it was judged is taken
+ * by the time Generate is pressed) with `state` untouched, and the gate reported
+ * it fresh. A snapshot of one input cannot answer for two.
+ */
+export type ValidationSnapshot = {
+  readonly state: EditorState;
+  readonly existingIds: readonly string[];
+};
+
+/**
+ * SG-D15 / §8.4 — is the stored validation still the verdict on what is on screen?
  *
  * **Reference equality on `state`, and it lives here rather than inline in the
  * editor so the decision has one home and one test.** Validation is a pure
- * synchronous function of `state` (`validateState`), so it is fresh exactly while
- * `state` is unchanged. Two properties of `reduceEditor` make that exact rather
- * than approximate: a real change returns a new object (any edit flips this), and
- * a refused or no-op action deliberately stays identity-equal (`:745`'s
- * `return state.countNotice === null ? state : …`, `:1159`'s same-mode flip), so a
- * rejected keystroke does not invalidate a good validation — nothing changed.
+ * synchronous function of its two arguments (`validateState`), so it is fresh
+ * exactly while neither has changed. Two properties of `reduceEditor` make the
+ * document half exact rather than approximate: a real change returns a new object
+ * (any edit flips this), and a refused or no-op action deliberately stays
+ * identity-equal (`:745`'s `return state.countNotice === null ? state : …`,
+ * `:1159`'s same-mode flip), so a rejected keystroke does not invalidate a good
+ * validation — nothing changed.
  *
  * **Never re-key this onto `toBrief(state)`**, however much it looks like
  * `isDirtySinceApply` above. `toBrief` is what Save sends, so it DROPS and
@@ -2762,11 +2790,41 @@ export function isDirtySinceApply(state: EditorState): boolean {
  * a brief the operator never approved. `editor-state.validation-gate.test.ts`
  * pins that case; it is the one assertion that fails under the rewrite.
  *
+ * **The listing half is compared BY VALUE, and it has to be.** `existingIds` is
+ * `briefs.map(…)`, a new array on every render, so the reference test that is
+ * right for `state` is catastrophically wrong here: it would answer "stale" on
+ * every single render and the gate would never open at all. Order is not
+ * meaningful either — the listing is a set of ids, and a refetch that returns the
+ * same briefs in another order changed nothing a validation read.
+ *
+ * **Not the ERRORS, and not a narrower question than "the ids moved".** Keying on
+ * `valuesEqual(validatedErrors, errors)` is more precise — only a listing change
+ * that moves the VERDICT would close the gate — and it quietly removes §8.4's own
+ * pin: with an errors term standing, the projection-keyed rewrite above is caught
+ * by the second term and the reference test could be deleted unnoticed. Asking
+ * instead whether the id set is still the one that was judged (rather than
+ * re-deriving `validateIdentity`'s duplicate rule here, a second copy that can
+ * drift from the first) keeps one comparison, and errs toward asking the operator
+ * to look again — the safe direction for a verb that spends money.
+ *
  * **Not a boolean flag** (§8.4): a flag must be cleared by every writer that can
  * invalidate it, and the writer that forgets is the bug.
  */
-export function isValidationFresh(validatedState: EditorState | null, state: EditorState): boolean {
-  return validatedState === state;
+export function isValidationFresh(
+  validation: ValidationSnapshot | null,
+  state: EditorState,
+  existingIds: readonly string[],
+): boolean {
+  if (validation === null) return false;
+  if (validation.state !== state) return false;
+  return sameIdSet(validation.existingIds, existingIds);
+}
+
+function sameIdSet(a: readonly string[], b: readonly string[]): boolean {
+  if (a.length !== b.length) return false;
+  const left = [...a].sort();
+  const right = [...b].sort();
+  return left.every((id, index) => id === right[index]);
 }
 
 export function draftKeyFor(id: string): string {

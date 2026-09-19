@@ -4098,6 +4098,208 @@ describe("BriefPage — the run slot: Validate → Generate (SG9)", () => {
     expect(slot(messages.generate)).toBeNull();
     expect(generateCalls(calls)).toEqual([]);
   });
+
+  /**
+   * D7's third question, end to end: *runnable* is *persistable* PLUS the host.
+   *
+   * `status.applyRefusal` has always told the operator "Generate will wait until it is
+   * set up"; until this lane it did not wait — `motionUnavailableReason` sits outside
+   * `validateState` (D7, correctly), so the brief validated clean and the run verb
+   * spent credits on a host with no ffmpeg. SG9 found it, wrote this test, watched it
+   * fail and removed it rather than ship un-stamped behaviour.
+   *
+   * BOTH halves are asserted here, because the cheap way to make the sentence true is
+   * to make the document invalid, and that would break D7's first question:
+   *
+   *   1. Generate is genuinely unavailable and the reason is on screen.
+   *   2. The DOCUMENT is still valid — the snapshot was taken (Generate is present at
+   *      all, which `handleValidate` only allows at zero errors), the validation view
+   *      says clean-and-validated, and Save is still offered.
+   */
+  test("a motion brief on a host that cannot make video validates clean and refuses to run", async () => {
+    const user = userEvent.setup();
+    const clip = {
+      ...brief("clip"),
+      mode: "variation",
+      variation: {
+        count: 8,
+        seed: 3,
+        minDistance: 2,
+        coverage: { perProduct: 1, perRatio: 1 },
+        axes: {
+          layout: ["headline-top", "headline-bottom"],
+          tone: ["bold", "subtle"],
+          background: { source: ["procedural"] },
+          paletteShift: [0, 0.1],
+          motion: ["ken-burns-in", "headline-rise"],
+          duration: [6],
+        },
+      },
+      output: { formats: ["static", "motion"], platforms: ["instagram-feed", "instagram-reel"] },
+    };
+    const calls = routes({
+      list: () => json({ briefs: [{ file: "clip.yaml", brief: clip, revision: "r1" }] }),
+      capabilities: () => json({ motion: false, reason: "no ffmpeg" }),
+    });
+    renderWithRun(<Editor id="clip" />);
+    await waitForEditorReady();
+    // The probe's verdict has LANDED. Without this the draft still reads
+    // `capabilities: null` — "unknown is not unavailable" — and the whole test would
+    // be measuring the ungated case.
+    await waitFor(() => expect(screen.getByText(messages.formatsMotionUnavailable)).toBeTruthy());
+
+    await user.click(slot(messages.editorValidate) as HTMLElement);
+
+    // Half 1 — the run is refused, and the sentence that promised the wait is the
+    // sentence on screen.
+    const generate = slot(messages.generate) as HTMLButtonElement;
+    expect(generate).not.toBeNull();
+    expect(generate.disabled).toBe(true);
+    await waitFor(() => expect(editorStatuses()[0]!.textContent).toBe(messages.statusApplyRefusal));
+    // Pressing it is not a way round: no confirm opens, and nothing is spent. A
+    // `disabled` attribute the confirm ignored would pass the two lines above.
+    await user.click(generate);
+    expect(screen.queryByRole("dialog", { name: messages.generateConfirmTitle })).toBeNull();
+    expect(generateCalls(calls)).toEqual([]);
+
+    // Half 2 — D7 is intact: a missing codec did not make the DOCUMENT invalid.
+    // Generate is on screen at all only because `handleValidate` stored the snapshot,
+    // which it refuses to do at one error or more; the view names the same verdict;
+    // and the brief is still persistable, which is D7's first question.
+    expect(slot(messages.editorValidate)).toBeNull();
+    expect(screen.getByText(messages.validationCleanValidated)).toBeTruthy();
+    expect((screen.getByRole("button", { name: /^Save$/ }) as HTMLButtonElement).disabled).toBe(
+      false,
+    );
+  });
+
+  /**
+   * The refusal was spoken only while the draft was COMMITTED — `applied ?
+   * motionUnavailableReason(state) : undefined`. A loaded brief is committed, so the
+   * test above cannot tell that apart from the widened rule; an EDITED draft can.
+   * Edit one keystroke, press Validate, and the run is refused exactly as before —
+   * so the reason has to be said there too, or the operator meets a Generate that
+   * will not run and a status line talking about something else.
+   */
+  test("an edited draft that has just been validated still says why Generate waits", async () => {
+    const user = userEvent.setup();
+    const clip = {
+      ...brief("clip"),
+      mode: "variation",
+      variation: {
+        count: 8,
+        seed: 3,
+        minDistance: 2,
+        coverage: { perProduct: 1, perRatio: 1 },
+        axes: {
+          layout: ["headline-top", "headline-bottom"],
+          tone: ["bold", "subtle"],
+          background: { source: ["procedural"] },
+          paletteShift: [0, 0.1],
+          motion: ["ken-burns-in", "headline-rise"],
+          duration: [6],
+        },
+      },
+      output: { formats: ["static", "motion"], platforms: ["instagram-feed", "instagram-reel"] },
+    };
+    routes({
+      list: () => json({ briefs: [{ file: "clip.yaml", brief: clip, revision: "r1" }] }),
+      capabilities: () => json({ motion: false, reason: "no ffmpeg" }),
+    });
+    renderWithRun(<Editor id="clip" />);
+    await waitForEditorReady();
+    await waitFor(() => expect(screen.getByText(messages.formatsMotionUnavailable)).toBeTruthy());
+
+    // One keystroke: the draft is no longer the committed snapshot, and it is still
+    // perfectly valid.
+    await user.type(screen.getByLabelText("Headline"), "!");
+    await user.click(slot(messages.editorValidate) as HTMLElement);
+
+    expect((slot(messages.generate) as HTMLButtonElement).disabled).toBe(true);
+    await waitFor(() => expect(editorStatuses()[0]!.textContent).toBe(messages.statusApplyRefusal));
+    // Not the generic "loaded" sentence that would stand here if the refusal were
+    // still gated on `applied` alone.
+    expect(editorStatuses()[0]!.textContent).not.toBe(messages.statusLoaded("clip"));
+  });
+
+  /**
+   * SG-D15's key covered ONE of `validateState`'s two arguments.
+   *
+   * `errors` is `validateState(state, existingIds)`, and `existingIds` comes from the
+   * brief listing, which refetches itself on every window focus. So the errors could
+   * change while `state` did not — and the gate, keyed on `state` alone, went on
+   * reporting the validation fresh. The live case is this one: an id that was free
+   * when the operator validated is taken by the time they press Generate, and the
+   * editor offers a run of a brief the API would refuse, having charged for it.
+   */
+  test("a validation is closed by a listing that takes the id out from under it", async () => {
+    const user = userEvent.setup();
+    let listed: readonly ReturnType<typeof entry>[] = [];
+    routes({ list: () => json({ briefs: listed }) });
+    renderWithRun(<NewEditor />);
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
+    );
+    await fillValidDraft(user, "fresh");
+
+    await user.click(slot(messages.editorValidate) as HTMLElement);
+    expect(slot(messages.generate)).not.toBeNull();
+
+    // Someone else saved `fresh` while this operator was away. The refetch on focus
+    // brings it back, `validateIdentity` now calls the id a duplicate — and the
+    // DOCUMENT has not moved by one byte.
+    listed = [entry("fresh", "r1")];
+    window.dispatchEvent(new Event("focus"));
+
+    await waitFor(() => expect(slot(messages.generate)).toBeNull());
+    expect(slot(messages.editorValidate)).not.toBeNull();
+  });
+
+  /**
+   * The inverse, and the one a fix for the test above will skip: `existingIds` is
+   * `briefs.map(…)`, a NEW array after every refetch, so a freshness key that read it
+   * by identity would shut the gate on every focus — and on every render in between.
+   * That trades a stale gate for one that resets constantly, which is the same verb
+   * unreachable for a different reason.
+   */
+  test("a listing refetch that changed nothing leaves Generate standing", async () => {
+    const user = userEvent.setup();
+    let lists = 0;
+    let listed: readonly ReturnType<typeof entry>[] = [entry("other", "r1")];
+    routes({
+      list: () => {
+        lists += 1;
+        // A NEW array of NEW objects each time, exactly as a real refetch answers —
+        // identical content, nothing shared by reference with the last answer.
+        return json({ briefs: listed.map((e) => ({ ...e })) });
+      },
+    });
+    renderWithRun(<NewEditor />);
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
+    );
+    await waitFor(() => expect(lists).toBe(1));
+    await fillValidDraft(user, "fresh");
+
+    await user.click(slot(messages.editorValidate) as HTMLElement);
+    expect(slot(messages.generate)).not.toBeNull();
+
+    window.dispatchEvent(new Event("focus"));
+    await waitFor(() => expect(lists).toBe(2));
+
+    // The listing answered, the arrays are different objects, and the operator's
+    // consent survives it: still Generate, and no Validate to press again.
+    expect(slot(messages.generate)).not.toBeNull();
+    expect(slot(messages.editorValidate)).toBeNull();
+
+    // And the absence above is not simply a focus whose answer never arrived. The
+    // SAME gesture, with a listing that really did move, closes the gate — so the
+    // refetch demonstrably reaches the component, and "nothing changed" is what the
+    // assertions above measured rather than "nothing happened yet".
+    listed = [entry("other", "r1"), entry("fresh", "r1")];
+    window.dispatchEvent(new Event("focus"));
+    await waitFor(() => expect(slot(messages.generate)).toBeNull());
+  });
 });
 
 /**
