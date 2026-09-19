@@ -109,11 +109,23 @@ No seed migration. No golden re-record. No rewrite of `regenerateOnly`. No liter
 
 ## 8. Premise
 
-```premise SL
-# `index` still compacts, so a deleted creative is reborn with its old seed. This
-# flips when SL2 allocates monotonically. Greps the source, ~40 ms.
-grep -rqn 'const index = accepted.length' packages/CampaignOrchestration/src
-```
+**`premise SL` retired: SL2 shipped.** The fence asserted that `index` still
+compacts, so a deleted creative is reborn with its old seed — and it probed for
+that by grepping `const index = accepted.length` in
+`PlanVariationsUseCase.use-case.ts`. Both halves are now false. The line is gone:
+the index comes from an explicit allocation cursor over `[0, occupancy.nextIndex)`,
+and what the draw accumulates is no longer the emitted set but the **allocation
+history**, renamed accordingly, because it now retains tombstoned slots that are
+drawn and never emitted. The fence would report the lane stale rather than live.
+
+What replaced it is stronger than the grep was, and is the reason the grep was
+only ever a proxy: the property is **deleting a creative leaves the others
+byte-identical**, and it is asserted as `toEqual` over the whole surviving
+`Variant` objects — axes included — for a plain brief and for one whose plan came
+from the exhaustive search (`PlanVariationsUseCase.use-case.test.ts`, "monotonic
+slots (SL2)"). Seeds and asset keys are asserted too, but only alongside: both are
+index-derived, so they survive a wrong allocation scheme that keeps the index and
+moves the axes, which is exactly the near-miss design this lane had to reject.
 
 ## 9. What this plan does not do
 
