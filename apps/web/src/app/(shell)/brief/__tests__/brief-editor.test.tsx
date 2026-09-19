@@ -1538,6 +1538,35 @@ describe("BriefPage — data flow", () => {
     expect(screen.getByText(messages.targetRegion)).toBeTruthy();
   });
 
+  test("a refused Save lands on the field that is wrong, not the top of its section (PE1)", async () => {
+    const user = userEvent.setup();
+    const calls = routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
+    renderWithRun(<Editor id="camp" />);
+    await waitForEditorReady();
+
+    // This brief carries TWO products, which is what makes the assertion mean
+    // anything: blank the SECOND row's Name and the refusal has to reach row 1,
+    // not merely the first field of the Products section. Row 0 stays valid, so
+    // landing on it would be landing on a field with nothing wrong with it.
+    const names = screen.getAllByLabelText("Name");
+    expect(names).toHaveLength(2);
+    await user.clear(names[1]!);
+    await saveVia(user, "Save");
+
+    // Refused, as before.
+    expect(writes(calls)).toEqual([]);
+
+    // The part that is new: focus is inside the offending FIELD's wrapper. Before
+    // PE1 the refusal handed focus to the section and the operator searched the
+    // rows by eye — with two rows that is a short search, with six it is the
+    // complaint. `data-field-key` is the wrapper the validator's key names.
+    const landed = (document.activeElement as HTMLElement | null)?.closest("[data-field-key]");
+    expect(landed?.getAttribute("data-field-key")).toBe("product-1-name");
+    // And it is the control that holds focus, so the fix can be typed straight
+    // away — never the wrapper, and never `document.body` (H2).
+    expect(document.activeElement?.tagName).toBe("INPUT");
+  });
+
   test("Save refuses a click destination the API would refuse, and writes nothing (HL5b)", async () => {
     // The API's boundary refuses a destination that is not an absolute URL
     // (load-brief.ts's validateClickDestination). Save must refuse the same thing:
@@ -4028,11 +4057,19 @@ describe("BriefPage — the run slot: Validate → Generate (SG9)", () => {
 
     // D3's surviving half (SG-D11): the verb is never disabled, so the press answers —
     // every error shown, the count spoken, and the first blocking section revealed with
-    // focus on it, exactly the landing Save's refusal gives (H2).
+    // focus landing in it, exactly the landing Save's refusal gives (H2).
     expect(
       screen.getAllByRole("status").some((el) => el.textContent?.startsWith("Not saved yet —")),
     ).toBe(true);
-    expect(document.activeElement).toBe(document.getElementById("copy"));
+    // PE1 sharpened where that focus lands. It used to be the `<section>` itself;
+    // it is now the control of the field that actually blocks, which is inside
+    // that same section. H2's requirement is unchanged and still met — the press
+    // unmounts its own button, so focus must go somewhere, never to
+    // `document.body` — and the operator can now type the fix without hunting.
+    const copy = document.getElementById("copy") as HTMLElement;
+    expect(copy.contains(document.activeElement)).toBe(true);
+    expect((document.activeElement as HTMLElement).closest("[data-field-key]")).toBeTruthy();
+    expect(document.activeElement).toBe(screen.getByLabelText("Headline"));
     // And the money: the gate stayed shut, so no press can reach a run.
     expect(slot(messages.generate)).toBeNull();
     expect(slot(messages.editorValidate)).not.toBeNull();

@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "lane": "PE1",
+  "mutations": [
+    {
+      "file": "apps/web/src/lib/scroll-to-section.ts",
+      "before": "  const failing = Array.from(host.querySelectorAll<HTMLElement>(\"[data-field-key]\"))\n    .map((el) => ({ el, key: el.dataset.fieldKey }))\n    .filter((found): found is { el: HTMLElement; key: string } => {\n      return found.key !== undefined && keys.has(found.key);\n    });",
+      "after": "  const failing = [...keys].flatMap((key) => {\n    const el = host.querySelector<HTMLElement>(`[data-field-key=\"${key}\"]`);\n    return el === null ? [] : [{ el, key }];\n  });",
+      "because": "The ordering claim, and the only one that distinguishes this function from a lookup. Reading order is the DOM's own order, so the search walks the document and keeps the keys as a membership test. The mutation walks the KEYS instead and looks each one up — which is the implementation a reader reaches for first, and it is wrong: `FieldErrors` is a `Record<string, string>` whose key order is whatever the validator appended, so the refusal lands on whichever failing field the validator happened to mint first rather than the one the operator reads first. It coincides with the form's order for products today only because `validateProducts` walks rows in array order; nothing holds it there. The test hands the keys over deliberately out of order (row 2 before row 0) so the coincidence cannot cover for it.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "apps/web/src/lib/__tests__/scroll-to-section.test.ts",
+        "-t",
+        "first field in DOCUMENT order"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/BriefEditor.tsx",
+      "before": "    revealField(blockedAt, blocked.fieldKeys);",
+      "after": "    revealField(blockedAt, new Set());",
+      "because": "The wiring. `revealField` can be entirely correct while the refusal never reaches it with anything to find — the section reveal above still runs, the draft is still refused, the error is still on screen, and every other test in the suite stays green. Handing it an empty set restores the pre-PE1 behaviour exactly (the function returns `null` on `keys.size === 0` and moves nothing), which is the point: the only thing that observes the difference is the test that presses Save on a two-product draft whose SECOND row is blank and then asks which field holds focus. A lane that fixed the derivation and mis-wired the call would pass everything else.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx",
+        "-t",
+        "lands on the field that is wrong"
+      ],
+      "verdict": "caught"
+    }
+  ],
+  "note": "Two mutations for two independent failure modes: the ordering rule inside `revealField`, and whether the refusal calls it at all. The brief asked for at least one aimed at the ordering, because that is the claim a naive implementation gets wrong; the second was added after measuring that the first passes with the call site deleted."
+}

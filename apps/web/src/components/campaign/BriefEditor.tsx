@@ -86,7 +86,10 @@ import { FloatingBar } from "@/components/shell/FloatingBar";
 import { SectionModeContext } from "@/components/campaign/SectionModeContext";
 import { useEditorPanelPublisher } from "@/lib/editor-panels-context";
 import { Accordion } from "@/components/shell/Accordion";
-import { revealSection } from "@/lib/scroll-to-section";
+import { revealField, revealSection } from "@/lib/scroll-to-section";
+
+/** Stable identity, so a valid draft's `blocked` memo never churns its consumers. */
+const EMPTY_FIELD_KEYS: ReadonlySet<string> = new Set<string>();
 import { cn } from "@/lib/cn";
 import { BriefSelector } from "@/components/campaign/BriefSelector";
 import { HeadlinePoolDrawer } from "@/components/campaign/HeadlinePoolDrawer";
@@ -723,7 +726,12 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   const warnings = useMemo(() => validateWarnings(state), [state]);
   // Not a boolean: the section that blocks is what the refusal needs to scroll to, and
   // deriving it here keeps "is it blocked" and "where" from disagreeing. null = valid.
-  const blockedAt = useMemo(() => {
+  // PE1: the blocking section AND the keys that block it, from one derivation.
+  // The same argument the section's own comment makes — "is it blocked" and
+  // "where" must not disagree — applies with more force to "where" and "which
+  // field": two memos would each re-run `validateState` against the same state
+  // and could only ever agree by coincidence.
+  const blocked = useMemo(() => {
     // D7: Save is blocked by structural invalidity only. A capability being off
     // makes the draft unrunnable on this host, not unsavable — so the gating check
     // runs the same validation with the capability unknown. The API parses saves in
@@ -737,12 +745,21 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
     const walk = sectionOrder(state.mode);
     const walkIndex = (bucket: string) =>
       walk.indexOf((bucket === MOTION_ERROR_KEY ? MOTION_HOST_SECTION : bucket) as SectionId);
-    return (
+    const section =
       Object.keys(structural)
         .filter((bucket) => getTotalErrorCount({ [bucket]: structural[bucket] }) > 0)
-        .sort((a, b) => walkIndex(a) - walkIndex(b))[0] ?? null
-    );
+        .sort((a, b) => walkIndex(a) - walkIndex(b))[0] ?? null;
+    // Only the blocking bucket's keys: the refusal lands inside the section it
+    // names, never in a later one that also fails. No `?? {}` on the lookup —
+    // `section` came out of `Object.keys(structural)`, so it indexes something
+    // by construction, and a fallback there would be an unreachable branch
+    // dressed as caution.
+    return {
+      section,
+      fieldKeys: section === null ? EMPTY_FIELD_KEYS : new Set(Object.keys(structural[section])),
+    };
   }, [state, existingIds]);
+  const blockedAt = blocked.section;
 
   /**
    * SG-D15's gate, computed ONCE. It used to be spelled out at each of its two call
@@ -1701,8 +1718,15 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
     // outline's activation uses (W4.2); the reveal's step-heading suppression keeps
     // the step handoff from fighting it.
     reveal(blockedAt, true);
+    // PE1: the section is the neighbourhood, the field is the address. `reveal`
+    // has already flipped the view out of YAML and mounted the form (SG4), so
+    // the field is in the document to be found — targeting it before that would
+    // search a `<pre>`. When nothing resolves (a bucket-level error naming no
+    // field, a collapsed disclosure) the section handoff above stands untouched,
+    // which is the pre-PE1 behaviour exactly.
+    revealField(blockedAt, blocked.fieldKeys);
     return true;
-  }, [blockedAt, reveal]);
+  }, [blockedAt, blocked.fieldKeys, reveal]);
 
   /**
    * D35: Save writes the file and commits the brief to the shell — the one act, told
