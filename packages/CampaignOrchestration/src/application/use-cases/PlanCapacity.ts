@@ -22,6 +22,21 @@ export interface AxisNeed {
   readonly aspectRatio?: string;
 }
 
+/**
+ * Whether this brief's occupancy describes creatives that already exist (SL-D3):
+ * a tombstoned slot, or an allocation cursor that has moved past the recipe's
+ * cardinality because a creative was added.
+ *
+ * A brief carrying neither — which includes every brief written before SL1, since
+ * absent occupancy resolves to `nextIndex === count` with nothing tombstoned — is
+ * indistinguishable from one with no occupancy block, and takes every path it
+ * took before. That is what makes the distinction usable as a switch: it is only
+ * ever true for a brief whose creatives the operator has already edited.
+ */
+export function hasOccupants(policy: VariationPolicy): boolean {
+  return policy.occupancy.tombstoned.length > 0 || policy.occupancy.nextIndex !== policy.count;
+}
+
 /** Every combination the draw could produce, in a fixed order, so it can be searched or counted. */
 export function enumerateAxes(policy: VariationPolicy): Axes[] {
   const out: Axes[] = [];
@@ -176,6 +191,11 @@ export function matchesNeed(candidate: Axes, need: AxisNeed): boolean {
  * Seeded greedy over the whole enumerated space with a few restarts: reaches the
  * capacity of a tight space where 3 × count random draws could not. Coverage needs
  * rank candidates first, as in the random draw. Deterministic for a brief and seed.
+ *
+ * It targets `policy.count` and assigns the slots `0 … count-1`, which is sound
+ * only because the caller refuses to take this path once the brief has occupants
+ * (`hasOccupants`): the search re-chooses the whole set from a reshuffled order,
+ * so it cannot preserve a slot that already exists.
  */
 export function exhaustiveAccept(
   space: readonly Axes[],
@@ -219,6 +239,21 @@ export function exhaustiveAccept(
   }));
 }
 
+/**
+ * Why the draw fell short, and what would fix it.
+ *
+ * The target is the number of slots ALLOCATED (`occupancy.nextIndex`), not the
+ * recipe's `count`: once a creative has been added the two differ, and the
+ * operator's request was for the slot, not for the recipe. They are equal for
+ * every brief that carries no occupancy, so the sentence is unchanged there.
+ *
+ * With occupants the message also has to say that the existing creatives are not
+ * negotiable — they keep their draw (see `PlanVariationsUseCase`'s replay), so a
+ * shortfall is about the slots still to allocate and one of the remedies is to
+ * delete a creative. This is §7's "refused loudly, naming the shortfall": the
+ * alternative, taking the exhaustive search, would silently reshuffle every
+ * creative the operator already has.
+ */
 export function shortfallMessage(
   policy: VariationPolicy,
   space: readonly Axes[],
@@ -229,12 +264,18 @@ export function shortfallMessage(
   const why = singleRatio
     ? ` — every motion platform is ${policy.ratios[0]}, so the aspect ratio cannot vary`
     : "";
+  const occupied = hasOccupants(policy)
+    ? `Existing creatives keep their draw (${accepted} of ${policy.occupancy.nextIndex} slots ` +
+      `are already occupied), so the shortfall is in the slots still to allocate. `
+    : "";
   const remedies = [`lower count to ${max}`];
+  if (hasOccupants(policy)) remedies.unshift("delete a creative");
   if (policy.minDistance > 1)
     remedies.push(`lower minDistance (at 1 the maximum is ${space.length})`);
   remedies.push("add axis values (another palette shift, layout, tone, motion kind or duration)");
   return (
-    `Variation plan shortfall: accepted ${accepted} of count ${policy.count}. ` +
+    `Variation plan shortfall: accepted ${accepted} of count ${policy.occupancy.nextIndex}. ` +
+    occupied +
     `At minDistance ${policy.minDistance} this brief can yield ${exact ? "at most" : "no more than"} ${max} ` +
     `distinct variants (${space.length} combinations${why}). To fix: ${remedies.join(", ")}.`
   );

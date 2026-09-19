@@ -1,10 +1,15 @@
 import { describe, test, expect, vi } from "vitest";
+import { err, ok } from "@campaignfoundry/shared";
 import {
   GenerateCampaignUseCase,
   unionSafeInsets,
   unionSizeInsets,
 } from "../GenerateCampaignUseCase.use-case.js";
-import type { GenerateCampaignDeps } from "../GenerateCampaignUseCase.use-case.js";
+import type {
+  GenerateCampaignDeps,
+  VariationPlanner,
+} from "../GenerateCampaignUseCase.use-case.js";
+import type { VariationPlan } from "../../../domain/value-objects/VariationPlan.vo.js";
 import type {
   PlatformSafeZone,
   PlatformSafeZoneResolver,
@@ -2318,5 +2323,89 @@ describe("GenerateCampaignUseCase — campaign type in background context (T4)",
     expect(result.success).toBe(true);
     const ctx = vi.mocked(d.imageGenerator.resolveBackground).mock.calls[0][2];
     expect(ctx.campaignType).toBe("short-video");
+  });
+});
+
+/**
+ * H1 — a re-roll target names a SLOT, and slots stop being contiguous once a
+ * creative can be deleted (SL-D3). `plan.variants.length` is then a count of
+ * survivors, not a bound on their indices, and `plan.variants[i]` is not slot
+ * `i`. This block is the red test for the bounds check at the top of
+ * `executeVariation`'s re-roll path.
+ *
+ * It uses its own planner fake rather than `fakePlanner`, because that one
+ * indexes `current.variants[index]` positionally too — a fake that made the same
+ * assumption could not tell the fix from the bug.
+ */
+const slotPlanner = (plan: VariationPlan): VariationPlanner => ({
+  plan: vi.fn(() => ok(plan)),
+  replan: vi.fn((current: VariationPlan, index: number, attempt: number) => {
+    const position = current.variants.findIndex((variant) => variant.index === index);
+    if (position < 0) return err(new Error(`Invalid variant index ${index}.`));
+    const next: Variant = { ...current.variants[position], seed: attempt + 100, tone: "subtle" };
+    return ok({
+      ...current,
+      variants: current.variants.map((variant, slot) => (slot === position ? next : variant)),
+    });
+  }),
+});
+
+/** Slots 0, 1 and 3 — slot 2 was deleted. Length 3; highest index 3. */
+const holeyPlan = (): VariationPlan =>
+  fakePlan([
+    fakeVariant({ index: 0 }),
+    fakeVariant({ index: 1, aspectRatio: "9:16" }),
+    fakeVariant({ index: 3, aspectRatio: "16:9" }),
+  ]);
+
+describe("GenerateCampaignUseCase — a holey plan re-rolls by slot (H1)", () => {
+  test("re-rolling the highest slot of a holey set succeeds and touches only that slot", async () => {
+    const plan = holeyPlan();
+    expect(plan.variants).toHaveLength(3);
+    expect(plan.variants.map((v) => v.index)).toEqual([0, 1, 3]);
+    const planner = slotPlanner(plan);
+    const d = deps({ planner });
+    const result = await new GenerateCampaignUseCase(d).execute(variationBrief(), {
+      regenerateOnly: [{ productId: "alpha", variantIndex: 3, attempt: 1 }],
+    });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(planner.replan).toHaveBeenCalledWith(expect.anything(), 3, 1);
+    expect(result.value.assets).toHaveLength(1);
+    expect(result.value.assets[0].variantIndex).toBe(3);
+    expect(result.value.assets[0].outputPath).toMatch(/\/v3\.png$/);
+  });
+
+  test("a tombstoned slot inside the range is refused, because membership is the bound", async () => {
+    const planner = slotPlanner(holeyPlan());
+    const d = deps({ planner });
+    const result = await new GenerateCampaignUseCase(d).execute(variationBrief(), {
+      regenerateOnly: [{ productId: "alpha", variantIndex: 2, attempt: 1 }],
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.error.message).toMatch(/Invalid variant index 2/);
+    expect(planner.replan).not.toHaveBeenCalled();
+  });
+
+  test("the productId check reads the slot's occupant, not the array position", async () => {
+    // Slot 3 sits at position 2. Reading position 3 was `undefined`; reading
+    // position 1 would compare against the wrong creative's product.
+    const plan = fakePlan([
+      fakeVariant({ index: 0, productId: "alpha" }),
+      fakeVariant({ index: 1, productId: "alpha" }),
+      fakeVariant({ index: 3, productId: "beta" }),
+    ]);
+    const planner = slotPlanner(plan);
+    const d = deps({ planner });
+    const mismatch = await new GenerateCampaignUseCase(d).execute(variationBrief(), {
+      regenerateOnly: [{ productId: "alpha", variantIndex: 3, attempt: 1 }],
+    });
+    expect(mismatch.success).toBe(false);
+    if (!mismatch.success) {
+      expect(mismatch.error.message).toMatch(
+        /productId "alpha" does not match plan slot 3 \("beta"\)/,
+      );
+    }
+    expect(planner.replan).not.toHaveBeenCalled();
   });
 });

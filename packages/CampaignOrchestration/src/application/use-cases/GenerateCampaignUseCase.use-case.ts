@@ -579,14 +579,19 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
       });
       const slots: Variant[] = [];
       for (const target of unique) {
-        if (
-          !Number.isInteger(target.variantIndex) ||
-          target.variantIndex < 0 ||
-          target.variantIndex >= plan.variants.length
-        ) {
+        // H1: a target names a SLOT, and slots are monotonic — a deleted one is
+        // never reissued (SL-D3), so `plan.variants` can have holes and its
+        // length is a count of survivors, not a bound on their indices. Slots
+        // `0, 1, 3` give length 3, and the old `variantIndex >= length` test
+        // refused a re-roll of the perfectly valid slot 3 (and `variants[3]`
+        // read `undefined`). Membership in the planned set is the bound.
+        const position = plan.variants.findIndex(
+          (variant) => variant.index === target.variantIndex,
+        );
+        if (!Number.isInteger(target.variantIndex) || target.variantIndex < 0 || position < 0) {
           return err(new Error(`Invalid variant index ${target.variantIndex}.`));
         }
-        const occupant = plan.variants[target.variantIndex];
+        const occupant = plan.variants[position];
         if (occupant.productId !== target.productId) {
           return err(
             new Error(
@@ -601,7 +606,10 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
         const next = this.deps.planner.replan(plan, target.variantIndex, attempt);
         if (!next.success) return next;
         plan = next.value;
-        slots.push(plan.variants[target.variantIndex]);
+        // `replan` replaces the slot in place, so the re-rolled variant is at the
+        // same POSITION the occupant was found at — read it there rather than by
+        // index, which would be the very confusion H1 names.
+        slots.push(plan.variants[position]);
         attemptByIndex.set(target.variantIndex, attempt);
       }
       variants = slots;

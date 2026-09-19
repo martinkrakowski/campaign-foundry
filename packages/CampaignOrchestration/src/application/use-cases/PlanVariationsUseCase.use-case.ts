@@ -30,13 +30,44 @@ interface AxisDraw {
 /**
  * PlanVariationsUseCase — pure, synchronous, seeded planner.
  *
- * `plan` round-robins deficient coverage axes, then fills to `count`, greedy-accepting
- * at Hamming `minDistance`, with a hard cap of `count × 3` candidates. Coverage is
- * a property of the accepted set. `replan` replaces one slot without breaking
- * distance or coverage. `input` carries what the brief cannot: `headlines` (the
- * approved copy pool) and `motionRatios` (the ratios the requested motion
- * platforms package) — both resolved into the policy at plan time; the stored
- * policy carries them for `replan`.
+ * `plan` round-robins deficient coverage axes, then fills the **allocated** slots,
+ * greedy-accepting at Hamming `minDistance`, with a hard cap of `allocated × 3`
+ * candidates. Coverage is a property of the accepted set. `replan` replaces one
+ * slot without breaking distance or coverage. `input` carries what the brief
+ * cannot: `headlines` (the approved copy pool) and `motionRatios` (the ratios the
+ * requested motion platforms package) — both resolved into the policy at plan
+ * time; the stored policy carries them for `replan`.
+ *
+ * ## Slots are monotonic, and the draw is a replay (SL-D3, SL-D5)
+ *
+ * A creative's identity is its slot — `productId` + `index` (`Variant.ts:10`) —
+ * and its seed is `seedFrom(briefId, index, attempt)`. The index used to be the
+ * accepted **count**, so it compacted: delete slot 2, replan the same `count`,
+ * and index 2 was reborn with its old seed and (being the third accepted draw)
+ * its old axes. That compaction was the whole of the recreate-on-delete bug.
+ *
+ * What replaces it is not "skip the tombstoned index" — that is not enough, and
+ * the reason is worth stating because it is the only thing the two designs
+ * disagree about. The axes come from **one sequential RNG consumed per
+ * candidate**, so a slot's axes are a function of its *position in the draw*,
+ * not of its index. Skip index 2 without consuming its draw and slot 3 receives
+ * the third draw where it used to receive the fourth: same index, same seed,
+ * **different axes** — a different picture at `…/v3.png`. §7's first line
+ * ("deleting a creative leaves the others byte-identical") would fail.
+ *
+ * So the draw **replays the whole allocation history**, `[0, occupancy.nextIndex)`,
+ * exactly as it always did; a tombstoned slot is still drawn, still spends its
+ * budget and still occupies the distance and coverage sets. Occupancy decides
+ * only which slots are *emitted*. Deleting a slot therefore leaves every other
+ * slot's `index`, `seed` and axes untouched — deep-equal, not merely similar —
+ * and an added slot is `nextIndex`, above every index ever used, drawn against
+ * the history that precedes it (SL-D4's "append against occupants": the history
+ * is a superset of the live occupants, so a candidate too close to any existing
+ * creative is rejected).
+ *
+ * A brief with no `variation.occupancy` resolves to `nextIndex === count` with
+ * nothing tombstoned (`resolveOccupancy`), so every line below is the old line
+ * and every existing plan is byte-identical.
  */
 export class PlanVariationsUseCase {
   constructor(private readonly hasher: PolicyHasher) {}
@@ -46,10 +77,16 @@ export class PlanVariationsUseCase {
     if (!policyResult.success) return policyResult;
     const policy = policyResult.value;
 
-    if (policy.axisProductSize < policy.count) {
+    // How many slots the draw must fill: every index ever allocated, tombstoned
+    // ones included, because the draw is a replay (see the class comment). Equal
+    // to `count` for a brief that carries no occupancy.
+    const allocated = policy.occupancy.nextIndex;
+    const live = new Set(policy.occupancy.liveIndices);
+
+    if (policy.axisProductSize < allocated) {
       return err(
         new Error(
-          `Variation count ${policy.count} exceeds axisProductSize ${policy.axisProductSize}.`,
+          `Variation count ${allocated} exceeds axisProductSize ${policy.axisProductSize}.`,
         ),
       );
     }
@@ -71,30 +108,40 @@ export class PlanVariationsUseCase {
       );
     }
 
-    const budget = policy.count * 3;
+    const budget = allocated * 3;
     const rng = new SeededRandom(seedFrom(brief.id, String(policy.seed)));
-    let accepted: Variant[] = [];
+    /**
+     * Every slot the draw has allocated so far, tombstoned ones included — the
+     * allocation history, not the emitted set. It is dense over `[0, cursor)`,
+     * which is what makes the replay reproducible.
+     */
+    let history: Variant[] = [];
+    /** The allocation cursor (SL-D3): it only ever advances, and never revisits a slot. */
+    let cursor = 0;
     let drawn = 0;
     let turn = 0;
 
-    const remaining = (): boolean => accepted.length < policy.count && drawn < budget;
+    const remaining = (): boolean => cursor < allocated && drawn < budget;
 
     const addCandidate = (fixed: AxisDraw): void => {
       drawn += 1;
       const axes = drawAxes(rng, policy, fixed);
-      const index = accepted.length;
+      const index = cursor;
       const variant: Variant = {
         index,
         seed: seedFrom(brief.id, String(index), "0"),
         ...axes,
       };
-      if (meetsMinDistance(variant, accepted, policy.minDistance)) {
-        accepted.push(variant);
+      // The occupants a candidate must keep its distance from are every slot
+      // already allocated (SL-D4) — for an append, that is the whole existing set.
+      if (meetsMinDistance(variant, history, policy.minDistance)) {
+        history.push(variant);
+        cursor += 1;
       }
     };
 
     while (remaining()) {
-      const needs = deficient(accepted, policy);
+      const needs = deficient(history, policy);
       if (needs.length > 0) {
         addCandidate(needs[turn % needs.length]);
         turn += 1;
@@ -103,44 +150,77 @@ export class PlanVariationsUseCase {
       }
     }
 
-    if (accepted.length < policy.count) {
+    if (cursor < allocated) {
       // The random draw (kept first so every plan it can satisfy stays golden) has a
-      // budget of 3 × count, which is hopeless in a tight space — a motion-only brief
+      // budget of 3 × allocated, which is hopeless in a tight space — a motion-only brief
       // sits at one aspect ratio, since every motion platform is 9:16. Search the
       // whole space instead, seeded, before deciding the brief really cannot fit.
+      //
+      // It answers one question, though: "choose `policy.count` points from
+      // scratch". That is the right question exactly while `allocated === count`
+      // — a dense brief, and a DELETE, which leaves `nextIndex` alone. The chosen
+      // set is then identical before and after the delete (occupancy is not in
+      // the policy hash and not an input to the search), so the survivors of a
+      // brief that needed this path are byte-identical too.
+      //
+      // Once a slot has been ADDED, `allocated > count` and the question no
+      // longer matches: re-choosing from a reshuffled order would move every
+      // creative the operator already has, to make room for one more. Refuse
+      // loudly instead, naming the shortfall (§7).
+      //
+      // CONSTRAINT ON THE GESTURES (SL4): add advances `nextIndex` only, delete
+      // appends a tombstone only, and NEITHER touches `count` — SL-D5's reading,
+      // that `count` is the recipe's target cardinality and occupancy is what
+      // exists. This test breaks in both directions otherwise: an add that also
+      // raised `count` would make the two equal again and re-open the search on
+      // the very gesture it guards, and a delete that lowered `count` would make
+      // them differ and strand a brief whose plan this search produced.
       const space = enumerateAxes(policy);
       const exhaustive =
-        space.length <= EXHAUSTIVE_MAX_SPACE
+        space.length <= EXHAUSTIVE_MAX_SPACE && allocated === policy.count
           ? exhaustiveAccept(space, policy, brief.id, deficient)
-          : accepted;
-      if (exhaustive.length < policy.count) {
+          : history;
+      if (exhaustive.length < allocated) {
         return err(
-          new Error(shortfallMessage(policy, space, Math.max(accepted.length, exhaustive.length))),
+          new Error(shortfallMessage(policy, space, Math.max(history.length, exhaustive.length))),
         );
       }
-      accepted = exhaustive; // the coverage check below applies to either search
+      history = exhaustive; // the coverage check below applies to either search
     }
 
-    const unmet = firstUnmetCoverage(accepted, policy);
+    // Occupancy decides what is emitted; the history decided what was drawn.
+    const variants = history.filter((variant) => live.has(variant.index));
+
+    const unmet = firstUnmetCoverage(variants, policy);
     if (unmet !== undefined) {
-      return err(new Error(`Variation plan coverage unmet: ${unmet}.`));
+      return err(new Error(`Variation plan coverage unmet: ${unmet}${tombstoneNote(policy)}.`));
     }
 
     const copyHash = hashCopy(brief, this.hasher);
-    return ok(toPlan(brief.id, policy, accepted, hasSceneBackgrounds(brief), copyHash));
+    return ok(toPlan(brief.id, policy, variants, hasSceneBackgrounds(brief), copyHash));
   }
 
+  /**
+   * Re-roll one slot, keeping its `index` and restamping its seed from `attempt`.
+   *
+   * `index` is a **slot**, not a position in `plan.variants` (H1). With holes the
+   * two differ — a plan of slots `0, 1, 3` has `length` 3, so the old
+   * `index >= plan.variants.length` bound refused slot 3, and `plan.variants[3]`
+   * was `undefined`. Every lookup here resolves the slot first and works in
+   * positions afterwards.
+   */
   replan(plan: VariationPlan, index: number, attempt: number): Result<VariationPlan, Error> {
-    if (!Number.isInteger(index) || index < 0 || index >= plan.variants.length) {
+    const position = plan.variants.findIndex((variant) => variant.index === index);
+    if (!Number.isInteger(index) || index < 0 || position < 0) {
       return err(new Error(`Invalid variant index ${index}.`));
     }
     if (!Number.isInteger(attempt) || attempt < 1) {
       return err(new Error(`replan attempt must be an integer >= 1 (received ${attempt}).`));
     }
 
-    const occupant = plan.variants[index];
+    const occupant = plan.variants[position];
     const rng = new SeededRandom(seedFrom(plan.briefId, String(index), String(attempt)));
-    const others = plan.variants.filter((_, slot) => slot !== index);
+    const others = plan.variants.filter((_, slot) => slot !== position);
     const seed = seedFrom(plan.briefId, String(index), String(attempt));
 
     for (let draw = 0; draw < REPLAN_MAX_DRAWS; draw++) {
@@ -150,7 +230,9 @@ export class PlanVariationsUseCase {
       });
       const variant: Variant = { index, seed, ...axes };
       if (!meetsMinDistance(variant, others, plan.policy.minDistance)) continue;
-      const variants = plan.variants.map((current, slot) => (slot === index ? variant : current));
+      const variants = plan.variants.map((current, slot) =>
+        slot === position ? variant : current,
+      );
       if (firstUnmetCoverage(variants, plan.policy) !== undefined) continue;
       return ok({
         ...plan,
@@ -169,6 +251,17 @@ export class PlanVariationsUseCase {
       ),
     );
   }
+}
+
+/**
+ * Coverage counts the slots that EXIST, so a delete can put a brief below its
+ * own floor. Say which delete did it; silence here reads as a planner bug.
+ * Empty for a brief with no tombstones, so every pre-SL2 message is unchanged.
+ */
+function tombstoneNote(policy: VariationPolicy): string {
+  const { tombstoned } = policy.occupancy;
+  if (tombstoned.length === 0) return "";
+  return ` (${tombstoned.length} deleted slot${tombstoned.length === 1 ? "" : "s"}: ${tombstoned.join(", ")})`;
 }
 
 function drawAxes(

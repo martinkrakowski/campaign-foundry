@@ -1192,3 +1192,308 @@ describe("PlanVariationsUseCase.plan at count = axisProductSize (SG-D7)", () => 
     expect(atCeiling.value.count).toBe(sized.value.axisProductSize);
   });
 });
+
+/**
+ * SL2 — slots are monotonic and a deleted one is never reissued (SL-D3/SL-D4/SL-D5).
+ *
+ * The property every test here serves is §7's first line: **deleting one creative
+ * leaves the others byte-identical**. That is asserted on the whole `Variant` —
+ * `toEqual` over the surviving objects — and deliberately not on seeds and asset
+ * keys alone. Seeds are derived from the index, so they survive any allocation
+ * scheme that keeps the index, including the wrong one; and the key
+ * `${productId}/v${index}` can match by luck when a coverage need pins the
+ * product. The axes are what a wrong scheme moves, and the axes are what a
+ * screenshot would have shown.
+ */
+const occupancyBrief = (
+  occupancy: Record<string, unknown> | undefined,
+  over: Record<string, unknown> = {},
+): CampaignBrief =>
+  brief({
+    variation: {
+      count: 12,
+      seed: 7,
+      minDistance: 1,
+      ...(occupancy === undefined ? {} : { occupancy }),
+      ...over,
+    },
+  } as Partial<CampaignBrief>);
+
+/**
+ * The reported tight case: one kind, one duration, three palettes, 9:16 → 24
+ * points, capacity exactly 8 at minDistance 2.
+ *
+ * The seed is a parameter because whether the 3 × allocated **random** draw
+ * reaches that capacity depends on it, and the two facts this file needs are on
+ * opposite sides of that line — measured, not assumed:
+ *
+ * - `seed: 7` — the random draw reaches 8 on its own. An append of an eighth
+ *   creative to seven therefore goes through the draw, which is the path that
+ *   distances a new candidate against the occupants.
+ * - `"derived"`, the brief's own seed with no `seed` key — the random draw stops
+ *   at 7, so a plan of 8 exists only through `exhaustiveAccept`. That is the
+ *   case a delete must not strand. (Spelled as a word, not `undefined`: an
+ *   explicit `undefined` argument takes a parameter's default, so the two
+ *   fixtures would silently be one.)
+ */
+const tightBrief = (
+  count: number,
+  occupancy?: Record<string, unknown>,
+  seed: number | "derived" = 7,
+): CampaignBrief =>
+  motionBrief({
+    variation: {
+      count,
+      ...(seed === "derived" ? {} : { seed }),
+      minDistance: 2,
+      axes: { paletteShift: [0, 0.1, 0.2], motion: ["ken-burns-out"], duration: [5] },
+      ...(occupancy === undefined ? {} : { occupancy }),
+    },
+    output: { formats: ["motion"], platforms: ["instagram-reel"] },
+  } as Partial<CampaignBrief>);
+
+const tightInput = { motionRatios: ["9:16"] } as const;
+
+describe("PlanVariationsUseCase.plan — monotonic slots (SL2)", () => {
+  test("a brief carrying no occupancy plans exactly what it planned before", () => {
+    const withoutBlock = planner().plan(occupancyBrief(undefined));
+    const trivialBlock = planner().plan(occupancyBrief({ nextIndex: 12 }));
+    const emptyTombstones = planner().plan(occupancyBrief({ nextIndex: 12, tombstoned: [] }));
+    expect(withoutBlock.success).toBe(true);
+    expect(trivialBlock.success).toBe(true);
+    expect(emptyTombstones.success).toBe(true);
+    if (!withoutBlock.success || !trivialBlock.success || !emptyTombstones.success) return;
+    expect(withoutBlock.value.variants).toHaveLength(12);
+    expect(withoutBlock.value.variants.map((v) => v.index)).toEqual([
+      0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11,
+    ]);
+    expect(trivialBlock.value.variants).toEqual(withoutBlock.value.variants);
+    expect(emptyTombstones.value.variants).toEqual(withoutBlock.value.variants);
+  });
+
+  test("deleting a slot leaves every other creative byte-identical — axes, seed and index", () => {
+    const before = planner().plan(occupancyBrief(undefined));
+    const after = planner().plan(occupancyBrief({ nextIndex: 12, tombstoned: [2] }));
+    expect(before.success).toBe(true);
+    expect(after.success).toBe(true);
+    if (!before.success || !after.success) return;
+
+    const survivors = before.value.variants.filter((variant) => variant.index !== 2);
+    // The whole object, not a summary of it: this is the assertion the rejected
+    // coordinate design and a compacting reallocation both fail.
+    expect(after.value.variants).toEqual(survivors);
+    expect(after.value.variants).toHaveLength(11);
+    // And the two surrogates the definition of done names explicitly.
+    expect(after.value.variants.map((v) => v.seed)).toEqual(survivors.map((v) => v.seed));
+    expect(after.value.variants.map((v) => `${v.productId}/v${v.index}`)).toEqual(
+      survivors.map((v) => `${v.productId}/v${v.index}`),
+    );
+    // Slot 2 is gone and is not reborn under anyone else's index.
+    expect(after.value.variants.some((v) => v.index === 2)).toBe(false);
+    expect(after.value.variants.some((v) => v.seed === seedFrom("golden", "2", "0"))).toBe(false);
+    expect(after.value.estimate.creatives).toBe(11);
+  });
+
+  test("a delete on a brief that needed the exhaustive search also keeps its survivors", () => {
+    // At this brief's derived seed the 3 × allocated random draw reaches only 7
+    // of 8, so this plan comes from `exhaustiveAccept`. A delete leaves
+    // `nextIndex` at `count`, so that search is asked the identical question and
+    // returns the identical set — which is why the gate on the fallback is
+    // `allocated === count` and not "the brief has no tombstones".
+    const before = planner().plan(tightBrief(8, undefined, "derived"), tightInput);
+    const after = planner().plan(
+      tightBrief(8, { nextIndex: 8, tombstoned: [3] }, "derived"),
+      tightInput,
+    );
+    expect(before.success).toBe(true);
+    expect(after.success).toBe(true);
+    if (!before.success || !after.success) return;
+    expect(before.value.variants).toHaveLength(8);
+    expect(after.value.variants).toEqual(before.value.variants.filter((v) => v.index !== 3));
+    // The premise: this plan is not reachable by the random draw alone. Asking
+    // for the same eight slots with the allocation target moved off `count`
+    // — which is what closes the fallback — falls short.
+    const randomOnly = planner().plan(tightBrief(7, { nextIndex: 8 }, "derived"), tightInput);
+    expect(randomOnly.success).toBe(false);
+  });
+
+  test("an append the random draw cannot place is refused, not bought by moving the occupants", () => {
+    // Same brief, same eight-point capacity: seven creatives exist and an eighth
+    // would fit the space, but not at any point the draw reaches. The exhaustive
+    // search could find one — by re-choosing all eight, which would rewrite the
+    // seven the operator already has. Refusing is the honest answer, and the
+    // message says the existing creatives keep their draw.
+    const before = planner().plan(tightBrief(7, undefined, "derived"), tightInput);
+    expect(before.success).toBe(true);
+    if (!before.success) return;
+    expect(before.value.variants).toHaveLength(7);
+    const appended = planner().plan(tightBrief(7, { nextIndex: 8 }, "derived"), tightInput);
+    expect(appended.success).toBe(false);
+    if (appended.success) return;
+    expect(appended.error.message).toMatch(/Variation plan shortfall: accepted 7 of count 8\./);
+    expect(appended.error.message).toMatch(/Existing creatives keep their draw \(7 of 8 slots/);
+    expect(appended.error.message).toMatch(/To fix: delete a creative/);
+  });
+
+  test("an added creative takes a fresh index above every index ever used, never a tombstoned one", () => {
+    const before = planner().plan(occupancyBrief(undefined));
+    // Two deleted (2 and 5) and two added: the cursor has run to 14.
+    const after = planner().plan(occupancyBrief({ nextIndex: 14, tombstoned: [2, 5] }));
+    expect(before.success).toBe(true);
+    expect(after.success).toBe(true);
+    if (!before.success || !after.success) return;
+
+    expect(after.value.variants.map((v) => v.index)).toEqual([
+      0, 1, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13,
+    ]);
+    const survivors = before.value.variants.filter((v) => v.index !== 2 && v.index !== 5);
+    expect(after.value.variants.filter((v) => v.index < 12)).toEqual(survivors);
+    const added = after.value.variants.filter((v) => v.index >= 12);
+    expect(added.map((v) => v.index)).toEqual([12, 13]);
+    for (const variant of added) {
+      expect(variant.seed).toBe(seedFrom("golden", String(variant.index), "0"));
+    }
+  });
+
+  test("an appended creative is distanced against the occupants, which keep their draw", () => {
+    // 24 points at minDistance 2 hold exactly 8. Seven exist; the eighth has to be
+    // chosen so that it conflicts with none of them, and the seven do not move.
+    const before = planner().plan(tightBrief(7), tightInput);
+    const after = planner().plan(tightBrief(7, { nextIndex: 8 }), tightInput);
+    expect(before.success).toBe(true);
+    expect(after.success).toBe(true);
+    if (!before.success || !after.success) return;
+
+    expect(after.value.variants).toHaveLength(8);
+    expect(after.value.variants.slice(0, 7)).toEqual(before.value.variants);
+    const appended = after.value.variants[7];
+    expect(appended.index).toBe(7);
+    for (const occupant of before.value.variants) {
+      expect(hamming(appended, occupant), `appended vs ${occupant.index}`).toBeGreaterThanOrEqual(
+        2,
+      );
+    }
+    expectDistanceHeld(after.value);
+  });
+
+  test("an append the occupants leave no room for is refused loudly, naming the shortfall", () => {
+    // Eight is the capacity. A ninth cannot be placed at minDistance 2 without
+    // moving one of the eight — so the request is refused rather than silently
+    // reshuffling the operator's creatives to make room, and rather than
+    // returning eight and calling it nine.
+    const refused = planner().plan(tightBrief(8, { nextIndex: 9 }), tightInput);
+    expect(refused.success).toBe(false);
+    if (refused.success) return;
+    expect(refused.error.message).toMatch(/Variation plan shortfall: accepted 8 of count 9\./);
+    expect(refused.error.message).toMatch(
+      /Existing creatives keep their draw \(8 of 9 slots are already occupied\), so the shortfall is in the slots still to allocate\./,
+    );
+    expect(refused.error.message).toMatch(/At minDistance 2 this brief can yield at most 8/);
+    expect(refused.error.message).toMatch(/To fix: delete a creative, lower count to 8/);
+  });
+
+  test("a delete that drops the brief below its own coverage floor says which delete did it", () => {
+    // Three slots, one per ratio, perRatio 1. Deleting any of the three leaves a
+    // ratio with none — a real state an operator can reach, and one the planner
+    // must not emit in silence.
+    const result = planner().plan(
+      occupancyBrief({ nextIndex: 3, tombstoned: [1] }, { count: 3, coverage: { perRatio: 1 } }),
+    );
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.message).toMatch(/coverage unmet: ratio "16:9" has 0 of perRatio 1/);
+    expect(result.error.message).toMatch(/\(1 deleted slot: 1\)/);
+    // The same brief with nothing deleted plans, so the tombstone is the cause.
+    const dense = planner().plan(
+      occupancyBrief(undefined, { count: 3, coverage: { perRatio: 1 } }),
+    );
+    expect(dense.success).toBe(true);
+  });
+
+  test("the plural of the tombstone note tracks the number of deleted slots", () => {
+    const result = planner().plan(
+      occupancyBrief({ nextIndex: 3, tombstoned: [0, 1] }, { count: 3, coverage: { perRatio: 1 } }),
+    );
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.message).toMatch(/\(2 deleted slots: 0, 1\)/);
+  });
+
+  test("the axisProductSize guard counts allocated slots, not the recipe's count", () => {
+    // Three ratios and nothing else varying: three points. A brief at count 3 that
+    // then adds a fourth slot is asking for a fourth point that does not exist.
+    const narrow = (occupancy?: Record<string, unknown>): CampaignBrief =>
+      brief({
+        products: [product("alpha")],
+        variation: {
+          count: 3,
+          seed: 7,
+          minDistance: 1,
+          axes: { layout: ["headline-top"], tone: ["bold"] },
+          ...(occupancy === undefined ? {} : { occupancy }),
+        },
+      } as Partial<CampaignBrief>);
+    expect(planner().plan(narrow()).success).toBe(true);
+    const added = planner().plan(narrow({ nextIndex: 4 }));
+    expect(added.success).toBe(false);
+    if (added.success) return;
+    expect(added.error.message).toMatch(/Variation count 4 exceeds axisProductSize 3\./);
+  });
+});
+
+describe("PlanVariationsUseCase.replan — a slot is not a position (H1)", () => {
+  /** Slots 0, 1 and 3: `variants.length` is 3, and the highest slot is 3. */
+  const holey = (): { plan: VariationPlan; brief: CampaignBrief } => {
+    const source = occupancyBrief({ nextIndex: 4, tombstoned: [2] }, { count: 4 });
+    const planned = planner().plan(source);
+    if (!planned.success) throw planned.error;
+    return { plan: planned.value, brief: source };
+  };
+
+  test("the planned set really is holey, so the rest of this block means something", () => {
+    const { plan } = holey();
+    expect(plan.variants.map((v) => v.index)).toEqual([0, 1, 3]);
+    expect(plan.variants).toHaveLength(3);
+  });
+
+  test("re-rolling the highest slot of a holey set succeeds", () => {
+    // The bug this replaces: `index >= plan.variants.length` refused slot 3
+    // because the survivors number 3, and `plan.variants[3]` was `undefined`.
+    const { plan } = holey();
+    const result = planner().replan(plan, 3, 1);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.variants.map((v) => v.index)).toEqual([0, 1, 3]);
+    const rerolled = result.value.variants[2];
+    expect(rerolled.index).toBe(3);
+    expect(rerolled.seed).toBe(seedFrom("golden", "3", "1"));
+    // The other two slots are untouched by the re-roll.
+    expect(result.value.variants.slice(0, 2)).toEqual(plan.variants.slice(0, 2));
+  });
+
+  test("re-rolling a low slot of a holey set replaces that slot and no other", () => {
+    const { plan } = holey();
+    const result = planner().replan(plan, 1, 1);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.variants.map((v) => v.index)).toEqual([0, 1, 3]);
+    expect(result.value.variants[1].seed).toBe(seedFrom("golden", "1", "1"));
+    expect(result.value.variants[0]).toEqual(plan.variants[0]);
+    expect(result.value.variants[2]).toEqual(plan.variants[2]);
+  });
+
+  test("a tombstoned slot is not a valid re-roll target, even though it is in range", () => {
+    // Slot 2 sits between two live slots, so no bound on the index can catch it —
+    // only membership in the planned set can.
+    const { plan } = holey();
+    const result = planner().replan(plan, 2, 1);
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.message).toBe("Invalid variant index 2.");
+  });
+
+  test("a slot above the cursor is still refused", () => {
+    const { plan } = holey();
+    expect(planner().replan(plan, 4, 1).success).toBe(false);
+  });
+});
