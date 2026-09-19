@@ -2093,14 +2093,31 @@ export function serialisedFormats(state: EditorState): readonly string[] {
 
 /**
  * Whether the serialised output equals the absent-key default (static × the
- * static platforms). Shared with the preview so `outputShown` cannot disagree
- * with `toBrief` about whether a platform caption exists (D45/D99).
+ * static platforms × no sizes). Shared with the preview so `outputShown` cannot
+ * disagree with `toBrief` about whether a platform caption exists (D45/D99).
+ *
+ * Every field `toBrief` writes into the block is tested here, `sizes` included:
+ * the predicate's answer is what DROPS the block, so a field it does not read is
+ * a field the projection can lose. `sizes` was the one omission — a draft holding
+ * display sizes with otherwise-default formats and platforms read as "default"
+ * and saved without them. Today no gesture reaches that combination
+ * (`togglePlatform` drops the sizes no remaining display platform offers, and a
+ * loaded `output` sets `outputExplicit`), but that is two functions agreeing, not
+ * an invariant: the `toggleSize` action this state's doc comment says "no UI asks
+ * for yet" would author sizes without touching the platform list, and the drop
+ * would be live. The safety is now a property of this predicate alone.
+ *
+ * `sizes.length === 0` is the whole test because the platform clause above has
+ * already pinned the selection to the three static profiles, none of which offers
+ * a size — so "no sizes" and "exactly the sizes these platforms derive" are the
+ * same statement, and the shorter one cannot drift.
  */
 export function isDefaultOutput(state: EditorState): boolean {
   const formats = serialisedFormats(state);
   return (
     formats.length === 1 &&
     formats[0] === "static" &&
+    state.sizes.length === 0 &&
     state.platforms.length === STATIC_PLATFORMS.length &&
     STATIC_PLATFORMS.every((platform) => state.platforms.includes(platform))
   );
