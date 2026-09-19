@@ -48,11 +48,15 @@ export function TimelineSection({
   dispatch,
   errors = {},
   warnings = {},
+  onChooseScene,
 }: {
   state: EditorState;
   dispatch: Dispatch<EditorAction>;
   errors?: Record<string, string>;
   warnings?: Record<string, string>;
+  /** TL2 — open the Asset Bin for one beat. Absent disables the chip: a
+   * surface with no picker must not offer a gesture that does nothing. */
+  onChooseScene?: (index: number) => void;
 }) {
   const beats = state.timeline.beats;
   const blocked = addBeatBlockedBy(state);
@@ -120,6 +124,40 @@ export function TimelineSection({
                       dispatch({ type: "setBeatWeight", index, weight: Number(value) })
                     }
                   />
+                  {/* TL2 — the beat's own scene. A beat naming none shows the
+                      creative's ground (VE-D3), and the chip says so rather than
+                      leaving the absence unreadable. The cap is NOT counted here:
+                      a fourth distinct scene is refused by `scenesProblem`
+                      through `validateTimeline`, and this surface only reports
+                      it — a local count is the debt this lane exists to stop. */}
+                  <span className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      aria-label={messages.timelineBeatSceneLabel(index + 1)}
+                      onClick={() => onChooseScene?.(index)}
+                      disabled={onChooseScene === undefined}
+                      className={cn(
+                        "max-w-[10rem] truncate rounded border px-2 py-1 text-[11px]",
+                        beat.background === undefined
+                          ? "border-border text-text-muted"
+                          : "border-accent text-accent",
+                      )}
+                    >
+                      {beat.background === undefined
+                        ? messages.timelineBeatSceneNone
+                        : beat.background.split("/").pop()}
+                    </button>
+                    {beat.background === undefined ? null : (
+                      <button
+                        type="button"
+                        aria-label={messages.timelineBeatSceneClearLabel(index + 1)}
+                        onClick={() => dispatch({ type: "setBeatBackground", index })}
+                        className="rounded border border-border px-2 py-1 text-[11px] text-text-muted"
+                      >
+                        ×
+                      </button>
+                    )}
+                  </span>
                   <button
                     type="button"
                     aria-label={messages.timelineKeyBeatLabel(index + 1)}

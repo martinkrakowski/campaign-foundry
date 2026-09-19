@@ -1620,3 +1620,7 @@ export function tapePxPerSecond(pxPerSec: number): string {
 export function tapeTick(seconds: number): string {
   return `${seconds}s`;
 }
+
+export const timelineBeatSceneLabel = (n: number) => `Beat ${n} scene`;
+export const timelineBeatSceneClearLabel = (n: number) => `Clear beat ${n} scene`;
+export const timelineBeatSceneNone = "Creative ground";

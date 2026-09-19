@@ -516,7 +516,15 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   // block for `fixed` descendants, so a drawer mounted inside it (as ProductsSection
   // once did) could never cover the viewport in Guided. Same hoist, same reason as
   // the headline pool drawer above.
-  const [assetPickerKey, setAssetPickerKey] = useState<number | null>(null);
+  /**
+   * What the Asset Bin will write to when it answers. Two surfaces open the one
+   * drawer — a product's logo (M7) and, since TL2, a beat's own scene — so the
+   * target is discriminated rather than a bare key: a `number | null` cannot say
+   * which of the two a 0 means.
+   */
+  const [assetTarget, setAssetTarget] = useState<
+    { kind: "product"; key: number } | { kind: "beat"; index: number } | null
+  >(null);
   // D14 — the replace confirmation's parked action, the two-phase form of the old
   // synchronous `window.confirm` gate: a dirty draft ends the gesture here, the
   // ConfirmDialog asks, and the confirm (or the refusal) finishes the story.
@@ -2293,6 +2301,7 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
               errors={sectionErrorsVisible("copy")}
               warnings={warnings.copy}
               onOpenPool={() => setPoolDrawerOpen(true)}
+              onChooseScene={(index) => setAssetTarget({ kind: "beat", index })}
             />
           </div>
           <div>
@@ -2300,7 +2309,7 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
               state={state}
               dispatch={dispatch}
               errors={sectionErrorsVisible("products")}
-              onChooseFromBin={setAssetPickerKey}
+              onChooseFromBin={(key) => setAssetTarget({ kind: "product", key })}
             />
           </div>
           <div>
@@ -2627,22 +2636,35 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
            gone, and the root is still where a scrim belongs, so it stays here rather
            than moving back under a section that could acquire a transform of its own.
            ProductsSection keeps the trigger; this owns the drawer and the selection. */}
-      <AssetPickerDrawer
-        briefId={state.briefId}
-        open={assetPickerKey !== null}
-        onClose={() => setAssetPickerKey(null)}
-        selectedPath={state.products.find((p) => p.key === assetPickerKey)?.logoPath}
-        onSelect={(asset) => {
-          // The drawer renders only while a product opened it, so the key is set
-          // by construction — the cast restates it, like the step-heading handoff.
-          dispatch({
-            type: "setProduct",
-            key: assetPickerKey as number,
-            patch: { logoPath: `assets/inputs/${state.briefId}/${asset.name}` },
-          });
-          setAssetPickerKey(null);
-        }}
-      />
+      {((target) =>
+        target === null ? null : (
+          <AssetPickerDrawer
+            briefId={state.briefId}
+            open
+            onClose={() => setAssetTarget(null)}
+            selectedPath={
+              target.kind === "product"
+                ? state.products.find((p) => p.key === target.key)?.logoPath
+                : state.timeline.beats[target.index]?.background
+            }
+            onSelect={(asset) => {
+              // No `target === null` guard here: the narrowing is the mount's, so
+              // the type says what the render already guaranteed. A guard would be
+              // an unreachable branch — `AssetPickerDrawer` returns null while
+              // closed, so conditional mounting is exactly what `open` did.
+              const path = `assets/inputs/${state.briefId}/${asset.name}`;
+              if (target.kind === "product") {
+                dispatch({ type: "setProduct", key: target.key, patch: { logoPath: path } });
+              } else {
+                // The whole reason the target is discriminated: a bare key cannot
+                // say whether 0 means product 0 or beat 0, and this write would
+                // silently land on the other one.
+                dispatch({ type: "setBeatBackground", index: target.index, background: path });
+              }
+              setAssetTarget(null);
+            }}
+          />
+        ))(assetTarget)}
 
       {/* D14 — the replace confirmation, the editor's own instance of the shell's
            "Unsaved edits" pattern (DESIGN.md §5): one prompt, a refusal changes

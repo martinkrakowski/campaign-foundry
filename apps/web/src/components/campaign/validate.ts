@@ -12,6 +12,7 @@ import { outputFamilyProblem } from "@campaignfoundry/CampaignOrchestration/crea
 import { templateHasAnchorProp } from "@campaignfoundry/CampaignOrchestration/brief-template";
 import { matchProhibitedTerms } from "@campaignfoundry/GovernanceAndCompliance";
 import type { EditorState } from "./editor-state";
+import { scenesProblem } from "@campaignfoundry/CampaignOrchestration/copy-timeline";
 import {
   LAYOUT_OPTIONS,
   TONE_OPTIONS,
@@ -222,12 +223,31 @@ export function validateTimeline(state: EditorState): FieldErrors {
     return errors;
   }
 
-  // The scene cap (VE-D10): distinct named backgrounds, counted the same way the domain
-  // counts them — beats naming none spend nothing, repeats are one scene.
-  const scenes = new Set(
-    beats.flatMap((beat) => (beat.background !== undefined ? [beat.background] : [])),
-  );
-  if (scenes.size > MAX_SCENES) {
+  // The scene cap (VE-D10) — the DOMAIN's rule, called, not counted again here.
+  //
+  // This used to re-implement `scenesProblem`'s Set/flatMap with a comment saying
+  // it counted "the same way the domain counts them", which is a promise a copy
+  // can only keep until one of them changes. TL2 adds the gesture that makes the
+  // cap reachable from the editor, so it is the lane that has to stop the rule
+  // living in two places rather than three.
+  //
+  // The MESSAGE stays this surface's own: `scenesProblem` answers in the domain's
+  // register (`copy.timeline.beats name more than 3 …`), which is right for a
+  // parse error and wrong under a form field. One rule, two presentations.
+  if (
+    scenesProblem({
+      beats: beats.map((beat) => ({
+        text: beat.text,
+        weight: beat.weight,
+        // Spread, never `background: beat.background` — an explicit `undefined`
+        // key is a different object to `canonicalJson`, and this mapping must not
+        // be the place that difference is introduced.
+        ...(beat.background !== undefined ? { background: beat.background } : {}),
+      })),
+      transition: state.timeline.transition,
+      keyBeat,
+    }) !== undefined
+  ) {
     errors["copy-timeline"] = messages.timelineTooManyBackgrounds(MAX_SCENES);
     return errors;
   }
