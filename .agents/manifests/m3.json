@@ -1,39 +1,140 @@
 {
   "version": 1,
-  "lane": "M3",
+  "lane": "m3",
   "mutations": [
     {
-      "file": "apps/web/src/components/campaign/editor-state.ts",
-      "before": "      if (!action.enabled && !disableableLayerIds(state).includes(action.id)) {\n        return state;\n      }",
-      "after": "      // mutated: the required-kind guard is gone",
-      "because": "MP-D4: the last enabled instance of a required kind must be refused, or the editor hands the boundary a template it refuses to parse — an image-text brief whose only image is switched off leaves nothing to paint the ground. The offer is absent from the section and the refusal is in the reducer; removing it makes the toggle a way to build an unsaveable brief. CC3 moved the surface: the stack is now `LayerStack` in the creative rail, so the command names `layer-stack.test.tsx` -- the same test, at its new address. The mutation itself is untouched (it is in the reducer, which did not move), and this manifest is replayed by the CC3 change that retargeted it.",
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/variation-defaults.ts",
+      "before": "    field: \"count\",\n    min: 1,\n    absent: { kind: \"required\" },",
+      "after": "    field: \"count\",\n    min: 1,\n    absent: { kind: \"default\", value: 1 },",
+      "because": "Row 1 of the table alone: `count`'s absence stops being a refusal and silently becomes a plan of one. This is the failure M3 names — a field quietly acquiring a default — and it is invisible to every assertion that supplies a count, which is almost all of them. Only the field's own named test asks what an ABSENT count means, which is why the five are five tests and not one `test.each`: a group case over the table would be satisfied by the four rows that did not move.",
       "command": [
         "yarn",
         "vitest",
         "run",
-        "--project",
-        "web",
-        "apps/web/src/components/campaign/__tests__/layer-stack.test.tsx",
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/policy-integers.test.ts",
         "-t",
-        "the last enabled required layer offers no toggle"
+        "count: absent is REFUSED"
       ],
       "verdict": "caught"
     },
     {
-      "file": "apps/web/src/components/campaign/derive.ts",
-      "before": "  const draws = (layers: readonly CreativeTemplateLayer[]) =>\n    layers.filter((layer) => layer.enabled !== false);",
-      "after": "  const draws = (layers: readonly CreativeTemplateLayer[]) => layers;",
-      "because": "MP-D3: occlusion is evaluated over the enabled subset, because a disabled layer draws nothing and so occludes nothing. Computing it over the whole array leaves a notice standing for a layer that no longer paints (and silently swallows the notice when it is switched back on, since the pair never left the list). CC3 moved the surface: the stack is now `LayerStack` in the creative rail, so the command names `layer-stack.test.tsx` -- the same MP-D3 tests, at their new address.",
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/variation-defaults.ts",
+      "before": "    field: \"seed\",\n    min: 0,\n    max: UINT32_MAX,\n    absent: { kind: \"derived\" },",
+      "after": "    field: \"seed\",\n    min: 0,\n    max: UINT32_MAX,\n    absent: { kind: \"default\", value: 0 },",
+      "because": "The one row where 0 and absence are genuinely different, collapsed into the rule the coverage pair uses. Every brief with no seed would draw from seed 0 instead of `seedFrom(brief.id)` — a plan that still succeeds, still has a count, still has a policyHash, and is a completely different set of creatives. The test that catches it pins `seedFrom` as its own expected value AND guards the vacuity (`seedFrom(\"golden\") !== 0`), because asserting `seed !== 0` against a derived seed that happened to be 0 would prove nothing.",
       "command": [
         "yarn",
         "vitest",
         "run",
-        "--project",
-        "web",
-        "apps/web/src/components/campaign/__tests__/layer-stack.test.tsx",
-        "apps/web/src/components/campaign/__tests__/derive.test.ts",
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/policy-integers.test.ts",
         "-t",
-        "MP-D3"
+        "seed: absent is DERIVED from the brief id"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/variation-defaults.ts",
+      "before": "    max: POLICY_MAX_ACTIVE_AXES,\n    absent: { kind: \"default\", value: 1 },",
+      "after": "    max: POLICY_MAX_ACTIVE_AXES,\n    absent: { kind: \"default\", value: 2 },",
+      "because": "A NUMBER MOVED — the fault M3 is most likely to commit while unifying five rules into one table. An absent `minDistance` would resolve to 2 instead of 1, so every brief that never wrote the key gets a different, stricter draw. The goldens file catches it as a changed `policyHash`, which is the strongest available form of 'the brief plans identically': the hash is recorded pre-change against the merge-base sources and carries all five integers, so no reader can update it alongside the code and call it still-passing.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/policy-integer-goldens.test.ts",
+        "-t",
+        "every integer absent"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/variation-defaults.ts",
+      "before": "    field: \"coverage.perProduct\",\n    min: 0,\n    absent: { kind: \"default\", value: 0 },",
+      "after": "    field: \"coverage.perProduct\",\n    min: 0,\n    absent: { kind: \"default\", value: 1 },",
+      "because": "The same number-moved fault on the field whose default is the easiest to get wrong, because 0 reads as 'nothing'. A per-product floor of 1 where there was none changes which creatives the draw is even allowed to produce. Caught by the pre-change hash, not by an arithmetic assertion — a `perProduct` of 1 is perfectly plausible and every count/ratio assertion in the suite stays green under it.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/policy-integer-goldens.test.ts",
+        "-t",
+        "every integer absent"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/variation-defaults.ts",
+      "before": "    field: \"coverage.perRatio\",\n    min: 0,\n    absent: { kind: \"default\", value: 0 },",
+      "after": "    field: \"coverage.perRatio\",\n    min: 0,\n    absent: { kind: \"default\", value: 1 },",
+      "because": "The fifth row on its own, and the reason the per-field tests are not one loop: `perProduct` and `perRatio` are the two rows that genuinely DO agree, so a reader is tempted to assert them together. Moved alone, `perRatio`'s default is a floor on every ratio of every brief that never asked for one. Its own named test is what sees it.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/policy-integers.test.ts",
+        "-t",
+        "coverage.perRatio: absent means 0"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/variation-defaults.ts",
+      "before": "    field: \"minDistance\",\n    min: 1,",
+      "after": "    field: \"minDistance\",\n    min: 0,",
+      "because": "**SL-D6, reverted through the table.** The floor of 1 is now a row rather than a literal in `fromBrief`, so the row has to be load-bearing or the stamp has moved without anyone editing the code that enforced it. Dropping it to 0 lets an explicit `minDistance: 0` reach the planner again — the hole SG-D7 measured at 83 of 120 distinct. The existing SL-D6 tests, written before this lane and untouched by it, are what go red: the policy's own refusal and the ceiling case that depends on it.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/VariationPolicy.vo.test.ts",
+        "packages/CampaignOrchestration/src/application/use-cases/__tests__/PlanVariationsUseCase.use-case.test.ts",
+        "-t",
+        "minDistance"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/editor-state.ts",
+      "before": "    ...policyKey(POLICY_INTEGERS.perProduct, perProduct),\n    ...policyKey(POLICY_INTEGERS.perRatio, perRatio),",
+      "after": "    ...(perProduct !== undefined && perProduct > 0 ? { perProduct } : {}),\n    ...(perRatio !== undefined && perRatio > 0 ? { perRatio } : {}),",
+      "because": "The EDITOR's half alone, restored to exactly the `> 0` it had before this lane, with the domain left correct — the drift that actually recurs here, and the one no domain test can see. `> 0` swallows a NEGATIVE floor: the editor shows the operator an error while `toBrief` hands the plan-preview route a brief with no coverage block at all, so the preview estimates a legal plan for a draft that cannot be saved. The parity tests drive both sides from one `EditorState`, so this shows up as the planner accepting what the editor refused rather than as two fixtures someone updated together.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "apps/web/src/components/campaign/__tests__/policy-integer-parity.test.ts",
+        "-t",
+        "coverage.perProduct: blank and a typed 0 both mean no floor"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/editor-state.ts",
+      "before": "  if (rule.omitWhenDefault && rule.absent.kind === \"default\" && parsed === rule.absent.value) {",
+      "after": "  if (rule.absent.kind === \"default\" && parsed === rule.absent.value) {",
+      "because": "The plausible over-unification: if absence means 1 and the draft says 1, why write the key? Because `minDistance` is a top-level key an operator authored, and dropping a stored `minDistance: 1` on save rewrites every document that carries one — a diff on first open, for no change in meaning. This mutation MOVES NO NUMBER (the resolved distance stays 1 either way), so nothing in the domain and nothing about plan output can see it; only the assertion on what `toBrief` actually writes does. `omitWhenDefault` is the table's answer to why two rows with identical defaults are serialised differently, and this proves the flag is read rather than decorative.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "apps/web/src/components/campaign/__tests__/policy-integer-parity.test.ts",
+        "-t",
+        "minDistance: a blank field is 1, and a typed 1 is still WRITTEN"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/editor-state.ts",
+      "before": "  const count = parsePolicyInteger(state.variation.count) ?? POLICY_INTEGERS.count.min - 1;",
+      "after": "  const count = parsePolicyInteger(state.variation.count) ?? POLICY_INTEGERS.count.min;",
+      "because": "SG5's own instance of M3: `count` is the field read through `parsePolicyInteger` with a substituted fallback while its four siblings omit their key. The substitution has to land on a value the planner REFUSES — otherwise a blank or unparseable count becomes a silently plannable brief, and the preview estimates a campaign the operator never described. One below the floor is that value by construction; `count.min` is one step away and is plannable. The domain is untouched and its whole suite stays green, because every domain fixture supplies a count.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "apps/web/src/components/campaign/__tests__/policy-integer-parity.test.ts",
+        "-t",
+        "count: the editor has no spelling for absence"
       ],
       "verdict": "caught"
     }
