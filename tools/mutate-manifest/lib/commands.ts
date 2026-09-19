@@ -107,3 +107,36 @@ export function listingCommand(argv: readonly string[]): readonly string[] | und
   if (vitest === -1 || argv[vitest + 1] !== "run") return undefined;
   return argv.map((arg, index) => (index === vitest + 1 ? "list" : arg));
 }
+
+/**
+ * The same listing with the `-t` selector removed, so it answers "what does
+ * this file register here?" rather than "what does this pattern select?".
+ *
+ * Only ever run when the `-t` listing came back empty, and only to tell two
+ * different things apart. An empty selection means either the pattern matches
+ * nothing — a real finding, the mutation reports "survived" without running —
+ * or the file registers no tests in THIS environment, in which case the check
+ * could not look and must not answer. They are indistinguishable from the
+ * selecting listing alone, and the second one is not a finding about the
+ * manifest at all.
+ *
+ * Measured: a worktree installed with `--mode=skip-build` never runs
+ * ffmpeg-static's postinstall, so the ffmpeg-gated tests in
+ * `CanvasFfmpegVideoCompositor.byte-golden.test.ts` do not register and
+ * `x31.json#0` was reported as a dead pattern. Its pattern was fine. A full
+ * `yarn install` cleared it — which is the point: the tree was never wrong, the
+ * environment was, and a checker that cannot tell those apart sends a lane
+ * hunting through manifests for a defect that is not in them.
+ */
+export function unselectedListing(listing: readonly string[]): readonly string[] {
+  const out: string[] = [];
+  for (let i = 0; i < listing.length; i++) {
+    const arg = listing[i] as string;
+    if (arg === "-t" || arg === "--testNamePattern") {
+      i++;
+      continue;
+    }
+    out.push(arg);
+  }
+  return out;
+}
