@@ -206,14 +206,7 @@ Each open lane states the gap that makes it necessary as a script that exits 0 *
 
 Every fence below probes a **mechanism**, not a name an implementer is free to choose, and excludes test directories the way the keyframing plan's fences do. A fence that can only be flipped by naming something a particular way is not a fence — it is a wish.
 
-```premise SE1
-# Only two non-test files mention the html element editor: the component itself and
-# the stack row that mounts it inline. An inspector that hosts it is necessarily a
-# THIRD, whatever it is called -- and SE0 keeps the guided/everything mount in place,
-# so a fence that demanded the tag leave TemplateSection could never flip. Counting
-# the mount sites is the mechanism; the names are free.
-test "$(grep -rl 'HtmlElementsEditor' apps/web/src/components/campaign | grep -vc '__tests__')" -le 2
-```
+**`premise SE1` retired — CC4's sheet is the inspector this fence was waiting for.** `apps/web/src/components/campaign/LayerPropsSheet.tsx` hosts `HtmlElementsEditor` for the selected `html` layer, which is the third non-test mount site the fence's own comment named ("an inspector that hosts it is necessarily a THIRD, whatever it is called") — the component itself, `TemplateSection`'s inline copy (kept, per that section's own comment, rather than removed by this lane), and the sheet. `creative-first-chrome.md`'s §5 said this in advance: "CC3 delivers SE1's *selection* half; the fence measures its *hosting* half, which is CC4's sheet." It has.
 
 ```premise SE2
 # Every prop a drawer reads (C4) can still only be set by hand-authoring YAML. The

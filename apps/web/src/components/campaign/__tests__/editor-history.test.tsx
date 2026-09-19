@@ -68,6 +68,23 @@ const renderHtml = () =>
     }),
   );
 
+// The canonical `image-text` template's own layer list: image, shade, accent,
+// static-text, logo — the fixture CC4's geometry-props tests need.
+const TEXT_CANONICAL = CANONICAL_TEMPLATES["image-text"];
+const renderImageText = () =>
+  renderHook(() =>
+    useEditorHistory({
+      ...initialEditorState(),
+      template: {
+        id: "canonical-image-text",
+        version: TEXT_CANONICAL.version,
+        creativeType: TEXT_CANONICAL.creativeType,
+        unit: TEXT_CANONICAL.unit,
+        layers: TEXT_CANONICAL.layers,
+      },
+    }),
+  );
+
 /** The html layer's elements, as the draft holds them. */
 const htmlElements = (state: EditorState): readonly HtmlElement[] =>
   state.template.layers.find((layer) => layer.id === "html")?.elements ?? [];
@@ -643,5 +660,91 @@ describe("setHtmlElementStyle is undoable (HL5e, VE1)", () => {
     act(() => hook.result.current.undo());
     // One step, not two: the whole run reverts, as a typed run does.
     expect("style" in htmlElements(hook.result.current.state)[0]!).toBe(false);
+  });
+});
+
+/**
+ * CC4, D134 — `setLayerProps` is undoable, and a live run of commits to ONE
+ * field coalesces into a single entry (red fault 4): the same
+ * `setHtmlElementFrame` rule the block above pins for an element's style,
+ * reused rather than re-derived — `editor-history.ts:coalesceKeyOf`'s
+ * `setLayerProps` case is keyed by the layer id and the sorted patch field
+ * set, exactly like `setHtmlElementFrame`'s and `setHtmlElementStyle`'s.
+ */
+describe("setLayerProps is undoable, and a run on one field coalesces (D134, VE1)", () => {
+  const accentLayer = (state: EditorState) =>
+    state.template.layers.find((layer) => layer.id === "accent")!;
+
+  test("a single prop change is one undo step, restored to the absent key exactly", () => {
+    const hook = renderImageText();
+    const before = hook.result.current.state.template;
+    send(hook, {
+      type: "setLayerProps",
+      layerId: "accent",
+      patch: { solidHeight: 0.2 },
+    });
+    expect(accentLayer(hook.result.current.state).props).toEqual({ solidHeight: 0.2 });
+    act(() => hook.result.current.undo());
+    // `toStrictEqual`, so a `props: {}` (or `props: undefined`) left behind by
+    // the edit would fail here — undo restores the layer objects, not their
+    // shape (the same proof the layer-toggle and html-element blocks above
+    // hold for their own fields).
+    expect(hook.result.current.state.template).toStrictEqual(before);
+    act(() => hook.result.current.redo());
+    expect(accentLayer(hook.result.current.state).props).toEqual({ solidHeight: 0.2 });
+  });
+
+  test("a refused patch (a field the kind does not carry) leaves nothing to undo", () => {
+    const hook = renderImageText();
+    // `width` is `logo`'s field; `accent` refuses it via `layerPropsProblem`.
+    send(hook, { type: "setLayerProps", layerId: "accent", patch: { width: 0.2 } });
+    expect(hook.result.current.canUndo).toBe(false);
+  });
+
+  test("a live run of commits to ONE field is a single undo step, not one per commit", () => {
+    const hook = renderImageText();
+    send(
+      hook,
+      { type: "setLayerProps", layerId: "accent", patch: { solidHeight: 0.1 } },
+      { type: "setLayerProps", layerId: "accent", patch: { solidHeight: 0.15 } },
+      { type: "setLayerProps", layerId: "accent", patch: { solidHeight: 0.2 } },
+      { type: "setLayerProps", layerId: "accent", patch: { solidHeight: 0.24 } },
+    );
+    expect(
+      (accentLayer(hook.result.current.state).props as { solidHeight?: number })?.solidHeight,
+    ).toBe(0.24);
+    act(() => hook.result.current.undo());
+    // The WHOLE run reverts in one step — four commits are not four entries.
+    expect("props" in accentLayer(hook.result.current.state)).toBe(false);
+    expect(hook.result.current.canUndo).toBe(false);
+  });
+
+  test("a different field on the same layer starts a new entry", () => {
+    const hook = renderImageText();
+    send(
+      hook,
+      { type: "setLayerProps", layerId: "accent", patch: { solidHeight: 0.2 } },
+      { type: "setLayerProps", layerId: "accent", patch: { fadeHeight: 0.3 } },
+    );
+    act(() => hook.result.current.undo());
+    // Only the `fadeHeight` edit reverts; the `solidHeight` one stands.
+    expect(accentLayer(hook.result.current.state).props).toEqual({ solidHeight: 0.2 });
+    act(() => hook.result.current.undo());
+    expect("props" in accentLayer(hook.result.current.state)).toBe(false);
+  });
+
+  test("editing a different LAYER starts a new entry, even for the same field name", () => {
+    const hook = renderImageText();
+    send(
+      hook,
+      { type: "setLayerProps", layerId: "logo", patch: { width: 0.2 } },
+      { type: "setLayerProps", layerId: "logo", patch: { margin: 0.3 } },
+    );
+    const logoLayer = (state: EditorState) =>
+      state.template.layers.find((layer) => layer.id === "logo")!;
+    act(() => hook.result.current.undo());
+    expect(logoLayer(hook.result.current.state).props).toEqual({ width: 0.2 });
+    act(() => hook.result.current.undo());
+    expect("props" in logoLayer(hook.result.current.state)).toBe(false);
   });
 });

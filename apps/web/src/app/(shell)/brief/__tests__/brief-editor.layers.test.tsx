@@ -854,3 +854,113 @@ describe("the default template is clickable (CE2)", () => {
     }
   });
 });
+
+/**
+ * CC4 — the layer sheet, through the editor that ships. `LayerPropsSheet`'s
+ * own suite (`LayerPropsSheet.test.tsx`) pins its per-kind fields and its own
+ * Escape/no-aria-modal contract in isolation; what only the mounted editor
+ * can show is the mount SITE (a sibling of the step card, reading CC3's own
+ * selection) and the four red faults, end to end.
+ */
+const sheetEl = () => screen.getByTestId("layer-props-sheet");
+
+describe("CC4 — the sheet is a sibling of the step card, and reads CC3's selection", () => {
+  test("no sheet exists before a layer is picked", async () => {
+    await mountEditor();
+    expect(screen.queryByTestId("layer-props-sheet")).toBeNull();
+  });
+
+  test("picking a layer mounts the sheet as a sibling — never inside the Template section or the rail", async () => {
+    const user = userEvent.setup();
+    await mountEditor();
+    await user.click(pick("accent", "Accent"));
+    const el = sheetEl();
+    expect((document.getElementById("template") as HTMLElement | null)?.contains(el)).toBeFalsy();
+    expect(rail().contains(el)).toBe(false);
+  });
+
+  test("closing the sheet clears the SAME pick — never a second selection concept", async () => {
+    const user = userEvent.setup();
+    await mountEditor();
+    await user.click(pick("accent", "Accent"));
+    expect(pick("accent", "Accent").getAttribute("aria-pressed")).toBe("true");
+    await user.click(within(sheetEl()).getByRole("button", { name: "Close" }));
+    expect(screen.queryByTestId("layer-props-sheet")).toBeNull();
+    expect(pick("accent", "Accent").getAttribute("aria-pressed")).toBe("false");
+  });
+});
+
+describe("CC4 — red fault 1: the creative stays visible with the sheet open", () => {
+  test("the preview is still rendered, not merely that the sheet mounted", async () => {
+    const user = userEvent.setup();
+    await mountDefaultWithFrame();
+    await user.click(pick("image", "Image"));
+    expect(sheetEl()).toBeTruthy();
+    expect(rail().querySelector("img")).not.toBeNull();
+  });
+});
+
+describe("CC4 — red fault 2: ⌘Z still undoes with the sheet open, and it carries no aria-modal", () => {
+  test("a geometry edit made through the sheet is undoable, with no [aria-modal] anywhere", async () => {
+    const user = userEvent.setup();
+    await mountEditor();
+    const before = await columnYaml(user);
+
+    await user.click(pick("accent", "Accent"));
+    // The exact signal `editor-history.ts`'s `useHistoryKeys` reads for
+    // switching ⌘Z off — absent, with the sheet open, is the whole claim.
+    expect(document.querySelector('[aria-modal="true"]')).toBeNull();
+
+    const input = within(sheetEl()).getByLabelText(messages.layerPropSolidHeightLabel);
+    fireEvent.change(input, { target: { value: "0.2" } });
+    fireEvent.blur(input);
+    const edited = await columnYaml(user);
+    expect(edited).not.toBe(before);
+
+    fireEvent.keyDown(window, { key: "z", metaKey: true });
+    expect(await columnYaml(user)).toBe(before);
+  });
+});
+
+describe("CC4 — red fault 3: set then clear leaves the brief byte-identical", () => {
+  test("a geometry override, set then cleared through Reset, round-trips to the loaded YAML exactly", async () => {
+    const user = userEvent.setup();
+    await mountEditor();
+    const before = await columnYaml(user);
+
+    await user.click(pick("logo", "Logo"));
+    const input = within(sheetEl()).getByLabelText(messages.layerPropWidthLabel);
+    fireEvent.change(input, { target: { value: "0.3" } });
+    fireEvent.blur(input);
+    expect(await columnYaml(user)).not.toBe(before);
+
+    const reset = within(sheetEl()).getByRole("button", {
+      name: messages.layerPropResetLabel(messages.layerPropWidthLabel),
+    });
+    await user.click(reset);
+    expect(await columnYaml(user)).toBe(before);
+  });
+});
+
+describe("CC4 — red fault 4: a live run on one field is one undo entry, not one per commit", () => {
+  test("four commits to one geometry field revert in a single ⌘Z", async () => {
+    const user = userEvent.setup();
+    await mountEditor();
+    const before = await columnYaml(user);
+
+    await user.click(pick("accent", "Accent"));
+    const input = within(sheetEl()).getByLabelText(messages.layerPropSolidHeightLabel);
+    for (const value of ["0.1", "0.15", "0.2", "0.24"]) {
+      fireEvent.change(input, { target: { value } });
+    }
+    fireEvent.blur(input);
+    expect(await columnYaml(user)).not.toBe(before);
+
+    fireEvent.keyDown(window, { key: "z", metaKey: true });
+    expect(await columnYaml(user)).toBe(before);
+    // Nothing left to undo from this run — a second ⌘Z is a no-op, not a
+    // partial revert of a run that was secretly four entries.
+    fireEvent.keyDown(window, { key: "z", metaKey: true });
+    expect(await columnYaml(user)).toBe(before);
+  });
+});
