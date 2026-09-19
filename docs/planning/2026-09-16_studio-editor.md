@@ -208,21 +208,7 @@ Every fence below probes a **mechanism**, not a name an implementer is free to c
 
 **`premise SE1` retired — CC4's sheet is the inspector this fence was waiting for.** `apps/web/src/components/campaign/LayerPropsSheet.tsx` hosts `HtmlElementsEditor` for the selected `html` layer, which is the third non-test mount site the fence's own comment named ("an inspector that hosts it is necessarily a THIRD, whatever it is called") — the component itself, `TemplateSection`'s inline copy (kept, per that section's own comment, rather than removed by this lane), and the sheet. `creative-first-chrome.md`'s §5 said this in advance: "CC3 delivers SE1's _selection_ half; the fence measures its _hosting_ half, which is CC4's sheet." It has.
 
-```premise SE2
-# Every prop a drawer reads (C4) can still only be set by hand-authoring YAML. The
-# probe is `canonicalLayer`, because SE2 cannot ship without teaching it to drop an
-# empty or default-valued `props` block (X16) -- an editor that writes props and does
-# NOT extend it would dirty a loaded brief, so this flips for any correct SE2. The
-# action union is not probed: its entries are multiline, so a same-line grep would
-# hold forever whatever the implementer writes.
-#
-# The probe reads canonicalLayer's OWN body, cut out by its declaration and the closing
-# brace in column 0. The first cut of this fence flattened the whole file with `tr` and
-# then ran `.{0,700}` against that single 100 kB line, which backtracked until the 10 s
-# budget killed it -- plan:verify reported TIMED-OUT, "not stale, make the premise decide
-# quickly", and it was right. Bounded to the function, it answers in about 7 ms.
-! sed -n '/^function canonicalLayer/,/^}/p' apps/web/src/components/campaign/editor-state.ts | grep -q props
-```
+**`premise SE2` retired — `canonicalLayer` knows about `props`.** The fence probed `canonicalLayer`'s own body for `props`, on the reasoning that an editor which writes props without extending it would dirty a loaded brief. CC4 shipped the writing half and deliberately did not extend it (its comment defers to "a future lane"); this is that lane. `canonicalLayer` now drops `props: {}` and any prop equal to the default it overrides, with the pairing read from `layerPropDefault` rather than restated — a second statement of which constant a prop overrides is a second geometry.
 
 **`premise TL1` retired — the lift shipped as CC5, in the TS1 PR** (the chrome plan's
 CC5 row already read "closes TL1", and the rail-timeline plan's §4 permits TS1 to carry

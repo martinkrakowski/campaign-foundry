@@ -63,6 +63,7 @@ import {
   MIN_DWELL_SEC,
   type CopyTimeline,
 } from "@campaignfoundry/CampaignOrchestration/copy-timeline";
+import { layerPropDefault } from "@campaignfoundry/CampaignOrchestration/creative-geometry";
 import {
   ALIGN_VALUES,
   FONT_FAMILY_VALUES,
@@ -1204,7 +1205,40 @@ function canonicalElement(element: HtmlElement): HtmlElement {
  * `setHtmlElementStyle` already write, so a hand-authored brief that spelled
  * the defaults out compares equal to the draft after an off→on (or add→remove,
  * or set→clear) round trip. Same object when nothing needs rewriting.
+ *
+ * SE2 adds `props` to that list, and it is the half CC4 deferred. CC4's
+ * `setLayerProps` drops the key when its own edit empties the block, so the
+ * EDITOR's writes were already clean — but a brief LOADED from disk spelling out
+ * `props: {}`, or a prop written at exactly the kind's default, still arrived
+ * un-canonical and dirtied on sight. The pairing comes from
+ * `layerPropDefault` rather than being restated here: a second statement of
+ * which constant a prop overrides is a second geometry.
  */
+function canonicalProps(layer: CreativeTemplateLayer): Record<string, unknown> | undefined {
+  const props = layer.props as Record<string, unknown> | undefined;
+  if (props === undefined) return undefined;
+  const kept: Record<string, unknown> = {};
+  for (const [field, value] of Object.entries(props)) {
+    // Equal to the default this prop overrides ⇒ it says nothing absence does
+    // not already say. `anchor` and `alpha` have no default (they shadow a
+    // variation axis, C4), so `layerPropDefault` answers `undefined` and they
+    // are always kept.
+    if (layerPropDefault(layer.kind, field) === value) continue;
+    kept[field] = value;
+  }
+  // `props: {}` is the same as no block — including one that became empty only
+  // because every prop in it was a default. Tested FIRST: an empty block that
+  // dropped nothing satisfies the same-length check below too, and answering
+  // `props` there would keep the very block this rule exists to remove.
+  if (Object.keys(kept).length === 0) return undefined;
+  // Nothing dropped ⇒ hand back the ORIGINAL object, so `canonicalLayer` can
+  // test by reference and an already-canonical template comes back untouched.
+  // Building a fresh object unconditionally would mark every layer carrying
+  // props as changed on every call.
+  if (Object.keys(kept).length === Object.keys(props).length) return props;
+  return kept;
+}
+
 function canonicalLayer(layer: CreativeTemplateLayer): CreativeTemplateLayer {
   const dropEnabled = layer.enabled === true;
   const dropElements = Array.isArray(layer.elements) && layer.elements.length === 0;
@@ -1213,11 +1247,20 @@ function canonicalLayer(layer: CreativeTemplateLayer): CreativeTemplateLayer {
     canonicalElements !== undefined &&
     layer.elements !== undefined &&
     canonicalElements.some((element, index) => element !== layer.elements![index]);
-  if (!dropEnabled && !dropElements && !restyledElements) return layer;
+  const nextProps = canonicalProps(layer);
+  // Reference equality is the test, not deep equality: `canonicalProps` returns
+  // a NEW object only when it dropped something, so a props block already
+  // canonical comes back identical and the layer is returned untouched.
+  const repropped = nextProps !== (layer.props as Record<string, unknown> | undefined);
+  if (!dropEnabled && !dropElements && !restyledElements && !repropped) return layer;
   const next: Record<string, unknown> = { ...layer };
   if (dropEnabled) delete next.enabled;
   if (dropElements) delete next.elements;
   else if (restyledElements) next.elements = canonicalElements;
+  if (repropped) {
+    if (nextProps === undefined) delete next.props;
+    else next.props = nextProps;
+  }
   return next as unknown as CreativeTemplateLayer;
 }
 

@@ -1,4 +1,5 @@
 import { describe, test, expect, beforeEach, vi, afterEach } from "vitest";
+import { CREATIVE_GEOMETRY } from "@campaignfoundry/CampaignOrchestration/creative-geometry";
 import type { CampaignBrief, CampaignType, CopyPool } from "@campaignfoundry/CampaignOrchestration";
 import { DEFAULT_CAMPAIGN_TYPE } from "@campaignfoundry/CampaignOrchestration/campaign-types";
 import {
@@ -1105,9 +1106,14 @@ describe("per-layer props survive the editor (L3b, D134)", () => {
   });
 
   test("a stored draft carrying props round-trips through the real storage path", () => {
+    // SE2 — `typeFloor: 0.4` was this fixture's value and is EXACTLY
+    // `CREATIVE_GEOMETRY.headlineTypeFloorFraction`, so it is now canonicalised
+    // away as saying nothing absence does not. The claim under test is that props
+    // survive storage, not that a default-valued one does, so the fixture carries
+    // a value that is actually an override. The dropped case is asserted below.
     const template = withProps("short-video", "animated-text", {
       anchor: "middle",
-      typeFloor: 0.4,
+      typeFloor: 0.55,
     });
     const state: EditorState = {
       ...base(),
@@ -1119,6 +1125,28 @@ describe("per-layer props survive the editor (L3b, D134)", () => {
     const restored = loadDraftFromStorage(state);
     expect(restored?.template).toEqual(template);
     expect(toBrief(restored as EditorState).template).toEqual(template);
+  });
+
+  /**
+   * SE2's rule, through the same storage path: a prop written at exactly the
+   * default it overrides is dropped, so a brief that spells it out compares
+   * equal to one that omits it and does not dirty on load. `anchor` has no
+   * default (it shadows the anchor axis, C4) and survives beside it.
+   */
+  test("a stored prop equal to its default is canonicalised away, its neighbour kept", () => {
+    const state: EditorState = {
+      ...base(),
+      briefId: "camp",
+      type: "short-video",
+      template: withProps("short-video", "animated-text", {
+        anchor: "middle",
+        typeFloor: CREATIVE_GEOMETRY.headlineTypeFloorFraction,
+      }),
+    };
+    saveDraftToStorage(state);
+    const restored = loadDraftFromStorage(state);
+    const layer = restored?.template.layers.find((l) => l.kind === "animated-text");
+    expect(layer?.props).toEqual({ anchor: "middle" });
   });
 
   test("a stored draft whose props are invalid falls back to the canonical template, never throwing", () => {

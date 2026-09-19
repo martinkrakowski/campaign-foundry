@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "lane": "SE2",
+  "mutations": [
+    {
+      "file": "apps/web/src/components/campaign/editor-state.ts",
+      "before": "    if (layerPropDefault(layer.kind, field) === value) continue;",
+      "after": "    if (false) continue;",
+      "because": "The rule SE2 exists for. A prop written at exactly the default it overrides says nothing absence does not already say, so a brief spelling it out must compare equal to one omitting it — otherwise it dirties the moment it loads, with no edit behind the dirty flag. CC4 shipped the editor's own writes clean (its action drops the key when its edit empties the block), but a brief LOADED from disk carrying `typeFloor: 0.4` was untouched. The test that reds stores exactly that through the real storage path and asserts the neighbour `anchor` survives beside it — because `anchor` shadows a variation axis and has no default to be equal to.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "apps/web/src/components/campaign/__tests__/editor-state.test.ts",
+        "-t",
+        "canonicalised away"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/editor-state.ts",
+      "before": "  if (Object.keys(kept).length === Object.keys(props).length) return props;\n  return kept;",
+      "after": "  return kept;",
+      "because": "The same-object guarantee, and the half a reader is most likely to call redundant. `canonicalTemplate` decides whether the template changed by reference, so returning a fresh object whenever a layer merely HAS props marks every such layer changed on every call — a draft would read dirty with no edit behind it, which is the defect this lane is closing, reintroduced from the other side. This is not hypothetical: the function's first draft did exactly this and the same-object test caught it.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "apps/web/src/components/campaign/__tests__/editor-state.canonical-props.test.ts",
+        "-t",
+        "comes back as the same object"
+      ],
+      "verdict": "caught"
+    }
+  ],
+  "note": "No mutation on the compositor's five repointed call sites: they read the same constants through `LAYER_PROP_DEFAULTS` and the byte goldens are the proof the values did not move. A mutation there would only restate what the goldens already pin."
+}
