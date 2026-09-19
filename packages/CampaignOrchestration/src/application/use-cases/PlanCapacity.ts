@@ -411,20 +411,45 @@ export function exhaustiveAccept(
  * delete a creative. This is §7's "refused loudly, naming the shortfall": the
  * alternative, taking the exhaustive search, would silently reshuffle every
  * creative the operator already has.
+ *
+ * ## Capacity is not the same question as reachability
+ *
+ * `capacityAt` answers "how many mutually distant points does this SPACE hold?"
+ * — a property of the axes alone. When creatives already exist, that is the
+ * wrong number to leave an operator holding: their draw is fixed, so what
+ * matters is how many points are still at least `minDistance` from **the
+ * creatives they already have**. The two diverge exactly where the refusal is
+ * hardest to read. A greedy corner — eight points fit, seven are placed, and
+ * none of the remaining combinations clears all seven — quotes "at most 8
+ * distinct variants" at someone who has 7, which reads as spare room and sends
+ * them looking for a bug.
+ *
+ * So `occupants` is taken, and the count of reachable points is stated
+ * alongside the capacity. It is a filter over an already-enumerated `space` on
+ * a path that has already failed, so it costs nothing anyone will notice.
  */
 export function shortfallMessage(
   policy: VariationPolicy,
   space: readonly Axes[],
   accepted: number,
+  occupants: readonly Axes[] = [],
 ): string {
   const { max, exact } = capacityAt(space, policy);
+  const reachable = space.filter((point) =>
+    occupants.every((occupant) => !conflicts(point, occupant, policy.minDistance)),
+  ).length;
   const singleRatio = policy.motionEnabled && !policy.mixStatic && policy.ratios.length === 1;
   const why = singleRatio
     ? ` — every motion platform is ${policy.ratios[0]}, so the aspect ratio cannot vary`
     : "";
   const occupied = hasOccupants(policy)
     ? `Existing creatives keep their draw (${accepted} of ${policy.occupancy.nextIndex} slots ` +
-      `are already occupied), so the shortfall is in the slots still to allocate. `
+      `are already occupied), so the shortfall is in the slots still to allocate. ` +
+      // The number the operator can act on. Without it the capacity figure below
+      // reads as spare room on exactly the refusals where there is none.
+      (reachable === 0
+        ? `No remaining combination is ${policy.minDistance} or more away from the creatives you already have. `
+        : `${reachable} of ${space.length} combinations are still ${policy.minDistance} or more away from them. `)
     : "";
   const remedies = [`lower count to ${max}`];
   if (hasOccupants(policy)) remedies.unshift("delete a creative");

@@ -333,4 +333,60 @@ describe("shortfallMessage", () => {
     expect(flat).not.toMatch(/lower minDistance/);
     expect(flat).toMatch(/lower count to 24, add axis values/);
   });
+
+  /**
+   * Capacity is a property of the SPACE; reachability is a property of the space
+   * GIVEN the creatives that already exist. Quoting the first to an operator who
+   * is blocked by the second is what made this refusal unreadable: "at most 8
+   * distinct variants" reads as spare room to someone holding seven of them.
+   */
+  describe("with occupants, it says how many points are still reachable", () => {
+    const appended = (count: number) =>
+      policyOf(
+        {
+          variation: {
+            count,
+            minDistance: 2,
+            occupancy: { nextIndex: count + 1, tombstoned: [] },
+            axes: { paletteShift: [0, 0.1, 0.2], motion: ["ken-burns-out"], duration: [5] },
+          },
+          output: { formats: ["motion"], platforms: ["instagram-reel"] },
+        },
+        { motionRatios: ["9:16"] },
+      );
+
+    test("none reachable — the existing creatives are named as the constraint", () => {
+      const policy = appended(8);
+      const space = enumerateAxes(policy);
+      // Every point in the space, so nothing is 2 away from all of them.
+      const message = shortfallMessage(policy, space, 8, space);
+      expect(message).toMatch(
+        /No remaining combination is 2 or more away from the creatives you already have\./,
+      );
+      // And the capacity sentence still follows, so the operator keeps the
+      // ceiling — it just no longer reads as though it were spare.
+      expect(message).toMatch(/At minDistance 2 this brief can yield at most 8 distinct variants/);
+      expect(message).toMatch(/To fix: delete a creative/);
+    });
+
+    test("some reachable — the count is stated rather than implied by the capacity", () => {
+      const policy = appended(2);
+      const space = enumerateAxes(policy);
+      const occupants = space.slice(0, 1);
+      const message = shortfallMessage(policy, space, 2, occupants);
+      const reachable = space.filter((p) => !conflicts(p, occupants[0]!, 2)).length;
+      expect(reachable).toBeGreaterThan(0);
+      expect(message).toContain(
+        `${reachable} of ${space.length} combinations are still 2 or more away from them.`,
+      );
+      expect(message).not.toMatch(/No remaining combination/);
+    });
+
+    test("with no occupants the sentence is absent entirely", () => {
+      const policy = tight(12, 2);
+      expect(shortfallMessage(policy, enumerateAxes(policy), 7)).not.toMatch(
+        /away from (the creatives you already have|them)/,
+      );
+    });
+  });
 });
