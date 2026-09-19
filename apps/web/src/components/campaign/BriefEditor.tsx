@@ -30,6 +30,7 @@ import {
   unknownErrorMessage,
   isBriefsApiError,
   type BriefEntry,
+  type PlanVariant,
 } from "@/lib/briefs-api";
 import {
   initialEditorState,
@@ -89,7 +90,9 @@ import { HeadlinePoolDrawer } from "@/components/campaign/HeadlinePoolDrawer";
 import { AssetPickerDrawer } from "@/components/campaign/AssetPickerDrawer";
 import { ModePanel } from "@/components/campaign/ModePanel";
 import { SectionOutline } from "@/components/ui/section-outline";
-import { EstimatePanel } from "@/components/campaign/EstimatePanel";
+import { EstimateFromPlan } from "@/components/campaign/EstimatePanel";
+import { CreativesSection, type PlannedCreative } from "@/components/campaign/CreativesPanel";
+import { VariationPlanProvider } from "@/components/campaign/variation-plan";
 import { sectionOrder, LayoutSection, type SectionId } from "./sections";
 import { PreviewDock, PreviewRailEmptyState, type PlayheadState } from "./PreviewDock";
 import { previewDockProps, previewRailKey } from "./preview-props";
@@ -838,11 +841,50 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   // handoff, the rail's YAML view and `draftDiffers` all read this one object rather
   // than each projecting again.
   const draftBrief = useMemo(() => toBrief(state), [state]);
+  /**
+   * **SL3 — D139: which creative the operator has picked out. Ephemeral,
+   * host-owned, never a field of `EditorState`, never persisted.**
+   *
+   * The owner's *"before loading a new creative on user-click, the current
+   * creative should be saved/preserved"* resolves to **there is nothing to
+   * save**, and that is a claim about this line rather than about a prompt.
+   * Selecting a creative is a LENS over the recipe: it changes which slot's draw
+   * the rail composes, and writes nothing — not the brief, not occupancy, not
+   * storage. The draft the operator was editing is the same object before and
+   * after the click, and L1 has already autosaved it. Wiring
+   * `useGuardedNavigation` or an implicit Save here would be the second prompt
+   * the lane brief warns about AND a write, which the read-only-over-occupancy
+   * scope forbids. `brief-editor.creatives.test.tsx` asserts the positive half:
+   * an edit made before a switch is still in the field after switching away and
+   * back, and the dirty flag is exactly what it was.
+   *
+   * **The selection lives HERE and the plan does not**, which is the shape the
+   * cost contract forces. The rail is published from this component, so the
+   * editor must know the selected creative; the PLAN moves on every keystroke,
+   * so holding it here cost `rail-in-shell` (3b) its exactly-one-render (four)
+   * and X30 its three commits (six). `CreativesSection` renders inside the
+   * published panels, holds the rows there, and writes this state only on a
+   * click and when a re-plan has dropped or redrawn the selected slot.
+   *
+   * The whole variant, not a slot number: the rail needs its axes, and a
+   * re-plan that redraws the slot re-points this at the fresh object so the row
+   * and the rail can never disagree about the same creative.
+   */
+  const [selectedCreative, setSelectedCreative] = useState<PlannedCreative | null>(null);
+  /**
+   * D139's second retirement, the one `CreativesSection` cannot see: the
+   * document underneath changed. Slot numbers are shared across briefs by
+   * construction — every variation plan starts at 0 — so "the slot still
+   * resolves" resolves perfectly well in the brief just opened, and the rail
+   * would keep composing a look the operator never picked. `openBriefKey` is
+   * declared below, beside the layer pick that clears on exactly this event.
+   */
+  const selectedVariant = selectedCreative ?? undefined;
   // R7.2/D45 — the dock's props come from the one exported derivation, fed by the live
   // draft. Null (nothing to draw) means an empty state, never an invented creative
   // (D26/D142) — the house rule is `hasProduct`. SG1: no cursor is passed because
   // there is no longer one to pass — the rail's M2 step readout went with the walk.
-  const rawRailProps = previewDockProps(state);
+  const rawRailProps = previewDockProps(state, selectedVariant);
   // CC1/CC2 — value-keyed, not `[state]`: a keystroke that changes neither the
   // look, anything the frame's own fetch reads, nor the previewed creative's
   // OWN identity (`previewRailKey`, `preview-props.ts` — that file's comment
@@ -982,6 +1024,10 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   const openBriefKey = state.source.kind === "file" ? state.source.loadedId : state.source.tempId;
   useEffect(() => {
     setPickedLayerId(null);
+  }, [openBriefKey]);
+  /** SL3 — the same fact about the same event, for the creative selection. */
+  useEffect(() => {
+    setSelectedCreative(null);
   }, [openBriefKey]);
   /** Stable across every render: a fresh arrow would defeat the `memo` above. */
   const pickLayer = useCallback((id: string) => setPickedLayerId(id), []);
@@ -1277,13 +1323,37 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
             </Accordion>
           </div>
         ) : null}
-        <Accordion title="Estimate">
-          <EstimatePanel state={state} />
-        </Accordion>
+        {/*
+          SL3 — one `/campaigns/plan` request for the two surfaces that read it,
+          and it travels INSIDE what is published so its state changes land in
+          the sidebar's tree rather than in this component's. See
+          `variation-plan.tsx` for the render counts that put it here.
+
+          The creatives list is the owner's 2a — "the creatives are listed in the
+          left sidebar" — and it draws no chrome at all when the plan has no
+          creatives in it: a classic brief, a fresh draft, a refused plan. An
+          empty panel with a heading is the invisible-surface defect this project
+          has hit repeatedly, so the accordion is inside the gate.
+        */}
+        <VariationPlanProvider state={state}>
+          <Accordion title="Estimate">
+            <EstimateFromPlan state={state} />
+          </Accordion>
+          <CreativesSection selected={selectedCreative} onSelect={setSelectedCreative} />
+        </VariationPlanProvider>
       </>,
     );
     // sectionErrors only reads what `errors` already covers.
-  }, [state, errors, policyErrors, setPanels, touchSectionFromEvent, unknownId, failedRouteId]);
+  }, [
+    state,
+    errors,
+    policyErrors,
+    setPanels,
+    touchSectionFromEvent,
+    unknownId,
+    failedRouteId,
+    selectedCreative,
+  ]);
   useEffect(() => () => setPanels(null), []);
 
   /**

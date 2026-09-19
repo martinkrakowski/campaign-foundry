@@ -104,12 +104,32 @@ export interface PlanEstimate {
 }
 
 /**
- * One planned creative, as `plan.post.ts` serializes it. Only the fields the editor
- * reads are declared; the route sends more.
+ * One planned creative, as `plan.post.ts:57-70` serializes it.
+ *
+ * SL3 widened this from the two fields the estimate's ratio split read to the
+ * whole serialized shape, because the sidebar's creatives list is a row per
+ * planned creative and every field it shows comes from here. **Every field stays
+ * optional, and that is not laziness**: `planCampaign` does not validate the
+ * array (`variants: Array.isArray(rec.variants) ? rec.variants : []`, below) — it
+ * is an unchecked cast over whatever the route answered. Declaring `index:
+ * number` would let a consumer key a row on a value the parse never checked. So
+ * the list guards `typeof index === "number"` at the point it keys on it, and a
+ * variant without one is not a row.
+ *
+ * `index` is the SLOT (SL-D1: identity in variation mode is `productId` +
+ * `index`), monotonic and holey since SL2 — never the array position.
  */
 export interface PlanVariant {
+  readonly index?: number;
   readonly aspectRatio?: string;
   readonly productId?: string;
+  readonly layout?: string;
+  readonly tone?: string;
+  readonly backgroundSource?: string;
+  readonly paletteShift?: number;
+  readonly headline?: string;
+  readonly motion?: string;
+  readonly durationSec?: number;
 }
 
 export type PlanResult =

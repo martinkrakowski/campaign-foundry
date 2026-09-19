@@ -68,7 +68,26 @@ export interface PreviewLook {
   readonly platformId: string | undefined;
 }
 
-export function previewLook(state: EditorState): PreviewLook | null {
+/**
+ * SL3 — the slot the operator clicked in the sidebar's creatives list, as much of
+ * it as the look can honestly wear.
+ *
+ * Only the axes the look itself carries are here. `aspectRatio` is NOT: the ratio
+ * is derived once by the caller (`derivePreviewRatio`, `PreviewDock.tsx:28`) and
+ * `PreviewLook` has never held one. Nor is `productId`: the frame's cell builds
+ * its product in `PreviewFrame.tsx`, so overriding the colour here alone would
+ * make the client-composed preview and the server-rendered frame disagree about
+ * which product they are drawing — exactly the D45 split this derivation exists
+ * to prevent. Both are recorded gaps, not oversights.
+ */
+export interface SelectedVariantLook {
+  readonly layout?: string;
+  readonly tone?: string;
+  readonly motion?: string;
+  readonly headline?: string;
+}
+
+export function previewLook(state: EditorState, variant?: SelectedVariantLook): PreviewLook | null {
   const product = state.products[0];
   if (product === undefined || product.id.length === 0) return null;
   const treatment = state.mode === "brief" ? state.treatments[0] : undefined;
@@ -99,12 +118,19 @@ export function previewLook(state: EditorState): PreviewLook | null {
   const motion: MotionKind | undefined =
     wantsMotion && state.motion.length > 0 ? (state.motion[0] as MotionKind) : undefined;
   return {
-    layout,
-    tone,
+    // SL3 — the selected slot's own draw wins over the draft's first-of-each-axis
+    // default, which is what "clicking the creative loads the creative" means for
+    // the rail: the look is that instance's, not the axis list's head.
+    layout: (variant?.layout as LayoutOption | undefined) ?? layout,
+    tone: (variant?.tone as ToneOption | undefined) ?? tone,
     anchor,
-    motion,
+    // The plan carries `motion` only for a brief that asked for video
+    // (`plan.post.ts:67`), so this never turns a static draft into a moving one.
+    motion: (variant?.motion as MotionKind | undefined) ?? motion,
     primaryColor: product.primaryColor,
-    headline: state.campaignMessage,
+    // The drawn copy line, when the slot has one — a pooled headline is a
+    // property of the creative, not of the brief, so it can only come from here.
+    headline: variant?.headline ?? state.campaignMessage,
     // The brief's style (T5) — exactly what toBrief will emit (D45: the preview
     // and the saved brief cannot disagree about the typography it shows).
     style: briefStyle(state),
@@ -126,8 +152,11 @@ export function previewIdentityKey(state: EditorState): string | undefined {
  * `PreviewDock`, in product code, so no test fixture is the only definition of it.
  * The look itself is `previewLook`, shared with the Layout step's frame.
  */
-export function previewDockProps(state: EditorState): PreviewDockLook | null {
-  const look = previewLook(state);
+export function previewDockProps(
+  state: EditorState,
+  variant?: SelectedVariantLook,
+): PreviewDockLook | null {
+  const look = previewLook(state, variant);
   if (look === null) return null;
   return {
     campaignName: state.campaignName,
