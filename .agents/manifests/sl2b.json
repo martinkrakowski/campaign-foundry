@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "lane": "SL2B",
+  "mutations": [
+    {
+      "file": "packages/CampaignOrchestration/src/application/use-cases/PlanVariationsUseCase.use-case.ts",
+      "before": "    const remaining = (): boolean =>\n      cursor < allocated &&\n      (drawn < budget || (cursor >= policy.count && slotDraws < PER_SLOT_MIN_DRAWS));",
+      "after": "    const remaining = (): boolean => cursor < allocated && drawn < budget;",
+      "because": "The floor itself. Removing it restores the shared pool alone, which is spent in order and leaves the appended slot — last allocated and most constrained, since it must clear every occupant — with whatever the replay of the operator's existing slots did not use. Because the exhaustive fallback is deliberately closed once a slot has been added, that starvation is reported as `Variation plan shortfall`, i.e. as though the brief could not fit, when the space demonstrably holds the point. Measured over a 4-20 count by 12-seed by 2-distance sweep: 42 briefs whose dense plan succeeds refuse on a single add, and 27 of those place given more turns at the new slot. The test this runs is the one that observes a placement the pool alone cannot reach AND checks the seven occupants stay byte-identical, so it fails if the floor is removed and also if the floor were bought by re-choosing the existing creatives.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "packages/CampaignOrchestration/src/application/use-cases/__tests__/PlanVariationsUseCase.use-case.test.ts",
+        "-t",
+        "eighth creative the space has room for"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/application/use-cases/PlanVariationsUseCase.use-case.ts",
+      "before": "(drawn < budget || (cursor >= policy.count && slotDraws < PER_SLOT_MIN_DRAWS));",
+      "after": "(drawn < budget || slotDraws < PER_SLOT_MIN_DRAWS));",
+      "because": "The SCOPE of the floor, which is the half a reader is most likely to think is an unnecessary restriction. Dropping `cursor >= policy.count` extends the floor to every slot, including the dense replay. That is not merely broader: a dense brief whose random draw falls short today drops through to `exhaustiveAccept`, and several plans depend on that fallback being the thing that answers. Give the dense replay extra turns and the random draw reaches a set the fallback used to serve — a DIFFERENT set, silently, for a brief nobody added a slot to. The test that reds is the delete-keeps-its-survivors pair built on exactly such a brief.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "packages/CampaignOrchestration/src/application/use-cases/__tests__/PlanVariationsUseCase.use-case.test.ts",
+        "-t",
+        "needed the exhaustive search"
+      ],
+      "verdict": "caught"
+    }
+  ],
+  "note": "Two mutations because the change has two claims and they fail differently. #0 is that the floor exists (without it a placeable append is refused). #1 is that the floor stops at `count` (without that bound, dense briefs quietly change plan because the random draw starts reaching sets the exhaustive fallback used to produce). A floor with no bound passes #0 and fails #1, which is the shape of the first draft of this change."
+}
