@@ -523,6 +523,13 @@ computability. It is keyed on the `state` reference, never on `toBrief(state)`: 
 drops and narrows on the way out, so an edit that breaks the document can leave it identical.
 The snapshot is client-local and ephemeral — a reload clears it.
 
+**The one Generate that is disabled is the one this host cannot run.** D3's rule is that
+nothing is disabled for being *invalid*; a capability is not invalidity (D7), and the
+capability rule below is the one that applies — the control is disabled **and the reason is
+shown**, in the status line beside it. So a video brief on a host without ffmpeg validates
+clean, stays savable, and offers a Generate that plainly waits, which is what
+`status.applyRefusal` has always said it would do. Nothing else disables Generate.
+
 **Status feedback.** Anything that changes state the user cannot see from where they are
 says so in a `role="status"` line next to the control — *"Saved — press Validate, then
 Generate, to make "clip""*. Success is `text-success`, a refusal `text-error`.
