@@ -1,7 +1,7 @@
 # Creatives as a list — from two volume mechanisms to one addressable one
 
 **Date:** 2026-09-17 · **Revised:** 2026-09-17 after an adversarial review that blocked the first draft.
-**Status:** **decision document. Not dispatchable. Twelve decisions open (CL-D1…CL-D12).** Nothing dispatched.
+**Status:** **CLOSED — not now.** The owner answered the question this document exists to ask on **2026-09-19**: hand-editing a brief is not a user need, so the addressability thesis in §2.1 has no near-term customer. CL-D10 survived into `2026-09-18_creatives-as-slots.md` as SL-D4 and **shipped**; CL-D1…CL-D9, CL-D11 and CL-D12 are **closed undecided**, not rejected on their merits. See §9. Nothing was ever dispatched from this document.
 **Verified against:** `origin/main` at `78dc964a`.
 **Source:** the owner's flow of 2026-09-17 — *"if user elects to generate a campaign with 2 variations (i.e. creatives), then 2 items appear in the left sidebar … User should be able to add and delete the creatives."*
 
@@ -237,3 +237,43 @@ Derive those rows locally the way `classicAdCount` already does — `products ×
 # not an argument. That is a limit of fences, recorded here rather than papered over.
 ! grep -qn 'creatives' packages/CampaignOrchestration/src/domain/entities/CampaignBrief.ts
 ```
+
+## 9. Closed — the owner's answer, 2026-09-19
+
+This document's case rests on one sentence in §2.1: *"you cannot point at a cell, name it, or
+hand-edit it without changing others."* The owner was asked whether creatives should become a
+literal authored list. The answer retires the premise rather than the design:
+
+> _"Whether or not a user will hand edit a brief is questionable, and probably would only exist in
+> the case of running batches, even then the software that we are creating is the author of this
+> yaml file. A user could technically create a batch script to edit an existing yaml, e.g. change
+> text and image. Then run a batch of 100 or 1000 yaml files. This batch processing does not yet
+> exist and will be a future feature. The yaml import/export flow will be a part of this design."_
+
+**What that settles.** Addressability was argued for a *human* editing one cell. There is no such
+user. The author of the YAML is this software, and the only realistic editor of an existing brief is
+a **script**, at batch scale, changing a field like text or an image path. So CL-D1…CL-D9, CL-D11
+and CL-D12 are closed **undecided**: the schema upheaval they describe (a `creatives` list, a
+`schemaVersion` bump, asset identity moving off `variantIndex`) was never refuted — it simply has no
+demand behind it today, and a bump paid now would be paid against a guess at what batch needs.
+
+**Where the work actually went.** The one decision here that had a customer was CL-D10
+("occupied-set planning"), which `2026-09-18_creatives-as-slots.md` adopted as **SL-D4** and shipped
+(#500/#504). Add and delete for creatives exist; they are addressed by *slot*, which is what
+`regenerateOnly` already did. Grok's refutation of the coordinate design made the same point from
+the other side — an override map keyed by coordinate **is** this list with a worse key.
+
+**What replaces it.** Batch processing, as a future feature. The requirement it places on the brief
+is not per-creative identity in the domain but a YAML that **round-trips losslessly and survives a
+machine edit** — a different and much cheaper property. *(That framing is this document's inference
+from the owner's words, not their instruction; treat it as the thing to verify first when the batch
+design starts, not as a settled constraint.)*
+
+**The YAML import/export flow is part of that design and is no longer a standalone item.** It had
+been carried as named-but-unspecified work; it is now explicitly owned by the batch feature, so it
+should not be scheduled, scoped, or dispatched on its own.
+
+**Reopen this document if** a human-facing reason to edit one creative appears — or when the batch
+design lands and needs per-entry identity after all. The CL0 fence below is deliberately left live:
+it is cheap (~23 ms) and it still watches the exact condition that would make this question urgent
+again.
