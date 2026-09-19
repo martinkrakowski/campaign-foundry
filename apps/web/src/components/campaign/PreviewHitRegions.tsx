@@ -232,9 +232,12 @@ export function PreviewHitRegions({
   return (
     <>
       {regions.map((region) => {
-        // `-layer` rather than an index for the whole-layer regions: a real
-        // suffix, not the string "undefined", and one an element index can
-        // never collide with.
+        // `-layer` rather than an index for the whole-layer regions. Not for
+        // uniqueness — the layer id above already carries that, and a layer is
+        // either an `html` layer with elements or a ground layer with one
+        // whole-layer region, never both — but because `String(undefined)`
+        // would put the literal text "undefined" in a description id, which is
+        // the kind of thing that later reads as a bug in something else.
         const slot = region.element === undefined ? "layer" : String(region.elementIndex);
         const descId = `${uid}-region-${region.layerId}-${slot}`;
         const selected = region.layerId === selectedLayerId;

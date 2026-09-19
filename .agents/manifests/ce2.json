@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "lane": "CE2",
+  "mutations": [
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/creative-geometry.ts",
+      "before": "export const GROUND_LAYER_KINDS: readonly LayerKind[] = [\"image\", \"video\"];",
+      "after": "export const GROUND_LAYER_KINDS: readonly LayerKind[] = [\"image\"];",
+      "because": "The set quietly shrinking to the kind somebody happened to test. `video` is the OTHER member, and it reaches the preview only through a `short-video` campaign — a path nobody exercises by hand while working on a still. Dropping it is invisible everywhere the lane is usually looked at: the default social-post creative is still clickable, every element region still works, every assertion about `image` still passes, and the component compiles unchanged because it never names a kind at all. What breaks is a clip's creative going back to un-clickable for exactly the reason CE1 was inert — and there is no error, just nothing happening. It is caught only by asking the COMPOSITOR which kinds share `paintBackground`, which is the whole reason the set is an export with a test against `LAYER_DRAWERS` rather than a two-element array in a component.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CreativeGeneration/src/infrastructure/adapters/__tests__/NodeCanvasCompositor.ground-kinds.test.ts",
+        "-t",
+        "ARE the ground kinds"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/PreviewHitRegions.tsx",
+      "before": "    .filter((layer) => layer.enabled !== false)\n    .flatMap(",
+      "after": "    .filter((layer) => layer.enabled !== false)\n    .sort((a, b) => Number(isGroundLayerKind(b.kind)) - Number(isGroundLayerKind(a.kind)))\n    .flatMap(",
+      "because": "Overlap resolved by SIZE instead of by z-order, in the shape somebody would actually introduce it. A full-canvas region covers everything, so 'put the big ones underneath' reads like the obvious fix for a ground that swallows clicks — and on the template everybody looks at it is even right, because the canonical stacks all put their ground at the bottom anyway. Every region still renders, still names its layer, still reports it, and the default creative behaves identically. It is wrong only for a template that stacks a ground ABOVE something — where the compositor paints the picture over the markup and the layer list shows it over the markup, while the hit regions now say the opposite. Caught by asserting the rendered DOM order in BOTH stacking directions: one fixture alone cannot tell 'follows the template' from 'grounds first'.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/preview-hit-regions.test.tsx",
+        "-t",
+        "a ground stacked above an html layer renders its button last"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/PreviewHitRegions.tsx",
+      "before": "              style={hitRegionStyle(region.rect)}",
+      "after": "              style={{ ...hitRegionStyle(region.rect), zIndex: region.element === undefined ? -1 : undefined }}",
+      "because": "The other way to 'stop the big region stealing clicks': push it behind instead of ordering it. A negative z-index on the whole-layer regions looks like a tidy one-line fix and is a real defect — it takes the ground's region out of the frame box's paint order entirely and puts it BEHIND the `<img>` that fills that box, so the picture becomes un-clickable again while the element regions keep working. Nothing about it is visible: no layout changes, no name changes, the layer list is untouched, and the element regions — the ones a developer would click while checking — behave exactly as before. It is caught by the claim that stands in for stacking in a DOM with no layout: no region carries a z-index at all, asserted with a layer picked as well as with none, because 'lift the selected one' is the same mistake wearing a highlight.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/preview-hit-regions.test.tsx",
+        "-t",
+        "and none carries a z-index"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/PreviewHitRegions.tsx",
+      "before": "      if (isGroundLayerKind(layer.kind)) {",
+      "after": "      if (isGroundLayerKind(layer.kind) || layer.kind === \"shade\") {",
+      "because": "The lane's hardest judgment, undone by the argument that looks strongest for it. `paintShade` fills `(0, 0, width, height)` — literally the whole canvas, the same rect the ground gets — so 'the shade fills the canvas too, why isn't it clickable?' is the note a reviewer writes and the change a later lane makes in one word. It reads as CONSISTENCY, and every test about shade-the-layer still passes. What it actually does is fatal to the feature this lane exists to deliver: the shade sits directly above the ground in all three canonical stacks, and a full-canvas region for it is emitted after the ground's, so it takes every click in the creative and the picture — the one thing an operator points at — becomes unreachable by click again. The default campaign still 'works': something goes pressed on every click. It is just always the veil. Nothing about opacity is visible to a hit test, which is why the exclusion is asserted against a template of frameless kinds rather than argued in a comment.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/preview-hit-regions.test.tsx",
+        "-t",
+        "the frameless kinds get nothing"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

@@ -473,19 +473,34 @@ describe("PreviewHitRegions — the ground layer's whole-canvas button (CE2)", (
    * picture's above it.
    */
   test("the ground's button precedes the element buttons it sits under, and none carries a z-index", () => {
-    const { container } = render(
+    const { container, rerender } = render(
       <PreviewHitRegions brief={stackedBrief(["ground", "markup"])} onSelectLayer={() => {}} />,
     );
-    const buttons = [...container.querySelectorAll("button")];
-    expect(buttons.map((b) => b.getAttribute("aria-label"))).toEqual([
+    const buttons = () => [...container.querySelectorAll("button")];
+    expect(buttons().map((b) => b.getAttribute("aria-label"))).toEqual([
       "ground",
       "markup",
       "markup",
     ]);
     // The ground's is first in DOM order, so it paints first and is hit LAST.
-    expect(buttons[0].getAttribute("aria-describedby")).toContain("-ground-layer");
+    expect(buttons()[0].getAttribute("aria-describedby")).toContain("-ground-layer");
     // Nothing lifts itself out of that order — inline or by class.
-    for (const b of buttons) {
+    for (const b of buttons()) {
+      expect(b.style.zIndex).toBe("");
+      expect(b.className).not.toContain("z-");
+    }
+    // And picking one must not lift it either: a selected region that floated
+    // above the stack would put a layer's hit box somewhere the layer is not,
+    // which is the one thing a highlight is never allowed to change.
+    rerender(
+      <PreviewHitRegions
+        brief={stackedBrief(["ground", "markup"])}
+        selectedLayerId="ground"
+        onSelectLayer={() => {}}
+      />,
+    );
+    expect(buttons()[0].getAttribute("aria-pressed")).toBe("true");
+    for (const b of buttons()) {
       expect(b.style.zIndex).toBe("");
       expect(b.className).not.toContain("z-");
     }
@@ -508,10 +523,11 @@ describe("PreviewHitRegions — the ground layer's whole-canvas button (CE2)", (
   });
 
   /**
-   * Two ground layers in one template give two regions with distinct
-   * description ids — the `-layer` slot has to be unique per LAYER, the way the
-   * element slot is unique per index. A shared id would point both buttons'
-   * `aria-describedby` at one span and lose a name.
+   * A template may carry more than one ground layer, and each gets its OWN
+   * region and its own description span — one whole-canvas region is not
+   * emitted per template. (The ids are distinct because the LAYER ID is in
+   * them; the `-layer` slot is spelling, not uniqueness, and is pinned by the
+   * order test above.)
    */
   test("two ground layers get two regions with distinct descriptions", () => {
     const { container } = render(
