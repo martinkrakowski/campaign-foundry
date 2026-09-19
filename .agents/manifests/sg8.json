@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "lane": "SG8",
+  "mutations": [
+    {
+      "file": "apps/web/src/components/campaign/derive.ts",
+      "before": "    layers: state.template.layers.filter((layer) => layer.enabled !== false).length,",
+      "after": "    layers: state.template.layers.length,",
+      "because": "The pre-flight promises what a RUN composes, not what is authored. The generator gathers `enabled !== false` (HL4's rule), so a disabled layer is not a deliverable — counting it inflates the figure shown immediately before the operator spends credits, which is the one moment the number has to be right. The mutation is the count a reader reaches for, and the test that reds disables one layer and asserts the figure drops by exactly one.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "apps/web/src/components/campaign/__tests__/derive.preflight.test.ts",
+        "-t",
+        "layers counts what the run composes"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/derive.ts",
+      "before": "  if (creatives === null) return null;",
+      "after": "  if (creatives === null) return { creatives: 0, layers: 0, platforms: [] };",
+      "because": "`null` means the surface cannot answer; zero is a claim that the run produces nothing. Returning the zero shape makes the confirm say '0 creatives · 0 layers · no platforms selected' to a Randomized operator whose plan simply is not reachable from this dialog's tree — a confident, wrong statement about their run, in the dialog that precedes spending credits. The test that reds asserts the Randomized confirm names the Estimate panel and never matches `0 creatives`.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx",
+        "-t",
+        "pointed at the Estimate panel"
+      ],
+      "verdict": "caught"
+    }
+  ],
+  "note": "Shipped as option A of three the owner chose between. The Randomized creative count is the planner's, and `VariationPlanProvider` travels with the published sidebar fragment, so it does not reach this dialog's tree; a second provider would issue a second debounced planCampaign POST per keystroke. `preflightFigures` takes the plan as a PARAMETER rather than fetching, so whichever way that is resolved later, this derivation is already the one place the figures come from."
+}

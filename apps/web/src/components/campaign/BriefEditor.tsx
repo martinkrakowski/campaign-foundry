@@ -87,6 +87,7 @@ import { SectionModeContext } from "@/components/campaign/SectionModeContext";
 import { useEditorPanelPublisher } from "@/lib/editor-panels-context";
 import { Accordion } from "@/components/shell/Accordion";
 import { revealField, revealSection } from "@/lib/scroll-to-section";
+import { preflightFigures } from "./derive";
 import { useLatestOnly } from "@/lib/use-latest-only";
 
 /** Stable identity, so a valid draft's `blocked` memo never churns its consumers. */
@@ -567,6 +568,14 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   const [validation, setValidation] = useState<ValidationSnapshot | null>(null);
   /** Generate's credit-spending confirm (SG-D10, after `CommandBar.tsx:164`). */
   const [runConfirmOpen, setRunConfirmOpen] = useState(false);
+  /**
+   * SG8 — what the run is about to produce. Derived, never counted here:
+   * `preflightFigures` reads `classicAdCount` for a classic brief and the
+   * planner for a Randomized one. `null` is passed for the plan deliberately
+   * (see the confirm below), so a Randomized draft resolves to null and the
+   * dialog says where the number lives instead of inventing one.
+   */
+  const preflight = preflightFigures(state, null);
 
   // Load briefs on mount and set up focus listener
   useEffect(() => {
@@ -2691,7 +2700,18 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
       <ConfirmDialog
         open={runConfirmOpen}
         title={messages.generateConfirmTitle}
-        message={messages.generateConfirmPrompt}
+        // SG8 — the pre-flight figures, before a run spends credits. The plan is
+        // NOT passed: `VariationPlanProvider` lives inside the published sidebar
+        // fragment, which the sidebar renders, so the planner's answer does not
+        // reach this dialog's tree. A second provider here would issue a second
+        // debounced `planCampaign` POST per keystroke, so the classic figure is
+        // shown (it needs no planner) and a Randomized draft is pointed at the
+        // Estimate panel rather than given a zero.
+        message={`${
+          preflight === null
+            ? messages.generatePreflightUnknown
+            : messages.generatePreflight(preflight)
+        } ${messages.generateConfirmPrompt}`}
         confirmLabel={messages.generate}
         cancelLabel={messages.confirmCancel}
         onConfirm={runValidatedBrief}

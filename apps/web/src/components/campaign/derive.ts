@@ -529,3 +529,47 @@ export {
   type OcclusionFinding,
   type OcclusionRule,
 } from "@campaignfoundry/CampaignOrchestration/creative-types";
+
+/**
+ * SG8 — what a run is about to produce, for the Generate confirm.
+ *
+ * The figures are READ from where they already live, never counted a second
+ * time. `creatives` is the planner's own number in Randomized (the same
+ * `PlanResult` the Estimate panel renders) and `classicAdCount`'s in classic —
+ * the two sources the estimate already distinguishes, for the reason it
+ * distinguishes them: `plan.post.ts` refuses classic briefs, so there is no
+ * planner answer to ask for.
+ *
+ * `null` means "not answerable yet": a Randomized draft whose plan has not
+ * arrived, or a classic one with no identified product. The confirm says so
+ * rather than showing a zero, because a zero is a claim about the run and
+ * "unknown" is not.
+ */
+export interface PreflightFigures {
+  readonly creatives: number;
+  readonly layers: number;
+  readonly platforms: readonly string[];
+}
+
+export function preflightFigures(
+  state: EditorState,
+  plan: { creatives: number } | null,
+): PreflightFigures | null {
+  const creatives =
+    state.mode === "variation"
+      ? (plan?.creatives ?? null)
+      : (() => {
+          const products = state.products.filter((product) => product.id.length > 0).length;
+          return products > 0
+            ? classicAdCount(products, state.treatments.length, state.sizes.length)
+            : null;
+        })();
+  if (creatives === null) return null;
+  return {
+    creatives,
+    // The layers a run composes: `enabled !== false` is the same test the
+    // generator applies (HL4's gather), not a count of everything authored.
+    layers: state.template.layers.filter((layer) => layer.enabled !== false).length,
+    platforms: state.platforms,
+  };
+}

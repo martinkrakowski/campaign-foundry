@@ -3902,6 +3902,63 @@ describe("BriefPage — the run slot: Validate → Generate (SG9)", () => {
     expect(generateCalls(calls)).toEqual([]);
   });
 
+  /**
+   * SG8 — the pre-flight figures, in the confirm SG-D10 already shipped rather
+   * than a second dialog. This brief is CLASSIC, which is the half that needs no
+   * planner: `classicAdCount` is the estimate's own derivation and the confirm
+   * reads it rather than counting again.
+   */
+  test("the Generate confirm names what the run will produce, before it spends (SG8)", async () => {
+    const user = userEvent.setup();
+    routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
+    renderWithRun(<Editor id="camp" />);
+    await waitForEditorReady();
+
+    await user.click(slot(messages.editorValidate) as HTMLElement);
+    await user.click(slot(messages.generate) as HTMLElement);
+
+    const text = confirm().textContent ?? "";
+    // The figures, and the credit warning that was already there — one message,
+    // because `ConfirmDialog` renders one paragraph.
+    expect(text).toMatch(/\d+ creatives? · \d+ layers? · /);
+    expect(text).toContain(messages.generateConfirmPrompt);
+  });
+
+  /**
+   * The other half, and the honest one. A Randomized draft's count is the
+   * planner's, and the planner's answer reaches the Estimate panel — not this
+   * dialog's tree, because `VariationPlanProvider` travels with the published
+   * sidebar fragment. Rather than show a zero (a claim about the run) or fetch
+   * the plan a second time (a second debounced POST per keystroke), the confirm
+   * says where the number lives.
+   */
+  test("a Randomized draft is pointed at the Estimate panel, never given a zero (SG8)", async () => {
+    const user = userEvent.setup();
+    // entry() builds a classic brief; a Randomized one is the point here, so the
+    // mode and its policy are set explicitly rather than assumed.
+    const randomized = {
+      file: "rand.yaml",
+      revision: "r1",
+      brief: {
+        ...brief("rand"),
+        mode: "variation",
+        variation: { count: 4, seed: 7, minDistance: 1 },
+      },
+    };
+    routes({ list: () => json({ briefs: [randomized] }) });
+    renderWithRun(<Editor id="rand" />);
+    await waitForEditorReady();
+
+    await user.click(slot(messages.editorValidate) as HTMLElement);
+    await user.click(slot(messages.generate) as HTMLElement);
+
+    const text = confirm().textContent ?? "";
+    expect(text).toContain(messages.generatePreflightUnknown);
+    // The failure this guards: a zero deliverables count reads as "this run makes
+    // nothing", which is a statement about the run and not about the surface.
+    expect(text).not.toMatch(/\b0 creatives\b/);
+  });
+
   test("Validate opens the gate, and Generate's confirm runs the brief on screen", async () => {
     const user = userEvent.setup();
     const calls = routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
