@@ -488,6 +488,12 @@ describe("PreviewHitRegions — the ground layer's whole-canvas button (CE2)", (
     for (const b of buttons()) {
       expect(b.style.zIndex).toBe("");
       expect(b.className).not.toContain("z-");
+      // And every ring is INSET. A ring is a box-shadow outside the border
+      // box, and the whole-canvas region fills its `overflow-hidden`
+      // container exactly, so an outset one is clipped away entirely —
+      // leaving a keyboard user with no focus indicator and a picked picture
+      // with no highlight. No layout runs here, so the class is the claim.
+      expect(b.className).toContain("ring-inset");
     }
     // And picking one must not lift it either: a selected region that floated
     // above the stack would put a layer's hit box somewhere the layer is not,

@@ -100,8 +100,12 @@ export interface CanvasRect {
  * `ctx.drawImage(image, 0, 0, width, height)`. So a ground layer's box is the
  * canvas itself: {@link FULL_CANVAS_RECT}, exactly, with no fraction left to
  * get wrong. The ken-burns poses scale ABOUT THE CENTRE between
- * `1 + KEN_BURNS_ZOOM` and `1` and never below 1, so a moving ground never
- * uncovers a corner either.
+ * `1 + KEN_BURNS_ZOOM` and `1` and never below 1, so neither synthesised
+ * ground motion uncovers a corner. A hand-authored `scale` track (K4) can go
+ * below 1, and the rect stays this one anyway: the rect is the layer's DRAW
+ * rect, and a pose transform is not geometry — the same class as the window
+ * `PreviewHitRegions` already names, where a region and the last fetched
+ * raster disagree for one debounce.
  *
  * The set lives here rather than in the web, and
  * `NodeCanvasCompositor.ground-kinds.test.ts` pins it against `LAYER_DRAWERS`

@@ -261,7 +261,17 @@ export function PreviewHitRegions({
               onClick={() => onSelectLayer(region.layerId)}
               style={hitRegionStyle(region.rect)}
               className={cn(
-                "absolute rounded-[2px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary",
+                // `ring-inset`, or the ground region has no visible state at
+                // all. A ring is a box-shadow drawn OUTSIDE the border box, and
+                // a whole-canvas region fills its container exactly — a
+                // container `PreviewFrame` gives `overflow-hidden` — so an
+                // outset ring lands entirely in the clipped zone: no focus
+                // indicator for a keyboard user, and no highlight when the
+                // layer list picks the picture. Inset draws it inside the
+                // region, which is also right for an element frame flush to an
+                // edge. Neither happy-dom nor any assertion here performs
+                // layout, so this is pinned as a class rather than as a pixel.
+                "absolute rounded-[2px] ring-inset focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary",
                 selected ? "ring-2 ring-brand-primary" : "ring-0",
               )}
             />
