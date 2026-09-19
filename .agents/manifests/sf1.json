@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "lane": "SF1",
+  "mutations": [
+    {
+      "file": "packages/CampaignOrchestration/src/application/use-cases/PlanCapacity.ts",
+      "before": "  const reachable = space.filter((point) =>\n    occupants.every((occupant) => !conflicts(point, occupant, policy.minDistance)),\n  ).length;",
+      "after": "  const reachable = space.length;",
+      "because": "Reachability is the whole finding, and this line is the only thing that distinguishes it from capacity. Reporting `space.length` makes the new sentence always say every combination is still available — which on a greedy corner is precisely the falsehood the lane exists to remove, now stated explicitly instead of merely implied by the capacity figure. The test that reds is the one whose occupants are the entire space, so nothing can be far enough from them and the honest answer is `No remaining combination`.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "packages/CampaignOrchestration/src/application/use-cases/__tests__/PlanCapacity.test.ts",
+        "-t",
+        "the existing creatives are named as the constraint"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/application/use-cases/PlanVariationsUseCase.use-case.ts",
+      "before": "shortfallMessage(policy, space, best.length, best)",
+      "after": "shortfallMessage(policy, space, best.length)",
+      "because": "The wiring, and the reason `occupants` defaults to `[]` rather than being required. The default keeps the three existing call-free unit tests honest, but it also means a caller that forgets to pass the occupants gets a message that silently omits the sentence instead of failing to compile. Nothing else in the suite observes the omission: the refusal still happens, the shortfall is still named, and every other assertion on that message still matches. Only the test that reads the message end to end, on a real plan that fails at a greedy corner, can tell that the operator was left holding the capacity figure alone.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "packages/CampaignOrchestration/src/application/use-cases/__tests__/PlanVariationsUseCase.use-case.test.ts",
+        "-t",
+        "genuinely cannot hold is still refused"
+      ],
+      "verdict": "caught"
+    }
+  ],
+  "note": "Two mutations for two independent ways to lose the finding: computing reachability wrongly (#0) and never handing it the occupants (#1). #1 is the one a reader is most likely to dismiss, because the optional parameter makes the omission compile and every other assertion on the message keeps passing."
+}

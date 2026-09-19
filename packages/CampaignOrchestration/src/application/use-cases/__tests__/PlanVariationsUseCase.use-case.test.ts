@@ -1355,6 +1355,13 @@ describe("PlanVariationsUseCase.plan — monotonic slots (SL2)", () => {
     expect(appended.error.message).toMatch(/Variation plan shortfall: accepted 8 of count 9\./);
     expect(appended.error.message).toMatch(/Existing creatives keep their draw \(8 of 9 slots/);
     expect(appended.error.message).toMatch(/To fix: delete a creative/);
+    // And it names the constraint that actually binds. The capacity sentence
+    // that follows says "at most 8 distinct variants" — true of the space, and
+    // read as spare room by an operator holding eight of them. The real answer
+    // is that nothing left in the space clears the creatives they have.
+    expect(appended.error.message).toMatch(
+      /No remaining combination is 2 or more away from the creatives you already have\./,
+    );
   });
 
   test("an added creative takes a fresh index above every index ever used, never a tombstoned one", () => {

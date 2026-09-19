@@ -215,9 +215,12 @@ export class PlanVariationsUseCase {
           ? exhaustiveAccept(space, policy, brief.id, deficient)
           : history;
       if (exhaustive.length < allocated) {
-        return err(
-          new Error(shortfallMessage(policy, space, Math.max(history.length, exhaustive.length))),
-        );
+        // One set answers both halves of the message: the number accepted and
+        // the creatives a further point would have to clear. Taking the count
+        // from `Math.max` while the occupants came from somewhere else would let
+        // the two disagree about which draw is being described.
+        const best = exhaustive.length > history.length ? exhaustive : history;
+        return err(new Error(shortfallMessage(policy, space, best.length, best)));
       }
       history = exhaustive; // the coverage check below applies to either search
     }
