@@ -1,7 +1,7 @@
 # Video Editing Features — Architecture & Development Plan
 
 **Date:** 2026-09-13
-**Status:** Phase A shipped (VE1, VE2). VE-Q1–VE-Q4 answered by the owner on 2026-09-15 (VE-D8–VE-D11, recommended defaults, refined by plan review); VE5a shipped, then VE5b1 and VE5b2 shipped — VE5b is complete — and VE3a, VE3b1 and now VE3b2 shipped (this PR — uploads, generation wiring, the interim refusal removed; `premise VE3b` retired). VE4 now waits only on the speech vendor (VE-Q5 — the owner is evaluating ElevenLabs as of 2026-09-16; no decision recorded). VE6 is deferred (VE-D11). **VE-Q5 answered 2026-09-20 (VE-D12); VE4 is unblocked and not yet dispatched.**
+**Status:** Phase A shipped (VE1, VE2). VE-Q1–VE-Q4 answered by the owner on 2026-09-15 (VE-D8–VE-D11, recommended defaults, refined by plan review); VE5a shipped, then VE5b1 and VE5b2 shipped — VE5b is complete — and VE3a, VE3b1 and now VE3b2 shipped (this PR — uploads, generation wiring, the interim refusal removed; `premise VE3b` retired). VE6 is deferred (VE-D11). **VE-Q5 was answered on 2026-09-20 and VE4 is unblocked, not yet dispatched.** The vendor half of that answer (OpenRouter, `hexgrad/kokoro-82m`) survives in VE-D12, but VE-D12 itself is **superseded**: cues bind to an `AudioTrack`, per **VE-D13–VE-D15**, never to a TTS response. The contract now lives in `artifacts/audiotrack/`, with ten confirmed defects recorded against it below that VE4 must resolve first.
 **Scope:** Which ideas from a reference video editor fit Campaign Foundry, and how each is built on
 the existing server-side compositor instead of beside it.
 **Related:** `2026-09-10_keyframing.md` (K1–K5), `2026-09-10_finishing-video.md`,
@@ -310,7 +310,7 @@ uploaded bytes VE3b1 needs. The interim refusal in `load-brief.ts` is removed; `
 >    with `char_end` 5, not 6, so `text` and the char span no longer cover the phrase.
 >    Narrower than reported — `'"Wait!"'` keeps its closing quote and is **fine**; it is
 >    specifically consecutive sentence punctuation that is lost.
-> 10. **`max_word_s` is not actually a bound.** §3.8 clamps each word to
+> 10. **The clamp does not bind — in either direction.** §3.8 clamps each word to
 >    `[0.07, 0.90]`, then says to scale uniformly to fill the budget — and the scale runs
 >    *after* the clamp with no re-check. When every word clamps, `free` is empty and the
 >    scale reinflates straight past the maximum. Measured on one long token beside three
@@ -318,8 +318,11 @@ uploaded bytes VE3b1 needs. The interim refusal in `load-brief.ts` is removed; `
 >    `max_word_s` of `0.90`. The clamp is presented as a guarantee and is not one.
 >    Reachable without anything exotic — the trigger is a token long enough to dominate
 >    the weights while staying under `max_chars` 140, which a URL, a product name or a
->    German compound will do. Needs the bound re-applied after scaling, or the residual
->    absorbed into pauses.
+>    German compound will do. **The low side breaches too**, by the same mechanism running
+>    the other way: in the refuted case below, `Wait` comes back at `0.0318 s` against a
+>    `min_word_s` of `0.07`. Neither bound is enforced after the scale, and no
+>    `RATE_CLAMPED` warning is emitted to say so. Needs the bounds re-applied after
+>    scaling, or the residual absorbed into pauses.
 >
 > **Refuted — allocated words do NOT overrun a short clip.** A reviewer read §3.8's
 > `speech_budget = max(speech_duration_s - internal_pause, n * min_word_s)` and predicted
@@ -330,7 +333,14 @@ uploaded bytes VE3b1 needs. The interim refusal in `load-brief.ts` is removed; `
 > rather than holding `0.08`. §3.8's closing rule ("scale every word uniformly so they
 > fill `speech_budget`") is implemented as a scale to the *measured* duration, which
 > contains the `max`. The spec prose is genuinely misleading on this point and worth
-> tightening, but the behaviour is correct and needs no fix.
+> tightening.
+>
+> **But read the numbers again before filing it as harmless.** `Wait` is `0.0318 s`, and
+> `min_word_s` is `0.07`. Words stay inside the clip, which is all the overrun claim was
+> about — and in getting there the scale breaches the *lower* clamp, silently, with no
+> `RATE_CLAMPED`. That is defect 10 running in the other direction, and it is what the
+> reviewer's suggested fix was actually reaching for. The overrun is refuted; the clamp
+> is still not a bound.
 
 > **Per-creative speech cost — PLACEHOLDER, 2026-09-20. Replace with a measurement.**
 >
