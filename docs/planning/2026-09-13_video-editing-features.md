@@ -240,8 +240,8 @@ uploaded bytes VE3b1 needs. The interim refusal in `load-brief.ts` is removed; `
 > the producer becomes a separate audio service behind the `AudioTrack` boundary (what
 > that boundary is for) or a TS port is still not decided.
 
-> **Nine confirmed defects in the artifacts as received (2026-09-20).** Review bots
-> raised ten on #530; each was reproduced against the files before being recorded here,
+> **Ten confirmed defects in the artifacts as received (2026-09-20).** Review bots
+> raised eleven on #530; each was reproduced against the files before being recorded here,
 > one was **refuted by measurement** (below), and none was fixed — the artifacts are
 > committed as the owner authored them, because the contract is theirs to change.
 > **VE4 must resolve these before it can emit a schema-valid track.** Whoever ports or
@@ -250,8 +250,8 @@ uploaded bytes VE3b1 needs. The interim refusal in `load-brief.ts` is removed; `
 > Several are the implementation disagreeing with its own spec rather than the spec being
 > unclear, which is the cheap kind of defect to fix and the expensive kind to discover
 > late: §3.3 lists `--` and parenthetical close as split triggers that never fire, §3.8
-> lists a `( )` pause that is always zero, and §3.6 prescribes empty-clip handling the
-> code does not implement.
+> lists a `( )` pause that is always zero and a `max_word_s` that does not bind, and §3.6
+> prescribes empty-clip handling the code does not implement.
 >
 > 1. **A track can validate with no audio at all.** `audio.uri` is required but
 >    `["string","null"]`, `audio_base64` is optional *and* nullable, and there is no
@@ -310,6 +310,16 @@ uploaded bytes VE3b1 needs. The interim refusal in `load-brief.ts` is removed; `
 >    with `char_end` 5, not 6, so `text` and the char span no longer cover the phrase.
 >    Narrower than reported — `'"Wait!"'` keeps its closing quote and is **fine**; it is
 >    specifically consecutive sentence punctuation that is lost.
+> 10. **`max_word_s` is not actually a bound.** §3.8 clamps each word to
+>    `[0.07, 0.90]`, then says to scale uniformly to fill the budget — and the scale runs
+>    *after* the clamp with no re-check. When every word clamps, `free` is empty and the
+>    scale reinflates straight past the maximum. Measured on one long token beside three
+>    short ones at a `2.0 s` budget: the long word comes back **`1.6216 s`**, against a
+>    `max_word_s` of `0.90`. The clamp is presented as a guarantee and is not one.
+>    Reachable without anything exotic — the trigger is a token long enough to dominate
+>    the weights while staying under `max_chars` 140, which a URL, a product name or a
+>    German compound will do. Needs the bound re-applied after scaling, or the residual
+>    absorbed into pauses.
 >
 > **Refuted — allocated words do NOT overrun a short clip.** A reviewer read §3.8's
 > `speech_budget = max(speech_duration_s - internal_pause, n * min_word_s)` and predicted
