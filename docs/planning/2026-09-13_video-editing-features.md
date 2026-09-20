@@ -210,15 +210,35 @@ uploaded bytes VE3b1 needs. The interim refusal in `load-brief.ts` is removed; `
 > unknown text; no MP3-frame concat — trim and stitch PCM, encode once; and TTS I/O
 > stays outside the chunker so the splitter and allocator remain unit-testable.
 
-> **Artifacts.** The owner's schema and chunker live under `artifacts/audiotrack/`
-> (`audiotrack.example.json` is the market-line track filled from the chunker). They
-> were **not present in this repo** when this was recorded on 2026-09-20 — the contract
-> above is transcribed from the owner's message, and the files should be added or
-> pointed at before VE4 is dispatched. **Open integration question:** the reference
-> chunker is `phrase_chunker.py`, and this is a TypeScript monorepo with layer rules and
-> a 100 % coverage gate. Either it is a separate audio service behind the `AudioTrack`
-> boundary — which is what that boundary is for — or it needs a TS port. That choice is
-> not made here.
+> **Artifacts — in the repo as of 2026-09-20.** `artifacts/audiotrack/`:
+> `AUDIO_TRACK_SPEC.md` (the contract, cue binding, chunker policy, failure modes),
+> `audiotrack.schema.json` (JSON Schema 2020-12; 11 required fields, plus `voice`,
+> `sentences`, `pauses`, `warnings`, `provenance`, `speech_start_s`/`speech_end_s`) and
+> `phrase_chunker.py` (tokenize, split, allocate, gap policy — TTS and I/O deliberately
+> outside it, so the splitter and allocator unit-test without a vendor).
+>
+> **Verified on arrival, not taken on trust.** The reference chunker reproduces the
+> spec's own §5 worked example exactly: the market line splits at the comma and NOT at
+> `after` (only four words precede it, `soft_min_words` is 8), the long line breaks
+> _before_ `and` once eight words precede it, and with measured durations 2.86 s / 1.05 s
+> it places `P0 0.00–2.86`, `P1 3.00–4.05` on a 0.14 s comma gap with
+> `speech_end_s = 4.05`. Phrase rows come back `timing: "exact"`; words carry
+> `char_start`/`char_end` into `spoken_text`.
+>
+> **Two things to know before building on it.** `plan_to_json` emits the PLAN half —
+> `phrases`, `words`, `speech_end_s` — not a whole `AudioTrack`: `schema_version`,
+> `track_id`, `audio`, `source` and `confidence` are the producer's to assemble, which
+> is the same boundary that keeps TTS I/O out of the chunker. And
+> `audiotrack.example.json` is referenced in conversation but is **not** among the
+> artifacts and is not cited by the spec; the worked example above stands in until it
+> appears.
+>
+> **Open integration question, unchanged.** The reference chunker is Python and this is
+> a TypeScript monorepo with layer rules and a 100 % coverage gate. Nothing under
+> `artifacts/` is on the build path — `format:check` globs `**/*.{ts,tsx}` and
+> `lint:arch` covers `packages/*/src` — so it sits here safely as a reference. Whether
+> the producer becomes a separate audio service behind the `AudioTrack` boundary (what
+> that boundary is for) or a TS port is still not decided.
 
 > **Per-creative speech cost — PLACEHOLDER, 2026-09-20. Replace with a measurement.**
 >

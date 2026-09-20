@@ -52,3 +52,9 @@ SYNC-MIGRATION-REPORT.md
 
 # Keep per-template env examples tracked
 !.env.*.example
+
+# Byte-code from running the AudioTrack reference chunker (artifacts/audiotrack).
+# The chunker is a reference implementation, not part of the build; running it to
+# verify a change must not leave artefacts in the tree.
+__pycache__/
+*.pyc

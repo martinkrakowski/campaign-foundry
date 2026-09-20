@@ -1,0 +1,253 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/schemas/audiotrack.schema.json",
+  "title": "AudioTrack",
+  "description": "Canonical audio + alignment payload consumed by VE-D9 cue binding. The video engine must not call TTS directly.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "track_id",
+    "language",
+    "script_text",
+    "spoken_text",
+    "audio",
+    "duration_s",
+    "words",
+    "phrases",
+    "source",
+    "confidence"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0.0"
+    },
+    "track_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Stable id for this render of this voiceover."
+    },
+    "creative_id": {
+      "type": ["string", "null"]
+    },
+    "language": {
+      "type": "string",
+      "description": "BCP-47, e.g. en-US."
+    },
+    "voice": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "voice_id"],
+      "properties": {
+        "provider": { "type": "string" },
+        "voice_id": { "type": "string" },
+        "model": { "type": ["string", "null"] },
+        "style": { "type": ["string", "null"] },
+        "speaking_rate": { "type": ["number", "null"] }
+      }
+    },
+    "script_text": {
+      "type": "string",
+      "description": "Author-facing script. Cue selectors may reference this string."
+    },
+    "spoken_text": {
+      "type": "string",
+      "description": "Exact text sent to TTS after number/abbreviation expansion. Word char offsets index this string."
+    },
+    "audio": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["uri", "codec", "container", "sample_rate_hz", "channels", "bytes"],
+      "properties": {
+        "uri": {
+          "type": ["string", "null"],
+          "description": "Object-store URL, or null when audio_base64 is inline."
+        },
+        "audio_base64": { "type": ["string", "null"] },
+        "codec": { "type": "string", "enum": ["pcm_s16le", "mp3", "opus", "aac", "wav"] },
+        "container": { "type": "string", "enum": ["raw", "wav", "mp3", "ogg", "mp4"] },
+        "sample_rate_hz": { "type": "integer", "minimum": 8000 },
+        "channels": { "type": "integer", "minimum": 1, "maximum": 2 },
+        "bytes": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "duration_s": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Full file duration including leading/trailing silence."
+    },
+    "speech_start_s": {
+      "type": "number",
+      "minimum": 0,
+      "description": "First word start. Prefer this over 0 when TTS prepends silence."
+    },
+    "speech_end_s": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Last word end. Prefer this over duration_s when TTS appends silence."
+    },
+    "words": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/word" }
+    },
+    "sentences": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/span" }
+    },
+    "phrases": {
+      "type": "array",
+      "description": "Synthesis units. Phrase boundaries are exact; intra-phrase word times may be allocated.",
+      "items": { "$ref": "#/$defs/phrase" }
+    },
+    "pauses": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["start_s", "end_s", "kind"],
+        "properties": {
+          "start_s": { "type": "number", "minimum": 0 },
+          "end_s": { "type": "number", "minimum": 0 },
+          "kind": {
+            "type": "string",
+            "enum": ["leading", "trailing", "inter_phrase", "punctuation", "breath"]
+          }
+        }
+      }
+    },
+    "source": {
+      "type": "string",
+      "enum": ["native", "chunked", "aligned", "estimated", "hybrid"]
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Track-level trust in word timings. Phrase boundaries from measured clips should be >= 0.9."
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "message"],
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": [
+              "TOKEN_MISMATCH",
+              "EMPTY_PHRASE_AUDIO",
+              "SILENCE_HEAVY",
+              "RATE_CLAMPED",
+              "CUE_UNBOUND",
+              "SPOKEN_SCRIPT_DIVERGED",
+              "MAX_PHRASE_SPLIT"
+            ]
+          },
+          "message": { "type": "string" },
+          "phrase_index": { "type": ["integer", "null"] }
+        }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "tts_endpoint": { "type": "string" },
+        "chunker_version": { "type": "string" },
+        "aligner": { "type": ["string", "null"] },
+        "generated_at": { "type": "string", "format": "date-time" }
+      }
+    }
+  },
+  "$defs": {
+    "word": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "i",
+        "text",
+        "spoken",
+        "start_s",
+        "end_s",
+        "char_start",
+        "char_end",
+        "phrase_index",
+        "timing"
+      ],
+      "properties": {
+        "i": { "type": "integer", "minimum": 0 },
+        "text": {
+          "type": "string",
+          "description": "Surface token as it appears in spoken_text, punctuation stripped from the spoken form but original punctuation kept in text if attached."
+        },
+        "spoken": { "type": "string", "description": "What the voice actually says for this token." },
+        "start_s": { "type": "number", "minimum": 0 },
+        "end_s": { "type": "number", "minimum": 0 },
+        "char_start": { "type": "integer", "minimum": 0 },
+        "char_end": { "type": "integer", "minimum": 0 },
+        "script_char_start": { "type": ["integer", "null"] },
+        "script_char_end": { "type": ["integer", "null"] },
+        "phrase_index": { "type": "integer", "minimum": 0 },
+        "sentence_index": { "type": ["integer", "null"] },
+        "timing": {
+          "type": "string",
+          "enum": ["exact", "allocated", "aligned", "estimated"]
+        },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "span": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["i", "text", "start_s", "end_s", "word_start", "word_end"],
+      "properties": {
+        "i": { "type": "integer", "minimum": 0 },
+        "text": { "type": "string" },
+        "start_s": { "type": "number", "minimum": 0 },
+        "end_s": { "type": "number", "minimum": 0 },
+        "word_start": { "type": "integer", "minimum": 0 },
+        "word_end": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "phrase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "i",
+        "text",
+        "word_start",
+        "word_end",
+        "start_s",
+        "end_s",
+        "audio_duration_s",
+        "speech_duration_s",
+        "gap_before_s",
+        "timing"
+      ],
+      "properties": {
+        "i": { "type": "integer", "minimum": 0 },
+        "text": { "type": "string" },
+        "word_start": { "type": "integer", "minimum": 0 },
+        "word_end": { "type": "integer", "minimum": 0 },
+        "start_s": { "type": "number", "minimum": 0 },
+        "end_s": { "type": "number", "minimum": 0 },
+        "audio_duration_s": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Measured clip length before concat, including TTS pad."
+        },
+        "speech_duration_s": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Clip length after leading/trailing silence trim."
+        },
+        "gap_before_s": { "type": "number", "minimum": 0 },
+        "trim_lead_s": { "type": "number", "minimum": 0 },
+        "trim_trail_s": { "type": "number", "minimum": 0 },
+        "timing": { "type": "string", "enum": ["exact", "allocated"] }
+      }
+    }
+  }
+}
