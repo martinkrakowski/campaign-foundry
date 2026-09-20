@@ -1,4 +1,4 @@
-name: "PR-Agent UI Review"
+name: "PR-Agent (on request)"
 
 # An LLM reviewer specialised in this repo's UI contracts — DESIGN.md and the D-decisions
 # in docs/planning/. It complements CodeRabbit rather than duplicating it. Not a merge
@@ -20,9 +20,16 @@ name: "PR-Agent UI Review"
 # uses: the-pr-agent/pr-agent@<sha> — that repo's action.yaml FROMs the rolling
 # :github_action tag. Version tags are immutable; rolling tags are not.
 
+# V3 — the automatic UI REVIEW is disabled (owner, 2026-09-19): it measured 83 %
+# refuted against this lane's 60 % line. The `pull_request` trigger is removed and
+# the workflow is kept, because it is not only a reviewer — it is the repo's ONLY
+# `/improve` entry point, and `pr-agent-arch.yml` and the (now removed)
+# `pr-agent-api.yml` both document relying on it: "a human can still summon a
+# fresh pass with /improve via pr-agent.yml". Deleting the file would have taken
+# that hatch away from the reviewer this lane deliberately exempts.
+#
+# So: no unprompted review, and a human can still ask for one.
 on:
-  pull_request:
-    types: [opened, reopened, ready_for_review]
   issue_comment:
     types: [created]
 
