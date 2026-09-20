@@ -1,6 +1,6 @@
 # The Reconciliation — Architecture & Development Plan
 
-**Date:** 2026-09-10 · **Status:** draft, for the owner's approval · **Nothing dispatched.**
+**Date:** 2026-09-10 · **Status:** **PHASE 0 COMPLETE — stamped 2026-09-20**, which §4c of this same file already stated. On `main`: C1 (#313), C2 (#315), C3 (#319), C4 (#397), C4b (#427), C5 (#328), M2 (#330), M3 (#395), R1 (#318), VD (#322). **Open:** M4 is **partial** (see below), §5's gap 5 (L7's remainder) and gap 6 (D136 — the occlusion advisory reaches the editor and no further; X5/#334 fixed the encoding, the aggregation never shipped).
 **Verified against:** `main` at `7471bf5`. Every claim below cites code that was read, not recalled.
 **Supersedes nothing on its own** — it says which plans survive, and in what order they run.
 

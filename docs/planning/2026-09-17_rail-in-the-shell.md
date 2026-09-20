@@ -1,6 +1,6 @@
 # The rail becomes a shell sidebar — one container, two sides, no container query
 
-**Date:** 2026-09-17 · **Status:** draft, for the owner's approval. **Nothing dispatched.**
+**Date:** 2026-09-17 · **Status:** **SHIPPED — stamped 2026-09-20.** RS1 and RS2 both shipped in #481, and §9 of this same file retires both premises.
 **Verified against:** `origin/main` at `484fdf6b`.
 **Source:** the owner, 2026-09-17 — *"The right sidebar should re-use the left sidebar container, it should span the full height of the browser view just like the left sidebar"*, then *"make it a part of the main shell and then reveal it based on view."*
 **Related:** `2026-09-17_wireframe-gap.md` (§9 SG-D16/17/18, SG2, SG11), `2026-09-16_creative-first-chrome.md` (CC1/CC2's cost contract, CC3 shipped), `2026-09-16_rail-timeline-surface.md` (TS1 shipped), `DESIGN.md` §3.

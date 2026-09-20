@@ -1,6 +1,6 @@
 # Architecture & Development Plan — remediation: the unenforced layer graph, and data nothing reads
 
-**Status:** Proposed v1.0
+**Status:** **SHIPPED — stamped 2026-09-20.** R1 (#115) and R2, covering R2.1–R2.5 (#113), are on `main`; M1 was **withdrawn** (#114). _Was: "Proposed v1.0"._
 **Scope:** `packages/CampaignOrchestration`, `package.json`, `.architecture/`, `apps/api/server/lib/report.ts`, `apps/web` (grid + run-context)
 **Follows:** #102 (the three PR-Agent reviewers), #108 (`descriptor.beats`), #110 (L6-E5 PR3)
 

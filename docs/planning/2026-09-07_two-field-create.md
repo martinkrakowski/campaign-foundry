@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-07
 **Author:** orchestrator
-**Status:** draft — for the owner's review
+**Status:** **SHIPPED — stamped 2026-09-20.** S1 (#236), S2 (#225), S3 (#217 and #228), S4 (#218), P1 (#240) are all on `main` — which §8 of this same file already said in its own words. _Was: "draft — for the owner's review"._
 **Verified against:** `main` at `1f0944c` (the graphics arc merged; gate green, 100 % ×4)
 **Decision ids introduced:** D97 – D101
 **Relates to:** **D86** (the dialog's question set), **D66** (the dialog is the Identity step, and

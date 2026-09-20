@@ -6,7 +6,7 @@
 > VF4 was new. I created a C1/M1 collision earlier this session and did not notice for hours; this is
 > the same mistake and it is recorded rather than quietly renamed.
 
-**Date:** 2026-09-10 · **Status:** draft, for the owner's approval · **Nothing dispatched.**
+**Date:** 2026-09-10 · **Status:** **PARTLY SHIPPED — stamped 2026-09-20.** VF1 shipped **as C5** (#328), VF2 **as VG** (#326), and VF4 was **absorbed** into #328 when C5 deleted `SEQUENCED_KINDS` — §1 of this same file already said so. **Open: VF3**, which is L11's `fill` half in the templates plan; VF-D3 sequences `fill` before `html`, and `html` already shipped as HL3.
 **Verified against:** `main` at `f4f4d63`, plus PR #322 (the `video` drawer) in flight.
 **Hands off to:** `2026-09-10_keyframing.md`, whose gate this plan is.
 

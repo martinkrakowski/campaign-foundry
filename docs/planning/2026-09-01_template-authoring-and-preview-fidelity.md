@@ -1,7 +1,7 @@
 # Template Authoring & Preview Fidelity — Architecture & Development Plan
 
 **Date:** 2026-09-01
-**Status:** for review
+**Status:** **SHIPPED — stamped 2026-09-20.** T1a (#171), T1b (#177), T2 (#169), T3 via R7 (#174), T4 (#175), T5 (#176), T6 (#179), T7 (#178) are all on `main`. **Open:** §6's D51 per-creative finishing, deferred. _Was: "for review"._
 **Decision ids introduced:** D51 – D60, D62 – D63 (D43–D50 are claimed by `2026-09-01_r7-preview-panel.md`, PR #165)
 **Relates to:** D26 (the preview shows only what the compositor draws), D10 (`drawLegacy` freeze)
 

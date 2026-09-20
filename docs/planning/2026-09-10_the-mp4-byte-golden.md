@@ -1,6 +1,6 @@
 # The MP4 Byte Golden — Architecture & Development Plan
 
-**Date:** 2026-09-10 · **Status:** draft, for the owner's approval · **Nothing dispatched.**
+**Date:** 2026-09-10 · **Status:** **SHIPPED — stamped 2026-09-20.** VG1 and VG2 both shipped in #326. VG3 is moot: it was the fallback for VG1 failing, and VG1 passed.
 **Verified against:** `main` at `f4f4d63`. **This is the lane the finishing-video plan called VF2.** That name is retired; these are the lanes.
 
 ---

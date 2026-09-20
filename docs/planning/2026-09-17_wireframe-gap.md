@@ -4,7 +4,7 @@
 **Status:** **no decision open — SG-D7 verified 2026-09-18** (conditional yes; SG-D1 unblocked, two defects raised for their own lanes: a `minDistance 0` silent-sampling hole and a mixed-brief ceiling overcount). §8.4 and §9 answered by the owner 2026-09-17. SG-D8 stamped; SG-D9 answered then partly superseded; SG-D10–SG-D14 recorded from the owner's run-gate correction (§8). CC3 dispatched; TS1 merged as `#469`.
 **Verified against:** `origin/main` at `4876aa31`.
 **Source:** the owner's annotated wireframe of the campaign editor (two images, 2026-09-17), read against the shipped DOM of `/brief/new` captured from the owner's own browser the same day.
-**Related:** `2026-09-16_studio-editor.md` (D137–D140, SE0–SE5, TL1–TL7 — **drafted, never dispatched**), `2026-09-16_creative-first-chrome.md` (D141–D145, CC1 shipped), `2026-09-16_rail-timeline-surface.md` (TS1, in PR #469, **unmerged**), `DESIGN.md` §3 shell anatomy.
+**Related:** `2026-09-16_studio-editor.md` (D137–D140, SE0–SE5, TL1–TL7 — **partly shipped**; corrected 2026-09-20, six lanes are on `main`, see that file's own status line), `2026-09-16_creative-first-chrome.md` (D141–D145, CC1 shipped), `2026-09-16_rail-timeline-surface.md` (TS1, in PR #469, **unmerged**), `DESIGN.md` §3 shell anatomy.
 
 ---
 

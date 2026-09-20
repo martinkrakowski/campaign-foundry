@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-07
 **Author:** orchestrator
-**Status:** draft — for the owner's review. **Not a quick win, and the plan says why before anything else.**
+**Status:** **SHIPPED — stamped 2026-09-20.** A0 (#244), A1 (#243), A2 (#246), A3 (#248), A4 (#249), A4b (#251), A5 (#252) are all on `main`. _Was: "draft — for the owner's review."_ **Not a quick win, and the plan says why before anything else.**
 **Verified against:** `main` at `6217632`
 **Decision ids introduced:** D113 – D118
 **Relates to:** `2026-09-07_campaign-type.md` (adds the `display-ad` type this plan's ratios make

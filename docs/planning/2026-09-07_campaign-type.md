@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-07
 **Author:** orchestrator
-**Status:** draft — for the owner's review
+**Status:** **SHIPPED — stamped 2026-09-20.** T1 (#224), T2 (#228), T3 (#236), T4 (#234) are all on `main`. _Was: "draft — for the owner's review"._
 **Verified against:** `main` at `6217632`
 **Decision ids introduced:** D108 – D112
 **Supersedes:** **D97** of `2026-09-07_two-field-create.md` — the create dialog's second field is the

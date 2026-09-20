@@ -1,7 +1,7 @@
 # The Create Moment & Pipeline Prerequisites — Architecture & Development Plan
 
 **Date:** 2026-09-03
-**Status:** for review
+**Status:** **SHIPPED — stamped 2026-09-20.** P1 (#184), P2 (#187), W1 (#185), W2 (#188), W3 (#186) are on `main`. **Open:** the whole §6 deferral list — server-side drafts, server-minted ids, ownership on the ports, the D62 template library, markets fan-out, presigned uploads, external ingestion, and ports for reports/packages/output — **all gated on D64, which is still unanswered**. _Was: "for review"._
 **Decision ids introduced:** D64 – D72 (D51–D63 are claimed by `2026-09-01_template-authoring-and-preview-fidelity.md` and `2026-09-01_r7-preview-panel.md`)
 **Relates to:** D5 (brief id is a store key, not a field), D15 (a storage port before the S3 move), D35 (save and commit are one act), D37 (a brief's identity lives in the URL), D57 (new vocabulary lands in new optional fields), D62 (the template library is deferred)
 

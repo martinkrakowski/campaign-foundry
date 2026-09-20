@@ -1,6 +1,6 @@
 # The template library modal — browse, search, sort, and one detail view
 
-**Date:** 2026-09-17 · **Status:** draft, for the owner's approval. **Nothing dispatched.**
+**Date:** 2026-09-17 · **Status:** **SHIPPED — stamped 2026-09-20.** TM1, TM2, TM3 and TM4 all shipped in #478 — as §7 of this same file says in its own words.
 **Verified against:** `origin/main` at `05db8e65`.
 **Source:** the owner's decisions of 2026-09-17 (items 3, 3a, 3b, 3c) against their annotated wireframe — *"Opens a modal window allowing user to browse existing templates (Sorted by campaign type)."*
 **Related:** `2026-09-08_creative-templates-and-units.md` (**D123** defines the library; **L7** shipped its store and routes), `2026-09-16_creative-first-chrome.md` (**CC7** — *"Browse over a real library… the library is its own plan"*; **this is that plan**), `2026-09-17_wireframe-gap.md` (SG-D5).

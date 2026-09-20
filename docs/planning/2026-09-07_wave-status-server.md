@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-07
 **Author:** orchestrator
-**Status:** draft — for the owner's review
+**Status:** **SHIPPED — stamped 2026-09-20.** T1 (#229), T2 (#238), T3 (#232) are all on `main`. _Was: "draft — for the owner's review"._
 **Verified against:** `main` at `2341401`
 **Decision ids introduced:** D102 – D106
 **Relates to:** `.claude/skills/orchestrate-wave/SKILL.md` (the pipeline this observes),

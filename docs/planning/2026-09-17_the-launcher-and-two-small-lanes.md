@@ -1,6 +1,6 @@
 # The launcher, the target, and the token — three lanes from one night's corrections
 
-**Date:** 2026-09-17 · **Status:** draft, for the owner's approval · **Nothing dispatched.**
+**Date:** 2026-09-17 · **Status:** **SHIPPED — stamped 2026-09-20**, as §5 of this same file records. W1 (#468), W2 (#467), W3 (#522) are on `main`. L3 was **refuted** before dispatch — "this plan does not dispatch prophylaxis".
 **Verified against:** `origin/main` at `ddfea9a1`, after the 2026-09-16 wave (21 merges) and X1's reformat.
 **Source:** three findings that surfaced while closing that wave — one from a reviewer on the orchestration
 skill itself, one from the owner's `yarn dev` output, one from the state-freshness review this session added.

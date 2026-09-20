@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-08
 **Author:** orchestrator
-**Status:** revised 2026-09-08 after the owner's second-round answers (§0.1). **This is an arc, not a lane; §3 says where it splits.**
+**Status:** **MOSTLY SHIPPED — stamped 2026-09-20.** An arc, not a lane; §3 says where it splits. On `main`: L1 (#260, #263), L2 (#265, #266), L3 (#268, #273), L4 (#276), L5 (#278), L6 (#277), L8 (#284, #297, #298), L12 (#255, extended by #396), H2 (#285), and L9 **as M2** (#330) with **M3** (#395). **L7 is partial** — the listing and detail UI arrived via TM1–TM4 (#478), but **template thumbnails and any write path are still open**. **Open lanes: L10** (per-layer frames, D130) and **L11** (the `fill` kind and generative region, D131/D132 — this is also `finishing-video`'s VF3). **Two recorded defects in this document:** §4's L9 DoD still reads "a disabled control", which M4/F5 was chartered to rewrite as "no toggle is offered on a required layer" and never did; and the **L10a/L10b split that `2026-09-16_studio-editor.md` depends on for SE3 and SE5 has never been recorded here**, which blocks both.
 **Verified against:** `main` at `65518ac`
 **Decision ids introduced:** D119 – D136
 **Relates to:** `2026-09-07_campaign-type.md` (the create-time type this plan re-parents),
