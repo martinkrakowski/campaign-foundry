@@ -63,6 +63,18 @@ describe("trackDiamonds", () => {
     expect(unplaceable.count).toBe(3);
   });
 
+  test("an effect-only layer is counted too — the message covers both clocks", () => {
+    // The count used to be explained as "timed to a caption beat", which is
+    // false for a text-effect key: its resolver reads the effect own progress
+    // when there is one. One count, one accurate sentence covering both.
+    const { placed, unplaceable } = trackDiamonds(
+      layer([{ property: "opacity", stops: [{ t: 0.5, value: 1, clock: "effect" }] }]),
+      4,
+    );
+    expect(placed).toEqual([]);
+    expect(unplaceable.count).toBe(1);
+  });
+
   test("a layer mixing clocks places one half and counts the other", () => {
     const { placed, unplaceable } = trackDiamonds(
       layer([

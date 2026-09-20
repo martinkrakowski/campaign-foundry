@@ -1527,9 +1527,13 @@ export function tapeDiamondName(propertyLabel: string, index: number): string {
 
 /** Said when the picked layer has keys that cannot sit on this ruler. */
 export function tapeKeysNotPlaced(count: number): string {
+  // Covers BOTH local clocks. The earlier wording said "caption beat" for every
+  // one, which is false for a text-effect key: its resolver reads the effect's
+  // own progress when there is one, so "it repeats with the captions" was a
+  // confident explanation of the wrong mechanism.
   return count === 1
-    ? "1 key is timed to a caption beat, so it repeats and is edited in the layer panel."
-    : `${count} keys are timed to caption beats, so they repeat and are edited in the layer panel.`;
+    ? "1 key is timed inside a caption beat or a text effect rather than to the whole clip, so it has no single place here — edit it in the layer panel."
+    : `${count} keys are timed inside caption beats or text effects rather than to the whole clip, so they have no single place here — edit them in the layer panel.`;
 }
 
 /* ── The click destination (HL5b, HL-D3) ─────────────────────────────────── */

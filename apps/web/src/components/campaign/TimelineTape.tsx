@@ -265,7 +265,11 @@ function Diamond({
       step={1 / MOTION_FPS}
       value={shown}
       aria-label={name}
-      aria-valuenow={diamond.t}
+      // The COMMITTED position (§9.3.3), in the control's own units: this
+      // range's min/max are seconds, so announcing a normalised `t` would put
+      // 0.25 inside a 0–8 range and tell assistive technology something the
+      // widget never means.
+      aria-valuenow={diamond.sec}
       data-tape-diamond={`${diamond.trackIndex}:${diamond.stopIndex}`}
       className="absolute top-1/2 h-6 w-24 -translate-x-12 -translate-y-1/2 cursor-ew-resize accent-brand-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary"
       style={{ left: xFor(shown, pxPerSec) }}
@@ -588,7 +592,14 @@ function TimelineTapeImpl(props: TimelineTapeProps): ReactNode {
    * unselectable by mouse.
    */
   const commitFromCanvas = (e: MouseEvent<HTMLDivElement>) => {
-    if ((e.target as HTMLElement).closest("button") !== null) return;
+    // Any interactive control inside the scrollport owns its own pointer, not
+    // just a button: TL6 put range inputs on the canvas, and with only the
+    // button guard a diamond drag committed the key AND scrubbed the playhead
+    // to wherever the release happened. Widened to the class rather than to
+    // `input`, so the next control added here is covered on arrival.
+    if ((e.target as HTMLElement).closest("button, input, select, textarea, a[href]") !== null) {
+      return;
+    }
     const port = e.currentTarget;
     const rect = port.getBoundingClientRect();
     commit((e.clientX - rect.left + port.scrollLeft - TAPE_LABEL_PX) / pxPerSec);

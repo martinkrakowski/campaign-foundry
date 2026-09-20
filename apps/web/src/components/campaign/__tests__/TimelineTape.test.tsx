@@ -782,7 +782,9 @@ describe("TL6 — keyframe diamonds on the ruler", () => {
     expect(el.getAttribute("aria-label")).toBe(
       messages.tapeDiamondName(messages.TRACK_PROPERTY_LABEL.opacity!, 0),
     );
-    expect(el.getAttribute("aria-valuenow")).toBe("0.25");
+    // The COMMITTED position, in the range own units (seconds) - a normalised
+    // t here would announce 0.25 inside a 0-to-duration range.
+    expect(el.getAttribute("aria-valuenow")).toBe(String(DURATION / 4));
   });
 
   test("a drag commits exactly once, on release", () => {
@@ -803,6 +805,25 @@ describe("TL6 — keyframe diamonds on the ruler", () => {
     fireEvent.change(el, { target: { value: "2" } });
     fireEvent.keyUp(el, { key: "ArrowRight" });
     expect(onDiamondCommit).toHaveBeenCalledWith(0, 0, 2);
+  });
+
+  test("a drag on a key does not also scrub the playhead", () => {
+    // The scrollport commits a click as a scrub, and its guard named only
+    // `button` - so a diamond release committed the key AND moved the playhead
+    // to wherever the pointer happened to be.
+    const onScrubCommit = vi.fn();
+    const onDiamondCommit = vi.fn();
+    renderTape({
+      diamonds: { placed: [diamond()], unplaceable: { count: 0 } },
+      onDiamondCommit,
+      onScrubCommit,
+    });
+    const el = key(messages.tapeDiamondName(messages.TRACK_PROPERTY_LABEL.opacity, 0));
+    fireEvent.change(el, { target: { value: "2" } });
+    fireEvent.pointerUp(el);
+    fireEvent.click(el);
+    expect(onDiamondCommit).toHaveBeenCalledTimes(1);
+    expect(onScrubCommit).not.toHaveBeenCalled();
   });
 
   test("beat-timed keys are counted and explained, never placed", () => {
