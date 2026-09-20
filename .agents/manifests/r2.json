@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "r2",
+  "mutations": [
+    {
+      "file": "packages/CampaignOrchestration/src/application/use-cases/GenerateCampaignUseCase.use-case.ts",
+      "before": "  return `${briefId}/${path}`;",
+      "after": "  return path;",
+      "because": "The whole lane is this one line, so the plausible regression is a refactor that treats campaignScoped as a formatting helper and quietly drops the prefix - every path still looks well-formed, every existing assertion about shape still passes, and campaigns silently resume overwriting each other. Caught by the disjoint-paths test, which asserts two runs of the SAME brief under different ids share no output or proof path at all.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/application/use-cases/__tests__/GenerateCampaignUseCase.use-case.test.ts",
+        "-t",
+        "DISJOINT"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
