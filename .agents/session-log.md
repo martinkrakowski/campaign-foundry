@@ -6034,3 +6034,18 @@ repo was one file short of clean and `format:check` would have failed on its fir
 mutation manifests survived the reformat only because their quoted `before`/`after` fragments
 happened to fall on lines the formatter left alone — a latent coupling between manifest fragments
 and source formatting, recorded here rather than fixed.
+
+## 2026-09-20 — remaining-work plan: RW-7 had no legal slot (#540 follow-up)
+
+- **Mode:** Implementer
+- **Changes:**
+  - `docs/planning/2026-09-20_remaining-work.md`: moved RW-7 (beat-boundary drag) to Wave A as a
+    fourth lane; dropped "draft, for the owner's approval" from the status line; kept **Nothing
+    dispatched**.
+- **Decisions:**
+  - Wave A, not sequenced behind RW-5 in Wave B. The Wave B hatch ("or Wave C") was closed: RW-3
+    owns `editor-state.ts` (the 3-ratio product pinned at 36 in `editor-state.test.ts:2124`), RW-15
+    owns `TimelineTape.tsx`, and only Wave A has no collision. Four concurrent lanes stretch RW-D6;
+    a 1-day lane beside three small ones is cheaper than a lane with nowhere to run.
+- **Left open:**
+  - Wave B slot 2 is empty on purpose (do not invent occupancy). Still nothing dispatched.

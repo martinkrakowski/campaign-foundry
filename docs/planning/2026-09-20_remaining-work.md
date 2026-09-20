@@ -1,6 +1,6 @@
 # The remaining work — a scheduling plan
 
-**Date:** 2026-09-20 · **Status:** draft, for the owner's approval · **Nothing dispatched.**
+**Date:** 2026-09-20 · **Status:** on `main` as of #540 · **Nothing dispatched.**
 **Scope:** every open lane in this repository as of `bd242dc`, ordered for parallel execution. This
 plan **introduces no new work** — every lane below already exists in another document, and this one
 only decides _when_ each runs and _who owns which file_.
@@ -19,6 +19,13 @@ at planning-document sections while the repository's `§` convention resolves to
 Both are corrected below. Neither was a slip of the pen: they are how easily a document argues for
 a discipline and then does not apply it.
 
+**It failed a third time after merge, and the hatch was never a hatch.** Wave B parked RW-7 on
+`editor-state.ts` beside RW-5 and offered "or RW-7 moves to Wave C" as the escape. Wave C's RW-3
+owns that same file as one of its nine `RATIO_VALUES` consumers — `RATIO_OPTIONS` is the re-export,
+and `editor-state.test.ts` pins `axisProductSize` at **36**, which is `1 × 3 ratios × 2 × 2 × 1 × 3 ×
+1` and becomes 48 the moment a fourth ratio exists. Wave D's RW-15 owns `TimelineTape.tsx`. Only
+Wave A is free. RW-7 runs there as a fourth lane.
+
 ---
 
 ## 0. Decisions
@@ -28,7 +35,7 @@ a discipline and then does not apply it.
 | **RW-D1** | **`packages/CreativeGeneration` is ONE lane at a time.** **Eight** golden fixture families live in one directory — the four named in the first draft plus `-display`, `-display-insets`, `-insets` and `-mp4` — and a golden must be recorded **by the CI runner itself** (`gh workflow run ci.yml -f record_goldens=true`) because container-recorded Linux cells differed in all 16. Two lanes re-recording concurrently cannot both be proven.                                                                                                        | This is the **critical path**, and it is a scheduling fact rather than a preference. Four lanes enter that package and run **one per wave** — RW-4, RW-5, RW-3, RW-15 — not because they depend on each other but because the lock is a package, not a file. **Only some of them move bytes:** RW-4's source says goldens are _unedited_ (frames default to today's geometry), so the lock protects the shared source files and the recording run, not a byte change that lane does not make. `record_goldens_suite` also offers a per-suite mode, so a recording need not be all-or-nothing. |
 | **RW-D2** | **`BriefEditor.tsx` is the second contended file, and it is scheduled, not locked.** Almost every UI lane reaches it — it mounts the sheet, the rail, the tape and the dialog. Its `railSlot` `useCallback` carries a **hand-maintained dependency list** whose staleness is invisible to the type checker **and to render counts**. `BriefEditor.tsx` says so itself: a missing dependency there “does not show up as a slow form. It shows up as a STALE one, silently … which no render count can see”. It was proved by a **mutation**, not a count. | At most **one** lane owning `BriefEditor.tsx` per wave. A second lane needing it waits rather than merging into a conflict, because the merge that reconciles two dep-list edits is the one nobody reviews properly.                                                                                                                                                                                                                                                                                                                                                                          |
 | **RW-D3** | **`messages.ts` and the two barrels are append-only and therefore free.** `scripts/merge-prs.sh` resolves ordinary text conflicts in `messages.ts`, `components/ui/index.ts` and `ports/out/index.ts` by keeping both sides.                                                                                                                                                                                                                                                                                                                             | Shared freely across concurrent lanes. **Verified the hard way on 2026-09-20:** TL6 and TL7 both appended to `messages.ts` and the rebase resolved by keeping both — but the conflict boundary fell mid-function and silently ate a closing brace, which `tsc` caught. **Keep both sides, then typecheck, never eyeball.**                                                                                                                                                                                                                                                                    |
-| **RW-D4** | **A blocked lane is not scheduled.** Four lanes below wait on an unanswered question, and this plan does not guess an answer to make a wave look full.                                                                                                                                                                                                                                                                                                                                                                                                   | RW-12 (`RunRegistryPort`) and the whole `2026-09-03_create-moment-and-pipeline-prerequisites.md` §6 deferral list wait on **D64**; RW-9 (multi-window drafts) waits on **D82**; RW-7 (beat-boundary drag) waits on **D138**; RW-14 (SE0) is a presentation question two documents answer differently. They appear in **§5 of this document** with their blocker named, not in a wave.                                                                                                                                                                                                         |
+| **RW-D4** | **A blocked lane is not scheduled.** Nine lanes below wait on an unanswered question, and this plan does not guess an answer to make a wave look full.                                                                                                                                                                                                                                                                                                                                                                                                   | RW-12 (`RunRegistryPort`) and the whole `2026-09-03_create-moment-and-pipeline-prerequisites.md` §6 deferral list wait on **D64**; RW-9 (multi-window drafts) waits on **D82**; RW-14 (SE0) is a presentation question two documents answer differently. **RW-7 does not wait on D138** — that decision was answered 2026-09-16; the first draft of this row still named it, which is how a lane with a home got described as blocked in the same document that scheduled it. They appear in **§5 of this document** with their blocker named, not in a wave.                                                                                                  |
 | **RW-D5** | **Every lane pays the same gate, and the gate is the estimate.** 100 % statements/branches/functions/lines, one replayed mutation, `plan:verify`, `lint:arch`, `lint:bytes`, `format:check`, and the drift gate.                                                                                                                                                                                                                                                                                                                                         | Tests cost **3–4×** the code on this codebase. Every figure below is gate-inclusive; a "one file" lane is never a one-hour lane. Measured today: K5 was ~40 minutes of authoring and ~4 hours in total.                                                                                                                                                                                                                                                                                                                                                                                       |
 | **RW-D6** | **Budget one review round per lane.** Every lane merged on 2026-09-20 had at least one real finding, including two where a test I wrote **could not fail** against the defect it named.                                                                                                                                                                                                                                                                                                                                                                  | The round is in the estimate, not optimism on top of it. A lane with no finding is a lane whose reviewers were rate-limited, not a lane that was perfect.                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 
@@ -49,7 +56,8 @@ a discipline and then does not apply it.
 
 ## 2. The lanes
 
-**Corrected 2026-09-20 after an adversarial review** (§7). The first draft of this table was wrong
+**Corrected 2026-09-20 after an adversarial review** (§7), **and again the same day after merge**
+when the Wave B hatch for RW-7 turned out not to be a hatch. The first draft of this table was wrong
 in ways that changed the schedule: two lanes were scheduled that are blocked, one blocked lane was
 already unblocked, and two lanes' ownership omitted files they must touch. Every row below now
 names the files its **source plan** requires, not the ones I assumed.
@@ -60,12 +68,12 @@ Ownership is exclusive **among lanes running in the same wave**.
 | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ | ---------------------------------------------- | ---------------- |
 | **RW-1**  | **Characterise the `creatives` flake** — reproduce, then fix or quarantine with a reason. See H2: it was seen **locally**, never in CI.                                                             | `brief-editor.creatives.test.tsx`                                                                            | H2                                             | 0.5 d            |
 | **RW-2**  | **Real job progress.** `done`/`total` are `0/0` while running and jump to `n/n` at the end.                                                                                                         | `fs-job-store.ts`, `jobs.ts`, `routes/campaigns/jobs/[id].get.ts`, the web poller                            | `randomized-campaigns-and-motion.md` §10       | 0.5 d            |
-| **RW-3**  | **4:5 aspect ratio.**                                                                                                                                                                               | `aspect-ratios.ts`, compositor, **goldens**, **nine web consumers**, and `messages.test.ts`'s raw-ratio gate | same §10, Q2                                   | **2 d**          |
+| **RW-3**  | **4:5 aspect ratio.**                                                                                                                                                                               | `aspect-ratios.ts`, compositor, **goldens**, **nine web consumers** (one is `editor-state.ts` — `RATIO_OPTIONS` is the re-export; the 3-ratio product is pinned at 36), and `messages.test.ts`'s raw-ratio gate | same §10, Q2                                   | **2 d**          |
 | **RW-4**  | **Per-layer frames** (`creative-templates-and-units.md`'s L10a — the _field_, not the click-to-select half). **Its source says goldens are UNEDITED**: frames default to today's geometry.          | `creative-geometry.ts`, `brief-template.ts`, compositor                                                      | D130                                           | 2 d              |
 | **RW-5**  | **The `fill` kind and generative region** (that plan's L11; = `finishing-video.md`'s VF3).                                                                                                          | `brief-template.ts`, compositor, **goldens**, **`editor-state.ts`**, **`LayerPropsSheet.tsx`**               | D131/D132                                      | 2 d              |
-| **RW-7**  | **Beat-boundary drag** (`studio-editor.md`'s TL3). **Not blocked** — D138 was answered on 2026-09-16 ("drag allowed, as a neighbour transfer; commit and flag").                                    | `TimelineTape.tsx`, `editor-state.ts`                                                                        | TL3                                            | 1 d              |
+| **RW-7**  | **Beat-boundary drag** (`studio-editor.md`'s TL3). **Not blocked** — D138 was answered on 2026-09-16 ("drag allowed, as a neighbour transfer; commit and flag"). **The rail host wires the callback** — `TimelineTape` cannot dispatch (the word itself is forbidden), so `BriefEditor.tsx` passes it the way TL6 passed `onDiamondCommit`. | `TimelineTape.tsx`, `editor-state.ts`, **`BriefEditor.tsx`**                                                  | TL3                                            | 1 d              |
 | **RW-10** | **Overlay depth counter (F-B / D84)** — `inert` on all but the topmost, one `aria-modal`.                                                                                                           | `packages/ui/src/dialog-shell.tsx`                                                                           | `remaining-work-and-the-migration-gate.md` F-B | 0.5 d            |
-| **RW-11** | **Design-system drift** — the four audit items. `text-white` is in **11 files / 26 sites**, none of them `BriefEditor.tsx` or `LayerPropsSheet.tsx`.                                                | `DESIGN.md`, tokens, `packages/ui`, 11 `.tsx`                                                                | `create-dialog-design-audit.md` R1–R4          | 0.5 d            |
+| **RW-11** | **Design-system drift** — the four audit items. `text-white` is in **11 files / 26 sites**, none of them `BriefEditor.tsx`, `LayerPropsSheet.tsx`, `TimelineTape.tsx` or `editor-state.ts`.         | `DESIGN.md`, tokens, `packages/ui`, 11 `.tsx`                                                                | `create-dialog-design-audit.md` R1–R4          | 0.5 d            |
 | **RW-13** | **Fence tokens on guarded writes (D78).** **No lane owns this anywhere** — scope before building.                                                                                                   | `ports/`, stores                                                                                             | `run-exclusion…` D78                           | scope first      |
 | **RW-15** | **Audio clip on the tape** (TL4). **Also owns `CanvasFfmpegVideoCompositor.ts`** — the caption reads the encoder's rounding from it, exported rather than recomputed. Tape has **two** mount sites. | `TimelineTape.tsx`, `TimelineSection.tsx`, `BriefEditor.tsx`, `CanvasFfmpegVideoCompositor.ts`               | TL4                                            | 1 d              |
 | **RW-18** | **Bookkeeping** — M4's amendments, PD1, PD4, `the-unowned-gaps.md` §42's collision grep, the D-id index, V3's fence. **PD2 is NOT here** — see RW-21.                                               | `docs/`, `.claude/skills/`                                                                                   | L1                                             | 1 d              |
@@ -97,27 +105,33 @@ Two locks and one rule shape every wave: **one lane at a time inside
 `packages/CreativeGeneration`** (RW-D1), **one lane per wave owning `BriefEditor.tsx`** (RW-D2),
 and **a blocked lane does not occupy a slot** (RW-D4).
 
-### Wave A — three in parallel, ~2 days
+### Wave A — four in parallel, ~2 days
 
-| Slot | Lane                                      | Why it can run alongside                                                                   |
-| ---- | ----------------------------------------- | ------------------------------------------------------------------------------------------ |
-| 1    | **RW-1** flake                            | One test file. First, because its verdict decides whether later waves can trust a red run. |
-| 2    | **RW-4** frames                           | Holds the `CreativeGeneration` lock. Longest chain in the tree.                            |
-| 3    | **RW-11** drift → **RW-10** overlay depth | `packages/ui` and tokens; `text-white` touches neither contended editor file.              |
+| Slot | Lane                                      | Why it can run alongside                                                                                                                                                                                                                                                                                                                                                       |
+| ---- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1    | **RW-1** flake                            | One test file. First, because its verdict decides whether later waves can trust a red run.                                                                                                                                                                                                                                                                                     |
+| 2    | **RW-4** frames                           | Holds the `CreativeGeneration` lock. Longest chain in the tree. Domain and compositor files, not the editor.                                                                                                                                                                                                                                                                   |
+| 3    | **RW-11** drift → **RW-10** overlay depth | `packages/ui` and tokens; `text-white` is in 11 files / 26 sites, none of them `TimelineTape.tsx`, `editor-state.ts` or `BriefEditor.tsx`.                                                                                                                                                                                                                                      |
+| 4    | **RW-7** beat drag                        | The **only** wave with no file collision. Four concurrent lanes stretch RW-D6; a 1-day lane beside three small ones is cheaper than a lane with nowhere to run. RW-D2 is satisfied: Wave A had no `BriefEditor.tsx` owner until this row, and the tape's section host (`TimelineSection.tsx`) does not have to take the callback — TL6 left diamonds unwired there the same way. |
 
-### Wave B — three in parallel, ~2 days
+### Wave B — two in parallel, ~2 days
 
 | Slot | Lane                  | Note                                                                                                                                                                                                                                                         |
 | ---- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | 1    | **RW-5** fill         | Holds the lock. **Also owns `editor-state.ts` and `LayerPropsSheet.tsx`** — the editor cannot author a `fill` today (`LayerPropsPatch` has no member for it; `LAYER_PROPS.fill` is `[]`), so this lane either widens both or ships a kind nobody can author. |
-| 2    | **RW-7** beat drag    | Owns `TimelineTape.tsx`. `editor-state.ts` is RW-5's this wave — **these two must be sequenced inside the wave, or RW-7 moves to Wave C.**                                                                                                                   |
-| 3    | **RW-2** job progress | API-side; no overlap.                                                                                                                                                                                                                                        |
+| 2    | **RW-2** job progress | API-side; no overlap.                                                                                                                                                                                                                                        |
+
+The first draft parked RW-7 in the empty slot with "or RW-7 moves to Wave C." **That hatch is
+closed.** Wave C's RW-3 owns `editor-state.ts` (the 36-pin above); Wave D's RW-15 owns
+`TimelineTape.tsx`; putting RW-7 in Wave C would also make four concurrent lanes *and* collide.
+The slot stays empty rather than filled to make the wave look full — RW-D4's cousin: do not invent
+occupancy.
 
 ### Wave C — three in parallel, ~2 days
 
 | Slot | Lane                    | Note                                                                                                            |
 | ---- | ----------------------- | --------------------------------------------------------------------------------------------------------------- |
-| 1    | **RW-3** 4:5            | Holds the lock. Nine web consumers plus the raw-ratio gate in `messages.test.ts`.                               |
+| 1    | **RW-3** 4:5            | Holds the lock. Nine web consumers plus the raw-ratio gate in `messages.test.ts`. **One of the nine is `editor-state.ts`.** |
 | 2    | **RW-15** audio clip    | **Cannot run here** — it owns `CanvasFfmpegVideoCompositor.ts`, inside the locked package. **Moves to Wave D.** |
 | 2′   | **RW-24** slots ceiling | Planner-side; takes the freed slot.                                                                             |
 | 3    | **RW-18** bookkeeping   | Docs only.                                                                                                      |
@@ -133,15 +147,16 @@ and **a blocked lane does not occupy a slot** (RW-D4).
 ### Shape of it
 
 ```
-Wave A  ~2d   RW-1 flake ──┐  RW-4 frames [CG lock] ──┐  RW-11 → RW-10 ──┐
-Wave B  ~2d                │  RW-5 fill  [CG lock] ───┼─ RW-7 beat drag ─┼─ RW-2 progress
+Wave A  ~2d   RW-1 flake ──┐  RW-4 frames [CG lock] ──┐  RW-11 → RW-10 ──┐  RW-7 beat drag
+Wave B  ~2d                │  RW-5 fill  [CG lock] ───┼─ RW-2 progress ──┼─ (empty)
 Wave C  ~2d                │  RW-3 4:5   [CG lock] ───┼─ RW-24 ceiling ──┼─ RW-18 books
 Wave D  ~2d                └─ RW-15 audio [CG lock] ──┴─ RW-23 D136 ─────┴─ RW-22 L7
 ```
 
-**~8 working days** for the unblocked lanes, against ~12 serial. The lock caps the gain: all four
-waves have a `CreativeGeneration` lane in slot 1, and nothing else may enter that package while
-one holds it.
+**~8 working days** for the unblocked lanes, against ~12 serial. Moving RW-7 into Wave A does not
+stretch the critical path: RW-4 is still the 2-day gate, and RW-7 is a 1-day lane beside it. The
+lock still caps the gain: all four waves have a `CreativeGeneration` lane in slot 1, and nothing
+else may enter that package while one holds it.
 
 **Nine lanes are blocked and not in any wave.** Five of the nine wait on a decision only the owner
 can make, and **D64 gates more of them than any other single fact.**
@@ -169,7 +184,7 @@ can make, and **D64 gates more of them than any other single fact.**
 
 - **It does not invent work.** Every lane cites the document that already defines it; RW-1 is the
   single exception and exists because a flake was observed three times on 2026-09-20.
-- **It does not schedule around an unanswered question.** Four lanes wait, named, rather than being
+- **It does not schedule around an unanswered question.** Nine lanes wait, named, rather than being
   given a guessed answer so a wave looks full (RW-D4).
 - **It does not estimate VE4 seriously.** M1 says why, and a figure that is not trustworthy is
   worse than an absent one.
@@ -178,6 +193,9 @@ can make, and **D64 gates more of them than any other single fact.**
 - **It no longer claims to cover every open lane.** The first draft did, on the strength of a
   method (`merge-base --is-ancestor`) that proves what _shipped_ and cannot detect an omission by
   construction. Review found six missing lanes, now RW-21 through RW-25.
+- **It does not leave a lane with a fallback it has not checked.** The merged draft parked RW-7 in
+  Wave B with "or Wave C"; Wave C was already closed on the same file. A hatch is a slot, or it is
+  not a hatch.
 
 ---
 
@@ -251,7 +269,8 @@ find it. Reviewer-facing versions of the first two are now in
 ## 7. The adversarial review, and what it changed (2026-09-20)
 
 This plan was red-teamed by a second model against the code before approval. **It found the
-scheduling core wrong**, and the corrections above are its, not mine:
+scheduling core wrong**, and the corrections above are its, not mine. A third defect — RW-7's
+hatch — survived that review and the merge, and is corrected here rather than silently moved:
 
 | Severity | What was wrong                                                                                                                                                                                           |
 | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -264,6 +283,7 @@ scheduling core wrong**, and the corrections above are its, not mine:
 | High     | **§6.4 had the `railSlot` mechanism inverted** — a stale dep is exactly what a render count _cannot_ see.                                                                                                |
 | High     | **RW-3 was estimated at 0.5 d** owning three things; it owns nine web consumers and a message gate.                                                                                                      |
 | Medium   | **Six open lanes were missing** — L7's remainder, D136's aggregation, Slots M1, seat selection, D34's copy axes, D51, TS-Q1 — and PD2 was mislabelled as bookkeeping when it is a live silent drop.      |
+| Critical | **RW-7 has no legal slot in Waves B–D.** Wave B collides with RW-5 on `editor-state.ts`. The offered hatch — Wave C — collides with RW-3 on the same file (`RATIO_OPTIONS` is the re-export; `editor-state.test.ts:2124` pins the 3-ratio product at 36). Wave D collides with RW-15 on `TimelineTape.tsx`. Only Wave A is free: RW-4 owns domain and compositor files, and RW-11's `text-white` sites include none of RW-7's. It runs there as a fourth lane, stretching RW-D6 rather than leaving a lane with nowhere to run. |
 
 **Two of its findings were themselves wrong, and are recorded because a review is evidence, not
 authority.** It reported the `variation-plan.tsx` 1→4 render claim as having no basis in the repo
@@ -273,4 +293,6 @@ sections, where each list restarts.
 
 **What this says about the first draft:** it was written from a day inside the code, and it was
 still wrong about which lanes could run together — because _plausible_ file ownership and _actual_
-file ownership are different things, and only reading each lane's source plan tells them apart.
+file ownership are different things, and only reading each lane's source plan tells them apart. The
+Wave B hatch was the same failure one round later: a fallback named from the wave table, not from
+the files the destination wave actually owns.
