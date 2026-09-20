@@ -240,6 +240,38 @@ uploaded bytes VE3b1 needs. The interim refusal in `load-brief.ts` is removed; `
 > the producer becomes a separate audio service behind the `AudioTrack` boundary (what
 > that boundary is for) or a TS port is still not decided.
 
+> **Four confirmed defects in the artifacts as received (2026-09-20).** Review bots
+> raised them on #530; each was reproduced against the files before being recorded here,
+> and none was fixed — the artifacts are committed as the owner authored them, because
+> the contract is theirs to change. **VE4 must resolve all four before it can emit a
+> schema-valid track.** Whoever ports or wraps the chunker inherits this list.
+>
+> 1. **A track can validate with no audio at all.** `audio.uri` is required but
+>    `["string","null"]`, `audio_base64` is optional *and* nullable, and there is no
+>    `oneOf`. So `{uri: null, codec, container, sample_rate_hz, channels, bytes}`
+>    validates while carrying nothing to mux. Needs a `oneOf` requiring exactly one
+>    non-null source.
+> 2. **The tokenizer is ASCII-only, and the contract is not.** `WORD_RE` is
+>    `[A-Za-z0-9]`-based, so `"The café opened."` tokenizes as `The`/`caf`/`é`(**punct**)
+>    /`opened` — the word splits, `é` is misclassified, and every `char_start`/`char_end`
+>    after it is wrong. Since VE-D14 binds cues by those offsets, one accented name
+>    silently mis-times every later cue. The track carries a `language` field, so ASCII is
+>    not a defensible assumption. Needs Unicode-aware matching, keeping internal
+>    apostrophes and hyphens.
+> 3. **A zero-duration clip emits an inverted interval.** Measured, not inferred: at
+>    `speech_duration_s = 0.0` the final word comes back `0.2190 → 0.0000`. It is
+>    **exactly one** inverted word — the last — not the general corruption the bot
+>    described; `0.05 s` allocates cleanly, so the defect is strictly at `≤ 0`. Spec §3.6
+>    already says the right answer (warn `EMPTY_PHRASE_AUDIO`, treat the clip as
+>    `gap_before` silence, merge with the neighbour and re-synth), so this is the
+>    implementation disagreeing with its own spec. Guard before allocating.
+> 4. **The planner's own rows fail the schema beside it.** `place_on_timeline` writes
+>    `audio_duration_s: None` on every phrase, and `$defs.phrase` requires that field as
+>    `"type": "number"`. Assembling a record from `plan_to_json` plus the producer-owned
+>    top-level fields therefore still does not validate. Either thread each clip's
+>    pre-trim duration through, or give the plan its own type instead of emitting
+>    schema-shaped rows that cannot pass.
+
 > **Per-creative speech cost — PLACEHOLDER, 2026-09-20. Replace with a measurement.**
 >
 > Budget **$0.002 per motion creative**. The owner does not have a figure yet and asked
