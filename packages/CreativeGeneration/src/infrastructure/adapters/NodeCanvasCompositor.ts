@@ -54,19 +54,33 @@ export { scaleBasis, widthTermBasis };
 
 /**
  * The one geometry merge (C4, R-D3): `CREATIVE_GEOMETRY` is the default and a
- * layer's `props` is the override — every reader of one of the four live
+ * layer's `props` is the override — every reader of one of the five live
  * quantities calls this and never the constant directly. An absent prop is
  * `undefined`, so the default stands and a props-free template renders the
  * exact bytes it rendered before the merge; a present prop is already a
  * fraction validated into `[0, 1]` at both boundaries (D134), comparable to the
  * constant it overrides.
  *
- * Only these four quantities route through here: `accent`'s `solidHeight` and
- * `fadeHeight`, `logo`'s `width` and `margin`, and the text layers'
- * `typeFloor`. `anchor` (text) and `alpha` (shade) are deliberately NOT merged:
- * each shadows a variation axis — the anchor axis and the tone axis — and which
- * of the prop or the axis wins is an open owner decision, so both still read
- * their axis exactly as they do today (C4 reduced scope).
+ * Only these five quantities route through here, one call site each: `accent`'s
+ * `solidHeight` and `fadeHeight`, `logo`'s `width` and `margin`, and the text
+ * layers' `typeFloor`. What they have in common is being a **fraction with a
+ * constant default** — which is the whole precondition for `??` against
+ * `CREATIVE_GEOMETRY` meaning anything.
+ *
+ * `anchor` is the text layers' other prop and is deliberately NOT merged here,
+ * for a reason that is now settled rather than deferred. It is an enum, not a
+ * fraction, and its default is derived from layout rather than read from a
+ * constant, so there is no constant for `mergeGeometry` to merge against.
+ * **R-D4 (2026-09-15) closed how it resolves**: the anchor axis wins while it
+ * is live, the prop is honoured when the axis is absent, and a brief setting
+ * both is refused at the API and editor boundaries. That is the `??` chain at
+ * the `const anchor` line in `prepare`, commented there — so `anchor` does read
+ * the prop today, and this block is not the place it happens.
+ *
+ * `alpha` is no longer a prop at all: R-D4 withdrew it and `LAYER_PROPS` gives
+ * `shade: []`. The tone axis is never absent — it defaults to every tone — so
+ * an override would always silence it, which is the same test `anchor` passes
+ * and `alpha` fails.
  *
  * Two different call sites, same merge: `paintAccent` reads `c.layer.props`
  * straight off the dispatched {@link LayerDrawContext} — `maxOf.accent === 1`
