@@ -6,6 +6,7 @@ import { render, screen, fireEvent, act, within } from "@testing-library/react";
 import { resolveTimeline } from "@campaignfoundry/CampaignOrchestration/copy-timeline";
 import { MOTION_FPS } from "@campaignfoundry/CampaignOrchestration/motion-kinds";
 import * as messages from "../messages";
+import type { TrackDiamond } from "../track-diamonds";
 import {
   TimelineTape,
   beatUnderFloor,
@@ -729,5 +730,106 @@ describe("the lanes TS1 ships", () => {
     // A beat clip, by contrast, IS a control — the sibling proof that this test
     // is about the video clip and not about clips in general.
     expect(screen.getByRole("button", { name: messages.tapeBeatName(1) }).tagName).toBe("BUTTON");
+  });
+});
+
+describe("TL6 — keyframe diamonds on the ruler", () => {
+  const diamond = (over: Partial<TrackDiamond> = {}): TrackDiamond => ({
+    trackIndex: 0,
+    stopIndex: 0,
+    property: "opacity",
+    t: 0.5,
+    sec: DURATION / 2,
+    ...over,
+  });
+  const withKeys = (
+    placed: readonly TrackDiamond[],
+    unplaceable = 0,
+    onDiamondCommit = vi.fn(),
+  ) => {
+    const view = renderTape({
+      diamonds: { placed, unplaceable: { count: unplaceable } },
+      onDiamondCommit,
+    });
+    return { view, onDiamondCommit };
+  };
+  const key = (name: string) => screen.getByRole("slider", { name });
+
+  test("no keys means no lane — an empty one would imply this creative has some", () => {
+    // TS1's own rule, which this lane is subject to: "an empty waveform now
+    // would imply a bed the brief does not carry".
+    const { container } = renderTape({ diamonds: { placed: [], unplaceable: { count: 0 } } });
+    const laneNames = [...container.querySelectorAll(".sticky")].map((el) => el.textContent);
+    expect(laneNames).not.toContain(messages.tapeLaneKeyframes);
+  });
+
+  test("a key is a NATIVE range, so the guided swipe cannot swallow it (§9.3.5)", () => {
+    withKeys([diamond()]);
+    const el = key(messages.tapeDiamondName(messages.TRACK_PROPERTY_LABEL.opacity!, 0));
+    // `use-step-navigation` hands a drag to `[role="slider"]`,
+    // `input[type="range"]` or `[draggable="true"]` and nothing else.
+    expect(el.tagName).toBe("INPUT");
+    expect(el.getAttribute("type")).toBe("range");
+  });
+
+  test("the name is stable and `aria-valuenow` is the COMMITTED t (§9.3.2, §9.3.3)", () => {
+    withKeys([diamond({ t: 0.25, sec: DURATION / 4 })]);
+    const el = key(messages.tapeDiamondName(messages.TRACK_PROPERTY_LABEL.opacity!, 0));
+    fireEvent.change(el, { target: { value: String(DURATION * 0.9) } });
+    // Dragged nine tenths along, and BOTH still describe the committed stop —
+    // a control that renamed itself or re-announced its value every pixel is
+    // the failure these two points exist to prevent.
+    expect(el.getAttribute("aria-label")).toBe(
+      messages.tapeDiamondName(messages.TRACK_PROPERTY_LABEL.opacity!, 0),
+    );
+    expect(el.getAttribute("aria-valuenow")).toBe("0.25");
+  });
+
+  test("a drag commits exactly once, on release", () => {
+    const { onDiamondCommit } = withKeys([diamond()]);
+    const el = key(messages.tapeDiamondName(messages.TRACK_PROPERTY_LABEL.opacity!, 0));
+    fireEvent.change(el, { target: { value: "1" } });
+    fireEvent.change(el, { target: { value: "2" } });
+    fireEvent.change(el, { target: { value: "3" } });
+    expect(onDiamondCommit).not.toHaveBeenCalled();
+    fireEvent.pointerUp(el);
+    expect(onDiamondCommit).toHaveBeenCalledTimes(1);
+    expect(onDiamondCommit).toHaveBeenCalledWith(0, 0, 3);
+  });
+
+  test("a keyboard user commits too — the pointer is not the only way", () => {
+    const { onDiamondCommit } = withKeys([diamond()]);
+    const el = key(messages.tapeDiamondName(messages.TRACK_PROPERTY_LABEL.opacity!, 0));
+    fireEvent.change(el, { target: { value: "2" } });
+    fireEvent.keyUp(el, { key: "ArrowRight" });
+    expect(onDiamondCommit).toHaveBeenCalledWith(0, 0, 2);
+  });
+
+  test("beat-timed keys are counted and explained, never placed", () => {
+    // A beat-clock stop's `t` is beat-LOCAL: at 0.5 it fires at the midpoint of
+    // EVERY beat, so it has no single second to sit at. One diamond would be a
+    // lie; several would make a drag ambiguous about which it moved.
+    const { container } = renderTape({
+      diamonds: { placed: [], unplaceable: { count: 3 } },
+    });
+    expect(container.querySelectorAll("[data-tape-diamond]")).toHaveLength(0);
+    expect(container.textContent).toContain(messages.tapeKeysNotPlaced(3));
+  });
+
+  test("one unplaceable key is said in the singular", () => {
+    const { container } = renderTape({ diamonds: { placed: [], unplaceable: { count: 1 } } });
+    expect(container.textContent).toContain(messages.tapeKeysNotPlaced(1));
+    expect(messages.tapeKeysNotPlaced(1)).not.toEqual(messages.tapeKeysNotPlaced(2));
+  });
+
+  test("each key sits at its own second", () => {
+    const { container } = withKeys([
+      diamond({ stopIndex: 0, t: 0, sec: 0 }),
+      diamond({ stopIndex: 1, t: 1, sec: DURATION }),
+    ]).view;
+    const els = [...container.querySelectorAll("[data-tape-diamond]")] as HTMLInputElement[];
+    expect(els).toHaveLength(2);
+    expect(els[0]!.style.left).toBe(`calc(${TAPE_LABEL_PX}px + 0 * ${TAPE_PX_MIN}px)`);
+    expect(els[1]!.style.left).toBe(`calc(${TAPE_LABEL_PX}px + ${DURATION} * ${TAPE_PX_MIN}px)`);
   });
 });

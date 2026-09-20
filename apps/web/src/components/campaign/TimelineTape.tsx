@@ -19,6 +19,7 @@ import {
 } from "@campaignfoundry/CampaignOrchestration/copy-timeline";
 import type { SurfaceHost } from "@/components/campaign/PreviewDock";
 import * as messages from "@/components/campaign/messages";
+import type { TrackDiamond, UnplaceableTracks } from "@/components/campaign/track-diamonds";
 
 /**
  * The time surface: one scrollport that owns the ruler, the lanes and the
@@ -171,6 +172,17 @@ export interface TimelineTapeProps {
   readonly onScrubCommit: (sec: number) => void;
   readonly onSelectBeat: (index: number) => void;
   /**
+   * TL6 — the picked layer's pose-clock stops, already placed in seconds, and
+   * the count of the ones this ruler cannot honestly place. Absent means no
+   * layer is picked; `trackDiamonds` builds both halves.
+   */
+  readonly diamonds?: {
+    readonly placed: readonly TrackDiamond[];
+    readonly unplaceable: UnplaceableTracks;
+  };
+  /** Called ONCE, on release — never per pointermove (studio §9.2's TL6 row). */
+  readonly onDiamondCommit?: (trackIndex: number, stopIndex: number, sec: number) => void;
+  /**
    * Which host mounted it (D145 rail, D146 Copy section). Reflected, not styled.
    *
    * The SAME discriminant `PreviewDock` reads, imported rather than restated:
@@ -203,6 +215,64 @@ function Ruler({ durationSec, pxPerSec }: { durationSec: number; pxPerSec: numbe
         </span>
       ))}
     </div>
+  );
+}
+
+/**
+ * One keyframe diamond — a NATIVE range, for the same two reasons the playhead
+ * is one (§9.3 points 1 and 5): `use-step-navigation.ts` hands a drag to the
+ * component only for `[role="slider"]`, `input[type="range"]` or
+ * `[draggable="true"]`, so a custom-painted lozenge would be swallowed by the
+ * guided swipe — and a range is arrow/Home/End operable without writing any of
+ * that by hand.
+ *
+ * The thumb follows the finger through a drag (local state), and exactly ONE
+ * commit callback fires once, on release. `aria-valuenow` is pinned to the COMMITTED
+ * `t` rather than the in-flight second (§9.3 point 3), and the name is fixed
+ * (point 2) — a control that renamed itself every pixel would be unusable.
+ *
+ * Point 4 (the dwell-floor flag) has nothing to flag here: a floor is a beat's
+ * readability rule, and a keyframe has none — `layerTracksProblem` is the only
+ * refusal, and it cannot fire on a `t` a range input clamps into range.
+ */
+function Diamond({
+  diamond,
+  durationSec,
+  pxPerSec,
+  onCommit,
+}: {
+  diamond: TrackDiamond;
+  durationSec: number;
+  pxPerSec: number;
+  onCommit: (sec: number) => void;
+}): ReactNode {
+  const [dragSec, setDragSec] = useState<number | null>(null);
+  const shown = dragSec ?? diamond.sec;
+  const name = messages.tapeDiamondName(
+    messages.TRACK_PROPERTY_LABEL[diamond.property],
+    diamond.stopIndex,
+  );
+  const commit = (sec: number) => {
+    setDragSec(null);
+    onCommit(sec);
+  };
+  return (
+    <input
+      type="range"
+      min={0}
+      max={durationSec}
+      // The encoder's own frame step, exactly as the playhead uses it.
+      step={1 / MOTION_FPS}
+      value={shown}
+      aria-label={name}
+      aria-valuenow={diamond.t}
+      data-tape-diamond={`${diamond.trackIndex}:${diamond.stopIndex}`}
+      className="absolute top-1/2 h-6 w-24 -translate-x-12 -translate-y-1/2 cursor-ew-resize accent-brand-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary"
+      style={{ left: xFor(shown, pxPerSec) }}
+      onChange={(e) => setDragSec(Number(e.target.value))}
+      onPointerUp={(e) => commit(Number(e.currentTarget.value))}
+      onKeyUp={(e) => commit(Number(e.currentTarget.value))}
+    />
   );
 }
 
@@ -613,6 +683,35 @@ function TimelineTapeImpl(props: TimelineTapeProps): ReactNode {
               <FilmPerforations />
             </Clip>
           </Lane>
+
+          {/* TL6 — the keys lane, present only when the picked layer HAS keys.
+              An empty one would imply this creative carries keyframes, which is
+              precisely what TS1's own lane rule refuses ("an empty waveform now
+              would imply a bed the brief does not carry"). */}
+          {props.diamonds !== undefined &&
+          (props.diamonds.placed.length > 0 || props.diamonds.unplaceable.count > 0) ? (
+            <Lane name={messages.tapeLaneKeyframes} durationSec={durationSec} pxPerSec={pxPerSec}>
+              {props.diamonds.placed.map((diamond) => (
+                <Diamond
+                  key={`${diamond.trackIndex}:${diamond.stopIndex}`}
+                  diamond={diamond}
+                  durationSec={durationSec}
+                  pxPerSec={pxPerSec}
+                  onCommit={(sec) =>
+                    props.onDiamondCommit?.(diamond.trackIndex, diamond.stopIndex, sec)
+                  }
+                />
+              ))}
+              {props.diamonds.unplaceable.count > 0 ? (
+                <p
+                  data-tape-keys-unplaced=""
+                  className="pl-2 text-[10px] leading-[2.75rem] text-text-muted"
+                >
+                  {messages.tapeKeysNotPlaced(props.diamonds.unplaceable.count)}
+                </p>
+              ) : null}
+            </Lane>
+          ) : null}
 
           <Playhead
             seconds={scrubSec}

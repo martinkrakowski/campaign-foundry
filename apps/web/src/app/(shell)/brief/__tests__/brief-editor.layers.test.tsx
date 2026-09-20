@@ -1035,3 +1035,78 @@ describe("CC4 — red fault 4: a live run on one field is one undo entry, not on
     expect(await columnYaml(user)).toBe(before);
   });
 });
+
+/** TL6 — what the editor actually hands the tape, so the wiring has a witness. */
+const tapeProps = vi.hoisted(() => ({ last: undefined as unknown }));
+
+vi.mock("@/components/campaign/TimelineTape", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/components/campaign/TimelineTape")>();
+  return {
+    ...actual,
+    TimelineTape: (props: Parameters<typeof actual.TimelineTape>[0]) => {
+      tapeProps.last = props;
+      return createElement(actual.TimelineTape, props);
+    },
+  };
+});
+
+describe("TL6 — the picked layer's keys reach the ruler", () => {
+  /** The canonical template, with one pose track on the image layer. */
+  const withTrack = () => {
+    const base = templateFromCanonical(DEFAULT_CAMPAIGN_TYPE);
+    return {
+      ...base,
+      layers: base.layers.map((l) =>
+        l.kind === "image"
+          ? {
+              ...l,
+              tracks: [{ property: "opacity", stops: [{ t: 0.5, value: 1, clock: "pose" }] }],
+            }
+          : l,
+      ),
+    };
+  };
+  const motionBrief = () => ({
+    ...layerBrief,
+    template: withTrack(),
+    mode: "variation",
+    output: { formats: ["motion"], platforms: ["linkedin"] },
+    variation: { axes: { motion: ["ken-burns-in"], duration: [6] }, count: 1 },
+  });
+
+  test("picking the layer places its key; picking nothing places none", async () => {
+    // D157 — the prop is optional, so only a caller test can tell "wired" from
+    // "exists". Both directions, because a hard-coded constant would pass one.
+    const user = userEvent.setup();
+    await mountEditor([motionBrief()]);
+    await waitFor(() => expect(tapeProps.last).toBeDefined());
+    const placed = () =>
+      (tapeProps.last as { diamonds?: { placed: readonly { sec: number }[] } }).diamonds?.placed ??
+      [];
+    expect(placed()).toHaveLength(0);
+
+    await user.click(pick("image", "Image"));
+    await waitFor(() => expect(placed()).toHaveLength(1));
+    // t 0.5 of a six-second clip — the editor's own duration, not a fixture of it.
+    expect(placed()[0]!.sec).toBe(3);
+  });
+
+  test("dragging a key writes the same `t` the form commits", async () => {
+    // TL6's stated acceptance, end to end through the real editor: the drag
+    // reaches `setTrackStop`, so a dragged key and a typed one are one edit.
+    const user = userEvent.setup();
+    await mountEditor([motionBrief()]);
+    await user.click(pick("image", "Image"));
+    const key = await screen.findByRole("slider", {
+      name: messages.tapeDiamondName(messages.TRACK_PROPERTY_LABEL.opacity, 0),
+    });
+    fireEvent.change(key, { target: { value: "1.5" } });
+    fireEvent.pointerUp(key);
+    // 1.5s of 6s is t 0.25, and the YAML view is the document itself.
+    await waitFor(() => {
+      const placed = (tapeProps.last as { diamonds?: { placed: readonly { t: number }[] } })
+        .diamonds?.placed;
+      expect(placed?.[0]?.t).toBe(0.25);
+    });
+  });
+});

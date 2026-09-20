@@ -96,6 +96,7 @@ import { cn } from "@/lib/cn";
 import { BriefSelector } from "@/components/campaign/BriefSelector";
 import { HeadlinePoolDrawer } from "@/components/campaign/HeadlinePoolDrawer";
 import { LayerPropsSheet } from "@/components/campaign/LayerPropsSheet";
+import { tAtSecond, trackDiamonds } from "@/components/campaign/track-diamonds";
 import { AssetPickerDrawer } from "@/components/campaign/AssetPickerDrawer";
 import { ModePanel } from "@/components/campaign/ModePanel";
 import { SectionOutline } from "@/components/ui/section-outline";
@@ -1642,6 +1643,33 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
                 onScrubLive={playhead.onScrubLive}
                 onScrubCommit={playhead.onScrubCommit}
                 onSelectBeat={setSelectedBeatIndex}
+                /* TL6 — the picked layer diamonds. The SAME pick the sheet
+                   reads (CC3), never a second selection, so the ruler and the
+                   inspector are always describing one layer. */
+                diamonds={trackDiamonds(
+                  state.template.layers.find((l) => l.id === pickedLayerId),
+                  playhead.durationSec,
+                )}
+                /* Passed only when a layer is picked. A guard inside could never
+                   fire - `diamonds` is derived from the same pick, so with none
+                   there are no keys to drag - and a branch no input can take is
+                   what the coverage gate exists to surface. The prop being
+                   optional carries the meaning instead. */
+                onDiamondCommit={
+                  pickedLayerId === null
+                    ? undefined
+                    : (trackIndex, stopIndex, sec) =>
+                        /* One call, on release, through the SAME action the
+                           inspector number box uses - so a dragged key and a
+                           typed one are one edit with one refusal path. */
+                        dispatch({
+                          type: "setTrackStop",
+                          layerId: pickedLayerId,
+                          trackIndex,
+                          stopIndex,
+                          patch: { t: tAtSecond(sec, playhead.durationSec) },
+                        })
+                }
                 host="rail"
               />
             ) : null}
