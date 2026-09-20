@@ -86,20 +86,41 @@ function Row({ label, children }: { label: string; children: (id: string) => Rea
 function StopFields({
   stop,
   propertyLabel,
+  clockLabel,
   index,
+  problemOf,
   onPatch,
   onRemove,
 }: {
   stop: Stop;
   propertyLabel: string;
+  clockLabel: string;
   index: number;
+  /** The domain's `must` clause for a candidate patch, or `undefined` if legal. */
+  problemOf: (patch: { t?: number; value?: number }) => string | undefined;
   onPatch: (patch: { t?: number; value?: number; easing?: EasingKind | undefined }) => void;
   onRemove: () => void;
 }) {
   const [tDraft, setTDraft] = useState<string | null>(null);
   const [valueDraft, setValueDraft] = useState<string | null>(null);
+  const [refused, setRefused] = useState<string | null>(null);
+  /**
+   * One commit path for both boxes: parse, ask the domain, then either dispatch
+   * or SAY WHY. Without the middle step a refused edit was invisible — the
+   * reducer returned the same state, the box kept the draft, and blur silently
+   * put the old number back.
+   */
+  const commit = (patch: { t?: number; value?: number }) => {
+    const must = problemOf(patch);
+    if (must !== undefined) {
+      setRefused(must);
+      return;
+    }
+    setRefused(null);
+    onPatch(patch);
+  };
   return (
-    <div className="flex items-end gap-2 rounded-md border border-border p-2">
+    <div className="flex flex-wrap items-end gap-2 rounded-md border border-border p-2">
       <div className="w-20">
         <Row label={messages.tracksStopTimeLabel}>
           {(id) => (
@@ -116,7 +137,7 @@ function StopFields({
                 if (raw.trim() === "") return;
                 const parsed = Number(raw);
                 if (!Number.isFinite(parsed)) return;
-                onPatch({ t: parsed });
+                commit({ t: parsed });
               }}
               onBlur={() => setTDraft(null)}
             />
@@ -137,7 +158,7 @@ function StopFields({
                 if (raw.trim() === "") return;
                 const parsed = Number(raw);
                 if (!Number.isFinite(parsed)) return;
-                onPatch({ value: parsed });
+                commit({ value: parsed });
               }}
               onBlur={() => setValueDraft(null)}
             />
@@ -164,21 +185,26 @@ function StopFields({
               <option value="">{messages.tracksEasingDefault}</option>
               {EASING_KINDS.map((kind) => (
                 <option key={kind} value={kind}>
-                  {kind}
+                  {messages.TRACK_EASING_LABEL[kind]}
                 </option>
               ))}
             </select>
           )}
         </Row>
       </div>
+      {refused === null ? null : (
+        <p role="status" className="w-full text-[11px] text-text-muted">
+          {messages.tracksRefused(refused)}
+        </p>
+      )}
       <Button
         type="button"
         variant="ghost"
         size="sm"
-        aria-label={messages.tracksRemoveStopLabel(propertyLabel, index)}
+        aria-label={messages.tracksRemoveStopLabel(propertyLabel, clockLabel, index)}
         onClick={onRemove}
       >
-        Remove
+        {messages.tracksRemoveShort}
       </Button>
     </div>
   );
@@ -296,7 +322,7 @@ export function TrackForm({
                 disabled={problem !== undefined}
                 onClick={() => addStop(property)}
               >
-                Add stop
+                {messages.tracksAddShort}
               </Button>
             </div>
             {problem !== undefined ? (
@@ -304,33 +330,72 @@ export function TrackForm({
                 {messages.tracksRefused(problem.must)}
               </p>
             ) : null}
-            {mine.map((entry) =>
-              entry.track.stops.map((stop, stopIndex) => (
-                <StopFields
-                  key={`${entry.trackIndex}:${stopIndex}`}
-                  stop={stop}
-                  propertyLabel={propertyLabel}
-                  index={stopIndex}
-                  onPatch={(patch) =>
-                    dispatch({
-                      type: "setTrackStop",
-                      layerId: layer.id,
-                      trackIndex: entry.trackIndex,
-                      stopIndex,
-                      patch,
-                    })
-                  }
-                  onRemove={() =>
-                    dispatch({
-                      type: "removeTrackStop",
-                      layerId: layer.id,
-                      trackIndex: entry.trackIndex,
-                      stopIndex,
-                    })
-                  }
-                />
-              )),
-            )}
+            {/* Grouped by track, with its clock named. A property may hold one
+                track per clock (rule 4), and a flat list of rows made those
+                indistinguishable — two `pose` and `beat` rows looked identical
+                and their remove controls shared an accessible name, so neither
+                an operator nor a test could say which timeline a row drove. */}
+            {mine.map((entry) => {
+              const clock = clockOf(entry.track);
+              const clockLabel = messages.TRACK_CLOCK_LABEL[clock]!;
+              return (
+                <div key={`${property}:${clock}`} className="space-y-2">
+                  <p className="text-[11px] text-text-muted">{clockLabel}</p>
+                  {entry.track.stops.map((stop, stopIndex) => (
+                    <StopFields
+                      /* Keyed by the stop's IDENTITY, not its position. `t` is
+                         unique within a track by the domain's own rule (K-D9),
+                         so this is stable — where an index key was not:
+                         removing an earlier track shifts the later ones down,
+                         and React would hand a surviving row the removed row's
+                         half-typed draft. */
+                      key={`${property}:${clock}:${stop.t}`}
+                      stop={stop}
+                      propertyLabel={propertyLabel}
+                      clockLabel={clockLabel}
+                      index={stopIndex}
+                      /* The same gate the Add button uses, on the EDIT
+                         candidate: a `t` that duplicates a sibling, or falls
+                         outside [0, 1], is refused by the reducer, and without
+                         this the draft simply reverted on blur with nothing
+                         said. */
+                      problemOf={(patch) =>
+                        layerTracksProblem(
+                          layer.kind,
+                          tracks.map((track, i) =>
+                            i === entry.trackIndex
+                              ? {
+                                  ...track,
+                                  stops: track.stops.map((candidate, j) =>
+                                    j === stopIndex ? { ...candidate, ...patch } : candidate,
+                                  ),
+                                }
+                              : track,
+                          ),
+                        )?.must
+                      }
+                      onPatch={(patch) =>
+                        dispatch({
+                          type: "setTrackStop",
+                          layerId: layer.id,
+                          trackIndex: entry.trackIndex,
+                          stopIndex,
+                          patch,
+                        })
+                      }
+                      onRemove={() =>
+                        dispatch({
+                          type: "removeTrackStop",
+                          layerId: layer.id,
+                          trackIndex: entry.trackIndex,
+                          stopIndex,
+                        })
+                      }
+                    />
+                  ))}
+                </div>
+              );
+            })}
           </div>
         );
       })}

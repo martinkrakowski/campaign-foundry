@@ -78,6 +78,20 @@ vi.mock("@/components/campaign/sections", async (importOriginal) => {
  * The map paints hundreds of SVG nodes per mount under happy-dom and has its own
  * suite; a stub keeps this file about the layers.
  */
+/** K5 — what the editor actually hands the tracks form, so D157 has a witness. */
+const trackFormProps = vi.hoisted(() => ({ last: undefined as unknown }));
+
+vi.mock("@/components/campaign/TrackForm", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/components/campaign/TrackForm")>();
+  return {
+    ...actual,
+    TrackForm: (props: Parameters<typeof actual.TrackForm>[0]) => {
+      trackFormProps.last = props;
+      return createElement(actual.TrackForm, props);
+    },
+  };
+});
+
 vi.mock("@/components/ui", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/components/ui")>();
   return { ...actual, WorldMap: () => <div data-testid="world-map-stub" /> };
@@ -904,16 +918,16 @@ describe("K5 — the tracks form reaches the operator through the real editor", 
     expect(within(sheetEl()).getByTestId("layer-tracks")).toBeTruthy();
   });
 
-  test("the clock select is live, which is only true if the playhead prop arrived", async () => {
-    // `playhead` is typed `TrackPlayhead | null`, so a caller that forgot it
-    // fails typecheck — but a caller passing a permanently-null literal would
-    // still compile and still render. This asserts the section renders with its
-    // control usable from the editor's own tree.
+  test("the editor hands the form a real playhead, not a null literal", async () => {
+    // This is the D157 witness, and it is the assertion the first two drafts of
+    // this test could not make: both would have passed with `playhead={null}`
+    // hard-coded at the call site. A captured `null` fails here.
     const user = userEvent.setup();
     await mountEditor();
     await user.click(pick("image", "Image"));
-    const select = within(sheetEl()).getByLabelText(messages.tracksClockLabel);
-    expect((select as HTMLSelectElement).options.length).toBeGreaterThan(0);
+    const props = trackFormProps.last as { playhead: { durationSec: number } | null };
+    expect(props.playhead).not.toBeNull();
+    expect(props.playhead!.durationSec).toBeGreaterThan(0);
   });
 });
 

@@ -15,6 +15,7 @@
 // one `display-names.ts` spells out. Type-only, so nothing is pulled in at
 // runtime by the file every other one imports.
 import type { Frame } from "@campaignfoundry/CampaignOrchestration/html-element";
+import type { EasingKind } from "@campaignfoundry/CampaignOrchestration/easing";
 
 // --- Identity ---
 
@@ -1437,11 +1438,40 @@ export function tracksAddStopLabel(propertyLabel: string): string {
   return `Add a ${propertyLabel} stop`;
 }
 
-export function tracksRemoveStopLabel(propertyLabel: string, index: number): string {
-  return `Remove ${propertyLabel} stop ${index + 1}`;
+/**
+ * A stop is addressed by property, CLOCK and position. The clock is in the name
+ * because one property may hold a track per clock (§4.4 rule 4), and without it
+ * the pose and beat rows offered two controls with one accessible name.
+ */
+export function tracksRemoveStopLabel(
+  propertyLabel: string,
+  clockLabel: string,
+  index: number,
+): string {
+  return `Remove ${propertyLabel} ${clockLabel} stop ${index + 1}`;
 }
 
-export const tracksStopTimeLabel = "t";
+/** The visible face of the two track buttons; the accessible names say more. */
+export const tracksAddShort = "Add stop";
+export const tracksRemoveShort = "Remove";
+
+/**
+ * Easing, in words rather than as the resolver spells it. Keyed by `EasingKind`
+ * rather than by `string`: a kind added to the vocabulary without a label here
+ * is then a compile error, where a `?? kind` fallback would have been a branch
+ * no input could take and a silent raw identifier on the day it could.
+ */
+export const TRACK_EASING_LABEL: Record<EasingKind, string> = {
+  "ease-out-cubic": "Ease out",
+  linear: "Linear",
+};
+
+/**
+ * The stop time control. Labelled for the operator, not for the schema: the
+ * field is `t` and a fraction of its own clock, but "t" alone is the track
+ * model leaking into the surface someone edits.
+ */
+export const tracksStopTimeLabel = "Time (0–1)";
 export const tracksStopValueLabel = "Value";
 export const tracksStopEasingLabel = "Easing";
 

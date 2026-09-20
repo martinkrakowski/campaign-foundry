@@ -788,6 +788,31 @@ describe("setTrackStop coalesces per stop and per field (K5)", () => {
     expect(textLayer(hook.result.current.state).tracks![0]!.stops[0]!.value).toBe(1);
   });
 
+  test("the same field on a DIFFERENT stop is a separate entry", () => {
+    // The key carries the stop index, and without this the index half of it was
+    // unproven: a key that ignored it would fold two stops into one undo step.
+    const hook = seeded();
+    const id = textId(hook.result.current.state);
+    send(hook, {
+      type: "addTrackStop",
+      layerId: id,
+      property: "opacity",
+      clock: "pose",
+      t: 1,
+      value: 0,
+    });
+    send(
+      hook,
+      { type: "setTrackStop", layerId: id, trackIndex: 0, stopIndex: 0, patch: { value: 0.3 } },
+      { type: "setTrackStop", layerId: id, trackIndex: 0, stopIndex: 1, patch: { value: 0.7 } },
+    );
+    act(() => hook.result.current.undo());
+    // Only stop 1 reverted; stop 0 keeps its own edit behind its own entry.
+    const stops = () => textLayer(hook.result.current.state).tracks![0]!.stops;
+    expect(stops()[1]!.value).toBe(0);
+    expect(stops()[0]!.value).toBe(0.3);
+  });
+
   test("the other field on the same stop is a SEPARATE entry", () => {
     const hook = seeded();
     const id = textId(hook.result.current.state);

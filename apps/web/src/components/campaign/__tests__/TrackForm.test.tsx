@@ -179,7 +179,11 @@ describe("authoring a stop", () => {
     );
     fireEvent.click(
       screen.getByLabelText(
-        messages.tracksRemoveStopLabel(messages.TRACK_PROPERTY_LABEL.opacity!, 0),
+        messages.tracksRemoveStopLabel(
+          messages.TRACK_PROPERTY_LABEL.opacity!,
+          messages.TRACK_CLOCK_LABEL.pose!,
+          0,
+        ),
       ),
     );
     expect(latest!.template.layers.find((l) => l.id === TEXT_ID)!.tracks).toBeUndefined();
@@ -345,5 +349,129 @@ describe("a clock the newly picked layer cannot carry falls back rather than sti
     const select = screen.getByLabelText(messages.tracksClockLabel) as HTMLSelectElement;
     expect([...select.options].map((o) => o.value)).toEqual(["pose"]);
     expect(select.value).toBe("pose");
+  });
+});
+
+describe("two tracks on one property are told apart (review, #535)", () => {
+  const twoClocks = (onState?: (s: EditorState) => void) => {
+    render(<Harness layerId={TEXT_ID} onState={onState} />);
+    const add = () =>
+      screen.getByLabelText(messages.tracksAddStopLabel(messages.TRACK_PROPERTY_LABEL.opacity!));
+    fireEvent.click(add());
+    fireEvent.change(screen.getByLabelText(messages.tracksClockLabel), {
+      target: { value: "beat" },
+    });
+    fireEvent.click(add());
+  };
+
+  test("each track names its clock, and the remove controls differ by it", () => {
+    // Flat rows gave both tracks the accessible name "Remove Opacity stop 1",
+    // so neither an operator nor a query could say which timeline a row drove.
+    twoClocks();
+    const section = screen.getByTestId("layer-tracks");
+    // Both clock headings are present. getAllByText, because the clock SELECT
+    // renders the same words as its options.
+    expect(screen.getAllByText(messages.TRACK_CLOCK_LABEL.pose!).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(messages.TRACK_CLOCK_LABEL.beat!).length).toBeGreaterThan(0);
+    expect(
+      within(section).getByLabelText(
+        messages.tracksRemoveStopLabel(
+          messages.TRACK_PROPERTY_LABEL.opacity!,
+          messages.TRACK_CLOCK_LABEL.pose!,
+          0,
+        ),
+      ),
+    ).toBeTruthy();
+    expect(
+      within(section).getByLabelText(
+        messages.tracksRemoveStopLabel(
+          messages.TRACK_PROPERTY_LABEL.opacity!,
+          messages.TRACK_CLOCK_LABEL.beat!,
+          0,
+        ),
+      ),
+    ).toBeTruthy();
+  });
+
+  test("editing the SECOND track validates against the first without touching it", () => {
+    // `problemOf` maps over every track to build the candidate, so with two
+    // tracks it has both a "this is the one I am editing" arm and a "leave this
+    // one alone" arm. With a single track the second never ran.
+    //
+    // Asserted on STATE, not on the absence of a status region: the Add button
+    // legitimately shows its own refusal here (both tracks already hold a stop
+    // at t=0, so another would duplicate), and an assertion that merely counted
+    // status regions would have been reading that one.
+    let latest: EditorState | undefined;
+    twoClocks((s2) => (latest = s2));
+    const section = screen.getByTestId("layer-tracks");
+    const values = within(section).getAllByLabelText(messages.tracksStopValueLabel);
+    fireEvent.change(values[1]!, { target: { value: "0.25" } });
+    const tracks = latest!.template.layers.find((l) => l.id === TEXT_ID)!.tracks!;
+    // The beat track took the edit; the pose track is untouched.
+    expect(tracks[1]!.stops[0]!.value).toBe(0.25);
+    expect(tracks[0]!.stops[0]!.value).toBe(1);
+  });
+
+  test("removing the FIRST track does not hand its draft to the survivor", () => {
+    // The rows were keyed by array position, so filtering an earlier track out
+    // shifted the later one into its key and React reused the removed row's
+    // local draft state on a different stop.
+    twoClocks();
+    const section = screen.getByTestId("layer-tracks");
+    const poseValue = within(section).getAllByLabelText(messages.tracksStopValueLabel)[0]!;
+    fireEvent.change(poseValue, { target: { value: "" } });
+    expect((poseValue as HTMLInputElement).value).toBe("");
+    fireEvent.click(
+      within(section).getByLabelText(
+        messages.tracksRemoveStopLabel(
+          messages.TRACK_PROPERTY_LABEL.opacity!,
+          messages.TRACK_CLOCK_LABEL.pose!,
+          0,
+        ),
+      ),
+    );
+    // The surviving beat row shows its OWN committed value, not the emptied draft.
+    const survivor = within(screen.getByTestId("layer-tracks")).getByLabelText(
+      messages.tracksStopValueLabel,
+    );
+    expect((survivor as HTMLInputElement).value).toBe("1");
+  });
+});
+
+describe("a refused EDIT says why instead of reverting in silence (review, #535)", () => {
+  test("typing a `t` that duplicates a sibling shows the domain's words", () => {
+    let latest: EditorState | undefined;
+    render(<Harness layerId={TEXT_ID} onState={(s) => (latest = s)} />);
+    const add = () =>
+      screen.getByLabelText(messages.tracksAddStopLabel(messages.TRACK_PROPERTY_LABEL.opacity!));
+    fireEvent.click(add());
+    fireEvent.change(screen.getAllByLabelText(messages.tracksStopTimeLabel)[0]!, {
+      target: { value: "0.5" },
+    });
+    fireEvent.click(add());
+    // Two stops now, at 0.5 and 0. Move the second onto the first.
+    const times = screen.getAllByLabelText(messages.tracksStopTimeLabel);
+    fireEvent.change(times[1]!, { target: { value: "0.5" } });
+    expect(screen.getAllByRole("status").some((el) => el.textContent?.includes("unique"))).toBe(
+      true,
+    );
+    // And the document is unchanged — the refusal is shown, not applied.
+    const stops = latest!.template.layers.find((l) => l.id === TEXT_ID)!.tracks![0]!.stops;
+    expect(stops.map((s) => s.t).sort()).toEqual([0, 0.5]);
+  });
+
+  test("a legal edit after a refused one clears the message", () => {
+    render(<Harness layerId={TEXT_ID} />);
+    const add = () =>
+      screen.getByLabelText(messages.tracksAddStopLabel(messages.TRACK_PROPERTY_LABEL.opacity!));
+    fireEvent.click(add());
+    const t = screen.getByLabelText(messages.tracksStopTimeLabel);
+    fireEvent.change(t, { target: { value: "5" } });
+    const outOfRange = () =>
+      screen.queryAllByRole("status").some((el) => el.textContent?.includes("[0, 1]"));
+    expect(outOfRange()).toBe(true);
+    fireEvent.change(t, { target: { value: "0.75" } });
+    expect(outOfRange()).toBe(false);
   });
 });
