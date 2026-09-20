@@ -342,7 +342,7 @@ describe("pipeline composition root", () => {
       { productId: "alpha", aspectRatio: "1:1", treatment: "default" },
     ]);
     expect(r.success).toBe(true);
-    if (r.success) expect(r.value.assets.map((a) => a.outputPath)).toEqual(["alpha/1x1.png"]);
+    if (r.success) expect(r.value.assets.map((a) => a.outputPath)).toEqual(["camp/alpha/1x1.png"]);
   });
 
   test("variation + platforms resolves safe zones from the profile table (unknown ids ignored)", async () => {

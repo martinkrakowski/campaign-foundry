@@ -371,6 +371,44 @@ describe("GenerateCampaignUseCase — legal gate — music rights (VE-D8)", () =
   });
 });
 
+describe("the output namespace is campaign-scoped (R2, D74)", () => {
+  /**
+   * The defect this lane exists for, reproduced as a test rather than described.
+   *
+   * Before the campaign segment, two campaigns naming the same product wrote the
+   * SAME files and the second silently overwrote the first. D74 records it
+   * happening in the operator own tree: trail-blaze-2026,
+   * trail-blaze-motion-2026 and trail-blaze-motion2-2026 all wrote
+   * blaze-bottle/ and blaze-pack/. A per-campaign lock never excluded it,
+   * because the lock key and the resource key are different keys.
+   */
+  test("two campaigns sharing a product write DISJOINT paths", async () => {
+    const run = async (id: string) => {
+      const d = deps();
+      const result = await new GenerateCampaignUseCase(d).execute({ ...baseBrief(), id });
+      expect(result.success).toBe(true);
+      if (!result.success) throw new Error("run failed");
+      return {
+        outputs: result.value.assets.map((a) => a.outputPath),
+        proofs: [...(d.exporter as RecordingExporter).proofs],
+      };
+    };
+    const first = await run("spring-launch");
+    const second = await run("autumn-launch");
+
+    // Same products, same ratios — and not one shared path between them.
+    expect(first.outputs).toHaveLength(second.outputs.length);
+    const overlap = first.outputs.filter((path) => second.outputs.includes(path));
+    expect(overlap).toEqual([]);
+    const proofOverlap = first.proofs.filter((path) => second.proofs.includes(path));
+    expect(proofOverlap).toEqual([]);
+
+    // And the campaign is the FIRST segment, so one campaign is one subtree.
+    expect(first.outputs.every((path) => path.startsWith("spring-launch/"))).toBe(true);
+    expect(second.proofs.every((path) => path.startsWith("autumn-launch/"))).toBe(true);
+  });
+});
+
 describe("GenerateCampaignUseCase — happy path", () => {
   test("produces the full product × ratio matrix for a single (default) treatment", async () => {
     const d = deps();
@@ -384,12 +422,12 @@ describe("GenerateCampaignUseCase — happy path", () => {
 
     // Order is product → ratio → treatment, and paths are NOT namespaced by treatment.
     expect(result.value.assets.map((a) => a.outputPath)).toEqual([
-      "alpha/1x1.png",
-      "alpha/9x16.png",
-      "alpha/16x9.png",
-      "beta/1x1.png",
-      "beta/9x16.png",
-      "beta/16x9.png",
+      "camp/alpha/1x1.png",
+      "camp/alpha/9x16.png",
+      "camp/alpha/16x9.png",
+      "camp/beta/1x1.png",
+      "camp/beta/9x16.png",
+      "camp/beta/16x9.png",
     ]);
 
     // One background resolved per (product × ratio) cell; one proof per product.
@@ -397,7 +435,7 @@ describe("GenerateCampaignUseCase — happy path", () => {
     expect(d.compositor.compositeAsset).toHaveBeenCalledTimes(6);
     const exporter = d.exporter as RecordingExporter;
     expect(exporter.saved).toHaveLength(6);
-    expect(exporter.proofs).toEqual(["proofs/alpha.pdf", "proofs/beta.pdf"]);
+    expect(exporter.proofs).toEqual(["camp/proofs/alpha.pdf", "camp/proofs/beta.pdf"]);
 
     // Per-asset fields are stamped from the port results.
     const first = result.value.assets[0];
@@ -409,7 +447,7 @@ describe("GenerateCampaignUseCase — happy path", () => {
       complianceScore: 0.5,
       passedCompliance: true,
       logoApplied: true,
-      proofPath: "proofs/alpha.pdf",
+      proofPath: "camp/proofs/alpha.pdf",
     });
   });
 
@@ -425,8 +463,8 @@ describe("GenerateCampaignUseCase — happy path", () => {
     expect(result.value.assets).toHaveLength(12);
     expect(d.imageGenerator.resolveBackground).toHaveBeenCalledTimes(6);
     expect(d.compositor.compositeAsset).toHaveBeenCalledTimes(12);
-    expect(result.value.assets[0].outputPath).toBe("alpha/1x1/bold-bottom.png");
-    expect(result.value.assets[1].outputPath).toBe("alpha/1x1/subtle-top.png");
+    expect(result.value.assets[0].outputPath).toBe("camp/alpha/1x1/bold-bottom.png");
+    expect(result.value.assets[1].outputPath).toBe("camp/alpha/1x1/subtle-top.png");
   });
 
   test("the use case resolves the copy: localized message wins, else campaign message", async () => {
@@ -576,18 +614,20 @@ describe("GenerateCampaignUseCase — display sizes (A4b)", () => {
     expect(pngSize(rectangle!.image)).toEqual({ width: 300, height: 250 });
     // The exporter saved exactly those renders.
     const exporter = d.exporter as RecordingExporter;
-    expect(exporter.saved.map((s) => s.path)).toContain("alpha/728x90.png");
-    expect(exporter.saved.map((s) => s.path)).toContain("alpha/300x250.png");
+    expect(exporter.saved.map((s) => s.path)).toContain("camp/alpha/728x90.png");
+    expect(exporter.saved.map((s) => s.path)).toContain("camp/alpha/300x250.png");
 
     // Display assets carry their size, not a ratio; ratio assets are untouched.
-    const leaderboardAsset = result.value.assets.find((a) => a.outputPath === "alpha/728x90.png");
+    const leaderboardAsset = result.value.assets.find(
+      (a) => a.outputPath === "camp/alpha/728x90.png",
+    );
     expect(leaderboardAsset).toMatchObject({
       productId: "alpha",
       size: "728x90",
       treatment: "default",
     });
     expect(leaderboardAsset).not.toHaveProperty("aspectRatio");
-    const ratioAsset = result.value.assets.find((a) => a.outputPath === "alpha/1x1.png");
+    const ratioAsset = result.value.assets.find((a) => a.outputPath === "camp/alpha/1x1.png");
     expect(ratioAsset).toMatchObject({
       productId: "alpha",
       aspectRatio: "1:1",
@@ -647,7 +687,7 @@ describe("GenerateCampaignUseCase — display sizes (A4b)", () => {
     expect(result.value.assets).toHaveLength(8);
     expect(result.value.assets.filter((a) => a.size === "728x90")).toHaveLength(2);
     expect(
-      result.value.assets.map((a) => a.outputPath).filter((p) => p === "alpha/728x90.png"),
+      result.value.assets.map((a) => a.outputPath).filter((p) => p === "camp/alpha/728x90.png"),
     ).toHaveLength(1);
     expect(result.value.log.totalOperations).toBe(8);
   });
@@ -659,7 +699,7 @@ describe("GenerateCampaignUseCase — display sizes (A4b)", () => {
     });
     expect(result.success).toBe(true);
     if (!result.success) return;
-    expect(result.value.assets.map((a) => a.outputPath)).toEqual(["alpha/728x90.png"]);
+    expect(result.value.assets.map((a) => a.outputPath)).toEqual(["camp/alpha/728x90.png"]);
     // Not the 1:1 hero, so no proof is rewritten.
     expect((d.exporter as RecordingExporter).proofs).toEqual([]);
   });
@@ -760,10 +800,10 @@ describe("GenerateCampaignUseCase — selective regeneration", () => {
     expect(result.success).toBe(true);
     if (!result.success) return;
 
-    expect(result.value.assets.map((a) => a.outputPath)).toEqual(["alpha/1x1.png"]);
+    expect(result.value.assets.map((a) => a.outputPath)).toEqual(["camp/alpha/1x1.png"]);
     expect(d.imageGenerator.resolveBackground).toHaveBeenCalledTimes(1);
     // The 1:1 first-treatment cell is the proof hero, so alpha's proof is rewritten.
-    expect((d.exporter as RecordingExporter).proofs).toEqual(["proofs/alpha.pdf"]);
+    expect((d.exporter as RecordingExporter).proofs).toEqual(["camp/proofs/alpha.pdf"]);
   });
 
   test("does not rewrite a product's proof when the targeted cell is not its hero", async () => {
@@ -772,7 +812,7 @@ describe("GenerateCampaignUseCase — selective regeneration", () => {
       regenerateOnly: [{ productId: "alpha", aspectRatio: "16:9", treatment: "default" }],
     });
     if (!result.success) return;
-    expect(result.value.assets.map((a) => a.outputPath)).toEqual(["alpha/16x9.png"]);
+    expect(result.value.assets.map((a) => a.outputPath)).toEqual(["camp/alpha/16x9.png"]);
     expect((d.exporter as RecordingExporter).proofs).toEqual([]);
   });
 
@@ -1069,9 +1109,9 @@ describe("GenerateCampaignUseCase — variation", () => {
 
     expect(result.value.assets).toHaveLength(3);
     expect(result.value.assets.map((a) => a.outputPath)).toEqual([
-      "alpha/1x1/v0.png",
-      "beta/9x16/v1.png",
-      "alpha/16x9/v2.png",
+      "camp/alpha/1x1/v0.png",
+      "camp/beta/9x16/v1.png",
+      "camp/alpha/16x9/v2.png",
     ]);
     expect(result.value.assets[0]).toMatchObject({
       variantIndex: 0,
@@ -1090,7 +1130,7 @@ describe("GenerateCampaignUseCase — variation", () => {
     expect(result.value.copyHash).toBe("copy-hash");
     expect(result.value.seed).toBe(42);
     expect(result.value.log.totalOperations).toBe(3);
-    expect((d.exporter as RecordingExporter).proofs).toEqual(["proofs/alpha.pdf"]);
+    expect((d.exporter as RecordingExporter).proofs).toEqual(["camp/proofs/alpha.pdf"]);
   });
 
   test("returns a planner error without touching generation ports", async () => {
@@ -1154,7 +1194,7 @@ describe("GenerateCampaignUseCase — variation", () => {
     expect(planner.replan).toHaveBeenCalledTimes(1);
     expect(planner.replan).toHaveBeenCalledWith(expect.anything(), 1, 3);
     expect(result.value.assets).toHaveLength(1);
-    expect(result.value.assets[0].outputPath).toBe("beta/9x16/v1.png");
+    expect(result.value.assets[0].outputPath).toBe("camp/beta/9x16/v1.png");
     expect(result.value.assets[0].seed).toBe(103); // attempt + 100 from the fake
     expect(result.value.assets[0].attempt).toBe(3);
     expect(d.proceduralGenerator.resolveBackground).toHaveBeenCalledTimes(1);
@@ -1342,7 +1382,7 @@ describe("GenerateCampaignUseCase — variation", () => {
     expect(result.value.assets[0]).toMatchObject({
       productId: "alpha",
       aspectRatio: "9:16",
-      outputPath: "alpha/9x16/v0.png",
+      outputPath: "camp/alpha/9x16/v0.png",
       variantIndex: 0,
       attempt: 1,
     });
@@ -1356,7 +1396,7 @@ describe("GenerateCampaignUseCase — variation", () => {
       regenerateOnly: [{ productId: "alpha", variantIndex: 0, attempt: 1 }],
     });
     expect(result.success).toBe(true);
-    expect((d.exporter as RecordingExporter).removed).toEqual(["alpha/9x16/v0.mp4"]);
+    expect((d.exporter as RecordingExporter).removed).toEqual(["camp/alpha/9x16/v0.mp4"]);
   });
 
   test("a static variation row keeps the pre-motion key order (reports stay byte-identical)", async () => {
@@ -1393,8 +1433,8 @@ describe("GenerateCampaignUseCase — variation", () => {
     const result = await new GenerateCampaignUseCase(d).execute(variationBrief());
     expect(result.success).toBe(true);
     expect((d.exporter as RecordingExporter).proofs).toEqual([
-      "proofs/alpha.pdf",
-      "proofs/beta.pdf",
+      "camp/proofs/alpha.pdf",
+      "camp/proofs/beta.pdf",
     ]);
   });
 
@@ -1422,7 +1462,7 @@ describe("GenerateCampaignUseCase — variation", () => {
       regenerateOnly: [{ productId: "alpha", variantIndex: 0, attempt: 1 }],
     });
     expect(result.success).toBe(true);
-    expect((d.exporter as RecordingExporter).proofs).toEqual(["proofs/alpha.pdf"]);
+    expect((d.exporter as RecordingExporter).proofs).toEqual(["camp/proofs/alpha.pdf"]);
   });
 
   test("warns on procedural variation backgrounds and records a missing logo", async () => {
@@ -1704,14 +1744,14 @@ describe("GenerateCampaignUseCase — motion variants", () => {
     expect(saved).toHaveLength(3);
     expect(saved).toEqual(
       expect.arrayContaining([
-        { path: "alpha/1x1/v0.mp4", bytes: 4 },
-        { path: "alpha/1x1/v0.png", bytes: 3 },
-        { path: "alpha/9x16/v1.png", bytes: 3 },
+        { path: "camp/alpha/1x1/v0.mp4", bytes: 4 },
+        { path: "camp/alpha/1x1/v0.png", bytes: 3 },
+        { path: "camp/alpha/9x16/v1.png", bytes: 3 },
       ]),
     );
     expect(result.value.assets[0]).toMatchObject({
-      outputPath: "alpha/1x1/v0.png",
-      videoPath: "alpha/1x1/v0.mp4",
+      outputPath: "camp/alpha/1x1/v0.png",
+      videoPath: "camp/alpha/1x1/v0.mp4",
       durationSec: 6,
       format: "motion",
       complianceScore: 0.5,
@@ -1722,7 +1762,7 @@ describe("GenerateCampaignUseCase — motion variants", () => {
     expect(result.value.assets[1]).toMatchObject({ format: "static" });
     expect(result.value.assets[1]).not.toHaveProperty("videoPath");
     // Only the still slot clears a clip; the motion slot just wrote its own.
-    expect((d.exporter as RecordingExporter).removed).toEqual(["alpha/9x16/v1.mp4"]);
+    expect((d.exporter as RecordingExporter).removed).toEqual(["camp/alpha/9x16/v1.mp4"]);
     // Every sampled frame was brand-checked (5) plus the one static composite.
     expect(d.compliance.validateBrandColorDensity).toHaveBeenCalledTimes(6);
     expect(
@@ -1814,10 +1854,10 @@ describe("GenerateCampaignUseCase — motion variants", () => {
     const d = deps({ planner: fakePlanner(fakePlan(variants)) });
     const result = await new GenerateCampaignUseCase(d).execute(variationBrief());
     expect(result.success).toBe(true);
-    expect((d.exporter as RecordingExporter).proofs).toEqual(["proofs/alpha.pdf"]);
+    expect((d.exporter as RecordingExporter).proofs).toEqual(["camp/proofs/alpha.pdf"]);
     expect(d.exporter.generatePrintProof).toHaveBeenCalledWith(
       new Uint8Array([4, 5, 6]),
-      "proofs/alpha.pdf",
+      "camp/proofs/alpha.pdf",
     );
   });
 
@@ -1834,7 +1874,7 @@ describe("GenerateCampaignUseCase — motion variants", () => {
     expect(result.value.assets[0]).toMatchObject({
       variantIndex: 1,
       attempt: 2,
-      videoPath: "alpha/1x1/v1.mp4",
+      videoPath: "camp/alpha/1x1/v1.mp4",
     });
   });
 

@@ -198,16 +198,16 @@ describe("POST /campaigns/generate", () => {
     expect(body.result?.halted).toBe(false);
     // 1 product × (3 social ratios the run always renders + the 5 display sizes).
     const paths = body.result?.assets.map((a) => a.outputPath) ?? [];
-    expect(paths).toContain("alpha/300x250.png");
-    expect(paths).toContain("alpha/728x90.png");
+    expect(paths).toContain("camp/alpha/300x250.png");
+    expect(paths).toContain("camp/alpha/728x90.png");
     // The D113 proof at the pixel level: the saved PNG's IHDR carries
     // resolveCanvas's dimensions for the unit — never scaled to a ratio.
     const ihdr = (path: string) => {
       const bytes = readFileSync(resolve(dir, path));
       return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) };
     };
-    expect(ihdr("alpha/300x250.png")).toEqual({ width: 300, height: 250 });
-    expect(ihdr("alpha/728x90.png")).toEqual({ width: 728, height: 90 });
+    expect(ihdr("camp/alpha/300x250.png")).toEqual({ width: 300, height: 250 });
+    expect(ihdr("camp/alpha/728x90.png")).toEqual({ width: 728, height: 90 });
     // A4b — packaging a display platform afterwards is not a dead end either.
     const pack = await web(
       "post",
@@ -303,7 +303,7 @@ describe("POST /campaigns/generate", () => {
     });
     expect(res.status).toBe(202);
     const { body } = await awaitJob(((await res.json()) as { jobId: string }).jobId);
-    expect(body.result?.assets.map((a) => a.outputPath)).toEqual(["alpha/1x1.png"]);
+    expect(body.result?.assets.map((a) => a.outputPath)).toEqual(["camp/alpha/1x1.png"]);
   });
 
   test("variation re-roll keeps report row count at variation.count", async () => {

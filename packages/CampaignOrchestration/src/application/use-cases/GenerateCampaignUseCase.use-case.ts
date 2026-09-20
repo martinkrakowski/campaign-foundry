@@ -75,6 +75,31 @@ const MAX_CONCURRENT_BACKGROUNDS = 8;
 const MOTION_SAMPLE_AT: readonly number[] = [0, 0.25, 0.5, 0.75, 1];
 
 /**
+ * The output namespace's first segment (R2, D74): the campaign id.
+ *
+ * Without it, rendered bytes are keyed by `<product>/<ratio>[/<treatment>]`
+ * alone, so two campaigns naming the same product write the same files and the
+ * second silently overwrites the first. That is not hypothetical — D74 records
+ * it happening in the operator's own tree, where `trail-blaze-2026`,
+ * `trail-blaze-motion-2026` and `trail-blaze-motion2-2026` all wrote
+ * `blaze-bottle/` and `blaze-pack/`. A per-campaign LOCK never excluded this,
+ * because the lock key and the resource key are different keys.
+ *
+ * `brief.id` is safe to put in a path: `validateBrief` refuses anything failing
+ * `SAFE_ID_PATTERN` before the pipeline starts, for exactly this class of
+ * reason (it is already the persisted report's filename).
+ *
+ * **No migration is forced, by construction.** Every consumer reads a path the
+ * report STORED — the grid and export pages prefix `${API}/output/`, packaging
+ * reads `asset.outputPath` — and the `output/**` route serves whatever is under
+ * its confined root. So an existing report keeps resolving to the bytes it
+ * already names, and only new runs take the scoped shape.
+ */
+function campaignScoped(briefId: string, path: string): string {
+  return `${briefId}/${path}`;
+}
+
+/**
  * The times to brand-density check on a sequenced clip (D8).
  *
  * The fixed set alone is not evidence about a timeline: a short beat can fall entirely
@@ -454,9 +479,12 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
           // SaveOutputFiles — the use case owns the path (OutputDirectoryConvention).
           // A size is already path-safe ("728x90"); a ratio slugs its colons away.
           const isHtml = brief.template.creativeType === "image-html";
-          const basePath = namespaceByTreatment
-            ? `${product.id}/${canvas.replace(":", "x")}/${treatment.id}`
-            : `${product.id}/${canvas.replace(":", "x")}`;
+          const basePath = campaignScoped(
+            brief.id,
+            namespaceByTreatment
+              ? `${product.id}/${canvas.replace(":", "x")}/${treatment.id}`
+              : `${product.id}/${canvas.replace(":", "x")}`,
+          );
           const outputPath = `${basePath}.png`;
           await this.deps.exporter.saveToDirectory(composite.image, outputPath);
           if (canvas === "1:1" && treatment === treatments[0]) heroImage = composite.image;
@@ -488,7 +516,7 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
             productId: product.id,
             ...assetCanvas,
             outputPath,
-            proofPath: `proofs/${product.id}.pdf`,
+            proofPath: campaignScoped(brief.id, `proofs/${product.id}.pdf`),
             complianceScore: visual.score ?? 0,
             passedCompliance: visual.passed,
             logoApplied: composite.logoApplied,
@@ -528,7 +556,10 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     for (const product of brief.products) {
       const heroImage = heroByProduct.get(product.id);
       if (!heroImage) continue;
-      await this.deps.exporter.generatePrintProof(heroImage, `proofs/${product.id}.pdf`);
+      await this.deps.exporter.generatePrintProof(
+        heroImage,
+        campaignScoped(brief.id, `proofs/${product.id}.pdf`),
+      );
       log.record("ExportPrintProofs", `Print proof written for ${product.id}`);
     }
 
@@ -710,6 +741,7 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
         timeline,
         brief.style,
         brief.template,
+        brief.id,
         brief.clickDestination,
         brief.audio?.rights,
         backgroundsByRatio.get(cell.ratio.value),
@@ -727,7 +759,10 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     for (const product of brief.products) {
       const heroImage = heroByProduct.get(product.id);
       if (!heroImage) continue;
-      await this.deps.exporter.generatePrintProof(heroImage, `proofs/${product.id}.pdf`);
+      await this.deps.exporter.generatePrintProof(
+        heroImage,
+        campaignScoped(brief.id, `proofs/${product.id}.pdf`),
+      );
       log.record("ExportPrintProofs", `Print proof written for ${product.id}`);
     }
 
@@ -755,6 +790,9 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     timeline: CopyTimeline | undefined,
     style: CampaignBrief["style"],
     template: CampaignBrief["template"],
+    /** R2 — the output namespace scope. Passed rather than reachable: this
+        method never sees the brief, and a variant writes bytes. */
+    campaignId: string,
     clickDestination?: string,
     audioRights?: AudioRights,
     backgrounds?: Readonly<Record<string, Uint8Array>>,
@@ -798,14 +836,14 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     };
 
     const treatment = variantTreatmentId(variant);
-    const basePath = `${product.id}/${ratio.slug}/v${variant.index}`;
+    const basePath = campaignScoped(campaignId, `${product.id}/${ratio.slug}/v${variant.index}`);
     const outputPath = `${basePath}.png`;
     const videoPath = `${basePath}.mp4`;
     const identity: VariationAssetIdentity = {
       productId: product.id,
       aspectRatio: ratio.value,
       outputPath,
-      proofPath: `proofs/${product.id}.pdf`,
+      proofPath: campaignScoped(campaignId, `proofs/${product.id}.pdf`),
     };
     const lineage: VariationAssetLineage = {
       treatment,
