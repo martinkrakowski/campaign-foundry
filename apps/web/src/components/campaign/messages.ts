@@ -15,6 +15,7 @@
 // one `display-names.ts` spells out. Type-only, so nothing is pulled in at
 // runtime by the file every other one imports.
 import type { Frame } from "@campaignfoundry/CampaignOrchestration/html-element";
+import type { TrackProperty } from "@campaignfoundry/CampaignOrchestration/tracks";
 import type { EasingKind } from "@campaignfoundry/CampaignOrchestration/easing";
 
 // --- Identity ---
@@ -1423,7 +1424,7 @@ export const TRACK_CLOCK_LABEL: Record<string, string> = {
   effect: "Text effect",
 };
 
-export const TRACK_PROPERTY_LABEL: Record<string, string> = {
+export const TRACK_PROPERTY_LABEL: Record<TrackProperty, string> = {
   opacity: "Opacity",
   scale: "Scale",
   dx: "Offset X",
@@ -1508,6 +1509,31 @@ export const tracksPresetReadOnly =
  */
 export function tracksPresetStop(t: number, value: number): string {
   return `${tracksStopTimeLabel} ${t} · ${tracksStopValueLabel} ${value}`;
+}
+
+/* ── Keyframe diamonds on the ruler (TL6) ────────────────────────────────── */
+
+/** The diamond lane name, shown in the tape sticky label column. */
+export const tapeLaneKeyframes = "Keys";
+
+/**
+ * A diamond STABLE accessible name (studio 9.3 point 2): the property and the
+ * stop position in its track, never the live seconds - a control that renamed
+ * itself on every pixel of a drag would be unusable with a screen reader.
+ */
+export function tapeDiamondName(propertyLabel: string, index: number): string {
+  return `${propertyLabel} key ${index + 1}`;
+}
+
+/** Said when the picked layer has keys that cannot sit on this ruler. */
+export function tapeKeysNotPlaced(count: number): string {
+  // Covers BOTH local clocks. The earlier wording said "caption beat" for every
+  // one, which is false for a text-effect key: its resolver reads the effect's
+  // own progress when there is one, so "it repeats with the captions" was a
+  // confident explanation of the wrong mechanism.
+  return count === 1
+    ? "1 key is timed inside a caption beat or a text effect rather than to the whole clip, so it has no single place here — edit it in the layer panel."
+    : `${count} keys are timed inside caption beats or text effects rather than to the whole clip, so they have no single place here — edit them in the layer panel.`;
 }
 
 /* ── The click destination (HL5b, HL-D3) ─────────────────────────────────── */

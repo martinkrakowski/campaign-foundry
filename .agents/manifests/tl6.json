@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "tl6",
+  "mutations": [
+    {
+      "file": "apps/web/src/components/campaign/track-diamonds.ts",
+      "before": "    if (track.stops[0]!.clock !== \"pose\") {",
+      "after": "    if (false) {",
+      "because": "Placing EVERY clock on the whole-creative ruler is the obvious simplification, and it is wrong in a way nothing else catches: a beat-clock stop t is beat-LOCAL, so at 0.5 it fires at the midpoint of every beat and has no single second to sit at. One diamond would claim a position the renderer never uses, and dragging it would write a t meaning something else entirely. The ruler would look complete and lie. Caught by the test asserting beat and effect stops are counted rather than placed.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/track-diamonds.test.ts",
+        "-t",
+        "COUNTED"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
