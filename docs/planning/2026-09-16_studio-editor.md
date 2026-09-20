@@ -1,6 +1,6 @@
 # The studio editor — a layer inspector and a time surface, on one document
 
-**Date:** 2026-09-16 · **Status:** draft, for the owner's approval · **Nothing dispatched.**
+**Date:** 2026-09-16 · **Status:** **partly shipped — stamped 2026-09-20.** The line below used to read *"draft, for the owner's approval · Nothing dispatched"*, which stopped being true days ago: six lanes from this plan are on `main`, under their own names rather than this document's. **TS1** `52db1529` (#469), **TS2** `d7f41429`, **TL2** `3e13feb7`, **SE2** `14b0f4e9`, **CC3** `484fdf6b` (#474), **CC4** `ee220308` — each verified an ancestor of `origin/main`, not read off a merge list (D155). What is **not** dispatched is the rest, including **§4.4 / SE6 / TL5 — which is K5**, still the live specification for the tracks UI and the reason this status line matters: K5's own plan defers to it. **§4.4 stands. SE0's chrome premise does not** — it assumes a third `studio` presentation, and SG1 (`8e374e73`, #479) retired the guided presentation so the editor is one column. Whether SE0 survives in another form is an open owner decision, recorded here rather than resolved.
 **Scope:** the editor chrome around `EditorState`. No new renderer, no new document field except where a lane says so.
 **Premise of the whole plan:** `/brief/new` and `/brief/:id` already share `BriefEditor` and `editor-state`. The gap is not
 a create surface. The gap is that `TemplateSection` and `TimelineSection` are **data entry for a list**, not editors of a
