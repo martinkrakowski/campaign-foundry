@@ -918,6 +918,36 @@ describe("K5 — the tracks form reaches the operator through the real editor", 
     expect(within(sheetEl()).getByTestId("layer-tracks")).toBeTruthy();
   });
 
+  test("a motion brief hands the form the PREVIEWED cell, kind and canvas together", async () => {
+    // TL7 / D140: the preset group may only claim what the rail actually
+    // composed. This is the caller half - a hard-coded null here would render
+    // an honest-looking "nothing to list" on a creative that plainly moves.
+    const user = userEvent.setup();
+    await mountEditor([
+      {
+        ...layerBrief,
+        // A RANDOMIZED brief, deliberately: `previewDockProps` derives the
+        // rail motion only when `mode === "variation"` and the formats include
+        // video, because that is when a cell has a motion kind of its own. A
+        // classic brief therefore shows no preset group at all - which is the
+        // honest answer rather than a gap.
+        mode: "variation",
+        output: { formats: ["motion"], platforms: ["linkedin"] },
+        variation: { axes: { motion: ["ken-burns-in"] }, count: 1 },
+      },
+    ]);
+    await user.click(pick("image", "Image"));
+    const props = trackFormProps.last as {
+      preset: { motion: string; canvas: { ratio?: string; size?: string } } | null;
+    };
+    expect(props.preset).not.toBeNull();
+    expect(props.preset!.motion).toBe("ken-burns-in");
+    // The canvas travels with the kind, which is the half D140 insists on —
+    // and it is a CanvasSpec, so a display-size preview names its size rather
+    // than being forced into one of the three social ratios.
+    expect(props.preset!.canvas).toEqual({ ratio: "1:1" });
+  });
+
   test("the editor hands the form a real playhead, not a null literal", async () => {
     // This is the D157 witness, and it is the assertion the first two drafts of
     // this test could not make: both would have passed with `playhead={null}`

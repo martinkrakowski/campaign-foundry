@@ -9,6 +9,11 @@ import type { BriefTemplate } from "@campaignfoundry/CampaignOrchestration/brief
 import { editorReducer, initialEditorState, type EditorState } from "../editor-state";
 import { LayerPropsSheet } from "../LayerPropsSheet";
 import { poseTAt } from "../TrackForm";
+import { presetTracksFor, type PresetCell } from "../preset-tracks";
+import { MOTION_KIND_META } from "../MotionKindPanel";
+import { canvasDisplayName } from "../display-names";
+import { LAYER_KINDS } from "@campaignfoundry/CampaignOrchestration/layer-kinds";
+import { TRACKABLE_LAYER_KINDS } from "@campaignfoundry/CampaignOrchestration/tracks";
 import * as messages from "../messages";
 
 /**
@@ -37,11 +42,13 @@ function Harness({
   layers,
   layerId,
   playhead,
+  preset,
   onState,
 }: {
   layers?: readonly CreativeTemplateLayer[];
   layerId: string;
   playhead?: { durationSec: number; committedSec: number } | null;
+  preset?: PresetCell | null;
   onState?: (state: EditorState) => void;
 }) {
   const [state, dispatch] = useReducer(editorReducer, {
@@ -55,6 +62,7 @@ function Harness({
       dispatch={dispatch}
       layerId={layerId}
       playhead={playhead ?? null}
+      preset={preset ?? null}
       onClose={vi.fn()}
     />
   );
@@ -128,6 +136,7 @@ describe("authoring a stop", () => {
       <Harness
         layerId={TEXT_ID}
         playhead={{ durationSec: 10, committedSec: 5 }}
+        preset={null}
         onState={(s) => (latest = s)}
       />,
     );
@@ -333,6 +342,7 @@ describe("a clock the newly picked layer cannot carry falls back rather than sti
             dispatch={dispatch}
             layerId={id}
             playhead={null}
+            preset={null}
             onClose={vi.fn()}
           />
         </>
@@ -473,5 +483,118 @@ describe("a refused EDIT says why instead of reverting in silence (review, #535)
     expect(outOfRange()).toBe(true);
     fireEvent.change(t, { target: { value: "0.75" } });
     expect(outOfRange()).toBe(false);
+  });
+});
+
+describe("TL7 — the preset group, beside the authored one (D140)", () => {
+  const IMAGE_CELL = { motion: "ken-burns-in", canvas: { ratio: "1:1" } } as const;
+
+  test("a ground layer shows the motion kind's expansion, read-only", () => {
+    render(<Harness layerId={IMAGE_ID} preset={IMAGE_CELL} />);
+    const section = screen.getByTestId("layer-tracks");
+    // Labelled with the kind AND the canvas — D140's actual requirement, since
+    // the expansion belongs to a cell rather than to the document.
+    expect(
+      within(section).getByText(
+        messages.tracksPresetHeading(
+          MOTION_KIND_META["ken-burns-in"],
+          canvasDisplayName({ ratio: "1:1" }),
+        ),
+      ),
+    ).toBeTruthy();
+    // `ken-burns-in` expands to a scale track; the stops are stated, not offered.
+    const expected = presetTracksFor("image", IMAGE_CELL);
+    expect(expected.length).toBeGreaterThan(0);
+    expect(
+      within(section).getByText(
+        messages.tracksPresetStop(expected[0]!.stops[0]!.t, expected[0]!.stops[0]!.value),
+      ),
+    ).toBeTruthy();
+  });
+
+  test("the preset group offers no control at all — read-only is structural", () => {
+    // Not a disabled button: there is nothing to press. A preset stop cannot be
+    // edited here because the motion axis owns it.
+    render(<Harness layerId={IMAGE_ID} preset={IMAGE_CELL} />);
+    const before = screen.getAllByRole("button").length;
+    const authoredOnly = screen
+      .getAllByRole("button")
+      .filter((b) => (b.getAttribute("aria-label") ?? "").startsWith("Add"));
+    // Every button in the section belongs to the authored half.
+    expect(before).toBeGreaterThan(0);
+    expect(authoredOnly.length).toBeGreaterThan(0);
+    expect(screen.queryByLabelText(/Remove .* preset/i)).toBeNull();
+  });
+
+  test("a text layer's expansion is canvas-dependent, and the label says which canvas", () => {
+    // `copyMotionTracks(motion, height)` takes the canvas height, so the same
+    // motion kind expands differently at 1:1 and 9:16. That is exactly why D140
+    // refuses an unlabelled group.
+    const square = presetTracksFor("static-text", {
+      motion: "headline-rise",
+      canvas: { ratio: "1:1" },
+    });
+    const tall = presetTracksFor("static-text", {
+      motion: "headline-rise",
+      canvas: { ratio: "9:16" },
+    });
+    expect(square.length).toBeGreaterThan(0);
+    // The dy stops differ because the canvas differs — the claim the label makes.
+    expect(JSON.stringify(square)).not.toEqual(JSON.stringify(tall));
+
+    render(
+      <Harness layerId={TEXT_ID} preset={{ motion: "headline-rise", canvas: { ratio: "9:16" } }} />,
+    );
+    expect(
+      within(screen.getByTestId("layer-tracks")).getByText(
+        messages.tracksPresetHeading(
+          MOTION_KIND_META["headline-rise"],
+          canvasDisplayName({ ratio: "9:16" }),
+        ),
+      ),
+    ).toBeTruthy();
+  });
+
+  test("a motion kind that expands to nothing for this layer says so", () => {
+    // `accent-wipe` is a clip-extent animation none of TRACK_PROPERTIES can
+    // represent (K2 decided this), so a ground layer has no expansion to show.
+    render(
+      <Harness layerId={IMAGE_ID} preset={{ motion: "accent-wipe", canvas: { ratio: "1:1" } }} />,
+    );
+    expect(
+      within(screen.getByTestId("layer-tracks")).getByText(messages.tracksPresetNone),
+    ).toBeTruthy();
+  });
+
+  test("no previewed motion means no group, rather than an empty one", () => {
+    render(<Harness layerId={IMAGE_ID} preset={null} />);
+    expect(
+      within(screen.getByTestId("layer-tracks")).getByText(messages.tracksPresetNone),
+    ).toBeTruthy();
+  });
+});
+
+describe("presetTracksFor — the kind table itself (TL7)", () => {
+  test("every kind outside TRACKABLE_LAYER_KINDS expands to nothing", () => {
+    // Derived from the domain lists rather than typed out — D121 forbids
+    // restating the vocabulary, and the test is stronger for it: a kind added
+    // to LAYER_KINDS is covered here the day it appears.
+    const untrackable = LAYER_KINDS.filter((kind) => !TRACKABLE_LAYER_KINDS.includes(kind));
+    expect(untrackable.length).toBeGreaterThan(0);
+    for (const kind of untrackable) {
+      expect(presetTracksFor(kind, { motion: "ken-burns-in", canvas: { ratio: "1:1" } })).toEqual(
+        [],
+      );
+    }
+  });
+
+  test("no previewed cell is not the same question as no expansion", () => {
+    expect(presetTracksFor("image", null)).toEqual([]);
+  });
+
+  test("a video layer expands like an image one — both are ground", () => {
+    const cell = { motion: "ken-burns-in", canvas: { ratio: "1:1" } } as const;
+    expect(presetTracksFor("video", cell)).toEqual(presetTracksFor("image", cell));
+    expect(presetTracksFor("video", cell).length).toBeGreaterThan(0);
   });
 });

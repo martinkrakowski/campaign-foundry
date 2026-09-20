@@ -50,6 +50,10 @@
       "types": "./src/domain/value-objects/tracks.ts",
       "default": "./src/domain/value-objects/tracks.ts"
     },
+    "./motion-tracks": {
+      "types": "./src/domain/value-objects/motion-tracks.ts",
+      "default": "./src/domain/value-objects/motion-tracks.ts"
+    },
     "./easing": {
       "types": "./src/domain/value-objects/easing.ts",
       "default": "./src/domain/value-objects/easing.ts"

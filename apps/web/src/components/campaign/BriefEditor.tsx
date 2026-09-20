@@ -103,7 +103,12 @@ import { EstimateFromPlan } from "@/components/campaign/EstimatePanel";
 import { CreativesSection, type PlannedCreative } from "@/components/campaign/CreativesPanel";
 import { VariationPlanProvider } from "@/components/campaign/variation-plan";
 import { sectionOrder, LayoutSection, type SectionId } from "./sections";
-import { PreviewDock, PreviewRailEmptyState, type PlayheadState } from "./PreviewDock";
+import {
+  PreviewDock,
+  PreviewRailEmptyState,
+  derivePreviewSpec,
+  type PlayheadState,
+} from "./PreviewDock";
 import { previewDockProps, previewRailKey } from "./preview-props";
 import { LayerStack } from "./LayerStack";
 import { layerStackKey, layerStackProps } from "./layer-stack-props";
@@ -2698,6 +2703,26 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
             : {
                 durationSec: sectionPlayhead.durationSec,
                 committedSec: sectionPlayhead.committedSec,
+              }
+        }
+        /* TL7 / D140 — the PREVIEWED cell, which is the only one whose preset
+           expansion the editor can honestly show: `copyMotionTracks` is
+           per-canvas and `motion` is a per-cell axis value, so a group that
+           claimed to be the document one would be unverifiable. Both come from
+           `railProps`, which composes exactly that cell. */
+        preset={
+          railProps?.motion === undefined
+            ? null
+            : {
+                motion: railProps.motion,
+                // The SAME derivation the dock runs, not a second one - §6
+                // question 4 ("never derive twice"), and it is why the group
+                // can name the canvas the preview actually drew.
+                canvas: derivePreviewSpec(
+                  railProps.platformId,
+                  railProps.ratio,
+                  previewBrief.output?.sizes,
+                ),
               }
         }
         onClose={() => setPickedLayerId(null)}
