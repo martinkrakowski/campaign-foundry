@@ -19,6 +19,7 @@ import {
 import { anchorDisplayName } from "@/components/campaign/display-names";
 import * as messages from "@/components/campaign/messages";
 import { TrackForm, type TrackPlayhead } from "@/components/campaign/TrackForm";
+import type { PresetCell } from "@/components/campaign/preset-tracks";
 
 /**
  * CC4 — the layer sheet: a **non-modal** panel that edits the layer CC3's
@@ -240,6 +241,7 @@ export function LayerPropsSheet({
   dispatch,
   layerId,
   playhead,
+  preset,
   onClose,
 }: {
   state: EditorState;
@@ -252,6 +254,11 @@ export function LayerPropsSheet({
    * stop at 0 rather than inventing a position.
    */
   playhead: TrackPlayhead | null;
+  /**
+   * The previewed cell, for TL7 preset group. `null` when the rail composes
+   * no motion - there is then no expansion to show rather than an empty one.
+   */
+  preset: PresetCell | null;
   onClose: () => void;
 }) {
   const layer =
@@ -361,7 +368,9 @@ export function LayerPropsSheet({
             onClear={() => setProp({ alt: undefined })}
           />
         ) : null}
-        {showTracks ? <TrackForm layer={layer} dispatch={dispatch} playhead={playhead} /> : null}
+        {showTracks ? (
+          <TrackForm layer={layer} dispatch={dispatch} playhead={playhead} preset={preset} />
+        ) : null}
         {layer.kind === "html" ? (
           <HtmlElementsEditor
             layerId={layer.id}

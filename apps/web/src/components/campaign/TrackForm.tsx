@@ -18,6 +18,9 @@ import type { CreativeTemplateLayer } from "@campaignfoundry/CampaignOrchestrati
 
 import { Button, Input } from "@/components/ui";
 import * as messages from "@/components/campaign/messages";
+import { MOTION_KIND_META } from "@/components/campaign/MotionKindPanel";
+import { canvasDisplayName } from "@/components/campaign/display-names";
+import { presetTracksFor, type PresetCell } from "@/components/campaign/preset-tracks";
 import type { EditorAction } from "@/components/campaign/editor-state";
 
 /**
@@ -229,12 +232,21 @@ export function TrackForm({
   layer,
   dispatch,
   playhead,
+  preset,
 }: {
   layer: CreativeTemplateLayer;
   dispatch: Dispatch<EditorAction>;
   playhead: TrackPlayhead | null;
+  /**
+   * The previewed cell, whose preset expansion this form may honestly show
+   * (TL7, D140). `null` when the rail composes no motion — there is then no
+   * expansion to display rather than an empty one.
+   */
+  preset: PresetCell | null;
 }) {
   const tracks = layer.tracks ?? [];
+  // Called, not restated: the same expanders the compositor folds (K2).
+  const presetTracks = presetTracksFor(layer.kind, preset);
   const textKind = TEXT_LAYER_KINDS.includes(layer.kind);
   const [clock, setClock] = useState<StopClock>("pose");
   // A clock the layer's kind cannot carry is never the live one: a select that
@@ -282,6 +294,45 @@ export function TrackForm({
 
       {tracks.length === 0 ? (
         <p className="text-[12px] text-text-muted">{messages.tracksNone}</p>
+      ) : null}
+
+      {/* TL7 / D140 — the preset half, READ-ONLY and labelled with the video
+          style AND the canvas it was expanded for. Two groups rather than one
+          merged list: a preset expansion belongs to a cell, not to the
+          document, so showing it as though the brief carried these stops would
+          be a claim the operator could not check. It offers no control at all,
+          which is what makes read-only structural rather than a disabled-
+          looking button.
+
+          Rendered ONLY when there is an expansion to show. An empty bordered
+          group would imply this creative has preset keys, which is the same
+          mistake TS1 lane rule names ("an empty waveform now would imply a
+          bed the brief does not carry") and which two reviewers caught here. */}
+      {preset !== null && presetTracks.length > 0 ? (
+        <section className="space-y-2 rounded-md border border-dashed border-border p-2">
+          <h5 className="text-[11px] font-semibold text-text-primary">
+            {messages.tracksPresetHeading(
+              MOTION_KIND_META[preset.motion],
+              canvasDisplayName(preset.canvas),
+            )}
+          </h5>
+          <p className="text-[11px] text-text-muted">{messages.tracksPresetReadOnly}</p>
+          {presetTracks.map((track, i) => (
+            <div key={`${track.property}:${i}`} className="space-y-1">
+              <p className="text-[11px] font-medium text-text-muted">
+                {messages.TRACK_PROPERTY_LABEL[track.property]} ·{" "}
+                {messages.TRACK_CLOCK_LABEL[clockOf(track)]}
+              </p>
+              <ul className="space-y-0.5">
+                {track.stops.map((stop, j) => (
+                  <li key={`${stop.t}:${j}`} className="text-[11px] text-text-muted">
+                    {messages.tracksPresetStop(stop.t, stop.value)}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </section>
       ) : null}
 
       {TRACK_PROPERTIES.map((property) => {

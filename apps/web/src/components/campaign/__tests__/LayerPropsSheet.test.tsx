@@ -60,6 +60,7 @@ function Harness({
       dispatch={dispatch}
       layerId={layerId}
       playhead={null}
+      preset={null}
       onClose={onClose}
     />
   );
@@ -84,6 +85,7 @@ const StateHarness = ({
       dispatch={dispatch}
       layerId={layerId}
       playhead={null}
+      preset={null}
       onClose={onClose}
     />
   );
@@ -340,6 +342,7 @@ describe("LayerPropsSheet — committing and clearing a geometry prop (D134, X16
         dispatch={dispatch}
         layerId="accent"
         playhead={null}
+        preset={null}
         onClose={vi.fn()}
       />,
     );
@@ -465,6 +468,7 @@ describe("LayerPropsSheet — the coalesce key it reuses (setHtmlElementFrame's 
           dispatch={dispatch}
           layerId="accent"
           playhead={null}
+          preset={null}
           onClose={vi.fn()}
         />
       );

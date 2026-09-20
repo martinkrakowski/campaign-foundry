@@ -1487,6 +1487,29 @@ export function tracksRefused(must: string): string {
   return `That stop must ${must}.`;
 }
 
+/**
+ * The preset group (TL7, D140). Labelled with the motion kind AND the canvas
+ * it was expanded for, because it is neither one list across a run nor a
+ * property of the document: `copyMotionTracks` is per-canvas and `motion` is a
+ * per-cell axis value, so an unlabelled group would claim more than it knows.
+ */
+export function tracksPresetHeading(motionLabel: string, ratioLabel: string): string {
+  return `From ${motionLabel} · ${ratioLabel} canvas`;
+}
+
+/** Said under the preset group, so "read-only" is a reason rather than a state. */
+export const tracksPresetReadOnly =
+  "These come from the video style chosen for the creative shown, so they are not edited here. Change that style to change them.";
+
+/**
+ * A preset stop row: read-only, so it states its values rather than offering
+ * them. Worded as the editable rows are labelled — the schema calls the first
+ * number `t`, and an operator should never have to know that.
+ */
+export function tracksPresetStop(t: number, value: number): string {
+  return `${tracksStopTimeLabel} ${t} · ${tracksStopValueLabel} ${value}`;
+}
+
 /* ── The click destination (HL5b, HL-D3) ─────────────────────────────────── */
 
 /** The destination input's label. */

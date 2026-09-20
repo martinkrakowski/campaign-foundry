@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "tl7",
+  "mutations": [
+    {
+      "file": "apps/web/src/components/campaign/preset-tracks.ts",
+      "before": "      copyMotionTracks(cell.motion, resolveCanvas(cell.canvas).height)",
+      "after": "      copyMotionTracks(cell.motion, resolveCanvas({ ratio: \"1:1\" }).height)",
+      "because": "D140 exists because copyMotionTracks is PER CANVAS: the same motion kind expands to different dy stops at 1:1 and 9:16. Pinning the canvas is the plausible simplification - the group still renders, still looks right on a square preview, and still carries a label naming the real canvas, which is now a lie the operator cannot check. That is exactly the failure D140 refuses. Caught by the test that asserts the square and tall expansions differ and that the label names the previewed canvas.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/TrackForm.test.tsx",
+        "-t",
+        "canvas-dependent"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
