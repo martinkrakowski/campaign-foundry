@@ -78,6 +78,20 @@ vi.mock("@/components/campaign/sections", async (importOriginal) => {
  * The map paints hundreds of SVG nodes per mount under happy-dom and has its own
  * suite; a stub keeps this file about the layers.
  */
+/** K5 — what the editor actually hands the tracks form, so D157 has a witness. */
+const trackFormProps = vi.hoisted(() => ({ last: undefined as unknown }));
+
+vi.mock("@/components/campaign/TrackForm", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/components/campaign/TrackForm")>();
+  return {
+    ...actual,
+    TrackForm: (props: Parameters<typeof actual.TrackForm>[0]) => {
+      trackFormProps.last = props;
+      return createElement(actual.TrackForm, props);
+    },
+  };
+});
+
 vi.mock("@/components/ui", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/components/ui")>();
   return { ...actual, WorldMap: () => <div data-testid="world-map-stub" /> };
@@ -887,6 +901,33 @@ describe("CC4 — the sheet is a sibling of the step card, and reads CC3's selec
     await user.click(within(sheetEl()).getByRole("button", { name: "Close" }));
     expect(screen.queryByTestId("layer-props-sheet")).toBeNull();
     expect(pick("accent", "Accent").getAttribute("aria-pressed")).toBe("false");
+  });
+});
+
+describe("K5 — the tracks form reaches the operator through the real editor", () => {
+  /**
+   * Mounted through `BriefEditor`, not through the sheet, and that is the whole
+   * point of these two. `TrackForm.test.tsx` already drives the form itself; a
+   * prop nobody passes is indistinguishable from one that does not exist
+   * (D157), so the wiring at the sheet's real call site needs its own witness.
+   */
+  test("picking a trackable layer offers the tracks section", async () => {
+    const user = userEvent.setup();
+    await mountEditor();
+    await user.click(pick("image", "Image"));
+    expect(within(sheetEl()).getByTestId("layer-tracks")).toBeTruthy();
+  });
+
+  test("the editor hands the form a real playhead, not a null literal", async () => {
+    // This is the D157 witness, and it is the assertion the first two drafts of
+    // this test could not make: both would have passed with `playhead={null}`
+    // hard-coded at the call site. A captured `null` fails here.
+    const user = userEvent.setup();
+    await mountEditor();
+    await user.click(pick("image", "Image"));
+    const props = trackFormProps.last as { playhead: { durationSec: number } | null };
+    expect(props.playhead).not.toBeNull();
+    expect(props.playhead!.durationSec).toBeGreaterThan(0);
   });
 });
 

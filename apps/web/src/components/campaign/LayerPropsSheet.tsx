@@ -3,6 +3,9 @@
 import { useEffect, useId, useState, type Dispatch, type ReactNode } from "react";
 import type { LayerKind } from "@campaignfoundry/CampaignOrchestration/layer-kinds";
 import { CREATIVE_GEOMETRY } from "@campaignfoundry/CampaignOrchestration/creative-geometry";
+// The domain's own list of kinds that may carry tracks (K1), so this sheet
+// offers the section exactly where `layerTracksProblem` would accept one.
+import { TRACKABLE_LAYER_KINDS } from "@campaignfoundry/CampaignOrchestration/tracks";
 import { Button, DialogHead, Input } from "@/components/ui";
 import { htmlWeightReading } from "@/components/campaign/derive";
 import { HtmlElementsEditor } from "@/components/campaign/sections/HtmlElementsEditor";
@@ -15,6 +18,7 @@ import {
 } from "@/components/campaign/editor-state";
 import { anchorDisplayName } from "@/components/campaign/display-names";
 import * as messages from "@/components/campaign/messages";
+import { TrackForm, type TrackPlayhead } from "@/components/campaign/TrackForm";
 
 /**
  * CC4 — the layer sheet: a **non-modal** panel that edits the layer CC3's
@@ -235,12 +239,19 @@ export function LayerPropsSheet({
   state,
   dispatch,
   layerId,
+  playhead,
   onClose,
 }: {
   state: EditorState;
   dispatch: Dispatch<EditorAction>;
   /** CC3's own selection (`pickedLayerId`), read — never a second one. */
   layerId: string | null;
+  /**
+   * TS2's committed second, for the tracks form's pose mapping (§4.4 rule 3).
+   * `null` where the editor has no timeline to read — the form then starts a
+   * stop at 0 rather than inventing a position.
+   */
+  playhead: TrackPlayhead | null;
   onClose: () => void;
 }) {
   const layer =
@@ -286,8 +297,29 @@ export function LayerPropsSheet({
   // sheet never offers a control that would create one.
   const showAnchor =
     (layer.kind === "static-text" || layer.kind === "animated-text") && !anchorAxisActive(state);
+  /**
+   * K5's two gates, and no third one.
+   *
+   * `TRACKABLE_LAYER_KINDS` is the domain's own list, imported rather than
+   * restated, so this section is offered exactly where `layerTracksProblem`
+   * would accept a tracks block.
+   *
+   * The enabled check is DoD 6, and it is an EDITOR rule only: the domain
+   * accepts tracks on a disabled layer and K-D4 resolves them to nothing, so
+   * the controls go away without the editor claiming a refusal the boundary
+   * does not make.
+   *
+   * There is deliberately no third gate on motion. A still resolves tracks the
+   * same way, the domain accepts them either way, and withholding the section
+   * on a still would be exactly the invented refusal DoD 6 warns against.
+   */
+  const showTracks = TRACKABLE_LAYER_KINDS.includes(layer.kind) && layer.enabled !== false;
   const hasControls =
-    numericFields.length > 0 || showAnchor || layer.kind === "image" || layer.kind === "html";
+    numericFields.length > 0 ||
+    showAnchor ||
+    showTracks ||
+    layer.kind === "image" ||
+    layer.kind === "html";
 
   return (
     <div
@@ -329,6 +361,7 @@ export function LayerPropsSheet({
             onClear={() => setProp({ alt: undefined })}
           />
         ) : null}
+        {showTracks ? <TrackForm layer={layer} dispatch={dispatch} playhead={playhead} /> : null}
         {layer.kind === "html" ? (
           <HtmlElementsEditor
             layerId={layer.id}

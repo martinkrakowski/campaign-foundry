@@ -15,6 +15,7 @@
 // one `display-names.ts` spells out. Type-only, so nothing is pulled in at
 // runtime by the file every other one imports.
 import type { Frame } from "@campaignfoundry/CampaignOrchestration/html-element";
+import type { EasingKind } from "@campaignfoundry/CampaignOrchestration/easing";
 
 // --- Identity ---
 
@@ -1399,6 +1400,91 @@ export const layerPropDefault = "Brief default";
 /** A field's reset control: returns that ONE prop to the brief default (D134). */
 export function layerPropResetLabel(fieldLabel: string): string {
   return `Reset ${fieldLabel} to the brief default`;
+}
+
+/* ── Keyframe tracks (K5, `studio-editor.md` §4.4) ───────────────────────── */
+
+export const tracksHeading = "Motion tracks";
+
+/** Said on a trackable layer carrying no tracks yet — the whole section's empty state. */
+export const tracksNone = "No keyframes yet. Add a stop to start a track.";
+
+/**
+ * The clock the NEXT stop lands on. Deliberately not phrased as a property of
+ * a track: a track's clock is fixed by its first stop (K1b), so choosing a
+ * different one here sends the next stop to a different track rather than
+ * changing an existing one (§4.4 rule 4).
+ */
+export const tracksClockLabel = "Add stops on";
+
+export const TRACK_CLOCK_LABEL: Record<string, string> = {
+  pose: "Whole creative",
+  beat: "Current beat",
+  effect: "Text effect",
+};
+
+export const TRACK_PROPERTY_LABEL: Record<string, string> = {
+  opacity: "Opacity",
+  scale: "Scale",
+  dx: "Offset X",
+  dy: "Offset Y",
+};
+
+/** Said where `beat` and `effect` are not offered — the reason, not just their absence. */
+export const tracksClockTextOnly =
+  "Beat and text-effect clocks need a beat to measure against, so they are offered on text layers only.";
+
+export function tracksAddStopLabel(propertyLabel: string): string {
+  return `Add a ${propertyLabel} stop`;
+}
+
+/**
+ * A stop is addressed by property, CLOCK and position. The clock is in the name
+ * because one property may hold a track per clock (§4.4 rule 4), and without it
+ * the pose and beat rows offered two controls with one accessible name.
+ */
+export function tracksRemoveStopLabel(
+  propertyLabel: string,
+  clockLabel: string,
+  index: number,
+): string {
+  return `Remove ${propertyLabel} ${clockLabel} stop ${index + 1}`;
+}
+
+/** The visible face of the two track buttons; the accessible names say more. */
+export const tracksAddShort = "Add stop";
+export const tracksRemoveShort = "Remove";
+
+/**
+ * Easing, in words rather than as the resolver spells it. Keyed by `EasingKind`
+ * rather than by `string`: a kind added to the vocabulary without a label here
+ * is then a compile error, where a `?? kind` fallback would have been a branch
+ * no input could take and a silent raw identifier on the day it could.
+ */
+export const TRACK_EASING_LABEL: Record<EasingKind, string> = {
+  "ease-out-cubic": "Ease out",
+  linear: "Linear",
+};
+
+/**
+ * The stop time control. Labelled for the operator, not for the schema: the
+ * field is `t` and a fraction of its own clock, but "t" alone is the track
+ * model leaking into the surface someone edits.
+ */
+export const tracksStopTimeLabel = "Time (0–1)";
+export const tracksStopValueLabel = "Value";
+export const tracksStopEasingLabel = "Easing";
+
+/** The easing select's empty option: absence means the domain's own default (K-D7). */
+export const tracksEasingDefault = "Default";
+
+/**
+ * A refused stop, in the domain's words. `layerTracksProblem` supplies the
+ * `must` clause and this only frames it, so the editor never invents a
+ * requirement the boundary does not make (TL5: "called, not restated").
+ */
+export function tracksRefused(must: string): string {
+  return `That stop must ${must}.`;
 }
 
 /* ── The click destination (HL5b, HL-D3) ─────────────────────────────────── */

@@ -46,6 +46,18 @@
       "types": "./src/domain/value-objects/layer-kinds.ts",
       "default": "./src/domain/value-objects/layer-kinds.ts"
     },
+    "./tracks": {
+      "types": "./src/domain/value-objects/tracks.ts",
+      "default": "./src/domain/value-objects/tracks.ts"
+    },
+    "./easing": {
+      "types": "./src/domain/value-objects/easing.ts",
+      "default": "./src/domain/value-objects/easing.ts"
+    },
+    "./resolve-tracks": {
+      "types": "./src/domain/value-objects/resolve-tracks.ts",
+      "default": "./src/domain/value-objects/resolve-tracks.ts"
+    },
     "./creative-geometry": {
       "types": "./src/domain/value-objects/creative-geometry.ts",
       "default": "./src/domain/value-objects/creative-geometry.ts"

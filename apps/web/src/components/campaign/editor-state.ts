@@ -23,6 +23,25 @@ import {
   type LogoProps,
   type TextProps,
 } from "@campaignfoundry/CampaignOrchestration/brief-template";
+// The keyframe track vocabulary (K1, K5): the properties a track may name, the
+// clocks a stop may be measured in, which kinds may carry tracks at all, and
+// the one function that decides whether a tracks block is a shape the brief may
+// carry. Leaf subpaths, like every import above — `tracks.ts` reaches only
+// `easing.ts` and `layer-kinds.ts`, so none of the barrel's `node:fs`
+// hitchhikers come with it. `layerTracksProblem` is the ONLY refusal this file
+// makes about tracks: the reducer calls it, never restates it (TL5).
+import {
+  TRACKABLE_LAYER_KINDS,
+  TEXT_LAYER_KINDS,
+  TRACK_PROPERTIES,
+  STOP_CLOCKS,
+  layerTracksProblem,
+  type Stop,
+  type StopClock,
+  type Track,
+  type TrackProperty,
+} from "@campaignfoundry/CampaignOrchestration/tracks";
+import type { EasingKind } from "@campaignfoundry/CampaignOrchestration/easing";
 // The html layer's element vocabulary (HL1): the kinds an element may be, the
 // frame it positions itself with, and the leaf's own values — never restated
 // here, for the same reason every other domain value above is imported.
@@ -536,6 +555,37 @@ export type EditorAction =
       layerId: string;
       patch: LayerPropsPatch;
     }
+  // The layer's keyframe tracks (K1, K5 — `studio-editor.md` §4.4). Three
+  // actions, not one patch, because the three edits differ in what they may
+  // create: adding a stop may mint a track, removing one may retire it, and
+  // editing one may do neither. Every dispatch is refused whole by
+  // `layerTracksProblem` — a duplicate `t`, a `beat` clock on a non-text kind,
+  // a clock that disagrees with the track's first stop — so this union never
+  // restates a rule the domain already owns.
+  //
+  // There is deliberately NO `setTrackClock`. §4.4's rule 4 says changing a
+  // non-empty track's clock creates a new track rather than mutating its
+  // stops — and since the domain refuses an empty `stops` array, a track
+  // cannot exist before its first stop anyway. So the rule IS `addTrackStop`
+  // finding-or-creating on the (property, clock) pair: pick a different clock
+  // and the next stop lands on a different track, which is exactly K1b's "two
+  // clocks on one property is two separate single-clock tracks".
+  | {
+      type: "addTrackStop";
+      layerId: string;
+      property: TrackProperty;
+      clock: StopClock;
+      t: number;
+      value: number;
+    }
+  | {
+      type: "setTrackStop";
+      layerId: string;
+      trackIndex: number;
+      stopIndex: number;
+      patch: { t?: number; value?: number; easing?: EasingKind | undefined };
+    }
+  | { type: "removeTrackStop"; layerId: string; trackIndex: number; stopIndex: number }
   // The `html` layer's elements (HL5a, HL-D1): the second vocabulary, nested
   // inside the first, so every action names the layer it edits and the index
   // inside that layer's list. Each one is a no-op — the SAME state object — when
@@ -1133,6 +1183,104 @@ interface HtmlElementEdit {
   readonly elements: readonly HtmlElement[];
 }
 
+/** The layer a track action names, resolved once: its index and its tracks. */
+interface TrackEdit {
+  readonly layerIndex: number;
+  readonly layer: CreativeTemplateLayer;
+  readonly tracks: readonly Track[];
+}
+
+/**
+ * The layer a track action addresses, or `undefined` when there is nothing to
+ * edit — the same refusal shape as `htmlElementEdit`, so every track action is
+ * a no-op returning the SAME state object when the layer is absent, is a kind
+ * that may not carry tracks, or an index falls outside the list.
+ *
+ * The kind check reads `TRACKABLE_LAYER_KINDS` rather than listing the four
+ * kinds here. `layerTracksProblem` would refuse them anyway at the gate below,
+ * so this is not the refusal — it is the early exit that keeps a nonsense
+ * dispatch from building a candidate first.
+ */
+function trackEdit(
+  state: EditorState,
+  layerId: string,
+  trackIndex?: number,
+  stopIndex?: number,
+): TrackEdit | undefined {
+  const layerIndex = state.template.layers.findIndex((layer) => layer.id === layerId);
+  if (layerIndex === -1) return undefined;
+  const layer = state.template.layers[layerIndex]!;
+  if (!TRACKABLE_LAYER_KINDS.includes(layer.kind)) return undefined;
+  const tracks = layer.tracks ?? [];
+  if (trackIndex !== undefined && !isListIndex(trackIndex, tracks.length)) return undefined;
+  if (
+    stopIndex !== undefined &&
+    trackIndex !== undefined &&
+    !isListIndex(stopIndex, tracks[trackIndex]!.stops.length)
+  ) {
+    return undefined;
+  }
+  return { layerIndex, layer, tracks };
+}
+
+/**
+ * The one place a tracks edit is committed, so the three actions share one
+ * gate and one canonical form (the `setLayerProps` shape).
+ *
+ * Order matters and is the lesson SE2 paid for. The domain decides FIRST —
+ * `layerTracksProblem` refuses the whole dispatch, in its own words, so a
+ * duplicate `t` or an off-clock stop never reaches the template. Then an edit
+ * that changed nothing returns the SAME state object, so it writes no history
+ * entry. Only then is the key dropped when the list is empty and the layer run
+ * through `canonicalLayer`, which owns `tracks: []` (and `enabled`, `elements`
+ * and `props`) rather than having that rule restated here.
+ */
+function withLayerTracks(
+  state: EditorState,
+  edit: TrackEdit,
+  tracks: readonly Track[],
+): EditorState {
+  if (layerTracksProblem(edit.layer.kind, tracks) !== undefined) return state;
+  if (tracksEqual(edit.tracks, tracks)) return state;
+  const next: Record<string, unknown> = { ...edit.layer };
+  if (tracks.length > 0) next.tracks = tracks;
+  else delete next.tracks;
+  const nextLayers = state.template.layers.map((existing, i) =>
+    i === edit.layerIndex ? canonicalLayer(next as unknown as CreativeTemplateLayer) : existing,
+  );
+  return { ...state, template: { ...state.template, layers: nextLayers } };
+}
+
+/**
+ * Two track lists carrying the same stops. Deep by hand rather than by
+ * `JSON.stringify`, which would call an absent `easing` and an `easing:
+ * undefined` different — the very pair `setTrackStop`'s clear produces.
+ */
+function tracksEqual(a: readonly Track[], b: readonly Track[]): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((track, i) => {
+    const other = b[i]!;
+    // No `property` comparison, deliberately. Every candidate reaching
+    // `withLayerTracks` is derived from the CURRENT list by map, filter or
+    // append: a map preserves each track's property and position, a filter and
+    // an append both change the length, which the check above already catches.
+    // So at equal length the properties at each index are identical by
+    // construction, and comparing them would be a branch no input can take —
+    // the kind the coverage gate is there to surface. An action that reorders
+    // or retypes a track in place would break that and must revisit this.
+    if (track.stops.length !== other.stops.length) return false;
+    return track.stops.every((stop, j) => {
+      const otherStop = other.stops[j]!;
+      return (
+        stop.t === otherStop.t &&
+        stop.value === otherStop.value &&
+        stop.clock === otherStop.clock &&
+        stop.easing === otherStop.easing
+      );
+    });
+  });
+}
+
 function htmlElementEdit(
   state: EditorState,
   layerId: string,
@@ -1247,12 +1395,20 @@ function canonicalLayer(layer: CreativeTemplateLayer): CreativeTemplateLayer {
     canonicalElements !== undefined &&
     layer.elements !== undefined &&
     canonicalElements.some((element, index) => element !== layer.elements![index]);
+  // K5 adds `tracks` to the same list. `tracks: []` is accepted by
+  // `layerTracksProblem` — it walks no entries — but says exactly what absence
+  // says, so a brief that spelled it out, or a draft whose last stop was just
+  // removed, would dirty on sight against the same template saved without it.
+  // Note the asymmetry with the empty case one level down: an empty `stops`
+  // array is REFUSED by the domain rather than canonicalised, which is why the
+  // remove path below drops the whole track instead of leaving `stops: []`.
+  const dropTracks = Array.isArray(layer.tracks) && layer.tracks.length === 0;
   const nextProps = canonicalProps(layer);
   // Reference equality is the test, not deep equality: `canonicalProps` returns
   // a NEW object only when it dropped something, so a props block already
   // canonical comes back identical and the layer is returned untouched.
   const repropped = nextProps !== (layer.props as Record<string, unknown> | undefined);
-  if (!dropEnabled && !dropElements && !restyledElements && !repropped) return layer;
+  if (!dropEnabled && !dropElements && !restyledElements && !repropped && !dropTracks) return layer;
   const next: Record<string, unknown> = { ...layer };
   if (dropEnabled) delete next.enabled;
   if (dropElements) delete next.elements;
@@ -1261,6 +1417,7 @@ function canonicalLayer(layer: CreativeTemplateLayer): CreativeTemplateLayer {
     if (nextProps === undefined) delete next.props;
     else next.props = nextProps;
   }
+  if (dropTracks) delete next.tracks;
   return next as unknown as CreativeTemplateLayer;
 }
 
@@ -1672,6 +1829,68 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
         i === index ? canonicalLayer(next as unknown as CreativeTemplateLayer) : existing,
       );
       return { ...state, template: { ...state.template, layers: nextLayers } };
+    }
+    case "addTrackStop": {
+      const edit = trackEdit(state, action.layerId);
+      if (edit === undefined) return state;
+      const stop: Stop = { t: action.t, value: action.value, clock: action.clock };
+      // Find-or-create on the (property, clock) PAIR — §4.4 rule 4. Matching on
+      // the property alone would append a `beat` stop to a `pose` track, which
+      // `layerTracksProblem` then refuses wholesale ("a track's stops share one
+      // clock") and the user would see a control that never works.
+      const index = edit.tracks.findIndex(
+        (track) => track.property === action.property && track.stops[0]?.clock === action.clock,
+      );
+      const nextTracks =
+        index === -1
+          ? [...edit.tracks, { property: action.property, stops: [stop] }]
+          : edit.tracks.map((track, i) =>
+              i === index ? { ...track, stops: [...track.stops, stop] } : track,
+            );
+      return withLayerTracks(state, edit, nextTracks);
+    }
+    case "setTrackStop": {
+      const edit = trackEdit(state, action.layerId, action.trackIndex, action.stopIndex);
+      if (edit === undefined) return state;
+      const nextTracks = edit.tracks.map((track, i) => {
+        if (i !== action.trackIndex) return track;
+        return {
+          ...track,
+          stops: track.stops.map((stop, j) => {
+            if (j !== action.stopIndex) return stop;
+            const next: Record<string, unknown> = { ...stop };
+            if (action.patch.t !== undefined) next.t = action.patch.t;
+            if (action.patch.value !== undefined) next.value = action.patch.value;
+            // `easing` is the one field whose CLEAR is meaningful: absent means
+            // the domain default (K-D7), so "Default" in the select writes the
+            // key away rather than writing the default's own name. Spelling it
+            // out would be a second statement of which easing is default.
+            if ("easing" in action.patch) {
+              if (action.patch.easing === undefined) delete next.easing;
+              else next.easing = action.patch.easing;
+            }
+            return next as unknown as Stop;
+          }),
+        };
+      });
+      return withLayerTracks(state, edit, nextTracks);
+    }
+    case "removeTrackStop": {
+      const edit = trackEdit(state, action.layerId, action.trackIndex, action.stopIndex);
+      if (edit === undefined) return state;
+      const nextTracks = edit.tracks
+        .map((track, i) =>
+          i === action.trackIndex
+            ? { ...track, stops: track.stops.filter((_, j) => j !== action.stopIndex) }
+            : track,
+        )
+        // §4.4 rule 7, and the domain's own shape: an empty stop list is an
+        // ABSENT track, never `stops: []` — which `layerTracksProblem` refuses
+        // outright ("be a non-empty array of stops"). Dropping the track here
+        // is what keeps removing the last stop a legal edit instead of one the
+        // gate below would silently swallow.
+        .filter((track) => track.stops.length > 0);
+      return withLayerTracks(state, edit, nextTracks);
     }
     case "addHtmlElement": {
       const edit = htmlElementEdit(state, action.layerId);

@@ -54,7 +54,15 @@ function Harness({
   onClose: () => void;
 }) {
   const [state, dispatch] = useReducer(editorReducer, initial);
-  return <LayerPropsSheet state={state} dispatch={dispatch} layerId={layerId} onClose={onClose} />;
+  return (
+    <LayerPropsSheet
+      state={state}
+      dispatch={dispatch}
+      layerId={layerId}
+      playhead={null}
+      onClose={onClose}
+    />
+  );
 }
 
 const StateHarness = ({
@@ -70,7 +78,15 @@ const StateHarness = ({
 }) => {
   const [state, dispatch] = useReducer(editorReducer, initial);
   onState(state);
-  return <LayerPropsSheet state={state} dispatch={dispatch} layerId={layerId} onClose={onClose} />;
+  return (
+    <LayerPropsSheet
+      state={state}
+      dispatch={dispatch}
+      layerId={layerId}
+      playhead={null}
+      onClose={onClose}
+    />
+  );
 };
 
 afterEach(() => {
@@ -239,7 +255,9 @@ describe("LayerPropsSheet — per-kind fields (D134's table, brief-template.ts L
       />,
     );
     expect(screen.getByLabelText(messages.layerPropTypeFloorLabel)).toBeTruthy();
-    expect(screen.getByRole("combobox")).toBeTruthy();
+    // Named, not "the only combobox": K5 adds the tracks clock select to this
+    // same sheet, and the fact under test is that the ANCHOR control is offered.
+    expect(screen.getByLabelText(messages.layerPropAnchorLabel)).toBeTruthy();
   });
 
   test("static-text offers no anchor control while the variation axis is live (SE2)", () => {
@@ -251,7 +269,11 @@ describe("LayerPropsSheet — per-kind fields (D134's table, brief-template.ts L
       />,
     );
     expect(screen.getByLabelText(messages.layerPropTypeFloorLabel)).toBeTruthy();
-    expect(screen.queryByRole("combobox")).toBeNull();
+    // SE2 is about the ANCHOR control specifically. Asserting "no combobox"
+    // said the same thing only while this sheet had exactly one select; K5 adds
+    // another, and the weaker phrasing would have started passing for the wrong
+    // reason or failing for one.
+    expect(screen.queryByLabelText(messages.layerPropAnchorLabel)).toBeNull();
   });
 
   test("image offers the alt text override", () => {
@@ -317,6 +339,7 @@ describe("LayerPropsSheet — committing and clearing a geometry prop (D134, X16
         state={{ ...initialEditorState(), template: textTemplate() }}
         dispatch={dispatch}
         layerId="accent"
+        playhead={null}
         onClose={vi.fn()}
       />,
     );
@@ -420,7 +443,7 @@ describe("LayerPropsSheet — committing and clearing a geometry prop (D134, X16
       />,
     );
     const textLayer = () => latest!.template.layers.find((l) => l.id === "static-text")!;
-    const select = screen.getByRole("combobox");
+    const select = screen.getByLabelText(messages.layerPropAnchorLabel);
     await user.selectOptions(select, "top");
     expect(textLayer().props).toEqual({ anchor: "top" });
     await user.selectOptions(select, messages.layerPropDefault);
@@ -441,6 +464,7 @@ describe("LayerPropsSheet — the coalesce key it reuses (setHtmlElementFrame's 
           state={{ ...initialEditorState(), template: textTemplate() }}
           dispatch={dispatch}
           layerId="accent"
+          playhead={null}
           onClose={vi.fn()}
         />
       );
