@@ -92,11 +92,10 @@ class. A finding whose premise one of these facts disproves should not be posted
 Four PRs on 2026-09-20 (#535, #537, #538, #539) produced **eleven** findings in the four classes
 below. All eleven were refuted with the same few facts. Check these before reporting the class.
 
-1. **"Add a guard / fallback / default for this impossible case."** The coverage gate is
-   **100 % statements, branches, functions AND lines**. A branch no input can take fails the
-   build, so a defensive arm is not free insurance — it is a broken gate. Five such suggestions
-   were refuted in one day, and two genuine dead branches were **removed** for the same reason.
-   Before suggesting one, ask what input reaches it; if the answer is "malformed data", see 2.
+1. **"Add a guard / fallback / default for this impossible case."** This repeats House rules 5
+   above — kept here only for the evidence: **five** such suggestions were refuted across #535,
+   #537, #538 and #539 in one day, and two genuine dead branches were **removed** for the same
+   reason. If House rules 5 were enough on its own, that count would be lower.
 
 2. **"Validate this invariant at the point of use."** The domain validates once, at its own
    boundary, and both brief boundaries plus every editor write call the same function. So
