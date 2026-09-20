@@ -12,3 +12,4 @@ export * from "./NodeCanvasCompositor.js";
 export * from "./OpenRouterCopyGenerator.js";
 export * from "./OpenRouterImageGenerator.js";
 export * from "./ProceduralBackgroundGenerator.js";
+export * from "./request-deadline.js";
