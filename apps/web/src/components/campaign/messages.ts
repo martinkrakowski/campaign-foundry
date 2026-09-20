@@ -1501,13 +1501,13 @@ export function tracksPresetHeading(motionLabel: string, ratioLabel: string): st
 export const tracksPresetReadOnly =
   "These come from the video style chosen for the creative shown, so they are not edited here. Change that style to change them.";
 
-/** Said on a trackable layer whose previewed cell carries no motion at all. */
-export const tracksPresetNone =
-  "The creative shown has no video style that moves this layer, so there is nothing to list here.";
-
-/** A preset stop row: read-only, so it states its values rather than offering them. */
+/**
+ * A preset stop row: read-only, so it states its values rather than offering
+ * them. Worded as the editable rows are labelled — the schema calls the first
+ * number `t`, and an operator should never have to know that.
+ */
 export function tracksPresetStop(t: number, value: number): string {
-  return `t ${t} → ${value}`;
+  return `${tracksStopTimeLabel} ${t} · ${tracksStopValueLabel} ${value}`;
 }
 
 /* ── The click destination (HL5b, HL-D3) ─────────────────────────────────── */

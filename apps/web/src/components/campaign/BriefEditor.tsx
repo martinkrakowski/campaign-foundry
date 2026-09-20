@@ -2716,7 +2716,7 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
             : {
                 motion: railProps.motion,
                 // The SAME derivation the dock runs, not a second one - §6
-                // question 4 ("never derive twice"), and it is why the group
+                // `studio-editor.md` §6 question 4 ("never derive twice"), which is why
                 // can name the canvas the preview actually drew.
                 canvas: derivePreviewSpec(
                   railProps.platformId,

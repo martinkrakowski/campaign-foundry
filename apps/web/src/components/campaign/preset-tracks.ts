@@ -36,7 +36,7 @@ export interface PresetCell {
    * A ratio would have been wrong twice: the previewed canvas may be a display
    * SIZE (a leaderboard is not any of the three social ratios), and the ratio
    * is not on the look at all - `preview-props.ts` says so outright, because
-   * it is derived once by `derivePreviewSpec` and §6 question 4 is "never
+   * it is derived once by `derivePreviewSpec` and `studio-editor.md` §6 question 4 is "never
    * derive twice". So the caller hands over the spec it already has.
    */
   readonly canvas: CanvasSpec;
@@ -55,7 +55,7 @@ export interface PresetCell {
  * representable property — and that widening needs a decision here rather than
  * silently inheriting the ground expansion.
  *
- * **Text effects are deliberately absent.** §4.4 rule 8 is about preset *motion
+ * **Text effects are deliberately absent.** `studio-editor.md` §4.4 rule 8 is about preset *motion
  * kinds*, and `textEffectTracks` needs the cell's `TextEffectKind`, which the
  * rail does not publish — so showing one would mean guessing which effect the
  * previewed cell drew. That is the lie D140 refuses, in the other direction.

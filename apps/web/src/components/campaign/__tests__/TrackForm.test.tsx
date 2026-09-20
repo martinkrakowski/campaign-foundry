@@ -555,21 +555,29 @@ describe("TL7 — the preset group, beside the authored one (D140)", () => {
     ).toBeTruthy();
   });
 
-  test("a motion kind that expands to nothing for this layer says so", () => {
+  test("a video style that expands to nothing for this layer shows NO group", () => {
     // `accent-wipe` is a clip-extent animation none of TRACK_PROPERTIES can
-    // represent (K2 decided this), so a ground layer has no expansion to show.
+    // represent (K2 decided this), so a ground layer has no expansion. An empty
+    // bordered group would imply preset keys this creative does not have — the
+    // same rule TS1's lane list states, and what two reviewers caught here.
     render(
       <Harness layerId={IMAGE_ID} preset={{ motion: "accent-wipe", canvas: { ratio: "1:1" } }} />,
     );
     expect(
-      within(screen.getByTestId("layer-tracks")).getByText(messages.tracksPresetNone),
-    ).toBeTruthy();
+      within(screen.getByTestId("layer-tracks")).queryByText(messages.tracksPresetReadOnly),
+    ).toBeNull();
   });
 
-  test("no previewed motion means no group, rather than an empty one", () => {
+  test("no previewed video style means no group at all", () => {
     render(<Harness layerId={IMAGE_ID} preset={null} />);
     expect(
-      within(screen.getByTestId("layer-tracks")).getByText(messages.tracksPresetNone),
+      within(screen.getByTestId("layer-tracks")).queryByText(messages.tracksPresetReadOnly),
+    ).toBeNull();
+    // The authored half is untouched — a still creative can still be keyframed.
+    expect(
+      within(screen.getByTestId("layer-tracks")).getByLabelText(
+        messages.tracksAddStopLabel(messages.TRACK_PROPERTY_LABEL.opacity),
+      ),
     ).toBeTruthy();
   });
 });
