@@ -13,15 +13,15 @@ One session produced **79 automated review threads** across ~25 PRs. Every one w
 against the code, answered with a mechanism, and resolved. That discipline found real defects — and
 it cost more than the lanes did.
 
-| Reviewer | Threads | Refuted | Accepted | Share of volume |
-|---|---|---|---|---|
-| **PR-Agent** (3 workflows) | **46** | **32** | 7 | **58 %** |
-| Qodo | 26 | 6 | 9 | 33 % |
-| CodeRabbit | 7 | 1 | 4 | 9 % |
+| Reviewer                   | Threads | Refuted | Accepted | Share of volume |
+| -------------------------- | ------- | ------- | -------- | --------------- |
+| **PR-Agent** (3 workflows) | **46**  | **32**  | 7        | **58 %**        |
+| Qodo                       | 26      | 6       | 9        | 33 %            |
+| CodeRabbit                 | 7       | 1       | 4        | 9 %             |
 
 **PR-Agent produced the majority of the volume and the smallest share of the value.** Its one true
 finding on #268 was raised independently by both other bots the same hour, so it has yet to
-contribute a *unique* real finding in this repository.
+contribute a _unique_ real finding in this repository.
 
 **This plan is not "read fewer comments".** Two of the session's worst defects — a token route
 serving prose as a stylesheet, and a guard that admitted `null` layers — were found by bots and
@@ -31,14 +31,14 @@ dismissed or missed by me. The plan is to spend the same care on inputs that ear
 
 ## 0.1 Proposed decisions
 
-| id | Decision | Why |
-|---|---|---|
+| id       | Decision                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | Why                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **V-D1** | **Forbid the absence claim, pad the hunk modestly, then re-measure.** The reviewer may not report a symbol, import, helper, guard or cleanup as missing when its definition would sit outside the hunk. Raise `patch_extra_lines_before` to ~25 for the within-function case only. **Keep `suggestions_score_threshold = 0` and keep the architecture workflow** — both were tested and both are fine. Re-measure one wave; **disable the two UI/API workflows if refuted stays above 60 %.** | Its dominant failure is diagnosable and one config key: on #263 it claimed `isPlainObject` and `isFiniteInteger` were undefined when both are defined 60 lines above the hunk, asked for a `null` guard the helper performs, and asked for a `delete` the line above already does. **A reviewer that cannot see the file cannot tell "absent" from "out of hunk", and resolves the ambiguity by inventing a defect.** Fix the cause before judging the tool. |
-| **V-D2** | **Dispose of a *class* once, not a thread at a time.** When ≥ 3 threads share one premise, post one disposition naming the class and its mechanism, link it from each thread, and resolve them together. | Three threads on #277 restated one wrong claim about a default-formats fallback; I wrote three replies. The reader needs the mechanism once; the threads need closing, which is cheap. |
-| **V-D3** | **A finding without a mechanism gets a one-line refusal, not an investigation.** "Consider adding…", "this could be confusing", "for robustness" — reply asking for the input that fails, and resolve. Reopen if one arrives. | 14 of PR-Agent's 46 were phrased as preferences with no failing case. Verifying a claim nobody has made costs the same as verifying a real one. Both other bots lead with a mechanism, which is why their rates are better. |
-| **V-D4** | **The orchestrator's mutation must be read from the file, never written from memory.** Copy the literal text, assert the edit applied (`git diff` non-empty **and** the intended line changed), then run. A mutation that fails to apply, or that changes nothing observable, is **not evidence** and must be re-done or recorded as equivalent. | Five misfired this session: a regex that missed an operator at a line end; a `[^;]*` class terminated by a semicolon inside a string; a target that was a static placeholder rather than the runtime fallback; a test file that did not contain the tests; and two genuinely equivalent mutants. **Four of the five looked like passes.** |
-| **V-D5** | **Attribute every finding to the lane or to the brief, in the wave record.** | Most fix rounds this session traced to defects in the orchestrator's briefs — a scalar where the plan's own table said a list, a required field behind a fence that made it impossible, a minimum-shape check on a five-field type. Counting those against the implementer misreads the whole trial. |
-| **V-D6** | **Never merge a PR whose fix round has not been verified to have landed.** Check for the commit, not the exit code. | #282 merged with four verified defects still in it — terminal escape injection, overlapping refreshes, a flag that swallows the next option, a partial escape on truncation — because its fix round reported success and committed nothing. **Four lanes this session exited 0 having written nothing.** |
+| **V-D2** | **Dispose of a _class_ once, not a thread at a time.** When ≥ 3 threads share one premise, post one disposition naming the class and its mechanism, link it from each thread, and resolve them together.                                                                                                                                                                                                                                                                                      | Three threads on #277 restated one wrong claim about a default-formats fallback; I wrote three replies. The reader needs the mechanism once; the threads need closing, which is cheap.                                                                                                                                                                                                                                                                       |
+| **V-D3** | **A finding without a mechanism gets a one-line refusal, not an investigation.** "Consider adding…", "this could be confusing", "for robustness" — reply asking for the input that fails, and resolve. Reopen if one arrives.                                                                                                                                                                                                                                                                 | 14 of PR-Agent's 46 were phrased as preferences with no failing case. Verifying a claim nobody has made costs the same as verifying a real one. Both other bots lead with a mechanism, which is why their rates are better.                                                                                                                                                                                                                                  |
+| **V-D4** | **The orchestrator's mutation must be read from the file, never written from memory.** Copy the literal text, assert the edit applied (`git diff` non-empty **and** the intended line changed), then run. A mutation that fails to apply, or that changes nothing observable, is **not evidence** and must be re-done or recorded as equivalent.                                                                                                                                              | Five misfired this session: a regex that missed an operator at a line end; a `[^;]*` class terminated by a semicolon inside a string; a target that was a static placeholder rather than the runtime fallback; a test file that did not contain the tests; and two genuinely equivalent mutants. **Four of the five looked like passes.**                                                                                                                    |
+| **V-D5** | **Attribute every finding to the lane or to the brief, in the wave record.**                                                                                                                                                                                                                                                                                                                                                                                                                  | Most fix rounds this session traced to defects in the orchestrator's briefs — a scalar where the plan's own table said a list, a required field behind a fence that made it impossible, a minimum-shape check on a five-field type. Counting those against the implementer misreads the whole trial.                                                                                                                                                         |
+| **V-D6** | **Never merge a PR whose fix round has not been verified to have landed.** Check for the commit, not the exit code.                                                                                                                                                                                                                                                                                                                                                                           | #282 merged with four verified defects still in it — terminal escape injection, overlapping refreshes, a flag that swallows the next option, a partial escape on truncation — because its fix round reported success and committed nothing. **Four lanes this session exited 0 having written nothing.**                                                                                                                                                     |
 
 ---
 
@@ -50,11 +50,11 @@ dismissed or missed by me. The plan is to spend the same care on inputs that ear
 defaults give "about three lines of context and no view of the file" and that setting one unset key
 would fix it. Verified against `configuration.toml` at the pinned `v0.42.0`:
 
-| Key | Real default | Draft claimed |
-|---|---|---|
-| `patch_extra_lines_before` | **5** (+3 built in) | ~3 total |
-| `patch_extra_lines_after` | **1** (+3 built in) | ~3 total |
-| `allow_dynamic_context` | **already `true`** | not considered |
+| Key                                      | Real default                  | Draft claimed  |
+| ---------------------------------------- | ----------------------------- | -------------- |
+| `patch_extra_lines_before`               | **5** (+3 built in)           | ~3 total       |
+| `patch_extra_lines_after`                | **1** (+3 built in)           | ~3 total       |
+| `allow_dynamic_context`                  | **already `true`**            | not considered |
 | `max_extra_lines_before_dynamic_context` | **10**, to an enclosing scope | not considered |
 
 So a reviewer already sees roughly eight lines before a hunk and expands to ten until it reaches an
@@ -72,7 +72,7 @@ Two further levers were tested against the record and **both are dead**:
   `suggestions_score_threshold = 0` and the rationale written beside it are **confirmed, not
   overturned**. Leave both alone.
 - **There is no single bad workflow to switch off.** Splitting threads by signature, the
-  **architecture** reviewer is the *best* proportional performer — 12 threads, 5 refuted, 3
+  **architecture** reviewer is the _best_ proportional performer — 12 threads, 5 refuted, 3
   accepted. The volume and the noise are both in the two UI/API reviewers: **54 threads, 28
   refuted, 5 accepted**.
 
@@ -86,10 +86,10 @@ low-signal threads (V-D1) or cheaper disposal of them (V-D2, V-D3) — not less 
 
 `[pr_code_suggestions].extra_instructions` already states that **every finding MUST carry a concrete
 failure scenario**, gives a worked example of one, lists seven defect classes that have really
-shipped here, and closes with *"prefer silence to a speculative finding."* It is a good prompt.
+shipped here, and closes with _"prefer silence to a speculative finding."_ It is a good prompt.
 
-**It did not work, and that is the finding.** The dominant false class is not vague — *"`isPlainObject`
-is undefined here"* names a symbol, a file and a consequence. It is mechanism-*shaped* and false,
+**It did not work, and that is the finding.** The dominant false class is not vague — _"`isPlainObject`
+is undefined here"_ names a symbol, a file and a consequence. It is mechanism-_shaped_ and false,
 because the reviewer cannot distinguish **absent** from **outside the hunk** and resolves the
 ambiguity toward a finding.
 
@@ -113,13 +113,35 @@ never worked.
 
 ## 2. Lanes
 
-| Lane | Task | Buys |
-|---|---|---|
-| **V1** | **Forbid absence claims** in `[pr_code_suggestions]`, and raise the hunk padding modestly. Narrow wording only — the rule must kill claims about code the reviewer cannot see, **not** claims about code it can. Two of the real findings this session were about inputs to visible code. | The measured dominant false class |
-| **V2** | *Withdrawn.* The instruction blocks already demand a concrete failure scenario and already prefer silence (F2b). Rewriting them again would repeat a lever that has been pulled. | — |
-| **V3** | **Measure one wave, then decide** (V-D1's gate). Record threads and verified-real per bot *and per workflow* in the wave record. **If the two UI/API reviewers stay above 60 % refuted, disable them** — do not tune a third time. The architecture reviewer is exempt; it already passes. | The evidence that ends the question |
-| **V4** | **The disposition tooling** (V-D2). A small script: given a PR and a set of thread ids, post one class disposition and resolve them together. | The reply cost, halved for repeated claims |
-| **V5** | **Mutation discipline in the skill** (V-D4) and **the merge precondition** (V-D6): a checklist item that a fix round's commit exists before merge. | The two failure modes that cost most this session |
+| Lane                         | Task                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | Buys                                              |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
+| **V1**                       | **Forbid absence claims** in `[pr_code_suggestions]`, and raise the hunk padding modestly. Narrow wording only — the rule must kill claims about code the reviewer cannot see, **not** claims about code it can. Two of the real findings this session were about inputs to visible code.                                                                                                                                                                                                                                                                                  | The measured dominant false class                 |
+| **V2**                       | _Withdrawn._ The instruction blocks already demand a concrete failure scenario and already prefer silence (F2b). Rewriting them again would repeat a lever that has been pulled.                                                                                                                                                                                                                                                                                                                                                                                           | —                                                 |
+| **V3**                       | **Measure one wave, then decide** (V-D1's gate). Record threads and verified-real per bot _and per workflow_ in the wave record. **If the two UI/API reviewers stay above 60 % refuted, disable them** — do not tune a third time. The architecture reviewer is exempt; it already passes.                                                                                                                                                                                                                                                                                 | The evidence that ends the question               |
+| **V3 — decided, 2026-09-19** | **The UI and API REVIEWS are disabled.** `pr-agent-api.yml` is removed outright. `pr-agent.yml` keeps its file and loses its `pull_request` trigger: it is the repo's only `/improve` entry point, and both other reviewers document relying on it — deleting it would have taken that hatch from the reviewer this lane deliberately exempts. No unprompted review; a human can still ask for one. `pr-agent-arch.yml` stays (exempt by this lane's own words) and `pr-agent-react.yml` stays (it postdates the measurement entirely, #454, and has never been measured). | Owner's call on the recorded arithmetic           |
+| **V4**                       | **The disposition tooling** (V-D2). A small script: given a PR and a set of thread ids, post one class disposition and resolve them together.                                                                                                                                                                                                                                                                                                                                                                                                                              | The reply cost, halved for repeated claims        |
+| **V5**                       | **Mutation discipline in the skill** (V-D4) and **the merge precondition** (V-D6): a checklist item that a fix round's commit exists before merge.                                                                                                                                                                                                                                                                                                                                                                                                                         | The two failure modes that cost most this session |
+
+> **What the decision was taken on, stated plainly.** The only recorded
+> measurement is the 2026-09-09 wave record: PR-Agent **6 threads, 1 accepted,
+> 5 refuted — 83 %**, comfortably above this lane's 60 % line. But that record
+> says of itself _"Do not disable yet — the gate says one wave, and this is a
+> third of one"_, and it is **per bot, not per workflow**: all reviewers comment
+> as `github-actions[bot]` and nothing in a comment names the workflow that
+> wrote it, so the 83 % cannot be attributed to the UI and API reviewers
+> specifically. The owner decided on that sample anyway. Recording it this way
+> so nobody later reads the disable as the arithmetic the lane asked for — it is
+> a judgement taken with the arithmetic incomplete, which is the owner's to make.
+>
+> **The disable is of the REVIEW, not the tool.** `pr-agent.yml` still exists and
+> still invokes PR-Agent on `/improve`, which is why `premise V3` goes on counting
+> it as a running reviewer. That is the honest reading: it can still post findings,
+> it just no longer does so unasked.
+>
+> **`premise V3` is deliberately NOT retired.** It is open while any running
+> reviewer is unmeasured per workflow, and two still run unmeasured. Disabling
+> settles half this lane; the measure half is untouched and the fence should go
+> on saying so.
 
 **Order.** V5 first — it is documentation and prevents the worst outcome. Then V1 → V3 (gated). V4
 whenever convenient. **V2 is withdrawn** and V-D3 survives only as the human-side disposal rule.
@@ -159,8 +181,8 @@ Each open lane states the claim that makes it necessary, as a script that exits 
 still open**. `yarn plan:verify` runs them. Audited 2026-09-12 against `main` at `7a4b8ab`.
 
 **V1 — shipped in #290.** `.pr_agent.toml` carries it: `patch_extra_lines_before = 25`, and
-`[pr_code_suggestions].extra_instructions` forbids the absence claim outright (*"YOU ARE READING A
-PATCH, NOT A FILE"*). The one wave recorded since found **zero** refuted findings in that class.
+`[pr_code_suggestions].extra_instructions` forbids the absence claim outright (_"YOU ARE READING A
+PATCH, NOT A FILE"_). The one wave recorded since found **zero** refuted findings in that class.
 
 **V2 — withdrawn in §2 on evidence**, not shipped, and not tracked.
 
@@ -243,11 +265,11 @@ after the fact, which is not measurement.
 
 ### Per bot
 
-| Bot | Threads | Verified real | Refuted | Refuted % |
-|---|---|---|---|---|
-| **PR-Agent** (`github-actions[bot]`) | 6 | 0 | 6 | **100 %** |
-| **Qodo** (`qodo-code-review[bot]`) | 7 | 4 | 3 | **43 %** |
-| **CodeRabbit** (`coderabbitai[bot]`) | 0 | 0 | 0 | — (rate limited on all three) |
+| Bot                                  | Threads | Verified real | Refuted | Refuted %                     |
+| ------------------------------------ | ------- | ------------- | ------- | ----------------------------- |
+| **PR-Agent** (`github-actions[bot]`) | 6       | 0             | 6       | **100 %**                     |
+| **Qodo** (`qodo-code-review[bot]`)   | 7       | 4             | 3       | **43 %**                      |
+| **CodeRabbit** (`coderabbitai[bot]`) | 0       | 0             | 0       | — (rate limited on all three) |
 
 Qodo's four real findings: the event-only row dropping its gate log (#369, blocking, fixed); the html
 drawer painting the first layer for every dispatched layer (#371, blocking, fixed); and two real
@@ -266,7 +288,7 @@ Architecture**. That split cannot be made from the artifacts:
 - All three PR-Agent workflows post as `github-actions[bot]` with identical formatting and **no
   workflow marker in the comment body**.
 - Only the check-run list attributes a PR's comments, and only when one workflow ran. **#369** lists
-  UI alone (2 threads, both refuted). **#371** lists Architecture *and* UI, so its 2 threads cannot be
+  UI alone (2 threads, both refuted). **#371** lists Architecture _and_ UI, so its 2 threads cannot be
   split. **#370** lists neither PR-Agent run at all, though it changed both `apps/api/**` and
   `packages/*/src/**` and carries 2 PR-Agent threads.
 
@@ -300,11 +322,11 @@ against their branches: **#374** (X9), **#376** (S3) and **#377** (HL4). Every t
 verified against the code; none is counted from a bot's self-description. §8's table stands as a
 record of what was known then; this one supersedes it as the wave's figure.
 
-| Bot | Threads | Verified real | Refuted | Refuted % |
-|---|---|---|---|---|
-| **Qodo** | 14 | 11 | 3 | **21 %** |
-| **PR-Agent** | 15 | 3 | 12 | **80 %** |
-| **CodeRabbit** | 0 | 0 | 0 | — rate limited throughout |
+| Bot            | Threads | Verified real | Refuted | Refuted %                 |
+| -------------- | ------- | ------------- | ------- | ------------------------- |
+| **Qodo**       | 14      | 11            | 3       | **21 %**                  |
+| **PR-Agent**   | 15      | 3             | 12      | **80 %**                  |
+| **CodeRabbit** | 0       | 0             | 0       | — rate limited throughout |
 
 **Qodo's eleven** include every defect that blocked a merge this wave: the event-only row dropping its
 gate log (#369); the html drawer painting the first layer for every dispatch (#371); a review blocker
@@ -327,11 +349,11 @@ low-severity finding in fifteen threads.**
 Attribution by each workflow's `paths` filter, which decides whether it can run at all (UI Review has
 none; API is `apps/api/**`; Architecture is `packages/*/src/**` plus web TS):
 
-| | Threads | Real | Refuted | Refuted % |
-|---|---|---|---|---|
-| **UI Review** — PRs only it could review (#369, #376) | 5 | 1 | 4 | **80 %** |
-| **API Review** — attributable alone | 0 | — | — | no data |
-| **Unattributable** — #370, #371, #377, where two or three workflows were eligible | 10 | 2 | 8 | 80 % |
+|                                                                                   | Threads | Real | Refuted | Refuted % |
+| --------------------------------------------------------------------------------- | ------- | ---- | ------- | --------- |
+| **UI Review** — PRs only it could review (#369, #376)                             | 5       | 1    | 4       | **80 %**  |
+| **API Review** — attributable alone                                               | 0       | —    | —       | no data   |
+| **Unattributable** — #370, #371, #377, where two or three workflows were eligible | 10      | 2    | 8       | 80 %      |
 
 **UI Review crosses V3's 60 % line on its own attributable threads — but on n = 5.** API Review has
 **no** attributable thread at all: it never ran on a PR without another PR-Agent workflow beside it.
