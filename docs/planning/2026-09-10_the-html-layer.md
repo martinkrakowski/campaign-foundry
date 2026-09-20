@@ -1,6 +1,6 @@
 # The HTML Layer — Architecture & Development Plan
 
-**Date:** 2026-09-10 · **Status:** draft, for the owner's approval · **Nothing dispatched.**
+**Date:** 2026-09-10 · **Status:** **SHIPPED — stamped 2026-09-20**, which the §2 table in this same file marks in every row. On `main`: HL1 (#354), HL2 (#364), HL3 (#371), HL4 (#377), HL5a (#399), HL5b (#390), HL5c (#425), HL5d (#401), HL5e (#432), HL5f (#428).
 **Verified against:** `main` at `f4f4d63`. **Owner's brief:** an HTML layer with tooling — add text,
 add link, add button — and the ability to bring an existing campaign's styles into it.
 

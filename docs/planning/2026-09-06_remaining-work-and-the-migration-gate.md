@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-06
 **Author:** orchestrator
-**Status:** draft — for the owner's review, then the grok + agy two-reviewer pass
+**Status:** **PARTLY SHIPPED — stamped 2026-09-20.** F-A (#197) and F-C, shipped **as A0** (#244), are on `main`; the two-reviewer pass this line used to await is in §8 of this same file. **F-B is half done:** F5's containment shipped (#196), but **D84's overlay-depth counter has not** — `dialog-shell.tsx` contains no `inert` and no depth, so the F22 close-first workaround still stands. **F-D is open and blocked on D82, which is unanswered** (no `addEventListener("storage")` exists in `BriefEditor.tsx`). _Was: "draft — for the owner's review, then the grok + agy two-reviewer pass"._
 **Verified against:** `main` at `f454d46` (CI green, including the `hexagen sync --check` drift gate at `.github/workflows/ci.yml:78`)
 **Decision ids introduced:** D82 – D85
 **Relates to:** **D64** (identity model — OPEN, the owner's call), D73 – D81 (the lock plan), D11

@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-07
 **Author:** orchestrator
-**Status:** draft — for the owner's review, then the two-reviewer pass
+**Status:** **SHIPPED — stamped 2026-09-20.** G1 (#206), G2 (#208), G3 (#209), M1 (#207), M2 (#214, extended by #231 and #235) are all on `main`. _Was: "draft — for the owner's review, then the two-reviewer pass"._
 **Verified against:** `main` at `c9a0505` (W1 merged; W2(a) in flight on `feat/w2a`)
 **Decision ids introduced:** D93 – D96
 **Relates to:** `2026-09-06_create-dialog-recomposition.md` (D86 – D92, C1 – C7), **D65** (no id in

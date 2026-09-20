@@ -1,6 +1,6 @@
 # Architecture & Development Plan — two more PR-Agent reviewers: API and architecture
 
-**Status:** Proposed v1.0
+**Status:** **SHIPPED, THEN PARTLY RETIRED — stamped 2026-09-20.** P1+P2 (#102), P2.4 (#117), P3 (#125) are all on `main`. **But the two reviewers this plan built were later switched off** by V3 (#527, 2026-09-20): `pr-agent-api.yml` is deleted and `pr-agent.yml` keeps only its `issue_comment` trigger, so `/improve` remains the one entry point. The architecture reviewer (`pr-agent-arch.yml`) still runs. Read this plan as history for the two disabled reviewers, not as live spec. _Was: "Proposed v1.0"._
 **Scope:** `.github/workflows/` and `.pr_agent.toml` — two additional PR-Agent workflows beside the
 existing UI-contract reviewer. No application code changes.
 **Depends on:** #96 (the UI-contract PR-Agent, merged as `caa329f`)

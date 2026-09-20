@@ -1,6 +1,6 @@
 # Creative-first chrome — widening the rail that already exists, and putting the creative's own controls in it
 
-**Date:** 2026-09-16 · **Status:** draft, for the owner's approval · **Nothing dispatched.**
+**Date:** 2026-09-16 · **Status:** **PARTLY SHIPPED — stamped 2026-09-20**, which the §3 rows in this same file mark "shipped in this PR". On `main`: CC1+CC2 (#453), CC3 (#474), CC4 (#521), CC5 (inside #469), CC6 (#455), FI1 (#453). **Open: CC7** — Browse over a real library, whose stated blocker has partly dissolved now that TM1–TM4 (#478) shipped a library modal, so whether it still has content is undecided. **And §5's note 2 has no lane and needs a decision:** below the rail's breakpoint there is now **no layer editing at all**.
 **Revision:** second draft. The first was **blocked in review** for asserting things about the tree that were false; §0
 records what it got wrong, because the corrections are the plan.
 **Source:** the owner's diagram (`~/Desktop/brief-screen-flow.png`) and the intent stated with it — *"the user is

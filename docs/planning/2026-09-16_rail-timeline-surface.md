@@ -1,6 +1,6 @@
 # The rail timeline surface — one scrollport, one playhead, DESIGN.md tokens
 
-**Date:** 2026-09-16 · **Revised:** 2026-09-17 · **Status:** decisions adopted by the owner; TS1 and TS2 dispatchable.
+**Date:** 2026-09-16 · **Revised:** 2026-09-17 · **Status:** **TS1 AND TS2 SHIPPED — stamped 2026-09-20** (this line used to call them "dispatchable"). TS1 (#469) and TS2 (#525) are on `main`, and §9 records both premises retired. Of the paint-overs, **TL2 shipped** (#523); **TL3, TL4, TL6 remain open** and are owned by `2026-09-16_studio-editor.md`. **TS-Q1 is still open.**
 **Scope:** the _visual_ time surface that CC5 / TL1 mount in the rail, and — under D146, now adopted — under the Copy form on a narrow container. No new renderer. No new document field. No second playhead. No play-through clock.
 **Related:** `DESIGN.md` (tokens, density, chrome-in-flow, §7 sideways-scroll rule), `2026-09-16_studio-editor.md` (D137–D140, TL1–TL7, §9 gesture contract), `2026-09-16_creative-first-chrome.md` (D141–D145, CC5 closes TL1), `2026-09-13_video-editing-features.md` (VE-D2, VE-D5, VE-D6, VE2 shipped), `2026-08-27_motion-copy-timeline.md` (D7 weights-not-timestamps), `2026-09-10_keyframing.md` (K4 shipped, K5 open).
 **Sketch that does not ship:** `timeline-component.html` (2026-09-16), a layout experiment. Three lessons survive: one scrollport owns ruler + lanes + playhead; an end pad stops the last second being cropped; sticky lane labels. Four things in it are **defects against recorded decisions** and are listed in §2 so they cannot leak into the PR.

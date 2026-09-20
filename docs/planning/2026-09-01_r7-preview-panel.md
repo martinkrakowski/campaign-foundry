@@ -1,7 +1,7 @@
 # R7 — The Preview Panel: Architecture & Development Plan
 
 **Date:** 2026-09-01
-**Status:** for review
+**Status:** **SHIPPED — stamped 2026-09-20.** R7.1 (#170); R7.2, R7.3, R7.4, R7.5, R7.7, R7.8 and the caption half of R7.6 (#174); R7.6's fill-mode half shipped **as T1a** (#171) in the template-authoring plan. _Was: "for review"._
 **Supersedes:** lanes **R1.3** and **R7.1** of `docs/planning/2026-08-31_brief-flow-remediation.md`
 **Decision ids introduced:** D43 – D50, D61
 

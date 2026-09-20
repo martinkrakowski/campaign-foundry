@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-09
 **Author:** orchestrator
-**Status:** draft — for the owner's review. Nothing built.
+**Status:** **SHIPPED, WITH ONE THING TO SETTLE — stamped 2026-09-20.** V1 (#290), V4 (#366) and V5 (#289) are on `main`, and **V3's decision was made by the owner and executed** (#527: `pr-agent-api.yml` deleted, `pr-agent.yml` reduced to `issue_comment`). V2 was withdrawn on evidence. **The contradiction to settle:** §5 and §8 below still read "V3 stays open" — they predate the decision — and `premise V3` at §7 is still live, because its body asks that every workflow *still* invoking PR-Agent be measured per workflow in a wave record, and `pr-agent-arch`, `pr-agent-react` and `pr-agent` are each unmeasured. The architecture reviewer is "exempt from the DISABLE decision, not from being measured", and `pr-agent-react` is a **fourth** reviewer added after the fence was written. **So: retire the fence and the stale prose, or keep the fence and record the measurement. That is an owner call and is deliberately not made here.** _Was: "draft — for the owner's review. Nothing built."_
 **Verified against:** `main` at `0b1faa0`, and the 79 review threads on PRs #254–#287
 
 ---

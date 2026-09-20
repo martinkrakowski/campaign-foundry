@@ -1,7 +1,7 @@
 # Brief Flow Remediation — Architecture & Development Plan
 
 **Date:** 2026-08-31
-**Status:** Draft v1.0 — for review. Every finding in §1 was reproduced by execution against the live tree unless explicitly marked *inferred*; the three the user could see for themselves were re-verified by hand before this plan was written.
+**Status:** **SHIPPED — stamped 2026-09-20.** Every lane is on `main`: R1.1/R1.2 (#156), R1.3→R7.1 (#170), R2.1–R2.3 (#159), R3.1 (#157), R3.2 (#160), R4.1 (#161), R5.1/R5.2 (#166), R6.1–R6.3 (#162), R6.4 (#163), R7.1 (#170, #174). _The review note below is kept as provenance._ Draft v1.0 — for review. Every finding in §1 was reproduced by execution against the live tree unless explicitly marked *inferred*; the three the user could see for themselves were re-verified by hand before this plan was written.
 **Scope:** `apps/web` — the `/brief` editor's verbs, routing, status surfaces and preview; `apps/api/server/lib/brief-files.ts` — the YAML writer, which one decision here gates. **No brief-schema change and no domain change.**
 **Related:** `2026-08-29_guided-brief-and-visual-system.md` (D19–D34, shipped across #128–#148), `2026-08-26_unified-campaign-editor.md` (UE-D1–D15), `2026-08-28_graphical-brief-editor.md` (GB-D1–D18), `DESIGN.md`. PRs merged since: #149, #151, #152, #153, #154.
 

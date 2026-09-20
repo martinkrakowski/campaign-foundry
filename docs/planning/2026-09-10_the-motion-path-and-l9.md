@@ -1,6 +1,6 @@
 # The Motion Path Blocks L9 — Architecture & Development Plan
 
-**Date:** 2026-09-10 · **Status:** draft, for the owner's approval · **Nothing dispatched.**
+**Date:** 2026-09-10 · **Status:** **SHIPPED, ONE AMENDMENT OUTSTANDING — stamped 2026-09-20.** M1 shipped **as C1** (#313), M1b **as C3** (#319), M2 (#330), M3 (#395). **M4 is the exception and is only half applied:** it is a plan-amendment lane, and while F3's L7 status was updated, **F4's ownership list and F5's DoD wording were not** — §4 of `2026-09-08_creative-templates-and-units.md` still reads "disabling a required layer is a 400 and a disabled control", the exact sentence F5 exists to rewrite as "no toggle is offered on a required layer". **Note also that M4's premise-retirement note below describes the wrong change** — it talks about `prepare` memoising per-text layout, which is a compositor change, not the amendment M4 is defined as.
 **Origin:** the Fable plan review of `2026-09-08_creative-templates-and-units.md`, 2026-09-09.
 **Verified against:** `main` at `7471bf5`.
 
