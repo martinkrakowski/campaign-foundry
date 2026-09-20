@@ -240,11 +240,18 @@ uploaded bytes VE3b1 needs. The interim refusal in `load-brief.ts` is removed; `
 > the producer becomes a separate audio service behind the `AudioTrack` boundary (what
 > that boundary is for) or a TS port is still not decided.
 
-> **Four confirmed defects in the artifacts as received (2026-09-20).** Review bots
-> raised them on #530; each was reproduced against the files before being recorded here,
-> and none was fixed — the artifacts are committed as the owner authored them, because
-> the contract is theirs to change. **VE4 must resolve all four before it can emit a
-> schema-valid track.** Whoever ports or wraps the chunker inherits this list.
+> **Nine confirmed defects in the artifacts as received (2026-09-20).** Review bots
+> raised ten on #530; each was reproduced against the files before being recorded here,
+> one was **refuted by measurement** (below), and none was fixed — the artifacts are
+> committed as the owner authored them, because the contract is theirs to change.
+> **VE4 must resolve these before it can emit a schema-valid track.** Whoever ports or
+> wraps the chunker inherits the list.
+>
+> Several are the implementation disagreeing with its own spec rather than the spec being
+> unclear, which is the cheap kind of defect to fix and the expensive kind to discover
+> late: §3.3 lists `--` and parenthetical close as split triggers that never fire, §3.8
+> lists a `( )` pause that is always zero, and §3.6 prescribes empty-clip handling the
+> code does not implement.
 >
 > 1. **A track can validate with no audio at all.** `audio.uri` is required but
 >    `["string","null"]`, `audio_base64` is optional *and* nullable, and there is no
@@ -271,6 +278,49 @@ uploaded bytes VE3b1 needs. The interim refusal in `load-brief.ts` is removed; `
 >    top-level fields therefore still does not validate. Either thread each clip's
 >    pre-trim duration through, or give the plan its own type instead of emitting
 >    schema-shaped rows that cannot pass.
+> 5. **`--` never splits, though §3.3 lists it.** The tokenizer emits two separate `-`
+>    tokens and `COMMA_LIKE` is `{",", "–", "—", "―"}`, containing neither. Measured on
+>    one sentence: the em-dash form splits into two phrases, the `--` form stays one.
+>    Narration written in the documented ASCII form silently loses both its boundary and
+>    its dash pause. Tokenize `--` before the single-char alternative.
+> 6. **Parenthetical close never splits, and `( )` pauses zero.** §3.3 row 3 names
+>    parenthetical close a trigger; `"…lower today (as expected) and yields jumped."`
+>    comes back as a single phrase. §3.8 sets `( ) → 0.04`; `_punct_pause` returns `0.0`
+>    for both characters, short-circuiting before it even reads the config.
+> 7. **A straight opening quote is pulled onto the previous phrase.** §3.3 says to move a
+>    quote only when a phrase *starts with a closing* quote or *ends with an opening* one.
+>    The repair pass cannot tell `"` apart by direction, so it treats every leading
+>    straight quote as closing. The contrast is the proof — same sentence, two quote
+>    styles:
+>
+>    ```
+>    … lower. "Yields jumped," …   →  ['The market opened lower. "', 'Yields jumped," …']
+>    … lower today. “Yields…,” …   →  ['The market opened lower today.', '“Yields jumped,” …']
+>    ```
+>
+>    The first clip is sent to TTS ending on a dangling open quote and the quoted clip
+>    loses it. Direction has to come from surrounding token context, not set membership.
+> 8. **The schema does not require the fields its own invariant reads.** §1 states
+>    `speech_start_s == words[0].start_s` and `speech_end_s == words[-1].end_s`, but
+>    neither bound is in `required` and `words` has no `minItems`. A track with an empty
+>    `words` array and no speech bounds validates, leaving VE-D9 no declared speech
+>    interval — the exact thing VE-D13 introduced the two-clock distinction to guarantee.
+> 9. **`Wait?!` loses the `!`.** `flush()` discards a buffer holding no words, so the
+>    second mark after a sentence-ending flush is dropped: the phrase comes back `'Wait?'`
+>    with `char_end` 5, not 6, so `text` and the char span no longer cover the phrase.
+>    Narrower than reported — `'"Wait!"'` keeps its closing quote and is **fine**; it is
+>    specifically consecutive sentence punctuation that is lost.
+>
+> **Refuted — allocated words do NOT overrun a short clip.** A reviewer read §3.8's
+> `speech_budget = max(speech_duration_s - internal_pause, n * min_word_s)` and predicted
+> that a short clip would allocate past `phrase.end_s`; the worked case given was two
+> words with a comma at `0.10 s`, predicted to produce `0.14 s` of words plus a `0.08 s`
+> pause. Measured, `allocate_phrase` returns `Wait 0.0000→0.0318`, `now 0.0682→0.1000` —
+> last end exactly `0.1000`, overrun `+0.0000`, and the comma pause compressed to `0.036`
+> rather than holding `0.08`. §3.8's closing rule ("scale every word uniformly so they
+> fill `speech_budget`") is implemented as a scale to the *measured* duration, which
+> contains the `max`. The spec prose is genuinely misleading on this point and worth
+> tightening, but the behaviour is correct and needs no fix.
 
 > **Per-creative speech cost — PLACEHOLDER, 2026-09-20. Replace with a measurement.**
 >
