@@ -87,8 +87,13 @@ export interface Track {
  * K2 gives the wipe a representable property, `shade`/`logo` with a generic
  * per-drawer pose wrapper (K4 territory). Narrowing later would refuse
  * tracks a brief already carries, which this list is written to avoid.
+ *
+ * Exported for K5, the same reason `TEXT_LAYER_KINDS` is: the editor decides
+ * which layers are offered a Tracks section, and a second list there would be
+ * free to drift from the one this boundary actually enforces — offering a
+ * control whose every dispatch `layerTracksProblem` then refuses.
  */
-const TRACKABLE_LAYER_KINDS: readonly LayerKind[] = [
+export const TRACKABLE_LAYER_KINDS: readonly LayerKind[] = [
   "image",
   "video",
   "static-text",

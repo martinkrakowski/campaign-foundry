@@ -2686,6 +2686,20 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
         state={state}
         dispatch={dispatch}
         layerId={pickedLayerId}
+        /* K5 §4.4 rule 3 — the COMMITTED second, which is the only one TS2
+           publishes up here: `PlayheadHost` keeps the live scrub second inside
+           the rail so a drag writes no context per pointermove. A stop is
+           committed state, so the committed second is also the correct one to
+           map. `null` while no timeline is mounted, and the form then starts a
+           stop at 0 rather than inventing a position. */
+        playhead={
+          sectionPlayhead === null
+            ? null
+            : {
+                durationSec: sectionPlayhead.durationSec,
+                committedSec: sectionPlayhead.committedSec,
+              }
+        }
         onClose={() => setPickedLayerId(null)}
       />
 

@@ -748,3 +748,57 @@ describe("setLayerProps is undoable, and a run on one field coalesces (D134, VE1
     expect("props" in logoLayer(hook.result.current.state)).toBe(false);
   });
 });
+
+/**
+ * K5 — `setTrackStop` is keyed like every other keystroke-driven field, so
+ * typing into one stop's value is ONE undo step rather than one per digit. The
+ * key carries the stop's address, so moving to a different stop starts a new
+ * entry instead of folding two edits together.
+ */
+describe("setTrackStop coalesces per stop and per field (K5)", () => {
+  const textLayer = (state: EditorState) =>
+    state.template.layers.find((layer) => layer.kind === "static-text")!;
+  const textId = (state: EditorState) => textLayer(state).id;
+
+  const seeded = () => {
+    const hook = renderImageText();
+    send(hook, {
+      type: "addTrackStop",
+      layerId: textId(hook.result.current.state),
+      property: "opacity",
+      clock: "pose",
+      t: 0,
+      value: 1,
+    });
+    return hook;
+  };
+
+  test("a live run on one stop's value is a single undo step", () => {
+    const hook = seeded();
+    const id = textId(hook.result.current.state);
+    send(
+      hook,
+      { type: "setTrackStop", layerId: id, trackIndex: 0, stopIndex: 0, patch: { value: 0.8 } },
+      { type: "setTrackStop", layerId: id, trackIndex: 0, stopIndex: 0, patch: { value: 0.5 } },
+      { type: "setTrackStop", layerId: id, trackIndex: 0, stopIndex: 0, patch: { value: 0.2 } },
+    );
+    expect(textLayer(hook.result.current.state).tracks![0]!.stops[0]!.value).toBe(0.2);
+    act(() => hook.result.current.undo());
+    // Back to the stop as it was added — the whole run in one step.
+    expect(textLayer(hook.result.current.state).tracks![0]!.stops[0]!.value).toBe(1);
+  });
+
+  test("the other field on the same stop is a SEPARATE entry", () => {
+    const hook = seeded();
+    const id = textId(hook.result.current.state);
+    send(
+      hook,
+      { type: "setTrackStop", layerId: id, trackIndex: 0, stopIndex: 0, patch: { value: 0.5 } },
+      { type: "setTrackStop", layerId: id, trackIndex: 0, stopIndex: 0, patch: { t: 0.5 } },
+    );
+    act(() => hook.result.current.undo());
+    // Only the `t` run reverted; the value edit is still its own entry behind it.
+    expect(textLayer(hook.result.current.state).tracks![0]!.stops[0]!.t).toBe(0);
+    expect(textLayer(hook.result.current.state).tracks![0]!.stops[0]!.value).toBe(0.5);
+  });
+});

@@ -1401,6 +1401,62 @@ export function layerPropResetLabel(fieldLabel: string): string {
   return `Reset ${fieldLabel} to the brief default`;
 }
 
+/* ── Keyframe tracks (K5, `studio-editor.md` §4.4) ───────────────────────── */
+
+export const tracksHeading = "Motion tracks";
+
+/** Said on a trackable layer carrying no tracks yet — the whole section's empty state. */
+export const tracksNone = "No keyframes yet. Add a stop to start a track.";
+
+/**
+ * The clock the NEXT stop lands on. Deliberately not phrased as a property of
+ * a track: a track's clock is fixed by its first stop (K1b), so choosing a
+ * different one here sends the next stop to a different track rather than
+ * changing an existing one (§4.4 rule 4).
+ */
+export const tracksClockLabel = "Add stops on";
+
+export const TRACK_CLOCK_LABEL: Record<string, string> = {
+  pose: "Whole creative",
+  beat: "Current beat",
+  effect: "Text effect",
+};
+
+export const TRACK_PROPERTY_LABEL: Record<string, string> = {
+  opacity: "Opacity",
+  scale: "Scale",
+  dx: "Offset X",
+  dy: "Offset Y",
+};
+
+/** Said where `beat` and `effect` are not offered — the reason, not just their absence. */
+export const tracksClockTextOnly =
+  "Beat and text-effect clocks need a beat to measure against, so they are offered on text layers only.";
+
+export function tracksAddStopLabel(propertyLabel: string): string {
+  return `Add a ${propertyLabel} stop`;
+}
+
+export function tracksRemoveStopLabel(propertyLabel: string, index: number): string {
+  return `Remove ${propertyLabel} stop ${index + 1}`;
+}
+
+export const tracksStopTimeLabel = "t";
+export const tracksStopValueLabel = "Value";
+export const tracksStopEasingLabel = "Easing";
+
+/** The easing select's empty option: absence means the domain's own default (K-D7). */
+export const tracksEasingDefault = "Default";
+
+/**
+ * A refused stop, in the domain's words. `layerTracksProblem` supplies the
+ * `must` clause and this only frames it, so the editor never invents a
+ * requirement the boundary does not make (TL5: "called, not restated").
+ */
+export function tracksRefused(must: string): string {
+  return `That stop must ${must}.`;
+}
+
 /* ── The click destination (HL5b, HL-D3) ─────────────────────────────────── */
 
 /** The destination input's label. */

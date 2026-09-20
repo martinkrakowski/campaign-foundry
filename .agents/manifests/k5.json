@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "lane": "k5",
+  "mutations": [
+    {
+      "file": "apps/web/src/components/campaign/editor-state.ts",
+      "before": "  if (layerTracksProblem(edit.layer.kind, tracks) !== undefined) return state;",
+      "after": "  // if (layerTracksProblem(edit.layer.kind, tracks) !== undefined) return state;",
+      "because": "TL5 s rule is that every refusal is layerTracksProblem s, CALLED rather than restated. Deleting the call is the plausible tidy-up: the three actions each build a candidate that looks well-formed by construction, so the gate reads like belt-and-braces over a UI that already only offers legal moves. It is not. The form s own controls can be driven by a hand-restored draft, and three §4.4 rules live ONLY in that function - a duplicate t on one clock (rule 6), a beat clock on a non-text kind (rule 5), and a stop moved onto another stop s t. Without it all three are silently accepted into the template and reach the brief.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/editor-state.tracks.test.ts"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

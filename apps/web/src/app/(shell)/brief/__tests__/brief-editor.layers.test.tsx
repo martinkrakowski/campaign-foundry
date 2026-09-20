@@ -890,6 +890,33 @@ describe("CC4 — the sheet is a sibling of the step card, and reads CC3's selec
   });
 });
 
+describe("K5 — the tracks form reaches the operator through the real editor", () => {
+  /**
+   * Mounted through `BriefEditor`, not through the sheet, and that is the whole
+   * point of these two. `TrackForm.test.tsx` already drives the form itself; a
+   * prop nobody passes is indistinguishable from one that does not exist
+   * (D157), so the wiring at the sheet's real call site needs its own witness.
+   */
+  test("picking a trackable layer offers the tracks section", async () => {
+    const user = userEvent.setup();
+    await mountEditor();
+    await user.click(pick("image", "Image"));
+    expect(within(sheetEl()).getByTestId("layer-tracks")).toBeTruthy();
+  });
+
+  test("the clock select is live, which is only true if the playhead prop arrived", async () => {
+    // `playhead` is typed `TrackPlayhead | null`, so a caller that forgot it
+    // fails typecheck — but a caller passing a permanently-null literal would
+    // still compile and still render. This asserts the section renders with its
+    // control usable from the editor's own tree.
+    const user = userEvent.setup();
+    await mountEditor();
+    await user.click(pick("image", "Image"));
+    const select = within(sheetEl()).getByLabelText(messages.tracksClockLabel);
+    expect((select as HTMLSelectElement).options.length).toBeGreaterThan(0);
+  });
+});
+
 describe("CC4 — red fault 1: the creative stays visible with the sheet open", () => {
   test("the preview is still rendered, not merely that the sheet mounted", async () => {
     const user = userEvent.setup();

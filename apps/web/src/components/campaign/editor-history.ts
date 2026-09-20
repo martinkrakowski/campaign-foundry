@@ -66,6 +66,16 @@ function coalesceKeyOf(action: EditorAction): string | null {
     // (or a different layer) starts its own.
     case "setLayerProps":
       return `setLayerProps:${action.layerId}:${Object.keys(action.patch).sort().join(",")}`;
+    // K5: typing into one stop's `t` or `value` coalesces the way every other
+    // keystroke-driven field does. The stop's address is part of the key, so
+    // moving to a different stop — or to the other field on the same stop —
+    // starts a new history entry rather than folding two edits into one undo.
+    case "setTrackStop":
+      return `setTrackStop:${action.layerId}:${action.trackIndex}:${action.stopIndex}:${Object.keys(
+        action.patch,
+      )
+        .sort()
+        .join(",")}`;
     // An html element's copy and frame (HL5a): the same rule the beat's copy
     // has, keyed by the layer AND the element inside it — copy typed into the
     // second element is not a continuation of a run in the first.
