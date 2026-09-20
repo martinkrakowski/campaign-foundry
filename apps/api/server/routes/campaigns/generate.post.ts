@@ -1,5 +1,7 @@
+import { setResponseHeader } from "h3";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { acquireJob, completeJob, failJob, runJob } from "../../lib/jobs.js";
+import { JobCapacityError } from "../../lib/ports/fs-job-store.js";
 import { parseBrief, parseRegenerateOnly } from "../../lib/load-brief.js";
 import { outputRoot } from "../../lib/config.js";
 import { ALLOWED_IMAGE_MODELS, runCampaign } from "../../lib/pipeline.js";
@@ -129,7 +131,22 @@ export default defineEventHandler(async (event) => {
   // carries the running job's handle (`jobId`) so the second press can adopt the run
   // in progress and keep polling it — the pipeline really is running, and discarding
   // it threw away a campaign that succeeded.
-  const claim = await acquireJob(brief.id);
+  // A full queue is a capacity answer, not an internal error: every slot is a
+  // live run, so there is nothing to retire (R1). 503 with Retry-After, because
+  // the caller should try again rather than treat it as a broken server - the
+  // one thing it must NOT do is what the old code did, which was delete somebody
+  // else's running campaign to make room.
+  let claim: Awaited<ReturnType<typeof acquireJob>>;
+  try {
+    claim = await acquireJob(brief.id);
+  } catch (error) {
+    if (error instanceof JobCapacityError) {
+      setResponseStatus(event, 503);
+      setResponseHeader(event, "retry-after", 30);
+      return { error: error.message, campaignId: brief.id };
+    }
+    throw error;
+  }
   if (!claim.acquired) {
     setResponseStatus(event, 409);
     return {
@@ -140,7 +157,7 @@ export default defineEventHandler(async (event) => {
   }
 
   const jobId = claim.jobId;
-  runJob(jobId, async () => {
+  runJob(jobId, async (signal) => {
     const expectedPolicyHash = await persistedPolicyHash(brief, reroll);
     const expectedCopyHash = await persistedCopyHash(brief, reroll);
     const result = await runCampaign(
@@ -149,6 +166,7 @@ export default defineEventHandler(async (event) => {
       regenerateOnly,
       expectedPolicyHash,
       expectedCopyHash,
+      signal,
     );
     if (!result.success) {
       await failJob(jobId, result.error.message);

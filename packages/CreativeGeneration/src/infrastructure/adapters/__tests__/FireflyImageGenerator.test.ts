@@ -227,3 +227,72 @@ describe("FireflyImageGenerator", () => {
     );
   });
 });
+
+describe("FireflyImageGenerator — the run deadline (R5, D77)", () => {
+  /** The signal each call was actually made with, by endpoint. */
+  const signalsByHost = () => {
+    const out: Record<string, AbortSignal | undefined> = {};
+    for (const call of fetchMock.mock.calls as unknown[][]) {
+      const url = String(call[0]);
+      const init = call[1] as RequestInit | undefined;
+      const host = url.includes("adobelogin") ? "ims" : url.includes("firefly-api") ? "gen" : "img";
+      out[host] = init?.signal ?? undefined;
+    }
+    return out;
+  };
+
+  test("every call carries a signal — the adapter had none at all before", async () => {
+    wire();
+    await new FireflyImageGenerator(creds).resolveBackground(product, ratio("1:1"), ctx);
+    const s = signalsByHost();
+    expect(s.ims).toBeInstanceOf(AbortSignal);
+    expect(s.gen).toBeInstanceOf(AbortSignal);
+    expect(s.img).toBeInstanceOf(AbortSignal);
+  });
+
+  test("an already-aborted run stops the generate call, and never reaches the image fetch", async () => {
+    // The mock must honour the signal, because that is what real `fetch` does:
+    // otherwise this would assert the mock's indifference, not the adapter's
+    // wiring. A generator with a fallback degrades rather than throwing, so the
+    // observable fact is which calls were MADE.
+    fetchMock.mockImplementation((url: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.signal?.aborted) return Promise.reject(new Error("aborted"));
+      const u = String(url);
+      if (u.includes("adobelogin")) return Promise.resolve(res({ json: { access_token: "tok" } }));
+      if (u.includes("firefly-api"))
+        return Promise.resolve(
+          res({ json: { outputs: [{ image: { url: "https://img/x.png" } }] } }),
+        );
+      return Promise.resolve(res({ bytes: pngBytes() }));
+    });
+    const run = AbortSignal.abort(new Error("run abandoned"));
+    const out = await new FireflyImageGenerator({
+      ...creds,
+      fallback: fallback(),
+    }).resolveBackground(product, ratio("1:1"), ctx, run);
+    // It degraded to the fallback rather than producing a Firefly image...
+    expect(out.source).toBe("procedural");
+    // ...and the presigned image fetch was never reached.
+    const hosts = (fetchMock.mock.calls as unknown[][]).map((c) => String(c[0]));
+    expect(hosts.some((u) => u.includes("https://img/"))).toBe(false);
+  });
+
+  test("the SHARED token grant is never bound to one run's signal", async () => {
+    // `authenticate` memoises its promise across runs. Binding run A's signal to
+    // it would cancel the token run B is waiting on — so the IMS call takes the
+    // ceiling only, and must NOT abort when this run does.
+    wire();
+    const run = new AbortController();
+    await new FireflyImageGenerator(creds).resolveBackground(
+      product,
+      ratio("1:1"),
+      ctx,
+      run.signal,
+    );
+    const s = signalsByHost();
+    run.abort(new Error("this run is done"));
+    expect(s.ims!.aborted).toBe(false);
+    // The run-scoped calls do follow it.
+    expect(s.gen!.aborted).toBe(true);
+  });
+});

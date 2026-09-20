@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "lane": "r5",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/ports/fs-job-store.ts",
+      "before": "        throw new JobCapacityError(jobs.length);",
+      "after": "        const [oldest] = jobs.splice(0, 1);\n        await this.deleteJob(oldest!.id);\n        continue;",
+      "because": "This is the defect R1 exists to remove, restored in the exact shape it had: when no settled job can be retired, fall back to evicting index 0 - the oldest RUNNER. It looks like sensible capacity management and it deletes a live campaign out from under itself, releasing its lock so a second Generate for the same campaign is admitted and the two runs overwrite each other. Caught by the store test asserting the refusal and that the live run survives.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/fs-job-store.test.ts",
+        "-t",
+        "REFUSES"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CreativeGeneration/src/infrastructure/adapters/request-deadline.ts",
+      "before": "  return run === undefined ? ceiling : AbortSignal.any([run, ceiling]);",
+      "after": "  return ceiling;",
+      "because": "The plausible simplification: every request already has a ceiling, so composing the run signal looks redundant. It is not - the ceiling bounds ONE request, while the run signal is what stops the calls an abandoned run has not made yet. Dropping it leaves a cancelled run still spending on its remaining cells, and every adapter test that aborts a run and asserts the passed signal follows it goes red.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CreativeGeneration/src/infrastructure/adapters/__tests__/OpenRouterImageGenerator.test.ts",
+        "-t",
+        "follows the run"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

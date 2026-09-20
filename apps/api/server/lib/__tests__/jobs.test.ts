@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import { PipelineExecutionLog } from "@campaignfoundry/CampaignOrchestration";
 import {
   JOB_TTL_MS,
+  RUN_DEADLINE_MS,
   MAX_JOBS,
   acquireJob,
   completeJob,
@@ -115,11 +116,34 @@ describe("jobs port facade", () => {
     expect((await getJob(next))?.status).toBe("running");
   });
 
-  test("when every job is still running, the oldest runner is evicted", async () => {
+  test("when every job is still running, the facade refuses rather than evicting one", async () => {
+    // Pinned the defect, like its counterpart in the store suite: a live run was
+    // deleted to make room, losing its lock.
     const oldest = await createJob("c0");
     for (let i = 1; i < MAX_JOBS; i++) await createJob(`c${i}`);
-    await createJob("overflow");
-    expect(await getJob(oldest)).toBeUndefined();
+    await expect(createJob("overflow")).rejects.toThrow(/job slots are running/);
+    expect(await getJob(oldest)).toBeDefined();
+  });
+
+  test("runJob hands the work a signal that aborts at the run deadline", async () => {
+    // R5 - the bound that makes refusing to evict safe (D73). Asserted through
+    // the signal the work actually receives, not through the constant: a
+    // runJob that forgot to pass one, or passed an already-settled one, fails.
+    vi.useFakeTimers();
+    try {
+      const id = await createJob("camp");
+      let seen: AbortSignal | undefined;
+      runJob(id, async (signal) => {
+        seen = signal;
+        await new Promise(() => {});
+      });
+      await vi.waitFor(() => expect(seen).toBeDefined());
+      expect(seen!.aborted).toBe(false);
+      await vi.advanceTimersByTimeAsync(RUN_DEADLINE_MS + 1);
+      expect(seen!.aborted).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   test("runJob lets work complete the job", async () => {
@@ -212,5 +236,40 @@ console.log(JSON.stringify(job));`,
     expect(result.status).toBe(0);
     const parsed = JSON.parse(result.stdout.trim());
     expect(parsed).toEqual({ status: "running", done: 0, total: 0, log: null });
+  });
+});
+
+describe("the run deadline is terminal (review, #537)", () => {
+  test("the job FAILS at the deadline even when the work keeps going", async () => {
+    // Aborting the signal alone was not enough, and this is the test that says
+    // so. Every image adapter has a fallback, so an aborted provider call
+    // degrades and RESOLVES — the run would carry on compositing and writing
+    // files and could complete long after it expired, leaving R1's refusal to
+    // evict a runner resting on a slot that never comes back.
+    vi.useFakeTimers();
+    try {
+      const id = await createJob("camp");
+      let stillRunning = true;
+      runJob(id, async () => {
+        // Work that ignores the signal entirely — the worst case, and the one
+        // the fallback chain actually produces.
+        await new Promise(() => {});
+        stillRunning = false;
+      });
+      await vi.advanceTimersByTimeAsync(RUN_DEADLINE_MS + 1);
+      await vi.waitFor(async () => expect((await getJob(id))?.status).toBe("failed"));
+      // The work was not killed — it cannot be — but the slot came back.
+      expect(stillRunning).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("work that finishes first is untouched by the deadline", async () => {
+    const id = await createJob("camp");
+    runJob(id, async () => {
+      await completeJob(id, payload());
+    });
+    await vi.waitFor(async () => expect((await getJob(id))?.status).toBe("completed"));
   });
 });

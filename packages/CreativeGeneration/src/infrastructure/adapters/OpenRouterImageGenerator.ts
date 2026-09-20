@@ -9,6 +9,7 @@ import {
   type Product,
 } from "@campaignfoundry/CampaignOrchestration";
 import { resolveCachedBackground } from "./FileSystemBackgroundCache.js";
+import { requestSignal } from "./request-deadline.js";
 
 const ENDPOINT = "https://openrouter.ai/api/v1/chat/completions";
 /** A different provider from Imagen by default, so it's a real second source. */
@@ -68,6 +69,7 @@ export class OpenRouterImageGenerator implements ImageGeneratorPort {
     product: Product,
     ratio: AspectRatio,
     context: BackgroundContext,
+    signal?: AbortSignal,
   ): Promise<BackgroundResult> {
     const prompt = this.buildPrompt(product, context);
     const aspect = ASPECT_RATIO[ratio.value] ?? "1:1";
@@ -82,10 +84,10 @@ export class OpenRouterImageGenerator implements ImageGeneratorPort {
           // specific modality mismatch rather than requiring per-model config.
           let dataUrl: string | undefined;
           try {
-            dataUrl = await this.request(prompt, aspect, ["image"]);
+            dataUrl = await this.request(prompt, aspect, ["image"], signal);
           } catch (error) {
             if (error instanceof Error && error.message.includes("modalities")) {
-              dataUrl = await this.request(prompt, aspect, ["image", "text"]);
+              dataUrl = await this.request(prompt, aspect, ["image", "text"], signal);
             } else {
               throw error;
             }
@@ -101,7 +103,7 @@ export class OpenRouterImageGenerator implements ImageGeneratorPort {
         console.warn(
           `[OpenRouterImageGenerator] failed for ${product.id} @ ${ratio.value}; using fallback. ${message}`,
         );
-        return this.fallback.resolveBackground(product, ratio, context);
+        return this.fallback.resolveBackground(product, ratio, context, signal);
       }
       throw new Error(message);
     }
@@ -112,8 +114,10 @@ export class OpenRouterImageGenerator implements ImageGeneratorPort {
     prompt: string,
     aspectRatio: string,
     modalities: string[],
+    signal: AbortSignal | undefined,
   ): Promise<string | undefined> {
     const response = await fetch(ENDPOINT, {
+      signal: requestSignal(signal),
       method: "POST",
       headers: { authorization: `Bearer ${this.apiKey}`, "content-type": "application/json" },
       body: JSON.stringify({

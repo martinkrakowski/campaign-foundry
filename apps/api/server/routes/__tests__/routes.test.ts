@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createApp, createRouter, toWebHandler, type EventHandler } from "h3";
 import { createCanvas } from "@napi-rs/canvas";
-import { createJob, failJob, resetJobs } from "../../lib/jobs.js";
+import { createJob, failJob, resetJobs, MAX_JOBS } from "../../lib/jobs.js";
 import { setCapabilities } from "../../lib/capabilities.js";
 import indexHandler from "../index.js";
 import generateHandler from "../campaigns/generate.post.js";
@@ -539,6 +539,41 @@ describe("POST /campaigns/generate", () => {
       });
     } finally {
       await failJob(id, "test teardown");
+    }
+  });
+
+  test("a full queue of live runs answers 503 with Retry-After, not a 500", async () => {
+    // R1 refuses to evict a runner, so a full store now throws. That must reach
+    // the caller as a capacity answer: a 500 would read as a broken server, and
+    // the one thing it must NOT do is what the old code did - delete somebody
+    // else's running campaign to make room.
+    const ids: string[] = [];
+    try {
+      for (let i = 0; i < MAX_JOBS; i++) ids.push(await createJob(`other-${i}`));
+      const res = await call(brief());
+      expect(res.status).toBe(503);
+      expect(res.headers.get("retry-after")).toBe("30");
+      const body = (await res.json()) as { error: string; campaignId: string };
+      expect(body.error).toMatch(/job slots are running/);
+      expect(body.campaignId).toBe("camp");
+    } finally {
+      for (const id of ids) await failJob(id, "test teardown");
+    }
+  });
+
+  test("a NON-capacity failure from the job store still propagates", async () => {
+    // The 503 arm must not have turned into a catch-all: a broken store is a
+    // broken server and should read as one.
+    const jobs = await import("../../lib/jobs.js");
+    const spy = vi.spyOn(jobs, "acquireJob").mockRejectedValueOnce(new Error("disk went away"));
+    try {
+      const res = await call(brief());
+      // h3 turns an unhandled throw into a 500 - which is exactly right here,
+      // and exactly wrong for a full queue, which is why that one is caught.
+      expect(res.status).toBe(500);
+      expect(res.status).not.toBe(503);
+    } finally {
+      spy.mockRestore();
     }
   });
 

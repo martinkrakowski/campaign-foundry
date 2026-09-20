@@ -202,3 +202,57 @@ describe("OpenRouterImageGenerator", () => {
     );
   });
 });
+
+describe("OpenRouterImageGenerator — the run deadline (R5, D77)", () => {
+  test("the request carries a signal that follows the run", async () => {
+    fetchMock.mockResolvedValueOnce(
+      res({ json: messageWith({ images: [{ image_url: { url: pngDataUrl() } }] }) }),
+    );
+    const run = new AbortController();
+    await new OpenRouterImageGenerator({ apiKey: "k" }).resolveBackground(
+      product,
+      ratio("1:1"),
+      ctx,
+      run.signal,
+    );
+    const passed = (fetchMock.mock.calls[0]![1] as RequestInit).signal;
+    expect(passed).toBeInstanceOf(AbortSignal);
+    expect(passed!.aborted).toBe(false);
+    run.abort(new Error("run abandoned"));
+    expect(passed!.aborted).toBe(true);
+  });
+
+  test("a caller with no run still gets the per-request ceiling", async () => {
+    fetchMock.mockResolvedValueOnce(
+      res({ json: messageWith({ images: [{ image_url: { url: pngDataUrl() } }] }) }),
+    );
+    await new OpenRouterImageGenerator({ apiKey: "k" }).resolveBackground(
+      product,
+      ratio("1:1"),
+      ctx,
+    );
+    expect((fetchMock.mock.calls[0]![1] as RequestInit).signal).toBeInstanceOf(AbortSignal);
+  });
+
+  test("the modality retry carries the run's signal too", async () => {
+    // The retry is a SECOND request. It used to be unbounded like the first;
+    // an abandoned run must not leave it running.
+    fetchMock
+      .mockResolvedValueOnce(res({ ok: false, status: 400, text: "modalities not supported" }))
+      .mockResolvedValueOnce(
+        res({ json: messageWith({ images: [{ image_url: { url: pngDataUrl() } }] }) }),
+      );
+    const run = new AbortController();
+    await new OpenRouterImageGenerator({ apiKey: "k", fallback: fallback() }).resolveBackground(
+      product,
+      ratio("1:1"),
+      ctx,
+      run.signal,
+    );
+    expect(fetchMock.mock.calls.length).toBeGreaterThan(1);
+    const retrySignal = (fetchMock.mock.calls[1]![1] as RequestInit).signal;
+    expect(retrySignal).toBeInstanceOf(AbortSignal);
+    run.abort(new Error("run abandoned"));
+    expect(retrySignal!.aborted).toBe(true);
+  });
+});
