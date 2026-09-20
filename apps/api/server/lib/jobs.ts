@@ -77,9 +77,31 @@ export function runJob(id: string, work: (signal: AbortSignal) => Promise<void>)
     RUN_DEADLINE_MS,
   );
   timer.unref();
+  // The deadline must be TERMINAL, and aborting the signal alone is not.
+  // Every image adapter has a fallback, so an aborted provider call degrades to
+  // the procedural generator and RESOLVES - the run then carries on compositing,
+  // writing files and exporting proofs, and can complete successfully long after
+  // it expired. Racing the work against the abort is what actually settles the
+  // job, which is the whole reason R1 may refuse to evict a runner.
+  //
+  // The work itself cannot be killed; it is left to unwind on its own. What
+  // matters here is that the SLOT comes back on time.
+  const expired = new Promise<never>((_, reject) => {
+    controller.signal.addEventListener(
+      "abort",
+      // No `??` fallback: `abort` above is always called with an Error, so a
+      // default here would be a branch no input can take - the kind the
+      // coverage gate exists to surface.
+      () => reject(controller.signal.reason as Error),
+      { once: true },
+    );
+  });
+  // The loser of the race stays pending; without this an abort that arrives
+  // after the work has already finished would surface as an unhandled rejection.
+  expired.catch(() => undefined);
   void (async () => {
     try {
-      await work(controller.signal);
+      await Promise.race([work(controller.signal), expired]);
     } catch (reason) {
       try {
         await failJob(id, reason instanceof Error ? reason.message : "Job failed");

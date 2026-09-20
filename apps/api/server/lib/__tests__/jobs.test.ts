@@ -238,3 +238,38 @@ console.log(JSON.stringify(job));`,
     expect(parsed).toEqual({ status: "running", done: 0, total: 0, log: null });
   });
 });
+
+describe("the run deadline is terminal (review, #537)", () => {
+  test("the job FAILS at the deadline even when the work keeps going", async () => {
+    // Aborting the signal alone was not enough, and this is the test that says
+    // so. Every image adapter has a fallback, so an aborted provider call
+    // degrades and RESOLVES — the run would carry on compositing and writing
+    // files and could complete long after it expired, leaving R1's refusal to
+    // evict a runner resting on a slot that never comes back.
+    vi.useFakeTimers();
+    try {
+      const id = await createJob("camp");
+      let stillRunning = true;
+      runJob(id, async () => {
+        // Work that ignores the signal entirely — the worst case, and the one
+        // the fallback chain actually produces.
+        await new Promise(() => {});
+        stillRunning = false;
+      });
+      await vi.advanceTimersByTimeAsync(RUN_DEADLINE_MS + 1);
+      await vi.waitFor(async () => expect((await getJob(id))?.status).toBe("failed"));
+      // The work was not killed — it cannot be — but the slot came back.
+      expect(stillRunning).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("work that finishes first is untouched by the deadline", async () => {
+    const id = await createJob("camp");
+    runJob(id, async () => {
+      await completeJob(id, payload());
+    });
+    await vi.waitFor(async () => expect((await getJob(id))?.status).toBe("completed"));
+  });
+});
