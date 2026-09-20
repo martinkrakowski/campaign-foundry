@@ -43,5 +43,18 @@ export interface ImageGeneratorPort {
     product: Product,
     ratio: AspectRatio,
     context: BackgroundContext,
+    /**
+     * The RUN's deadline (R5, D77/L13), not a per-request one.
+     *
+     * The seam has to express cancellation or patching the adapters alone
+     * cannot: each adapter still applies its own per-request ceiling, and
+     * composes this with it, so a hung socket is bounded either way and a
+     * cancelled run stops the calls it has not made yet.
+     *
+     * Optional because an adapter that performs no I/O — the procedural
+     * generator, the asset-reusing one — has nothing to abort, and because a
+     * caller with no run to bound (the CLI) is legitimate.
+     */
+    signal?: AbortSignal,
   ): Promise<BackgroundResult>;
 }

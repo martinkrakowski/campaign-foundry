@@ -47,6 +47,13 @@ export interface CampaignExecutionOptions {
    * disturbing approved ones. Absent → full campaign run (every cell).
    */
   readonly regenerateOnly?: ReadonlyArray<RegenerationTarget>;
+  /**
+   * The run's deadline (R5, D77). Threaded into every image adapter's fetch so
+   * a hung upstream cannot hold a campaign until the process dies — which is
+   * what made eviction the only way to reclaim a slot, and therefore what made
+   * the eviction fix unsafe on its own (D73).
+   */
+  readonly signal?: AbortSignal;
 }
 
 /**

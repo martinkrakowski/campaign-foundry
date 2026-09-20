@@ -185,6 +185,8 @@ export async function runCampaign(
   regenerateOnly?: ReadonlyArray<RegenerationTarget>,
   expectedPolicyHash?: string,
   expectedCopyHash?: string,
+  /** The run's deadline (R5, D77), created by `runJob` and threaded to every image adapter. */
+  signal?: AbortSignal,
 ): Promise<Result<PipelineResult, Error>> {
   const planInput = await planInputFor(brief);
   if (!planInput.success) return planInput;
@@ -206,10 +208,13 @@ export async function runCampaign(
       );
     }
   }
-  return buildPipeline(imageModel, planInput.value).execute(
-    brief,
-    regenerateOnly ? { regenerateOnly } : undefined,
-  );
+  // Options are built from whichever of the two is present: a re-roll with no
+  // deadline (the CLI) and a full run with one are both legitimate.
+  const options =
+    regenerateOnly === undefined && signal === undefined
+      ? undefined
+      : { ...(regenerateOnly ? { regenerateOnly } : {}), ...(signal ? { signal } : {}) };
+  return buildPipeline(imageModel, planInput.value).execute(brief, options);
 }
 
 /**

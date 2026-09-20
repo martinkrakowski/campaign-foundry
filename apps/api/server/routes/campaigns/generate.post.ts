@@ -140,7 +140,7 @@ export default defineEventHandler(async (event) => {
   }
 
   const jobId = claim.jobId;
-  runJob(jobId, async () => {
+  runJob(jobId, async (signal) => {
     const expectedPolicyHash = await persistedPolicyHash(brief, reroll);
     const expectedCopyHash = await persistedCopyHash(brief, reroll);
     const result = await runCampaign(
@@ -149,6 +149,7 @@ export default defineEventHandler(async (event) => {
       regenerateOnly,
       expectedPolicyHash,
       expectedCopyHash,
+      signal,
     );
     if (!result.success) {
       await failJob(jobId, result.error.message);

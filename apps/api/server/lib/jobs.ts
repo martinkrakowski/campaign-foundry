@@ -1,3 +1,4 @@
+import { JOB_TTL_MS } from "./ports/fs-job-store.js";
 import { getJobStore } from "./ports/index.js";
 import type { Job, JobResult, JobStatus, StoredJob } from "./ports/job-store.port.js";
 
@@ -48,16 +49,45 @@ export async function failJob(id: string, error: string): Promise<void> {
  * Run `work` without blocking the caller. Rejections become status `"failed"`
  * rather than unhandled rejections — the POST has already returned 202.
  */
-export function runJob(id: string, work: () => Promise<void>): void {
+/**
+ * A whole run's ceiling (R5, D77).
+ *
+ * Matched to `JOB_TTL_MS` on purpose: that is how long a settled job stays
+ * observable, so a run permitted to outlive it could finish into a job nobody
+ * can read. The per-request ceiling inside each adapter is a different and
+ * much shorter bound — this one exists so a run made of many well-behaved
+ * requests still cannot run forever.
+ */
+export const RUN_DEADLINE_MS = JOB_TTL_MS;
+
+export function runJob(id: string, work: (signal: AbortSignal) => Promise<void>): void {
+  // The deadline belongs here rather than inside the pipeline: this is the
+  // scope that owns the job slot, and D73's whole point is that the slot must
+  // come back.
+  //
+  // A controller with a cleared timer rather than `AbortSignal.timeout`, for two
+  // reasons. A run that finishes in thirty seconds should not leave a ten-minute
+  // timer alive behind it - `expireLater` in the store already clears its timers
+  // for the same reason. And `AbortSignal.timeout` schedules on a timer no test
+  // can advance, so the deadline would have been unobservable: the only thing
+  // left to assert would be the constant, which is not the behaviour.
+  const controller = new AbortController();
+  const timer = setTimeout(
+    () => controller.abort(new Error("Run deadline exceeded")),
+    RUN_DEADLINE_MS,
+  );
+  timer.unref();
   void (async () => {
     try {
-      await work();
+      await work(controller.signal);
     } catch (reason) {
       try {
         await failJob(id, reason instanceof Error ? reason.message : "Job failed");
       } catch {
         await deleteJob(id).catch(() => undefined);
       }
+    } finally {
+      clearTimeout(timer);
     }
   })();
 }

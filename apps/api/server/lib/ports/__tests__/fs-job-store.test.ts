@@ -11,7 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PipelineExecutionLog } from "@campaignfoundry/CampaignOrchestration";
-import { FsJobStore, JOB_TTL_MS, MAX_JOBS } from "../fs-job-store.js";
+import { FsJobStore, JobCapacityError, JOB_TTL_MS, MAX_JOBS } from "../fs-job-store.js";
 import type { JobResult, StoredJob } from "../job-store.port.js";
 
 const payload = (over: Partial<JobResult> = {}): JobResult => ({
@@ -210,11 +210,30 @@ describe("FsJobStore", () => {
     expect((await store.getJob(next))?.status).toBe("running");
   });
 
-  test("when every job is still running, the oldest runner is evicted", async () => {
+  test("when every job is still running, the store REFUSES rather than evicting one", async () => {
+    // This test used to assert the opposite, and it was pinning the defect: the
+    // oldest RUNNER was deleted out from under itself, its lock vanished, and a
+    // second Generate for that campaign was admitted to write over it.
+    //
+    // Refusing is only safe because every run now carries a deadline (R5) - see
+    // evictToFit own comment. Without one, a runner never settles and refusing
+    // here would wedge the API permanently, which is why D73 puts them in one
+    // change.
     const oldest = await store.createJob("c0");
     for (let i = 1; i < MAX_JOBS; i++) await store.createJob(`c${i}`);
-    await store.createJob("overflow");
-    expect(await store.getJob(oldest)).toBeUndefined();
+    await expect(store.createJob("overflow")).rejects.toThrow(JobCapacityError);
+    // The live run is untouched, which is the whole point.
+    expect(await store.getJob(oldest)).toBeDefined();
+  });
+
+  test("a settled job is still retired to make room", async () => {
+    // The capacity refusal must not have turned into "never evict anything".
+    const settled = await store.createJob("c0");
+    await store.completeJob(settled, { halted: false, assets: [], log: null });
+    for (let i = 1; i < MAX_JOBS; i++) await store.createJob(`c${i}`);
+    const admitted = await store.createJob("overflow");
+    expect(admitted).toBeTruthy();
+    expect(await store.getJob(settled)).toBeUndefined();
   });
 
   test("cleans up the temp file when rename fails during write", async () => {

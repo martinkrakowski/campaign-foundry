@@ -9,6 +9,7 @@ import {
   type Product,
 } from "@campaignfoundry/CampaignOrchestration";
 import { resolveCachedBackground } from "./FileSystemBackgroundCache.js";
+import { requestSignal } from "./request-deadline.js";
 
 /** Adobe IMS token endpoint (server-to-server client-credentials flow). */
 const IMS_TOKEN_ENDPOINT = "https://ims-na1.adobelogin.com/ims/token/v3";
@@ -79,6 +80,7 @@ export class FireflyImageGenerator implements ImageGeneratorPort {
     product: Product,
     ratio: AspectRatio,
     context: BackgroundContext,
+    signal?: AbortSignal,
   ): Promise<BackgroundResult> {
     try {
       const prompt = this.buildPrompt(product, context);
@@ -88,8 +90,8 @@ export class FireflyImageGenerator implements ImageGeneratorPort {
         { provider: "firefly", model: FIREFLY_MODEL, prompt, ratio: ratio.value },
         async () => {
           const token = await this.authenticate();
-          const url = await this.generate(token, prompt, ratio);
-          return this.coverFit(await this.fetchImage(url), ratio);
+          const url = await this.generate(token, prompt, ratio, signal);
+          return this.coverFit(await this.fetchImage(url, signal), ratio);
         },
         "firefly",
       );
@@ -101,7 +103,7 @@ export class FireflyImageGenerator implements ImageGeneratorPort {
         console.warn(
           `[FireflyImageGenerator] failed for ${product.id} @ ${ratio.value}; using fallback. ${message}`,
         );
-        return this.fallback.resolveBackground(product, ratio, context);
+        return this.fallback.resolveBackground(product, ratio, context, signal);
       }
       throw new Error(message);
     }
@@ -126,6 +128,10 @@ export class FireflyImageGenerator implements ImageGeneratorPort {
   /** Client-credentials grant against Adobe IMS; caches and returns the bearer token. */
   private async requestToken(): Promise<string> {
     const response = await fetch(IMS_TOKEN_ENDPOINT, {
+      // Ceiling only, never a run's signal: `authenticate` memoises this promise
+      // and shares it across concurrent runs, so one run's abort would cancel
+      // the token another run is waiting on.
+      signal: requestSignal(undefined),
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
@@ -147,8 +153,14 @@ export class FireflyImageGenerator implements ImageGeneratorPort {
   }
 
   /** One Firefly generate call; returns the output image URL. */
-  private async generate(token: string, prompt: string, ratio: AspectRatio): Promise<string> {
+  private async generate(
+    token: string,
+    prompt: string,
+    ratio: AspectRatio,
+    signal: AbortSignal | undefined,
+  ): Promise<string> {
     const response = await fetch(FIREFLY_GENERATE_ENDPOINT, {
+      signal: requestSignal(signal),
       method: "POST",
       headers: {
         authorization: `Bearer ${token}`,
@@ -170,8 +182,8 @@ export class FireflyImageGenerator implements ImageGeneratorPort {
   }
 
   /** Firefly returns a presigned URL; fetch the actual bytes. */
-  private async fetchImage(url: string): Promise<Uint8Array> {
-    const response = await fetch(url);
+  private async fetchImage(url: string, signal: AbortSignal | undefined): Promise<Uint8Array> {
+    const response = await fetch(url, { signal: requestSignal(signal) });
     if (!response.ok) throw new Error(`Firefly image fetch failed (HTTP ${response.status})`);
     return new Uint8Array(await response.arrayBuffer());
   }

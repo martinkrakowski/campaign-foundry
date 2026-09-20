@@ -9,6 +9,7 @@ import {
   type Product,
 } from "@campaignfoundry/CampaignOrchestration";
 import { resolveCachedBackground } from "./FileSystemBackgroundCache.js";
+import { requestSignal } from "./request-deadline.js";
 
 /** Default Imagen model (override with the IMAGEN_MODEL env var). */
 const DEFAULT_MODEL = "imagen-4.0-generate-001";
@@ -19,7 +20,13 @@ export interface ImagenClient {
     generateImages(args: {
       model: string;
       prompt: string;
-      config: { numberOfImages: number; aspectRatio: string };
+      config: {
+        numberOfImages: number;
+        aspectRatio: string;
+        /** R5 — the run deadline. Part of the SEAM, or a test double could not
+            observe that the adapter passes one. */
+        abortSignal?: AbortSignal;
+      };
     }): Promise<{ generatedImages?: Array<{ image?: { imageBytes?: string } }> }>;
   };
 }
@@ -58,6 +65,7 @@ export class GeminiImageGenerator implements ImageGeneratorPort {
     product: Product,
     ratio: AspectRatio,
     context: BackgroundContext,
+    signal?: AbortSignal,
   ): Promise<BackgroundResult> {
     try {
       const prompt = this.buildPrompt(product, context);
@@ -69,7 +77,16 @@ export class GeminiImageGenerator implements ImageGeneratorPort {
           const response = await this.ai.models.generateImages({
             model: this.model,
             prompt,
-            config: { numberOfImages: 1, aspectRatio: ratio.value },
+            config: {
+              numberOfImages: 1,
+              aspectRatio: ratio.value,
+              // The SDK is explicit that this is client-only: aborting stops us
+              // WAITING, it does not stop the service, and the usage is still
+              // billed. That is the right trade here anyway — the point is to
+              // free the slot a hung call is holding, not to save the spend on
+              // a call already made.
+              abortSignal: requestSignal(signal),
+            },
           });
           const imageBytes = response.generatedImages?.[0]?.image?.imageBytes;
           if (!imageBytes) throw new Error("Imagen returned no image data");
@@ -86,7 +103,7 @@ export class GeminiImageGenerator implements ImageGeneratorPort {
         console.warn(
           `[GeminiImageGenerator] Imagen failed for ${product.id} @ ${ratio.value}; using fallback generator. ${message}`,
         );
-        return this.fallback.resolveBackground(product, ratio, context);
+        return this.fallback.resolveBackground(product, ratio, context, signal);
       }
       throw new Error(message);
     }

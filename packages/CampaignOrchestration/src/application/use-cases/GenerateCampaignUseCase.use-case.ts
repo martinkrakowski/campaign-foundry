@@ -440,6 +440,7 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
           product,
           backgroundRatio,
           context,
+          options?.signal,
         );
         log.record(
           "ResolveBackgroundAssets",
@@ -742,6 +743,7 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
         brief.style,
         brief.template,
         brief.id,
+        options?.signal,
         brief.clickDestination,
         brief.audio?.rights,
         backgroundsByRatio.get(cell.ratio.value),
@@ -793,6 +795,11 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     /** R2 — the output namespace scope. Passed rather than reachable: this
         method never sees the brief, and a variant writes bytes. */
     campaignId: string,
+    /**
+     * The run's deadline (R5). Passed for the same reason the campaign id is:
+     * this method never sees the brief or the options, and it does the I/O.
+     */
+    signal: AbortSignal | undefined,
     clickDestination?: string,
     audioRights?: AudioRights,
     backgrounds?: Readonly<Record<string, Uint8Array>>,
@@ -807,7 +814,7 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
       variant.backgroundSource === "procedural"
         ? this.deps.proceduralGenerator
         : this.deps.imageGenerator;
-    const background = await generator.resolveBackground(product, ratio, cellContext);
+    const background = await generator.resolveBackground(product, ratio, cellContext, signal);
     log.record(
       "ResolveBackgroundAssets",
       `${product.id} @ ${ratio.value} v${variant.index} — background: ${background.source}${background.source === "procedural" ? " (procedural fallback — no GenAI background)" : ""}`,

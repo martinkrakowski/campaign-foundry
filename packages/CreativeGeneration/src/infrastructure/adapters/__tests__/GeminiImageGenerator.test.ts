@@ -25,7 +25,7 @@ const fallback = (): ImageGeneratorPort => ({
 type GenArgs = {
   model: string;
   prompt: string;
-  config: { numberOfImages: number; aspectRatio: string };
+  config: { numberOfImages: number; aspectRatio: string; abortSignal?: AbortSignal };
 };
 
 beforeEach(() => vi.spyOn(console, "warn").mockImplementation(() => {}));
@@ -170,5 +170,43 @@ describe("GeminiImageGenerator", () => {
     expect(generateImages.mock.calls[1][0].prompt).toBe(
       'Premium social-advertising hero background for the subject "Hydra Bottle". Audience: Urban. Market/region: DE. Evoke the brand accent colour #1473E6. Cinematic, photographic, high production value, with clean negative space toward the bottom for a headline. Absolutely no text, words, letters, logos or watermarks in the image. Campaign type: paid social advertising across feeds, stories and reels.',
     );
+  });
+});
+
+describe("GeminiImageGenerator — the run deadline (R5, D77)", () => {
+  test("passes a signal to the SDK, and it follows the run", async () => {
+    // Through the seam, because the SDK call is the only place a signal can
+    // reach: this adapter makes no `fetch` of its own.
+    const generateImages = vi.fn(async (_args: GenArgs) => ({
+      generatedImages: [{ image: { imageBytes: "AA==" } }],
+    }));
+    const client: ImagenClient = { models: { generateImages } };
+    const run = new AbortController();
+    await new GeminiImageGenerator({ apiKey: "k", client }).resolveBackground(
+      product,
+      ratio("1:1"),
+      ctx,
+      run.signal,
+    );
+    const passed = generateImages.mock.calls[0]![0].config.abortSignal;
+    expect(passed).toBeInstanceOf(AbortSignal);
+    expect(passed!.aborted).toBe(false);
+    run.abort(new Error("run abandoned"));
+    expect(passed!.aborted).toBe(true);
+  });
+
+  test("still passes one when the caller has no run to bound", async () => {
+    // The CLI runs without a job, so there is no run signal — the per-request
+    // ceiling must still apply, or that path keeps the old unbounded behaviour.
+    const generateImages = vi.fn(async (_args: GenArgs) => ({
+      generatedImages: [{ image: { imageBytes: "AA==" } }],
+    }));
+    const client: ImagenClient = { models: { generateImages } };
+    await new GeminiImageGenerator({ apiKey: "k", client }).resolveBackground(
+      product,
+      ratio("1:1"),
+      ctx,
+    );
+    expect(generateImages.mock.calls[0]![0].config.abortSignal).toBeInstanceOf(AbortSignal);
   });
 });

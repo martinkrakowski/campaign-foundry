@@ -11,6 +11,23 @@ export const MAX_JOBS = 50;
 /** How long a settled job stays pollable after it completes or fails. */
 export const JOB_TTL_MS = 10 * 60_000;
 
+/**
+ * Every slot is a live run, so there is nothing to retire (R1).
+ *
+ * Distinct from “this campaign is already running”, which `acquireJob`
+ * answers with the incumbent's id: this is the server being at capacity, and
+ * the caller should be told rather than have a stranger's run deleted to make
+ * space.
+ */
+export class JobCapacityError extends Error {
+  constructor(running: number) {
+    super(
+      `All ${running} job slots are running campaigns; no settled job can be retired. Try again once one finishes.`,
+    );
+    this.name = "JobCapacityError";
+  }
+}
+
 let globalJobSeq = 0;
 
 interface CacheItem {
@@ -62,13 +79,32 @@ export class FsJobStore implements JobStorePort {
     }
   }
 
+  /**
+   * Make room by retiring SETTLED jobs only (R1, D73).
+   *
+   * It used to fall back to `index 0` — the oldest entry — whenever no
+   * settled job existed, which is the oldest RUNNER. A live campaign was
+   * therefore deleted out from under itself: its lock vanished, a second
+   * Generate for the same campaign was admitted, and the two runs wrote over
+   * each other.
+   *
+   * Why this could not be fixed on its own, and why R5 is in the same change:
+   * `expireLater` is called only from `settle`, so a RUNNING job never
+   * expires. Before the run deadline landed, eviction was the only thing that
+   * ever reclaimed a slot from a hung run — refusing to evict runners without
+   * bounding them would have let fifty hung jobs wedge the API permanently.
+   * With every run now carrying a deadline, a runner always settles, so
+   * refusing here is safe and a full store is a real capacity signal rather
+   * than a leak.
+   */
   private async evictToFit(): Promise<void> {
     const jobs = (await this.listJobs()).slice();
     while (jobs.length >= MAX_JOBS) {
-      // Evict oldest settled job first, else oldest runner.
       const settledIndex = jobs.findIndex((entry) => entry.job.status !== "running");
-      const evictIndex = settledIndex !== -1 ? settledIndex : 0;
-      const [evicted] = jobs.splice(evictIndex, 1);
+      if (settledIndex === -1) {
+        throw new JobCapacityError(jobs.length);
+      }
+      const [evicted] = jobs.splice(settledIndex, 1);
       await this.deleteJob(evicted!.id);
     }
   }
