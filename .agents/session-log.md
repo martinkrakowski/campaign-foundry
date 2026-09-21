@@ -6039,13 +6039,17 @@ and source formatting, recorded here rather than fixed.
 
 - **Mode:** Implementer
 - **Changes:**
-  - `docs/planning/2026-09-20_remaining-work.md`: moved RW-7 (beat-boundary drag) to Wave A as a
-    fourth lane; dropped "draft, for the owner's approval" from the status line; kept **Nothing
-    dispatched**.
+  - `docs/planning/2026-09-20_remaining-work.md`: moved RW-7 (beat-boundary drag) to Wave A,
+    sequenced behind RW-1 (not parallel); dropped "draft, for the owner's approval" from the
+    status line; kept **Nothing dispatched**. Wave C no longer lists RW-15 in a 2/2′ slot.
 - **Decisions:**
   - Wave A, not sequenced behind RW-5 in Wave B. The Wave B hatch ("or Wave C") was closed: RW-3
-    owns `editor-state.ts` (the 3-ratio product pinned at 36 in `editor-state.test.ts:2124`), RW-15
-    owns `TimelineTape.tsx`, and only Wave A has no collision. Four concurrent lanes stretch RW-D6;
-    a 1-day lane beside three small ones is cheaper than a lane with nowhere to run.
+    owns `editor-state.ts` (the 3-ratio product pinned at 36 in `editor-state.test.ts:2124` and
+    `:2134`), RW-15 owns `TimelineTape.tsx`, and only Wave A is free of a file collision.
+  - RW-1 then RW-7 inside one slot (0.5 d + 1 d = 1.5 d in a 2-day wave). The flake test mounts
+    `<BriefEditor>` (`:338`); RW-7 owns that file. Parallel would poison the measurement. This
+    also restores three concurrent lanes, so RW-D6 is no longer stretched.
 - **Left open:**
-  - Wave B slot 2 is empty on purpose (do not invent occupancy). Still nothing dispatched.
+  - Wave B slot 2 is empty on purpose (do not invent occupancy).
+  - Pre-dispatch, not pre-merge: does RW-4's frame field need dropping from `canonicalLayer`?
+    Ten minutes against D130 before Wave A starts. Still nothing dispatched.
