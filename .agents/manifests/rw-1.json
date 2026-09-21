@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "lane": "RW-1",
+  "mutations": [
+    {
+      "file": "apps/web/src/components/campaign/preview-props.ts",
+      "before": "    headline: variant?.headline ?? state.campaignMessage,",
+      "after": "    headline: state.campaignMessage,",
+      "because": "Stop the selected slot's own drawn copy from reaching the look. The list still lists, the row still highlights and every network assertion stays green — the rail simply keeps drawing the brief's campaign message for whichever creative is clicked. This is the assertion that used to sit behind a 450 ms settle and flake when the clock lost; waitFor on the headline is what makes the catch load-independent.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.creatives.test.tsx",
+        "-t",
+        "the rail composes the clicked slot's own look, not the first value of each axis"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

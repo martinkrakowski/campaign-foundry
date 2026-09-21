@@ -268,7 +268,15 @@ const routes = (opts: { briefs?: readonly unknown[]; plan?: () => Response } = {
   return calls;
 };
 
-/** Longer than both the plan debounce (250 ms) and the frame debounce (300 ms). */
+/**
+ * Longer than both the plan debounce (250 ms) and the frame debounce (300 ms).
+ *
+ * Only for proving a request that WOULD have been issued was not. Waiting on
+ * an already-true condition is vacuous, which is why "no further calls" stays
+ * a clock wait after the positive half has been `waitFor`'d — the same split
+ * `rail-in-shell.test.tsx` records. Do not use this to wait for something to
+ * appear: that is the H2 flake (a 450 ms wall-clock racing `test:cov` workers).
+ */
 const settle = () => new Promise((r) => setTimeout(r, 450));
 
 type Call = { url: string; method: string; body?: Record<string, unknown> };
@@ -339,17 +347,28 @@ const show = (id: string) => (
   </>
 );
 
-const ready = async (id: string) => {
+const ready = async (id: string, calls: Call[]) => {
   await waitFor(() =>
     expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(id),
   );
-  await settle();
+  // The plan POST is debounced 250 ms and the frame POST 300 ms. A 450 ms
+  // wall-clock wait after the name is set is the race this file flaked on
+  // (H2): under `yarn test:cov` workers the debounce timers reset on hydration
+  // and have not fired inside 450 ms, so a different assertion fails each run.
+  // Wait for the conditions instead — Estimate has left "Working out…", and
+  // the mount's own frame has been issued. Classic drafts never plan
+  // (`canPlan` is variation-only) but they still compose a frame.
+  await waitFor(() => {
+    expect(screen.getAllByText("Estimate").length).toBeGreaterThan(0);
+    expect(screen.queryByText(messages.estimateWorking)).toBeNull();
+  });
+  await waitFor(() => expect(frameCalls(calls).length).toBeGreaterThan(0));
 };
 
 const mountWith = async (id: string, opts: Parameters<typeof routes>[0]) => {
   const calls = routes(opts);
   const view = renderWithRun(show(id));
-  await ready(id);
+  await ready(id, calls);
   return { calls, view };
 };
 
@@ -417,37 +436,40 @@ describe("(2) clicking a row loads that creative", () => {
     const framesBefore = frameCalls(calls).length;
 
     await user.click(row(2));
-    await settle();
-
-    // Rendered state, not a spy: the composed creative in the rail now draws
-    // slot 2's own headline, and the brief's words are gone from it.
-    expect(railShows("Twocreative")).toBeGreaterThan(0);
-    expect(railShows("Hi")).toBe(0);
-    // And the picture itself moved. The headline is drawn on the page, but
-    // `layout` and `tone` are the SERVER's to composite, so the claim about
-    // them is a claim about the request: exactly one new frame, asking for slot
-    // 2's own axes rather than the head of each axis list.
-    expect(frameCalls(calls).length).toBe(framesBefore + 1);
-    expect(lastCell(calls).layout).toBe("headline-bottom");
-    expect(lastCell(calls).tone).toBe("subtle");
-    // And the row says it is the one selected.
-    expect(row(2).getAttribute("aria-pressed")).toBe("true");
-    expect(row(0).getAttribute("aria-pressed")).toBe("false");
+    await waitFor(() => {
+      // Rendered state, not a spy: the composed creative in the rail now draws
+      // slot 2's own headline, and the brief's words are gone from it.
+      expect(railShows("Twocreative")).toBeGreaterThan(0);
+      expect(railShows("Hi")).toBe(0);
+      // And the picture itself moved. The headline is drawn on the page, but
+      // `layout` and `tone` are the SERVER's to composite, so the claim about
+      // them is a claim about the request: exactly one new frame, asking for slot
+      // 2's own axes rather than the head of each axis list.
+      expect(frameCalls(calls).length).toBe(framesBefore + 1);
+      expect(lastCell(calls).layout).toBe("headline-bottom");
+      expect(lastCell(calls).tone).toBe("subtle");
+      // And the row says it is the one selected.
+      expect(row(2).getAttribute("aria-pressed")).toBe("true");
+      expect(row(0).getAttribute("aria-pressed")).toBe("false");
+    });
 
     // Clicking through to the other creative moves the editor with it (2b).
     await user.click(row(0));
-    await settle();
-    expect(railShows("Zerocreative")).toBeGreaterThan(0);
-    expect(railShows("Twocreative")).toBe(0);
-    expect(row(0).getAttribute("aria-pressed")).toBe("true");
-    expect(row(2).getAttribute("aria-pressed")).toBe("false");
+    await waitFor(() => {
+      expect(railShows("Zerocreative")).toBeGreaterThan(0);
+      expect(railShows("Twocreative")).toBe(0);
+      expect(row(0).getAttribute("aria-pressed")).toBe("true");
+      expect(row(2).getAttribute("aria-pressed")).toBe("false");
+    });
   });
 
   test("re-clicking the creative already loaded fetches nothing — no plan, no frame", async () => {
     const user = userEvent.setup();
     const calls = await mount();
+    const framesAtClick = frameCalls(calls).length;
     await user.click(row(2));
-    await settle();
+    await waitFor(() => expect(row(2).getAttribute("aria-pressed")).toBe("true"));
+    await waitFor(() => expect(frameCalls(calls).length).toBe(framesAtClick + 1));
 
     const plansBefore = planCalls(calls).length;
     const framesBefore = frameCalls(calls).length;
@@ -476,10 +498,7 @@ describe("(2) clicking a row loads that creative", () => {
 
     // Selecting slot 1 (drawn for Product B "beta")
     await user.click(row(1));
-    await settle();
-
-    // Assert rendered colour, not a prop
-    expect(railSwatchColor()?.toLowerCase()).toBe("#e61414");
+    await waitFor(() => expect(railSwatchColor()?.toLowerCase()).toBe("#e61414"));
   });
 
   test("the composed frame agrees with the client preview product", async () => {
@@ -490,11 +509,11 @@ describe("(2) clicking a row loads that creative", () => {
     });
 
     await user.click(row(1));
-    await settle();
-
-    // The composed frame request must name the second product ("beta")
-    expect(lastCell(calls).productId).toBe("beta");
-    expect(railSwatchColor()?.toLowerCase()).toBe("#e61414");
+    await waitFor(() => {
+      // The composed frame request must name the second product ("beta")
+      expect(lastCell(calls).productId).toBe("beta");
+      expect(railSwatchColor()?.toLowerCase()).toBe("#e61414");
+    });
   });
 
   test("switching between two slots of different products re-fetches", async () => {
@@ -508,23 +527,26 @@ describe("(2) clicking a row loads that creative", () => {
 
     // Click slot 1 (product "beta")
     await user.click(row(1));
-    await settle();
+    await waitFor(() => {
+      expect(frameCalls(calls).length).toBe(framesBefore + 1);
+      expect(lastCell(calls).productId).toBe("beta");
+    });
     const framesAfterBeta = frameCalls(calls).length;
-    expect(framesAfterBeta).toBe(framesBefore + 1);
-    expect(lastCell(calls).productId).toBe("beta");
 
     // Switch to slot 0 (product "alpha")
     await user.click(row(0));
-    await settle();
+    await waitFor(() => {
+      expect(frameCalls(calls).length).toBe(framesAfterBeta + 1);
+      expect(lastCell(calls).productId).toBe("alpha");
+    });
     const framesAfterAlpha = frameCalls(calls).length;
-    expect(framesAfterAlpha).toBe(framesAfterBeta + 1);
-    expect(lastCell(calls).productId).toBe("alpha");
 
     // Switch back to slot 1 (product "beta")
     await user.click(row(1));
-    await settle();
-    expect(frameCalls(calls).length).toBe(framesAfterAlpha + 1);
-    expect(lastCell(calls).productId).toBe("beta");
+    await waitFor(() => {
+      expect(frameCalls(calls).length).toBe(framesAfterAlpha + 1);
+      expect(lastCell(calls).productId).toBe("beta");
+    });
   });
 
   test("a slot naming no product falls back to products 0 and renders", async () => {
@@ -536,23 +558,26 @@ describe("(2) clicking a row loads that creative", () => {
 
     // First select slot 1 (product "beta")
     await user.click(row(1));
-    await settle();
-    expect(railSwatchColor()?.toLowerCase()).toBe("#e61414");
-    expect(lastCell(calls).productId).toBe("beta");
+    await waitFor(() => {
+      expect(railSwatchColor()?.toLowerCase()).toBe("#e61414");
+      expect(lastCell(calls).productId).toBe("beta");
+    });
 
     // Click slot 2 (names no product) — must fall back to products[0]
     await user.click(row(2));
-    await settle();
-    expect(railShows("NoProductCreative")).toBeGreaterThan(0);
-    expect(railSwatchColor()?.toLowerCase()).toBe("#1473e6");
-    expect(lastCell(calls).productId).toBe("alpha");
+    await waitFor(() => {
+      expect(railShows("NoProductCreative")).toBeGreaterThan(0);
+      expect(railSwatchColor()?.toLowerCase()).toBe("#1473e6");
+      expect(lastCell(calls).productId).toBe("alpha");
+    });
 
     // Click slot 3 (names a product the brief does not have) — must fall back to products[0]
     await user.click(row(3));
-    await settle();
-    expect(railShows("StaleProductCreative")).toBeGreaterThan(0);
-    expect(railSwatchColor()?.toLowerCase()).toBe("#1473e6");
-    expect(lastCell(calls).productId).toBe("alpha");
+    await waitFor(() => {
+      expect(railShows("StaleProductCreative")).toBeGreaterThan(0);
+      expect(railSwatchColor()?.toLowerCase()).toBe("#1473e6");
+      expect(lastCell(calls).productId).toBe("alpha");
+    });
   });
 });
 
@@ -584,18 +609,17 @@ describe("(3) nothing is lost by switching", () => {
     expect(screen.getByTestId("dirty-probe").textContent).toBe("dirty");
 
     await user.click(row(2));
-    await settle();
+    await waitFor(() => expect(row(2).getAttribute("aria-pressed")).toBe("true"));
     await user.click(row(0));
-    await settle();
+    await waitFor(() => {
+      expect(row(0).getAttribute("aria-pressed")).toBe("true");
+      expect(railShows("Zerocreative")).toBeGreaterThan(0);
+    });
 
     expect((screen.getByLabelText("Target Audience") as HTMLInputElement).value).toBe("cyclists");
     // Still unsaved — the switch preserved the work by not touching it, which
     // is a different thing from having saved it for the operator.
     expect(screen.getByTestId("dirty-probe").textContent).toBe("dirty");
-    // The positive half: the switch really happened, so the survival above is
-    // not the survival of a click that did nothing.
-    expect(row(0).getAttribute("aria-pressed")).toBe("true");
-    expect(railShows("Zerocreative")).toBeGreaterThan(0);
   });
 });
 
@@ -611,8 +635,11 @@ describe("(4) selection is not a document change", () => {
     expect(plansBefore).toBeGreaterThan(0);
 
     await user.click(row(2));
-    await settle();
+    await waitFor(() => expect(row(2).getAttribute("aria-pressed")).toBe("true"));
     await user.click(row(0));
+    await waitFor(() => expect(row(0).getAttribute("aria-pressed")).toBe("true"));
+    // A plan that WOULD have been issued has had time — the clicks themselves
+    // are not a document change, so the debounce must not fire a second POST.
     await settle();
 
     // A loaded brief the operator only LOOKED at is still byte-identical, so the
@@ -683,9 +710,10 @@ describe("the selection is ephemeral and host-owned (D139)", () => {
     const user = userEvent.setup();
     await mount();
     await user.click(row(2));
-    await settle();
-    expect(row(2).getAttribute("aria-pressed")).toBe("true");
-    expect(railShows("Twocreative")).toBeGreaterThan(0);
+    await waitFor(() => {
+      expect(row(2).getAttribute("aria-pressed")).toBe("true");
+      expect(railShows("Twocreative")).toBeGreaterThan(0);
+    });
 
     // The planner now answers with slot 2 gone. The selection names nothing, so
     // it retires rather than pointing at a creative that is not there.
@@ -706,17 +734,17 @@ describe("the selection is ephemeral and host-owned (D139)", () => {
     const audience = screen.getByLabelText("Target Audience") as HTMLInputElement;
     await user.clear(audience);
     await user.type(audience, "z");
-    await settle();
-
-    expect(rows()).toHaveLength(1);
-    expect(row(0).getAttribute("aria-pressed")).toBe("false");
-    // Back to the brief's own words — no slot is loaded.
-    expect(railShows("Hi")).toBeGreaterThan(0);
-    // SL4: the document still says two slots are live and the answer carries
-    // one, which is exactly the shortfall the pending line counts — but the
-    // answer is IN, so nothing is being made and the line must not appear. A
-    // pending notice keyed on the shortfall alone would stand here forever.
-    expect(screen.queryByText(messages.creativeDrawing)).toBeNull();
+    await waitFor(() => {
+      expect(rows()).toHaveLength(1);
+      expect(row(0).getAttribute("aria-pressed")).toBe("false");
+      // Back to the brief's own words — no slot is loaded.
+      expect(railShows("Hi")).toBeGreaterThan(0);
+      // SL4: the document still says two slots are live and the answer carries
+      // one, which is exactly the shortfall the pending line counts — but the
+      // answer is IN, so nothing is being made and the line must not appear. A
+      // pending notice keyed on the shortfall alone would stand here forever.
+      expect(screen.queryByText(messages.creativeDrawing)).toBeNull();
+    });
   });
 
   /**
@@ -731,8 +759,7 @@ describe("the selection is ephemeral and host-owned (D139)", () => {
     const user = userEvent.setup();
     await mount();
     await user.click(row(2));
-    await settle();
-    expect(railShows("Twocreative")).toBeGreaterThan(0);
+    await waitFor(() => expect(railShows("Twocreative")).toBeGreaterThan(0));
 
     // Slot 2 survives, drawn differently.
     const redrawn = { ...EMITTED[1]!, headline: "Tworedrawn", layout: "headline-top" };
@@ -755,14 +782,14 @@ describe("the selection is ephemeral and host-owned (D139)", () => {
     const audience = screen.getByLabelText("Target Audience") as HTMLInputElement;
     await user.clear(audience);
     await user.type(audience, "z");
-    await settle();
-
-    // The slot is still selected — it did not retire, because it still exists…
-    expect(row(2).getAttribute("aria-pressed")).toBe("true");
-    expect(row(2).textContent).toContain("Tworedrawn");
-    // …and the rail followed it rather than holding the draw it was handed.
-    expect(railShows("Tworedrawn")).toBeGreaterThan(0);
-    expect(railShows("Twocreative")).toBe(0);
+    await waitFor(() => {
+      // The slot is still selected — it did not retire, because it still exists…
+      expect(row(2).getAttribute("aria-pressed")).toBe("true");
+      expect(row(2).textContent).toContain("Tworedrawn");
+      // …and the rail followed it rather than holding the draw it was handed.
+      expect(railShows("Tworedrawn")).toBeGreaterThan(0);
+      expect(railShows("Twocreative")).toBe(0);
+    });
   });
 });
 
@@ -839,18 +866,18 @@ describe("(6) deleting a creative", () => {
       screen.queryByRole("button", { name: new RegExp(`^${messages.creativeRowLabel(2)}`) }),
     ).toBeNull();
 
-    await settle();
-
-    // And what it then asked the planner for: the same recipe, one more
-    // tombstone. `count` is the recipe's target cardinality (SL-D5) and the
-    // gesture does not touch it — an add that raised it would re-open the
-    // exhaustive search, and a delete that lowered it would strand a brief whose
-    // plan that search produced.
-    expect(askedFor(calls)).toMatchObject({
-      count: 3,
-      occupancy: { nextIndex: 3, tombstoned: [1, 2] },
+    await waitFor(() => {
+      // And what it then asked the planner for: the same recipe, one more
+      // tombstone. `count` is the recipe's target cardinality (SL-D5) and the
+      // gesture does not touch it — an add that raised it would re-open the
+      // exhaustive search, and a delete that lowered it would strand a brief whose
+      // plan that search produced.
+      expect(askedFor(calls)).toMatchObject({
+        count: 3,
+        occupancy: { nextIndex: 3, tombstoned: [1, 2] },
+      });
+      expect(rows()).toHaveLength(1);
     });
-    expect(rows()).toHaveLength(1);
   });
 
   test("it asks nothing first — ⌘Z is the undo, and it brings the same creative back", async () => {
@@ -862,20 +889,33 @@ describe("(6) deleting a creative", () => {
     // No confirm. The delete is a draft edit like any other: nothing is on disk
     // until Save, and the chord below reverses it exactly.
     expect(screen.queryByRole("dialog")).toBeNull();
-    await settle();
-    expect(rows()).toHaveLength(1);
+    // The mount already asked for `{tombstoned:[1]}` — the occupancy undo will
+    // restore. Waiting only for the row to vanish lets ⌘Z inside the 250ms plan
+    // debounce cancel the delete POST, and the restored-occupancy assertion
+    // below would pass for that first body. Wait for the delete occupancy first
+    // so the restored occupancy cannot be the mount request.
+    await waitFor(() => {
+      expect(askedFor(calls)).toMatchObject({
+        count: 3,
+        occupancy: { nextIndex: 3, tombstoned: [1, 2] },
+      });
+      expect(rows()).toHaveLength(1);
+    });
+    const plansAfterDelete = planCalls(calls).length;
 
     await user.keyboard("{Meta>}z{/Meta}");
-    await settle();
-
-    // The SAME creative, at the same slot, with the same draw — which is what
-    // makes ⌘Z an undo and a re-add not one. The request says so too: the
-    // tombstone is gone and `count` never moved.
-    expect(rows()).toHaveLength(2);
-    expect(row(2).textContent).toContain("Twocreative");
-    expect(askedFor(calls)).toMatchObject({
-      count: 3,
-      occupancy: { nextIndex: 3, tombstoned: [1] },
+    await waitFor(() => {
+      // The SAME creative, at the same slot, with the same draw — which is what
+      // makes ⌘Z an undo and a re-add not one. The request says so too: the
+      // tombstone is gone and `count` never moved. A new plan call, not the
+      // delete body still sitting at `askedFor`.
+      expect(rows()).toHaveLength(2);
+      expect(row(2).textContent).toContain("Twocreative");
+      expect(askedFor(calls)).toMatchObject({
+        count: 3,
+        occupancy: { nextIndex: 3, tombstoned: [1] },
+      });
+      expect(planCalls(calls).length).toBeGreaterThan(plansAfterDelete);
     });
   });
 
@@ -883,20 +923,21 @@ describe("(6) deleting a creative", () => {
     const user = userEvent.setup();
     await mount();
     await user.click(row(2));
-    await settle();
-    // The positive half first: the rail really is composing slot 2's own draw,
-    // so its disappearance below is a retirement and not a rail that never
-    // showed anything.
-    expect(railShows("Twocreative")).toBeGreaterThan(0);
+    await waitFor(() => {
+      // The positive half first: the rail really is composing slot 2's own draw,
+      // so its disappearance below is a retirement and not a rail that never
+      // showed anything.
+      expect(railShows("Twocreative")).toBeGreaterThan(0);
+    });
 
     await user.click(deleteControl(2)!);
-    await settle();
-
-    // D139: a selection that names nothing retires. The rail is back on the
-    // brief's own words, and no row is pressed.
-    expect(railShows("Twocreative")).toBe(0);
-    expect(railShows("Hi")).toBeGreaterThan(0);
-    expect(row(0).getAttribute("aria-pressed")).toBe("false");
+    await waitFor(() => {
+      // D139: a selection that names nothing retires. The rail is back on the
+      // brief's own words, and no row is pressed.
+      expect(railShows("Twocreative")).toBe(0);
+      expect(railShows("Hi")).toBeGreaterThan(0);
+      expect(row(0).getAttribute("aria-pressed")).toBe("false");
+    });
   });
 
   test("the last remaining creative carries no delete control, and the panel says why", async () => {
@@ -908,14 +949,14 @@ describe("(6) deleting a creative", () => {
     expect(screen.queryByText(messages.creativeDeleteLastNote)).toBeNull();
 
     await user.click(deleteControl(2)!);
-    await settle();
-
-    // One left. A control that is offered and then refuses is the defect
-    // DESIGN.md §1.5 names, so it is not offered — and the reason is on screen
-    // rather than left for the operator to infer from a dead button.
-    expect(rows()).toHaveLength(1);
-    expect(deleteControl(0)).toBeNull();
-    expect(screen.getByText(messages.creativeDeleteLastNote)).toBeTruthy();
+    await waitFor(() => {
+      // One left. A control that is offered and then refuses is the defect
+      // DESIGN.md §1.5 names, so it is not offered — and the reason is on screen
+      // rather than left for the operator to infer from a dead button.
+      expect(rows()).toHaveLength(1);
+      expect(deleteControl(0)).toBeNull();
+      expect(screen.getByText(messages.creativeDeleteLastNote)).toBeTruthy();
+    });
   });
 });
 
@@ -933,26 +974,26 @@ describe("(7) adding a creative", () => {
     expect(rows()).toHaveLength(2);
     expect(screen.getByText(messages.creativeDrawing)).toBeTruthy();
 
-    await settle();
-
-    // The new slot is the cursor — slot 3, "Creative 4" — and NOT the hole at
-    // slot 1. A scheme that reused the lowest tombstoned slot would also produce
-    // one more row here, which is why the fixture starts with a hole in it.
-    expect(rows()).toHaveLength(3);
-    expect(row(3).textContent).toContain("Threecreative");
-    expect(
-      screen.queryByRole("button", { name: new RegExp(`^${messages.creativeRowLabel(1)}`) }),
-    ).toBeNull();
-    expect(askedFor(calls)).toMatchObject({
-      count: 3,
-      occupancy: { nextIndex: 4, tombstoned: [1] },
+    await waitFor(() => {
+      // The new slot is the cursor — slot 3, "Creative 4" — and NOT the hole at
+      // slot 1. A scheme that reused the lowest tombstoned slot would also produce
+      // one more row here, which is why the fixture starts with a hole in it.
+      expect(rows()).toHaveLength(3);
+      expect(row(3).textContent).toContain("Threecreative");
+      expect(
+        screen.queryByRole("button", { name: new RegExp(`^${messages.creativeRowLabel(1)}`) }),
+      ).toBeNull();
+      expect(askedFor(calls)).toMatchObject({
+        count: 3,
+        occupancy: { nextIndex: 4, tombstoned: [1] },
+      });
+      // And the line comes down when the answer lands — a pending notice that
+      // never went away would be the worse lie.
+      expect(screen.queryByText(messages.creativeDrawing)).toBeNull();
+      // The creatives that were already there are untouched, rows and all.
+      expect(row(0).textContent).toContain("Zerocreative");
+      expect(row(2).textContent).toContain("Twocreative");
     });
-    // And the line comes down when the answer lands — a pending notice that
-    // never went away would be the worse lie.
-    expect(screen.queryByText(messages.creativeDrawing)).toBeNull();
-    // The creatives that were already there are untouched, rows and all.
-    expect(row(0).textContent).toContain("Zerocreative");
-    expect(row(2).textContent).toContain("Twocreative");
   });
 
   test("add is refused when the axes cannot produce another creative, and says so", async () => {
@@ -978,10 +1019,9 @@ describe("(8) the round trip — a gesture survives a save and a reload", () => 
     const { calls, view } = await mountWith("holey", {});
 
     await user.click(addControl());
-    await settle();
+    await waitFor(() => expect(row(3)).toBeTruthy());
     await user.click(deleteControl(0)!);
-    await settle();
-    expect(rows()).toHaveLength(2);
+    await waitFor(() => expect(rows()).toHaveLength(2));
 
     await user.click(screen.getByRole("button", { name: /^Save$/ }));
     await waitFor(() => expect(savedBodies(calls)).toHaveLength(1));
@@ -995,16 +1035,22 @@ describe("(8) the round trip — a gesture survives a save and a reload", () => 
 
     // Reload the editor against the stored brief — a different mount reading
     // what the save wrote, which is the only form of this claim that means
-    // anything.
+    // anything. `calls` still holds the previous mount's fetches, so `ready()`
+    // would see them and return before this mount has planned.
+    const plansBeforeReload = planCalls(calls).length;
     view.unmount();
     renderWithRun(show("holey"));
-    await ready("holey");
-
-    // The same two creatives, at the same slots, and the reloaded draft asks the
-    // planner the same question the saved one did.
-    expect(rows()).toHaveLength(2);
-    expect(row(2).textContent).toContain("Twocreative");
-    expect(row(3).textContent).toContain("Threecreative");
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("holey"),
+    );
+    await waitFor(() => expect(planCalls(calls).length).toBeGreaterThan(plansBeforeReload));
+    await waitFor(() => {
+      // The same two creatives, at the same slots, and the reloaded draft asks the
+      // planner the same question the saved one did.
+      expect(rows()).toHaveLength(2);
+      expect(row(2).textContent).toContain("Twocreative");
+      expect(row(3).textContent).toContain("Threecreative");
+    });
     expect(askedFor(calls)).toMatchObject({
       count: 3,
       occupancy: { nextIndex: 4, tombstoned: [0, 1] },
