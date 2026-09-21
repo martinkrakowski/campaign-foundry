@@ -251,6 +251,16 @@ describe("DialogShell and DrawerShell anatomy", () => {
     expect(document.activeElement).not.toBe(screen.getByRole("button", { name: "Only control" }));
   });
 
+  test("Tab on an open shell with no focusable descendants does not throw", () => {
+    render(
+      <DialogShell open onClose={vi.fn()} ariaLabel="Empty Shell">
+        <p>No controls</p>
+      </DialogShell>,
+    );
+
+    expect(() => fireEvent.keyDown(window, { key: "Tab" })).not.toThrow();
+  });
+
   test("re-rendering with a fresh inline onClose does not re-run the trap and move focus", () => {
     const Controlled = () => {
       const [open, setOpen] = useState(true);
@@ -407,6 +417,38 @@ describe("DialogShell and DrawerShell anatomy", () => {
     expect(lowerFocus).not.toHaveBeenCalled();
   });
 
+  test("a lower trap that still has reachable controls does not claim Tab from the topmost", () => {
+    // A kit shell would be inert, so getFocusableDialogElements would be empty
+    // and the Tab handler would return before the open-order registry check.
+    const LowerTrap = () => {
+      const dialogRef = useRef<HTMLDivElement>(null);
+      useDialogFocusTrap({ open: true, onClose: vi.fn(), dialogRef });
+      return (
+        <div ref={dialogRef}>
+          <button type="button">Lower first</button>
+        </div>
+      );
+    };
+
+    render(
+      <div>
+        <LowerTrap />
+        <DialogShell open onClose={vi.fn()} ariaLabel="Upper Overlay">
+          <button type="button">Upper first</button>
+        </DialogShell>
+      </div>,
+    );
+
+    (document.activeElement as HTMLElement).blur();
+    const lowerFirst = screen.getByRole("button", { name: "Lower first" });
+    const lowerFocus = vi.spyOn(lowerFirst, "focus");
+
+    fireEvent.keyDown(window, { key: "Tab" });
+
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Upper first" }));
+    expect(lowerFocus).not.toHaveBeenCalled();
+  });
+
   test("a trap whose dialog element never mounts registers nothing and leaves earlier overlays in charge", () => {
     render(
       <DialogShell open onClose={vi.fn()} ariaLabel="Real Overlay">
@@ -453,8 +495,278 @@ describe("getFocusableDialogElements", () => {
     ]);
   });
 
+  test("skips controls inside an inert subtree", () => {
+    const container = document.createElement("div");
+    container.innerHTML = `
+      <button type="button">reachable</button>
+      <div inert><button type="button">inert-child</button></div>
+    `;
+    expect(getFocusableDialogElements(container).map((el) => el.textContent)).toEqual([
+      "reachable",
+    ]);
+  });
+
   test("returns an empty list for an absent container", () => {
     expect(getFocusableDialogElements(null)).toEqual([]);
+  });
+});
+
+describe("overlay depth (D84)", () => {
+  const overlayNamed = (name: string) =>
+    document.querySelector(`[role="dialog"][aria-label="${name}"]`) as HTMLElement | null;
+
+  const effectiveZ = (el: HTMLElement): number => {
+    if (el.style.zIndex !== "") return Number(el.style.zIndex);
+    const arbitrary = el.className.match(/z-\[(\d+)\]/);
+    if (arbitrary) return Number(arbitrary[1]);
+    const scale = el.className.match(/(?:^|\s)z-(\d+)(?:\s|$)/);
+    return scale ? Number(scale[1]) : 0;
+  };
+
+  test("closing a lone overlay restores focus to the control that opened it", async () => {
+    const user = userEvent.setup();
+    const Harness = () => {
+      const [open, setOpen] = useState(false);
+      return (
+        <div>
+          <button type="button" onClick={() => setOpen(true)}>
+            Opener
+          </button>
+          <DialogShell open={open} onClose={() => setOpen(false)} ariaLabel="From Opener">
+            <button type="button">Inside</button>
+          </DialogShell>
+        </div>
+      );
+    };
+
+    render(<Harness />);
+    await user.click(screen.getByRole("button", { name: "Opener" }));
+    expect(screen.getByRole("dialog", { name: "From Opener" })).toBeTruthy();
+    await user.keyboard("{Escape}");
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Opener" }));
+  });
+
+  test("a single shell is aria-modal, not inert, and keeps its className z", () => {
+    const { unmount } = render(
+      <DialogShell open onClose={vi.fn()} ariaLabel="Solo Dialog">
+        <button type="button">Inside</button>
+      </DialogShell>,
+    );
+
+    const dialog = screen.getByRole("dialog", { name: "Solo Dialog" });
+    expect(dialog.getAttribute("aria-modal")).toBe("true");
+    expect(dialog.hasAttribute("inert")).toBe(false);
+    expect(dialog.style.zIndex).toBe("");
+    expect(dialog.className).toContain("z-[70]");
+    unmount();
+
+    render(
+      <DrawerShell open onClose={vi.fn()} ariaLabel="Solo Drawer">
+        <button type="button">Inside</button>
+      </DrawerShell>,
+    );
+    const drawer = screen.getByRole("dialog", { name: "Solo Drawer" });
+    expect(drawer.getAttribute("aria-modal")).toBe("true");
+    expect(drawer.hasAttribute("inert")).toBe(false);
+    expect(drawer.style.zIndex).toBe("");
+    expect(drawer.className).toContain("z-50");
+  });
+
+  test("a lone shell with a z-[80] override keeps the class and gets no inline z", () => {
+    render(
+      <DialogShell open onClose={vi.fn()} ariaLabel="Raised Dialog" containerClassName="z-[80]">
+        <button type="button">Inside</button>
+      </DialogShell>,
+    );
+    const dialog = screen.getByRole("dialog", { name: "Raised Dialog" });
+    expect(dialog.className).toContain("z-[80]");
+    expect(dialog.style.zIndex).toBe("");
+  });
+
+  test("a buried z-[80] shell cannot tie the upper overlay's paint order", () => {
+    render(
+      <div>
+        <DialogShell open onClose={vi.fn()} ariaLabel="Raised Lower" containerClassName="z-[80]">
+          <button type="button">Lower</button>
+        </DialogShell>
+        <DialogShell open onClose={vi.fn()} ariaLabel="Plain Upper">
+          <button type="button">Upper</button>
+        </DialogShell>
+      </div>,
+    );
+
+    const lower = overlayNamed("Raised Lower");
+    const upper = overlayNamed("Plain Upper");
+    expect(lower).toBeTruthy();
+    expect(upper).toBeTruthy();
+    expect(lower?.className).toContain("z-[80]");
+    expect(upper?.style.zIndex).not.toBe("");
+    expect(Number(upper?.style.zIndex)).toBeGreaterThan(effectiveZ(lower!));
+  });
+
+  test("with two shells open the lower is inert and has no aria-modal, the upper has it", () => {
+    render(
+      <div>
+        <DialogShell open onClose={vi.fn()} ariaLabel="Lower Overlay">
+          <button type="button">Lower</button>
+        </DialogShell>
+        <DialogShell open onClose={vi.fn()} ariaLabel="Upper Overlay">
+          <button type="button">Upper</button>
+        </DialogShell>
+      </div>,
+    );
+
+    const lower = overlayNamed("Lower Overlay");
+    const upper = overlayNamed("Upper Overlay");
+    expect(lower).toBeTruthy();
+    expect(upper).toBeTruthy();
+    expect(lower?.hasAttribute("inert")).toBe(true);
+    expect(lower?.hasAttribute("aria-modal")).toBe(false);
+    expect(upper?.hasAttribute("inert")).toBe(false);
+    expect(upper?.getAttribute("aria-modal")).toBe("true");
+  });
+
+  test("closing the upper overlay restores the lower's Escape handler", () => {
+    const onCloseLower = vi.fn();
+    const Harness = () => {
+      const [upperOpen, setUpperOpen] = useState(true);
+      return (
+        <div>
+          <DialogShell open onClose={onCloseLower} ariaLabel="Lower Overlay">
+            <button type="button">Lower</button>
+          </DialogShell>
+          <DialogShell
+            open={upperOpen}
+            onClose={() => setUpperOpen(false)}
+            ariaLabel="Upper Overlay"
+          >
+            <button type="button">Upper</button>
+          </DialogShell>
+        </div>
+      );
+    };
+
+    render(<Harness />);
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(overlayNamed("Upper Overlay")).toBeNull();
+    expect(onCloseLower).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Lower" }));
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(onCloseLower).toHaveBeenCalledTimes(1);
+  });
+
+  test("closing the upper overlay restores the lower", () => {
+    const Stacked = ({ upperOpen }: { upperOpen: boolean }) => (
+      <div>
+        <DialogShell open onClose={vi.fn()} ariaLabel="Lower Overlay">
+          <button type="button">Lower</button>
+        </DialogShell>
+        <DialogShell open={upperOpen} onClose={vi.fn()} ariaLabel="Upper Overlay">
+          <button type="button">Upper</button>
+        </DialogShell>
+      </div>
+    );
+
+    const { rerender } = render(<Stacked upperOpen={true} />);
+    expect(overlayNamed("Lower Overlay")?.hasAttribute("inert")).toBe(true);
+
+    rerender(<Stacked upperOpen={false} />);
+
+    const lower = overlayNamed("Lower Overlay");
+    expect(overlayNamed("Upper Overlay")).toBeNull();
+    expect(lower?.hasAttribute("inert")).toBe(false);
+    expect(lower?.getAttribute("aria-modal")).toBe("true");
+  });
+
+  test("closing the upper overlay over a lower with no focusable controls does not throw", () => {
+    const Harness = () => {
+      const [upperOpen, setUpperOpen] = useState(true);
+      return (
+        <div>
+          <DialogShell open onClose={vi.fn()} ariaLabel="Lower Overlay">
+            <button type="button" disabled>
+              Lower
+            </button>
+          </DialogShell>
+          <DialogShell
+            open={upperOpen}
+            onClose={() => setUpperOpen(false)}
+            ariaLabel="Upper Overlay"
+          >
+            <button type="button">Upper</button>
+          </DialogShell>
+        </div>
+      );
+    };
+
+    render(<Harness />);
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(overlayNamed("Upper Overlay")).toBeNull();
+    expect(overlayNamed("Lower Overlay")?.hasAttribute("inert")).toBe(false);
+  });
+
+  test("closing the lower overlay does not steal focus from the upper", () => {
+    const Stacked = ({ lowerOpen }: { lowerOpen: boolean }) => (
+      <div>
+        <DialogShell open={lowerOpen} onClose={vi.fn()} ariaLabel="Lower Overlay">
+          <button type="button">Lower</button>
+        </DialogShell>
+        <DialogShell open onClose={vi.fn()} ariaLabel="Upper Overlay">
+          <button type="button">Upper</button>
+        </DialogShell>
+      </div>
+    );
+
+    const { rerender } = render(<Stacked lowerOpen={true} />);
+    const upperBtn = screen.getByRole("button", { name: "Upper" });
+    expect(document.activeElement).toBe(upperBtn);
+
+    rerender(<Stacked lowerOpen={false} />);
+    expect(document.activeElement).toBe(upperBtn);
+    expect(overlayNamed("Upper Overlay")?.hasAttribute("inert")).toBe(false);
+  });
+
+  test("a drawer opened over a dialog paints above it and is the modal layer", () => {
+    render(
+      <div>
+        <DialogShell open onClose={vi.fn()} ariaLabel="Under Dialog">
+          <button type="button">Dialog</button>
+        </DialogShell>
+        <DrawerShell open onClose={vi.fn()} ariaLabel="Over Drawer">
+          <button type="button">Drawer</button>
+        </DrawerShell>
+      </div>,
+    );
+
+    const dialog = overlayNamed("Under Dialog");
+    const drawer = overlayNamed("Over Drawer");
+    expect(dialog?.hasAttribute("inert")).toBe(true);
+    expect(dialog?.hasAttribute("aria-modal")).toBe(false);
+    expect(drawer?.hasAttribute("inert")).toBe(false);
+    expect(drawer?.getAttribute("aria-modal")).toBe("true");
+    expect(Number(drawer?.style.zIndex)).toBeGreaterThan(effectiveZ(dialog!));
+  });
+
+  test("a dialog opened over a drawer paints above it and is the modal layer", () => {
+    render(
+      <div>
+        <DrawerShell open onClose={vi.fn()} ariaLabel="Under Drawer">
+          <button type="button">Drawer</button>
+        </DrawerShell>
+        <DialogShell open onClose={vi.fn()} ariaLabel="Over Dialog">
+          <button type="button">Dialog</button>
+        </DialogShell>
+      </div>,
+    );
+
+    const drawer = overlayNamed("Under Drawer");
+    const dialog = overlayNamed("Over Dialog");
+    expect(drawer?.hasAttribute("inert")).toBe(true);
+    expect(dialog?.hasAttribute("inert")).toBe(false);
+    expect(dialog?.getAttribute("aria-modal")).toBe("true");
+    expect(dialog?.style.zIndex).not.toBe("");
+    expect(Number(dialog?.style.zIndex)).toBeGreaterThan(effectiveZ(drawer!));
   });
 });
 

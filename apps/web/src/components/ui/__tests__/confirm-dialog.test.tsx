@@ -29,6 +29,10 @@ describe("ConfirmDialog", () => {
 
     const dialog = screen.getByRole("dialog", { name: "Custom Title" });
     expect(dialog).toBeTruthy();
+    // D84's counter does not replace this raise: ConfirmDialog stacks over the
+    // hand-rolled Save-as overlay, which the kit counter cannot see.
+    expect(dialog.className).toContain("z-[80]");
+    expect(dialog.style.zIndex).toBe("");
     expect(screen.getByText("Custom warning message")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Proceed" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Abort" })).toBeTruthy();

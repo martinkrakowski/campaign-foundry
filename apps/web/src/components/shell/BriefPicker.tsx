@@ -78,8 +78,9 @@ export function BriefPicker() {
 
   /**
    * W1 (D66/D67): the row opens the create dialog. The guard asks once, before the
-   * dialog opens, and the picker closes first (F22): two `DialogShell`s at the same
-   * layer stack two scrims and two Escape handlers.
+   * dialog opens. The picker still closes so the chooser does not linger under the
+   * form — D84 now makes a stacked pair legal (inert + one `aria-modal`), but Create
+   * new is leaving the picker, not stacking over it.
    */
   const createNew = () => {
     guardedAction(() => {
