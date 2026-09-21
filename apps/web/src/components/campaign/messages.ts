@@ -1838,3 +1838,19 @@ export const COMPLIANCE_GATE_LABEL = {
   advisory: "ADVISORY",
   pending: "PENDING",
 } as const;
+
+/** TL4 — the tape's music-bed lane (VE-D8). */
+export const tapeLaneAudio = "Music bed";
+
+/**
+ * The bed's span caption: what the brief asked for, and what the clip will
+ * actually be.
+ *
+ * Both numbers, never one. Frames are whole, so a brief asking for 6.02
+ * seconds gets a clip of 6.033… — and an operator who sees only the brief's
+ * figure has no way to know the bed is cut against a different length. Showing
+ * the pair is the whole of TL4, and the reason it is display-only.
+ */
+export function tapeAudioSpan(briefSec: number, encodedSec: number): string {
+  return `Music bed spans the clip — brief ${briefSec.toFixed(2)}s, encoded ${encodedSec.toFixed(2)}s`;
+}

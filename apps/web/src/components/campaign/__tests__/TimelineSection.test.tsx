@@ -499,3 +499,60 @@ describe("TimelineSection — the proportion bar (E5.3)", () => {
     expect(screen.queryByText(messages.timelineProportionCaption(6))).toBeNull();
   });
 });
+
+describe("TimelineSection — TL4's bed reaches the section tape too", () => {
+  const playhead = { durationSec: 6, committedSec: 0, commit: vi.fn() };
+  const bed = {
+    path: "assets/audio/bed-01.mp3",
+    rights: { licenceId: "LIC-42", source: "Acme Library", expiresOn: "2027-01-01" },
+  } as const;
+
+  /** Below the rail breakpoint, which is the only width this host renders at. */
+  const atNarrowWidth = () => {
+    const original = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", { value: 900, configurable: true });
+    return () =>
+      Object.defineProperty(window, "innerWidth", { value: original, configurable: true });
+  };
+
+  test("a brief with a bed shows the lane in this host as well as the rail's", () => {
+    // TL4 is display only, so BOTH hosts show it. The section leaves diamonds
+    // and boundary handles unwired because it cannot commit them; a caption
+    // commits nothing, so withholding it here would hide a fact rather than
+    // withhold an affordance — and a prop wired in one host and forgotten in
+    // the other is exactly what a caller test is for.
+    const restore = atNarrowWidth();
+    try {
+      render(
+        <TimelineSection
+          state={withBeats([{ text: "One", weight: 1 }], { audio: bed })}
+          dispatch={vi.fn()}
+          sectionPlayhead={playhead}
+        />,
+      );
+      // The tape is here at all — without this the negative test below would
+      // pass at any width, including one where this host renders nothing.
+      expect(document.querySelector("[data-tape-host]")).toBeTruthy();
+      expect(screen.getByText(messages.tapeLaneAudio)).toBeTruthy();
+    } finally {
+      restore();
+    }
+  });
+
+  test("a brief with no bed shows no lane here either", () => {
+    const restore = atNarrowWidth();
+    try {
+      render(
+        <TimelineSection
+          state={withBeats([{ text: "One", weight: 1 }])}
+          dispatch={vi.fn()}
+          sectionPlayhead={playhead}
+        />,
+      );
+      expect(document.querySelector("[data-tape-host]")).toBeTruthy();
+      expect(screen.queryByText(messages.tapeLaneAudio)).toBeNull();
+    } finally {
+      restore();
+    }
+  });
+});

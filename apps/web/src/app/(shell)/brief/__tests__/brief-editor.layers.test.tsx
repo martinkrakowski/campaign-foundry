@@ -1091,6 +1091,39 @@ describe("TL6 — the picked layer's keys reach the ruler", () => {
     expect(placed()[0]!.sec).toBe(3);
   });
 
+  /** The same motion brief, carrying a licensed bed (VE-D8). */
+  const beddedBrief = () => ({
+    ...motionBrief(),
+    audio: {
+      path: "assets/inputs/layers/bed.mp3",
+      rights: {
+        licenceId: "LIC-42",
+        source: "Acme Library",
+        expiresOn: "2027-01-01",
+        territories: ["DE", "FR"],
+      },
+    },
+  });
+
+  test("TL4 — a brief with a bed hands the tape its path", async () => {
+    // D157 — `audioPath` is optional, so only a caller test separates "wired"
+    // from "exists". One mount per direction: remounting inside a test
+    // restores the shell's persisted brief rather than the new fixture.
+    await mountEditor([beddedBrief()]);
+    await waitFor(() => expect(tapeProps.last).toBeDefined());
+    await waitFor(() =>
+      expect((tapeProps.last as { audioPath?: string }).audioPath).toBe(
+        "assets/inputs/layers/bed.mp3",
+      ),
+    );
+  });
+
+  test("TL4 — a brief with no bed hands the tape nothing", async () => {
+    // The other direction, because a hard-coded constant passes the first.
+    await mountEditor([motionBrief()]);
+    await waitFor(() => expect(tapeProps.last).toBeDefined());
+    expect((tapeProps.last as { audioPath?: string }).audioPath).toBeUndefined();
+  });
   test("dragging a key writes the same `t` the form commits", async () => {
     // TL6's stated acceptance, end to end through the real editor: the drag
     // reaches `setTrackStop`, so a dragged key and a typed one are one edit.
