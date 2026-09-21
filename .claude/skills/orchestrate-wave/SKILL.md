@@ -261,8 +261,11 @@ output for a cell, the cell is *unknown* — a valid answer. A confident wrong o
    because a lane that sees a list assumes the list was checked.
 
    Before dispatch, for every brief:
-   - **Grep the lane id against every plan, not only its own.** `grep -rn '\*\*<ID>\*\*' docs/planning/`
-     is one command and it is the whole check. Lane ids are the join key for the session-log
+   - **Grep the lane id against every plan, not only its own.** `grep -rniE '\b<ID>\b' docs/planning/`
+     is one command and it is the whole check. Match on word boundaries, **not** on `**<ID>**`: ids
+     are written `| **C4b** |` in a table, `**Lane C4b**` in prose and bare in a sentence, and a
+     pattern that assumes one spelling reports "no collision" for the two forms it cannot see —
+     which is worse than not running it, because it is evidence that is not evidence. Lane ids are the join key for the session-log
      citation, the plan's shipped note, the mutation manifest filename
      (`.agents/manifests/<lane>.json`), the wave-status row and the premise fence's own name, so a
      collision silently merges two lanes' histories and `plan:verify` can evaluate one plan's fence
