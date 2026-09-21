@@ -1133,6 +1133,10 @@ function drawTimeline(
  * already decides this: preset expansions fold before the authored tracks, so
  * a brief that authors no tracks (`layer.tracks` undefined) spreads an empty
  * array and folds exactly as before (byte-identical).
+ *
+ * **D130**: a present `layer.frame` clips every beat — including a crossfade
+ * pair — to the resolved rect, the same clip {@link drawStaticText} applies on
+ * the still path. Absent is today's unclipped blit.
  */
 function drawSequencedCopy(
   ctx: SKRSContext2D,
@@ -1164,8 +1168,22 @@ function drawSequencedCopy(
     scenes.resolved,
     { t, copyT, effectT },
   );
+  // A present frame clips the block to the resolved rect (D130); placement
+  // stays prepare's. One clip wraps every live beat so a crossfade cannot
+  // paint incoming copy outside the frame either.
+  const framed = layer.frame !== undefined;
+  if (framed) {
+    const dest = layerPixelRect(layer, prepared.canvas, prepared.width, prepared.height);
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(dest.x, dest.y, dest.w, dest.h);
+    ctx.clip();
+  }
   for (const entry of resolved.copy) {
     drawBeat(ctx, prepared, scenes, entry.beat, entry.mix, entry.pose);
+  }
+  if (framed) {
+    ctx.restore();
   }
 }
 

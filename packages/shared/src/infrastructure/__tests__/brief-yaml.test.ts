@@ -554,6 +554,50 @@ describe("dumpBrief layer tracks order (K1)", () => {
     expect(dumpBrief(parsed)).toBe(yaml);
   });
 
+  test("byFamily.ratio and byFamily.size dump independently, and a non-object overlay passes through", () => {
+    const dump = (byFamily: unknown) =>
+      dumpBrief({
+        ...brief,
+        template: {
+          id: "canonical-image-text",
+          version: 1,
+          creativeType: "image-text",
+          unit: "standard-web",
+          layers: [
+            {
+              id: "bg",
+              kind: "image",
+              frame: { x: 0, y: 0, w: 1, h: 1, anchor: "top", byFamily },
+            },
+          ],
+        },
+      });
+
+    const both = dump({
+      size: { "300x250": { h: 0.25 } },
+      ratio: { "1:1": { y: 0.1 } },
+    });
+    expect(both).toContain("ratio:");
+    expect(both).toContain("size:");
+    expect(both.indexOf("ratio:")).toBeLessThan(both.indexOf("size:"));
+    expect(dumpBrief(parse(both) as object)).toBe(both);
+
+    const ratioOnly = dump({ ratio: { "9:16": { w: 0.5 } } });
+    expect(ratioOnly).toContain("ratio:");
+    expect(ratioOnly).not.toContain("size:");
+
+    const sizeOnly = dump({ size: { "728x90": { x: 0.1 } } });
+    expect(sizeOnly).toContain("size:");
+    expect(sizeOnly).not.toContain("ratio:");
+
+    const empty = dump({});
+    expect(empty).toContain("byFamily: {}");
+
+    const passthrough = dump({ size: { "300x250": null }, ratio: "junk" });
+    expect(passthrough).toContain("ratio: junk");
+    expect(passthrough).toContain("300x250: null");
+  });
+
   test("a brief that omits frame still omits it", () => {
     const yaml = dumpBrief(templated);
     expect(yaml).not.toContain("frame:");

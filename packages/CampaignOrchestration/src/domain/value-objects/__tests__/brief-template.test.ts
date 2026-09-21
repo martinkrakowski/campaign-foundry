@@ -1230,6 +1230,13 @@ describe("layerFrameProblem and isBriefTemplate layer frame (D130)", () => {
       must: "be a number in [0, 1]",
       value: 1.4,
     });
+    expect(layerFrameProblem({ ...frame, byFamily: { size: { "300x250": { w: -0.1 } } } })).toEqual(
+      {
+        path: '.byFamily.size["300x250"].w',
+        must: "be a number in [0, 1]",
+        value: -0.1,
+      },
+    );
     expect(
       layerFrameProblem({ ...frame, byFamily: { size: { "300x250": { y: "0.2" } } } }),
     ).toEqual({

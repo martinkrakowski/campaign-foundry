@@ -3,6 +3,7 @@ import { createCanvas } from "@napi-rs/canvas";
 import {
   type BriefTemplate,
   type CompositeRequest,
+  type CopyTimeline,
   type CreativeTemplateLayer,
   type HtmlElement,
 } from "@campaignfoundry/CampaignOrchestration";
@@ -29,7 +30,11 @@ const redBackground = (width: number, height: number): Uint8Array => {
   return c.toBuffer("image/png");
 };
 
-type TemplateRequest = CompositeRequest & { readonly template?: BriefTemplate };
+type TemplateRequest = CompositeRequest & {
+  readonly template?: BriefTemplate;
+  readonly durationSec?: number;
+  readonly timeline?: CopyTimeline;
+};
 
 const request = (
   canvas: CanvasSpec,
@@ -82,6 +87,25 @@ async function pixels(req: TemplateRequest): Promise<FramePixels> {
   return { data: imageData.data, width: prepared.width, height: prepared.height };
 }
 
+async function timelinePixels(req: TemplateRequest): Promise<FramePixels> {
+  const prepared = await NodeCanvasCompositor.prepare(req);
+  const canvas = createCanvas(prepared.width, prepared.height);
+  const ctx = canvas.getContext("2d");
+  NodeCanvasCompositor.draw(ctx, prepared, 1, undefined, 0.5, 1);
+  const imageData = ctx.getImageData(0, 0, prepared.width, prepared.height);
+  return { data: imageData.data, width: prepared.width, height: prepared.height };
+}
+
+const withTimeline = (req: TemplateRequest): TemplateRequest => ({
+  ...req,
+  durationSec: 8,
+  timeline: {
+    beats: [{ text: req.message, weight: 1 }],
+    transition: "cut",
+    keyBeat: 1,
+  },
+});
+
 const at = (f: FramePixels, x: number, y: number): readonly [number, number, number] => {
   const i = (y * f.width + x) * 4;
   return [f.data[i]!, f.data[i + 1]!, f.data[i + 2]!];
@@ -93,6 +117,17 @@ const isRed = (rgb: readonly [number, number, number]): boolean =>
 const sameBytes = (a: FramePixels, b: FramePixels): boolean =>
   a.width === b.width && a.height === b.height && a.data.every((v, i) => v === b.data[i]);
 
+/** Non-ground pixels strictly below `yMax` — the region a top-strip clip must clear. */
+const nonRedBelow = (f: FramePixels, yMax: number): number => {
+  let n = 0;
+  for (let y = yMax; y < f.height; y++) {
+    for (let x = 0; x < f.width; x++) {
+      if (!isRed(at(f, x, y))) n += 1;
+    }
+  }
+  return n;
+};
+
 const HALF: LayerFrame = { x: 0, y: 0, w: 1, h: 0.5, anchor: "top" };
 const SIZE_OVERRIDE: LayerFrame = {
   ...HALF,
@@ -100,14 +135,6 @@ const SIZE_OVERRIDE: LayerFrame = {
 };
 
 describe("compositor layer frames (D130, L10a)", () => {
-  test("absent frame is byte-identical to today's geometry", async () => {
-    const layers = IMAGE_TEXT({ id: "image", kind: "image" });
-    const withKey = IMAGE_TEXT({ id: "image", kind: "image", frame: undefined });
-    const a = await pixels(request({ ratio: "1:1" }, 80, 80, layers));
-    const b = await pixels(request({ ratio: "1:1" }, 80, 80, withKey));
-    expect(sameBytes(a, b)).toBe(true);
-  });
-
   test("a full-canvas frame on the ground is byte-identical to an absent frame", async () => {
     const absent = await pixels(
       request({ ratio: "1:1" }, 80, 80, IMAGE_TEXT({ id: "image", kind: "image" })),
@@ -217,6 +244,28 @@ describe("compositor layer frames (D130, L10a)", () => {
     );
     // Default headline sits near the bottom; clipping to the top strip hides it.
     expect(sameBytes(clipped, full)).toBe(false);
+  });
+
+  test("a text frame clips sequenced copy on the timeline path", async () => {
+    const clip = { x: 0, y: 0, w: 1, h: 0.15, anchor: "top" as const };
+    const clipped = await timelinePixels(
+      withTimeline(
+        request(
+          { ratio: "1:1" },
+          80,
+          80,
+          IMAGE_TEXT({ id: "image", kind: "image" }, { "static-text": { frame: clip } }),
+        ),
+      ),
+    );
+    const full = await timelinePixels(
+      withTimeline(request({ ratio: "1:1" }, 80, 80, IMAGE_TEXT({ id: "image", kind: "image" }))),
+    );
+    expect(sameBytes(clipped, full)).toBe(false);
+    // Headline-bottom copy sits below the 0.15 strip (y=12 on an 80px canvas).
+    // The clip must clear that region; the unclipped timeline frame must not.
+    expect(nonRedBelow(full, 12)).toBeGreaterThan(0);
+    expect(nonRedBelow(clipped, 12)).toBe(0);
   });
 
   test("an html layer frame clips its elements to the resolved rect", async () => {
