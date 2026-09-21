@@ -749,7 +749,18 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     }
     const backgroundsByRatio = new Map<string, Readonly<Record<string, Uint8Array>> | undefined>();
     for (const ratio of motionRatios.values()) {
-      const resolved = await resolveTimelineBackgrounds(timeline, ratio, this.deps.sceneAssets);
+      // D132: a beat's scene is cover-fit to the shape it will be DRAWN at,
+      // which is the ground's frame when it carries one — the same derivation
+      // the cell's own background uses. Resolving scenes at the raw canvas
+      // while the ground plate came from the frame would give a clip two
+      // source aspects: the picture would jump its crop on every beat that
+      // names a scene, and only on a framed template, which is exactly the
+      // kind of per-path drift a single derivation exists to prevent.
+      const resolved = await resolveTimelineBackgrounds(
+        timeline,
+        AspectRatio.forBackground({ ratio: ratio.value }, groundFrameOf(brief.template.layers)),
+        this.deps.sceneAssets,
+      );
       if (!resolved.success) return resolved;
       backgroundsByRatio.set(ratio.value, resolved.value);
     }

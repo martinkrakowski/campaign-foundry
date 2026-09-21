@@ -2585,3 +2585,70 @@ describe("GenerateCampaignUseCase — the generative region reaches the port (D1
     expect(askedOf(d.proceduralGenerator)).toEqual(["16:9", "1:1"]);
   });
 });
+
+describe("GenerateCampaignUseCase — a framed ground shapes the scenes too (D132)", () => {
+  const SCENE = "assets/inputs/camp/scene-a.png";
+  const TOP_HALF = { x: 0, y: 0, w: 1, h: 0.5, anchor: "top" } as const;
+
+  const framedTimelineBrief = (): CampaignBrief => {
+    const base = variationBrief({
+      copy: {
+        timeline: {
+          transition: "fade",
+          keyBeat: 1,
+          beats: [{ text: "Alpha", weight: 1, background: SCENE }],
+        },
+      },
+    });
+    return {
+      ...base,
+      template: {
+        ...base.template,
+        layers: base.template.layers.map((l) =>
+          l.kind === "image" ? { ...l, frame: TOP_HALF } : l,
+        ),
+      },
+    };
+  };
+
+  test("a beat's scene is cover-fit to the ground's frame, not to the canvas", async () => {
+    const sceneAssets = fakeSceneAssets();
+    const d = deps({ sceneAssets, planner: fakePlanner(fakePlan([motionVariant()])) });
+    const result = await new GenerateCampaignUseCase(d).execute(framedTimelineBrief());
+    expect(result.success).toBe(true);
+
+    // The plate and the scene must be fetched at ONE shape. This variant draws
+    // at 1:1, where a full-width half-height box is 2.0 — nearest 16:9.
+    // Resolving the scene at the raw canvas instead would hand the clip two
+    // source aspects and make the picture jump its crop on every scened beat,
+    // which is what this lane introduced before the fix and a reviewer caught.
+    const askedFor = vi
+      .mocked(sceneAssets.resolveScene)
+      .mock.calls.map((c) => (c[1] as { value: string }).value);
+    expect(askedFor).toEqual(["16:9"]);
+    const plate = vi
+      .mocked(d.proceduralGenerator.resolveBackground)
+      .mock.calls.map((c) => (c[1] as { value: string }).value);
+    expect(new Set(plate)).toEqual(new Set(askedFor));
+  });
+
+  test("an unframed ground resolves scenes at the canvas, exactly as before", async () => {
+    const sceneAssets = fakeSceneAssets();
+    const d = deps({ sceneAssets, planner: fakePlanner(fakePlan([motionVariant()])) });
+    const result = await new GenerateCampaignUseCase(d).execute(
+      variationBrief({
+        copy: {
+          timeline: {
+            transition: "fade",
+            keyBeat: 1,
+            beats: [{ text: "Alpha", weight: 1, background: SCENE }],
+          },
+        },
+      }),
+    );
+    expect(result.success).toBe(true);
+    expect(
+      vi.mocked(sceneAssets.resolveScene).mock.calls.map((c) => (c[1] as { value: string }).value),
+    ).toEqual(["1:1"]);
+  });
+});
