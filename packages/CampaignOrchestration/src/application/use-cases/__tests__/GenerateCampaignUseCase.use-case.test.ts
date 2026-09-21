@@ -1,4 +1,6 @@
 import { describe, test, expect, vi } from "vitest";
+import { RATIO_VALUES } from "../../../domain/value-objects/aspect-ratios.js";
+import type { ImageGeneratorPort } from "../../ports/out/ImageGeneratorPort.js";
 import { err, ok } from "@campaignfoundry/shared";
 import {
   GenerateCampaignUseCase,
@@ -2513,5 +2515,140 @@ describe("GenerateCampaignUseCase — progress reporting", () => {
     if (without.success && withReporter.success) {
       expect(without.value.assets).toEqual(withReporter.value.assets);
     }
+  });
+});
+
+describe("GenerateCampaignUseCase — the generative region reaches the port (D132)", () => {
+  const TOP_HALF = { x: 0, y: 0, w: 1, h: 0.5, anchor: "top" } as const;
+
+  /** The canonical image-text template with its ground framed to the top half. */
+  const framedBrief = (over: Partial<CampaignBrief> = {}): CampaignBrief => {
+    const base = baseBrief(over);
+    return {
+      ...base,
+      template: {
+        ...base.template,
+        layers: base.template.layers.map((l) =>
+          l.kind === "image" ? { ...l, frame: TOP_HALF } : l,
+        ),
+      },
+    };
+  };
+
+  /** Every ratio a generator was asked for, in call order. */
+  const askedOf = (port: ImageGeneratorPort): string[] =>
+    vi
+      .mocked(port.resolveBackground)
+      .mock.calls.map((call) => (call[1] as { value: string }).value);
+  const asked = (d: GenerateCampaignDeps): string[] => askedOf(d.imageGenerator);
+
+  test("a framed ground asks for the box's shape, not the canvas's", async () => {
+    const d = deps();
+    const result = await new GenerateCampaignUseCase(d).execute(
+      framedBrief({ products: [product("alpha")] }),
+    );
+    expect(result.success).toBe(true);
+    // The SAME frame, three different answers — because the box is a fraction
+    // of each canvas, not a shape of its own. Top half of 1:1 is 2.00 (nearest
+    // 16:9); of 9:16 it is 1.125, which is nearer 1:1 than 16:9; of 16:9 it is
+    // 3.55, wide again. A uniform expectation here would have been a test that
+    // agreed with a derivation reading the frame and ignoring the canvas.
+    expect(asked(d)).toEqual(["16:9", "1:1", "16:9"]);
+  });
+
+  test("an unframed ground asks for the canvas, exactly as before", async () => {
+    const d = deps();
+    const result = await new GenerateCampaignUseCase(d).execute(
+      baseBrief({ products: [product("alpha")] }),
+    );
+    expect(result.success).toBe(true);
+    // Each ratio cell asks for itself. This is the byte-identical path, and it
+    // is asserted here so the framed expectation above cannot be read as "the
+    // derivation runs everywhere".
+    expect(asked(d)).toEqual([...RATIO_VALUES]);
+  });
+
+  test("the variation path derives it too", async () => {
+    const variants = [fakeVariant(), fakeVariant({ index: 1, aspectRatio: "9:16" })];
+    const d = deps({ planner: fakePlanner(fakePlan(variants)) });
+    const result = await new GenerateCampaignUseCase(d).execute({
+      ...framedBrief({ products: [product("alpha")] }),
+      mode: "variation",
+      variation: { count: 3, seed: 42 },
+    });
+    expect(result.success).toBe(true);
+    // A `procedural` variant resolves through the procedural port, so that is
+    // where the request lands. Both variants sit on the same framed template:
+    // the 1:1 one asks wide, the 9:16 one asks square — the same per-canvas
+    // answer the classic path gives. A derivation added only to the classic
+    // loop leaves both at their own canvas ratio and fails here.
+    expect(askedOf(d.proceduralGenerator)).toEqual(["16:9", "1:1"]);
+  });
+});
+
+describe("GenerateCampaignUseCase — a framed ground shapes the scenes too (D132)", () => {
+  const SCENE = "assets/inputs/camp/scene-a.png";
+  const TOP_HALF = { x: 0, y: 0, w: 1, h: 0.5, anchor: "top" } as const;
+
+  const framedTimelineBrief = (): CampaignBrief => {
+    const base = variationBrief({
+      copy: {
+        timeline: {
+          transition: "fade",
+          keyBeat: 1,
+          beats: [{ text: "Alpha", weight: 1, background: SCENE }],
+        },
+      },
+    });
+    return {
+      ...base,
+      template: {
+        ...base.template,
+        layers: base.template.layers.map((l) =>
+          l.kind === "image" ? { ...l, frame: TOP_HALF } : l,
+        ),
+      },
+    };
+  };
+
+  test("a beat's scene is cover-fit to the ground's frame, not to the canvas", async () => {
+    const sceneAssets = fakeSceneAssets();
+    const d = deps({ sceneAssets, planner: fakePlanner(fakePlan([motionVariant()])) });
+    const result = await new GenerateCampaignUseCase(d).execute(framedTimelineBrief());
+    expect(result.success).toBe(true);
+
+    // The plate and the scene must be fetched at ONE shape. This variant draws
+    // at 1:1, where a full-width half-height box is 2.0 — nearest 16:9.
+    // Resolving the scene at the raw canvas instead would hand the clip two
+    // source aspects and make the picture jump its crop on every scened beat,
+    // which is what this lane introduced before the fix and a reviewer caught.
+    const askedFor = vi
+      .mocked(sceneAssets.resolveScene)
+      .mock.calls.map((c) => (c[1] as { value: string }).value);
+    expect(askedFor).toEqual(["16:9"]);
+    const plate = vi
+      .mocked(d.proceduralGenerator.resolveBackground)
+      .mock.calls.map((c) => (c[1] as { value: string }).value);
+    expect(new Set(plate)).toEqual(new Set(askedFor));
+  });
+
+  test("an unframed ground resolves scenes at the canvas, exactly as before", async () => {
+    const sceneAssets = fakeSceneAssets();
+    const d = deps({ sceneAssets, planner: fakePlanner(fakePlan([motionVariant()])) });
+    const result = await new GenerateCampaignUseCase(d).execute(
+      variationBrief({
+        copy: {
+          timeline: {
+            transition: "fade",
+            keyBeat: 1,
+            beats: [{ text: "Alpha", weight: 1, background: SCENE }],
+          },
+        },
+      }),
+    );
+    expect(result.success).toBe(true);
+    expect(
+      vi.mocked(sceneAssets.resolveScene).mock.calls.map((c) => (c[1] as { value: string }).value),
+    ).toEqual(["1:1"]);
   });
 });

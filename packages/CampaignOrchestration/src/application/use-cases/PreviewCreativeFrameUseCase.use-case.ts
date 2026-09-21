@@ -3,10 +3,10 @@ import type { CampaignBrief } from "../../domain/entities/CampaignBrief.js";
 import type { Product } from "../../domain/entities/Product.js";
 import { AspectRatio } from "../../domain/value-objects/AspectRatio.vo.js";
 import {
-  nearestSocialRatio,
   type AspectRatioValue,
   type CanvasSpec,
 } from "../../domain/value-objects/aspect-ratios.js";
+import { groundFrameOf } from "../../domain/value-objects/creative-geometry.js";
 import { DISPLAY_SIZE_VALUES, type DisplaySize } from "../../domain/value-objects/display-sizes.js";
 import type { BackgroundSource } from "../../domain/value-objects/BackgroundSource.vo.js";
 import type { LayoutKind, ToneKind } from "../../domain/value-objects/Treatment.vo.js";
@@ -257,11 +257,19 @@ export class PreviewCreativeFrameUseCase {
     // The background port speaks the social vocabulary; a display size borrows
     // its nearest orientation and the compositor stretches the result over the
     // exact canvas. Ratio validation (including the axis vocabulary) stays here.
-    const backgroundRatio =
-      ratio !== undefined
-        ? AspectRatio.create(ratio)
-        : AspectRatio.create(nearestSocialRatio(selection.canvas));
-    if (!backgroundRatio.success) return backgroundRatio;
+    //
+    // D132: this used to derive the ratio itself, one `nearestSocialRatio`
+    // call beside the run's `forBackground`. Two derivations of the same fact
+    // is how the rail comes to preview a picture the run would never request —
+    // a framed ground would have made them disagree the moment it shipped. The
+    // validation stays here (the axis vocabulary is a preview concern); the
+    // ANSWER comes from the one function the run also calls.
+    const ratioCheck = ratio !== undefined ? AspectRatio.create(ratio) : undefined;
+    if (ratioCheck !== undefined && !ratioCheck.success) return ratioCheck;
+    const backgroundRatio = AspectRatio.forBackground(
+      selection.canvas,
+      groundFrameOf(brief.template.layers),
+    );
 
     // VE5b2: resolve the SAME per-beat scenes the run would (VE-D2), and do
     // it BEFORE background generation below — image generation can spend the
@@ -279,7 +287,7 @@ export class PreviewCreativeFrameUseCase {
         }
         const resolved = await resolveTimelineBackgrounds(
           timeline,
-          backgroundRatio.value,
+          backgroundRatio,
           this.deps.sceneAssets,
         );
         if (!resolved.success) return resolved;
@@ -291,7 +299,7 @@ export class PreviewCreativeFrameUseCase {
       brief,
       selection,
       product,
-      backgroundRatio.value,
+      backgroundRatio,
     );
 
     let scrub: ScrubFingerprint | undefined;

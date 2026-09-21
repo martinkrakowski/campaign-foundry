@@ -98,10 +98,20 @@ export function scaleBasisPx(spec: CanvasSpec, sizeScale: number): number {
  * exact display canvas, so a leaderboard asks for a wide background, not a
  * square one. A ratio-family spec is itself.
  */
-export function nearestSocialRatio(spec: CanvasSpec): AspectRatioValue {
-  if (spec.ratio !== undefined) return spec.ratio;
-  const { width, height } = resolveCanvas(spec);
-  const aspect = width / height;
+/**
+ * The vocabulary ratio closest to a bare width/height ratio (D132).
+ *
+ * Extracted from {@link nearestSocialRatio} so a caller that already knows the
+ * aspect it wants — a framed generative ground, whose box is a fraction of the
+ * canvas rather than the canvas — can ask without inventing a `CanvasSpec` to
+ * carry it. `nearestSocialRatio` short-circuits on `spec.ratio`, which is
+ * exactly the branch a framed ground must NOT take: its canvas is 1:1 and the
+ * box it fills is not.
+ *
+ * It iterates `RATIO_VALUES`, so a ratio added to the vocabulary becomes a
+ * candidate here with no change.
+ */
+export function nearestRatioForAspect(aspect: number): AspectRatioValue {
   let nearest: AspectRatioValue = RATIO_VALUES[0];
   let nearestDiff = Number.POSITIVE_INFINITY;
   for (const ratio of RATIO_VALUES) {
@@ -113,4 +123,10 @@ export function nearestSocialRatio(spec: CanvasSpec): AspectRatioValue {
     }
   }
   return nearest;
+}
+
+export function nearestSocialRatio(spec: CanvasSpec): AspectRatioValue {
+  if (spec.ratio !== undefined) return spec.ratio;
+  const { width, height } = resolveCanvas(spec);
+  return nearestRatioForAspect(width / height);
 }
