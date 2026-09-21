@@ -7,6 +7,7 @@ import {
   defaultLayerRect,
   resolveLayerFrame,
   type LayerFrame,
+  groundFrameOf,
 } from "../creative-geometry.js";
 import { LAYER_KINDS } from "../layer-kinds.js";
 
@@ -102,5 +103,40 @@ describe("resolveLayerFrame (D130)", () => {
     expect(
       resolveLayerFrame({ ...BASE, byFamily: { size: { "300x250": {} } } }, { size: "300x250" }),
     ).toEqual({ x: 0, y: 0, w: 1, h: 0.5 });
+  });
+});
+
+describe("groundFrameOf — which box the generated picture must fill (D132)", () => {
+  const F = { x: 0, y: 0, w: 1, h: 0.5, anchor: "top" } as const;
+  const G = { x: 0, y: 0.5, w: 0.5, h: 0.5, anchor: "bottom" } as const;
+
+  test("returns the first enabled ground's frame", () => {
+    expect(groundFrameOf([{ kind: "shade" }, { kind: "image", frame: F }])).toEqual(F);
+  });
+
+  test("skips a disabled ground — it is not drawn, so its box is not the one to fill", () => {
+    expect(
+      groundFrameOf([
+        { kind: "image", enabled: false, frame: F },
+        { kind: "video", frame: G },
+      ]),
+    ).toEqual(G);
+  });
+
+  test("an unframed ground yields undefined, which is the canvas", () => {
+    expect(groundFrameOf([{ kind: "image" }])).toBeUndefined();
+  });
+
+  test("a template with no ground at all yields undefined", () => {
+    expect(groundFrameOf([{ kind: "static-text" }, { kind: "logo" }])).toBeUndefined();
+  });
+
+  test("a later ground does not override the first — one background per cell", () => {
+    expect(
+      groundFrameOf([
+        { kind: "image", frame: F },
+        { kind: "image", frame: G },
+      ]),
+    ).toEqual(F);
   });
 });

@@ -3,6 +3,7 @@ import type { CampaignBrief } from "../../domain/entities/CampaignBrief.js";
 import type { GeneratedAsset, VariantDescriptor } from "../../domain/entities/GeneratedAsset.js";
 import type { Product } from "../../domain/entities/Product.js";
 import { variantTreatmentId, type Variant } from "../../domain/entities/Variant.js";
+import { groundFrameOf } from "../../domain/value-objects/creative-geometry.js";
 import { AspectRatio } from "../../domain/value-objects/AspectRatio.vo.js";
 import { type AspectRatioValue } from "../../domain/value-objects/aspect-ratios.js";
 import { DISPLAY_SIZE_VALUES, type DisplaySize } from "../../domain/value-objects/display-sizes.js";
@@ -403,6 +404,9 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     // draws it onto the exact pixel canvas. `forBackground` cannot fail for a
     // vocabulary size (validateBrief has already gated the list), so there is
     // no failure path here to cover.
+    // D132: the box the picture actually has to fill. Absent on every canonical
+    // template, and absent means the canvas — today's request, unchanged.
+    const groundFrame = groundFrameOf(brief.template.layers);
     const sizeCellsPrep: Array<{
       readonly size: DisplaySize;
       readonly backgroundRatio: AspectRatio;
@@ -412,7 +416,7 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
       const insets = insetsBySize.get(size);
       sizeCellsPrep.push({
         size,
-        backgroundRatio: AspectRatio.forBackground({ size }),
+        backgroundRatio: AspectRatio.forBackground({ size }, groundFrame),
         ...(insets !== undefined ? { safeInsets: insets } : {}),
       });
     }
@@ -431,7 +435,9 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
           product,
           canvas: ratio.value,
           spec: { ratio: ratio.value },
-          backgroundRatio: ratio,
+          // A ratio cell used to BE its own background ratio. With a framed
+          // ground it is not: the canvas is 1:1 and the box is not.
+          backgroundRatio: AspectRatio.forBackground({ ratio: ratio.value }, groundFrame),
           assetCanvas: { aspectRatio: ratio.value },
           safeInsets: undefined,
           treatments: treatments.filter((t) => isTarget(product.id, ratio.value, t.id)),
@@ -851,7 +857,12 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
       variant.backgroundSource === "procedural"
         ? this.deps.proceduralGenerator
         : this.deps.imageGenerator;
-    const background = await generator.resolveBackground(product, ratio, cellContext, signal);
+    const background = await generator.resolveBackground(
+      product,
+      AspectRatio.forBackground({ ratio: ratio.value }, groundFrameOf(template.layers)),
+      cellContext,
+      signal,
+    );
     log.record(
       "ResolveBackgroundAssets",
       `${product.id} @ ${ratio.value} v${variant.index} — background: ${background.source}${background.source === "procedural" ? " (procedural fallback — no GenAI background)" : ""}`,

@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "RW-26",
+  "mutations": [
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/AspectRatio.vo.ts",
+      "before": "    const canvas = resolveCanvas(spec);\n    const value = nearestRatioForAspect((rect.w * canvas.width) / (rect.h * canvas.height));",
+      "after": "    const canvas = resolveCanvas(spec);\n    const value = nearestRatioForAspect(rect.w / rect.h);",
+      "because": "The frame's fractions read as an aspect without multiplying them back through the canvas — the mistake is invisible on a square canvas, where w/h and (w*W)/(h*H) agree exactly, and a 1:1-only test would pass. It is wrong on every other canvas: a top-half frame on 9:16 is 1.125 (nearest 1:1) and this mutant calls it 2.0 (nearest 16:9), so the run asks for a wide picture to fill a nearly-square box. Caught by the caller test that asserts all three ratio cells at once, which is why that expectation is deliberately NOT uniform.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/application/use-cases/__tests__/GenerateCampaignUseCase.use-case.test.ts",
+        "-t",
+        "a framed ground asks for the box's shape, not the canvas's"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

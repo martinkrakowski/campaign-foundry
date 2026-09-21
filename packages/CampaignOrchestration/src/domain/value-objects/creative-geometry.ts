@@ -215,6 +215,40 @@ export function isGroundLayerKind(kind: LayerKind): boolean {
   return GROUND_LAYER_KINDS.includes(kind);
 }
 
+/**
+ * The frame of the ground a cell generates its background for (D132), or
+ * undefined when the ground carries none — which is every canonical template.
+ *
+ * **The FIRST enabled ground, and the limit is older than this function.** A
+ * creative type may accept more than one `image` (it is uncapped in
+ * `image-text`), but a cell resolves exactly ONE background and hands it to
+ * every ground drawer. Picking the first is therefore not a choice between
+ * frames so much as a statement of which layer the single background belongs
+ * to; a template that wants two differently-shaped generative grounds needs a
+ * background per layer first, which no lane has built.
+ *
+ * A disabled ground is skipped: it is not drawn, so its box is not what the
+ * picture has to fill.
+ *
+ * Typed structurally rather than against `CreativeTemplateLayer` so this leaf
+ * keeps reaching only `layer-kinds` and its own module — the editor imports it
+ * through a subpath and must not pull the template validator's dependencies
+ * into the browser.
+ */
+export function groundFrameOf(
+  layers: readonly {
+    readonly kind: LayerKind;
+    readonly enabled?: boolean;
+    readonly frame?: LayerFrame;
+  }[],
+): LayerFrame | undefined {
+  for (const layer of layers) {
+    if (layer.enabled === false) continue;
+    if (isGroundLayerKind(layer.kind)) return layer.frame;
+  }
+  return undefined;
+}
+
 /** The canvas itself, in the fraction units every frame in this vocabulary speaks. */
 export const FULL_CANVAS_RECT: CanvasRect = { x: 0, y: 0, w: 1, h: 1 };
 
