@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "RW-15",
+  "mutations": [
+    {
+      "file": "apps/web/src/components/campaign/TimelineTape.tsx",
+      "before": "                {messages.tapeAudioSpan(durationSec, encodedDurationSec(durationSec, MOTION_FPS))}",
+      "after": "                {messages.tapeAudioSpan(durationSec, durationSec)}",
+      "because": "The caption showing the brief's number twice — which is what a caption that 'recomputes' the encoder's rounding degenerates into, and the precise thing TL4 exists to refuse. It is invisible on every whole-second duration, which is every fixture anyone reaches for: 6 s at 30 fps is exactly 180 frames, so both numbers read 6.00 and the lane looks right. It is wrong only where the caption has a job — a brief whose duration is not a whole frame, where the operator needs to see that the bed is cut against 6.03 and not 6.02. Caught by the test that renders 6.02 and builds its expectation from `encodedDurationSec` rather than from a literal.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/TimelineTape.test.tsx",
+        "-t",
+        "the caption shows the ENCODED length beside the brief's, from the encoder's own function"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

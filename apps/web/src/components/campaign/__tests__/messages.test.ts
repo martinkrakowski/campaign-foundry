@@ -43,6 +43,9 @@ const forbidden = [
  * join-the-ids regression is invisible to the gate.
  */
 const SAMPLE_ARGS = {
+  // TL4 — two numbers, and the generic string args cannot be .toFixed()-ed.
+  // The pair is deliberately a rounding case: 6.02 s at 30 fps is 181 frames.
+  tapeAudioSpan: [6.02, 181 / 30],
   // SG8 — an object formatter, so the scanner needs a shape to call it with.
   // Plural forms are exercised here; the singular branches are pinned by
   // derive.preflight and the confirm tests.

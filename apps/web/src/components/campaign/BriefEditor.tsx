@@ -1641,6 +1641,8 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
                 scrubSec={playhead.scrubSec}
                 committedSec={playhead.committedSec}
                 selectedBeatIndex={selectedBeatIndex}
+                /* TL4 — the brief's music bed, when it carries one. */
+                audioPath={state.audio?.path}
                 onScrubLive={playhead.onScrubLive}
                 onScrubCommit={playhead.onScrubCommit}
                 onSelectBeat={setSelectedBeatIndex}

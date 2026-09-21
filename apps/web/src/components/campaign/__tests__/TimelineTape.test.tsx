@@ -4,7 +4,10 @@ import { resolve } from "node:path";
 import { useState, type ReactNode } from "react";
 import { render, screen, fireEvent, act, within } from "@testing-library/react";
 import { resolveTimeline } from "@campaignfoundry/CampaignOrchestration/copy-timeline";
-import { MOTION_FPS } from "@campaignfoundry/CampaignOrchestration/motion-kinds";
+import {
+  MOTION_FPS,
+  encodedDurationSec,
+} from "@campaignfoundry/CampaignOrchestration/motion-kinds";
 import * as messages from "../messages";
 import type { TrackDiamond } from "../track-diamonds";
 import {
@@ -1008,5 +1011,59 @@ describe("TL3 — beat-boundary drag as a neighbour transfer", () => {
     expect(handle(1)).toBeTruthy();
     expect(handle(2)).toBeTruthy();
     expect(screen.queryByRole("slider", { name: messages.tapeBeatBoundaryName(3) })).toBeNull();
+  });
+});
+
+describe("TimelineTape — the music-bed lane (TL4)", () => {
+  test("no bed, no lane — an empty one would imply audio the brief lacks", () => {
+    renderTape();
+    expect(screen.queryByText(messages.tapeLaneAudio)).toBeNull();
+    expect(document.querySelector("[data-tape-audio-span]")).toBeNull();
+  });
+
+  test("a bed renders the lane and its span", () => {
+    renderTape({ audioPath: "assets/inputs/camp/bed.mp3" });
+    expect(screen.getByText(messages.tapeLaneAudio)).toBeTruthy();
+    expect(document.querySelector("[data-tape-audio-span]")).toBeTruthy();
+  });
+
+  test("the caption shows the ENCODED length beside the brief's, from the encoder's own function", () => {
+    // 6.02 s at 30 fps is 181 frames, so the clip is 181/30 = 6.0333… s. The
+    // expectation is built from `encodedDurationSec` rather than spelled as
+    // "6.03": a literal here would be a second statement of the encoder's
+    // rounding, which is the twin TL4 exists to refuse — and it would keep
+    // passing after the encoder's rounding changed.
+    renderTape({ durationSec: 6.02, audioPath: "assets/inputs/camp/bed.mp3" });
+    expect(
+      screen.getByText(messages.tapeAudioSpan(6.02, encodedDurationSec(6.02, MOTION_FPS))),
+    ).toBeTruthy();
+  });
+
+  test("the two numbers differ when the brief's duration is not a whole frame", () => {
+    // Without this the caption could print one number twice and still match a
+    // formatter-derived expectation.
+    const text = messages.tapeAudioSpan(6.02, encodedDurationSec(6.02, MOTION_FPS));
+    expect(text).toContain("6.02");
+    expect(text).toContain("6.03");
+  });
+
+  test("the lane adds no control of its own — display only", () => {
+    // NOT "clicking it does nothing": the span sits inside the scrollport, and
+    // a click on the canvas scrubs the playhead, which is the tape's existing
+    // and intended behaviour. Display-only means TL4 contributes no affordance
+    // — nothing to press, drag or focus — so it needs no entry in
+    // commitFromCanvas's guard and cannot be tabbed into.
+    const before = renderTape();
+    const controlsWithout = document.querySelectorAll(
+      "button, input, [role='slider'], [draggable='true'], a[href]",
+    ).length;
+    before.unmount();
+
+    renderTape({ audioPath: "assets/inputs/camp/bed.mp3" });
+    expect(document.querySelector("[data-tape-audio-span]")).toBeTruthy();
+    expect(
+      document.querySelectorAll("button, input, [role='slider'], [draggable='true'], a[href]")
+        .length,
+    ).toBe(controlsWithout);
   });
 });

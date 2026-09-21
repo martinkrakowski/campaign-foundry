@@ -14,7 +14,7 @@ import type {
   VideoCompositeResult,
   VideoCompositorPort,
 } from "@campaignfoundry/CampaignOrchestration";
-import { restT } from "@campaignfoundry/CampaignOrchestration";
+import { encodedFrameCount, restT } from "@campaignfoundry/CampaignOrchestration";
 // Static import (not createRequire) so bundlers such as Nitro trace the package
 // and its binary into the production output.
 import ffmpegStatic from "ffmpeg-static";
@@ -120,7 +120,7 @@ export class CanvasFfmpegVideoCompositor implements VideoCompositorPort {
 
   async compositeVideo(request: VideoCompositeRequest): Promise<VideoCompositeResult> {
     const sampleAt = validateRequest(request);
-    const frames = Math.round(request.durationSec * request.fps);
+    const frames = encodedFrameCount(request.durationSec, request.fps);
     if (frames < 2) {
       throw new VideoCompositeValidationError("durationSec * fps must yield at least 2 frames");
     }
@@ -161,7 +161,7 @@ export class CanvasFfmpegVideoCompositor implements VideoCompositorPort {
 
   async compositeFrame(request: VideoCompositeRequest, atSec: number): Promise<CompositeResult> {
     validateRequest(request);
-    const frames = Math.round(request.durationSec * request.fps);
+    const frames = encodedFrameCount(request.durationSec, request.fps);
     if (frames < 2) {
       throw new VideoCompositeValidationError("durationSec * fps must yield at least 2 frames");
     }

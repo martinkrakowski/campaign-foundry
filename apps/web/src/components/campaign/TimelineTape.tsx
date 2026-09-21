@@ -12,7 +12,10 @@ import {
 } from "react";
 import { cn } from "@/lib/cn";
 import { useInlineWidth } from "@/lib/use-min-inline-size";
-import { MOTION_FPS } from "@campaignfoundry/CampaignOrchestration/motion-kinds";
+import {
+  MOTION_FPS,
+  encodedDurationSec,
+} from "@campaignfoundry/CampaignOrchestration/motion-kinds";
 import {
   DWELL_TOLERANCE,
   MAX_WEIGHT,
@@ -197,6 +200,17 @@ export interface TimelineTapeProps {
    * have.
    */
   readonly onBoundaryCommit?: (boundary: number, delta: number) => void;
+  /**
+   * TL4 — the brief's music bed (VE-D8), present only when it carries one.
+   *
+   * The path, not a waveform: nothing here reads the file, and a drawn
+   * waveform would be a picture of audio this surface has never decoded. The
+   * lane renders only when this is present, for the reason TS1 states — an
+   * empty waveform would imply a bed the brief does not carry.
+   *
+   * Display only. Nothing on this lane commits.
+   */
+  readonly audioPath?: string;
   /**
    * Which host mounted it (D145 rail, D146 Copy section). Reflected, not styled.
    *
@@ -835,6 +849,27 @@ function TimelineTapeImpl(props: TimelineTapeProps): ReactNode {
                   {messages.tapeKeysNotPlaced(props.diamonds.unplaceable.count)}
                 </p>
               ) : null}
+            </Lane>
+          ) : null}
+
+          {/* TL4 — the bed's span, present only when the brief carries one.
+              The caption puts the ENCODED length beside the brief's: frames are
+              whole, so 6.02 s at 30 fps is 181 frames and a 6.033… s clip. The
+              number comes from `encodedDurationSec` — the same function the
+              encoder's frame count comes from — because a formula restated here
+              would keep claiming a length the encoder had stopped producing,
+              which is the twin TL4 exists to refuse. */}
+          {props.audioPath !== undefined ? (
+            <Lane name={messages.tapeLaneAudio} durationSec={durationSec} pxPerSec={pxPerSec}>
+              <div
+                data-tape-audio-span=""
+                aria-hidden="true"
+                className="absolute inset-y-2 left-0 rounded bg-brand/20"
+                style={{ width: `${durationSec * pxPerSec}px` }}
+              />
+              <p className="relative pl-2 text-[10px] leading-[2.75rem] text-text-muted">
+                {messages.tapeAudioSpan(durationSec, encodedDurationSec(durationSec, MOTION_FPS))}
+              </p>
             </Lane>
           ) : null}
 

@@ -115,6 +115,11 @@ export function TimelineSection({
         scrubSec={sectionPlayhead.committedSec}
         committedSec={sectionPlayhead.committedSec}
         selectedBeatIndex={selectedBeatIndex}
+        /* TL4 — display only, so BOTH hosts show it. The section leaves
+           diamonds and boundary handles unwired because it cannot commit
+           them; a caption commits nothing, so withholding it here would
+           hide a fact rather than withhold an affordance. */
+        audioPath={state.audio?.path}
         onScrubLive={sectionPlayhead.commit}
         onScrubCommit={sectionPlayhead.commit}
         onSelectBeat={setSelectedBeatIndex}
