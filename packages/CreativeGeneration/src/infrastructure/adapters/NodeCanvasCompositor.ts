@@ -43,6 +43,7 @@ import {
 import {
   CREATIVE_GEOMETRY,
   LAYER_PROP_DEFAULTS,
+  resolveLayerFrame,
 } from "@campaignfoundry/CampaignOrchestration/creative-geometry";
 import { hexToRgb, wrapText } from "./canvas-util.js";
 import { registerBundledFonts } from "../fonts.js";
@@ -1239,26 +1240,54 @@ function selectGround(prepared: PreparedCreative, copyT: number | undefined): Gr
   return { current, incoming: groundFor(pair.incoming), mix: pair.mix };
 }
 
+/**
+ * The pixel box a layer paints into (D130). Absent `layer.frame` is the
+ * whole canvas — today's geometry, byte-identical — so canonical templates
+ * (no `frame` key) leave the goldens unedited. A present frame overlays
+ * `byFamily` for the current canvas family, then scales fractions by the
+ * prepared pixel size.
+ */
+function layerPixelRect(
+  layer: CreativeTemplateLayer,
+  canvas: CanvasSpec,
+  width: number,
+  height: number,
+): { x: number; y: number; w: number; h: number } {
+  const frame = resolveLayerFrame(layer.frame, canvas);
+  if (frame === undefined) {
+    return { x: 0, y: 0, w: width, h: height };
+  }
+  return {
+    x: frame.x * width,
+    y: frame.y * height,
+    w: frame.w * width,
+    h: frame.h * height,
+  };
+}
+
 /** Blit one ground image under the shared ken-burns zoom, at an optional layer alpha. */
 function drawGroundImage(
   ctx: SKRSContext2D,
   image: Image,
-  width: number,
-  height: number,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
   zoom: number,
   alpha: number,
 ): void {
   // `alpha === 1` never touches globalAlpha, so the no-scene path is exactly
-  // the pre-VE5b1 call sequence — byte-identical (VE-D3).
+  // the pre-VE5b1 call sequence — byte-identical (VE-D3). Absent-frame callers
+  // pass `(0, 0, width, height)`, which is the pre-D130 blit.
   if (alpha !== 1) ctx.globalAlpha = alpha;
   if (zoom === 1) {
-    ctx.drawImage(image, 0, 0, width, height);
+    ctx.drawImage(image, x, y, w, h);
   } else {
     ctx.save();
-    ctx.translate(width / 2, height / 2);
+    ctx.translate(x + w / 2, y + h / 2);
     ctx.scale(zoom, zoom);
-    ctx.translate(-width / 2, -height / 2);
-    ctx.drawImage(image, 0, 0, width, height);
+    ctx.translate(-(x + w / 2), -(y + h / 2));
+    ctx.drawImage(image, x, y, w, h);
     ctx.restore();
   }
   if (alpha !== 1) ctx.globalAlpha = 1;
@@ -1285,7 +1314,8 @@ function drawGroundImage(
  */
 function paintBackground(c: LayerDrawContext): void {
   const { ctx, prepared, motion, t, copyT, layer } = c;
-  const { width, height } = prepared;
+  const { width, height, canvas } = prepared;
+  const dest = layerPixelRect(layer, canvas, width, height);
   const resolved = resolveTracks(
     [
       {
@@ -1299,23 +1329,24 @@ function paintBackground(c: LayerDrawContext): void {
   );
   const zoom = poseOf(resolved, layer.id).scale;
   const ground = selectGround(prepared, copyT);
-  drawGroundImage(ctx, ground.current, width, height, zoom, 1);
+  drawGroundImage(ctx, ground.current, dest.x, dest.y, dest.w, dest.h, zoom, 1);
   if (ground.incoming !== undefined && ground.mix > 0) {
-    drawGroundImage(ctx, ground.incoming, width, height, zoom, ground.mix);
+    drawGroundImage(ctx, ground.incoming, dest.x, dest.y, dest.w, dest.h, zoom, ground.mix);
   }
 }
 
 /** The shade layer — contrast shade, darkest at the headline edge (D121). */
 function paintShade(c: LayerDrawContext): void {
-  const { ctx, prepared } = c;
-  const { width, height, top, shadeAlpha } = prepared;
+  const { ctx, prepared, layer } = c;
+  const { width, height, top, shadeAlpha, canvas } = prepared;
+  const dest = layerPixelRect(layer, canvas, width, height);
   const shade = top
     ? ctx.createLinearGradient(0, height * 0.55, 0, 0)
     : ctx.createLinearGradient(0, height * 0.45, 0, height);
   shade.addColorStop(0, "rgba(0, 0, 0, 0)");
   shade.addColorStop(1, `rgba(0, 0, 0, ${shadeAlpha})`);
   ctx.fillStyle = shade;
-  ctx.fillRect(0, 0, width, height);
+  ctx.fillRect(dest.x, dest.y, dest.w, dest.h);
 }
 
 /**
@@ -1337,8 +1368,14 @@ function paintShade(c: LayerDrawContext): void {
  */
 function paintAccent(c: LayerDrawContext): void {
   const { ctx, prepared, motion, eased, layer } = c;
-  const { width, height, top } = prepared;
+  const { width, height, top, canvas } = prepared;
   const [ar, ag, ab] = hexToRgb(prepared.brandColor);
+  if (layer.frame !== undefined) {
+    const dest = layerPixelRect(layer, canvas, width, height);
+    ctx.fillStyle = `rgb(${ar}, ${ag}, ${ab})`;
+    ctx.fillRect(dest.x, dest.y, dest.w, dest.h);
+    return;
+  }
   const accentProps = (layer.props ?? {}) as AccentProps;
   const solidH =
     height * mergeGeometry(LAYER_PROP_DEFAULTS.accent.solidHeight, accentProps.solidHeight);
@@ -1391,10 +1428,19 @@ function paintAccent(c: LayerDrawContext): void {
  */
 function drawStaticText(c: LayerDrawContext): void {
   const { ctx, prepared, motion, t, effectT, layer } = c;
-  const { width, height } = prepared;
+  const { width, height, canvas } = prepared;
   // Layer 4 — campaign copy, wrapped to the inset-reduced width and placed
   // in the inset rectangle per the prepared style's alignment (D10 amendment,
-  // T5). Reads the layout `prepare` already resolved (C5).
+  // T5). Reads the layout `prepare` already resolved (C5). A present frame
+  // clips the block to the resolved rect (D130); placement stays prepare's.
+  const framed = layer.frame !== undefined;
+  if (framed) {
+    const dest = layerPixelRect(layer, canvas, width, height);
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(dest.x, dest.y, dest.w, dest.h);
+    ctx.clip();
+  }
   const headline = prepared.logoAnchorLayout!;
   const resolved = resolveTracks(
     [
@@ -1428,6 +1474,9 @@ function drawStaticText(c: LayerDrawContext): void {
   if (posed) {
     ctx.restore();
   }
+  if (framed) {
+    ctx.restore();
+  }
 }
 
 /**
@@ -1445,7 +1494,15 @@ function drawHtml(c: LayerDrawContext): void {
   if (layer.elements === undefined || layer.elements.length === 0) {
     return;
   }
-  const { width, height } = prepared;
+  const { width, height, canvas } = prepared;
+  const framed = layer.frame !== undefined;
+  if (framed) {
+    const dest = layerPixelRect(layer, canvas, width, height);
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(dest.x, dest.y, dest.w, dest.h);
+    ctx.clip();
+  }
   for (const element of layer.elements) {
     const boxX = element.frame.x * width;
     const boxY = element.frame.y * height;
@@ -1540,6 +1597,9 @@ function drawHtml(c: LayerDrawContext): void {
       }
     }
   }
+  if (framed) {
+    ctx.restore();
+  }
 }
 
 /**
@@ -1555,12 +1615,18 @@ function drawHtml(c: LayerDrawContext): void {
  * than guessing an anchor.
  */
 function drawLogo(c: LayerDrawContext): void {
-  const { ctx, prepared } = c;
+  const { ctx, prepared, layer } = c;
   // Layer 5 — brand logo, anchored opposite the headline (top-right for a bottom
   // headline, bottom-left for a top headline). Inset offset was captured in
   // prepare; if the rest-pose headline block overlaps it, snap to an inset edge.
   // The rest-pose box (not the translated one) keeps the logo static across `t`.
+  // A present frame (D130) is the draw box; the overlap snap is today's path.
   if (prepared.logo) {
+    if (layer.frame !== undefined) {
+      const dest = layerPixelRect(layer, prepared.canvas, prepared.width, prepared.height);
+      ctx.drawImage(prepared.logo.image, dest.x, dest.y, dest.w, dest.h);
+      return;
+    }
     const anchor = prepared.logoAnchorLayout;
     if (anchor === undefined) {
       if (!prepared.layers.some((layer) => layer.kind === "html")) {

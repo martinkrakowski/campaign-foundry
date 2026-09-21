@@ -7,14 +7,17 @@
  * reads — nothing invented — where every absent prop means the value the layer resolves today.
  */
 import { ADVERTISING_UNITS, type AdvertisingUnit } from "./advertising-units.js";
+import { RATIO_VALUES } from "./aspect-ratios.js";
 import type { CampaignType } from "./campaign-types.js";
 import { CAMPAIGN_TYPE_PRESETS } from "./campaign-types.js";
+import type { LayerFrame } from "./creative-geometry.js";
 import {
   CANONICAL_TEMPLATES,
   CANONICAL_TEMPLATE_IDS,
   type CanonicalTemplateId,
   type CreativeTemplateLayer,
 } from "./creative-templates.js";
+import { DISPLAY_SIZE_VALUES } from "./display-sizes.js";
 import {
   CREATIVE_TYPES,
   CREATIVE_TYPE_RULES,
@@ -119,6 +122,170 @@ export interface LayerEnabledProblem {
 export function layerEnabledProblem(enabled: unknown): LayerEnabledProblem | undefined {
   if (enabled === undefined || typeof enabled === "boolean") return undefined;
   return { field: "enabled", must: "be a boolean", value: enabled };
+}
+
+/** Why a layer's `frame` is not a shape the brief may carry (D130); undefined when it is. */
+export interface LayerFrameProblem {
+  /** The frame subpath the problem names — "" for the frame itself, `.x` for one value. */
+  readonly path: string;
+  /** The requirement, phrased to follow "must" in a `Campaign brief field …` message. */
+  readonly must: string;
+  /** The offending value, for the message's `got <JSON>` clause. */
+  readonly value: unknown;
+}
+
+/** A base frame's fields (D130), in declaration order. */
+const LAYER_FRAME_FIELDS = ["x", "y", "w", "h", "anchor", "byFamily"] as const;
+
+/** A `byFamily` overlay's fields: the two canvas families, nothing else. */
+const BY_FAMILY_FIELDS = ["ratio", "size"] as const;
+
+/** A per-canvas overlay may restate any of the box/anchor fields, never `byFamily`. */
+const LAYER_FRAME_OVERRIDE_FIELDS = ["x", "y", "w", "h", "anchor"] as const;
+
+/**
+ * The one frame decision both boundaries read (D130): `isLayerEntry` refuses
+ * on a defined problem, and the API's `validateTemplate` formats the same
+ * problem into its message shape — the two cannot drift. Absent frame is
+ * always fine: absence is the kind's default rect. A present frame is an
+ * object of [0, 1] fractions, a vocabulary `anchor`, and an optional
+ * `byFamily` whose keys are real ratios and sizes; unknown extra junk is
+ * refused, not ignored.
+ */
+export function layerFrameProblem(frame: unknown): LayerFrameProblem | undefined {
+  if (frame === undefined) return undefined;
+  if (typeof frame !== "object" || frame === null || Array.isArray(frame)) {
+    return { path: "", must: "be an object", value: frame };
+  }
+  const record = frame as Record<string, unknown>;
+  for (const [field, value] of Object.entries(record)) {
+    if (!(LAYER_FRAME_FIELDS as readonly string[]).includes(field)) {
+      return {
+        path: `.${field}`,
+        must: `be one of ${LAYER_FRAME_FIELDS.map((key) => `"${key}"`).join(", ")}`,
+        value,
+      };
+    }
+  }
+  const boxProblem = frameBoxProblem(record, "");
+  if (boxProblem !== undefined) return boxProblem;
+  if (record.byFamily !== undefined) {
+    return byFamilyProblem(record.byFamily);
+  }
+  return undefined;
+}
+
+/** Required x/y/w/h in [0, 1] and a vocabulary anchor — the base frame's box. */
+function frameBoxProblem(
+  record: Record<string, unknown>,
+  path: string,
+): LayerFrameProblem | undefined {
+  for (const field of ["x", "y", "w", "h"] as const) {
+    const value = record[field];
+    if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 1) {
+      return { path: `${path}.${field}`, must: "be a number in [0, 1]", value };
+    }
+  }
+  const anchor = record.anchor;
+  if (typeof anchor !== "string" || !(ANCHOR_VALUES as readonly string[]).includes(anchor)) {
+    return {
+      path: `${path}.anchor`,
+      must: `be one of ${ANCHOR_VALUES.map((value) => `"${value}"`).join(", ")}`,
+      value: anchor,
+    };
+  }
+  return undefined;
+}
+
+function byFamilyProblem(byFamily: unknown): LayerFrameProblem | undefined {
+  if (typeof byFamily !== "object" || byFamily === null || Array.isArray(byFamily)) {
+    return { path: ".byFamily", must: "be an object", value: byFamily };
+  }
+  const record = byFamily as Record<string, unknown>;
+  for (const [field, value] of Object.entries(record)) {
+    if (!(BY_FAMILY_FIELDS as readonly string[]).includes(field)) {
+      return {
+        path: `.byFamily.${field}`,
+        must: `be one of ${BY_FAMILY_FIELDS.map((key) => `"${key}"`).join(", ")}`,
+        value,
+      };
+    }
+  }
+  if (record.ratio !== undefined) {
+    const problem = familyMapProblem(
+      record.ratio,
+      ".byFamily.ratio",
+      RATIO_VALUES as readonly string[],
+    );
+    if (problem !== undefined) return problem;
+  }
+  if (record.size !== undefined) {
+    const problem = familyMapProblem(
+      record.size,
+      ".byFamily.size",
+      DISPLAY_SIZE_VALUES as readonly string[],
+    );
+    if (problem !== undefined) return problem;
+  }
+  return undefined;
+}
+
+function familyMapProblem(
+  map: unknown,
+  path: string,
+  allowed: readonly string[],
+): LayerFrameProblem | undefined {
+  if (typeof map !== "object" || map === null || Array.isArray(map)) {
+    return { path, must: "be an object", value: map };
+  }
+  const record = map as Record<string, unknown>;
+  for (const [key, value] of Object.entries(record)) {
+    const entryPath = `${path}[${JSON.stringify(key)}]`;
+    if (!allowed.includes(key)) {
+      return {
+        path: entryPath,
+        must: `be one of ${allowed.map((name) => `"${name}"`).join(", ")}`,
+        value,
+      };
+    }
+    const overrideProblem = frameOverrideProblem(value, entryPath);
+    if (overrideProblem !== undefined) return overrideProblem;
+  }
+  return undefined;
+}
+
+function frameOverrideProblem(override: unknown, path: string): LayerFrameProblem | undefined {
+  if (typeof override !== "object" || override === null || Array.isArray(override)) {
+    return { path, must: "be an object", value: override };
+  }
+  const record = override as Record<string, unknown>;
+  for (const [field, value] of Object.entries(record)) {
+    if (!(LAYER_FRAME_OVERRIDE_FIELDS as readonly string[]).includes(field)) {
+      return {
+        path: `${path}.${field}`,
+        must: `be one of ${LAYER_FRAME_OVERRIDE_FIELDS.map((key) => `"${key}"`).join(", ")}`,
+        value,
+      };
+    }
+  }
+  for (const field of ["x", "y", "w", "h"] as const) {
+    if (record[field] === undefined) continue;
+    const value = record[field];
+    if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 1) {
+      return { path: `${path}.${field}`, must: "be a number in [0, 1]", value };
+    }
+  }
+  if (record.anchor !== undefined) {
+    const anchor = record.anchor;
+    if (typeof anchor !== "string" || !(ANCHOR_VALUES as readonly string[]).includes(anchor)) {
+      return {
+        path: `${path}.anchor`,
+        must: `be one of ${ANCHOR_VALUES.map((value) => `"${value}"`).join(", ")}`,
+        value: anchor,
+      };
+    }
+  }
+  return undefined;
 }
 
 /** Why a layer's `props` is not a shape the brief may carry (D134); undefined when it is. */
@@ -301,7 +468,10 @@ export function satisfiesOrderConstraints(
  * half-written template can never be cast through and reach `toBrief`. Array
  * position IS z-order (D128): a template whose layer order violates the creative
  * type's declared `above`/`below` constraints is not a valid template. A layer's `enabled`,
- * when present, must be a boolean (D129) — absent means enabled. A layer's `props`,
+ * when present, must be a boolean (D129) — absent means enabled. A layer's `frame`,
+ * when present, must be a canvas-relative box of [0, 1] fractions, a vocabulary
+ * `anchor`, and an optional `byFamily` whose keys are real ratios and sizes
+ * (D130) — unknown extra junk is refused. A layer's `props`,
  * when present, must be a shape that layer's kind may carry (D134, X2) — same key set,
  * every number a fraction in [0, 1], the anchor a vocabulary member, `alt` a string — so an
  * unknown key or a value out of range cannot ride the guard into the editor or
@@ -395,6 +565,7 @@ interface LayerEntry {
   readonly id: string;
   readonly kind: LayerKind;
   readonly enabled?: boolean;
+  readonly frame?: LayerFrame;
   readonly props?: LayerProps;
   readonly elements?: readonly HtmlElement[];
   readonly tracks?: readonly Track[];
@@ -405,8 +576,9 @@ interface LayerEntry {
  * non-empty string `id` (the API's `validateTemplate` refuses an empty one)
  * and a vocabulary `kind` — the fields every consumer below the
  * guard dereferences, and which a `null`, a bare string or a kindless object
- * names neither of — with `enabled`, when present, a boolean (D129), and
- * `props`, when present, a shape that kind may carry (D134), `elements`,
+ * names neither of — with `enabled`, when present, a boolean (D129), `frame`,
+ * when present, a canvas-relative box (D130), `props`, when present, a shape
+ * that kind may carry (D134), `elements`,
  * when present, an `html` layer's element list (HL1), and `tracks`, when
  * present, that kind's own keyframe tracks (K1) — so an element with an
  * unknown kind, a non-vocabulary anchor, a fraction outside [0, 1], or a
@@ -434,6 +606,7 @@ function isLayerEntry(layer: unknown): layer is LayerEntry {
     return false;
   }
   if (layerEnabledProblem(rec.enabled) !== undefined) return false;
+  if (layerFrameProblem(rec.frame) !== undefined) return false;
   if (
     rec.props !== undefined &&
     layerPropsProblem(rec.kind as LayerKind, rec.props) !== undefined

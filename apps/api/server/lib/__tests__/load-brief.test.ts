@@ -610,6 +610,83 @@ describe("parseBrief", () => {
     });
   });
 
+  describe("layer frame (D130)", () => {
+    const frame = { x: 0, y: 0, w: 1, h: 0.5, anchor: "top" };
+
+    const withFrame = (kind: string, value: unknown) => {
+      const base = templateFromCanonical(DEFAULT_CAMPAIGN_TYPE);
+      return {
+        ...base,
+        layers: base.layers.map((layer) =>
+          layer.kind === kind ? { ...layer, frame: value } : layer,
+        ),
+      };
+    };
+
+    test("a well-formed frame parses and carries verbatim, including a byFamily.size overlay", () => {
+      const overlay = {
+        ...frame,
+        byFamily: { size: { "300x250": { h: 0.25 } } },
+      };
+      const parsed = parseBrief({ ...valid, template: withFrame("image", overlay) });
+      expect(parsed.template.layers.find((layer) => layer.kind === "image")?.frame).toEqual(
+        overlay,
+      );
+    });
+
+    test("an omitted frame stays omitted", () => {
+      const parsed = parseBrief({
+        ...valid,
+        template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+      });
+      expect(parsed.template.layers.every((layer) => layer.frame === undefined)).toBe(true);
+    });
+
+    test("unknown extra junk on the frame is refused, not ignored", () => {
+      expect(() =>
+        parseBrief({ ...valid, template: withFrame("image", { ...frame, extra: 1 }) }),
+      ).toThrow(
+        'Campaign brief field "template.layers[0].frame.extra" must be one of "x", "y", "w", "h", "anchor", "byFamily"; got 1.',
+      );
+    });
+
+    test("a byFamily size that is not a real display size is refused", () => {
+      expect(() =>
+        parseBrief({
+          ...valid,
+          template: withFrame("image", { ...frame, byFamily: { size: { "970x250": { h: 0.2 } } } }),
+        }),
+      ).toThrow(
+        'Campaign brief field "template.layers[0].frame.byFamily.size["970x250"]" must be one of "300x250", "728x90", "160x600", "320x50", "300x600"; got {"h":0.2}.',
+      );
+    });
+
+    test("a fraction outside [0, 1] is refused", () => {
+      expect(() =>
+        parseBrief({ ...valid, template: withFrame("image", { ...frame, h: 1.4 }) }),
+      ).toThrow(
+        'Campaign brief field "template.layers[0].frame.h" must be a number in [0, 1]; got 1.4.',
+      );
+    });
+
+    test("a frame that is not an object is refused", () => {
+      expect(() => parseBrief({ ...valid, template: withFrame("image", 5) })).toThrow(
+        'Campaign brief field "template.layers[0].frame" must be an object; got 5.',
+      );
+    });
+
+    test("the refusal holds with enforceCapabilities: false (authoring mode too)", () => {
+      expect(() =>
+        parseBrief(
+          { ...valid, template: withFrame("image", { ...frame, extra: 1 }) },
+          { enforceCapabilities: false },
+        ),
+      ).toThrow(
+        'Campaign brief field "template.layers[0].frame.extra" must be one of "x", "y", "w", "h", "anchor", "byFamily"; got 1.',
+      );
+    });
+  });
+
   describe("anchor prop vs anchor axis (C4b, R-D4)", () => {
     /** The canonical social-post template with `props` swapped onto one kind's layer. */
     const withProps = (kind: string, props: unknown) => {

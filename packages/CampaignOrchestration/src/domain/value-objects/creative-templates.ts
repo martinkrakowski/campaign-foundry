@@ -7,6 +7,7 @@
  */
 import type { AdvertisingUnit } from "./advertising-units.js";
 import type { LayerProps } from "./brief-template.js";
+import type { LayerFrame } from "./creative-geometry.js";
 import type { CreativeType } from "./creative-types.js";
 import type { HtmlElement } from "./html-element.js";
 import type { LayerKind } from "./layer-kinds.js";
@@ -31,6 +32,13 @@ export interface CreativeTemplateLayer {
    * Refused if disabling would leave a required kind with no enabled instances (MP-D4).
    */
   readonly enabled?: boolean;
+  /**
+   * The layer's canvas-relative frame (D130). Optional, and absent means the
+   * kind's default rect — `CREATIVE_GEOMETRY` / `FULL_CANVAS_RECT` for grounds,
+   * exported as `LAYER_KIND_DEFAULT_RECTS`. Canonical templates never carry
+   * `frame`; that absence is the mechanism that keeps goldens unedited.
+   */
+  readonly frame?: LayerFrame;
   /**
    * The layer's own props (D134): overrides of the geometry this layer already
    * reads. Optional, and absent means the resolved defaults — the canonical

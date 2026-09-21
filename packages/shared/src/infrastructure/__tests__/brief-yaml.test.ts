@@ -501,7 +501,67 @@ describe("dumpBrief layer tracks order (K1)", () => {
   // from the order array and it falls into the "remaining keys" bucket too,
   // in source order — after "extra" — flipping this assertion (mirrors the
   // `clickDestination` positional test above).
-  test("tracks sits at its declared (sixth) key position, not merely 'somewhere' (positional proof)", () => {
+  test("a layer frame override round-trips and sits after enabled, before props", () => {
+    const withFrame = {
+      ...brief,
+      template: {
+        id: "canonical-image-text",
+        version: 1,
+        creativeType: "image-text",
+        unit: "standard-web",
+        layers: [
+          {
+            props: { alt: "pack" },
+            byFamily: undefined,
+            frame: {
+              byFamily: { size: { "300x250": { h: 0.25, x: 0 } }, ratio: { "1:1": { y: 0.1 } } },
+              anchor: "top",
+              h: 0.5,
+              w: 1,
+              y: 0,
+              x: 0,
+            },
+            kind: "image",
+            id: "bg",
+          },
+        ],
+      },
+    };
+    const yaml = dumpBrief(withFrame);
+    expect(yaml.indexOf("id: bg")).toBeLessThan(yaml.indexOf("kind: image"));
+    expect(yaml.indexOf("kind: image")).toBeLessThan(yaml.indexOf("frame:"));
+    expect(yaml.indexOf("frame:")).toBeLessThan(yaml.indexOf("props:"));
+    expect(yaml.indexOf("x: 0")).toBeLessThan(yaml.indexOf("y: 0"));
+    expect(yaml.indexOf("y: 0")).toBeLessThan(yaml.indexOf("w: 1"));
+    expect(yaml.indexOf("w: 1")).toBeLessThan(yaml.indexOf("h: 0.5"));
+    expect(yaml.indexOf("h: 0.5")).toBeLessThan(yaml.indexOf("anchor: top"));
+    expect(yaml.indexOf("anchor: top")).toBeLessThan(yaml.indexOf("byFamily:"));
+    expect(yaml.indexOf("ratio:")).toBeLessThan(yaml.indexOf("size:"));
+    const parsed = parse(yaml) as typeof withFrame;
+    expect(parsed.template.layers[0]).toEqual({
+      id: "bg",
+      kind: "image",
+      frame: {
+        x: 0,
+        y: 0,
+        w: 1,
+        h: 0.5,
+        anchor: "top",
+        byFamily: { ratio: { "1:1": { y: 0.1 } }, size: { "300x250": { h: 0.25, x: 0 } } },
+      },
+      props: { alt: "pack" },
+    });
+    expect(dumpBrief(parsed)).toBe(yaml);
+  });
+
+  test("a brief that omits frame still omits it", () => {
+    const yaml = dumpBrief(templated);
+    expect(yaml).not.toContain("frame:");
+    expect(yaml).not.toContain("byFamily:");
+    expect(dumpBrief(parse(yaml) as object)).toBe(yaml);
+  });
+
+  test("tracks sits at its declared key position, not merely 'somewhere' (positional proof)", () => {
     const positional = {
       ...brief,
       template: {

@@ -6,6 +6,7 @@ import type { LayerKind } from "../layer-kinds.js";
 import {
   isBriefTemplate,
   layerEnabledProblem,
+  layerFrameProblem,
   layerPropsProblem,
   satisfiesOrderConstraints,
   templateFromCanonical,
@@ -1027,5 +1028,238 @@ describe("isBriefTemplate mirrors the API's table rules (X11)", () => {
         ),
       ),
     ).toBe(false);
+  });
+});
+
+describe("layerFrameProblem and isBriefTemplate layer frame (D130)", () => {
+  const frame = { x: 0, y: 0, w: 1, h: 0.5, anchor: "top" as const };
+
+  const withLayer = (layer: unknown, creativeType: CreativeType = "image-text"): boolean => {
+    const kind = (layer as { kind?: unknown } | null)?.kind;
+    const canonical = CANONICAL_TEMPLATES[creativeType].layers;
+    return isBriefTemplate({
+      id: CANONICAL_TEMPLATES[creativeType].id,
+      version: 1,
+      creativeType,
+      unit: "standard-web",
+      layers:
+        typeof kind === "string" && canonical.some((l) => l.kind === kind)
+          ? canonical.map((l) => (l.kind === kind ? layer : l))
+          : [...canonical, layer],
+    });
+  };
+
+  test("absent frame is always fine", () => {
+    expect(layerFrameProblem(undefined)).toBeUndefined();
+    expect(withLayer({ id: "image", kind: "image" })).toBe(true);
+  });
+
+  test("accepts a well-formed frame, 0/1 fractions, and a byFamily.size overlay", () => {
+    expect(layerFrameProblem(frame)).toBeUndefined();
+    expect(
+      layerFrameProblem({ ...frame, x: 0, y: 1, w: 0, h: 1, anchor: "bottom" }),
+    ).toBeUndefined();
+    expect(
+      layerFrameProblem({
+        ...frame,
+        byFamily: { size: { "300x250": { h: 0.25 } }, ratio: { "1:1": { y: 0.1 } } },
+      }),
+    ).toBeUndefined();
+    expect(withLayer({ id: "image", kind: "image", frame })).toBe(true);
+    expect(
+      withLayer({
+        id: "image",
+        kind: "image",
+        frame: { ...frame, byFamily: { size: { "300x250": { h: 0.25 } } } },
+      }),
+    ).toBe(true);
+  });
+
+  test("empty byFamily and empty overlays are legal", () => {
+    expect(layerFrameProblem({ ...frame, byFamily: {} })).toBeUndefined();
+    expect(layerFrameProblem({ ...frame, byFamily: { size: {} } })).toBeUndefined();
+    expect(layerFrameProblem({ ...frame, byFamily: { size: { "300x250": {} } } })).toBeUndefined();
+  });
+
+  test("refuses a frame that is not an object", () => {
+    for (const value of ["nope", 5, null, true, [1]]) {
+      expect(layerFrameProblem(value)).toEqual({ path: "", must: "be an object", value });
+      expect(withLayer({ id: "image", kind: "image", frame: value })).toBe(false);
+    }
+  });
+
+  test("refuses unknown extra junk on the frame, not ignored", () => {
+    expect(layerFrameProblem({ ...frame, extra: 1 })).toEqual({
+      path: ".extra",
+      must: 'be one of "x", "y", "w", "h", "anchor", "byFamily"',
+      value: 1,
+    });
+    expect(withLayer({ id: "image", kind: "image", frame: { ...frame, extra: 1 } })).toBe(false);
+  });
+
+  test("refuses a fraction outside [0, 1] or a non-number", () => {
+    expect(layerFrameProblem({ ...frame, h: 1.4 })).toEqual({
+      path: ".h",
+      must: "be a number in [0, 1]",
+      value: 1.4,
+    });
+    expect(layerFrameProblem({ ...frame, x: -0.1 })).toEqual({
+      path: ".x",
+      must: "be a number in [0, 1]",
+      value: -0.1,
+    });
+    expect(layerFrameProblem({ ...frame, w: "0.5" })).toEqual({
+      path: ".w",
+      must: "be a number in [0, 1]",
+      value: "0.5",
+    });
+    expect(layerFrameProblem({ ...frame, y: Number.NaN })).toEqual({
+      path: ".y",
+      must: "be a number in [0, 1]",
+      value: Number.NaN,
+    });
+    expect(withLayer({ id: "image", kind: "image", frame: { ...frame, h: 2 } })).toBe(false);
+  });
+
+  test("refuses a missing required box field", () => {
+    expect(layerFrameProblem({ x: frame.x, y: frame.y, w: frame.w, anchor: frame.anchor })).toEqual(
+      {
+        path: ".h",
+        must: "be a number in [0, 1]",
+        value: undefined,
+      },
+    );
+  });
+
+  test("refuses an anchor outside the vocabulary", () => {
+    expect(layerFrameProblem({ ...frame, anchor: "sideways" })).toEqual({
+      path: ".anchor",
+      must: 'be one of "top", "middle", "bottom"',
+      value: "sideways",
+    });
+    expect(layerFrameProblem({ ...frame, anchor: 5 })).toEqual({
+      path: ".anchor",
+      must: 'be one of "top", "middle", "bottom"',
+      value: 5,
+    });
+    expect(withLayer({ id: "image", kind: "image", frame: { ...frame, anchor: "left" } })).toBe(
+      false,
+    );
+  });
+
+  test("refuses a byFamily that is not an object, and extra keys on it", () => {
+    expect(layerFrameProblem({ ...frame, byFamily: "nope" })).toEqual({
+      path: ".byFamily",
+      must: "be an object",
+      value: "nope",
+    });
+    expect(layerFrameProblem({ ...frame, byFamily: [] })).toEqual({
+      path: ".byFamily",
+      must: "be an object",
+      value: [],
+    });
+    expect(layerFrameProblem({ ...frame, byFamily: { extra: 1 } })).toEqual({
+      path: ".byFamily.extra",
+      must: 'be one of "ratio", "size"',
+      value: 1,
+    });
+  });
+
+  test("refuses a family map that is not an object", () => {
+    expect(layerFrameProblem({ ...frame, byFamily: { size: "300x250" } })).toEqual({
+      path: ".byFamily.size",
+      must: "be an object",
+      value: "300x250",
+    });
+    expect(layerFrameProblem({ ...frame, byFamily: { ratio: null } })).toEqual({
+      path: ".byFamily.ratio",
+      must: "be an object",
+      value: null,
+    });
+  });
+
+  test("refuses byFamily keys that are not real ratios or sizes", () => {
+    expect(layerFrameProblem({ ...frame, byFamily: { ratio: { "4:5": { h: 0.2 } } } })).toEqual({
+      path: '.byFamily.ratio["4:5"]',
+      must: 'be one of "1:1", "9:16", "16:9"',
+      value: { h: 0.2 },
+    });
+    expect(layerFrameProblem({ ...frame, byFamily: { size: { "970x250": { h: 0.2 } } } })).toEqual({
+      path: '.byFamily.size["970x250"]',
+      must: 'be one of "300x250", "728x90", "160x600", "320x50", "300x600"',
+      value: { h: 0.2 },
+    });
+    expect(
+      withLayer({
+        id: "image",
+        kind: "image",
+        frame: { ...frame, byFamily: { size: { "970x250": { h: 0.2 } } } },
+      }),
+    ).toBe(false);
+  });
+
+  test("refuses extra junk on an overlay, including a nested byFamily", () => {
+    expect(layerFrameProblem({ ...frame, byFamily: { size: { "300x250": { foo: 1 } } } })).toEqual({
+      path: '.byFamily.size["300x250"].foo',
+      must: 'be one of "x", "y", "w", "h", "anchor"',
+      value: 1,
+    });
+    expect(
+      layerFrameProblem({
+        ...frame,
+        byFamily: { size: { "300x250": { byFamily: { ratio: {} } } } },
+      }),
+    ).toEqual({
+      path: '.byFamily.size["300x250"].byFamily',
+      must: 'be one of "x", "y", "w", "h", "anchor"',
+      value: { ratio: {} },
+    });
+  });
+
+  test("refuses an overlay that is not an object", () => {
+    expect(layerFrameProblem({ ...frame, byFamily: { size: { "300x250": 0.25 } } })).toEqual({
+      path: '.byFamily.size["300x250"]',
+      must: "be an object",
+      value: 0.25,
+    });
+  });
+
+  test("refuses an overlay fraction outside [0, 1] or a bad overlay anchor", () => {
+    expect(layerFrameProblem({ ...frame, byFamily: { size: { "300x250": { h: 1.4 } } } })).toEqual({
+      path: '.byFamily.size["300x250"].h',
+      must: "be a number in [0, 1]",
+      value: 1.4,
+    });
+    expect(
+      layerFrameProblem({ ...frame, byFamily: { size: { "300x250": { y: "0.2" } } } }),
+    ).toEqual({
+      path: '.byFamily.size["300x250"].y',
+      must: "be a number in [0, 1]",
+      value: "0.2",
+    });
+    expect(
+      layerFrameProblem({
+        ...frame,
+        byFamily: { ratio: { "1:1": { x: Number.POSITIVE_INFINITY } } },
+      }),
+    ).toEqual({
+      path: '.byFamily.ratio["1:1"].x',
+      must: "be a number in [0, 1]",
+      value: Number.POSITIVE_INFINITY,
+    });
+    expect(
+      layerFrameProblem({ ...frame, byFamily: { size: { "300x250": { anchor: "sideways" } } } }),
+    ).toEqual({
+      path: '.byFamily.size["300x250"].anchor',
+      must: 'be one of "top", "middle", "bottom"',
+      value: "sideways",
+    });
+    expect(
+      layerFrameProblem({ ...frame, byFamily: { size: { "300x250": { anchor: 1 } } } }),
+    ).toEqual({
+      path: '.byFamily.size["300x250"].anchor',
+      must: 'be one of "top", "middle", "bottom"',
+      value: 1,
+    });
   });
 });

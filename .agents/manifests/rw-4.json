@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "RW-4",
+  "mutations": [
+    {
+      "file": "packages/CreativeGeneration/src/infrastructure/adapters/NodeCanvasCompositor.ts",
+      "before": "  const frame = resolveLayerFrame(layer.frame, canvas);",
+      "after": "  const frame = resolveLayerFrame(layer.frame, { ratio: \"1:1\" });",
+      "because": "The compositor must honour byFamily.size for the current display canvas. Forcing every resolve through a 1:1 spec makes a 300x250-only overlay apply nowhere — the 300x250 cell paints the base half-height and the test that names all three canvases goes red.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CreativeGeneration/src/infrastructure/adapters/__tests__/NodeCanvasCompositor.frames.test.ts",
+        "-t",
+        "a byFamily.size 300x250 override applies at 300x250 and not at 1:1 or 728x90"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

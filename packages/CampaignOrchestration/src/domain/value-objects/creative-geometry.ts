@@ -20,7 +20,10 @@
  * {@link GROUND_LAYER_KINDS} at the foot of the file. The import is type-only,
  * so the leaf still has no runtime dependency at all.
  */
+import type { AspectRatioValue, CanvasSpec } from "./aspect-ratios.js";
+import type { DisplaySize } from "./display-sizes.js";
 import type { LayerKind } from "./layer-kinds.js";
+import type { AnchorKind } from "./variation-defaults.js";
 
 export const CREATIVE_GEOMETRY = {
   /**
@@ -79,10 +82,11 @@ export const CREATIVE_GEOMETRY = {
 } as const;
 
 /**
- * A rect in canvas fractions: `Frame` (D130) minus the vertical `anchor`, which
- * is a placement instruction for copy rather than part of the box. Declared
- * here so a consumer that only needs "where is this box" does not have to
- * invent an anchor value to say it; every `Frame` is already one of these.
+ * A rect in canvas fractions: {@link LayerFrame} (D130) minus the vertical
+ * `anchor`, which is a placement instruction for copy rather than part of the
+ * box. Declared here so a consumer that only needs "where is this box" does
+ * not have to invent an anchor value to say it; every `LayerFrame` is already
+ * one of these once `byFamily` has been resolved against the current canvas.
  */
 
 /**
@@ -135,6 +139,45 @@ export interface CanvasRect {
 }
 
 /**
+ * A partial overlay of a {@link LayerFrame}'s box and anchor (D130). `byFamily`
+ * maps hold these, never a nested `byFamily` — a second family map on an
+ * override is junk, not a second override.
+ */
+export interface LayerFrameOverride {
+  readonly x?: number;
+  readonly y?: number;
+  readonly w?: number;
+  readonly h?: number;
+  readonly anchor?: AnchorKind;
+}
+
+/**
+ * Per-canvas overlays keyed by the canvas family (D130). A `ratio` entry
+ * applies only to a social-ratio canvas; a `size` entry applies only to that
+ * display size. The two maps never mix: a 300×250 canvas does not consult
+ * `ratio`, and a 1:1 canvas does not consult `size`.
+ */
+export interface LayerFrameByFamily {
+  readonly ratio?: Readonly<Partial<Record<AspectRatioValue, LayerFrameOverride>>>;
+  readonly size?: Readonly<Partial<Record<DisplaySize, LayerFrameOverride>>>;
+}
+
+/**
+ * A layer's canvas-relative frame (D130): fractions of the resolved canvas plus
+ * the vertical `anchor` vocabulary, with optional per-family overlays. Absent
+ * on the layer means the kind's default rect ({@link LAYER_KIND_DEFAULT_RECTS}).
+ * Canonical templates never carry one.
+ */
+export interface LayerFrame {
+  readonly x: number;
+  readonly y: number;
+  readonly w: number;
+  readonly h: number;
+  readonly anchor: AnchorKind;
+  readonly byFamily?: LayerFrameByFamily;
+}
+
+/**
  * The GROUND kinds (CE2): the layer kinds whose drawer is `paintBackground`.
  *
  * Both entries dispatch to that one drawer in the compositor's `LAYER_DRAWERS`
@@ -174,3 +217,75 @@ export function isGroundLayerKind(kind: LayerKind): boolean {
 
 /** The canvas itself, in the fraction units every frame in this vocabulary speaks. */
 export const FULL_CANVAS_RECT: CanvasRect = { x: 0, y: 0, w: 1, h: 1 };
+
+/**
+ * The default draw rect per layer kind (D130), extracted from the boxes the
+ * compositor already paints — not invented. Grounds (`image`, `video`) and
+ * every other kind whose drawer fills `(0, 0, width, height)` are
+ * {@link FULL_CANVAS_RECT}. Accent is the solid band flush to the default
+ * (headline-bottom) edge; logo is the top-right width box; text kinds span
+ * the vertical range `headlineAnchor` names. Canonical templates carry no
+ * `frame`, so these rects are what "absent means the kind default" equals,
+ * asserted against `CREATIVE_GEOMETRY`'s fractions verbatim.
+ */
+export const LAYER_KIND_DEFAULT_RECTS: Readonly<Record<LayerKind, CanvasRect>> = {
+  image: FULL_CANVAS_RECT,
+  video: FULL_CANVAS_RECT,
+  shade: FULL_CANVAS_RECT,
+  fill: FULL_CANVAS_RECT,
+  html: FULL_CANVAS_RECT,
+  accent: {
+    x: 0,
+    y: 1 - CREATIVE_GEOMETRY.accentSolidHeightFraction,
+    w: 1,
+    h: CREATIVE_GEOMETRY.accentSolidHeightFraction,
+  },
+  logo: {
+    x: 1 - CREATIVE_GEOMETRY.logoWidthFraction - CREATIVE_GEOMETRY.logoMarginFraction,
+    y: CREATIVE_GEOMETRY.logoMarginFraction,
+    w: CREATIVE_GEOMETRY.logoWidthFraction,
+    h: CREATIVE_GEOMETRY.logoWidthFraction,
+  },
+  "static-text": {
+    x: 0,
+    y: CREATIVE_GEOMETRY.headlineAnchor.top,
+    w: 1,
+    h: 1 - CREATIVE_GEOMETRY.headlineAnchor.top - CREATIVE_GEOMETRY.headlineAnchor.bottom,
+  },
+  "animated-text": {
+    x: 0,
+    y: CREATIVE_GEOMETRY.headlineAnchor.top,
+    w: 1,
+    h: 1 - CREATIVE_GEOMETRY.headlineAnchor.top - CREATIVE_GEOMETRY.headlineAnchor.bottom,
+  },
+};
+
+/** The kind's default draw rect — {@link LAYER_KIND_DEFAULT_RECTS}, named once. */
+export function defaultLayerRect(kind: LayerKind): CanvasRect {
+  return LAYER_KIND_DEFAULT_RECTS[kind];
+}
+
+/**
+ * Resolve a layer's declared frame against the current canvas family (D130).
+ *
+ * Absent `frame` returns `undefined` so the compositor keeps today's geometry
+ * — byte-identical, which is how canonical templates (no `frame` key) leave
+ * the goldens unedited. A present frame overlays `byFamily.ratio` at a social
+ * ratio and `byFamily.size` at a display size; the other map is ignored.
+ */
+export function resolveLayerFrame(
+  frame: LayerFrame | undefined,
+  spec: CanvasSpec,
+): CanvasRect | undefined {
+  if (frame === undefined) return undefined;
+  const override =
+    spec.size !== undefined
+      ? frame.byFamily?.size?.[spec.size]
+      : frame.byFamily?.ratio?.[spec.ratio];
+  return {
+    x: override?.x ?? frame.x,
+    y: override?.y ?? frame.y,
+    w: override?.w ?? frame.w,
+    h: override?.h ?? frame.h,
+  };
+}

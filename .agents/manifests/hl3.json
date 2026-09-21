@@ -94,9 +94,9 @@
     },
     {
       "file": "packages/CreativeGeneration/src/infrastructure/adapters/NodeCanvasCompositor.ts",
-      "before": "  const { ctx, prepared, layer } = c;\n  if (layer.elements === undefined || layer.elements.length === 0) {\n    return;\n  }\n  const { width, height } = prepared;\n  for (const element of layer.elements) {",
-      "after": "  const { ctx, prepared } = c;\n  const htmlLayer = prepared.layers.find((layer) => layer.kind === \"html\");\n  if (htmlLayer === undefined || htmlLayer.elements === undefined || htmlLayer.elements.length === 0) {\n    return;\n  }\n  const { width, height } = prepared;\n  for (const element of htmlLayer.elements) {",
-      "because": "drawHtml must read its elements from the dispatched layer on the draw context — a template may carry two html layers, and hunting prepared.layers for \"the\" html layer paints the first list twice and never paints the second.",
+      "before": "  const { ctx, prepared, layer } = c;\n  if (layer.elements === undefined || layer.elements.length === 0) {\n    return;\n  }\n  const { width, height, canvas } = prepared;\n  const framed = layer.frame !== undefined;\n  if (framed) {\n    const dest = layerPixelRect(layer, canvas, width, height);\n    ctx.save();\n    ctx.beginPath();\n    ctx.rect(dest.x, dest.y, dest.w, dest.h);\n    ctx.clip();\n  }\n  for (const element of layer.elements) {",
+      "after": "  const { ctx, prepared } = c;\n  const htmlLayer = prepared.layers.find((layer) => layer.kind === \"html\");\n  if (htmlLayer === undefined || htmlLayer.elements === undefined || htmlLayer.elements.length === 0) {\n    return;\n  }\n  const { width, height, canvas } = prepared;\n  const framed = htmlLayer.frame !== undefined;\n  if (framed) {\n    const dest = layerPixelRect(htmlLayer, canvas, width, height);\n    ctx.save();\n    ctx.beginPath();\n    ctx.rect(dest.x, dest.y, dest.w, dest.h);\n    ctx.clip();\n  }\n  for (const element of htmlLayer.elements) {",
+      "because": "drawHtml must read its elements from the dispatched layer on the draw context — a template may carry two html layers, and hunting prepared.layers for \"the\" html layer paints the first list twice and never paints the second. (Re-anchored by ANCHORS: L10a wrapped the element loop in an optional layer-frame clip; The semantic edit is the same one; the after-text is that edit re-expressed against the current shape, not a new claim.)",
       "command": [
         "yarn",
         "vitest",

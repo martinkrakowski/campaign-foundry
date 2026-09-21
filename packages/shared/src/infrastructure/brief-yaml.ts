@@ -28,12 +28,12 @@ export const BRIEF_KEY_ORDER = [
 ] as const;
 
 /**
- * A template layer's canonical key order (L3b, D134, D129, HL1, K1): identity,
- * kind, enabled, then its props, elements and — last, deliberately — its
- * keyframe tracks (K1): motion is a choreography layered over an already-
- * defined shape and content, so it sits after both.
+ * A template layer's canonical key order (L3b, D134, D129, D130, HL1, K1):
+ * identity, kind, enabled, its frame, then its props, elements and — last,
+ * deliberately — its keyframe tracks (K1): motion is a choreography layered
+ * over an already-defined shape and content, so it sits after both.
  */
-const LAYER_KEY_ORDER = ["id", "kind", "enabled", "props", "elements", "tracks"] as const;
+const LAYER_KEY_ORDER = ["id", "kind", "enabled", "frame", "props", "elements", "tracks"] as const;
 
 /**
  * One html element's canonical key order (HL1, HL5e): kind, its copy, the
@@ -45,8 +45,11 @@ const ELEMENT_KEY_ORDER = ["kind", "text", "style", "frame"] as const;
 /** An element style block's canonical key order (HL5e), matching the VO's. */
 const ELEMENT_STYLE_KEY_ORDER = ["fontWeight", "fontFamily"] as const;
 
-/** A frame's canonical key order (D130): the fractions, then the anchor. */
-const FRAME_KEY_ORDER = ["x", "y", "w", "h", "anchor"] as const;
+/** A frame's canonical key order (D130): the fractions, then the anchor, then per-family overlays. */
+const FRAME_KEY_ORDER = ["x", "y", "w", "h", "anchor", "byFamily"] as const;
+
+/** A `byFamily` map's canonical key order (D130): social ratios, then display sizes. */
+const BY_FAMILY_KEY_ORDER = ["ratio", "size"] as const;
 
 /** One keyframe track's canonical key order (K1): the property, then its stops. */
 const TRACK_KEY_ORDER = ["property", "stops"] as const;
@@ -103,9 +106,37 @@ function orderedElement(element: unknown): unknown {
     ordered.style = orderedKeys(ordered.style, ELEMENT_STYLE_KEY_ORDER);
   }
   if (isPlainRecord(ordered.frame)) {
-    ordered.frame = orderedKeys(ordered.frame, FRAME_KEY_ORDER);
+    ordered.frame = orderedFrame(ordered.frame);
   }
   return ordered;
+}
+
+/** Reorder a frame's keys (x, y, w, h, anchor, byFamily) and any per-family overlays. */
+function orderedFrame(frame: Record<string, unknown>): Record<string, unknown> {
+  const ordered = orderedKeys(frame, FRAME_KEY_ORDER);
+  if (isPlainRecord(ordered.byFamily)) {
+    ordered.byFamily = orderedByFamily(ordered.byFamily);
+  }
+  return ordered;
+}
+
+function orderedByFamily(byFamily: Record<string, unknown>): Record<string, unknown> {
+  const ordered = orderedKeys(byFamily, BY_FAMILY_KEY_ORDER);
+  if (isPlainRecord(ordered.ratio)) {
+    ordered.ratio = orderedFrameMap(ordered.ratio);
+  }
+  if (isPlainRecord(ordered.size)) {
+    ordered.size = orderedFrameMap(ordered.size);
+  }
+  return ordered;
+}
+
+function orderedFrameMap(map: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(map)) {
+    out[key] = isPlainRecord(value) ? orderedFrame(value) : value;
+  }
+  return out;
 }
 
 /** Reorder one keyframe track's keys (property, stops) and each stop's own keys. */
@@ -125,13 +156,16 @@ function orderedStop(stop: unknown): unknown {
 }
 
 /**
- * Reorder a layer's keys (id, kind, enabled, props, elements, tracks) and,
- * when it carries props, elements or tracks, those keys in their own
- * canonical order.
+ * Reorder a layer's keys (id, kind, enabled, frame, props, elements, tracks)
+ * and, when it carries a frame, props, elements or tracks, those keys in
+ * their own canonical order.
  */
 function orderedLayer(layer: unknown): unknown {
   if (!isPlainRecord(layer)) return layer;
   const ordered = orderedKeys(layer, LAYER_KEY_ORDER);
+  if (isPlainRecord(ordered.frame)) {
+    ordered.frame = orderedFrame(ordered.frame);
+  }
   if (isPlainRecord(ordered.props)) {
     ordered.props = orderedKeys(ordered.props, PROPS_KEY_ORDER);
   }
@@ -161,9 +195,9 @@ function orderedTemplate(template: unknown): unknown {
  * Keys whose value is `undefined` are omitted, matching the previous js-yaml
  * dump byte for byte on the briefs this project writes. A template's layers
  * dump with the layer's own canonical order — `id`, `kind`, `enabled`,
- * `props` and `elements`, with the props keys in the union's order (L3b,
- * D134) and each element's keys, style keys and frame keys in order (HL1,
- * HL5e) — so a save
+ * `frame`, `props` and `elements`, with the frame keys in D130 order and the
+ * props keys in the union's order (L3b, D134) and each element's keys, style
+ * keys and frame keys in order (HL1, HL5e) — so a save
  * serialises a hand-written layer deterministically too. `tracks`, when
  * present, sits last (K1) with each track's own keys (`property`, `stops`)
  * and each stop's (`t`, `value`, `easing`, `clock`) in their own order.
