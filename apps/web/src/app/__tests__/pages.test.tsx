@@ -14,6 +14,53 @@ describe("IndexPage", () => {
   });
 });
 
+describe("CompliancePage — occlusion advisories (D136)", () => {
+  test("an advisory gets its own row, labelled Layer Order, beside the density row", async () => {
+    seedPersistedRun([
+      makeAsset({ occlusionAdvisories: ["Shade sits above Static text and mutes it."] }),
+    ]);
+    renderWithRun(<CompliancePage />);
+    expect(await screen.findByText(/Shade sits above Static text/)).toBeTruthy();
+    // Its own row and its own rule name: the density verdict and the layer
+    // finding are different checks with different verdicts, on one surface.
+    expect(screen.getByText("Layer Order")).toBeTruthy();
+    expect(screen.getByText("Brand Density + Logo")).toBeTruthy();
+  });
+
+  test("an advisory reads ADVISORY, never FAIL (D135)", async () => {
+    seedPersistedRun([
+      makeAsset({
+        passedCompliance: true,
+        logoApplied: true,
+        occlusionAdvisories: ["Shade sits above Static text and mutes it."],
+      }),
+    ]);
+    renderWithRun(<CompliancePage />);
+    expect(await screen.findByText("ADVISORY")).toBeTruthy();
+    // D135: a reorder that hides or mutes a layer warns and never refuses.
+    // The density row beside it is still a PASS, so the advisory cannot be
+    // read as a gate the operator has to clear.
+    expect(screen.getByText("PASS")).toBeTruthy();
+    expect(screen.queryByText("FAIL")).toBeNull();
+  });
+
+  test("two advisories on one asset are two rows", async () => {
+    seedPersistedRun([makeAsset({ occlusionAdvisories: ["First finding.", "Second finding."] })]);
+    renderWithRun(<CompliancePage />);
+    expect(await screen.findByText("First finding.")).toBeTruthy();
+    expect(screen.getByText("Second finding.")).toBeTruthy();
+    expect(screen.getAllByText("ADVISORY")).toHaveLength(2);
+  });
+
+  test("an asset with no advisory adds no row", async () => {
+    seedPersistedRun([makeAsset()]);
+    renderWithRun(<CompliancePage />);
+    expect(await screen.findByText("Brand Density + Logo")).toBeTruthy();
+    expect(screen.queryByText("Layer Order")).toBeNull();
+    expect(screen.queryByText("ADVISORY")).toBeNull();
+  });
+});
+
 describe("CompliancePage", () => {
   test("shows the awaiting state with no run", async () => {
     renderWithRun(<CompliancePage />);

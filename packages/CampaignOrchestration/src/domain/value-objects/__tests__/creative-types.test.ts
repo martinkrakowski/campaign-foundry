@@ -1,4 +1,5 @@
 import { describe, test, expect } from "vitest";
+import { CANONICAL_TEMPLATES } from "../creative-templates.js";
 import { ADVERTISING_UNITS } from "../advertising-units.js";
 import { LAYER_KINDS, type LayerKind } from "../layer-kinds.js";
 import {
@@ -11,6 +12,7 @@ import {
   formatOcclusionReason,
   outputFamilyProblem,
   type CreativeType,
+  findIntroducedOcclusions,
 } from "../creative-types.js";
 import type { ComplianceResult } from "../ComplianceResult.vo.js";
 import { isBriefTemplate, templateFromCanonical } from "../brief-template.js";
@@ -629,6 +631,73 @@ describe("outputFamilyProblem (X14)", () => {
           creativeType: type,
         });
       }
+    }
+  });
+});
+
+describe("findIntroducedOcclusions — the report's question (D136)", () => {
+  const CANONICAL = CANONICAL_TEMPLATES["image-text"].layers;
+
+  test("the canonical stack introduces nothing over itself", () => {
+    // The property the whole shape exists for. `logo` obscures `static-text` by
+    // the table and sits above it in the canonical order, so an ABSOLUTE scan
+    // reports every default creative ever rendered — on a pair `drawLogo`
+    // actively resolves by snapping to an inset edge. It would also move the
+    // report bytes of every brief that never touched its layers.
+    expect(findIntroducedOcclusions(CANONICAL, CANONICAL)).toEqual([]);
+  });
+
+  test("a reordered stack reports the pair it introduced, and only that pair", () => {
+    // `shade` lifted above the headline buries it where the canonical order
+    // does not. The pre-existing logo-over-text pair must NOT come along.
+    const reordered = [
+      { kind: "image" as const },
+      { kind: "accent" as const },
+      { kind: "static-text" as const },
+      { kind: "shade" as const },
+      { kind: "logo" as const },
+    ];
+    const found = findIntroducedOcclusions(CANONICAL, reordered);
+    expect(found).toEqual([{ above: "shade", below: "static-text", behavior: "attenuating" }]);
+  });
+
+  test("a disabled layer introduces nothing — it renders as an absent one (D129)", () => {
+    const withDisabled = [
+      { kind: "image" as const },
+      { kind: "accent" as const },
+      { kind: "static-text" as const },
+      { kind: "shade" as const, enabled: false },
+      { kind: "logo" as const },
+    ];
+    expect(findIntroducedOcclusions(CANONICAL, withDisabled)).toEqual([]);
+  });
+
+  test("it agrees with checkPairOcclusion about what counts", () => {
+    // Two readers of one table: anything this reports must be something the
+    // pair check calls advisory, or the editor and the report disagree about
+    // the same stack.
+    const reordered = [
+      { kind: "image" as const },
+      { kind: "static-text" as const },
+      { kind: "shade" as const },
+    ];
+    for (const finding of findIntroducedOcclusions(CANONICAL, reordered)) {
+      expect(checkPairOcclusion(finding.above, finding.below).severity).toBe("advisory");
+    }
+  });
+
+  test("every finding formats through the one reason function", () => {
+    const reordered = [
+      { kind: "image" as const },
+      { kind: "static-text" as const },
+      { kind: "shade" as const },
+    ];
+    const found = findIntroducedOcclusions(CANONICAL, reordered);
+    expect(found.length).toBeGreaterThan(0);
+    for (const finding of found) {
+      expect(formatOcclusionReason(finding.above, finding.below, finding.behavior)).toContain(
+        "shade",
+      );
     }
   });
 });

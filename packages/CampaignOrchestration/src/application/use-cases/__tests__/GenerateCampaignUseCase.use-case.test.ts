@@ -2652,3 +2652,78 @@ describe("GenerateCampaignUseCase — a framed ground shapes the scenes too (D13
     ).toEqual(["1:1"]);
   });
 });
+
+describe("GenerateCampaignUseCase — occlusion advisories reach the report (D136)", () => {
+  /** The canonical stack with `shade` lifted over the headline it then mutes. */
+  const buriedHeadline = (over: Partial<CampaignBrief> = {}): CampaignBrief => {
+    const base = baseBrief(over);
+    const byKind = new Map(base.template.layers.map((l) => [l.kind, l]));
+    return {
+      ...base,
+      template: {
+        ...base.template,
+        layers: [
+          byKind.get("image")!,
+          byKind.get("accent")!,
+          byKind.get("static-text")!,
+          byKind.get("shade")!,
+          byKind.get("logo")!,
+        ],
+      },
+    };
+  };
+
+  test("a reordered stack puts its advisory on every asset of the run", async () => {
+    const result = await new GenerateCampaignUseCase(deps()).execute(
+      buriedHeadline({ products: [product("alpha")] }),
+    );
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.assets.length).toBeGreaterThan(0);
+    for (const asset of result.value.assets) {
+      expect(asset.occlusionAdvisories).toHaveLength(1);
+      expect(asset.occlusionAdvisories![0]).toContain("shade");
+    }
+  });
+
+  test("an advisory never turns the compliance verdict red (D135)", async () => {
+    // D135: a reorder that hides or mutes a layer WARNS and never refuses, and
+    // that has to survive the trip to the report — otherwise the aggregation
+    // turns an advisory into a gate the operator must clear.
+    const result = await new GenerateCampaignUseCase(deps()).execute(
+      buriedHeadline({ products: [product("alpha")] }),
+    );
+    if (!result.success) return;
+    for (const asset of result.value.assets) {
+      expect(asset.passedCompliance).toBe(true);
+    }
+  });
+
+  test("a canonical stack writes no key at all, so its report bytes do not move", async () => {
+    const result = await new GenerateCampaignUseCase(deps()).execute(
+      baseBrief({ products: [product("alpha")] }),
+    );
+    if (!result.success) return;
+    for (const asset of result.value.assets) {
+      expect("occlusionAdvisories" in asset).toBe(false);
+    }
+  });
+
+  test("the variation path carries it too, on both the still and motion rows", async () => {
+    const variants = [fakeVariant(), motionVariant({ index: 1 })];
+    const d = deps({ planner: fakePlanner(fakePlan(variants)) });
+    const result = await new GenerateCampaignUseCase(d).execute({
+      ...buriedHeadline({ products: [product("alpha")] }),
+      mode: "variation",
+      variation: { count: 3, seed: 42 },
+    });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    // Both rows are built in different functions; a derivation wired into only
+    // one of them leaves the other silent.
+    expect(result.value.assets).toHaveLength(2);
+    for (const asset of result.value.assets) {
+      expect(asset.occlusionAdvisories).toHaveLength(1);
+    }
+  });
+});

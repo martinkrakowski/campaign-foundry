@@ -4,6 +4,11 @@ import type { GeneratedAsset, VariantDescriptor } from "../../domain/entities/Ge
 import type { Product } from "../../domain/entities/Product.js";
 import { variantTreatmentId, type Variant } from "../../domain/entities/Variant.js";
 import { groundFrameOf } from "../../domain/value-objects/creative-geometry.js";
+import {
+  findIntroducedOcclusions,
+  formatOcclusionReason,
+} from "../../domain/value-objects/creative-types.js";
+import { CANONICAL_TEMPLATES } from "../../domain/value-objects/creative-templates.js";
 import { AspectRatio } from "../../domain/value-objects/AspectRatio.vo.js";
 import { type AspectRatioValue } from "../../domain/value-objects/aspect-ratios.js";
 import { DISPLAY_SIZE_VALUES, type DisplaySize } from "../../domain/value-objects/display-sizes.js";
@@ -407,6 +412,14 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     // D132: the box the picture actually has to fill. Absent on every canonical
     // template, and absent means the canvas — today's request, unchanged.
     const groundFrame = groundFrameOf(brief.template.layers);
+    // D136's aggregation half. The stack is the brief's, not the cell's, so
+    // this is one derivation per run rather than one per cell — every cell of
+    // a run renders the same template. Conditional-spread onto the asset so a
+    // template with no occlusion writes no key and its report bytes do not move.
+    const advisories = findIntroducedOcclusions(
+      CANONICAL_TEMPLATES[brief.template.creativeType].layers,
+      brief.template.layers,
+    ).map((finding) => formatOcclusionReason(finding.above, finding.below, finding.behavior));
     const sizeCellsPrep: Array<{
       readonly size: DisplaySize;
       readonly backgroundRatio: AspectRatio;
@@ -553,6 +566,7 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
             ...assetCanvas,
             outputPath,
             proofPath: campaignScoped(brief.id, `proofs/${product.id}.pdf`),
+            ...(advisories.length > 0 ? { occlusionAdvisories: advisories } : {}),
             complianceScore: visual.score ?? 0,
             passedCompliance: visual.passed,
             logoApplied: composite.logoApplied,
@@ -928,8 +942,17 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
       ...(variant.anchor === undefined ? {} : { anchor: variant.anchor }),
     };
 
+    // D136: one scan of the brief's stack, shared by the still and motion
+    // rows — every cell of a run renders the same template, so a per-row
+    // derivation would be the same answer computed twice.
+    const advisories = findIntroducedOcclusions(
+      CANONICAL_TEMPLATES[template.creativeType].layers,
+      template.layers,
+    ).map((finding) => formatOcclusionReason(finding.above, finding.below, finding.behavior));
+
     if (variant.motion !== undefined) {
       return this.renderMotionVariant(
+        advisories,
         variant,
         variant.motion,
         product,
@@ -984,6 +1007,7 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     // reports stay byte-identical to the pre-motion pipeline.
     const asset: GeneratedAsset = {
       ...identity,
+      ...(advisories.length > 0 ? { occlusionAdvisories: advisories } : {}),
       complianceScore: visual.score ?? 0,
       passedCompliance: visual.passed,
       logoApplied: composite.logoApplied,
@@ -1015,6 +1039,8 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
    * The poster is the still the grid, export, packaging, and proof keep using.
    */
   private async renderMotionVariant(
+    /** D136 advisories for the brief's stack, scanned once by the caller. */
+    advisories: readonly string[],
     variant: Variant,
     motion: MotionKind,
     product: Product,
@@ -1063,6 +1089,7 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
 
     const asset: GeneratedAsset = {
       ...identity,
+      ...(advisories.length > 0 ? { occlusionAdvisories: advisories } : {}),
       complianceScore: minScore,
       passedCompliance: passed,
       logoApplied: video.logoApplied,

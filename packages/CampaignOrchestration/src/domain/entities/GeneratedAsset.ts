@@ -91,6 +91,16 @@ export interface GeneratedAsset {
    * report.json derives `brandCompliant = passedCompliance && logoApplied`).
    */
   readonly logoApplied: boolean;
+  /**
+   * Occlusion advisories for the stack this asset rendered (D136), or absent
+   * when it has none — which is every canonical template, so classic JSON
+   * fixtures stay byte-identical (optional fields omit from serialization).
+   *
+   * Advisory, never a gate: D135 says a reorder that hides or mutes a layer
+   * WARNS and never refuses, and the same must hold once the finding reaches
+   * the report. `passedCompliance` is untouched by anything here.
+   */
+  readonly occlusionAdvisories?: readonly string[];
   /** The creative treatment id this asset was rendered with (e.g. "default", "subtle-top"). */
   readonly treatment: string;
   /** Provenance of the background layer (Imagen / procedural fallback / reused asset). */

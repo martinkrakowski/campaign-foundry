@@ -31,6 +31,12 @@ export const API = "/api/pipeline";
 /** One rendered creative, as returned by the pipeline run report. */
 export interface Asset {
   productId: string;
+  /**
+   * Occlusion advisories for the stack this asset rendered (D136), absent when
+   * it has none. Advisory only — never part of a pass/fail verdict, because
+   * D135 says a reorder that hides or mutes a layer warns and never refuses.
+   */
+  occlusionAdvisories?: readonly string[];
   /** The social canvas. Display-size assets carry `size` instead (D113) — exactly one of the two. */
   aspectRatio?: string;
   /** The display family's canvas (the `728x90` form); ratio assets omit it. */
