@@ -1,6 +1,13 @@
 "use client";
 
-import { useEffect, useRef, type ReactNode, type RefObject } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+  type RefObject,
+} from "react";
 import { cn } from "./cn";
 import { IconButton } from "./icon-button";
 
@@ -29,6 +36,7 @@ function isFocusableCandidate(element: HTMLElement): boolean {
   if (element.getAttribute("tabindex") === "-1") return false;
   if (element.closest("[hidden]")) return false;
   if (element.closest('[aria-hidden="true"]')) return false;
+  if (element.closest("[inert]")) return false;
   return true;
 }
 
@@ -54,11 +62,145 @@ export function dialogHoldsFocus(dialog: HTMLElement | null): boolean {
  * recently *opened* overlay. Open order, never DOM order: paint order is set by callers
  * hand-raising `z` (`CreateCampaignDialog` passes `containerClassName="z-[80]"`), so
  * the last `[role=dialog]` in the document is not authoritative for which overlay is
- * on top. This is scoped to the Tab handler and is NOT the overlay-depth counter
- * (D84): no `inert`, no `aria-modal` change, no paint order — F-B's counter may later
- * absorb this registry.
+ * on top. This is scoped to the Tab handler. Overlay depth (D84) is a separate
+ * registry: `inert`, `aria-modal`, and paint order live there, not here.
  */
 const openTraps: HTMLElement[] = [];
+
+type OverlayKind = "dialog" | "drawer";
+
+type OverlayLayer = {
+  readonly inert: boolean;
+  readonly ariaModal: boolean;
+  readonly zIndex: number | undefined;
+};
+
+type OverlayRegistration = {
+  readonly id: number;
+  readonly kind: OverlayKind;
+  readonly element: HTMLElement;
+  readonly setLayer: (layer: OverlayLayer) => void;
+};
+
+/**
+ * Open-order overlay stack for DialogShell and DrawerShell (D84). Every overlay
+ * but the topmost is `inert` and drops `aria-modal`; only the topmost is modal.
+ * Paint order is computed from this same stack so a `z-50` drawer opened over a
+ * `z-[70]` dialog cannot sit under it. Callers may still raise `z` (`z-[80]` on
+ * ConfirmDialog / the resume two-way) when stacking over a non-kit overlay this
+ * counter cannot see; a lone kit shell therefore keeps its className z and gets
+ * no inline override.
+ */
+const overlayStack: OverlayRegistration[] = [];
+let overlaySeq = 0;
+
+const DIALOG_BASE_Z = 70;
+const DRAWER_BASE_Z = 50;
+const OVERLAY_Z_STEP = 10;
+
+const SINGLE_LAYER: OverlayLayer = { inert: false, ariaModal: true, zIndex: undefined };
+
+function baseZ(kind: OverlayKind): number {
+  return kind === "drawer" ? DRAWER_BASE_Z : DIALOG_BASE_Z;
+}
+
+function paintZ(index: number): number {
+  let z = 0;
+  for (let i = 0; i <= index; i++) {
+    const base = baseZ(overlayStack[i]!.kind);
+    z = i === 0 ? base : Math.max(base, z + OVERLAY_Z_STEP);
+  }
+  return z;
+}
+
+function layerOf(index: number): OverlayLayer {
+  const isTop = index === overlayStack.length - 1;
+  const kind = overlayStack[index]!.kind;
+  const z = paintZ(index);
+  return {
+    inert: !isTop,
+    ariaModal: isTop,
+    zIndex: index === 0 || z === baseZ(kind) ? undefined : z,
+  };
+}
+
+function applyLayerDom(entry: OverlayRegistration, layer: OverlayLayer): void {
+  const el = entry.element;
+  el.toggleAttribute("inert", layer.inert);
+  if (layer.ariaModal) el.setAttribute("aria-modal", "true");
+  else el.removeAttribute("aria-modal");
+  if (layer.zIndex !== undefined) el.style.zIndex = String(layer.zIndex);
+  else el.style.removeProperty("z-index");
+}
+
+function publishLayers(): void {
+  overlayStack.forEach((entry, index) => {
+    const layer = layerOf(index);
+    // Write the DOM immediately so a sibling's useEffect focus-restore (the trap)
+    // sees the new topmost as focusable. Waiting for React to re-render left the
+    // lower overlay `inert` for one tick, and happy-dom's focus() is a no-op on
+    // an inert tree — Escape after dismissing a stacked shell then hit nobody.
+    applyLayerDom(entry, layer);
+    entry.setLayer(layer);
+  });
+}
+
+function registerOverlay(
+  kind: OverlayKind,
+  setLayer: (layer: OverlayLayer) => void,
+  element: HTMLElement,
+): number {
+  const id = ++overlaySeq;
+  overlayStack.push({ id, kind, element, setLayer });
+  publishLayers();
+  return id;
+}
+
+function unregisterOverlay(id: number): void {
+  // Mirrors `openTraps` removal: this id was pushed by the same effect invocation
+  // that owns the cleanup, so `findIndex` is never -1 and a found-check would be
+  // an unreachable branch this repo cannot cover.
+  overlayStack.splice(
+    overlayStack.findIndex((entry) => entry.id === id),
+    1,
+  );
+  publishLayers();
+}
+
+function useOverlayDepth(
+  open: boolean,
+  kind: OverlayKind,
+  elementRef: RefObject<HTMLElement | null>,
+): OverlayLayer {
+  const [layer, setLayer] = useState<OverlayLayer>(SINGLE_LAYER);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    // The shell renders the overlay element before this effect when `open` is
+    // true, so the ref is populated. A found-check would be an unreachable
+    // branch this repo cannot cover.
+    const id = registerOverlay(kind, setLayer, elementRef.current!);
+    return () => {
+      unregisterOverlay(id);
+    };
+  }, [open, kind, elementRef]);
+
+  // After the trap's useEffect restore (this hook is declared first so this
+  // cleanup runs last). The dismissed overlay may restore `body` — both shells
+  // mounting together never captured a lower-overlay previouslyFocused, because
+  // the lower was already inert when its trap ran.
+  useEffect(() => {
+    if (!open) return;
+    return () => {
+      const top = overlayStack[overlayStack.length - 1];
+      if (top && !dialogHoldsFocus(top.element)) {
+        getFocusableDialogElements(top.element)[0]?.focus();
+      }
+    };
+  }, [open]);
+
+  return open ? layer : SINGLE_LAYER;
+}
 
 /**
  * Focus trap and Escape key hook for dialogs and drawers (W10.5 / SHELL-41).
@@ -145,7 +287,12 @@ export function useDialogFocusTrap({
       // would read as prudence, but its false arm is unreachable and this repo holds
       // 100 % branch coverage without `istanbul ignore`.
       if (dialogElement) openTraps.splice(openTraps.indexOf(dialogElement), 1);
-      previouslyFocused?.focus?.();
+      // Restoring onto `body` is a no-op for a lone overlay (unmount already
+      // left focus there) and it steals from a remaining overlay this trap
+      // stacked over — D84 has just made the new topmost focusable.
+      if (previouslyFocused !== document.body) {
+        previouslyFocused?.focus();
+      }
     };
   }, [open, dialogRef, initialFocusRef, onCloseRef]);
 }
@@ -288,6 +435,7 @@ export function DialogShell({
   containerClassName,
 }: DialogShellProps): ReactNode {
   const dialogRef = useRef<HTMLDivElement>(null);
+  const layer = useOverlayDepth(open, "dialog", dialogRef);
   useDialogFocusTrap({ open, onClose, dialogRef });
 
   if (!open) return null;
@@ -296,8 +444,10 @@ export function DialogShell({
     <div
       ref={dialogRef}
       role="dialog"
-      aria-modal="true"
+      aria-modal={layer.ariaModal ? true : undefined}
       aria-label={ariaLabel}
+      inert={layer.inert}
+      style={layer.zIndex !== undefined ? { zIndex: layer.zIndex } : undefined}
       className={cn(
         "fixed inset-0 z-[70] flex items-center justify-center bg-scrim/80 p-4 backdrop-blur-sm sm:p-8",
         containerClassName,
@@ -337,6 +487,7 @@ export function DrawerShell({
   className,
 }: DrawerShellProps): ReactNode {
   const dialogRef = useRef<HTMLDivElement>(null);
+  const layer = useOverlayDepth(open, "drawer", dialogRef);
   useDialogFocusTrap({ open, onClose, dialogRef });
 
   if (!open) return null;
@@ -345,8 +496,10 @@ export function DrawerShell({
     <div
       ref={dialogRef}
       role="dialog"
-      aria-modal="true"
+      aria-modal={layer.ariaModal ? true : undefined}
       aria-label={ariaLabel}
+      inert={layer.inert}
+      style={layer.zIndex !== undefined ? { zIndex: layer.zIndex } : undefined}
       className="fixed inset-0 z-50 flex justify-end"
     >
       <div className="absolute inset-0 bg-scrim/80 backdrop-blur-sm" onClick={onClose} />

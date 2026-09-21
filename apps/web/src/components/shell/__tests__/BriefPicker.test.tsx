@@ -84,7 +84,7 @@ describe("BriefPicker create / duplicate", () => {
     await screen.findByText(/No briefs found/);
     await user.click(screen.getByText("Create new"));
     // W1 (D66/D67): the row is a door to the dialog now — the blank route is reached
-    // by the dialog's Create, so nothing navigates and the picker closes first (F22).
+    // by the dialog's Create, so nothing navigates.
     expect(nextMock().router.push).not.toHaveBeenCalled();
     await waitFor(() =>
       expect(screen.queryByRole("dialog", { name: "Load a campaign brief" })).toBeNull(),

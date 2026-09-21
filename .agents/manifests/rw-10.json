@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "RW-10",
+  "mutations": [
+    {
+      "file": "packages/ui/src/dialog-shell.tsx",
+      "before": "    inert: !isTop,",
+      "after": "    inert: true,",
+      "because": "Mark every kit overlay inert, including the one that remains after the upper closes — D84's restore is that the lower becomes the modal layer again, and a counter that never lifts inert leaves the last shell unreachable.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "packages/ui/src/__tests__/dialog-shell.test.tsx",
+        "-t",
+        "closing the upper overlay restores the lower$"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
