@@ -167,6 +167,16 @@ describe("the state-tint contract (the carried dark-theme contrast audit)", () =
   });
 });
 
+describe("ink on the brand colour is its own token (F3 / R2)", () => {
+  test("brand-on-primary is stated in both themes and clears 4.5:1 on the brand ground", () => {
+    expect(light).toContain("--color-brand-on-primary:");
+    expect(dark).toContain("--color-brand-on-primary:");
+    const ground = hexValue(light, "brand-primary");
+    expect(contrast(hexValue(light, "brand-on-primary"), ground)).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(hexValue(dark, "brand-on-primary"), ground)).toBeGreaterThanOrEqual(4.5);
+  });
+});
+
 describe("the solid error ground keeps readable ink in both palettes (WCAG 4.5:1)", () => {
   // One dark value cannot serve both of a state colour's jobs (the tint retune above
   // proved the bound), so the destructive button's ink is its own token and flips

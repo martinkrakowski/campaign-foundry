@@ -22,6 +22,9 @@
   /* Brand — primary is the generated brand colour; adjust the others to taste */
   --color-brand-primary: #1473e6;
   --color-brand-primary-hover: color-mix(in srgb, var(--color-brand-primary) 85%, black);
+  /* Ink ON the brand ground (primary Button, check badges, selected wells). Brand
+     primary is the same hex in both themes, so the ink is too — white, 4.59:1. */
+  --color-brand-on-primary: #ffffff;
   --color-brand-secondary: #8b5cf6;
   /* Opaque brand tint pair — used for FIREFLY badge background and text */
   --color-brand-tint: #cadff8;      /* opaque on purpose: equals brand/20 over `surface` today */
@@ -132,6 +135,8 @@
   /* Opaque brand tint pair — used for FIREFLY badge background and text */
   --color-brand-tint: #1a2d44;
   --color-brand-on-tint: #7cc4ff;   /* 7.45:1 on the tint */
+  /* Restated so ink-on-brand is a decision in both blocks, not an inherit. */
+  --color-brand-on-primary: #ffffff;
 
   /* Semantic — see :root for the two jobs a state colour does. Success, warning and
      modified keep the darker values that favour the solid job; error and info take the

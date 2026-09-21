@@ -120,3 +120,52 @@ describe("the kit does not import the campaign feature (D87)", () => {
     expect(webFiles).not.toContain("mode-panel.tsx");
   });
 });
+
+/**
+ * Ink on brand-primary is `--color-brand-on-primary` (`text-brand-on-primary`).
+ * `text-white` on that ground is the F3 defect: a literal for a design decision
+ * the token file now expresses. Sites that are *not* ink-on-brand stay on the
+ * allowlist with a reason — the list may only shrink.
+ */
+const textWhiteAllowlist: Record<string, string> = {
+  "swatch-picker.tsx":
+    "check mark on an arbitrary hex swatch, not brand-primary; drop-shadow is the contrast, not a token.",
+  "creative-glyph.tsx": "directional cues on the photo-ground miniature, not brand-primary.",
+};
+
+const TEXT_WHITE = /\btext-white\b/;
+const BRAND_WITH_WHITE =
+  /["'`][^"'`]*bg-brand-primary[^"'`]*\btext-white\b[^"'`]*["'`]|["'`][^"'`]*\btext-white\b[^"'`]*bg-brand-primary[^"'`]*["'`]/;
+
+describe("ink on brand-primary is a token, not text-white (F3 / R2)", () => {
+  test("no kit source pairs bg-brand-primary with text-white", () => {
+    const violations = packageFiles
+      .map((file) => {
+        const source = readFileSync(join(packageKitDir, file), "utf-8");
+        return { file, hit: BRAND_WITH_WHITE.test(source) };
+      })
+      .filter((entry) => entry.hit)
+      .map((entry) => entry.file);
+    expect(violations).toEqual([]);
+  });
+
+  test("text-white does not reappear on brand-primary", () => {
+    const violations = packageFiles
+      .filter((file) => !(file in textWhiteAllowlist))
+      .filter((file) => TEXT_WHITE.test(readFileSync(join(packageKitDir, file), "utf-8")));
+    expect(violations).toEqual([]);
+  });
+
+  test("every text-white allowlist entry still matches a kit file that still needs it, each with a reason", () => {
+    for (const [file, reason] of Object.entries(textWhiteAllowlist)) {
+      expect(reason.trim().length, `${file} must carry a one-line reason`).toBeGreaterThan(0);
+      expect(packageFiles, `${file} is not a kit source — remove its allowlist entry`).toContain(
+        file,
+      );
+      expect(
+        TEXT_WHITE.test(readFileSync(join(packageKitDir, file), "utf-8")),
+        `${file} no longer contains text-white — remove its allowlist entry (the list may only shrink)`,
+      ).toBe(true);
+    }
+  });
+});

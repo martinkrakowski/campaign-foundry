@@ -249,7 +249,7 @@ export function DurationStrip({
                   "relative z-10 -ml-5 flex h-7 items-center justify-center gap-1 rounded-full border px-2 shadow-sm transition-transform",
                   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary focus-visible:ring-offset-2",
                   isValid
-                    ? "border-brand-primary bg-brand-primary text-white"
+                    ? "border-brand-primary bg-brand-primary text-brand-on-primary"
                     : "border-error bg-surface text-error",
                   !readOnly && !disabled && "cursor-grab active:cursor-grabbing hover:scale-105",
                 )}

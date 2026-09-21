@@ -128,14 +128,14 @@ export function OptionTile({
     >
       {selected ? (
         <span
-          className="absolute right-2.5 top-2.5 flex size-[22px] items-center justify-center rounded-full bg-brand-primary text-white motion-safe:animate-check-pop"
+          className="absolute right-2.5 top-2.5 flex size-[22px] items-center justify-center rounded-full bg-brand-primary text-brand-on-primary motion-safe:animate-check-pop"
           aria-hidden="true"
         >
           <svg
             viewBox="0 0 12 12"
             focusable="false"
             aria-hidden="true"
-            className="size-3 text-white"
+            className="size-3 text-brand-on-primary"
           >
             <path
               d="M2 6.5 5 9.5 10 3"
@@ -162,7 +162,7 @@ export function OptionTile({
               it; `title` is the hover remainder. The button's aria-label still
               owns the accessible name, so the tooltip cannot join it. */}
           <span
-            className="min-w-0 truncate text-[15px] font-bold leading-tight text-text-primary"
+            className="min-w-0 truncate text-sm font-bold leading-tight text-text-primary"
             title={name}
           >
             {name}
