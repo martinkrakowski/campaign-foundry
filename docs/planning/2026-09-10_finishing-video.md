@@ -21,7 +21,7 @@
 | `video` layer has a drawer                       | **In flight** (#322) — short-video renders again                                                               |
 | Motion frames honour the **full** declared order | **Not done** — text and logo are drawn in fixed positions                                                      |
 | A video **byte** golden                          | **Does not exist.** D10 freezes bytes nothing measures. C1 added _frame_ goldens; the MP4 itself is unmeasured |
-| `fill` and `html` layer kinds                    | No drawer; both throw. `html` is deliberate (D122)                                                             |
+| `fill` and `html` layer kinds                    | **`fill` draws** (RW-5, #548) — a brand role over the layer's frame. `html` still throws, deliberately (D122)  |
 
 **The honest summary: video renders correctly and is not yet provably stable.**
 
@@ -42,7 +42,7 @@
 | --------------------- | -------------------------------------------------- | ----------------------------------------------------------------------- |
 | **C5**                | `2026-09-10_reconciliation.md` §4c                 | The motion path honours the **full** order. **Scope correction below.** |
 | **VG1–VG3**           | `2026-09-10_the-mp4-byte-golden.md`                | The MP4 byte golden, or D10's claim withdrawn.                          |
-| **L11 (`fill` half)** | `2026-09-08_creative-templates-and-units.md`, D131 | The `fill` drawer.                                                      |
+| **L11 (`fill` half)** | `2026-09-08_creative-templates-and-units.md`, D131 | The `fill` drawer. **SHIPPED as RW-5 (#548).**                          |
 
 **VF4 — shipped in #328 (C5).** C5's own merge deleted `SEQUENCED_KINDS`; the split this lane existed
 to retire is gone (`grep -c SEQUENCED_KINDS packages/` finds nothing), and the §2 DoD clause

@@ -1,6 +1,10 @@
 # The remaining work — a scheduling plan
 
-**Date:** 2026-09-20 · **Status:** on `main` as of #540 · **Nothing dispatched.**
+**Date:** 2026-09-20 · **Status:** **Waves A and B are merged.** Wave A: RW-11 (#542), RW-1
+(#543), RW-4 (#544), RW-10 (#545), RW-7 (#546). Wave B: RW-2 (#547), RW-5 (#548) — **RW-5 shipped
+L11's `fill` half only; D132's generative region is blocked and needs an owner decision, recorded in
+`creative-templates-and-units.md` as L11b.** Wave B's third slot stayed empty, as §3 said it should.
+**Waves C and D are not dispatched.**
 **Scope:** every open lane in this repository as of `bd242dc`, ordered for parallel execution. This
 plan **introduces no new work** — every lane below already exists in another document, and this one
 only decides _when_ each runs and _who owns which file_.
