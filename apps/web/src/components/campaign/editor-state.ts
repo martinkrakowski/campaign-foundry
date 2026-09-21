@@ -617,6 +617,15 @@ export type EditorAction =
   | { type: "setBeatText"; index: number; text: string }
   | { type: "setBeatWeight"; index: number; weight: number }
   /**
+   * TL3 — neighbour transfer across the join between beats `i` and `i+1`.
+   * `delta` is added to beat `i` and subtracted from beat `i+1`, so the
+   * sequence's total weight is unchanged. Integers in `[1, MAX_WEIGHT]`; a
+   * transfer that would push either neighbour out of that range is a no-op.
+   * The dwell floor is NOT a bound here (D138): a breach is committed, and
+   * the tape flags it the same way a stepper-authored thin beat already is.
+   */
+  | { type: "shiftBeatBoundary"; boundary: number; delta: number }
+  /**
    * TL2 — attach or clear a beat's own scene. `background` absent (or blank)
    * CLEARS it, and clearing deletes the key rather than writing
    * `background: undefined`: `toBrief` spreads the draft, and an explicit
@@ -2103,6 +2112,41 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
           ),
         },
       };
+    case "shiftBeatBoundary": {
+      // Neighbour transfer: the join between beats `i` and `i+1`. A one-beat
+      // sequence has no join, and a non-integer delta is not a weight.
+      const beats = state.timeline.beats;
+      if (
+        !Number.isInteger(action.boundary) ||
+        action.boundary < 0 ||
+        action.boundary >= beats.length - 1 ||
+        !Number.isInteger(action.delta) ||
+        action.delta === 0
+      ) {
+        return state;
+      }
+      const left = beats[action.boundary]!;
+      const right = beats[action.boundary + 1]!;
+      const nextLeft = left.weight + action.delta;
+      const nextRight = right.weight - action.delta;
+      if (nextLeft < 1 || nextLeft > MAX_WEIGHT || nextRight < 1 || nextRight > MAX_WEIGHT) {
+        return state;
+      }
+      // D138: a dwell-floor breach is committed, not snapped back. The tape
+      // flags the thin neighbour via `dwellProblem`'s own slack (`beatUnderFloor`),
+      // the same detection-not-prevention the stepper already lives by.
+      return {
+        ...state,
+        timeline: {
+          ...state.timeline,
+          beats: beats.map((beat, index) => {
+            if (index === action.boundary) return { ...beat, weight: nextLeft };
+            if (index === action.boundary + 1) return { ...beat, weight: nextRight };
+            return beat;
+          }),
+        },
+      };
+    }
     case "setKeyBeat":
       // keyBeat is 1-based and must point at a beat that exists; the action is 0-based.
       if (!isBeatIndex(action.index, state.timeline.beats.length)) return state;

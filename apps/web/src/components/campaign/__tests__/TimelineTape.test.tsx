@@ -32,22 +32,24 @@ import {
 const DURATION = 6;
 
 /** Two beats, 2:1 — resolved by the compositor's own function, never divided here. */
+const SOURCE_BEATS = [
+  { text: "Stay wild", weight: 2 },
+  { text: "Stay hydrated", weight: 1 },
+] as const;
 const resolved = resolveTimeline(
   {
-    beats: [
-      { text: "Stay wild", weight: 2 },
-      { text: "Stay hydrated", weight: 1 },
-    ],
+    beats: [...SOURCE_BEATS],
     transition: "cut",
     keyBeat: 1,
   },
   DURATION,
 );
 
-const beats: readonly TimelineTapeBeat[] = resolved.map((beat) => ({
+const beats: readonly TimelineTapeBeat[] = resolved.map((beat, index) => ({
   text: beat.text,
   startT: beat.startT,
   endT: beat.endT,
+  weight: SOURCE_BEATS[index]!.weight,
   underFloor: false,
 }));
 
@@ -543,9 +545,9 @@ describe("§7 — the status sentence", () => {
     // beat 3 heard beat 2's seconds.
     const shortest = 3;
     const uneven: TimelineTapeBeat[] = [
-      { text: "a", startT: 0, endT: 0.5, underFloor: false },
-      { text: "b", startT: 0.5, endT: 0.7, underFloor: true },
-      { text: "c", startT: 0.7, endT: 1, underFloor: true },
+      { text: "a", startT: 0, endT: 0.5, weight: 5, underFloor: false },
+      { text: "b", startT: 0.5, endT: 0.7, weight: 2, underFloor: true },
+      { text: "c", startT: 0.7, endT: 1, weight: 3, underFloor: true },
     ];
     renderTape({ beats: uneven, shortestDurationSec: shortest });
 
@@ -852,5 +854,159 @@ describe("TL6 — keyframe diamonds on the ruler", () => {
     expect(els).toHaveLength(2);
     expect(els[0]!.style.left).toBe(`calc(${TAPE_LABEL_PX}px + 0 * ${TAPE_PX_MIN}px)`);
     expect(els[1]!.style.left).toBe(`calc(${TAPE_LABEL_PX}px + ${DURATION} * ${TAPE_PX_MIN}px)`);
+  });
+});
+
+describe("TL3 — beat-boundary drag as a neighbour transfer", () => {
+  const even = (): TimelineTapeBeat[] => {
+    const source = [
+      { text: "One", weight: 3 },
+      { text: "Two", weight: 3 },
+    ];
+    return resolveTimeline({ beats: source, transition: "cut", keyBeat: 1 }, DURATION).map(
+      (beat, index) => ({
+        text: beat.text,
+        startT: beat.startT,
+        endT: beat.endT,
+        weight: source[index]!.weight,
+        underFloor: false,
+      }),
+    );
+  };
+  const withHandles = (
+    handleBeats: readonly TimelineTapeBeat[] = even(),
+    onBoundaryCommit = vi.fn(),
+  ) => {
+    const view = renderTape({ beats: handleBeats, onBoundaryCommit });
+    return { view, onBoundaryCommit };
+  };
+  const handle = (position = 1) =>
+    screen.getByRole("slider", { name: messages.tapeBeatBoundaryName(position) });
+
+  test("no callback means no handle — an inert slider is an affordance this host does not have", () => {
+    renderTape();
+    expect(screen.queryByRole("slider", { name: messages.tapeBeatBoundaryName(1) })).toBeNull();
+  });
+
+  test("a one-beat sequence has no join, so no handle", () => {
+    renderTape({
+      beats: [{ text: "Only", startT: 0, endT: 1, weight: 1, underFloor: false }],
+      onBoundaryCommit: vi.fn(),
+    });
+    expect(screen.queryByRole("slider", { name: messages.tapeBeatBoundaryName(1) })).toBeNull();
+  });
+
+  test("the handle is a NATIVE range, so the guided swipe cannot swallow it (§9.3.5)", () => {
+    withHandles();
+    const el = handle();
+    expect(el.tagName).toBe("INPUT");
+    expect(el.getAttribute("type")).toBe("range");
+  });
+
+  test("the name is stable and `aria-valuenow` is the COMMITTED weight (§9.3.2, §9.3.3)", () => {
+    withHandles();
+    const el = handle();
+    fireEvent.change(el, { target: { value: "4" } });
+    expect(el.getAttribute("aria-label")).toBe(messages.tapeBeatBoundaryName(1));
+    expect(el.getAttribute("aria-label")).not.toMatch(/\ds/);
+    expect(el.getAttribute("aria-valuenow")).toBe("3");
+  });
+
+  test("a drag commits exactly once, on release, as a neighbour-transfer delta", () => {
+    const { onBoundaryCommit } = withHandles();
+    const el = handle();
+    fireEvent.change(el, { target: { value: "4" } });
+    fireEvent.change(el, { target: { value: "5" } });
+    expect(onBoundaryCommit).not.toHaveBeenCalled();
+    fireEvent.pointerUp(el);
+    expect(onBoundaryCommit).toHaveBeenCalledTimes(1);
+    expect(onBoundaryCommit).toHaveBeenCalledWith(0, 2);
+  });
+
+  test("a keyboard user commits too — the pointer is not the only way", () => {
+    const { onBoundaryCommit } = withHandles();
+    const el = handle();
+    fireEvent.change(el, { target: { value: "2" } });
+    fireEvent.keyUp(el, { key: "ArrowLeft" });
+    expect(onBoundaryCommit).toHaveBeenCalledWith(0, -1);
+  });
+
+  test("a drag on a boundary does not also scrub the playhead", () => {
+    const onScrubCommit = vi.fn();
+    const onBoundaryCommit = vi.fn();
+    renderTape({ beats: even(), onBoundaryCommit, onScrubCommit });
+    const el = handle();
+    fireEvent.change(el, { target: { value: "4" } });
+    fireEvent.pointerUp(el);
+    fireEvent.click(el);
+    expect(onBoundaryCommit).toHaveBeenCalledTimes(1);
+    expect(onScrubCommit).not.toHaveBeenCalled();
+  });
+
+  test("the dwell-floor flag is hearable on the handle that caused it (§9.3.4, D138)", () => {
+    const described = (beats: readonly TimelineTapeBeat[], which: 0 | 1) => {
+      const view = renderTape({
+        beats,
+        shortestDurationSec: 3,
+        onBoundaryCommit: vi.fn(),
+      });
+      const el = handle();
+      expect(el.getAttribute("aria-invalid")).toBe("true");
+      const id = el.getAttribute("aria-describedby");
+      expect(id).not.toBeNull();
+      const text = (document.getElementById(id as string) as HTMLElement).textContent;
+      expect(text).toBe(
+        messages.timelineDwellUnderFloor((beats[which]!.endT - beats[which]!.startT) * 3, 1.2),
+      );
+      view.unmount();
+    };
+    // Either neighbour can be the thin one — the handle describes THAT beat,
+    // not always the first, which is the same defect the clips already closed.
+    described(
+      even().map((beat, index) => ({ ...beat, underFloor: index === 0 })),
+      0,
+    );
+    described(
+      even().map((beat, index) => ({ ...beat, underFloor: index === 1 })),
+      1,
+    );
+  });
+
+  test("a clear handle is not invalid", () => {
+    withHandles();
+    expect(handle().getAttribute("aria-invalid")).toBeNull();
+    expect(handle().getAttribute("aria-describedby")).toBeNull();
+  });
+
+  test("the handle sits at the committed join, and follows the finger locally", () => {
+    const { view } = withHandles();
+    const el = handle() as HTMLInputElement;
+    const joinSec = even()[0]!.endT * DURATION;
+    expect(el.style.left).toBe(`calc(${joinSec} * ${TAPE_PX_MIN}px)`);
+    fireEvent.change(el, { target: { value: "4" } });
+    const liveJoin = (4 / 6) * DURATION;
+    expect(el.style.left).toBe(`calc(${liveJoin} * ${TAPE_PX_MIN}px)`);
+    view.unmount();
+  });
+
+  test("three beats have two joins, each named for the beat it ends", () => {
+    const source = [
+      { text: "a", weight: 2 },
+      { text: "b", weight: 2 },
+      { text: "c", weight: 2 },
+    ];
+    const three = resolveTimeline({ beats: source, transition: "cut", keyBeat: 1 }, DURATION).map(
+      (beat, index) => ({
+        text: beat.text,
+        startT: beat.startT,
+        endT: beat.endT,
+        weight: source[index]!.weight,
+        underFloor: false,
+      }),
+    );
+    renderTape({ beats: three, onBoundaryCommit: vi.fn() });
+    expect(handle(1)).toBeTruthy();
+    expect(handle(2)).toBeTruthy();
+    expect(screen.queryByRole("slider", { name: messages.tapeBeatBoundaryName(3) })).toBeNull();
   });
 });

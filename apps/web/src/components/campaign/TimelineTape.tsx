@@ -15,6 +15,7 @@ import { useInlineWidth } from "@/lib/use-min-inline-size";
 import { MOTION_FPS } from "@campaignfoundry/CampaignOrchestration/motion-kinds";
 import {
   DWELL_TOLERANCE,
+  MAX_WEIGHT,
   MIN_DWELL_SEC,
 } from "@campaignfoundry/CampaignOrchestration/copy-timeline";
 import type { SurfaceHost } from "@/components/campaign/PreviewDock";
@@ -144,6 +145,11 @@ export interface TimelineTapeBeat {
   /** From `resolveTimeline`, in `t` — this component never divides a weight. */
   readonly startT: number;
   readonly endT: number;
+  /**
+   * The committed integer weight. The boundary handle's own units (studio 9.3
+   * point 3): `aria-valuenow` is this number, never the live seconds.
+   */
+  readonly weight: number;
   /** Computed by the parent with the domain's own slack, never `1.2` here. */
   readonly underFloor: boolean;
 }
@@ -182,6 +188,15 @@ export interface TimelineTapeProps {
   };
   /** Called ONCE, on release — never per pointermove (studio §9.2's TL6 row). */
   readonly onDiamondCommit?: (trackIndex: number, stopIndex: number, sec: number) => void;
+  /**
+   * TL3 — neighbour transfer across the join between beats `i` and `i+1`.
+   * Called ONCE, on release, with the integer `delta` to add to beat `i` and
+   * subtract from beat `i+1`. Absent means this host does not author weights
+   * (the section tape, the way it leaves diamonds unwired) and no handles
+   * render: a slider that cannot commit is an affordance the surface does not
+   * have.
+   */
+  readonly onBoundaryCommit?: (boundary: number, delta: number) => void;
   /**
    * Which host mounted it (D145 rail, D146 Copy section). Reflected, not styled.
    *
@@ -277,6 +292,78 @@ function Diamond({
       onPointerUp={(e) => commit(Number(e.currentTarget.value))}
       onKeyUp={(e) => commit(Number(e.currentTarget.value))}
     />
+  );
+}
+
+/**
+ * The join between two title clips — a NATIVE range, for the same two reasons
+ * the playhead and the diamonds are (§9.3 points 1 and 5). The thumb follows
+ * the finger through a drag (local state), and exactly ONE commit fires once,
+ * on release, as an integer neighbour-transfer delta.
+ *
+ * `aria-valuenow` is the COMMITTED left-beat weight (§9.3.3), in this range's
+ * own units, and the name is fixed ("Beat 2 boundary") rather than the live
+ * seconds (§9.3.2). A dwell-floor breach is hearable on this handle (§9.3.4,
+ * D138): committed and flagged, never snapped back.
+ */
+function BeatBoundary({
+  boundary,
+  left,
+  right,
+  durationSec,
+  pxPerSec,
+  underFloorText,
+  onCommit,
+}: {
+  boundary: number;
+  left: TimelineTapeBeat;
+  right: TimelineTapeBeat;
+  durationSec: number;
+  pxPerSec: number;
+  underFloorText?: string;
+  onCommit: (delta: number) => void;
+}): ReactNode {
+  const [dragWeight, setDragWeight] = useState<number | null>(null);
+  const shown = dragWeight ?? left.weight;
+  const pair = left.weight + right.weight;
+  const min = Math.max(1, pair - MAX_WEIGHT);
+  const max = Math.min(MAX_WEIGHT, pair - 1);
+  const spanT = right.endT - left.startT;
+  const liveT = left.startT + (shown / pair) * spanT;
+  const name = messages.tapeBeatBoundaryName(boundary + 1);
+  const reactId = useId();
+  const dwellId = `${reactId}-dwell`;
+  const commit = (weight: number) => {
+    setDragWeight(null);
+    onCommit(weight - left.weight);
+  };
+  return (
+    <>
+      {underFloorText !== undefined ? (
+        <span id={dwellId} className="sr-only">
+          {underFloorText}
+        </span>
+      ) : null}
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={1}
+        value={shown}
+        aria-label={name}
+        aria-valuemin={min}
+        aria-valuemax={max}
+        aria-valuenow={left.weight}
+        aria-invalid={underFloorText !== undefined ? true : undefined}
+        aria-describedby={underFloorText !== undefined ? dwellId : undefined}
+        data-tape-boundary={boundary}
+        className="absolute top-1/2 h-6 w-24 -translate-x-12 -translate-y-1/2 cursor-ew-resize accent-brand-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary"
+        style={{ left: `calc(${liveT * durationSec} * ${pxPerSec}px)` }}
+        onChange={(e) => setDragWeight(Number(e.target.value))}
+        onPointerUp={(e) => commit(Number(e.currentTarget.value))}
+        onKeyUp={(e) => commit(Number(e.currentTarget.value))}
+      />
+    </>
   );
 }
 
@@ -550,8 +637,8 @@ function TimelineTapeImpl(props: TimelineTapeProps): ReactNode {
    *
    * It follows the committed second itself, not only this component's own commit
    * path: every surface that can commit writes the SAME lifted second (that is
-   * what CC5 is for) — the dock's own scrub under the `section` host today, and
-   * whatever TL3's boundary handles add later. A flag set only by the tape's own
+   * what CC5 is for) — the dock's own scrub under the `section` host today. A
+   * flag set only by the tape's own
    * buttons would leave the sentence saying "drag the playhead to scrub" while
    * the readout under the diamond already showed the frame somebody else's
    * commit had landed — two surfaces disagreeing about the same draft, which is
@@ -621,6 +708,8 @@ function TimelineTapeImpl(props: TimelineTapeProps): ReactNode {
         )
       : undefined;
 
+  const onBoundaryCommit = props.onBoundaryCommit;
+
   const breached = beats.find((beat) => beat.underFloor);
   const statusSentence =
     breached !== undefined
@@ -681,6 +770,31 @@ function TimelineTapeImpl(props: TimelineTapeProps): ReactNode {
                 onSelect={() => props.onSelectBeat(index)}
               />
             ))}
+            {/* TL3 — one handle per join, only when this host can commit a
+                neighbour transfer. An inert slider on the section tape would
+                be an affordance the surface does not have. */}
+            {onBoundaryCommit !== undefined
+              ? beats.slice(0, -1).map((left, index) => {
+                  const right = beats[index + 1]!;
+                  const underFloorText = left.underFloor
+                    ? dwellTextFor(left)
+                    : right.underFloor
+                      ? dwellTextFor(right)
+                      : undefined;
+                  return (
+                    <BeatBoundary
+                      key={`boundary-${index}`}
+                      boundary={index}
+                      left={left}
+                      right={right}
+                      durationSec={durationSec}
+                      pxPerSec={pxPerSec}
+                      underFloorText={underFloorText}
+                      onCommit={(delta) => onBoundaryCommit(index, delta)}
+                    />
+                  );
+                })
+              : null}
           </Lane>
 
           <Lane name={messages.tapeLaneVideo} durationSec={durationSec} pxPerSec={pxPerSec}>

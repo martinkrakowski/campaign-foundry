@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "RW-7",
+  "mutations": [
+    {
+      "file": "apps/web/src/components/campaign/editor-state.ts",
+      "before": "      const nextLeft = left.weight + action.delta;\n      const nextRight = right.weight - action.delta;",
+      "after": "      const nextLeft = left.weight;\n      const nextRight = right.weight;",
+      "because": "Make shiftBeatBoundary a no-op: the weights are copied through unchanged, so every range guard still passes and the reducer still returns a new state object, but the neighbour-transfer test — the lane's central requirement — goes red. A transfer that does not move weight is the defect D138 refuses to ship as 'drag allowed'.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/editor-state.beat-boundary.test.ts",
+        "-t",
+        "a neighbour transfer moves weight between adjacent beats"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

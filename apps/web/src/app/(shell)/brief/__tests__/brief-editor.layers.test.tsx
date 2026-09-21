@@ -1110,3 +1110,44 @@ describe("TL6 — the picked layer's keys reach the ruler", () => {
     });
   });
 });
+
+describe("TL3 — the rail wires the boundary commit", () => {
+  const twoBeatBrief = () => ({
+    ...layerBrief,
+    mode: "variation",
+    output: { formats: ["motion"], platforms: ["linkedin"] },
+    variation: { axes: { motion: ["ken-burns-in"], duration: [6] }, count: 1 },
+    copy: {
+      timeline: {
+        beats: [
+          { text: "One", weight: 3 },
+          { text: "Two", weight: 3 },
+        ],
+        transition: "cut",
+        keyBeat: 1,
+      },
+    },
+  });
+
+  test("the rail hands the tape a boundary commit — not a hard-coded no-op", async () => {
+    // D157: the prop is optional, so only a caller test can tell "wired" from
+    // "exists". Hard-coding it to undefined would hide the handles entirely.
+    await mountEditor([twoBeatBrief()]);
+    await waitFor(() => expect(tapeProps.last).toBeDefined());
+    const onBoundaryCommit = (tapeProps.last as { onBoundaryCommit?: unknown }).onBoundaryCommit;
+    expect(typeof onBoundaryCommit).toBe("function");
+  });
+
+  test("releasing the handle transfers weight between neighbours", async () => {
+    await mountEditor([twoBeatBrief()]);
+    const boundary = await screen.findByRole("slider", {
+      name: messages.tapeBeatBoundaryName(1),
+    });
+    fireEvent.change(boundary, { target: { value: "4" } });
+    fireEvent.pointerUp(boundary);
+    await waitFor(() => {
+      const beats = (tapeProps.last as { beats: readonly { weight: number }[] }).beats;
+      expect(beats.map((beat) => beat.weight)).toEqual([4, 2]);
+    });
+  });
+});
