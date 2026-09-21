@@ -265,34 +265,47 @@ describe("the compositor does not draw a disabled layer (X9, D129)", () => {
     expect(Buffer.from(disabledThenEnabled)).toEqual(Buffer.from(copyAfterShade));
   });
 
-  test("a disabled layer of a kind this compositor cannot draw still throws — the skip is for drawable kinds only", async () => {
-    // The brief declares a kind this renderer has no drawer for; switching it
-    // off does not make it supported. Turning L6's refusal into a silent skip
-    // would be the same defect this lane fixes, wearing the opposite face.
-    const template = templateWith([
+  test("a disabled fill is an ordinary hide now that the kind is drawable (L11)", async () => {
+    // These two tests used to assert that a disabled `fill` STILL threw: the
+    // renderer could not draw the kind switched on either, so letting the
+    // `enabled: false` skip swallow it would have turned L6's refusal into an
+    // accepted-then-not-rendered promise. L11 draws `fill` (D131), so there is
+    // no refusal left to protect and the rule that applies is D129's: a
+    // disabled layer renders exactly what the same template without it renders.
+    const off = templateWith([
       { id: "image", kind: "image" },
       { id: "wash", kind: "fill", enabled: false },
     ]);
-    const prepared = await NodeCanvasCompositor.prepare(request({ template }));
-    const ctx = createCanvas(prepared.width, prepared.height).getContext("2d");
-    expect(() => NodeCanvasCompositor.draw(ctx, prepared, 1)).toThrow(
-      /layer kind "fill" has no drawer/,
-    );
+    const absent = templateWith([{ id: "image", kind: "image" }]);
+    const withOff = await NodeCanvasCompositor.prepare(request({ template: off }));
+    const withAbsent = await NodeCanvasCompositor.prepare(request({ template: absent }));
+    const drawOne = (prepared: Awaited<ReturnType<typeof NodeCanvasCompositor.prepare>>) => {
+      const canvas = createCanvas(prepared.width, prepared.height);
+      NodeCanvasCompositor.draw(canvas.getContext("2d"), prepared, 1);
+      return canvas.toBuffer("image/png");
+    };
+    expect(Buffer.from(drawOne(withOff))).toEqual(Buffer.from(drawOne(withAbsent)));
   });
 
-  test("a disabled layer of an undrawable kind throws on the sequenced path too", async () => {
-    const req = timelineRequest(
+  test("a disabled fill is skipped on the sequenced path too (L11)", async () => {
+    const off = timelineRequest(
       templateWith([
         { id: "image", kind: "image" },
         { id: "wash", kind: "fill", enabled: false },
       ]),
       "Stay wild, stay hydrated",
     );
-    const prepared = await NodeCanvasCompositor.prepare(req);
-    const ctx = createCanvas(prepared.width, prepared.height).getContext("2d");
-    expect(() => NodeCanvasCompositor.draw(ctx, prepared, 1, undefined, 0.5, 1)).toThrow(
-      /layer kind "fill" has no drawer/,
+    const absent = timelineRequest(
+      templateWith([{ id: "image", kind: "image" }]),
+      "Stay wild, stay hydrated",
     );
+    const drawOne = async (req: Parameters<typeof NodeCanvasCompositor.prepare>[0]) => {
+      const prepared = await NodeCanvasCompositor.prepare(req);
+      const canvas = createCanvas(prepared.width, prepared.height);
+      NodeCanvasCompositor.draw(canvas.getContext("2d"), prepared, 1, undefined, 0.5, 1);
+      return canvas.toBuffer("image/png");
+    };
+    expect(Buffer.from(await drawOne(off))).toEqual(Buffer.from(await drawOne(absent)));
   });
 
   test("logoApplied reports what was drawn: a disabled logo layer applies no logo", async () => {

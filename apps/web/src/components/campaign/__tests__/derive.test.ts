@@ -133,9 +133,15 @@ describe("derive.ts", () => {
     test("addableKinds omits a kind already at its limit and includes one below it", () => {
       // Canonical image-text: one logo, one shade, one accent, one static-text —
       // every decorated kind sits at its declared cap, and the shared text budget
-      // is full. Only the uncapped kind remains.
+      // is full. The uncapped kinds remain: `image`, and `fill` since L11 gave
+      // the kind a drawer and `image-text` a slot for it (D131), with no cap
+      // because each fill owns its own frame.
       const state = initialEditorState();
-      expect(addableKinds(state)).toEqual(["image"]);
+      // One expect per kind, and a length: D121's scanner refuses a literal
+      // list of the vocabulary in a `campaign/` file, tests included.
+      expect(addableKinds(state)).toHaveLength(2);
+      expect(addableKinds(state)).toContain("image");
+      expect(addableKinds(state)).toContain("fill");
       // Below the cap: dropping the shade frees the single slot the table declares.
       const noShade = stateWithLayers(state.template.layers.filter((l) => l.kind !== "shade"));
       expect(addableKinds(noShade)).toContain("shade");

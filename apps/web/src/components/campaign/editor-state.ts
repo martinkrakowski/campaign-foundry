@@ -19,6 +19,7 @@ import {
   templateFromCanonical,
   type AccentProps,
   type BriefTemplate,
+  type FillProps,
   type ImageProps,
   type LogoProps,
   type TextProps,
@@ -505,7 +506,7 @@ export interface EditorState {
  * only caller) can type the patches it builds without re-deriving the same
  * intersection.
  */
-export type LayerPropsPatch = Partial<AccentProps & LogoProps & TextProps & ImageProps>;
+export type LayerPropsPatch = Partial<AccentProps & LogoProps & TextProps & ImageProps & FillProps>;
 
 export type EditorAction =
   | { type: "setMode"; mode: CampaignMode }

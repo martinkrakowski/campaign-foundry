@@ -9,6 +9,7 @@ import {
   DISPLAY_SIZE_VALUES,
   type DisplaySize,
 } from "@campaignfoundry/CampaignOrchestration/display-sizes";
+import type { FillRole } from "@campaignfoundry/CampaignOrchestration/brief-template";
 import type { AdvertisingUnit } from "@campaignfoundry/CampaignOrchestration/advertising-units";
 import { ANCHOR_VALUES } from "@campaignfoundry/CampaignOrchestration/variation-defaults";
 import {
@@ -100,6 +101,24 @@ const ANCHOR_LABELS: Record<(typeof ANCHOR_VALUES)[number], string> = {
   middle: "Middle",
   bottom: "Bottom",
 };
+
+/**
+ * Display labels for the fill layer's brand roles (D131) — keyed by the
+ * domain vocabulary, so a new role is a compile error rather than a raw id on
+ * screen (D18).
+ *
+ * No `??` fallback beside the sibling label maps: every caller already holds a
+ * `FillRole` (the sheet maps over `FILL_ROLES` itself), so a miss is not a
+ * value any input can produce — and an unreachable fallback is the branch the
+ * coverage gate exists to surface.
+ */
+const FILL_ROLE_LABELS: Record<FillRole, string> = {
+  primary: "Primary brand colour",
+};
+
+export function fillRoleDisplayName(role: FillRole): string {
+  return FILL_ROLE_LABELS[role];
+}
 
 export function anchorDisplayName(anchor: string): string {
   return ANCHOR_LABELS[anchor as (typeof ANCHOR_VALUES)[number]] ?? anchor;

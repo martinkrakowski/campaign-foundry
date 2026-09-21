@@ -3,7 +3,11 @@ import { useReducer } from "react";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { CANONICAL_TEMPLATES } from "@campaignfoundry/CampaignOrchestration/creative-templates";
-import type { BriefTemplate } from "@campaignfoundry/CampaignOrchestration/brief-template";
+import {
+  FILL_ROLES,
+  type BriefTemplate,
+} from "@campaignfoundry/CampaignOrchestration/brief-template";
+import { fillRoleDisplayName } from "@/components/campaign/display-names";
 import {
   editorReducer,
   initialEditorState,
@@ -510,5 +514,95 @@ describe("LayerPropsSheet — the creative-visible claim's other half: this pane
     expect(
       within(screen.getByRole("region", { name: "stand-in creative rail" })).getByText("creative"),
     ).toBeTruthy();
+  });
+});
+
+describe("LayerPropsSheet — the fill layer's brand role (L11, D131)", () => {
+  /** A template whose fill layer the sheet can be pointed at. */
+  const fillTemplate = (props?: unknown): BriefTemplate => ({
+    ...textTemplate(),
+    layers: [
+      ...TEXT_CANONICAL.layers,
+      { id: "band", kind: "fill", ...(props === undefined ? {} : { props }) } as never,
+    ],
+  });
+
+  test("offers the roles the domain declares, and nothing else", () => {
+    render(
+      <Harness
+        initial={{ ...initialEditorState(), template: fillTemplate() }}
+        layerId="band"
+        onClose={vi.fn()}
+      />,
+    );
+    const select = screen.getByLabelText(messages.layerPropRoleLabel);
+    const options = within(select)
+      .getAllByRole("option")
+      .map((o) => o.textContent);
+    // The empty option is "no override"; the rest are FILL_ROLES, one for one.
+    expect(options).toHaveLength(FILL_ROLES.length + 1);
+    expect(options[0]).toBe(messages.layerPropDefault);
+    for (const role of FILL_ROLES) {
+      expect(options, `role "${role}" must be offered`).toContain(fillRoleDisplayName(role));
+    }
+  });
+
+  test("choosing a role writes it onto that layer's props", () => {
+    let latest: EditorState | undefined;
+    render(
+      <StateHarness
+        initial={{ ...initialEditorState(), template: fillTemplate() }}
+        layerId="band"
+        onClose={vi.fn()}
+        onState={(s) => {
+          latest = s;
+        }}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText(messages.layerPropRoleLabel), {
+      target: { value: "primary" },
+    });
+    // Asserted against the STATE the real reducer produced, not a spy call: a
+    // control that renders and dispatches nothing passes a spy-free render test.
+    expect(
+      (latest!.template.layers.find((l) => l.id === "band")!.props as { role?: string })?.role,
+    ).toBe("primary");
+  });
+
+  test("clearing the choice removes the key rather than writing a sentinel", () => {
+    let latest: EditorState | undefined;
+    render(
+      <StateHarness
+        initial={{ ...initialEditorState(), template: fillTemplate({ role: "primary" }) }}
+        layerId="band"
+        onClose={vi.fn()}
+        onState={(s) => {
+          latest = s;
+        }}
+      />,
+    );
+    // Without this the clear below would be a no-op and the assertion would
+    // hold whether or not clearing does anything.
+    expect((screen.getByLabelText(messages.layerPropRoleLabel) as HTMLSelectElement).value).toBe(
+      "primary",
+    );
+    fireEvent.change(screen.getByLabelText(messages.layerPropRoleLabel), {
+      target: { value: "" },
+    });
+    const props = latest!.template.layers.find((l) => l.id === "band")!.props as
+      | { role?: string }
+      | undefined;
+    expect(props?.role).toBeUndefined();
+  });
+
+  test("no other kind is offered the role control", () => {
+    render(
+      <Harness
+        initial={{ ...initialEditorState(), template: textTemplate() }}
+        layerId="accent"
+        onClose={vi.fn()}
+      />,
+    );
+    expect(screen.queryByLabelText(messages.layerPropRoleLabel)).toBeNull();
   });
 });

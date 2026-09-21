@@ -210,6 +210,29 @@ describe("dumpBrief layer and props order (L3b, D134)", () => {
     expect(parsed.template.layers[1]).toEqual({ kind: "shade", id: "tint" });
   });
 
+  test("a fill layer's role round-trips through YAML (L11, D131)", () => {
+    // A brand role is a string in a vocabulary, not a number in [0, 1] like
+    // the geometry props around it — it has to survive the writer's ordering
+    // pass and the reader unchanged, or a template loses its band's colour.
+    const withFill = {
+      ...templated,
+      template: {
+        ...templated.template,
+        layers: [
+          ...templated.template.layers,
+          { kind: "fill", id: "band-fill", props: { role: "primary" } },
+        ],
+      },
+    };
+    const yaml = dumpBrief(withFill);
+    const parsed = parse(yaml) as typeof withFill;
+    expect(parsed.template.layers[5]).toEqual({
+      id: "band-fill",
+      kind: "fill",
+      props: { role: "primary" },
+    });
+  });
+
   test("a layer key named after an Object.prototype member survives the dump", () => {
     // `constructor` is also an inherited member of the writer's accumulator;
     // an own layer key of that name must still be emitted (L3b review).

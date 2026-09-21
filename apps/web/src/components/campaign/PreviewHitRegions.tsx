@@ -138,8 +138,15 @@ export interface PreviewHitRegion {
  *   Exporting a band rect from the domain would not fix that, and would still
  *   be a twin unless `paintAccent` consumed it — a change to the byte-pinned
  *   compositor this lane does not make.
- * - `fill`: `LAYER_DRAWERS` has no entry for it (D131 — the vocabulary has the
- *   kind, no creative type accepts it, nothing draws it). No pixels, no region.
+ * - `fill`: it HAS pixels now — L11 gave it a drawer, `image-text` accepts it,
+ *   and its rect is its own frame, so unlike `accent` there is one rectangle to
+ *   offer and unlike `shade` it really does own what it covers. It is still
+ *   excluded, for the reason `shade` is: absent a frame a fill is the whole
+ *   canvas (`LAYER_KIND_DEFAULT_RECTS.fill`), and a full-canvas region above
+ *   the ground would take every click in the creative. Offering it only when it
+ *   carries a frame is the shape that works, and it is a change to what this
+ *   surface derives rather than a comment — it belongs to the hit-region lane,
+ *   not to the one that gave the kind a drawer.
  *
  * Every excluded kind stays reachable from the layer list, which is and
  * remains the primary path (CC3).

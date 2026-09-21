@@ -30,7 +30,8 @@
         "node",
         "packages/CreativeGeneration/src/infrastructure/adapters/__tests__/NodeCanvasCompositor.layer-order.test.ts"
       ],
-      "verdict": "caught"
+      "verdict": "caught",
+      "retired": "Retired by RW-5 (L11, D131): the code is gone, not moved. This mutation shortened the kinds list in drawLayer's \"no drawer\" error so a template naming an unsupported kind was refused with a message that lied about what the compositor draws. `fill` was the last member of LAYER_KINDS without a drawer; L11 gave it one, LAYER_DRAWERS became a total Record, and the lookup can no longer miss for any value the type admits — so the throw, its message and the kinds list in it were all removed rather than kept as a branch no input can reach. There is no equivalent spelling to re-anchor on: what now refuses a new kind is the table's own totality, at compile time in every reader, which no text mutation can express. HL3's other mutations still cover the html drawer itself."
     },
     {
       "file": "packages/CreativeGeneration/src/infrastructure/adapters/NodeCanvasCompositor.ts",

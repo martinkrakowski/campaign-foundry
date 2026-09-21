@@ -6,7 +6,7 @@
 > VF4 was new. I created a C1/M1 collision earlier this session and did not notice for hours; this is
 > the same mistake and it is recorded rather than quietly renamed.
 
-**Date:** 2026-09-10 · **Status:** **PARTLY SHIPPED — stamped 2026-09-20.** VF1 shipped **as C5** (#328), VF2 **as VG** (#326), and VF4 was **absorbed** into #328 when C5 deleted `SEQUENCED_KINDS` — §1 of this same file already said so. **Open: VF3**, which is L11's `fill` half in the templates plan; VF-D3 sequences `fill` before `html`, and `html` already shipped as HL3.
+**Date:** 2026-09-10 · **Status:** **PARTLY SHIPPED — stamped 2026-09-20.** VF1 shipped **as C5** (#328), VF2 **as VG** (#326), and VF4 was **absorbed** into #328 when C5 deleted `SEQUENCED_KINDS` — §1 of this same file already said so. **VF3 SHIPPED as RW-5** — it is L11's `fill` half in the templates plan, and that half is now on `main`: the kind resolves a brand role (D131), `image-text` accepts it, and the compositor paints it over the layer's frame. VF-D3 sequenced `fill` before `html`; `html` shipped first as HL3, and the ordering cost nothing. **Nothing in this document is open.** (L11's OTHER half, D132's generative region, is blocked — see `creative-templates-and-units.md` L11b. It was never VF3's.)
 **Verified against:** `main` at `f4f4d63`, plus PR #322 (the `video` drawer) in flight.
 **Hands off to:** `2026-09-10_keyframing.md`, whose gate this plan is.
 
@@ -14,35 +14,35 @@
 
 ## 0. Where video actually stands
 
-| Piece | State |
-|---|---|
-| Motion path reads the layer list | **Done** (C1, #313) — for **ground layers only** |
-| The brief's template reaches the renderer | **Done** (C3, #319) |
-| `video` layer has a drawer | **In flight** (#322) — short-video renders again |
-| Motion frames honour the **full** declared order | **Not done** — text and logo are drawn in fixed positions |
-| A video **byte** golden | **Does not exist.** D10 freezes bytes nothing measures. C1 added *frame* goldens; the MP4 itself is unmeasured |
-| `fill` and `html` layer kinds | No drawer; both throw. `html` is deliberate (D122) |
+| Piece                                            | State                                                                                                          |
+| ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
+| Motion path reads the layer list                 | **Done** (C1, #313) — for **ground layers only**                                                               |
+| The brief's template reaches the renderer        | **Done** (C3, #319)                                                                                            |
+| `video` layer has a drawer                       | **In flight** (#322) — short-video renders again                                                               |
+| Motion frames honour the **full** declared order | **Not done** — text and logo are drawn in fixed positions                                                      |
+| A video **byte** golden                          | **Does not exist.** D10 freezes bytes nothing measures. C1 added _frame_ goldens; the MP4 itself is unmeasured |
+| `fill` and `html` layer kinds                    | No drawer; both throw. `html` is deliberate (D122)                                                             |
 
 **The honest summary: video renders correctly and is not yet provably stable.**
 
 ## 0.1 Proposed decisions
 
-| id | Decision | Why |
-|---|---|---|
-| **VF-D1** | **The motion path honours the whole declared order, not just the ground.** | C1 scoped to the ground trio because copy is beat-selected and the logo is anchored to the key beat's rest-pose box. That was right for C1 and is not a resting place: a template that puts the logo below the shade is honoured in the still and ignored in the video. |
-| **VF-D2** | **The MP4 gets a byte golden, or D10's freeze stops being claimed.** | A rule that freezes bytes nothing measures is a comment, not a guarantee. Either measure it or delete the claim; both are honest, pretending is not. |
-| **VF-D3** | **`fill` before `html`.** `fill` is a canvas primitive the compositor can draw. `html` is an output family (D122) and is not a drawer problem at all. | They look like siblings in `LAYER_KINDS` and are not. Treating them as one lane is how `html` ends up half-built inside a compositor that D122 says must never rasterise markup. |
-| **VF-D4** | **Video is "finished" when a reordered, toggled, framed template renders identically in the still and in every frame.** | Anything less leaves two renderers that agree by luck. |
+| id        | Decision                                                                                                                                              | Why                                                                                                                                                                                                                                                                     |
+| --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **VF-D1** | **The motion path honours the whole declared order, not just the ground.**                                                                            | C1 scoped to the ground trio because copy is beat-selected and the logo is anchored to the key beat's rest-pose box. That was right for C1 and is not a resting place: a template that puts the logo below the shade is honoured in the still and ignored in the video. |
+| **VF-D2** | **The MP4 gets a byte golden, or D10's freeze stops being claimed.**                                                                                  | A rule that freezes bytes nothing measures is a comment, not a guarantee. Either measure it or delete the claim; both are honest, pretending is not.                                                                                                                    |
+| **VF-D3** | **`fill` before `html`.** `fill` is a canvas primitive the compositor can draw. `html` is an output family (D122) and is not a drawer problem at all. | They look like siblings in `LAYER_KINDS` and are not. Treating them as one lane is how `html` ends up half-built inside a compositor that D122 says must never rasterise markup.                                                                                        |
+| **VF-D4** | **Video is "finished" when a reordered, toggled, framed template renders identically in the still and in every frame.**                               | Anything less leaves two renderers that agree by luck.                                                                                                                                                                                                                  |
 
 ---
 
 ## 1. Lanes
 
-| Lane | Where it already lives | Note |
-|---|---|---|
-| **C5** | `2026-09-10_reconciliation.md` §4c | The motion path honours the **full** order. **Scope correction below.** |
-| **VG1–VG3** | `2026-09-10_the-mp4-byte-golden.md` | The MP4 byte golden, or D10's claim withdrawn. |
-| **L11 (`fill` half)** | `2026-09-08_creative-templates-and-units.md`, D131 | The `fill` drawer. |
+| Lane                  | Where it already lives                             | Note                                                                    |
+| --------------------- | -------------------------------------------------- | ----------------------------------------------------------------------- |
+| **C5**                | `2026-09-10_reconciliation.md` §4c                 | The motion path honours the **full** order. **Scope correction below.** |
+| **VG1–VG3**           | `2026-09-10_the-mp4-byte-golden.md`                | The MP4 byte golden, or D10's claim withdrawn.                          |
+| **L11 (`fill` half)** | `2026-09-08_creative-templates-and-units.md`, D131 | The `fill` drawer.                                                      |
 
 **VF4 — shipped in #328 (C5).** C5's own merge deleted `SEQUENCED_KINDS`; the split this lane existed
 to retire is gone (`grep -c SEQUENCED_KINDS packages/` finds nothing), and the §2 DoD clause
@@ -50,7 +50,7 @@ to retire is gone (`grep -c SEQUENCED_KINDS packages/` finds nothing), and the �
 
 **A scope correction C5 needs, found in review.** VF-D1 claimed a reordered template "is honoured in
 the still and ignored in the video". **The still path cannot honour it either in one case**:
-`drawLogo` throws *"the logo layer snaps to the text block, but no static-text layer ran before it"*
+`drawLogo` throws _"the logo layer snaps to the text block, but no static-text layer ran before it"_
 when no text layer has run, and the ordering table permits `[image, logo, shade, static-text]`. So
 C5 must also take the logo's anchor from a prepared layout — as `drawTimeline` already does via
 `scenes.anchor.box` — **or** narrow its definition of done and say why. As written, an implementer
@@ -71,8 +71,8 @@ lands the motion change, runs the DoD and finds the still path throwing.
 ## 3. The handoff to keyframing
 
 **This plan is keyframing's gate.** `2026-09-10_keyframing.md` says K1–K4 cannot start before the
-motion path is list-driven, because *"keyframed per-layer motion is meaningless while the motion path
-draws three of five layers by name."*
+motion path is list-driven, because _"keyframed per-layer motion is meaningless while the motion path
+draws three of five layers by name."_
 
 **C1 satisfied the letter of that and not the spirit — but my original reason was wrong**, and the
 review corrected it. I claimed a track on the logo "cannot mean anything while the logo's position is
@@ -83,11 +83,11 @@ on the logo or the copy is **meaningful today** — copy already composes exactl
 **The real reasons to gate keyframing on C5 are two, and both are engineering rather than semantic:**
 
 1. **There is no single site to resolve a track by `id`.** `drawBeat` and the logo block never hold a
-   layer record — copy is drawn without knowing *which* `static-text` layer it is, and a template
+   layer record — copy is drawn without knowing _which_ `static-text` layer it is, and a template
    with two text layers collapses to one beat block on the motion path. A track addressed by `id`
    has nothing to bind to.
 2. **Z-order would be wrong, silently.** An opacity track fading a text layer the template places
-   below the shade would fade it *above* the shade in motion. That is the C5 defect surfacing through
+   below the shade would fade it _above_ the shade in motion. That is the C5 defect surfacing through
    keyframing rather than a keyframing defect.
 
 **What keyframing inherits when VF1 lands:** one ordered list, every layer addressed by id, both draw

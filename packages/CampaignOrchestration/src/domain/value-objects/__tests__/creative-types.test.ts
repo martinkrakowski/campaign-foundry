@@ -59,12 +59,26 @@ describe("creative types and compatibility rules (D119, D124, D131)", () => {
     }
   });
 
-  test("fill is accepted by no creative type (pins D131)", () => {
-    for (const [type, rule] of Object.entries(CREATIVE_TYPE_RULES)) {
-      expect(
-        rule.accepts.includes("fill"),
-        `creative type "${type}" must not accept "fill" until L11 (D131)`,
-      ).toBe(false);
+  test("image-text accepts fill, and the other two types still do not (D131, L11)", () => {
+    // The inverse of what this test asserted until L11: `fill` was in the
+    // vocabulary from L1 and accepted nowhere, because nothing drew it. It is
+    // drawn now, and `image-text` is the composition D131's own example is
+    // written in — a band under the copy with a picture above it.
+    expect(CREATIVE_TYPE_RULES["image-text"].accepts).toContain("fill");
+    // `video` and `image-html` are unchanged: a fill over a video plate and a
+    // fill under markup are both compositions nobody has specified, and
+    // widening them here would accept a template no lane has drawn.
+    expect(CREATIVE_TYPE_RULES.video.accepts).not.toContain("fill");
+    expect(CREATIVE_TYPE_RULES["image-html"].accepts).not.toContain("fill");
+  });
+
+  test("fill carries no cardinality cap (D124)", () => {
+    // Each fill owns its own frame (D130), so a template may stack a band per
+    // region the way it stacks text. A cap of one would refuse D131's own
+    // two-band worked example for no reason the compositor has.
+    expect(CREATIVE_TYPE_RULES["image-text"].maxOf.fill).toBeUndefined();
+    for (const budget of CREATIVE_TYPE_RULES["image-text"].sharedBudgets) {
+      expect(budget.kinds).not.toContain("fill");
     }
   });
 
@@ -93,7 +107,7 @@ describe("creative types and compatibility rules (D119, D124, D131)", () => {
   test("rules match the plan's §2.1 compatibility table exactly", () => {
     expect(CREATIVE_TYPE_RULES["image-text"]).toEqual({
       unit: "standard-web",
-      accepts: ["image", "shade", "accent", "static-text", "animated-text", "logo"],
+      accepts: ["image", "fill", "shade", "accent", "static-text", "animated-text", "logo"],
       required: ["image", "static-text"],
       maxOf: { logo: 1, shade: 1, accent: 1 },
       sharedBudgets: [{ kinds: ["static-text", "animated-text"], max: 1 }],

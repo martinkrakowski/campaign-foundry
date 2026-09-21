@@ -3,6 +3,9 @@
 import { useEffect, useId, useState, type Dispatch, type ReactNode } from "react";
 import type { LayerKind } from "@campaignfoundry/CampaignOrchestration/layer-kinds";
 import { CREATIVE_GEOMETRY } from "@campaignfoundry/CampaignOrchestration/creative-geometry";
+// The fill layer's role vocabulary (D131), imported rather than restated: D121
+// refuses a literal list of domain values in a `campaign/` file.
+import { FILL_ROLES } from "@campaignfoundry/CampaignOrchestration/brief-template";
 // The domain's own list of kinds that may carry tracks (K1), so this sheet
 // offers the section exactly where `layerTracksProblem` would accept one.
 import { TRACKABLE_LAYER_KINDS } from "@campaignfoundry/CampaignOrchestration/tracks";
@@ -16,7 +19,7 @@ import {
   type EditorState,
   type LayerPropsPatch,
 } from "@/components/campaign/editor-state";
-import { anchorDisplayName } from "@/components/campaign/display-names";
+import { anchorDisplayName, fillRoleDisplayName } from "@/components/campaign/display-names";
 import * as messages from "@/components/campaign/messages";
 import { TrackForm, type TrackPlayhead } from "@/components/campaign/TrackForm";
 import type { PresetCell } from "@/components/campaign/preset-tracks";
@@ -199,6 +202,48 @@ function AnchorField({
 }
 
 /**
+ * The fill layer's brand role (D131). The same empty-option idiom as
+ * `AnchorField`: clearing writes no key rather than a sentinel, and the layer
+ * then resolves `DEFAULT_FILL_ROLE` at render.
+ *
+ * A role, never a colour: there is deliberately no swatch or picker here. A
+ * template that names a value is a template for one brand, which is the thing
+ * D131 exists to refuse.
+ */
+function RoleField({
+  value,
+  onCommit,
+  onClear,
+}: {
+  value: string | undefined;
+  onCommit: (value: string) => void;
+  onClear: () => void;
+}) {
+  return (
+    <SheetField label={messages.layerPropRoleLabel}>
+      {(id) => (
+        <select
+          id={id}
+          value={value ?? ""}
+          onChange={(e) => {
+            if (e.target.value === "") onClear();
+            else onCommit(e.target.value);
+          }}
+          className="w-full rounded border border-border-control bg-surface px-3 py-2 text-sm text-text-emphasis"
+        >
+          <option value="">{messages.layerPropDefault}</option>
+          {FILL_ROLES.map((role) => (
+            <option key={role} value={role}>
+              {fillRoleDisplayName(role)}
+            </option>
+          ))}
+        </select>
+      )}
+    </SheetField>
+  );
+}
+
+/**
  * `image`'s alt override (X2). Three states, not two: absent (no key at
  * all), the empty string (declared decorative), and text — so clearing the
  * box types an empty string (a real, intentional value) while the Reset
@@ -326,6 +371,7 @@ export function LayerPropsSheet({
     showAnchor ||
     showTracks ||
     layer.kind === "image" ||
+    layer.kind === "fill" ||
     layer.kind === "html";
 
   return (
@@ -359,6 +405,13 @@ export function LayerPropsSheet({
             value={props?.anchor as string | undefined}
             onCommit={(value) => setProp({ anchor: value })}
             onClear={() => setProp({ anchor: undefined })}
+          />
+        ) : null}
+        {layer.kind === "fill" ? (
+          <RoleField
+            value={props?.role as string | undefined}
+            onCommit={(value) => setProp({ role: value })}
+            onClear={() => setProp({ role: undefined })}
           />
         ) : null}
         {layer.kind === "image" ? (

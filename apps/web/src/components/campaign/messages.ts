@@ -1818,3 +1818,6 @@ export const gridRunningUncounted = `Running the pipeline — ${GRID_RUN_WORK}�
 export function gridRunningCounted(done: number, total: number): string {
   return `Running the pipeline — ${done} of ${total} creatives done, ${GRID_RUN_WORK}…`;
 }
+
+/** The `fill` layer's brand-role control (D131) — a role, never a colour value. */
+export const layerPropRoleLabel = "Brand colour role";

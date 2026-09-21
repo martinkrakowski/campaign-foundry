@@ -46,6 +46,7 @@ const request = (over: Partial<TemplateRequest> = {}): TemplateRequest => ({
 /** The kinds this compositor draws. */
 const DRAWABLE_KINDS = [
   "image",
+  "fill",
   "video",
   "shade",
   "accent",
@@ -128,7 +129,11 @@ describe("the compositor's draw order is the template's layer list (L2a, D121)",
     expect(order).toEqual(["image", "accent", "shade", "static-text", "logo"]);
   });
 
-  test("a layer kind this compositor cannot draw throws the named error (fill)", async () => {
+  test("a fill layer reaches the table on the still path, in the template's order (L11)", async () => {
+    // This test used to assert the opposite: `fill` was the one member of
+    // `LAYER_KINDS` with no drawer, and reaching it threw. L11 gave it one
+    // (D131), so the refusal it pinned no longer exists and the claim worth
+    // holding is that the kind now dispatches like any other.
     const template: BriefTemplate = {
       id: "canonical-image-text",
       version: 1,
@@ -141,9 +146,9 @@ describe("the compositor's draw order is the template's layer list (L2a, D121)",
     };
     const prepared = await NodeCanvasCompositor.prepare(request({ template }));
     const ctx = createCanvas(prepared.width, prepared.height).getContext("2d");
-    expect(() => NodeCanvasCompositor.draw(ctx, prepared, 1)).toThrow(
-      /layer kind "fill" has no drawer in this compositor — it draws image, video, shade, accent, static-text, animated-text, logo and html only/,
-    );
+    const order = recordDrawOrder();
+    expect(() => NodeCanvasCompositor.draw(ctx, prepared, 1)).not.toThrow();
+    expect(order).toEqual(["image", "fill"]);
   });
 
   test("a canonical-image-html template renders without throwing on the still path and records order (HL3)", async () => {
@@ -235,11 +240,11 @@ describe("the compositor's draw order is the template's layer list (L2a, D121)",
     expect(order).toEqual(["accent", "logo", "shade", "image"]);
   });
 
-  test("the timeline path throws on a ground kind it cannot draw, the same way the still path does (html)", async () => {
-    // The GROUND_KINDS asymmetry C1 flagged forward: `drawTimeline` used to
-    // skip every kind but the canonical trio, silently. When a template's
-    // order reaches this loop, an undrawable ground kind (e.g. fill)
-    // throws rather than silently skipping.
+  test("the timeline path draws a fill layer too, at its template position (L11)", async () => {
+    // The same inversion as the still-path test above, and the reason C1
+    // flagged the asymmetry in the first place still holds: `drawTimeline`
+    // must reach every kind the template lists, at the position it lists it,
+    // rather than skipping what it does not recognise.
     const template: BriefTemplate = {
       id: "canonical-image-text",
       version: 1,
@@ -262,9 +267,9 @@ describe("the compositor's draw order is the template's layer list (L2a, D121)",
     };
     const prepared = await NodeCanvasCompositor.prepare(req);
     const ctx = createCanvas(prepared.width, prepared.height).getContext("2d");
-    expect(() => NodeCanvasCompositor.draw(ctx, prepared, 0.5, undefined, 0.5)).toThrow(
-      /layer kind "fill" has no drawer/,
-    );
+    const order = recordDrawOrder();
+    expect(() => NodeCanvasCompositor.draw(ctx, prepared, 0.5, undefined, 0.5)).not.toThrow();
+    expect(order).toEqual(["image", "fill", "logo"]);
   });
 
   test("the timeline path renders a canonical-image-html template without throwing (HL3)", async () => {

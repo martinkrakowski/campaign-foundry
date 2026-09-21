@@ -10,7 +10,10 @@
  * - `image-html`: "html" (+ raster fallback per D122)
  * - `video`: "motion"
  *
- * Per D131, `fill` appears in no `accepts` list until L11 draws it.
+ * Per D131, `image-text` accepts `fill` now that L11 draws it. It carries no
+ * `maxOf`: each fill owns its own frame (D130), so a template may stack a band
+ * per region the way it stacks text, and a cap of one would refuse the owner's
+ * own two-band example for no reason the compositor has.
  */
 import type { AdvertisingUnit } from "./advertising-units.js";
 import type { ComplianceResult, ComplianceSeverity } from "./ComplianceResult.vo.js";
@@ -86,7 +89,7 @@ export interface CreativeTypeRule {
 export const CREATIVE_TYPE_RULES: Readonly<Record<CreativeType, CreativeTypeRule>> = {
   "image-text": {
     unit: "standard-web",
-    accepts: ["image", "shade", "accent", "static-text", "animated-text", "logo"],
+    accepts: ["image", "fill", "shade", "accent", "static-text", "animated-text", "logo"],
     required: ["image", "static-text"],
     maxOf: { logo: 1, shade: 1, accent: 1 },
     sharedBudgets: [{ kinds: ["static-text", "animated-text"], max: 1 }],
