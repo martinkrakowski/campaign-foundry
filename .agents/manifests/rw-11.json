@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "RW-11",
+  "mutations": [
+    {
+      "file": "packages/ui/src/button.tsx",
+      "before": "    \"bg-brand-primary text-brand-on-primary hover:bg-brand-primary-hover focus-visible:ring-brand-primary\",",
+      "after": "    \"bg-brand-primary text-white hover:bg-brand-primary-hover focus-visible:ring-brand-primary\",",
+      "because": "Put the stock white literal back on the primary verb — the F3 defect exactly: ink on brand-primary expressed as text-white because DESIGN.md had no token for it. Caught by the kit-boundaries scan that forbids text-white on brand-primary.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "packages/ui/src/__tests__/kit-boundaries.test.ts",
+        "-t",
+        "text-white does not reappear on brand-primary"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
