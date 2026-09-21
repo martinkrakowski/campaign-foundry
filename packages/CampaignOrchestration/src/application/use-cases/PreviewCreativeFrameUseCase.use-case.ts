@@ -7,6 +7,7 @@ import {
   type CanvasSpec,
 } from "../../domain/value-objects/aspect-ratios.js";
 import { groundFrameOf } from "../../domain/value-objects/creative-geometry.js";
+import { encodedFrameCount } from "../../domain/value-objects/MotionKind.vo.js";
 import { DISPLAY_SIZE_VALUES, type DisplaySize } from "../../domain/value-objects/display-sizes.js";
 import type { BackgroundSource } from "../../domain/value-objects/BackgroundSource.vo.js";
 import type { LayoutKind, ToneKind } from "../../domain/value-objects/Treatment.vo.js";
@@ -304,7 +305,12 @@ export class PreviewCreativeFrameUseCase {
 
     let scrub: ScrubFingerprint | undefined;
     if (hasMotion) {
-      const frames = Math.round(durationSec! * MOTION_FPS);
+      // The encoder's own rounding, not a copy of it: this count keys the
+      // preview's cache fingerprint and picks its frame, so a rounding change
+      // that reached the encoder and not here would leave the rail selecting a
+      // frame the run never produces. `frameIndex` below is a different
+      // computation — where inside the clip — and stays local.
+      const frames = encodedFrameCount(durationSec!, MOTION_FPS);
       const frameIndex = Math.round((atSec! / durationSec!) * (frames - 1));
       scrub = {
         frameIndex,

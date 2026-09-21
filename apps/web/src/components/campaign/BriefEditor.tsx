@@ -1725,6 +1725,12 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
       pickLayer,
       // D142's empty state names the campaign.
       state.campaignName,
+      // TL4 — read inside the tape's `audioPath`. This list is hand-maintained
+      // and a render count CANNOT see a missing entry: the failure is a STALE
+      // rail, not a slow one. Adding or clearing a bed changes no other value
+      // the rail reads, so without this the wide-screen rail would keep the old
+      // lane while the section host showed the new one.
+      state.audio?.path,
       // SG4 — `railView`, `chooseRailView` and `draftBrief` were all here and are
       // all gone, because the rail no longer reads any of them. `draftBrief` is
       // the consequential one: it was the LIVE projection, so the rail was
