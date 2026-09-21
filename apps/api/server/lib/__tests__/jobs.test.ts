@@ -13,6 +13,7 @@ import {
   getJob,
   getRunningJobId,
   hasRunningJob,
+  progressJob,
   resetJobs,
   runJob,
   type JobResult,
@@ -38,6 +39,32 @@ describe("jobs port facade", () => {
     const id = await createJob("camp");
     expect(id).toMatch(/^[0-9a-f-]{36}$/i);
     expect(await getJob(id)).toEqual({ status: "running", done: 0, total: 0, log: null });
+  });
+
+  test("progressJob moves a running job off 0/0", async () => {
+    const id = await createJob("camp");
+    await progressJob(id, 3, 12);
+    expect(await getJob(id)).toMatchObject({ status: "running", done: 3, total: 12 });
+  });
+
+  test("progressJob leaves a completed job on the counts its settlement wrote", async () => {
+    const id = await createJob("camp");
+    await completeJob(id, payload({ assets: [] }));
+    // A cell still unwinding after the run settled must not walk n/n backwards.
+    await progressJob(id, 1, 12);
+    expect(await getJob(id)).toMatchObject({ status: "completed", done: 0, total: 0 });
+  });
+
+  test("progressJob does not resurrect a failed job", async () => {
+    const id = await createJob("camp");
+    await failJob(id, "boom");
+    // runJob's deadline fails the job while the work it cannot kill keeps ticking.
+    await progressJob(id, 5, 12);
+    expect(await getJob(id)).toMatchObject({ status: "failed", done: 0, total: 0, error: "boom" });
+  });
+
+  test("progressJob on an unknown id is a no-op", async () => {
+    await expect(progressJob("missing", 1, 2)).resolves.toBeUndefined();
   });
 
   test("getJob returns undefined for an unknown id", async () => {

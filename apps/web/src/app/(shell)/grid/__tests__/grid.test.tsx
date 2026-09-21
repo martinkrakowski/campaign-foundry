@@ -46,6 +46,34 @@ describe("GridPage", () => {
     expect(await screen.findByText(/Running the pipeline/)).toBeTruthy();
   });
 
+  test("counts the creatives once the run reports progress", async () => {
+    const user = userEvent.setup();
+    let polls = 0;
+    mockPipelineApi({
+      job: () => {
+        polls += 1;
+        if (polls === 1) return json({ status: "running", done: 2, total: 5, log: null });
+        return new Promise<Response>(() => {}); // hold the run open on the counted state
+      },
+    });
+    renderWithRun(<Harness />);
+    await user.click(screen.getByText("exec"));
+    expect(await screen.findByText(/2 of 5 creatives done/)).toBeTruthy();
+  });
+
+  test("says nothing about counts before the run has planned its cells", async () => {
+    const user = userEvent.setup();
+    mockPipelineApi({
+      job: () => json({ status: "running", done: 0, total: 0, log: null }),
+    });
+    renderWithRun(<Harness />);
+    await user.click(screen.getByText("exec"));
+    // 0/0 is the opening state of every run — "0 of 0 creatives done" would be
+    // the same non-answer the counter exists to replace.
+    expect(await screen.findByText(/Running the pipeline/)).toBeTruthy();
+    expect(screen.queryByText(/creatives done/)).toBeNull();
+  });
+
   test("renders the review matrix with provenance and compliance badges", async () => {
     seedPersistedRun([
       // alpha has two ratios (exercises the ratio sort), incl. an unranked one (ratioRank -1).

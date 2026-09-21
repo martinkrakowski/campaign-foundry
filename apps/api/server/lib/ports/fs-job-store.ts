@@ -217,6 +217,19 @@ export class FsJobStore implements JobStorePort {
     return (await this.getRunningJobId(campaignId)) !== undefined;
   }
 
+  async progressJob(id: string, done: number, total: number): Promise<void> {
+    return this.withJobLock(id, async () => {
+      const entry = await this.getStoredJob(id);
+      if (!entry) return;
+      // Only a running job takes progress. `runJob`'s deadline can fail a job
+      // while the work it could not kill carries on ticking, and that work
+      // finishes into a settled entry — writing here would flip "failed" back
+      // to "running" and hand the poller a run that is never coming back.
+      if (entry.job.status !== "running") return;
+      await this.writeJobEntry({ ...entry, job: { ...entry.job, done, total } });
+    });
+  }
+
   async completeJob(id: string, payload: JobResult): Promise<void> {
     return this.withJobLock(id, async () => {
       const entry = await this.getStoredJob(id);

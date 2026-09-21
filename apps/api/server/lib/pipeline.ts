@@ -187,6 +187,8 @@ export async function runCampaign(
   expectedCopyHash?: string,
   /** The run's deadline (R5, D77), created by `runJob` and threaded to every image adapter. */
   signal?: AbortSignal,
+  /** Per-cell progress sink; the route writes it onto the job the poller reads. */
+  onProgress?: (done: number, total: number) => void,
 ): Promise<Result<PipelineResult, Error>> {
   const planInput = await planInputFor(brief);
   if (!planInput.success) return planInput;
@@ -208,12 +210,17 @@ export async function runCampaign(
       );
     }
   }
-  // Options are built from whichever of the two is present: a re-roll with no
-  // deadline (the CLI) and a full run with one are both legitimate.
+  // Options are built from whichever of the three is present: a re-roll with no
+  // deadline (the CLI) and a full run with one are both legitimate, and a run
+  // with nobody listening for progress is the CLI again.
   const options =
-    regenerateOnly === undefined && signal === undefined
+    regenerateOnly === undefined && signal === undefined && onProgress === undefined
       ? undefined
-      : { ...(regenerateOnly ? { regenerateOnly } : {}), ...(signal ? { signal } : {}) };
+      : {
+          ...(regenerateOnly ? { regenerateOnly } : {}),
+          ...(signal ? { signal } : {}),
+          ...(onProgress ? { onProgress } : {}),
+        };
   return buildPipeline(imageModel, planInput.value).execute(brief, options);
 }
 

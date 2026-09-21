@@ -1,6 +1,6 @@
 import { setResponseHeader } from "h3";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
-import { acquireJob, completeJob, failJob, runJob } from "../../lib/jobs.js";
+import { acquireJob, completeJob, failJob, progressJob, runJob } from "../../lib/jobs.js";
 import { JobCapacityError } from "../../lib/ports/fs-job-store.js";
 import { parseBrief, parseRegenerateOnly } from "../../lib/load-brief.js";
 import { outputRoot } from "../../lib/config.js";
@@ -167,6 +167,15 @@ export default defineEventHandler(async (event) => {
       expectedPolicyHash,
       expectedCopyHash,
       signal,
+      // The tick is synchronous and the store is not, so the write is queued
+      // rather than awaited — the pipeline must not stall on a job file. Order
+      // survives anyway: `progressJob` runs inside the store's per-id lock
+      // chain, which settles calls in the order they were made. A failed write
+      // is dropped on purpose: progress is advisory, and a run that finished
+      // must not be failed by a counter that could not be persisted.
+      (done, total) => {
+        void progressJob(jobId, done, total).catch(() => undefined);
+      },
     );
     if (!result.success) {
       await failJob(jobId, result.error.message);

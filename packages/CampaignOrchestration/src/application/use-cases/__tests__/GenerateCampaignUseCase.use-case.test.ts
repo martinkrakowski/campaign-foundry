@@ -2449,3 +2449,66 @@ describe("GenerateCampaignUseCase — a holey plan re-rolls by slot (H1)", () =>
     expect(planner.replan).not.toHaveBeenCalled();
   });
 });
+
+describe("GenerateCampaignUseCase — progress reporting", () => {
+  test("announces the total before the first cell, then ticks once per cell", async () => {
+    const calls: Array<[number, number]> = [];
+    const result = await new GenerateCampaignUseCase(deps()).execute(baseBrief(), {
+      onProgress: (done, total) => calls.push([done, total]),
+    });
+    expect(result.success).toBe(true);
+    // 2 products × 3 ratios × 1 treatment. The head is the announce — it is what
+    // lets a poller show "0 of 6" instead of 0/0 — and each later entry is a
+    // settled cell, so the run is observable while it is still running.
+    expect(calls).toEqual([
+      [0, 6],
+      [1, 6],
+      [2, 6],
+      [3, 6],
+      [4, 6],
+      [5, 6],
+      [6, 6],
+    ]);
+  });
+
+  test("reports the same total the log records", async () => {
+    const calls: Array<[number, number]> = [];
+    const result = await new GenerateCampaignUseCase(deps()).execute(baseBrief(), {
+      onProgress: (done, total) => calls.push([done, total]),
+    });
+    // One count, two readers: a `total` that drifts from `log.totalOperations`
+    // would have the grid and the telemetry drawer disagreeing about one run.
+    if (result.success) {
+      expect(new Set(calls.map(([, total]) => total))).toEqual(
+        new Set([result.value.log.totalOperations]),
+      );
+    }
+  });
+
+  test("ticks every variation cell too", async () => {
+    const variants = [fakeVariant(), fakeVariant({ index: 1, aspectRatio: "9:16" })];
+    const calls: Array<[number, number]> = [];
+    const result = await new GenerateCampaignUseCase(
+      deps({ planner: fakePlanner(fakePlan(variants)) }),
+    ).execute(variationBrief({ products: [product("alpha")] }), {
+      onProgress: (done, total) => calls.push([done, total]),
+    });
+    expect(result.success).toBe(true);
+    expect(calls).toEqual([
+      [0, 2],
+      [1, 2],
+      [2, 2],
+    ]);
+  });
+
+  test("runs identically with no reporter — the CLI's path", async () => {
+    const withReporter = await new GenerateCampaignUseCase(deps()).execute(baseBrief(), {
+      onProgress: () => undefined,
+    });
+    const without = await new GenerateCampaignUseCase(deps()).execute(baseBrief());
+    expect(without.success).toBe(true);
+    if (without.success && withReporter.success) {
+      expect(without.value.assets).toEqual(withReporter.value.assets);
+    }
+  });
+});

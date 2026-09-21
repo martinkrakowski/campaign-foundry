@@ -77,6 +77,16 @@ export interface JobStorePort {
   hasRunningJob(campaignId: string): Promise<boolean>;
 
   /**
+   * Record how far a running job has got.
+   *
+   * Progress is advisory: a job that has already settled keeps the counts its
+   * settlement wrote. A late tick from work still unwinding after the run
+   * deadline aborted it (see `runJob`) must not resurrect a failed job, and
+   * a tick racing `completeJob` must not walk `n/n` back to `n-1/n`.
+   */
+  progressJob(id: string, done: number, total: number): Promise<void>;
+
+  /**
    * Settle a job as completed with its result payload.
    */
   completeJob(id: string, payload: JobResult): Promise<void>;
