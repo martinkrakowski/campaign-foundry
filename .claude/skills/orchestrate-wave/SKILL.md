@@ -261,6 +261,23 @@ output for a cell, the cell is *unknown* — a valid answer. A confident wrong o
    because a lane that sees a list assumes the list was checked.
 
    Before dispatch, for every brief:
+   - **Grep the lane id against every plan, not only its own.** `grep -rn '\*\*<ID>\*\*' docs/planning/`
+     is one command and it is the whole check. Lane ids are the join key for the session-log
+     citation, the plan's shipped note, the mutation manifest filename
+     (`.agents/manifests/<lane>.json`), the wave-status row and the premise fence's own name, so a
+     collision silently merges two lanes' histories and `plan:verify` can evaluate one plan's fence
+     against the other's claim. It has happened twice: `TL1` named both the template-library routes
+     and "one playhead, two positions preserved" in plans written the same day, and `L10`/`L11`
+     collided between the templates plan and `run-exclusion-and-the-second-surface`. Both times the
+     colliding ids were **bare sequential** ones; prefixing with the plan's arc (`L7a2`, `CC5`,
+     `SE3`) is what has kept the other arcs clean. (`the-unowned-gaps.md` §42.)
+   - **Check the gap is still open before dispatching the lane that closes it.** A recorded finding
+     is a claim about the past. `git log --oneline -- <the test file the fix would touch>` and a
+     grep for the defect's own numbers cost seconds; re-deriving an inventory with
+     `merge-base --is-ancestor` does **not** cover this, because that method proves what shipped
+     and cannot see that a recorded gap was closed by something it did not cite. RW-24 was
+     scheduled on 2026-09-20 against a ceiling overcount that #499 had fixed on 2026-09-18, with
+     the reported 48-against-32 numbers pinned in a test named after them.
    - **If it names a type or a document surface, open that type and paste its fields in.** A brief
      covering `CopyTimeline` names five things, because `CopyBeat` is `{text, weight, background?}`
      and `CopyTimeline` is `{beats, transition, keyBeat}`.
