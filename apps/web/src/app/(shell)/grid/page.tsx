@@ -12,6 +12,7 @@ import {
 } from "@/lib/run-context";
 import { ASPECT_RATIOS } from "@/lib/aspect-ratios";
 import { cn } from "@/lib/cn";
+import * as messages from "@/components/campaign/messages";
 import { descriptorBeats, descriptorHeadline } from "@/components/campaign/messages";
 import { EmptyNote, MiniChip } from "@/components/ui";
 import { campaignTypeOf, typeDisplayName } from "@/components/campaign/display-names";
@@ -94,9 +95,9 @@ const effective = (value: string, options: string[]): string =>
  * state of every run, not a fallback for a shape that cannot happen.
  */
 function runningMessage(progress: RunProgress | null): string {
-  const work = "resolving assets, compositing brand layers, and checking compliance";
-  if (progress === null || progress.total === 0) return `Running the pipeline — ${work}…`;
-  return `Running the pipeline — ${progress.done} of ${progress.total} creatives done, ${work}…`;
+  return progress === null || progress.total === 0
+    ? messages.gridRunningUncounted
+    : messages.gridRunningCounted(progress.done, progress.total);
 }
 
 export default function GridPage() {
@@ -214,11 +215,7 @@ export default function GridPage() {
       <EmptyNote
         className="h-full"
         title="Start orchestrating assets"
-        message={
-          loading
-            ? runningMessage(progress)
-            : "Execute the pipeline below to resolve missing assets, composite brand layers, and run brand-compliance checks."
-        }
+        message={loading ? runningMessage(progress) : messages.gridRunIdle}
       />
     );
   }

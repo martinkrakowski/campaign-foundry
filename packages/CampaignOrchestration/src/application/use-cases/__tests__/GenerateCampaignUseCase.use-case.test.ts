@@ -2476,13 +2476,16 @@ describe("GenerateCampaignUseCase — progress reporting", () => {
     const result = await new GenerateCampaignUseCase(deps()).execute(baseBrief(), {
       onProgress: (done, total) => calls.push([done, total]),
     });
+    // Asserted BEFORE the narrowing, not inside it: with the expect alone under
+    // `if (result.success)` a run that started failing would skip the branch and
+    // the test would pass having checked nothing.
+    expect(result.success).toBe(true);
+    if (!result.success) return;
     // One count, two readers: a `total` that drifts from `log.totalOperations`
     // would have the grid and the telemetry drawer disagreeing about one run.
-    if (result.success) {
-      expect(new Set(calls.map(([, total]) => total))).toEqual(
-        new Set([result.value.log.totalOperations]),
-      );
-    }
+    expect(new Set(calls.map(([, total]) => total))).toEqual(
+      new Set([result.value.log.totalOperations]),
+    );
   });
 
   test("ticks every variation cell too", async () => {
