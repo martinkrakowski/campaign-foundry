@@ -40,7 +40,7 @@ describe("AxisCard", () => {
     // 44px preview tile inverts to brand-filled when pressed
     const tile = button.querySelector("span[aria-hidden='true'].size-11");
     expect(tile?.className).toContain("bg-brand-primary");
-    expect(tile?.className).toContain("text-white");
+    expect(tile?.className).toContain("text-brand-on-primary");
 
     // 22px check badge with check-pop overshoot animation
     const checkBadge = button.querySelector("span[aria-hidden='true'].size-\\[22px\\]");

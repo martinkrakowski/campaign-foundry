@@ -12,6 +12,7 @@ export const theme = {
     brand: {
       primary: "var(--color-brand-primary)",
       primaryHover: "var(--color-brand-primary-hover)",
+      onPrimary: "var(--color-brand-on-primary)",
       secondary: "var(--color-brand-secondary)",
     },
     surface: {

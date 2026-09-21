@@ -41,7 +41,7 @@ describe("PlatformCard", () => {
 
     // 44px preview tile inverts when pressed
     expect(tile?.className).toContain("bg-brand-primary");
-    expect(tile?.className).toContain("text-white");
+    expect(tile?.className).toContain("text-brand-on-primary");
 
     // 22px check badge
     const checkBadge = button.querySelector("span[aria-hidden='true'].size-\\[22px\\]");

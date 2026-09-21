@@ -86,7 +86,7 @@ export function Header() {
           onClick={(e) => handleTabClick(e, HOME)}
           className="flex items-center space-x-2 rounded-sm"
         >
-          <div className="flex h-7 w-7 items-center justify-center rounded bg-brand-primary text-xs font-bold text-white">
+          <div className="flex h-7 w-7 items-center justify-center rounded bg-brand-primary text-xs font-bold text-brand-on-primary">
             CF
           </div>
           <div className="flex cursor-default items-center space-x-2 text-text-primary">

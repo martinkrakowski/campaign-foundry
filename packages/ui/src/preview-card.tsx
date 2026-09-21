@@ -55,14 +55,14 @@ export function PreviewCard({
     >
       {selected ? (
         <span
-          className="absolute right-2.5 top-2.5 flex size-[22px] items-center justify-center rounded-full bg-brand-primary text-white motion-safe:animate-check-pop"
+          className="absolute right-2.5 top-2.5 flex size-[22px] items-center justify-center rounded-full bg-brand-primary text-brand-on-primary motion-safe:animate-check-pop"
           aria-hidden="true"
         >
           <svg
             viewBox="0 0 12 12"
             focusable="false"
             aria-hidden="true"
-            className="size-3 text-white"
+            className="size-3 text-brand-on-primary"
           >
             <path
               d="M2 6.5 5 9.5 10 3"
@@ -79,7 +79,7 @@ export function PreviewCard({
         aria-hidden="true"
         className={cn(
           "flex size-11 shrink-0 items-center justify-center rounded-md transition-colors",
-          selected ? "bg-brand-primary text-white" : "bg-background text-text-secondary",
+          selected ? "bg-brand-primary text-brand-on-primary" : "bg-background text-text-secondary",
         )}
       >
         {children}
@@ -87,7 +87,7 @@ export function PreviewCard({
       <span className="min-w-0 flex-1">
         <span
           className={cn(
-            "block text-[15px] font-bold leading-tight",
+            "block text-sm font-bold leading-tight",
             selected ? "text-text-emphasis" : "text-text-primary",
           )}
         >
