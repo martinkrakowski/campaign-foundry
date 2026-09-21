@@ -83,7 +83,47 @@ export interface ImageProps {
   readonly alt?: string;
 }
 
-export type LayerProps = AccentProps | LogoProps | TextProps | ImageProps;
+/**
+ * The brand roles a `fill` layer may name (D131): a role, never a literal.
+ *
+ * A template that hard-codes `#1a2b3c` is a template for one brand, and the
+ * library exists to serve many (D123). The role is resolved against the brand
+ * at render, so the same template fills with each brand's own colour.
+ *
+ * **One member today, and the union is the point.** The brand surface a brief
+ * carries is a single colour — `Product.primaryColor` — so `primary` is the
+ * only role with anything to resolve against. `accent` and `surface` (D131
+ * names both) wait on a brand kit with a palette by role, and adding either
+ * before there is a value behind it would ship a role that silently resolves
+ * to the same hex as `primary`. Union-keyed like every other vocabulary here
+ * (D119), so a second member is a compile error at every reader rather than a
+ * runtime surprise.
+ */
+export const FILL_ROLES = ["primary"] as const;
+export type FillRole = (typeof FILL_ROLES)[number];
+
+/**
+ * The role a fill resolves when its layer names none.
+ *
+ * Not in `LAYER_PROP_DEFAULTS`: that table is the MERGED GEOMETRY — every
+ * entry a number the compositor already read from `CREATIVE_GEOMETRY`, and
+ * `layerPropDefault` returns `number | undefined` for the editor's
+ * drop-when-equal canonicaliser. A role is neither a geometry nor a number, so
+ * it lives beside its own vocabulary and the compositor reads it from here.
+ */
+export const DEFAULT_FILL_ROLE: FillRole = "primary";
+
+/**
+ * `fill`'s props (D131): which brand role the layer resolves at render.
+ * Optional like every other prop in this vocabulary (D134) — absent means
+ * `"primary"`, so a fill layer written with no props draws the brand colour
+ * rather than nothing.
+ */
+export interface FillProps {
+  readonly role?: FillRole;
+}
+
+export type LayerProps = AccentProps | LogoProps | TextProps | ImageProps | FillProps;
 
 /**
  * The props vocabulary per layer kind (D134), in `LayerProps`' declaration
@@ -99,7 +139,7 @@ const LAYER_PROPS: Readonly<Record<LayerKind, readonly string[]>> = {
   image: ["alt"],
   video: [],
   html: [],
-  fill: [],
+  fill: ["role"],
 };
 
 /** Why a layer's `enabled` is not a shape the brief may carry (D129); undefined when it is. */
@@ -342,6 +382,16 @@ export function layerPropsProblem(kind: LayerKind, props: unknown): LayerPropsPr
         return {
           path: `.${field}`,
           must: `be one of ${ANCHOR_VALUES.map((anchor) => `"${anchor}"`).join(", ")}`,
+          value,
+        };
+      }
+      continue;
+    }
+    if (field === "role") {
+      if (typeof value !== "string" || !(FILL_ROLES as readonly string[]).includes(value)) {
+        return {
+          path: `.${field}`,
+          must: `be one of ${FILL_ROLES.map((role) => `"${role}"`).join(", ")}`,
           value,
         };
       }

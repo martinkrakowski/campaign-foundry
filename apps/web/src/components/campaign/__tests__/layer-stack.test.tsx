@@ -98,8 +98,9 @@ describe("LayerStack — the layer list (L5, D124)", () => {
     const dispatch = vi.fn();
     render(<Stack state={state()} dispatch={dispatch} />);
     // The fresh social post's decorated kinds sit at their own caps or fill the
-    // shared text budget; only `image` — unbounded — is offered.
-    expect(addGroup().getAllByRole("button")).toHaveLength(1);
+    // shared text budget; the two unbounded kinds — `image` and, since L11,
+    // `fill` — are what remain.
+    expect(addGroup().getAllByRole("button")).toHaveLength(2);
     await user.click(addGroup().getByRole("button", { name: "image" }));
     expect(dispatch).toHaveBeenCalledWith({ type: "addLayer", kind: "image" });
   });
@@ -954,10 +955,12 @@ describe("layerStackProps — the seam the rail's memo keys on (CC3)", () => {
   test("every offer is the derivation's answer, and a strict subset of the vocabulary", () => {
     const props = layerStackProps(state());
     // The fresh social post's decorated kinds sit at their own caps or fill the
-    // shared text budget, so `image` — unbounded — is the only offer. A
-    // hard-coded list would have to be exactly this, on exactly this template,
-    // and would then be wrong for the stripped one below.
-    expect([...props.addable]).toEqual(["image"]);
+    // shared text budget, so the unbounded pair is the offer: `image`, and
+    // `fill` since L11. A hard-coded list would have to be exactly this, on
+    // exactly this template, and would then be wrong for the stripped one below.
+    expect([...props.addable]).toHaveLength(2);
+    expect([...props.addable]).toContain("image");
+    expect([...props.addable]).toContain("fill");
     expect(props.rows.map((row) => row.id)).toEqual([
       "image",
       "shade",

@@ -211,14 +211,14 @@ describe("parseBrief", () => {
       );
     });
 
-    test("a layer whose kind its creative type does not accept is refused (fill on image-text)", () => {
+    test("a layer whose kind its creative type does not accept is refused (video on image-text)", () => {
       const base = templateFromCanonical("social-post");
       const template = {
         ...base,
-        layers: [...base.layers, { id: "bg-fill", kind: "fill" }],
+        layers: [...base.layers, { id: "plate", kind: "video" }],
       };
       expect(() => parseBrief({ ...valid, template })).toThrow(
-        'Campaign brief field "template.layers[5].kind" must be one of ["image", "shade", "accent", "static-text", "animated-text", "logo"]; got "fill".',
+        'Campaign brief field "template.layers[5].kind" must be one of ["image", "fill", "shade", "accent", "static-text", "animated-text", "logo"]; got "video".',
       );
     });
 
@@ -248,10 +248,10 @@ describe("parseBrief", () => {
       const base = templateFromCanonical("social-post");
       const template = {
         ...base,
-        layers: [...base.layers, { id: "bg-fill", kind: "fill" }],
+        layers: [...base.layers, { id: "plate", kind: "video" }],
       };
       expect(() => parseBrief({ ...valid, template }, { enforceCapabilities: false })).toThrow(
-        'Campaign brief field "template.layers[5].kind" must be one of ["image", "shade", "accent", "static-text", "animated-text", "logo"]; got "fill".',
+        'Campaign brief field "template.layers[5].kind" must be one of ["image", "fill", "shade", "accent", "static-text", "animated-text", "logo"]; got "video".',
       );
     });
 

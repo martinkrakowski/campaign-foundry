@@ -4,6 +4,8 @@ import { CANONICAL_TEMPLATES } from "../creative-templates.js";
 import type { CreativeType } from "../creative-types.js";
 import type { LayerKind } from "../layer-kinds.js";
 import {
+  DEFAULT_FILL_ROLE,
+  FILL_ROLES,
   isBriefTemplate,
   layerEnabledProblem,
   layerFrameProblem,
@@ -391,14 +393,13 @@ describe("isBriefTemplate layer props (L3b, D134)", () => {
 
   test("refuses props on a kind that carries none, the empty object included", () => {
     // `html` sits on a type that accepts it, so the props verdict — not X11's
-    // `accepts` mirror — is what refuses it there. `fill` is accepted by no
-    // creative type (D131), so the whole-template check refuses it for that
-    // reason alone; its props rule is asserted directly, or it goes untested.
+    // `accepts` mirror — is what refuses it there. `fill` LEFT this set at L11:
+    // it carries `role` now (D131), and its own rule is asserted below.
     expect(withLayer({ id: "html", kind: "html", props: { alt: "x" } }, "image-html")).toBe(false);
-    expect(withLayer({ id: "fill", kind: "fill", props: { alpha: 0.5 } })).toBe(false);
-    expect(layerPropsProblem("fill", { alpha: 0.5 })).toEqual({
+    expect(withLayer({ id: "plate", kind: "video", props: { alpha: 0.5 } }, "video")).toBe(false);
+    expect(layerPropsProblem("video", { alpha: 0.5 })).toEqual({
       path: "",
-      must: 'be absent for layer kind "fill"',
+      must: 'be absent for layer kind "video"',
       value: { alpha: 0.5 },
     });
     // `shade` joined this set by R-D4 (withdrawn 2026-09-15): the tone axis is
@@ -511,6 +512,61 @@ describe("isBriefTemplate layer props (L3b, D134)", () => {
       path: "",
       must: 'be absent for layer kind "bogus"',
       value: {},
+    });
+  });
+});
+
+describe("the fill layer's role prop (L11, D131)", () => {
+  const fillLayer = (props: unknown) => ({ id: "band", kind: "fill", props });
+
+  const withFill = (props: unknown): boolean =>
+    isBriefTemplate({
+      id: CANONICAL_TEMPLATES["image-text"].id,
+      version: 1,
+      creativeType: "image-text",
+      unit: "standard-web",
+      layers: [...CANONICAL_TEMPLATES["image-text"].layers, fillLayer(props)],
+    });
+
+  test("every declared role is accepted", () => {
+    // Read off the vocabulary rather than spelled out: a role added to
+    // FILL_ROLES joins this test without anyone remembering to.
+    for (const role of FILL_ROLES) {
+      expect(
+        layerPropsProblem("fill", { role }),
+        `role "${role}" must be accepted`,
+      ).toBeUndefined();
+      expect(withFill({ role })).toBe(true);
+    }
+  });
+
+  test("absent props are fine — the role defaults", () => {
+    expect(layerPropsProblem("fill", undefined)).toBeUndefined();
+    expect(DEFAULT_FILL_ROLE).toBe("primary");
+    expect(FILL_ROLES).toContain(DEFAULT_FILL_ROLE);
+  });
+
+  test("a role outside the vocabulary is refused, naming what it may be", () => {
+    expect(layerPropsProblem("fill", { role: "chartreuse" })).toEqual({
+      path: ".role",
+      must: 'be one of "primary"',
+      value: "chartreuse",
+    });
+    expect(withFill({ role: "chartreuse" })).toBe(false);
+  });
+
+  test("a role that is not a string is refused", () => {
+    // The colour a template must NOT carry, in the shape somebody would
+    // actually write it: D131 refuses a literal, not merely a bad enum.
+    expect(layerPropsProblem("fill", { role: "#1a2b3c" })?.path).toBe(".role");
+    expect(layerPropsProblem("fill", { role: 3 })?.path).toBe(".role");
+  });
+
+  test("a field fill does not carry is refused", () => {
+    expect(layerPropsProblem("fill", { alpha: 0.5 })).toEqual({
+      path: ".alpha",
+      must: 'be one of "role" for layer kind "fill"',
+      value: 0.5,
     });
   });
 });

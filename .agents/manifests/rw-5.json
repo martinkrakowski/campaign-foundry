@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "RW-5",
+  "mutations": [
+    {
+      "file": "packages/CreativeGeneration/src/infrastructure/adapters/NodeCanvasCompositor.ts",
+      "before": "  ctx.fillStyle = FILL_ROLE_COLORS[role](prepared);\n  ctx.fillRect(dest.x, dest.y, dest.w, dest.h);",
+      "after": "  ctx.fillStyle = FILL_ROLE_COLORS[role](prepared);\n  ctx.fillRect(0, 0, width, height);",
+      "because": "A fill that ignores its frame, in the shape somebody would actually write it: the kind is called `fill` and `fillRect(0, 0, width, height)` is what every other whole-canvas drawer in this file passes, so it reads as the obvious body. It stays invisible to everything structural — the drawer is still dispatched, at the template's position, on both the still and the timeline path; the layer order tests still record `fill`; the role still resolves through the brand; a disabled fill is still skipped; and the goldens do not move, because no canonical template carries the kind. What breaks is the only thing L11 promised: D131's worked example stops being a band under the copy and becomes a wash over the whole creative, swallowing the picture it was meant to sit beside. Caught only by reading pixels ABOVE the frame — an assertion inside the band passes either way, which is why the test names both halves.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CreativeGeneration/src/infrastructure/adapters/__tests__/NodeCanvasCompositor.fill.test.ts",
+        "-t",
+        "the owner's example: a brand band in the bottom half, the picture untouched above it"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

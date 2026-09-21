@@ -140,9 +140,9 @@
     },
     {
       "file": "packages/CampaignOrchestration/src/domain/value-objects/brief-template.ts",
-      "before": "  fill: [],",
+      "before": "  fill: [\"role\"],",
       "after": "  fill: [\"alpha\"],",
-      "because": "The fill props rule must be asserted directly: fill is accepted by no creative type (D131), so after X11 the whole-template guard refuses a fill layer for that reason alone, and an isBriefTemplate assertion stayed green with fill allowed to carry alpha. layerPropsProblem(\"fill\", ...) is the only place that rule is observable.",
+      "because": "The fill props rule must be asserted directly: the kind's props vocabulary is the only thing this rule is made of, and a wrong entry is invisible to every template-shaped assertion around it. (Re-anchored at L11: the entry was `[]` while nothing drew `fill`, and is `[\"role\"]` now that something does — same line, same defect, new spelling.) layerPropsProblem(\"fill\", ...) is the only place that rule is observable.",
       "command": [
         "yarn",
         "vitest",

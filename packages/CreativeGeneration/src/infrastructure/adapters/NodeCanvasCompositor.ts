@@ -31,7 +31,10 @@ import {
   type CreativeTemplateLayer,
   type CreativeType,
   type LayerKind,
+  DEFAULT_FILL_ROLE,
   type AccentProps,
+  type FillProps,
+  type FillRole,
   type LogoProps,
   type TextProps,
   toneFontWeight,
@@ -282,8 +285,9 @@ interface LayerDrawContext {
  * sequence rather than an input asset, and on any single frame the background
  * is a still image blit (with a `groundMotionTracks`-resolved zoom applied in
  * motion, K2).
- * Kinds this compositor cannot draw (`fill`) are absent, and
- * hitting one throws ({@link drawLayer}) instead of skipping.
+ * `fill` (D131, L11) paints a brand role over the layer's frame, which
+ * completed the table: every member of `LAYER_KINDS` has an entry, so the
+ * type is a total `Record` and a new kind is a compile error here.
  * `drawTimeline` (C5) uses this same table for every kind except
  * `static-text`/`animated-text` — whose sequenced beat-selection and
  * crossfade ({@link drawBeat}) it calls directly at that layer's position —
@@ -295,8 +299,9 @@ interface LayerDrawContext {
  * the public package surface; the structural tests spy the table through the
  * TS-private seam {@link NodeCanvasCompositor.layerDrawers}.
  */
-const LAYER_DRAWERS: Readonly<Partial<Record<LayerKind, LayerDrawer>>> = {
+const LAYER_DRAWERS: Readonly<Record<LayerKind, LayerDrawer>> = {
   image: paintBackground,
+  fill: paintFill,
   video: paintBackground,
   shade: paintShade,
   accent: paintAccent,
@@ -1498,6 +1503,41 @@ function drawStaticText(c: LayerDrawContext): void {
 }
 
 /**
+ * How each brand role resolves to a colour at render (D131).
+ *
+ * A `Record<FillRole, …>` rather than a switch or a `??` chain: adding a role
+ * to `FILL_ROLES` breaks this build until it is given a value, which is the
+ * whole reason the roles are a union. One entry today because the brief
+ * carries one brand colour — see `FILL_ROLES` for why `accent` and `surface`
+ * wait rather than aliasing to the same hex.
+ */
+const FILL_ROLE_COLORS: Readonly<Record<FillRole, (prepared: PreparedCreative) => string>> = {
+  primary: (prepared) => prepared.brandColor,
+};
+
+/**
+ * The fill layer (D131, L11) — a solid brand colour over the layer's own box.
+ *
+ * It names a ROLE, never a literal, so one template serves every brand: the
+ * owner's example is a band under white text with a picture above it, and it
+ * is the same template whatever brand renders it.
+ *
+ * The box is the layer's frame (D130) — `layerPixelRect` returns the whole
+ * canvas when no frame is present, which is `LAYER_KIND_DEFAULT_RECTS.fill`
+ * stated once rather than twice. A fill is opaque (D135), so painting the
+ * frame and nothing else is what makes a half-canvas band a band instead of a
+ * wash over the picture it was meant to sit beside.
+ */
+function paintFill(c: LayerDrawContext): void {
+  const { ctx, prepared, layer } = c;
+  const { width, height, canvas } = prepared;
+  const dest = layerPixelRect(layer, canvas, width, height);
+  const role = (layer.props as FillProps | undefined)?.role ?? DEFAULT_FILL_ROLE;
+  ctx.fillStyle = FILL_ROLE_COLORS[role](prepared);
+  ctx.fillRect(dest.x, dest.y, dest.w, dest.h);
+}
+
+/**
  * The html layer (HL3, HL-D5) — draws the dispatched layer's element list
  * (text, button, image) directly onto the canvas, producing the static raster
  * fallback rendition (D122) before the markup assembler (HL4) is built. The
@@ -1685,29 +1725,32 @@ function resolveLayerList(
  * One layer of the draw: look the kind up in the dispatch table and paint it,
  * handing the drawer the layer it was dispatched for (HL3) — a template may
  * carry several layers of one kind, and the loop position is the only identity
- * the drawer can trust. A kind with no entry — `fill` (L6) — throws, never
- * skips: a silently dropped layer is a redesign the goldens cannot see.
+ * the drawer can trust.
+ *
+ * **There is no "kind with no drawer" arm any more.** `fill` was the last
+ * member of `LAYER_KINDS` without an entry, and L11 gave it one, so
+ * `LAYER_DRAWERS` is a total `Record` and the lookup cannot miss for any
+ * value the type admits. The refusal that stood here threw for `fill`; it is
+ * gone rather than kept as a guard no input can reach, and the table's own
+ * totality is what a new kind now trips — at compile time, in every reader,
+ * instead of at render in this one.
  */
 function drawLayer(layer: CreativeTemplateLayer, c: Omit<LayerDrawContext, "layer">): void {
-  const drawer = LAYER_DRAWERS[layer.kind];
-  if (drawer === undefined) {
-    throw new Error(
-      `NodeCanvasCompositor: layer kind "${layer.kind}" has no drawer in this compositor — it draws image, video, shade, accent, static-text, animated-text, logo and html only`,
-    );
-  }
-  drawer({ ...c, layer });
+  LAYER_DRAWERS[layer.kind]({ ...c, layer });
 }
 
 /**
  * Whether a dispatch loop skips this layer (X9): an explicit `enabled: false`
- * (D129 — absence means enabled) hides a layer this compositor CAN draw, so a
- * disabled layer renders exactly what the same template with that layer absent
- * renders. A kind with no drawer is never skipped here: it still reaches
- * {@link drawLayer} and throws, because a brief naming an unsupported kind has
- * declared something this renderer cannot draw whether or not the operator
- * switched it off — silently dropping it would turn L6's refusal into the same
- * accepted-then-not-rendered promise this rule exists to keep.
+ * (D129 — absence means enabled) hides the layer, so a disabled layer renders
+ * exactly what the same template with that layer absent renders.
+ *
+ * The second half of this test — "and the compositor can draw its kind" — is
+ * gone with L11. It existed so a disabled `fill` still reached {@link
+ * drawLayer} and threw rather than being silently accepted, because the
+ * renderer could not draw `fill` switched on either. It can now, so switching
+ * one off is an ordinary hide and the extra condition would be a clause no
+ * kind can fail.
  */
 function isDisabledLayer(layer: CreativeTemplateLayer): boolean {
-  return layer.enabled === false && LAYER_DRAWERS[layer.kind] !== undefined;
+  return layer.enabled === false;
 }

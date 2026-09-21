@@ -60,7 +60,8 @@ const STOP_KEY_ORDER = ["t", "value", "easing", "clock"] as const;
 /**
  * The props' canonical key order: the order the domain's `LayerProps` union
  * declares its members (D134) — accent's heights, logo's widths, the text
- * layers' `anchor` and `typeFloor`, then the image layer's `alt` (X2). `shade`
+ * layers' `anchor` and `typeFloor`, the image layer's `alt` (X2), then the
+ * fill layer's `role` (D131). `shade`
  * carries no props (R-D4, withdrawn 2026-09-15 — `alpha` is gone). A valid
  * props object carries one kind's keys only, so one flat list orders them
  * all; keys the union does not name keep their written order at the end.
@@ -73,6 +74,7 @@ const PROPS_KEY_ORDER = [
   "anchor",
   "typeFloor",
   "alt",
+  "role",
 ] as const;
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {

@@ -3,8 +3,8 @@
  *
  * A layer kind owns one drawing responsibility and its own props (§2.1, §2.5).
  *
- * `fill` is in the vocabulary from L1 and accepted by no creative type until
- * L11 draws it (D131).
+ * `fill` entered the vocabulary at L1 and stayed undrawn until L11 (D131); it
+ * now resolves a brand role and `image-text` accepts it.
  */
 export const LAYER_KINDS = [
   "image",
