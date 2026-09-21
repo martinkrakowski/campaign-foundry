@@ -44,6 +44,13 @@ describe("Tailwind Alpha Colors", () => {
     expect(css).toContain(".bg-brand-primary-hover\\/50");
   });
 
+  it("generates text-brand-on-primary from the on-primary token", async () => {
+    const css = await generateCss(["text-brand-on-primary"]);
+
+    expect(css).toContain(".text-brand-on-primary");
+    expect(css).toContain("--color-brand-on-primary");
+  });
+
   it("does not emit alpha utilities for a bare var() colour", async () => {
     const bareVarConfig: Config = {
       content: [],

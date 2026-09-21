@@ -29,7 +29,7 @@ export interface AxisCardProps {
 /**
  * The selectable card for one value of a fixed-vocabulary axis (D28 / D29 / W2b.1).
  * It adopts the mock's .opt idiom: 1.5px border, a 44px preview tile that inverts
- * when pressed, a 22px overshoot check badge, a 15px/700 label, and motion-safe hover/press.
+ * when pressed, a 22px overshoot check badge, a text-sm/700 label, and motion-safe hover/press.
  *
  * The accessible name is exactly `value` (an explicit aria-label, which
  * overrides content): tests across the app query these controls as
@@ -69,14 +69,14 @@ export function AxisCard({
     >
       {selected ? (
         <span
-          className="absolute right-2.5 top-2.5 flex size-[22px] items-center justify-center rounded-full bg-brand-primary text-white motion-safe:animate-check-pop"
+          className="absolute right-2.5 top-2.5 flex size-[22px] items-center justify-center rounded-full bg-brand-primary text-brand-on-primary motion-safe:animate-check-pop"
           aria-hidden="true"
         >
           <svg
             viewBox="0 0 12 12"
             focusable="false"
             aria-hidden="true"
-            className="size-3 text-white"
+            className="size-3 text-brand-on-primary"
           >
             <path
               d="M2 6.5 5 9.5 10 3"
@@ -93,14 +93,14 @@ export function AxisCard({
         aria-hidden="true"
         className={cn(
           "flex size-11 shrink-0 items-center justify-center rounded-md transition-colors",
-          selected ? "bg-brand-primary text-white" : "bg-background text-text-secondary",
+          selected ? "bg-brand-primary text-brand-on-primary" : "bg-background text-text-secondary",
         )}
       >
         {children}
       </span>
       <span
         className={cn(
-          "text-[15px] font-bold leading-tight",
+          "text-sm font-bold leading-tight",
           selected ? "text-text-emphasis" : "text-text-primary",
         )}
       >

@@ -47,6 +47,7 @@ Source of truth: `apps/web/src/styles/tokens.css`. Change a value there; nothing
 |---|---|---|---|---|
 | `--color-brand-primary` | `#1473e6` | inherits | `bg-brand-primary` `text-brand-primary` | primary actions, brand mark, active states |
 | `--color-brand-primary-hover` | `color-mix(primary 85%, black)` | inherits | `hover:bg-brand-primary-hover` | |
+| `--color-brand-on-primary` | `#ffffff` | `#ffffff` | `text-brand-on-primary` | ink on the brand colour |
 | `--color-brand-secondary` | `#8b5cf6` | inherits | `brand-secondary` | accents, rarely |
 | `--color-background` | `#ffffff` | `#0f0f0f` | `bg-background` | page ground, inputs |
 | `--color-surface` | `#f8fafc` | `#1c1c1c` | `bg-surface` | panels, cards, menus, drawers |
@@ -186,11 +187,12 @@ The scale as actually used — these are deliberate, keep to them:
 | Section heading | `text-lg font-semibold text-text-emphasis` |
 | Panel / dialog title | `text-sm font-semibold text-text-emphasis` |
 | Body, controls | `text-sm` (14px) / `text-[13px]` |
+| Compact body | `text-[12px]` — a step between caption and body (tile blurbs and meta, dialog status) |
 | Field label | `text-[11px] text-text-muted` |
 | Group label (eyebrow) | `Eyebrow` — `font-mono text-[11px] uppercase tracking-eyebrow text-text-muted` (`tracking-eyebrow` is `0.08em`, a token in `tailwind.config.ts`) |
 | Hint, caption, badge | `text-[11px]` / `text-[10px]` |
 
-The 70 existing `text-white` occurrences across 29 files migrate to `text-text-emphasis` in lane W0b.3; the table above is the instruction for new code.
+Ink on the brand colour is `text-brand-on-primary`, not `text-white` and not `text-text-emphasis` (emphasis is the inverse of the page ground, and on a light page that is dark). Tile names sit on `text-sm` with the rest of body.
 
 ### Spacing, radius, elevation, motion
 
@@ -260,19 +262,21 @@ brief nobody is editing must not still be the one **Generate** would run.
 - **CommandBar** — the pipeline's controls, rendered only on `/grid` where the creatives
   and the approve/reject flow live. Elsewhere it would obscure read-only reports.
 - **Overlays** — `BriefPicker`, the headline pool drawer, the Save-as dialog, the telemetry
-  drawer: `fixed inset-0` with a `bg-black/80 backdrop-blur-sm` scrim, `z-50`+, and a
+  drawer: `fixed inset-0` with a `bg-scrim/80 backdrop-blur-sm` scrim, `z-50`+, and a
   `role="dialog"` (labelled) on the panel.
 
 ---
 
 ## 4. Components
 
-### UI kit (`src/components/ui`)
+### UI kit (`packages/ui`)
 
-Skeletal by design — patterns to extend, not a library.
+Skeletal by design — patterns to extend, not a library. `apps/web/src/components/ui` re-exports
+the package so call sites keep the `@/components/ui` alias.
 
-- **Button** — variants `primary` (brand), `secondary` (surface + border), `ghost`,
-  `destructive`; sizes `sm` h-8, `md` h-10 (default), `lg` h-12. `isLoading` swaps the label
+- **Button** — variants `primary` (brand, `text-brand-on-primary` on the brand ground),
+  `secondary` (surface + border), `ghost`, `destructive` (`text-on-error` on the error ground);
+  sizes `sm` h-8, `md` h-10 (default), `lg` h-12. `isLoading` swaps the label
   for a spinner and sets `aria-busy`. Disabled: `opacity-50`, no pointer events.
 - **Input** — h-10, `bg-background`, token border; `invalid` sets `aria-invalid` and the
   error border. Always paired with a visible label or `aria-label`.
@@ -363,6 +367,44 @@ Skeletal by design — patterns to extend, not a library.
   action button whose label moves with the state.) It renders the server's dark default first
   and adopts the stored theme on mount, so it never disagrees with what the pre-paint script
   has already put on `<html>`.
+- **OptionTile** — the richer sibling of `AxisCard`, for options whose picture is a caller-sized
+  slot rather than a fixed 44px well. Slots: `preview` (full-bleed panel above the body),
+  `children` (the picture), visible `name`, optional `tag` / `blurb` / `meta`. `blurb` is
+  neutral body copy; `description` is the gate's reason (warning-toned, visible) and
+  `srDescription` is an `sr-only` mirror of facts the tile aria-hides — two slots, not one.
+  States: pressed/unpressed, selected border + tint, a 22px brand check, `focus-visible` ring,
+  disabled. The accessible name is exactly the raw `value` (`aria-label`); picture, preview,
+  tag, blurb, meta and check are `aria-hidden`. `aria-pressed`; `aria-describedby` joins the
+  gate and the mirror when both are set.
+- **PosterFrame** — a miniature poster at one of the domain's true ratios: a hairline frame
+  holding four layered content rects (`pA` image-top, `pB` image-left, `pC` centred) or a
+  dashed empty frame (`blank`). Slot is the canvas (`spec` / `ratio`) and `variant`. Wholly
+  decorative and static (`aria-hidden`, no animation classes — D88); the tile's name carries
+  the meaning.
+- **PosterStack** — three `PosterFrame`s drawn overlapping, offset by a few pixels — the set
+  of layouts a mode can produce, all visible at once. Decorative, static, `aria-hidden`. No
+  slots beyond the shared canvas and size.
+- **ScrubBar** — a rounded track with two ticks and a `brand-primary` head parked at ~30 %,
+  the static replacement for a sweeping playhead. No props, no motion (D88). Decorative
+  (`aria-hidden`); the option's name carries the meaning.
+- **WorldMap** — one `<g>` per footprint with its dot matrix, in token colours. Single-select
+  (D94): `footprints`, `value`, `onSelect`, `labelFor`, `fallbackHint`. Hover paints a mono
+  caption under the map; selection scales the dots and labels the hub. The SVG is
+  `aria-hidden` — a pointer enhancement bound to the same state as the chips, which remain
+  the accessible and keyboard path. `fallbackHint` is `sr-only` beside the map. The hub
+  ripple is refused (D96); the dot reveal is a one-shot on selection.
+- **DialogShell** — centred modal chrome: `fixed inset-0` with a `bg-scrim/80 backdrop-blur-sm`
+  scrim, a labelled `role="dialog"` `aria-modal` panel, focus trap, Escape closes, click-scrim
+  closes, focus restores. Slots: `children`, typically `DialogHead` / `DialogBody` /
+  `DialogFoot` (close control, labelled heading, scrolling body, foot actions). Closed
+  (`open={false}`) renders nothing. `DrawerShell` is the side-docked sibling sharing the
+  same trap. Overlay depth (`inert` on all but the topmost) is a later lane.
+- **GuardBar** — the inline confirm strip (D89): a warning-tinted panel that replaces a
+  footer's button row in place. Slots: `title`, optional `detail`, `actions` (any number, any
+  `Button` variant — not a fixed confirm/cancel pair). `busy` holds the actions still and
+  sets `aria-busy`. It is a `role="group"` `aria-labelledby` region inside a footer, not a
+  dialog — no overlay, no scrim, no focus trap, no Escape; the surface around it already
+  owns modality.
 
 ### Shell (`src/components/shell`)
 

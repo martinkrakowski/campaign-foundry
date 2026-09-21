@@ -46,7 +46,7 @@ describe("PreviewCard", () => {
     // 44px preview tile inverts
     const tile = selected.querySelector("span[aria-hidden='true'].size-11");
     expect(tile?.className).toContain("bg-brand-primary");
-    expect(tile?.className).toContain("text-white");
+    expect(tile?.className).toContain("text-brand-on-primary");
 
     // 22px check badge with check-pop
     const checkBadge = selected.querySelector("span[aria-hidden='true'].size-\\[22px\\]");

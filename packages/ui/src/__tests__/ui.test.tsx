@@ -11,6 +11,7 @@ describe("Button", () => {
     const b = screen.getByRole("button");
     expect(b.textContent).toContain("Go");
     expect(b.className).toContain("bg-brand-primary");
+    expect(b.className).toContain("text-brand-on-primary");
     expect(b.className).toContain("h-10"); // md
   });
 

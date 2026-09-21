@@ -47,7 +47,7 @@ export function BrowseBriefsButton({ onActivate }: { onActivate?: () => void }) 
           // only on consent, and Create itself then navigates with a plain push.
           guardedAction(openCreateDialog);
         }}
-        className="flex w-full items-center justify-center gap-2 rounded-lg bg-brand-primary px-3 py-2 text-[12px] font-medium text-white transition-colors hover:bg-brand-primary-hover"
+        className="flex w-full items-center justify-center gap-2 rounded-lg bg-brand-primary px-3 py-2 text-[12px] font-medium text-brand-on-primary transition-colors hover:bg-brand-primary-hover"
       >
         <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v14m-7-7h14" />
