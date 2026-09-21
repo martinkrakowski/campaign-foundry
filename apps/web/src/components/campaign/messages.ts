@@ -1821,3 +1821,20 @@ export function gridRunningCounted(done: number, total: number): string {
 
 /** The `fill` layer's brand-role control (D131) — a role, never a colour value. */
 export const layerPropRoleLabel = "Brand colour role";
+
+/**
+ * The compliance report's rule names and verdict chips (D136).
+ *
+ * The whole table moved here, not only the layer-order row: the two rule names
+ * sit in one column and the four verdicts in another, and a catalogue holding
+ * half of each is the split that lets them drift apart.
+ */
+export const complianceRuleBrandDensity = "Brand Density + Logo";
+export const complianceRuleLayerOrder = "Layer Order";
+
+export const COMPLIANCE_GATE_LABEL = {
+  pass: "PASS",
+  fail: "FAIL",
+  advisory: "ADVISORY",
+  pending: "PENDING",
+} as const;

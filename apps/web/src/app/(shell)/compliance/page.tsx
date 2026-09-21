@@ -2,6 +2,7 @@
 
 import { assetKey, assetLabel, useRun } from "@/lib/run-context";
 import { Eyebrow, MiniChip } from "@/components/ui";
+import * as messages from "@/components/campaign/messages";
 import type { MiniChipTone } from "@campaignfoundry/ui";
 
 /** Automated compliance report — one row per generated asset. */
@@ -35,7 +36,7 @@ export default function CompliancePage() {
             {!hasRun || assets.length === 0 ? (
               <tr className="opacity-50">
                 <td className="p-4 font-mono">—</td>
-                <td className="p-4">Brand Density + Logo</td>
+                <td className="p-4">{messages.complianceRuleBrandDensity}</td>
                 <td className="p-4 text-text-muted">Awaiting pipeline execution…</td>
                 <td className="p-4">
                   <GateBadge status="pending" />
@@ -45,7 +46,7 @@ export default function CompliancePage() {
               assets.flatMap((asset) => [
                 <tr key={assetKey(asset)}>
                   <td className="p-4 font-mono">{assetLabel(asset)}</td>
-                  <td className="p-4">Brand Density + Logo</td>
+                  <td className="p-4">{messages.complianceRuleBrandDensity}</td>
                   <td className="p-4 text-text-muted">
                     Brand-colour density {(asset.complianceScore * 100).toFixed(1)}%
                     {asset.passedCompliance ? " — at or above threshold" : " — below threshold"};
@@ -66,7 +67,7 @@ export default function CompliancePage() {
                 ...(asset.occlusionAdvisories ?? []).map((advisory, index) => (
                   <tr key={`${assetKey(asset)}::occlusion::${index}`}>
                     <td className="p-4 font-mono">{assetLabel(asset)}</td>
-                    <td className="p-4">Layer Order</td>
+                    <td className="p-4">{messages.complianceRuleLayerOrder}</td>
                     <td className="p-4 text-text-muted">{advisory}</td>
                     <td className="p-4">
                       <GateBadge status="advisory" />
@@ -94,15 +95,8 @@ const GATE_TONES: Record<GateStatus, MiniChipTone> = {
   pending: "neutral",
 };
 
-const GATE_LABELS: Record<GateStatus, string> = {
-  pass: "PASS",
-  fail: "FAIL",
-  advisory: "ADVISORY",
-  pending: "PENDING",
-};
-
 type GateStatus = "pass" | "fail" | "advisory" | "pending";
 
 function GateBadge({ status }: { status: GateStatus }) {
-  return <MiniChip tone={GATE_TONES[status]}>{GATE_LABELS[status]}</MiniChip>;
+  return <MiniChip tone={GATE_TONES[status]}>{messages.COMPLIANCE_GATE_LABEL[status]}</MiniChip>;
 }

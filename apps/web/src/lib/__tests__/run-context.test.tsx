@@ -13,6 +13,7 @@ import {
   assetCanvas,
   assetLabel,
   fetchPersistedRun,
+  normalizeRunResult,
   isStoredBrief,
   type Asset,
 } from "@/lib/run-context";
@@ -2368,5 +2369,34 @@ describe("RunProvider — run progress", () => {
     });
     expect(result.current.progress).toBeNull();
     expect(result.current.assets).toHaveLength(1);
+  });
+});
+
+describe("normalizeRunResult — D136 advisories are persisted JSON", () => {
+  test("a well-formed list survives", () => {
+    const [row] = normalizeRunResult({
+      halted: false,
+      assets: [asset({ occlusionAdvisories: ["Shade mutes the headline."] })],
+    }).assets;
+    expect(row!.occlusionAdvisories).toEqual(["Shade mutes the headline."]);
+  });
+
+  test("a hand-edited report handing back a string drops the key instead of rendering it", () => {
+    // The compliance page maps over this. A string would take the whole page
+    // down at render, which is the class `assetCanvas({})`'s fallback exists
+    // for — repaired here, where the repair lives.
+    const [row] = normalizeRunResult({
+      halted: false,
+      assets: [asset({ occlusionAdvisories: "not a list" as never })],
+    }).assets;
+    expect(row!.occlusionAdvisories).toBeUndefined();
+  });
+
+  test("a list with a non-string member is dropped whole", () => {
+    const [row] = normalizeRunResult({
+      halted: false,
+      assets: [asset({ occlusionAdvisories: ["fine", 7 as never] })],
+    }).assets;
+    expect(row!.occlusionAdvisories).toBeUndefined();
   });
 });

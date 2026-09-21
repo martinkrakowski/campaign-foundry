@@ -210,11 +210,24 @@ export function normalizeRunResult(result: RunResult): RunResult {
   if (!Array.isArray(result.assets)) return result;
   return {
     ...result,
-    assets: result.assets.map((asset) =>
-      asset.descriptor === undefined
-        ? asset
-        : { ...asset, descriptor: normalizeDescriptor(asset.descriptor) },
-    ),
+    assets: result.assets.map((asset) => {
+      const descripted =
+        asset.descriptor === undefined
+          ? asset
+          : { ...asset, descriptor: normalizeDescriptor(asset.descriptor) };
+      // D136's advisories are persisted JSON like everything else here, and
+      // the compliance page maps over them. A hand-edited report handing back
+      // a string would take the whole page down at render — the same class of
+      // input assetCanvas({})'s fallback exists for. Narrowed here, where the
+      // repair lives, rather than guarded at the one site that reads it.
+      const advisories: unknown = descripted.occlusionAdvisories;
+      if (advisories === undefined) return descripted;
+      if (Array.isArray(advisories) && advisories.every((a) => typeof a === "string")) {
+        return descripted;
+      }
+      const { occlusionAdvisories: _dropped, ...rest } = descripted;
+      return rest;
+    }),
   };
 }
 

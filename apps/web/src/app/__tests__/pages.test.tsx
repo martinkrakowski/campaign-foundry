@@ -2,6 +2,7 @@ import { describe, test, expect } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import { renderWithRun, seedPersistedRun, makeAsset } from "@/__tests__/helpers";
 import { nextMock } from "@/__tests__/helpers";
+import * as messages from "@/components/campaign/messages";
 import CompliancePage from "@/app/(shell)/compliance/page";
 import ExportPage from "@/app/(shell)/export/page";
 import RunsPage from "@/app/(shell)/runs/page";
@@ -23,8 +24,8 @@ describe("CompliancePage — occlusion advisories (D136)", () => {
     expect(await screen.findByText(/Shade sits above Static text/)).toBeTruthy();
     // Its own row and its own rule name: the density verdict and the layer
     // finding are different checks with different verdicts, on one surface.
-    expect(screen.getByText("Layer Order")).toBeTruthy();
-    expect(screen.getByText("Brand Density + Logo")).toBeTruthy();
+    expect(screen.getByText(messages.complianceRuleLayerOrder)).toBeTruthy();
+    expect(screen.getByText(messages.complianceRuleBrandDensity)).toBeTruthy();
   });
 
   test("an advisory reads ADVISORY, never FAIL (D135)", async () => {
@@ -36,12 +37,12 @@ describe("CompliancePage — occlusion advisories (D136)", () => {
       }),
     ]);
     renderWithRun(<CompliancePage />);
-    expect(await screen.findByText("ADVISORY")).toBeTruthy();
+    expect(await screen.findByText(messages.COMPLIANCE_GATE_LABEL.advisory)).toBeTruthy();
     // D135: a reorder that hides or mutes a layer warns and never refuses.
     // The density row beside it is still a PASS, so the advisory cannot be
     // read as a gate the operator has to clear.
-    expect(screen.getByText("PASS")).toBeTruthy();
-    expect(screen.queryByText("FAIL")).toBeNull();
+    expect(screen.getByText(messages.COMPLIANCE_GATE_LABEL.pass)).toBeTruthy();
+    expect(screen.queryByText(messages.COMPLIANCE_GATE_LABEL.fail)).toBeNull();
   });
 
   test("two advisories on one asset are two rows", async () => {
@@ -49,15 +50,15 @@ describe("CompliancePage — occlusion advisories (D136)", () => {
     renderWithRun(<CompliancePage />);
     expect(await screen.findByText("First finding.")).toBeTruthy();
     expect(screen.getByText("Second finding.")).toBeTruthy();
-    expect(screen.getAllByText("ADVISORY")).toHaveLength(2);
+    expect(screen.getAllByText(messages.COMPLIANCE_GATE_LABEL.advisory)).toHaveLength(2);
   });
 
   test("an asset with no advisory adds no row", async () => {
     seedPersistedRun([makeAsset()]);
     renderWithRun(<CompliancePage />);
-    expect(await screen.findByText("Brand Density + Logo")).toBeTruthy();
-    expect(screen.queryByText("Layer Order")).toBeNull();
-    expect(screen.queryByText("ADVISORY")).toBeNull();
+    expect(await screen.findByText(messages.complianceRuleBrandDensity)).toBeTruthy();
+    expect(screen.queryByText(messages.complianceRuleLayerOrder)).toBeNull();
+    expect(screen.queryByText(messages.COMPLIANCE_GATE_LABEL.advisory)).toBeNull();
   });
 });
 
@@ -95,7 +96,7 @@ describe("CompliancePage", () => {
     ]);
     renderWithRun(<CompliancePage />);
     await waitFor(() => expect(screen.getAllByText(/Brand-colour density/)).toHaveLength(2));
-    expect(screen.getByText("PASS")).toBeTruthy();
+    expect(screen.getByText(messages.COMPLIANCE_GATE_LABEL.pass)).toBeTruthy();
     expect(screen.getByText("FAIL")).toBeTruthy();
   });
 

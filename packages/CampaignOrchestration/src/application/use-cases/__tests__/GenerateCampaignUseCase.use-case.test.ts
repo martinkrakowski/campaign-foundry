@@ -2693,7 +2693,12 @@ describe("GenerateCampaignUseCase — occlusion advisories reach the report (D13
     const result = await new GenerateCampaignUseCase(deps()).execute(
       buriedHeadline({ products: [product("alpha")] }),
     );
+    // Asserted BEFORE the narrowing: with only `if (!result.success) return`
+    // a regression to a failure result skips every expect below and the test
+    // passes having checked nothing.
+    expect(result.success).toBe(true);
     if (!result.success) return;
+    expect(result.value.assets.length).toBeGreaterThan(0);
     for (const asset of result.value.assets) {
       expect(asset.passedCompliance).toBe(true);
     }
@@ -2703,7 +2708,9 @@ describe("GenerateCampaignUseCase — occlusion advisories reach the report (D13
     const result = await new GenerateCampaignUseCase(deps()).execute(
       baseBrief({ products: [product("alpha")] }),
     );
+    expect(result.success).toBe(true);
     if (!result.success) return;
+    expect(result.value.assets.length).toBeGreaterThan(0);
     for (const asset of result.value.assets) {
       expect("occlusionAdvisories" in asset).toBe(false);
     }
@@ -2725,5 +2732,25 @@ describe("GenerateCampaignUseCase — occlusion advisories reach the report (D13
     for (const asset of result.value.assets) {
       expect(asset.occlusionAdvisories).toHaveLength(1);
     }
+  });
+});
+
+describe("GenerateCampaignUseCase — the creative-type gate (D136's baseline lookup)", () => {
+  test("a creative type outside the vocabulary is a Result, never a TypeError", async () => {
+    // `validateBrief` is the use case's contract for a caller that bypassed
+    // parsing — the same defence `brief.id` gets. D136 reads
+    // `CANONICAL_TEMPLATES[creativeType]` for its occlusion baseline, and
+    // before this gate an invalid type reached that lookup as `undefined` and
+    // threw deep in the run instead of coming back as an error the caller can
+    // read.
+    const brief = baseBrief();
+    const result = await new GenerateCampaignUseCase(deps()).execute({
+      ...brief,
+      template: { ...brief.template, creativeType: "collage" as never },
+    });
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.message).toContain("collage");
+    expect(result.error.message).toContain("image-text");
   });
 });

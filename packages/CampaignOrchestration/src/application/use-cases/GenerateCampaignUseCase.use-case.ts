@@ -5,6 +5,7 @@ import type { Product } from "../../domain/entities/Product.js";
 import { variantTreatmentId, type Variant } from "../../domain/entities/Variant.js";
 import { groundFrameOf } from "../../domain/value-objects/creative-geometry.js";
 import {
+  CREATIVE_TYPES,
   findIntroducedOcclusions,
   formatOcclusionReason,
 } from "../../domain/value-objects/creative-types.js";
@@ -1208,6 +1209,19 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     // vocabulary allowlist stays the single source of truth, and escaping
     // would hide an invalid value rather than refuse it. Only the message
     // shape is local to this use case, mirroring the destination check below.
+    // D136 reads `CANONICAL_TEMPLATES[creativeType]` for the occlusion
+    // baseline, and this method is the use case's own contract for a caller
+    // that bypassed parsing (the SAFE_ID defense-in-depth reasoning above). A
+    // creative type outside the vocabulary reached that lookup as `undefined`
+    // and threw a TypeError deep in the run instead of returning a Result the
+    // caller can read.
+    if (!(CREATIVE_TYPES as readonly string[]).includes(brief.template.creativeType)) {
+      return err(
+        new Error(
+          `Campaign brief template names creative type "${brief.template.creativeType}", which is not one of ${CREATIVE_TYPES.join(", ")}.`,
+        ),
+      );
+    }
     for (const [i, layer] of brief.template.layers.entries()) {
       const elementsProblem = layerElementsProblem(layer.kind, layer.elements);
       if (elementsProblem !== undefined) {
