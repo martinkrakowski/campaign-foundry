@@ -268,6 +268,58 @@ export function checkPairOcclusion(above: LayerKind, below: LayerKind): Complian
   };
 }
 
+/**
+ * The occluding pairs a template INTRODUCES over its baseline (D136's
+ * aggregation half).
+ *
+ * **Not an absolute scan, and the canonical stack is why.** `image-text` is
+ * `[image, shade, accent, static-text, logo]`, and `logo` obscures
+ * `static-text` by the table — so every default creative ever rendered would
+ * carry an advisory, on a pair the renderer actively resolves (`drawLogo`
+ * snaps the logo to an inset edge when the headline box overlaps it). A finding
+ * that fires on the composition every campaign uses is noise, and it would move
+ * the report bytes of every brief that never touched its layers.
+ *
+ * So the baseline is the canonical template for the creative type, and the
+ * question is the one the editor already asks — what does THIS arrangement do
+ * that the shipped one does not. `findOcclusionDelta` asks it about a single
+ * move and returns the first answer; this asks it about a whole template and
+ * returns all of them, for a surface that lists rather than interrupts.
+ *
+ * Both read `checkPairOcclusion`, so the two cannot disagree about what counts
+ * as an occlusion — only about which ones are worth saying.
+ *
+ * Disabled layers are skipped on both sides: D129 makes a disabled layer render
+ * exactly as an absent one, so it buries nothing and is buried by nothing.
+ */
+export function findIntroducedOcclusions(
+  baseline: readonly { readonly kind: LayerKind; readonly enabled?: boolean }[],
+  layers: readonly { readonly kind: LayerKind; readonly enabled?: boolean }[],
+): readonly OcclusionFinding[] {
+  const pairsOf = (
+    stack: readonly { readonly kind: LayerKind; readonly enabled?: boolean }[],
+  ): OcclusionFinding[] => {
+    const drawn = stack.filter((layer) => layer.enabled !== false);
+    const found: OcclusionFinding[] = [];
+    for (let j = drawn.length - 1; j >= 1; j--) {
+      const above = drawn[j]!;
+      for (let i = j - 1; i >= 0; i--) {
+        const below = drawn[i]!;
+        if (checkPairOcclusion(above.kind, below.kind).severity === "advisory") {
+          found.push({
+            above: above.kind,
+            below: below.kind,
+            behavior: OCCLUSION_TABLE[above.kind]!.behavior,
+          });
+        }
+      }
+    }
+    return found;
+  };
+  const baselinePairs = new Set(pairsOf(baseline).map((f) => `${f.above}->${f.below}`));
+  return pairsOf(layers).filter((f) => !baselinePairs.has(`${f.above}->${f.below}`));
+}
+
 export interface OcclusionFinding {
   readonly above: LayerKind;
   readonly below: LayerKind;

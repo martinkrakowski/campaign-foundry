@@ -2,6 +2,8 @@
 
 import { assetKey, assetLabel, useRun } from "@/lib/run-context";
 import { Eyebrow, MiniChip } from "@/components/ui";
+import * as messages from "@/components/campaign/messages";
+import type { MiniChipTone } from "@campaignfoundry/ui";
 
 /** Automated compliance report — one row per generated asset. */
 export default function CompliancePage() {
@@ -34,17 +36,17 @@ export default function CompliancePage() {
             {!hasRun || assets.length === 0 ? (
               <tr className="opacity-50">
                 <td className="p-4 font-mono">—</td>
-                <td className="p-4">Brand Density + Logo</td>
+                <td className="p-4">{messages.complianceRuleBrandDensity}</td>
                 <td className="p-4 text-text-muted">Awaiting pipeline execution…</td>
                 <td className="p-4">
                   <GateBadge status="pending" />
                 </td>
               </tr>
             ) : (
-              assets.map((asset) => (
+              assets.flatMap((asset) => [
                 <tr key={assetKey(asset)}>
                   <td className="p-4 font-mono">{assetLabel(asset)}</td>
-                  <td className="p-4">Brand Density + Logo</td>
+                  <td className="p-4">{messages.complianceRuleBrandDensity}</td>
                   <td className="p-4 text-text-muted">
                     Brand-colour density {(asset.complianceScore * 100).toFixed(1)}%
                     {asset.passedCompliance ? " — at or above threshold" : " — below threshold"};
@@ -55,8 +57,24 @@ export default function CompliancePage() {
                       status={asset.passedCompliance && asset.logoApplied ? "pass" : "fail"}
                     />
                   </td>
-                </tr>
-              ))
+                </tr>,
+                // D136: the layer-order finding is a third member of this
+                // family, on this surface rather than a parallel one — a
+                // product with two places that answer "is this creative sound?"
+                // is the two-sources-of-truth defect the arc exists to remove.
+                // Its own row, because it is a different check with a different
+                // verdict: an advisory never turns the density gate red.
+                ...(asset.occlusionAdvisories ?? []).map((advisory, index) => (
+                  <tr key={`${assetKey(asset)}::occlusion::${index}`}>
+                    <td className="p-4 font-mono">{assetLabel(asset)}</td>
+                    <td className="p-4">{messages.complianceRuleLayerOrder}</td>
+                    <td className="p-4 text-text-muted">{advisory}</td>
+                    <td className="p-4">
+                      <GateBadge status="advisory" />
+                    </td>
+                  </tr>
+                )),
+              ])
             )}
           </tbody>
         </table>
@@ -65,8 +83,20 @@ export default function CompliancePage() {
   );
 }
 
-function GateBadge({ status }: { status: "pass" | "fail" | "pending" }) {
-  const tone = status === "pass" ? "success" : status === "fail" ? "error" : "neutral";
-  const label = status === "pass" ? "PASS" : status === "fail" ? "FAIL" : "PENDING";
-  return <MiniChip tone={tone}>{label}</MiniChip>;
+/**
+ * The verdict chip. `advisory` (D136) is deliberately NOT a fail: D135 says a
+ * reorder that hides or mutes a layer warns and never refuses, so a
+ * layer-order finding must never read as a gate the operator has to clear.
+ */
+const GATE_TONES: Record<GateStatus, MiniChipTone> = {
+  pass: "success",
+  fail: "error",
+  advisory: "warning",
+  pending: "neutral",
+};
+
+type GateStatus = "pass" | "fail" | "advisory" | "pending";
+
+function GateBadge({ status }: { status: GateStatus }) {
+  return <MiniChip tone={GATE_TONES[status]}>{messages.COMPLIANCE_GATE_LABEL[status]}</MiniChip>;
 }

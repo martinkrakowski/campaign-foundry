@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "RW-23",
+  "mutations": [
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/creative-types.ts",
+      "before": "  const baselinePairs = new Set(pairsOf(baseline).map((f) => `${f.above}->${f.below}`));\n  return pairsOf(layers).filter((f) => !baselinePairs.has(`${f.above}->${f.below}`));",
+      "after": "  return pairsOf(layers);",
+      "because": "The absolute scan, which is what this function looked like in its first cut and what a reader reaches for: 'every occluding pair the stack contains'. It is wrong on exactly the template every campaign uses. `image-text` is [image, shade, accent, static-text, logo] and `logo` obscures `static-text` by the table, so the mutant reports an advisory on every default creative ever rendered — on a pair `drawLogo` actively resolves by snapping to an inset edge — and writes an `occlusionAdvisories` key onto every asset, moving the report bytes of every brief that never touched its layers. Caught by the canonical-introduces-nothing property, which is the whole reason the baseline is a parameter.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/creative-types.test.ts",
+        "-t",
+        "the canonical stack introduces nothing over itself"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
