@@ -100,4 +100,12 @@ describe("canonical creative templates (D123, D128)", () => {
     const kinds = CANONICAL_TEMPLATES["image-text"].layers.map((l) => l.kind);
     expect(kinds).toEqual(["image", "shade", "accent", "static-text", "logo"]);
   });
+
+  test("canonical templates do not carry a frame key (D130)", () => {
+    for (const template of Object.values(CANONICAL_TEMPLATES)) {
+      for (const layer of template.layers) {
+        expect(layer).not.toHaveProperty("frame");
+      }
+    }
+  });
 });

@@ -35,9 +35,9 @@
     },
     {
       "file": "packages/shared/src/infrastructure/brief-yaml.ts",
-      "before": "const LAYER_KEY_ORDER = [\"id\", \"kind\", \"enabled\", \"props\", \"elements\", \"tracks\"] as const;",
-      "after": "const LAYER_KEY_ORDER = [\"id\", \"kind\", \"enabled\", \"props\", \"elements\"] as const;",
-      "because": "orderedKeys appends unnamed keys at the end, so dropping tracks from LAYER_KEY_ORDER does not make it disappear — it falls into the same tail bucket as any other unrecognised key, which a plain 'tracks appears in the output' assertion cannot tell apart from tracks sitting at its declared sixth position. Only a fixture with an unnamed key written before tracks in source order proves the position.",
+      "before": "const LAYER_KEY_ORDER = [\"id\", \"kind\", \"enabled\", \"frame\", \"props\", \"elements\", \"tracks\"] as const;",
+      "after": "const LAYER_KEY_ORDER = [\"id\", \"kind\", \"enabled\", \"frame\", \"props\", \"elements\"] as const;",
+      "because": "orderedKeys appends unnamed keys at the end, so dropping tracks from LAYER_KEY_ORDER does not make it disappear — it falls into the same tail bucket as any other unrecognised key, which a plain 'tracks appears in the output' assertion cannot tell apart from tracks sitting at its declared position. Only a fixture with an unnamed key written before tracks in source order proves the position. (Re-anchored by ANCHORS: L10a inserted `frame` into LAYER_KEY_ORDER; The semantic edit is the same one; the after-text is that edit re-expressed against the current shape, not a new claim.)",
       "command": [
         "yarn",
         "vitest",

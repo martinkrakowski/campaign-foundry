@@ -29,6 +29,7 @@ import {
   clickDestinationProblem,
   layerElementsProblem,
   layerEnabledProblem,
+  layerFrameProblem,
   layerPropsProblem,
   layerTracksProblem,
   outputFamilyProblem,
@@ -288,6 +289,19 @@ export function validateTemplate(value: unknown, type?: CampaignType): BriefTemp
     }
     if (layer.enabled !== false) {
       enabledKinds.add(layer.kind);
+    }
+
+    // D130 — a layer's own frame, when present, must be a canvas-relative box
+    // of [0, 1] fractions, a vocabulary anchor, and an optional byFamily whose
+    // keys are real ratios and sizes. Structural, never lenient (the
+    // `validateSizes` convention): the decision is the domain's
+    // `layerFrameProblem`, shared with `isBriefTemplate` so the two
+    // boundaries cannot drift — only the message shape is local.
+    const frameProblem = layerFrameProblem(layer.frame);
+    if (frameProblem !== undefined) {
+      throw new Error(
+        `Campaign brief field "template.layers[${i}].frame${frameProblem.path}" must ${frameProblem.must}; got ${JSON.stringify(frameProblem.value)}.`,
+      );
     }
 
     // D134 — a layer's own props, when present, must be its kind's. Structural,
