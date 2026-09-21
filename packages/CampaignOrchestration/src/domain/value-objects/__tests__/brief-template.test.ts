@@ -261,6 +261,22 @@ describe("isBriefTemplate (L3a)", () => {
     };
     expect(isBriefTemplate(shadeBelowImage)).toBe(false);
   });
+
+  test("an order constraint whose kind is absent is unviolated, and an optional maxOf kind may be omitted (D128)", () => {
+    const canonical = templateFromCanonical("social-post");
+    const withoutLogo = {
+      ...canonical,
+      layers: canonical.layers.filter((layer) => layer.kind !== "logo"),
+    };
+    expect(
+      satisfiesOrderConstraints(withoutLogo.creativeType, withoutLogo.layers, {
+        kind: "logo",
+        relation: "above",
+        target: "image",
+      }),
+    ).toBe(true);
+    expect(isBriefTemplate(withoutLogo)).toBe(true);
+  });
 });
 
 describe("isBriefTemplate layer props (L3b, D134)", () => {
@@ -289,6 +305,7 @@ describe("isBriefTemplate layer props (L3b, D134)", () => {
   test("a template whose layers carry no props parses exactly as before", () => {
     expect(isBriefTemplate(templateFromCanonical("social-post"))).toBe(true);
     expect(withLayer({ id: "image", kind: "image" })).toBe(true);
+    expect(layerPropsProblem("image", undefined)).toBeUndefined();
   });
 
   test("refuses a layers entry that is not a layer (L5)", () => {
@@ -1073,6 +1090,19 @@ describe("layerFrameProblem and isBriefTemplate layer frame (D130)", () => {
         frame: { ...frame, byFamily: { size: { "300x250": { h: 0.25 } } } },
       }),
     ).toBe(true);
+    expect(
+      layerFrameProblem({
+        ...frame,
+        byFamily: { size: { "300x250": { anchor: "middle" } } },
+      }),
+    ).toBeUndefined();
+    expect(
+      withLayer({
+        id: "image",
+        kind: "image",
+        frame: { ...frame, byFamily: { size: { "300x250": { anchor: "bottom" } } } },
+      }),
+    ).toBe(true);
   });
 
   test("empty byFamily and empty overlays are legal", () => {
@@ -1225,18 +1255,28 @@ describe("layerFrameProblem and isBriefTemplate layer frame (D130)", () => {
   });
 
   test("refuses an overlay fraction outside [0, 1] or a bad overlay anchor", () => {
-    expect(layerFrameProblem({ ...frame, byFamily: { size: { "300x250": { h: 1.4 } } } })).toEqual({
-      path: '.byFamily.size["300x250"].h',
-      must: "be a number in [0, 1]",
-      value: 1.4,
-    });
-    expect(layerFrameProblem({ ...frame, byFamily: { size: { "300x250": { w: -0.1 } } } })).toEqual(
-      {
-        path: '.byFamily.size["300x250"].w',
+    const overlayArms: ReadonlyArray<{ field: "x" | "y" | "w" | "h"; value: unknown }> = [
+      { field: "x", value: true },
+      { field: "w", value: -0.1 },
+      { field: "h", value: 1.4 },
+      { field: "y", value: Number.NaN },
+    ];
+    for (const { field, value } of overlayArms) {
+      expect(
+        layerFrameProblem({ ...frame, byFamily: { size: { "300x250": { [field]: value } } } }),
+      ).toEqual({
+        path: `.byFamily.size["300x250"].${field}`,
         must: "be a number in [0, 1]",
-        value: -0.1,
-      },
-    );
+        value,
+      });
+      expect(
+        withLayer({
+          id: "image",
+          kind: "image",
+          frame: { ...frame, byFamily: { size: { "300x250": { [field]: value } } } },
+        }),
+      ).toBe(false);
+    }
     expect(
       layerFrameProblem({ ...frame, byFamily: { size: { "300x250": { y: "0.2" } } } }),
     ).toEqual({
