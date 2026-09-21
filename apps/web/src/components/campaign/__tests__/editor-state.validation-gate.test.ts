@@ -58,8 +58,14 @@ describe("isValidationFresh (SG-D15 / §8.4)", () => {
     const clean = fromBrief(classicBrief());
     expect(getTotalErrorCount(validateState(clean))).toBe(0);
 
-    // Turn Video on in a CLASSIC draft. `serialisedFormats` strips `motion` on the way
-    // out of a classic brief (D99), so `toBrief` cannot see this edit at all…
+    // Turn Video on in a CLASSIC draft. **PD4: the operator route here is the MODE
+    // FLIP, not the card.** Nobody reaches this state by pressing Video on a classic
+    // draft — the card is not offered there. They build a Randomized draft with Video
+    // on and then flip the mode back to Classic, which leaves `state.formats` carrying
+    // `motion` under a campaign that cannot run it. Stated because a reader who thinks
+    // the card is the route concludes this state is unreachable and deletes the test.
+    // `serialisedFormats` strips `motion` on the way out of a classic brief (D99), so
+    // `toBrief` cannot see this edit at all…
     const broken = editorReducer(clean, { type: "toggleFormat", value: "motion" });
     expect(valuesEqual(toBrief(clean), toBrief(broken))).toBe(true);
 

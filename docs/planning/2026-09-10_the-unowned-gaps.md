@@ -4,7 +4,7 @@
 > lane prefix moved from `U` to `X`, because `U1`–`U8` are the directives in
 > `2026-08-28_graphical-brief-editor.md`.
 
-**Date:** 2026-09-10 · **Status:** **SHIPPED — stamped 2026-09-20. This line previously read "Nothing dispatched" above roughly thirty-five merged lanes**, the largest status mismatch in this repository and the reason the 2026-09-20 sweep happened at all. On `main`: X1–X5, X7–X36 and X38, including X2 (#370), X3 (#335), X4 (#327, #333), X5 (#334), X6 (#331), X9 (#374), X11 (#380), X12 (#388), X13 (#389), X14 (#424), X15 (#398), X16 (#403), X17 (#406), X18 (#408), X19 (#409), X20 (#410), X21 (#413), X22 (#414), X23 (#417), X24 (#415), X25 (#416), X26 (#418), X27 (#426), X30 (#434), X31 (#437), X32 (#436), X34 (#439, #441), X35 (#438), X36 (#442). X7 was retired. **Open:** §42's fix sketch — a pre-dispatch id-collision grep for the orchestration skill — which that section itself calls "bookkeeping, no lane".
+**Date:** 2026-09-10 · **Status:** **SHIPPED — stamped 2026-09-20. This line previously read "Nothing dispatched" above roughly thirty-five merged lanes**, the largest status mismatch in this repository and the reason the 2026-09-20 sweep happened at all. On `main`: X1–X5, X7–X36 and X38, including X2 (#370), X3 (#335), X4 (#327, #333), X5 (#334), X6 (#331), X9 (#374), X11 (#380), X12 (#388), X13 (#389), X14 (#424), X15 (#398), X16 (#403), X17 (#406), X18 (#408), X19 (#409), X20 (#410), X21 (#413), X22 (#414), X23 (#417), X24 (#415), X25 (#416), X26 (#418), X27 (#426), X30 (#434), X31 (#437), X32 (#436), X34 (#439, #441), X35 (#438), X36 (#442). X7 was retired. §42's fix sketch — a pre-dispatch id-collision grep — **shipped as RW-18** into the orchestration skill. **Nothing in this document is open.**
 **Verified against:** `main` at `f4f4d63`.
 
 Every gap surfaced this session that **no plan owns**. Each carries a recommended default, because a
@@ -1708,7 +1708,7 @@ and adapter that shipped earlier), with the dispatched id noted so the session-l
 under "TL1" remain findable. The session log itself is append-only history and is **not** rewritten:
 it says what happened, and what happened is that the lane ran under the wrong id.
 
-**Fix sketch — not shipped — bookkeeping, no lane.** Before an id is dispatched, check it against
+**Fix — SHIPPED as RW-18.** The check is now the first item in the orchestration skill's pre-dispatch list (`.claude/skills/orchestrate-wave/SKILL.md`), with both recorded collisions named so the rule carries its own evidence. Before an id is dispatched, check it against
 every plan, not only the one being worked: `grep -rn '\*\*<ID>\*\*' docs/planning/` costs one
 command and is the whole check. The orchestration skill's pre-dispatch list is where that belongs,
 beside "red-team each lane brief against the code". Prefixing an id with its plan's arc (`L7a2`,
