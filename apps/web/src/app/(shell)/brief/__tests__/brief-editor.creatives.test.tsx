@@ -889,19 +889,33 @@ describe("(6) deleting a creative", () => {
     // No confirm. The delete is a draft edit like any other: nothing is on disk
     // until Save, and the chord below reverses it exactly.
     expect(screen.queryByRole("dialog")).toBeNull();
-    await waitFor(() => expect(rows()).toHaveLength(1));
+    // The mount already asked for `{tombstoned:[1]}` — the occupancy undo will
+    // restore. Waiting only for the row to vanish lets ⌘Z inside the 250ms plan
+    // debounce cancel the delete POST, and the restored-occupancy assertion
+    // below would pass for that first body. Wait for the delete occupancy first
+    // so the restored occupancy cannot be the mount request.
+    await waitFor(() => {
+      expect(askedFor(calls)).toMatchObject({
+        count: 3,
+        occupancy: { nextIndex: 3, tombstoned: [1, 2] },
+      });
+      expect(rows()).toHaveLength(1);
+    });
+    const plansAfterDelete = planCalls(calls).length;
 
     await user.keyboard("{Meta>}z{/Meta}");
     await waitFor(() => {
       // The SAME creative, at the same slot, with the same draw — which is what
       // makes ⌘Z an undo and a re-add not one. The request says so too: the
-      // tombstone is gone and `count` never moved.
+      // tombstone is gone and `count` never moved. A new plan call, not the
+      // delete body still sitting at `askedFor`.
       expect(rows()).toHaveLength(2);
       expect(row(2).textContent).toContain("Twocreative");
       expect(askedFor(calls)).toMatchObject({
         count: 3,
         occupancy: { nextIndex: 3, tombstoned: [1] },
       });
+      expect(planCalls(calls).length).toBeGreaterThan(plansAfterDelete);
     });
   });
 
