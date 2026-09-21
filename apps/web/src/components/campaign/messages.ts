@@ -1794,3 +1794,27 @@ export const generatePreflight = (f: {
  */
 export const generatePreflightUnknown =
   "The deliverables count for a Randomized brief is in the Estimate panel — this confirm does not repeat it.";
+
+/**
+ * The review grid's empty-state copy, both faces of it (R7).
+ *
+ * The idle sentence moved here with the running one rather than being left
+ * behind: they are one ternary in the page, and splitting a sentence-pair
+ * across two homes is how the two drift apart.
+ */
+const GRID_RUN_WORK = "resolving assets, compositing brand layers, and checking compliance";
+
+export const gridRunIdle =
+  "Execute the pipeline below to resolve missing assets, composite brand layers, and run brand-compliance checks.";
+
+/** Said while a run is in flight and the cell count is not known yet. */
+export const gridRunningUncounted = `Running the pipeline — ${GRID_RUN_WORK}…`;
+
+/**
+ * Said once the run has planned its cells. Absent counts keep
+ * {@link gridRunningUncounted}: "0 of 0 creatives done" is the same non-answer
+ * the counter exists to replace.
+ */
+export function gridRunningCounted(done: number, total: number): string {
+  return `Running the pipeline — ${done} of ${total} creatives done, ${GRID_RUN_WORK}…`;
+}

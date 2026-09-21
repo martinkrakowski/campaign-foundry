@@ -231,13 +231,23 @@ export async function fetchPersistedRun(campaignId: string): Promise<RunResult |
 
 type PollOutcome = { kind: "completed"; result: RunResult } | { kind: "lost" };
 
+/** How far the running job has got, as its last well-formed snapshot reported it. */
+export interface RunProgress {
+  readonly done: number;
+  readonly total: number;
+}
+
 /**
  * Poll a job until it settles. A 404 means the in-memory job is gone (API restart or
  * TTL) — reported as `lost` so the caller decides what to show; it is never a result.
  * Transient poll failures (proxy blips, non-JSON pages) are retried up to
  * JOB_POLL_MAX_TRANSIENT times with backoff, because the server job keeps running.
  */
-async function pollJob(jobId: string, signal: AbortSignal): Promise<PollOutcome> {
+async function pollJob(
+  jobId: string,
+  signal: AbortSignal,
+  onProgress: (progress: RunProgress) => void,
+): Promise<PollOutcome> {
   let delay = JOB_POLL_MS;
   let transient = 0;
   for (;;) {
@@ -262,6 +272,13 @@ async function pollJob(jobId: string, signal: AbortSignal): Promise<PollOutcome>
       }
     } else {
       transient = 0; // a well-formed "running" snapshot
+      // Counts the server has not resolved yet arrive as numbers all the same,
+      // so there is nothing to guard: `total` is 0 only until the run has
+      // planned its cells, and 0/0 renders as the same "starting" state the
+      // absent case does.
+      if (typeof data.done === "number" && typeof data.total === "number") {
+        onProgress({ done: data.done, total: data.total });
+      }
     }
     await wait(delay, signal);
     delay = Math.min(delay * JOB_POLL_BACKOFF, JOB_POLL_MAX_MS);
@@ -407,6 +424,12 @@ interface RunContextValue {
   halted: boolean;
   log: LogEntry[];
   loading: boolean;
+  /**
+   * How far the in-flight run has got, or null when nothing is running and
+   * before its first well-formed snapshot. `total` is 0 until the server has
+   * planned the run's cells.
+   */
+  progress: RunProgress | null;
   error: string | null;
   hasRun: boolean;
   decisions: Record<string, Decision>;
@@ -522,6 +545,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
   const [run, setRun] = useState<CommittedRun | null>(null);
   const [decisions, setDecisions] = useState<Record<string, Decision>>({});
   const [loading, setLoading] = useState(false);
+  const [progress, setProgress] = useState<RunProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [assetVersion, setAssetVersion] = useState(0);
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
@@ -631,6 +655,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
       packageAbort.current?.abort();
       packageAbort.current = null;
       setLoading(false);
+      setProgress(null);
       setRegeneratingKeys(null);
       // (2)/(3) Clear, then adopt this brief's own persisted run if one exists. The API
       // keys reports by campaign id, so we ask for exactly this brief's report — every
@@ -800,13 +825,14 @@ export function RunProvider({ children }: { children: ReactNode }) {
       // polled), so exactly one run is ever adopted and one result committed.
       let owned = runSeq.current;
       setLoading(true);
+      setProgress(null);
       setError(null);
       try {
         const jobId = await postGenerate(target);
         if (runSeq.current !== owned) return; // a brief switch (or newer run) superseded this press
         const started = beginRun();
         owned = started.seq;
-        const outcome = await pollJob(jobId, started.signal);
+        const outcome = await pollJob(jobId, started.signal, setProgress);
         if (runSeq.current !== owned) return; // a brief switch (or newer run) superseded this
         if (outcome.kind === "lost") {
           // The job vanished mid-run. Whatever is on disk is the *previous* run, so show
@@ -831,7 +857,10 @@ export function RunProvider({ children }: { children: ReactNode }) {
         if (runSeq.current !== owned) return;
         setError(e instanceof Error ? e.message : "Generation failed");
       } finally {
-        if (runSeq.current === owned) setLoading(false);
+        if (runSeq.current === owned) {
+          setLoading(false);
+          setProgress(null);
+        }
       }
     },
     [brief, postGenerate],
@@ -891,13 +920,14 @@ export function RunProvider({ children }: { children: ReactNode }) {
     let owned = runSeq.current;
     setRegeneratingKeys(targetKeys);
     setLoading(true);
+    setProgress(null);
     setError(null);
     try {
       const jobId = await postGenerate({ brief: target, regenerateOnly: targets });
       if (runSeq.current !== owned) return; // a brief switch (or newer run) superseded this press
       const started = beginRun();
       owned = started.seq;
-      const outcome = await pollJob(jobId, started.signal);
+      const outcome = await pollJob(jobId, started.signal, setProgress);
       if (runSeq.current !== owned) return; // a brief switch (or newer run) superseded this
       if (outcome.kind === "lost") {
         // Nothing was regenerated that we can see: leave the grid and the rejected
@@ -941,6 +971,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
     } finally {
       if (runSeq.current === owned) {
         setLoading(false);
+        setProgress(null);
         setRegeneratingKeys(null);
       }
     }
@@ -1029,6 +1060,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
       halted: run?.result.halted ?? false,
       log: run?.result.log?.entries ?? EMPTY_LOG,
       loading,
+      progress,
       error,
       hasRun: run !== null,
       decisions,
@@ -1066,6 +1098,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
       briefApplied,
       run,
       loading,
+      progress,
       error,
       decisions,
       decide,

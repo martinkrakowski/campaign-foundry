@@ -54,6 +54,17 @@ export interface CampaignExecutionOptions {
    * the eviction fix unsafe on its own (D73).
    */
   readonly signal?: AbortSignal;
+  /**
+   * Where per-cell progress goes, so a driving adapter can report a run's real
+   * `done`/`total` while it is still running rather than `0/0` until the end.
+   *
+   * Called once with `(0, total)` the moment the run knows how many cells it
+   * will render, then once per settled cell. Cells render concurrently, so
+   * `done` is a count in completion order, never an index. Absent — the CLI,
+   * and any caller with no job behind it — skips every call and renders
+   * identically.
+   */
+  readonly onProgress?: (done: number, total: number) => void;
 }
 
 /**

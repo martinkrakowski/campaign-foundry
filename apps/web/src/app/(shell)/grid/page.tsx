@@ -1,9 +1,18 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { API, assetCanvas, assetKey, assetLabel, useRun, type Asset } from "@/lib/run-context";
+import {
+  API,
+  assetCanvas,
+  assetKey,
+  assetLabel,
+  useRun,
+  type Asset,
+  type RunProgress,
+} from "@/lib/run-context";
 import { ASPECT_RATIOS } from "@/lib/aspect-ratios";
 import { cn } from "@/lib/cn";
+import * as messages from "@/components/campaign/messages";
 import { descriptorBeats, descriptorHeadline } from "@/components/campaign/messages";
 import { EmptyNote, MiniChip } from "@/components/ui";
 import { campaignTypeOf, typeDisplayName } from "@/components/campaign/display-names";
@@ -79,8 +88,21 @@ const effective = (value: string, options: string[]): string =>
   options.includes(value) ? value : "";
 
 /** Review grid — the HITL surface where a human approves or rejects creatives. */
+/**
+ * What the empty grid says while a run is in flight. The cell count arrives on
+ * the job snapshot a beat after the run starts — and `total` is 0 until the
+ * server has planned the cells — so the countless phrasing is the opening
+ * state of every run, not a fallback for a shape that cannot happen.
+ */
+function runningMessage(progress: RunProgress | null): string {
+  return progress === null || progress.total === 0
+    ? messages.gridRunningUncounted
+    : messages.gridRunningCounted(progress.done, progress.total);
+}
+
 export default function GridPage() {
-  const { brief, assets, decisions, decide, loading, assetVersion, regeneratingKeys } = useRun();
+  const { brief, assets, decisions, decide, loading, progress, assetVersion, regeneratingKeys } =
+    useRun();
   const [previewKey, setPreviewKey] = useState<string | null>(null);
   // Filters and the page belong to one brief + run: a brief switch or a new run
   // (assetVersion bump) drops them back to defaults instead of hiding the new
@@ -193,11 +215,7 @@ export default function GridPage() {
       <EmptyNote
         className="h-full"
         title="Start orchestrating assets"
-        message={
-          loading
-            ? "Running the pipeline — resolving assets, compositing brand layers, and checking compliance…"
-            : "Execute the pipeline below to resolve missing assets, composite brand layers, and run brand-compliance checks."
-        }
+        message={loading ? runningMessage(progress) : messages.gridRunIdle}
       />
     );
   }

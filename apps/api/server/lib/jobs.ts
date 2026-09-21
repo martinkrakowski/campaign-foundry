@@ -37,6 +37,14 @@ export async function hasRunningJob(campaignId: string): Promise<boolean> {
   return getJobStore().hasRunningJob(campaignId);
 }
 
+/**
+ * Record how far a running job has got. Advisory — a settled job keeps the
+ * counts its settlement wrote (see `JobStorePort.progressJob`).
+ */
+export async function progressJob(id: string, done: number, total: number): Promise<void> {
+  return getJobStore().progressJob(id, done, total);
+}
+
 export async function completeJob(id: string, payload: JobResult): Promise<void> {
   return getJobStore().completeJob(id, payload);
 }

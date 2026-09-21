@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "RW-2",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/ports/fs-job-store.ts",
+      "before": "      if (entry.job.status !== \"running\") return;",
+      "after": "      // if (entry.job.status !== \"running\") return;",
+      "because": "Progress is advisory and must never un-settle a job. runJob's deadline fails a run while the work it cannot kill keeps rendering cells, so a tick arrives after failJob has written the verdict; without this guard that tick rewrites the entry as running and the poller waits forever on a run that is never coming back.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/jobs.test.ts",
+        "-t",
+        "progressJob does not resurrect a failed job"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

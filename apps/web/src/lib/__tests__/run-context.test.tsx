@@ -2323,3 +2323,50 @@ describe("RunProvider — a second Generate does not lose the campaign (C4)", ()
     expect(screen.queryByText(/already in progress/)).toBeNull();
   });
 });
+
+describe("RunProvider — run progress", () => {
+  test("a running snapshot's counts reach the context, and clear when the run settles", async () => {
+    let polls = 0;
+    mockPipelineApi({
+      job: () => {
+        polls += 1;
+        // The first snapshot is mid-run; the poller keeps going until a settled
+        // one arrives, so this is the shape a real run spends its life in.
+        if (polls === 1) return json({ status: "running", done: 2, total: 5, log: null });
+        return jobOk({ halted: false, assets: [asset()], log: { entries: [] } });
+      },
+    });
+    const { result } = setup();
+    let exec!: Promise<void>;
+    act(() => {
+      exec = result.current.execute();
+    });
+    await waitFor(() => expect(result.current.progress).toEqual({ done: 2, total: 5 }));
+    await act(async () => {
+      await exec;
+    });
+    // Progress belongs to a run in flight; a finished run shows its assets.
+    expect(result.current.progress).toBeNull();
+    expect(result.current.assets).toHaveLength(1);
+  });
+
+  test("a running snapshot with no counts leaves progress alone", async () => {
+    let polls = 0;
+    mockPipelineApi({
+      job: () => {
+        polls += 1;
+        // A proxy or an older API can answer 200 without the counters; the
+        // poller treats it as a running snapshot and shows nothing rather than
+        // inventing a number.
+        if (polls === 1) return json({ status: "running" });
+        return jobOk({ halted: false, assets: [asset()], log: { entries: [] } });
+      },
+    });
+    const { result } = setup();
+    await act(async () => {
+      await result.current.execute();
+    });
+    expect(result.current.progress).toBeNull();
+    expect(result.current.assets).toHaveLength(1);
+  });
+});

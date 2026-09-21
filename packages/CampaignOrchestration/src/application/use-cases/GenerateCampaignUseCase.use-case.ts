@@ -285,6 +285,34 @@ export interface GenerateCampaignDeps {
 export class GenerateCampaignUseCase implements CampaignPipelinePort {
   constructor(private readonly deps: GenerateCampaignDeps) {}
 
+  /**
+   * Open a progress report for one run: announce the total immediately, then
+   * return the per-cell tick. Announcing up front is the point — a poller that
+   * learns the total only at the end has nothing to show while it matters,
+   * which is the whole of the `0/0` defect.
+   *
+   * The sink rides on the run options beside `signal`, not on the deps: it is
+   * per-run, and a caller with no job to report into — the CLI — is as
+   * legitimate here as one with no deadline. Absent, every call below is
+   * skipped and the run is byte-identical.
+   *
+   * Cells render concurrently, so `done` counts finished cells; it is never
+   * an index, and it rises in completion order.
+   */
+  private reportProgress(
+    log: PipelineExecutionLog,
+    options: CampaignExecutionOptions | undefined,
+  ): () => void {
+    const onProgress = options?.onProgress;
+    let done = 0;
+    const total = log.totalOperations;
+    onProgress?.(done, total);
+    return () => {
+      done += 1;
+      onProgress?.(done, total);
+    };
+  }
+
   async execute(
     brief: CampaignBrief,
     options?: CampaignExecutionOptions,
@@ -359,6 +387,7 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
         ),
       0,
     );
+    const tick = this.reportProgress(log, options);
     // LocalizedMessageFallback — the use case resolves the copy; adapters never do.
     const copy = brief.localizedMessage ?? brief.campaignMessage;
     // Campaign context handed to the image generator for personalized (GenAI) backgrounds.
@@ -534,6 +563,7 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
                 }
               : {}),
           });
+          tick();
           log.record(
             "CompositeVariations",
             `${product.id} @ ${canvas} [${treatment.id}] — brand density ${(visual.score ?? 0).toFixed(3)}${visual.passed ? "" : " (below threshold)"}, logo ${composite.logoApplied ? "present" : "missing"}`,
@@ -658,6 +688,7 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
       return ok({ assets: [], log, halted: true });
 
     log.totalOperations = variants.length;
+    const tick = this.reportProgress(log, options);
     log.record(
       "PlanVariations",
       `policy ${plan.policyHash} seed ${plan.seed} — ${variants.length} variants`,
@@ -728,27 +759,33 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     if (!audioResolved.success) return audioResolved;
     const audio = audioResolved.value;
 
-    const cellResults = await mapWithConcurrency(cells, MAX_CONCURRENT_BACKGROUNDS, (cell) =>
-      this.renderVariant(
-        cell.variant,
-        cell.product,
-        cell.ratio,
-        copy,
-        context,
-        log,
-        cell.attempt,
-        pinnedProofIndex.get(cell.product.id) === cell.variant.index,
-        insetsByRatio.get(cell.ratio.value),
-        timeline,
-        brief.style,
-        brief.template,
-        brief.id,
-        options?.signal,
-        brief.clickDestination,
-        brief.audio?.rights,
-        backgroundsByRatio.get(cell.ratio.value),
-        audio,
-      ),
+    const cellResults = await mapWithConcurrency(
+      cells,
+      MAX_CONCURRENT_BACKGROUNDS,
+      async (cell) => {
+        const rendered = await this.renderVariant(
+          cell.variant,
+          cell.product,
+          cell.ratio,
+          copy,
+          context,
+          log,
+          cell.attempt,
+          pinnedProofIndex.get(cell.product.id) === cell.variant.index,
+          insetsByRatio.get(cell.ratio.value),
+          timeline,
+          brief.style,
+          brief.template,
+          brief.id,
+          options?.signal,
+          brief.clickDestination,
+          brief.audio?.rights,
+          backgroundsByRatio.get(cell.ratio.value),
+          audio,
+        );
+        tick();
+        return rendered;
+      },
     );
 
     const assets: GeneratedAsset[] = cellResults.map((cell) => cell.asset);

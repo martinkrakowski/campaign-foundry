@@ -16,6 +16,7 @@ import {
 import { useRun } from "@/lib/run-context";
 import GridPage from "../page";
 import { typeDisplayName } from "@/components/campaign/display-names";
+import * as messages from "@/components/campaign/messages";
 
 /** A tiny harness exposing execute/regenerate so loading states can be driven. */
 function Harness() {
@@ -44,6 +45,34 @@ describe("GridPage", () => {
     renderWithRun(<Harness />);
     await user.click(screen.getByText("exec"));
     expect(await screen.findByText(/Running the pipeline/)).toBeTruthy();
+  });
+
+  test("counts the creatives once the run reports progress", async () => {
+    const user = userEvent.setup();
+    let polls = 0;
+    mockPipelineApi({
+      job: () => {
+        polls += 1;
+        if (polls === 1) return json({ status: "running", done: 2, total: 5, log: null });
+        return new Promise<Response>(() => {}); // hold the run open on the counted state
+      },
+    });
+    renderWithRun(<Harness />);
+    await user.click(screen.getByText("exec"));
+    expect(await screen.findByText(messages.gridRunningCounted(2, 5))).toBeTruthy();
+  });
+
+  test("says nothing about counts before the run has planned its cells", async () => {
+    const user = userEvent.setup();
+    mockPipelineApi({
+      job: () => json({ status: "running", done: 0, total: 0, log: null }),
+    });
+    renderWithRun(<Harness />);
+    await user.click(screen.getByText("exec"));
+    // 0/0 is the opening state of every run — "0 of 0 creatives done" would be
+    // the same non-answer the counter exists to replace.
+    expect(await screen.findByText(messages.gridRunningUncounted)).toBeTruthy();
+    expect(screen.queryByText(messages.gridRunningCounted(0, 0))).toBeNull();
   });
 
   test("renders the review matrix with provenance and compliance badges", async () => {
