@@ -89,7 +89,8 @@ type OverlayRegistration = {
  * `z-[70]` dialog cannot sit under it. Callers may still raise `z` (`z-[80]` on
  * ConfirmDialog / the resume two-way) when stacking over a non-kit overlay this
  * counter cannot see; a lone kit shell therefore keeps its className z and gets
- * no inline override.
+ * no inline override. Two or more kit shells always receive inline `paintZ`,
+ * including index 0 — otherwise a buried `z-[80]` class ties the top's inline 80.
  */
 const overlayStack: OverlayRegistration[] = [];
 let overlaySeq = 0;
@@ -115,12 +116,14 @@ function paintZ(index: number): number {
 
 function layerOf(index: number): OverlayLayer {
   const isTop = index === overlayStack.length - 1;
-  const kind = overlayStack[index]!.kind;
-  const z = paintZ(index);
   return {
     inert: !isTop,
     ariaModal: isTop,
-    zIndex: index === 0 || z === baseZ(kind) ? undefined : z,
+    // Stacked shells must pin every layer, including the first: leaving index 0
+    // on class-only z lets a buried `z-[80]` tie the top's inline 80. A lone
+    // shell keeps class-only z so ConfirmDialog / CreateCampaignDialog can still
+    // raise over a non-kit overlay this counter cannot see.
+    zIndex: overlayStack.length > 1 ? paintZ(index) : undefined,
   };
 }
 
