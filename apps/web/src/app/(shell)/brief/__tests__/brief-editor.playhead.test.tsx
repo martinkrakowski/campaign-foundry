@@ -348,7 +348,16 @@ describe("TS1 — the tape in the rail (plan §4 acceptance (e), §5)", () => {
     const names = [...rail.querySelectorAll('input[type="range"]')].map((el) =>
       el.getAttribute("aria-label"),
     );
-    expect(names).toEqual([messages.tapePlayheadName, messages.tapeZoomName]);
+    // TL3 adds a native range per beat join. Those are WEIGHT sliders, not a
+    // second scrub of the lifted second — the dock's scrub is still the one
+    // that went. Playhead remains the only control that moves the frame.
+    expect(names).toEqual([
+      messages.tapeBeatBoundaryName(1),
+      messages.tapeBeatBoundaryName(2),
+      messages.tapePlayheadName,
+      messages.tapeZoomName,
+    ]);
+    expect(screen.getAllByLabelText(messages.tapePlayheadName)).toHaveLength(1);
     // Named explicitly, because "one range fewer" is not the claim — "the dock's
     // scrub is the one that went" is.
     expect(screen.queryByLabelText(messages.previewScrubLabel)).toBeNull();

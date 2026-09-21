@@ -1742,6 +1742,14 @@ export const tapeNudgeForwardGlyph = "+1s";
 export function tapeBeatName(position: number): string {
   return `Beat ${position}`;
 }
+/**
+ * A boundary handle's STABLE accessible name (studio 9.3 point 2): the beat
+ * whose right edge this is, never the live seconds — a control that renamed
+ * itself on every pixel of a drag would be unusable with a screen reader.
+ */
+export function tapeBeatBoundaryName(position: number): string {
+  return `Beat ${position} boundary`;
+}
 /** The video lane's name and its single clip's name. */
 export const tapeLaneVideo = "Video";
 export const tapeVideoClip = "Video clip";

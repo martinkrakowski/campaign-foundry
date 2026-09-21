@@ -95,10 +95,11 @@ export function TimelineSection({
   const shortestSec = Math.min(...durations);
   const tapeBeats = useMemo(
     () =>
-      resolveTimeline(asCopyTimeline(state.timeline), tapeDuration).map((beat) => ({
+      resolveTimeline(asCopyTimeline(state.timeline), tapeDuration).map((beat, index) => ({
         text: beat.text,
         startT: beat.startT,
         endT: beat.endT,
+        weight: beats[index]!.weight,
         underFloor: beatUnderFloor((beat.endT - beat.startT) * shortestSec),
       })),
     [state.timeline, tapeDuration, shortestSec],

@@ -1064,10 +1064,11 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   const shortestDurationSec = Math.min(...timelineDurations(state));
   const tapeBeats = useMemo(
     () =>
-      resolveTimeline(asCopyTimeline(state.timeline), previewDurationSec).map((beat) => ({
+      resolveTimeline(asCopyTimeline(state.timeline), previewDurationSec).map((beat, index) => ({
         text: beat.text,
         startT: beat.startT,
         endT: beat.endT,
+        weight: state.timeline.beats[index]!.weight,
         underFloor: beatUnderFloor((beat.endT - beat.startT) * shortestDurationSec),
       })),
     [state.timeline, previewDurationSec, shortestDurationSec],
@@ -1669,6 +1670,12 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
                           stopIndex,
                           patch: { t: tAtSecond(sec, playhead.durationSec) },
                         })
+                }
+                /* TL3 — neighbour transfer, same seam as the diamond commit:
+                   one call on release, through the reducer. The tape cannot
+                   name the action (the word itself is forbidden there). */
+                onBoundaryCommit={(boundary, delta) =>
+                  dispatch({ type: "shiftBeatBoundary", boundary, delta })
                 }
                 host="rail"
               />
