@@ -172,7 +172,13 @@ describe("PlatformProfile", () => {
 
     test("every preset's formats agree with the profiles it lists", () => {
       for (const [type, preset] of Object.entries(CAMPAIGN_TYPE_PRESETS)) {
-        const motionOnly = !preset.formats.includes("static");
+        // "motionOnly" used to be "doesn't include static", which was safe while
+        // static/motion were the only two formats. display-ad (D161) made that
+        // false: its formats are ["html"], so it doesn't include "static" either,
+        // and the old boolean would have demanded its html profiles be 9:16 motion
+        // profiles — they are size-based and carry no ratio at all. motionOnly now
+        // means exactly what it says: formats is motion and nothing else.
+        const motionOnly = preset.formats.length === 1 && preset.formats[0] === "motion";
         const staticOnly = !preset.formats.includes("motion");
         const packaged = new Set<string>();
         for (const id of preset.platforms) {
