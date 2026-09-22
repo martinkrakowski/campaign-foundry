@@ -4276,7 +4276,7 @@ describe("the campaign type preset (T2 / D108–D112)", () => {
     expect(() => parseBrief(toBrief(short), RUN)).not.toThrow();
   });
 
-  test("D117 — a display-ad seed is Classic, stills-only, seeds A3's profiles, derives the five sizes, and parses on the run path", () => {
+  test("D161 — a display-ad seed is Classic, HTML, seeds the html profiles, derives the five sizes, and parses on the run path", () => {
     const display = reduce(
       base(),
       {
@@ -4292,8 +4292,8 @@ describe("the campaign type preset (T2 / D108–D112)", () => {
       { type: "applyPreset", campaignType: "display-ad" },
     );
     expect(display.mode).toBe("brief");
-    expect(display.formats).toEqual(["static"]);
-    expect(display.platforms).toEqual(["google-display", "meta-audience-network", "display-web"]);
+    expect(display.formats).toEqual(["html"]);
+    expect(display.platforms).toEqual(["google-display-html", "display-web-html"]);
     const brief = toBrief(display);
     expect(brief.type).toBe("display-ad");
     expect(brief.output?.sizes).toEqual([...DISPLAY_SIZE_VALUES]);

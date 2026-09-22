@@ -416,7 +416,7 @@ describe("OpenRouterCopyGenerator", () => {
     await generator.suggestHeadlines({ brief: { ...brief, type: "display-ad" }, count: 3 });
     const display = requestOf(fetchFn).body.messages as Array<{ role: string; content: string }>;
     expect(display[1].content).toBe(
-      "Subject(s): <<<Hydra Bottle>>>. Audience: <<<Urban outdoor enthusiasts>>>. Market/region: <<<DE>>>. Campaign message: <<<Stay wild. Stay hydrated.>>>. Campaign type: static display advertising in IAB banner sizes.",
+      "Subject(s): <<<Hydra Bottle>>>. Audience: <<<Urban outdoor enthusiasts>>>. Market/region: <<<DE>>>. Campaign message: <<<Stay wild. Stay hydrated.>>>. Campaign type: HTML5 display advertising in IAB banner sizes, with a static raster fallback.",
     );
   });
 });

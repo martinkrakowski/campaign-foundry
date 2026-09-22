@@ -122,17 +122,22 @@ describe("parseBrief", () => {
   });
 
   describe("template enforcement (D120, D124)", () => {
-    test("a brief with no template and type: 'display-ad' parses and returns the canonical image-text template with its five layers in order", () => {
+    test("a brief with no template and type: 'display-ad' parses and returns the canonical image-html template", () => {
       vi.mocked(templateFromCanonical).mockClear();
-      const parsed = parseBrief({ ...valid, type: "display-ad" });
-      expect(parsed.template.id).toBe("canonical-image-text");
-      expect(parsed.template.creativeType).toBe("image-text");
+      const parsed = parseBrief({
+        ...valid,
+        type: "display-ad",
+        output: {
+          formats: ["html"],
+          platforms: ["google-display-html", "display-web-html"],
+        },
+      });
+      expect(parsed.template.id).toBe("canonical-image-html");
+      expect(parsed.template.creativeType).toBe("image-html");
       expect(parsed.template.unit).toBe("standard-web");
       expect(parsed.template.layers).toEqual([
         { id: "image", kind: "image" },
-        { id: "shade", kind: "shade" },
-        { id: "accent", kind: "accent" },
-        { id: "static-text", kind: "static-text" },
+        { id: "html", kind: "html" },
         { id: "logo", kind: "logo" },
       ]);
       expect(vi.mocked(templateFromCanonical)).toHaveBeenCalledWith("display-ad");

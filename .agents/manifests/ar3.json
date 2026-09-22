@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "AR3",
+  "mutations": [
+    {
+      "file": "packages/Distribution/src/application/use-cases/PackageForPlatformUseCase.use-case.ts",
+      "before": "            // D161: the bundle belongs to an html profile. A display static\n            // profile (it matches sizes, not a social ratio) packages the same\n            // row's raster fallback. A social static profile does not.\n            if (!wantsHtml && !(wantsStatic && profile.sizes !== undefined)) return false;",
+      "after": "            if (!wantsHtml) return false;",
+      "because": "A static display profile must package an html row's raster fallback. Dropping that branch lets google-display ignore an html-only run, which is the gap D161 closes.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/Distribution/src/application/use-cases/__tests__/PackageForPlatformUseCase.use-case.test.ts",
+        "-t",
+        "google-display packages the fallback when the run produced only html rows"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
