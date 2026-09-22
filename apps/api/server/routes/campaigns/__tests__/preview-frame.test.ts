@@ -50,6 +50,36 @@ const jsonReq = (body: unknown) =>
     body: JSON.stringify(body),
   });
 
+/** Canonical image-html: no shade, accent, or copy. Dropping the brief template makes the preview draw image-text instead. */
+const imageHtmlTemplate = {
+  id: "canonical-image-html",
+  version: 1,
+  creativeType: "image-html",
+  unit: "standard-web",
+  layers: [
+    { id: "image", kind: "image" },
+    { id: "html", kind: "html" },
+    { id: "logo", kind: "logo" },
+  ],
+};
+
+/** Image-text with the shade layer on, switched off, or left out of the list. */
+const imageTextTemplate = (shade: "on" | "off" | "absent") => ({
+  id: "canonical-image-text",
+  version: 1,
+  creativeType: "image-text",
+  unit: "standard-web",
+  layers: [
+    { id: "image", kind: "image" },
+    ...(shade === "absent"
+      ? []
+      : [{ id: "shade", kind: "shade", ...(shade === "off" ? { enabled: false } : {}) }]),
+    { id: "accent", kind: "accent" },
+    { id: "static-text", kind: "static-text" },
+    { id: "logo", kind: "logo" },
+  ],
+});
+
 /** A 1×1 transparent PNG, so the compositor's logo step has real bytes to load. */
 const ONE_PX_PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
@@ -261,6 +291,43 @@ describe("POST /campaigns/preview-frame", () => {
     expect((await res.json()) as { error: string }).toMatchObject({
       error: expect.stringMatching(/unknown product "ghost"/),
     });
+  });
+
+  test("an image-html brief previews different pixels than the image-text canonical", async () => {
+    const web = mount();
+    const html = await web(
+      jsonReq({
+        brief: { ...brief(), output: { formats: ["html"] }, template: imageHtmlTemplate },
+        cell: cell(),
+      }),
+    );
+    const text = await web(
+      jsonReq({ brief: { ...brief(), template: imageTextTemplate("on") }, cell: cell() }),
+    );
+    expect(html.status).toBe(200);
+    expect(text.status).toBe(200);
+    expect(Buffer.from(await html.arrayBuffer())).not.toEqual(
+      Buffer.from(await text.arrayBuffer()),
+    );
+  });
+
+  test("a disabled shade previews the same pixels as a template that omits it", async () => {
+    const web = mount();
+    const off = await web(
+      jsonReq({ brief: { ...brief(), template: imageTextTemplate("off") }, cell: cell() }),
+    );
+    const on = await web(
+      jsonReq({ brief: { ...brief(), template: imageTextTemplate("on") }, cell: cell() }),
+    );
+    const absent = await web(
+      jsonReq({ brief: { ...brief(), template: imageTextTemplate("absent") }, cell: cell() }),
+    );
+    expect(off.status).toBe(200);
+    expect(on.status).toBe(200);
+    expect(absent.status).toBe(200);
+    const offBytes = Buffer.from(await off.arrayBuffer());
+    expect(offBytes).not.toEqual(Buffer.from(await on.arrayBuffer()));
+    expect(offBytes).toEqual(Buffer.from(await absent.arrayBuffer()));
   });
 
   test("returns 400 with errorMessage when body parsing throws a non-Error", async () => {
