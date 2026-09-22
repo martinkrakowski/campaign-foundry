@@ -86,3 +86,26 @@ describe("OutputSection — the click destination (HL5b, HL-D3)", () => {
     expect(destinationInput().value).toBe(destination);
   });
 });
+
+describe("Formats — a creative type with no static/motion choice (D161, AR3)", () => {
+  const displayAdState = (): EditorState =>
+    editorReducer(state(), { type: "applyPreset", campaignType: "display-ad" });
+
+  test("neither FormatPanel renders — there is nothing to choose", () => {
+    render(<OutputSection state={displayAdState()} dispatch={vi.fn()} errors={{}} />);
+    // Confirms the fieldset itself still renders — a missing legend would make
+    // the negative assertions below pass by rendering nothing at all.
+    expect(screen.getByText(messages.outputFormatsLegend)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /still images/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /video/i })).toBeNull();
+    expect(screen.getByText(messages.outputFormatFixedToHtml)).toBeTruthy();
+  });
+
+  test("a static/motion creative type keeps both cards, unchanged", () => {
+    // The togglableFormats branch must not touch social-post or short-video —
+    // this is the regression guard for every OTHER preset.
+    render(<OutputSection state={state()} dispatch={vi.fn()} errors={{}} />);
+    expect(screen.queryByText(messages.outputFormatFixedToHtml)).toBeNull();
+    expect(screen.getByText(messages.formatStillMeta)).toBeTruthy();
+  });
+});

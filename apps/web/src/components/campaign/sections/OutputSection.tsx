@@ -93,6 +93,15 @@ export function OutputSection({ state, dispatch, errors, compact = false }: Outp
 
   const staticGate = formatGate("static", state, state.capabilities);
   const motionGate = formatGate("motion", state, state.capabilities);
+  // D161/AR3: image-html's outputFamilies is exclusively "html" — neither
+  // FormatPanel can ever be the right control for it, because there is
+  // nothing to choose. Before this, a display-ad draft showed BOTH cards
+  // unselected (state.formats is ["html"], which neither .includes("static")
+  // nor .includes("motion") is true for) — a valid, saved brief looked like
+  // an empty choice — and either card was clickable, adding a format
+  // outputFamilyProblem refuses on Save. X14's own principle for the
+  // platform grid above applies here too: absent, not present-and-disabled.
+  const togglableFormats = families.includes("static") || families.includes("motion");
 
   return (
     <SectionShell id="output" title="5 · Output" errorCount={outputErrorCount} compact={compact}>
@@ -142,20 +151,24 @@ export function OutputSection({ state, dispatch, errors, compact = false }: Outp
         {/* Formats */}
         <fieldset className="space-y-2">
           <legend className="text-[11px] text-text-muted">{messages.outputFormatsLegend}</legend>
-          <div className="grid grid-cols-2 gap-2">
-            <FormatPanel
-              format="static"
-              selected={state.formats.includes("static")}
-              onToggle={(value) => dispatch({ type: "toggleFormat", value })}
-              gate={staticGate}
-            />
-            <FormatPanel
-              format="motion"
-              selected={state.formats.includes("motion")}
-              onToggle={(value) => dispatch({ type: "toggleFormat", value })}
-              gate={motionGate}
-            />
-          </div>
+          {togglableFormats ? (
+            <div className="grid grid-cols-2 gap-2">
+              <FormatPanel
+                format="static"
+                selected={state.formats.includes("static")}
+                onToggle={(value) => dispatch({ type: "toggleFormat", value })}
+                gate={staticGate}
+              />
+              <FormatPanel
+                format="motion"
+                selected={state.formats.includes("motion")}
+                onToggle={(value) => dispatch({ type: "toggleFormat", value })}
+                gate={motionGate}
+              />
+            </div>
+          ) : (
+            <p className="text-[11px] text-text-muted">{messages.outputFormatFixedToHtml}</p>
+          )}
           {errors.formats ? <FieldLine tone="error">{errors.formats}</FieldLine> : null}
         </fieldset>
 

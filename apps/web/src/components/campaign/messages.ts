@@ -546,6 +546,14 @@ export function formatMotionMeta(fps: number, min: number, max: number): string 
   return `clip · ${fps} fps · ${min}–${max} s`;
 }
 
+/**
+ * Said in place of the Formats toggle for a creative type whose outputFamilies
+ * is exclusively html (D161) — there is nothing to choose, so no card is
+ * offered rather than two cards neither of which can be selected.
+ */
+export const outputFormatFixedToHtml =
+  "This ad always renders as HTML, with a raster fallback included automatically.";
+
 /** A Classic brief cannot produce video; the pipeline branches on mode alone. */
 export const formatsMotionNeedsRandomizedMode =
   "Video needs a Randomized campaign — switch the mode, or turn Video off.";

@@ -58,9 +58,9 @@
     },
     {
       "file": "apps/web/src/app/(shell)/export/page.tsx",
-      "before": "    const profile = platformProfile(id);\n    if (!profile?.formats.some((format) => runFormats.has(format))) return false;\n    const slots = profile?.sizes;",
-      "after": "    const profile = platformProfile(id);\n    const slots = profile?.sizes;",
-      "because": "Offer a display profile on its sizes alone again: the html profiles list the same five IAB units as the static ones, so a static run gets \"Google Display (HTML5)\" in the picker and its Package action deterministically finds no eligible asset — the size filter cannot see the format mismatch, only the format filter can.",
+      "before": "    if (!profile?.formats.some((format) => runFormats.has(format)) && !fallbackEligible) {\n      return false;\n    }",
+      "after": "    // if (!profile?.formats.some((format) => runFormats.has(format)) && !fallbackEligible) {\n    //   return false;\n    // }",
+      "because": "Offer a display profile on its sizes alone again: the html profiles list the same five IAB units as the static ones, so a static run gets \"Google Display (HTML5)\" in the picker and its Package action deterministically finds no eligible asset — the size filter cannot see the format mismatch, only the format filter can. (Re-anchored 2026-09-22, AR3: the guard grew a fallbackEligible clause and a multi-line body when the html-row fallback route was added; the defect and the test it catches are unchanged — a display profile shown on its sizes alone, with no format check at all.)",
       "command": [
         "yarn",
         "vitest",
