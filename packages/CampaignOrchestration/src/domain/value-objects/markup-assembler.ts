@@ -22,9 +22,10 @@
 
 import { resolveCanvas, type CanvasSpec } from "./aspect-ratios.js";
 import { CLICK_TAG_VARIABLE, isAbsoluteUrl } from "./click-destination.js";
-import type { Style } from "./creative-style.js";
+import { resolveLayerFrame } from "./creative-geometry.js";
+import { DEFAULT_STYLE, resolveStyle, toneFontWeight, type Style } from "./creative-style.js";
 import type { CreativeTemplateLayer } from "./creative-templates.js";
-import type { ToneKind } from "./Treatment.vo.js";
+import { DEFAULT_TREATMENT, type ToneKind } from "./Treatment.vo.js";
 
 /** HTML-escape user-authored strings for the HTML text / quoted-attribute contexts (HL-D7). */
 export function escapeHtml(value: string): string {
@@ -90,8 +91,9 @@ export interface AssembleHtmlOptions {
   readonly brandColor: string;
   readonly style?: Style;
   /**
-   * Kept on the options so a caller that already resolved a treatment tone
-   * can pass it through. Layer markup does not interpolate a font from it.
+   * The treatment tone. With `style`, it resolves the font the static-text
+   * layer emits, the same `resolveStyle` / `toneFontWeight` pair the canvas
+   * uses. Absent tone is `DEFAULT_TREATMENT.tone`.
    */
   readonly tone?: ToneKind;
   readonly clickDestination?: string;
@@ -123,13 +125,17 @@ function layerAlt(layer: CreativeTemplateLayer): string {
  * image fills the canvas and a logo or static-text layer uses the percentage
  * block — still `position: absolute`.
  */
-function layerBoxStyle(layer: CreativeTemplateLayer, width: number, height: number): string {
-  if (layer.frame !== undefined) {
-    const left = layer.frame.x * width;
-    const top = layer.frame.y * height;
-    const boxW = layer.frame.w * width;
-    const boxH = layer.frame.h * height;
-    return `position: absolute; left: ${left}px; top: ${top}px; width: ${boxW}px; height: ${boxH}px;`;
+function layerBoxStyle(
+  layer: CreativeTemplateLayer,
+  spec: CanvasSpec,
+  width: number,
+  height: number,
+): string {
+  // D130: a display size or ratio overlay wins over the base fractions, the
+  // same resolution the compositor paints. Reading `frame.x` raw drops it.
+  const frame = resolveLayerFrame(layer.frame, spec);
+  if (frame !== undefined) {
+    return `position: absolute; left: ${frame.x * width}px; top: ${frame.y * height}px; width: ${frame.w * width}px; height: ${frame.h * height}px;`;
   }
   if (layer.kind === "image") {
     return `position: absolute; left: 0px; top: 0px; width: ${width}px; height: ${height}px;`;
@@ -172,16 +178,29 @@ export function assembleHtml(options: AssembleHtmlOptions): AssembledHtml {
   const fallbackImageSrc = options.fallbackImageSrc ?? "fallback.png";
   const src = escapeHtml(fallbackImageSrc);
   const copy = escapeHtml(options.headline ?? "");
+  const face = resolveStyle(
+    options.style,
+    toneFontWeight(options.tone ?? DEFAULT_TREATMENT.tone),
+    DEFAULT_STYLE.fontFamily,
+  );
+  // Native `<p>` / `<button>` margins, borders and black text are not the
+  // canvas face. The reset plus the resolved family and weight are what the
+  // compositor already paints.
+  const textFace = ` margin: 0; padding: 0; border: none; background: transparent; color: #ffffff; font-family: ${escapeHtml(face.fontFamily)}, sans-serif; font-weight: ${face.fontWeight};`;
 
   const layerMarkup: string[] = [];
   for (const layer of options.layers) {
     if (layer.enabled === false) continue;
-    if (layer.kind === "image" || layer.kind === "logo") {
-      layerMarkup.push(pictureMarkup(layer, layerBoxStyle(layer, width, height), src, hasClick));
+    // Logo is already in the fallback raster. Emitting it as another
+    // `<img src="fallback.png">` would paint that whole raster a second time.
+    if (layer.kind === "image") {
+      layerMarkup.push(
+        pictureMarkup(layer, layerBoxStyle(layer, options.canvas, width, height), src, hasClick),
+      );
       continue;
     }
     if (layer.kind === "static-text") {
-      const box = layerBoxStyle(layer, width, height);
+      const box = `${layerBoxStyle(layer, options.canvas, width, height)}${textFace}`;
       if (layer.link === true) {
         const nav = hasClick ? CLICK_OPEN : "";
         layerMarkup.push(`<button type="button" style="${box}"${nav}>${copy}</button>`);

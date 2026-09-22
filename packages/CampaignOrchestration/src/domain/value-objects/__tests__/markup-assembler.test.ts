@@ -96,18 +96,71 @@ describe("assembleHtml", () => {
     );
   });
 
-  test("an image layer and a logo layer each emit an img of the fallback", () => {
+  test("an image layer emits one img of the fallback, and a logo does not repeat that raster", () => {
     const result = assembleHtml(
       base({
-        layers: [layer({ id: "picture", kind: "image" }), layer({ id: "mark", kind: "logo" })],
+        layers: [
+          layer({ id: "picture", kind: "image" }),
+          layer({ id: "mark", kind: "logo" }),
+          layer({ id: "copy", kind: "static-text" }),
+        ],
+        headline: "Shop",
       }),
     );
 
-    expect(result.html).toContain("<img");
+    expect(result.html.match(/<img/g)?.length).toBe(1);
     expect(result.html).toContain("fallback.png");
-    expect(result.html.match(/<img/g)?.length).toBe(2);
     expect(result.html).toContain("left: 0px; top: 0px; width: 1080px; height: 1080px;");
     expect(result.html).toContain("left: 5%; top: 10%; width: 90%; height: 30%;");
+    expect(result.html).toContain(">Shop</p>");
+  });
+
+  test("a display-size frame overlay wins over the base fractions", () => {
+    const result = assembleHtml(
+      base({
+        canvas: { size: "300x250" },
+        layers: [
+          layer({
+            id: "picture",
+            kind: "image",
+            frame: {
+              x: 0,
+              y: 0,
+              w: 1,
+              h: 1,
+              anchor: "top",
+              byFamily: { size: { "300x250": { x: 0.25 } } },
+            },
+          }),
+        ],
+      }),
+    );
+
+    expect(result.html).toContain("left: 75px;");
+    expect(result.html).not.toContain("left: 0px;");
+  });
+
+  test("static-text uses the resolved face, not the browser's paragraph defaults", () => {
+    const result = assembleHtml(
+      base({
+        layers: [layer({ id: "copy", kind: "static-text" })],
+        headline: "Shop",
+        tone: "subtle",
+        style: {
+          fontFamily: "Lora",
+          fontWeight: 700,
+          align: "left",
+          letterSpacing: 0,
+          lineHeight: 1.2,
+          sizeScale: 1,
+        },
+      }),
+    );
+
+    expect(result.html).toContain("font-family: Lora, sans-serif");
+    expect(result.html).toContain("font-weight: 700");
+    expect(result.html).toContain("margin: 0");
+    expect(result.html).toContain("color: #ffffff");
   });
 
   test("a picture layer honours an override src and a string alt, and a non-string alt is empty", () => {

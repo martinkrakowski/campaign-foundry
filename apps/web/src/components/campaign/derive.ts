@@ -370,8 +370,9 @@ function weighedLayer(layer: CreativeTemplateLayer): unknown {
  * the template layers, the campaign message, the ship sizes, the brand colour,
  * the click destination, and the budget (label and figure ride the reading) —
  * so an unchanged draft reweighs nothing and any change to a weighed input
- * reweighs. Tone and style are not inputs: layer markup does not interpolate
- * a font from them. The platforms and profiles the budget was drawn from need
+ * reweighs. Style is an input because the static-text face embeds its family
+ * and weight. Tone's weight is three digits either way, so it does not change
+ * the byte count; the platforms and profiles the budget was drawn from need
  * no separate slot: a change to either is a change to the budget's label or
  * `maxBytes` here, and to the assembled `bytes` through `sizes`.
  */
@@ -381,12 +382,14 @@ function htmlWeightKey(
   headline: string,
   brandColor: string,
   destination: string,
+  style: EditorState["style"],
   budget: PlatformProfile,
 ): string {
   return JSON.stringify({
     brandColor,
     destination,
     headline,
+    style,
     sizes,
     maxBytes: budget.maxBytes,
     profileLabel: budget.label,
@@ -444,7 +447,7 @@ export function htmlWeightReading(
   // no weighable markup, and the Products section already says so.
   if (!isBrandColor(brandColor)) return undefined;
 
-  const key = htmlWeightKey(sizes, layers, headline, brandColor, destination, budget);
+  const key = htmlWeightKey(sizes, layers, headline, brandColor, destination, state.style, budget);
   const cached = weightReadingCache;
   if (cached !== undefined && cached.key === key) return cached.reading;
   let bytes = 0;
