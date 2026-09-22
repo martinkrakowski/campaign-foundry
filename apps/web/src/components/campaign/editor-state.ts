@@ -1874,13 +1874,17 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
       // The checkbox is the only caller, so a non-boolean cannot arrive here;
       // `layerLinkProblem` is the boundaries' guard, not this reducer's second
       // opinion. Absence is the canonical form of "not a click target", so the
-      // no-op test reads the key through that default: asked-for `false` on a
-      // layer with no key writes nothing, and the whole dispatch runs through
-      // `canonicalLayer` the way `setLayerProps` does.
+      // no-op tests read the key itself: asked-for `true` on a layer already
+      // carrying it, and asked-for `false` on a layer with NO key, write
+      // nothing. A spelled-out `link: false` is not that absence — asking for
+      // `false` on it must run the write, so `withLink` deletes the key and
+      // the whole dispatch runs through `canonicalLayer` the way
+      // `setLayerProps` does.
       const index = state.template.layers.findIndex((layer) => layer.id === action.layerId);
       if (index === -1) return state;
       const layer = state.template.layers[index]!;
-      if ((layer.link === true) === action.link) return state;
+      if (action.link === true && layer.link === true) return state;
+      if (action.link === false && layer.link === undefined) return state;
       const nextLayers = state.template.layers.map((existing, i) =>
         i === index ? canonicalLayer(withLink(existing, action.link)) : existing,
       );

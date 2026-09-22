@@ -87,23 +87,28 @@ describe("setLayerLink — the write, its delete, and the fields beside them", (
     expect(Object.keys(layer(next, "image"))).not.toContain("link");
   });
 
-  test("the write runs through canonicalLayer, like setLayerProps: a loaded link: false is dropped", () => {
+  test("a loaded link: false asked for false still runs the write: the key is dropped", () => {
     // A server brief may arrive spelling `link: false` and (bypassing the load
-    // normaliser) `enabled: true` too; the dispatch cleans the whole layer,
-    // not only the field it touched.
+    // normaliser) `enabled: true` too. That spelled `false` is NOT the
+    // canonical absence the no-op guards on, so the dispatch must run the
+    // write — `withLink(false)` deletes the key and `canonicalLayer` drops
+    // `enabled: true` — cleaning the whole layer, not only the field it
+    // touched.
     const loaded: CreativeTemplateLayer = {
       id: "image",
       kind: "image",
       enabled: true,
       link: false,
     };
-    const next = editorReducer(stateWith([loaded, ...CANONICAL.layers.slice(1)]), {
+    const before = stateWith([loaded, ...CANONICAL.layers.slice(1)]);
+    const next = editorReducer(before, {
       type: "setLayerLink",
       layerId: "image",
-      link: true,
+      link: false,
     });
+    expect(next).not.toBe(before);
     const image = layer(next, "image");
-    expect(image.link).toBe(true);
+    expect(Object.keys(image)).not.toContain("link");
     expect(Object.keys(image)).not.toContain("enabled");
   });
 });
