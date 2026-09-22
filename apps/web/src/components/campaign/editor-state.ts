@@ -556,6 +556,11 @@ export type EditorAction =
       layerId: string;
       patch: LayerPropsPatch;
     }
+  // D160 — whether the layer is a click target. `enabled`'s polarity inverted:
+  // absence means NOT linked, so ticking writes `link: true` and unticking
+  // deletes the key. The destination is the brief's own `clickDestination`;
+  // nothing here names a URL, and `button` is not a kind.
+  | { type: "setLayerLink"; layerId: string; link: boolean }
   // The layer's keyframe tracks (K1, K5 — `studio-editor.md` §4.4). Three
   // actions, not one patch, because the three edits differ in what they may
   // create: adding a stop may mint a track, removing one may retire it, and
@@ -1121,6 +1126,22 @@ function withEnabled(layer: CreativeTemplateLayer, value: boolean): CreativeTemp
 }
 
 /**
+ * A layer with `link` set to `value` in the one canonical form (D160): the
+ * mechanics are `withEnabled`'s, the POLARITY is not — absence here means NOT
+ * a click target, so ticking the box writes `link: true` and unticking it
+ * DELETES the key. A round trip therefore returns the layer to the shape it
+ * loaded with, and a brief never grows a `link: false` only the editor's own
+ * load normalisation could have spelled out.
+ */
+function withLink(layer: CreativeTemplateLayer, value: boolean): CreativeTemplateLayer {
+  if (value) return { ...layer, link: true };
+  // The same `delete`-on-a-copy-of-readonly cast `withEnabled` names.
+  const next: Record<string, unknown> = { ...layer };
+  delete next.link;
+  return next as unknown as CreativeTemplateLayer;
+}
+
+/**
  * Whether `next` (a layer's merged `props`, or the empty object standing in
  * for absence) already equals `prior` — field for field, in both directions —
  * so a dispatch that would leave the layer exactly as it loaded, the absent
@@ -1356,8 +1377,10 @@ function canonicalElement(element: HtmlElement): HtmlElement {
 }
 
 /**
- * The one canonical form a template layer's defaults take (X16, D129, HL5a):
- * `enabled: true` restates what absence already means, `elements: []` is
+ * The one canonical form a template layer's defaults take (X16, D129, D160, HL5a):
+ * `enabled: true` restates what absence already means, `link: false` restates
+ * what its absence already means at the opposite polarity (D160 — absence is
+ * "not a click target"), `elements: []` is
  * the same as no list, and an element's empty `style` block is the same as no
  * block. Mapping these to absent is what `withEnabled` / `withElements` /
  * `setHtmlElementStyle` already write, so a hand-authored brief that spelled
@@ -1399,6 +1422,10 @@ function canonicalProps(layer: CreativeTemplateLayer): Record<string, unknown> |
 
 function canonicalLayer(layer: CreativeTemplateLayer): CreativeTemplateLayer {
   const dropEnabled = layer.enabled === true;
+  // D160 joins the same list, with `enabled`'s opposite sign: absence means
+  // NOT linked, so it is `link: false` — not `link: true` — that restates
+  // what absence already says.
+  const dropLink = layer.link === false;
   const dropElements = Array.isArray(layer.elements) && layer.elements.length === 0;
   const canonicalElements = dropElements ? undefined : layer.elements?.map(canonicalElement);
   const restyledElements =
@@ -1418,9 +1445,11 @@ function canonicalLayer(layer: CreativeTemplateLayer): CreativeTemplateLayer {
   // a NEW object only when it dropped something, so a props block already
   // canonical comes back identical and the layer is returned untouched.
   const repropped = nextProps !== (layer.props as Record<string, unknown> | undefined);
-  if (!dropEnabled && !dropElements && !restyledElements && !repropped && !dropTracks) return layer;
+  if (!dropEnabled && !dropLink && !dropElements && !restyledElements && !repropped && !dropTracks)
+    return layer;
   const next: Record<string, unknown> = { ...layer };
   if (dropEnabled) delete next.enabled;
+  if (dropLink) delete next.link;
   if (dropElements) delete next.elements;
   else if (restyledElements) next.elements = canonicalElements;
   if (repropped) {
@@ -1837,6 +1866,23 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
         // action keeps the layer canonical on every field a future lane teaches
         // it about `props`, not only the one this action just touched.
         i === index ? canonicalLayer(next as unknown as CreativeTemplateLayer) : existing,
+      );
+      return { ...state, template: { ...state.template, layers: nextLayers } };
+    }
+    case "setLayerLink": {
+      // D160 — `setLayerProps`' shape, `setLayerEnabled`'s no-op discipline.
+      // The checkbox is the only caller, so a non-boolean cannot arrive here;
+      // `layerLinkProblem` is the boundaries' guard, not this reducer's second
+      // opinion. Absence is the canonical form of "not a click target", so the
+      // no-op test reads the key through that default: asked-for `false` on a
+      // layer with no key writes nothing, and the whole dispatch runs through
+      // `canonicalLayer` the way `setLayerProps` does.
+      const index = state.template.layers.findIndex((layer) => layer.id === action.layerId);
+      if (index === -1) return state;
+      const layer = state.template.layers[index]!;
+      if ((layer.link === true) === action.link) return state;
+      const nextLayers = state.template.layers.map((existing, i) =>
+        i === index ? canonicalLayer(withLink(existing, action.link)) : existing,
       );
       return { ...state, template: { ...state.template, layers: nextLayers } };
     }

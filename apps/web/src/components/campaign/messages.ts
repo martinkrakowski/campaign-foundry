@@ -1395,6 +1395,19 @@ export const layerPropAnchorLabel = "Headline anchor";
 export const layerPropTypeFloorLabel = "Autofit minimum";
 export const layerPropAltLabel = "Image alt text";
 
+/**
+ * The click-target checkbox (D160): linkability is a property on a layer,
+ * never a new kind, and the label names the author's question, not the
+ * emission.
+ */
+export const layerLinkLabel = "Click target";
+
+/**
+ * Where the destination lives: the brief already carries exactly one, so the
+ * control says what ticking does and promises no new picture.
+ */
+export const layerLinkHelp = "Opens this brief's click destination. The picture does not change.";
+
 /** The face a prop's control shows while the layer carries no override for it. */
 export const layerPropDefault = "Brief default";
 

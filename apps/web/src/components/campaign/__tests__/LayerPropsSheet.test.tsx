@@ -627,25 +627,27 @@ describe("LayerPropsSheet — the click-target checkbox (D160)", () => {
   });
 
   const videoTemplate = (): BriefTemplate => ({
-    id: VIDEO_CANONICAL.id,
+    id: "canonical-video",
     version: VIDEO_CANONICAL.version,
     creativeType: VIDEO_CANONICAL.creativeType,
     unit: VIDEO_CANONICAL.unit,
     layers: VIDEO_CANONICAL.layers,
   });
 
-  test("every layer kind gets the checkbox — image-text's five and video", () => {
-    for (const layerId of ["image", "shade", "accent", "static-text", "logo"]) {
+  test("every layer kind gets the checkbox — image-text's layers and video", () => {
+    // The rows are read from the canonical template, never a literal list —
+    // the D121 guard's own rule, applied to this file too.
+    for (const candidate of TEXT_CANONICAL.layers) {
       render(
         <Harness
           initial={{ ...initialEditorState(), template: textTemplate() }}
-          layerId={layerId}
+          layerId={candidate.id}
           onClose={vi.fn()}
         />,
       );
       expect(
         screen.getByRole("checkbox", { name: messages.layerLinkLabel }),
-        `kind behind layer "${layerId}" must offer the click-target checkbox`,
+        `layer "${candidate.id}" must offer the click-target checkbox`,
       ).toBeTruthy();
       cleanup();
     }
