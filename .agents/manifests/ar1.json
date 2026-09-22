@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "AR1",
+  "mutations": [
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/creative-templates.ts",
+      "before": "    name: \"Canonical Image & Text\",\n    unit: \"standard-web\",\n    creativeType: \"image-text\",\n    layers: [\n      { id: \"image\", kind: \"image\" },",
+      "after": "    name: \"Canonical Image & Text\",\n    unit: \"standard-web\",\n    creativeType: \"image-text\",\n    layers: [\n      { id: \"image\", kind: \"image\", link: true },",
+      "because": "Canonical templates are what the compositor goldens draw. Putting link on one changes that input, so the test that every canonical layer omits link must go red. A survivor would mean goldens could move without a failing test.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/creative-templates.test.ts",
+        "-t",
+        "canonical templates do not carry a link key"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

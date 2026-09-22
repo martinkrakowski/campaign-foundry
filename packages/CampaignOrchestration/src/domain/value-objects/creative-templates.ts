@@ -47,6 +47,15 @@ export interface CreativeTemplateLayer {
    */
   readonly props?: LayerProps;
   /**
+   * Whether this layer is a click target (D160). Optional, and absent means
+   * NOT a click target — the opposite polarity of `enabled`'s absence. This is
+   * a property on a layer, never a new layer kind: the destination is the
+   * brief's single `clickDestination`, not a field here, and the emission is
+   * AR2's compile job. Canonical templates never carry the key; that absence
+   * is what keeps the compositor goldens unedited.
+   */
+  readonly link?: boolean;
+  /**
    * The `html` layer's element list (HL1, HL-D1). Optional, and absent means no
    * elements; only the `html` layer kind may carry a defined list, so the
    * canonical templates — which carry their own `props`-less layers — never
