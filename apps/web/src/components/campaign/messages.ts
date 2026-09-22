@@ -1244,6 +1244,15 @@ export function typeTileRunsAs(mode: string): string {
 export function typeTilePlacements(placements: string): string {
   return `Runs on ${placements}.`;
 }
+/**
+ * D162 — the three tile-group headings. Not `formatDisplayName`: that speaks
+ * for a `formats` entry (D159's compile target, "Still images"/plural), while
+ * these name what the user is making (singular) and "HTML ad" has no format
+ * counterpart at all.
+ */
+export const typeGroupStillImage = "Still image";
+export const typeGroupVideo = "Video";
+export const typeGroupHtmlAd = "HTML ad";
 
 /* ── The Template step (L5, D124) ─────────────────────────────────────────── */
 

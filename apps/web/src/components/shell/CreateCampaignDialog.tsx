@@ -45,9 +45,13 @@ import * as messages from "@/components/campaign/messages";
 const IDENTITY_STEP = "identity";
 
 /**
- * D144 / CC6: The four campaign types grouped by format.
- * - Still images (static): social-post, paid-social, display-ad
- * - Video (motion): short-video
+ * D162 / CC6: The four campaign types grouped by what the user is making, not
+ * by format — `paid-social` stays under Still image alongside `social-post`
+ * despite shipping both formats (D162's own rationale: a two-way fork by
+ * format cannot route it, and neither can a three-way one).
+ * - Still image: social-post, paid-social
+ * - Video: short-video
+ * - HTML ad: display-ad
  *
  * A view grouping only: domain values, presets, and selection behaviour are unchanged.
  */
@@ -58,12 +62,16 @@ export interface CampaignTypeGroup {
 
 export const CAMPAIGN_TYPE_GROUPS: readonly CampaignTypeGroup[] = [
   {
-    label: formatDisplayName("static"),
-    types: ["social-post", "paid-social", "display-ad"],
+    label: messages.typeGroupStillImage,
+    types: ["social-post", "paid-social"],
   },
   {
-    label: formatDisplayName("motion"),
+    label: messages.typeGroupVideo,
     types: ["short-video"],
+  },
+  {
+    label: messages.typeGroupHtmlAd,
+    types: ["display-ad"],
   },
 ];
 
