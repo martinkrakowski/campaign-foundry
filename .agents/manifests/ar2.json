@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "AR2",
+  "mutations": [
+    {
+      "file": "packages/CreativeGeneration/src/infrastructure/adapters/NodeCanvasCompositor.ts",
+      "before": "  // The html layer paints nothing. Copy is markup, and the canonical\n  // image-html template's html layer was already a no-op blit — which is\n  // what keeps the compositor goldens byte-identical.\n  return;",
+      "after": "  // The html layer paints nothing. Copy is markup, and the canonical\n  // image-html template's html layer was already a no-op blit — which is\n  // what keeps the compositor goldens byte-identical.\n  _c.ctx.fillStyle = \"#ff00fe\";\n  _c.ctx.fillRect(0, 0, 2, 2);\n  return;",
+      "because": "drawHtml must paint nothing, or the canonical image-html golden can change without a failing test. Painting #ff00fe at (0,0,2,2) before the return makes the top-left pixel that colour.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CreativeGeneration/src/infrastructure/adapters/__tests__/NodeCanvasCompositor.draw-html.test.ts",
+        "-t",
+        "top-left pixel is not #ff00fe"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

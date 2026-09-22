@@ -43,16 +43,6 @@ import {
   type TrackProperty,
 } from "@campaignfoundry/CampaignOrchestration/tracks";
 import type { EasingKind } from "@campaignfoundry/CampaignOrchestration/easing";
-// The html layer's element vocabulary (HL1): the kinds an element may be, the
-// frame it positions itself with, and the leaf's own values — never restated
-// here, for the same reason every other domain value above is imported.
-import {
-  HTML_ELEMENT_KINDS,
-  type Frame,
-  type HtmlElement,
-  type HtmlElementKind,
-  type HtmlElementStyle,
-} from "@campaignfoundry/CampaignOrchestration/html-element";
 // The layer's shape, from the same module the canonical templates are declared
 // in: the toggle writes the field, so it writes that module's type.
 import type { CreativeTemplateLayer } from "@campaignfoundry/CampaignOrchestration/creative-templates";
@@ -97,8 +87,6 @@ import {
   styleDiverges,
   styleProblem,
   TEXT_EFFECT_VALUES,
-  type FontFamilyKind,
-  type FontWeightKind,
   type Style,
 } from "@campaignfoundry/CampaignOrchestration/creative-style";
 
@@ -107,7 +95,6 @@ import {
 export {
   DEFAULT_DURATION_SEC,
   HEADLINE_POOL_REF,
-  HTML_ELEMENT_KINDS,
   MAX_DURATION_SEC,
   MIN_DURATION_SEC,
   MOTION_KINDS,
@@ -116,7 +103,6 @@ export {
   MAX_WEIGHT,
   MIN_DWELL_SEC,
 };
-export type { Frame, HtmlElement, HtmlElementKind, HtmlElementStyle };
 import { RATIO_VALUES } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import {
   DISPLAY_SIZE_VALUES,
@@ -592,31 +578,6 @@ export type EditorAction =
       patch: { t?: number; value?: number; easing?: EasingKind | undefined };
     }
   | { type: "removeTrackStop"; layerId: string; trackIndex: number; stopIndex: number }
-  // The `html` layer's elements (HL5a, HL-D1): the second vocabulary, nested
-  // inside the first, so every action names the layer it edits and the index
-  // inside that layer's list. Each one is a no-op — the SAME state object — when
-  // the layer is absent, is not of kind `html`, or the index is outside the
-  // list, exactly as `removeLayer` and `moveLayer` refuse.
-  | { type: "addHtmlElement"; layerId: string; kind: HtmlElementKind }
-  | { type: "removeHtmlElement"; layerId: string; index: number }
-  | { type: "moveHtmlElement"; layerId: string; from: number; to: number }
-  | { type: "setHtmlElementText"; layerId: string; index: number; text: string }
-  | {
-      type: "setHtmlElementFrame";
-      layerId: string;
-      index: number;
-      patch: Partial<Frame>;
-    }
-  // The element's own font override (HL5e, HL-D8): a patch field set to
-  // `undefined` is the "brief default" choice — it REMOVES the key, so an
-  // element whose last override is cleared carries no `style` at all, the X16
-  // canonical form that keeps a set-then-clear round trip byte-identical.
-  | {
-      type: "setHtmlElementStyle";
-      layerId: string;
-      index: number;
-      patch: Partial<HtmlElementStyle>;
-    }
   | { type: "addBeat"; text?: string }
   | { type: "removeBeat"; index: number }
   | { type: "moveBeat"; from: number; to: number }
@@ -1173,47 +1134,6 @@ function clampedGeometryProp(value: number): number | undefined {
   return Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : undefined;
 }
 
-/**
- * Where a new element sits (HL5a), per kind: fractions of the canvas (D130), so
- * the element the editor adds is one both renderers can already place. Keyed by
- * the kind vocabulary, so a fourth kind is a compile error rather than a frame
- * nobody chose.
- */
-const NEW_ELEMENT_FRAMES: Readonly<Record<HtmlElementKind, Frame>> = {
-  text: { x: 0.08, y: 0.08, w: 0.84, h: 0.18, anchor: "top" },
-  button: { x: 0.35, y: 0.74, w: 0.3, h: 0.12, anchor: "bottom" },
-  image: { x: 0.08, y: 0.16, w: 0.84, h: 0.56, anchor: "middle" },
-};
-
-/** A frame's own fields, in declaration order — the equality an edit asks first. */
-const FRAME_FIELDS = ["x", "y", "w", "h", "anchor"] as const;
-/** The numeric ones: the fields a frame patch clamps. */
-const FRAME_NUMBER_FIELDS = ["x", "y", "w", "h"] as const;
-
-/**
- * A new element (HL5a): the kind, the frame its kind starts at, and — for the
- * kinds that carry copy — the copy the catalog hands out. An `image` element
- * gets no `text` key at all, because the domain's field table refuses copy on
- * it: an element the boundary rejects is not a default, it is a defect.
- */
-function newHtmlElement(kind: HtmlElementKind): HtmlElement {
-  const frame = { ...NEW_ELEMENT_FRAMES[kind] };
-  return kind === "image"
-    ? { kind, frame }
-    : { kind, text: messages.htmlElementDefaultCopy(kind), frame };
-}
-
-/**
- * The `html` layer's element list, with the index an element action needs to
- * put it back — or undefined when the action must be a no-op: no layer by that
- * id, a layer of another kind (only `html` carries elements, HL-D1), or an
- * index outside the list.
- */
-interface HtmlElementEdit {
-  readonly layerIndex: number;
-  readonly elements: readonly HtmlElement[];
-}
-
 /** The layer a track action names, resolved once: its index and its tracks. */
 interface TrackEdit {
   readonly layerIndex: number;
@@ -1223,9 +1143,9 @@ interface TrackEdit {
 
 /**
  * The layer a track action addresses, or `undefined` when there is nothing to
- * edit — the same refusal shape as `htmlElementEdit`, so every track action is
- * a no-op returning the SAME state object when the layer is absent, is a kind
- * that may not carry tracks, or an index falls outside the list.
+ * edit, so every track action is a no-op returning the SAME state object when
+ * the layer is absent, is a kind that may not carry tracks, or an index falls
+ * outside the list.
  *
  * The kind check reads `TRACKABLE_LAYER_KINDS` rather than listing the four
  * kinds here. `layerTracksProblem` would refuse them anyway at the gate below,
@@ -1263,7 +1183,7 @@ function trackEdit(
  * duplicate `t` or an off-clock stop never reaches the template. Then an edit
  * that changed nothing returns the SAME state object, so it writes no history
  * entry. Only then is the key dropped when the list is empty and the layer run
- * through `canonicalLayer`, which owns `tracks: []` (and `enabled`, `elements`
+ * through `canonicalLayer`, which owns `tracks: []` (and `enabled`, `link`
  * and `props`) rather than having that rule restated here.
  */
 function withLayerTracks(
@@ -1312,80 +1232,14 @@ function tracksEqual(a: readonly Track[], b: readonly Track[]): boolean {
   });
 }
 
-function htmlElementEdit(
-  state: EditorState,
-  layerId: string,
-  index?: number,
-): HtmlElementEdit | undefined {
-  const layerIndex = state.template.layers.findIndex((layer) => layer.id === layerId);
-  if (layerIndex === -1) return undefined;
-  const layer = state.template.layers[layerIndex]!;
-  if (layer.kind !== "html") return undefined;
-  const elements = layer.elements ?? [];
-  if (index !== undefined && !isListIndex(index, elements.length)) return undefined;
-  return { layerIndex, elements };
-}
-
 /**
- * The layer carrying `elements`, in the one canonical form (HL5a): an empty
- * list IS the absent key, so removing the last element returns the layer — and
- * with it the template — to the shape it was loaded with, and an add-then-remove
- * is `valuesEqual` (the round-trip lesson from M3's review). The `elements: []`
- * a naive splice leaves behind is a brief that reads as dirty for a change the
- * user undid.
- */
-function withElements(
-  layer: CreativeTemplateLayer,
-  elements: readonly HtmlElement[],
-): CreativeTemplateLayer {
-  if (elements.length > 0) return { ...layer, elements };
-  // The double cast is the type system's blind spot around `delete` on a
-  // record, the same one `withEnabled` names: the result is the same layer
-  // minus a field that was optional to begin with.
-  const next: Record<string, unknown> = { ...layer };
-  delete next.elements;
-  return next as unknown as CreativeTemplateLayer;
-}
-
-function withHtmlElements(
-  state: EditorState,
-  edit: HtmlElementEdit,
-  elements: readonly HtmlElement[],
-): EditorState {
-  const layers = [...state.template.layers];
-  layers[edit.layerIndex] = withElements(layers[edit.layerIndex]!, elements);
-  return { ...state, template: { ...state.template, layers } };
-}
-
-/**
- * The one canonical form an element's defaults take (X16, HL5e): a `style`
- * block naming no override restates what the absent key already means — every
- * field of an optional-override block is optional — so it is dropped the way
- * `enabled: true` and `elements: []` are. Same object when there is nothing to
- * drop.
- */
-function canonicalElement(element: HtmlElement): HtmlElement {
-  if (
-    element.style === undefined ||
-    element.style.fontWeight !== undefined ||
-    element.style.fontFamily !== undefined
-  )
-    return element;
-  const next: Record<string, unknown> = { ...element };
-  delete next.style;
-  return next as unknown as HtmlElement;
-}
-
-/**
- * The one canonical form a template layer's defaults take (X16, D129, D160, HL5a):
- * `enabled: true` restates what absence already means, `link: false` restates
- * what its absence already means at the opposite polarity (D160 — absence is
- * "not a click target"), `elements: []` is
- * the same as no list, and an element's empty `style` block is the same as no
- * block. Mapping these to absent is what `withEnabled` / `withElements` /
- * `setHtmlElementStyle` already write, so a hand-authored brief that spelled
- * the defaults out compares equal to the draft after an off→on (or add→remove,
- * or set→clear) round trip. Same object when nothing needs rewriting.
+ * The one canonical form a template layer's defaults take (X16, D129, D160):
+ * `enabled: true` restates what absence already means, and `link: false`
+ * restates what its absence already means at the opposite polarity (D160 —
+ * absence is "not a click target"). Mapping these to absent is what
+ * `withEnabled` / `withLink` already write, so a hand-authored brief that
+ * spelled the defaults out compares equal to the draft after an off→on
+ * round trip. Same object when nothing needs rewriting.
  *
  * SE2 adds `props` to that list, and it is the half CC4 deferred. CC4's
  * `setLayerProps` drops the key when its own edit empties the block, so the
@@ -1426,12 +1280,6 @@ function canonicalLayer(layer: CreativeTemplateLayer): CreativeTemplateLayer {
   // NOT linked, so it is `link: false` — not `link: true` — that restates
   // what absence already says.
   const dropLink = layer.link === false;
-  const dropElements = Array.isArray(layer.elements) && layer.elements.length === 0;
-  const canonicalElements = dropElements ? undefined : layer.elements?.map(canonicalElement);
-  const restyledElements =
-    canonicalElements !== undefined &&
-    layer.elements !== undefined &&
-    canonicalElements.some((element, index) => element !== layer.elements![index]);
   // K5 adds `tracks` to the same list. `tracks: []` is accepted by
   // `layerTracksProblem` — it walks no entries — but says exactly what absence
   // says, so a brief that spelled it out, or a draft whose last stop was just
@@ -1445,13 +1293,10 @@ function canonicalLayer(layer: CreativeTemplateLayer): CreativeTemplateLayer {
   // a NEW object only when it dropped something, so a props block already
   // canonical comes back identical and the layer is returned untouched.
   const repropped = nextProps !== (layer.props as Record<string, unknown> | undefined);
-  if (!dropEnabled && !dropLink && !dropElements && !restyledElements && !repropped && !dropTracks)
-    return layer;
+  if (!dropEnabled && !dropLink && !repropped && !dropTracks) return layer;
   const next: Record<string, unknown> = { ...layer };
   if (dropEnabled) delete next.enabled;
   if (dropLink) delete next.link;
-  if (dropElements) delete next.elements;
-  else if (restyledElements) next.elements = canonicalElements;
   if (repropped) {
     if (nextProps === undefined) delete next.props;
     else next.props = nextProps;
@@ -1552,27 +1397,6 @@ export function canonicalBrief(brief: CampaignBrief): CampaignBrief {
   const template = canonicalTemplate(brief.template);
   const withTemplate = template === brief.template ? brief : { ...brief, template };
   return canonicalNullScalars(withTemplate);
-}
-
-/**
- * A frame patch merged into `prior` (HL5a), so the result is always a frame the
- * domain accepts: a value that is not a finite number — a NaN or an infinity a
- * hand-restored draft can carry — keeps the one it had, a finite one is clamped
- * into [0, 1], and an `anchor` outside `ANCHOR_VALUES` is refused the same way.
- * The editor never produces an element the boundary refuses.
- */
-function clampedFrame(patch: Partial<Frame>, prior: Frame): Frame {
-  const next: Record<string, unknown> = { ...prior };
-  for (const field of FRAME_NUMBER_FIELDS) {
-    const value = patch[field];
-    if (typeof value !== "number" || !Number.isFinite(value)) continue;
-    next[field] = Math.min(1, Math.max(0, value));
-  }
-  const anchor = patch.anchor;
-  if (anchor !== undefined && (ANCHOR_VALUES as readonly string[]).includes(anchor)) {
-    next.anchor = anchor;
-  }
-  return next as unknown as Frame;
 }
 
 function reduceEditor(state: EditorState, action: EditorAction): EditorState {
@@ -1862,7 +1686,7 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
       else delete next.props;
       const nextLayers = state.template.layers.map((existing, i) =>
         // `canonicalLayer` (D129, HL5a) is called here, not extended: it already
-        // owns `enabled` and `elements`, and running its result through this
+        // owns `enabled` and `link`, and running its result through this
         // action keeps the layer canonical on every field a future lane teaches
         // it about `props`, not only the one this action just touched.
         i === index ? canonicalLayer(next as unknown as CreativeTemplateLayer) : existing,
@@ -1951,118 +1775,6 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
         // gate below would silently swallow.
         .filter((track) => track.stops.length > 0);
       return withLayerTracks(state, edit, nextTracks);
-    }
-    case "addHtmlElement": {
-      const edit = htmlElementEdit(state, action.layerId);
-      if (edit === undefined) return state;
-      return withHtmlElements(state, edit, [...edit.elements, newHtmlElement(action.kind)]);
-    }
-    case "removeHtmlElement": {
-      const edit = htmlElementEdit(state, action.layerId, action.index);
-      if (edit === undefined) return state;
-      return withHtmlElements(
-        state,
-        edit,
-        edit.elements.filter((_, index) => index !== action.index),
-      );
-    }
-    case "moveHtmlElement": {
-      const edit = htmlElementEdit(state, action.layerId, action.from);
-      if (edit === undefined) return state;
-      // Both ends, both bounds, and integrality — the `moveLayer` rule: an
-      // element moved onto its own index says nothing, and one moved past the
-      // end would splice it somewhere no caller asked for.
-      if (action.from === action.to) return state;
-      if (!isListIndex(action.to, edit.elements.length)) return state;
-      const elements = [...edit.elements];
-      const [moved] = elements.splice(action.from, 1);
-      elements.splice(action.to, 0, moved);
-      return withHtmlElements(state, edit, elements);
-    }
-    case "setHtmlElementText": {
-      const edit = htmlElementEdit(state, action.layerId, action.index);
-      if (edit === undefined) return state;
-      // An `image` element carries no copy — the domain's field table refuses
-      // it — so there is no text to set and nothing to write.
-      if (edit.elements[action.index]!.kind === "image") return state;
-      return withHtmlElements(
-        state,
-        edit,
-        edit.elements.map((element, index) =>
-          index === action.index ? { ...element, text: action.text } : element,
-        ),
-      );
-    }
-    case "setHtmlElementFrame": {
-      const edit = htmlElementEdit(state, action.layerId, action.index);
-      if (edit === undefined) return state;
-      const element = edit.elements[action.index]!;
-      const frame = clampedFrame(action.patch, element.frame);
-      // Already the frame asked for: no edit, so no history entry either.
-      if (FRAME_FIELDS.every((field) => frame[field] === element.frame[field])) return state;
-      return withHtmlElements(
-        state,
-        edit,
-        edit.elements.map((existing, index) =>
-          index === action.index ? { ...existing, frame } : existing,
-        ),
-      );
-    }
-    case "setHtmlElementStyle": {
-      const edit = htmlElementEdit(state, action.layerId, action.index);
-      if (edit === undefined) return state;
-      const element = edit.elements[action.index]!;
-      // An `image` element carries no style — the domain's field table refuses
-      // it — so there is nothing to override and nothing to write.
-      if (element.kind === "image") return state;
-      const style: { fontWeight?: FontWeightKind; fontFamily?: FontFamilyKind } = {
-        ...element.style,
-      };
-      // A field the patch names is written or removed; a field it does not
-      // name keeps what the element had — the per-field composition of
-      // `setStyle`'s patch, the `setHtmlElementFrame` patch's shape.
-      if ("fontWeight" in action.patch) {
-        const value = action.patch.fontWeight;
-        if (value === undefined) delete style.fontWeight;
-        else {
-          // The reducer is the contract, the way `setBeatWeight`'s bounds are:
-          // a value outside the domain's own vocabulary refuses the whole
-          // dispatch, so a hand-restored draft cannot smuggle one in.
-          if (!(FONT_WEIGHT_VALUES as readonly number[]).includes(value)) return state;
-          style.fontWeight = value;
-        }
-      }
-      if ("fontFamily" in action.patch) {
-        const value = action.patch.fontFamily;
-        if (value === undefined) delete style.fontFamily;
-        else {
-          if (!(FONT_FAMILY_VALUES as readonly string[]).includes(value)) return state;
-          style.fontFamily = value;
-        }
-      }
-      const overridden = Object.keys(style).length > 0;
-      // Already the style asked for — the absent block included: no edit, so
-      // no history entry either, the `setHtmlElementFrame` rule.
-      if (
-        overridden === (element.style !== undefined) &&
-        element.style?.fontWeight === style.fontWeight &&
-        element.style?.fontFamily === style.fontFamily
-      )
-        return state;
-      return withHtmlElements(
-        state,
-        edit,
-        edit.elements.map((existing, index) => {
-          if (index !== action.index) return existing;
-          if (overridden) return { ...existing, style };
-          // The all-absent block IS the absent key (X16's rule, the same one
-          // `withElements` gives an empty list): set-then-clear leaves the
-          // element exactly as it loaded, so the round trip is byte-clean.
-          const next: Record<string, unknown> = { ...existing };
-          delete next.style;
-          return next as unknown as HtmlElement;
-        }),
-      );
     }
     case "addBeat":
       // The domain caps a sequence at MAX_BEATS and the parser refuses more, so the editor
@@ -2550,7 +2262,7 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
       // dispatch lands. Save & apply awaits the network first, so recomputing here
       // would record edits made during the request as applied when the run has the
       // pre-await brief — the same trap the `save` action carries `saved` for.
-      // A server brief may still spell `enabled: true` / `elements: []`; store
+      // A server brief may still spell `enabled: true`; store
       // the canonical form so the dirty check compares like with like (X16).
       return {
         ...state,
@@ -3000,7 +2712,7 @@ export function fromBrief(
   brief: CampaignBrief,
   entry?: { file: string; revision?: string },
 ): EditorState {
-  // X16: a hand-authored `enabled: true` or `elements: []` is the same as
+  // X16: a hand-authored `enabled: true` is the same as
   // absence. X17: a YAML empty scalar is null at the boundary (D68); the
   // snapshot maps those to the form `toBrief` writes (`""` or omitted), so
   // a freshly loaded file is not dirty. Canonicalise once so the draft and
@@ -3110,7 +2822,7 @@ export function fromBrief(
     type: brief.type ?? DEFAULT_CAMPAIGN_TYPE,
     // The brief's template is held after X16 canonicalisation (L3a): `toBrief`
     // writes it back so a load → save never drops or re-derives the pinned
-    // reference. `enabled: true` and `elements: []` are absence, not edits.
+    // reference. `enabled: true` is absence, not an edit.
     template: canonical.template,
     campaignName: brief.id,
     briefId: brief.id,
@@ -3615,7 +3327,7 @@ export function normalizeDraftState(raw: Record<string, unknown>): EditorState {
       ? (rawSource as EditorSource)
       : initial.source;
   // A draft persisted before X16 may still carry a raw `enabled: true` /
-  // `elements: []` snapshot. Canonicalise it so recovery does not restore a
+  // spelled-out default. Canonicalise it so recovery does not restore a
   // "difference" that is only the default spelled out, and so a restored
   // draft is not dirty against its own snapshot. canonicalBrief itself
   // leaves a template it does not recognise unchanged, so a corrupt

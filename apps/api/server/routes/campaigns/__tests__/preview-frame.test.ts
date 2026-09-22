@@ -3,8 +3,6 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createApp, createRouter, toWebHandler, type EventHandler } from "h3";
-import { createCanvas, loadImage } from "@napi-rs/canvas";
-import type { HtmlElement } from "@campaignfoundry/CampaignOrchestration";
 import {
   AssetReusingImageGenerator,
   CanvasFfmpegVideoCompositor,
@@ -51,6 +49,36 @@ const jsonReq = (body: unknown) =>
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
   });
+
+/** Canonical image-html: no shade, accent, or copy. Dropping the brief template makes the preview draw image-text instead. */
+const imageHtmlTemplate = {
+  id: "canonical-image-html",
+  version: 1,
+  creativeType: "image-html",
+  unit: "standard-web",
+  layers: [
+    { id: "image", kind: "image" },
+    { id: "html", kind: "html" },
+    { id: "logo", kind: "logo" },
+  ],
+};
+
+/** Image-text with the shade layer on, switched off, or left out of the list. */
+const imageTextTemplate = (shade: "on" | "off" | "absent") => ({
+  id: "canonical-image-text",
+  version: 1,
+  creativeType: "image-text",
+  unit: "standard-web",
+  layers: [
+    { id: "image", kind: "image" },
+    ...(shade === "absent"
+      ? []
+      : [{ id: "shade", kind: "shade", ...(shade === "off" ? { enabled: false } : {}) }]),
+    { id: "accent", kind: "accent" },
+    { id: "static-text", kind: "static-text" },
+    { id: "logo", kind: "logo" },
+  ],
+});
 
 /** A 1×1 transparent PNG, so the compositor's logo step has real bytes to load. */
 const ONE_PX_PNG = Buffer.from(
@@ -265,6 +293,43 @@ describe("POST /campaigns/preview-frame", () => {
     });
   });
 
+  test("an image-html brief previews different pixels than the image-text canonical", async () => {
+    const web = mount();
+    const html = await web(
+      jsonReq({
+        brief: { ...brief(), output: { formats: ["html"] }, template: imageHtmlTemplate },
+        cell: cell(),
+      }),
+    );
+    const text = await web(
+      jsonReq({ brief: { ...brief(), template: imageTextTemplate("on") }, cell: cell() }),
+    );
+    expect(html.status).toBe(200);
+    expect(text.status).toBe(200);
+    expect(Buffer.from(await html.arrayBuffer())).not.toEqual(
+      Buffer.from(await text.arrayBuffer()),
+    );
+  });
+
+  test("a disabled shade previews the same pixels as a template that omits it", async () => {
+    const web = mount();
+    const off = await web(
+      jsonReq({ brief: { ...brief(), template: imageTextTemplate("off") }, cell: cell() }),
+    );
+    const on = await web(
+      jsonReq({ brief: { ...brief(), template: imageTextTemplate("on") }, cell: cell() }),
+    );
+    const absent = await web(
+      jsonReq({ brief: { ...brief(), template: imageTextTemplate("absent") }, cell: cell() }),
+    );
+    expect(off.status).toBe(200);
+    expect(on.status).toBe(200);
+    expect(absent.status).toBe(200);
+    const offBytes = Buffer.from(await off.arrayBuffer());
+    expect(offBytes).not.toEqual(Buffer.from(await on.arrayBuffer()));
+    expect(offBytes).toEqual(Buffer.from(await absent.arrayBuffer()));
+  });
+
   test("returns 400 with errorMessage when body parsing throws a non-Error", async () => {
     const g = globalThis as Record<string, unknown>;
     const original = g.readBody;
@@ -278,186 +343,5 @@ describe("POST /campaigns/preview-frame", () => {
     } finally {
       g.readBody = original;
     }
-  });
-
-  /**
-   * HL5d — the editor preview draws the `html` layer.
-   *
-   * The preview is the only place a user sees an element they just added (HL-D7:
-   * no user-authored string is rendered into the operator's own DOM), so these
-   * tests ask the route for the SAME cell twice — once carrying an element, once
-   * carrying none — and compare the bytes the real compositor drew. Pixel
-   * identity outside the element's own frame is what makes "drawn" more than
-   * "accepted": a preview that silently dropped the layer would answer 200
-   * `image/png` for both and differ nowhere.
-   */
-  describe("the html layer (HL5d)", () => {
-    /**
-     * The canonical `image-html` template, materialised: image, html, logo. No
-     * campaign type seeds it — D120's presets name three social types — so the
-     * pinned id is the library's own, spelled out rather than derived.
-     */
-    const htmlTemplate = (
-      html: Record<string, unknown> = {},
-      extra: readonly Record<string, unknown>[] = [],
-    ) => ({
-      id: "canonical-image-html",
-      version: 1,
-      creativeType: "image-html",
-      unit: "standard-web",
-      layers: [
-        { id: "image", kind: "image" },
-        { id: "html", kind: "html", ...html },
-        ...extra,
-        { id: "logo", kind: "logo" },
-      ],
-    });
-
-    /** A frame well inside a 9:16 canvas, so "outside it" is most of the image. */
-    const FRAME = { x: 0.1, y: 0.42, w: 0.8, h: 0.12, anchor: "middle" } as const;
-
-    const textElement = (text: string): HtmlElement => ({ kind: "text", text, frame: FRAME });
-
-    const htmlBrief = (
-      html: Record<string, unknown> = {},
-      extra: readonly Record<string, unknown>[] = [],
-    ) => ({
-      ...brief(),
-      template: htmlTemplate(html, extra),
-      // The family an `image-html` template actually produces (D119, X14): the
-      // boundary refuses one left on the static default, preview included.
-      output: { formats: ["html"] },
-    });
-
-    /** One frame's decoded pixels, as the compositor's own tests decode them. */
-    interface Frame {
-      readonly data: Uint8ClampedArray;
-      readonly width: number;
-      readonly height: number;
-    }
-
-    const decode = async (png: Uint8Array): Promise<Frame> => {
-      const image = await loadImage(Buffer.from(png));
-      const canvas = createCanvas(image.width, image.height);
-      const ctx = canvas.getContext("2d");
-      ctx.drawImage(image, 0, 0);
-      return {
-        data: ctx.getImageData(0, 0, canvas.width, canvas.height).data,
-        width: canvas.width,
-        height: canvas.height,
-      };
-    };
-
-    /** One rendered preview frame: its cache key and its decoded pixels. */
-    const render = async (body: { brief: unknown; cell: unknown }) => {
-      const res = await mount()(jsonReq(body));
-      expect(res.status).toBe(200);
-      expect(res.headers.get("content-type")).toBe("image/png");
-      return {
-        key: res.headers.get("x-preview-frame-cache-key")!,
-        frame: await decode(Buffer.from(await res.arrayBuffer())),
-      };
-    };
-
-    /**
-     * How many pixels differ between two frames of one canvas, split by the
-     * element's own frame (X10 clips the drawer to it, so a drawn element cannot
-     * move a pixel outside).
-     */
-    const diffByRegion = (a: Frame, b: Frame): { inside: number; outside: number } => {
-      expect(a.width).toBe(b.width);
-      expect(a.height).toBe(b.height);
-      const x0 = Math.round(FRAME.x * a.width);
-      const x1 = Math.round((FRAME.x + FRAME.w) * a.width);
-      const y0 = Math.round(FRAME.y * a.height);
-      const y1 = Math.round((FRAME.y + FRAME.h) * a.height);
-      let inside = 0;
-      let outside = 0;
-      for (let y = 0; y < a.height; y += 1) {
-        const rowInBox = y >= y0 && y < y1;
-        for (let x = 0; x < a.width; x += 1) {
-          const i = (y * a.width + x) * 4;
-          if (
-            a.data[i] === b.data[i] &&
-            a.data[i + 1] === b.data[i + 1] &&
-            a.data[i + 2] === b.data[i + 2] &&
-            a.data[i + 3] === b.data[i + 3]
-          ) {
-            continue;
-          }
-          if (rowInBox && x >= x0 && x < x1) inside += 1;
-          else outside += 1;
-        }
-      }
-      return { inside, outside };
-    };
-
-    test("an element draws inside its own frame and nowhere else", async () => {
-      const withElement = await render({
-        brief: htmlBrief({ elements: [textElement("Summer Sale")] }),
-        cell: cell(),
-      });
-      const without = await render({ brief: htmlBrief(), cell: cell() });
-
-      expect(withElement.key).toMatch(/^[a-f0-9]{64}$/);
-      expect(withElement.key).not.toBe(without.key);
-
-      const diff = diffByRegion(withElement.frame, without.frame);
-      expect(diff.inside).toBeGreaterThan(0);
-      expect(diff.outside).toBe(0);
-    });
-
-    test("changing only the element's copy moves the key and the pixels inside the frame", async () => {
-      const first = await render({
-        brief: htmlBrief({ elements: [textElement("Summer Sale")] }),
-        cell: cell(),
-      });
-      const second = await render({
-        brief: htmlBrief({ elements: [textElement("Winter Sale")] }),
-        cell: cell(),
-      });
-
-      expect(second.key).not.toBe(first.key);
-      const diff = diffByRegion(second.frame, first.frame);
-      expect(diff.inside).toBeGreaterThan(0);
-      // The copy stays inside its own frame (X10), so nothing outside it moves.
-      expect(diff.outside).toBe(0);
-    });
-
-    test("an element whose copy is markup renders image/png — drawn as text, never parsed", async () => {
-      const hostile = await render({
-        brief: htmlBrief({ elements: [textElement("<img src=x onerror=alert(1)>")] }),
-        cell: cell(),
-      });
-      expect(hostile.key).toMatch(/^[a-f0-9]{64}$/);
-
-      // It was drawn, not dropped: the same cell without it differs inside the frame.
-      const without = await render({ brief: htmlBrief(), cell: cell() });
-      expect(diffByRegion(hostile.frame, without.frame).inside).toBeGreaterThan(0);
-    });
-
-    test("a disabled html layer renders pixel-identical to the same template without it", async () => {
-      // The disabled layer is an ADDITION, not the canonical one: `html` is a
-      // required kind for `image-html`, so MP-D4 refuses a brief whose only html
-      // layer is off (load-brief.test.ts pins that refusal) — a second, enabled
-      // html layer is what makes a disabled one legal. What is being pinned is
-      // X9's own promise: a disabled layer renders what the template renders with
-      // that layer absent.
-      const disabled = await render({
-        brief: htmlBrief({}, [
-          {
-            id: "html-paused",
-            kind: "html",
-            enabled: false,
-            elements: [textElement("Summer Sale")],
-          },
-        ]),
-        cell: cell(),
-      });
-      const without = await render({ brief: htmlBrief(), cell: cell() });
-
-      const diff = diffByRegion(disabled.frame, without.frame);
-      expect(diff.inside + diff.outside).toBe(0);
-    });
   });
 });

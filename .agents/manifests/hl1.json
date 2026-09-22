@@ -15,13 +15,14 @@
         "node",
         "packages/CampaignOrchestration/src/domain/value-objects/__tests__/html-element.test.ts"
       ],
-      "verdict": "caught"
+      "verdict": "caught",
+      "retired": "Retired by AR2: html-element.ts is deleted. Copy is a static-text layer; an elements key is refused by isLayerEntry and validateTemplate."
     },
     {
       "file": "packages/CampaignOrchestration/src/domain/value-objects/html-element.ts",
       "before": "value < 0 || value > 1",
       "after": "      value < 0 ||\n      value > 1.5",
-      "because": "A frame fraction is canvas-relative, so [0, 1] is the contract, not a near-enough guess. Widening the ceiling to 1.5 admits 1.4, and the renderer would place an element at a fraction no canvas has. (Re-anchored by ANCHORS: the recorded text was reformatted or moved, not changed — the mutation, its claim and its command are untouched.)",
+      "because": "A frame fraction is canvas-relative, so [0, 1] is the contract, not a near-enough guess. Widening the ceiling to 1.5 admits 1.4, and the renderer would place an element at a fraction no canvas has. (Re-anchored by ANCHORS: the recorded text was reformatted or moved, not changed \u2014 the mutation, its claim and its command are untouched.)",
       "command": [
         "yarn",
         "vitest",
@@ -30,7 +31,8 @@
         "node",
         "packages/CampaignOrchestration/src/domain/value-objects/__tests__/html-element.test.ts"
       ],
-      "verdict": "caught"
+      "verdict": "caught",
+      "retired": "Retired by AR2: html-element.ts is deleted. Element frames are no longer a brief field."
     },
     {
       "file": "packages/CampaignOrchestration/src/domain/value-objects/html-element.ts",
@@ -45,7 +47,8 @@
         "node",
         "packages/CampaignOrchestration/src/domain/value-objects/__tests__/html-element.test.ts"
       ],
-      "verdict": "caught"
+      "verdict": "caught",
+      "retired": "Retired by AR2: html-element.ts is deleted. Image elements and their field table are gone."
     },
     {
       "file": "packages/CampaignOrchestration/src/domain/value-objects/html-element.ts",
@@ -60,7 +63,8 @@
         "node",
         "packages/CampaignOrchestration/src/domain/value-objects/__tests__/html-element.test.ts"
       ],
-      "verdict": "caught"
+      "verdict": "caught",
+      "retired": "Retired by AR2: html-element.ts is deleted. Text elements and their required-copy table are gone."
     },
     {
       "file": "packages/CampaignOrchestration/src/domain/value-objects/html-element.ts",
@@ -75,13 +79,14 @@
         "node",
         "packages/CampaignOrchestration/src/domain/value-objects/__tests__/html-element.test.ts"
       ],
-      "verdict": "caught"
+      "verdict": "caught",
+      "retired": "Retired by AR2: html-element.ts is deleted. Button elements and their required-copy table are gone."
     },
     {
       "file": "packages/CampaignOrchestration/src/domain/value-objects/brief-template.ts",
       "before": "  if (layerElementsProblem(rec.kind as LayerKind, rec.elements) !== undefined) {\n    return false;\n  }",
       "after": "  // mutated: the elements check dropped from the per-layer guard",
-      "because": "A validator no boundary calls is a vocabulary nothing enforces. Drop the call from the per-layer guard and a malformed element passes `isBriefTemplate` even though `layerElementsProblem` still refuses it in isolation — the two boundaries would drift exactly as D134's props check exists to prevent. (Re-anchored by ANCHORS: K1 added the tracks check after this one, so the elements check became a guard clause instead of the tail return; The semantic edit is the same one; the after-text is that edit re-expressed against the current shape, not a new claim.)",
+      "because": "A validator no boundary calls is a vocabulary nothing enforces. Drop the call from the per-layer guard and a malformed element passes `isBriefTemplate` even though `layerElementsProblem` still refuses it in isolation \u2014 the two boundaries would drift exactly as D134's props check exists to prevent. (Re-anchored by ANCHORS: K1 added the tracks check after this one, so the elements check became a guard clause instead of the tail return; The semantic edit is the same one; the after-text is that edit re-expressed against the current shape, not a new claim.)",
       "command": [
         "yarn",
         "vitest",
@@ -90,7 +95,8 @@
         "node",
         "packages/CampaignOrchestration/src/domain/value-objects/__tests__/brief-template.test.ts"
       ],
-      "verdict": "caught"
+      "verdict": "caught",
+      "retired": "Retired by AR2: isLayerEntry no longer calls layerElementsProblem. An own elements property returns false, which is the refusal that replaced this call."
     }
   ]
 }

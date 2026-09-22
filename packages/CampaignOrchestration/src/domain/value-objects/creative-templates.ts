@@ -9,7 +9,6 @@ import type { AdvertisingUnit } from "./advertising-units.js";
 import type { LayerProps } from "./brief-template.js";
 import type { LayerFrame } from "./creative-geometry.js";
 import type { CreativeType } from "./creative-types.js";
-import type { HtmlElement } from "./html-element.js";
 import type { LayerKind } from "./layer-kinds.js";
 import type { Track } from "./tracks.js";
 
@@ -55,13 +54,6 @@ export interface CreativeTemplateLayer {
    * is what keeps the compositor goldens unedited.
    */
   readonly link?: boolean;
-  /**
-   * The `html` layer's element list (HL1, HL-D1). Optional, and absent means no
-   * elements; only the `html` layer kind may carry a defined list, so the
-   * canonical templates — which carry their own `props`-less layers — never
-   * grow the key.
-   */
-  readonly elements?: readonly HtmlElement[];
   /**
    * The layer's own keyframe tracks (K1). Optional, and absent means no
    * motion — the canonical library's own layers never carry tracks; only a

@@ -5,7 +5,6 @@ import {
   type CompositeRequest,
   type CopyTimeline,
   type CreativeTemplateLayer,
-  type HtmlElement,
 } from "@campaignfoundry/CampaignOrchestration";
 import type { CanvasSpec } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import type { LayerFrame } from "@campaignfoundry/CampaignOrchestration/creative-geometry";
@@ -266,42 +265,5 @@ describe("compositor layer frames (D130, L10a)", () => {
     // The clip must clear that region; the unclipped timeline frame must not.
     expect(nonRedBelow(full, 12)).toBeGreaterThan(0);
     expect(nonRedBelow(clipped, 12)).toBe(0);
-  });
-
-  test("an html layer frame clips its elements to the resolved rect", async () => {
-    const element: HtmlElement = {
-      kind: "button",
-      text: "Buy",
-      frame: { x: 0, y: 0, w: 1, h: 1, anchor: "middle" },
-    };
-    const template = (frame?: LayerFrame): BriefTemplate => ({
-      id: "canonical-image-html",
-      version: 1,
-      creativeType: "image-html",
-      unit: "standard-web",
-      layers: [
-        { id: "image", kind: "image" },
-        {
-          id: "html",
-          kind: "html",
-          ...(frame !== undefined ? { frame } : {}),
-          elements: [element],
-        },
-      ],
-    });
-    const req = (template: BriefTemplate): TemplateRequest => ({
-      background: redBackground(40, 40),
-      message: "Stay wild, stay hydrated",
-      brandColor: BRAND,
-      logoPath: "assets/inputs/hydra-logo.png",
-      canvas: { ratio: "1:1" },
-      pixelSize: { width: 40, height: 40 },
-      layout: "headline-bottom",
-      tone: "bold",
-      template,
-    });
-    const clipped = await pixels(req(template({ x: 0, y: 0, w: 0.4, h: 0.4, anchor: "top" })));
-    const full = await pixels(req(template()));
-    expect(sameBytes(clipped, full)).toBe(false);
   });
 });

@@ -38,10 +38,6 @@ import {
   type LogoProps,
   type TextProps,
   toneFontWeight,
-  htmlTextGeometry,
-  htmlButtonFontSize,
-  htmlTextFirstLineOffset,
-  htmlElementFont,
 } from "@campaignfoundry/CampaignOrchestration";
 import {
   CREATIVE_GEOMETRY,
@@ -1538,126 +1534,15 @@ function paintFill(c: LayerDrawContext): void {
 }
 
 /**
- * The html layer (HL3, HL-D5) — draws the dispatched layer's element list
- * (text, button, image) directly onto the canvas, producing the static raster
- * fallback rendition (D122) before the markup assembler (HL4) is built. The
- * elements come from `c.layer` — the layer this draw was dispatched for (the
- * compositor iterates per layer, and nothing caps how many `html` layers a
- * template may carry, so hunting `prepared.layers` for "the" html layer would
- * paint the first list twice and never paint the second). Absent or empty
- * elements (e.g. the canonical template) is a no-op blit.
+ * The html layer paints nothing. Copy is markup (`assembleHtml`), and the
+ * canonical image-html template's html layer was already a no-op blit — which
+ * is what keeps the compositor goldens byte-identical.
  */
-function drawHtml(c: LayerDrawContext): void {
-  const { ctx, prepared, layer } = c;
-  if (layer.elements === undefined || layer.elements.length === 0) {
-    return;
-  }
-  const { width, height, canvas } = prepared;
-  const framed = layer.frame !== undefined;
-  if (framed) {
-    const dest = layerPixelRect(layer, canvas, width, height);
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(dest.x, dest.y, dest.w, dest.h);
-    ctx.clip();
-  }
-  for (const element of layer.elements) {
-    const boxX = element.frame.x * width;
-    const boxY = element.frame.y * height;
-    const boxW = element.frame.w * width;
-    const boxH = element.frame.h * height;
-
-    switch (element.kind) {
-      case "button": {
-        const radius = Math.min(8, boxH / 2, boxW / 2);
-        ctx.save();
-        // Clip to the rounded shape the button is filled with: the markup's
-        // `border-radius` + `overflow: hidden` clips its label to that shape too.
-        ctx.beginPath();
-        ctx.roundRect(boxX, boxY, boxW, boxH, radius);
-        ctx.clip();
-        ctx.fillStyle = prepared.brandColor;
-        ctx.beginPath();
-        ctx.roundRect(boxX, boxY, boxW, boxH, radius);
-        ctx.fill();
-
-        ctx.fillStyle = "#ffffff";
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        const fontSize = htmlButtonFontSize(boxH, scaleBasis(prepared.canvas, width, height));
-        // HL5e: the element's own font, resolved by the one function
-        // `assembleHtml` also calls — the button's override if it names one,
-        // the brief's resolved weight/family otherwise.
-        const font = htmlElementFont(element, prepared);
-        ctx.font = `${font.fontWeight} ${fontSize}px ${font.fontFamily}, sans-serif`;
-        ctx.fillText(element.text!, boxX + boxW / 2, boxY + boxH / 2);
-        ctx.restore();
-        break;
-      }
-      case "text": {
-        ctx.save();
-        ctx.beginPath();
-        ctx.rect(boxX, boxY, boxW, boxH);
-        ctx.clip();
-        ctx.fillStyle = "#ffffff";
-        ctx.textAlign = prepared.style.align;
-        ctx.textBaseline = "alphabetic";
-        // HL5f: font size, line height and letter spacing come from the one
-        // function `assembleHtml` also calls — see `htmlTextGeometry`.
-        const geometry = htmlTextGeometry({
-          boxH,
-          canvasBasis: scaleBasis(prepared.canvas, width, height),
-          sizeScale: prepared.style.sizeScale,
-          lineHeight: prepared.style.lineHeight,
-          letterSpacing: prepared.style.letterSpacing,
-        });
-        const { fontSize, lineHeight, letterSpacing } = geometry;
-        // HL5e: the element's own font, resolved by the one function
-        // `assembleHtml` also calls — stated BEFORE the wrap below, which
-        // measures with it, exactly as the browser lays out wrapped markup at
-        // the same font the markup's inline style declares.
-        const font = htmlElementFont(element, prepared);
-        ctx.font = `${font.fontWeight} ${fontSize}px ${font.fontFamily}, sans-serif`;
-        ctx.letterSpacing = `${letterSpacing}px`;
-
-        const lines = wrapText(ctx, element.text!, boxW);
-        // HL5f: the per-anchor baseline offset comes from the one function
-        // `htmlTextFirstLineOffset` — see its comment: the MARKUP does not
-        // consume that offset (it positions with CSS flex `justify-content`,
-        // which the browser resolves against the real line count); this
-        // canvas pass uses the REAL post-wrap line count.
-        const startY =
-          boxY +
-          htmlTextFirstLineOffset(element.frame.anchor, boxH, fontSize, lineHeight, lines.length);
-
-        let lineX: number;
-        if (prepared.style.align === "left") {
-          lineX = boxX;
-        } else if (prepared.style.align === "right") {
-          lineX = boxX + boxW;
-        } else {
-          lineX = boxX + boxW / 2;
-        }
-
-        let currY = startY;
-        for (const line of lines) {
-          ctx.fillText(line, lineX, currY);
-          currY += lineHeight;
-        }
-        ctx.restore();
-        break;
-      }
-      case "image": {
-        ctx.save();
-        ctx.drawImage(prepared.background, boxX, boxY, boxW, boxH);
-        ctx.restore();
-        break;
-      }
-    }
-  }
-  if (framed) {
-    ctx.restore();
-  }
+function drawHtml(_c: LayerDrawContext): void {
+  // The html layer paints nothing. Copy is markup, and the canonical
+  // image-html template's html layer was already a no-op blit — which is
+  // what keeps the compositor goldens byte-identical.
+  return;
 }
 
 /**

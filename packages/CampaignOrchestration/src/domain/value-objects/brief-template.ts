@@ -24,7 +24,6 @@ import {
   type CreativeType,
   type OrderConstraint,
 } from "./creative-types.js";
-import { layerElementsProblem, type HtmlElement } from "./html-element.js";
 import { LAYER_KINDS, type LayerKind } from "./layer-kinds.js";
 import { layerTracksProblem, type Track } from "./tracks.js";
 import { ANCHOR_VALUES, type AnchorKind } from "./variation-defaults.js";
@@ -550,9 +549,9 @@ export function satisfiesOrderConstraints(
  * when present, must be a shape that layer's kind may carry (D134, X2) — same key set,
  * every number a fraction in [0, 1], the anchor a vocabulary member, `alt` a string — so an
  * unknown key or a value out of range cannot ride the guard into the editor or
- * the run. An `html` layer's `elements`, when present, must be well-formed
- * elements of the vocabulary (HL1), so the two renderers never receive a list
- * the other cannot draw. A layer's `tracks`, when present, must be well-formed
+ * the run. A layer that still carries an own `elements` property is not a layer
+ * (AR2): copy is a `static-text` layer, and the key is refused rather than
+ * dropped. A layer's `tracks`, when present, must be well-formed
  * keyframe tracks (K1), and only a kind this compositor draws through one
  * single mechanism may carry them. Every `layers` entry must itself be a layer — a non-null, non-array
  * object naming a non-empty string `id` and a vocabulary `kind` (L5): a `null`, a bare
@@ -643,7 +642,6 @@ interface LayerEntry {
   readonly frame?: LayerFrame;
   readonly props?: LayerProps;
   readonly link?: boolean;
-  readonly elements?: readonly HtmlElement[];
   readonly tracks?: readonly Track[];
 }
 
@@ -655,9 +653,9 @@ interface LayerEntry {
  * names neither of — with `enabled`, when present, a boolean (D129), `link`,
  * when present, a boolean (D160), `frame`,
  * when present, a canvas-relative box (D130), `props`, when present, a shape
- * that kind may carry (D134), `elements`,
- * when present, an `html` layer's element list (HL1), and `tracks`, when
- * present, that kind's own keyframe tracks (K1) — so an element with an
+ * that kind may carry (D134), and `tracks`, when
+ * present, that kind's own keyframe tracks (K1). An own `elements` property
+ * refuses the entry outright (AR2) — so an element with an
  * unknown kind, a non-vocabulary anchor, a fraction outside [0, 1], or a
  * track on a kind that draws through no single mechanism cannot ride the
  * guard into the editor. This is the
@@ -691,8 +689,6 @@ function isLayerEntry(layer: unknown): layer is LayerEntry {
   ) {
     return false;
   }
-  if (layerElementsProblem(rec.kind as LayerKind, rec.elements) !== undefined) {
-    return false;
-  }
+  if (Object.prototype.hasOwnProperty.call(rec, "elements")) return false;
   return layerTracksProblem(rec.kind as LayerKind, rec.tracks) === undefined;
 }

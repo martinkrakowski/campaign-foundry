@@ -380,19 +380,7 @@ describe("dumpBrief element order (HL1)", () => {
     expect(yaml.indexOf("props:")).toBeLessThan(yaml.indexOf("elements:"));
   });
 
-  test("emits each element's keys as kind, text, frame, and the frame's as x, y, w, h, anchor", () => {
-    const yaml = dumpBrief(templated);
-    expect(yaml.indexOf("kind: text")).toBeLessThan(yaml.indexOf("text: Buy"));
-    expect(yaml.indexOf("text: Buy")).toBeLessThan(yaml.indexOf("frame:"));
-    expect(yaml.indexOf("x: 0.11")).toBeLessThan(yaml.indexOf("y: 0.22"));
-    expect(yaml.indexOf("y: 0.22")).toBeLessThan(yaml.indexOf("w: 0.33"));
-    expect(yaml.indexOf("w: 0.33")).toBeLessThan(yaml.indexOf("h: 0.44"));
-    expect(yaml.indexOf("h: 0.44")).toBeLessThan(yaml.indexOf("anchor: top"));
-    // The second element's own frame follows, untouched.
-    expect(yaml.indexOf("anchor: top")).toBeLessThan(yaml.indexOf("anchor: middle"));
-  });
-
-  test("an html layer's elements round-trip through YAML and dump byte-identically", () => {
+  test("an unrecognized elements key round-trips through YAML and dumps byte-identically", () => {
     const yaml = dumpBrief(templated);
     expect(parse(yaml)).toEqual(templated);
     expect(dumpBrief(parse(yaml) as object)).toBe(yaml);
@@ -649,52 +637,6 @@ describe("dumpBrief layer tracks order (K1)", () => {
     const yaml = dumpBrief(positional);
     expect(yaml.indexOf("tracks:")).toBeLessThan(yaml.indexOf("extra:"));
     expect(parse(yaml)).toEqual(positional);
-    expect(dumpBrief(parse(yaml) as object)).toBe(yaml);
-  });
-});
-
-describe("dumpBrief element style order (HL5e)", () => {
-  // Positional proof, the `tracks` test's own warning: an unnamed key written
-  // BEFORE `style` in source order must still emit after it, and `style` must
-  // sit between `text` and `frame` however the source scrambles them.
-  const styled = {
-    ...brief,
-    template: {
-      id: "canonical-image-html",
-      version: 1,
-      creativeType: "image-html",
-      unit: "standard-web",
-      layers: [
-        {
-          id: "html",
-          kind: "html",
-          elements: [
-            {
-              frame: { anchor: "top", h: 0.3, w: 0.5, y: 0.2, x: 0.1 },
-              style: { fontFamily: "Lora", fontWeight: 400 },
-              extra: "z",
-              text: "Buy",
-              kind: "text",
-            },
-          ],
-        },
-      ],
-    },
-  };
-
-  test("style sits after text and before frame, and its own keys are ordered", () => {
-    const yaml = dumpBrief(styled);
-    expect(yaml.indexOf("text: Buy")).toBeLessThan(yaml.indexOf("style:"));
-    // The declared position, not merely "somewhere": the unnamed `extra` key
-    // comes first in source order yet must emit after `style` and its frame.
-    expect(yaml.indexOf("style:")).toBeLessThan(yaml.indexOf("extra:"));
-    expect(yaml.indexOf("style:")).toBeLessThan(yaml.indexOf("frame:"));
-    expect(yaml.indexOf("fontWeight: 400")).toBeLessThan(yaml.indexOf("fontFamily: Lora"));
-  });
-
-  test("an element with a style round-trips and dumps byte-identically", () => {
-    const yaml = dumpBrief(styled);
-    expect(parse(yaml)).toEqual(styled);
     expect(dumpBrief(parse(yaml) as object)).toBe(yaml);
   });
 });

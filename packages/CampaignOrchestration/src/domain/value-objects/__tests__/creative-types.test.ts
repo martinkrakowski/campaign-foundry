@@ -67,11 +67,12 @@ describe("creative types and compatibility rules (D119, D124, D131)", () => {
     // drawn now, and `image-text` is the composition D131's own example is
     // written in — a band under the copy with a picture above it.
     expect(CREATIVE_TYPE_RULES["image-text"].accepts).toContain("fill");
-    // `video` and `image-html` are unchanged: a fill over a video plate and a
-    // fill under markup are both compositions nobody has specified, and
-    // widening them here would accept a template no lane has drawn.
+    // `video` is unchanged: a fill over a video plate is a composition nobody
+    // has specified. `image-html` accepts fill now (AR2) — the markup lane
+    // compiles the layer kinds a display ad is made of, and fill stays in the
+    // raster.
     expect(CREATIVE_TYPE_RULES.video.accepts).not.toContain("fill");
-    expect(CREATIVE_TYPE_RULES["image-html"].accepts).not.toContain("fill");
+    expect(CREATIVE_TYPE_RULES["image-html"].accepts).toContain("fill");
   });
 
   test("fill carries no cardinality cap (D124)", () => {
@@ -122,10 +123,10 @@ describe("creative types and compatibility rules (D119, D124, D131)", () => {
 
     expect(CREATIVE_TYPE_RULES["image-html"]).toEqual({
       unit: "standard-web",
-      accepts: ["image", "html", "logo"],
+      accepts: ["image", "html", "logo", "static-text", "shade", "accent", "fill"],
       required: ["image", "html"],
-      maxOf: { logo: 1 },
-      sharedBudgets: [],
+      maxOf: { logo: 1, shade: 1, accent: 1 },
+      sharedBudgets: [{ kinds: ["static-text"], max: 1 }],
       outputFamilies: ["html"],
     });
 

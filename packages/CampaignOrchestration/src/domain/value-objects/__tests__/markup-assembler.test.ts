@@ -1,339 +1,261 @@
 import { describe, expect, test } from "vitest";
-import { assembleHtml } from "../markup-assembler.js";
-import type { HtmlElement } from "../html-element.js";
+import type { CreativeTemplateLayer } from "../creative-templates.js";
+import { assembleHtml, type AssembleHtmlOptions } from "../markup-assembler.js";
 
-describe("assembleHtml (HL4, HL-D3, HL-D6)", () => {
-  const sampleElements: readonly HtmlElement[] = [
-    {
-      kind: "button",
-      text: "Shop Now",
-      frame: { x: 0.1, y: 0.7, w: 0.3, h: 0.1, anchor: "middle" },
-    },
-    {
-      kind: "text",
-      text: "Summer Collection",
-      frame: { x: 0.05, y: 0.1, w: 0.8, h: 0.2, anchor: "top" },
-    },
-    {
-      kind: "image",
-      frame: { x: 0.1, y: 0.3, w: 0.8, h: 0.4, anchor: "middle" },
-    },
-  ];
+const base = (over: Partial<AssembleHtmlOptions> = {}): AssembleHtmlOptions => ({
+  layers: [],
+  canvas: { ratio: "1:1" },
+  brandColor: "#1473E6",
+  ...over,
+});
 
-  test("a brief with a clickDestination produces a unit declaring var clickTag and NO <a href (HL-D3)", () => {
-    const destination = "https://example.com/landing-page";
-    const result = assembleHtml({
-      elements: sampleElements,
-      canvas: { ratio: "1:1" },
-      brandColor: "#ff0000",
-      clickDestination: destination,
-    });
+const layer = (
+  over: Partial<CreativeTemplateLayer> & Pick<CreativeTemplateLayer, "id" | "kind">,
+): CreativeTemplateLayer => over;
 
-    // 1. Must emit var clickTag in script
-    expect(result.html).toContain(`var clickTag = "${destination}";`);
-    // 2. Must NEVER emit an <a href
-    expect(result.html).not.toContain("<a href");
-    expect(result.html).not.toContain("<a ");
-    // 3. Interactive elements (button) navigate via window.open(window.clickTag)
+const linkedCopy = layer({ id: "copy", kind: "static-text", link: true });
+
+describe("assembleHtml", () => {
+  test("a linked static-text layer with an absolute destination emits clickTag and never an anchor", () => {
+    const result = assembleHtml(
+      base({
+        layers: [linkedCopy],
+        headline: "Shop",
+        clickDestination: "https://example.com/landing-page",
+      }),
+    );
+
+    expect(result.html).toContain('var clickTag = "https://example.com/landing-page";');
     expect(result.html).toContain("window.open(window.clickTag)");
+    expect(result.html).not.toContain("<a");
+    expect(result.html).toContain('<button type="button"');
+    expect((result.html.match(/<script/g) ?? []).length).toBe(1);
   });
 
-  test("a brief without clickDestination produces no clickTag variable and no navigation handler (HL-D3)", () => {
-    const result = assembleHtml({
-      elements: sampleElements,
-      canvas: { ratio: "1:1" },
-      brandColor: "#ff0000",
-    });
+  test("the same layers with no clickDestination emit no clickTag and no window.open", () => {
+    const result = assembleHtml(base({ layers: [linkedCopy], headline: "Shop" }));
 
     expect(result.html).not.toContain("clickTag");
     expect(result.html).not.toContain("window.open");
-    expect(result.html).not.toContain("<a ");
+    expect(result.html).toContain('<button type="button"');
+    expect(result.html).not.toContain("onclick");
   });
 
-  test("an over-budget bundle is refused against profile.maxBytes for that platform, naming budget and overage (HL-D6)", () => {
-    // Set a tiny budget to guarantee failure
-    const maxBytes = 100;
+  test("an empty clickDestination is the same absence: no script and no onclick", () => {
+    const result = assembleHtml(
+      base({ layers: [linkedCopy], headline: "Shop", clickDestination: "" }),
+    );
+
+    expect(result.html).not.toContain("clickTag");
+    expect(result.html).not.toContain("window.open");
+  });
+
+  test("a javascript clickDestination is refused as a non-absolute http(s) URL", () => {
     expect(() =>
-      assembleHtml({
-        elements: sampleElements,
-        canvas: { ratio: "1:1" },
-        brandColor: "#ff0000",
-        profile: { maxBytes },
+      assembleHtml(base({ layers: [linkedCopy], clickDestination: "javascript:alert(1)" })),
+    ).toThrow(
+      'assembleHtml: clickDestination must be an absolute http(s) URL, got "javascript:alert(1)"',
+    );
+  });
+
+  test("a headline that looks like a script is escaped and never raw", () => {
+    const result = assembleHtml(
+      base({
+        layers: [layer({ id: "copy", kind: "static-text" })],
+        headline: '<script>alert("xss")</script>',
       }),
-    ).toThrowError(/exceeds.*budget/i);
-
-    try {
-      assembleHtml({
-        elements: sampleElements,
-        canvas: { ratio: "1:1" },
-        brandColor: "#ff0000",
-        profile: { maxBytes },
-      });
-      expect.unreachable("should have thrown");
-    } catch (error) {
-      const msg = (error as Error).message;
-      expect(msg).toContain("100"); // Names the budget
-      expect(msg).toMatch(/overage|over/i); // Names the overage
-    }
-  });
-
-  test("a bundle within budget succeeds and returns html and bytes", () => {
-    const result = assembleHtml({
-      elements: sampleElements,
-      canvas: { ratio: "1:1" },
-      brandColor: "#ff0000",
-      profile: { maxBytes: 10 * 1024 * 1024 }, // 10 MB
-    });
-
-    expect(result.html).toBeTruthy();
-    expect(result.bytes.length).toBe(result.byteLength);
-    expect(result.bytes.length).toBeLessThanOrEqual(10 * 1024 * 1024);
-  });
-
-  test("escapes user-authored copy in text and buttons against XSS (HL-D7)", () => {
-    const maliciousElements: readonly HtmlElement[] = [
-      {
-        kind: "text",
-        text: '<script>alert("xss")</script>',
-        frame: { x: 0, y: 0, w: 1, h: 0.5, anchor: "top" },
-      },
-      {
-        kind: "button",
-        text: '"><img src=x onerror=alert(1)>',
-        frame: { x: 0, y: 0.6, w: 0.5, h: 0.2, anchor: "middle" },
-      },
-    ];
-
-    const result = assembleHtml({
-      elements: maliciousElements,
-      canvas: { ratio: "1:1" },
-      brandColor: "#0000ff",
-    });
+    );
 
     expect(result.html).not.toContain('<script>alert("xss")</script>');
-    expect(result.html).toContain("&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;");
-    expect(result.html).not.toContain('"><img src=x');
+    expect(result.html).toContain("&lt;script&gt;");
+    expect(result.html).toContain("<p ");
   });
 
-  test("renders display sizes (e.g. 728x90) and honors style typography", () => {
-    const result = assembleHtml({
-      elements: sampleElements,
-      canvas: { size: "728x90" },
-      brandColor: "#22c55e",
-      style: {
-        fontFamily: "Lora",
-        fontWeight: 700,
-        align: "right",
-        letterSpacing: 0.05,
-        lineHeight: 1.2,
-        sizeScale: 0.5,
-      },
-      fallbackImageSrc: "custom-fallback.png",
-    });
-
-    expect(result.html).toContain("width: 728px");
-    expect(result.html).toContain("height: 90px");
-    expect(result.html).toContain("Lora");
-    expect(result.html).toContain("custom-fallback.png");
-  });
-
-  test("handles text anchor middle, bottom, and undefined element text", () => {
-    const elements: readonly HtmlElement[] = [
-      {
-        kind: "text",
-        text: "Middle text",
-        frame: { x: 0, y: 0, w: 1, h: 0.3, anchor: "middle" },
-      },
-      {
-        kind: "text",
-        text: "Bottom text",
-        frame: { x: 0, y: 0.3, w: 1, h: 0.3, anchor: "bottom" },
-      },
-      {
-        kind: "text",
-        frame: { x: 0, y: 0.6, w: 1, h: 0.2, anchor: "top" },
-      },
-      {
-        kind: "button",
-        frame: { x: 0, y: 0.8, w: 1, h: 0.2, anchor: "middle" },
-      },
-    ];
-
-    const result = assembleHtml({
-      elements,
-      canvas: { ratio: "1:1" },
-      brandColor: "#000000",
-    });
-
-    // HL5f (orchestrator fix round): text elements place with CSS flex
-    // `justify-content`, NOT a padding-top computed for one line — a browser
-    // must lay out however many lines the text actually wraps to, which the
-    // server-side assembler cannot know (no browser, D122). No text or
-    // button element emits a padding-top.
-    expect(result.html).not.toContain("padding-top");
-    expect(result.html).toContain("justify-content: center;");
-    expect(result.html).toContain("justify-content: flex-end;");
-    expect(result.html).toContain("justify-content: flex-start;");
-  });
-
-  describe("HL5f — renderer fidelity: tone-derived weight and shared geometry", () => {
-    const topElement: HtmlElement = {
-      kind: "text",
-      text: "Hi",
-      frame: { x: 0, y: 0, w: 1, h: 0.2, anchor: "top" },
-    };
-
-    test('tone "subtle" with no brief fontWeight renders weight 500, matching the canvas (D60)', () => {
-      const result = assembleHtml({
-        elements: [topElement],
-        canvas: { ratio: "1:1" },
-        brandColor: "#1473E6",
-        tone: "subtle",
-      });
-      expect(result.html).toContain("font-weight: 500;");
-      expect(result.html).not.toContain("font-weight: bold;");
-    });
-
-    test('tone "bold" with no brief fontWeight renders weight bold', () => {
-      const result = assembleHtml({
-        elements: [topElement],
-        canvas: { ratio: "1:1" },
-        brandColor: "#1473E6",
-        tone: "bold",
-      });
-      expect(result.html).toContain("font-weight: bold;");
-    });
-
-    test("no tone supplied at all still defaults to bold — the pre-HL5f behaviour, unchanged", () => {
-      const result = assembleHtml({
-        elements: [topElement],
-        canvas: { ratio: "1:1" },
-        brandColor: "#1473E6",
-      });
-      expect(result.html).toContain("font-weight: bold;");
-    });
-
-    test("a style-supplied fontWeight still overrides tone", () => {
-      const result = assembleHtml({
-        elements: [topElement],
-        canvas: { ratio: "1:1" },
-        brandColor: "#1473E6",
-        tone: "subtle",
-        style: { fontWeight: 700 },
-      });
-      expect(result.html).toContain("font-weight: 700;");
-    });
-
-    test("a button's font size is the canvas's own two-term min, hand-computed (HL5f item 3)", () => {
-      const result = assembleHtml({
-        elements: [
-          {
-            kind: "button",
-            text: "Shop",
-            frame: { x: 0.1, y: 0.1, w: 0.3, h: 0.08, anchor: "middle" },
-          },
-        ],
-        canvas: { ratio: "1:1" },
-        brandColor: "#1473E6",
-      });
-      // "1:1" resolves to 1080x1080; boxH = 0.08 * 1080 = 86.4.
-      // min(round(86.4 * 0.45), round(1080 * 0.6)) = min(39, 648) = 39.
-      expect(result.html).toContain("font-size: 39px");
-    });
-
-    test("a multi-line bottom-anchored text element is positioned by flex, not a single-line padding-top", () => {
-      // A narrow box and a long headline: certain to wrap to more than one
-      // line in a real browser. The assembler cannot know how many lines
-      // that will be (no browser to wrap in, D122) — a padding-top computed
-      // for one line would push line 2+ below the box, clipped by
-      // `overflow: hidden` (the regression this test pins).
-      const result = assembleHtml({
-        elements: [
-          {
-            kind: "text",
-            text: "This headline is long enough to wrap across more than one line in a real browser",
-            frame: { x: 0, y: 0, w: 0.3, h: 0.3, anchor: "bottom" },
-          },
-        ],
-        canvas: { ratio: "1:1" },
-        brandColor: "#1473E6",
-      });
-      const styleMatch = /<div style="([^"]*)">/.exec(result.html);
-      expect(styleMatch).not.toBeNull();
-      const style = styleMatch![1]!;
-      expect(style).not.toContain("padding-top");
-      expect(style).toContain("display: flex");
-      expect(style).toContain("justify-content: flex-end;");
-    });
-  });
-
-  test("a clickDestination containing </script> cannot break out of the script element (HL-D7)", () => {
+  test("a clickDestination containing a script close still round-trips through escapeScriptJson", () => {
     const destination = "https://example.com/</script><script>alert(1)</script>";
-    const result = assembleHtml({
-      elements: sampleElements,
-      canvas: { ratio: "1:1" },
-      brandColor: "#1473E6",
-      clickDestination: destination,
-    });
+    const result = assembleHtml(
+      base({
+        layers: [linkedCopy],
+        clickDestination: destination,
+      }),
+    );
 
-    // Exactly one script element: the crafted value cannot close the
-    // declaration and append executable markup.
     expect((result.html.match(/<script/g) ?? []).length).toBe(1);
     expect((result.html.match(/<\/script>/g) ?? []).length).toBe(1);
-    // `<`/`>` survive only as \uXXXX escapes — no literal HTML syntax in the JS string.
     expect(result.html).toContain("\\u003C/script\\u003E");
-    // The value stays a correct JS string: decoding the literal yields the original destination.
     const declaration = /var clickTag = (".*");/.exec(result.html);
     expect(declaration).not.toBeNull();
     expect(JSON.parse(declaration![1] as string)).toBe(destination);
   });
 
-  test("a brandColor that is not the documented 6-digit hex shape is refused (HL-D7)", () => {
-    expect(() =>
-      assembleHtml({
-        elements: sampleElements,
-        canvas: { ratio: "1:1" },
-        brandColor: '#fff" autofocus onfocus="alert(1)',
+  test("an over-budget bundle names the budget and the overage", () => {
+    const within = assembleHtml(base({ layers: [linkedCopy], profile: { maxBytes: 1024 * 1024 } }));
+    const maxBytes = 100;
+    expect(() => assembleHtml(base({ layers: [linkedCopy], profile: { maxBytes } }))).toThrow(
+      `HTML bundle weight (${within.byteLength} bytes) exceeds profile.maxBytes budget (${maxBytes} bytes) with overage of ${within.byteLength - maxBytes} bytes`,
+    );
+  });
+
+  test("an image layer emits one img of the fallback, and a logo does not repeat that raster", () => {
+    const result = assembleHtml(
+      base({
+        layers: [
+          layer({ id: "picture", kind: "image" }),
+          layer({ id: "mark", kind: "logo" }),
+          layer({ id: "copy", kind: "static-text" }),
+        ],
+        headline: "Shop",
       }),
-    ).toThrowError(/brandColor/);
+    );
+
+    expect(result.html.match(/<img/g)?.length).toBe(1);
+    expect(result.html).toContain("fallback.png");
+    expect(result.html).toContain("left: 0px; top: 0px; width: 1080px; height: 1080px;");
+    expect(result.html).toContain("left: 5%; top: 10%; width: 90%; height: 30%;");
+    expect(result.html).toContain(">Shop</p>");
   });
 
-  test("a valid brandColor renders unchanged in the button style attribute", () => {
-    const result = assembleHtml({
-      elements: [
-        { kind: "button", text: "Go", frame: { x: 0, y: 0, w: 1, h: 1, anchor: "middle" } },
-      ],
-      canvas: { ratio: "1:1" },
-      brandColor: "#1473E6",
-    });
+  test("a display-size frame overlay wins over the base fractions", () => {
+    const result = assembleHtml(
+      base({
+        canvas: { size: "300x250" },
+        layers: [
+          layer({
+            id: "picture",
+            kind: "image",
+            frame: {
+              x: 0,
+              y: 0,
+              w: 1,
+              h: 1,
+              anchor: "top",
+              byFamily: { size: { "300x250": { x: 0.25 } } },
+            },
+          }),
+        ],
+      }),
+    );
 
-    expect(result.html).toContain("background-color: #1473E6;");
+    expect(result.html).toContain("left: 75px;");
+    expect(result.html).not.toContain("left: 0px;");
   });
 
-  test("handles empty elements options", () => {
-    const result = assembleHtml({
-      canvas: { ratio: "1:1" },
-      brandColor: "#000000",
-    });
-
-    expect(result.html).toContain('<div id="ad-container">\n      \n    </div>');
-  });
-
-  test("a button element's style contains overflow: hidden (X10)", () => {
-    const result = assembleHtml({
-      elements: [
-        {
-          kind: "button",
-          text: "Click Me",
-          frame: { x: 0.1, y: 0.7, w: 0.3, h: 0.1, anchor: "middle" },
+  test("static-text uses the resolved face, not the browser's paragraph defaults", () => {
+    const result = assembleHtml(
+      base({
+        layers: [layer({ id: "copy", kind: "static-text" })],
+        headline: "Shop",
+        tone: "subtle",
+        style: {
+          fontFamily: "Lora",
+          fontWeight: 700,
+          align: "left",
+          letterSpacing: 0,
+          lineHeight: 1.2,
+          sizeScale: 1,
         },
-      ],
-      canvas: { ratio: "1:1" },
-      brandColor: "#1473E6",
-    });
+      }),
+    );
 
-    const buttonMatch = /<button[^>]*style="([^"]*)"/.exec(result.html);
-    expect(buttonMatch).not.toBeNull();
-    expect(buttonMatch![1]).toContain("overflow: hidden;");
+    expect(result.html).toContain("font-family: Lora, sans-serif");
+    expect(result.html).toContain("font-weight: 700");
+    expect(result.html).toContain("margin: 0");
+    expect(result.html).toContain("color: #ffffff");
+  });
+
+  test("a picture layer honours an override src and a string alt, and a non-string alt is empty", () => {
+    const named = assembleHtml(
+      base({
+        layers: [layer({ id: "picture", kind: "image", props: { alt: 'say "hi" <b>' } })],
+        fallbackImageSrc: "custom.png",
+      }),
+    );
+    expect(named.html).toContain('src="custom.png"');
+    expect(named.html).toContain('alt="say &quot;hi&quot; &lt;b&gt;"');
+
+    const unnamed = assembleHtml(
+      base({
+        layers: [
+          layer({
+            id: "picture",
+            kind: "image",
+            props: { alt: 1 } as CreativeTemplateLayer["props"],
+          }),
+          layer({ id: "mark", kind: "logo", props: { width: 0.2 } }),
+        ],
+      }),
+    );
+    expect(unnamed.html).toContain('alt=""');
+    expect(unnamed.html).not.toContain('alt="1"');
+  });
+
+  test("a shade layer emits nothing, and so does a disabled picture", () => {
+    const empty = assembleHtml(base());
+    const shaded = assembleHtml(
+      base({
+        layers: [
+          layer({ id: "scrim", kind: "shade" }),
+          layer({ id: "picture", kind: "image", enabled: false }),
+          layer({ id: "html", kind: "html" }),
+        ],
+      }),
+    );
+    expect(shaded.html).toBe(empty.html);
+    expect(shaded.html).not.toContain("<img");
+  });
+
+  test("a declared frame is canvas fractions in px, and a linked image opens clickTag", () => {
+    const result = assembleHtml(
+      base({
+        layers: [
+          layer({
+            id: "picture",
+            kind: "image",
+            link: true,
+            frame: { x: 0.1, y: 0.2, w: 0.5, h: 0.25, anchor: "top" },
+          }),
+          layer({
+            id: "copy",
+            kind: "static-text",
+            frame: { x: 0, y: 0, w: 1, h: 0.2, anchor: "top" },
+          }),
+        ],
+        headline: "Hi",
+        clickDestination: "https://example.com/landing-page",
+      }),
+    );
+
+    expect(result.html).toContain("left: 108px; top: 216px; width: 540px; height: 270px;");
+    expect(result.html).toContain(
+      '<div style="position: absolute; left: 108px; top: 216px; width: 540px; height: 270px;"><button type="button" onclick="window.open(window.clickTag)"><img',
+    );
+    expect(result.html).toContain('<p style="position: absolute; left: 0px;');
+    expect(result.html).toContain(">Hi</p>");
+  });
+
+  test("a linked image without a destination is not wrapped in a button", () => {
+    const result = assembleHtml(
+      base({ layers: [layer({ id: "picture", kind: "image", link: true })] }),
+    );
+    expect(result.html).toContain("<img");
+    expect(result.html).not.toContain("<button");
+  });
+
+  test("an absent headline on static-text emits an empty paragraph", () => {
+    const result = assembleHtml(base({ layers: [layer({ id: "copy", kind: "static-text" })] }));
+    expect(result.html).toContain("<p ");
+    expect(result.html).toContain("></p>");
+  });
+
+  test("a brandColor that is not the documented 6-digit hex shape is refused", () => {
+    expect(() =>
+      assembleHtml(base({ brandColor: '#fff" autofocus onfocus="alert(1)' })),
+    ).toThrowError(/assembleHtml: brandColor must be a 6-digit hex colour/);
+  });
+
+  test("a bundle within budget returns html whose byteLength matches the encoded bytes", () => {
+    const result = assembleHtml(base({ profile: { maxBytes: 1024 * 1024 } }));
+    expect(result.bytes.length).toBe(result.byteLength);
+    expect(result.byteLength).toBeLessThanOrEqual(1024 * 1024);
   });
 });

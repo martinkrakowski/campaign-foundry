@@ -735,11 +735,12 @@ describe("parseBrief", () => {
     });
   });
 
-  describe("html layer elements (HL1)", () => {
-    const frame = { x: 0.1, y: 0.2, w: 0.5, h: 0.3, anchor: "top" };
-
-    /** The canonical image-html template with `elements` swapped onto one layer. */
-    const withElements = (layerId: string, elements: unknown) => ({
+  describe("a layer elements key is refused (AR2)", () => {
+    const htmlBrief = {
+      ...valid,
+      output: { formats: ["html"] },
+    };
+    const imageHtml = {
       id: "canonical-image-html",
       version: 1,
       creativeType: "image-html",
@@ -748,166 +749,41 @@ describe("parseBrief", () => {
         { id: "image", kind: "image" },
         { id: "html", kind: "html" },
         { id: "logo", kind: "logo" },
-      ].map((layer) => (layer.id === layerId ? { ...layer, elements } : layer)),
-    });
-
-    /**
-     * The template's own output family spelled out (X14): `image-html`
-     * produces html, so an html-template brief that leaves `output.formats`
-     * to its `static` default is refused by the boundary as of right now —
-     * these element-shape tests must ask for the format their template ships.
-     */
-    const htmlBrief = {
-      ...valid,
-      output: { formats: ["html"] },
+      ],
     };
+    const REFUSAL =
+      'Campaign brief field "template.layers[1].elements" is no longer a layer field; author the copy as a static-text layer.';
 
-    test("an html layer carrying each element kind parses and carries the list verbatim", () => {
-      const elements = [
-        { kind: "text", text: "Buy now", frame },
-        { kind: "button", text: "Shop", frame },
-        { kind: "image", frame },
-      ];
-      const parsed = parseBrief({
-        ...htmlBrief,
-        template: withElements("html", elements),
-      });
-      expect(parsed.template.layers.find((layer) => layer.kind === "html")?.elements).toEqual(
-        elements,
-      );
+    test("the canonical image-html template, which has no elements key, loads", () => {
+      expect(() => parseBrief({ ...htmlBrief, template: imageHtml })).not.toThrow();
     });
 
-    test("an html layer with no elements, or an empty list, parses", () => {
-      expect(() =>
-        parseBrief({ ...htmlBrief, template: withElements("html", undefined) }),
-      ).not.toThrow();
-      expect(() => parseBrief({ ...htmlBrief, template: withElements("html", []) })).not.toThrow();
-    });
-
-    test("elements on a non-html layer are refused — the kind carries none", () => {
-      expect(() =>
-        parseBrief({
-          ...htmlBrief,
-          template: withElements("image", [{ kind: "image", frame }]),
-        }),
-      ).toThrow(
-        'Campaign brief field "template.layers[0].elements" must be absent for layer kind "image"; got [{"kind":"image","frame":{"x":0.1,"y":0.2,"w":0.5,"h":0.3,"anchor":"top"}}].',
-      );
-    });
-
-    test("elements that are not an array are refused", () => {
-      expect(() => parseBrief({ ...htmlBrief, template: withElements("html", "nope") })).toThrow(
-        'Campaign brief field "template.layers[1].elements" must be an array of elements; got "nope".',
-      );
-    });
-
-    test("a malformed element names its index and field", () => {
-      expect(() =>
-        parseBrief({
-          ...htmlBrief,
-          template: withElements("html", [{ kind: "link", text: "x", frame }]),
-        }),
-      ).toThrow(
-        'Campaign brief field "template.layers[1].elements[0].kind" must be one of "text", "button", "image"; got "link".',
-      );
-      expect(() =>
-        parseBrief({
-          ...htmlBrief,
-          template: withElements("html", [{ kind: "text", text: "x", frame: { ...frame, x: 2 } }]),
-        }),
-      ).toThrow(
-        'Campaign brief field "template.layers[1].elements[0].frame.x" must be a number in [0, 1]; got 2.',
-      );
-      expect(() =>
-        parseBrief({
-          ...htmlBrief,
-          template: withElements("html", [{ kind: "image", text: "x", frame }]),
-        }),
-      ).toThrow(
-        'Campaign brief field "template.layers[1].elements[0].text" must be one of "kind", "frame" for element kind "image"; got "x".',
-      );
-    });
-
-    test("a text or button element with no copy is refused, naming the absent field", () => {
-      for (const kind of ["text", "button"]) {
+    test("an own elements property is refused rather than dropped, whatever its value", () => {
+      for (const elements of [[], "nope", [{ kind: "text", text: "Buy" }], null]) {
         expect(() =>
           parseBrief({
             ...htmlBrief,
-            template: withElements("html", [{ kind, frame }]),
+            template: {
+              ...imageHtml,
+              layers: imageHtml.layers.map((layer) =>
+                layer.id === "html" ? { ...layer, elements } : layer,
+              ),
+            },
           }),
-        ).toThrow(
-          'Campaign brief field "template.layers[1].elements[0].text" must be present; got undefined.',
-        );
+        ).toThrow(REFUSAL);
       }
-    });
-
-    test("the refusal holds with enforceCapabilities: false (authoring mode too)", () => {
       expect(() =>
-        parseBrief(
-          {
-            ...htmlBrief,
-            template: withElements("image", [{ kind: "image", frame }]),
+        parseBrief({
+          ...htmlBrief,
+          template: {
+            ...imageHtml,
+            layers: imageHtml.layers.map((layer) =>
+              layer.id === "image" ? { ...layer, elements: [] } : layer,
+            ),
           },
-          { enforceCapabilities: false },
-        ),
-      ).toThrow(/template.layers\[0\]\.elements/);
-    });
-
-    // HL5e — the element `style` override rides the SAME shared decision, so
-    // the boundary test pins the assembled message, path included.
-    test("a valid element style override parses and survives verbatim", () => {
-      const elements = [
-        { kind: "text", text: "Buy now", frame, style: { fontWeight: 400 } },
-        { kind: "button", text: "Shop", frame, style: { fontFamily: "Lora", fontWeight: 700 } },
-        { kind: "image", frame },
-      ];
-      const parsed = parseBrief({
-        ...htmlBrief,
-        template: withElements("html", elements),
-      });
-      expect(parsed.template.layers.find((layer) => layer.kind === "html")?.elements).toEqual(
-        elements,
-      );
-    });
-
-    test("an unknown weight or family, an extra key, and style on an image are refused with the path", () => {
-      expect(() =>
-        parseBrief({
-          ...htmlBrief,
-          template: withElements("html", [
-            { kind: "text", text: "x", frame, style: { fontWeight: 500 } },
-          ]),
         }),
       ).toThrow(
-        'Campaign brief field "template.layers[1].elements[0].style.fontWeight" must be one of 400, 700; got 500.',
-      );
-      expect(() =>
-        parseBrief({
-          ...htmlBrief,
-          template: withElements("html", [
-            { kind: "text", text: "x", frame, style: { fontFamily: "Comic Sans" } },
-          ]),
-        }),
-      ).toThrow(
-        'Campaign brief field "template.layers[1].elements[0].style.fontFamily" must be one of "Inter", "Lora"; got "Comic Sans".',
-      );
-      expect(() =>
-        parseBrief({
-          ...htmlBrief,
-          template: withElements("html", [
-            { kind: "button", text: "x", frame, style: { color: "#fff" } },
-          ]),
-        }),
-      ).toThrow(
-        'Campaign brief field "template.layers[1].elements[0].style.color" must be one of "fontWeight", "fontFamily"; got "#fff".',
-      );
-      expect(() =>
-        parseBrief({
-          ...htmlBrief,
-          template: withElements("html", [{ kind: "image", frame, style: { fontWeight: 700 } }]),
-        }),
-      ).toThrow(
-        'Campaign brief field "template.layers[1].elements[0].style" must be one of "kind", "frame" for element kind "image"; got {"fontWeight":700}.',
+        'Campaign brief field "template.layers[0].elements" is no longer a layer field; author the copy as a static-text layer.',
       );
     });
   });

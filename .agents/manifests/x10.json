@@ -17,7 +17,8 @@
         "-t",
         "text: label far longer than its frame clips drawing to the element frame"
       ],
-      "verdict": "caught"
+      "verdict": "caught",
+      "retired": "Retired by AR2: drawHtml no longer paints text elements, so there is no element frame to clip."
     },
     {
       "file": "packages/CreativeGeneration/src/infrastructure/adapters/NodeCanvasCompositor.ts",
@@ -34,7 +35,8 @@
         "-t",
         "button: label far longer than its frame clips drawing to the element frame"
       ],
-      "verdict": "caught"
+      "verdict": "caught",
+      "retired": "Retired by AR2: drawHtml no longer paints button elements, so there is no rounded clip."
     },
     {
       "file": "packages/CampaignOrchestration/src/domain/value-objects/markup-assembler.ts",
@@ -51,7 +53,8 @@
         "-t",
         "a button element's style contains overflow: hidden"
       ],
-      "verdict": "caught"
+      "verdict": "caught",
+      "retired": "Retired by AR2: assembleHtml no longer emits element buttons with overflow:hidden. A linked layer's button is the click target, not a styled label."
     },
     {
       "file": "packages/CreativeGeneration/src/infrastructure/adapters/NodeCanvasCompositor.ts",
@@ -66,7 +69,8 @@
         "-t",
         "same rounded rectangle it fills"
       ],
-      "verdict": "caught"
+      "verdict": "caught",
+      "retired": "Retired by AR2: drawHtml no longer fills a rounded button. The html layer paints nothing."
     }
   ]
 }

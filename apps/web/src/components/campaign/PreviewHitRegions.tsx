@@ -8,7 +8,6 @@ import {
   FULL_CANVAS_RECT,
   isGroundLayerKind,
 } from "@campaignfoundry/CampaignOrchestration/creative-geometry";
-import type { HtmlElement } from "@campaignfoundry/CampaignOrchestration/html-element";
 import type { LayerKind } from "@campaignfoundry/CampaignOrchestration/layer-kinds";
 import { cn } from "@/lib/cn";
 import { layerKindDisplayName } from "./display-names";
@@ -18,25 +17,15 @@ import * as messages from "./messages";
  * CE1/CE2 — reaching a layer from the creative itself rather than from the list
  * below it.
  *
- * CE1 built this out of an element's declared `frame`, which is the right
- * geometry and reached almost nothing: only an `html` layer may carry elements
- * (HL-D1), and the default campaign type resolves to canonical `image-text`,
- * which has no `html` layer at all. A new campaign therefore rendered ZERO
- * regions — the operator clicked the creative and nothing happened. CE2 adds
- * the extension CE1 named itself: a whole-canvas region for the GROUND kinds,
- * whose drawer paints `(0, 0, width, height)` and whose box is therefore the
- * canvas by the compositor's own call rather than by anyone's estimate. What
- * the other frameless kinds get, and why they get nothing, is stated on
- * {@link previewHitRegions}.
+ * The regions that exist are whole-canvas regions for the GROUND kinds, whose
+ * drawer paints `(0, 0, width, height)` and whose box is therefore the canvas
+ * by the compositor's own call rather than by anyone's estimate. An `html`
+ * layer paints nothing on the raster (markup owns the copy), so it declares
+ * no region. What the other frameless kinds get, and why they get nothing, is
+ * stated on {@link previewHitRegions}.
  *
- * **The hit target is a DECLARED region, never glyph bounds.**
- * `drawHtml` sizes every element box from `frame.x/y/w/h` multiplied by the
- * resolved canvas and nothing else; the `frame.anchor` a text element carries
- * is consumed by `htmlTextFirstLineOffset` alone, which moves the FIRST
- * BASELINE inside a box this component never has to know the height of. So a
- * short label in a wide box means clicking the empty half of that box still
- * picks the layer — correct behaviour for a selection, and the reason nothing
- * here measures text. D52 deleted an SVG twin for trying: the browser and the
+ * **The hit target is a DECLARED region, never glyph bounds.** Nothing here
+ * measures text. D52 deleted an SVG twin for trying: the browser and the
  * compositor are two unrelated layout engines that disagree by 0.85x-2.15x with
  * the sign flipping by ratio, so a client-side re-layout of the headline would
  * put the hit region somewhere the raster never drew it.
@@ -69,23 +58,16 @@ import * as messages from "./messages";
  */
 
 /**
- * One clickable region: a rect over the frame, and the layer it selects.
- *
- * Two shapes, one type. An ELEMENT region carries the element whose declared
- * `frame` it is (CE1) and its position in the layer's list. A WHOLE-LAYER
- * region (CE2) is the layer itself: no element, and a rect that is the canvas.
- * `element === undefined` tells them apart, and is what the description reads.
+ * One clickable region: the whole-canvas box of a ground layer, and the layer
+ * it selects. Ground kinds are the only layers this surface offers; every
+ * other kind stays reachable from the layer list.
  */
 export interface PreviewHitRegion {
-  /** The layer the click selects — an element is not separately selectable (CC3 lists layers). */
+  /** The layer the click selects (CC3 lists layers). */
   readonly layerId: string;
-  /** The owning layer's kind, for the description's display words. */
+  /** The layer's kind, for the description's display words. */
   readonly layerKind: LayerKind;
-  /** Position in the layer's element list, so two regions of one layer have distinct ids. */
-  readonly elementIndex?: number;
-  /** The element itself; only its `frame` and `kind` are read. Absent on a whole-layer region. */
-  readonly element?: HtmlElement;
-  /** The box, in canvas fractions: an element's declared frame, or the canvas. */
+  /** The box, in canvas fractions: the whole canvas for a ground kind. */
   readonly rect: CanvasRect;
 }
 
@@ -95,9 +77,8 @@ export interface PreviewHitRegion {
  * compositor draws it — and, because these are ordinary positioned siblings
  * with no `z-index` anywhere, the topmost region at a point is the one that
  * takes the click. That is the whole of the overlap rule: a full-canvas ground
- * region sits UNDER the element regions of the layers above it, exactly as the
- * ground itself sits under their pixels, so clicking an element picks the
- * element's layer and clicking anywhere else picks the ground.
+ * region sits under any later ground, exactly as the compositor stacks them,
+ * so the topmost ground at a point is the one that takes the click.
  *
  * Only a layer the compositor actually draws may be hit: an explicit
  * `enabled: false` renders exactly what the same template without that layer
@@ -106,8 +87,6 @@ export interface PreviewHitRegion {
  *
  * **What gets a region, and why:**
  *
- * - `html` — one per element (HL-D1; only this kind may carry a list), each
- *   the element's own DECLARED `frame`. CE1's rule, unchanged.
  * - `image` and `video` — one per layer, the whole canvas. They are the GROUND
  *   kinds (`GROUND_LAYER_KINDS`): both dispatch to `paintBackground`, which
  *   draws at `(0, 0, width, height)`. The rect is the layer's own draw call,
@@ -155,15 +134,6 @@ export function previewHitRegions(template: BriefTemplate): readonly PreviewHitR
   return template.layers
     .filter((layer) => layer.enabled !== false)
     .flatMap((layer): readonly PreviewHitRegion[] => {
-      if (layer.kind === "html") {
-        return (layer.elements ?? []).map((element, elementIndex) => ({
-          layerId: layer.id,
-          layerKind: layer.kind,
-          elementIndex,
-          element,
-          rect: element.frame,
-        }));
-      }
       if (isGroundLayerKind(layer.kind)) {
         return [{ layerId: layer.id, layerKind: layer.kind, rect: FULL_CANVAS_RECT }];
       }
@@ -239,26 +209,12 @@ export function PreviewHitRegions({
   return (
     <>
       {regions.map((region) => {
-        // `-layer` rather than an index for the whole-layer regions. Not for
-        // uniqueness — the layer id above already carries that, and a layer is
-        // either an `html` layer with elements or a ground layer with one
-        // whole-layer region, never both — but because `String(undefined)`
-        // would put the literal text "undefined" in a description id, which is
-        // the kind of thing that later reads as a bug in something else.
-        const slot = region.element === undefined ? "layer" : String(region.elementIndex);
-        const descId = `${uid}-region-${region.layerId}-${slot}`;
+        const descId = `${uid}-region-${region.layerId}-layer`;
         const selected = region.layerId === selectedLayerId;
         return (
           <Fragment key={descId}>
             <span id={descId} className="sr-only">
-              {region.element === undefined
-                ? messages.previewWholeLayerRegionDescription(
-                    layerKindDisplayName(region.layerKind),
-                  )
-                : messages.previewRegionDescription(
-                    layerKindDisplayName(region.layerKind),
-                    messages.htmlElementKindLabel(region.element.kind),
-                  )}
+              {messages.previewWholeLayerRegionDescription(layerKindDisplayName(region.layerKind))}
             </span>
             <button
               type="button"

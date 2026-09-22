@@ -24,7 +24,7 @@
       "file": "apps/web/src/components/campaign/editor-state.ts",
       "before": "const dropElements = Array.isArray(layer.elements) && layer.elements.length === 0;",
       "after": "  const dropElements = false;",
-      "because": "An empty elements list is the absent key (HL5a). If the canonicaliser stops mapping elements: [] to absent, a loaded empty list survives in the snapshot, add-then-remove deletes the key, and a brief the user returned to its loaded state still reads dirty. (Re-anchored by ANCHORS: the recorded text was reformatted or moved, not changed — the mutation, its claim and its command are untouched.)",
+      "because": "An empty elements list is the absent key (HL5a). If the canonicaliser stops mapping elements: [] to absent, a loaded empty list survives in the snapshot, add-then-remove deletes the key, and a brief the user returned to its loaded state still reads dirty. (Re-anchored by ANCHORS: the recorded text was reformatted or moved, not changed \u2014 the mutation, its claim and its command are untouched.)",
       "command": [
         "yarn",
         "vitest",
@@ -36,7 +36,8 @@
         "a loaded empty elements list is not dirty; add then remove returns clean",
         "--maxWorkers=2"
       ],
-      "verdict": "caught"
+      "verdict": "caught",
+      "retired": "Retired by AR2: canonicalLayer no longer maps elements: [] to absence. An own elements property is refused by isLayerEntry rather than canonicalised, and the add-then-remove element actions are gone."
     },
     {
       "file": "apps/web/src/components/campaign/editor-state.ts",

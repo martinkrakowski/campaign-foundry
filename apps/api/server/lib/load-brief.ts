@@ -27,7 +27,6 @@ import {
   normalizeRegion,
   parseExpiresOnMs,
   clickDestinationProblem,
-  layerElementsProblem,
   layerEnabledProblem,
   layerFrameProblem,
   layerLinkProblem,
@@ -185,8 +184,9 @@ function validateType(value: unknown): void {
  * Structural, never lenient: checked in authoring mode too (`enforceCapabilities: false`).
  * Compatibility is a declared table, validated at the boundary (D124). A layer's own
  * props, when present, must be its kind's (D134) — same key set, every number a
- * fraction in [0, 1], the anchor a vocabulary member — and an `html` layer's
- * elements, when present, must be well-formed elements (HL1).
+ * fraction in [0, 1], the anchor a vocabulary member. An own `elements`
+ * property is refused (AR2): copy is a `static-text` layer, and the key is
+ * not dropped.
  * Absent → defaults to the campaign type's canonical template (D120: type before template).
  */
 export function validateTemplate(value: unknown, type?: CampaignType): BriefTemplate {
@@ -331,15 +331,13 @@ export function validateTemplate(value: unknown, type?: CampaignType): BriefTemp
       );
     }
 
-    // HL1 — an `html` layer's element list, when present, must be well-formed
-    // elements of the vocabulary. Structural, never lenient (the `validateSizes`
-    // convention): the decision is the domain's `layerElementsProblem`, shared
-    // with `isBriefTemplate` so the two boundaries cannot drift — only the
-    // message shape is local.
-    const elementsProblem = layerElementsProblem(layer.kind as LayerKind, layer.elements);
-    if (elementsProblem !== undefined) {
+    // AR2 — `elements` is not a layer field. The key is refused wherever it
+    // is an own property, including an empty list: dropping it would hide a
+    // brief that still authored copy as nested elements. The domain guard
+    // (`isLayerEntry`) refuses the same key; only the message is local.
+    if (Object.prototype.hasOwnProperty.call(layer, "elements")) {
       throw new Error(
-        `Campaign brief field "template.layers[${i}].elements${elementsProblem.path}" must ${elementsProblem.must}; got ${JSON.stringify(elementsProblem.value)}.`,
+        `Campaign brief field "template.layers[${i}].elements" is no longer a layer field; author the copy as a static-text layer.`,
       );
     }
 

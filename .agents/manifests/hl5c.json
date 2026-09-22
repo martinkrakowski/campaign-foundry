@@ -6,7 +6,7 @@
       "file": "apps/web/src/components/campaign/derive.ts",
       "before": "    if (tightest === undefined || profile.maxBytes < tightest.maxBytes) {",
       "after": "    if (tightest === undefined || profile.maxBytes > tightest.maxBytes) {",
-      "because": "The budget shown while building must be the TIGHTEST html placement's (HL-D6): the smallest maxBytes is the profile that refuses first at packaging, so a meter reading the largest would promise a number one of the selected placements already breaks — the two-budgets disagreement this decision exists to remove.",
+      "because": "The budget shown while building must be the TIGHTEST html placement's (HL-D6): the smallest maxBytes is the profile that refuses first at packaging, so a meter reading the largest would promise a number one of the selected placements already breaks \u2014 the two-budgets disagreement this decision exists to remove.",
       "command": [
         "yarn",
         "vitest",
@@ -32,13 +32,14 @@
         "web",
         "apps/web/src/components/campaign/sections/__tests__/html-elements-editor.test.tsx"
       ],
-      "verdict": "caught"
+      "verdict": "caught",
+      "retired": "Retired by AR2: HtmlElementsEditor.tsx is deleted, and with it the meter that rendered the overage beside the element list. The warning still reads htmlWeightReading."
     },
     {
       "file": "apps/web/src/components/campaign/derive.ts",
       "before": "  const cached = weightReadingCache;\n  if (cached !== undefined && cached.key === key) return cached.reading;\n  let bytes = 0;",
       "after": "  let bytes = 0;",
-      "because": "The weight reading is assembled once per change and shared: the meter (TemplateSection) and the overage (validateTemplateWarnings) both reach htmlWeightReading, so without the memo the whole unit is rebuilt and UTF-8 encoded on every keystroke, twice over. Dropping the cache read leaves the write in place but never served, so two identical calls assemble twice — the assemble-once test sees the second call reach the assembler.",
+      "because": "The weight reading is assembled once per change and shared: the meter (TemplateSection) and the overage (validateTemplateWarnings) both reach htmlWeightReading, so without the memo the whole unit is rebuilt and UTF-8 encoded on every keystroke, twice over. Dropping the cache read leaves the write in place but never served, so two identical calls assemble twice \u2014 the assemble-once test sees the second call reach the assembler.",
       "command": [
         "yarn",
         "vitest",
@@ -54,7 +55,7 @@
       "file": "apps/web/src/components/campaign/derive.ts",
       "before": "  if (!isBrandColor(brandColor)) return undefined;\n  const tones = draftTones(state);\n\n  const key = htmlWeightKey(sizes, elements, brandColor, state.style, destination, budget, tones);\n  const cached = weightReadingCache;\n  if (cached !== undefined && cached.key === key) return cached.reading;\n  let bytes = 0;\n  for (const size of sizes) {\n    for (const tone of tones) {\n      const assembled = assembleHtml({\n        elements,\n        canvas: { size },\n        brandColor,\n        style: state.style,\n        tone,\n        clickDestination: destination === \"\" ? undefined : destination,\n      });\n      bytes = Math.max(bytes, assembled.byteLength);\n    }",
       "after": "  const tones = draftTones(state);\n\n  const key = htmlWeightKey(sizes, elements, brandColor, state.style, destination, budget, tones);\n  const cached = weightReadingCache;\n  if (cached !== undefined && cached.key === key) return cached.reading;\n  let bytes = 0;\n  try {\n    for (const size of sizes) {\n      for (const tone of tones) {\n        const assembled = assembleHtml({\n          elements,\n          canvas: { size },\n          brandColor,\n          style: state.style,\n          tone,\n          clickDestination: destination === \"\" ? undefined : destination,\n        });\n        bytes = Math.max(bytes, assembled.byteLength);\n      }\n    }\n  } catch {\n    return undefined;\n  }",
-      "because": "The bare catch was the defect: it swallowed every error assembleHtml raises and hid the meter, so a real assembler bug looked like an unweighable draft. The fix checks the one expected failure (a missing or non-hex brand colour) up front and lets anything else propagate. Restoring the bare catch makes a stubbed assembler error disappear, so the propagate test — which asserts the throw reaches the caller — fails. (Re-anchored by ANCHORS: VE3 added the per-tone loop and the `tones` cache key; The semantic edit is the same one; the after-text is that edit re-expressed against the current shape, not a new claim.)",
+      "because": "The bare catch was the defect: it swallowed every error assembleHtml raises and hid the meter, so a real assembler bug looked like an unweighable draft. The fix checks the one expected failure (a missing or non-hex brand colour) up front and lets anything else propagate. Restoring the bare catch makes a stubbed assembler error disappear, so the propagate test \u2014 which asserts the throw reaches the caller \u2014 fails. (Re-anchored by ANCHORS: VE3 added the per-tone loop and the `tones` cache key; The semantic edit is the same one; the after-text is that edit re-expressed against the current shape, not a new claim.)",
       "command": [
         "yarn",
         "vitest",
@@ -64,7 +65,8 @@
         "web",
         "apps/web/src/components/campaign/__tests__/derive.test.ts"
       ],
-      "verdict": "caught"
+      "verdict": "caught",
+      "retired": "Retired by AR2: draftTones is gone because layer markup does not interpolate tone. The assembler call is still uncaught, and derive.test.ts still asserts an unexpected error propagates."
     }
   ]
 }

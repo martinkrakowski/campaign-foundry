@@ -19,8 +19,8 @@
     },
     {
       "file": "packages/CreativeGeneration/src/infrastructure/adapters/NodeCanvasCompositor.ts",
-      "before": "      `NodeCanvasCompositor: layer kind \"${layer.kind}\" has no drawer in this compositor — it draws image, video, shade, accent, static-text, animated-text, logo and html only`,",
-      "after": "      `NodeCanvasCompositor: layer kind \"${layer.kind}\" has no drawer in this compositor — it draws image, video, shade, accent, static-text, animated-text and logo only`,",
+      "before": "      `NodeCanvasCompositor: layer kind \"${layer.kind}\" has no drawer in this compositor \u2014 it draws image, video, shade, accent, static-text, animated-text, logo and html only`,",
+      "after": "      `NodeCanvasCompositor: layer kind \"${layer.kind}\" has no drawer in this compositor \u2014 it draws image, video, shade, accent, static-text, animated-text and logo only`,",
       "because": "The error message in drawLayer must list html among the supported layer kinds when an unknown kind is encountered, keeping diagnostic messages accurate for unsupported layers.",
       "command": [
         "yarn",
@@ -31,7 +31,7 @@
         "packages/CreativeGeneration/src/infrastructure/adapters/__tests__/NodeCanvasCompositor.layer-order.test.ts"
       ],
       "verdict": "caught",
-      "retired": "Retired by RW-5 (L11, D131): the code is gone, not moved. This mutation shortened the kinds list in drawLayer's \"no drawer\" error so a template naming an unsupported kind was refused with a message that lied about what the compositor draws. `fill` was the last member of LAYER_KINDS without a drawer; L11 gave it one, LAYER_DRAWERS became a total Record, and the lookup can no longer miss for any value the type admits — so the throw, its message and the kinds list in it were all removed rather than kept as a branch no input can reach. There is no equivalent spelling to re-anchor on: what now refuses a new kind is the table's own totality, at compile time in every reader, which no text mutation can express. HL3's other mutations still cover the html drawer itself."
+      "retired": "Retired by RW-5 (L11, D131): the code is gone, not moved. This mutation shortened the kinds list in drawLayer's \"no drawer\" error so a template naming an unsupported kind was refused with a message that lied about what the compositor draws. `fill` was the last member of LAYER_KINDS without a drawer; L11 gave it one, LAYER_DRAWERS became a total Record, and the lookup can no longer miss for any value the type admits \u2014 so the throw, its message and the kinds list in it were all removed rather than kept as a branch no input can reach. There is no equivalent spelling to re-anchor on: what now refuses a new kind is the table's own totality, at compile time in every reader, which no text mutation can express. HL3's other mutations still cover the html drawer itself."
     },
     {
       "file": "packages/CreativeGeneration/src/infrastructure/adapters/NodeCanvasCompositor.ts",
@@ -65,7 +65,7 @@
     },
     {
       "file": "packages/CreativeGeneration/src/infrastructure/adapters/NodeCanvasCompositor.ts",
-      "before": "      case \"button\": {\n        const radius = Math.min(8, boxH / 2, boxW / 2);\n        ctx.save();\n        // Clip to the rounded shape the button is filled with: the markup's\n        // `border-radius` + `overflow: hidden` clips its label to that shape too.\n        ctx.beginPath();\n        ctx.roundRect(boxX, boxY, boxW, boxH, radius);\n        ctx.clip();\n        ctx.fillStyle = prepared.brandColor;\n        ctx.beginPath();\n        ctx.roundRect(boxX, boxY, boxW, boxH, radius);\n        ctx.fill();\n\n        ctx.fillStyle = \"#ffffff\";\n        ctx.textAlign = \"center\";\n        ctx.textBaseline = \"middle\";\n        const fontSize = htmlButtonFontSize(boxH, scaleBasis(prepared.canvas, width, height));\n        // HL5e: the element's own font, resolved by the one function\n        // `assembleHtml` also calls — the button's override if it names one,\n        // the brief's resolved weight/family otherwise.\n        const font = htmlElementFont(element, prepared);\n        ctx.font = `${font.fontWeight} ${fontSize}px ${font.fontFamily}, sans-serif`;\n        ctx.fillText(element.text!, boxX + boxW / 2, boxY + boxH / 2);\n        ctx.restore();\n        break;\n      }",
+      "before": "      case \"button\": {\n        const radius = Math.min(8, boxH / 2, boxW / 2);\n        ctx.save();\n        // Clip to the rounded shape the button is filled with: the markup's\n        // `border-radius` + `overflow: hidden` clips its label to that shape too.\n        ctx.beginPath();\n        ctx.roundRect(boxX, boxY, boxW, boxH, radius);\n        ctx.clip();\n        ctx.fillStyle = prepared.brandColor;\n        ctx.beginPath();\n        ctx.roundRect(boxX, boxY, boxW, boxH, radius);\n        ctx.fill();\n\n        ctx.fillStyle = \"#ffffff\";\n        ctx.textAlign = \"center\";\n        ctx.textBaseline = \"middle\";\n        const fontSize = htmlButtonFontSize(boxH, scaleBasis(prepared.canvas, width, height));\n        // HL5e: the element's own font, resolved by the one function\n        // `assembleHtml` also calls \u2014 the button's override if it names one,\n        // the brief's resolved weight/family otherwise.\n        const font = htmlElementFont(element, prepared);\n        ctx.font = `${font.fontWeight} ${fontSize}px ${font.fontFamily}, sans-serif`;\n        ctx.fillText(element.text!, boxX + boxW / 2, boxY + boxH / 2);\n        ctx.restore();\n        break;\n      }",
       "after": "      case \"button\": {\n        break;\n      }",
       "because": "The drawHtml drawer must handle button elements by rendering the rounded button background with brandColor and drawing the button text label onto the canvas. (Re-anchored by ANCHORS: X10 (#391) added the rounded clip and HL5e resolved the button's font and font size through named helpers, so the case block grew around the claim; The semantic edit is the same one; the after-text is that edit re-expressed against the current shape, not a new claim.)",
       "command": [
@@ -76,7 +76,8 @@
         "node",
         "packages/CreativeGeneration/src/infrastructure/adapters/__tests__/NodeCanvasCompositor.layer-order.test.ts"
       ],
-      "verdict": "caught"
+      "verdict": "caught",
+      "retired": "Retired by AR2: drawHtml returns immediately and paints no button. The html layer is raster-silent."
     },
     {
       "file": "packages/CreativeGeneration/src/infrastructure/adapters/NodeCanvasCompositor.ts",
@@ -91,13 +92,14 @@
         "node",
         "packages/CreativeGeneration/src/infrastructure/adapters/__tests__/NodeCanvasCompositor.layer-order.test.ts"
       ],
-      "verdict": "caught"
+      "verdict": "caught",
+      "retired": "Retired by AR2: drawHtml returns immediately and paints no image element. The html layer is raster-silent."
     },
     {
       "file": "packages/CreativeGeneration/src/infrastructure/adapters/NodeCanvasCompositor.ts",
       "before": "  const { ctx, prepared, layer } = c;\n  if (layer.elements === undefined || layer.elements.length === 0) {\n    return;\n  }\n  const { width, height, canvas } = prepared;\n  const framed = layer.frame !== undefined;\n  if (framed) {\n    const dest = layerPixelRect(layer, canvas, width, height);\n    ctx.save();\n    ctx.beginPath();\n    ctx.rect(dest.x, dest.y, dest.w, dest.h);\n    ctx.clip();\n  }\n  for (const element of layer.elements) {",
       "after": "  const { ctx, prepared } = c;\n  const htmlLayer = prepared.layers.find((layer) => layer.kind === \"html\");\n  if (htmlLayer === undefined || htmlLayer.elements === undefined || htmlLayer.elements.length === 0) {\n    return;\n  }\n  const { width, height, canvas } = prepared;\n  const framed = htmlLayer.frame !== undefined;\n  if (framed) {\n    const dest = layerPixelRect(htmlLayer, canvas, width, height);\n    ctx.save();\n    ctx.beginPath();\n    ctx.rect(dest.x, dest.y, dest.w, dest.h);\n    ctx.clip();\n  }\n  for (const element of htmlLayer.elements) {",
-      "because": "drawHtml must read its elements from the dispatched layer on the draw context — a template may carry two html layers, and hunting prepared.layers for \"the\" html layer paints the first list twice and never paints the second. (Re-anchored by ANCHORS: L10a wrapped the element loop in an optional layer-frame clip; The semantic edit is the same one; the after-text is that edit re-expressed against the current shape, not a new claim.)",
+      "because": "drawHtml must read its elements from the dispatched layer on the draw context \u2014 a template may carry two html layers, and hunting prepared.layers for \"the\" html layer paints the first list twice and never paints the second. (Re-anchored by ANCHORS: L10a wrapped the element loop in an optional layer-frame clip; The semantic edit is the same one; the after-text is that edit re-expressed against the current shape, not a new claim.)",
       "command": [
         "yarn",
         "vitest",
@@ -106,7 +108,8 @@
         "node",
         "packages/CreativeGeneration/src/infrastructure/adapters/__tests__/NodeCanvasCompositor.layer-order.test.ts"
       ],
-      "verdict": "caught"
+      "verdict": "caught",
+      "retired": "Retired by AR2: drawHtml no longer reads a dispatched element list. The html layer paints nothing."
     }
   ]
 }

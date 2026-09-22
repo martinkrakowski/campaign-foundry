@@ -35,7 +35,7 @@ function phaseOf(action: EditorAction): "baseline" | "server" | "edit" {
  * The coalescing key for a keystroke-driven action: consecutive edits carrying the
  * same key collapse into ONE history entry, so typing a word is one undo step and
  * the entry reverts the whole run. `patch` can name several fields at once, and
- * `setProduct`/`setTreatment`/`setHtmlElementFrame`/`setLayerProps` carry a
+ * `setProduct`/`setTreatment`/`setLayerProps` carry a
  * patch too — the
  * identity is the field set, sorted so a re-arrival in another order cannot split
  * the run. Every other action (a toggle, an add, a remove) is its own entry, and
@@ -60,10 +60,9 @@ function coalesceKeyOf(action: EditorAction): string | null {
       return `setBeatText:${action.index}`;
     case "setVariation":
       return `setVariation:${action.field}`;
-    // The layer's own geometry override (D134, SE2 in `studio-editor.md`): the
-    // `setHtmlElementFrame` rule one level up — keyed by the LAYER and the
-    // field set, so a live drag on one prop is one run and a different prop
-    // (or a different layer) starts its own.
+    // The layer's own geometry override (D134, SE2 in `studio-editor.md`):
+    // keyed by the LAYER and the field set, so a live drag on one prop is one
+    // run and a different prop (or a different layer) starts its own.
     case "setLayerProps":
       return `setLayerProps:${action.layerId}:${Object.keys(action.patch).sort().join(",")}`;
     // K5: typing into one stop's `t` or `value` coalesces the way every other
@@ -76,18 +75,6 @@ function coalesceKeyOf(action: EditorAction): string | null {
       )
         .sort()
         .join(",")}`;
-    // An html element's copy and frame (HL5a): the same rule the beat's copy
-    // has, keyed by the layer AND the element inside it — copy typed into the
-    // second element is not a continuation of a run in the first.
-    case "setHtmlElementText":
-      return `setHtmlElementText:${action.layerId}:${action.index}`;
-    case "setHtmlElementFrame":
-      return `setHtmlElementFrame:${action.layerId}:${action.index}:${Object.keys(action.patch).sort().join(",")}`;
-    // The element's font override (HL5e): the frame patch's rule — the field
-    // set is the identity, so weight then family are two steps while
-    // consecutive changes to one field revert as one run.
-    case "setHtmlElementStyle":
-      return `setHtmlElementStyle:${action.layerId}:${action.index}:${Object.keys(action.patch).sort().join(",")}`;
     default:
       return null;
   }

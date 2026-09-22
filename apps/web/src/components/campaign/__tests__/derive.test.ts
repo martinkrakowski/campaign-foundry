@@ -17,7 +17,7 @@ import {
 } from "@campaignfoundry/CampaignOrchestration/brief-template";
 import { LAYER_KINDS, type LayerKind } from "@campaignfoundry/CampaignOrchestration/layer-kinds";
 import { assembleHtml } from "@campaignfoundry/CampaignOrchestration/markup-assembler";
-import type { HtmlElement } from "@campaignfoundry/CampaignOrchestration/html-element";
+import type { CreativeTemplateLayer } from "@campaignfoundry/CampaignOrchestration/creative-templates";
 import type { PlatformProfile } from "@campaignfoundry/Distribution/platform-profiles";
 import {
   addableKinds,
@@ -549,48 +549,6 @@ describe("derive.ts", () => {
       ...over,
     });
 
-    const htmlTemplate = (
-      layers: {
-        readonly id: string;
-        readonly kind: "html";
-        readonly elements?: readonly HtmlElement[];
-        readonly enabled?: boolean;
-      }[] = [{ id: "html", kind: "html" }],
-    ): BriefTemplate => ({
-      id: "canonical-image-html",
-      version: 1,
-      creativeType: "image-html",
-      unit: "standard-web",
-      layers: [{ id: "image", kind: "image" }, ...layers, { id: "logo", kind: "logo" }],
-    });
-
-    const frame = { x: 0.1, y: 0.2, w: 0.5, h: 0.3, anchor: "middle" } as const;
-    const text = (value: string): HtmlElement => ({
-      kind: "text",
-      text: value,
-      frame,
-    });
-
-    const meterState = (over: Partial<EditorState> = {}): EditorState =>
-      ({
-        ...initialEditorState(),
-        template: htmlTemplate(),
-        platforms: ["google-display-html"],
-        sizes: ["300x250"],
-        products: [
-          {
-            key: 1,
-            id: "alpha",
-            name: "A",
-            primaryColor: "#1473E6",
-            logoPath: "l.png",
-            inputAsset: "",
-            idTouched: true,
-          },
-        ],
-        ...over,
-      }) as EditorState;
-
     describe("htmlByteBudget", () => {
       test("no html profile among the platforms → no budget", () => {
         expect(htmlByteBudget(["instagram-feed", "google-display"])).toBeUndefined();
@@ -618,27 +576,74 @@ describe("derive.ts", () => {
       });
     });
 
+    const picture = (over: Partial<CreativeTemplateLayer> = {}): CreativeTemplateLayer => ({
+      id: "image",
+      kind: "image",
+      ...over,
+    });
+    const copy = (over: Partial<CreativeTemplateLayer> = {}): CreativeTemplateLayer => ({
+      id: "copy",
+      kind: "static-text",
+      ...over,
+    });
+    const htmlTemplate = (
+      layers: readonly CreativeTemplateLayer[] = [
+        picture(),
+        { id: "html", kind: "html" },
+        { id: "logo", kind: "logo" },
+      ],
+    ): BriefTemplate => ({
+      id: "canonical-image-html",
+      version: 1,
+      creativeType: "image-html",
+      unit: "standard-web",
+      layers,
+    });
+
+    const meterState = (over: Partial<EditorState> = {}): EditorState =>
+      ({
+        ...initialEditorState(),
+        template: htmlTemplate(),
+        platforms: ["google-display-html"],
+        sizes: ["300x250"],
+        campaignMessage: "Stay wild",
+        products: [
+          {
+            key: 1,
+            id: "alpha",
+            name: "A",
+            primaryColor: "#1473E6",
+            logoPath: "l.png",
+            inputAsset: "",
+            idTouched: true,
+          },
+        ],
+        ...over,
+      }) as EditorState;
+
     describe("htmlWeightReading", () => {
       test("no html profile selected → no reading", () => {
         expect(htmlWeightReading(meterState({ platforms: ["instagram-feed"] }))).toBeUndefined();
       });
 
-      test("the figure is assembleHtml's byteLength for the same inputs", () => {
-        // Expected computed INDEPENDENTLY here — the same options spelled out,
-        // not the derivation's own internals.
-        const elements = [
-          text("Stay wild"),
-          { kind: "button", text: "Shop", frame } as HtmlElement,
+      test("the figure is assembleHtml's byteLength for the same layers and headline", () => {
+        const layers = [
+          picture(),
+          copy({ link: true }),
+          { id: "html", kind: "html" as const },
+          { id: "logo", kind: "logo" as const },
         ];
         const state = meterState({
-          template: htmlTemplate([{ id: "html", kind: "html", elements }]),
+          template: htmlTemplate(layers),
           clickDestination: "https://example.com/shop",
+          campaignMessage: "Stay wild",
         });
         const expected = assembleHtml({
-          elements,
+          layers,
+          headline: "Stay wild",
           canvas: { size: "300x250" },
           brandColor: "#1473E6",
-          style: {},
+          style: state.style,
           clickDestination: "https://example.com/shop",
         }).byteLength;
         const reading = htmlWeightReading(state);
@@ -648,152 +653,75 @@ describe("derive.ts", () => {
         expect(reading?.overBy).toBe(0);
       });
 
-      test("adding a text element increases the measured bytes", () => {
-        const before = htmlWeightReading(meterState());
-        const elements = [text("Stay wild")];
+      test("a longer headline increases the measured bytes", () => {
+        const layers = [
+          picture(),
+          copy(),
+          { id: "html", kind: "html" as const },
+          { id: "logo", kind: "logo" as const },
+        ];
+        const before = htmlWeightReading(
+          meterState({ template: htmlTemplate(layers), campaignMessage: "A" }),
+        );
         const after = htmlWeightReading(
-          meterState({ template: htmlTemplate([{ id: "html", kind: "html", elements }]) }),
+          meterState({ template: htmlTemplate(layers), campaignMessage: "A".repeat(80) }),
         );
         expect(before).toBeDefined();
         expect(after?.bytes).toBeGreaterThan(before?.bytes ?? 0);
       });
 
       test("the figure is the LARGEST across the selected sizes", () => {
-        const elements = [text("Stay wild")];
-        const state = meterState({
-          template: htmlTemplate([{ id: "html", kind: "html", elements }]),
-          sizes: ["320x50", "300x600"],
-        });
+        const layers = htmlTemplate().layers;
+        const state = meterState({ sizes: ["320x50", "300x600"] });
         const small = assembleHtml({
-          elements,
+          layers,
+          headline: "Stay wild",
           canvas: { size: "320x50" },
           brandColor: "#1473E6",
-          style: {},
+          style: state.style,
         }).byteLength;
         const large = assembleHtml({
-          elements,
+          layers,
+          headline: "Stay wild",
           canvas: { size: "300x600" },
           brandColor: "#1473E6",
-          style: {},
+          style: state.style,
         }).byteLength;
         expect(small).not.toBe(large);
         expect(htmlWeightReading(state)?.bytes).toBe(Math.max(small, large));
       });
 
-      test("brief mode: the figure is the max byte count across the draft's distinct treatment tones", () => {
-        // Qodo finding: weight now follows tone (toneFontWeight), so a
-        // later bold treatment can outweigh an earlier subtle one. The
-        // meter must measure every distinct tone generation will actually
-        // write a bundle for, not just the first treatment's.
-        const elements = [text("Stay wild")];
+      test("a disabled layer is not measured", () => {
+        const measured = [
+          picture(),
+          copy(),
+          { id: "html", kind: "html" as const },
+          { id: "logo", kind: "logo" as const },
+        ];
         const state = meterState({
-          template: htmlTemplate([{ id: "html", kind: "html", elements }]),
-          treatments: [
-            { id: "t1", layout: "headline-bottom", tone: "subtle" },
-            { id: "t2", layout: "headline-bottom", tone: "bold" },
-          ],
-        });
-        const boldBytes = assembleHtml({
-          elements,
-          canvas: { size: "300x250" },
-          brandColor: "#1473E6",
-          style: {},
-          tone: "bold",
-        }).byteLength;
-        const subtleBytes = assembleHtml({
-          elements,
-          canvas: { size: "300x250" },
-          brandColor: "#1473E6",
-          style: {},
-          tone: "subtle",
-        }).byteLength;
-        // Sanity: tone must actually change the byte count, or this test
-        // cannot tell a max-across-tones bug from a first-tone-only one.
-        expect(boldBytes).not.toBe(subtleBytes);
-        expect(htmlWeightReading(state)?.bytes).toBe(boldBytes);
-      });
-
-      test("variation mode: the figure follows the draft's tone AXIS, not the (empty) treatments list", () => {
-        // The buggy reading always fell back to state.treatments[0]?.tone —
-        // empty in variation mode — which defaults to "bold". Picking a
-        // tone axis that does NOT contain "bold" is what makes this red on
-        // that bug (the fallback would coincidentally still answer "bold").
-        const elements = [text("Stay wild")];
-        const state = meterState({
-          mode: "variation",
-          template: htmlTemplate([{ id: "html", kind: "html", elements }]),
-          variation: { ...initialEditorState().variation, tone: ["subtle"] },
-        });
-        const subtleBytes = assembleHtml({
-          elements,
-          canvas: { size: "300x250" },
-          brandColor: "#1473E6",
-          style: {},
-          tone: "subtle",
-        }).byteLength;
-        expect(htmlWeightReading(state)?.bytes).toBe(subtleBytes);
-      });
-
-      test("variation mode: the figure is the max across the axis, not its first entry", () => {
-        // Order "subtle" before "bold" so a first-tone-only implementation
-        // (as opposed to a true max) would answer the smaller figure.
-        const elements = [text("Stay wild")];
-        const state = meterState({
-          mode: "variation",
-          template: htmlTemplate([{ id: "html", kind: "html", elements }]),
-          variation: { ...initialEditorState().variation, tone: ["subtle", "bold"] },
-        });
-        const boldBytes = assembleHtml({
-          elements,
-          canvas: { size: "300x250" },
-          brandColor: "#1473E6",
-          style: {},
-          tone: "bold",
-        }).byteLength;
-        expect(htmlWeightReading(state)?.bytes).toBe(boldBytes);
-      });
-
-      test("an empty tone axis falls back to the compositor's default (undefined tone), as today", () => {
-        const elements = [text("Stay wild")];
-        const state = meterState({
-          mode: "variation",
-          template: htmlTemplate([{ id: "html", kind: "html", elements }]),
-          variation: { ...initialEditorState().variation, tone: [] },
+          template: htmlTemplate([...measured, copy({ id: "copy-off", enabled: false })]),
+          campaignMessage: "Stay wild",
         });
         const expected = assembleHtml({
-          elements,
+          layers: measured,
+          headline: "Stay wild",
           canvas: { size: "300x250" },
           brandColor: "#1473E6",
-          style: {},
+          style: state.style,
         }).byteLength;
-        expect(htmlWeightReading(state)?.bytes).toBe(expected);
-      });
-
-      test("a disabled html layer's elements are not measured", () => {
-        const measured = [text("Stay wild")];
-        const state = meterState({
-          template: htmlTemplate([
-            { id: "html", kind: "html", elements: measured },
-            {
-              id: "html-off",
-              kind: "html",
-              elements: [text("Z".repeat(100_000))],
-              enabled: false,
-            },
-          ]),
-        });
-        const expected = assembleHtml({
-          elements: measured,
+        // The disabled copy would have emitted the same headline again.
+        const withIt = assembleHtml({
+          layers: [...measured, copy({ id: "copy-off" })],
+          headline: "Stay wild",
           canvas: { size: "300x250" },
           brandColor: "#1473E6",
-          style: {},
+          style: state.style,
         }).byteLength;
+        expect(withIt).toBeGreaterThan(expected);
         expect(htmlWeightReading(state)?.bytes).toBe(expected);
       });
 
       test("a selected size the html profile does not carry contributes nothing", () => {
-        // The profile ships only 300x250; the draft also selected 728x90, which
-        // no html placement will ever render.
         const profiles = { "odd-html": fakeHtml("odd-html", { maxBytes: 150 * 1024 }) };
         const state = meterState({
           platforms: ["odd-html"],
@@ -829,25 +757,31 @@ describe("derive.ts", () => {
             }),
           ),
         ).toBeUndefined();
-        // No product at all — the same refusal, not a crash.
         expect(htmlWeightReading(meterState({ products: [] }))).toBeUndefined();
       });
 
       test("over budget: overBy names the overage; within budget it is zero", () => {
-        const elements = [text("A".repeat(500))];
+        const layers = [
+          picture(),
+          copy(),
+          { id: "html", kind: "html" as const },
+          { id: "logo", kind: "logo" as const },
+        ];
+        const state = meterState({
+          platforms: ["tiny-html"],
+          template: htmlTemplate(layers),
+          campaignMessage: "A".repeat(500),
+        });
         const measured = assembleHtml({
-          elements,
+          layers,
+          headline: "A".repeat(500),
           canvas: { size: "300x250" },
           brandColor: "#1473E6",
-          style: {},
+          style: state.style,
         }).byteLength;
-        const over = htmlWeightReading(
-          meterState({
-            platforms: ["tiny-html"],
-            template: htmlTemplate([{ id: "html", kind: "html", elements }]),
-          }),
-          { "tiny-html": fakeHtml("tiny-html", { maxBytes: 512 }) },
-        );
+        const over = htmlWeightReading(state, {
+          "tiny-html": fakeHtml("tiny-html", { maxBytes: 512 }),
+        });
         expect(over?.overBy).toBe(measured - 512);
         expect(over?.profileLabel).toBe("Fake tiny-html");
         const within = htmlWeightReading(meterState({ platforms: ["roomy-html"] }), {
@@ -857,119 +791,69 @@ describe("derive.ts", () => {
       });
     });
 
-    // HL5c fix: the reading is shared between the meter and the warning through
-    // one memoised derivation, and it swallows only the failure it expects (an
-    // unweighable brand colour) rather than every assembler error.
     describe("the memo and the expected failure (HL5c fix)", () => {
-      // A marker the rest of the file never assembles, so the module-level
-      // single-entry memo is guaranteed cold at each call under test. An `image`
-      // element rides along: it carries no `text`, so the key's `el.text ?? ""`
-      // covers the absent-copy branch the text-only fixtures never reach.
-      const meterElements = (marker: string): EditorState =>
+      const marked = (headline: string): EditorState =>
         meterState({
+          campaignMessage: headline,
           template: htmlTemplate([
-            {
-              id: "html",
-              kind: "html",
-              elements: [text(marker), { kind: "image", frame } as HtmlElement],
-            },
+            picture({ props: { alt: "pack" } }),
+            copy({ link: true }),
+            { id: "html", kind: "html" },
+            { id: "logo", kind: "logo", props: { width: 0.2 } },
           ]),
+          clickDestination: "https://example.com/shop",
         });
 
       test("two calls with the same inputs assemble the markup once", () => {
-        const state = meterElements("assemble-once");
+        const state = marked("assemble-once");
         assembleSpy.mockClear();
         const first = htmlWeightReading(state);
         expect(assembleSpy.mock.calls.length).toBeGreaterThan(0);
         const afterFirst = assembleSpy.mock.calls.length;
         const second = htmlWeightReading(state);
-        // The second caller (the warning, or a re-render) is served from the memo:
-        // no new assembly, and it is the very same reading object.
         expect(assembleSpy.mock.calls.length).toBe(afterFirst);
         expect(second).toBe(first);
       });
 
-      test("a changed element text re-assembles", () => {
-        htmlWeightReading(meterElements("before-edit"));
+      test("a changed headline re-assembles", () => {
+        htmlWeightReading(marked("before-edit"));
         assembleSpy.mockClear();
-        htmlWeightReading(meterElements("after-edit"));
+        htmlWeightReading(marked("after-edit"));
         expect(assembleSpy.mock.calls.length).toBeGreaterThan(0);
       });
 
-      // HL5e fix round (Qodo): the element's style override reaches the
-      // assembled bytes through `htmlElementFont`, but the memo key did not
-      // weigh it — a style-only edit returned the previous reading from the
-      // single-entry cache, so the meter disagreed with what generation would
-      // produce. Both fields get their own test; each is a byte-count change
-      // the unstyled primed reading cannot coincide with.
-
-      const draftWith = (elements: readonly HtmlElement[]): EditorState =>
-        meterState({
-          template: htmlTemplate([{ id: "html", kind: "html", elements }]),
+      test("changing only a layer link re-weighs", () => {
+        const linked = marked("memo-link");
+        const unlinked = meterState({
+          ...linked,
+          template: htmlTemplate([
+            picture({ props: { alt: "pack" } }),
+            copy(),
+            { id: "html", kind: "html" },
+            { id: "logo", kind: "logo" },
+          ]),
         });
-
-      test("changing only an element's fontWeight re-weighs", () => {
-        const plain = text("memo-element-weight");
-        const styled: HtmlElement = { ...plain, style: { fontWeight: 400 } };
-        const primed = htmlWeightReading(draftWith([plain]));
+        const primed = htmlWeightReading(unlinked);
         const expected = assembleHtml({
-          elements: [styled],
+          layers: linked.template.layers,
+          headline: "memo-link",
           canvas: { size: "300x250" },
           brandColor: "#1473E6",
-          style: {},
+          style: linked.style,
+          clickDestination: "https://example.com/shop",
         }).byteLength;
-        // Sanity: the override must actually move the byte count (400 vs the
-        // default tone's "bold"), or a stale reading would pass by coincidence.
         expect(primed?.bytes).not.toBe(expected);
-        expect(htmlWeightReading(draftWith([styled]))?.bytes).toBe(expected);
-      });
-
-      test("changing only an element's fontFamily re-weighs", () => {
-        const plain = text("memo-element-family");
-        const styled: HtmlElement = { ...plain, style: { fontFamily: "Lora" } };
-        const primed = htmlWeightReading(draftWith([plain]));
-        const expected = assembleHtml({
-          elements: [styled],
-          canvas: { size: "300x250" },
-          brandColor: "#1473E6",
-          style: {},
-        }).byteLength;
-        // Sanity: "Lora" vs the default "Inter" must differ in length, or this
-        // test cannot see the stale reading.
-        expect(primed?.bytes).not.toBe(expected);
-        expect(htmlWeightReading(draftWith([styled]))?.bytes).toBe(expected);
-      });
-
-      test("an empty style block keys the same as an absent one", () => {
-        // The assembler resolves `style: {}` exactly like no block at all
-        // (`htmlElementFont` reads `style?.fontWeight !== undefined` / `??`),
-        // so re-assembling for the no-op edit would be pure churn — and the
-        // key must not become a SECOND, stricter vocabulary than the domain's.
-        const plain = text("memo-empty-style");
-        htmlWeightReading(draftWith([plain]));
-        assembleSpy.mockClear();
-        const reading = htmlWeightReading(draftWith([{ ...plain, style: {} }]));
-        expect(assembleSpy).not.toHaveBeenCalled();
-        expect(reading?.bytes).toBe(
-          assembleHtml({
-            elements: [plain],
-            canvas: { size: "300x250" },
-            brandColor: "#1473E6",
-            style: {},
-          }).byteLength,
-        );
+        expect(htmlWeightReading(linked)?.bytes).toBe(expected);
       });
 
       test("a missing or non-hex brand color yields no reading and never calls the assembler", () => {
-        // The one failure this derivation expects is checked up front, so the
-        // assembler is never asked to throw it — no reading, no swallow.
-        const noProducts = { ...meterElements("no-colour"), products: [] };
+        const noProducts = { ...marked("no-colour"), products: [] };
         assembleSpy.mockClear();
         expect(htmlWeightReading(noProducts)).toBeUndefined();
         expect(assembleSpy).not.toHaveBeenCalled();
         assembleSpy.mockClear();
         const badColour = meterState({
-          template: htmlTemplate([{ id: "html", kind: "html", elements: [text("bad-colour")] }]),
+          campaignMessage: "bad-colour",
           products: [
             {
               key: 1,
@@ -987,14 +871,12 @@ describe("derive.ts", () => {
       });
 
       test("an unexpected error from the assembler propagates rather than hiding the meter", () => {
-        const state = meterElements("propagate-boom");
+        const state = marked("propagate-boom");
         assembleSpy.mockClear();
         assembleSpy.mockImplementationOnce(() => {
           throw new Error("assembler defect");
         });
         expect(() => htmlWeightReading(state)).toThrow("assembler defect");
-        // Nothing was cached on the way out, so the very next call assembles for
-        // real (the spy's default implementation delegates to the assembler).
         expect(htmlWeightReading(state)?.bytes).toBeGreaterThan(0);
       });
     });

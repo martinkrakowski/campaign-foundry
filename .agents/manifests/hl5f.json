@@ -13,33 +13,36 @@
         "run",
         "packages/CampaignOrchestration/src/domain/value-objects/__tests__/markup-assembler.test.ts"
       ],
-      "verdict": "caught"
+      "verdict": "caught",
+      "retired": "Retired by AR2: assembleHtml does not interpolate a tone-derived font-weight. Layer markup has no font."
     },
     {
       "file": "packages/CampaignOrchestration/src/domain/value-objects/markup-assembler.ts",
       "before": "        let justify = \"flex-start\";\n        if (element.frame.anchor === \"middle\") {\n          justify = \"center\";\n        } else if (element.frame.anchor === \"bottom\") {\n          justify = \"flex-end\";\n        }",
       "after": "        const justify = \"flex-start\";",
-      "because": "This is the regression the orchestrator's fix round closes: the markup positions text with CSS flex `justify-content`, which must follow the element's own anchor (`top`/`middle`/`bottom`) for the browser to lay out the right side of the box regardless of how many lines the text wraps to. A `justify-content` that no longer follows the anchor renders every text element flush to the top of its frame — a `bottom`-anchored headline (or a `middle`-anchored one) would render in the wrong place with nothing else in the pipeline noticing, the same \"looks fine in review\" shape as the padding-top regression this replaces.",
+      "because": "This is the regression the orchestrator's fix round closes: the markup positions text with CSS flex `justify-content`, which must follow the element's own anchor (`top`/`middle`/`bottom`) for the browser to lay out the right side of the box regardless of how many lines the text wraps to. A `justify-content` that no longer follows the anchor renders every text element flush to the top of its frame \u2014 a `bottom`-anchored headline (or a `middle`-anchored one) would render in the wrong place with nothing else in the pipeline noticing, the same \"looks fine in review\" shape as the padding-top regression this replaces.",
       "command": [
         "yarn",
         "vitest",
         "run",
         "packages/CreativeGeneration/src/infrastructure/adapters/__tests__/NodeCanvasCompositor.html-fidelity.test.ts"
       ],
-      "verdict": "caught"
+      "verdict": "caught",
+      "retired": "Retired by AR2: assembleHtml no longer positions element text with justify-content. static-text emits the escaped headline in a p or button."
     },
     {
       "file": "apps/web/src/components/campaign/derive.ts",
       "before": "  return distinct.length > 0 ? distinct : [undefined];",
       "after": "  return distinct.length > 0 ? [distinct[0]] : [undefined];",
-      "because": "Qodo finding: htmlWeightReading must measure every distinct tone the draft will actually generate a bundle for, not just the first one — generation writes one html unit per treatment (brief mode) or per variant (variation mode), and each carries its own tone. Measuring only the first tone reopens exactly the gap just closed: a later bold treatment (or a tone-axis value ordered after the first) can produce a larger bundle than the one the meter reports, so an over-budget unit ships without the editor ever warning about it.",
+      "because": "Qodo finding: htmlWeightReading must measure every distinct tone the draft will actually generate a bundle for, not just the first one \u2014 generation writes one html unit per treatment (brief mode) or per variant (variation mode), and each carries its own tone. Measuring only the first tone reopens exactly the gap just closed: a later bold treatment (or a tone-axis value ordered after the first) can produce a larger bundle than the one the meter reports, so an over-budget unit ships without the editor ever warning about it.",
       "command": [
         "yarn",
         "vitest",
         "run",
         "apps/web/src/components/campaign/__tests__/derive.test.ts"
       ],
-      "verdict": "caught"
+      "verdict": "caught",
+      "retired": "Retired by AR2: draftTones is deleted. Layer markup does not vary by tone, so the weight reading does not loop tones."
     }
   ]
 }
