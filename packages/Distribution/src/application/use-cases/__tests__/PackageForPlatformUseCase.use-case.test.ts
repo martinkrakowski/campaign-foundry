@@ -910,7 +910,10 @@ describe("PackageForPlatformUseCase — shipped html5 display profiles (X14)", (
     });
     expect(result.success).toBe(true);
     if (!result.success) return;
-    expect(result.value.platforms[0].items.map((item) => item.format)).toEqual(["static", "static"]);
+    expect(result.value.platforms[0].items.map((item) => item.format)).toEqual([
+      "static",
+      "static",
+    ]);
     expect(result.value.platforms[0].items.map((item) => item.source)).toEqual([
       "alpha/300x250/fallback.png",
       "alpha/728x90/fallback.png",
