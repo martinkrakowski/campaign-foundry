@@ -87,7 +87,7 @@ describe("CreateCampaignDialog", () => {
       within(group)
         .getAllByRole("button")
         .map((tile) => tile.getAttribute("aria-label")),
-    ).toEqual(["social-post", "paid-social", "display-ad", "short-video"]);
+    ).toEqual(["social-post", "paid-social", "short-video", "display-ad"]);
     expect(within(dialog).getAllByRole("status")).toHaveLength(1);
   });
 
@@ -846,25 +846,32 @@ describe("the inline discard guard (W2(a) / D90)", () => {
   });
 });
 
-describe("CC6 — format grouping by format display names (D144)", () => {
+describe("CC6 — three tile groups, named for what the user is making (D162)", () => {
   test("each group exposes an accessible name, and each tile appears under the correct one", async () => {
     const user = userEvent.setup();
     renderDialog();
     const dialog = await openDialog(user);
 
-    const staticGroup = within(dialog).getByRole("group", { name: formatDisplayName("static") });
+    const stillGroup = within(dialog).getByRole("group", { name: messages.typeGroupStillImage });
     expect(
-      within(staticGroup)
+      within(stillGroup)
         .getAllByRole("button")
         .map((tile) => tile.getAttribute("aria-label")),
-    ).toEqual(["social-post", "paid-social", "display-ad"]);
+    ).toEqual(["social-post", "paid-social"]);
 
-    const motionGroup = within(dialog).getByRole("group", { name: formatDisplayName("motion") });
+    const videoGroup = within(dialog).getByRole("group", { name: messages.typeGroupVideo });
     expect(
-      within(motionGroup)
+      within(videoGroup)
         .getAllByRole("button")
         .map((tile) => tile.getAttribute("aria-label")),
     ).toEqual(["short-video"]);
+
+    const htmlGroup = within(dialog).getByRole("group", { name: messages.typeGroupHtmlAd });
+    expect(
+      within(htmlGroup)
+        .getAllByRole("button")
+        .map((tile) => tile.getAttribute("aria-label")),
+    ).toEqual(["display-ad"]);
   });
 
   test("all four types remain reachable and selectable, iterating CAMPAIGN_TYPES", async () => {

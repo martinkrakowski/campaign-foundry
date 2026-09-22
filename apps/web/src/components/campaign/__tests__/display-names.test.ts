@@ -28,6 +28,7 @@ describe("display names", () => {
   test("formats read as things a person makes, not enum values", () => {
     expect(formatDisplayName("static")).toBe("Still images");
     expect(formatDisplayName("motion")).toBe("Video");
+    expect(formatDisplayName("html")).toBe("HTML");
     // an unknown value passes through rather than rendering "undefined"
     expect(formatDisplayName("hologram")).toBe("hologram");
   });

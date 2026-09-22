@@ -40,6 +40,8 @@ export function formatDisplayName(format: string): string {
       return "Still images";
     case "motion":
       return "Video";
+    case "html":
+      return "HTML";
     default:
       return format;
   }
