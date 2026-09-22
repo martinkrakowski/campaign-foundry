@@ -18,7 +18,6 @@ export * from "./creative-templates.js";
 export * from "./creative-types.js";
 export * from "./display-sizes.js";
 export * from "./easing.js";
-export * from "./html-element.js";
 export * from "./layer-kinds.js";
 export * from "./LogEntry.vo.js";
 export * from "./markup-assembler.js";

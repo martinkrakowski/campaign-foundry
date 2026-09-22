@@ -31,13 +31,13 @@
         "packages/CampaignOrchestration/src/domain/value-objects/__tests__/tracks.test.ts"
       ],
       "verdict": "caught",
-      "retired": "Retired by ANCHORS: a later decision reversed the claim. K1b made a track SINGLE-clock — two clocks on one property are now two tracks — so the per-clock `seenTByClock` map this mutation collapses is exactly the `seenT` set the module ships today. The mutant is the current code, and a cross-clock duplicate inside one track is no longer legal for this mutation to defend. The surviving half of K-D9, that a duplicate `t` is refused at all, is still pinned by k1a.json#0."
+      "retired": "Retired by ANCHORS: a later decision reversed the claim. K1b made a track SINGLE-clock \u2014 two clocks on one property are now two tracks \u2014 so the per-clock `seenTByClock` map this mutation collapses is exactly the `seenT` set the module ships today. The mutant is the current code, and a cross-clock duplicate inside one track is no longer legal for this mutation to defend. The surviving half of K-D9, that a duplicate `t` is refused at all, is still pinned by k1a.json#0."
     },
     {
       "file": "packages/shared/src/infrastructure/brief-yaml.ts",
-      "before": "const LAYER_KEY_ORDER = [\n  \"id\",\n  \"kind\",\n  \"enabled\",\n  \"frame\",\n  \"props\",\n  \"link\",\n  \"elements\",\n  \"tracks\",\n] as const;",
-      "after": "const LAYER_KEY_ORDER = [\n  \"id\",\n  \"kind\",\n  \"enabled\",\n  \"frame\",\n  \"props\",\n  \"link\",\n  \"elements\",\n] as const;",
-      "because": "orderedKeys appends unnamed keys at the end, so dropping tracks from LAYER_KEY_ORDER does not make it disappear — it falls into the same tail bucket as any other unrecognised key, which a plain 'tracks appears in the output' assertion cannot tell apart from tracks sitting at its declared position. Only a fixture with an unnamed key written before tracks in source order proves the position. (Re-anchored by ANCHORS: AR1 inserted `link` into LAYER_KEY_ORDER, which Prettier reformatted onto separate lines; the semantic edit — `tracks` dropped from the order — is the same one.)",
+      "before": "const LAYER_KEY_ORDER = [\"id\", \"kind\", \"enabled\", \"frame\", \"props\", \"link\", \"tracks\"] as const;",
+      "after": "const LAYER_KEY_ORDER = [\"id\", \"kind\", \"enabled\", \"frame\", \"props\", \"link\"] as const;",
+      "because": "orderedKeys appends unnamed keys at the end, so dropping tracks from LAYER_KEY_ORDER does not make it disappear \u2014 it falls into the same tail bucket as any other unrecognised key, which a plain 'tracks appears in the output' assertion cannot tell apart from tracks sitting at its declared position. Only a fixture with an unnamed key written before tracks in source order proves the position. (Re-anchored by AR2: elements left LAYER_KEY_ORDER and Prettier collapsed the array onto one line; the semantic edit \u2014 tracks dropped from the order \u2014 is the same one.)",
       "command": [
         "yarn",
         "vitest",

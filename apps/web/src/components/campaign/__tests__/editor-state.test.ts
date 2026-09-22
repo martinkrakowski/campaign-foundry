@@ -4738,25 +4738,7 @@ describe("canonical layer defaults (X16)", () => {
     expect(isDirtySinceSave(on)).toBe(false);
   });
 
-  test("a loaded empty elements list is not dirty; add then remove returns clean", () => {
-    const template = htmlTemplate({ elements: [] });
-    const state = fromBrief(savedBrief({ template }), { file: "camp.yaml" });
-    expect(isDirtySinceSave(state)).toBe(false);
-    const added = reduce(state, {
-      type: "addHtmlElement",
-      layerId: "html",
-      kind: "text",
-    });
-    expect(isDirtySinceSave(added)).toBe(true);
-    const removed = reduce(added, {
-      type: "removeHtmlElement",
-      layerId: "html",
-      index: 0,
-    });
-    expect(isDirtySinceSave(removed)).toBe(false);
-  });
-
-  test("canonicalTemplate leaves enabled: false and a non-empty elements list alone", () => {
+  test("canonicalTemplate leaves enabled: false alone", () => {
     const off = withLayer(templateFromCanonical(DEFAULT_CAMPAIGN_TYPE), "shade", {
       enabled: false,
     });
@@ -4767,20 +4749,6 @@ describe("canonical layer defaults (X16)", () => {
       enabled: false,
     });
 
-    const populated = htmlTemplate({
-      elements: [
-        {
-          kind: "text",
-          text: "Stay wild.",
-          frame: { x: 0.08, y: 0.08, w: 0.84, h: 0.18, anchor: "top" },
-        },
-      ],
-    });
-    expect(canonicalTemplate(populated)).toEqual(populated);
-    expect(
-      canonicalTemplate(populated).layers.find((layer) => layer.id === "html")?.elements,
-    ).toHaveLength(1);
-
     // Already-canonical input keeps the same object — the load path should not
     // copy a brief that did not need rewriting.
     const untouched = templateFromCanonical(DEFAULT_CAMPAIGN_TYPE);
@@ -4788,8 +4756,8 @@ describe("canonical layer defaults (X16)", () => {
     const brief = savedBrief();
     expect(canonicalBrief(brief)).toBe(brief);
 
-    const both = htmlTemplate({ enabled: true, elements: [] });
-    expect(canonicalTemplate(both).layers.find((layer) => layer.id === "html")).toEqual({
+    const spelled = htmlTemplate({ enabled: true });
+    expect(canonicalTemplate(spelled).layers.find((layer) => layer.id === "html")).toEqual({
       id: "html",
       kind: "html",
     });

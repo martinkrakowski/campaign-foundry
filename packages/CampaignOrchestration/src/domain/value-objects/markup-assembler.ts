@@ -1,35 +1,30 @@
 /**
- * The markup assembler (HL4, HL-D3, HL-D5, HL-D6).
+ * The markup assembler (HL4, AR2).
  *
- * Produces a self-contained HTML creative unit server-side from the same
- * `html` layer element list that HL3's `drawHtml` paints on the canvas fallback.
+ * Produces a self-contained HTML creative unit from the template's layers.
+ * Copy is a `static-text` layer, pictures are `image` and `logo` layers, and
+ * a linked layer is a `<button>` that opens `window.clickTag`. Every other
+ * kind stays in the raster and emits nothing here.
  *
  * Key invariants:
- * 1. `clickDestination` (HL-D3): When present, emits a standard `var clickTag`
- *    variable declaration in the `<head>` script, NEVER an `<a href>`. Interactive
- *    elements navigate via `window.open(window.clickTag)`. When absent, no `clickTag`
- *    variable is emitted and no navigation handler is wired.
- * 2. Weight budget (HL-D6): Measured against `profile.maxBytes` when a profile
- *    is provided; refused over budget with an error naming both the budget and the overage.
- * 3. Element vocabulary (HL-D2): Expresses `button`, `text`, and `image` elements
- *    matching the canvas rendition geometry and styling.
- * 4. Content safety (HL-D7): Every interpolation is escaped for its context —
+ * 1. `clickDestination`: absent or `""` emits no `clickTag` and no onclick.
+ *    A present value that is not an absolute http(s) URL is refused. A valid
+ *    one emits one `var clickTag` declaration in the head, never an `<a href>`.
+ * 2. Weight budget (HL-D6): measured against `profile.maxBytes` when a profile
+ *    is provided; refused over budget with an error naming both the budget and
+ *    the overage.
+ * 3. Content safety (HL-D7): every interpolation is escaped for its context —
  *    HTML text and quoted attributes are HTML-escaped, the clickTag script
  *    declaration uses `\uXXXX` escapes (entities would corrupt the JS string),
  *    and the brand colour is additionally refused unless it is the documented
  *    6-digit hex shape.
  */
 
-import { resolveCanvas, scaleBasis, type CanvasSpec } from "./aspect-ratios.js";
-import { CLICK_TAG_VARIABLE } from "./click-destination.js";
-import { DEFAULT_STYLE, resolveStyle, toneFontWeight, type Style } from "./creative-style.js";
-import {
-  htmlTextGeometry,
-  htmlButtonFontSize,
-  htmlElementFont,
-  type HtmlElement,
-} from "./html-element.js";
-import { DEFAULT_TREATMENT, type ToneKind } from "./Treatment.vo.js";
+import { resolveCanvas, type CanvasSpec } from "./aspect-ratios.js";
+import { CLICK_TAG_VARIABLE, isAbsoluteUrl } from "./click-destination.js";
+import type { Style } from "./creative-style.js";
+import type { CreativeTemplateLayer } from "./creative-templates.js";
+import type { ToneKind } from "./Treatment.vo.js";
 
 /** HTML-escape user-authored strings for the HTML text / quoted-attribute contexts (HL-D7). */
 export function escapeHtml(value: string): string {
@@ -88,22 +83,21 @@ function safeBrandColor(brandColor: string): string {
 }
 
 export interface AssembleHtmlOptions {
-  readonly elements?: readonly HtmlElement[];
+  readonly layers: readonly CreativeTemplateLayer[];
+  /** The campaign copy a `static-text` layer emits. Absent is an empty string. */
+  readonly headline?: string;
   readonly canvas: CanvasSpec;
   readonly brandColor: string;
   readonly style?: Style;
   /**
-   * The variant's tone (HL5f, HL-D8): drives the default font weight exactly
-   * as `NodeCanvasCompositor.prepare` derives it for the canvas fallback
-   * (`toneFontWeight`) — a style-supplied `fontWeight` still overrides it.
-   * Absent → `DEFAULT_TREATMENT.tone` ("bold"), the pre-HL5f literal, so an
-   * omitted tone renders exactly what this function always rendered.
+   * Kept on the options so a caller that already resolved a treatment tone
+   * can pass it through. Layer markup does not interpolate a font from it.
    */
   readonly tone?: ToneKind;
   readonly clickDestination?: string;
   /** Platform profile or budget. When present, weight is verified against profile.maxBytes (HL-D6). */
   readonly profile?: { readonly maxBytes: number };
-  /** Relative path to fallback image for image elements (defaults to "fallback.png"). */
+  /** Relative path to the image a picture layer emits (defaults to "fallback.png"). */
   readonly fallbackImageSrc?: string;
 }
 
@@ -113,115 +107,89 @@ export interface AssembledHtml {
   readonly byteLength: number;
 }
 
+const CLICK_OPEN = ` onclick="window.open(window.${CLICK_TAG_VARIABLE})"`;
+
+/** `alt` is the image prop when it is a string; every other shape is empty. */
+function layerAlt(layer: CreativeTemplateLayer): string {
+  const props = layer.props;
+  if (props !== undefined && "alt" in props && typeof props.alt === "string") {
+    return escapeHtml(String(props.alt));
+  }
+  return "";
+}
+
 /**
- * Assembles an HTML creative unit from an element list and brand styling.
+ * The positioned box. A declared frame is canvas fractions in px. Absent, an
+ * image fills the canvas and a logo or static-text layer uses the percentage
+ * block — still `position: absolute`.
+ */
+function layerBoxStyle(layer: CreativeTemplateLayer, width: number, height: number): string {
+  if (layer.frame !== undefined) {
+    const left = layer.frame.x * width;
+    const top = layer.frame.y * height;
+    const boxW = layer.frame.w * width;
+    const boxH = layer.frame.h * height;
+    return `position: absolute; left: ${left}px; top: ${top}px; width: ${boxW}px; height: ${boxH}px;`;
+  }
+  if (layer.kind === "image") {
+    return `position: absolute; left: 0px; top: 0px; width: ${width}px; height: ${height}px;`;
+  }
+  return `position: absolute; left: 5%; top: 10%; width: 90%; height: 30%;`;
+}
+
+function pictureMarkup(
+  layer: CreativeTemplateLayer,
+  box: string,
+  src: string,
+  hasClick: boolean,
+): string {
+  const img = `<img src="${src}" alt="${layerAlt(layer)}" />`;
+  if (layer.link === true && hasClick) {
+    return `<div style="${box}"><button type="button"${CLICK_OPEN}>${img}</button></div>`;
+  }
+  return `<div style="${box}">${img}</div>`;
+}
+
+/**
+ * Assembles an HTML creative unit from the template's layers and brand styling.
  */
 export function assembleHtml(options: AssembleHtmlOptions): AssembledHtml {
   const { width, height } = resolveCanvas(options.canvas);
-  // HL5f: the default weight is tone-derived, exactly as the canvas fallback
-  // derives it — not the hard-coded "bold" this line used to read regardless
-  // of tone (HL-D8's gap). Absent tone → DEFAULT_TREATMENT.tone, the same
-  // "bold" this function always defaulted to.
-  const resolvedStyle = resolveStyle(
-    options.style,
-    toneFontWeight(options.tone ?? DEFAULT_TREATMENT.tone),
-    DEFAULT_STYLE.fontFamily,
-  );
-  const elements = options.elements ?? [];
-  const brandColor = safeBrandColor(options.brandColor);
-  const clickDestination = options.clickDestination;
-  const profile = options.profile;
-  const fallbackImageSrc = options.fallbackImageSrc ?? "fallback.png";
-
-  const headScripts: string[] = [];
-  if (clickDestination !== undefined) {
-    headScripts.push(
-      `<script>var ${CLICK_TAG_VARIABLE} = ${escapeScriptJson(JSON.stringify(clickDestination))};</script>`,
-    );
+  // The shape gate stays even though layer markup does not interpolate the
+  // colour: a non-hex value is a defect, not a string to escape into CSS.
+  safeBrandColor(options.brandColor);
+  const destination = options.clickDestination;
+  let scriptSection = "";
+  if (destination !== undefined && destination !== "") {
+    if (!isAbsoluteUrl(destination)) {
+      throw new Error(
+        `assembleHtml: clickDestination must be an absolute http(s) URL, got ${JSON.stringify(destination)}`,
+      );
+    }
+    scriptSection = `\n    <script>var ${CLICK_TAG_VARIABLE} = ${escapeScriptJson(JSON.stringify(destination))};</script>`;
   }
+  const hasClick = scriptSection !== "";
+  const fallbackImageSrc = options.fallbackImageSrc ?? "fallback.png";
+  const src = escapeHtml(fallbackImageSrc);
+  const copy = escapeHtml(options.headline ?? "");
 
-  const elementMarkup: string[] = [];
-
-  for (const element of elements) {
-    const boxX = element.frame.x * width;
-    const boxY = element.frame.y * height;
-    const boxW = element.frame.w * width;
-    const boxH = element.frame.h * height;
-
-    const baseStyle = `position: absolute; left: ${boxX}px; top: ${boxY}px; width: ${boxW}px; height: ${boxH}px; box-sizing: border-box;`;
-
-    switch (element.kind) {
-      case "button": {
-        const radius = Math.min(8, boxH / 2, boxW / 2);
-        // HL5f: the same function the canvas drawer calls — `htmlButtonFontSize`.
-        const fontSize = htmlButtonFontSize(boxH, scaleBasis(options.canvas, width, height));
-        // HL5e: the element's own font, resolved by the one function the canvas
-        // drawer also calls — an override here, or the brief's resolved
-        // (tone-derived) weight and family there.
-        const font = htmlElementFont(element, resolvedStyle);
-        const navAttr =
-          clickDestination !== undefined
-            ? ` onclick="window.open(window.${CLICK_TAG_VARIABLE})"`
-            : "";
-        const cursor = clickDestination !== undefined ? "cursor: pointer;" : "";
-        const buttonStyle = `${baseStyle} background-color: ${brandColor}; border-radius: ${radius}px; color: #ffffff; font-family: ${font.fontFamily}, sans-serif; font-weight: ${font.fontWeight}; font-size: ${fontSize}px; text-align: center; display: flex; align-items: center; justify-content: center; border: none; padding: 0; overflow: hidden; ${cursor}`;
-        const text = escapeHtml(element.text ?? "");
-        elementMarkup.push(
-          `<button type="button" style="${buttonStyle}"${navAttr}>${text}</button>`,
-        );
-        break;
-      }
-      case "text": {
-        // HL5f: font size, line height (px) and letter spacing (px) come from
-        // the same function the canvas drawer calls — `htmlTextGeometry`.
-        const { fontSize, lineHeight, letterSpacing } = htmlTextGeometry({
-          boxH,
-          canvasBasis: scaleBasis(options.canvas, width, height),
-          sizeScale: resolvedStyle.sizeScale,
-          lineHeight: resolvedStyle.lineHeight,
-          letterSpacing: resolvedStyle.letterSpacing,
-        });
-        // HL5f (orchestrator fix round): CSS flex `justify-content`, NOT a
-        // padding-top computed for one line. The markup cannot wrap text
-        // itself (no browser, D122) — it does not know how many lines a
-        // headline will actually take, so it cannot compute a fixed offset
-        // that stays correct for any line count. A single-line padding-top
-        // does the opposite: it is exact for exactly one line and WRONG for
-        // every other count, pushing wrapped lines below the box where
-        // `overflow: hidden` clips them. `justify-content` delegates that
-        // question to the browser, which lays out however many lines the
-        // text actually takes — structurally correct for any `n`, and
-        // differing from the canvas's placement only by the canvas's own
-        // baseline-correction terms (stated as the plan's residual, not
-        // narrowed here: see the HL5f entry in
-        // docs/planning/2026-09-10_the-html-layer.md).
-        let justify = "flex-start";
-        if (element.frame.anchor === "middle") {
-          justify = "center";
-        } else if (element.frame.anchor === "bottom") {
-          justify = "flex-end";
-        }
-        // HL5e: the element's own font, resolved by the one function the canvas
-        // drawer also calls — an override here, or the brief's resolved
-        // (tone-derived) weight and family there.
-        const font = htmlElementFont(element, resolvedStyle);
-        const textStyle = `${baseStyle} color: #ffffff; font-family: ${font.fontFamily}, sans-serif; font-weight: ${font.fontWeight}; font-size: ${fontSize}px; letter-spacing: ${letterSpacing}px; line-height: ${lineHeight}px; text-align: ${resolvedStyle.align}; display: flex; flex-direction: column; justify-content: ${justify}; overflow: hidden;`;
-        const text = escapeHtml(element.text ?? "");
-        elementMarkup.push(`<div style="${textStyle}">${text}</div>`);
-        break;
-      }
-      case "image": {
-        const imgStyle = "display: block; width: 100%; height: 100%; object-fit: cover;";
-        const src = escapeHtml(fallbackImageSrc);
-        elementMarkup.push(
-          `<div style="${baseStyle}"><img src="${src}" style="${imgStyle}" alt="" /></div>`,
-        );
-        break;
+  const layerMarkup: string[] = [];
+  for (const layer of options.layers) {
+    if (layer.enabled === false) continue;
+    if (layer.kind === "image" || layer.kind === "logo") {
+      layerMarkup.push(pictureMarkup(layer, layerBoxStyle(layer, width, height), src, hasClick));
+      continue;
+    }
+    if (layer.kind === "static-text") {
+      const box = layerBoxStyle(layer, width, height);
+      if (layer.link === true) {
+        const nav = hasClick ? CLICK_OPEN : "";
+        layerMarkup.push(`<button type="button" style="${box}"${nav}>${copy}</button>`);
+      } else {
+        layerMarkup.push(`<p style="${box}">${copy}</p>`);
       }
     }
   }
-
-  const scriptSection = headScripts.length > 0 ? `\n    ${headScripts.join("\n    ")}` : "";
 
   const html = `<!DOCTYPE html>
 <html>
@@ -245,12 +213,13 @@ export function assembleHtml(options: AssembleHtmlOptions): AssembledHtml {
   </head>
   <body>
     <div id="ad-container">
-      ${elementMarkup.join("\n      ")}
+      ${layerMarkup.join("\n      ")}
     </div>
   </body>
 </html>\n`;
 
   const bytes = new TextEncoder().encode(html);
+  const profile = options.profile;
 
   if (profile !== undefined && bytes.length > profile.maxBytes) {
     const overage = bytes.length - profile.maxBytes;

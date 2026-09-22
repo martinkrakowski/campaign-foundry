@@ -1173,12 +1173,11 @@ describe("inline legal lint warnings (R1)", () => {
 });
 
 describe("html weight warning (HL5c, HL-D6)", () => {
-  const frame = { x: 0.1, y: 0.2, w: 0.5, h: 0.3, anchor: "middle" } as const;
-
   /** An image-html draft aimed at one html placement at one size. */
   const weightState = (text: string): EditorState =>
     ({
       ...valid(),
+      campaignMessage: text,
       template: {
         id: "canonical-image-html",
         version: 1,
@@ -1186,11 +1185,8 @@ describe("html weight warning (HL5c, HL-D6)", () => {
         unit: "standard-web",
         layers: [
           { id: "image", kind: "image" },
-          {
-            id: "html",
-            kind: "html",
-            elements: [{ kind: "text", text, frame }],
-          },
+          { id: "html", kind: "html" },
+          { id: "copy", kind: "static-text" },
           { id: "logo", kind: "logo" },
         ],
       },

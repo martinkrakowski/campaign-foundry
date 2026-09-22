@@ -101,7 +101,7 @@ export const CREATIVE_TYPE_RULES: Readonly<Record<CreativeType, CreativeTypeRule
   },
   "image-html": {
     unit: "standard-web",
-    accepts: ["image", "html", "logo"],
+    accepts: ["image", "html", "logo", "static-text", "shade", "accent", "fill"],
     required: ["image", "html"],
     maxOf: { logo: 1 },
     sharedBudgets: [],

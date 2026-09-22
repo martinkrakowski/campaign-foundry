@@ -308,7 +308,7 @@ describe("LayerPropsSheet — per-kind fields (D134's table, brief-template.ts L
     expect(screen.getByRole("checkbox", { name: messages.layerLinkLabel })).toBeTruthy();
   });
 
-  test("html hosts the element editor (the sheet's third mount site, premise CC4/SE1)", () => {
+  test("html offers the click-target checkbox and no element editor", () => {
     render(
       <Harness
         initial={{ ...initialEditorState(), template: htmlTemplate() }}
@@ -316,10 +316,8 @@ describe("LayerPropsSheet — per-kind fields (D134's table, brief-template.ts L
         onClose={vi.fn()}
       />,
     );
-    expect(screen.getByRole("group", { name: messages.htmlElementAddLabel })).toBeTruthy();
-    // D160: the element editor stays, and the checkbox shares the sheet with
-    // it — AR2 will delete the editor, not this control.
     expect(screen.getByRole("checkbox", { name: messages.layerLinkLabel })).toBeTruthy();
+    expect(screen.queryByRole("group", { name: "Add an element" })).toBeNull();
   });
 });
 

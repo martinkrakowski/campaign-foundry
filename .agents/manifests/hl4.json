@@ -4,9 +4,9 @@
   "mutations": [
     {
       "file": "packages/CampaignOrchestration/src/domain/value-objects/markup-assembler.ts",
-      "before": "  if (clickDestination !== undefined) {\n    headScripts.push(\n      `<script>var ${CLICK_TAG_VARIABLE} = ${escapeScriptJson(JSON.stringify(clickDestination))};</script>`,\n    );\n  }",
-      "after": "  // clickTag script omitted",
-      "because": "assembleHtml must emit a var clickTag declaration in the head scripts when clickDestination is present (HL-D3) so ad servers can wire and track click navigation.",
+      "before": "    scriptSection = `\\n    <script>var ${CLICK_TAG_VARIABLE} = ${escapeScriptJson(JSON.stringify(destination))};</script>`;",
+      "after": "    scriptSection = \"\";",
+      "because": "assembleHtml must emit a var clickTag declaration in the head scripts when clickDestination is present (HL-D3) so ad servers can wire and track click navigation. (Re-anchored by AR2: the declaration is assigned to scriptSection when the destination is an absolute URL; omitting it is the same claim.)",
       "command": [
         "yarn",
         "vitest",
@@ -19,9 +19,9 @@
     },
     {
       "file": "packages/CampaignOrchestration/src/domain/value-objects/markup-assembler.ts",
-      "before": "        const navAttr =\n          clickDestination !== undefined\n            ? ` onclick=\"window.open(window.${CLICK_TAG_VARIABLE})\"`\n            : \"\";",
-      "after": "        const navAttr = \"\";",
-      "because": "assembleHtml must wire interactive button elements to navigate via window.open(window.clickTag) when clickDestination is present (HL-D3).",
+      "before": "const CLICK_OPEN = ` onclick=\"window.open(window.${CLICK_TAG_VARIABLE})\"`;",
+      "after": "const CLICK_OPEN = \"\";",
+      "because": "assembleHtml must wire interactive button elements to navigate via window.open(window.clickTag) when clickDestination is present (HL-D3). (Re-anchored by AR2: the onclick string is one constant shared by linked layers; emptying it is the same claim.)",
       "command": [
         "yarn",
         "vitest",
@@ -66,7 +66,7 @@
       "file": "packages/CampaignOrchestration/src/application/use-cases/GenerateCampaignUseCase.use-case.ts",
       "before": "...(isHtml\n              ? {\n                  format: \"html\",\n                  htmlBundlePath,\n                  htmlFallbackPath,\n                  ...(brief.clickDestination !== undefined\n                    ? { clickDestination: brief.clickDestination }\n                    : {}),\n                }\n              : {}),",
       "after": "            ...(isHtml\n              ? {\n                  htmlBundlePath,\n                  htmlFallbackPath,\n                  ...(brief.clickDestination !== undefined ? { clickDestination: brief.clickDestination } : {}),\n                }\n              : {}),",
-      "because": "GenerateCampaignUseCase must emit format: \"html\" on generated assets for image-html briefs so that downstream systems distinguish HTML units from static images. (Re-anchored by ANCHORS: the recorded text was reformatted or moved, not changed — the mutation, its claim and its command are untouched.)",
+      "because": "GenerateCampaignUseCase must emit format: \"html\" on generated assets for image-html briefs so that downstream systems distinguish HTML units from static images. (Re-anchored by ANCHORS: the recorded text was reformatted or moved, not changed \u2014 the mutation, its claim and its command are untouched.)",
       "command": [
         "yarn",
         "vitest",
@@ -79,9 +79,9 @@
     },
     {
       "file": "packages/CampaignOrchestration/src/domain/value-objects/markup-assembler.ts",
-      "before": "      `<script>var ${CLICK_TAG_VARIABLE} = ${escapeScriptJson(JSON.stringify(clickDestination))};</script>`,",
-      "after": "      `<script>var ${CLICK_TAG_VARIABLE} = ${JSON.stringify(clickDestination)};</script>`,",
-      "because": "assembleHtml must escape <, > and & as \\uXXXX inside the clickTag script declaration: JSON.stringify does not stop a crafted destination containing </script> from closing the element and appending executable markup (HL-D7).",
+      "before": "    scriptSection = `\\n    <script>var ${CLICK_TAG_VARIABLE} = ${escapeScriptJson(JSON.stringify(destination))};</script>`;",
+      "after": "    scriptSection = `\\n    <script>var ${CLICK_TAG_VARIABLE} = ${JSON.stringify(destination)};</script>`;",
+      "because": "assembleHtml must escape <, > and & as \\uXXXX inside the clickTag script declaration: JSON.stringify does not stop a crafted destination containing </script> from closing the element and appending executable markup (HL-D7). (Re-anchored by AR2: the declaration moved onto the scriptSection assignment; dropping escapeScriptJson is the same claim.)",
       "command": [
         "yarn",
         "vitest",

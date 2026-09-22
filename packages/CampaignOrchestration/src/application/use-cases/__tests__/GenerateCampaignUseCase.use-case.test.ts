@@ -26,6 +26,7 @@ import {
   type BriefTemplate,
 } from "../../../domain/value-objects/brief-template.js";
 import { CANONICAL_TEMPLATES } from "../../../domain/value-objects/creative-templates.js";
+import { validateTemplate } from "../../../../../../apps/api/server/lib/load-brief.js";
 import type { CampaignBrief } from "../../../domain/entities/CampaignBrief.js";
 import type { Product } from "../../../domain/entities/Product.js";
 import type { Variant } from "../../../domain/entities/Variant.js";
@@ -158,21 +159,6 @@ describe("GenerateCampaignUseCase — validation", () => {
     const template: BriefTemplate = {
       ...CANONICAL_TEMPLATES["image-html"],
       id: "canonical-image-html",
-      layers: [
-        { id: "image", kind: "image" },
-        {
-          id: "html",
-          kind: "html",
-          elements: [
-            {
-              kind: "button",
-              text: "Buy Now",
-              frame: { x: 0.1, y: 0.8, w: 0.3, h: 0.1, anchor: "middle" },
-            },
-          ],
-        },
-        { id: "logo", kind: "logo" },
-      ],
     };
     const result = await new GenerateCampaignUseCase(d).execute(
       baseBrief({
@@ -720,76 +706,25 @@ describe("GenerateCampaignUseCase — display sizes (A4b)", () => {
     expect(d.compositor.compositeAsset).not.toHaveBeenCalled();
   });
 
-  // HL5e fix round (Qodo): `assembleHtml` interpolates an element's resolved
-  // font straight into a quoted style attribute. The API boundary allowlists
-  // it via `layerElementsProblem`; the use case must too, for the same
-  // programmatic callers `styleProblem` above already covers.
-  const htmlTemplateWith = (elementStyle: Record<string, unknown>): BriefTemplate =>
-    ({
+  // The use case used to re-check an html layer's elements. That check is
+  // gone: the brief boundary refuses the key instead of skipping it, so a
+  // layer that still carries `elements` never becomes a brief the use case runs.
+  test("an elements key is refused by the brief boundary, not silently dropped", () => {
+    const template = {
       ...CANONICAL_TEMPLATES["image-html"],
-      id: "canonical-image-html",
       layers: [
         { id: "image", kind: "image" },
         {
           id: "html",
           kind: "html",
-          elements: [
-            {
-              kind: "text",
-              text: "Hello",
-              style: elementStyle,
-              frame: { x: 0.1, y: 0.2, w: 0.5, h: 0.3, anchor: "middle" },
-            },
-          ],
+          elements: [{ kind: "text", text: "Hello", style: { fontFamily: "Lora" } }],
         },
         { id: "logo", kind: "logo" },
       ],
-    }) as BriefTemplate;
-
-  test("refuses a programmatic html element whose style.fontFamily carries markup, before touching any port", async () => {
-    const d = deps();
-    // A programmatic brief that bypassed parsing — the exact caller this
-    // defense-in-depth check exists for — so the style is deliberately forged.
-    const result = await new GenerateCampaignUseCase(d).execute(
-      baseBrief({
-        template: htmlTemplateWith({ fontFamily: '"><script>alert(1)</script>' }),
-        clickDestination: "https://example.com/landing",
-      }),
+    };
+    expect(() => validateTemplate(template)).toThrow(
+      'Campaign brief field "template.layers[1].elements" is no longer a layer field; author the copy as a static-text layer.',
     );
-    expect(result.success).toBe(false);
-    if (!result.success) {
-      expect(result.error.message).toMatch(
-        /Campaign brief field "template\.layers\[1\]\.elements\[0\]\.style\.fontFamily" must be one of "Inter", "Lora"/,
-      );
-    }
-    expect(d.imageGenerator.resolveBackground).not.toHaveBeenCalled();
-    expect(d.compositor.compositeAsset).not.toHaveBeenCalled();
-    // Nothing reached the assembler: no html markup was ever exported.
-    const exporter = d.exporter as RecordingExporter;
-    expect(exporter.saved.some((s) => s.path.endsWith("index.html"))).toBe(false);
-  });
-
-  test("refuses a programmatic html element whose style.fontWeight is off-vocabulary", async () => {
-    const d = deps();
-    const result = await new GenerateCampaignUseCase(d).execute(
-      baseBrief({ template: htmlTemplateWith({ fontWeight: 900 }) }),
-    );
-    expect(result.success).toBe(false);
-    if (!result.success) {
-      expect(result.error.message).toMatch(
-        /template\.layers\[1\]\.elements\[0\]\.style\.fontWeight" must be one of 400, 700; got 900/,
-      );
-    }
-    expect(d.compositor.compositeAsset).not.toHaveBeenCalled();
-  });
-
-  test("a valid element style override still generates", async () => {
-    const d = deps();
-    const result = await new GenerateCampaignUseCase(d).execute(
-      baseBrief({ template: htmlTemplateWith({ fontFamily: "Lora", fontWeight: 400 }) }),
-    );
-    expect(result.success).toBe(true);
-    expect(d.compositor.compositeAsset).toHaveBeenCalled();
   });
 });
 
@@ -996,21 +931,6 @@ describe("GenerateCampaignUseCase — variation", () => {
     const template: BriefTemplate = {
       ...CANONICAL_TEMPLATES["image-html"],
       id: "canonical-image-html",
-      layers: [
-        { id: "image", kind: "image" },
-        {
-          id: "html",
-          kind: "html",
-          elements: [
-            {
-              kind: "button",
-              text: "Buy Now",
-              frame: { x: 0.1, y: 0.8, w: 0.3, h: 0.1, anchor: "middle" },
-            },
-          ],
-        },
-        { id: "logo", kind: "logo" },
-      ],
     };
     const variationD = deps({ planner: fakePlanner(fakePlan([fakeVariant()])) });
     const result = await new GenerateCampaignUseCase(variationD).execute(
@@ -2006,7 +1926,7 @@ describe("GenerateCampaignUseCase — motion variants", () => {
     expect(result.success).toBe(true);
   });
 
-  test("a timeline on a brief whose template does not accept text layers is refused before generation (image-html)", async () => {
+  test("a timeline on canonical image-html is refused: the type accepts text, the template has none enabled", async () => {
     const d = deps();
     const result = await new GenerateCampaignUseCase(d).execute(
       variationBrief({
@@ -2027,7 +1947,7 @@ describe("GenerateCampaignUseCase — motion variants", () => {
     );
     expect(result.success).toBe(false);
     if (!result.success) {
-      expect(result.error.message).toMatch(/does not accept text layers for "copy\.timeline"/);
+      expect(result.error.message).toMatch(/requires an enabled text layer in "template\.layers"/);
     }
     expect(d.imageGenerator.resolveBackground).not.toHaveBeenCalled();
     expect(d.videoCompositor.compositeVideo).not.toHaveBeenCalled();
@@ -2116,7 +2036,7 @@ describe("GenerateCampaignUseCase — motion variants", () => {
     expect(d.videoCompositor.compositeVideo).not.toHaveBeenCalled();
   });
 
-  test("variation.axes.headline on a brief whose template does not accept text layers is refused before generation (image-html)", async () => {
+  test("variation.axes.headline on canonical image-html is refused: the type accepts text, the template has none enabled", async () => {
     const d = deps();
     const result = await new GenerateCampaignUseCase(d).execute(
       variationBrief({
@@ -2132,9 +2052,7 @@ describe("GenerateCampaignUseCase — motion variants", () => {
     );
     expect(result.success).toBe(false);
     if (!result.success) {
-      expect(result.error.message).toMatch(
-        /does not accept text layers for "variation\.axes\.headline"/,
-      );
+      expect(result.error.message).toMatch(/requires an enabled text layer in "template\.layers"/);
     }
     expect(d.imageGenerator.resolveBackground).not.toHaveBeenCalled();
     expect(d.videoCompositor.compositeVideo).not.toHaveBeenCalled();

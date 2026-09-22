@@ -23,7 +23,6 @@ import {
   type AudioRights,
 } from "../../domain/value-objects/AudioRights.vo.js";
 import { styleProblem } from "../../domain/value-objects/creative-style.js";
-import { layerElementsProblem } from "../../domain/value-objects/html-element.js";
 import { assembleHtml } from "../../domain/value-objects/markup-assembler.js";
 import { PipelineExecutionLog } from "../../domain/value-objects/PipelineExecutionLog.vo.js";
 import type { PipelineResult } from "../../domain/value-objects/PipelineResult.vo.js";
@@ -55,7 +54,6 @@ import {
   timelineProblem,
   type CopyTimeline,
 } from "../../domain/value-objects/CopyTimeline.vo.js";
-import { CREATIVE_TYPE_RULES } from "../../domain/value-objects/creative-types.js";
 import {
   DEFAULT_DURATION,
   DEFAULT_DURATION_SEC,
@@ -545,17 +543,14 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
             htmlFallbackPath = `${basePath}/fallback.png`;
             htmlBundlePath = `${basePath}/index.html`;
             await this.deps.exporter.saveToDirectory(composite.image, htmlFallbackPath);
-            const htmlElements = brief.template.layers
-              .filter((l) => l.kind === "html" && l.enabled !== false)
-              .flatMap((l) => l.elements ?? []);
             const assembled = assembleHtml({
-              elements: htmlElements,
+              layers: brief.template.layers,
+              headline: copy,
               canvas: spec,
               brandColor: product.primaryColor,
               style: brief.style,
-              // HL5f: the markup's default weight matches this cell's
-              // treatment tone, the same tone the composite request above
-              // already passes to the canvas fallback.
+              // The same tone the composite request above already passes to
+              // the canvas fallback. Layer markup does not interpolate it.
               tone: treatment.tone,
               clickDestination: brief.clickDestination,
             });
@@ -988,16 +983,14 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
       htmlFallbackPath = `${basePath}/fallback.png`;
       htmlBundlePath = `${basePath}/index.html`;
       await this.deps.exporter.saveToDirectory(composite.image, htmlFallbackPath);
-      const htmlElements = template.layers
-        .filter((l) => l.kind === "html" && l.enabled !== false)
-        .flatMap((l) => l.elements ?? []);
       const assembled = assembleHtml({
-        elements: htmlElements,
+        layers: template.layers,
+        headline: variant.headline ?? copy,
         canvas: { ratio: ratio.value },
         brandColor: product.primaryColor,
         style,
-        // HL5f: the markup's default weight matches this variant's tone, the
-        // same tone `request.tone` above already passes to the canvas fallback.
+        // The same tone `request.tone` above already passes to the canvas
+        // fallback. Layer markup does not interpolate it.
         tone: variant.tone,
         clickDestination,
       });
@@ -1197,18 +1190,6 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     // Defense-in-depth, exactly the SAFE_ID reasoning above.
     const styleProblemText = styleProblem(brief.style);
     if (styleProblemText !== undefined) return err(new Error(styleProblemText));
-    // An `html` layer's elements (HL1, HL5e) ride the SAME defence-in-depth as
-    // the styleProblem call above it: `assembleHtml` interpolates
-    // `htmlElementFont`'s resolved weight/family straight into a quoted
-    // `style="…"` attribute, so a programmatic caller that bypasses parsing
-    // could otherwise hand the assembler a quote-bearing fontFamily the API
-    // boundary's allowlist never saw. The decision is the domain's one
-    // elements validator — the same `layerElementsProblem` the API parse and
-    // the stored-draft guard read, so no boundary can drift — and the font
-    // values are deliberately NOT escaped in the assembler instead: the
-    // vocabulary allowlist stays the single source of truth, and escaping
-    // would hide an invalid value rather than refuse it. Only the message
-    // shape is local to this use case, mirroring the destination check below.
     // D136 reads `CANONICAL_TEMPLATES[creativeType]` for the occlusion
     // baseline, and this method is the use case's own contract for a caller
     // that bypassed parsing (the SAFE_ID defense-in-depth reasoning above). A
@@ -1221,16 +1202,6 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
           `Campaign brief template names creative type "${brief.template.creativeType}", which is not one of ${CREATIVE_TYPES.join(", ")}.`,
         ),
       );
-    }
-    for (const [i, layer] of brief.template.layers.entries()) {
-      const elementsProblem = layerElementsProblem(layer.kind, layer.elements);
-      if (elementsProblem !== undefined) {
-        return err(
-          new Error(
-            `Campaign brief field "template.layers[${i}].elements${elementsProblem.path}" must ${elementsProblem.must}; got ${JSON.stringify(elementsProblem.value)}.`,
-          ),
-        );
-      }
     }
     // The brief's clickDestination (HL2, HL-D3) is parse-validated at the brief
     // boundary; enforce it here too through the SAME validator the parser calls —
@@ -1267,17 +1238,6 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
 
   private validateCopyTemplateCompatibility(brief: CampaignBrief): Result<true, Error> {
     if (brief.copy?.timeline !== undefined) {
-      const templateRules = CREATIVE_TYPE_RULES[brief.template.creativeType];
-      const acceptsText = templateRules.accepts.some(
-        (kind) => kind === "static-text" || kind === "animated-text",
-      );
-      if (!acceptsText) {
-        return err(
-          new Error(
-            `Campaign brief template creative type "${brief.template.creativeType}" does not accept text layers for "copy.timeline".`,
-          ),
-        );
-      }
       const hasEnabledText = brief.template.layers.some(
         (layer) =>
           (layer.kind === "static-text" || layer.kind === "animated-text") &&
@@ -1292,17 +1252,6 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
       }
     }
     if (brief.variation?.axes?.headline !== undefined) {
-      const templateRules = CREATIVE_TYPE_RULES[brief.template.creativeType];
-      const acceptsText = templateRules.accepts.some(
-        (kind) => kind === "static-text" || kind === "animated-text",
-      );
-      if (!acceptsText) {
-        return err(
-          new Error(
-            `Campaign brief template creative type "${brief.template.creativeType}" does not accept text layers for "variation.axes.headline".`,
-          ),
-        );
-      }
       const hasEnabledText = brief.template.layers.some(
         (layer) =>
           (layer.kind === "static-text" || layer.kind === "animated-text") &&

@@ -130,8 +130,8 @@ const TRACK_FIELDS = ["property", "stops"] as const;
 const STOP_FIELDS = ["t", "value", "easing", "clock"] as const;
 
 /**
- * The one tracks decision both boundaries read (K1), shaped like
- * `layerElementsProblem`: `isLayerEntry` refuses on a defined problem and the
+ * The one tracks decision both boundaries read (K1). `isLayerEntry` refuses
+ * on a defined problem and the
  * API's `validateTemplate` formats the same problem into its message shape —
  * the two cannot drift. Absent `tracks` is always fine. Only a kind in
  * `TRACKABLE_LAYER_KINDS` may carry a defined `tracks` — the empty array

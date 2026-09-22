@@ -559,13 +559,10 @@ describe("the stack lives inside CC1/CC2's cost contract (CC3, C3)", () => {
  * lights the region. A second selection concept would pass every component-level
  * assertion and fail here.
  *
- * The fixture is an `image-html` template, because an html element's `frame` is
- * the only DECLARED geometry in the vocabulary — every other layer's position
- * is decided by a layout engine (`anchorFirstY` over a measured span and type
- * size, and the logo's snap against that measured block), so none of them is
- * hit-testable and all of them stay reachable through the list. The canonical
- * `image-text` brief the rest of this file uses therefore has no regions at
- * all, which is asserted below rather than assumed.
+ * The fixture is an `image-html` template. The picture is a ground layer, so
+ * it owns the whole-canvas region; the html layer paints nothing on the raster
+ * and stays reachable through the list. The canonical `image-text` brief the
+ * rest of this file uses has that same ground region, asserted below.
  */
 const htmlElementBrief = {
   schemaVersion: 1,
@@ -576,13 +573,7 @@ const htmlElementBrief = {
     unit: "standard-web",
     layers: [
       { id: "image", kind: "image" },
-      {
-        id: "html",
-        kind: "html",
-        elements: [
-          { kind: "text", text: "Hello", frame: { x: 0.1, y: 0.2, w: 0.5, h: 0.3, anchor: "top" } },
-        ],
-      },
+      { id: "html", kind: "html" },
     ],
   },
   id: "layers",
@@ -595,12 +586,8 @@ const htmlElementBrief = {
   output: { formats: ["html"], platforms: ["linkedin"] },
 };
 
-/** The region drawn over the creative — named by the raw layer id, like every control in the stack (D18). */
-const region = () =>
-  within(rail()).getByRole("button", {
-    name: "html",
-    description: messages.previewRegionDescription("HTML", "Text"),
-  });
+/** The ground region drawn over the creative — named by the raw layer id (D18). */
+const region = () => wholeRegion("image", "Image");
 
 /**
  * A whole-layer region over the creative (CE2) — the ground kinds' own way in,
@@ -633,11 +620,11 @@ describe("the creative and the list are one selection (CE1)", () => {
   test("clicking the creative lights the row — read off the rendered list, not a spy", async () => {
     const user = userEvent.setup();
     await mountWithFrame();
-    expect(pick("html", "HTML").getAttribute("aria-pressed")).toBe("false");
+    expect(pick("image", "Image").getAttribute("aria-pressed")).toBe("false");
 
     await user.click(region());
 
-    expect(pick("html", "HTML").getAttribute("aria-pressed")).toBe("true");
+    expect(pick("image", "Image").getAttribute("aria-pressed")).toBe("true");
     expect(region().getAttribute("aria-pressed")).toBe("true");
   });
 
@@ -645,10 +632,10 @@ describe("the creative and the list are one selection (CE1)", () => {
     const user = userEvent.setup();
     await mountWithFrame();
 
-    await user.click(pick("html", "HTML"));
+    await user.click(pick("image", "Image"));
 
     expect(region().getAttribute("aria-pressed")).toBe("true");
-    expect(pick("html", "HTML").getAttribute("aria-pressed")).toBe("true");
+    expect(pick("image", "Image").getAttribute("aria-pressed")).toBe("true");
   });
 
   /**
@@ -662,18 +649,18 @@ describe("the creative and the list are one selection (CE1)", () => {
     await mountWithFrame();
 
     await user.click(region());
-    expect(pick("html", "HTML").getAttribute("aria-pressed")).toBe("true");
-    expect(pick("image", "Image").getAttribute("aria-pressed")).toBe("false");
+    expect(pick("image", "Image").getAttribute("aria-pressed")).toBe("true");
+    expect(pick("html", "HTML").getAttribute("aria-pressed")).toBe("false");
 
     // The row moves the pick the canvas made.
-    await user.click(pick("image", "Image"));
-    expect(pick("image", "Image").getAttribute("aria-pressed")).toBe("true");
+    await user.click(pick("html", "HTML"));
+    expect(pick("html", "HTML").getAttribute("aria-pressed")).toBe("true");
     expect(region().getAttribute("aria-pressed")).toBe("false");
 
     // And the canvas moves the pick the row made.
     await user.click(region());
     expect(region().getAttribute("aria-pressed")).toBe("true");
-    expect(pick("image", "Image").getAttribute("aria-pressed")).toBe("false");
+    expect(pick("html", "HTML").getAttribute("aria-pressed")).toBe("false");
   });
 
   /**
@@ -697,7 +684,7 @@ describe("the creative and the list are one selection (CE1)", () => {
     expect(frameCallCount()).toBe(before);
     // And the painted frame is still there — "no calls" must not mean "no frame".
     expect(rail().querySelector("img")).not.toBeNull();
-    expect(pick("html", "HTML").getAttribute("aria-pressed")).toBe("true");
+    expect(pick("image", "Image").getAttribute("aria-pressed")).toBe("true");
   });
 
   /**
@@ -720,12 +707,12 @@ describe("the creative and the list are one selection (CE1)", () => {
     expect(keysBefore).toContain("cf:brief-picked");
 
     await user.click(region());
-    expect(pick("html", "HTML").getAttribute("aria-pressed")).toBe("true");
+    expect(pick("image", "Image").getAttribute("aria-pressed")).toBe("true");
     expect(storedKeys()).toEqual(keysBefore);
 
     cleanup();
     await mountWithFrame();
-    expect(pick("html", "HTML").getAttribute("aria-pressed")).toBe("false");
+    expect(pick("image", "Image").getAttribute("aria-pressed")).toBe("false");
     expect(region().getAttribute("aria-pressed")).toBe("false");
   });
 
@@ -744,21 +731,15 @@ describe("the creative and the list are one selection (CE1)", () => {
     expect(document.activeElement).toBe(region());
     await user.keyboard("{Enter}");
 
-    expect(pick("html", "HTML").getAttribute("aria-pressed")).toBe("true");
+    expect(pick("image", "Image").getAttribute("aria-pressed")).toBe("true");
   });
 
-  /**
-   * The element exclusion, through the editor: the canonical `image-text`
-   * brief the rest of this file uses carries no `html` layer at all, so there
-   * is no ELEMENT region over its creative. Its ground layer has one — that is
-   * CE2's own block below — and the element vocabulary is untouched by it.
-   */
-  test("a template that declares no element frames puts no element region over the creative", async () => {
-    await mountDefaultWithFrame();
+  test("an html layer puts no region over the creative", async () => {
+    await mountWithFrame();
 
     expect(
       within(rail()).queryAllByRole("button", {
-        description: messages.previewRegionDescription("HTML", "Text"),
+        description: messages.previewWholeLayerRegionDescription("HTML"),
       }),
     ).toEqual([]);
   });

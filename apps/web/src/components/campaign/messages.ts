@@ -14,7 +14,6 @@
 // The leaf, never the barrel: the type vocabulary rides the same rule as the
 // one `display-names.ts` spells out. Type-only, so nothing is pulled in at
 // runtime by the file every other one imports.
-import type { Frame } from "@campaignfoundry/CampaignOrchestration/html-element";
 import type { TrackProperty } from "@campaignfoundry/CampaignOrchestration/tracks";
 import type { EasingKind } from "@campaignfoundry/CampaignOrchestration/easing";
 
@@ -1269,17 +1268,6 @@ export function layerSelectDescription(name: string): string {
 }
 
 /**
- * A hit region on the creative itself (CE1): the same D18 contract again — the
- * region's accessible name is the raw layer id, and these are the words that
- * say which layer it is and which of that layer's elements sits here. It reads
- * "Pick" for the same reason the row's does: the two controls are one selection
- * reached two ways, and neither writes a document byte (D139).
- */
-export function previewRegionDescription(layerName: string, elementName: string): string {
-  return `Pick ${layerName} — its ${elementName} element`;
-}
-
-/**
  * A hit region that IS a whole layer (CE2): the ground kinds — the picture and
  * the clip — occupy the entire canvas, so their region has no element to name
  * and says instead how much of the creative it covers. Same D18 contract as the
@@ -1298,17 +1286,6 @@ export function previewWholeLayerRegionDescription(layerName: string): string {
  */
 export const templateStackInRail =
   "Layers are edited beside the creative, in the preview rail: pick one, hide it, reorder it, add or remove.";
-
-/**
- * The heading over one html layer's element editor, now that the editor no
- * longer rides inside that layer's stack row and cannot borrow the row's
- * context. The layer's raw id, because that is what the rail's row shows and
- * what the brief carries — a display name would name the kind, of which a
- * template may hold several.
- */
-export function templateHtmlLayerLabel(layerId: string): string {
-  return `Elements of layer ${layerId}`;
-}
 
 /**
  * An add control's description: the control's accessible name is the raw kind
@@ -1570,133 +1547,6 @@ export function clickDestinationInvalid(problem: { readonly must: string }): str
   return `That is not a destination we can use — it must ${problem.must}.`;
 }
 
-/* ── The html layer's elements (HL5a, HL-D1, HL-D2) ──────────────────────── */
-
-/** The element list's name, said above it and used as its accessible name. */
-export const htmlElementsLabel = "Elements";
-
-/** Said while the layer holds none — the offer below it is the next step. */
-export const htmlElementsEmpty = "No elements yet — add one below.";
-
-/** The add row's group name. */
-export const htmlElementAddLabel = "Add an element";
-
-/**
- * An add control's description (D18): the control's accessible name is the raw
- * kind id — `text`, `button`, `image` — the way a layer's add control names
- * itself by its kind; the words live here. `kindName` is a display label
- * (`htmlElementKindLabel`), never a raw id.
- */
-export function htmlElementAddDescription(kindName: string): string {
-  return `Add ${kindName}`;
-}
-
-/**
- * An element row's accessible name: its position in the list, one-based. An
- * element has no id of its own, so the position it holds in the layer is the
- * identity every control on the row is named by — the same reason a beat's
- * controls name themselves by position.
- */
-export function htmlElementName(position: number): string {
-  return `Element ${position}`;
-}
-
-/** A move-up control's description: up is toward the start of the list. */
-export function htmlElementMoveUpDescription(position: number): string {
-  return `Move element ${position} up`;
-}
-
-/** A move-down control's description: down is toward the end of the list. */
-export function htmlElementMoveDownDescription(position: number): string {
-  return `Move element ${position} down`;
-}
-
-/** A remove control's description — the same contract as the row's other controls. */
-export function htmlElementRemoveDescription(position: number): string {
-  return `Remove element ${position}`;
-}
-
-/**
- * The copy input's label — carried by the `text` and `button` kinds only. An
- * `image` element has no copy, so it carries no input rather than a disabled
- * one (DESIGN.md §1.5).
- */
-export function htmlElementTextLabel(position: number): string {
-  return `Element ${position} text`;
-}
-
-/**
- * A frame's numeric fields — the ones an element editor gives a number input.
- * Derived from the domain's own `Frame`, so a fifth field is a field with no
- * words below rather than a raw key on a label.
- */
-export type FrameNumberField = Exclude<keyof Frame, "anchor">;
-
-/**
- * What a frame field is called, in words (D18): the label is read aloud by a
- * screen reader and read on screen by a person, and neither of them is reading
- * a schema — `x` on a label is a letter, "horizontal position" is a place.
- * Keyed by the field, so a frame field with no words here is a compile error.
- */
-const FRAME_FIELD_WORDS: Readonly<Record<FrameNumberField, string>> = {
-  x: "horizontal position",
-  y: "vertical position",
-  w: "width",
-  h: "height",
-};
-
-/** A frame input's label; `field` is the frame's own key, named here in words. */
-export function htmlElementFrameLabel(position: number, field: FrameNumberField): string {
-  return `Element ${position} ${FRAME_FIELD_WORDS[field]}`;
-}
-
-/** The anchor select's label. */
-export function htmlElementAnchorLabel(position: number): string {
-  return `Element ${position} anchor`;
-}
-
-/* ── The element style override (HL5e, HL-D4, HL-D8) ─────────────────────── */
-
-/**
- * The face of both style selects that writes the ABSENT key — the element
- * follows the brief's own `creative-style`, which is what HL-D4 says style
- * comes from; the override is the exception a row can state.
- */
-export const htmlElementStyleDefault = "Brief default";
-
-/** The weight select's label (carried by the `text` and `button` rows only). */
-export function htmlElementWeightLabel(position: number): string {
-  return `Element ${position} weight`;
-}
-
-/** The typeface select's label — the brief-level control's word, per element. */
-export function htmlElementFamilyLabel(position: number): string {
-  return `Element ${position} typeface`;
-}
-
-/**
- * The copy a new element starts with (HL5a): something a person can see and
- * replace, never an empty field — an element with nothing to say is an element
- * neither renderer can place. Only the `text` and `button` kinds ask: an
- * `image` element carries no copy at all, and the domain refuses it one.
- */
-export function htmlElementDefaultCopy(kind: string): string {
-  return kind === "button" ? "Shop now" : "Your message here";
-}
-
-/**
- * Display words for an element kind (HL5a, D18) — the LAYER_KIND_META pattern
- * one file up. The kind's raw id stays the accessible name of the control that
- * offers it; these are the words the eye reads and the description carries. An
- * unknown kind reads as itself rather than as an empty label.
- */
-export function htmlElementKindLabel(kind: string): string {
-  if (kind === "text") return "Text";
-  if (kind === "button") return "Button";
-  if (kind === "image") return "Image";
-  return kind;
-}
-
 /* ── The html weight meter (HL5c, HL-D6) ─────────────────────────────────── */
 
 /**
@@ -1708,18 +1558,6 @@ export function htmlElementKindLabel(kind: string): string {
 export function weightKb(bytes: number): string {
   return String(Math.ceil(bytes / 1024));
 }
-
-/** The meter's sentence: what the markup weighs, against which placement. */
-export function htmlWeightMeterText(bytes: number, maxBytes: number, profileLabel: string): string {
-  return `${weightKb(bytes)} KB of ${weightKb(maxBytes)} KB for ${profileLabel}.`;
-}
-
-/**
- * Why the meter's figure is a lower bound, said beside it: the fallback joins
- * the same budget at packaging, and its bytes do not exist until generation.
- */
-export const htmlWeightFallbackNote =
-  "The raster fallback image is added at packaging and counts toward the same budget — its size is unknown until the unit is generated, so packaging's check is the one that enforces it.";
 
 /** The over-budget sentence — the meter's warning and the draft's warning, in one voice. */
 export function htmlWeightOverage(overBytes: number): string {

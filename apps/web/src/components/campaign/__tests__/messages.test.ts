@@ -261,23 +261,3 @@ describe("template messages (L5)", () => {
     );
   });
 });
-
-describe("html element messages (HL5a)", () => {
-  test("an element kind reads as words; an unknown one reads as itself", () => {
-    expect(messages.htmlElementKindLabel("text")).toBe("Text");
-    expect(messages.htmlElementKindLabel("button")).toBe("Button");
-    expect(messages.htmlElementKindLabel("image")).toBe("Image");
-    // Never an empty label — the rule `layerKindDisplayName` follows (D18).
-    expect(messages.htmlElementKindLabel("made-up")).toBe("made-up");
-  });
-
-  test("an add description carries the display words, not the raw kind", () => {
-    expect(messages.htmlElementAddDescription("Text")).toBe("Add Text");
-    expect(messages.htmlElementAddDescription("Image")).toBe("Add Image");
-  });
-
-  test("a new element's copy is never blank, and differs by kind", () => {
-    expect(messages.htmlElementDefaultCopy("text")).toBe("Your message here");
-    expect(messages.htmlElementDefaultCopy("button")).toBe("Shop now");
-  });
-});

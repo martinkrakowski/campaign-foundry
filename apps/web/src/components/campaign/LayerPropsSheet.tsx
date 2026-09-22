@@ -10,8 +10,6 @@ import { FILL_ROLES } from "@campaignfoundry/CampaignOrchestration/brief-templat
 // offers the section exactly where `layerTracksProblem` would accept one.
 import { TRACKABLE_LAYER_KINDS } from "@campaignfoundry/CampaignOrchestration/tracks";
 import { Button, DialogHead, Input } from "@/components/ui";
-import { htmlWeightReading } from "@/components/campaign/derive";
-import { HtmlElementsEditor } from "@/components/campaign/sections/HtmlElementsEditor";
 import {
   ANCHOR_OPTIONS,
   anchorAxisActive,
@@ -27,8 +25,8 @@ import type { PresetCell } from "@/components/campaign/preset-tracks";
 /**
  * CC4 — the layer sheet: a **non-modal** panel that edits the layer CC3's
  * selection already names (`pickedLayerId`, read here, never a second
- * selection concept), live geometry props, the D160 click-target flag (every
- * kind), and the `html` layer's element editor.
+ * selection concept), live geometry props, and the D160 click-target flag
+ * (every kind).
  *
  * **Never `aria-modal`.** `editor-history.ts`'s `useHistoryKeys` switches
  * `⌘Z` off while `[aria-modal="true"]` is anywhere in the document — that is
@@ -100,13 +98,11 @@ function SheetField({ label, children }: { label: string; children: (id: string)
 }
 
 /**
- * One geometry field's number input — `HtmlElementsEditor.tsx`'s
- * `FrameNumberInput` shape, reused rather than re-invented: the box keeps its
- * own draft string while it is being typed into and hands a number to the
- * reducer only once the draft parses to a finite one, so a half-typed `0.`
- * survives its own re-render instead of losing the point. Every commit here
- * is one keystroke's worth — `setLayerProps`'s own coalesce key (the
- * `setHtmlElementFrame` rule) is what keeps a run of them to one undo entry.
+ * One geometry field's number input: the box keeps its own draft string while
+ * it is being typed into and hands a number to the reducer only once the draft
+ * parses to a finite one, so a half-typed `0.` survives its own re-render
+ * instead of losing the point. Every commit here is one keystroke's worth —
+ * `setLayerProps`'s coalesce key keeps a run of them to one undo entry.
  */
 function GeometryNumberField({
   field,
@@ -163,10 +159,9 @@ function GeometryNumberField({
 }
 
 /**
- * The text layers' anchor override — the same "brief default" empty-option
- * idiom `HtmlElementsEditor`'s `StyleSelect` uses: the empty value clears the
- * key rather than writing it, so the reducer never sees a stringly-typed
- * sentinel for "no override".
+ * The text layers' anchor override: the empty value clears the key rather
+ * than writing it, so the reducer never sees a stringly-typed sentinel for
+ * "no override".
  */
 function AnchorField({
   value,
@@ -247,8 +242,7 @@ function RoleField({
  * `image`'s alt override (X2). Three states, not two: absent (no key at
  * all), the empty string (declared decorative), and text — so clearing the
  * box types an empty string (a real, intentional value) while the Reset
- * control is the only way back to "no key", the same distinction
- * `setHtmlElementStyle`'s "brief default" face draws for a select.
+ * control is the only way back to "no key".
  */
 function AltField({
   value,
@@ -413,14 +407,6 @@ export function LayerPropsSheet({
         ) : null}
         {showTracks ? (
           <TrackForm layer={layer} dispatch={dispatch} playhead={playhead} preset={preset} />
-        ) : null}
-        {layer.kind === "html" ? (
-          <HtmlElementsEditor
-            layerId={layer.id}
-            elements={layer.elements ?? []}
-            dispatch={dispatch}
-            reading={htmlWeightReading(state)}
-          />
         ) : null}
         {/*
          * D160 — the click-target checkbox, on every layer kind: linkability

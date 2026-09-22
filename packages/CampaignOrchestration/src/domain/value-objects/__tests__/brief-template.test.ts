@@ -707,10 +707,7 @@ describe("isBriefTemplate layer link (D160)", () => {
   });
 });
 
-describe("isBriefTemplate layer elements (HL1)", () => {
-  const frame = { x: 0.1, y: 0.2, w: 0.5, h: 0.3, anchor: "top" as const };
-
-  /** An image-html template with `elements` swapped onto its html layer. */
+describe("isBriefTemplate refuses an own elements property (AR2)", () => {
   const withElements = (elements: unknown): boolean =>
     isBriefTemplate({
       id: "canonical-image-html",
@@ -724,38 +721,26 @@ describe("isBriefTemplate layer elements (HL1)", () => {
       ],
     });
 
-  test("accepts an html layer carrying each element kind, and absent or empty elements", () => {
-    expect(withElements(undefined)).toBe(true);
-    expect(withElements([])).toBe(true);
+  test("a layer with no elements key is a layer", () => {
     expect(
-      withElements([
-        { kind: "text", text: "Buy now", frame },
-        { kind: "button", text: "Shop", frame },
-        { kind: "image", frame },
-      ]),
+      isBriefTemplate({
+        id: "canonical-image-html",
+        version: 1,
+        creativeType: "image-html",
+        unit: "standard-web",
+        layers: [
+          { id: "image", kind: "image" },
+          { id: "html", kind: "html" },
+          { id: "logo", kind: "logo" },
+        ],
+      }),
     ).toBe(true);
   });
 
-  // HL5e: the guard reads the SAME `layerElementsProblem` the API does, so a
-  // stored draft's element style faces the identical contract — the draft that
-  // survives the guard is one both renderers can honour.
-  test("accepts an element style override and refuses a malformed one (HL5e)", () => {
-    expect(
-      withElements([
-        { kind: "text", text: "x", frame, style: { fontWeight: 400, fontFamily: "Lora" } },
-        { kind: "button", text: "y", frame, style: {} },
-      ]),
-    ).toBe(true);
-    expect(withElements([{ kind: "text", text: "x", frame, style: { fontWeight: 500 } }])).toBe(
-      false,
-    );
-    expect(withElements([{ kind: "text", text: "x", frame, style: { color: "#fff" } }])).toBe(
-      false,
-    );
-    expect(withElements([{ kind: "image", frame, style: { fontWeight: 700 } }])).toBe(false);
-  });
-
-  test("refuses elements on a layer that is not html", () => {
+  test("an own elements property refuses the entry, empty list included", () => {
+    expect(withElements([])).toBe(false);
+    expect(withElements(undefined)).toBe(false);
+    expect(withElements([{ kind: "text", text: "Buy now" }])).toBe(false);
     expect(
       isBriefTemplate({
         id: "canonical-image-html",
@@ -769,18 +754,6 @@ describe("isBriefTemplate layer elements (HL1)", () => {
         ],
       }),
     ).toBe(false);
-  });
-
-  test("refuses a malformed element — an unknown kind, a non-string copy, a bad frame", () => {
-    expect(withElements([{ kind: "link", text: "x", frame }])).toBe(false);
-    expect(withElements([{ kind: "text", text: 5, frame }])).toBe(false);
-    expect(withElements([{ kind: "text", text: "x", frame: { ...frame, x: 2 } }])).toBe(false);
-    expect(withElements([{ kind: "image", text: "x", frame }])).toBe(false);
-  });
-
-  test("refuses a text or button element with no copy", () => {
-    expect(withElements([{ kind: "text", frame }])).toBe(false);
-    expect(withElements([{ kind: "button", frame }])).toBe(false);
   });
 });
 

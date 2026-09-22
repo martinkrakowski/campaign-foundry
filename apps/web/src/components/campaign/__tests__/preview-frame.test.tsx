@@ -531,17 +531,7 @@ describe("the creative as a way in to a layer (CE1)", () => {
       unit: "standard-web",
       layers: [
         { id: "image", kind: "image" },
-        {
-          id: "html",
-          kind: "html",
-          elements: [
-            {
-              kind: "text",
-              text: "Hello",
-              frame: { x: 0.1, y: 0.2, w: 0.5, h: 0.3, anchor: "top" },
-            },
-          ],
-        },
+        { id: "html", kind: "html" },
       ],
     },
   });
@@ -560,7 +550,7 @@ describe("the creative as a way in to a layer (CE1)", () => {
     const view = await paintFrame({ onSelectLayer: () => {} });
     const box = view.getByTestId("preview-frame");
     const img = box.querySelector("img")!;
-    const region = within(box).getByRole("button", { name: "html" });
+    const region = within(box).getByRole("button", { name: "image" });
     // Same box, so a percentage of the region's containing block is a fraction
     // of the canvas: the `<img>` is `block h-auto w-full` inside it, and the
     // box is the positioning context.
@@ -593,7 +583,7 @@ describe("the creative as a way in to a layer (CE1)", () => {
     const narrow = await paintFrame({ onSelectLayer: (id) => picked.push(id) });
     const narrowBox = narrow.getByTestId("preview-frame");
     narrowBox.style.width = "320px";
-    const narrowRegion = within(narrowBox).getByRole("button", { name: "html" });
+    const narrowRegion = within(narrowBox).getByRole("button", { name: "image" });
     const insets = [
       narrowRegion.style.left,
       narrowRegion.style.top,
@@ -606,20 +596,20 @@ describe("the creative as a way in to a layer (CE1)", () => {
     const wide = await paintFrame({ onSelectLayer: (id) => picked.push(id) });
     const wideBox = wide.getByTestId("preview-frame");
     wideBox.style.width = "1280px";
-    const wideRegion = within(wideBox).getByRole("button", { name: "html" });
+    const wideRegion = within(wideBox).getByRole("button", { name: "image" });
     expect([
       wideRegion.style.left,
       wideRegion.style.top,
       wideRegion.style.width,
       wideRegion.style.height,
     ]).toEqual(insets);
-    expect(insets).toEqual(["10%", "20%", "50%", "30%"]);
+    expect(insets).toEqual(["0%", "0%", "100%", "100%"]);
     fireEvent.click(wideRegion);
 
     // Joined rather than compared as an array literal: two bare layer-kind
     // strings in brackets is what D121's scanner hunts for, and it does not
     // care that this one is an assertion.
-    expect(picked.join("|")).toBe("html|html");
+    expect(picked.join("|")).toBe("image|image");
   });
 
   test("selecting a layer issues no frame request: a click is not a document change", async () => {
@@ -627,7 +617,7 @@ describe("the creative as a way in to a layer (CE1)", () => {
     const before = vi.mocked(globalThis.fetch).mock.calls.length;
     expect(before).toBeGreaterThan(0);
 
-    fireEvent.click(screen.getByRole("button", { name: "html" }));
+    fireEvent.click(screen.getByRole("button", { name: "image" }));
     await act(async () => {
       await vi.advanceTimersByTimeAsync(PREVIEW_FRAME_DEBOUNCE_MS * 5);
     });
