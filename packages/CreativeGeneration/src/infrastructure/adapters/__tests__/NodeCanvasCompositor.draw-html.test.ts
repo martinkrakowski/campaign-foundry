@@ -42,6 +42,9 @@ describe("drawHtml paints nothing", () => {
     const hex = `#${[px[0], px[1], px[2]]
       .map((channel) => channel!.toString(16).padStart(2, "0"))
       .join("")}`;
-    expect(hex).not.toBe("#ff00fe");
+    // The ground is painted first and nothing after it covers the origin:
+    // the html layer is a no-op and the missing logo is skipped. Any stamp
+    // drawHtml might add, not only #ff00fe, changes this pixel.
+    expect(hex).toBe("#112233");
   });
 });

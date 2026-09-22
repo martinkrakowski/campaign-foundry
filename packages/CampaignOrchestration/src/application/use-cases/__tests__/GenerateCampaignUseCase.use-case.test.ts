@@ -26,7 +26,6 @@ import {
   type BriefTemplate,
 } from "../../../domain/value-objects/brief-template.js";
 import { CANONICAL_TEMPLATES } from "../../../domain/value-objects/creative-templates.js";
-import { validateTemplate } from "../../../../../../apps/api/server/lib/load-brief.js";
 import type { CampaignBrief } from "../../../domain/entities/CampaignBrief.js";
 import type { Product } from "../../../domain/entities/Product.js";
 import type { Variant } from "../../../domain/entities/Variant.js";
@@ -704,27 +703,6 @@ describe("GenerateCampaignUseCase — display sizes (A4b)", () => {
     }
     expect(d.imageGenerator.resolveBackground).not.toHaveBeenCalled();
     expect(d.compositor.compositeAsset).not.toHaveBeenCalled();
-  });
-
-  // The use case used to re-check an html layer's elements. That check is
-  // gone: the brief boundary refuses the key instead of skipping it, so a
-  // layer that still carries `elements` never becomes a brief the use case runs.
-  test("an elements key is refused by the brief boundary, not silently dropped", () => {
-    const template = {
-      ...CANONICAL_TEMPLATES["image-html"],
-      layers: [
-        { id: "image", kind: "image" },
-        {
-          id: "html",
-          kind: "html",
-          elements: [{ kind: "text", text: "Hello", style: { fontFamily: "Lora" } }],
-        },
-        { id: "logo", kind: "logo" },
-      ],
-    };
-    expect(() => validateTemplate(template)).toThrow(
-      'Campaign brief field "template.layers[1].elements" is no longer a layer field; author the copy as a static-text layer.',
-    );
   });
 });
 

@@ -103,8 +103,11 @@ export const CREATIVE_TYPE_RULES: Readonly<Record<CreativeType, CreativeTypeRule
     unit: "standard-web",
     accepts: ["image", "html", "logo", "static-text", "shade", "accent", "fill"],
     required: ["image", "html"],
-    maxOf: { logo: 1 },
-    sharedBudgets: [],
+    // Same caps as image-text for the kinds both renderers treat as one:
+    // the compositor draws a single copy layer, and shade/accent/logo are
+    // singular. fill stays uncapped — each fill owns its frame.
+    maxOf: { logo: 1, shade: 1, accent: 1 },
+    sharedBudgets: [{ kinds: ["static-text"], max: 1 }],
     outputFamilies: ["html"],
   },
   video: {
