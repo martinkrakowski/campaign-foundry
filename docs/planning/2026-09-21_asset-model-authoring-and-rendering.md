@@ -1,6 +1,7 @@
 # The Asset Model — one authoring surface, three compile targets
 
-**Status:** **D158, D159, D160 and D163 STAMPED (Owner, 2026-09-21). D161 and D162 remain
+**Status:** **D158, D159, D160, D162 and D163 STAMPED. D161 remains
+unstamped.**
 unstamped.** **Third draft**, revised the same day on the owner's corrections: D160 no longer mints a
 `button` layer kind (§7 says what the first draft got wrong), and the `html` rendition compiles
 `<img>` and `<video>` from layers.
@@ -76,7 +77,7 @@ This is the eleven-PR HL arc (HL1–HL5f, stamped SHIPPED) terminating in a surf
 | **D160** | **STAMPED — Owner, 2026-09-21; the decision's content is the owner's own correction in review, not a proposal they accepted.** **Linkability is a PROPERTY on a layer, not a layer kind. `button` is never minted.** Any layer may carry a click target: a `static-text` layer with it compiles to `<button>`; an `image` layer with it makes the whole rasterised creative clickable — the common display case. `clickTag` remains the emission, never `href` (HL-D3). | **The owner's correction, and it completes HL-D2 rather than amending it** — that decision already said a link is a property any element may carry, and the property was never built (M1). A `button` layer kind would have been a *third* way to say "text that is clickable", which is the duplication D121 and HL-D1 both exist to prevent. It also unlocks the case a button kind cannot express: a fully rasterised AI-generated ad whose single image layer is the click target. |
 | **D161** | **UNSTAMPED — follows from D158/D159, still the author's proposal.** **The display-ad preset targets HTML5, with static as its fallback rendition — not as its product.** `display-ad` becomes `formats: ["html"]` on `google-display-html` / `display-web-html`, and D122's required raster fallback continues to serve `google-display` / `display-web` / `meta-audience-network`. | C1. The `-html` profiles exist (X14) and nothing routes to them. `meta-audience-network` correctly gains no html sibling — X14 records that it *"is understood not to take third-party HTML5 display creatives"* — so it keeps taking the fallback. |
 | **D163** | **STAMPED — Owner, 2026-09-21; owner-raised — the request was a process to keep injected script out of the bundle.** **The bundle's only script is the one this codebase writes, and every value reaching markup is escaped at emission or gated by a closed vocabulary. D158 carries that property forward unchanged.** Concretely, after the rewrite: copy is `escapeHtml`'d wherever it lands; the `clickTag` declaration stays the sole `<script>` and keeps `escapeScriptJson`; any URL a layer contributes is scheme-gated to `http:`/`https:` the way `clickDestination` is; and per-layer style stays a closed union (`fontWeight`, `fontFamily`), never free CSS. | **This is already true and already tested — the risk is losing it in the rewrite, not acquiring it.** On `main`: `escapeHtml` is the five-character escape; `escapeScriptJson` turns `<`, `>`, `&` into `\uXXXX` so a crafted value cannot close the declaration with a literal `</script>` (HL-D7); `isAbsoluteUrl` refuses anything but http/https, with a test named *"refuses non-http/https protocols (XSS surface and untrackable schemes)"* asserting `javascript:alert(1)` is false; and `markup-assembler.test.ts` asserts a `<script>alert("xss")</script>` headline emits escaped. **The threat model is not hypothetical:** headline copy is LLM-generated, so an untrusted string reaches markup on the ordinary path, not only via a hostile operator. AR2 replaces the emission sites those guarantees live at, which is exactly when a property like this gets dropped silently. |
-| **D162** | **UNSTAMPED — follows from D158/D159, still the author's proposal.** **The create modal offers three kinds, not two and not four-grouped-by-two: Still image · Video · HTML ad.** The four campaign types stay as the presets behind them; the tiles name what the user is making. | The owner's model — every asset is static or video — holds for **content**. HTML is the wrapper. A two-tile fork cannot route `paid-social`, which is deliberately `formats: ["static", "motion"]` (both), and a tile set that omits html hides the format C1 found unreachable. |
+| **D162** | **STAMPED — Owner, 2026-09-22.** **The create modal offers three kinds, not two and not four-grouped-by-two: Still image · Video · HTML ad.** The four campaign types stay as the presets behind them; the tiles name what the user is making. | The owner's model — every asset is static or video — holds for **content**. HTML is the wrapper. A two-tile fork cannot route `paid-social`, which is deliberately `formats: ["static", "motion"]` (both), and a tile set that omits html hides the format C1 found unreachable. |
 
 ---
 
@@ -114,10 +115,10 @@ therefore not a fifth campaign type — it is this table's second row under the 
 
 | Lane | Delivers | Owns | Depends on |
 | --- | --- | --- | --- |
-| **AR1** | **Linkability as a layer property** (D160): the field, its validation at both boundaries, and the editor control. No new layer kind, so **no golden moves** — the raster rendition of a linked layer is byte-identical to the same layer unlinked. | `brief-template.ts`, `LayerPropsSheet.tsx`, `load-brief.ts`, `brief-yaml.ts` | **ready** (D160 stamped) |
-| **AR2** | `assembleHtml` compiles **layers** to the §3 table: `<img>`, `<p>`/`<button>`, each wrapped with `clickTag` when linked. The element vocabulary and `HtmlElementsEditor` retire; `image-html.accepts` widens to the layer kinds. **`<video>` is NOT in this lane** — see AR6. | `markup-assembler.ts`, `html-element.ts`, `creative-types.ts`, `LayerPropsSheet.tsx` | AR1 |
-| **AR3** | `display-ad` preset repointed at `image-html` + the `-html` profiles; the raster fallback routes to the static profiles. | `campaign-types.ts`, `PackageForPlatformUseCase` | AR2, **D161 — unstamped** |
-| **AR4** | The create modal's three tiles (D162), and the `image-html` path reachable end to end. | `CreateCampaignDialog.tsx`, `messages.ts` | AR3, **D162 — unstamped** |
+| **AR1** | **Linkability as a layer property** (D160): the field, its validation at both boundaries, and the editor control. No new layer kind, so **no golden moves** — the raster rendition of a linked layer is byte-identical to the same layer unlinked. | `brief-template.ts`, `LayerPropsSheet.tsx`, `load-brief.ts`, `brief-yaml.ts` | **merged** (#554) |
+| **AR2** | `assembleHtml` compiles **layers** to the §3 table: `<img>`, `<p>`/`<button>`, each wrapped with `clickTag` when linked. The element vocabulary and `HtmlElementsEditor` retire; `image-html.accepts` widens to the layer kinds. **`<video>` is NOT in this lane** — see AR6. | `markup-assembler.ts`, `html-element.ts`, `creative-types.ts`, `LayerPropsSheet.tsx` | **merged** (#555) |
+| **AR3** | `display-ad` preset repointed at `image-html` + the `-html` profiles; the raster fallback routes to the static profiles. | `campaign-types.ts`, `PackageForPlatformUseCase` | **merged** (#556) — dispatched and shipped while D161 was still unstamped in this document; see §7 |
+| **AR4** | The create modal's three tiles (D162), and the `image-html` path reachable end to end. | `CreateCampaignDialog.tsx`, `messages.ts` | AR3 (merged, #556); D162 stamped — **ready** |
 | **AR5** | Migration: every persisted brief carrying `html` elements is rewritten to layers, or refused at the boundary with a message naming the fix. **Scope measured:** zero of the seven tracked sample briefs carry them (`git grep -l 'elements:' -- 'briefs/*.yaml'` → 0); operator briefs are gitignored since #167, so their content is **unknown**, which is why this lane refuses rather than assumes. | `load-brief.ts`, `brief-yaml.ts` | AR2 |
 | **AR6** | **`<video>` in the bundle — BLOCKED on D64.** `image-html.accepts` gains `video`, and the compile rule emits `<video src=…>` pointing at a hosted clip. Needs object storage with stable addresses (H3, H4). **The `src` is a new URL surface and takes `isAbsoluteUrl`'s scheme gate (D163)** — a hosted-asset URL is no more trusted than a click destination. | `markup-assembler.ts`, `creative-types.ts`, the asset store | **D64** |
 
@@ -142,9 +143,9 @@ against a pre-change baseline on the CI runner (DoD 5), not at AR1.
 - **It does not touch `CAMPAIGN_TYPES`' membership.** D162 changes the tiles' *labels and grouping*,
   not the four presets behind them, so no `policyHash` moves. That is the difference between this
   plan and the 4:5 question.
-- **It does not schedule anything.** AR1 and AR2 are **ready** on the stamped decisions; AR3 and AR4
-  wait on D161 and D162, and AR6 on D64. Per RW-D4 a blocked lane does not occupy a slot, so the
-  wave that runs this is AR1 → AR2 → AR5, and the tile work follows a second stamp.
+- **It does not schedule anything.** AR1 (#554), AR2 (#555) and AR3 (#556) are merged. AR4 is
+  **ready** — D162 is stamped. AR6 stays named and blocked on **D64**; per RW-D4 a blocked lane does
+  not occupy a slot.
 
 ---
 
@@ -170,11 +171,12 @@ against a pre-change baseline on the CI runner (DoD 5), not at AR1.
 
 ## 7. What the owner is actually deciding
 
-**D158, D159, D160 and D163 are stamped (Owner, 2026-09-21).** What is left to decide is **D161**
-(does the display-ad preset target HTML5, with static as its fallback rather than its product) and
-**D162** (the three tiles). Both follow naturally from the stamped four, and both are still the
-author's proposals rather than the owner's words — which is why they are marked unstamped rather
-than carried along.
+**D158, D159, D160, D162 and D163 are stamped.** **D161 was never formally stamped in this
+document, and it should have been before AR3 shipped rather than after.** AR3 (#556) is merged to
+`main` and its content IS D161's content — the display-ad preset targets HTML5 — but that happened
+by a lane being dispatched, not by the owner saying so here. Recorded as fact, not backfilled as a
+stamp: this row is left unstamped, and the gap is named rather than papered over. What remains
+undecided in what this plan itself proposed is nothing; only **D64** stands between here and AR6.
 
 **Original framing, kept because the reasoning is the record:** **D160 was rewritten on the owner's
 correction (2026-09-21):** the first draft minted a `button` layer kind; linkability is a property
