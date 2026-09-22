@@ -575,6 +575,7 @@ const htmlElementBrief = {
     layers: [
       { id: "image", kind: "image" },
       { id: "shade", kind: "shade" },
+      { id: "static-text", kind: "static-text" },
     ],
   },
   id: "layers",

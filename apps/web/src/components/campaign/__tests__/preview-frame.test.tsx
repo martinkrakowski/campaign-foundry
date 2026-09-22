@@ -531,6 +531,7 @@ describe("the creative as a way in to a layer (CE1)", () => {
       unit: "standard-web",
       layers: [
         { id: "image", kind: "image" },
+        { id: "static-text", kind: "static-text" },
         { id: "logo", kind: "logo" },
       ],
     },

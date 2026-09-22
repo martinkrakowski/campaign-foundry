@@ -589,6 +589,7 @@ describe("derive.ts", () => {
     const htmlTemplate = (
       layers: readonly CreativeTemplateLayer[] = [
         picture(),
+        copy(),
         { id: "shade", kind: "shade" },
         { id: "logo", kind: "logo" },
       ],
