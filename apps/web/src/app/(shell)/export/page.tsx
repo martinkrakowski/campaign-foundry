@@ -77,7 +77,20 @@ export default function ExportPage() {
   const runSizes = new Set(packaged.flatMap((a) => (a.size === undefined ? [] : [a.size])));
   const platforms = visiblePlatformIds({ motion: hasMotion }).filter((id) => {
     const profile = platformProfile(id);
-    if (!profile?.formats.some((format) => runFormats.has(format))) return false;
+    // D161: an html row always carries a raster fallback (D122), which a DISPLAY
+    // static profile (sizes, not a social ratio) can package — the same
+    // fallback routing PackageForPlatformUseCase applies. A social static
+    // profile never packages an html row's fallback, so this is scoped to
+    // sizes, mirroring the use case's own `wantsStatic && profile.sizes !==
+    // undefined` condition rather than a second statement of it.
+    // `profile` is never undefined here — every id `visiblePlatformIds`
+    // returns is a `PLATFORM_PROFILES` key — so this keeps the existing
+    // optional-chaining shape rather than a guard nothing can take.
+    const fallbackEligible =
+      profile?.formats.includes("static") && profile?.sizes !== undefined && runFormats.has("html");
+    if (!profile?.formats.some((format) => runFormats.has(format)) && !fallbackEligible) {
+      return false;
+    }
     const slots = profile?.sizes;
     return slots === undefined || slots.some((slot) => runSizes.has(slot.size));
   });

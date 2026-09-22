@@ -170,10 +170,9 @@ describe("POST /campaigns/generate", () => {
     );
   });
 
-  // D117 — the create option's proof, at the route the editor's Save → run path
-  // serves. The brief is the shape a display-ad create's `toBrief` emits (A5):
-  // A3's three display profiles, the five IAB sizes, stills, Classic, typed.
-  test("generates a display-ad brief end to end — a display cell renders at resolveCanvas dimensions and google-display packages a non-empty manifest", async () => {
+  // D161 — the create option's proof. A display-ad generates HTML for the
+  // two html profiles; google-display packages the raster fallback.
+  test("generates a display-ad brief end to end — a display cell renders at resolveCanvas dimensions and google-display packages the fallback", async () => {
     const res = await call(
       brief({
         type: "display-ad",
@@ -186,8 +185,8 @@ describe("POST /campaigns/generate", () => {
           },
         ],
         output: {
-          formats: ["static"],
-          platforms: ["google-display", "meta-audience-network", "display-web"],
+          formats: ["html"],
+          platforms: ["google-display-html", "display-web-html"],
           sizes: ["300x250", "728x90", "160x600", "320x50", "300x600"],
         },
       }),

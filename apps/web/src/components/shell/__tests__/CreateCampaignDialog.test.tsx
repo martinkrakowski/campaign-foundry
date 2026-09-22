@@ -205,7 +205,7 @@ describe("CreateCampaignDialog", () => {
     const tile = within(dialog).getByRole("button", { name: "display-ad" });
     const target = document.getElementById(tile.getAttribute("aria-describedby") as string);
     expect(target?.textContent).toContain(
-      "Runs on Google Display, Meta Audience Network and Display Web.",
+      "Runs on Google Display (HTML5) and Display web (HTML5).",
     );
     // The jargon gate: display words only — never a raw platform or format id.
     expect(target?.textContent).not.toContain("google-display");
@@ -378,7 +378,7 @@ describe("CreateCampaignDialog", () => {
     // A3's three display profiles start selected. SG1 — the editor is one column,
     // so the Output section's platform cards are already mounted; the walk to the
     // Output step this used to need is gone with the wizard.
-    for (const id of ["google-display", "meta-audience-network", "display-web"]) {
+    for (const id of ["google-display-html", "display-web-html"]) {
       expect(screen.getByRole("button", { name: id }).getAttribute("aria-pressed")).toBe("true");
     }
     // The D117 proof — end to end against the run path, not the preset table:
@@ -389,7 +389,7 @@ describe("CreateCampaignDialog", () => {
       state: Record<string, unknown>;
     };
     const state = normalizeDraftState(draft.state);
-    expect(state.platforms).toEqual(["google-display", "meta-audience-network", "display-web"]);
+    expect(state.platforms).toEqual(["google-display-html", "display-web-html"]);
     // Identity and products are the user's answers, not the seed's (D108) — fill
     // them the way the editor's own controls dispatch, then run the D117 proof:
     // toBrief → parseBrief with the run paths' enforceCapabilities gate, and the

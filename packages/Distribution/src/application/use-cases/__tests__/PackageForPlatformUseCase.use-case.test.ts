@@ -878,7 +878,7 @@ describe("PackageForPlatformUseCase — shipped html5 display profiles (X14)", (
     expect(store.manifests[0].manifest.profile.maxBytes).toBe(150 * 1024);
   });
 
-  test("the static google-display profile does not take the html row — a static profile packages the statics only", async () => {
+  test("a static display profile packages an html row's raster fallback, and a static row too", async () => {
     const store = fakeStore();
     const result = await exec(store, {
       assets: [
@@ -894,8 +894,30 @@ describe("PackageForPlatformUseCase — shipped html5 display profiles (X14)", (
     });
     expect(result.success).toBe(true);
     if (!result.success) return;
-    expect(result.value.platforms[0].items.map((i) => i.source)).toEqual(["alpha/300x250.png"]);
-    expect(store.reads).toEqual(["alpha/300x250.png"]);
+    expect(result.value.platforms[0].items.map((i) => i.source)).toEqual([
+      "alpha/300x250/fallback.png",
+      "alpha/300x250.png",
+    ]);
+    expect(result.value.platforms[0].items.every((item) => item.format === "static")).toBe(true);
+    expect(store.reads).toEqual(["alpha/300x250/fallback.png", "alpha/300x250.png"]);
+  });
+
+  test("google-display packages the fallback when the run produced only html rows", async () => {
+    const store = fakeStore();
+    const result = await exec(store, {
+      assets: [htmlDisplay("300x250"), htmlDisplay("728x90")],
+      platforms: ["google-display"],
+    });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.platforms[0].items.map((item) => item.format)).toEqual([
+      "static",
+      "static",
+    ]);
+    expect(result.value.platforms[0].items.map((item) => item.source)).toEqual([
+      "alpha/300x250/fallback.png",
+      "alpha/728x90/fallback.png",
+    ]);
   });
 
   test("display-web-html packages an image-html asset too, and no other size reaches the unit", async () => {

@@ -72,10 +72,10 @@ describe("campaign types (D108–D112, A5/D117)", () => {
     });
     expect(CAMPAIGN_TYPE_PRESETS["display-ad"]).toEqual({
       unit: "standard-web",
-      creativeType: "image-text",
-      template: "canonical-image-text",
-      platforms: ["google-display", "meta-audience-network", "display-web"],
-      formats: ["static"],
+      creativeType: "image-html",
+      template: "canonical-image-html",
+      platforms: ["google-display-html", "display-web-html"],
+      formats: ["html"],
       mode: "brief",
     });
   });
@@ -142,13 +142,13 @@ describe("campaign types (D108–D112, A5/D117)", () => {
     ).toEqual(["static", "motion"]);
     expect(
       CREATIVE_TYPE_RULES[CAMPAIGN_TYPE_PRESETS["display-ad"].creativeType].outputFamilies,
-    ).toEqual(["static", "motion"]);
+    ).toEqual(["html"]);
   });
 
   test("presets only ever request the two known formats and the two known modes", () => {
     for (const preset of Object.values(CAMPAIGN_TYPE_PRESETS)) {
       for (const format of preset.formats) {
-        expect(["static", "motion"]).toContain(format);
+        expect(["static", "motion", "html"]).toContain(format);
       }
       expect(["brief", "variation"]).toContain(preset.mode);
     }
@@ -167,7 +167,7 @@ describe("campaign types (D108–D112, A5/D117)", () => {
     );
     expect(CAMPAIGN_TYPE_PROMPT_HINTS["short-video"]).toBe("short-form video for social feeds");
     expect(CAMPAIGN_TYPE_PROMPT_HINTS["display-ad"]).toBe(
-      "static display advertising in IAB banner sizes",
+      "HTML5 display advertising in IAB banner sizes, with a static raster fallback",
     );
     expect(CAMPAIGN_TYPE_PROMPT_HINTS["short-video"]).not.toBe(
       CAMPAIGN_TYPE_PROMPT_HINTS["social-post"],
@@ -191,7 +191,7 @@ describe("campaign types (D108–D112, A5/D117)", () => {
       "Campaign type: short-form video for social feeds.",
     );
     expect(campaignTypePromptSentence("display-ad")).toBe(
-      "Campaign type: static display advertising in IAB banner sizes.",
+      "Campaign type: HTML5 display advertising in IAB banner sizes, with a static raster fallback.",
     );
   });
 

@@ -73,11 +73,11 @@ describe("BriefTemplate and templateFromCanonical (D120, D123, D128)", () => {
     });
   });
 
-  test("display-ad resolves to canonical-image-text with 5 layers in z-order", () => {
+  test("display-ad resolves to canonical-image-html", () => {
     const template = templateFromCanonical("display-ad");
-    expect(template.id).toBe("canonical-image-text");
-    expect(template.creativeType).toBe("image-text");
-    expect(template.layers).toHaveLength(5);
+    expect(template.id).toBe("canonical-image-html");
+    expect(template.creativeType).toBe("image-html");
+    expect(template.layers.map((layer) => layer.kind)).toEqual(["image", "html", "logo"]);
   });
 });
 

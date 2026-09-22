@@ -182,13 +182,21 @@ describe("ExportPage — platform packaging", () => {
     expect(screen.queryByRole("button", { name: "display-web-html" })).toBeNull();
   });
 
-  test("an html run is offered the html profiles", async () => {
+  test("an html run is offered the html profiles AND the static ones via the fallback (D161)", async () => {
+    // The picker used to hide google-display / display-web / meta-audience-network
+    // for an html-only run: it read the run's formats as {"html"} alone, and none
+    // of those profiles' formats (["static"]) intersected it. But
+    // PackageForPlatformUseCase already packages an html row's raster fallback
+    // (D122) onto exactly these three — so the picker was hiding a package the
+    // API could actually build. htmlFallbackPath is what makes the row eligible;
+    // an html asset without one must not gain the static profiles.
     const assets = [
       makeAsset({
         format: "html",
         size: "300x250",
         outputPath: "alpha/300x250.png",
         htmlBundlePath: "alpha/300x250/index.html",
+        htmlFallbackPath: "alpha/300x250/fallback.png",
       }),
     ];
     seedPersistedRun(assets);
@@ -198,9 +206,37 @@ describe("ExportPage — platform packaging", () => {
       screen.getByRole("button", { name: "google-display-html", pressed: false }),
     ).toBeTruthy();
     expect(screen.getByRole("button", { name: "display-web-html", pressed: false })).toBeTruthy();
-    // The run holds no static asset, so the static display profiles are out on
-    // the same format rule.
-    expect(screen.queryByRole("button", { name: "google-display" })).toBeNull();
+    // All three static display profiles list 300x250, so all three are now
+    // offered — packaging one sends the fallback PNG, not the html bundle.
+    expect(screen.getByRole("button", { name: "google-display", pressed: false })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "display-web", pressed: false })).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "meta-audience-network", pressed: false }),
+    ).toBeTruthy();
+  });
+
+  test("a social static profile never packages an html row's fallback (D161 scope)", async () => {
+    // The fallback route is scoped to DISPLAY static profiles (sizes, not a
+    // ratio) — a social platform like instagram-feed has formats ["static"]
+    // too, and must not light up just because runFormats now effectively
+    // covers "static" for this row. Asserted with an aspectRatio-bearing html
+    // asset, the shape a social-format html row would never actually have, to
+    // prove the scope is the field (sizes !== undefined), not the presence of
+    // "static" in a profile's formats.
+    const assets = [
+      makeAsset({
+        format: "html",
+        aspectRatio: "1:1",
+        size: undefined,
+        outputPath: "alpha/1x1.png",
+        htmlBundlePath: "alpha/1x1/index.html",
+        htmlFallbackPath: "alpha/1x1/fallback.png",
+      }),
+    ];
+    seedPersistedRun(assets);
+    renderWithRun(<ExportPage />);
+    expect(await screen.findByRole("group", { name: "Platforms" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "instagram-feed" })).toBeNull();
   });
 
   test("a run whose html assets were rejected is not offered the html profiles (X14 fix2)", async () => {

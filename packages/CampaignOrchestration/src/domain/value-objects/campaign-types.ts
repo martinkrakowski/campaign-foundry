@@ -68,13 +68,17 @@ export const CAMPAIGN_TYPE_PRESETS: Readonly<Record<CampaignType, CampaignTypePr
     formats: ["motion"],
     mode: "variation",
   },
-  // IAB display units (D113) on the three display profiles (D116) — stills only (D118), Classic mode: static + brief is legal, and the type joined last (D117) so its sizes render before the option exists.
+  // HTML5 is the product (D161). The two `-html` profiles are what a new
+  // display-ad generates. google-display, display-web, and
+  // meta-audience-network are not generation platforms: image-html cannot
+  // request a static format, and those profiles package the raster fallback
+  // at package time instead.
   "display-ad": {
     unit: "standard-web",
-    creativeType: "image-text",
-    template: "canonical-image-text",
-    platforms: ["google-display", "meta-audience-network", "display-web"],
-    formats: ["static"],
+    creativeType: "image-html",
+    template: "canonical-image-html",
+    platforms: ["google-display-html", "display-web-html"],
+    formats: ["html"],
     mode: "brief",
   },
 };
@@ -88,7 +92,7 @@ export const CAMPAIGN_TYPE_PROMPT_HINTS: Readonly<Record<CampaignType, string>> 
   "social-post": "a social post for organic feeds",
   "paid-social": "paid social advertising across feeds, stories and reels",
   "short-video": "short-form video for social feeds",
-  "display-ad": "static display advertising in IAB banner sizes",
+  "display-ad": "HTML5 display advertising in IAB banner sizes, with a static raster fallback",
 };
 
 /** The sentence every generator appends. Always present; absent or unknown type → social-post. */

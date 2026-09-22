@@ -168,7 +168,10 @@ export class PackageForPlatformUseCase {
           if (isMotionAsset(asset)) {
             if (!wantsMotion) return false;
           } else if (isHtmlAsset(asset)) {
-            if (!wantsHtml) return false;
+            // D161: the bundle belongs to an html profile. A display static
+            // profile (it matches sizes, not a social ratio) packages the same
+            // row's raster fallback. A social static profile does not.
+            if (!wantsHtml && !(wantsStatic && profile.sizes !== undefined)) return false;
           } else if (!wantsStatic) {
             return false;
           }
@@ -253,9 +256,16 @@ export class PackageForPlatformUseCase {
           items.push(
             isMotionAsset(asset)
               ? await this.packageMotion(platformId, profile, asset)
-              : isHtmlAsset(asset)
+              : isHtmlAsset(asset) && profile.formats.includes("html")
                 ? await this.packageHtml(platformId, profile, asset, input.clickDestination)
-                : await this.packageStatic(platformId, profile, asset),
+                : isHtmlAsset(asset) &&
+                    profile.formats.includes("static") &&
+                    profile.sizes !== undefined
+                  ? await this.packageStatic(platformId, profile, {
+                      ...asset,
+                      outputPath: asset.htmlFallbackPath,
+                    })
+                  : await this.packageStatic(platformId, profile, asset),
           );
         }
 
