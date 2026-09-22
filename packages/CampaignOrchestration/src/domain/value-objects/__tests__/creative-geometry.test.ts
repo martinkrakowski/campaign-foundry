@@ -23,7 +23,6 @@ describe("LAYER_KIND_DEFAULT_RECTS (D130)", () => {
     expect(defaultLayerRect("video")).toEqual(FULL_CANVAS_RECT);
     expect(defaultLayerRect("shade")).toEqual(FULL_CANVAS_RECT);
     expect(defaultLayerRect("fill")).toEqual(FULL_CANVAS_RECT);
-    expect(defaultLayerRect("html")).toEqual(FULL_CANVAS_RECT);
     expect(FULL_CANVAS_RECT).toEqual({ x: 0, y: 0, w: 1, h: 1 });
   });
 

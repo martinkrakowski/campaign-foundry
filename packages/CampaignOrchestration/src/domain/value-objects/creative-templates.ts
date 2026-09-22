@@ -95,7 +95,9 @@ export const CANONICAL_TEMPLATES: Readonly<Record<CreativeType, CreativeTemplate
     creativeType: "image-html",
     layers: [
       { id: "image", kind: "image" },
-      { id: "html", kind: "html" },
+      { id: "shade", kind: "shade" },
+      { id: "accent", kind: "accent" },
+      { id: "static-text", kind: "static-text" },
       { id: "logo", kind: "logo" },
     ],
   },

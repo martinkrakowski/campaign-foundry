@@ -25,7 +25,13 @@ describe("FsTemplateStore", () => {
       "static-text",
       "logo",
     ]);
-    expect(templates[1].layers.map((l) => l.id)).toEqual(["image", "html", "logo"]);
+    expect(templates[1].layers.map((l) => l.id)).toEqual([
+      "image",
+      "shade",
+      "accent",
+      "static-text",
+      "logo",
+    ]);
     expect(templates[2].layers.map((l) => l.id)).toEqual([
       "video",
       "shade",

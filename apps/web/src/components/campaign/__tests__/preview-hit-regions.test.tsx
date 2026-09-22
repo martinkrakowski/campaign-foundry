@@ -39,12 +39,12 @@ const briefOf = (template: BriefTemplate): CampaignBrief => ({
 const ids = (regions: readonly { layerId: string }[]) => regions.map((region) => region.layerId);
 
 describe("previewHitRegions — grounds fill the canvas; other kinds do not", () => {
-  test("an html layer declares no region", () => {
+  test("a shade layer declares no region", () => {
     expect(
       ids(
         previewHitRegions(
           htmlTemplate([
-            { id: "html", kind: "html" },
+            { id: "shade", kind: "shade" },
             { id: "logo", kind: "logo" },
           ]),
         ),
@@ -66,7 +66,7 @@ describe("previewHitRegions — grounds fill the canvas; other kinds do not", ()
     expect(regions[0]!.rect).toEqual(FULL_CANVAS_RECT);
   });
 
-  test("the frameless kinds get nothing: shade, accent, text, html and logo are list-only", () => {
+  test("every frameless kind gets nothing: shade, accent, text and logo are list-only", () => {
     expect(
       previewHitRegions(
         htmlTemplate([
@@ -74,7 +74,6 @@ describe("previewHitRegions — grounds fill the canvas; other kinds do not", ()
           { id: "accent", kind: "accent" },
           { id: "static-text", kind: "static-text" },
           { id: "animated-text", kind: "animated-text" },
-          { id: "html", kind: "html" },
           { id: "logo", kind: "logo" },
           { id: "fill", kind: "fill" },
         ]),
@@ -88,20 +87,20 @@ describe("previewHitRegions — grounds fill the canvas; other kinds do not", ()
         previewHitRegions(
           htmlTemplate([
             { id: "image", kind: "image", enabled: false },
-            { id: "html", kind: "html" },
+            { id: "shade", kind: "shade" },
           ]),
         ),
       ),
     ).toEqual([]);
   });
 
-  test("an enabled ground beside an html layer is the only region", () => {
+  test("an enabled ground beside a disabled one is the only region", () => {
     expect(
       ids(
         previewHitRegions(
           htmlTemplate([
             { id: "image", kind: "image" },
-            { id: "html", kind: "html", enabled: false },
+            { id: "video", kind: "video", enabled: false },
           ]),
         ),
       ),
@@ -110,13 +109,13 @@ describe("previewHitRegions — grounds fill the canvas; other kinds do not", ()
 });
 
 describe("regions are emitted in the template's z-order (D128)", () => {
-  test("two grounds keep the template's order, and an html layer between them adds nothing", () => {
+  test("two grounds keep the template's order, and a shade layer between them adds nothing", () => {
     expect(
       ids(
         previewHitRegions(
           htmlTemplate([
             { id: "back", kind: "image" },
-            { id: "html", kind: "html" },
+            { id: "shade", kind: "shade" },
             { id: "front", kind: "video" },
           ]),
         ),
@@ -127,7 +126,7 @@ describe("regions are emitted in the template's z-order (D128)", () => {
         previewHitRegions(
           htmlTemplate([
             { id: "front", kind: "video" },
-            { id: "html", kind: "html" },
+            { id: "shade", kind: "shade" },
             { id: "back", kind: "image" },
           ]),
         ),
@@ -214,7 +213,7 @@ describe("PreviewHitRegions — the ground layer's whole-canvas button", () => {
         brief={briefOf(
           htmlTemplate([
             { id: "back", kind: "image" },
-            { id: "html", kind: "html" },
+            { id: "shade", kind: "shade" },
             { id: "front", kind: "video" },
           ]),
         )}
@@ -253,7 +252,7 @@ describe("PreviewHitRegions — the ground layer's whole-canvas button", () => {
         brief={briefOf(
           htmlTemplate([
             { id: "shade", kind: "shade" },
-            { id: "html", kind: "html" },
+            { id: "accent", kind: "accent" },
             { id: "static-text", kind: "static-text" },
             { id: "logo", kind: "logo" },
           ]),

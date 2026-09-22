@@ -50,7 +50,7 @@ const jsonReq = (body: unknown) =>
     body: JSON.stringify(body),
   });
 
-/** Canonical image-html: no shade, accent, or copy. Dropping the brief template makes the preview draw image-text instead. */
+/** Canonical image-html: the same layers as image-text (D159 — one authoring surface, html a compile target). */
 const imageHtmlTemplate = {
   id: "canonical-image-html",
   version: 1,
@@ -58,7 +58,9 @@ const imageHtmlTemplate = {
   unit: "standard-web",
   layers: [
     { id: "image", kind: "image" },
-    { id: "html", kind: "html" },
+    { id: "shade", kind: "shade" },
+    { id: "accent", kind: "accent" },
+    { id: "static-text", kind: "static-text" },
     { id: "logo", kind: "logo" },
   ],
 };
@@ -293,7 +295,7 @@ describe("POST /campaigns/preview-frame", () => {
     });
   });
 
-  test("an image-html brief previews different pixels than the image-text canonical", async () => {
+  test("an image-html brief with the same layers previews identical pixels to image-text (D159)", async () => {
     const web = mount();
     const html = await web(
       jsonReq({
@@ -306,9 +308,10 @@ describe("POST /campaigns/preview-frame", () => {
     );
     expect(html.status).toBe(200);
     expect(text.status).toBe(200);
-    expect(Buffer.from(await html.arrayBuffer())).not.toEqual(
-      Buffer.from(await text.arrayBuffer()),
-    );
+    // The compile target (html vs static) never touches the raster: one layer
+    // vocabulary, one compositor pass, so identical layers draw identical
+    // pixels regardless of `output.formats`.
+    expect(Buffer.from(await html.arrayBuffer())).toEqual(Buffer.from(await text.arrayBuffer()));
   });
 
   test("a disabled shade previews the same pixels as a template that omits it", async () => {

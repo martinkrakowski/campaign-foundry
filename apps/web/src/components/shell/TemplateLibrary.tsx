@@ -40,7 +40,6 @@ const KIND_FILL: Record<LayerKind, string> = {
   fill: "fill-surface-2",
   "static-text": "fill-text-primary",
   "animated-text": "fill-text-primary",
-  html: "fill-info",
   video: "fill-text-muted",
   logo: "fill-brand-primary",
   accent: "fill-brand-primary",

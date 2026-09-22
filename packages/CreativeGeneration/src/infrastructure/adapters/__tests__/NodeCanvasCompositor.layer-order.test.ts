@@ -52,7 +52,6 @@ const DRAWABLE_KINDS = [
   "static-text",
   "animated-text",
   "logo",
-  "html",
 ] as const;
 
 /**
@@ -158,7 +157,7 @@ describe("the compositor's draw order is the template's layer list (L2a, D121)",
       unit: "standard-web",
       layers: [
         { id: "image", kind: "image" },
-        { id: "html", kind: "html" },
+        { id: "static-text", kind: "static-text" },
         { id: "logo", kind: "logo" },
       ],
     };
@@ -168,7 +167,7 @@ describe("the compositor's draw order is the template's layer list (L2a, D121)",
     expect(() => NodeCanvasCompositor.draw(ctx, prepared, 1)).not.toThrow();
 
     const order = await drawWithRecorder(req);
-    expect(order).toEqual(["image", "html", "logo"]);
+    expect(order).toEqual(["image", "static-text", "logo"]);
   });
 
   test("the logo layer snaps to the text block — a logo with no text layer in the template throws, never guesses", async () => {
@@ -279,7 +278,7 @@ describe("the compositor's draw order is the template's layer list (L2a, D121)",
       unit: "standard-web",
       layers: [
         { id: "image", kind: "image" },
-        { id: "html", kind: "html" },
+        { id: "static-text", kind: "static-text" },
         { id: "logo", kind: "logo" },
       ],
     };

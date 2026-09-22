@@ -123,8 +123,8 @@ describe("creative types and compatibility rules (D119, D124, D131)", () => {
 
     expect(CREATIVE_TYPE_RULES["image-html"]).toEqual({
       unit: "standard-web",
-      accepts: ["image", "html", "logo", "static-text", "shade", "accent", "fill"],
-      required: ["image", "html"],
+      accepts: ["image", "logo", "static-text", "shade", "accent", "fill"],
+      required: ["image", "static-text"],
       maxOf: { logo: 1, shade: 1, accent: 1 },
       sharedBudgets: [{ kinds: ["static-text"], max: 1 }],
       outputFamilies: ["html"],
@@ -192,10 +192,9 @@ describe("occlusion table and guard checks (D135, D136)", () => {
       obscures: ["static-text", "animated-text"],
     });
 
-    // unclassified by D135: static-text, animated-text, html, video have behavior "none"
+    // unclassified by D135: static-text, animated-text, video have behavior "none"
     expect(OCCLUSION_TABLE["static-text"]).toEqual({ behavior: "none" });
     expect(OCCLUSION_TABLE["animated-text"]).toEqual({ behavior: "none" });
-    expect(OCCLUSION_TABLE.html).toEqual({ behavior: "none" });
     expect(OCCLUSION_TABLE.video).toEqual({ behavior: "none" });
   });
 
@@ -265,7 +264,6 @@ describe("occlusion table and guard checks (D135, D136)", () => {
       passed: true,
     });
     expect(checkPairOcclusion("video", "shade")).toEqual({ passed: true });
-    expect(checkPairOcclusion("html", "image")).toEqual({ passed: true });
 
     // Same layer kind compared to itself produces no finding when behavior is "none" or doesn't obscure
     expect(checkPairOcclusion("shade", "shade")).toEqual({ passed: true });
@@ -295,11 +293,11 @@ describe("occlusion table and guard checks (D135, D136)", () => {
   });
 
   test("formatOcclusionReason formats subject and target layers accurately", () => {
-    expect(formatOcclusionReason("html", "image", "opaque")).toBe(
-      "the HTML layer now sits above the image and will hide it",
+    expect(formatOcclusionReason("logo", "image", "opaque")).toBe(
+      "the logo layer now sits above the image and will hide it",
     );
-    expect(formatOcclusionReason("shade", "html", "opaque")).toBe(
-      "the shade layer now sits above the HTML and will hide it",
+    expect(formatOcclusionReason("shade", "accent", "opaque")).toBe(
+      "the shade layer now sits above the accent and will hide it",
     );
     expect(formatOcclusionReason("static-text", "video", "opaque")).toBe(
       "the headline layer now sits above the video and will hide it",

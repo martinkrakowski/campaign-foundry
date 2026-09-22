@@ -4690,10 +4690,10 @@ describe("canonical layer defaults (X16)", () => {
 
   /**
    * The canonical `image-html` template, materialised: no campaign type seeds
-   * it, so the pinned id is the library's own, spelled out rather than derived
-   * — the same fixture `editor-state.html-elements.test.ts` uses.
+   * it, so the pinned id is the library's own, spelled out rather than
+   * derived.
    */
-  const htmlTemplate = (htmlPatch: Record<string, unknown> = {}): BriefTemplate => {
+  const htmlTemplate = (staticTextPatch: Record<string, unknown> = {}): BriefTemplate => {
     const canonical = CANONICAL_TEMPLATES["image-html"];
     return {
       id: "canonical-image-html",
@@ -4701,7 +4701,7 @@ describe("canonical layer defaults (X16)", () => {
       creativeType: canonical.creativeType,
       unit: canonical.unit,
       layers: canonical.layers.map((layer) =>
-        layer.id === "html" ? { ...layer, ...htmlPatch } : layer,
+        layer.id === "static-text" ? { ...layer, ...staticTextPatch } : layer,
       ),
     };
   };
@@ -4757,9 +4757,9 @@ describe("canonical layer defaults (X16)", () => {
     expect(canonicalBrief(brief)).toBe(brief);
 
     const spelled = htmlTemplate({ enabled: true });
-    expect(canonicalTemplate(spelled).layers.find((layer) => layer.id === "html")).toEqual({
-      id: "html",
-      kind: "html",
+    expect(canonicalTemplate(spelled).layers.find((layer) => layer.id === "static-text")).toEqual({
+      id: "static-text",
+      kind: "static-text",
     });
   });
 

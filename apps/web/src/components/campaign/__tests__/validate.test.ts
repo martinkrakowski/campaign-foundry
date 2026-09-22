@@ -1185,7 +1185,6 @@ describe("html weight warning (HL5c, HL-D6)", () => {
         unit: "standard-web",
         layers: [
           { id: "image", kind: "image" },
-          { id: "html", kind: "html" },
           { id: "copy", kind: "static-text" },
           { id: "logo", kind: "logo" },
         ],

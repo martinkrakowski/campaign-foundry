@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "AR7",
+  "mutations": [
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/creative-templates.ts",
+      "before": "    creativeType: \"image-html\",\n    layers: [\n      { id: \"image\", kind: \"image\" },\n      { id: \"shade\", kind: \"shade\" },\n      { id: \"accent\", kind: \"accent\" },\n      { id: \"static-text\", kind: \"static-text\" },\n      { id: \"logo\", kind: \"logo\" },\n    ],\n  },",
+      "after": "    creativeType: \"image-html\",\n    layers: [\n      { id: \"image\", kind: \"image\" },\n      { id: \"shade\", kind: \"shade\" },\n      { id: \"accent\", kind: \"accent\" },\n      { id: \"logo\", kind: \"logo\" },\n    ],\n  },",
+      "because": "This is the lane's whole point: without a default static-text layer, a fresh display-ad brief ships with no editable headline, exactly the gap AR7 was opened to close. Dropping it silently regresses to that gap — the type system does not catch it, since static-text was never structurally required to exist in a template's own literal shape, only in the creative type's `required` list, which a hand-authored canonical entry can still fail to satisfy.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/brief-template.test.ts",
+        "-t",
+        "display-ad resolves to canonical-image-html"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

@@ -17,7 +17,8 @@
         "-t",
         "top-left pixel is not #ff00fe"
       ],
-      "verdict": "caught"
+      "verdict": "caught",
+      "retired": "Retired by AR7: drawHtml and the html layer kind it drew are gone (creative-templates.ts's canonical image-html now mirrors image-text's layers — image, shade, accent, static-text, logo — per D159, so there is no html-kind layer left for a golden to hold byte-identical). Its own test file, NodeCanvasCompositor.draw-html.test.ts, was deleted with it."
     }
   ]
 }

@@ -267,7 +267,6 @@ export const LAYER_KIND_DEFAULT_RECTS: Readonly<Record<LayerKind, CanvasRect>> =
   video: FULL_CANVAS_RECT,
   shade: FULL_CANVAS_RECT,
   fill: FULL_CANVAS_RECT,
-  html: FULL_CANVAS_RECT,
   accent: {
     x: 0,
     y: 1 - CREATIVE_GEOMETRY.accentSolidHeightFraction,

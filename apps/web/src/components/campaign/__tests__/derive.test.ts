@@ -383,7 +383,7 @@ describe("derive.ts", () => {
           unit: "standard-web",
           layers: [
             { id: "layer-image", kind: "image" },
-            { id: "layer-html", kind: "html" },
+            { id: "layer-shade", kind: "shade" },
             { id: "layer-logo", kind: "logo" },
           ],
         },
@@ -589,7 +589,7 @@ describe("derive.ts", () => {
     const htmlTemplate = (
       layers: readonly CreativeTemplateLayer[] = [
         picture(),
-        { id: "html", kind: "html" },
+        { id: "shade", kind: "shade" },
         { id: "logo", kind: "logo" },
       ],
     ): BriefTemplate => ({
@@ -630,7 +630,7 @@ describe("derive.ts", () => {
         const layers = [
           picture(),
           copy({ link: true }),
-          { id: "html", kind: "html" as const },
+          { id: "shade", kind: "shade" as const },
           { id: "logo", kind: "logo" as const },
         ];
         const state = meterState({
@@ -657,7 +657,7 @@ describe("derive.ts", () => {
         const layers = [
           picture(),
           copy(),
-          { id: "html", kind: "html" as const },
+          { id: "shade", kind: "shade" as const },
           { id: "logo", kind: "logo" as const },
         ];
         const before = htmlWeightReading(
@@ -695,7 +695,7 @@ describe("derive.ts", () => {
         const measured = [
           picture(),
           copy(),
-          { id: "html", kind: "html" as const },
+          { id: "shade", kind: "shade" as const },
           { id: "logo", kind: "logo" as const },
         ];
         const state = meterState({
@@ -764,7 +764,7 @@ describe("derive.ts", () => {
         const layers = [
           picture(),
           copy(),
-          { id: "html", kind: "html" as const },
+          { id: "shade", kind: "shade" as const },
           { id: "logo", kind: "logo" as const },
         ];
         const state = meterState({
@@ -798,7 +798,7 @@ describe("derive.ts", () => {
           template: htmlTemplate([
             picture({ props: { alt: "pack" } }),
             copy({ link: true }),
-            { id: "html", kind: "html" },
+            { id: "shade", kind: "shade" },
             { id: "logo", kind: "logo", props: { width: 0.2 } },
           ]),
           clickDestination: "https://example.com/shop",
@@ -829,7 +829,7 @@ describe("derive.ts", () => {
           template: htmlTemplate([
             picture({ props: { alt: "pack" } }),
             copy(),
-            { id: "html", kind: "html" },
+            { id: "shade", kind: "shade" },
             { id: "logo", kind: "logo" },
           ]),
         });
