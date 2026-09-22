@@ -293,7 +293,7 @@ describe("LayerPropsSheet — per-kind fields (D134's table, brief-template.ts L
     expect(screen.getByLabelText(messages.layerPropAltLabel)).toBeTruthy();
   });
 
-  test("shade offers nothing, and says so", () => {
+  test("shade offers the click-target checkbox and no longer says it has nothing", () => {
     render(
       <Harness
         initial={{ ...initialEditorState(), template: textTemplate() }}
@@ -301,7 +301,11 @@ describe("LayerPropsSheet — per-kind fields (D134's table, brief-template.ts L
         onClose={vi.fn()}
       />,
     );
-    expect(screen.getByText(messages.layerPropsNone)).toBeTruthy();
+    // D160 gave every kind a control, so the empty sentence is unreachable —
+    // this assertion is what keeps the deleted branch from hiding behind an
+    // uncoverable coverage gap.
+    expect(screen.queryByText(messages.layerPropsNone)).toBeNull();
+    expect(screen.getByRole("checkbox", { name: messages.layerLinkLabel })).toBeTruthy();
   });
 
   test("html hosts the element editor (the sheet's third mount site, premise CC4/SE1)", () => {
@@ -313,6 +317,9 @@ describe("LayerPropsSheet — per-kind fields (D134's table, brief-template.ts L
       />,
     );
     expect(screen.getByRole("group", { name: messages.htmlElementAddLabel })).toBeTruthy();
+    // D160: the element editor stays, and the checkbox shares the sheet with
+    // it — AR2 will delete the editor, not this control.
+    expect(screen.getByRole("checkbox", { name: messages.layerLinkLabel })).toBeTruthy();
   });
 });
 
@@ -604,5 +611,123 @@ describe("LayerPropsSheet — the fill layer's brand role (L11, D131)", () => {
       />,
     );
     expect(screen.queryByLabelText(messages.layerPropRoleLabel)).toBeNull();
+  });
+});
+
+describe("LayerPropsSheet — the click-target checkbox (D160)", () => {
+  const VIDEO_CANONICAL = CANONICAL_TEMPLATES["video"];
+
+  /** The image-text template with `link` spelled onto the named layer. */
+  const linkedTemplate = (layerId: string, link: boolean): BriefTemplate => ({
+    id: "canonical-image-text",
+    version: TEXT_CANONICAL.version,
+    creativeType: TEXT_CANONICAL.creativeType,
+    unit: TEXT_CANONICAL.unit,
+    layers: TEXT_CANONICAL.layers.map((l) => (l.id === layerId ? { ...l, link } : l)),
+  });
+
+  const videoTemplate = (): BriefTemplate => ({
+    id: "canonical-video",
+    version: VIDEO_CANONICAL.version,
+    creativeType: VIDEO_CANONICAL.creativeType,
+    unit: VIDEO_CANONICAL.unit,
+    layers: VIDEO_CANONICAL.layers,
+  });
+
+  test("every layer kind gets the checkbox — image-text's layers and video", () => {
+    // The rows are read from the canonical template, never a literal list —
+    // the D121 guard's own rule, applied to this file too.
+    for (const candidate of TEXT_CANONICAL.layers) {
+      render(
+        <Harness
+          initial={{ ...initialEditorState(), template: textTemplate() }}
+          layerId={candidate.id}
+          onClose={vi.fn()}
+        />,
+      );
+      expect(
+        screen.getByRole("checkbox", { name: messages.layerLinkLabel }),
+        `layer "${candidate.id}" must offer the click-target checkbox`,
+      ).toBeTruthy();
+      cleanup();
+    }
+    render(
+      <Harness
+        initial={{ ...initialEditorState(), template: videoTemplate() }}
+        layerId="video"
+        onClose={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole("checkbox", { name: messages.layerLinkLabel })).toBeTruthy();
+  });
+
+  test("the help line names the destination's home without naming a field", () => {
+    render(
+      <Harness
+        initial={{ ...initialEditorState(), template: textTemplate() }}
+        layerId="shade"
+        onClose={vi.fn()}
+      />,
+    );
+    expect(screen.getByText(messages.layerLinkHelp)).toBeTruthy();
+  });
+
+  test("the box is checked iff the layer carries link: true — a spelled false reads unchecked", () => {
+    const cases: readonly [BriefTemplate, boolean][] = [
+      [textTemplate(), false],
+      [linkedTemplate("shade", true), true],
+      [linkedTemplate("shade", false), false],
+    ];
+    for (const [template, checked] of cases) {
+      render(
+        <Harness
+          initial={{ ...initialEditorState(), template }}
+          layerId="shade"
+          onClose={vi.fn()}
+        />,
+      );
+      expect(
+        (screen.getByRole("checkbox", { name: messages.layerLinkLabel }) as HTMLInputElement)
+          .checked,
+      ).toBe(checked);
+      cleanup();
+    }
+  });
+
+  test("toggling the box dispatches setLayerLink with the box's own checked value", () => {
+    const dispatch = vi.fn();
+    render(
+      <LayerPropsSheet
+        state={{ ...initialEditorState(), template: linkedTemplate("image", true) }}
+        dispatch={dispatch}
+        layerId="image"
+        playhead={null}
+        preset={null}
+        onClose={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByRole("checkbox", { name: messages.layerLinkLabel }));
+    expect(dispatch).toHaveBeenCalledWith({ type: "setLayerLink", layerId: "image", link: false });
+  });
+
+  test("through the real reducer: ticking writes link: true, unticking deletes the key", () => {
+    let latest: EditorState | undefined;
+    render(
+      <StateHarness
+        initial={{ ...initialEditorState(), template: textTemplate() }}
+        layerId="logo"
+        onClose={vi.fn()}
+        onState={(s) => {
+          latest = s;
+        }}
+      />,
+    );
+    const box = screen.getByRole("checkbox", { name: messages.layerLinkLabel });
+    fireEvent.click(box);
+    expect(latest!.template.layers.find((l) => l.id === "logo")!.link).toBe(true);
+    fireEvent.click(screen.getByRole("checkbox", { name: messages.layerLinkLabel }));
+    expect(Object.keys(latest!.template.layers.find((l) => l.id === "logo")!)).not.toContain(
+      "link",
+    );
   });
 });

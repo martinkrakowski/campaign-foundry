@@ -9,6 +9,7 @@ import {
   isBriefTemplate,
   layerEnabledProblem,
   layerFrameProblem,
+  layerLinkProblem,
   layerPropsProblem,
   satisfiesOrderConstraints,
   templateFromCanonical,
@@ -663,6 +664,46 @@ describe("isBriefTemplate layer enabled (D129)", () => {
       must: "be a boolean",
       value: null,
     });
+  });
+});
+
+describe("isBriefTemplate layer link (D160)", () => {
+  // The enabled helper's shape: the layer under test replaces its canonical
+  // counterpart, so `link` is the only thing that can refuse.
+  const withLayer = (layer: unknown): boolean => {
+    const kind = (layer as { kind?: unknown } | null)?.kind;
+    const canonical = CANONICAL_TEMPLATES["image-text"].layers;
+    return isBriefTemplate({
+      id: "canonical-image-text",
+      version: 1,
+      creativeType: "image-text",
+      unit: "standard-web",
+      layers:
+        typeof kind === "string" && canonical.some((l) => l.kind === kind)
+          ? canonical.map((l) => (l.kind === kind ? layer : l))
+          : [...canonical, layer],
+    });
+  };
+
+  test("accepts a layer with link: true and link: false", () => {
+    expect(withLayer({ id: "image", kind: "image", link: true })).toBe(true);
+    expect(withLayer({ id: "image", kind: "image", link: false })).toBe(true);
+  });
+
+  test("refuses a layer with non-boolean link, a destination URL included", () => {
+    expect(withLayer({ id: "image", kind: "image", link: "yes" })).toBe(false);
+    expect(withLayer({ id: "image", kind: "image", link: "https://example.com" })).toBe(false);
+    expect(withLayer({ id: "image", kind: "image", link: 1 })).toBe(false);
+    expect(withLayer({ id: "image", kind: "image", link: null })).toBe(false);
+  });
+
+  test("layerLinkProblem returns undefined for boolean and undefined, problem for non-boolean", () => {
+    expect(layerLinkProblem(undefined)).toBeUndefined();
+    expect(layerLinkProblem(true)).toBeUndefined();
+    expect(layerLinkProblem(false)).toBeUndefined();
+    expect(layerLinkProblem("yes")).toEqual({ field: "link", must: "be a boolean", value: "yes" });
+    expect(layerLinkProblem(1)).toEqual({ field: "link", must: "be a boolean", value: 1 });
+    expect(layerLinkProblem(null)).toEqual({ field: "link", must: "be a boolean", value: null });
   });
 });
 

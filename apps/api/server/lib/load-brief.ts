@@ -30,6 +30,7 @@ import {
   layerElementsProblem,
   layerEnabledProblem,
   layerFrameProblem,
+  layerLinkProblem,
   layerPropsProblem,
   layerTracksProblem,
   outputFamilyProblem,
@@ -289,6 +290,21 @@ export function validateTemplate(value: unknown, type?: CampaignType): BriefTemp
     }
     if (layer.enabled !== false) {
       enabledKinds.add(layer.kind);
+    }
+
+    // D160 — a layer's own link flag, when present, must be boolean; absent
+    // means NOT a click target. Structural, never lenient (the
+    // `validateSizes` convention): the decision is the domain's
+    // `layerLinkProblem`, shared with `isBriefTemplate` so the two boundaries
+    // cannot drift — only the message shape is local. A non-boolean (a
+    // destination URL included) refuses here; `link: false` is a spelled-out
+    // default the API does NOT strip — only the editor's `canonicalLayer`
+    // drops it.
+    const linkProblem = layerLinkProblem(layer.link);
+    if (linkProblem !== undefined) {
+      throw new Error(
+        `Campaign brief field "template.layers[${i}].${linkProblem.field}" must ${linkProblem.must}; got ${JSON.stringify(linkProblem.value)}.`,
+      );
     }
 
     // D130 — a layer's own frame, when present, must be a canvas-relative box

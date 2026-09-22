@@ -27,8 +27,8 @@ import type { PresetCell } from "@/components/campaign/preset-tracks";
 /**
  * CC4 — the layer sheet: a **non-modal** panel that edits the layer CC3's
  * selection already names (`pickedLayerId`, read here, never a second
- * selection concept), live geometry props and the `html` layer's element
- * editor.
+ * selection concept), live geometry props, the D160 click-target flag (every
+ * kind), and the `html` layer's element editor.
  *
  * **Never `aria-modal`.** `editor-history.ts`'s `useHistoryKeys` switches
  * `⌘Z` off while `[aria-modal="true"]` is anywhere in the document — that is
@@ -366,13 +366,6 @@ export function LayerPropsSheet({
    * on a still would be exactly the invented refusal DoD 6 warns against.
    */
   const showTracks = TRACKABLE_LAYER_KINDS.includes(layer.kind) && layer.enabled !== false;
-  const hasControls =
-    numericFields.length > 0 ||
-    showAnchor ||
-    showTracks ||
-    layer.kind === "image" ||
-    layer.kind === "fill" ||
-    layer.kind === "html";
 
   return (
     <div
@@ -388,9 +381,6 @@ export function LayerPropsSheet({
         closeText="Close"
       />
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
-        {hasControls ? null : (
-          <p className="text-[12px] text-text-muted">{messages.layerPropsNone}</p>
-        )}
         {numericFields.map((field) => (
           <GeometryNumberField
             key={field}
@@ -432,6 +422,34 @@ export function LayerPropsSheet({
             reading={htmlWeightReading(state)}
           />
         ) : null}
+        {/*
+         * D160 — the click-target checkbox, on every layer kind: linkability
+         * is a property on a layer, never a new kind, so there is no kind
+         * that does not answer the question. The control writes no URL (the
+         * destination is the brief's own `clickDestination`) and the sheet's
+         * old empty-state paragraph is gone with it — there is no kind left
+         * with nothing to offer.
+         */}
+        <SheetField label={messages.layerLinkLabel}>
+          {(id) => (
+            <div className="space-y-1">
+              <input
+                id={id}
+                type="checkbox"
+                className="size-4 rounded border-border-control"
+                checked={layer.link === true}
+                onChange={(event) =>
+                  dispatch({
+                    type: "setLayerLink",
+                    layerId: layer.id,
+                    link: event.currentTarget.checked,
+                  })
+                }
+              />
+              <p className="text-[12px] text-text-muted">{messages.layerLinkHelp}</p>
+            </div>
+          )}
+        </SheetField>
       </div>
     </div>
   );

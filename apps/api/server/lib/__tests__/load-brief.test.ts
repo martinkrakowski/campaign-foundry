@@ -1622,6 +1622,61 @@ describe("parseBrief", () => {
     });
   });
 
+  describe("layer link (D160)", () => {
+    const base = templateFromCanonical("social-post");
+
+    test("a non-boolean link value is refused at the boundary with a message naming the field", () => {
+      const template = {
+        ...base,
+        layers: base.layers.map((l, i) => (i === 1 ? { ...l, link: "yes" } : l)),
+      };
+      expect(() => parseBrief({ ...valid, template })).toThrow(
+        'Campaign brief field "template.layers[1].link" must be a boolean; got "yes".',
+      );
+      expect(() => parseBrief({ ...valid, template }, { enforceCapabilities: false })).toThrow(
+        'Campaign brief field "template.layers[1].link" must be a boolean; got "yes".',
+      );
+      expect(() => validateTemplate(template, "social-post")).toThrow(
+        'Campaign brief field "template.layers[1].link" must be a boolean; got "yes".',
+      );
+    });
+
+    test("other non-boolean link values (number, null, URL string) are refused with a message naming the field", () => {
+      const forValue = (link: unknown) => ({
+        ...base,
+        layers: base.layers.map((l, i) => (i === 1 ? { ...l, link } : l)),
+      });
+      expect(() => parseBrief({ ...valid, template: forValue(1) })).toThrow(
+        'Campaign brief field "template.layers[1].link" must be a boolean; got 1.',
+      );
+      expect(() => parseBrief({ ...valid, template: forValue(null) })).toThrow(
+        'Campaign brief field "template.layers[1].link" must be a boolean; got null.',
+      );
+      expect(() => parseBrief({ ...valid, template: forValue("https://example.com") })).toThrow(
+        'Campaign brief field "template.layers[1].link" must be a boolean; got "https://example.com".',
+      );
+    });
+
+    test("a linked layer carries link: true, and absent link behaves as not a click target", () => {
+      const template = {
+        ...base,
+        layers: base.layers.map((l, i) => (i === 1 ? { ...l, link: true } : l)),
+      };
+      const parsed = parseBrief({ ...valid, template });
+      expect(parsed.template.layers[1]?.link).toBe(true);
+      expect(parsed.template.layers[0]?.link).toBeUndefined();
+    });
+
+    test("the API boundary does not strip link: false — the spelled-out default survives parseBrief", () => {
+      const template = {
+        ...base,
+        layers: base.layers.map((l, i) => (i === 1 ? { ...l, link: false } : l)),
+      };
+      const parsed = parseBrief({ ...valid, template });
+      expect(parsed.template.layers[1]?.link).toBe(false);
+    });
+  });
+
   describe("scalar shape checks (D68 — shape, not just presence)", () => {
     test.each([
       [

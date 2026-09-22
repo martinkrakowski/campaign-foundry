@@ -108,4 +108,15 @@ describe("canonical creative templates (D123, D128)", () => {
       }
     }
   });
+
+  // The golden claim, made checkable: the compositor goldens draw these
+  // objects, so a `link` key appearing on any of them means a golden's input
+  // moved. This test is the mutation target — it must go red when one does.
+  test("canonical templates do not carry a link key (D160)", () => {
+    for (const template of Object.values(CANONICAL_TEMPLATES)) {
+      for (const layer of template.layers) {
+        expect(layer).not.toHaveProperty("link");
+      }
+    }
+  });
 });

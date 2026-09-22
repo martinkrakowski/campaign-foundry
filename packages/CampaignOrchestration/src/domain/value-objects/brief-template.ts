@@ -164,6 +164,29 @@ export function layerEnabledProblem(enabled: unknown): LayerEnabledProblem | und
   return { field: "enabled", must: "be a boolean", value: enabled };
 }
 
+/** Why a layer's `link` is not a shape the brief may carry (D160); undefined when it is. */
+export interface LayerLinkProblem {
+  /** The field name the problem names — always "link". */
+  readonly field: "link";
+  /** The requirement, phrased to follow "must" in a `Campaign brief field …` message. */
+  readonly must: string;
+  /** The offending value, for the message's `got <JSON>` clause. */
+  readonly value: unknown;
+}
+
+/**
+ * The one link decision both boundaries read (D160), the twin of
+ * `layerEnabledProblem` with the opposite polarity of absence: absent link
+ * means NOT a click target, defined link must be a boolean. Linkability is a
+ * property on a layer, never a new layer kind, and it is never a destination —
+ * a URL (or anything else that is not a boolean) is refused here so it cannot
+ * reach the emission, which stays the brief's single `clickTag`.
+ */
+export function layerLinkProblem(link: unknown): LayerLinkProblem | undefined {
+  if (link === undefined || typeof link === "boolean") return undefined;
+  return { field: "link", must: "be a boolean", value: link };
+}
+
 /** Why a layer's `frame` is not a shape the brief may carry (D130); undefined when it is. */
 export interface LayerFrameProblem {
   /** The frame subpath the problem names — "" for the frame itself, `.x` for one value. */
@@ -518,7 +541,9 @@ export function satisfiesOrderConstraints(
  * half-written template can never be cast through and reach `toBrief`. Array
  * position IS z-order (D128): a template whose layer order violates the creative
  * type's declared `above`/`below` constraints is not a valid template. A layer's `enabled`,
- * when present, must be a boolean (D129) — absent means enabled. A layer's `frame`,
+ * when present, must be a boolean (D129) — absent means enabled. A layer's `link`,
+ * when present, must be a boolean (D160) — absent means NOT a click target, and a
+ * destination URL on a layer is refused here, not just ignored. A layer's `frame`,
  * when present, must be a canvas-relative box of [0, 1] fractions, a vocabulary
  * `anchor`, and an optional `byFamily` whose keys are real ratios and sizes
  * (D130) — unknown extra junk is refused. A layer's `props`,
@@ -617,6 +642,7 @@ interface LayerEntry {
   readonly enabled?: boolean;
   readonly frame?: LayerFrame;
   readonly props?: LayerProps;
+  readonly link?: boolean;
   readonly elements?: readonly HtmlElement[];
   readonly tracks?: readonly Track[];
 }
@@ -626,7 +652,8 @@ interface LayerEntry {
  * non-empty string `id` (the API's `validateTemplate` refuses an empty one)
  * and a vocabulary `kind` — the fields every consumer below the
  * guard dereferences, and which a `null`, a bare string or a kindless object
- * names neither of — with `enabled`, when present, a boolean (D129), `frame`,
+ * names neither of — with `enabled`, when present, a boolean (D129), `link`,
+ * when present, a boolean (D160), `frame`,
  * when present, a canvas-relative box (D130), `props`, when present, a shape
  * that kind may carry (D134), `elements`,
  * when present, an `html` layer's element list (HL1), and `tracks`, when
@@ -656,6 +683,7 @@ function isLayerEntry(layer: unknown): layer is LayerEntry {
     return false;
   }
   if (layerEnabledProblem(rec.enabled) !== undefined) return false;
+  if (layerLinkProblem(rec.link) !== undefined) return false;
   if (layerFrameProblem(rec.frame) !== undefined) return false;
   if (
     rec.props !== undefined &&
