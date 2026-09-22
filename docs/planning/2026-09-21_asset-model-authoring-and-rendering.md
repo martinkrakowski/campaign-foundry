@@ -60,6 +60,8 @@ This is the eleven-PR HL arc (HL1–HL5f, stamped SHIPPED) terminating in a surf
 | **H2** | High         | **D122 frames html as a third format beside static and motion; the code also models it as a layer kind.** Both are true at once and only the `accepts` table holds them apart: `image-text` and `video` do not accept an `html` layer, and `image-html`'s `outputFamilies` is `["html"]` exclusively. Nothing about the renderers requires this. |
 | **M1** | Medium       | **Link-as-a-property was decided and never built.** HL-D2 states it outright — *"a link is not an element kind — it is a property any element may carry"* — but `HtmlElement` is `{ kind, text?, style?, frame }` with no link field, and HL-D8 records that the `href?` sketch never shipped. Today only the `button` **kind** is clickable, and it uses the brief's single `clickDestination`. The property HL-D2 promised does not exist on elements or on layers. |
 | **M2** | Medium       | **The bundle emits no `<img>`/`<video>` from layers.** The assembler compiles an element list; `image-html` accepts only `image`, `html`, `logo` — **no `video` layer** — and there is no video element kind. Under D158 this is not a missing feature so much as a missing compile rule: an `image` layer becomes `<img>`, a `video` layer becomes `<video>`. |
+| **H3** | High         | **An HTML5 bundle is capped at 150 KB, and that — not D118 — is what constrains a video ad.** `HTML_MAX_BYTES = 150 * 1024` on both html profiles, against `MOTION_MAX_BYTES` of 100 MB. A clip cannot be embedded in that budget at any duration. Real video display creatives **reference** a hosted clip (`<video src="https://…">`) so the bundle stays small — which means the `<video>` compile rule needs an asset URL, not bytes. |
+| **H4** | High         | **That URL is behind D64.** Referencing a hosted clip requires object storage with stable public addresses — the cloud work D64 gates, whose list in `remaining-work.md` C1 names presigned uploads and object storage explicitly. The `<img>` half has the same shape but a smaller problem: an image can sit inside 150 KB, so it may embed as a data URI. **The `<video>` half of this plan is therefore gated by the same fork as everything else.** |
 | **L1** | Low          | **The display-ad tile's preview is already honest about the gap.** `TypePreview` renders a 300×250 medium rectangle for `display-ad` — the right picture for an ad, attached to a preset that makes a flat PNG. |
 
 ---
@@ -111,10 +113,11 @@ therefore not a fifth campaign type — it is this table's second row under the 
 | Lane | Delivers | Owns | Depends on |
 | --- | --- | --- | --- |
 | **AR1** | **Linkability as a layer property** (D160): the field, its validation at both boundaries, and the editor control. No new layer kind, so **no golden moves** — the raster rendition of a linked layer is byte-identical to the same layer unlinked. | `brief-template.ts`, `LayerPropsSheet.tsx`, `load-brief.ts`, `brief-yaml.ts` | D160 stamped |
-| **AR2** | `assembleHtml` compiles **layers** to the §3 table: `<img>`, `<video>`, `<p>`/`<button>`, each wrapped with `clickTag` when linked. The element vocabulary and `HtmlElementsEditor` retire; `image-html.accepts` widens to the layer kinds **including `video`**. | `markup-assembler.ts`, `html-element.ts`, `creative-types.ts`, `LayerPropsSheet.tsx` | AR1 |
+| **AR2** | `assembleHtml` compiles **layers** to the §3 table: `<img>`, `<p>`/`<button>`, each wrapped with `clickTag` when linked. The element vocabulary and `HtmlElementsEditor` retire; `image-html.accepts` widens to the layer kinds. **`<video>` is NOT in this lane** — see AR6. | `markup-assembler.ts`, `html-element.ts`, `creative-types.ts`, `LayerPropsSheet.tsx` | AR1 |
 | **AR3** | `display-ad` preset repointed at `image-html` + the `-html` profiles; the raster fallback routes to the static profiles. | `campaign-types.ts`, `PackageForPlatformUseCase` | AR2, D161 |
 | **AR4** | The create modal's three tiles (D162), and the `image-html` path reachable end to end. | `CreateCampaignDialog.tsx`, `messages.ts` | AR3 |
-| **AR5** | Migration: every persisted brief carrying `html` elements is rewritten to layers, or refused at the boundary with a message naming the fix. | `load-brief.ts`, `brief-yaml.ts` | AR2 |
+| **AR5** | Migration: every persisted brief carrying `html` elements is rewritten to layers, or refused at the boundary with a message naming the fix. **Scope measured:** zero of the seven tracked sample briefs carry them (`git grep -l 'elements:' -- 'briefs/*.yaml'` → 0); operator briefs are gitignored since #167, so their content is **unknown**, which is why this lane refuses rather than assumes. | `load-brief.ts`, `brief-yaml.ts` | AR2 |
+| **AR6** | **`<video>` in the bundle — BLOCKED on D64.** `image-html.accepts` gains `video`, and the compile rule emits `<video src=…>` pointing at a hosted clip. Needs object storage with stable addresses (H3, H4). | `markup-assembler.ts`, `creative-types.ts`, the asset store | **D64** |
 
 **Sequencing note.** AR1 moves **goldens** — a new layer kind changes nothing about existing
 canonical templates, so the byte expectation is *unmoved*, and that must be proven the way RW-4
@@ -124,12 +127,12 @@ proved it rather than assumed. AR2 is the only lane that deletes a shipped surfa
 
 ## 5. What this plan refuses
 
-- **It does not promise a motion-html PACKAGING profile.** AR2 makes the bundle able to carry a
-  `<video>` tag, which is what a video display ad is. What it does not do is add a platform profile
-  for one: `google-display-html` and `display-web-html` are `formats: ["html"]`, and whether an
-  html bundle containing a clip needs its own profile, a different `maxBytes`, or nothing at all is
-  a distribution question this plan has not researched. **D118's stills-only rule is about the
-  `static` family and is untouched** — an html bundle is not a static rendition.
+- **It does not ship `<video>` in the bundle.** That is AR6, and it is blocked on **D64**, not on
+  renderer work: the 150 KB html ceiling (H3) means a clip must be REFERENCED, and a stable public
+  URL is object-storage work behind the identity fork (H4). The first draft named this as a
+  packaging-profile question; measuring `HTML_MAX_BYTES` showed the real constraint is the budget,
+  and the real dependency is storage. **D118's stills-only rule is about the `static` family and is
+  untouched** — an html bundle is not a static rendition.
 - **It does not widen `image-text` to emit html.** D159 makes html a rendition, but the creative that
   carries a button and a click destination is the ad. One preset changes, not all four.
 - **It does not touch `CAMPAIGN_TYPES`' membership.** D162 changes the tiles' *labels and grouping*,
@@ -166,6 +169,10 @@ ad whose one image layer is the click target.
 
 The case for: one authoring model for every asset, an already-built ad format made reachable, and
 HL-D1's own anti-duplication principle carried to its conclusion.
+
+**What stamping them buys immediately:** AR1–AR5 become dispatchable and the display-ad tile stops
+making flat images. **AR6 does not** — the video half waits on D64 like everything else, so
+stamping D158/D159 does not commit to it.
 
 The case against, stated fairly: **HL-D1 and D122 are not mistakes.** HL-D2 constrains the element
 vocabulary to `text`/`button`/`image` precisely so the raster fallback can be faithful — *"a
