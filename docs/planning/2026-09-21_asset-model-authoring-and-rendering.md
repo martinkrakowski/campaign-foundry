@@ -4,8 +4,6 @@
 unstamped.** **Third draft**, revised the same day on the owner's corrections: D160 no longer mints a
 `button` layer kind (§7 says what the first draft got wrong), and the `html` rendition compiles
 `<img>` and `<video>` from layers.
-same day on the owner's correction: D160 no longer mints a `button` layer kind (§7 says what the
-first draft got wrong), and the `html` rendition compiles `<img>` and `<video>` from layers.
 **Scope:** how every asset type is **authored** and how each is **rendered**, stated once for all four
 campaign types. It introduces no new creative surface; it proposes retiring one authoring model that
 exists today and pointing the display-ad preset at machinery that is already built and unreachable.
@@ -73,7 +71,7 @@ This is the eleven-PR HL arc (HL1–HL5f, stamped SHIPPED) terminating in a surf
 
 | id | Decision | Why |
 | --- | --- | --- |
-| **D158** | **STAMPED — Owner, 2026-09-21.** **One authoring vocabulary: layers. `HL-D1` is amended — the html layer's nested `elements` are retired in favour of layer kinds.** A button becomes a layer kind; text stays `static-text`; an image stays `image`. `assembleHtml` compiles the **layer list**, not an element list. | This is HL-D1's own principle (D121) applied one step further. HL-D1 avoided a second way to add text by inventing a second, narrower vocabulary; reusing the first leaves exactly one. It also collapses two editors into one: the LayerStack and props sheet already do this job for every other creative. |
+| **D158** | **STAMPED — Owner, 2026-09-21.** **One authoring vocabulary: layers. `HL-D1` is amended — the html layer's nested `elements` are retired in favour of layer kinds.** Text stays `static-text`; an image stays `image`; a click target is a property any layer may carry, never a layer kind of its own (D160). `assembleHtml` compiles the **layer list**, not an element list. | This is HL-D1's own principle (D121) applied one step further. HL-D1 avoided a second way to add text by inventing a second, narrower vocabulary; reusing the first leaves exactly one. It also collapses two editors into one: the LayerStack and props sheet already do this job for every other creative. |
 | **D159** | **STAMPED — Owner, 2026-09-21.** **HTML is a compile target, not a creative kind. `D122` is amended:** `format: "html"` stays a packaging family, but it stops implying its own `creativeType`. A creative is authored once; `static`, `motion` and `html` are renditions of it. | D122's own rule already says an html creative *"always carries a raster rendition"* — i.e. one creative, two outputs. Making html a sibling type forces a second authoring path for what is a second **output** of the same thing. It is also why the display-ad tile points at `image-text`: the type system made the honest choice expensive. |
 | **D160** | **STAMPED — Owner, 2026-09-21; the decision's content is the owner's own correction in review, not a proposal they accepted.** **Linkability is a PROPERTY on a layer, not a layer kind. `button` is never minted.** Any layer may carry a click target: a `static-text` layer with it compiles to `<button>`; an `image` layer with it makes the whole rasterised creative clickable — the common display case. `clickTag` remains the emission, never `href` (HL-D3). | **The owner's correction, and it completes HL-D2 rather than amending it** — that decision already said a link is a property any element may carry, and the property was never built (M1). A `button` layer kind would have been a *third* way to say "text that is clickable", which is the duplication D121 and HL-D1 both exist to prevent. It also unlocks the case a button kind cannot express: a fully rasterised AI-generated ad whose single image layer is the click target. |
 | **D161** | **UNSTAMPED — follows from D158/D159, still the author's proposal.** **The display-ad preset targets HTML5, with static as its fallback rendition — not as its product.** `display-ad` becomes `formats: ["html"]` on `google-display-html` / `display-web-html`, and D122's required raster fallback continues to serve `google-display` / `display-web` / `meta-audience-network`. | C1. The `-html` profiles exist (X14) and nothing routes to them. `meta-audience-network` correctly gains no html sibling — X14 records that it *"is understood not to take third-party HTML5 display creatives"* — so it keeps taking the fallback. |
@@ -123,9 +121,11 @@ therefore not a fifth campaign type — it is this table's second row under the 
 | **AR5** | Migration: every persisted brief carrying `html` elements is rewritten to layers, or refused at the boundary with a message naming the fix. **Scope measured:** zero of the seven tracked sample briefs carry them (`git grep -l 'elements:' -- 'briefs/*.yaml'` → 0); operator briefs are gitignored since #167, so their content is **unknown**, which is why this lane refuses rather than assumes. | `load-brief.ts`, `brief-yaml.ts` | AR2 |
 | **AR6** | **`<video>` in the bundle — BLOCKED on D64.** `image-html.accepts` gains `video`, and the compile rule emits `<video src=…>` pointing at a hosted clip. Needs object storage with stable addresses (H3, H4). **The `src` is a new URL surface and takes `isAbsoluteUrl`'s scheme gate (D163)** — a hosted-asset URL is no more trusted than a click destination. | `markup-assembler.ts`, `creative-types.ts`, the asset store | **D64** |
 
-**Sequencing note.** AR1 moves **goldens** — a new layer kind changes nothing about existing
-canonical templates, so the byte expectation is *unmoved*, and that must be proven the way RW-4
-proved it rather than assumed. AR2 is the only lane that deletes a shipped surface.
+**Sequencing note.** AR1 moves **no goldens** — D160 makes linkability a property, not a layer
+kind, so no canonical template's draw order or pixels change; that is the claim AR1's own replayed
+mutation has to prove, not assume. AR2 is the only lane that deletes a shipped surface, and it is
+where a canonical template's `elements` field disappears — a byte-unmoved proof belongs there,
+against a pre-change baseline on the CI runner (DoD 5), not at AR1.
 
 ---
 
