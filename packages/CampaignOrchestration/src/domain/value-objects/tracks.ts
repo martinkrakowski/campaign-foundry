@@ -68,20 +68,13 @@ export interface Track {
 /**
  * The layer kinds a track may nest on (plan review 2026-09-15): only the
  * kinds K2/K3 drive — `image`, `video`, `static-text`, `animated-text`. This
- * is narrower than "every kind this compositor draws": `shade` (`paintShade`)
- * and `logo` (`drawLogo`) read neither `eased` nor `motion` at all — they
- * have no pose mechanism today — and `accent`'s only motion, the wipe, is a
- * clip-extent animation that none of `TRACK_PROPERTIES` represents (see its
- * own doc comment). Accepting tracks on a kind with no pose mechanism would
- * be the exact D134 mistake this comment cites elsewhere: a vocabulary
- * member nothing reads.
- *
- * `html` refuses for a different reason: it renders through two independent
- * paths that must agree pixel for pixel (HL1) — the canvas compositor's own
- * drawer and the markup assembler, which has no motion mechanism at all — so
- * a track on it would render on one path and not the other. `fill` refuses
- * because no creative type accepts it yet (D131) and this compositor draws
- * it nowhere.
+ * is narrower than "every kind this compositor draws": `shade` (`paintShade`),
+ * `logo` (`drawLogo`) and `fill` (`paintFill`, D131) read neither `eased` nor
+ * `motion` at all — they have no pose mechanism today — and `accent`'s only
+ * motion, the wipe, is a clip-extent animation that none of `TRACK_PROPERTIES`
+ * represents (see its own doc comment). Accepting tracks on a kind with no
+ * pose mechanism would be the exact D134 mistake this comment cites
+ * elsewhere: a vocabulary member nothing reads.
  *
  * Widening is additive later and never breaks a stored brief: `accent` when
  * K2 gives the wipe a representable property, `shade`/`logo` with a generic

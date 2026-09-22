@@ -11,7 +11,6 @@ export const LAYER_KINDS = [
   "fill",
   "static-text",
   "animated-text",
-  "html",
   "video",
   "logo",
   "accent",

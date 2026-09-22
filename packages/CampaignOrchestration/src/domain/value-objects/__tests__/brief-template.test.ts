@@ -77,7 +77,13 @@ describe("BriefTemplate and templateFromCanonical (D120, D123, D128)", () => {
     const template = templateFromCanonical("display-ad");
     expect(template.id).toBe("canonical-image-html");
     expect(template.creativeType).toBe("image-html");
-    expect(template.layers.map((layer) => layer.kind)).toEqual(["image", "html", "logo"]);
+    expect(template.layers.map((layer) => layer.kind)).toEqual([
+      "image",
+      "shade",
+      "accent",
+      "static-text",
+      "logo",
+    ]);
   });
 });
 
@@ -393,10 +399,10 @@ describe("isBriefTemplate layer props (L3b, D134)", () => {
   });
 
   test("refuses props on a kind that carries none, the empty object included", () => {
-    // `html` sits on a type that accepts it, so the props verdict — not X11's
+    // `shade` sits on a type that accepts it, so the props verdict — not X11's
     // `accepts` mirror — is what refuses it there. `fill` LEFT this set at L11:
     // it carries `role` now (D131), and its own rule is asserted below.
-    expect(withLayer({ id: "html", kind: "html", props: { alt: "x" } }, "image-html")).toBe(false);
+    expect(withLayer({ id: "shade", kind: "shade", props: { alt: "x" } })).toBe(false);
     expect(withLayer({ id: "plate", kind: "video", props: { alpha: 0.5 } }, "video")).toBe(false);
     expect(layerPropsProblem("video", { alpha: 0.5 })).toEqual({
       path: "",
@@ -716,7 +722,7 @@ describe("isBriefTemplate refuses an own elements property (AR2)", () => {
       unit: "standard-web",
       layers: [
         { id: "image", kind: "image" },
-        { id: "html", kind: "html", elements },
+        { id: "static-text", kind: "static-text", elements },
         { id: "logo", kind: "logo" },
       ],
     });
@@ -730,7 +736,7 @@ describe("isBriefTemplate refuses an own elements property (AR2)", () => {
         unit: "standard-web",
         layers: [
           { id: "image", kind: "image" },
-          { id: "html", kind: "html" },
+          { id: "static-text", kind: "static-text" },
           { id: "logo", kind: "logo" },
         ],
       }),
@@ -749,7 +755,7 @@ describe("isBriefTemplate refuses an own elements property (AR2)", () => {
         unit: "standard-web",
         layers: [
           { id: "image", kind: "image", elements: [] },
-          { id: "html", kind: "html" },
+          { id: "static-text", kind: "static-text" },
           { id: "logo", kind: "logo" },
         ],
       }),
@@ -838,22 +844,6 @@ describe("isBriefTemplate layer tracks (K1)", () => {
         }),
       ).toBe(false);
     }
-  });
-
-  test("refuses tracks on an html layer — the kind's two renderers cannot agree on motion", () => {
-    expect(
-      isBriefTemplate({
-        id: "canonical-image-html",
-        version: 1,
-        creativeType: "image-html",
-        unit: "standard-web",
-        layers: [
-          { id: "image", kind: "image" },
-          { id: "html", kind: "html", tracks: [track] },
-          { id: "logo", kind: "logo" },
-        ],
-      }),
-    ).toBe(false);
   });
 
   test("refuses a malformed track — an unknown property, a bad stop", () => {
@@ -999,7 +989,7 @@ describe("isBriefTemplate mirrors the API's table rules (X11)", () => {
       isBriefTemplate(
         asTemplate(
           "image-html",
-          CANONICAL_TEMPLATES["image-html"].layers.filter((l) => l.kind !== "html"),
+          CANONICAL_TEMPLATES["image-html"].layers.filter((l) => l.kind !== "static-text"),
         ),
       ),
     ).toBe(false);

@@ -101,8 +101,8 @@ export const CREATIVE_TYPE_RULES: Readonly<Record<CreativeType, CreativeTypeRule
   },
   "image-html": {
     unit: "standard-web",
-    accepts: ["image", "html", "logo", "static-text", "shade", "accent", "fill"],
-    required: ["image", "html"],
+    accepts: ["image", "logo", "static-text", "shade", "accent", "fill"],
+    required: ["image", "static-text"],
     // Same caps as image-text for the kinds both renderers treat as one:
     // the compositor draws a single copy layer, and shade/accent/logo are
     // singular. fill stays uncapped — each fill owns its frame.
@@ -182,8 +182,6 @@ export interface OcclusionRule {
  *   so text does not obscure the canvas or imagery beneath it.
  * - `animated-text`: behavior "none" — animated glyphs similarly composite with transparent background,
  *   leaving layers below visible.
- * - `html`: behavior "none" — HTML layers manage their own styled bounds and transparency,
- *   acting as layout elements rather than full-frame occluders.
  * - `video`: behavior "none" — video serves as the base motion background plate in video creative types,
  *   never as an overlay or scrim over other layers.
  */
@@ -204,7 +202,6 @@ export const OCCLUSION_TABLE: Readonly<Record<LayerKind, OcclusionRule>> = {
   },
   "static-text": { behavior: "none" },
   "animated-text": { behavior: "none" },
-  html: { behavior: "none" },
   video: { behavior: "none" },
 };
 
@@ -223,18 +220,9 @@ export function formatOcclusionReason(
   below: LayerKind,
   behavior: OcclusionBehavior,
 ): string {
-  const aboveName =
-    above === "static-text" || above === "animated-text"
-      ? "headline"
-      : above === "html"
-        ? "HTML"
-        : above;
+  const aboveName = above === "static-text" || above === "animated-text" ? "headline" : above;
   const belowName =
-    below === "static-text" || below === "animated-text"
-      ? "the headline"
-      : below === "html"
-        ? "the HTML"
-        : `the ${below}`;
+    below === "static-text" || below === "animated-text" ? "the headline" : `the ${below}`;
   const verb =
     behavior === "opaque"
       ? "hide it"

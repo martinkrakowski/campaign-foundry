@@ -304,7 +304,6 @@ const LAYER_DRAWERS: Readonly<Record<LayerKind, LayerDrawer>> = {
   "static-text": drawStaticText,
   "animated-text": drawStaticText,
   logo: drawLogo,
-  html: drawHtml,
 };
 
 /**
@@ -1534,18 +1533,6 @@ function paintFill(c: LayerDrawContext): void {
 }
 
 /**
- * The html layer paints nothing. Copy is markup (`assembleHtml`), and the
- * canonical image-html template's html layer was already a no-op blit — which
- * is what keeps the compositor goldens byte-identical.
- */
-function drawHtml(_c: LayerDrawContext): void {
-  // The html layer paints nothing. Copy is markup, and the canonical
-  // image-html template's html layer was already a no-op blit — which is
-  // what keeps the compositor goldens byte-identical.
-  return;
-}
-
-/**
  * The logo layer — the legacy logo block (D121), its anchor source changed
  * for C5: the overlap snap now reads `prepared.logoAnchorLayout`, resolved in
  * `prepare` independent of draw order, instead of a layout a prior drawer
@@ -1572,19 +1559,15 @@ function drawLogo(c: LayerDrawContext): void {
     }
     const anchor = prepared.logoAnchorLayout;
     if (anchor === undefined) {
-      if (!prepared.layers.some((layer) => layer.kind === "html")) {
-        throw new Error(
-          "NodeCanvasCompositor: the logo layer snaps to the text block, but there is no text layer in the template at all",
-        );
-      }
+      throw new Error(
+        "NodeCanvasCompositor: the logo layer snaps to the text block, but there is no text layer in the template at all",
+      );
     }
     const { image, x, width: lw, height: lh } = prepared.logo;
     let ly = prepared.logo.y;
-    if (anchor !== undefined) {
-      const logoBox = { x, y: ly, width: lw, height: lh };
-      if (boxesOverlap(anchor.box, logoBox)) {
-        ly = resolveOverlappingLogoY(prepared, anchor.box, lw, lh, x);
-      }
+    const logoBox = { x, y: ly, width: lw, height: lh };
+    if (boxesOverlap(anchor.box, logoBox)) {
+      ly = resolveOverlappingLogoY(prepared, anchor.box, lw, lh, x);
     }
     ctx.drawImage(image, x, ly, lw, lh);
   }

@@ -31,7 +31,6 @@ describe("layerTracksProblem — which kinds accept tracks", () => {
       "static-text",
       "animated-text",
       "logo",
-      "html",
       "fill",
     ];
     for (const kind of kinds) {
@@ -47,20 +46,7 @@ describe("layerTracksProblem — which kinds accept tracks", () => {
     }
   });
 
-  test("refuses tracks on html — it renders through two paths and only one has a motion mechanism", () => {
-    expect(layerTracksProblem("html", [])).toEqual({
-      path: "",
-      must: 'be absent for layer kind "html"',
-      value: [],
-    });
-    expect(layerTracksProblem("html", [opacityTrack])).toEqual({
-      path: "",
-      must: 'be absent for layer kind "html"',
-      value: [opacityTrack],
-    });
-  });
-
-  test("refuses tracks on fill — no creative type accepts the kind yet (D131), so nothing would read it", () => {
+  test("refuses tracks on fill — no pose mechanism reads eased/motion today (D131)", () => {
     expect(layerTracksProblem("fill", [])).toEqual({
       path: "",
       must: 'be absent for layer kind "fill"',

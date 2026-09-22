@@ -1913,7 +1913,9 @@ describe("GenerateCampaignUseCase — motion variants", () => {
           version: 1,
           creativeType: "image-html",
           unit: "standard-web",
-          layers: CANONICAL_TEMPLATES["image-html"].layers,
+          layers: CANONICAL_TEMPLATES["image-html"].layers.map((layer) =>
+            layer.kind === "static-text" ? { ...layer, enabled: false } : layer,
+          ),
         },
         copy: {
           timeline: threeBeatTimeline([
@@ -2023,7 +2025,9 @@ describe("GenerateCampaignUseCase — motion variants", () => {
           version: 1,
           creativeType: "image-html",
           unit: "standard-web",
-          layers: CANONICAL_TEMPLATES["image-html"].layers,
+          layers: CANONICAL_TEMPLATES["image-html"].layers.map((layer) =>
+            layer.kind === "static-text" ? { ...layer, enabled: false } : layer,
+          ),
         },
         variation: { count: 3, seed: 42, axes: { headline: "pool://copy" } },
       }),

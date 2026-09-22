@@ -67,7 +67,7 @@
         "web",
         "apps/web/src/components/campaign/__tests__/preview-hit-regions.test.tsx",
         "-t",
-        "the frameless kinds get nothing"
+        "every frameless kind gets nothing"
       ],
       "verdict": "caught"
     }

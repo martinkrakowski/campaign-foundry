@@ -560,9 +560,10 @@ describe("the stack lives inside CC1/CC2's cost contract (CC3, C3)", () => {
  * assertion and fail here.
  *
  * The fixture is an `image-html` template. The picture is a ground layer, so
- * it owns the whole-canvas region; the html layer paints nothing on the raster
- * and stays reachable through the list. The canonical `image-text` brief the
- * rest of this file uses has that same ground region, asserted below.
+ * it owns the whole-canvas region; the shade layer paints nothing but a solid
+ * band and stays reachable through the list only. The canonical `image-text`
+ * brief the rest of this file uses has that same ground region, asserted
+ * below.
  */
 const htmlElementBrief = {
   schemaVersion: 1,
@@ -573,7 +574,8 @@ const htmlElementBrief = {
     unit: "standard-web",
     layers: [
       { id: "image", kind: "image" },
-      { id: "html", kind: "html" },
+      { id: "shade", kind: "shade" },
+      { id: "static-text", kind: "static-text" },
     ],
   },
   id: "layers",
@@ -650,17 +652,17 @@ describe("the creative and the list are one selection (CE1)", () => {
 
     await user.click(region());
     expect(pick("image", "Image").getAttribute("aria-pressed")).toBe("true");
-    expect(pick("html", "HTML").getAttribute("aria-pressed")).toBe("false");
+    expect(pick("shade", "Shade").getAttribute("aria-pressed")).toBe("false");
 
     // The row moves the pick the canvas made.
-    await user.click(pick("html", "HTML"));
-    expect(pick("html", "HTML").getAttribute("aria-pressed")).toBe("true");
+    await user.click(pick("shade", "Shade"));
+    expect(pick("shade", "Shade").getAttribute("aria-pressed")).toBe("true");
     expect(region().getAttribute("aria-pressed")).toBe("false");
 
     // And the canvas moves the pick the row made.
     await user.click(region());
     expect(region().getAttribute("aria-pressed")).toBe("true");
-    expect(pick("html", "HTML").getAttribute("aria-pressed")).toBe("false");
+    expect(pick("shade", "Shade").getAttribute("aria-pressed")).toBe("false");
   });
 
   /**
@@ -734,12 +736,12 @@ describe("the creative and the list are one selection (CE1)", () => {
     expect(pick("image", "Image").getAttribute("aria-pressed")).toBe("true");
   });
 
-  test("an html layer puts no region over the creative", async () => {
+  test("a non-ground layer puts no region over the creative", async () => {
     await mountWithFrame();
 
     expect(
       within(rail()).queryAllByRole("button", {
-        description: messages.previewWholeLayerRegionDescription("HTML"),
+        description: messages.previewWholeLayerRegionDescription("Shade"),
       }),
     ).toEqual([]);
   });

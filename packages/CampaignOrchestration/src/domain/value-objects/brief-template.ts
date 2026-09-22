@@ -43,14 +43,13 @@ export { clickDestinationProblem, type ClickDestinationProblem } from "./click-d
  * `alt` is the one member that is not geometry (X2): the text alternative an
  * `image` layer carries, the one kind whose whole content is a picture a
  * reader may not be able to see. It is here and nowhere else because here is
- * where it can be *meant* — a shade or an accent is decoration, a text layer's
- * copy is already text, and an `html` layer's alternative belongs to the image
- * elements inside it rather than to the container. An empty string is not
- * absence: it declares the image decorative, which is a different claim from
- * saying nothing about it.
+ * where it can be *meant* — a shade or an accent is decoration, and a text
+ * layer's copy is already text. An empty string is not absence: it declares
+ * the image decorative, which is a different claim from saying nothing about
+ * it.
  *
- * `video`, `html` and `fill` carry no props at all — theirs arrive with the
- * lanes that draw them. `shade` carries none either (R-D4, withdrawn
+ * `video` carries no props at all — its lane arrives with the compositor
+ * pass that draws it. `shade` carries none either (R-D4, withdrawn
  * 2026-09-15): the tone axis is never absent — it defaults to every tone —
  * so an `alpha` override would always silence it.
  */
@@ -137,7 +136,6 @@ const LAYER_PROPS: Readonly<Record<LayerKind, readonly string[]>> = {
   "animated-text": ["anchor", "typeFloor"],
   image: ["alt"],
   video: [],
-  html: [],
   fill: ["role"],
 };
 

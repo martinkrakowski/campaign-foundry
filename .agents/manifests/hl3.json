@@ -15,7 +15,8 @@
         "node",
         "packages/CreativeGeneration/src/infrastructure/adapters/__tests__/NodeCanvasCompositor.layer-order.test.ts"
       ],
-      "verdict": "caught"
+      "verdict": "caught",
+      "retired": "Retired by AR7: html left LAYER_KINDS entirely (D159's own consequence \u2014 the compositor's own comment already said an html-kind layer paints nothing, so nothing about the renderers required a distinct layer kind for it). LAYER_DRAWERS is Readonly<Record<LayerKind, LayerDrawer>>, so there is no html key left to register or drop \u2014 the type itself refuses the shape this mutation names. HL3's other mutations still cover the drawer's own behaviour where it survives."
     },
     {
       "file": "packages/CreativeGeneration/src/infrastructure/adapters/NodeCanvasCompositor.ts",
@@ -46,7 +47,8 @@
         "node",
         "packages/CreativeGeneration/src/infrastructure/adapters/__tests__/NodeCanvasCompositor.layer-order.test.ts"
       ],
-      "verdict": "caught"
+      "verdict": "caught",
+      "retired": "Retired by AR7: the escape hatch is gone, not moved. image-html's canonical template now requires a static-text layer exactly as image-text and video require their own text kind (D159), so 'no enabled text layer at all' is unreachable through the domain boundary for any of the three creative types — the html-kind carve-out this mutation exercised has no successor to re-anchor on. A hand-built template that still omits every text-kind layer (bypassing the boundary, as this same test file's image-text case does) throws unconditionally now, which is the behaviour HL3's own doc comment already wanted."
     },
     {
       "file": "packages/CampaignOrchestration/src/application/use-cases/GenerateCampaignUseCase.use-case.ts",

@@ -196,7 +196,6 @@ describe("assembleHtml", () => {
         layers: [
           layer({ id: "scrim", kind: "shade" }),
           layer({ id: "picture", kind: "image", enabled: false }),
-          layer({ id: "html", kind: "html" }),
         ],
       }),
     );

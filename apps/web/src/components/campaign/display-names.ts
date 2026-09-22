@@ -180,7 +180,6 @@ export const LAYER_KIND_META: Record<LayerKind, string> = {
   fill: "Fill",
   "static-text": "Static text",
   "animated-text": "Animated text",
-  html: "HTML",
   video: "Video",
   logo: "Logo",
   accent: "Accent",

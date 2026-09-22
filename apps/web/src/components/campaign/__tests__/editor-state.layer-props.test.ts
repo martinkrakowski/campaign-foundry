@@ -91,12 +91,12 @@ describe("setLayerProps — the domain's own field table refuses the rest (D134)
     expect(next).toBe(before);
   });
 
-  test("a kind that carries no props at all (html) refuses every patch, empty included", () => {
-    const html: CreativeTemplateLayer = { id: "html", kind: "html" };
-    const before = stateWith([...CANONICAL.layers, html]);
+  test("a kind that carries no props at all (video) refuses every patch, empty included", () => {
+    const video: CreativeTemplateLayer = { id: "extra-video", kind: "video" };
+    const before = stateWith([...CANONICAL.layers, video]);
     const next = editorReducer(before, {
       type: "setLayerProps",
-      layerId: "html",
+      layerId: "extra-video",
       patch: { solidHeight: 0.2 },
     });
     expect(next).toBe(before);

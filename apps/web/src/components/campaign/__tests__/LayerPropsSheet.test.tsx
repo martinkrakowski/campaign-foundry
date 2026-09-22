@@ -308,11 +308,11 @@ describe("LayerPropsSheet — per-kind fields (D134's table, brief-template.ts L
     expect(screen.getByRole("checkbox", { name: messages.layerLinkLabel })).toBeTruthy();
   });
 
-  test("html offers the click-target checkbox and no element editor", () => {
+  test("an image-html brief's accent offers the click-target checkbox and no element editor", () => {
     render(
       <Harness
         initial={{ ...initialEditorState(), template: htmlTemplate() }}
-        layerId="html"
+        layerId="accent"
         onClose={vi.fn()}
       />,
     );

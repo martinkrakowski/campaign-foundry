@@ -137,7 +137,9 @@ describe("parseBrief", () => {
       expect(parsed.template.unit).toBe("standard-web");
       expect(parsed.template.layers).toEqual([
         { id: "image", kind: "image" },
-        { id: "html", kind: "html" },
+        { id: "shade", kind: "shade" },
+        { id: "accent", kind: "accent" },
+        { id: "static-text", kind: "static-text" },
         { id: "logo", kind: "logo" },
       ]);
       expect(vi.mocked(templateFromCanonical)).toHaveBeenCalledWith("display-ad");
@@ -752,12 +754,14 @@ describe("parseBrief", () => {
       unit: "standard-web",
       layers: [
         { id: "image", kind: "image" },
-        { id: "html", kind: "html" },
+        { id: "shade", kind: "shade" },
+        { id: "accent", kind: "accent" },
+        { id: "static-text", kind: "static-text" },
         { id: "logo", kind: "logo" },
       ],
     };
     const REFUSAL =
-      'Campaign brief field "template.layers[1].elements" is no longer a layer field; author the copy as a static-text layer.';
+      'Campaign brief field "template.layers[3].elements" is no longer a layer field; author the copy as a static-text layer.';
 
     test("the canonical image-html template, which has no elements key, loads", () => {
       expect(() => parseBrief({ ...htmlBrief, template: imageHtml })).not.toThrow();
@@ -771,7 +775,7 @@ describe("parseBrief", () => {
             template: {
               ...imageHtml,
               layers: imageHtml.layers.map((layer) =>
-                layer.id === "html" ? { ...layer, elements } : layer,
+                layer.id === "static-text" ? { ...layer, elements } : layer,
               ),
             },
           }),
@@ -823,28 +827,6 @@ describe("parseBrief", () => {
         parseBrief({ ...valid, template: withTracks("image", undefined) }),
       ).not.toThrow();
       expect(() => parseBrief({ ...valid, template: withTracks("image", []) })).not.toThrow();
-    });
-
-    test("tracks on html are refused — the kind's two renderers cannot agree on motion", () => {
-      expect(() =>
-        parseBrief({
-          ...valid,
-          output: { formats: ["html"] },
-          template: {
-            id: "canonical-image-html",
-            version: 1,
-            creativeType: "image-html",
-            unit: "standard-web",
-            layers: [
-              { id: "image", kind: "image" },
-              { id: "html", kind: "html", tracks: [track] },
-              { id: "logo", kind: "logo" },
-            ],
-          },
-        }),
-      ).toThrow(
-        `Campaign brief field "template.layers[1].tracks" must be absent for layer kind "html"; got ${JSON.stringify([track])}.`,
-      );
     });
 
     test("tracks that are not an array are refused", () => {
@@ -1035,33 +1017,10 @@ describe("parseBrief", () => {
         }),
       ).not.toThrow();
     });
-
-    test("the refusal holds with enforceCapabilities: false (authoring mode too)", () => {
-      expect(() =>
-        parseBrief(
-          {
-            ...valid,
-            output: { formats: ["html"] },
-            template: {
-              id: "canonical-image-html",
-              version: 1,
-              creativeType: "image-html",
-              unit: "standard-web",
-              layers: [
-                { id: "image", kind: "image" },
-                { id: "html", kind: "html", tracks: [track] },
-                { id: "logo", kind: "logo" },
-              ],
-            },
-          },
-          { enforceCapabilities: false },
-        ),
-      ).toThrow(/template\.layers\[1\]\.tracks/);
-    });
   });
 
   describe("output formats against the template's output families (X14)", () => {
-    /** The canonical image-html template, elements and all — no edits needed. */
+    /** The canonical image-html template, layers and all — no edits needed. */
     const htmlTemplate = {
       id: "canonical-image-html",
       version: 1,
@@ -1069,7 +1028,9 @@ describe("parseBrief", () => {
       unit: "standard-web",
       layers: [
         { id: "image", kind: "image" },
-        { id: "html", kind: "html" },
+        { id: "shade", kind: "shade" },
+        { id: "accent", kind: "accent" },
+        { id: "static-text", kind: "static-text" },
         { id: "logo", kind: "logo" },
       ],
     };
@@ -1740,7 +1701,9 @@ describe("parseBrief v2 fields", () => {
             unit: "standard-web",
             layers: [
               { id: "image", kind: "image" },
-              { id: "html", kind: "html" },
+              { id: "shade", kind: "shade" },
+              { id: "accent", kind: "accent" },
+              { id: "static-text", kind: "static-text" },
               { id: "logo", kind: "logo" },
             ],
           },
