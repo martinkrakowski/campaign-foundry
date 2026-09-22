@@ -7,7 +7,7 @@ first draft got wrong), and the `html` rendition compiles `<img>` and `<video>` 
 campaign types. It introduces no new creative surface; it proposes retiring one authoring model that
 exists today and pointing the display-ad preset at machinery that is already built and unreachable.
 **Verified against:** `main` at `d7e7cb0f`. Every claim below cites code that was read, not recalled.
-**Decision ids introduced:** D158 – D162. Lane prefix **`AR-`**, checked free against every plan
+**Decision ids introduced:** D158 – D163. Lane prefix **`AR-`**, checked free against every plan
 (`grep -rniE '\bD158\b' docs/ .agents/` … 0 hits) per `the-unowned-gaps.md` §42.
 **Relates to:** **HL-D1** and **D122**, both of which this plan proposes amending; **D121** (one
 vocabulary), **D124** (the compatibility table), **HL-D2/HL-D3**, **D113** (display sizes), **X14**
@@ -74,6 +74,7 @@ This is the eleven-PR HL arc (HL1–HL5f, stamped SHIPPED) terminating in a surf
 | **D159** | **HTML is a compile target, not a creative kind. `D122` is amended:** `format: "html"` stays a packaging family, but it stops implying its own `creativeType`. A creative is authored once; `static`, `motion` and `html` are renditions of it. | D122's own rule already says an html creative *"always carries a raster rendition"* — i.e. one creative, two outputs. Making html a sibling type forces a second authoring path for what is a second **output** of the same thing. It is also why the display-ad tile points at `image-text`: the type system made the honest choice expensive. |
 | **D160** | **Linkability is a PROPERTY on a layer, not a layer kind. `button` is never minted.** Any layer may carry a click target: a `static-text` layer with it compiles to `<button>`; an `image` layer with it makes the whole rasterised creative clickable — the common display case. `clickTag` remains the emission, never `href` (HL-D3). | **The owner's correction, and it completes HL-D2 rather than amending it** — that decision already said a link is a property any element may carry, and the property was never built (M1). A `button` layer kind would have been a *third* way to say "text that is clickable", which is the duplication D121 and HL-D1 both exist to prevent. It also unlocks the case a button kind cannot express: a fully rasterised AI-generated ad whose single image layer is the click target. |
 | **D161** | **The display-ad preset targets HTML5, with static as its fallback rendition — not as its product.** `display-ad` becomes `formats: ["html"]` on `google-display-html` / `display-web-html`, and D122's required raster fallback continues to serve `google-display` / `display-web` / `meta-audience-network`. | C1. The `-html` profiles exist (X14) and nothing routes to them. `meta-audience-network` correctly gains no html sibling — X14 records that it *"is understood not to take third-party HTML5 display creatives"* — so it keeps taking the fallback. |
+| **D163** | **The bundle's only script is the one this codebase writes, and every value reaching markup is escaped at emission or gated by a closed vocabulary. D158 carries that property forward unchanged.** Concretely, after the rewrite: copy is `escapeHtml`'d wherever it lands; the `clickTag` declaration stays the sole `<script>` and keeps `escapeScriptJson`; any URL a layer contributes is scheme-gated to `http:`/`https:` the way `clickDestination` is; and per-layer style stays a closed union (`fontWeight`, `fontFamily`), never free CSS. | **This is already true and already tested — the risk is losing it in the rewrite, not acquiring it.** On `main`: `escapeHtml` is the five-character escape; `escapeScriptJson` turns `<`, `>`, `&` into `\uXXXX` so a crafted value cannot close the declaration with a literal `</script>` (HL-D7); `isAbsoluteUrl` refuses anything but http/https, with a test named *"refuses non-http/https protocols (XSS surface and untrackable schemes)"* asserting `javascript:alert(1)` is false; and `markup-assembler.test.ts` asserts a `<script>alert("xss")</script>` headline emits escaped. **The threat model is not hypothetical:** headline copy is LLM-generated, so an untrusted string reaches markup on the ordinary path, not only via a hostile operator. AR2 replaces the emission sites those guarantees live at, which is exactly when a property like this gets dropped silently. |
 | **D162** | **The create modal offers three kinds, not two and not four-grouped-by-two: Still image · Video · HTML ad.** The four campaign types stay as the presets behind them; the tiles name what the user is making. | The owner's model — every asset is static or video — holds for **content**. HTML is the wrapper. A two-tile fork cannot route `paid-social`, which is deliberately `formats: ["static", "motion"]` (both), and a tile set that omits html hides the format C1 found unreachable. |
 
 ---
@@ -117,7 +118,7 @@ therefore not a fifth campaign type — it is this table's second row under the 
 | **AR3** | `display-ad` preset repointed at `image-html` + the `-html` profiles; the raster fallback routes to the static profiles. | `campaign-types.ts`, `PackageForPlatformUseCase` | AR2, D161 |
 | **AR4** | The create modal's three tiles (D162), and the `image-html` path reachable end to end. | `CreateCampaignDialog.tsx`, `messages.ts` | AR3 |
 | **AR5** | Migration: every persisted brief carrying `html` elements is rewritten to layers, or refused at the boundary with a message naming the fix. **Scope measured:** zero of the seven tracked sample briefs carry them (`git grep -l 'elements:' -- 'briefs/*.yaml'` → 0); operator briefs are gitignored since #167, so their content is **unknown**, which is why this lane refuses rather than assumes. | `load-brief.ts`, `brief-yaml.ts` | AR2 |
-| **AR6** | **`<video>` in the bundle — BLOCKED on D64.** `image-html.accepts` gains `video`, and the compile rule emits `<video src=…>` pointing at a hosted clip. Needs object storage with stable addresses (H3, H4). | `markup-assembler.ts`, `creative-types.ts`, the asset store | **D64** |
+| **AR6** | **`<video>` in the bundle — BLOCKED on D64.** `image-html.accepts` gains `video`, and the compile rule emits `<video src=…>` pointing at a hosted clip. Needs object storage with stable addresses (H3, H4). **The `src` is a new URL surface and takes `isAbsoluteUrl`'s scheme gate (D163)** — a hosted-asset URL is no more trusted than a click destination. | `markup-assembler.ts`, `creative-types.ts`, the asset store | **D64** |
 
 **Sequencing note.** AR1 moves **goldens** — a new layer kind changes nothing about existing
 canonical templates, so the byte expectation is *unmoved*, and that must be proven the way RW-4
@@ -150,12 +151,16 @@ proved it rather than assumed. AR2 is the only lane that deletes a shipped surfa
 2. A user can create an HTML ad from the modal, author it with the same layers as a social post, and
    package it for `google-display-html` — asserted end to end.
 3. Every html asset still carries its raster fallback (D122 unamended on that point), and the two
-   renderers agree on what they draw (HL5f's property, extended to the button layer).
-4. Goldens: existing canonical templates are byte-unmoved, proven against a pre-change baseline on
+   renderers agree on what they draw (HL5f's property, extended to every linkable layer).
+4. **The injection tests survive the rewrite against the LAYER path, not the retired element path**
+   (D163): a `<script>`-bearing headline emits escaped, a non-http click target is refused, and the
+   `clickTag` declaration is still the only script in the bundle. A test that passes only against
+   `HtmlElementsEditor`'s vocabulary is a test that retires with it.
+5. Goldens: existing canonical templates are byte-unmoved, proven against a pre-change baseline on
    the CI runner.
-5. Every persisted brief with html elements either migrates or is refused with a message naming the
+6. Every persisted brief with html elements either migrates or is refused with a message naming the
    fix — never silently dropped.
-6. No planning document's status line contradicts the tree at the end.
+7. No planning document's status line contradicts the tree at the end.
 
 ---
 
