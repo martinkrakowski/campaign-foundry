@@ -118,8 +118,8 @@ therefore not a fifth campaign type — it is this table's second row under the 
 | **AR1** | **Linkability as a layer property** (D160): the field, its validation at both boundaries, and the editor control. No new layer kind, so **no golden moves** — the raster rendition of a linked layer is byte-identical to the same layer unlinked. | `brief-template.ts`, `LayerPropsSheet.tsx`, `load-brief.ts`, `brief-yaml.ts` | **merged** (#554) |
 | **AR2** | `assembleHtml` compiles **layers** to the §3 table: `<img>`, `<p>`/`<button>`, each wrapped with `clickTag` when linked. The element vocabulary and `HtmlElementsEditor` retire; `image-html.accepts` widens to the layer kinds. **`<video>` is NOT in this lane** — see AR6. | `markup-assembler.ts`, `html-element.ts`, `creative-types.ts`, `LayerPropsSheet.tsx` | **merged** (#555) |
 | **AR3** | `display-ad` preset repointed at `image-html` + the `-html` profiles; the raster fallback routes to the static profiles. | `campaign-types.ts`, `PackageForPlatformUseCase` | **merged** (#556) — dispatched and shipped while D161 was still unstamped in this document; see §7 |
-| **AR4** | The create modal's three tiles (D162), and the `image-html` path reachable end to end. | `CreateCampaignDialog.tsx`, `messages.ts` | AR3 (merged, #556); D162 stamped — **ready** |
-| **AR5** | Migration: every persisted brief carrying `html` elements is rewritten to layers, or refused at the boundary with a message naming the fix. **Scope measured:** zero of the seven tracked sample briefs carry them (`git grep -l 'elements:' -- 'briefs/*.yaml'` → 0); operator briefs are gitignored since #167, so their content is **unknown**, which is why this lane refuses rather than assumes. | `load-brief.ts`, `brief-yaml.ts` | AR2 |
+| **AR4** | The create modal's three tiles (D162), and the `image-html` path reachable end to end. Found and fixed a live copy leak (`formatDisplayName("html")` returning the raw string) shipping since AR3; found and recorded (not fixed — see AR7) the dead, still-required `html` layer kind. | `CreateCampaignDialog.tsx`, `messages.ts` | **merged** (#557) |
+| **AR5** | Migration: every persisted brief carrying `html` elements is rewritten to layers, or refused at the boundary with a message naming the fix. **Scope measured:** zero of the seven tracked sample briefs carry them (`git grep -l 'elements:' -- 'briefs/*.yaml'` → 0); operator briefs are gitignored since #167, so their content is **unknown**, which is why this lane refuses rather than assumes. | `load-brief.ts`, `brief-yaml.ts` | AR2 (merged, #555) — **not started** |
 | **AR6** | **`<video>` in the bundle — BLOCKED on D64.** `image-html.accepts` gains `video`, and the compile rule emits `<video src=…>` pointing at a hosted clip. Needs object storage with stable addresses (H3, H4). **The `src` is a new URL surface and takes `isAbsoluteUrl`'s scheme gate (D163)** — a hosted-asset URL is no more trusted than a click destination. | `markup-assembler.ts`, `creative-types.ts`, the asset store | **D64** |
 | **AR7** | **`image-html.required` still carries the dead `html` layer kind.** AR2 retired what that kind draws and compiles (`drawHtml` is a no-op, `assembleHtml` emits nothing for it, `LAYER_PROPS.html = []`) but left it required on `CREATIVE_TYPE_RULES["image-html"]`, so every display-ad brief is stuck with a layer it can never disable and the canonical template has no default `static-text` — a fresh HTML ad ships with no headline. Found red-teaming AR4; not fixed there because the files are outside AR4's Owns column and retiring a layer kind is its own migration (existing briefs already carry the required `html` layer — see AR5's class of problem). **Goldens are not at risk**: the compositor's golden tests build a `CompositeRequest` by hand (`NodeCanvasCompositor.goldens.test.ts`), never through `CANONICAL_TEMPLATES`, so this lane cannot move them. | `creative-types.ts`, `creative-templates.ts`, `load-brief.ts` (existing-brief compatibility) | AR2 (merged, #555) — **not started** |
 
@@ -144,9 +144,10 @@ against a pre-change baseline on the CI runner (DoD 5), not at AR1.
 - **It does not touch `CAMPAIGN_TYPES`' membership.** D162 changes the tiles' *labels and grouping*,
   not the four presets behind them, so no `policyHash` moves. That is the difference between this
   plan and the 4:5 question.
-- **It does not schedule anything.** AR1 (#554), AR2 (#555) and AR3 (#556) are merged. AR4 is
-  **ready** — D162 is stamped. AR6 stays named and blocked on **D64**; per RW-D4 a blocked lane does
-  not occupy a slot.
+- **It does not schedule anything.** AR1 (#554), AR2 (#555), AR3 (#556) and AR4 (#557) are merged.
+  AR5 is dispatchable now (AR2 merged) and **not started**. AR6 stays named and blocked on **D64**;
+  per RW-D4 a blocked lane does not occupy a slot. AR7 — the dead, still-required `html` layer kind
+  found red-teaming AR4 — is dispatchable now (AR2 merged) and **not started**.
 
 ---
 
