@@ -698,3 +698,61 @@ describe("dumpBrief element style order (HL5e)", () => {
     expect(dumpBrief(parse(yaml) as object)).toBe(yaml);
   });
 });
+
+describe("dumpBrief layer link order (D160)", () => {
+  // Positional proof, the tracks test's own shape: an unnamed key emits at the
+  // end in source order, so with `link` NOT in `LAYER_KEY_ORDER` it lands after
+  // `elements` and the middle assertion below fails however the source scrambles
+  // the keys; the `props` fixture key is there so the first assertion pins
+  // "after props" too. Kind-invalid on an html layer is beside the point — the
+  // writer orders keys, it does not validate them (the tracks/elements
+  // passthrough tests above already dump junk).
+  const linked = {
+    ...brief,
+    template: {
+      id: "canonical-image-html",
+      version: 1,
+      creativeType: "image-html",
+      unit: "standard-web",
+      layers: [
+        {
+          kind: "html",
+          id: "html",
+          props: { alt: "pack" },
+          elements: [
+            { kind: "text", text: "Buy", frame: { x: 0.1, y: 0.2, w: 0.5, h: 0.2, anchor: "top" } },
+          ],
+          link: true,
+        },
+      ],
+    },
+  };
+
+  test("emits a layer link after props and before elements", () => {
+    const yaml = dumpBrief(linked);
+    expect(yaml.indexOf("id: html")).toBeLessThan(yaml.indexOf("kind: html"));
+    expect(yaml.indexOf("props:")).toBeLessThan(yaml.indexOf("link: true"));
+    expect(yaml.indexOf("link: true")).toBeLessThan(yaml.indexOf("elements:"));
+  });
+
+  test("a layer with link: true round-trips through YAML and dumps byte-identically", () => {
+    const yaml = dumpBrief(linked);
+    expect(parse(yaml)).toEqual(linked);
+    expect(dumpBrief(parse(yaml) as object)).toBe(yaml);
+  });
+
+  test("a layer without link omits the key", () => {
+    const yaml = dumpBrief({
+      ...brief,
+      template: {
+        id: "canonical-image-text",
+        version: 1,
+        creativeType: "image-text",
+        unit: "standard-web",
+        layers: [{ id: "image", kind: "image" }],
+      },
+    });
+    expect(yaml).not.toContain("link:");
+    expect(dumpBrief(parse(yaml) as object)).toBe(yaml);
+  });
+});
