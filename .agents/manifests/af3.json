@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "AF3",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/load-brief.ts",
+      "before": "    if (layer.kind === \"html\") {\n      throw new Error(\n        `Campaign brief field \"template.layers[${i}].kind\" \"html\" is retired; delete the layer and author the copy as a static-text layer.`,\n      );\n    }",
+      "after": "    // if (layer.kind === \"html\") {\n    //   throw new Error(\n    //     `Campaign brief field \"template.layers[${i}].kind\" \"html\" is retired; delete the layer and author the copy as a static-text layer.`,\n    //   );\n    // }",
+      "because": "without the special-case, kind html falls through to the generic accepts refusal, so a caller is not told to delete the layer and author static-text.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/load-brief.test.ts",
+        "-t",
+        "retired html kind names the fix"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

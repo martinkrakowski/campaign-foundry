@@ -229,6 +229,17 @@ describe("parseBrief", () => {
       );
     });
 
+    test("retired html kind names the fix", () => {
+      const base = templateFromCanonical("social-post");
+      const template = {
+        ...base,
+        layers: [...base.layers, { id: "plate", kind: "html" }],
+      };
+      expect(() => parseBrief({ ...valid, template })).toThrow(
+        'Campaign brief field "template.layers[5].kind" "html" is retired; delete the layer and author the copy as a static-text layer.',
+      );
+    });
+
     test("a template missing a required kind is refused (dropping static-text from image-text)", () => {
       const base = templateFromCanonical("social-post");
       const template = {
