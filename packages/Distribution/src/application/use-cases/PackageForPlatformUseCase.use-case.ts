@@ -108,7 +108,7 @@ const isHtmlAsset = (
 export class PackageForPlatformUseCase {
   constructor(
     private readonly store: PackageStorePort,
-    /** Profile lookup — injected so tests can register a profile that declares `html` (none ships one yet, D122). */
+    /** Profile lookup — injected so tests can register a profile that declares `html` (shipped as google-display-html and display-web-html). */
     private readonly resolveProfile: (
       platformId: string,
     ) => PlatformProfile | undefined = platformProfile,

@@ -338,9 +338,9 @@ describe("dumpBrief layer and props order (L3b, D134)", () => {
   });
 });
 
-describe("dumpBrief element order (HL1)", () => {
-  // A layer and its elements written with keys scrambled, so the assertions
-  // below can only pass if the writer orders them.
+describe("dumpBrief layer key order", () => {
+  // A layer written with keys scrambled, so the assertions below can only pass
+  // if the writer orders them.
   const templated = {
     ...brief,
     template: {
@@ -351,56 +351,49 @@ describe("dumpBrief element order (HL1)", () => {
       layers: [
         { kind: "image", id: "bg" },
         {
-          elements: [
-            {
-              text: "Buy",
-              kind: "text",
-              frame: { anchor: "top", h: 0.44, w: 0.33, y: 0.22, x: 0.11 },
-            },
-            {
-              kind: "image",
-              frame: { anchor: "middle", h: 0.2, w: 0.2, y: 0.4, x: 0.4 },
-            },
-          ],
-          props: { alpha: 0.5 },
+          link: true,
+          props: { anchor: "top", typeFloor: 0.4 },
+          frame: { anchor: "top", h: 0.44, w: 0.33, y: 0.22, x: 0.11 },
           enabled: false,
-          kind: "html",
-          id: "html",
+          kind: "static-text",
+          id: "head",
         },
         { kind: "logo", id: "mark" },
       ],
     },
   };
 
-  test("emits a layer's keys as id, kind, enabled, props, elements", () => {
+  test("emits a layer's keys as id, kind, enabled, frame, props, link", () => {
     const yaml = dumpBrief(templated);
-    expect(yaml.indexOf("id: html")).toBeLessThan(yaml.indexOf("kind: html"));
-    expect(yaml.indexOf("kind: html")).toBeLessThan(yaml.indexOf("enabled: false"));
-    expect(yaml.indexOf("enabled: false")).toBeLessThan(yaml.indexOf("props:"));
-    expect(yaml.indexOf("props:")).toBeLessThan(yaml.indexOf("elements:"));
+    expect(yaml.indexOf("id: head")).toBeLessThan(yaml.indexOf("kind: static-text"));
+    expect(yaml.indexOf("kind: static-text")).toBeLessThan(yaml.indexOf("enabled: false"));
+    expect(yaml.indexOf("enabled: false")).toBeLessThan(yaml.indexOf("frame:"));
+    expect(yaml.indexOf("frame:")).toBeLessThan(yaml.indexOf("props:"));
+    expect(yaml.indexOf("props:")).toBeLessThan(yaml.indexOf("link: true"));
   });
 
-  test("an unrecognized elements key round-trips through YAML and dumps byte-identically", () => {
+  test("a layer round-trips through YAML and dumps byte-identically", () => {
     const yaml = dumpBrief(templated);
     expect(parse(yaml)).toEqual(templated);
     expect(dumpBrief(parse(yaml) as object)).toBe(yaml);
   });
 
-  test("elements the order cannot name pass through untouched", () => {
+  test("layer keys the order cannot name pass through untouched", () => {
     const passthrough = {
       ...brief,
       template: {
         id: "x",
         layers: [
-          { id: "html", kind: "html", elements: "junk" },
-          { id: "html-2", kind: "html", elements: ["junk", { frame: null }] },
+          { id: "text-1", kind: "static-text", note: "junk" },
+          { id: "text-2", kind: "static-text", note: ["junk", { frame: null }] },
         ],
       },
     };
     const yaml = dumpBrief(passthrough);
-    expect(yaml).toContain("elements: junk");
+    expect(yaml).toContain("note: junk");
     expect(yaml).toContain("frame: null");
     expect(parse(yaml)).toEqual(passthrough);
+    expect(dumpBrief(parse(yaml) as object)).toBe(yaml);
   });
 });
 
@@ -434,7 +427,7 @@ describe("dumpBrief layer tracks order (K1)", () => {
     },
   };
 
-  test("emits a layer's keys as id, kind, props, elements, tracks — tracks last (K1's positional decision)", () => {
+  test("emits a layer's keys as id, kind, props, tracks — tracks last (K1's positional decision)", () => {
     const yaml = dumpBrief(templated);
     const heroAt = yaml.indexOf("id: hero");
     const heroKindAt = yaml.indexOf("kind: image", heroAt);
@@ -642,13 +635,9 @@ describe("dumpBrief layer tracks order (K1)", () => {
 });
 
 describe("dumpBrief layer link order (D160)", () => {
-  // Positional proof, the tracks test's own shape: an unnamed key emits at the
-  // end in source order, so with `link` NOT in `LAYER_KEY_ORDER` it lands after
-  // `elements` and the middle assertion below fails however the source scrambles
-  // the keys; the `props` fixture key is there so the first assertion pins
-  // "after props" too. Kind-invalid on an html layer is beside the point — the
-  // writer orders keys, it does not validate them (the tracks/elements
-  // passthrough tests above already dump junk).
+  // Positional proof: `link` is in `LAYER_KEY_ORDER`, after `props` and before
+  // `tracks`. The keys are written scrambled in source so the assertions below
+  // can only pass if the writer orders them.
   const linked = {
     ...brief,
     template: {
@@ -658,23 +647,29 @@ describe("dumpBrief layer link order (D160)", () => {
       unit: "standard-web",
       layers: [
         {
-          kind: "html",
-          id: "html",
-          props: { alt: "pack" },
-          elements: [
-            { kind: "text", text: "Buy", frame: { x: 0.1, y: 0.2, w: 0.5, h: 0.2, anchor: "top" } },
+          tracks: [
+            {
+              property: "scale",
+              stops: [
+                { t: 0, value: 1 },
+                { t: 1, value: 0.5 },
+              ],
+            },
           ],
           link: true,
+          props: { anchor: "top", typeFloor: 0.4 },
+          kind: "static-text",
+          id: "head",
         },
       ],
     },
   };
 
-  test("emits a layer link after props and before elements", () => {
+  test("emits a layer link after props and before tracks", () => {
     const yaml = dumpBrief(linked);
-    expect(yaml.indexOf("id: html")).toBeLessThan(yaml.indexOf("kind: html"));
+    expect(yaml.indexOf("id: head")).toBeLessThan(yaml.indexOf("kind: static-text"));
     expect(yaml.indexOf("props:")).toBeLessThan(yaml.indexOf("link: true"));
-    expect(yaml.indexOf("link: true")).toBeLessThan(yaml.indexOf("elements:"));
+    expect(yaml.indexOf("link: true")).toBeLessThan(yaml.indexOf("tracks:"));
   });
 
   test("a layer with link: true round-trips through YAML and dumps byte-identically", () => {

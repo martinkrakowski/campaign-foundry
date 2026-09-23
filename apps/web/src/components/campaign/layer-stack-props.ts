@@ -89,10 +89,8 @@ export function layerStackProps(state: EditorState): LayerStackLook {
  * `toggleableLayerIds` and `addableKinds` read nothing else (`derive.ts`), so
  * two states with the same key cannot differ in anything the stack shows.
  *
- * A layer's `props` and `elements` are deliberately absent: the stack draws
- * neither. The html element editor that does draw `elements` is NOT inside this
- * boundary — it stays on the Template step until CC4's sheet hosts it — so a
- * typed element cannot go stale behind this memo.
+ * A layer's `props` are deliberately absent: the stack draws none of them, so
+ * props changes cannot affect anything the stack shows.
  */
 export function layerStackKey(state: EditorState): string {
   return JSON.stringify([
