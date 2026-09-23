@@ -267,6 +267,12 @@ export function validateTemplate(value: unknown, type?: CampaignType): BriefTemp
     }
     seenIds.add(layer.id);
 
+    if (layer.kind === "html") {
+      throw new Error(
+        `Campaign brief field "template.layers[${i}].kind" "html" is retired; delete the layer and author the copy as a static-text layer.`,
+      );
+    }
+
     if (
       typeof layer.kind !== "string" ||
       !(rules.accepts as readonly string[]).includes(layer.kind)
