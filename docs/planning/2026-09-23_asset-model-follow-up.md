@@ -1,6 +1,6 @@
 # The Asset Model, Finished — Architecture & Development Plan
 
-**Date:** 2026-09-23 · **Status:** **DRAFT r2 — D164 and D165 unstamped; nothing dispatched.** r1 was
+**Date:** 2026-09-23 · **Status:** **DRAFT r2 — wave 1 merged. AF3 [#559](https://github.com/martinkrakowski/campaign-foundry/pull/559) (`3208e55c`), AF5 [#560](https://github.com/martinkrakowski/campaign-foundry/pull/560) (`8a0067dd`). D164, D165, L3a, and D161 remain unstamped, so AF1, AF2, AF4, and AF6 were not dispatched.** r1 was
 reviewed the same day by Fable 5.1 against `425e59e4`. It returned four blocking or major errors in r1
 itself, all corrected here and listed in §8, because they are the kind this repository keeps
 repeating.

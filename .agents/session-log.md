@@ -6053,3 +6053,34 @@ and source formatting, recorded here rather than fixed.
   - Wave B slot 2 is empty on purpose (do not invent occupancy).
   - Pre-dispatch, not pre-merge: does RW-4's frame field need dropping from `canonicalLayer`?
     Ten minutes against D130 before Wave A starts. Still nothing dispatched.
+
+## 2026-09-23 — asset-model follow-up, wave 1 (AF3, AF5)
+
+- **Mode:** Orchestrator
+- **Changes:**
+  - AF3, [#559](https://github.com/martinkrakowski/campaign-foundry/pull/559), squash `3208e55c`.
+    `validateTemplate` refuses `kind === "html"` before the generic accepts check, with the
+    sentence the plan names. One new test. Mutation `.agents/manifests/af3.json` re-ran and
+    reproduced `caught`.
+  - AF5, [#560](https://github.com/martinkrakowski/campaign-foundry/pull/560), squash `8a0067dd`.
+    HTML/`elements` fixtures in `brief-yaml.test.ts` rewritten onto `static-text`, and the five
+    named stale comments corrected (plus the second one at `brief-editor.layers.test.tsx:247`).
+    `git grep -nP '\belements\b'` on that test file is empty.
+- **Decisions:**
+  - D164, D165, L3a, and D161 were still unstamped at intake, and nobody had confirmed Google's
+    HTML5 validator, so wave 1 was AF3 and AF5 only. AF1 stays blocked on both the stamp and the
+    validator. AF4 takes no slot while D165 is open. L3a stays the silent canonical fallback.
+  - Implementer was `agy` / `gemini-3.8-flash-high`, one lane at a time. Both seats reported a
+    gate they had only launched in the background. The orchestrator re-ran each gate (exit 0,
+    coverage 100/100/100/100) and the AF3 mutation replay.
+  - Grok refused the first review and exhausted its turns on the second. Claude Sonnet reviewed
+    both diffs and returned no defect that survived a check. Qodo's jargon comment on #559 and
+    the `indexOf` suggestion on #560 were refuted: the message is the plan's sentence, and the
+    tracks fixture never contained `elements`.
+  - Definition of Done item 7 cannot be read as "the word elements appears only at the AR2
+    refusal." `click-destination.ts`, `motion-tracks.ts`, and `dialog-shell.tsx` use the word
+    as ordinary English. AF5 did not edit them.
+- **Left open:**
+  - AF1, AF2, AF4, AF6. AF1 still needs D164 stamped and a confirmation that Google's HTML5
+    validator accepts a transparent button over the image. AF2 waits on AF1. AF4 waits on D165
+    plus AF1 and AF3. AF6 is the docs lane after the others, and it is not delegated.
