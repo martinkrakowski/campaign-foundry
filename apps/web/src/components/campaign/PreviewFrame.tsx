@@ -131,12 +131,10 @@ export function PreviewFrame({
       >
         {/* The frame IS the creative — decorative to the reader, named by the caption. */}
         <img src={frame.dataUrl} alt="" className={className} />
-        {/* CE1 — the regions ride the REAL frame only. The SVG placeholder
-            paints no html elements at all (`CreativePreview`'s layer map has no
-            `html` entry), so a region over it would point at nothing drawn.
-            A caller with no `onSelectLayer` — the Review figure, every surface
-            that is not the editor's rail — gets no regions at all; a withheld
-            brief is the regions' own empty case, decided in one place. */}
+        {/* CE1 — the regions ride the REAL frame only. A caller with no
+            `onSelectLayer` — the Review figure, every surface that is not the
+            editor's rail — gets no regions at all; a withheld brief is the
+            regions' own empty case, decided in one place. */}
         {onSelectLayer !== undefined ? (
           <PreviewHitRegions
             brief={brief}

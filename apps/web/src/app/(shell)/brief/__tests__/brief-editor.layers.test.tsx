@@ -244,8 +244,7 @@ describe("the layer stack exists exactly once in the tree (CC3, plan §4.6)", ()
     expect(rail().contains(group)).toBe(true);
     expect((document.getElementById("template") as HTMLElement).contains(group)).toBe(false);
     // The section still says where its controls went: a section gone quiet reads
-    // as a failure, and the html element editor is still the section's to host
-    // until CC4's sheet takes it.
+    // as a failure.
     expect(screen.getByText(messages.templateStackInRail)).toBeTruthy();
   });
 
@@ -750,11 +749,10 @@ describe("the creative and the list are one selection (CE1)", () => {
 /**
  * CE2 — the same claim, on the template a new campaign actually gets.
  *
- * CE1 built the regions out of an element's DECLARED frame, which is the right
- * geometry and reaches almost nothing: only an `html` layer may carry elements,
- * and the social-post preset resolves to canonical `image-text`, which has no
- * `html` layer. So the feature was inert on every new campaign — an operator
- * clicked the creative and nothing happened.
+ * CE1 built the regions out of a layer's DECLARED frame, which is the right
+ * geometry and reaches almost nothing without ground coverage: canonical
+ * templates declare no layer frames, so the feature was inert on every new
+ * campaign — an operator clicked the creative and nothing happened.
  *
  * The extension is the one CE1 named: the GROUND kinds (`image`, `video`) are
  * drawn by `paintBackground` at `(0, 0, width, height)`, so a region over the

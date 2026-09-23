@@ -4676,7 +4676,7 @@ describe("display platforms (D116)", () => {
 describe("canonical layer defaults (X16)", () => {
   /**
    * A materialised template with one layer patched. The rest stay the canonical
-   * objects, so a test that only spells `enabled: true` or `elements: []` onto
+   * objects, so a test that only spells `enabled: true` or `link: true` onto
    * one layer is not also rewriting the others.
    */
   const withLayer = (
