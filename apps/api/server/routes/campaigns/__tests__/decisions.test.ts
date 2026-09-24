@@ -6,6 +6,8 @@ import { createApp, createRouter, toWebHandler } from "h3";
 import { getReportStore, resetDecisionStore, resetReportStore } from "../../../lib/ports/index.js";
 import { reportRevision } from "../../../lib/report.js";
 import { LOCAL_TENANT } from "../../../lib/tenant.js";
+import { resetDatabase, setDatabase } from "../../../lib/db/database.js";
+import { migratedDatabase } from "../../../lib/db/__tests__/pglite-client.js";
 import getHandler from "../decisions.get.js";
 import putHandler from "../decisions.put.js";
 
@@ -138,5 +140,42 @@ describe("GET / PUT /campaigns/decisions (D173)", () => {
     expect(bad.status).toBe(400);
     expect(((await bad.json()) as { error: string }).error).toMatch(/approved" or "rejected/);
     expect(await (await get("?campaignId=camp")).json()).toEqual({ decisions: {}, revision: null });
+  });
+});
+
+describe("GET / PUT /campaigns/decisions on Postgres (PT-3)", () => {
+  let dir: string;
+  const origOut = process.env.OUTPUT_DIR;
+  const origBackend = process.env.STORE_BACKEND;
+  beforeEach(async () => {
+    dir = mkdtempSync(join(tmpdir(), "cf-decisions-pg-"));
+    process.env.OUTPUT_DIR = dir;
+    process.env.STORE_BACKEND = "postgres";
+    setDatabase(await migratedDatabase());
+    resetDecisionStore();
+    resetReportStore();
+    await getReportStore(LOCAL_TENANT).writeReport("camp", JSON.stringify({ assets: [] }));
+  });
+  afterEach(() => {
+    resetDecisionStore();
+    resetReportStore();
+    resetDatabase();
+    if (origBackend === undefined) delete process.env.STORE_BACKEND;
+    else process.env.STORE_BACKEND = origBackend;
+    if (origOut === undefined) delete process.env.OUTPUT_DIR;
+    else process.env.OUTPUT_DIR = origOut;
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("the same contract: a save names its revision, a stale one is a 409, and a read returns the save", async () => {
+    const tab = (await (await get("?campaignId=camp")).json()) as Stored;
+    expect(tab).toEqual({ decisions: {}, revision: null });
+    const saved = (await (
+      await put({ campaignId: "camp", revision: null, decisions: { a: "approved" } })
+    ).json()) as Stored;
+    expect(saved.decisions.a!.run).toBe(await reportRevision(LOCAL_TENANT, "camp"));
+    const stale = await put({ campaignId: "camp", revision: null, decisions: { b: "rejected" } });
+    expect(stale.status).toBe(409);
+    expect(await (await get("?campaignId=camp")).json()).toEqual(saved);
   });
 });

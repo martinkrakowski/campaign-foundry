@@ -118,6 +118,11 @@ export function storageRoots(tenant: TenantContext): StorageRoots {
  */
 export type StorageScope = TenantContext | RunEnvironment;
 
+/** The tenant a scope acts for: a run's captured one, or the tenant itself. */
+export function scopeTenant(scope: StorageScope): TenantContext {
+  return "outputRoot" in scope ? scope.tenant : scope;
+}
+
 /** The storage roots a scope names: captured for a run, resolved for a tenant. */
 export function scopeRoots(scope: StorageScope): StorageRoots {
   return "outputRoot" in scope

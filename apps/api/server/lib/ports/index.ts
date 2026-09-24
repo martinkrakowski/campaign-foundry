@@ -1,5 +1,7 @@
 import { join } from "node:path";
-import { scopeRoots, type StorageScope } from "../run-environment.js";
+import { storeBackend } from "../config.js";
+import { database } from "../db/database.js";
+import { scopeRoots, scopeTenant, type StorageScope } from "../run-environment.js";
 import { FsBriefStore } from "./fs-brief-store.js";
 import { FsAssetStore } from "./fs-asset-store.js";
 import { FsPoolStore } from "./fs-pool-store.js";
@@ -8,6 +10,7 @@ import { FsJobStore } from "./fs-job-store.js";
 import { FsReportStore } from "./fs-report-store.js";
 import { FsOutputStore } from "./fs-output-store.js";
 import { FsDecisionStore } from "./fs-decision-store.js";
+import { PgDecisionStore } from "./pg-decision-store.js";
 import type { BriefStorePort } from "./brief-store.port.js";
 import type { AssetStorePort } from "./asset-store.port.js";
 import type { PoolStorePort } from "./pool-store.port.js";
@@ -33,6 +36,7 @@ export * from "./fs-job-store.js";
 export * from "./fs-report-store.js";
 export * from "./fs-output-store.js";
 export * from "./fs-decision-store.js";
+export * from "./pg-decision-store.js";
 
 /**
  * The store registry (PT-0b2, D167 stamped). Every getter takes the scope a
@@ -105,9 +109,15 @@ const outputs = new Registry<OutputStorePort>(
   (root) => new FsOutputStore(root),
 );
 
+// With STORE_BACKEND=postgres (PT-3), one store per org over the process's
+// database; otherwise one per output root, on files.
+const PG = "postgres:";
 const decisions = new Registry<DecisionStorePort>(
-  (t) => scopeRoots(t).outputRoot,
-  (root) => new FsDecisionStore(root),
+  (t) => (storeBackend() === "postgres" ? PG + scopeTenant(t).orgId : scopeRoots(t).outputRoot),
+  (key) =>
+    key.startsWith(PG)
+      ? new PgDecisionStore(database(), key.slice(PG.length))
+      : new FsDecisionStore(key),
 );
 
 export const getBriefStore = (scope: StorageScope): BriefStorePort => briefs.get(scope);

@@ -1,7 +1,7 @@
 import { describe, test, expect, afterEach } from "vitest";
 import { resolve } from "node:path";
 import { projectRoot } from "@campaignfoundry/shared";
-import { databaseSettings, outputRoot } from "../config.js";
+import { databaseSettings, outputRoot, storeBackend } from "../config.js";
 
 describe("outputRoot", () => {
   const orig = process.env.OUTPUT_DIR;
@@ -45,5 +45,26 @@ describe("databaseSettings (D174a)", () => {
       caPath: "certs/ca.pem",
       poolMax: "3",
     });
+  });
+});
+
+describe("storeBackend (PT-3)", () => {
+  const saved = process.env.STORE_BACKEND;
+  afterEach(() => {
+    if (saved === undefined) delete process.env.STORE_BACKEND;
+    else process.env.STORE_BACKEND = saved;
+  });
+
+  test("is fs unless STORE_BACKEND says postgres, and refuses anything else", () => {
+    delete process.env.STORE_BACKEND;
+    expect(storeBackend()).toBe("fs");
+    for (const value of ["", "fs"]) {
+      process.env.STORE_BACKEND = value;
+      expect(storeBackend()).toBe("fs");
+    }
+    process.env.STORE_BACKEND = "postgres";
+    expect(storeBackend()).toBe("postgres");
+    process.env.STORE_BACKEND = "mysql";
+    expect(() => storeBackend()).toThrow('STORE_BACKEND must be "fs" or "postgres", not "mysql".');
   });
 });

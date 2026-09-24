@@ -21,3 +21,18 @@ export function databaseSettings(): DatabaseSettings {
     poolMax: process.env.DATABASE_POOL_MAX,
   };
 }
+
+/** Where the stores that have a database adapter keep their records (PT-3). */
+export type StoreBackend = "fs" | "postgres";
+
+/**
+ * `STORE_BACKEND`: `fs` (the default) or `postgres`. Explicit, never inferred from
+ * `DATABASE_URL`: an operator's `.env.local` may name a database the app has not
+ * been moved onto yet, and switching on its presence would show an empty one.
+ */
+export function storeBackend(): StoreBackend {
+  const value = process.env.STORE_BACKEND;
+  if (value === undefined || value === "" || value === "fs") return "fs";
+  if (value === "postgres") return "postgres";
+  throw new Error(`STORE_BACKEND must be "fs" or "postgres", not "${value}".`);
+}

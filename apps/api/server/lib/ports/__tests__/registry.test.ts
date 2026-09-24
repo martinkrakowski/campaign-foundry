@@ -18,6 +18,10 @@ import {
 } from "../index.js";
 import { LOCAL_TENANT, type TenantContext } from "../../tenant.js";
 import { runEnvironment } from "../../run-environment.js";
+import { resetDatabase, setDatabase } from "../../db/database.js";
+import { migratedDatabase } from "../../db/__tests__/pglite-client.js";
+import { FsDecisionStore } from "../fs-decision-store.js";
+import { PgDecisionStore } from "../pg-decision-store.js";
 
 const acme: TenantContext = { ...LOCAL_TENANT, orgId: "acme", userId: "u1" };
 
@@ -96,5 +100,38 @@ describe("the store registry is per tenant", () => {
     expect(getDecisionStore(acme)).toBe(fake);
     resetDecisionStore();
     expect(getDecisionStore(LOCAL_TENANT)).not.toBe(fake);
+  });
+});
+
+describe("STORE_BACKEND=postgres puts decisions in the database, one store per org (PT-3)", () => {
+  const saved = process.env.STORE_BACKEND;
+  afterEach(() => {
+    if (saved === undefined) delete process.env.STORE_BACKEND;
+    else process.env.STORE_BACKEND = saved;
+    resetDecisionStore();
+    resetDatabase();
+  });
+
+  test("the default is the file store", () => {
+    delete process.env.STORE_BACKEND;
+    expect(getDecisionStore(LOCAL_TENANT)).toBeInstanceOf(FsDecisionStore);
+  });
+
+  test("postgres builds a database store per org; a run's scope is its tenant's org", async () => {
+    const db = await migratedDatabase();
+    setDatabase(db);
+    process.env.STORE_BACKEND = "postgres";
+    const local = getDecisionStore(LOCAL_TENANT);
+    expect(local).toBeInstanceOf(PgDecisionStore);
+    expect(getDecisionStore(LOCAL_TENANT)).toBe(local);
+    expect(getDecisionStore(acme)).not.toBe(local);
+    expect(getDecisionStore(runEnvironment(LOCAL_TENANT))).toBe(local);
+    await local.writeDecisions("camp", {
+      a: { verdict: "approved", actor: "local", at: "2026-09-24T00:00:00.000Z", run: "r" },
+    });
+    expect(
+      Object.keys((await getDecisionStore(LOCAL_TENANT).readDecisions("camp")).decisions),
+    ).toEqual(["a"]);
+    await db.end();
   });
 });

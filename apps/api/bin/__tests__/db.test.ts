@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { USAGE, connect, main } from "../db.js";
 import { pgliteClient } from "../../server/lib/db/__tests__/pglite-client.js";
 import type { SqlClient } from "../../server/lib/db/sql-client.js";
+import { loadMigrations } from "../../server/lib/db/migrate.js";
 
 describe("db CLI (PT-3)", () => {
   const lines: string[] = [];
@@ -26,7 +27,12 @@ describe("db CLI (PT-3)", () => {
     const keepOpen: SqlClient = { ...db, end: async () => undefined };
     await main("migrate", () => keepOpen, log);
     await main("migrate", () => keepOpen, log);
-    expect(lines).toEqual(["  Applied 1 migration(s): 0001_org", "  The database is up to date."]);
+    const shipped = (await loadMigrations()).map((m) => m.id);
+    expect(shipped[0]).toBe("0001_org");
+    expect(lines).toEqual([
+      `  Applied ${shipped.length} migration(s): ${shipped.join(", ")}`,
+      "  The database is up to date.",
+    ]);
     await db.end();
   });
 
