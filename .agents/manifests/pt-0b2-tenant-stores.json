@@ -52,6 +52,23 @@
         "another org"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/pipeline.ts",
+      "before": "  const planInput = await planInputFor(env, brief);",
+      "after": "  const planInput = await planInputFor(env.tenant, brief);",
+      "because": "pools are read from the process root instead of the run's captured root, so a pool under the environment's own root is not found (CodeRabbit on #575).",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/pipeline.test.ts",
+        "-t",
+        "reads pools from its environment"
+      ],
+      "verdict": "caught"
     }
   ]
 }

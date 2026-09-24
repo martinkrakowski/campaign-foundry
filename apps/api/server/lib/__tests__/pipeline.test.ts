@@ -240,14 +240,14 @@ describe("pipeline composition root", () => {
   // The run environment is resolved from the same fresh registry, because a run
   // uses the roots its environment captured (PT-0b2): an environment resolved from
   // the stale registry would carry the stale project root. The caller's own
-  // environment argument is replaced for exactly that reason.
-  const freshRunCampaign = async (): Promise<typeof runCampaign> => {
+  // environment is returned beside the run so a test passes it explicitly.
+  const freshRunCampaign = async (): Promise<{ run: typeof runCampaign; env: RunEnvironment }> => {
     vi.resetModules();
     process.env.PROJECT_ROOT = dir;
     const { runCampaign: fresh } = await import("../pipeline.js");
     const { runEnvironment: freshEnvironment } = await import("../run-environment.js");
     const { LOCAL_TENANT: freshTenant } = await import("../tenant.js");
-    return (_env, ...rest) => fresh(freshEnvironment(freshTenant), ...rest);
+    return { run: fresh, env: freshEnvironment(freshTenant) };
   };
 
   /** Spy on the compositor the freshly imported pipeline will construct (same module registry). */
@@ -264,7 +264,8 @@ describe("pipeline composition root", () => {
         mode: "variation",
         variation: { count: 2, seed: 42, axes: { headline: "pool://copy" } },
       };
-      const r = await (await freshRunCampaign())(localEnv(), pooled, "procedural");
+      const { run, env } = await freshRunCampaign();
+      const r = await run(env, pooled, "procedural");
       expect(r.success).toBe(false);
       if (!r.success) expect(r.error.message).toMatch(/briefs\/camp\/pools\.json/);
     } finally {
@@ -291,7 +292,8 @@ describe("pipeline composition root", () => {
         mode: "variation",
         variation: { count: 2, seed: 42, axes: { headline: "pool://copy" } },
       };
-      const r = await (await freshRunCampaign())(localEnv(), pooled, "procedural");
+      const { run, env } = await freshRunCampaign();
+      const r = await run(env, pooled, "procedural");
       expect(r.success).toBe(false);
       if (!r.success) {
         expect(r.error.message).toBe(
@@ -301,6 +303,36 @@ describe("pipeline composition root", () => {
     } finally {
       if (origRoot === undefined) delete process.env.PROJECT_ROOT;
       else process.env.PROJECT_ROOT = origRoot;
+    }
+  });
+
+  test("runCampaign reads pools from its environment's own root, not the process's (review on #575)", async () => {
+    const origRoot = process.env.PROJECT_ROOT;
+    const own = mkdtempSync(join(tmpdir(), "cf-pipeline-own-root-"));
+    try {
+      mkdirSync(join(own, "briefs", "camp"), { recursive: true });
+      writeFileSync(
+        join(own, "briefs", "camp", "pools.json"),
+        JSON.stringify({
+          briefId: "camp",
+          generatedAt: "2026-01-01T00:00:00.000Z",
+          model: "m",
+          entries: [{ id: "h1", text: "From my root", status: "approved" }],
+        }),
+      );
+      const pooled: CampaignBrief = {
+        ...brief,
+        mode: "variation",
+        variation: { count: 1, seed: 42, axes: { headline: "pool://copy" } },
+      };
+      const { run, env } = await freshRunCampaign(); // PROJECT_ROOT is `dir`, which has no pool
+      const r = await run({ ...env, assetRoot: own }, pooled, "procedural");
+      expect(r.success).toBe(true);
+      if (r.success) expect(r.value.assets[0]!.descriptor?.headline).toBe("From my root");
+    } finally {
+      if (origRoot === undefined) delete process.env.PROJECT_ROOT;
+      else process.env.PROJECT_ROOT = origRoot;
+      rmSync(own, { recursive: true, force: true });
     }
   });
 
@@ -322,9 +354,9 @@ describe("pipeline composition root", () => {
         mode: "variation",
         variation: { count: 2, seed: 42, axes: { headline: "pool://copy" } },
       };
-      const run = await freshRunCampaign();
+      const { run, env } = await freshRunCampaign();
       const compositeAsset = await spyCompositor();
-      const r = await run(localEnv(), pooled, "procedural");
+      const r = await run(env, pooled, "procedural");
       expect(r.success).toBe(true);
       if (r.success) {
         expect(r.value.assets).toHaveLength(2);
@@ -367,7 +399,8 @@ describe("pipeline composition root", () => {
         mode: "variation",
         variation: { count: 4, seed: 42, axes: { headline: "pool://copy" } },
       };
-      const r = await (await freshRunCampaign())(localEnv(), pooled, "procedural");
+      const { run, env } = await freshRunCampaign();
+      const r = await run(env, pooled, "procedural");
       expect(r.success).toBe(true);
       if (r.success) {
         expect(r.value.halted).toBe(true);
