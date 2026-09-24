@@ -52,12 +52,28 @@ describe("db CLI (PT-3)", () => {
       if (dir) rmSync(dir, { recursive: true, force: true });
     });
 
-    test("builds a client from the environment, reading the CA file, without connecting", async () => {
+    test("builds a one-connection client from the environment, verifying against the CA file it reads", async () => {
       dir = mkdtempSync(join(tmpdir(), "cf-ca-"));
       writeFileSync(join(dir, "ca.pem"), "PEM");
       process.env.DATABASE_URL = "postgres://me@db.example.com:5432/cf";
       process.env.DATABASE_CA_PATH = join(dir, "ca.pem");
-      await connect().end();
+      const build = vi.fn(() => pgliteClient());
+      await connect(build).end();
+      expect(build).toHaveBeenCalledWith(
+        expect.objectContaining({
+          host: "db.example.com",
+          max: 1,
+          ssl: { ca: "PEM", rejectUnauthorized: true },
+        }),
+      );
+      await connect().end(); // the default builder: a real pool, never connected
+    });
+
+    test("a CA file that cannot be read is refused", () => {
+      dir = mkdtempSync(join(tmpdir(), "cf-ca-"));
+      process.env.DATABASE_URL = "postgres://me@db.example.com:5432/cf";
+      process.env.DATABASE_CA_PATH = join(dir, "missing.pem");
+      expect(() => connect()).toThrow(/ENOENT/);
     });
 
     test("refuses a remote database with no CA before opening anything", () => {

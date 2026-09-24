@@ -35,6 +35,9 @@ export interface DatabaseConfig {
  */
 export const DEFAULT_POOL_MAX = 5;
 
+/** The most one process may hold: the whole of the Aiven service's capacity. */
+export const MAX_POOL = 15;
+
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
 
 /** Turn the raw settings into a driver config, or throw naming what is wrong (never the password). */
@@ -71,15 +74,16 @@ export function databaseConfig(
   let max = DEFAULT_POOL_MAX;
   if (settings.poolMax !== undefined && settings.poolMax !== "") {
     max = Number(settings.poolMax);
-    if (!Number.isInteger(max) || max < 1 || max > 100) {
+    if (!Number.isInteger(max) || max < 1 || max > MAX_POOL) {
       throw new Error(
-        `DATABASE_POOL_MAX must be a whole number from 1 to 100, not "${settings.poolMax}".`,
+        `DATABASE_POOL_MAX must be a whole number from 1 to ${MAX_POOL} (the service's capacity), not "${settings.poolMax}".`,
       );
     }
   }
 
   return {
-    host: url.hostname,
+    // An IPv6 literal is bracketed in a URL and bare to the driver.
+    host: url.hostname.replace(/^\[(.*)\]$/, "$1"),
     port: url.port === "" ? 5432 : Number(url.port),
     user: decodeURIComponent(url.username),
     password: decodeURIComponent(url.password),

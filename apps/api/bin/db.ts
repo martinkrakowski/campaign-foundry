@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { projectRoot } from "@campaignfoundry/shared";
 import { databaseSettings } from "../server/lib/config.js";
-import { databaseConfig } from "../server/lib/db/database-config.js";
+import { databaseConfig, type DatabaseConfig } from "../server/lib/db/database-config.js";
 import { loadMigrations, migrate } from "../server/lib/db/migrate.js";
 import { pgClient } from "../server/lib/db/pg-client.js";
 import type { SqlClient } from "../server/lib/db/sql-client.js";
@@ -20,12 +20,12 @@ import { loadEnv } from "../server/lib/env.js";
 export const USAGE = "usage: yarn db:ping | yarn db:migrate";
 
 /** The client the commands use: the environment's database, over a one-connection pool. */
-export function connect(): SqlClient {
+export function connect(build: (config: DatabaseConfig) => SqlClient = pgClient): SqlClient {
   loadEnv();
   const config = databaseConfig(databaseSettings(), (path) =>
     readFileSync(resolve(projectRoot(), path), "utf8"),
   );
-  return pgClient({ ...config, max: 1 });
+  return build({ ...config, max: 1 });
 }
 
 export async function main(

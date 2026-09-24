@@ -5,7 +5,10 @@ import type { SqlClient, SqlQuery, SqlRows } from "./sql-client.js";
 /** The part of a `pg` connection the client uses. */
 export interface PgConnection {
   query(text: string, params?: unknown[]): Promise<{ rows: unknown[] }>;
-  release(): void;
+  on(event: "error", listener: (error: Error) => void): unknown;
+  removeListener(event: "error", listener: (error: Error) => void): unknown;
+  /** `true` destroys the connection instead of returning it to the pool. */
+  release(destroy?: boolean): void;
 }
 
 /** The part of a `pg.Pool` the client uses, so tests can hand in a double. */
@@ -16,8 +19,19 @@ export interface PgPool {
   on(event: "error", listener: (error: Error) => void): unknown;
 }
 
-const realPool = (config: DatabaseConfig): PgPool =>
-  new pg.Pool({ ...config, ssl: config.ssl === false ? false : { ...config.ssl } });
+/** How long a connection may take to open before the statement waiting on it fails. */
+export const CONNECT_TIMEOUT_MS = 10_000;
+
+/** The `pg.Pool` options a config becomes. */
+export function poolOptions(config: DatabaseConfig): pg.PoolConfig {
+  return {
+    ...config,
+    ssl: config.ssl === false ? false : { ...config.ssl },
+    connectionTimeoutMillis: CONNECT_TIMEOUT_MS,
+  };
+}
+
+const realPool = (config: DatabaseConfig): PgPool => new pg.Pool(poolOptions(config));
 
 function over(run: PgPool | PgConnection): SqlQuery {
   return {
@@ -49,6 +63,14 @@ export function pgClient(
     ...over(pool),
     async transaction<T>(work: (tx: SqlQuery) => Promise<T>): Promise<T> {
       const connection = await pool.connect();
+      // A connection the server drops mid-transaction emits `error` on the checked-out
+      // client, which the pool's listener does not see. It, or a rollback that fails,
+      // leaves the connection's state unknown: it is destroyed, never pooled again.
+      let broken = false;
+      const onError = () => {
+        broken = true;
+      };
+      connection.on("error", onError);
       try {
         await connection.query("BEGIN");
         const result = await work(over(connection));
@@ -56,10 +78,13 @@ export function pgClient(
         return result;
       } catch (error) {
         // A failed rollback must not hide the error that caused it.
-        await connection.query("ROLLBACK").catch(() => undefined);
+        await connection.query("ROLLBACK").catch(() => {
+          broken = true;
+        });
         throw error;
       } finally {
-        connection.release();
+        connection.removeListener("error", onError);
+        connection.release(broken);
       }
     },
     end: () => pool.end(),

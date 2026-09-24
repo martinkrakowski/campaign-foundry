@@ -1,5 +1,5 @@
 import { describe, test, expect, vi } from "vitest";
-import { DEFAULT_POOL_MAX, databaseConfig } from "../database-config.js";
+import { DEFAULT_POOL_MAX, MAX_POOL, databaseConfig } from "../database-config.js";
 
 const remote =
   "postgres://avnadmin:s3cr%40t@db.example.aivencloud.com:12194/defaultdb?sslmode=require";
@@ -36,6 +36,8 @@ describe("databaseConfig (D174a)", () => {
       expect(config.port).toBe(5432);
       expect(config.password).toBe("");
     }
+    // An IPv6 literal reaches the driver without its URL brackets.
+    expect(databaseConfig({ url: "postgres://me@[::1]/cf" }, noCa).host).toBe("::1");
   });
 
   test("a local database given a CA verifies against it too", () => {
@@ -49,8 +51,9 @@ describe("databaseConfig (D174a)", () => {
   test("DATABASE_POOL_MAX bounds the pool; empty is the default; anything else is refused", () => {
     const local = "postgres://me@localhost/cf";
     expect(databaseConfig({ url: local, poolMax: "3" }, noCa).max).toBe(3);
+    expect(databaseConfig({ url: local, poolMax: String(MAX_POOL) }, noCa).max).toBe(15);
     expect(databaseConfig({ url: local, poolMax: "" }, noCa).max).toBe(DEFAULT_POOL_MAX);
-    for (const bad of ["0", "101", "2.5", "many"]) {
+    for (const bad of ["0", "16", "2.5", "many"]) {
       expect(() => databaseConfig({ url: local, poolMax: bad }, noCa)).toThrow(/DATABASE_POOL_MAX/);
     }
   });

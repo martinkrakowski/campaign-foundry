@@ -2,7 +2,7 @@ import { describe, test, expect, afterEach } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { MIGRATIONS_DIR, loadMigrations, migrate, type Migration } from "../migrate.js";
+import { MIGRATIONS_DIR, checksum, loadMigrations, migrate, type Migration } from "../migrate.js";
 import type { SqlClient } from "../sql-client.js";
 import { migratedDatabase, pgliteClient } from "./pglite-client.js";
 
@@ -27,6 +27,16 @@ describe("migrate (PT-3)", () => {
     expect(rows.map((r) => r.id)).toEqual(["0001_a", "0002_b"]);
     expect((await db.query<{ n: number }>("select count(*)::int as n from b")).rows[0]!.n).toBe(1);
     expect(await migrate(db, [...all, m("0003_c", "create table c (z int);")])).toEqual(["0003_c"]);
+  });
+
+  test("records each migration's checksum, and refuses one edited after it was applied", async () => {
+    db = pgliteClient();
+    await migrate(db, [m("0001_a", "create table a (x int);")]);
+    const { rows } = await db.query<{ checksum: string }>("select checksum from schema_migrations");
+    expect(rows[0]!.checksum).toBe(checksum("create table a (x int);"));
+    await expect(migrate(db, [m("0001_a", "create table a (x int, y int);")])).rejects.toThrow(
+      "Applied migrations were edited since they ran: 0001_a. Ship a change as a new migration.",
+    );
   });
 
   test("a migration that fails applies nothing, not even the ones before it", async () => {

@@ -1,6 +1,12 @@
 import { describe, test, expect, vi } from "vitest";
 import type { DatabaseConfig } from "../database-config.js";
-import { pgClient, type PgConnection, type PgPool } from "../pg-client.js";
+import {
+  CONNECT_TIMEOUT_MS,
+  pgClient,
+  poolOptions,
+  type PgConnection,
+  type PgPool,
+} from "../pg-client.js";
 
 const config: DatabaseConfig = {
   host: "localhost",
@@ -15,15 +21,18 @@ const config: DatabaseConfig = {
 function fakePool(connectionFails?: (text: string) => boolean) {
   const statements: string[] = [];
   let onError: ((error: Error) => void) | undefined;
-  const connection: PgConnection & { released: number } = {
-    released: 0,
+  const listeners = new Set<(error: Error) => void>();
+  const connection: PgConnection & { releases: (boolean | undefined)[] } = {
+    releases: [],
     query: vi.fn(async (text: string) => {
       statements.push(text);
       if (connectionFails?.(text)) throw new Error(`failed: ${text}`);
       return { rows: [] };
     }),
-    release() {
-      this.released += 1;
+    on: (_event, listener) => listeners.add(listener),
+    removeListener: (_event, listener) => listeners.delete(listener),
+    release(destroy) {
+      this.releases.push(destroy);
     },
   };
   const pool: PgPool = {
@@ -34,7 +43,14 @@ function fakePool(connectionFails?: (text: string) => boolean) {
       onError = listener;
     },
   };
-  return { pool, connection, statements, fail: (e: Error) => onError!(e) };
+  return {
+    pool,
+    connection,
+    statements,
+    listeners,
+    fail: (e: Error) => onError!(e),
+    drop: (e: Error) => [...listeners].forEach((l) => l(e)),
+  };
 }
 
 describe("pgClient", () => {
@@ -60,8 +76,8 @@ describe("pgClient", () => {
     expect(pool.end).toHaveBeenCalled();
   });
 
-  test("a transaction commits what resolves, on one connection, and releases it", async () => {
-    const { pool, connection, statements } = fakePool();
+  test("a transaction commits what resolves, on one connection, and pools it again", async () => {
+    const { pool, connection, statements, listeners } = fakePool();
     const db = pgClient(config, () => pool);
     const result = await db.transaction(async (tx) => {
       await tx.query("insert into t values ($1)", [1]);
@@ -75,10 +91,35 @@ describe("pgClient", () => {
       "select 1; select 2",
       "COMMIT",
     ]);
-    expect(connection.released).toBe(1);
+    expect(connection.releases).toEqual([false]);
+    expect(listeners.size).toBe(0);
   });
 
-  test("a transaction that throws is rolled back, released, and rethrows its own error even if the rollback fails", async () => {
+  test("a transaction that throws is rolled back and its connection pooled again", async () => {
+    const { pool, connection, statements } = fakePool();
+    const db = pgClient(config, () => pool);
+    await expect(
+      db.transaction(async () => {
+        throw new Error("work failed");
+      }),
+    ).rejects.toThrow("work failed");
+    expect(statements).toEqual(["BEGIN", "ROLLBACK"]);
+    expect(connection.releases).toEqual([false]);
+  });
+
+  test("a connection the server drops mid-transaction is destroyed, not pooled", async () => {
+    const { pool, connection, drop } = fakePool();
+    const db = pgClient(config, () => pool);
+    await expect(
+      db.transaction(async () => {
+        drop(new Error("terminating connection"));
+        throw new Error("query failed");
+      }),
+    ).rejects.toThrow("query failed");
+    expect(connection.releases).toEqual([true]);
+  });
+
+  test("a transaction whose rollback fails rethrows its own error and destroys the connection", async () => {
     const { pool, connection, statements } = fakePool((text) => text === "ROLLBACK");
     const db = pgClient(config, () => pool);
     await expect(
@@ -87,7 +128,7 @@ describe("pgClient", () => {
       }),
     ).rejects.toThrow("work failed");
     expect(statements).toEqual(["BEGIN", "ROLLBACK"]);
-    expect(connection.released).toBe(1);
+    expect(connection.releases).toEqual([true]);
   });
 
   test("an idle connection's failure is reported, not left to crash the process", () => {
@@ -99,6 +140,17 @@ describe("pgClient", () => {
       "[db] an idle connection failed: server closed the connection",
     );
     warn.mockRestore();
+  });
+
+  test("the pool options carry the config's TLS, its bound and a connect timeout", () => {
+    const tls = { ...config, ssl: { ca: "PEM", rejectUnauthorized: true as const } };
+    expect(poolOptions(tls)).toMatchObject({
+      host: "localhost",
+      max: 2,
+      ssl: { ca: "PEM", rejectUnauthorized: true },
+      connectionTimeoutMillis: CONNECT_TIMEOUT_MS,
+    });
+    expect(poolOptions(config).ssl).toBe(false);
   });
 
   test("the default pool is a real pg.Pool, built lazily from the config", async () => {
