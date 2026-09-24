@@ -10,7 +10,7 @@ import {
 } from "node:fs";
 import { realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { createApp, createRouter, toWebHandler, type EventHandler } from "h3";
 import { createCanvas } from "@napi-rs/canvas";
 import { createJob, failJob, resetJobs, MAX_JOBS } from "../../lib/jobs.js";
@@ -224,6 +224,72 @@ describe("POST /campaigns/generate", () => {
       readFileSync(resolve(dir, "packages/camp/google-display/manifest.json"), "utf8"),
     ) as { items: unknown[] };
     expect(manifest.items.length).toBeGreaterThan(0);
+  });
+
+  test("packages a display-ad for google-display-html beside its raster", async () => {
+    const res = await call(
+      brief({
+        type: "display-ad",
+        products: [
+          {
+            id: "alpha",
+            name: "A",
+            primaryColor: "#1473E6",
+            logoPath: "assets/inputs/hydra-logo.png",
+          },
+        ],
+        output: {
+          formats: ["html"],
+          platforms: ["google-display-html"],
+          sizes: ["300x250"],
+        },
+      }),
+    );
+    expect(res.status).toBe(202);
+    const { body } = await awaitJob(((await res.json()) as { jobId: string }).jobId);
+    expect(body.status).toBe("completed");
+    expect(body.result?.halted).toBe(false);
+
+    const pack = await web(
+      "post",
+      "/campaigns/package",
+      packageHandler,
+    )(
+      new Request("http://x/campaigns/package", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ campaignId: "camp", platforms: ["google-display-html"] }),
+      }),
+    );
+    expect(pack.status).toBe(200);
+
+    const manifest = JSON.parse(
+      readFileSync(resolve(dir, "packages/camp/google-display-html/manifest.json"), "utf8"),
+    ) as {
+      items: Array<{
+        packagedPath: string;
+        bytes: number;
+        checks: { size: string };
+      }>;
+    };
+    expect(manifest.items.length).toBeGreaterThan(0);
+    for (const item of manifest.items) {
+      expect(item.checks.size).toBe("pass");
+      const htmlBytes = readFileSync(resolve(dir, item.packagedPath));
+      expect(item.bytes).toBe(htmlBytes.length);
+
+      const html = htmlBytes.toString("utf8");
+      const imgMatch = html.match(/<img[^>]+src="([^">]+)"/);
+      expect(imgMatch).not.toBeNull();
+      const imgSrc = imgMatch![1];
+      const htmlDir = dirname(resolve(dir, item.packagedPath));
+      expect(existsSync(resolve(htmlDir, imgSrc))).toBe(true);
+
+      expect(html.match(/<img/g)).toHaveLength(1);
+      expect(html).not.toContain("<p");
+      expect(html).not.toContain(">Hi</p>");
+      expect(html).toContain('alt="Hi"');
+    }
   });
 
   test("refuses a classic brief that requests motion — the reported bug: it rendered stills", async () => {
