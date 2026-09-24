@@ -15,7 +15,10 @@
  * 2. Weight budget (HL-D6): measured against `profile.maxBytes` when a profile
  *    is provided; refused over budget with an error naming both the budget and
  *    the overage.
- * 3. Content safety (HL-D7): every interpolation is escaped for its context —
+ * 3. Size declaration: the head carries `<meta name="ad.size">` with the
+ *    resolved canvas, which Google Ads requires on every uploaded HTML5 ad
+ *    ("Ad format size meta tag within the <head> tag").
+ * 4. Content safety (HL-D7): every interpolation is escaped for its context —
  *    HTML text and quoted attributes are HTML-escaped, the clickTag script
  *    declaration uses `\uXXXX` escapes (entities would corrupt the JS string),
  *    and the brand colour is additionally refused unless it is the documented
@@ -223,7 +226,8 @@ export function assembleHtml(options: AssembleHtmlOptions): AssembledHtml {
 <html>
   <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">${scriptSection}
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="ad.size" content="width=${width},height=${height}">${scriptSection}
     <style>
       html, body {
         margin: 0;

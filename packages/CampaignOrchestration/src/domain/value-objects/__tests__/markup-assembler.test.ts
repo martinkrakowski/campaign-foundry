@@ -349,6 +349,20 @@ describe("assembleHtml", () => {
     expect(result.html).toContain('alt=""');
   });
 
+  test("the head declares the resolved canvas as ad.size, which Google Ads requires", () => {
+    for (const [size, width, height] of [
+      ["300x250", 300, 250],
+      ["728x90", 728, 90],
+      ["160x600", 160, 600],
+    ] as const) {
+      const { html } = assembleHtml(base({ canvas: { size } }));
+      const head = html.slice(0, html.indexOf("</head>"));
+      expect(head.match(/<meta name="ad\.size"[^>]*>/g), size).toEqual([
+        `<meta name="ad.size" content="width=${width},height=${height}">`,
+      ]);
+    }
+  });
+
   test("a brandColor that is not the documented 6-digit hex shape is refused", () => {
     expect(() =>
       assembleHtml(base({ brandColor: '#fff" autofocus onfocus="alert(1)' })),

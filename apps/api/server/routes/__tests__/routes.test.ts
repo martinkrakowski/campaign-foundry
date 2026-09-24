@@ -279,6 +279,10 @@ describe("POST /campaigns/generate", () => {
       expect(item.bytes).toBe(htmlBytes.length);
 
       const html = htmlBytes.toString("utf8");
+      // Google Ads refuses an uploaded HTML5 ad without its size meta tag.
+      expect(html.slice(0, html.indexOf("</head>"))).toContain(
+        '<meta name="ad.size" content="width=300,height=250">',
+      );
       const imgs = html.match(/<img\s[^>]*>/g) ?? [];
       expect(imgs).toHaveLength(1);
       const img = imgs[0]!;

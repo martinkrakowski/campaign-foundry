@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "html-bundle-ad-size",
+  "mutations": [
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/markup-assembler.ts",
+      "before": "    <meta name=\"ad.size\" content=\"width=${width},height=${height}\">${scriptSection}",
+      "after": "    ${scriptSection}",
+      "because": "without the size meta tag Google Ads rejects the uploaded HTML5 ad; the unit test must see no ad.size in the head.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/markup-assembler.test.ts",
+        "-t",
+        "declares the resolved canvas as ad.size"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
