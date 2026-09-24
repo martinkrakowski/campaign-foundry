@@ -190,8 +190,8 @@ export const fakeDecisionsApi = (verdicts: Verdicts = {}) => {
       if (Object.keys(next).length === Object.keys(stored).length) return;
       this.saveElsewhere(next);
     },
-    /** What the server holds now. */
-    get stored(): Verdicts {
+    /** What the server holds now (a method, so a spread copy still reads it live). */
+    stored(): Verdicts {
       return { ...stored };
     },
     /** Another tab's save: the stored map and its revision move. */

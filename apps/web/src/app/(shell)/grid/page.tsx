@@ -107,6 +107,7 @@ export default function GridPage() {
     decisions,
     decide,
     decisionsNotice,
+    decisionsLoaded,
     loading,
     progress,
     assetVersion,
@@ -315,6 +316,7 @@ export default function GridPage() {
                           (regeneratingKeys === null || regeneratingKeys.has(assetKey(asset)))
                         }
                         decision={decisions[assetKey(asset)]}
+                        decidable={decisionsLoaded}
                         onDecide={(d) => decide(assetKey(asset), d)}
                         onPreview={() => setPreviewKey(assetKey(asset))}
                       />
@@ -452,6 +454,7 @@ function Artboard({
   version,
   loading,
   decision,
+  decidable,
   onDecide,
   onPreview,
 }: {
@@ -459,6 +462,8 @@ function Artboard({
   version: number;
   loading: boolean;
   decision?: "approved" | "rejected";
+  /** False until the run's decisions load (D173): a verdict needs the map it joins. */
+  decidable: boolean;
   onDecide: (decision: "approved" | "rejected") => void;
   onPreview: () => void;
 }) {
@@ -597,8 +602,10 @@ function Artboard({
         <button
           type="button"
           onClick={() => onDecide("approved")}
+          disabled={!decidable}
+          title={decidable ? undefined : "Loading the review decisions"}
           className={cn(
-            "rounded-full border px-4 py-1 text-xs font-medium transition-colors",
+            "rounded-full border px-4 py-1 text-xs font-medium transition-colors disabled:cursor-wait disabled:opacity-60",
             decision === "approved"
               ? "border-success bg-success/20 text-success"
               : "border-border-control text-text-muted hover:text-text-emphasis",
@@ -609,8 +616,10 @@ function Artboard({
         <button
           type="button"
           onClick={() => onDecide("rejected")}
+          disabled={!decidable}
+          title={decidable ? undefined : "Loading the review decisions"}
           className={cn(
-            "rounded-full border px-4 py-1 text-xs font-medium transition-colors",
+            "rounded-full border px-4 py-1 text-xs font-medium transition-colors disabled:cursor-wait disabled:opacity-60",
             decision === "rejected"
               ? "border-error bg-error/20 text-error"
               : "border-border-control text-text-muted hover:text-text-emphasis",

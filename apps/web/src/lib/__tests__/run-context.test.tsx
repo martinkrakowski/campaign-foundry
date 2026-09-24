@@ -307,7 +307,7 @@ describe("RunProvider — review decisions", () => {
       decisions: server,
     });
     const hook = setup();
-    await waitFor(() => expect(hook.result.current.assets).toHaveLength(2));
+    await waitFor(() => expect(hook.result.current.decisionsLoaded).toBe(true));
     return { ...hook, server };
   };
 
@@ -333,7 +333,7 @@ describe("RunProvider — review decisions", () => {
     act(() => result.current.decide("alpha/1:1/default", "approved"));
     act(() => result.current.decide("beta/1:1/default", "rejected"));
     await waitFor(() =>
-      expect(server.stored).toEqual({
+      expect(server.stored()).toEqual({
         "alpha/1:1/default": "approved",
         "beta/1:1/default": "rejected",
       }),
@@ -359,11 +359,11 @@ describe("RunProvider — review decisions", () => {
     await waitFor(() =>
       expect(result.current.decisions).toEqual({ "beta/1:1/default": "rejected" }),
     );
-    expect(server.stored).toEqual({ "beta/1:1/default": "rejected" }); // the stale save never landed
+    expect(server.stored()).toEqual({ "beta/1:1/default": "rejected" }); // the stale save never landed
     // The next decision saves against the adopted revision, and clears the notice.
     act(() => result.current.decide("alpha/1:1/default", "approved"));
     await waitFor(() => expect(result.current.decisionsNotice).toBeNull());
-    expect(server.stored).toEqual({
+    expect(server.stored()).toEqual({
       "beta/1:1/default": "rejected",
       "alpha/1:1/default": "approved",
     });
@@ -378,7 +378,7 @@ describe("RunProvider — review decisions", () => {
     await waitFor(() =>
       expect(result.current.decisions).toEqual({ "beta/1:1/default": "approved" }),
     );
-    expect(server.stored).toEqual({ "beta/1:1/default": "approved" });
+    expect(server.stored()).toEqual({ "beta/1:1/default": "approved" });
   });
 
   test("decisions that land after a brief switch are dropped: they belong to the brief left behind", async () => {
@@ -477,6 +477,33 @@ describe("RunProvider — review decisions", () => {
       await regen;
     });
     expect(posts).toHaveLength(1); // the first run only: the re-roll never went out
+  });
+
+  test("a decision clicked before the server's decisions load is dropped, not saved over them", async () => {
+    let release!: () => void;
+    let gets = 0;
+    const server = fakeDecisionsApi({ "alpha/1:1/default": "approved" });
+    const held = {
+      ...server,
+      handle: (url: string, init: RequestInit) =>
+        init.method === "PUT" || (gets += 1) > 1
+          ? server.handle(url, init)
+          : new Promise<Response>((res) => (release = () => res(server.handle(url, init)))),
+    } as ReturnType<typeof fakeDecisionsApi>;
+    seedPersistedRun([asset(), asset({ productId: "beta", outputPath: "beta/1x1.png" })], {
+      decisions: held,
+    });
+    const { result } = setup();
+    await waitFor(() => expect(release).toBeTypeOf("function")); // the load is in flight
+    expect(result.current.decisionsLoaded).toBe(false);
+    act(() => result.current.decide("beta/1:1/default", "rejected"));
+    expect(result.current.decisions).toEqual({});
+    await act(async () => {
+      release();
+    });
+    await waitFor(() => expect(result.current.decisionsLoaded).toBe(true));
+    expect(result.current.decisions).toEqual({ "alpha/1:1/default": "approved" });
+    expect(server.stored()).toEqual({ "alpha/1:1/default": "approved" });
   });
 
   test("a save that does not land puts the screen back to what is recorded, and says so", async () => {
@@ -1006,12 +1033,10 @@ describe("RunProvider — brief picker & persistence", () => {
     await waitFor(() => expect(result.current.brief.id).toBe("stored-brief"));
   });
 
-  test("ignores malformed stored brief/decisions", async () => {
+  test("ignores a malformed stored brief", async () => {
     localStorage.setItem("cf:brief", "{ not json");
-    localStorage.setItem("cf:decisions", JSON.stringify(["not", "an", "object"]));
     const { result } = setup();
     await waitFor(() => expect(result.current.brief.id).toBe("summer-hydration-2026")); // falls back to default
-    expect(result.current.decisions).toEqual({});
   });
 
   test("the blank brief releases the shell but keeps the last-opened record (D37/H5)", async () => {

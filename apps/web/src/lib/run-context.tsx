@@ -848,6 +848,8 @@ export function RunProvider({ children }: { children: ReactNode }) {
   const decisionsQueue = useRef<Promise<void>>(Promise.resolve());
   const decisionsRevision = useRef<string | null>(null);
   const decisionsEpoch = useRef(0);
+  // Mirrors `decisionsLoaded`, set beside it so a click cannot land in between.
+  const decisionsLoadedRef = useRef(false);
   const decisionsRef = useRef(decisions);
   decisionsRef.current = decisions;
   const decisionsCampaignRef = useRef(decisionsCampaign);
@@ -868,6 +870,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
             return;
           decisionsRevision.current = stored.revision;
           setDecisions(stored.decisions);
+          decisionsLoadedRef.current = true;
           setDecisionsLoaded(true);
         },
         () => {
@@ -891,6 +894,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
     const epoch = (decisionsEpoch.current += 1);
     decisionsRevision.current = null;
     setDecisionsNotice(null);
+    decisionsLoadedRef.current = false;
     setDecisionsLoaded(false);
     if (decisionsCampaign === null) return;
     enqueueDecisions(() => loadDecisions(decisionsCampaign, epoch));
@@ -1083,7 +1087,9 @@ export function RunProvider({ children }: { children: ReactNode }) {
       });
       setAssetVersion((v) => v + 1);
       setError(null); // the re-rolled grid replaces any stale complaint about this run
-      // Regenerated creatives return to review: clear their (rejected) decisions.
+      // Regenerated creatives return to review: clear their (rejected) decisions. The
+      // server retired them at the report write and the reload below is authoritative;
+      // this is the optimistic mirror, so the tiles do not flash their old verdict.
       // The identity key is unchanged on a variation re-roll (productId/v<index>),
       // so the tile updates in place.
       setDecisions((prev) => {
@@ -1107,6 +1113,9 @@ export function RunProvider({ children }: { children: ReactNode }) {
     (key: string, decision: Decision) => {
       const campaignId = decisionsCampaignRef.current;
       if (campaignId === null) return; // no run on screen, nothing to decide on
+      // Until the server's decisions are on screen, a click would save its one verdict
+      // as the whole map and erase every other (the grid disables the buttons too).
+      if (!decisionsLoadedRef.current) return;
       const next = { ...decisionsRef.current };
       if (next[key] === decision) delete next[key];
       else next[key] = decision;
@@ -1128,6 +1137,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
           return;
         }
         // Another tab saved first, or this save did not land: show what is recorded.
+        // (The route's other 409, "no run to review", cannot arise with a run on screen.)
         const reload = (decisionsEpoch.current += 1);
         setDecisionsNotice(
           outcome === "conflict" ? DECISIONS_CONFLICT_MESSAGE : DECISIONS_UNSAVED_MESSAGE,

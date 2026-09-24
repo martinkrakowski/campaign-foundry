@@ -407,6 +407,7 @@ describe("GridPage", () => {
     renderWithRun(<GridPage />);
     await screen.findByText("IMAGEN").catch(() => undefined);
     const approve = await screen.findByText("Approve");
+    await waitFor(() => expect((approve as HTMLButtonElement).disabled).toBe(false)); // decisions loaded
     await user.click(approve);
     await waitFor(() => expect(screen.getByText(/✓ 1 approved/)).toBeTruthy());
     await user.click(screen.getByText("Reject"));
@@ -419,11 +420,32 @@ describe("GridPage", () => {
     seedPersistedRun([makeAsset()], { decisions: server });
     renderWithRun(<GridPage />);
     const approve = await screen.findByText("Approve");
+    await waitFor(() => expect((approve as HTMLButtonElement).disabled).toBe(false)); // decisions loaded
     server.saveElsewhere({ "alpha/1:1/default": "rejected" }); // the other tab
     await user.click(approve);
     expect((await screen.findByRole("status")).textContent).toBe(DECISIONS_CONFLICT_MESSAGE);
     await waitFor(() => expect(screen.getByText(/✗ 1 rejected/)).toBeTruthy());
     expect(screen.getByText(/✓ 0 approved/)).toBeTruthy();
+  });
+
+  test("Approve and Reject wait for the run's review decisions to load (D173)", async () => {
+    let release!: () => void;
+    const server = fakeDecisionsApi();
+    seedPersistedRun([makeAsset()], {
+      decisions: {
+        ...server,
+        handle: (url: string, init: RequestInit) =>
+          new Promise<Response>((res) => (release = () => res(server.handle(url, init)))),
+      } as unknown as ReturnType<typeof fakeDecisionsApi>,
+    });
+    renderWithRun(<GridPage />);
+    const approve = (await screen.findByText("Approve")) as HTMLButtonElement;
+    await waitFor(() => expect(release).toBeTypeOf("function"));
+    expect(approve.disabled).toBe(true);
+    expect(approve.title).toBe("Loading the review decisions");
+    expect((screen.getByText("Reject") as HTMLButtonElement).disabled).toBe(true);
+    release();
+    await waitFor(() => expect(approve.disabled).toBe(false));
   });
 
   test("the Preview pill carries its own boundary, not the video's", async () => {
