@@ -10,7 +10,7 @@ import {
 } from "node:fs";
 import { realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { createApp, createRouter, toWebHandler, type EventHandler } from "h3";
 import { createCanvas } from "@napi-rs/canvas";
 import { createJob, failJob, resetJobs, MAX_JOBS } from "../../lib/jobs.js";
@@ -279,17 +279,31 @@ describe("POST /campaigns/generate", () => {
       expect(item.bytes).toBe(htmlBytes.length);
 
       const html = htmlBytes.toString("utf8");
-      const imgMatch = html.match(/<img[^>]+src="([^">]+)"/);
-      expect(imgMatch).not.toBeNull();
-      const imgSrc = imgMatch![1];
-      const htmlDir = dirname(resolve(dir, item.packagedPath));
-      expect(existsSync(resolve(htmlDir, imgSrc))).toBe(true);
+      const imgs = html.match(/<img\s[^>]*>/g) ?? [];
+      expect(imgs).toHaveLength(1);
+      const img = imgs[0]!;
+      // The real src attribute (a data-src would not load), naming a bare file:
+      // beside the bundle, never absolute or parent-relative.
+      const src = /\ssrc="([^"]+)"/.exec(img);
+      expect(src).not.toBeNull();
+      const imgSrc = src![1]!;
+      expect(basename(imgSrc)).toBe(imgSrc);
+      const raster = resolve(dirname(resolve(dir, item.packagedPath)), imgSrc);
+      expect(existsSync(raster)).toBe(true);
+      // The raster is this cell's: its IHDR carries the 300x250 canvas.
+      const png = readFileSync(raster);
+      expect({ width: png.readUInt32BE(16), height: png.readUInt32BE(20) }).toEqual({
+        width: 300,
+        height: 250,
+      });
 
-      expect(html.match(/<img/g)).toHaveLength(1);
-      // D164: the raster paints the headline, so no element may paint it
-      // again — whatever the tag. The copy survives only as the img alt.
-      expect(html).not.toMatch(/>[^<]*Hi[^<]*</);
-      expect(html).toContain('alt="Hi"');
+      // D164: the raster paints the headline, so no element may paint it again,
+      // whatever the tag and however the text is split across inline elements.
+      // Stripping every tag drops attributes too, so the copy survives only as
+      // the img alt.
+      expect(img).toMatch(/\salt="Hi"/);
+      const bodyText = html.slice(html.indexOf("<body")).replace(/<[^>]*>/g, "");
+      expect(bodyText).not.toContain("Hi");
     }
   });
 
