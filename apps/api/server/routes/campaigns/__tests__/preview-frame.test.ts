@@ -13,11 +13,12 @@ import {
   ProceduralBackgroundGenerator,
 } from "@campaignfoundry/CreativeGeneration";
 import route, {
+  previewAdapters,
   previewBackgroundGenerator,
-  previewCompositor,
-  previewFrameCache,
-  previewVideoCompositor,
+  resetPreviewAdapters,
 } from "../preview-frame.post.js";
+import { runEnvironment } from "../../../lib/run-environment.js";
+import { LOCAL_TENANT } from "../../../lib/tenant.js";
 
 const mount = () => {
   const app = createApp();
@@ -97,7 +98,7 @@ describe("POST /campaigns/preview-frame", () => {
     mkdirSync(join(dir, "assets", "inputs"), { recursive: true });
     writeFileSync(join(dir, "assets", "inputs", "alpha-logo.png"), ONE_PX_PNG);
     process.env.PROJECT_ROOT = dir;
-    previewFrameCache.clear();
+    resetPreviewAdapters();
   });
   afterEach(() => {
     rmSync(dir, { recursive: true, force: true });
@@ -175,8 +176,19 @@ describe("POST /campaigns/preview-frame", () => {
     ]) {
       expect(previewBackgroundGenerator).not.toBeInstanceOf(chainLink);
     }
-    expect(previewCompositor).toBeInstanceOf(NodeCanvasCompositor);
-    expect(previewVideoCompositor).toBeInstanceOf(CanvasFfmpegVideoCompositor);
+    const adapters = previewAdapters(runEnvironment(LOCAL_TENANT));
+    expect(adapters.compositor).toBeInstanceOf(NodeCanvasCompositor);
+    expect(adapters.videoCompositor).toBeInstanceOf(CanvasFfmpegVideoCompositor);
+  });
+
+  test("each asset root gets its own adapters and frame cache, so no org is served another org's cached frame (PT-0b2)", () => {
+    const env = runEnvironment(LOCAL_TENANT);
+    const mine = previewAdapters({ ...env, assetRoot: "/roots/acme" });
+    const theirs = previewAdapters({ ...env, assetRoot: "/roots/globex" });
+    expect(mine).not.toBe(theirs);
+    expect(mine.frameCache).not.toBe(theirs.frameCache);
+    // The same environment reuses its bundle, so its cache keeps warm.
+    expect(previewAdapters({ ...env, assetRoot: "/roots/acme" })).toBe(mine);
   });
 
   test("a scrub cell with motion, durationSec, atSec renders image/png and returns cache key", async () => {
