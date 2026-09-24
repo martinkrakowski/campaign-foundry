@@ -217,10 +217,16 @@ export default defineEventHandler(async (event) => {
     return { error: errorMessage(error) };
   }
 
-  const result = await previewAdapters(runEnvironment(LOCAL_TENANT)).useCase.execute(
-    brief,
-    selection,
-  );
+  // The environment is read inside its own guard, as the generate route does: an
+  // unreadable .env is a controlled 500, not a framework error (review on #576).
+  let env: RunEnvironment;
+  try {
+    env = runEnvironment(LOCAL_TENANT);
+  } catch {
+    setResponseStatus(event, 500);
+    return { error: "Could not read the run environment." };
+  }
+  const result = await previewAdapters(env).useCase.execute(brief, selection);
   if (!result.success) {
     // A cell the brief cannot render (unknown product, bad ratio) is the caller's error.
     setResponseStatus(event, 400);
