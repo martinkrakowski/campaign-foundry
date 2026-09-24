@@ -13,6 +13,7 @@ import { getJob, resetJobs } from "../../../lib/jobs.js";
 import planHandler from "../plan.post.js";
 import generateHandler from "../generate.post.js";
 
+import { LOCAL_TENANT } from "../../../lib/tenant.js";
 const web = (path: string, handler: EventHandler) => {
   const app = createApp();
   const router = createRouter();
@@ -88,7 +89,7 @@ const started: string[] = [];
 async function settle(jobId: string): Promise<void> {
   const deadline = Date.now() + 9_000;
   while (Date.now() < deadline) {
-    const job = await getJob(jobId);
+    const job = await getJob(LOCAL_TENANT, jobId);
     if (job === undefined || job.status !== "running") return;
     await new Promise((resolve) => setTimeout(resolve, 10));
   }

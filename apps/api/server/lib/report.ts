@@ -6,6 +6,7 @@ import type {
 } from "@campaignfoundry/CampaignOrchestration";
 import { getReportStore, type ReportStorePort } from "./ports/index.js";
 
+import type { TenantContext } from "./tenant.js";
 /** Persisted asset = the entity plus the derived `brandCompliant` view field. */
 type ReportAsset = GeneratedAsset & { brandCompliant: boolean };
 
@@ -17,8 +18,8 @@ const keyOf = (a: GeneratedAsset): string => assetIdentity(a);
  * the report is missing / unreadable. A report that parses as JSON `null`
  * returns `null` (distinct from missing). Does not merge or write.
  */
-export async function readReport(campaignId: string): Promise<unknown> {
-  return getReportStore().readReport(campaignId);
+export async function readReport(tenant: TenantContext, campaignId: string): Promise<unknown> {
+  return getReportStore(tenant).readReport(campaignId);
 }
 
 /**
@@ -26,8 +27,11 @@ export async function readReport(campaignId: string): Promise<unknown> {
  * unsafe or nothing is stored — the value a caller passes back as
  * `writeReport`'s `expectedRevision`. Mirrors `BriefStorePort.getRevision`.
  */
-export async function reportRevision(campaignId: string): Promise<string | undefined> {
-  return getReportStore().getRevision(campaignId);
+export async function reportRevision(
+  tenant: TenantContext,
+  campaignId: string,
+): Promise<string | undefined> {
+  return getReportStore(tenant).getRevision(campaignId);
 }
 
 /**
@@ -184,6 +188,7 @@ async function readPersistedAssets(
  * while it ran, not waved through as an unconditional write that replaces it.
  */
 export async function writeReport(
+  tenant: TenantContext,
   result: PipelineResult,
   { merge = false, expectedRevision }: { merge?: boolean; expectedRevision?: string | null } = {},
 ): Promise<string> {
@@ -191,7 +196,7 @@ export async function writeReport(
   // and a run without one has no report to write (the "latest" pointer is gone).
   const campaignId = result.log?.campaignId;
   if (!campaignId) throw new Error("A run report needs a campaign id; this run has none.");
-  const store = getReportStore();
+  const store = getReportStore(tenant);
 
   // `brandCompliant` is a derived view field (density gate AND logo present); the
   // entity keeps the two raw signals as the source of truth.

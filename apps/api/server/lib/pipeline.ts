@@ -175,7 +175,7 @@ export async function runCampaign(
   /** Per-cell progress sink; the route writes it onto the job the poller reads. */
   onProgress?: (done: number, total: number) => void,
 ): Promise<Result<PipelineResult, Error>> {
-  const planInput = await planInputFor(brief);
+  const planInput = await planInputFor(env.tenant, brief);
   if (!planInput.success) return planInput;
   if (expectedPolicyHash !== undefined || expectedCopyHash !== undefined) {
     const planned = pooledPlanner(planInput.value).plan(brief);

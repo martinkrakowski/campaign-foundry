@@ -42,10 +42,8 @@ describe("FsJobStore", () => {
     expect(() => store.jobPath("../escape")).toThrow(/Path escapes the allowed directory/);
   });
 
-  test("getJobsDir returns the configured directory or default outputRoot", () => {
+  test("getJobsDir returns the directory the store was built with (it has no default, D167)", () => {
     expect(store.getJobsDir()).toBe(dir);
-    const defaultStore = new FsJobStore();
-    expect(defaultStore.getJobsDir()).toMatch(/\/output\/jobs$/);
   });
 
   test("createJob starts running at 0/0 and writes JSON atomically to disk", async () => {

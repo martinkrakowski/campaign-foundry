@@ -30,6 +30,7 @@ import type { PoolStorePort } from "../pool-store.port.js";
 import type { TemplateStorePort } from "../template-store.port.js";
 import type { JobStorePort } from "../job-store.port.js";
 
+import { LOCAL_TENANT } from "../../tenant.js";
 describe("ports registry", () => {
   afterEach(() => {
     resetBriefStore();
@@ -40,63 +41,63 @@ describe("ports registry", () => {
   });
 
   test("getBriefStore returns default FsBriefStore and allows override", () => {
-    const initial = getBriefStore();
+    const initial = getBriefStore(LOCAL_TENANT);
     expect(initial).toBeInstanceOf(FsBriefStore);
 
     const mockStore = {} as BriefStorePort;
     setBriefStore(mockStore);
-    expect(getBriefStore()).toBe(mockStore);
+    expect(getBriefStore(LOCAL_TENANT)).toBe(mockStore);
 
     resetBriefStore();
-    expect(getBriefStore()).toBeInstanceOf(FsBriefStore);
+    expect(getBriefStore(LOCAL_TENANT)).toBeInstanceOf(FsBriefStore);
   });
 
   test("getAssetStore returns default FsAssetStore and allows override", () => {
-    const initial = getAssetStore();
+    const initial = getAssetStore(LOCAL_TENANT);
     expect(initial).toBeInstanceOf(FsAssetStore);
 
     const mockStore = {} as AssetStorePort;
     setAssetStore(mockStore);
-    expect(getAssetStore()).toBe(mockStore);
+    expect(getAssetStore(LOCAL_TENANT)).toBe(mockStore);
 
     resetAssetStore();
-    expect(getAssetStore()).toBeInstanceOf(FsAssetStore);
+    expect(getAssetStore(LOCAL_TENANT)).toBeInstanceOf(FsAssetStore);
   });
 
   test("getPoolStore returns default FsPoolStore and allows override", () => {
-    const initial = getPoolStore();
+    const initial = getPoolStore(LOCAL_TENANT);
     expect(initial).toBeInstanceOf(FsPoolStore);
 
     const mockStore = {} as PoolStorePort;
     setPoolStore(mockStore);
-    expect(getPoolStore()).toBe(mockStore);
+    expect(getPoolStore(LOCAL_TENANT)).toBe(mockStore);
 
     resetPoolStore();
-    expect(getPoolStore()).toBeInstanceOf(FsPoolStore);
+    expect(getPoolStore(LOCAL_TENANT)).toBeInstanceOf(FsPoolStore);
   });
 
   test("getTemplateStore returns default FsTemplateStore and allows override", () => {
-    const initial = getTemplateStore();
+    const initial = getTemplateStore(LOCAL_TENANT);
     expect(initial).toBeInstanceOf(FsTemplateStore);
 
     const mockStore = {} as TemplateStorePort;
     setTemplateStore(mockStore);
-    expect(getTemplateStore()).toBe(mockStore);
+    expect(getTemplateStore(LOCAL_TENANT)).toBe(mockStore);
 
     resetTemplateStore();
-    expect(getTemplateStore()).toBeInstanceOf(FsTemplateStore);
+    expect(getTemplateStore(LOCAL_TENANT)).toBeInstanceOf(FsTemplateStore);
   });
 
   test("getJobStore returns default FsJobStore and allows override", () => {
-    const initial = getJobStore();
+    const initial = getJobStore(LOCAL_TENANT);
     expect(initial).toBeInstanceOf(FsJobStore);
 
     const mockStore = {} as JobStorePort;
     setJobStore(mockStore);
-    expect(getJobStore()).toBe(mockStore);
+    expect(getJobStore(LOCAL_TENANT)).toBe(mockStore);
 
     resetJobStore();
-    expect(getJobStore()).toBeInstanceOf(FsJobStore);
+    expect(getJobStore(LOCAL_TENANT)).toBeInstanceOf(FsJobStore);
   });
 
   test("job registry aliases point to the job store functions", () => {

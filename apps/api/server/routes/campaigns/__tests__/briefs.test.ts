@@ -20,6 +20,7 @@ import {
 } from "@campaignfoundry/CampaignOrchestration";
 import { loadBrief } from "../../../lib/load-brief.js";
 
+import { LOCAL_TENANT } from "../../../lib/tenant.js";
 type Method = "get" | "post" | "put";
 
 const mount = (routes: { method: Method; path: string; handler: EventHandler }[]) => {
@@ -432,7 +433,7 @@ describe("authoring briefs", () => {
     const { create } = await api();
     const { getBriefStore } = await import("../../../lib/ports/index.js");
     const spy = vi
-      .spyOn(getBriefStore(), "createBrief")
+      .spyOn(getBriefStore(LOCAL_TENANT), "createBrief")
       .mockRejectedValueOnce(Object.assign(new Error("EIO"), { code: "EIO" }));
     const res = await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
     expect(res.status).toBe(500);
@@ -574,7 +575,7 @@ describe("authoring briefs", () => {
     const original = readFileSync(campYaml());
     const { getBriefStore } = await import("../../../lib/ports/index.js");
     const spy = vi
-      .spyOn(getBriefStore(), "rewriteBrief")
+      .spyOn(getBriefStore(LOCAL_TENANT), "rewriteBrief")
       .mockRejectedValueOnce(new Error("Refusing to write through a symlink."));
     const res = await update()(
       jsonReq("http://x/campaigns/briefs/camp", "PUT", brief({ campaignMessage: "Nope" })),
@@ -591,7 +592,7 @@ describe("authoring briefs", () => {
     const original = readFileSync(campYaml());
     const { getBriefStore } = await import("../../../lib/ports/index.js");
     const spy = vi
-      .spyOn(getBriefStore(), "rewriteBrief")
+      .spyOn(getBriefStore(LOCAL_TENANT), "rewriteBrief")
       .mockRejectedValueOnce(Object.assign(new Error("EIO"), { code: "EIO" }));
     const res = await update()(
       jsonReq("http://x/campaigns/briefs/camp", "PUT", brief({ campaignMessage: "Nope" })),
@@ -869,7 +870,7 @@ describe("authoring briefs", () => {
     await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
     const { getBriefStore } = await import("../../../lib/ports/index.js");
     const spy = vi
-      .spyOn(getBriefStore(), "createBrief")
+      .spyOn(getBriefStore(LOCAL_TENANT), "createBrief")
       .mockRejectedValueOnce(Object.assign(new Error("EIO"), { code: "EIO" }));
     const res = await duplicate()(
       jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { newId: "copy" }),
@@ -976,7 +977,9 @@ describe("authoring briefs", () => {
       });
       const { getPoolStore } = await import("../../../lib/ports/index.js");
       // the source pool is untouched
-      expect(await getPoolStore().readPool("camp")).toMatchObject({ pool: { briefId: "camp" } });
+      expect(await getPoolStore(LOCAL_TENANT).readPool("camp")).toMatchObject({
+        pool: { briefId: "camp" },
+      });
     });
 
     test("duplicate of a brief without a pool still creates, and leaves no pool", async () => {
@@ -1159,7 +1162,7 @@ describe("authoring briefs", () => {
       poolFile("camp");
       const { getBriefStore, getPoolStore } = await import("../../../lib/ports/index.js");
       const spy = vi
-        .spyOn(getBriefStore(), "createBrief")
+        .spyOn(getBriefStore(LOCAL_TENANT), "createBrief")
         .mockRejectedValueOnce(Object.assign(new Error("EIO"), { code: "EIO" }));
       const res = await duplicate()(
         jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { newId: "camp-fail" }),
@@ -1167,7 +1170,7 @@ describe("authoring briefs", () => {
       spy.mockRestore();
       expect(res.status).toBe(500);
       expect(existsSync(yamlPath("camp-fail.yaml"))).toBe(false);
-      expect(await getPoolStore().readPool("camp-fail")).toBeUndefined();
+      expect(await getPoolStore(LOCAL_TENANT).readPool("camp-fail")).toBeUndefined();
       expect(existsSync(yamlPath("camp-fail", "pools.json"))).toBe(false);
       const listed = await list()(new Request("http://x/campaigns/briefs"));
       const json = (await listed.json()) as { briefs: { brief: { id: string } }[] };
@@ -1194,7 +1197,7 @@ describe("authoring briefs", () => {
     const { create, update } = await api();
     await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
     const { getBriefStore } = await import("../../../lib/ports/index.js");
-    vi.spyOn(getBriefStore(), "rewriteBrief").mockRejectedValueOnce(
+    vi.spyOn(getBriefStore(LOCAL_TENANT), "rewriteBrief").mockRejectedValueOnce(
       Object.assign(new Error("ENOENT"), { code: "ENOENT" }),
     );
     const res = await update()(
@@ -1212,7 +1215,7 @@ describe("authoring briefs", () => {
     const { create } = await api();
     await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
     const { getBriefStore } = await import("../../../lib/ports/index.js");
-    vi.spyOn(getBriefStore(), "replaceBrief").mockRejectedValueOnce(
+    vi.spyOn(getBriefStore(LOCAL_TENANT), "replaceBrief").mockRejectedValueOnce(
       Object.assign(new Error("EIO"), { code: "EIO" }),
     );
     const res = await create()(
@@ -1229,7 +1232,7 @@ describe("authoring briefs", () => {
     const { create, update } = await api();
     await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
     const { getBriefStore } = await import("../../../lib/ports/index.js");
-    vi.spyOn(getBriefStore(), "rewriteBrief").mockRejectedValueOnce(
+    vi.spyOn(getBriefStore(LOCAL_TENANT), "rewriteBrief").mockRejectedValueOnce(
       Object.assign(new Error("EIO"), { code: "EIO" }),
     );
     const res = await update()(
@@ -1703,7 +1706,7 @@ describe("authoring briefs", () => {
     const { list } = await api();
     const { getBriefStore } = await import("../../../lib/ports/index.js");
     const spy = vi
-      .spyOn(getBriefStore(), "listBriefs")
+      .spyOn(getBriefStore(LOCAL_TENANT), "listBriefs")
       .mockRejectedValueOnce(new Error("Disk failure"));
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const res = await list()(new Request("http://x/campaigns/briefs"));

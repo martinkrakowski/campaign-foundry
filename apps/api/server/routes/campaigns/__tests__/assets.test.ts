@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { createApp, createRouter, toWebHandler, type EventHandler } from "h3";
 import { MAX_ASSET_BYTES } from "../../../lib/asset-files.js";
 
+import { LOCAL_TENANT } from "../../../lib/tenant.js";
 const web = async (root: string) => {
   vi.resetModules();
   process.env.PROJECT_ROOT = root;
@@ -171,7 +172,7 @@ describe("POST /campaigns/assets", () => {
     const handler = await web(dir);
     const { getAssetStore } = await import("../../../lib/ports/index.js");
     const spy = vi
-      .spyOn(getAssetStore(), "writeAsset")
+      .spyOn(getAssetStore(LOCAL_TENANT), "writeAsset")
       .mockRejectedValueOnce(Object.assign(new Error("EIO"), { code: "EIO" }));
     const res = await post(handler, upload());
     expect(res.status).toBe(500);

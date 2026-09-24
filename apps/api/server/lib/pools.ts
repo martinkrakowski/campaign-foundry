@@ -13,6 +13,7 @@ import { motionRatiosFor } from "./platform-zones.js";
 import { getPoolStore } from "./ports/index.js";
 import { InvalidCopyPoolError, type StoredPool } from "./ports/pool-store.port.js";
 
+import type { TenantContext } from "./tenant.js";
 export {
   copyPoolProblem,
   InvalidCopyPoolError,
@@ -21,8 +22,11 @@ export {
 } from "./ports/pool-store.port.js";
 
 /** Read `briefs/<briefId>/pools.json` through the pool store port; undefined when absent. */
-export async function readPool(briefId: string): Promise<StoredPool | undefined> {
-  return getPoolStore().readPool(briefId);
+export async function readPool(
+  tenant: TenantContext,
+  briefId: string,
+): Promise<StoredPool | undefined> {
+  return getPoolStore(tenant).readPool(briefId);
 }
 
 /**
@@ -31,33 +35,39 @@ export async function readPool(briefId: string): Promise<StoredPool | undefined>
  * given: a stale one is refused with `ECONFLICT` carrying the fresh revision.
  */
 export async function writePool(
+  tenant: TenantContext,
   pool: CopyPool,
   options?: { expectedRevision?: string },
 ): Promise<StoredPool> {
-  return getPoolStore().writePool(pool, options);
+  return getPoolStore(tenant).writePool(pool, options);
 }
 
 /** Copy `briefs/<fromBriefId>/pools.json` to `briefs/<toBriefId>/`, rewritten to name the destination. */
 export async function copyPool(
+  tenant: TenantContext,
   fromBriefId: string,
   toBriefId: string,
 ): Promise<CopyPool | undefined> {
-  return getPoolStore().copyPool(fromBriefId, toBriefId);
+  return getPoolStore(tenant).copyPool(fromBriefId, toBriefId);
 }
 
 /** Remove `briefs/<briefId>/pools.json` through the pool store port; a missing file is a no-op. */
-export async function deletePool(briefId: string): Promise<void> {
-  await getPoolStore().deletePool(briefId);
+export async function deletePool(tenant: TenantContext, briefId: string): Promise<void> {
+  await getPoolStore(tenant).deletePool(briefId);
 }
 
 /** Serialise read→merge→write sections per brief within this process. */
-export function withPoolLock<T>(briefId: string, fn: () => Promise<T>): Promise<T> {
-  return getPoolStore().withPoolLock(briefId, fn);
+export function withPoolLock<T>(
+  tenant: TenantContext,
+  briefId: string,
+  fn: () => Promise<T>,
+): Promise<T> {
+  return getPoolStore(tenant).withPoolLock(briefId, fn);
 }
 
 /** True when `briefs/<briefId>` exists and is a symlink — writes through it are refused. */
-export async function isPoolDirSymlink(briefId: string): Promise<boolean> {
-  return getPoolStore().isPoolDirSymlink(briefId);
+export async function isPoolDirSymlink(tenant: TenantContext, briefId: string): Promise<boolean> {
+  return getPoolStore(tenant).isPoolDirSymlink(briefId);
 }
 
 /** True when the brief draws headlines from its approved copy pool. */
@@ -79,13 +89,16 @@ export function wantsHeadlinePool(brief: CampaignBrief): boolean {
  *   the brief carries the axis (absent → every ratio). The parser has already
  *   bounded it to supported values; the policy re-checks.
  */
-export async function planInputFor(brief: CampaignBrief): Promise<Result<PlanInput, Error>> {
+export async function planInputFor(
+  tenant: TenantContext,
+  brief: CampaignBrief,
+): Promise<Result<PlanInput, Error>> {
   const motion = motionRatiosFor(brief.output?.platforms);
   const requested = brief.variation?.axes?.ratio as PlanInput["ratios"];
   const ratios = requested === undefined ? {} : { ratios: requested };
   if (!wantsHeadlinePool(brief)) return ok({ ...ratios, ...motion });
   try {
-    const stored = await readPool(brief.id);
+    const stored = await readPool(tenant, brief.id);
     const headlines = stored ? approvedTexts(stored.pool) : [];
     return ok({ ...ratios, headlines, ...motion });
   } catch (error) {

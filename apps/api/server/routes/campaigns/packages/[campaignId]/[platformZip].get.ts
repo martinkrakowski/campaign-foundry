@@ -2,6 +2,7 @@ import { SAFE_ID_PATTERN } from "@campaignfoundry/CampaignOrchestration";
 import { getOutputStore, type PackageFileEntry } from "../../../../lib/ports/index.js";
 import { measure, storeZipStream, type ZipEntry } from "../store-zip.js";
 
+import { LOCAL_TENANT } from "../../../../lib/tenant.js";
 type FileEntry = ZipEntry & Pick<PackageFileEntry, "open">;
 
 /** Packaging swaps the platform folder with rm + rename; a walk can land in that gap. */
@@ -45,7 +46,7 @@ export default defineEventHandler(async (event) => {
 
   let files: FileEntry[];
   try {
-    const entries = await getOutputStore().listPackageFiles(campaignId, platformId);
+    const entries = await getOutputStore(LOCAL_TENANT).listPackageFiles(campaignId, platformId);
     if (entries === undefined) {
       setResponseStatus(event, 404);
       return { error: "Not found" };

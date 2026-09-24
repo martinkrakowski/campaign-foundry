@@ -64,9 +64,9 @@
     },
     {
       "file": "apps/api/server/lib/jobs.ts",
-      "before": "await deleteJob(id).catch(() => undefined);",
+      "before": "await deleteJob(tenant, id).catch(() => undefined);",
       "after": "/* do not cleanup dangling job */",
-      "because": "When recording a job failure fails due to a storage error, the dangling job must be deleted so the campaign is not blocked forever.",
+      "because": "When recording a job failure fails due to a storage error, the dangling job must be deleted so the campaign is not blocked forever. Re-anchored 2026-09-24 by PT-0b2: the calls it quotes now take the tenant (D167); the mutation is unchanged in meaning.",
       "command": [
         "yarn",
         "vitest",

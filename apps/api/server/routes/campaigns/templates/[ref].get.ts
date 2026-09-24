@@ -1,6 +1,7 @@
 import { errorMessage } from "@campaignfoundry/shared";
 import { getTemplateStore } from "../../../lib/ports/index.js";
 
+import { LOCAL_TENANT } from "../../../lib/tenant.js";
 /**
  * A version segment must be the canonical spelling of a positive integer: no
  * sign, no fraction, no leading `+`, and — because `Number("007")` and
@@ -66,7 +67,7 @@ export default defineEventHandler(async (event) => {
 
   let template;
   try {
-    template = await getTemplateStore().findTemplate(id, version);
+    template = await getTemplateStore(LOCAL_TENANT).findTemplate(id, version);
   } catch (error) {
     console.warn(`[templates] could not read template: ${errorMessage(error)}`);
     setResponseStatus(event, 500);

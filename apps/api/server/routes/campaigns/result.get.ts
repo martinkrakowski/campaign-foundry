@@ -1,5 +1,6 @@
 import { readReport } from "../../lib/report.js";
 
+import { LOCAL_TENANT } from "../../lib/tenant.js";
 /** The empty "no run yet" result the UI treats as "never ran". */
 const EMPTY = { halted: false, assets: [], log: null };
 
@@ -17,6 +18,6 @@ export default defineEventHandler(async (event) => {
   // A present campaignId must be a single string. Repeated params yield string[] —
   // treat that (and any non-string, and absence) as no campaign → empty.
   if (typeof campaignId !== "string") return EMPTY;
-  const report = await readReport(campaignId);
+  const report = await readReport(LOCAL_TENANT, campaignId);
   return report === undefined ? EMPTY : report;
 });

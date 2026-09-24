@@ -82,12 +82,32 @@ export function providerSettings(): ProviderSettings {
  * root. An org id is a path segment here, so it must be a safe id: anything else
  * is refused rather than joined.
  */
-export function tenantOutputRoot(root: string, tenant: TenantContext): string {
+export function tenantRoot(root: string, tenant: TenantContext): string {
   if (tenant.orgId === LOCAL_TENANT.orgId) return root;
   if (!SAFE_ID_PATTERN.test(tenant.orgId)) {
     throw new Error(`Tenant org id ${JSON.stringify(tenant.orgId)} is not a safe id.`);
   }
   return join(root, "orgs", tenant.orgId);
+}
+
+/** The name PT-0c shipped; the rule applies to every root, so it is `tenantRoot`. */
+export const tenantOutputRoot = tenantRoot;
+
+/** Where a tenant's stores keep their files (PT-0b2): both roots scoped by `tenantRoot`. */
+export interface StorageRoots {
+  /** Output: runs, reports, packages, jobs, the generation cache. */
+  readonly outputRoot: string;
+  /** Authored data: briefs, pools and uploaded assets (`assets/inputs`). */
+  readonly projectRoot: string;
+}
+
+/** A tenant's storage roots. The stores are built from these, never from env (D167). */
+export function storageRoots(tenant: TenantContext): StorageRoots {
+  loadEnv();
+  return {
+    outputRoot: tenantRoot(outputRoot(), tenant),
+    projectRoot: tenantRoot(projectRoot(), tenant),
+  };
 }
 
 /**
@@ -96,11 +116,13 @@ export function tenantOutputRoot(root: string, tenant: TenantContext): string {
  * resolves to its own root beneath it (`tenantOutputRoot`).
  */
 export function runEnvironment(tenant: TenantContext): RunEnvironment {
-  loadEnv();
+  const roots = storageRoots(tenant);
   return {
     tenant,
-    outputRoot: tenantOutputRoot(outputRoot(), tenant),
-    assetRoot: projectRoot(),
+    outputRoot: roots.outputRoot,
+    // The same root the tenant's briefs and uploads live under, so a brief's
+    // `assets/inputs/…` path resolves inside its own org.
+    assetRoot: roots.projectRoot,
     messageFont: messageFont(),
     providers: providerSettings(),
   };

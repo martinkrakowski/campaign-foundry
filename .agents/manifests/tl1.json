@@ -4,9 +4,9 @@
   "mutations": [
     {
       "file": "apps/api/server/routes/campaigns/templates/[ref].get.ts",
-      "before": "    template = await getTemplateStore().findTemplate(id, version);",
-      "after": "    template = (await getTemplateStore().findTemplate(id, version)) ?? (await getTemplateStore().findTemplate(id));",
-      "because": "An exact version the store does not have must be a 404, never a different version of the same id — D123's immutability promise reaching the wire. Falling back to the highest version silently serves the wrong record instead.",
+      "before": "    template = await getTemplateStore(LOCAL_TENANT).findTemplate(id, version);",
+      "after": "    template = (await getTemplateStore(LOCAL_TENANT).findTemplate(id, version)) ?? (await getTemplateStore(LOCAL_TENANT).findTemplate(id));",
+      "because": "An exact version the store does not have must be a 404, never a different version of the same id — D123's immutability promise reaching the wire. Falling back to the highest version silently serves the wrong record instead. Re-anchored 2026-09-24 by PT-0b2: the calls it quotes now take the tenant (D167); the mutation is unchanged in meaning.",
       "command": [
         "yarn",
         "vitest",

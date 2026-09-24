@@ -36,7 +36,7 @@ async function persistedPolicyHash(
   reroll: boolean,
 ): Promise<string | undefined> {
   if (!reroll || brief.mode !== "variation") return undefined;
-  const report = await readReport(brief.id);
+  const report = await readReport(LOCAL_TENANT, brief.id);
   const hash =
     typeof report === "object" && report !== null
       ? (report as { policyHash?: unknown }).policyHash
@@ -57,7 +57,7 @@ async function persistedCopyHash(
   reroll: boolean,
 ): Promise<string | undefined> {
   if (!reroll || brief.mode !== "variation") return undefined;
-  const report = await readReport(brief.id);
+  const report = await readReport(LOCAL_TENANT, brief.id);
   const hash =
     typeof report === "object" && report !== null
       ? (report as { copyHash?: unknown }).copyHash
@@ -120,7 +120,7 @@ export default defineEventHandler(async (event) => {
   let expectedRevision: string | null | undefined;
   if (reroll) {
     try {
-      expectedRevision = (await reportRevision(brief.id)) ?? null;
+      expectedRevision = (await reportRevision(LOCAL_TENANT, brief.id)) ?? null;
     } catch {
       setResponseStatus(event, 500);
       return { error: `Could not read the stored report for campaign "${brief.id}".` };
@@ -152,7 +152,7 @@ export default defineEventHandler(async (event) => {
   // else's running campaign to make room.
   let claim: Awaited<ReturnType<typeof acquireJob>>;
   try {
-    claim = await acquireJob(brief.id);
+    claim = await acquireJob(LOCAL_TENANT, brief.id);
   } catch (error) {
     if (error instanceof JobCapacityError) {
       setResponseStatus(event, 503);
@@ -171,7 +171,7 @@ export default defineEventHandler(async (event) => {
   }
 
   const jobId = claim.jobId;
-  runJob(jobId, async (signal) => {
+  runJob(LOCAL_TENANT, jobId, async (signal) => {
     const expectedPolicyHash = await persistedPolicyHash(brief, reroll);
     const expectedCopyHash = await persistedCopyHash(brief, reroll);
     const result = await runCampaign(
@@ -189,18 +189,18 @@ export default defineEventHandler(async (event) => {
       // is dropped on purpose: progress is advisory, and a run that finished
       // must not be failed by a counter that could not be persisted.
       (done, total) => {
-        void progressJob(jobId, done, total).catch(() => undefined);
+        void progressJob(LOCAL_TENANT, jobId, done, total).catch(() => undefined);
       },
     );
     if (!result.success) {
-      await failJob(jobId, result.error.message);
+      await failJob(LOCAL_TENANT, jobId, result.error.message);
       return;
     }
     // A selective run produced only the regenerated cells — merge them into the
     // persisted report so the full campaign survives a partial run. `runJob` fails the
     // job with the message if the merge is refused.
-    await writeReport(result.value, { merge: reroll, expectedRevision });
-    await completeJob(jobId, {
+    await writeReport(LOCAL_TENANT, result.value, { merge: reroll, expectedRevision });
+    await completeJob(LOCAL_TENANT, jobId, {
       halted: result.value.halted,
       assets: result.value.assets,
       log: result.value.log,

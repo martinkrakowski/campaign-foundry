@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "PT-0b2",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/ports/index.ts",
+      "before": "  (t) => storageRoots(t).outputRoot,\n  (root) => new FsReportStore(root),",
+      "after": "  (t) => storageRoots({ ...t, orgId: \"local\" }).outputRoot,\n  (root) => new FsReportStore(root),",
+      "because": "the report registry ignores the org, so two orgs share one report store and one org's report is readable by another (D167).",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/registry.test.ts",
+        "-t",
+        "one org's report is invisible to another"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

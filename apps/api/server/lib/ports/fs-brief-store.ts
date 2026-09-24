@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { lstat, mkdir, readdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, resolve } from "node:path";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
-import { projectRoot, errorMessage } from "@campaignfoundry/shared";
+import { errorMessage } from "@campaignfoundry/shared";
 import { resolveConfined } from "../confined-path.js";
 import { parseBriefText, type ParseBriefOptions } from "../load-brief.js";
 import type { BriefStorePort, StoredBrief } from "./brief-store.port.js";
@@ -21,15 +21,12 @@ import {
  * Stores briefs under `<projectRoot>/briefs/*.yaml` (or .yml / .json).
  */
 export class FsBriefStore implements BriefStorePort {
-  private readonly customDir?: string;
+  /** Resolved once at construction; the composition root decides it (D167). */
+  private readonly dir: string;
   private readonly lockChains = new Map<string, Promise<unknown>>();
 
-  constructor(dir?: string) {
-    if (dir) this.customDir = resolve(dir);
-  }
-
-  private get dir(): string {
-    return this.customDir ?? resolve(projectRoot(), "briefs");
+  constructor(dir: string) {
+    this.dir = resolve(dir);
   }
 
   getBriefsDir(): string {

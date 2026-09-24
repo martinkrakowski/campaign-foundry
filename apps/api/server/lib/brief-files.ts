@@ -6,6 +6,7 @@ import { dumpBrief } from "@campaignfoundry/shared";
 import { isAlias, isMap, parseAllDocuments, type Document, type Scalar, type YAMLMap } from "yaml";
 import { YAML_ALIAS_CAP } from "./load-brief.js";
 import { getBriefStore } from "./ports/index.js";
+import type { TenantContext } from "./tenant.js";
 
 /** The canonical brief YAML writer lives in shared — one serializer, one schema (R4.3). */
 export { dumpBrief };
@@ -192,21 +193,33 @@ export async function pathExists(path: string): Promise<boolean> {
 }
 
 /** Exclusive create — fails with EEXIST if anything is already at `path`. */
-export async function createBriefFile(path: string, brief: CampaignBrief): Promise<void> {
-  await getBriefStore().createBrief(brief);
+export async function createBriefFile(
+  tenant: TenantContext,
+  path: string,
+  brief: CampaignBrief,
+): Promise<void> {
+  await getBriefStore(tenant).createBrief(brief);
 }
 
 /** Overwrite an existing regular file in its own format; refuse a symlink. */
-export async function rewriteBriefFile(path: string, brief: CampaignBrief): Promise<void> {
-  await getBriefStore().rewriteBrief(brief);
+export async function rewriteBriefFile(
+  tenant: TenantContext,
+  path: string,
+  brief: CampaignBrief,
+): Promise<void> {
+  await getBriefStore(tenant).rewriteBrief(brief);
 }
 
 /**
  * Replace an existing file at `path`, or create it if missing.
  * Used by POST `?replace=1`. Symlinks are refused; a racing create is EEXIST.
  */
-export async function replaceBriefFile(path: string, brief: CampaignBrief): Promise<void> {
-  await getBriefStore().replaceBrief(brief);
+export async function replaceBriefFile(
+  tenant: TenantContext,
+  path: string,
+  brief: CampaignBrief,
+): Promise<void> {
+  await getBriefStore(tenant).replaceBrief(brief);
 }
 
 /**
@@ -214,6 +227,10 @@ export async function replaceBriefFile(path: string, brief: CampaignBrief): Prom
  * conditional write cannot be overtaken between its hash comparison and its write.
  * Errors in `fn` do not poison the chain.
  */
-export function withBriefLock<T>(briefId: string, fn: () => Promise<T>): Promise<T> {
-  return getBriefStore().withBriefLock(briefId, fn);
+export function withBriefLock<T>(
+  tenant: TenantContext,
+  briefId: string,
+  fn: () => Promise<T>,
+): Promise<T> {
+  return getBriefStore(tenant).withBriefLock(briefId, fn);
 }

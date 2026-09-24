@@ -1,26 +1,28 @@
 import { JOB_TTL_MS } from "./ports/fs-job-store.js";
 import { getJobStore } from "./ports/index.js";
+import { LOCAL_TENANT, type TenantContext } from "./tenant.js";
 import type { Job, JobResult, JobStatus, StoredJob } from "./ports/job-store.port.js";
 
 export type { JobStatus, JobResult, Job, StoredJob };
 export { MAX_JOBS, JOB_TTL_MS } from "./ports/fs-job-store.js";
 
 export async function acquireJob(
+  tenant: TenantContext,
   campaignId: string,
 ): Promise<{ acquired: true; jobId: string } | { acquired: false; runningJobId: string }> {
-  return getJobStore().acquireJob(campaignId);
+  return getJobStore(tenant).acquireJob(campaignId);
 }
 
-export async function createJob(campaignId: string): Promise<string> {
-  return getJobStore().createJob(campaignId);
+export async function createJob(tenant: TenantContext, campaignId: string): Promise<string> {
+  return getJobStore(tenant).createJob(campaignId);
 }
 
-export async function deleteJob(id: string): Promise<void> {
-  return getJobStore().deleteJob(id);
+export async function deleteJob(tenant: TenantContext, id: string): Promise<void> {
+  return getJobStore(tenant).deleteJob(id);
 }
 
-export async function getJob(id: string): Promise<Job | undefined> {
-  return getJobStore().getJob(id);
+export async function getJob(tenant: TenantContext, id: string): Promise<Job | undefined> {
+  return getJobStore(tenant).getJob(id);
 }
 
 /**
@@ -28,29 +30,41 @@ export async function getJob(id: string): Promise<Job | undefined> {
  * 409 "already in progress" hands back, so the second press can adopt the run that
  * is actually in flight instead of discarding it.
  */
-export async function getRunningJobId(campaignId: string): Promise<string | undefined> {
-  return getJobStore().getRunningJobId(campaignId);
+export async function getRunningJobId(
+  tenant: TenantContext,
+  campaignId: string,
+): Promise<string | undefined> {
+  return getJobStore(tenant).getRunningJobId(campaignId);
 }
 
 /** True while a job for this campaign is still running — one run per campaign at a time. */
-export async function hasRunningJob(campaignId: string): Promise<boolean> {
-  return getJobStore().hasRunningJob(campaignId);
+export async function hasRunningJob(tenant: TenantContext, campaignId: string): Promise<boolean> {
+  return getJobStore(tenant).hasRunningJob(campaignId);
 }
 
 /**
  * Record how far a running job has got. Advisory — a settled job keeps the
  * counts its settlement wrote (see `JobStorePort.progressJob`).
  */
-export async function progressJob(id: string, done: number, total: number): Promise<void> {
-  return getJobStore().progressJob(id, done, total);
+export async function progressJob(
+  tenant: TenantContext,
+  id: string,
+  done: number,
+  total: number,
+): Promise<void> {
+  return getJobStore(tenant).progressJob(id, done, total);
 }
 
-export async function completeJob(id: string, payload: JobResult): Promise<void> {
-  return getJobStore().completeJob(id, payload);
+export async function completeJob(
+  tenant: TenantContext,
+  id: string,
+  payload: JobResult,
+): Promise<void> {
+  return getJobStore(tenant).completeJob(id, payload);
 }
 
-export async function failJob(id: string, error: string): Promise<void> {
-  return getJobStore().failJob(id, error);
+export async function failJob(tenant: TenantContext, id: string, error: string): Promise<void> {
+  return getJobStore(tenant).failJob(id, error);
 }
 
 /**
@@ -68,7 +82,11 @@ export async function failJob(id: string, error: string): Promise<void> {
  */
 export const RUN_DEADLINE_MS = JOB_TTL_MS;
 
-export function runJob(id: string, work: (signal: AbortSignal) => Promise<void>): void {
+export function runJob(
+  tenant: TenantContext,
+  id: string,
+  work: (signal: AbortSignal) => Promise<void>,
+): void {
   // The deadline belongs here rather than inside the pipeline: this is the
   // scope that owns the job slot, and D73's whole point is that the slot must
   // come back.
@@ -112,9 +130,9 @@ export function runJob(id: string, work: (signal: AbortSignal) => Promise<void>)
       await Promise.race([work(controller.signal), expired]);
     } catch (reason) {
       try {
-        await failJob(id, reason instanceof Error ? reason.message : "Job failed");
+        await failJob(tenant, id, reason instanceof Error ? reason.message : "Job failed");
       } catch {
-        await deleteJob(id).catch(() => undefined);
+        await deleteJob(tenant, id).catch(() => undefined);
       }
     } finally {
       clearTimeout(timer);
@@ -122,7 +140,7 @@ export function runJob(id: string, work: (signal: AbortSignal) => Promise<void>)
   })();
 }
 
-/** Test seam: forget every job. */
+/** Test seam: forget every job the local operator's store holds. */
 export async function resetJobs(): Promise<void> {
-  return getJobStore().clear();
+  return getJobStore(LOCAL_TENANT).clear();
 }

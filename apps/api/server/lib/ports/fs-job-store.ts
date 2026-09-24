@@ -2,7 +2,6 @@ import { randomBytes } from "node:crypto";
 import { mkdir, readdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { isErrno } from "../brief-files.js";
-import { outputRoot } from "../config.js";
 import { resolveConfined } from "../confined-path.js";
 import type { Job, JobResult, JobStorePort, StoredJob } from "./job-store.port.js";
 
@@ -43,17 +42,14 @@ interface CacheItem {
  * boundaries and can be resolved across server instances.
  */
 export class FsJobStore implements JobStorePort {
-  private readonly customDir?: string;
+  /** Resolved once at construction; the composition root decides it (D167). */
+  private readonly dir: string;
   private readonly lockChains = new Map<string, Promise<unknown>>();
   private readonly timers = new Map<string, NodeJS.Timeout>();
   private readonly memoryCache = new Map<string, CacheItem>();
 
-  constructor(dir?: string) {
-    if (dir) this.customDir = resolve(dir);
-  }
-
-  private get dir(): string {
-    return this.customDir ?? resolve(outputRoot(), "jobs");
+  constructor(dir: string) {
+    this.dir = resolve(dir);
   }
 
   getJobsDir(): string {

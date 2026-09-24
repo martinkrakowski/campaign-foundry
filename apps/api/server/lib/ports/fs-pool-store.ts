@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { lstat, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import type { CopyPool } from "@campaignfoundry/CampaignOrchestration";
-import { errorMessage, projectRoot } from "@campaignfoundry/shared";
+import { errorMessage } from "@campaignfoundry/shared";
 import { hashBytes, isErrno, SYMLINK_WRITE_ERROR } from "../brief-files.js";
 import { resolveConfined } from "../confined-path.js";
 import {
@@ -18,15 +18,12 @@ import {
  * — a directory beside the brief file, invisible to the briefs lister.
  */
 export class FsPoolStore implements PoolStorePort {
-  private readonly customDir?: string;
+  /** Resolved once at construction; the composition root decides it (D167). */
+  private readonly dir: string;
   private readonly lockChains = new Map<string, Promise<unknown>>();
 
-  constructor(dir?: string) {
-    if (dir) this.customDir = resolve(dir);
-  }
-
-  private get dir(): string {
-    return this.customDir ?? resolve(projectRoot(), "briefs");
+  constructor(dir: string) {
+    this.dir = resolve(dir);
   }
 
   /** Confined path `briefs/<briefId>/pools.json` — a directory, invisible to the briefs lister. */

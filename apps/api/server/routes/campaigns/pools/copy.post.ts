@@ -161,14 +161,14 @@ export default defineEventHandler(async (event) => {
   }
 
   if (brief === undefined) {
-    const found = await getBriefStore().findBriefById(briefId);
+    const found = await getBriefStore(LOCAL_TENANT).findBriefById(briefId);
     if (!found) {
       setResponseStatus(event, 404);
       return { error: `Brief "${briefId}" not found.` };
     }
     brief = found.brief;
   }
-  if (await isPoolDirSymlink(briefId)) {
+  if (await isPoolDirSymlink(LOCAL_TENANT, briefId)) {
     setResponseStatus(event, 400);
     return { error: SYMLINK_WRITE_ERROR };
   }
@@ -201,10 +201,10 @@ export default defineEventHandler(async (event) => {
 
   // The slow LLM call is done; read→merge→write is serialised per brief so a
   // concurrent request's entries are merged into, never overwritten.
-  return withPoolLock(briefId, async () => {
+  return withPoolLock(LOCAL_TENANT, briefId, async () => {
     let stored;
     try {
-      stored = await readPool(briefId);
+      stored = await readPool(LOCAL_TENANT, briefId);
     } catch (error) {
       if (!(error instanceof InvalidCopyPoolError)) throw error;
       setResponseStatus(event, 422);
@@ -226,7 +226,7 @@ export default defineEventHandler(async (event) => {
     };
     const next = mergePool(existing ?? incoming, incoming);
     try {
-      const written = await writePool(next, { expectedRevision });
+      const written = await writePool(LOCAL_TENANT, next, { expectedRevision });
       setResponseStatus(event, 201);
       return { pool: written.pool, revision: written.revision, added: headlines.length };
     } catch (error) {

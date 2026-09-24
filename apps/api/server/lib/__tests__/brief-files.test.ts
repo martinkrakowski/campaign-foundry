@@ -20,6 +20,7 @@ import {
   type CampaignBrief,
 } from "@campaignfoundry/CampaignOrchestration";
 
+import { LOCAL_TENANT } from "../tenant.js";
 const origRoot = process.env.PROJECT_ROOT;
 
 const minimal: CampaignBrief = {
@@ -137,17 +138,17 @@ describe("brief file lookup and write", () => {
     const { pathExists, createBriefFile } = await filesFor(dir);
     const path = join(dir, "briefs", "camp.yaml");
     expect(await pathExists(path)).toBe(false);
-    await createBriefFile(path, minimal);
+    await createBriefFile(LOCAL_TENANT, path, minimal);
     expect(await pathExists(path)).toBe(true);
   });
 
   test("createBriefFile is exclusive — a second write does not overwrite", async () => {
     const { createBriefFile } = await filesFor(dir);
     const path = join(dir, "briefs", "camp.yaml");
-    await createBriefFile(path, minimal);
+    await createBriefFile(LOCAL_TENANT, path, minimal);
     const original = readFileSync(path);
     await expect(
-      createBriefFile(path, { ...minimal, campaignMessage: "Nope" }),
+      createBriefFile(LOCAL_TENANT, path, { ...minimal, campaignMessage: "Nope" }),
     ).rejects.toMatchObject({
       code: "EEXIST",
     });
@@ -161,16 +162,18 @@ describe("brief file lookup and write", () => {
     writeFileSync(outside, "ORIGINAL");
     const link = join(dir, "briefs", "camp.yaml");
     symlinkSync(outside, link);
-    await expect(rewriteBriefFile(link, minimal)).rejects.toThrow(SYMLINK_WRITE_ERROR);
+    await expect(rewriteBriefFile(LOCAL_TENANT, link, minimal)).rejects.toThrow(
+      SYMLINK_WRITE_ERROR,
+    );
     expect(readFileSync(outside, "utf8")).toBe("ORIGINAL");
   });
 
   test("replaceBriefFile creates when missing and rewrites a regular file", async () => {
     const { replaceBriefFile } = await filesFor(dir);
     const path = join(dir, "briefs", "camp.yaml");
-    await replaceBriefFile(path, minimal);
+    await replaceBriefFile(LOCAL_TENANT, path, minimal);
     expect(readFileSync(path, "utf8")).toContain("id: camp");
-    await replaceBriefFile(path, { ...minimal, campaignMessage: "Updated" });
+    await replaceBriefFile(LOCAL_TENANT, path, { ...minimal, campaignMessage: "Updated" });
     expect(readFileSync(path, "utf8")).toContain("campaignMessage: Updated");
   });
 
@@ -179,7 +182,7 @@ describe("brief file lookup and write", () => {
     mkdirSync(join(dir, "briefs"), { recursive: true });
     const path = join(dir, "briefs", "camp.json");
     writeFileSync(path, JSON.stringify(minimal));
-    await rewriteBriefFile(path, { ...minimal, campaignMessage: "JSON" });
+    await rewriteBriefFile(LOCAL_TENANT, path, { ...minimal, campaignMessage: "JSON" });
     expect(JSON.parse(readFileSync(path, "utf8"))).toMatchObject({ campaignMessage: "JSON" });
   });
 });
@@ -308,16 +311,16 @@ describe("withBriefLock", () => {
       const gate = new Promise<void>((resolve) => {
         release = resolve;
       });
-      const first = withBriefLock("camp", async () => {
+      const first = withBriefLock(LOCAL_TENANT, "camp", async () => {
         await gate;
         order.push("first");
         return 1;
       });
-      const second = withBriefLock("camp", async () => {
+      const second = withBriefLock(LOCAL_TENANT, "camp", async () => {
         order.push("second");
         return 2;
       });
-      const other = withBriefLock("other", async () => {
+      const other = withBriefLock(LOCAL_TENANT, "other", async () => {
         order.push("other");
         return 3;
       });
@@ -339,11 +342,11 @@ describe("withBriefLock", () => {
       process.env.PROJECT_ROOT = dir;
       const { withBriefLock } = await filesFor(dir);
       await expect(
-        withBriefLock("camp", async () => {
+        withBriefLock(LOCAL_TENANT, "camp", async () => {
           throw new Error("boom");
         }),
       ).rejects.toThrow("boom");
-      expect(await withBriefLock("camp", async () => "ok")).toBe("ok");
+      expect(await withBriefLock(LOCAL_TENANT, "camp", async () => "ok")).toBe("ok");
     } finally {
       rmSync(dir, { recursive: true, force: true });
       if (origRoot === undefined) delete process.env.PROJECT_ROOT;
@@ -363,26 +366,26 @@ describe("concurrent write scenario", () => {
       mkdirSync(join(dir, "briefs"), { recursive: true });
 
       const path = join(dir, "briefs", "camp.yaml");
-      await createBriefFile(path, minimal);
+      await createBriefFile(LOCAL_TENANT, path, minimal);
       const revision = await hashFile(path);
 
       let result1: boolean | undefined;
       let result2: boolean | undefined;
 
-      const write1 = withBriefLock("camp", async () => {
+      const write1 = withBriefLock(LOCAL_TENANT, "camp", async () => {
         const current = await hashFile(path);
         if (current === revision) {
-          await rewriteBriefFile(path, { ...minimal, campaignMessage: "First" });
+          await rewriteBriefFile(LOCAL_TENANT, path, { ...minimal, campaignMessage: "First" });
           result1 = true;
         } else {
           result1 = false;
         }
       });
 
-      const write2 = withBriefLock("camp", async () => {
+      const write2 = withBriefLock(LOCAL_TENANT, "camp", async () => {
         const current = await hashFile(path);
         if (current === revision) {
-          await rewriteBriefFile(path, { ...minimal, campaignMessage: "Second" });
+          await rewriteBriefFile(LOCAL_TENANT, path, { ...minimal, campaignMessage: "Second" });
           result2 = true;
         } else {
           result2 = false;

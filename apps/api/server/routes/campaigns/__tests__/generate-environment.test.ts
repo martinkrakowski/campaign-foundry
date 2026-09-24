@@ -7,6 +7,7 @@ import { getRunningJobId, resetJobs } from "../../../lib/jobs.js";
 import { NOT_PROBED_REASON, setCapabilities } from "../../../lib/capabilities.js";
 import generateHandler from "../generate.post.js";
 
+import { LOCAL_TENANT } from "../../../lib/tenant.js";
 const failing = { on: false };
 
 vi.mock("../../../lib/run-environment.js", async (importOriginal) => {
@@ -70,6 +71,6 @@ describe("POST /campaigns/generate — the run environment is read before the cl
       error: "Could not read the run environment.",
       campaignId: "camp",
     });
-    expect(await getRunningJobId("camp")).toBeUndefined();
+    expect(await getRunningJobId(LOCAL_TENANT, "camp")).toBeUndefined();
   });
 });
