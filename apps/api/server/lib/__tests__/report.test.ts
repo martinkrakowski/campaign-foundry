@@ -798,4 +798,22 @@ describe("reports go through the report store (PT-0a)", () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  test("a store that cannot read fails a merge instead of overwriting the report it could not read", async () => {
+    const writes: string[] = [];
+    setReportStore({
+      readReport: async () => {
+        throw new Error("store unavailable");
+      },
+      getRevision: async () => undefined,
+      writeReport: async (id) => {
+        writes.push(id);
+        return id;
+      },
+    });
+    await expect(writeReport(result([asset()]), { merge: true })).rejects.toThrow(
+      "store unavailable",
+    );
+    expect(writes).toEqual([]);
+  });
 });

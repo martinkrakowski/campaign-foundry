@@ -4,7 +4,7 @@ import type {
   GeneratedAsset,
   PipelineResult,
 } from "@campaignfoundry/CampaignOrchestration";
-import { getReportStore } from "./ports/index.js";
+import { getReportStore, type ReportStorePort } from "./ports/index.js";
 
 /** Persisted asset = the entity plus the derived `brandCompliant` view field. */
 type ReportAsset = GeneratedAsset & { brandCompliant: boolean };
@@ -136,21 +136,23 @@ export function isPersistedAsset(a: unknown): a is PersistedAsset {
  * Entries that can't be safely keyed (a hand-edited / corrupt report.json with
  * null/primitive rows) are filtered out so the merge can't throw on `keyOf`.
  */
-async function readPersistedAssets(campaignId: string): Promise<ReportAsset[]> {
-  try {
-    const parsed: unknown = await getReportStore().readReport(campaignId);
-    const assets = (parsed as { assets?: unknown })?.assets;
-    if (!Array.isArray(assets)) return [];
-    const persisted = assets.filter(isPersistedAsset) as ReportAsset[];
-    if (persisted.length !== assets.length) {
-      console.warn(
-        `[report] dropped ${assets.length - persisted.length} invalid persisted asset(s) from the campaign's report during merge`,
-      );
-    }
-    return persisted;
-  } catch {
-    return [];
+async function readPersistedAssets(
+  store: ReportStorePort,
+  campaignId: string,
+): Promise<ReportAsset[]> {
+  // The store answers `undefined` for a missing or unreadable report, so there is
+  // no parse failure to catch here. A store that throws fails the write instead:
+  // merging over an empty base would overwrite the report it could not read.
+  const parsed: unknown = await store.readReport(campaignId);
+  const assets = (parsed as { assets?: unknown })?.assets;
+  if (!Array.isArray(assets)) return [];
+  const persisted = assets.filter(isPersistedAsset) as ReportAsset[];
+  if (persisted.length !== assets.length) {
+    console.warn(
+      `[report] dropped ${assets.length - persisted.length} invalid persisted asset(s) from the campaign's report during merge`,
+    );
   }
+  return persisted;
 }
 
 /**
@@ -223,7 +225,7 @@ export async function writeReport(
     // re-roll of one brief never folds in another brief's creatives. Map preserves
     // existing order; re-keying an existing entry updates it in place, new cells append.
     const byKey = new Map(
-      (await readPersistedAssets(campaignId)).map((a) => [keyOf(a), a] as const),
+      (await readPersistedAssets(store, campaignId)).map((a) => [keyOf(a), a] as const),
     );
     for (const a of fresh) byKey.set(keyOf(a), a);
     assets = [...byKey.values()];
