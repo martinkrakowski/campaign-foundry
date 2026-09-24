@@ -3,7 +3,13 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createApp, createRouter, toWebHandler } from "h3";
-import { getReportStore, resetDecisionStore, resetReportStore } from "../../../lib/ports/index.js";
+import {
+  DecisionConflictError,
+  getReportStore,
+  resetDecisionStore,
+  resetReportStore,
+  setDecisionStore,
+} from "../../../lib/ports/index.js";
 import { reportRevision } from "../../../lib/report.js";
 import { LOCAL_TENANT } from "../../../lib/tenant.js";
 import { resetDatabase, setDatabase } from "../../../lib/db/database.js";
@@ -177,5 +183,44 @@ describe("GET / PUT /campaigns/decisions on Postgres (PT-3)", () => {
     const stale = await put({ campaignId: "camp", revision: null, decisions: { b: "rejected" } });
     expect(stale.status).toBe(409);
     expect(await (await get("?campaignId=camp")).json()).toEqual(saved);
+  });
+});
+
+describe("PUT /campaigns/decisions when the store refuses the write (PT-3)", () => {
+  let dir: string;
+  const origOut = process.env.OUTPUT_DIR;
+  beforeEach(async () => {
+    dir = mkdtempSync(join(tmpdir(), "cf-decisions-refused-"));
+    process.env.OUTPUT_DIR = dir;
+    resetReportStore();
+    await getReportStore(LOCAL_TENANT).writeReport("camp", JSON.stringify({ assets: [] }));
+  });
+  afterEach(() => {
+    resetDecisionStore();
+    resetReportStore();
+    if (origOut === undefined) delete process.env.OUTPUT_DIR;
+    else process.env.OUTPUT_DIR = origOut;
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  const refusing = (error: Error) =>
+    setDecisionStore({
+      readDecisions: async () => ({ decisions: {}, revision: null }),
+      writeDecisions: async () => {
+        throw error;
+      },
+    });
+
+  test("another process's save between the read and the write is a 409 carrying its revision", async () => {
+    refusing(new DecisionConflictError("camp", "theirs"));
+    const res = await put({ campaignId: "camp", revision: null, decisions: { a: "approved" } });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ revision: "theirs" });
+  });
+
+  test("any other failure is not dressed up as a conflict", async () => {
+    refusing(new Error("database down"));
+    const res = await put({ campaignId: "camp", revision: null, decisions: { a: "approved" } });
+    expect(res.status).toBe(500);
   });
 });

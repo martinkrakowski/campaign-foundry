@@ -3,7 +3,12 @@ import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { SAFE_ID_PATTERN } from "@campaignfoundry/CampaignOrchestration";
 import { hashBytes, isErrno } from "../brief-files.js";
-import type { DecisionMap, DecisionStorePort, StoredDecisions } from "./decision-store.port.js";
+import {
+  DecisionConflictError,
+  type DecisionMap,
+  type DecisionStorePort,
+  type StoredDecisions,
+} from "./decision-store.port.js";
 
 /** `<root>/decisions/<campaignId>.json`, or null when the id is not one safe segment. */
 function decisionsPath(root: string, campaignId: string): string | null {
@@ -62,10 +67,20 @@ export class FsDecisionStore implements DecisionStorePort {
     };
   }
 
-  async writeDecisions(campaignId: string, decisions: DecisionMap): Promise<string> {
+  async writeDecisions(
+    campaignId: string,
+    decisions: DecisionMap,
+    expectedRevision?: string | null,
+  ): Promise<string> {
     const path = decisionsPath(this.root, campaignId);
     if (!path) {
       throw new Error(`Decisions campaign id ${JSON.stringify(campaignId)} is not a safe id.`);
+    }
+    // On files the compare and the write are not one step (D79); the file store's
+    // phase runs one API process, and the decision lock serialises it.
+    if (expectedRevision !== undefined) {
+      const { revision } = await this.readDecisions(campaignId);
+      if (revision !== expectedRevision) throw new DecisionConflictError(campaignId, revision);
     }
     await mkdir(resolve(this.root, "decisions"), { recursive: true });
     const tmp = `${path}.${process.pid}-${randomBytes(4).toString("hex")}.tmp`;

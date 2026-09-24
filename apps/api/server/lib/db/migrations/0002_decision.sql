@@ -7,6 +7,9 @@ create table decision (
   org_id text not null references org (id),
   campaign_id text not null,
   asset_key text not null,
+  -- The key's place in the map, so a read rebuilds it in the order it was written
+  -- and its revision (a hash of those bytes) holds.
+  ordinal int not null,
   verdict text not null check (verdict in ('approved', 'rejected')),
   actor text not null,
   decided_at timestamptz not null,

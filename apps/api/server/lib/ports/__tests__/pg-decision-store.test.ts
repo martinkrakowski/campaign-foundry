@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { SqlClient } from "../../db/sql-client.js";
 import { migratedDatabase } from "../../db/__tests__/pglite-client.js";
-import type { DecisionRecord } from "../decision-store.port.js";
+import { DecisionConflictError, type DecisionRecord } from "../decision-store.port.js";
 import { FsDecisionStore } from "../fs-decision-store.js";
 import { PgDecisionStore } from "../pg-decision-store.js";
 
@@ -106,6 +106,50 @@ describe("PgDecisionStore (PT-3, D173)", () => {
     const read = await store.readDecisions("camp");
     expect(Object.keys(read.decisions)).toEqual(["a"]);
     expect(read.revision).toBe(revision);
+  });
+
+  test("a map reads back in the order it was written, so rewriting it keeps its revision", async () => {
+    const store = new PgDecisionStore(db, "local");
+    const revision = await store.writeDecisions("camp", {
+      zeta: rec("approved"),
+      alpha: rec("rejected"),
+      mid: rec("approved"),
+    });
+    const read = await store.readDecisions("camp");
+    expect(Object.keys(read.decisions)).toEqual(["zeta", "alpha", "mid"]);
+    expect(await store.writeDecisions("camp", read.decisions)).toBe(revision);
+  });
+
+  test("a time is kept exactly, and one not in toISOString's form is refused", async () => {
+    const store = new PgDecisionStore(db, "local");
+    await store.writeDecisions("camp", {
+      a: { ...rec("approved"), at: "2026-01-02T03:04:05.000Z" },
+    });
+    expect((await store.readDecisions("camp")).decisions.a!.at).toBe("2026-01-02T03:04:05.000Z");
+    for (const at of ["2026-01-02T03:04:05Z", "2026-01-02T04:04:05.000+01:00", "yesterday"]) {
+      await expect(store.writeDecisions("camp", { a: { ...rec("approved"), at } })).rejects.toThrow(
+        /not an ISO-8601 UTC instant/,
+      );
+    }
+  });
+
+  test("a write naming the revision it read lands; a stale or wrongly-absent one is a conflict carrying the current revision", async () => {
+    const store = new PgDecisionStore(db, "local");
+    const first = await store.writeDecisions("camp", { a: rec("approved") }, null);
+    const second = await store.writeDecisions("camp", { b: rec("rejected") }, first);
+    const stale = store.writeDecisions("camp", { c: rec("approved") }, first);
+    await expect(stale).rejects.toBeInstanceOf(DecisionConflictError);
+    await expect(stale).rejects.toMatchObject({ code: "ECONFLICT", revision: second });
+    await expect(store.writeDecisions("camp", { c: rec("approved") }, null)).rejects.toMatchObject({
+      revision: second,
+    });
+    await expect(
+      store.writeDecisions("fresh", { c: rec("approved") }, "no-such-revision"),
+    ).rejects.toMatchObject({ revision: null });
+    // Nothing a refused write carried landed.
+    expect(await store.readDecisions("camp")).toMatchObject({ revision: second });
+    expect(Object.keys((await store.readDecisions("camp")).decisions)).toEqual(["b"]);
+    expect((await store.readDecisions("fresh")).revision).toBeNull();
   });
 
   test("an org with no row cannot hold decisions", async () => {
