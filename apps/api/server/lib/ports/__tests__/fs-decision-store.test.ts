@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { hashBytes } from "../../brief-files.js";
 import { FsDecisionStore } from "../fs-decision-store.js";
+import { DecisionConflictError, isDecisionTime } from "../decision-store.port.js";
 
 const record = {
   verdict: "approved" as const,
@@ -82,6 +83,27 @@ describe("FsDecisionStore", () => {
     await expect(new FsDecisionStore(root).readDecisions("camp")).rejects.toThrow(
       /are not a decision map/,
     );
+  });
+
+  test("a write naming a stale revision is a conflict carrying the current one, and writes nothing", async () => {
+    const store = new FsDecisionStore(root);
+    const first = await store.writeDecisions("camp", { a: record }, null);
+    const second = await store.writeDecisions("camp", {}, first);
+    await expect(store.writeDecisions("camp", { a: record }, first)).rejects.toBeInstanceOf(
+      DecisionConflictError,
+    );
+    await expect(store.writeDecisions("camp", { a: record }, null)).rejects.toMatchObject({
+      code: "ECONFLICT",
+      revision: second,
+    });
+    expect((await store.readDecisions("camp")).revision).toBe(second);
+  });
+
+  test("isDecisionTime accepts only toISOString's form", () => {
+    expect(isDecisionTime("2026-09-24T00:00:00.000Z")).toBe(true);
+    for (const at of ["2026-09-24T00:00:00Z", "2026-09-24", "t", ""]) {
+      expect(isDecisionTime(at)).toBe(false);
+    }
   });
 
   test("a write that fails leaves no temp file behind", async () => {

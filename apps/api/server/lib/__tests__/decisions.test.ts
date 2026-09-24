@@ -2,7 +2,9 @@ import { describe, test, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DecisionConflictError, type DecisionStorePort } from "../ports/decision-store.port.js";
 import {
+  RETIRE_ATTEMPTS,
   MAX_DECISIONS,
   applyVerdicts,
   retireDecisions,
@@ -128,5 +130,41 @@ describe("verdictsProblem", () => {
       Array.from({ length: MAX_DECISIONS + 1 }, (_, i) => [`k${i}`, "approved"]),
     );
     expect(verdictsProblem(tooMany)).toMatch(/at most/);
+  });
+});
+
+describe("retireDecisions against a concurrent save (PT-3)", () => {
+  const stored = { a: rec("approved"), b: rec("rejected") };
+  const racing = (conflicts: number) => {
+    const writes: (string | null | undefined)[] = [];
+    let reads = 0;
+    const store: DecisionStorePort = {
+      readDecisions: async () => ({ decisions: stored, revision: `rev-${(reads += 1)}` }),
+      writeDecisions: async (campaignId, _decisions, expected) => {
+        writes.push(expected);
+        if (writes.length <= conflicts) throw new DecisionConflictError(campaignId, "moved");
+        return "done";
+      },
+    };
+    return { store, writes };
+  };
+
+  test("writes against the revision it read, and re-reads after losing to a save", async () => {
+    const { store, writes } = racing(2);
+    await retireDecisions(store, "camp", new Set(["a"]));
+    expect(writes).toEqual(["rev-1", "rev-2", "rev-3"]);
+  });
+
+  test("gives up after RETIRE_ATTEMPTS conflicts, and any other failure at once", async () => {
+    const { store, writes } = racing(RETIRE_ATTEMPTS);
+    await expect(retireDecisions(store, "camp")).rejects.toBeInstanceOf(DecisionConflictError);
+    expect(writes).toHaveLength(RETIRE_ATTEMPTS);
+    const broken: DecisionStorePort = {
+      ...store,
+      writeDecisions: async () => {
+        throw new Error("disk full");
+      },
+    };
+    await expect(retireDecisions(broken, "camp")).rejects.toThrow("disk full");
   });
 });

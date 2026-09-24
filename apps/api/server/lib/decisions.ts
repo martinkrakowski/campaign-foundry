@@ -1,9 +1,10 @@
 import { getDecisionStore } from "./ports/index.js";
-import type {
-  DecisionMap,
-  DecisionRecord,
-  DecisionStorePort,
-  Verdict,
+import {
+  DecisionConflictError,
+  type DecisionMap,
+  type DecisionRecord,
+  type DecisionStorePort,
+  type Verdict,
 } from "./ports/decision-store.port.js";
 import type { StorageScope } from "./run-environment.js";
 
@@ -84,14 +85,26 @@ export async function retireDecisions(
   campaignId: string,
   keys?: ReadonlySet<string>,
 ): Promise<void> {
-  const { decisions } = await store.readDecisions(campaignId);
-  const all = Object.keys(decisions);
-  const retired = keys === undefined ? all : all.filter((key) => keys.has(key));
-  if (retired.length === 0) return;
-  const next = Object.create(null) as Record<string, DecisionRecord>;
-  for (const key of all) if (!retired.includes(key)) next[key] = decisions[key];
-  await store.writeDecisions(campaignId, next);
+  // Written against the revision it read, so a save from another process that
+  // lands in between is never overwritten: the retirement reads again and retries.
+  for (let attempt = 1; ; attempt += 1) {
+    const { decisions, revision } = await store.readDecisions(campaignId);
+    const all = Object.keys(decisions);
+    const retired = keys === undefined ? all : all.filter((key) => keys.has(key));
+    if (retired.length === 0) return;
+    const next = Object.create(null) as Record<string, DecisionRecord>;
+    for (const key of all) if (!retired.includes(key)) next[key] = decisions[key];
+    try {
+      await store.writeDecisions(campaignId, next, revision);
+      return;
+    } catch (error) {
+      if (!(error instanceof DecisionConflictError) || attempt >= RETIRE_ATTEMPTS) throw error;
+    }
+  }
 }
+
+/** How often a retirement re-reads after losing to a concurrent save before it fails the write. */
+export const RETIRE_ATTEMPTS = 5;
 
 /** Why a submitted verdict map cannot be stored, or undefined when it can. */
 export function verdictsProblem(value: unknown): string | undefined {

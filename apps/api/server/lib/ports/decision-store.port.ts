@@ -45,8 +45,38 @@ export interface DecisionStorePort {
   readDecisions(campaignId: string): Promise<StoredDecisions>;
   /**
    * Replace a campaign's decisions, atomically, and answer the new revision.
-   * Rejects an unsafe campaign id. The revision guard is the caller's, as the
-   * report store's is.
+   * Rejects an unsafe campaign id.
+   *
+   * With `expectedRevision` (null: none recorded yet), the write happens only if
+   * the stored revision is still that one, checked in the same atomic step as the
+   * write, and otherwise throws a `DecisionConflictError` carrying the current
+   * revision: a save from a stale read never lands, whichever process made it.
    */
-  writeDecisions(campaignId: string, decisions: DecisionMap): Promise<string>;
+  writeDecisions(
+    campaignId: string,
+    decisions: DecisionMap,
+    expectedRevision?: string | null,
+  ): Promise<string>;
+}
+
+/** A write whose expected revision is no longer the stored one (D82). */
+export class DecisionConflictError extends Error {
+  readonly code = "ECONFLICT";
+  constructor(
+    campaignId: string,
+    /** The revision stored now (null: none). */
+    readonly revision: string | null,
+  ) {
+    super(`The decisions for campaign "${campaignId}" changed since they were read.`);
+  }
+}
+
+/**
+ * Whether `at` is the one form a decision's time takes: `Date#toISOString()`
+ * (UTC, milliseconds). The server stamps it so; a store keeps it exactly, so a
+ * record reads back byte for byte and its revision is stable.
+ */
+export function isDecisionTime(at: string): boolean {
+  const time = Date.parse(at);
+  return !Number.isNaN(time) && new Date(time).toISOString() === at;
 }

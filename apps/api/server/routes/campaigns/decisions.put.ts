@@ -5,6 +5,7 @@ import {
   withDecisionLock,
   type Verdict,
 } from "../../lib/decisions.js";
+import { DecisionConflictError } from "../../lib/ports/index.js";
 import { reportRevision } from "../../lib/report.js";
 import { LOCAL_TENANT } from "../../lib/tenant.js";
 
@@ -42,8 +43,8 @@ export default defineEventHandler(async (event) => {
   }
   // Under the campaign's decision lock, so the run a verdict is stamped with is
   // the report it stays against: a report write retires under the same lock.
-  // The lock is per process; across processes the compare and the write are
-  // not fused on a filesystem (D79), as the report guard's are not.
+  // The lock is per process; across processes the store's own compare-and-swap
+  // (one step in Postgres; D79 on files) refuses the loser.
   return withDecisionLock(tenant, campaignId, async (store) => {
     const run = await reportRevision(tenant, campaignId);
     if (run === undefined) {
@@ -62,7 +63,15 @@ export default defineEventHandler(async (event) => {
       new Date().toISOString(),
       run,
     );
-    const revision = await store.writeDecisions(campaignId, next);
-    return { decisions: next, revision };
+    try {
+      // The store checks the revision again in the write itself: another process's
+      // save between this read and this write is a 409 too, not a silent overwrite.
+      const revision = await store.writeDecisions(campaignId, next, expected);
+      return { decisions: next, revision };
+    } catch (error) {
+      if (!(error instanceof DecisionConflictError)) throw error;
+      setResponseStatus(event, 409);
+      return { error: "These decisions changed in another tab.", revision: error.revision };
+    }
   });
 });
