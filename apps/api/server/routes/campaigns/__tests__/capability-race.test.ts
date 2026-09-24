@@ -9,7 +9,7 @@ import {
   probeWait,
   setCapabilities,
 } from "../../../lib/capabilities.js";
-import { resetJobs } from "../../../lib/jobs.js";
+import { getJob, resetJobs } from "../../../lib/jobs.js";
 import planHandler from "../plan.post.js";
 import generateHandler from "../generate.post.js";
 
@@ -71,6 +71,30 @@ const motionBrief = () => ({
   output: { formats: ["static", "motion"], platforms: ["instagram-feed", "instagram-reel"] },
 });
 
+/**
+ * Jobs a test started, settled in `afterEach` BEFORE `resetJobs`.
+ *
+ * `runJob` is fire-and-forget, and `resetJobs` clears the job files without
+ * waiting for running work (after it, `getJob` answers undefined while the
+ * run carries on). The run resolves OUTPUT_DIR on every write, so a job left
+ * running writes its creatives into this test's already-removed dir,
+ * recreating it, and about 2-3 s later writes `report.json` into whichever
+ * test's dir is current. When that lands during that test's `rmSync`, the
+ * teardown fails with ENOTEMPTY (seen on a loaded run, 2026-09-24).
+ * Settling here, under the hook timeout, means no run outlives its test.
+ */
+const started: string[] = [];
+
+async function settle(jobId: string): Promise<void> {
+  const deadline = Date.now() + 9_000;
+  while (Date.now() < deadline) {
+    const job = await getJob(jobId);
+    if (job === undefined || job.status !== "running") return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`job ${jobId} did not settle before teardown`);
+}
+
 let dir: string;
 const origOut = process.env.OUTPUT_DIR;
 const origRoot = process.env.PROJECT_ROOT;
@@ -78,7 +102,8 @@ const defaultWait = probeWait.timeoutMs;
 
 beforeEach(() => {
   // The generate run paths start a background job on 202; point OUTPUT_DIR and
-  // PROJECT_ROOT at a throwaway dir so the job fails fast without touching the repo.
+  // PROJECT_ROOT at a throwaway dir so the job never touches the repo. It does not
+  // fail fast: it runs to completion, which is why afterEach settles it.
   dir = mkdtempSync(join(tmpdir(), "cf-caprace-"));
   process.env.OUTPUT_DIR = dir;
   process.env.PROJECT_ROOT = dir;
@@ -87,6 +112,7 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
+  for (const jobId of started.splice(0)) await settle(jobId);
   await resetJobs();
   probeWait.timeoutMs = defaultWait;
   setCapabilities({ motion: false, reason: NOT_PROBED_REASON });
@@ -117,7 +143,9 @@ describe("run paths vs the capability boot race", () => {
     setCapabilities({ motion: true });
     const res = await pending;
     expect(res.status).toBe(202);
-    expect(((await res.json()) as { jobId: string }).jobId).toEqual(expect.any(String));
+    const { jobId } = (await res.json()) as { jobId: string };
+    expect(jobId).toEqual(expect.any(String));
+    started.push(jobId);
   });
 
   test("a motion run on a host that cannot encode video is still refused, naming the probe reason", async () => {
