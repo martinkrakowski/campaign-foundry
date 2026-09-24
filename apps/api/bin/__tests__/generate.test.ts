@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync, rmSync, readdirSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -83,7 +83,9 @@ describe("generate CLI main()", () => {
 
   test("generates from the default sample brief and writes a report", async () => {
     await main(); // no arg → arg('--brief') ?? default sample brief
-    expect(existsSync(resolve(dir, "report.json"))).toBe(true);
+    // The report lands under its campaign; there is no global report.json (PT-0a).
+    expect(readdirSync(resolve(dir, "reports")).filter((f) => f.endsWith(".json"))).toHaveLength(1);
+    expect(existsSync(resolve(dir, "report.json"))).toBe(false);
     expect(process.exitCode).not.toBe(1);
   });
 

@@ -51,10 +51,10 @@
       "verdict": "caught"
     },
     {
-      "file": "apps/api/server/lib/report.ts",
+      "file": "apps/api/server/lib/ports/fs-report-store.ts",
       "before": "    return hashBytes(await readFile(path));",
       "after": "    return hashBytes(Buffer.from(\"stored\", \"utf8\"));",
-      "because": "The revision stops being the digest of the stored bytes and becomes a constant, so every write's base looks unchanged, no merge is ever refused, and the lost update this lane removes is back in full. A revision that is not the bytes is not a revision (D80).",
+      "because": "The revision stops being the digest of the stored bytes and becomes a constant, so every write's base looks unchanged, no merge is ever refused, and the lost update this lane removes is back in full. A revision that is not the bytes is not a revision (D80). Re-anchored 2026-09-24: PT-0a moved the report's file handling from report.ts into ports/fs-report-store.ts (ReportStorePort); the mutation is unchanged in meaning.",
       "command": [
         "yarn",
         "vitest",
@@ -68,9 +68,9 @@
     },
     {
       "file": "apps/api/server/routes/campaigns/generate.post.ts",
-      "before": "      expectedRevision = (await reportRevision(outputRoot(), brief.id)) ?? null;",
-      "after": "      expectedRevision = await reportRevision(outputRoot(), brief.id);",
-      "because": "The route hands `undefined` back for a campaign with no stored report, which is the value writeReport reads as “do not check” — so a re-roll that started against no report writes unconditionally and replaces one that appeared while it ran. Absence has to be named, not defaulted.",
+      "before": "      expectedRevision = (await reportRevision(brief.id)) ?? null;",
+      "after": "      expectedRevision = await reportRevision(brief.id);",
+      "because": "The route hands `undefined` back for a campaign with no stored report, which is the value writeReport reads as “do not check” — so a re-roll that started against no report writes unconditionally and replaces one that appeared while it ran. Absence has to be named, not defaulted. Re-anchored 2026-09-24: PT-0a dropped the outputRoot() argument from reportRevision (the report store owns its root); the mutation is unchanged in meaning.",
       "command": [
         "yarn",
         "vitest",
@@ -100,9 +100,9 @@
     },
     {
       "file": "apps/api/server/routes/campaigns/generate.post.ts",
-      "before": "  const reroll = regenerateOnly !== undefined;\n  let expectedRevision: string | null | undefined;\n  if (reroll) {\n    try {\n      expectedRevision = (await reportRevision(outputRoot(), brief.id)) ?? null;\n    } catch {\n      setResponseStatus(event, 500);\n      return { error: `Could not read the stored report for campaign \"${brief.id}\".` };\n    }\n  }\n\n  // One run per campaign at a time: a double-click or a retry after a poll blip must\n  // not start a second pipeline writing the same output paths and report. The 409\n  // carries the running job's handle (`jobId`) so the second press can adopt the run\n  // in progress and keep polling it — the pipeline really is running, and discarding\n  // it threw away a campaign that succeeded.\n  // A full queue is a capacity answer, not an internal error: every slot is a\n  // live run, so there is nothing to retire (R1). 503 with Retry-After, because\n  // the caller should try again rather than treat it as a broken server - the\n  // one thing it must NOT do is what the old code did, which was delete somebody\n  // else's running campaign to make room.\n  let claim: Awaited<ReturnType<typeof acquireJob>>;\n  try {\n    claim = await acquireJob(brief.id);",
-      "after": "\n  // One run per campaign at a time: a double-click or a retry after a poll blip must\n  // not start a second pipeline writing the same output paths and report. The 409\n  // carries the running job's handle (`jobId`) so the second press can adopt the run\n  // in progress and keep polling it — the pipeline really is running, and discarding\n  // it threw away a campaign that succeeded.\n  // A full queue is a capacity answer, not an internal error: every slot is a\n  // live run, so there is nothing to retire (R1). 503 with Retry-After, because\n  // the caller should try again rather than treat it as a broken server - the\n  // one thing it must NOT do is what the old code did, which was delete somebody\n  // else's running campaign to make room.\n  let claim: Awaited<ReturnType<typeof acquireJob>>;\n  try {\n    claim = await acquireJob(brief.id);\n  const reroll = regenerateOnly !== undefined;\n  let expectedRevision: string | null | undefined;\n  if (reroll) {\n    try {\n      expectedRevision = (await reportRevision(outputRoot(), brief.id)) ?? null;\n    } catch {\n      setResponseStatus(event, 500);\n      return { error: `Could not read the stored report for campaign \"${brief.id}\".` };\n    }\n  }",
-      "because": "The revision is read after `acquireJob` again, so a report nobody can read rejects the request with the job already persisted and “running”: the campaign stays claimed, every later request for it answers 409, and the run that would have cleared the claim never starts. The read has to precede the claim it can otherwise orphan. Re-anchored 2026-09-20: R5 wrapped `acquireJob` in a try/catch so a full queue answers 503, which moved this anchor's tail. The mutation is unchanged in meaning — the revision read still moves after the claim.",
+      "before": "  const reroll = regenerateOnly !== undefined;\n  let expectedRevision: string | null | undefined;\n  if (reroll) {\n    try {\n      expectedRevision = (await reportRevision(brief.id)) ?? null;\n    } catch {\n      setResponseStatus(event, 500);\n      return { error: `Could not read the stored report for campaign \"${brief.id}\".` };\n    }\n  }\n\n  // One run per campaign at a time: a double-click or a retry after a poll blip must\n  // not start a second pipeline writing the same output paths and report. The 409\n  // carries the running job's handle (`jobId`) so the second press can adopt the run\n  // in progress and keep polling it — the pipeline really is running, and discarding\n  // it threw away a campaign that succeeded.\n  // A full queue is a capacity answer, not an internal error: every slot is a\n  // live run, so there is nothing to retire (R1). 503 with Retry-After, because\n  // the caller should try again rather than treat it as a broken server - the\n  // one thing it must NOT do is what the old code did, which was delete somebody\n  // else's running campaign to make room.\n  let claim: Awaited<ReturnType<typeof acquireJob>>;\n  try {\n    claim = await acquireJob(brief.id);",
+      "after": "\n  // One run per campaign at a time: a double-click or a retry after a poll blip must\n  // not start a second pipeline writing the same output paths and report. The 409\n  // carries the running job's handle (`jobId`) so the second press can adopt the run\n  // in progress and keep polling it — the pipeline really is running, and discarding\n  // it threw away a campaign that succeeded.\n  // A full queue is a capacity answer, not an internal error: every slot is a\n  // live run, so there is nothing to retire (R1). 503 with Retry-After, because\n  // the caller should try again rather than treat it as a broken server - the\n  // one thing it must NOT do is what the old code did, which was delete somebody\n  // else's running campaign to make room.\n  let claim: Awaited<ReturnType<typeof acquireJob>>;\n  try {\n    claim = await acquireJob(brief.id);\n  const reroll = regenerateOnly !== undefined;\n  let expectedRevision: string | null | undefined;\n  if (reroll) {\n    try {\n      expectedRevision = (await reportRevision(brief.id)) ?? null;\n    } catch {\n      setResponseStatus(event, 500);\n      return { error: `Could not read the stored report for campaign \"${brief.id}\".` };\n    }\n  }",
+      "because": "The revision is read after `acquireJob` again, so a report nobody can read rejects the request with the job already persisted and “running”: the campaign stays claimed, every later request for it answers 409, and the run that would have cleared the claim never starts. The read has to precede the claim it can otherwise orphan. Re-anchored 2026-09-20: R5 wrapped `acquireJob` in a try/catch so a full queue answers 503, which moved this anchor's tail. The mutation is unchanged in meaning — the revision read still moves after the claim. Re-anchored 2026-09-24: PT-0a dropped the outputRoot() argument from reportRevision (the report store owns its root); the mutation is unchanged in meaning.",
       "command": [
         "yarn",
         "vitest",
@@ -114,10 +114,10 @@
       "verdict": "caught"
     },
     {
-      "file": "apps/api/server/lib/report.ts",
+      "file": "apps/api/server/lib/ports/fs-report-store.ts",
       "before": "    return hashBytes(await readFile(path));",
       "after": "    return hashBytes(Buffer.from(await readFile(path, \"utf8\"), \"utf8\"));",
-      "because": "L10’s pool defect, in the report’s revision: the digest is taken of re-encoded text rather than the stored bytes, so a report whose bytes are not valid UTF-8 — any hand-edited one — hashes to a revision the guard’s own read disagrees with, and every merge over it is refused for a conflict that is not there.",
+      "because": "L10’s pool defect, in the report’s revision: the digest is taken of re-encoded text rather than the stored bytes, so a report whose bytes are not valid UTF-8 — any hand-edited one — hashes to a revision the guard’s own read disagrees with, and every merge over it is refused for a conflict that is not there. Re-anchored 2026-09-24: PT-0a moved the report's file handling from report.ts into ports/fs-report-store.ts (ReportStorePort); the mutation is unchanged in meaning.",
       "command": [
         "yarn",
         "vitest",

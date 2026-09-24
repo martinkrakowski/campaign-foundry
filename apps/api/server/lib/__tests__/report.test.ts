@@ -1,5 +1,13 @@
 import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdtempSync, mkdirSync, readdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+  rmSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import {
@@ -7,14 +15,9 @@ import {
   type GeneratedAsset,
   type PipelineResult,
 } from "@campaignfoundry/CampaignOrchestration";
-import {
-  campaignReportPath,
-  isPersistedAsset,
-  latestReportPath,
-  readReport,
-  reportRevision,
-  writeReport,
-} from "../report.js";
+import { isPersistedAsset, readReport, reportRevision, writeReport } from "../report.js";
+import { campaignReportPath } from "../ports/fs-report-store.js";
+import { resetReportStore, setReportStore } from "../ports/index.js";
 import { hashBytes } from "../brief-files.js";
 
 // node:fs/promises is an ESM namespace (not spy-able), so the report's write path is
@@ -86,21 +89,17 @@ describe("report persistence", () => {
     expect(campaignReportPath(root, "../evil")).toBeNull();
   });
 
-  test("latestReportPath points at report.json", () => {
-    expect(latestReportPath(root)).toBe(resolve(root, "report.json"));
-  });
-
   test("reportRevision is the digest of the stored bytes, and moves when they do", async () => {
-    expect(await reportRevision(root, "camp")).toBeUndefined();
+    expect(await reportRevision("camp")).toBeUndefined();
 
     await writeReport(result([asset()]));
-    const first = await reportRevision(root, "camp");
+    const first = await reportRevision("camp");
     // Not a field on the document: the digest of the file, absent from the payload.
     expect(typeof first).toBe("string");
     expect(readFileSync(campaignReportPath(root, "camp")!, "utf8")).not.toContain(first!);
 
     await writeReport(result([asset({ complianceScore: 0.7 })]));
-    expect(await reportRevision(root, "camp")).not.toBe(first);
+    expect(await reportRevision("camp")).not.toBe(first);
   });
 
   test("reportRevision digests the stored bytes, not a re-encoding of them", async () => {
@@ -115,49 +114,62 @@ describe("report persistence", () => {
     ]);
     writeFileSync(campaignReportPath(root, "camp")!, stored);
 
-    const revision = await reportRevision(root, "camp");
+    const revision = await reportRevision("camp");
     expect(revision).toBe(hashBytes(stored));
     expect(revision).not.toBe(hashBytes(Buffer.from(stored.toString("utf8"), "utf8")));
   });
 
   test("reportRevision is undefined for an unsafe id and throws when the file cannot be read", async () => {
-    expect(await reportRevision(root, "../evil")).toBeUndefined();
+    expect(await reportRevision("../evil")).toBeUndefined();
 
     // A directory where the report should be: not ENOENT, so it is not "nothing stored".
     mkdirSync(campaignReportPath(root, "camp")!, { recursive: true });
-    await expect(reportRevision(root, "camp")).rejects.toThrow();
+    await expect(reportRevision("camp")).rejects.toThrow();
   });
 
   test("readReport returns the parsed per-campaign report", async () => {
     await writeReport(result([asset()]));
-    await expect(readReport(root, "camp")).resolves.toMatchObject({
+    await expect(readReport("camp")).resolves.toMatchObject({
       halted: false,
       assets: [expect.objectContaining({ productId: "alpha" })],
     });
   });
 
   test("readReport returns undefined for an unsafe id", async () => {
-    await expect(readReport(root, "../evil")).resolves.toBeUndefined();
+    await expect(readReport("../evil")).resolves.toBeUndefined();
   });
 
   test("readReport returns undefined when the file is missing", async () => {
-    await expect(readReport(root, "camp")).resolves.toBeUndefined();
+    await expect(readReport("camp")).resolves.toBeUndefined();
   });
 
-  test("readReport returns undefined for invalid JSON", async () => {
+  test("readReport rejects a stored report that does not parse: unreadable is not absent", async () => {
     mkdirSync(resolve(root, "reports"), { recursive: true });
     writeFileSync(resolve(root, "reports", "camp.json"), "{not json");
-    await expect(readReport(root, "camp")).resolves.toBeUndefined();
+    await expect(readReport("camp")).rejects.toThrow(SyntaxError);
   });
 
-  test("writes per-campaign and latest, deriving brandCompliant (density AND logo)", async () => {
+  test("a guarded re-roll over a corrupt report fails and leaves its bytes as they were", async () => {
+    mkdirSync(resolve(root, "reports"), { recursive: true });
+    const path = resolve(root, "reports", "camp.json");
+    writeFileSync(path, "{not json");
+    // The guard hashes the same corrupt bytes, so it agrees; only the read can refuse.
+    const revision = await reportRevision("camp");
+    await expect(
+      writeReport(result([asset()]), { merge: true, expectedRevision: revision }),
+    ).rejects.toThrow(SyntaxError);
+    expect(readFileSync(path, "utf8")).toBe("{not json");
+  });
+
+  test("writes the per-campaign report only, deriving brandCompliant (density AND logo)", async () => {
     const path = await writeReport(result([asset({ logoApplied: false }), beta()]));
     expect(path).toBe(resolve(root, "reports", "camp.json"));
 
     const per = readAssets(path);
     expect(per[0].brandCompliant).toBe(false); // passed but no logo
     expect(per[1].brandCompliant).toBe(true);
-    expect(readAssets(resolve(root, "report.json"))).toHaveLength(2);
+    // No global "latest" pointer (PT-0a): nothing lands at the output root.
+    expect(existsSync(resolve(root, "report.json"))).toBe(false);
   });
 
   test("merge overlays regenerated cells onto the prior report by identity", async () => {
@@ -176,11 +188,11 @@ describe("report persistence", () => {
 
   test("a merge whose report moved under it is refused, and writes nothing", async () => {
     await writeReport(result([asset(), beta()]));
-    const stale = await reportRevision(root, "camp");
+    const stale = await reportRevision("camp");
 
     // Another run's re-roll lands while this one is still going.
     await writeReport(result([asset({ complianceScore: 0.7 })]), { merge: true });
-    const current = await reportRevision(root, "camp");
+    const current = await reportRevision("camp");
 
     // Before this lane: both merges answered 200 and one of the two was gone.
     await expect(
@@ -199,7 +211,7 @@ describe("report persistence", () => {
 
   test("a merge carrying the revision it read is accepted, and keeps the base it merged", async () => {
     await writeReport(result([asset(), beta()]));
-    const revision = await reportRevision(root, "camp");
+    const revision = await reportRevision("camp");
 
     const path = await writeReport(result([asset({ complianceScore: 0.9 })]), {
       merge: true,
@@ -227,7 +239,7 @@ describe("report persistence", () => {
     await expect(
       writeReport(result([asset()]), { merge: true, expectedRevision: null }),
     ).resolves.toBe(campaignReportPath(root, "camp"));
-    const appeared = await reportRevision(root, "camp");
+    const appeared = await reportRevision("camp");
 
     await expect(
       writeReport(result([beta()]), { merge: true, expectedRevision: null }),
@@ -256,17 +268,19 @@ describe("report persistence", () => {
     ).toEqual(["beta", "gamma"]);
   });
 
-  test("a refused merge with no campaign id names no campaign", async () => {
+  test("a guarded merge with no campaign id is refused as idless, before any revision check", async () => {
     await writeReport(result([asset()]));
-    const stale = await reportRevision(root, "camp");
+    const stale = await reportRevision("camp");
     await writeReport(result([asset({ complianceScore: 0.7 })]));
 
+    // A run with no campaign id has no report to guard (PT-0a): the refusal is the
+    // missing id, never a conflict against some other campaign's report.
     await expect(
       writeReport(
         { halted: false, assets: [asset()], log: undefined } as unknown as PipelineResult,
         { merge: true, expectedRevision: stale },
       ),
-    ).rejects.toMatchObject({ code: "ECONFLICT", message: "Report was modified by another run." });
+    ).rejects.toThrow("A run report needs a campaign id; this run has none.");
   });
 
   test("isPersistedAsset requires the four string identity/path fields", () => {
@@ -499,7 +513,7 @@ describe("report persistence", () => {
     );
     const per = readAssets(path);
     expect(per[0].audioRights).toEqual(rights);
-    const stored = await readReport(root, "camp");
+    const stored = await readReport("camp");
     const rows = (stored as { assets: unknown[] }).assets;
     expect(isPersistedAsset(rows[0])).toBe(true);
     expect((rows[0] as { audioRights: unknown }).audioRights).toEqual(rights);
@@ -647,27 +661,16 @@ describe("report persistence", () => {
     expect(readAssets(path)).toHaveLength(1);
   });
 
-  test("falls back to the latest pointer when the run lacks a campaign id", async () => {
-    const path = await writeReport({
-      halted: false,
-      assets: [asset()],
-      log: undefined,
-    } as unknown as PipelineResult);
-    expect(path).toBe(resolve(root, "report.json"));
-  });
-
-  test("merge without a campaign id uses the latest pointer as its base", async () => {
-    await writeReport(result([asset()]));
-    const path = await writeReport(
-      {
+  test("refuses a run that lacks a campaign id, writing nothing", async () => {
+    await expect(
+      writeReport({
         halted: false,
-        assets: [asset({ complianceScore: 0.7 })],
+        assets: [asset()],
         log: undefined,
-      } as unknown as PipelineResult,
-      { merge: true },
-    );
-    expect(path).toBe(resolve(root, "report.json"));
-    expect(readAssets(path)[0].complianceScore).toBe(0.7);
+      } as unknown as PipelineResult),
+    ).rejects.toThrow("A run report needs a campaign id; this run has none.");
+    expect(existsSync(resolve(root, "report.json"))).toBe(false);
+    expect(existsSync(resolve(root, "reports"))).toBe(false);
   });
 
   test("a reader racing a write never parses a partial report", async () => {
@@ -694,7 +697,7 @@ describe("report persistence", () => {
     await halfWritten;
     // The writer is mid-write and a reader runs. It must see the whole prior report,
     // never the half-payload the writer has staged.
-    await expect(readReport(root, "camp")).resolves.toMatchObject({ assets: expect.any(Array) });
+    await expect(readReport("camp")).resolves.toMatchObject({ assets: expect.any(Array) });
     release();
     await writing;
     expect(
@@ -745,17 +748,84 @@ describe("report persistence", () => {
 
     await writeReport(result([asset()]));
 
-    // Both destinations — the per-campaign report and the latest pointer — are
-    // staged: either one written in place is a torn file a reader can parse.
-    for (const destination of [target, resolve(root, "report.json")]) {
-      const operation = renames.find((r) => r.to === destination);
-      expect(operation).toBeDefined();
-      // The staged name is a unique sibling — never the target itself.
-      expect(operation!.from).not.toBe(destination);
-      expect(operation!.from.startsWith(`${destination}.`)).toBe(true);
-      expect(operation!.from.endsWith(".tmp")).toBe(true);
-    }
+    // The report is staged: written in place it is a torn file a reader can parse.
+    expect(renames).toHaveLength(1);
+    const operation = renames[0]!;
+    expect(operation.to).toBe(target);
+    // The staged name is a unique sibling — never the target itself.
+    expect(operation.from).not.toBe(target);
+    expect(operation.from.startsWith(`${target}.`)).toBe(true);
+    expect(operation.from.endsWith(".tmp")).toBe(true);
     // And no temp name survives the write.
     expect(readdirSync(resolve(root, "reports"))).toEqual(["camp.json"]);
+  });
+});
+
+describe("reports go through the report store (PT-0a)", () => {
+  afterEach(() => resetReportStore());
+
+  test("a swapped-in store receives every read, revision and write, and nothing touches disk", async () => {
+    const root = mkdtempSync(join(tmpdir(), "cf-report-port-"));
+    const orig = process.env.OUTPUT_DIR;
+    process.env.OUTPUT_DIR = root;
+    try {
+      const stored = new Map<string, string>();
+      const calls: string[] = [];
+      setReportStore({
+        async readReport(id) {
+          calls.push(`read:${id}`);
+          const raw = stored.get(id);
+          return raw === undefined ? undefined : JSON.parse(raw);
+        },
+        async getRevision(id) {
+          calls.push(`revision:${id}`);
+          return stored.has(id) ? `rev-${stored.get(id)!.length}` : undefined;
+        },
+        async writeReport(id, payload) {
+          calls.push(`write:${id}`);
+          stored.set(id, payload);
+          return `memory:${id}`;
+        },
+      });
+
+      await expect(writeReport(result([asset()]))).resolves.toBe("memory:camp");
+      await writeReport(result([beta()]), {
+        merge: true,
+        expectedRevision: await reportRevision("camp"),
+      });
+
+      expect(((await readReport("camp")) as { assets: unknown[] }).assets).toHaveLength(2);
+      expect(calls).toEqual([
+        "write:camp",
+        "revision:camp",
+        "revision:camp",
+        "read:camp",
+        "write:camp",
+        "read:camp",
+      ]);
+      expect(readdirSync(root)).toEqual([]);
+    } finally {
+      if (orig === undefined) delete process.env.OUTPUT_DIR;
+      else process.env.OUTPUT_DIR = orig;
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("a store that cannot read fails a merge instead of overwriting the report it could not read", async () => {
+    const writes: string[] = [];
+    setReportStore({
+      readReport: async () => {
+        throw new Error("store unavailable");
+      },
+      getRevision: async () => undefined,
+      writeReport: async (id) => {
+        writes.push(id);
+        return id;
+      },
+    });
+    await expect(writeReport(result([asset()]), { merge: true })).rejects.toThrow(
+      "store unavailable",
+    );
+    expect(writes).toEqual([]);
   });
 });

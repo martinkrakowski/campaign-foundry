@@ -85,8 +85,7 @@ export default defineEventHandler(async (event) => {
     return { error: error instanceof Error ? error.message : "Invalid package request" };
   }
 
-  const root = outputRoot();
-  const report = await readReport(root, campaignId);
+  const report = await readReport(campaignId);
   if (report === undefined) {
     setResponseStatus(event, 404);
     return { error: "Campaign report not found" };
@@ -99,7 +98,7 @@ export default defineEventHandler(async (event) => {
   }
 
   const result = await new PackageForPlatformUseCase(
-    new FileSystemPackageStore(root, campaignId),
+    new FileSystemPackageStore(outputRoot(), campaignId),
   ).execute({
     campaignId,
     assets: parsed.assets,

@@ -134,7 +134,7 @@ reuse provided asset → (Firefly | Imagen) → OpenRouter → procedural gradie
 
 Every creative records which source produced its background (`imagen` /
 `openrouter` / `procedural` / `reused`) — surfaced as a badge in the review grid
-and stored in `report.json`. So a fallback (e.g. Imagen hitting its daily quota →
+and stored in the campaign's report (`reports/<campaignId>.json`). So a fallback (e.g. Imagen hitting its daily quota →
 OpenRouter) is **visible, not hidden**. In the HITL UI you can also **pick the
 model at runtime** (the model badge in the header → a picker); the choice is the
 *primary*, with the same chain beneath it. The API accepts it as `?model=<id>`,
@@ -470,13 +470,12 @@ output/
 │   ├── hydra-bottle.pdf
 │   └── trail-pack.pdf
 ├── reports/
-│   └── summer-hydration-2026.json
+│   └── summer-hydration-2026.json   # per-asset compliance (density + logo + brandCompliant) + log
 ├── packages/
 │   └── summer-hydration-2026/
 │       └── instagram-feed/
 │           ├── hydra-bottle/1x1.png
 │           └── manifest.json   # packagedAt + skipped + items
-└── report.json     # per-asset compliance (density + logo + brandCompliant) + log
 ```
 
 When a brief requests **more than one treatment**, creatives nest by treatment so

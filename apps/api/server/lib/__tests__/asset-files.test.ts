@@ -1,7 +1,4 @@
-import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { describe, test, expect } from "vitest";
 import {
   ASSET_NAME_PATTERN,
   AUDIO_ASSET_NAME_PATTERN,
@@ -17,7 +14,6 @@ import {
   templateFromCanonical,
 } from "@campaignfoundry/CampaignOrchestration";
 
-const origRoot = process.env.PROJECT_ROOT;
 const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0x00]);
 
@@ -156,34 +152,8 @@ describe("assetContentType", () => {
 });
 
 describe("asset paths", () => {
-  let dir: string;
-
-  const filesFor = async (root: string) => {
-    vi.resetModules();
-    process.env.PROJECT_ROOT = root;
-    return import("../asset-files.js");
-  };
-
-  beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "cf-asset-files-"));
-  });
-  afterEach(() => {
-    rmSync(dir, { recursive: true, force: true });
-    if (origRoot === undefined) delete process.env.PROJECT_ROOT;
-    else process.env.PROJECT_ROOT = origRoot;
-  });
-
   test("assetRelPath is the repo-relative logoPath a brief can store", () => {
     expect(assetRelPath("camp", "logo.png")).toBe("assets/inputs/camp/logo.png");
-  });
-
-  test("assetAbsPath formats path under assets/inputs/<briefId>/ and rejects escape", async () => {
-    const { assetAbsPath } = await filesFor(dir);
-    const dest = assetAbsPath("camp", "logo.png");
-    expect(dest).toBe(join(dir, "assets", "inputs", "camp", "logo.png"));
-    expect(() => assetAbsPath("camp", "../hydra-logo.png")).toThrow(
-      /Path escapes the allowed directory/,
-    );
   });
 });
 

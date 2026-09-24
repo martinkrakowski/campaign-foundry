@@ -714,15 +714,11 @@ describe("GET /campaigns/result", () => {
     );
   };
 
-  test("returns the empty result when no latest report exists", async () => {
+  test("returns the empty result when no id is given, whatever is on disk (PT-0a)", async () => {
     expect(await (await call()).json()).toEqual({ halted: false, assets: [], log: null });
-  });
-
-  test("returns the latest report when no id is given", async () => {
+    // A stale global report.json from before the pointer retired is never served.
     seed();
-    expect((await (await call()).json()) as { log: { campaignId: string } }).toMatchObject({
-      log: { campaignId: "latest" },
-    });
+    expect(await (await call()).json()).toEqual({ halted: false, assets: [], log: null });
   });
 
   test("returns a specific campaign's report by id", async () => {

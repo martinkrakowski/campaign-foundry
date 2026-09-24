@@ -3,7 +3,6 @@ import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { acquireJob, completeJob, failJob, progressJob, runJob } from "../../lib/jobs.js";
 import { JobCapacityError } from "../../lib/ports/fs-job-store.js";
 import { parseBrief, parseRegenerateOnly } from "../../lib/load-brief.js";
-import { outputRoot } from "../../lib/config.js";
 import { ALLOWED_IMAGE_MODELS, runCampaign } from "../../lib/pipeline.js";
 import { readReport, reportRevision, writeReport } from "../../lib/report.js";
 import {
@@ -35,7 +34,7 @@ async function persistedPolicyHash(
   reroll: boolean,
 ): Promise<string | undefined> {
   if (!reroll || brief.mode !== "variation") return undefined;
-  const report = await readReport(outputRoot(), brief.id);
+  const report = await readReport(brief.id);
   const hash =
     typeof report === "object" && report !== null
       ? (report as { policyHash?: unknown }).policyHash
@@ -56,7 +55,7 @@ async function persistedCopyHash(
   reroll: boolean,
 ): Promise<string | undefined> {
   if (!reroll || brief.mode !== "variation") return undefined;
-  const report = await readReport(outputRoot(), brief.id);
+  const report = await readReport(brief.id);
   const hash =
     typeof report === "object" && report !== null
       ? (report as { copyHash?: unknown }).copyHash
@@ -119,7 +118,7 @@ export default defineEventHandler(async (event) => {
   let expectedRevision: string | null | undefined;
   if (reroll) {
     try {
-      expectedRevision = (await reportRevision(outputRoot(), brief.id)) ?? null;
+      expectedRevision = (await reportRevision(brief.id)) ?? null;
     } catch {
       setResponseStatus(event, 500);
       return { error: `Could not read the stored report for campaign "${brief.id}".` };
