@@ -1,6 +1,6 @@
 # The Asset Model, Finished — Architecture & Development Plan
 
-**Date:** 2026-09-23 · **Status:** **CLOSED — every lane merged, 2026-09-24.** AF3 [#559](https://github.com/martinkrakowski/campaign-foundry/pull/559) (`3208e55c`), AF5 [#560](https://github.com/martinkrakowski/campaign-foundry/pull/560) (`8a0067dd`), AF1 [#562](https://github.com/martinkrakowski/campaign-foundry/pull/562) (`d08fa210`), AF2 [#563](https://github.com/martinkrakowski/campaign-foundry/pull/563) (`8cbcb616`), AF4 [#564](https://github.com/martinkrakowski/campaign-foundry/pull/564) (`cd9abd4e`), AF6 (this status, docs-only push). **D164 was stamped after AF1 had already shipped** (§7). **The Google HTML5 validator check it required was attempted on 2026-09-24 and is inconclusive for display ads** (§7). D165 and D161 are stamped, and L3a is kept as is. **Still open:** the validator check, and AR6 (blocked on D64). r1 was
+**Date:** 2026-09-23 · **Status:** **CLOSED — every lane merged, 2026-09-24.** AF3 [#559](https://github.com/martinkrakowski/campaign-foundry/pull/559) (`3208e55c`), AF5 [#560](https://github.com/martinkrakowski/campaign-foundry/pull/560) (`8a0067dd`), AF1 [#562](https://github.com/martinkrakowski/campaign-foundry/pull/562) (`d08fa210`), AF2 [#563](https://github.com/martinkrakowski/campaign-foundry/pull/563) (`8cbcb616`), AF4 [#564](https://github.com/martinkrakowski/campaign-foundry/pull/564) (`cd9abd4e`), AF6 (this status, docs-only push). **D164 was stamped after AF1 had already shipped** (§7). **The Google HTML5 validator check it required was run three times on 2026-09-24.** The validator only ran its App Campaigns rules, but every display-relevant check passed, and its preview painted the headline once. The one display requirement the bundle was missing, `<meta name="ad.size">`, shipped as [#566](https://github.com/martinkrakowski/campaign-foundry/pull/566) (`e73df68d`) (§7). D165 and D161 are stamped, and L3a is kept as is. **Still open:** the validator check, and AR6 (blocked on D64). r1 was
 reviewed the same day by Fable 5.1 against `425e59e4`. It returned four blocking or major errors in r1
 itself, all corrected here and listed in §8, because they are the kind this repository keeps
 repeating.
@@ -187,10 +187,14 @@ AF4 is blocked on D165 and does not hold a slot while it waits (RW-D4). Each lan
   are playable-ad rules that do not apply to a display ad: `ExitApi.exit()` missing, and 320x480
   dimensions. **Every check that does apply to display passed:** Multiple Click Exits (the
   transparent button plus clickTag is one exit), HTML5 Not Allowed Features, Missing asset, 4th
-  party calls, Secure URL, File Type/Count, Bundle Size and structure. **Still open:** a run under
-  the display rule set (the UPLOAD button with App Campaigns unticked, which only a person can
-  drive), and whether the bundle should carry `<meta name="ad.size" content="width=300,height=250">`.
-  The playable run recommended that tag, and nothing in the codebase emits it (`git grep ad.size` → 0). Recorded as fact, the way the
+  party calls, Secure URL, File Type/Count, Bundle Size and structure. The owner ran a third upload
+  by hand and got the identical App Campaigns result. The validator's own preview painted "Hi"
+  once, which is independent confirmation of H1's fix. **`ad.size` settled:** Google Ads' uploaded
+  display ads specification (support.google.com/google-ads/answer/1722096) requires the size meta
+  tag in `<head>`, and nothing emitted it. [#566](https://github.com/martinkrakowski/campaign-foundry/pull/566)
+  (`e73df68d`) declares the resolved canvas, asserted for three sizes and end to end. **Not
+  obtainable here:** a display-rule verdict from this validator page, which ran the playable rules
+  on every upload. The next real check is an upload in the Google Ads UI. Recorded as fact, the way the
   asset-model plan recorded D161. It is the second time in two plans that a lane shipped ahead of
   its decision.
 - **D165 — stamped** as recommended, and shipped as AF4 (#564). Review of #564 found one more

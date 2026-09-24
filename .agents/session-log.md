@@ -6135,3 +6135,10 @@ and source formatting, recorded here rather than fixed.
   button opens a native file picker); whether to emit `<meta name="ad.size">`; and AR6 (D64).
   The bundle also prints the band height as `205.00000000000003px` (float noise, harmless, not
   fixed).
+- **Addendum, same day:** the owner re-ran the validator by hand and got the same App Campaigns
+  result; its preview showed one "Hi" (H1 fixed). Google Ads' display spec requires
+  `<meta name="ad.size">`, which the bundle lacked. Fixed in
+  [#566](https://github.com/martinkrakowski/campaign-foundry/pull/566), squash `e73df68d`, with its
+  mutation recorded in `.agents/manifests/html-bundle-ad-size.json`. A teardown flake was seen once
+  in `capability-race.test.ts` (`rmSync` ENOTEMPTY); it passed 3/3 on rerun and is not fixed.
+  Still open: a display-rule verdict, which needs a Google Ads UI upload, and AR6 (D64).
