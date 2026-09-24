@@ -286,8 +286,9 @@ describe("POST /campaigns/generate", () => {
       expect(existsSync(resolve(htmlDir, imgSrc))).toBe(true);
 
       expect(html.match(/<img/g)).toHaveLength(1);
-      expect(html).not.toContain("<p");
-      expect(html).not.toContain(">Hi</p>");
+      // D164: the raster paints the headline, so no element may paint it
+      // again — whatever the tag. The copy survives only as the img alt.
+      expect(html).not.toMatch(/>[^<]*Hi[^<]*</);
       expect(html).toContain('alt="Hi"');
     }
   });
