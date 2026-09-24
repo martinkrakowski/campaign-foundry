@@ -27,8 +27,9 @@ describe("FsOutputStore", () => {
     // missing guard changes the answer instead of landing on an empty path.
     mkdirSync(join(root, "evil", "instagram-feed"), { recursive: true });
     writeFileSync(join(root, "evil", "instagram-feed", "manifest.json"), "{}");
-    mkdirSync(join(root, "packages", "camp", "evil"), { recursive: true });
-    writeFileSync(join(root, "packages", "camp", "evil", "manifest.json"), "{}");
+    // "packages/camp/../evil" is "packages/evil".
+    mkdirSync(join(root, "packages", "evil"), { recursive: true });
+    writeFileSync(join(root, "packages", "evil", "manifest.json"), "{}");
     const store = new FsOutputStore(root);
     await expect(store.listPackageManifests("../evil")).resolves.toEqual([]);
     await expect(store.listPackageFiles("../evil", "instagram-feed")).resolves.toBeUndefined();
@@ -67,5 +68,16 @@ describe("FsOutputStore", () => {
         reason: "missing",
       });
     }
+  });
+
+  test("a symlink elsewhere in the root that points into the cache is missing too", async () => {
+    mkdirSync(join(root, "cache"), { recursive: true });
+    writeFileSync(join(root, "cache", "run.json"), "{}");
+    mkdirSync(join(root, "public"), { recursive: true });
+    symlinkSync(join(root, "cache", "run.json"), join(root, "public", "run.json"));
+    await expect(new FsOutputStore(root).openOutput("public/run.json")).resolves.toEqual({
+      found: false,
+      reason: "missing",
+    });
   });
 });

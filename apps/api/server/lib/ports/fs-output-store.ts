@@ -1,5 +1,5 @@
 import { constants, createReadStream } from "node:fs";
-import { open, readdir, readFile, stat, type FileHandle } from "node:fs/promises";
+import { open, readdir, readFile, realpath, stat, type FileHandle } from "node:fs/promises";
 import { basename, join, relative, resolve, sep } from "node:path";
 import { SAFE_ID_PATTERN } from "@campaignfoundry/CampaignOrchestration";
 import { outputRoot } from "../config.js";
@@ -58,14 +58,22 @@ export class FsOutputStore implements OutputStorePort {
       } catch {
         return { found: false, reason: "invalid" };
       }
-      // Judge the hidden areas on the normalized target, not the raw string:
-      // "camp/../cache/run.json" is the run cache however it is spelled.
-      if (isHidden(relative(root, target).split(sep).join("/"))) return MISSING;
       try {
         // A symlink inside the root may aim outside it; resolveConfinedForRead validates
         // the real path and returns it, so the open below re-checks the same real path,
         // not a lexical name that could have been swapped since.
         target = await resolveConfinedForRead(root, relativePath);
+        // Judge the hidden areas on the real target, never the raw string: however the
+        // path is spelled ("camp/../cache/run.json") or wherever a symlink in the root
+        // points, the run cache and the job records are not output.
+        if (
+          isHidden(
+            relative(await realpath(root), target)
+              .split(sep)
+              .join("/"),
+          )
+        )
+          return MISSING;
       } catch {
         return MISSING;
       }
