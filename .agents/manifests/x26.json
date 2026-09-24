@@ -53,10 +53,10 @@
       "verdict": "caught"
     },
     {
-      "file": "apps/api/server/routes/output/[...path].get.ts",
+      "file": "apps/api/server/lib/ports/fs-output-store.ts",
       "before": "constants.O_RDONLY | constants.O_NOFOLLOW",
       "after": "constants.O_RDONLY",
-      "because": "Without O_NOFOLLOW, an entry swapped for an outside-pointing symlink between resolveConfinedForRead's check and this route's own open() is followed instead of rejected with ELOOP, streaming the outside file's bytes with 200 instead of 404.",
+      "because": "Without O_NOFOLLOW, an entry swapped for an outside-pointing symlink between resolveConfinedForRead's check and this route's own open() is followed instead of rejected with ELOOP, streaming the outside file's bytes with 200 instead of 404. Re-anchored 2026-09-24: PT-0a moved the open() into ports/fs-output-store.ts; the mutation is unchanged in meaning.",
       "command": [
         "yarn",
         "vitest",
