@@ -18,6 +18,23 @@
         "the package listing and zip come from the store"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/packages/[campaignId]/[platformZip].get.ts",
+      "before": "    out.push({ name: entry.name, open: () => entry.open(), ...(await measure(entry.open())) });",
+      "after": "    out.push({ name: entry.name, open: entry.open, ...(await measure(entry.open())) });",
+      "because": "a detached open() loses this, so a class-based store's second open during zip streaming cannot read its body (Qodo on #571).",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/__tests__/output-store-routes.test.ts",
+        "-t",
+        "class-based store"
+      ],
+      "verdict": "caught"
     }
   ]
 }

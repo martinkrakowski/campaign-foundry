@@ -14,7 +14,9 @@ const isRewriteError = (error: unknown): boolean => {
 async function measureEntries(entries: readonly PackageFileEntry[]): Promise<FileEntry[]> {
   const out: FileEntry[] = [];
   for (const entry of entries) {
-    out.push({ name: entry.name, open: entry.open, ...(await measure(entry.open())) });
+    // Call through the entry, never a detached copy of its method: a store whose
+    // open() reads instance state through `this` must keep it.
+    out.push({ name: entry.name, open: () => entry.open(), ...(await measure(entry.open())) });
   }
   return out;
 }

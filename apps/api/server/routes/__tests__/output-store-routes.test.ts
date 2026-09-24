@@ -100,4 +100,26 @@ describe("output and package routes read through the output store (PT-0a)", () =
     )(new Request("http://x/campaigns/packages/camp/linkedin.zip"));
     expect(none.status).toBe(404);
   });
+
+  test("a class-based store whose open() reads its own state still zips (the method is not detached)", async () => {
+    class Entry {
+      constructor(
+        readonly name: string,
+        private readonly body: string,
+      ) {}
+      open() {
+        return Readable.from([Buffer.from(this.body)]);
+      }
+    }
+    setOutputStore({
+      ...store,
+      listPackageFiles: async () => [new Entry("manifest.json", "{}")],
+    });
+    const zip = await web(
+      "/campaigns/packages/:campaignId/:platformZip",
+      zipHandler,
+    )(new Request("http://x/campaigns/packages/camp/instagram-feed.zip"));
+    expect(zip.status).toBe(200);
+    expect(Buffer.from(await zip.arrayBuffer()).includes(Buffer.from("{}"))).toBe(true);
+  });
 });
