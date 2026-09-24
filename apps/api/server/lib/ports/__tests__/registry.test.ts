@@ -10,6 +10,10 @@ import {
   resetJobStore,
   resetReportStore,
   setReportStore,
+  getDecisionStore,
+  resetDecisionStore,
+  setDecisionStore,
+  type DecisionStorePort,
   type ReportStorePort,
 } from "../index.js";
 import { LOCAL_TENANT, type TenantContext } from "../../tenant.js";
@@ -83,5 +87,14 @@ describe("the store registry is per tenant", () => {
     } finally {
       process.env.OUTPUT_DIR = before;
     }
+  });
+
+  test("the decision store is per tenant too, and takes a double like the others", () => {
+    expect(getDecisionStore(acme)).not.toBe(getDecisionStore(LOCAL_TENANT));
+    const fake = {} as DecisionStorePort;
+    setDecisionStore(fake);
+    expect(getDecisionStore(acme)).toBe(fake);
+    resetDecisionStore();
+    expect(getDecisionStore(LOCAL_TENANT)).not.toBe(fake);
   });
 });
