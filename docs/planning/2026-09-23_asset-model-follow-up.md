@@ -1,6 +1,6 @@
 # The Asset Model, Finished — Architecture & Development Plan
 
-**Date:** 2026-09-23 · **Status:** **CLOSED — every lane merged, 2026-09-24.** AF3 [#559](https://github.com/martinkrakowski/campaign-foundry/pull/559) (`3208e55c`), AF5 [#560](https://github.com/martinkrakowski/campaign-foundry/pull/560) (`8a0067dd`), AF1 [#562](https://github.com/martinkrakowski/campaign-foundry/pull/562) (`d08fa210`), AF2 [#563](https://github.com/martinkrakowski/campaign-foundry/pull/563) (`8cbcb616`), AF4 [#564](https://github.com/martinkrakowski/campaign-foundry/pull/564) (`cd9abd4e`), AF6 (this status, docs-only push). **D164 was stamped after AF1 had already shipped** (§7). **The Google HTML5 validator check it required was run three times on 2026-09-24.** The validator only ran its App Campaigns rules, but every display-relevant check passed, and its preview painted the headline once. The one display requirement the bundle was missing, `<meta name="ad.size">`, shipped as [#566](https://github.com/martinkrakowski/campaign-foundry/pull/566) (`e73df68d`) (§7). D165 and D161 are stamped, and L3a is kept as is. **Still open:** the validator check, and AR6 (blocked on D64). r1 was
+**Date:** 2026-09-23 · **Status:** **CLOSED — every lane merged, 2026-09-24.** AF3 [#559](https://github.com/martinkrakowski/campaign-foundry/pull/559) (`3208e55c`), AF5 [#560](https://github.com/martinkrakowski/campaign-foundry/pull/560) (`8a0067dd`), AF1 [#562](https://github.com/martinkrakowski/campaign-foundry/pull/562) (`d08fa210`), AF2 [#563](https://github.com/martinkrakowski/campaign-foundry/pull/563) (`8cbcb616`), AF4 [#564](https://github.com/martinkrakowski/campaign-foundry/pull/564) (`cd9abd4e`), AF6 (this status, docs-only push). **D164 was stamped after AF1 had already shipped** (§7). **The Google HTML5 validator check it required was run three times on 2026-09-24.** The validator only ran its App Campaigns rules, but every display-relevant check passed, and its preview painted the headline once. The one display requirement the bundle was missing, `<meta name="ad.size">`, shipped as [#566](https://github.com/martinkrakowski/campaign-foundry/pull/566) (`e73df68d`) (§7). D165 and D161 are stamped, and L3a is kept as is. **Still open:** a Google Ads UI upload for a display-rule verdict (the h5validator only runs playable rules; on the owner's 2026-09-24 run it read `ad.size` and sized the preview to 300x250), and AR6, which waits on a storage plan now that D64 is answered (b), database-fronted, 2026-09-24. r1 was
 reviewed the same day by Fable 5.1 against `425e59e4`. It returned four blocking or major errors in r1
 itself, all corrected here and listed in §8, because they are the kind this repository keeps
 repeating.
@@ -15,7 +15,7 @@ nothing. r1 made that mistake.)
 **Relates to:** D122 (the required raster fallback), D158 (one vocabulary), D160 (linkability as a
 property), D161 (stamped after the fact 2026-09-24), D163 (the bundle's injection guarantees), HL-D1 / HL5f
 (`2026-09-10_the-html-layer.md`), CE2's hit-region decision (`PreviewHitRegions.tsx:96-100`), L3a's
-draft fallback (`editor-state.ts:3303-3318`), **D64** (AR6's blocker, unchanged here).
+draft fallback (`editor-state.ts:3303-3318`), **D64** (AR6's blocker; answered (b), database-fronted, 2026-09-24).
 
 ---
 

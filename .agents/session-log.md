@@ -6150,3 +6150,9 @@ and source formatting, recorded here rather than fixed.
   next test's dir about 3 s later. Runs are now registered before assertions (Qodo's point) and
   settled in `afterEach` before `resetJobs`. `~/Desktop/unit.zip` was rebuilt from `7c7eccac` for the
   owner's Google Ads UI check. AR6 still waits on D64, asked of the owner.
+- **Addendum 3:** the owner's validator run on the rebuilt unit (`c34a3dbb`) read the `ad.size` tag
+  and sized the preview to 300x250. The only failures left are the playable rules (Exit API, and
+  320x480 dimensions), which do not apply to display. **D64 stamped by the owner: (b)
+  database-fronted.** Recorded in the plan that defines it and in every status line that called it
+  open. AR6 and the rest of the D64 list now wait on a storage plan, which is not written yet. C7
+  (re-keying assets to the surrogate id) is still a separate decision for that plan.
