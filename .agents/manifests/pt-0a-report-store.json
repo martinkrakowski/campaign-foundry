@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "PT-0a",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/report.ts",
+      "before": "  return getReportStore().readReport(campaignId);",
+      "after": "  return undefined;",
+      "because": "reads that stop going through the report store return nothing, so the swapped-in store sees no read and the merged report is not found.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/report.test.ts",
+        "-t",
+        "a swapped-in store receives every read"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

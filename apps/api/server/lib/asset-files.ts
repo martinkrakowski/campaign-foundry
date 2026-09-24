@@ -1,7 +1,5 @@
 import { extname } from "node:path";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
-import { projectRoot } from "@campaignfoundry/shared";
-import { resolveConfined } from "./confined-path.js";
 /**
  * Asset basename: a SAFE_ID_PATTERN stem plus a png/jpg/jpeg/mp3/m4a extension.
  * Dots, slashes, and `..` are rejected so the join `assets/inputs/<briefId>/<name>`
@@ -93,16 +91,6 @@ export function assetContentType(name: string): string {
 /** Repo-relative path a brief can put in `logoPath` / `inputAsset`. */
 export function assetRelPath(briefId: string, name: string): string {
   return `assets/inputs/${briefId}/${name}`;
-}
-
-/**
- * Absolute write path under `assets/inputs/<briefId>/<name>`.
- * Confined first to the brief directory, then to the basename, so `../` in
- * `name` cannot reach `assets/inputs/hydra-logo.png`.
- */
-export function assetAbsPath(briefId: string, name: string): string {
-  const dir = resolveConfined(projectRoot(), "assets", "inputs", briefId);
-  return resolveConfined(dir, name);
 }
 
 /**

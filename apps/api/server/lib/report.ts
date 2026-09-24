@@ -1,38 +1,10 @@
-import { randomBytes } from "node:crypto";
-import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
-import { resolve } from "node:path";
-import {
-  assetIdentity,
-  SAFE_ID_PATTERN,
-  isAudioRights,
-} from "@campaignfoundry/CampaignOrchestration";
+import { assetIdentity, isAudioRights } from "@campaignfoundry/CampaignOrchestration";
 import type {
   AudioRights,
   GeneratedAsset,
   PipelineResult,
 } from "@campaignfoundry/CampaignOrchestration";
-import { hashBytes, isErrno } from "./brief-files.js";
-import { outputRoot } from "./config.js";
-
-/**
- * Atomic write: unique temp sibling then rename, so a crash never leaves
- * half-written JSON and a concurrent reader never parses a torn report. The temp
- * name is per-process and random — the pattern both stores use (L9) — because a
- * fixed one would be shared by two overlapping writers: the first rename consumes
- * it and the second writer's rename fails with ENOENT though both writes were fine.
- * The report has no lock to make a shared temp safe, which is exactly why this lane
- * reuses the stores' naming rather than inventing a third shape.
- */
-async function writeAtomic(dest: string, content: string): Promise<void> {
-  const tmp = `${dest}.${process.pid}-${randomBytes(4).toString("hex")}.tmp`;
-  try {
-    await writeFile(tmp, content);
-    await rename(tmp, dest);
-  } catch (error) {
-    await unlink(tmp).catch(() => undefined);
-    throw error;
-  }
-}
+import { getReportStore } from "./ports/index.js";
 
 /** Persisted asset = the entity plus the derived `brandCompliant` view field. */
 type ReportAsset = GeneratedAsset & { brandCompliant: boolean };
@@ -41,49 +13,12 @@ type ReportAsset = GeneratedAsset & { brandCompliant: boolean };
 const keyOf = (a: GeneratedAsset): string => assetIdentity(a);
 
 /**
- * Resolve the per-campaign report path under `<output>/reports/<campaignId>.json`,
- * or null when the id can't be a safe single path segment. The id originates from a
- * brief (validated against the same pattern) but also flows in from the untrusted
- * `?campaignId=` query — so reuse SAFE_ID_PATTERN, the canonical brief/product/treatment
- * slug. It allows only lowercase letters, digits and hyphens, which inherently rules out
- * separators, `.`/`..` traversal, and anything else that isn't one safe path segment.
- */
-export function campaignReportPath(root: string, campaignId: string): string | null {
-  if (!SAFE_ID_PATTERN.test(campaignId)) return null;
-  return resolve(root, "reports", `${campaignId}.json`);
-}
-
-/**
  * Read a campaign's persisted report, or `undefined` when the id is unsafe or
- * the file is missing / unreadable. A file that parses as JSON `null` returns
- * `null` (distinct from missing). Does not merge or write.
+ * the report is missing / unreadable. A report that parses as JSON `null`
+ * returns `null` (distinct from missing). Does not merge or write.
  */
-export async function readReport(root: string, campaignId: string): Promise<unknown> {
-  const path = campaignReportPath(root, campaignId);
-  if (!path) return undefined;
-  try {
-    return JSON.parse(await readFile(path, "utf8"));
-  } catch {
-    return undefined;
-  }
-}
-
-/** The "latest run" pointer — read by GET /campaigns/result when no campaignId is given. */
-export const latestReportPath = (root: string): string => resolve(root, "report.json");
-
-/**
- * The revision of the report stored at `path` — the SHA-256 digest of the stored
- * bytes, never a field on the document (D80): a report is hand-editable, and a
- * revision it could name would not be the digest `writeReport`'s guard hashes.
- * Undefined when nothing is stored there.
- */
-async function revisionAt(path: string): Promise<string | undefined> {
-  try {
-    return hashBytes(await readFile(path));
-  } catch (error) {
-    if (isErrno(error, "ENOENT")) return undefined;
-    throw error;
-  }
+export async function readReport(campaignId: string): Promise<unknown> {
+  return getReportStore().readReport(campaignId);
 }
 
 /**
@@ -91,13 +26,8 @@ async function revisionAt(path: string): Promise<string | undefined> {
  * unsafe or nothing is stored — the value a caller passes back as
  * `writeReport`'s `expectedRevision`. Mirrors `BriefStorePort.getRevision`.
  */
-export async function reportRevision(
-  root: string,
-  campaignId: string,
-): Promise<string | undefined> {
-  const path = campaignReportPath(root, campaignId);
-  if (!path) return undefined;
-  return revisionAt(path);
+export async function reportRevision(campaignId: string): Promise<string | undefined> {
+  return getReportStore().getRevision(campaignId);
 }
 
 /**
@@ -206,15 +136,15 @@ export function isPersistedAsset(a: unknown): a is PersistedAsset {
  * Entries that can't be safely keyed (a hand-edited / corrupt report.json with
  * null/primitive rows) are filtered out so the merge can't throw on `keyOf`.
  */
-async function readPersistedAssets(path: string): Promise<ReportAsset[]> {
+async function readPersistedAssets(campaignId: string): Promise<ReportAsset[]> {
   try {
-    const parsed: unknown = JSON.parse(await readFile(path, "utf8"));
+    const parsed: unknown = await getReportStore().readReport(campaignId);
     const assets = (parsed as { assets?: unknown })?.assets;
     if (!Array.isArray(assets)) return [];
     const persisted = assets.filter(isPersistedAsset) as ReportAsset[];
     if (persisted.length !== assets.length) {
       console.warn(
-        `[report] dropped ${assets.length - persisted.length} invalid persisted asset(s) from report.json during merge`,
+        `[report] dropped ${assets.length - persisted.length} invalid persisted asset(s) from the campaign's report during merge`,
       );
     }
     return persisted;
@@ -224,12 +154,12 @@ async function readPersistedAssets(path: string): Promise<ReportAsset[]> {
 }
 
 /**
- * Persist a run's report under the output root; returns the per-campaign path it wrote.
+ * Persist a run's report through the report store; returns the store's locator.
  *
- * Reports are keyed by campaign id (`<output>/reports/<campaignId>.json`) so every
- * brief's run survives independently — switching briefs in the UI reloads the right
- * one instead of always seeing the most recent run. A copy is also written to the
- * `<output>/report.json` "latest" pointer for callers that don't pass a campaign id.
+ * Reports are keyed by campaign id so every brief's run survives independently —
+ * switching briefs in the UI reloads the right one instead of always seeing the most
+ * recent run. There is no "latest" copy (PT-0a): a run without a campaign id has
+ * nowhere to go and is refused.
  *
  * With `merge` (a selective/HITL re-roll), the run's assets are overlaid onto this
  * campaign's previously persisted set by identity — replacing the regenerated cells
@@ -255,18 +185,11 @@ export async function writeReport(
   result: PipelineResult,
   { merge = false, expectedRevision }: { merge?: boolean; expectedRevision?: string | null } = {},
 ): Promise<string> {
-  const root = outputRoot();
-  const latest = latestReportPath(root);
-  // The campaign id is the report's identity. Fall back to the latest-only pointer if a
-  // run somehow lacks one (defensive — the use case always stamps the brief id).
-  const perCampaign = result.log?.campaignId
-    ? campaignReportPath(root, result.log.campaignId)
-    : null;
-  // The file a merge reads and the one its revision guards: this campaign's own report.
-  const base = perCampaign ?? latest;
-
-  await mkdir(root, { recursive: true });
-  if (perCampaign) await mkdir(resolve(root, "reports"), { recursive: true });
+  // The campaign id is the report's identity: the use case always stamps the brief id,
+  // and a run without one has no report to write (the "latest" pointer is gone).
+  const campaignId = result.log?.campaignId;
+  if (!campaignId) throw new Error("A run report needs a campaign id; this run has none.");
+  const store = getReportStore();
 
   // `brandCompliant` is a derived view field (density gate AND logo present); the
   // entity keeps the two raw signals as the source of truth.
@@ -279,17 +202,14 @@ export async function writeReport(
   // read-modify-write at all — and the base it is refused over is the one it named.
   if (expectedRevision !== undefined) {
     // Absence is an expectation a caller can name, not a hole in the guard: a run that
-    // started against no report says `null`, which `revisionAt` reports as `undefined`.
+    // started against no report says `null`, which the store reports as `undefined`.
     // Carrying `undefined` here would mean "do not check", and a report created while
     // that run was in flight would be overwritten by a merge that never saw it.
     const expected = expectedRevision ?? undefined;
-    const current = await revisionAt(base);
+    const current = await store.getRevision(campaignId);
     if (current !== expected) {
-      const campaignId = result.log?.campaignId;
       const conflict = new Error(
-        campaignId
-          ? `Report for campaign "${campaignId}" was modified by another run.`
-          : "Report was modified by another run.",
+        `Report for campaign "${campaignId}" was modified by another run.`,
       );
       (conflict as { code?: string }).code = "ECONFLICT";
       (conflict as { revision?: string }).revision = current;
@@ -302,7 +222,9 @@ export async function writeReport(
     // Merge against this campaign's own prior report (not the global latest), so a
     // re-roll of one brief never folds in another brief's creatives. Map preserves
     // existing order; re-keying an existing entry updates it in place, new cells append.
-    const byKey = new Map((await readPersistedAssets(base)).map((a) => [keyOf(a), a] as const));
+    const byKey = new Map(
+      (await readPersistedAssets(campaignId)).map((a) => [keyOf(a), a] as const),
+    );
     for (const a of fresh) byKey.set(keyOf(a), a);
     assets = [...byKey.values()];
   }
@@ -319,7 +241,5 @@ export async function writeReport(
     null,
     2,
   );
-  if (perCampaign) await writeAtomic(perCampaign, payload);
-  await writeAtomic(latest, payload);
-  return perCampaign ?? latest;
+  return store.writeReport(campaignId, payload);
 }
