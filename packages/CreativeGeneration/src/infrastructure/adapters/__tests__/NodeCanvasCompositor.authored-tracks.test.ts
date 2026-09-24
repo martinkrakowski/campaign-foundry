@@ -11,6 +11,7 @@ import {
 } from "@campaignfoundry/CampaignOrchestration";
 import { NodeCanvasCompositor } from "../NodeCanvasCompositor.js";
 
+import { projectRoot } from "@campaignfoundry/shared";
 /**
  * K4: the missing read this lane closes — nothing in `NodeCanvasCompositor.ts`
  * read a layer's OWN `tracks` field before this PR (K2/K3 only ever passed
@@ -82,14 +83,14 @@ const imageTemplateWith = (layers: readonly CreativeTemplateLayer[]): BriefTempl
 });
 
 async function renderStill(req: TemplateRequest): Promise<Buffer> {
-  const prepared = await NodeCanvasCompositor.prepare(req);
+  const prepared = await NodeCanvasCompositor.prepare(req, "Inter", projectRoot());
   const ctx = createCanvas(prepared.width, prepared.height).getContext("2d");
   NodeCanvasCompositor.draw(ctx, prepared, 1);
   return ctx.canvas.toBuffer("image/png");
 }
 
 async function renderTimelineAt(req: TemplateRequest, t: number, copyT: number): Promise<Buffer> {
-  const prepared = await NodeCanvasCompositor.prepare(req);
+  const prepared = await NodeCanvasCompositor.prepare(req, "Inter", projectRoot());
   const ctx = createCanvas(prepared.width, prepared.height).getContext("2d");
   NodeCanvasCompositor.draw(ctx, prepared, t, undefined, copyT, 1);
   return ctx.canvas.toBuffer("image/png");
@@ -197,7 +198,11 @@ describe("K4: authored tracks compose with a preset in the fixed fold order (K-D
     // an 8-bit read-back off the rasterised pixel, which would quantize the
     // pose away from the pinned float (the same technique
     // `NodeCanvasCompositor.text-effect.test.ts` uses).
-    const prepared = await NodeCanvasCompositor.prepare(request({ template }));
+    const prepared = await NodeCanvasCompositor.prepare(
+      request({ template }),
+      "Inter",
+      projectRoot(),
+    );
     const canvas = createCanvas(prepared.width, prepared.height);
     const ctx = canvas.getContext("2d");
     let capturedAlpha: number | undefined;

@@ -77,7 +77,7 @@ const templateWithCopyKind = (copyKind: "static-text" | "animated-text"): BriefT
 const corruptLogo = resolve(projectRoot(), "assets/__cf-corrupt-logo-fixture.png");
 
 describe("NodeCanvasCompositor", () => {
-  const compositor = new NodeCanvasCompositor();
+  const compositor = new NodeCanvasCompositor("Inter", projectRoot());
 
   beforeAll(() => writeFileSync(corruptLogo, "not a real image"));
   afterAll(() => rmSync(corruptLogo, { force: true }));
@@ -92,7 +92,7 @@ describe("NodeCanvasCompositor", () => {
   });
 
   test("static prepare defaults the font family to Inter", async () => {
-    const prepared = await NodeCanvasCompositor.prepare(request());
+    const prepared = await NodeCanvasCompositor.prepare(request(), "Inter", projectRoot());
     expect(prepared.fontFamily).toBe("Inter");
   });
 
@@ -172,7 +172,11 @@ describe("NodeCanvasCompositor", () => {
         { id: "static-text", kind: "static-text" },
       ],
     };
-    const prepared = await NodeCanvasCompositor.prepare(request({ template }));
+    const prepared = await NodeCanvasCompositor.prepare(
+      request({ template }),
+      "Inter",
+      projectRoot(),
+    );
     expect(prepared.logo).toBeDefined();
     expect(prepared.logoApplied).toBe(false);
 
@@ -388,6 +392,8 @@ describe("NodeCanvasCompositor", () => {
     const r = ratio("9:16");
     const prepared = await NodeCanvasCompositor.prepare(
       request({ layout: "headline-top", canvas: { ratio: r.value }, safeInsets: insets }),
+      "Inter",
+      projectRoot(),
     );
     expect(prepared.logo?.x).toBe(insets.left);
     expect(prepared.logo?.y).toBe(insets.top);
@@ -409,15 +415,28 @@ describe("NodeCanvasCompositor", () => {
   });
 
   test("prepare derives the anchor from layout when the request omits it (T4)", async () => {
-    expect((await NodeCanvasCompositor.prepare(request({ layout: "headline-top" }))).anchor).toBe(
-      "top",
-    );
     expect(
-      (await NodeCanvasCompositor.prepare(request({ layout: "headline-bottom" }))).anchor,
+      (
+        await NodeCanvasCompositor.prepare(
+          request({ layout: "headline-top" }),
+          "Inter",
+          projectRoot(),
+        )
+      ).anchor,
+    ).toBe("top");
+    expect(
+      (
+        await NodeCanvasCompositor.prepare(
+          request({ layout: "headline-bottom" }),
+          "Inter",
+          projectRoot(),
+        )
+      ).anchor,
     ).toBe("bottom");
-    expect((await NodeCanvasCompositor.prepare(request({ anchor: "middle" }))).anchor).toBe(
-      "middle",
-    );
+    expect(
+      (await NodeCanvasCompositor.prepare(request({ anchor: "middle" }), "Inter", projectRoot()))
+        .anchor,
+    ).toBe("middle");
   });
 
   test("an absent anchor and its derived explicit anchor produce identical PNG bytes (D54)", async () => {
@@ -557,9 +576,9 @@ describe("NodeCanvasCompositor", () => {
   ] as const)(
     "prepare throws naming safeInsets.%s when that side is not a finite ≥ 0",
     async (side, safeInsets) => {
-      await expect(NodeCanvasCompositor.prepare(request({ safeInsets }))).rejects.toThrow(
-        new RegExp(`safeInsets\\.${side}`),
-      );
+      await expect(
+        NodeCanvasCompositor.prepare(request({ safeInsets }), "Inter", projectRoot()),
+      ).rejects.toThrow(new RegExp(`safeInsets\\.${side}`));
     },
   );
 
@@ -567,6 +586,8 @@ describe("NodeCanvasCompositor", () => {
     await expect(
       NodeCanvasCompositor.prepare(
         request({ safeInsets: { top: 540, right: 0, bottom: 540, left: 0 } }),
+        "Inter",
+        projectRoot(),
       ),
     ).rejects.toThrow(/safeInsets\.top \+ safeInsets\.bottom/);
   });
@@ -578,6 +599,8 @@ describe("NodeCanvasCompositor", () => {
           canvas: { ratio: "16:9" },
           safeInsets: { top: 0, right: 960, bottom: 0, left: 960 },
         }),
+        "Inter",
+        projectRoot(),
       ),
     ).rejects.toThrow(/safeInsets\.left \+ safeInsets\.right/);
   });
@@ -585,7 +608,7 @@ describe("NodeCanvasCompositor", () => {
   test("a still render fits the headline once (C5)", async () => {
     wrapCapture.maxWidths = [];
     const req = request({ message: "Stay wild, stay hydrated" });
-    const prepared = await NodeCanvasCompositor.prepare(req);
+    const prepared = await NodeCanvasCompositor.prepare(req, "Inter", projectRoot());
     expect(wrapCapture.maxWidths).toHaveLength(1);
 
     const canvas = createCanvas(prepared.width, prepared.height);
@@ -609,7 +632,7 @@ async function blit(
   req: CompositeRequest,
 ): Promise<{ fillText: BlitPoint[]; drawImage: BlitImage[]; wrapWidths: number[] }> {
   wrapCapture.maxWidths = [];
-  const prepared = await NodeCanvasCompositor.prepare(req);
+  const prepared = await NodeCanvasCompositor.prepare(req, "Inter", projectRoot());
   const canvas = createCanvas(prepared.width, prepared.height);
   const ctx = canvas.getContext("2d");
   const fillText: BlitPoint[] = [];

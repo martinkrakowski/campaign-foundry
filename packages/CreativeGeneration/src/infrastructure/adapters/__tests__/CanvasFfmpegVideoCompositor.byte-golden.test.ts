@@ -21,6 +21,7 @@ import {
   type GoldenRun,
 } from "./compositor-golden-key.js";
 
+import { projectRoot } from "@campaignfoundry/shared";
 /**
  * VG2 — the MP4 byte golden. D10 claims motion bytes are frozen; the still
  * goldens hash PNGs and C1's motion goldens hash individual frames, but
@@ -158,9 +159,10 @@ describe("CanvasFfmpegVideoCompositor byte golden (VG2)", () => {
       // extracts streams with (`ffmpegPath`, honouring COMPOSITOR_FFMPEG_PATH) —
       // otherwise a hash mismatch could mean "two different ffmpeg builds",
       // not "the encoder changed". VE3b1's audio golden already had this shape.
-      const { video } = await new CanvasFfmpegVideoCompositor({ ffmpegPath }).compositeVideo(
-        canonicalMp4Request(),
-      );
+      const { video } = await new CanvasFfmpegVideoCompositor({
+        ffmpegPath,
+        assetRoot: projectRoot(),
+      }).compositeVideo(canonicalMp4Request());
       const banner = parseX264Banner(video);
 
       const dir = mkdtempSync(join(tmpdir(), "cf-mp4-golden-"));
@@ -210,9 +212,11 @@ describe("CanvasFfmpegVideoCompositor byte golden (VG2)", () => {
         const alias = join(dir, "ffmpeg-resolved");
         linkSync(ffmpegPath, alias);
 
-        await new CanvasFfmpegVideoCompositor({ ffmpegPath: alias, spawn }).compositeVideo(
-          canonicalMp4Request(),
-        );
+        await new CanvasFfmpegVideoCompositor({
+          ffmpegPath: alias,
+          spawn,
+          assetRoot: projectRoot(),
+        }).compositeVideo(canonicalMp4Request());
 
         expect(invocations.map((call) => call.command)).toEqual([alias]);
         expect(invocations[0].args).toContain("libx264");

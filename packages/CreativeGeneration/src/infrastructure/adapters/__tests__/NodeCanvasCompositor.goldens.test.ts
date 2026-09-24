@@ -33,6 +33,7 @@ import {
   type GoldenRun,
 } from "./compositor-golden-key.js";
 
+import { projectRoot } from "@campaignfoundry/shared";
 const LAYOUTS: readonly LayoutKind[] = ["headline-bottom", "headline-top"];
 const TONES: readonly ToneKind[] = ["bold", "subtle"];
 const RATIOS = ["1:1", "9:16", "16:9"] as const;
@@ -80,7 +81,7 @@ const finishGolden = (
 };
 
 describe("NodeCanvasCompositor goldens", () => {
-  const compositor = new NodeCanvasCompositor();
+  const compositor = new NodeCanvasCompositor("Inter", projectRoot());
   const backgrounds = new ProceduralBackgroundGenerator();
   const key = compositorGoldenKey();
   const recording = isRecordingGoldens();
@@ -141,7 +142,7 @@ describe("NodeCanvasCompositor goldens", () => {
             };
             // One prepare per cell; the still and all four rest-pose frames share it
             // (the still test above already proves compositeAsset matches the map).
-            const prepared = await NodeCanvasCompositor.prepare(request);
+            const prepared = await NodeCanvasCompositor.prepare(request, "Inter", projectRoot());
             const canvas = createCanvas(prepared.width, prepared.height);
             const ctx = canvas.getContext("2d");
             NodeCanvasCompositor.draw(ctx, prepared, 1);
@@ -171,7 +172,7 @@ const insetFixture = JSON.parse(readFileSync(insetsPath, "utf8")) as GoldenFixtu
 // wrap width, clamping, overlap, and validation. A missing map fails (D115);
 // record via record-goldens.yml on the platform that will assert it.
 describe("NodeCanvasCompositor inset goldens", () => {
-  const compositor = new NodeCanvasCompositor();
+  const compositor = new NodeCanvasCompositor("Inter", projectRoot());
   const backgrounds = new ProceduralBackgroundGenerator();
   const key = compositorGoldenKey();
   const recording = isRecordingGoldens();
@@ -223,7 +224,7 @@ const displayBackground = (size: DisplaySize): Uint8Array => {
 };
 
 describe("NodeCanvasCompositor display goldens", () => {
-  const compositor = new NodeCanvasCompositor();
+  const compositor = new NodeCanvasCompositor("Inter", projectRoot());
   const key = compositorGoldenKey();
   const recording = isRecordingGoldens();
   const goldens = resolveGoldenMap(displayFixture, key);
@@ -262,7 +263,7 @@ describe("NodeCanvasCompositor display goldens", () => {
 });
 
 describe("NodeCanvasCompositor display inset goldens", () => {
-  const compositor = new NodeCanvasCompositor();
+  const compositor = new NodeCanvasCompositor("Inter", projectRoot());
   const key = compositorGoldenKey();
   const recording = isRecordingGoldens();
   const goldens = resolveGoldenMap(displayInsetFixture, key);

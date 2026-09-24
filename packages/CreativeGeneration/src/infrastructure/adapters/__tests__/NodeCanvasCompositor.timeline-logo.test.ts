@@ -7,6 +7,7 @@ import type {
 } from "@campaignfoundry/CampaignOrchestration";
 import { NodeCanvasCompositor } from "../NodeCanvasCompositor.js";
 
+import { projectRoot } from "@campaignfoundry/shared";
 /**
  * The motion path (`drawTimeline`, used for `copy.timeline` briefs) must draw
  * the brand logo if and only if `logoApplied` reports it — the same fact the
@@ -85,7 +86,11 @@ function drawImageCallCount(
 
 describe("the motion path draws the logo iff logoApplied reports it (D7/F2)", () => {
   test("a timeline template with no logo layer draws no logo pixels, and reports logoApplied: false", async () => {
-    const prepared = await NodeCanvasCompositor.prepare(request(templateWithoutLogo));
+    const prepared = await NodeCanvasCompositor.prepare(
+      request(templateWithoutLogo),
+      "Inter",
+      projectRoot(),
+    );
     // The file loaded fine; the resolved layer list simply omits `logo`.
     expect(prepared.logo).toBeDefined();
     expect(prepared.logoApplied).toBe(false);
@@ -98,7 +103,11 @@ describe("the motion path draws the logo iff logoApplied reports it (D7/F2)", ()
   });
 
   test("a timeline template with a logo layer draws the logo, and reports logoApplied: true", async () => {
-    const prepared = await NodeCanvasCompositor.prepare(request(templateWithLogo));
+    const prepared = await NodeCanvasCompositor.prepare(
+      request(templateWithLogo),
+      "Inter",
+      projectRoot(),
+    );
     expect(prepared.logo).toBeDefined();
     expect(prepared.logoApplied).toBe(true);
 

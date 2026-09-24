@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "PT-0b1",
+  "mutations": [
+    {
+      "file": "packages/CreativeGeneration/src/infrastructure/safe-path.ts",
+      "before": "  const assetBase = resolve(root, \"assets\");",
+      "after": "  const assetBase = resolve(process.cwd(), \"assets\");",
+      "because": "confining to the process working directory instead of the root the caller was constructed with rejects an asset under a tenant root (D167).",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CreativeGeneration/src/infrastructure/__tests__/safe-path.test.ts",
+        "-t",
+        "confines to the root it is given"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

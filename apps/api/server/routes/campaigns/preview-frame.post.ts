@@ -16,7 +16,7 @@ import {
   type PreviewCellSelection,
   type PreviewFrameCacheEntry,
 } from "@campaignfoundry/CampaignOrchestration";
-import { errorMessage } from "@campaignfoundry/shared";
+import { errorMessage, projectRoot } from "@campaignfoundry/shared";
 import {
   CanvasFfmpegVideoCompositor,
   FileSystemSceneAssetResolver,
@@ -56,13 +56,19 @@ export const PREVIEW_FRAME_CACHE_ENTRIES = 32;
 
 /** The preview's background source, wired directly (D52 credit safety). Exported for the wiring test. */
 export const previewBackgroundGenerator = new ProceduralBackgroundGenerator();
-export const previewCompositor = new NodeCanvasCompositor(process.env.MESSAGE_FONT);
+// PT-0b2 moves these import-time env reads to the composition root; until then
+// they keep their behaviour, and only gain the asset root the adapters now take.
+export const previewCompositor = new NodeCanvasCompositor(
+  process.env.MESSAGE_FONT ?? "Inter",
+  projectRoot(),
+);
 export const previewVideoCompositor = new CanvasFfmpegVideoCompositor({
   fontFamily: process.env.MESSAGE_FONT,
+  assetRoot: projectRoot(),
 });
 // VE5b2: a beat's own scene is a reused uploaded asset, never a GenAI call, so
 // wiring the real resolver here carries none of D52's credit-safety concern.
-export const previewSceneAssets = new FileSystemSceneAssetResolver();
+export const previewSceneAssets = new FileSystemSceneAssetResolver(projectRoot());
 export const previewFrameCache = new LruCache<PreviewFrameCacheEntry>(PREVIEW_FRAME_CACHE_ENTRIES);
 
 const sha256 = (input: string | Uint8Array): string =>

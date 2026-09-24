@@ -25,6 +25,7 @@ import {
   type GoldenFixture,
 } from "./compositor-golden-key.js";
 
+import { projectRoot } from "@campaignfoundry/shared";
 const LAYOUTS: readonly LayoutKind[] = ["headline-bottom", "headline-top"];
 const TONES: readonly ToneKind[] = ["bold", "subtle"];
 const RATIOS = ["1:1", "9:16", "16:9"] as const;
@@ -104,7 +105,7 @@ describe("NodeCanvasCompositor D10 — the legacy path is byte-identical after t
               layout,
               tone,
             };
-            const prepared = await NodeCanvasCompositor.prepare(request);
+            const prepared = await NodeCanvasCompositor.prepare(request, "Inter", projectRoot());
             expect(sha256(render(prepared, 1))).toBe(map[cellKey(layout, tone, ratioValue)]);
 
             for (const kind of MOTION_KINDS) {
@@ -160,7 +161,7 @@ describe("NodeCanvasCompositor D10 — the legacy path is byte-identical after t
       ];
 
       for (const request of variants) {
-        const prepared = await NodeCanvasCompositor.prepare(request);
+        const prepared = await NodeCanvasCompositor.prepare(request, "Inter", projectRoot());
         for (const kind of [undefined, ...MOTION_KINDS] as const) {
           for (const t of [0, 0.5, 1] as const) {
             // Comparing `draw` against `drawLegacy` pixel-for-pixel would be tautological:

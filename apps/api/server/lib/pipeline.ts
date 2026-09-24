@@ -25,7 +25,7 @@ import {
 } from "@campaignfoundry/CreativeGeneration";
 import { BrandComplianceChecker } from "@campaignfoundry/GovernanceAndCompliance";
 import { FileSystemExporter } from "@campaignfoundry/Distribution";
-import { err, type Result } from "@campaignfoundry/shared";
+import { err, projectRoot, type Result } from "@campaignfoundry/shared";
 import { outputRoot } from "./config.js";
 import { platformZones } from "./platform-zones.js";
 import { planInputFor, pooledPlanner } from "./pools.js";
@@ -112,7 +112,7 @@ function imageGenerator(selected?: string): ImageGeneratorPort {
   else if (selected && selected.includes("/")) generator = openRouter(selected);
   else generator = imagen(); // "auto" / "imagen" / unset → default chain
 
-  return new AssetReusingImageGenerator(generator);
+  return new AssetReusingImageGenerator(generator, projectRoot());
 }
 
 /**
@@ -148,13 +148,16 @@ export function buildPipeline(
     imageGenerator: imageGenerator(imageModel),
     proceduralGenerator: new ProceduralBackgroundGenerator(),
     planner: pooledPlanner(planInput),
-    compositor: new NodeCanvasCompositor(messageFont()),
+    compositor: new NodeCanvasCompositor(messageFont(), projectRoot()),
     // Motion variants only; the parser has already gated them on the ffmpeg probe.
-    videoCompositor: new CanvasFfmpegVideoCompositor({ fontFamily: messageFont() }),
+    videoCompositor: new CanvasFfmpegVideoCompositor({
+      fontFamily: messageFont(),
+      assetRoot: projectRoot(),
+    }),
     // VE5b2: resolves a timeline beat's own background — motion variants only.
-    sceneAssets: new FileSystemSceneAssetResolver(),
+    sceneAssets: new FileSystemSceneAssetResolver(projectRoot()),
     // VE3b2: resolves the brief's music bed (audio.path) — motion variants only.
-    audioAssets: new FileSystemAudioAssetResolver(),
+    audioAssets: new FileSystemAudioAssetResolver(projectRoot()),
     compliance: new BrandComplianceChecker(),
     exporter: new FileSystemExporter(outputRoot()),
     now: () => new Date(),

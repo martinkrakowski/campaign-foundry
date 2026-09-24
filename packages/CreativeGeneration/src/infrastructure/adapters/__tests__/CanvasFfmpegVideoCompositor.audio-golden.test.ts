@@ -21,6 +21,7 @@ import {
   type GoldenRun,
 } from "./compositor-golden-key.js";
 
+import { projectRoot } from "@campaignfoundry/shared";
 /**
  * VE3b1 — the audio byte golden.
  *
@@ -181,7 +182,10 @@ describe("CanvasFfmpegVideoCompositor audio byte golden (VE3b1)", () => {
       // extracts streams with (`ffmpegPath`, honouring COMPOSITOR_FFMPEG_PATH) —
       // otherwise a hash mismatch could mean "two different ffmpeg builds",
       // not "the encoder changed".
-      const { video } = await new CanvasFfmpegVideoCompositor({ ffmpegPath }).compositeVideo({
+      const { video } = await new CanvasFfmpegVideoCompositor({
+        ffmpegPath,
+        assetRoot: projectRoot(),
+      }).compositeVideo({
         ...request,
         audio,
       });

@@ -31,6 +31,7 @@ import {
   type FfmpegSpawn,
 } from "../CanvasFfmpegVideoCompositor.js";
 
+import { projectRoot } from "@campaignfoundry/shared";
 const PNG_MAGIC = [0x89, 0x50, 0x4e, 0x47];
 
 interface Mp4Box {
@@ -212,7 +213,7 @@ describe("CanvasFfmpegVideoCompositor", () => {
     async () => {
       const spawn: FfmpegSpawn = (command, args, options) =>
         realSpawn(command, ["-not-a-real-flag", ...args], options);
-      const compositor = new CanvasFfmpegVideoCompositor({ spawn });
+      const compositor = new CanvasFfmpegVideoCompositor({ spawn, assetRoot: projectRoot() });
       await expect(
         compositor.compositeVideo(videoRequest({ durationSec: 5, fps: 30 })),
       ).rejects.toSatisfy((error: unknown) => {
@@ -226,6 +227,7 @@ describe("CanvasFfmpegVideoCompositor", () => {
       const next = new CanvasFfmpegVideoCompositor({
         spawn: fakeFfmpeg({}),
         ffmpegPath: "/opt/ffmpeg",
+        assetRoot: projectRoot(),
       });
       await expect(next.compositeVideo(videoRequest({ sampleAt: [] }))).resolves.toBeTruthy();
     },
@@ -236,7 +238,7 @@ describe("CanvasFfmpegVideoCompositor", () => {
     async () => {
       const dir = mkdtempSync(join(tmpdir(), "cf-video-"));
       try {
-        const compositor = new CanvasFfmpegVideoCompositor();
+        const compositor = new CanvasFfmpegVideoCompositor({ assetRoot: projectRoot() });
         const out = await compositor.compositeVideo(videoRequest({ sampleAt: [0, 0.5, 1] }));
         writeFileSync(join(dir, "clip.mp4"), out.video);
         const bytes = Buffer.from(out.video);
@@ -269,6 +271,7 @@ describe("CanvasFfmpegVideoCompositor", () => {
     const compositor = new CanvasFfmpegVideoCompositor({
       spawn: fakeFfmpeg({}),
       ffmpegPath: "/opt/ffmpeg",
+      assetRoot: projectRoot(),
     });
     await expect(
       compositor.compositeVideo(videoRequest({ durationSec: 0.05, fps: 12 })),
@@ -281,6 +284,7 @@ describe("CanvasFfmpegVideoCompositor", () => {
       const compositor = new CanvasFfmpegVideoCompositor({
         spawn: fakeFfmpeg({}),
         ffmpegPath: "/opt/ffmpeg",
+        assetRoot: projectRoot(),
       });
       await expect(
         compositor.compositeVideo(videoRequest({ fps: fps as unknown as number })),
@@ -299,6 +303,7 @@ describe("CanvasFfmpegVideoCompositor", () => {
       const compositor = new CanvasFfmpegVideoCompositor({
         spawn: fakeFfmpeg({}),
         ffmpegPath: "/opt/ffmpeg",
+        assetRoot: projectRoot(),
       });
       await expect(
         compositor.compositeVideo(videoRequest({ durationSec: durationSec as unknown as number })),
@@ -310,6 +315,7 @@ describe("CanvasFfmpegVideoCompositor", () => {
     const compositor = new CanvasFfmpegVideoCompositor({
       spawn: fakeFfmpeg({}),
       ffmpegPath: "/opt/ffmpeg",
+      assetRoot: projectRoot(),
     });
     await expect(
       compositor.compositeVideo(videoRequest({ sampleAt: [t as unknown as number] })),
@@ -320,6 +326,7 @@ describe("CanvasFfmpegVideoCompositor", () => {
     const compositor = new CanvasFfmpegVideoCompositor({
       spawn: fakeFfmpeg({}),
       ffmpegPath: "/opt/ffmpeg",
+      assetRoot: projectRoot(),
     });
     await expect(
       compositor.compositeVideo(videoRequest({ sampleAt: 0.5 as unknown as number[] })),
@@ -330,6 +337,7 @@ describe("CanvasFfmpegVideoCompositor", () => {
     const compositor = new CanvasFfmpegVideoCompositor({
       spawn: fakeFfmpeg({}),
       ffmpegPath: "/opt/ffmpeg",
+      assetRoot: projectRoot(),
     });
     const out = await compositor.compositeVideo(videoRequest({ sampleAt: [1, 0.5, 0, 0.5, 1] }));
     expect(out.sampledFrames).toHaveLength(3);
@@ -343,6 +351,7 @@ describe("CanvasFfmpegVideoCompositor", () => {
     const compositor = new CanvasFfmpegVideoCompositor({
       spawn: fakeFfmpeg({}),
       ffmpegPath: "/opt/ffmpeg",
+      assetRoot: projectRoot(),
     });
     await expect(
       compositor.compositeVideo(videoRequest({ fps: 1, durationSec: 60, sampleAt: [] })),
@@ -352,7 +361,11 @@ describe("CanvasFfmpegVideoCompositor", () => {
   });
 
   test("rejects when ffmpeg-static path is missing", async () => {
-    const compositor = new CanvasFfmpegVideoCompositor({ spawn: fakeFfmpeg({}), ffmpegPath: null });
+    const compositor = new CanvasFfmpegVideoCompositor({
+      spawn: fakeFfmpeg({}),
+      ffmpegPath: null,
+      assetRoot: projectRoot(),
+    });
     await expect(compositor.compositeVideo(videoRequest())).rejects.toThrow(
       /ffmpeg-static binary is not available/,
     );
@@ -362,6 +375,7 @@ describe("CanvasFfmpegVideoCompositor", () => {
     const compositor = new CanvasFfmpegVideoCompositor({
       spawn: fakeFfmpeg({ missingStdio: true }),
       ffmpegPath: "/opt/ffmpeg",
+      assetRoot: projectRoot(),
     });
     await expect(compositor.compositeVideo(videoRequest())).rejects.toThrow(
       /stdio pipes were not created/,
@@ -373,6 +387,7 @@ describe("CanvasFfmpegVideoCompositor", () => {
     const compositor = new CanvasFfmpegVideoCompositor({
       spawn: fakeFfmpeg({ code: 1, stderr }),
       ffmpegPath: "/opt/ffmpeg",
+      assetRoot: projectRoot(),
     });
     await expect(compositor.compositeVideo(videoRequest())).rejects.toSatisfy((error: unknown) => {
       const message = error instanceof Error ? error.message : String(error);
@@ -389,6 +404,7 @@ describe("CanvasFfmpegVideoCompositor", () => {
     const compositor = new CanvasFfmpegVideoCompositor({
       spawn: fakeFfmpeg({ code: 1, stderr }),
       ffmpegPath: "/opt/ffmpeg",
+      assetRoot: projectRoot(),
     });
     await expect(compositor.compositeVideo(videoRequest())).rejects.toSatisfy((error: unknown) => {
       const message = error instanceof Error ? error.message : String(error);
@@ -404,6 +420,7 @@ describe("CanvasFfmpegVideoCompositor", () => {
     const compositor = new CanvasFfmpegVideoCompositor({
       spawn: fakeFfmpeg({ code: 1, stderr }),
       ffmpegPath: "/opt/ffmpeg",
+      assetRoot: projectRoot(),
     });
     await expect(compositor.compositeVideo(videoRequest())).rejects.toThrow(
       "libavutil 58. 2.100 / 58. 2.100 fps=30000/1001 root=/tmp bad=ffmpeg/x <path>",
@@ -414,6 +431,7 @@ describe("CanvasFfmpegVideoCompositor", () => {
     const compositor = new CanvasFfmpegVideoCompositor({
       spawn: fakeFfmpeg({ code: 3, stderr: "" }),
       ffmpegPath: "/opt/ffmpeg",
+      assetRoot: projectRoot(),
     });
     await expect(compositor.compositeVideo(videoRequest())).rejects.toThrow(/ffmpeg exited 3/);
   });
@@ -422,6 +440,7 @@ describe("CanvasFfmpegVideoCompositor", () => {
     const asError = new CanvasFfmpegVideoCompositor({
       spawn: fakeFfmpeg({ error: new Error("spawn /opt/ffmpeg ENOENT") }),
       ffmpegPath: "/opt/ffmpeg",
+      assetRoot: projectRoot(),
     });
     await expect(asError.compositeVideo(videoRequest())).rejects.toSatisfy((error: unknown) => {
       const message = error instanceof Error ? error.message : String(error);
@@ -433,6 +452,7 @@ describe("CanvasFfmpegVideoCompositor", () => {
     const asString = new CanvasFfmpegVideoCompositor({
       spawn: fakeFfmpeg({ error: "spawn exploded" }),
       ffmpegPath: "/opt/ffmpeg",
+      assetRoot: projectRoot(),
     });
     await expect(asString.compositeVideo(videoRequest())).rejects.toThrow(/spawn exploded/);
   });
@@ -445,6 +465,7 @@ describe("CanvasFfmpegVideoCompositor", () => {
         closeOnWriteThrow: 0,
       }),
       ffmpegPath: "/opt/ffmpeg",
+      assetRoot: projectRoot(),
     });
     await expect(compositor.compositeVideo(videoRequest())).rejects.toSatisfy((error: unknown) => {
       const message = error instanceof Error ? error.message : String(error);
@@ -458,6 +479,7 @@ describe("CanvasFfmpegVideoCompositor", () => {
     const compositor = new CanvasFfmpegVideoCompositor({
       spawn: fakeFfmpeg({ throwOnWrite: "pipe broke", alreadyKilled: true, closeOnWriteThrow: 0 }),
       ffmpegPath: "/opt/ffmpeg",
+      assetRoot: projectRoot(),
     });
     await expect(compositor.compositeVideo(videoRequest())).rejects.toThrow(/pipe broke/);
   });
@@ -466,6 +488,7 @@ describe("CanvasFfmpegVideoCompositor", () => {
     const compositor = new CanvasFfmpegVideoCompositor({
       spawn: fakeFfmpeg({ throwOnWrite: new Error("epipe"), alreadyKilled: false }),
       ffmpegPath: "/opt/ffmpeg",
+      assetRoot: projectRoot(),
     });
     await expect(compositor.compositeVideo(videoRequest())).rejects.toThrow();
   });
@@ -475,6 +498,7 @@ describe("CanvasFfmpegVideoCompositor", () => {
       spawn: fakeFfmpeg({ writeFalse: true }),
       ffmpegPath: "/opt/ffmpeg",
       fontFamily: "Inter",
+      assetRoot: projectRoot(),
     });
     const out = await compositor.compositeVideo(videoRequest({ sampleAt: [] }));
     expect(Buffer.from(out.video).includes(Buffer.from("ftyp"))).toBe(true);
@@ -485,6 +509,7 @@ describe("CanvasFfmpegVideoCompositor", () => {
     const compositor = new CanvasFfmpegVideoCompositor({
       spawn: fakeFfmpeg({}),
       ffmpegPath: "/opt/ffmpeg",
+      assetRoot: projectRoot(),
     });
     const out = await compositor.compositeVideo(
       videoRequest({ logoPath: "assets/inputs/missing-logo.png" }),
@@ -493,7 +518,10 @@ describe("CanvasFfmpegVideoCompositor", () => {
   });
 
   test("defaults ffmpegPath to ffmpeg-static when omitted", async () => {
-    const compositor = new CanvasFfmpegVideoCompositor({ spawn: fakeFfmpeg({}) });
+    const compositor = new CanvasFfmpegVideoCompositor({
+      spawn: fakeFfmpeg({}),
+      assetRoot: projectRoot(),
+    });
     if (!ffmpegStatic) {
       await expect(compositor.compositeVideo(videoRequest())).rejects.toThrow(
         /ffmpeg-static binary is not available/,
@@ -524,6 +552,7 @@ describe("CanvasFfmpegVideoCompositor", () => {
       ffmpegPath: "/opt/ffmpeg",
       encodeTimeoutMs: 40,
       killGraceMs: 20,
+      assetRoot: projectRoot(),
     });
     await expect(compositor.compositeVideo(videoRequest())).rejects.toThrow(
       /ffmpeg encode timed out after 40ms/,
@@ -536,6 +565,7 @@ describe("CanvasFfmpegVideoCompositor", () => {
     const healthy = new CanvasFfmpegVideoCompositor({
       spawn: fakeFfmpeg({}),
       ffmpegPath: "/opt/ffmpeg",
+      assetRoot: projectRoot(),
     });
     await expect(
       Promise.all([
@@ -574,10 +604,12 @@ describe("CanvasFfmpegVideoCompositor", () => {
       ffmpegPath: "/opt/ffmpeg",
       encodeTimeoutMs: 40,
       killGraceMs: 20,
+      assetRoot: projectRoot(),
     });
     const healthy = new CanvasFfmpegVideoCompositor({
       spawn: healthySpawn,
       ffmpegPath: "/opt/ffmpeg",
+      assetRoot: projectRoot(),
     });
 
     // Two hung encodes fill the pool; the healthy one must wait for a real exit.
@@ -603,6 +635,7 @@ describe("CanvasFfmpegVideoCompositor", () => {
       ffmpegPath: "/opt/ffmpeg",
       encodeTimeoutMs: 30,
       killGraceMs: 10,
+      assetRoot: projectRoot(),
     });
     await expect(compositor.compositeVideo(videoRequest())).rejects.toThrow(/timed out/);
     await new Promise((r) => setTimeout(r, 30));
@@ -616,6 +649,7 @@ describe("CanvasFfmpegVideoCompositor", () => {
       ffmpegPath: "/opt/ffmpeg",
       encodeTimeoutMs: 60,
       killGraceMs: 5,
+      assetRoot: projectRoot(),
     });
     await expect(compositor.compositeVideo(videoRequest())).rejects.toThrow(/timed out after 60ms/);
   });
@@ -637,7 +671,11 @@ describe("CanvasFfmpegVideoCompositor", () => {
       });
       return inner;
     };
-    const compositor = new CanvasFfmpegVideoCompositor({ spawn, ffmpegPath: "/opt/ffmpeg" });
+    const compositor = new CanvasFfmpegVideoCompositor({
+      spawn,
+      ffmpegPath: "/opt/ffmpeg",
+      assetRoot: projectRoot(),
+    });
     await Promise.all([
       compositor.compositeVideo(videoRequest()),
       compositor.compositeVideo(videoRequest()),
@@ -664,6 +702,7 @@ describe("CanvasFfmpegVideoCompositor", () => {
       const compositor = new CanvasFfmpegVideoCompositor({
         spawn: fakeFfmpeg({}),
         ffmpegPath: "/opt/ffmpeg",
+        assetRoot: projectRoot(),
       });
       const spy = vi.spyOn(NodeCanvasCompositor, "draw").mockClear();
       const req = videoRequest({ motion: kind, durationSec, fps, timeline });
@@ -701,6 +740,7 @@ describe("CanvasFfmpegVideoCompositor", () => {
     const compositor = new CanvasFfmpegVideoCompositor({
       spawn: fakeFfmpeg({}),
       ffmpegPath: "/opt/ffmpeg",
+      assetRoot: projectRoot(),
     });
     const spy = vi.spyOn(NodeCanvasCompositor, "draw");
     const durationSec = 2;
@@ -722,6 +762,7 @@ describe("CanvasFfmpegVideoCompositor", () => {
     const compositor = new CanvasFfmpegVideoCompositor({
       spawn: fakeFfmpeg({}),
       ffmpegPath: "/opt/ffmpeg",
+      assetRoot: projectRoot(),
     });
     const base = {
       motion: "ken-burns-out" as MotionKind,
@@ -748,7 +789,7 @@ describe("CanvasFfmpegVideoCompositor", () => {
       // The timeline path measures on a throwaway 1×1 context and drawBeat
       // re-sets ctx.font per frame; a spacing applied only on the still would
       // render identical video bytes. Real encode, real sampled frames.
-      const compositor = new CanvasFfmpegVideoCompositor();
+      const compositor = new CanvasFfmpegVideoCompositor({ assetRoot: projectRoot() });
       const timeline: CopyTimeline = {
         beats: [{ text: "Stay wild", weight: 1 }],
         transition: "cut",
@@ -783,7 +824,7 @@ describe("CanvasFfmpegVideoCompositor", () => {
       // sampled mid-entrance frame must differ from the plain brief's, and the
       // poster (drawn at restT = 1) must be byte-identical to it (H4/D54) —
       // a brief with no effect IS today's bytes.
-      const compositor = new CanvasFfmpegVideoCompositor();
+      const compositor = new CanvasFfmpegVideoCompositor({ assetRoot: projectRoot() });
       const base = {
         durationSec: 2,
         fps: 12,

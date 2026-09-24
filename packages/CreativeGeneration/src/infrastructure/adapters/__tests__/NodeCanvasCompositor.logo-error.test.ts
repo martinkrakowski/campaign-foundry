@@ -13,6 +13,7 @@ import { createCanvas } from "@napi-rs/canvas";
 import { type CompositeRequest } from "@campaignfoundry/CampaignOrchestration";
 import { NodeCanvasCompositor } from "../NodeCanvasCompositor.js";
 
+import { projectRoot } from "@campaignfoundry/shared";
 const request = (): CompositeRequest => {
   const c = createCanvas(32, 32);
   c.getContext("2d").fillRect(0, 0, 32, 32);
@@ -32,7 +33,7 @@ describe("NodeCanvasCompositor — non-Error logo failure", () => {
 
   test("formats a non-Error logo failure through String() and warns", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const out = await new NodeCanvasCompositor().compositeAsset(request());
+    const out = await new NodeCanvasCompositor("Inter", projectRoot()).compositeAsset(request());
     expect(out.logoApplied).toBe(false);
     expect(warn).toHaveBeenCalledOnce();
     expect(warn.mock.calls[0][0]).toContain("logo blew up (non-Error)");

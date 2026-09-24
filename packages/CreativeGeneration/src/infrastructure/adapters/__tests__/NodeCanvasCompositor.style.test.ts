@@ -14,6 +14,7 @@ import { CREATIVE_GEOMETRY } from "@campaignfoundry/CampaignOrchestration/creati
 import { NodeCanvasCompositor, headlineBoxX } from "../NodeCanvasCompositor.js";
 import { registerBundledFonts } from "../../fonts.js";
 
+import { projectRoot } from "@campaignfoundry/shared";
 registerBundledFonts();
 
 const ratio = (v = "1:1") => {
@@ -86,7 +87,7 @@ async function blit(
   motion?: Parameters<typeof NodeCanvasCompositor.draw>[3],
   copyT?: number,
 ): Promise<Blit> {
-  const prepared = await NodeCanvasCompositor.prepare(req);
+  const prepared = await NodeCanvasCompositor.prepare(req, "Inter", projectRoot());
   const canvas = createCanvas(prepared.width, prepared.height);
   const ctx = canvas.getContext("2d");
   const fillText: TextOp[] = [];
@@ -125,7 +126,7 @@ const sha256 = (bytes: Uint8Array): string => createHash("sha256").update(bytes)
 
 describe("NodeCanvasCompositor style block (T5) — the still path", () => {
   test("a style-less request resolves every field to today's literal (D54)", async () => {
-    const prepared = await NodeCanvasCompositor.prepare(request());
+    const prepared = await NodeCanvasCompositor.prepare(request(), "Inter", projectRoot());
     expect(prepared.style).toEqual({
       fontFamily: "Inter",
       fontWeight: "bold", // tone-derived: `bold` tone renders 700 via the Bold face

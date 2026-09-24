@@ -18,8 +18,11 @@ import { resolveAssetPath } from "../safe-path.js";
  * narrower port that actually fits: read the bytes, change nothing.
  */
 export class FileSystemAudioAssetResolver implements AudioAssetPort {
+  /** @param assetRoot the project root whose `assets/` tree confines every read (D167). */
+  constructor(private readonly assetRoot: string) {}
+
   async resolveAudio(path: string): Promise<Uint8Array> {
-    const safePath = resolveAssetPath(path);
+    const safePath = resolveAssetPath(path, this.assetRoot);
     if (!safePath) {
       throw new Error(`Audio "${path}" is not a valid asset path.`);
     }

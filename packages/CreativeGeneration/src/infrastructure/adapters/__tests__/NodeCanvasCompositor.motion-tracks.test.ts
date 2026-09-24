@@ -3,6 +3,7 @@ import { createCanvas } from "@napi-rs/canvas";
 import { AspectRatio, type CompositeRequest } from "@campaignfoundry/CampaignOrchestration";
 import { NodeCanvasCompositor } from "../NodeCanvasCompositor.js";
 
+import { projectRoot } from "@campaignfoundry/shared";
 /**
  * K2's drawn-output proof: the resolved pose actually reaches the canvas —
  * not just that `groundMotionTracks`/`resolveTracks` compute the right
@@ -44,7 +45,7 @@ async function frameAt(
   t: number,
   motion: Parameters<typeof NodeCanvasCompositor.draw>[3],
 ): Promise<Uint8Array> {
-  const prepared = await NodeCanvasCompositor.prepare(request());
+  const prepared = await NodeCanvasCompositor.prepare(request(), "Inter", projectRoot());
   const canvas = createCanvas(prepared.width, prepared.height);
   const ctx = canvas.getContext("2d");
   NodeCanvasCompositor.draw(ctx, prepared, t, motion);
@@ -90,7 +91,11 @@ describe("K3: a resolved text-effect pose reaches the canvas, not just the resol
     effectT: number,
     textEffect: NonNullable<CompositeRequest["style"]>["textEffect"],
   ) {
-    const prepared = await NodeCanvasCompositor.prepare({ ...request(), style: { textEffect } });
+    const prepared = await NodeCanvasCompositor.prepare(
+      { ...request(), style: { textEffect } },
+      "Inter",
+      projectRoot(),
+    );
     const canvas = createCanvas(prepared.width, prepared.height);
     const ctx = canvas.getContext("2d");
     // t = 1, no motion: only the effect clock moves between the two frames.

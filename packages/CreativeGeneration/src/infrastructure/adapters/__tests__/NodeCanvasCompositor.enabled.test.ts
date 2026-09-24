@@ -9,6 +9,7 @@ import {
 } from "@campaignfoundry/CampaignOrchestration";
 import { NodeCanvasCompositor } from "../NodeCanvasCompositor.js";
 
+import { projectRoot } from "@campaignfoundry/shared";
 /**
  * X9: a layer the brief disabled must not be drawn. `enabled` is a validated
  * field on every layer (D129) and absence means enabled, so the acceptance at
@@ -70,7 +71,7 @@ const timelineRequest = (template: BriefTemplate, message: string): TemplateRequ
 
 /** The still path's frame. */
 async function renderStill(req: TemplateRequest): Promise<Buffer> {
-  const prepared = await NodeCanvasCompositor.prepare(req);
+  const prepared = await NodeCanvasCompositor.prepare(req, "Inter", projectRoot());
   const ctx = createCanvas(prepared.width, prepared.height).getContext("2d");
   NodeCanvasCompositor.draw(ctx, prepared, 1);
   return ctx.canvas.toBuffer("image/png");
@@ -78,7 +79,7 @@ async function renderStill(req: TemplateRequest): Promise<Buffer> {
 
 /** The sequenced path's frame at the copy's mid-time, effect settled. */
 async function renderTimeline(req: TemplateRequest): Promise<Buffer> {
-  const prepared = await NodeCanvasCompositor.prepare(req);
+  const prepared = await NodeCanvasCompositor.prepare(req, "Inter", projectRoot());
   const ctx = createCanvas(prepared.width, prepared.height).getContext("2d");
   NodeCanvasCompositor.draw(ctx, prepared, 1, undefined, 0.5, 1);
   return ctx.canvas.toBuffer("image/png");
@@ -86,7 +87,7 @@ async function renderTimeline(req: TemplateRequest): Promise<Buffer> {
 
 /** How many text blits a still frame makes. */
 async function fillTextCalls(req: TemplateRequest): Promise<number> {
-  const prepared = await NodeCanvasCompositor.prepare(req);
+  const prepared = await NodeCanvasCompositor.prepare(req, "Inter", projectRoot());
   const ctx = createCanvas(prepared.width, prepared.height).getContext("2d");
   const spy = vi.spyOn(ctx, "fillText");
   NodeCanvasCompositor.draw(ctx, prepared, 1);
@@ -277,8 +278,16 @@ describe("the compositor does not draw a disabled layer (X9, D129)", () => {
       { id: "wash", kind: "fill", enabled: false },
     ]);
     const absent = templateWith([{ id: "image", kind: "image" }]);
-    const withOff = await NodeCanvasCompositor.prepare(request({ template: off }));
-    const withAbsent = await NodeCanvasCompositor.prepare(request({ template: absent }));
+    const withOff = await NodeCanvasCompositor.prepare(
+      request({ template: off }),
+      "Inter",
+      projectRoot(),
+    );
+    const withAbsent = await NodeCanvasCompositor.prepare(
+      request({ template: absent }),
+      "Inter",
+      projectRoot(),
+    );
     const drawOne = (prepared: Awaited<ReturnType<typeof NodeCanvasCompositor.prepare>>) => {
       const canvas = createCanvas(prepared.width, prepared.height);
       NodeCanvasCompositor.draw(canvas.getContext("2d"), prepared, 1);
@@ -300,7 +309,7 @@ describe("the compositor does not draw a disabled layer (X9, D129)", () => {
       "Stay wild, stay hydrated",
     );
     const drawOne = async (req: Parameters<typeof NodeCanvasCompositor.prepare>[0]) => {
-      const prepared = await NodeCanvasCompositor.prepare(req);
+      const prepared = await NodeCanvasCompositor.prepare(req, "Inter", projectRoot());
       const canvas = createCanvas(prepared.width, prepared.height);
       NodeCanvasCompositor.draw(canvas.getContext("2d"), prepared, 1, undefined, 0.5, 1);
       return canvas.toBuffer("image/png");
@@ -309,7 +318,7 @@ describe("the compositor does not draw a disabled layer (X9, D129)", () => {
   });
 
   test("logoApplied reports what was drawn: a disabled logo layer applies no logo", async () => {
-    const compositor = new NodeCanvasCompositor();
+    const compositor = new NodeCanvasCompositor("Inter", projectRoot());
     const disabled = await compositor.compositeAsset(
       request({
         template: templateWith([

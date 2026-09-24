@@ -9,6 +9,7 @@ import type { CanvasSpec } from "@campaignfoundry/CampaignOrchestration/aspect-r
 import type { LayerFrame } from "@campaignfoundry/CampaignOrchestration/creative-geometry";
 import { NodeCanvasCompositor } from "../NodeCanvasCompositor.js";
 
+import { projectRoot } from "@campaignfoundry/shared";
 /**
  * L11 / D131: a `fill` layer paints a BRAND ROLE over its own frame.
  *
@@ -70,7 +71,7 @@ interface FramePixels {
 }
 
 async function pixels(req: TemplateRequest): Promise<FramePixels> {
-  const prepared = await NodeCanvasCompositor.prepare(req);
+  const prepared = await NodeCanvasCompositor.prepare(req, "Inter", projectRoot());
   const canvas = createCanvas(prepared.width, prepared.height);
   const ctx = canvas.getContext("2d");
   NodeCanvasCompositor.draw(ctx, prepared, 1);
