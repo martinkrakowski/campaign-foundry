@@ -10,7 +10,7 @@ import {
 } from "node:fs";
 import { realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { createApp, createRouter, toWebHandler, type EventHandler } from "h3";
 import { createCanvas } from "@napi-rs/canvas";
 import { createJob, failJob, resetJobs, MAX_JOBS } from "../../lib/jobs.js";
@@ -224,6 +224,87 @@ describe("POST /campaigns/generate", () => {
       readFileSync(resolve(dir, "packages/camp/google-display/manifest.json"), "utf8"),
     ) as { items: unknown[] };
     expect(manifest.items.length).toBeGreaterThan(0);
+  });
+
+  test("packages a display-ad for google-display-html beside its raster", async () => {
+    const res = await call(
+      brief({
+        type: "display-ad",
+        products: [
+          {
+            id: "alpha",
+            name: "A",
+            primaryColor: "#1473E6",
+            logoPath: "assets/inputs/hydra-logo.png",
+          },
+        ],
+        output: {
+          formats: ["html"],
+          platforms: ["google-display-html"],
+          sizes: ["300x250"],
+        },
+      }),
+    );
+    expect(res.status).toBe(202);
+    const { body } = await awaitJob(((await res.json()) as { jobId: string }).jobId);
+    expect(body.status).toBe("completed");
+    expect(body.result?.halted).toBe(false);
+
+    const pack = await web(
+      "post",
+      "/campaigns/package",
+      packageHandler,
+    )(
+      new Request("http://x/campaigns/package", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ campaignId: "camp", platforms: ["google-display-html"] }),
+      }),
+    );
+    expect(pack.status).toBe(200);
+
+    const manifest = JSON.parse(
+      readFileSync(resolve(dir, "packages/camp/google-display-html/manifest.json"), "utf8"),
+    ) as {
+      items: Array<{
+        packagedPath: string;
+        bytes: number;
+        checks: { size: string };
+      }>;
+    };
+    expect(manifest.items.length).toBeGreaterThan(0);
+    for (const item of manifest.items) {
+      expect(item.checks.size).toBe("pass");
+      const htmlBytes = readFileSync(resolve(dir, item.packagedPath));
+      expect(item.bytes).toBe(htmlBytes.length);
+
+      const html = htmlBytes.toString("utf8");
+      const imgs = html.match(/<img\s[^>]*>/g) ?? [];
+      expect(imgs).toHaveLength(1);
+      const img = imgs[0]!;
+      // The real src attribute (a data-src would not load), naming a bare file:
+      // beside the bundle, never absolute or parent-relative.
+      const src = /\ssrc="([^"]+)"/.exec(img);
+      expect(src).not.toBeNull();
+      const imgSrc = src![1]!;
+      expect(basename(imgSrc)).toBe(imgSrc);
+      const raster = resolve(dirname(resolve(dir, item.packagedPath)), imgSrc);
+      expect(existsSync(raster)).toBe(true);
+      // The raster is this cell's: its IHDR carries the 300x250 canvas.
+      const png = readFileSync(raster);
+      expect({ width: png.readUInt32BE(16), height: png.readUInt32BE(20) }).toEqual({
+        width: 300,
+        height: 250,
+      });
+
+      // D164: the raster paints the headline, so no element may paint it again,
+      // whatever the tag and however the text is split across inline elements.
+      // Stripping every tag drops attributes too, so the copy survives only as
+      // the img alt.
+      expect(img).toMatch(/\salt="Hi"/);
+      const bodyText = html.slice(html.indexOf("<body")).replace(/<[^>]*>/g, "");
+      expect(bodyText).not.toContain("Hi");
+    }
   });
 
   test("refuses a classic brief that requests motion — the reported bug: it rendered stills", async () => {
