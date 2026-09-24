@@ -6,7 +6,7 @@ import { dumpBrief } from "@campaignfoundry/shared";
 import { isAlias, isMap, parseAllDocuments, type Document, type Scalar, type YAMLMap } from "yaml";
 import { YAML_ALIAS_CAP } from "./load-brief.js";
 import { getBriefStore } from "./ports/index.js";
-import type { TenantContext } from "./tenant.js";
+import type { StorageScope } from "./run-environment.js";
 
 /** The canonical brief YAML writer lives in shared — one serializer, one schema (R4.3). */
 export { dumpBrief };
@@ -194,20 +194,20 @@ export async function pathExists(path: string): Promise<boolean> {
 
 /** Exclusive create — fails with EEXIST if anything is already at `path`. */
 export async function createBriefFile(
-  tenant: TenantContext,
+  scope: StorageScope,
   path: string,
   brief: CampaignBrief,
 ): Promise<void> {
-  await getBriefStore(tenant).createBrief(brief);
+  await getBriefStore(scope).createBrief(brief);
 }
 
 /** Overwrite an existing regular file in its own format; refuse a symlink. */
 export async function rewriteBriefFile(
-  tenant: TenantContext,
+  scope: StorageScope,
   path: string,
   brief: CampaignBrief,
 ): Promise<void> {
-  await getBriefStore(tenant).rewriteBrief(brief);
+  await getBriefStore(scope).rewriteBrief(brief);
 }
 
 /**
@@ -215,11 +215,11 @@ export async function rewriteBriefFile(
  * Used by POST `?replace=1`. Symlinks are refused; a racing create is EEXIST.
  */
 export async function replaceBriefFile(
-  tenant: TenantContext,
+  scope: StorageScope,
   path: string,
   brief: CampaignBrief,
 ): Promise<void> {
-  await getBriefStore(tenant).replaceBrief(brief);
+  await getBriefStore(scope).replaceBrief(brief);
 }
 
 /**
@@ -228,9 +228,9 @@ export async function replaceBriefFile(
  * Errors in `fn` do not poison the chain.
  */
 export function withBriefLock<T>(
-  tenant: TenantContext,
+  scope: StorageScope,
   briefId: string,
   fn: () => Promise<T>,
 ): Promise<T> {
-  return getBriefStore(tenant).withBriefLock(briefId, fn);
+  return getBriefStore(scope).withBriefLock(briefId, fn);
 }

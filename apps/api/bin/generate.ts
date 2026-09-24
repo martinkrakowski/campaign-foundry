@@ -55,7 +55,7 @@ export async function main(briefPathArg?: string): Promise<void> {
       `  [${mark}] ${path}   ${asset.treatment.padEnd(12)} brand-density ${asset.complianceScore.toFixed(3)}   ${logo}`,
     );
   }
-  const reportPath = await writeReport(LOCAL_TENANT, result.value);
+  const reportPath = await writeReport(env, result.value);
   console.log(`\n  Done — ${assets.length} creatives + proofs in ${env.outputRoot}`);
   console.log(`  Report: ${reportPath}\n`);
 }

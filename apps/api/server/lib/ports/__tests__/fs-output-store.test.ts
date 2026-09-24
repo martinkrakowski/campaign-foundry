@@ -80,4 +80,16 @@ describe("FsOutputStore", () => {
       reason: "missing",
     });
   });
+
+  test("another org's files under orgs/ are never this store's output (review on #575)", async () => {
+    mkdirSync(join(root, "orgs", "acme", "reports"), { recursive: true });
+    writeFileSync(join(root, "orgs", "acme", "reports", "camp.json"), "{}");
+    const store = new FsOutputStore(root);
+    for (const path of ["orgs/acme/reports/camp.json", "camp/../orgs/acme/reports/camp.json"]) {
+      await expect(store.openOutput(path), path).resolves.toEqual({
+        found: false,
+        reason: "missing",
+      });
+    }
+  });
 });

@@ -12,11 +12,16 @@ import type {
 
 const MISSING: OutputLookup = { found: false, reason: "missing" };
 
-/** The run cache and the job records live under the output root but are not output. */
+/**
+ * Areas under the output root that are not this store's output: the run cache,
+ * the job records, and `orgs/`, where other tenants' roots live beneath the local
+ * operator's (`tenantRoot`, review on #575). Org roots never nest, so no store
+ * has output of its own under an `orgs/` segment.
+ */
+const HIDDEN_AREAS = ["cache", "jobs", "orgs"] as const;
+
 function isHidden(posix: string): boolean {
-  return (
-    posix === "cache" || posix.startsWith("cache/") || posix === "jobs" || posix.startsWith("jobs/")
-  );
+  return HIDDEN_AREAS.some((area) => posix === area || posix.startsWith(`${area}/`));
 }
 
 /** Whether `path` is an existing directory; false for anything else, missing included. */

@@ -237,10 +237,17 @@ describe("pipeline composition root", () => {
   });
 
   // projectRoot() memoizes per process: re-import the pipeline so PROJECT_ROOT points at `dir`.
+  // The run environment is resolved from the same fresh registry, because a run
+  // uses the roots its environment captured (PT-0b2): an environment resolved from
+  // the stale registry would carry the stale project root. The caller's own
+  // environment argument is replaced for exactly that reason.
   const freshRunCampaign = async (): Promise<typeof runCampaign> => {
     vi.resetModules();
     process.env.PROJECT_ROOT = dir;
-    return (await import("../pipeline.js")).runCampaign;
+    const { runCampaign: fresh } = await import("../pipeline.js");
+    const { runEnvironment: freshEnvironment } = await import("../run-environment.js");
+    const { LOCAL_TENANT: freshTenant } = await import("../tenant.js");
+    return (_env, ...rest) => fresh(freshEnvironment(freshTenant), ...rest);
   };
 
   /** Spy on the compositor the freshly imported pipeline will construct (same module registry). */

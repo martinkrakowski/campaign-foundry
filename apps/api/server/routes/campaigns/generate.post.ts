@@ -32,11 +32,12 @@ import {
 
 /** The persisted report's policyHash for a variation re-roll, else undefined (no pin). */
 async function persistedPolicyHash(
+  env: RunEnvironment,
   brief: CampaignBrief,
   reroll: boolean,
 ): Promise<string | undefined> {
   if (!reroll || brief.mode !== "variation") return undefined;
-  const report = await readReport(LOCAL_TENANT, brief.id);
+  const report = await readReport(env, brief.id);
   const hash =
     typeof report === "object" && report !== null
       ? (report as { policyHash?: unknown }).policyHash
@@ -53,11 +54,12 @@ async function persistedPolicyHash(
  * already follows.
  */
 async function persistedCopyHash(
+  env: RunEnvironment,
   brief: CampaignBrief,
   reroll: boolean,
 ): Promise<string | undefined> {
   if (!reroll || brief.mode !== "variation") return undefined;
-  const report = await readReport(LOCAL_TENANT, brief.id);
+  const report = await readReport(env, brief.id);
   const hash =
     typeof report === "object" && report !== null
       ? (report as { copyHash?: unknown }).copyHash
@@ -116,28 +118,29 @@ export default defineEventHandler(async (event) => {
   // `null` when no report is stored: `undefined` is what a caller that wants no check
   // passes, so an absent report has to be its own value or a run that started with none
   // would overwrite one that appeared while it was running.
-  const reroll = regenerateOnly !== undefined;
-  let expectedRevision: string | null | undefined;
-  if (reroll) {
-    try {
-      expectedRevision = (await reportRevision(LOCAL_TENANT, brief.id)) ?? null;
-    } catch {
-      setResponseStatus(event, 500);
-      return { error: `Could not read the stored report for campaign "${brief.id}".` };
-    }
-  }
-
-  // The run's environment is resolved before the claim, for the same reason the
-  // revision is: once `acquireJob` persists a running job, a throw here (an
-  // unreadable .env) would leave that claim recorded with nothing to settle it.
-  // Resolved here, it is also what the job captures (D167): the run keeps the
-  // location and credentials it was admitted with.
+  // The run's environment is resolved first, before the revision read and the
+  // claim: once `acquireJob` persists a running job, a throw here (an unreadable
+  // .env) would leave that claim recorded with nothing to settle it. It is also
+  // what the run carries everywhere (D167): the revision read, the claim, the
+  // job's updates and the report write all use its captured roots, so they land
+  // beside the run's assets however the process configuration moves meanwhile.
   let env: RunEnvironment;
   try {
     env = runEnvironment(LOCAL_TENANT);
   } catch {
     setResponseStatus(event, 500);
     return { error: "Could not read the run environment.", campaignId: brief.id };
+  }
+
+  const reroll = regenerateOnly !== undefined;
+  let expectedRevision: string | null | undefined;
+  if (reroll) {
+    try {
+      expectedRevision = (await reportRevision(env, brief.id)) ?? null;
+    } catch {
+      setResponseStatus(event, 500);
+      return { error: `Could not read the stored report for campaign "${brief.id}".` };
+    }
   }
 
   // One run per campaign at a time: a double-click or a retry after a poll blip must
@@ -152,7 +155,7 @@ export default defineEventHandler(async (event) => {
   // else's running campaign to make room.
   let claim: Awaited<ReturnType<typeof acquireJob>>;
   try {
-    claim = await acquireJob(LOCAL_TENANT, brief.id);
+    claim = await acquireJob(env, brief.id);
   } catch (error) {
     if (error instanceof JobCapacityError) {
       setResponseStatus(event, 503);
@@ -171,9 +174,9 @@ export default defineEventHandler(async (event) => {
   }
 
   const jobId = claim.jobId;
-  runJob(LOCAL_TENANT, jobId, async (signal) => {
-    const expectedPolicyHash = await persistedPolicyHash(brief, reroll);
-    const expectedCopyHash = await persistedCopyHash(brief, reroll);
+  runJob(env, jobId, async (signal) => {
+    const expectedPolicyHash = await persistedPolicyHash(env, brief, reroll);
+    const expectedCopyHash = await persistedCopyHash(env, brief, reroll);
     const result = await runCampaign(
       env,
       brief,
@@ -189,18 +192,18 @@ export default defineEventHandler(async (event) => {
       // is dropped on purpose: progress is advisory, and a run that finished
       // must not be failed by a counter that could not be persisted.
       (done, total) => {
-        void progressJob(LOCAL_TENANT, jobId, done, total).catch(() => undefined);
+        void progressJob(env, jobId, done, total).catch(() => undefined);
       },
     );
     if (!result.success) {
-      await failJob(LOCAL_TENANT, jobId, result.error.message);
+      await failJob(env, jobId, result.error.message);
       return;
     }
     // A selective run produced only the regenerated cells — merge them into the
     // persisted report so the full campaign survives a partial run. `runJob` fails the
     // job with the message if the merge is refused.
-    await writeReport(LOCAL_TENANT, result.value, { merge: reroll, expectedRevision });
-    await completeJob(LOCAL_TENANT, jobId, {
+    await writeReport(env, result.value, { merge: reroll, expectedRevision });
+    await completeJob(env, jobId, {
       halted: result.value.halted,
       assets: result.value.assets,
       log: result.value.log,

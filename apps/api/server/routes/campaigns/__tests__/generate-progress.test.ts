@@ -143,7 +143,13 @@ describe("POST /campaigns/generate — the job carries the run's real progress",
       expect(settled.error).toBe("stopped by the test");
       // Without this the test passes whether or not the rejection was ever
       // raised — the run fails for its own reasons either way.
-      expect(spy).toHaveBeenCalledWith(LOCAL_TENANT, expect.any(String), 2, 5);
+      // The run passes its captured environment, which carries the tenant it acts for.
+      expect(spy).toHaveBeenCalledWith(
+        expect.objectContaining({ tenant: LOCAL_TENANT }),
+        expect.any(String),
+        2,
+        5,
+      );
     } finally {
       spy.mockRestore();
     }

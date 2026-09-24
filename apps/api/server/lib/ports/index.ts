@@ -1,6 +1,5 @@
 import { join } from "node:path";
-import { storageRoots } from "../run-environment.js";
-import type { TenantContext } from "../tenant.js";
+import { scopeRoots, type StorageScope } from "../run-environment.js";
 import { FsBriefStore } from "./fs-brief-store.js";
 import { FsAssetStore } from "./fs-asset-store.js";
 import { FsPoolStore } from "./fs-pool-store.js";
@@ -32,10 +31,10 @@ export * from "./fs-report-store.js";
 export * from "./fs-output-store.js";
 
 /**
- * The store registry (PT-0b2, D167 stamped). Every getter takes the tenant a
- * request or run acts for, and builds the store from that tenant's storage
- * roots (`storageRoots`, the composition root), never from the process
- * environment. A store is cached per resolved root, so one tenant's requests
+ * The store registry (PT-0b2, D167 stamped). Every getter takes the scope a
+ * request or run acts for (a tenant, or a run's captured environment) and builds
+ * the store from that scope's storage roots (`scopeRoots`, the composition root),
+ * never from the process environment. A store is cached per resolved root, so one tenant's requests
  * share its in-memory lock chains, and two tenants never share a store.
  *
  * `set*` installs a test double for every tenant; `reset*` drops the double
@@ -46,13 +45,13 @@ class Registry<T> {
   private readonly byRoot = new Map<string, T>();
 
   constructor(
-    private readonly locate: (tenant: TenantContext) => string,
+    private readonly locate: (scope: StorageScope) => string,
     private readonly build: (root: string) => T,
   ) {}
 
-  get(tenant: TenantContext): T {
+  get(scope: StorageScope): T {
     if (this.override) return this.override;
-    const root = this.locate(tenant);
+    const root = this.locate(scope);
     let store = this.byRoot.get(root);
     if (!store) {
       store = this.build(root);
@@ -72,15 +71,15 @@ class Registry<T> {
 }
 
 const briefs = new Registry<BriefStorePort>(
-  (t) => join(storageRoots(t).projectRoot, "briefs"),
+  (t) => join(scopeRoots(t).projectRoot, "briefs"),
   (dir) => new FsBriefStore(dir),
 );
 const assets = new Registry<AssetStorePort>(
-  (t) => join(storageRoots(t).projectRoot, "assets", "inputs"),
+  (t) => join(scopeRoots(t).projectRoot, "assets", "inputs"),
   (dir) => new FsAssetStore(dir),
 );
 const pools = new Registry<PoolStorePort>(
-  (t) => join(storageRoots(t).projectRoot, "briefs"),
+  (t) => join(scopeRoots(t).projectRoot, "briefs"),
   (dir) => new FsPoolStore(dir),
 );
 // The canonical templates are platform-owned and in memory (M3): one store for
@@ -90,35 +89,35 @@ const templates = new Registry<TemplateStorePort>(
   () => new FsTemplateStore(),
 );
 const jobs = new Registry<JobStorePort>(
-  (t) => join(storageRoots(t).outputRoot, "jobs"),
+  (t) => join(scopeRoots(t).outputRoot, "jobs"),
   (dir) => new FsJobStore(dir),
 );
 const reports = new Registry<ReportStorePort>(
-  (t) => storageRoots(t).outputRoot,
+  (t) => scopeRoots(t).outputRoot,
   (root) => new FsReportStore(root),
 );
 const outputs = new Registry<OutputStorePort>(
-  (t) => storageRoots(t).outputRoot,
+  (t) => scopeRoots(t).outputRoot,
   (root) => new FsOutputStore(root),
 );
 
-export const getBriefStore = (tenant: TenantContext): BriefStorePort => briefs.get(tenant);
+export const getBriefStore = (scope: StorageScope): BriefStorePort => briefs.get(scope);
 export const setBriefStore = (store: BriefStorePort): void => briefs.set(store);
 export const resetBriefStore = (): void => briefs.reset();
 
-export const getAssetStore = (tenant: TenantContext): AssetStorePort => assets.get(tenant);
+export const getAssetStore = (scope: StorageScope): AssetStorePort => assets.get(scope);
 export const setAssetStore = (store: AssetStorePort): void => assets.set(store);
 export const resetAssetStore = (): void => assets.reset();
 
-export const getPoolStore = (tenant: TenantContext): PoolStorePort => pools.get(tenant);
+export const getPoolStore = (scope: StorageScope): PoolStorePort => pools.get(scope);
 export const setPoolStore = (store: PoolStorePort): void => pools.set(store);
 export const resetPoolStore = (): void => pools.reset();
 
-export const getTemplateStore = (tenant: TenantContext): TemplateStorePort => templates.get(tenant);
+export const getTemplateStore = (scope: StorageScope): TemplateStorePort => templates.get(scope);
 export const setTemplateStore = (store: TemplateStorePort): void => templates.set(store);
 export const resetTemplateStore = (): void => templates.reset();
 
-export const getJobStore = (tenant: TenantContext): JobStorePort => jobs.get(tenant);
+export const getJobStore = (scope: StorageScope): JobStorePort => jobs.get(scope);
 export const setJobStore = (store: JobStorePort): void => jobs.set(store);
 export const resetJobStore = (): void => jobs.reset();
 
@@ -126,10 +125,10 @@ export const getJobRegistry = getJobStore;
 export const setJobRegistry = setJobStore;
 export const resetJobRegistry = resetJobStore;
 
-export const getReportStore = (tenant: TenantContext): ReportStorePort => reports.get(tenant);
+export const getReportStore = (scope: StorageScope): ReportStorePort => reports.get(scope);
 export const setReportStore = (store: ReportStorePort): void => reports.set(store);
 export const resetReportStore = (): void => reports.reset();
 
-export const getOutputStore = (tenant: TenantContext): OutputStorePort => outputs.get(tenant);
+export const getOutputStore = (scope: StorageScope): OutputStorePort => outputs.get(scope);
 export const setOutputStore = (store: OutputStorePort): void => outputs.set(store);
 export const resetOutputStore = (): void => outputs.reset();

@@ -111,6 +111,21 @@ export function storageRoots(tenant: TenantContext): StorageRoots {
 }
 
 /**
+ * What a store is asked for: a tenant, whose roots are resolved now, or a run's
+ * captured environment, whose roots are the ones it was admitted with (review on
+ * #575). A run passes its environment everywhere, so its job updates and report
+ * land beside its assets even if the process configuration moved meanwhile.
+ */
+export type StorageScope = TenantContext | RunEnvironment;
+
+/** The storage roots a scope names: captured for a run, resolved for a tenant. */
+export function scopeRoots(scope: StorageScope): StorageRoots {
+  return "outputRoot" in scope
+    ? { outputRoot: scope.outputRoot, projectRoot: scope.assetRoot }
+    : storageRoots(scope);
+}
+
+/**
  * Resolve a tenant's run environment. The local operator resolves to the
  * process's output root, so bytes land exactly where they did; another org
  * resolves to its own root beneath it (`tenantOutputRoot`).

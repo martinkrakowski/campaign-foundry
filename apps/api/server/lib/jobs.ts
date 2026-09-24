@@ -1,28 +1,29 @@
 import { JOB_TTL_MS } from "./ports/fs-job-store.js";
 import { getJobStore } from "./ports/index.js";
-import { LOCAL_TENANT, type TenantContext } from "./tenant.js";
+import type { StorageScope } from "./run-environment.js";
+import { LOCAL_TENANT } from "./tenant.js";
 import type { Job, JobResult, JobStatus, StoredJob } from "./ports/job-store.port.js";
 
 export type { JobStatus, JobResult, Job, StoredJob };
 export { MAX_JOBS, JOB_TTL_MS } from "./ports/fs-job-store.js";
 
 export async function acquireJob(
-  tenant: TenantContext,
+  scope: StorageScope,
   campaignId: string,
 ): Promise<{ acquired: true; jobId: string } | { acquired: false; runningJobId: string }> {
-  return getJobStore(tenant).acquireJob(campaignId);
+  return getJobStore(scope).acquireJob(campaignId);
 }
 
-export async function createJob(tenant: TenantContext, campaignId: string): Promise<string> {
-  return getJobStore(tenant).createJob(campaignId);
+export async function createJob(scope: StorageScope, campaignId: string): Promise<string> {
+  return getJobStore(scope).createJob(campaignId);
 }
 
-export async function deleteJob(tenant: TenantContext, id: string): Promise<void> {
-  return getJobStore(tenant).deleteJob(id);
+export async function deleteJob(scope: StorageScope, id: string): Promise<void> {
+  return getJobStore(scope).deleteJob(id);
 }
 
-export async function getJob(tenant: TenantContext, id: string): Promise<Job | undefined> {
-  return getJobStore(tenant).getJob(id);
+export async function getJob(scope: StorageScope, id: string): Promise<Job | undefined> {
+  return getJobStore(scope).getJob(id);
 }
 
 /**
@@ -31,15 +32,15 @@ export async function getJob(tenant: TenantContext, id: string): Promise<Job | u
  * is actually in flight instead of discarding it.
  */
 export async function getRunningJobId(
-  tenant: TenantContext,
+  scope: StorageScope,
   campaignId: string,
 ): Promise<string | undefined> {
-  return getJobStore(tenant).getRunningJobId(campaignId);
+  return getJobStore(scope).getRunningJobId(campaignId);
 }
 
 /** True while a job for this campaign is still running — one run per campaign at a time. */
-export async function hasRunningJob(tenant: TenantContext, campaignId: string): Promise<boolean> {
-  return getJobStore(tenant).hasRunningJob(campaignId);
+export async function hasRunningJob(scope: StorageScope, campaignId: string): Promise<boolean> {
+  return getJobStore(scope).hasRunningJob(campaignId);
 }
 
 /**
@@ -47,24 +48,24 @@ export async function hasRunningJob(tenant: TenantContext, campaignId: string): 
  * counts its settlement wrote (see `JobStorePort.progressJob`).
  */
 export async function progressJob(
-  tenant: TenantContext,
+  scope: StorageScope,
   id: string,
   done: number,
   total: number,
 ): Promise<void> {
-  return getJobStore(tenant).progressJob(id, done, total);
+  return getJobStore(scope).progressJob(id, done, total);
 }
 
 export async function completeJob(
-  tenant: TenantContext,
+  scope: StorageScope,
   id: string,
   payload: JobResult,
 ): Promise<void> {
-  return getJobStore(tenant).completeJob(id, payload);
+  return getJobStore(scope).completeJob(id, payload);
 }
 
-export async function failJob(tenant: TenantContext, id: string, error: string): Promise<void> {
-  return getJobStore(tenant).failJob(id, error);
+export async function failJob(scope: StorageScope, id: string, error: string): Promise<void> {
+  return getJobStore(scope).failJob(id, error);
 }
 
 /**
@@ -83,7 +84,7 @@ export async function failJob(tenant: TenantContext, id: string, error: string):
 export const RUN_DEADLINE_MS = JOB_TTL_MS;
 
 export function runJob(
-  tenant: TenantContext,
+  scope: StorageScope,
   id: string,
   work: (signal: AbortSignal) => Promise<void>,
 ): void {
@@ -130,9 +131,9 @@ export function runJob(
       await Promise.race([work(controller.signal), expired]);
     } catch (reason) {
       try {
-        await failJob(tenant, id, reason instanceof Error ? reason.message : "Job failed");
+        await failJob(scope, id, reason instanceof Error ? reason.message : "Job failed");
       } catch {
-        await deleteJob(tenant, id).catch(() => undefined);
+        await deleteJob(scope, id).catch(() => undefined);
       }
     } finally {
       clearTimeout(timer);

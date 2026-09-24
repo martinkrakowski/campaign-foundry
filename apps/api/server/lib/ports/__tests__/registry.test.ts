@@ -13,6 +13,7 @@ import {
   type ReportStorePort,
 } from "../index.js";
 import { LOCAL_TENANT, type TenantContext } from "../../tenant.js";
+import { runEnvironment } from "../../run-environment.js";
 
 const acme: TenantContext = { ...LOCAL_TENANT, orgId: "acme", userId: "u1" };
 
@@ -64,5 +65,23 @@ describe("the store registry is per tenant", () => {
     expect(getReportStore(acme)).toBe(fake);
     resetReportStore();
     expect(getReportStore(LOCAL_TENANT)).not.toBe(fake);
+  });
+
+  test("a run's captured environment keeps its roots after OUTPUT_DIR moves (review on #575)", async () => {
+    const env = runEnvironment(LOCAL_TENANT); // captured at enqueue
+    const before = process.env.OUTPUT_DIR!;
+    process.env.OUTPUT_DIR = join(dir, "moved");
+    try {
+      await getReportStore(env).writeReport("camp", '{"assets":[]}');
+      // The run's report is where the run was admitted, not where the process moved to.
+      expect(getReportStore(env)).not.toBe(getReportStore(LOCAL_TENANT));
+      await expect(getReportStore(LOCAL_TENANT).readReport("camp")).resolves.toBeUndefined();
+      process.env.OUTPUT_DIR = before;
+      await expect(getReportStore(LOCAL_TENANT).readReport("camp")).resolves.toEqual({
+        assets: [],
+      });
+    } finally {
+      process.env.OUTPUT_DIR = before;
+    }
   });
 });

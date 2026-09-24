@@ -4,9 +4,9 @@
   "mutations": [
     {
       "file": "apps/api/server/lib/ports/index.ts",
-      "before": "  (t) => storageRoots(t).outputRoot,\n  (root) => new FsReportStore(root),",
-      "after": "  (t) => storageRoots({ ...t, orgId: \"local\" }).outputRoot,\n  (root) => new FsReportStore(root),",
-      "because": "the report registry ignores the org, so two orgs share one report store and one org's report is readable by another (D167).",
+      "before": "  (t) => scopeRoots(t).outputRoot,\n  (root) => new FsReportStore(root),",
+      "after": "  (t) => scopeRoots(\"outputRoot\" in t ? t : { ...t, orgId: \"local\" }).outputRoot,\n  (root) => new FsReportStore(root),",
+      "because": "the report registry ignores the org, so two orgs share one report store and one org's report is readable by another (D167). Re-anchored 2026-09-24 in PT-0b2 review: helpers and the run take a StorageScope (a tenant or the run's captured environment); the mutation is unchanged in meaning.",
       "command": [
         "yarn",
         "vitest",
@@ -16,6 +16,40 @@
         "apps/api/server/lib/ports/__tests__/registry.test.ts",
         "-t",
         "one org's report is invisible to another"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/run-environment.ts",
+      "before": "  return \"outputRoot\" in scope\n    ? { outputRoot: scope.outputRoot, projectRoot: scope.assetRoot }\n    : storageRoots(scope);",
+      "after": "  return storageRoots(\"outputRoot\" in scope ? scope.tenant : scope);",
+      "because": "a run's captured environment is ignored and its roots re-resolved from the process, so a report written after OUTPUT_DIR moved lands away from the run's assets (Qodo on #575).",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/registry.test.ts",
+        "-t",
+        "captured environment keeps its roots"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/fs-output-store.ts",
+      "before": "const HIDDEN_AREAS = [\"cache\", \"jobs\", \"orgs\"] as const;",
+      "after": "const HIDDEN_AREAS = [\"cache\", \"jobs\"] as const;",
+      "because": "the local output store serves orgs/*, so another org's report is readable through GET /output (CodeRabbit on #575).",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/fs-output-store.test.ts",
+        "-t",
+        "another org"
       ],
       "verdict": "caught"
     }
