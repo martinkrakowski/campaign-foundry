@@ -18,9 +18,46 @@ import {
   runCampaign,
 } from "../pipeline.js";
 
-import { runEnvironment } from "../run-environment.js";
+import { runEnvironment, type RunEnvironment } from "../run-environment.js";
 import { LOCAL_TENANT } from "../tenant.js";
 
+/**
+ * Review on #573 (CodeRabbit): record what each GenAI adapter is constructed
+ * with, so a test can see which provider a selection built and with whose
+ * credentials. Thin subclasses: behaviour is the real adapter's.
+ */
+const constructed = vi.hoisted(() => ({
+  openRouter: [] as Array<{ apiKey: string; model?: string }>,
+  gemini: [] as Array<{ apiKey: string; model?: string }>,
+  firefly: [] as Array<{ clientId: string; clientSecret: string }>,
+}));
+vi.mock("@campaignfoundry/CreativeGeneration", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@campaignfoundry/CreativeGeneration")>();
+  class OpenRouter extends actual.OpenRouterImageGenerator {
+    constructor(options: ConstructorParameters<typeof actual.OpenRouterImageGenerator>[0]) {
+      super(options);
+      constructed.openRouter.push({ apiKey: options.apiKey, model: options.model });
+    }
+  }
+  class Gemini extends actual.GeminiImageGenerator {
+    constructor(options: ConstructorParameters<typeof actual.GeminiImageGenerator>[0]) {
+      super(options);
+      constructed.gemini.push({ apiKey: options.apiKey, model: options.model });
+    }
+  }
+  class Firefly extends actual.FireflyImageGenerator {
+    constructor(options: ConstructorParameters<typeof actual.FireflyImageGenerator>[0]) {
+      super(options);
+      constructed.firefly.push({ clientId: options.clientId, clientSecret: options.clientSecret });
+    }
+  }
+  return {
+    ...actual,
+    OpenRouterImageGenerator: OpenRouter,
+    GeminiImageGenerator: Gemini,
+    FireflyImageGenerator: Firefly,
+  };
+});
 /** The local operator's environment, resolved when called so each test's env setup applies. */
 const localEnv = () => runEnvironment(LOCAL_TENANT);
 const brief: CampaignBrief = {
@@ -111,6 +148,42 @@ describe("pipeline composition root", () => {
       process.env.OUTPUT_DIR = dir;
       rmSync(elsewhere, { recursive: true, force: true });
     }
+  });
+
+  test("provider selection builds from env.providers alone, never from process.env (D167)", () => {
+    // Every key below exists only on the environment object; process.env has none.
+    const withProviders = (providers: RunEnvironment["providers"]): RunEnvironment => ({
+      ...localEnv(),
+      providers,
+    });
+    const reset = () => {
+      constructed.openRouter.length = 0;
+      constructed.gemini.length = 0;
+      constructed.firefly.length = 0;
+    };
+
+    reset();
+    buildPipeline(
+      withProviders({ openRouterKey: "or-key", openRouterImageModel: "or/model" }),
+      "imagen",
+    );
+    expect(constructed.gemini).toEqual([]);
+    expect(constructed.openRouter).toEqual([{ apiKey: "or-key", model: "or/model" }]);
+
+    reset();
+    buildPipeline(withProviders({ geminiKey: "g-key", imagenModel: "imagen-x" }), "imagen");
+    expect(constructed.gemini).toEqual([{ apiKey: "g-key", model: "imagen-x" }]);
+
+    reset();
+    buildPipeline(
+      withProviders({ fireflyClientId: "ff-id", fireflyClientSecret: "ff-secret" }),
+      "firefly",
+    );
+    expect(constructed.firefly).toEqual([{ clientId: "ff-id", clientSecret: "ff-secret" }]);
+
+    reset();
+    buildPipeline(withProviders({}), "firefly"); // no credentials anywhere: nothing GenAI is built
+    expect([constructed.openRouter, constructed.gemini, constructed.firefly]).toEqual([[], [], []]);
   });
 
   test("runCampaign executes fully offline with the procedural model", async () => {

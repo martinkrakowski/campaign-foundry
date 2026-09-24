@@ -18,6 +18,23 @@
         "captured environment"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/pipeline.ts",
+      "before": "          model: env.providers.imagenModel,",
+      "after": "          model: process.env.IMAGEN_MODEL,",
+      "because": "the Imagen model is read from process.env again, so an environment carrying imagenModel builds Gemini without it (CodeRabbit on #573: the old selection test could not see this).",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/pipeline.test.ts",
+        "-t",
+        "provider selection builds from env.providers alone"
+      ],
+      "verdict": "caught"
     }
   ]
 }
