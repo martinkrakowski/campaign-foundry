@@ -19,6 +19,9 @@ function getIncompleteSections(state: EditorState): SectionId[] {
   if (getTotalErrorCount({ identity: errors.identity }) > 0) sections.push("identity");
   if (getTotalErrorCount({ copy: errors.copy }) > 0) sections.push("copy");
   if (getTotalErrorCount({ products: errors.products }) > 0) sections.push("products");
+  // Treatments only validate in classic mode (validateTreatments returns
+  // nothing otherwise), so the bucket needs no mode gate of its own.
+  if (getTotalErrorCount({ treatments: errors.treatments }) > 0) sections.push("treatments");
   // D165: a click target where it cannot compile is the template's own error.
   if (getTotalErrorCount({ template: errors.template }) > 0) sections.push("template");
   if (getTotalErrorCount({ output: errors.output, motion: errors.motion }) > 0)

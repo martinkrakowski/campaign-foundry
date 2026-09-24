@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "status-line-treatments",
+  "mutations": [
+    {
+      "file": "apps/web/src/components/campaign/StatusLine.tsx",
+      "before": "  if (getTotalErrorCount({ treatments: errors.treatments }) > 0) sections.push(\"treatments\");",
+      "after": "  if (false) sections.push(\"treatments\");",
+      "because": "a classic brief whose only error is a treatment must name Treatments as a link; without the push the status line offers no section.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/status-line.test.tsx",
+        "-t",
+        "bad treatment in a classic brief"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

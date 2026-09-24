@@ -42,6 +42,18 @@ describe("StatusLine", () => {
     expect(onScroll).toHaveBeenCalledWith("template");
   });
 
+  test("a bad treatment in a classic brief names the Treatments section as a link", async () => {
+    const user = userEvent.setup();
+    const onScroll = vi.fn();
+    const state = {
+      ...initialEditorState("brief"),
+      treatments: [{ id: "Not A Safe Id", layout: "bottom-band", tone: "bold" }],
+    };
+    render(<StatusLine state={state} attempted onScrollToSection={onScroll} />);
+    await user.click(screen.getByRole("button", { name: SECTION_TITLES.treatments }));
+    expect(onScroll).toHaveBeenCalledWith("treatments");
+  });
+
   test("a failed write outranks everything else, and drops the links", () => {
     render(
       <StatusLine
