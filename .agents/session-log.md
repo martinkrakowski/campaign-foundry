@@ -6237,7 +6237,16 @@ and source formatting, recorded here rather than fixed.
     - a click during a conflict's reload had the same effect;
     - a re-roll whose verdict lost to another tab would retire that tab's approval;
     - a failed load blocked review with no reason.
-    All four are fixed and hand-checked by mutation.
+    All four are fixed. The wipe gate, the reload pause and the re-roll re-check were hand-checked by
+    mutation; the failed-load notice is tested, not mutated.
   - Refuted: tenant from `event.context` (PT-1), fsync (PT-3), a messages catalog for API errors. Also
     refuted: marking decisions loaded on a failed fetch, which reopens the wipe.
   - Test helper `fakeDecisionsApi`/`seedDecisions` replaces 14 `localStorage` seeds.
+  - **Known follow-up (not a regression):** Approve and Reject stay enabled on tiles not being
+    regenerated while a run is in flight. The run's report write retires decisions and moves the
+    revision, so a verdict given mid-run 409s with the "changed in another tab" notice and is dropped.
+    Nothing recorded is lost, but the copy is wrong. Fix: `decidable={decisionsLoaded && !loading}`
+    (and Package on `loading`), or softer copy ("changed since you loaded them").
+  - Not exercised end to end: the web and API halves share the contract by inspection and their own
+    tests. The first real check is approving a tile in the running app, then finding
+    `output/decisions/<campaign>.json` with verdict, actor, at and run.
