@@ -6253,7 +6253,8 @@ and source formatting, recorded here rather than fixed.
 - **Owner decisions and PT-0e (2026-09-24):**
   - Stamped:
     - D166 (i): a team is an access scope, for team sharing and editing of campaigns.
-    - D174a: PostgreSQL, hosted on the owner's Aiven service. The service allows 20 connections, so
+    - D174a: PostgreSQL, hosted on the owner's Aiven service (its campaign-foundry instance, not the
+      hexagen-monaco one first named). The service allows 15 connections, so
       the pool is bounded; the client verifies the server certificate against Aiven's CA;
       `DATABASE_URL` is read at the composition root and never committed.
     - D175, amended: bring-your-own-key is in, with keys encrypted server-side and write-only
