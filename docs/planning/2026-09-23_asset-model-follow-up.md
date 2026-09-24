@@ -194,7 +194,12 @@ AF4 is blocked on D165 and does not hold a slot while it waits (RW-D4). Each lan
   tag in `<head>`, and nothing emitted it. [#566](https://github.com/martinkrakowski/campaign-foundry/pull/566)
   (`e73df68d`) declares the resolved canvas, asserted for three sizes and end to end. **Not
   obtainable here:** a display-rule verdict from this validator page, which ran the playable rules
-  on every upload. The next real check is an upload in the Google Ads UI. Recorded as fact, the way the
+  on every upload. The next real check is an upload in the Google Ads UI.
+
+  **Cleanup, same day:** the band height printed as `205.00000000000003px`, and box pixels now
+  round to hundredths ([#568](https://github.com/martinkrakowski/campaign-foundry/pull/568)). The
+  `capability-race.test.ts` teardown flake was traced to a generate run leaking past its test into
+  the next test's `OUTPUT_DIR`, and fixed ([#567](https://github.com/martinkrakowski/campaign-foundry/pull/567)). Recorded as fact, the way the
   asset-model plan recorded D161. It is the second time in two plans that a lane shipped ahead of
   its decision.
 - **D165 — stamped** as recommended, and shipped as AF4 (#564). Review of #564 found one more

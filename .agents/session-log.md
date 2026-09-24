@@ -6142,3 +6142,11 @@ and source formatting, recorded here rather than fixed.
   mutation recorded in `.agents/manifests/html-bundle-ad-size.json`. A teardown flake was seen once
   in `capability-race.test.ts` (`rmSync` ENOTEMPTY); it passed 3/3 on rerun and is not fixed.
   Still open: a display-rule verdict, which needs a Google Ads UI upload, and AR6 (D64).
+- **Addendum 2:** [#568](https://github.com/martinkrakowski/campaign-foundry/pull/568) (`e18008c5`)
+  rounds bundle box pixels to hundredths. [#567](https://github.com/martinkrakowski/campaign-foundry/pull/567)
+  (`7c7eccac`) fixes the `capability-race.test.ts` flake. The accepted-generate run outlived its test:
+  `runJob` is fire-and-forget, `resetJobs` does not wait, and `outputRoot()` reads `OUTPUT_DIR` on
+  every write. A probe showed it recreating the removed temp dir and writing `report.json` into the
+  next test's dir about 3 s later. Runs are now registered before assertions (Qodo's point) and
+  settled in `afterEach` before `resetJobs`. `~/Desktop/unit.zip` was rebuilt from `7c7eccac` for the
+  owner's Google Ads UI check. AR6 still waits on D64, asked of the owner.
