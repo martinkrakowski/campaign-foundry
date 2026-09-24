@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "PT-0d",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/decisions.ts",
+      "before": "    next[key] = kept !== undefined && kept.verdict === verdict ? kept : { verdict, actor, at };",
+      "after": "    next[key] = { verdict, actor, at };",
+      "because": "every save restamps who and when, so the record says who last saved rather than who decided (D173 audit trail).",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/decisions.test.ts",
+        "-t",
+        "keeps its original time"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

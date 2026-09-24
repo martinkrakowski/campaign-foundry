@@ -7,6 +7,7 @@ import { FsTemplateStore } from "./fs-template-store.js";
 import { FsJobStore } from "./fs-job-store.js";
 import { FsReportStore } from "./fs-report-store.js";
 import { FsOutputStore } from "./fs-output-store.js";
+import { FsDecisionStore } from "./fs-decision-store.js";
 import type { BriefStorePort } from "./brief-store.port.js";
 import type { AssetStorePort } from "./asset-store.port.js";
 import type { PoolStorePort } from "./pool-store.port.js";
@@ -14,6 +15,7 @@ import type { TemplateStorePort } from "./template-store.port.js";
 import type { JobStorePort } from "./job-store.port.js";
 import type { ReportStorePort } from "./report-store.port.js";
 import type { OutputStorePort } from "./output-store.port.js";
+import type { DecisionStorePort } from "./decision-store.port.js";
 
 export * from "./brief-store.port.js";
 export * from "./asset-store.port.js";
@@ -22,6 +24,7 @@ export * from "./template-store.port.js";
 export * from "./job-store.port.js";
 export * from "./report-store.port.js";
 export * from "./output-store.port.js";
+export * from "./decision-store.port.js";
 export * from "./fs-brief-store.js";
 export * from "./fs-asset-store.js";
 export * from "./fs-pool-store.js";
@@ -29,6 +32,7 @@ export * from "./fs-template-store.js";
 export * from "./fs-job-store.js";
 export * from "./fs-report-store.js";
 export * from "./fs-output-store.js";
+export * from "./fs-decision-store.js";
 
 /**
  * The store registry (PT-0b2, D167 stamped). Every getter takes the scope a
@@ -101,6 +105,11 @@ const outputs = new Registry<OutputStorePort>(
   (root) => new FsOutputStore(root),
 );
 
+const decisions = new Registry<DecisionStorePort>(
+  (t) => scopeRoots(t).outputRoot,
+  (root) => new FsDecisionStore(root),
+);
+
 export const getBriefStore = (scope: StorageScope): BriefStorePort => briefs.get(scope);
 export const setBriefStore = (store: BriefStorePort): void => briefs.set(store);
 export const resetBriefStore = (): void => briefs.reset();
@@ -132,3 +141,7 @@ export const resetReportStore = (): void => reports.reset();
 export const getOutputStore = (scope: StorageScope): OutputStorePort => outputs.get(scope);
 export const setOutputStore = (store: OutputStorePort): void => outputs.set(store);
 export const resetOutputStore = (): void => outputs.reset();
+
+export const getDecisionStore = (scope: StorageScope): DecisionStorePort => decisions.get(scope);
+export const setDecisionStore = (store: DecisionStorePort): void => decisions.set(store);
+export const resetDecisionStore = (): void => decisions.reset();
