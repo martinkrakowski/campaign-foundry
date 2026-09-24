@@ -111,8 +111,10 @@ describe("assembleHtml", () => {
     expect(result.html.match(/<img/g)?.length).toBe(1);
     expect(result.html).toContain("fallback.png");
     expect(result.html).toContain("left: 0px; top: 0px; width: 1080px; height: 1080px;");
-    expect(result.html).toContain("left: 5%; top: 10%; width: 90%; height: 30%;");
-    expect(result.html).toContain(">Shop</p>");
+    expect(result.html).toContain('alt="Shop"');
+    expect(result.html).not.toContain("<p");
+    expect(result.html).not.toContain("5%");
+    expect(result.html).not.toContain(">Shop</p>");
   });
 
   test("a display-size frame overlay wins over the base fractions", () => {
