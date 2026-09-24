@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "PT-0c",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/run-environment.ts",
+      "before": "  return join(root, \"orgs\", tenant.orgId);",
+      "after": "  return root;",
+      "because": "every org shares the process output root again, so two orgs build their generation cache in the same directory and one org is served the other's paid-for image (H3).",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/pipeline.test.ts",
+        "-t",
+        "two orgs never share an entry"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

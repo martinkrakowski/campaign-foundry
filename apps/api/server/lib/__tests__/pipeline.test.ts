@@ -30,6 +30,7 @@ const constructed = vi.hoisted(() => ({
   openRouter: [] as Array<{ apiKey: string; model?: string }>,
   gemini: [] as Array<{ apiKey: string; model?: string }>,
   firefly: [] as Array<{ clientId: string; clientSecret: string }>,
+  cacheDirs: [] as string[],
 }));
 vi.mock("@campaignfoundry/CreativeGeneration", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@campaignfoundry/CreativeGeneration")>();
@@ -51,8 +52,15 @@ vi.mock("@campaignfoundry/CreativeGeneration", async (importOriginal) => {
       constructed.firefly.push({ clientId: options.clientId, clientSecret: options.clientSecret });
     }
   }
+  class Cache extends actual.FileSystemBackgroundCache {
+    constructor(dir: string) {
+      super(dir);
+      constructed.cacheDirs.push(dir);
+    }
+  }
   return {
     ...actual,
+    FileSystemBackgroundCache: Cache,
     OpenRouterImageGenerator: OpenRouter,
     GeminiImageGenerator: Gemini,
     FireflyImageGenerator: Firefly,
@@ -184,6 +192,20 @@ describe("pipeline composition root", () => {
     reset();
     buildPipeline(withProviders({}), "firefly"); // no credentials anywhere: nothing GenAI is built
     expect([constructed.openRouter, constructed.gemini, constructed.firefly]).toEqual([[], [], []]);
+  });
+
+  test("each tenant's generation cache lives under its own root, so two orgs never share an entry (PT-0c)", () => {
+    const acme = runEnvironment({ ...LOCAL_TENANT, orgId: "acme", userId: "u1" });
+    const globex = runEnvironment({ ...LOCAL_TENANT, orgId: "globex", userId: "u2" });
+    constructed.cacheDirs.length = 0;
+    buildPipeline(acme, "imagen");
+    buildPipeline(globex, "imagen");
+    buildPipeline(localEnv(), "imagen");
+    expect(constructed.cacheDirs).toEqual([
+      join(dir, "orgs", "acme", "cache"),
+      join(dir, "orgs", "globex", "cache"),
+      join(dir, "cache"),
+    ]);
   });
 
   test("runCampaign executes fully offline with the procedural model", async () => {
