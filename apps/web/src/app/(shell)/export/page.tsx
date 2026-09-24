@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { API, assetCanvas, assetKey, assetLabel, useRun } from "@/lib/run-context";
+import * as messages from "@/components/campaign/messages";
 import {
   platformProfile,
   visiblePlatformIds,
@@ -233,7 +234,7 @@ export default function ExportPage() {
             disabled={packaging || activePlatform === null || !decisionsLoaded}
             title={
               !decisionsLoaded
-                ? "Loading the review decisions"
+                ? messages.reviewDecisionsLoading
                 : activePlatform === null
                   ? "Select a platform first"
                   : undefined

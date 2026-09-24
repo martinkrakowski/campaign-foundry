@@ -316,6 +316,10 @@ export interface StoredDecisions {
 export const DECISIONS_CONFLICT_MESSAGE =
   "These review decisions were changed in another tab. Showing the latest; decide again if needed.";
 
+/** Said when the run's decisions could not be read: reviewing waits until they are. */
+export const DECISIONS_UNREADABLE_MESSAGE =
+  "The review decisions could not be loaded, so reviewing is paused. Try again.";
+
 /** Said when a save did not land: the decision on screen is put back to what is recorded. */
 export const DECISIONS_UNSAVED_MESSAGE =
   "That review decision could not be saved, so it is not recorded. Try again.";
@@ -531,6 +535,8 @@ interface RunContextValue {
    * decisions" means "not known yet", and nothing may be packaged on it.
    */
   decisionsLoaded: boolean;
+  /** Ask the server for the run's decisions again, after a load that failed. */
+  reloadDecisions: () => void;
   /**
    * Run the pipeline. With no argument the shell's active brief is POSTed, exactly as
    * always (the grid's Execute, the header's Generate over a committed brief). D35:
@@ -869,12 +875,17 @@ export function RunProvider({ children }: { children: ReactNode }) {
           if (decisionsEpoch.current !== epoch || decisionsCampaignRef.current !== campaignId)
             return;
           decisionsRevision.current = stored.revision;
+          decisionsRef.current = stored.decisions; // readable before the next render
           setDecisions(stored.decisions);
           decisionsLoadedRef.current = true;
           setDecisionsLoaded(true);
         },
         () => {
-          /* F6: could-not-ask is not absence — keep what is on screen. */
+          // F6: could-not-ask is not absence. The screen keeps what it shows, and
+          // reviewing stays paused (not loaded) with a reason and a way to retry.
+          if (decisionsEpoch.current !== epoch || decisionsCampaignRef.current !== campaignId)
+            return;
+          setDecisionsNotice(DECISIONS_UNREADABLE_MESSAGE);
         },
       ),
     [],
@@ -1053,6 +1064,16 @@ export function RunProvider({ children }: { children: ReactNode }) {
       // the server retires them only after it has them (D173).
       await decisionsQueue.current;
       if (runSeq.current !== owned) return; // a brief switch while the verdicts were saving
+      // A conflict or a failed save may have put other verdicts on screen: re-roll only
+      // what is recorded as rejected, or the report write would retire another tab's
+      // approval of a creative this tab no longer rejects.
+      if (
+        !decisionsLoadedRef.current ||
+        rejected.some((a) => decisionsRef.current[assetKey(a)] !== "rejected")
+      ) {
+        setRegeneratingKeys(null);
+        return;
+      }
       const jobId = await postGenerate({ brief: target, regenerateOnly: targets });
       if (runSeq.current !== owned) return; // a brief switch (or newer run) superseded this press
       const started = beginRun();
@@ -1138,7 +1159,11 @@ export function RunProvider({ children }: { children: ReactNode }) {
         }
         // Another tab saved first, or this save did not land: show what is recorded.
         // (The route's other 409, "no run to review", cannot arise with a run on screen.)
+        // Paused until the server's copy is on screen: a click during the reload would
+        // build on the stale map and save it under the fresh revision.
         const reload = (decisionsEpoch.current += 1);
+        decisionsLoadedRef.current = false;
+        setDecisionsLoaded(false);
         setDecisionsNotice(
           outcome === "conflict" ? DECISIONS_CONFLICT_MESSAGE : DECISIONS_UNSAVED_MESSAGE,
         );
@@ -1147,6 +1172,16 @@ export function RunProvider({ children }: { children: ReactNode }) {
     },
     [enqueueDecisions, loadDecisions],
   );
+
+  const reloadDecisions = useCallback(() => {
+    const campaignId = decisionsCampaignRef.current;
+    if (campaignId === null) return;
+    const epoch = (decisionsEpoch.current += 1);
+    decisionsLoadedRef.current = false;
+    setDecisionsLoaded(false);
+    setDecisionsNotice(null);
+    enqueueDecisions(() => loadDecisions(campaignId, epoch));
+  }, [enqueueDecisions, loadDecisions]);
 
   const setEstimate = useCallback(
     (next: { status: EstimateStatus; estimate?: PlanEstimate | null; error?: string | null }) => {
@@ -1229,6 +1264,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
       decide,
       decisionsNotice,
       decisionsLoaded,
+      reloadDecisions,
       execute,
       regenerateRejected,
       runMode,
@@ -1268,6 +1304,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
       decide,
       decisionsNotice,
       decisionsLoaded,
+      reloadDecisions,
       execute,
       regenerateRejected,
       runMode,

@@ -1700,6 +1700,9 @@ export const generatePreflightUnknown =
  */
 const GRID_RUN_WORK = "resolving assets, compositing brand layers, and checking compliance";
 
+/** A verdict control waiting on the run's review decisions to load (D173). */
+export const reviewDecisionsLoading = "Loading the review decisions";
+
 export const gridRunIdle =
   "Execute the pipeline below to resolve missing assets, composite brand layers, and run brand-compliance checks.";
 

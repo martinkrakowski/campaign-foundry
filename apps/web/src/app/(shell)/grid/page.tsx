@@ -108,6 +108,7 @@ export default function GridPage() {
     decide,
     decisionsNotice,
     decisionsLoaded,
+    reloadDecisions,
     loading,
     progress,
     assetVersion,
@@ -245,6 +246,15 @@ export default function GridPage() {
         {decisionsNotice !== null && (
           <p role="status" className="basis-full text-warning">
             {decisionsNotice}
+            {!decisionsLoaded && (
+              <button
+                type="button"
+                onClick={reloadDecisions}
+                className="ml-2 underline underline-offset-2 hover:text-text-emphasis"
+              >
+                Try again
+              </button>
+            )}
           </p>
         )}
       </div>
@@ -317,6 +327,7 @@ export default function GridPage() {
                         }
                         decision={decisions[assetKey(asset)]}
                         decidable={decisionsLoaded}
+                        waitingReason={decisionsNotice ?? messages.reviewDecisionsLoading}
                         onDecide={(d) => decide(assetKey(asset), d)}
                         onPreview={() => setPreviewKey(assetKey(asset))}
                       />
@@ -455,6 +466,7 @@ function Artboard({
   loading,
   decision,
   decidable,
+  waitingReason,
   onDecide,
   onPreview,
 }: {
@@ -464,6 +476,8 @@ function Artboard({
   decision?: "approved" | "rejected";
   /** False until the run's decisions load (D173): a verdict needs the map it joins. */
   decidable: boolean;
+  /** Why the verdict controls are paused, while they are. */
+  waitingReason: string;
   onDecide: (decision: "approved" | "rejected") => void;
   onPreview: () => void;
 }) {
@@ -603,7 +617,7 @@ function Artboard({
           type="button"
           onClick={() => onDecide("approved")}
           disabled={!decidable}
-          title={decidable ? undefined : "Loading the review decisions"}
+          title={decidable ? undefined : waitingReason}
           className={cn(
             "rounded-full border px-4 py-1 text-xs font-medium transition-colors disabled:cursor-wait disabled:opacity-60",
             decision === "approved"
@@ -617,7 +631,7 @@ function Artboard({
           type="button"
           onClick={() => onDecide("rejected")}
           disabled={!decidable}
-          title={decidable ? undefined : "Loading the review decisions"}
+          title={decidable ? undefined : waitingReason}
           className={cn(
             "rounded-full border px-4 py-1 text-xs font-medium transition-colors disabled:cursor-wait disabled:opacity-60",
             decision === "rejected"

@@ -17,6 +17,7 @@ import {
   isStoredBrief,
   DECISIONS_CONFLICT_MESSAGE,
   DECISIONS_UNSAVED_MESSAGE,
+  DECISIONS_UNREADABLE_MESSAGE,
   fetchDecisions,
   saveDecisions,
   type Asset,
@@ -521,18 +522,110 @@ describe("RunProvider — review decisions", () => {
     await waitFor(() => expect(result.current.decisions["alpha/1:1/default"]).toBe("approved"));
   });
 
-  test("decisions that could not be fetched leave the screen as it is", async () => {
+  test("decisions that could not be fetched pause reviewing with a reason, and a retry loads them", async () => {
+    let down = true;
+    const server = fakeDecisionsApi({ "alpha/1:1/default": "approved" });
     seedPersistedRun([asset()], {
-      decisions: { handle: () => json({ error: "down" }, 500) } as unknown as ReturnType<
-        typeof fakeDecisionsApi
-      >,
+      decisions: {
+        ...server,
+        handle: (url: string, init: RequestInit) =>
+          down ? json({ error: "down" }, 500) : server.handle(url, init),
+      } as ReturnType<typeof fakeDecisionsApi>,
     });
     const { result } = setup();
-    await waitFor(() => expect(result.current.assets).toHaveLength(1));
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 0));
-    });
+    await waitFor(() => expect(result.current.decisionsNotice).toBe(DECISIONS_UNREADABLE_MESSAGE));
+    expect(result.current.decisionsLoaded).toBe(false);
     expect(result.current.decisions).toEqual({});
+    down = false;
+    act(() => result.current.reloadDecisions());
+    expect(result.current.decisionsNotice).toBeNull();
+    await waitFor(() => expect(result.current.decisionsLoaded).toBe(true));
+    expect(result.current.decisions).toEqual({ "alpha/1:1/default": "approved" });
+  });
+
+  test("a failed load that lands after a brief switch says nothing about the new brief", async () => {
+    let fail!: () => void;
+    seedPersistedRun([asset()], {
+      decisions: {
+        handle: () =>
+          new Promise<Response>((res) => (fail = () => res(json({ error: "down" }, 500)))),
+      } as unknown as ReturnType<typeof fakeDecisionsApi>,
+    });
+    const { result } = setup();
+    await waitFor(() => expect(fail).toBeTypeOf("function")); // the load is in flight
+    act(() => result.current.setBrief(elsewhere));
+    await act(async () => {
+      fail();
+    });
+    await waitFor(() => expect(vi.mocked(globalThis.fetch)).toHaveBeenCalled());
+    expect(result.current.decisionsNotice).toBeNull();
+  });
+
+  test("reloadDecisions with no run on screen does nothing", () => {
+    mockPipelineApi();
+    const { result } = setup();
+    const calls = vi.mocked(globalThis.fetch).mock.calls.length;
+    act(() => result.current.reloadDecisions());
+    expect(vi.mocked(globalThis.fetch).mock.calls.length).toBe(calls);
+    expect(result.current.decisionsLoaded).toBe(false);
+  });
+
+  test("reviewing pauses while a conflict's reload is in flight: a click then is dropped", async () => {
+    let release: (() => void) | undefined;
+    let gets = 0;
+    const server = fakeDecisionsApi();
+    const fake = {
+      ...server,
+      handle: (url: string, init: RequestInit) =>
+        init.method === "PUT" || (gets += 1) !== 2
+          ? server.handle(url, init)
+          : new Promise<Response>((res) => (release = () => res(server.handle(url, init)))),
+    } as ReturnType<typeof fakeDecisionsApi>;
+    seedPersistedRun([asset(), asset({ productId: "beta", outputPath: "beta/1x1.png" })], {
+      decisions: fake,
+    });
+    const { result } = setup();
+    await waitFor(() => expect(result.current.decisionsLoaded).toBe(true));
+    server.saveElsewhere({ "beta/1:1/default": "approved" });
+    act(() => result.current.decide("alpha/1:1/default", "rejected")); // 409, then the held reload
+    await waitFor(() => expect(release).toBeTypeOf("function"));
+    expect(result.current.decisionsLoaded).toBe(false);
+    act(() => result.current.decide("alpha/1:1/default", "approved")); // during the reload
+    await act(async () => {
+      release!();
+    });
+    await waitFor(() => expect(result.current.decisionsLoaded).toBe(true));
+    expect(result.current.decisions).toEqual({ "beta/1:1/default": "approved" });
+    expect(server.stored()).toEqual({ "beta/1:1/default": "approved" });
+  });
+
+  test("a re-roll whose verdict lost to another tab's is not sent: the report write would retire that tab's approval", async () => {
+    const server = fakeDecisionsApi();
+    const posts: unknown[] = [];
+    mockPipelineApi({
+      decisions: server,
+      post: (_url, init) => {
+        posts.push(JSON.parse(init.body as string));
+        return json({ jobId: "job-1" }, 202);
+      },
+      job: () => jobOk({ halted: false, assets: [asset()], log: { entries: [] } }),
+    });
+    const { result } = setup();
+    await act(async () => {
+      await result.current.execute();
+    });
+    await waitFor(() => expect(result.current.decisionsLoaded).toBe(true));
+    server.saveElsewhere({ "alpha/1:1/default": "approved" }); // the other tab approves
+    act(() => result.current.decide("alpha/1:1/default", "rejected")); // this save will 409
+    await act(async () => {
+      await result.current.regenerateRejected();
+    });
+    expect(posts).toHaveLength(1); // the first run only
+    expect(result.current.regeneratingKeys).toBeNull();
+    await waitFor(() =>
+      expect(result.current.decisions).toEqual({ "alpha/1:1/default": "approved" }),
+    );
+    expect(server.stored()).toEqual({ "alpha/1:1/default": "approved" });
   });
 
   test("fetchDecisions keeps approved and rejected verdicts, and refuses an answer that is not a decision map", async () => {

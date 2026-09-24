@@ -15,7 +15,11 @@ import {
   storedTemplate,
   seedDecisions,
 } from "@/__tests__/helpers";
-import { DECISIONS_CONFLICT_MESSAGE, useRun } from "@/lib/run-context";
+import {
+  DECISIONS_CONFLICT_MESSAGE,
+  DECISIONS_UNREADABLE_MESSAGE,
+  useRun,
+} from "@/lib/run-context";
 import GridPage from "../page";
 import { typeDisplayName } from "@/components/campaign/display-names";
 import * as messages from "@/components/campaign/messages";
@@ -446,6 +450,30 @@ describe("GridPage", () => {
     expect((screen.getByText("Reject") as HTMLButtonElement).disabled).toBe(true);
     release();
     await waitFor(() => expect(approve.disabled).toBe(false));
+  });
+
+  test("decisions that could not be loaded say so on the review bar, pause the verdicts, and Try again loads them", async () => {
+    const user = userEvent.setup();
+    let down = true;
+    const server = fakeDecisionsApi({ "alpha/1:1/default": "approved" });
+    seedPersistedRun([makeAsset()], {
+      decisions: {
+        ...server,
+        handle: (url: string, init: RequestInit) =>
+          down ? json({ error: "down" }, 500) : server.handle(url, init),
+      } as ReturnType<typeof fakeDecisionsApi>,
+    });
+    renderWithRun(<GridPage />);
+    const notice = await screen.findByRole("status");
+    expect(notice.textContent).toContain(DECISIONS_UNREADABLE_MESSAGE);
+    const approve = screen.getByText("Approve") as HTMLButtonElement;
+    expect(approve.disabled).toBe(true);
+    expect(approve.title).toBe(DECISIONS_UNREADABLE_MESSAGE);
+    down = false;
+    await user.click(within(notice).getByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(screen.getByText(/✓ 1 approved/)).toBeTruthy());
+    expect(approve.disabled).toBe(false);
+    expect(screen.queryByRole("status")).toBeNull();
   });
 
   test("the Preview pill carries its own boundary, not the video's", async () => {
