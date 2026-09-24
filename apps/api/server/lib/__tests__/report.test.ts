@@ -12,12 +12,13 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import {
   PipelineExecutionLog,
+  assetIdentity,
   type GeneratedAsset,
   type PipelineResult,
 } from "@campaignfoundry/CampaignOrchestration";
 import { isPersistedAsset, readReport, reportRevision, writeReport } from "../report.js";
 import { campaignReportPath } from "../ports/fs-report-store.js";
-import { resetReportStore, setReportStore } from "../ports/index.js";
+import { getDecisionStore, resetReportStore, setReportStore } from "../ports/index.js";
 import { hashBytes } from "../brief-files.js";
 
 import { LOCAL_TENANT } from "../tenant.js";
@@ -182,6 +183,25 @@ describe("report persistence", () => {
     const per = readAssets(path);
     expect(per).toHaveLength(2); // beta preserved, alpha replaced
     expect(per.find((a) => a.productId === "alpha")?.complianceScore).toBe(0.9);
+  });
+
+  test("a report write returns the creatives it replaced to review (D173): a merge its own, a full run every one", async () => {
+    const decided = { verdict: "approved" as const, actor: "local", at: "t", run: "r" };
+    const decisions = getDecisionStore(LOCAL_TENANT);
+    await writeReport(LOCAL_TENANT, result([asset(), beta()]));
+    await decisions.writeDecisions("camp", {
+      [assetIdentity(asset())]: decided,
+      [assetIdentity(beta())]: decided,
+    });
+
+    // A re-roll of alpha: its approval was given to a creative that no longer exists.
+    await writeReport(LOCAL_TENANT, result([asset({ complianceScore: 0.9 })]), { merge: true });
+    expect(Object.keys((await decisions.readDecisions("camp")).decisions)).toEqual([
+      assetIdentity(beta()),
+    ]);
+
+    await writeReport(LOCAL_TENANT, result([beta()]));
+    expect(Object.keys((await decisions.readDecisions("camp")).decisions)).toEqual([]);
   });
 
   test("merge from a missing prior report starts empty", async () => {

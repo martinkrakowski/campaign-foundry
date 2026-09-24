@@ -4,6 +4,7 @@ import type {
   GeneratedAsset,
   PipelineResult,
 } from "@campaignfoundry/CampaignOrchestration";
+import { retireDecisions } from "./decisions.js";
 import { getReportStore, type ReportStorePort } from "./ports/index.js";
 import type { StorageScope } from "./run-environment.js";
 
@@ -248,5 +249,11 @@ export async function writeReport(
     null,
     2,
   );
-  return store.writeReport(campaignId, payload);
+  const locator = await store.writeReport(campaignId, payload);
+  // The creatives this run replaced go back to review (D173): the ones it
+  // regenerated after a merge, every one after a full run. After the report
+  // write, so a verdict given in between is against the new report and retires
+  // conservatively rather than surviving onto a creative it never saw.
+  await retireDecisions(scope, campaignId, merge ? new Set(fresh.map((a) => keyOf(a))) : undefined);
+  return locator;
 }

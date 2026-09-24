@@ -1,4 +1,6 @@
+import { getDecisionStore } from "./ports/index.js";
 import type { DecisionMap, DecisionRecord, Verdict } from "./ports/decision-store.port.js";
+import type { StorageScope } from "./run-environment.js";
 
 export type { DecisionMap, DecisionRecord, Verdict };
 
@@ -8,23 +10,49 @@ export const MAX_DECISIONS = 5000;
 /**
  * The next stored decisions, given the reviewer's whole verdict map (D173).
  *
- * A key whose verdict is unchanged keeps its original actor and time, so the
- * record says who decided and when, not who last saved. A new or changed
- * verdict is stamped with this actor and time. A key absent from `verdicts` is
- * back in review and drops out.
+ * A key whose verdict is unchanged keeps its original actor, time and run, so
+ * the record says who decided, when and against what, not who last saved. A
+ * new or changed verdict is stamped with this actor, time and run. A key
+ * absent from `verdicts` is back in review and drops out.
  */
 export function applyVerdicts(
   previous: DecisionMap,
   verdicts: Readonly<Record<string, Verdict>>,
   actor: string,
   at: string,
+  run: string,
 ): DecisionMap {
-  const next: Record<string, DecisionRecord> = {};
+  // A null prototype: a submitted `__proto__` key is stored, not a prototype swap.
+  const next = Object.create(null) as Record<string, DecisionRecord>;
   for (const [key, verdict] of Object.entries(verdicts)) {
-    const kept = previous[key];
-    next[key] = kept !== undefined && kept.verdict === verdict ? kept : { verdict, actor, at };
+    const kept = Object.hasOwn(previous, key) ? previous[key] : undefined;
+    next[key] = kept !== undefined && kept.verdict === verdict ? kept : { verdict, actor, at, run };
   }
   return next;
+}
+
+/**
+ * Return regenerated creatives to review (D173): drop the decisions for `keys`,
+ * or every decision when `keys` is undefined (a full run replaces the report).
+ *
+ * The report write calls this, so a stale verdict retires on the server, not
+ * in whichever tab ran the job: a second tab or a reload never shows an
+ * approval given to a creative that has since been replaced. Writes nothing
+ * when nothing is retired.
+ */
+export async function retireDecisions(
+  scope: StorageScope,
+  campaignId: string,
+  keys?: ReadonlySet<string>,
+): Promise<void> {
+  const store = getDecisionStore(scope);
+  const { decisions } = await store.readDecisions(campaignId);
+  const all = Object.keys(decisions);
+  const retired = keys === undefined ? all : all.filter((key) => keys.has(key));
+  if (retired.length === 0) return;
+  const next = Object.create(null) as Record<string, DecisionRecord>;
+  for (const key of all) if (!retired.includes(key)) next[key] = decisions[key];
+  await store.writeDecisions(campaignId, next);
 }
 
 /** Why a submitted verdict map cannot be stored, or undefined when it can. */

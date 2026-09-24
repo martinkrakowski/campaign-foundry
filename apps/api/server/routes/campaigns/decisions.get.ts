@@ -4,7 +4,8 @@ import { LOCAL_TENANT } from "../../lib/tenant.js";
 
 /**
  * GET /campaigns/decisions?campaignId= — a campaign's review decisions (D173),
- * each with its verdict, who gave it and when. `{ decisions: {} }` when none
+ * each with its verdict, who gave it, when and against which run, plus the
+ * `revision` a save must name. `{ decisions: {}, revision: null }` when none
  * are recorded; 400 for a missing or unsafe id.
  */
 export default defineEventHandler(async (event) => {
@@ -13,5 +14,5 @@ export default defineEventHandler(async (event) => {
     setResponseStatus(event, 400);
     return { error: "Invalid campaign id" };
   }
-  return { decisions: await getDecisionStore(LOCAL_TENANT).readDecisions(campaignId) };
+  return getDecisionStore(LOCAL_TENANT).readDecisions(campaignId);
 });

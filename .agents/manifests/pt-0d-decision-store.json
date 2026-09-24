@@ -4,9 +4,9 @@
   "mutations": [
     {
       "file": "apps/api/server/lib/decisions.ts",
-      "before": "    next[key] = kept !== undefined && kept.verdict === verdict ? kept : { verdict, actor, at };",
-      "after": "    next[key] = { verdict, actor, at };",
-      "because": "every save restamps who and when, so the record says who last saved rather than who decided (D173 audit trail).",
+      "before": "    next[key] = kept !== undefined && kept.verdict === verdict ? kept : { verdict, actor, at, run };",
+      "after": "    next[key] = { verdict, actor, at, run };",
+      "because": "every save restamps who, when and the run, so the record says who last saved rather than who decided (D173 audit trail).",
       "command": [
         "yarn",
         "vitest",
