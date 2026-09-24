@@ -9,7 +9,7 @@ import {
   readFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import {
   BRIEF_SCHEMA_VERSION,
   DEFAULT_CAMPAIGN_TYPE,
@@ -140,7 +140,7 @@ describe("FsBriefStore", () => {
     writeFileSync(join(dir, "bad.yaml"), "id: 1\nproducts: not-an-array\n");
     writeFileSync(join(dir, "ignore.txt"), "not a brief");
     writeFileSync(join(dir, "winter.json"), JSON.stringify({ ...minimalBrief, id: "winter" }));
-    const outside = join(dir, "..", `${dir.split("/").pop()}-outside.yaml`);
+    const outside = join(dir, "..", `${basename(dir)}-outside.yaml`);
     writeFileSync(outside, campYaml.replace("id: camp", "id: linked"));
     symlinkSync(outside, join(dir, "linked.yaml"));
     try {
