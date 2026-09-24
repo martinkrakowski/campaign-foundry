@@ -1,10 +1,12 @@
 /**
- * The markup assembler (HL4, AR2).
+ * The markup assembler (HL4, AR2, AF1).
  *
  * Produces a self-contained HTML creative unit from the template's layers.
- * Copy is a `static-text` layer, pictures are `image` and `logo` layers, and
- * a linked layer is a `<button>` that opens `window.clickTag`. Every other
- * kind stays in the raster and emits nothing here.
+ * The raster fallback is the full composite (D164), so unlinked static-text,
+ * logo, shade, fill, and accent layers emit nothing here. An image layer emits
+ * the fallback `<img>`, with `alt` falling back to the headline copy. A linked
+ * static-text layer emits a transparent `<button>` over its band that opens
+ * `window.clickTag`, with visually-hidden accessible copy.
  *
  * Key invariants:
  * 1. `clickDestination`: absent or `""` emits no `clickTag` and no onclick.
@@ -22,10 +24,10 @@
 
 import { resolveCanvas, type CanvasSpec } from "./aspect-ratios.js";
 import { CLICK_TAG_VARIABLE, isAbsoluteUrl } from "./click-destination.js";
-import { resolveLayerFrame } from "./creative-geometry.js";
-import { DEFAULT_STYLE, resolveStyle, toneFontWeight, type Style } from "./creative-style.js";
+import { defaultLayerRect, resolveLayerFrame } from "./creative-geometry.js";
+import type { Style } from "./creative-style.js";
 import type { CreativeTemplateLayer } from "./creative-templates.js";
-import { DEFAULT_TREATMENT, type ToneKind } from "./Treatment.vo.js";
+import type { ToneKind } from "./Treatment.vo.js";
 
 /** HTML-escape user-authored strings for the HTML text / quoted-attribute contexts (HL-D7). */
 export function escapeHtml(value: string): string {
@@ -111,19 +113,22 @@ export interface AssembledHtml {
 
 const CLICK_OPEN = ` onclick="window.open(window.${CLICK_TAG_VARIABLE})"`;
 
-/** `alt` is the image prop when it is a string; every other shape is empty. */
-function layerAlt(layer: CreativeTemplateLayer): string {
+/**
+ * `alt` is the image prop when it is a string; falls back to the escaped
+ * headline when that image layer has no string alt of its own.
+ */
+function layerAlt(layer: CreativeTemplateLayer, headline?: string): string {
   const props = layer.props;
   if (props !== undefined && "alt" in props && typeof props.alt === "string") {
-    return escapeHtml(String(props.alt));
+    return escapeHtml(props.alt);
   }
-  return "";
+  return escapeHtml(headline ?? "");
 }
 
 /**
  * The positioned box. A declared frame is canvas fractions in px. Absent, an
- * image fills the canvas and a logo or static-text layer uses the percentage
- * block — still `position: absolute`.
+ * image fills the canvas and a linked static-text layer sits on its default
+ * rect — still `position: absolute`.
  */
 function layerBoxStyle(
   layer: CreativeTemplateLayer,
@@ -133,14 +138,13 @@ function layerBoxStyle(
 ): string {
   // D130: a display size or ratio overlay wins over the base fractions, the
   // same resolution the compositor paints. Reading `frame.x` raw drops it.
-  const frame = resolveLayerFrame(layer.frame, spec);
+  const frame =
+    resolveLayerFrame(layer.frame, spec) ??
+    (layer.kind === "static-text" ? defaultLayerRect("static-text") : undefined);
   if (frame !== undefined) {
     return `position: absolute; left: ${frame.x * width}px; top: ${frame.y * height}px; width: ${frame.w * width}px; height: ${frame.h * height}px;`;
   }
-  if (layer.kind === "image") {
-    return `position: absolute; left: 0px; top: 0px; width: ${width}px; height: ${height}px;`;
-  }
-  return `position: absolute; left: 5%; top: 10%; width: 90%; height: 30%;`;
+  return `position: absolute; left: 0px; top: 0px; width: ${width}px; height: ${height}px;`;
 }
 
 function pictureMarkup(
@@ -148,8 +152,9 @@ function pictureMarkup(
   box: string,
   src: string,
   hasClick: boolean,
+  headline?: string,
 ): string {
-  const img = `<img src="${src}" alt="${layerAlt(layer)}" />`;
+  const img = `<img src="${src}" alt="${layerAlt(layer, headline)}" />`;
   if (layer.link === true && hasClick) {
     return `<div style="${box}"><button type="button"${CLICK_OPEN}>${img}</button></div>`;
   }
@@ -178,35 +183,29 @@ export function assembleHtml(options: AssembleHtmlOptions): AssembledHtml {
   const fallbackImageSrc = options.fallbackImageSrc ?? "fallback.png";
   const src = escapeHtml(fallbackImageSrc);
   const copy = escapeHtml(options.headline ?? "");
-  const face = resolveStyle(
-    options.style,
-    toneFontWeight(options.tone ?? DEFAULT_TREATMENT.tone),
-    DEFAULT_STYLE.fontFamily,
-  );
-  // Native `<p>` / `<button>` margins, borders and black text are not the
-  // canvas face. The reset plus the resolved family and weight are what the
-  // compositor already paints.
-  const textFace = ` margin: 0; padding: 0; border: none; background: transparent; color: #ffffff; font-family: ${escapeHtml(face.fontFamily)}, sans-serif; font-weight: ${face.fontWeight};`;
 
   const layerMarkup: string[] = [];
   for (const layer of options.layers) {
     if (layer.enabled === false) continue;
-    // Logo is already in the fallback raster. Emitting it as another
-    // `<img src="fallback.png">` would paint that whole raster a second time.
+    // Logo, shade, fill, and accent are already in the fallback raster. Emitting
+    // them here would duplicate what is already painted.
     if (layer.kind === "image") {
       layerMarkup.push(
-        pictureMarkup(layer, layerBoxStyle(layer, options.canvas, width, height), src, hasClick),
+        pictureMarkup(
+          layer,
+          layerBoxStyle(layer, options.canvas, width, height),
+          src,
+          hasClick,
+          options.headline,
+        ),
       );
       continue;
     }
-    if (layer.kind === "static-text") {
-      const box = `${layerBoxStyle(layer, options.canvas, width, height)}${textFace}`;
-      if (layer.link === true) {
-        const nav = hasClick ? CLICK_OPEN : "";
-        layerMarkup.push(`<button type="button" style="${box}"${nav}>${copy}</button>`);
-      } else {
-        layerMarkup.push(`<p style="${box}">${copy}</p>`);
-      }
+    if (layer.kind === "static-text" && layer.link === true) {
+      const box = `${layerBoxStyle(layer, options.canvas, width, height)} background: transparent; border: none; padding: 0; margin: 0;`;
+      const nav = hasClick ? CLICK_OPEN : "";
+      const hiddenSpan = `<span style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0);">${copy}</span>`;
+      layerMarkup.push(`<button type="button" style="${box}"${nav}>${hiddenSpan}</button>`);
     }
   }
 

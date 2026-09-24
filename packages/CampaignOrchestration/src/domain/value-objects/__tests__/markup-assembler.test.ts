@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import { defaultLayerRect } from "../creative-geometry.js";
 import type { CreativeTemplateLayer } from "../creative-templates.js";
 import { assembleHtml, type AssembleHtmlOptions } from "../markup-assembler.js";
 
@@ -30,6 +31,14 @@ describe("assembleHtml", () => {
     expect(result.html).not.toContain("<a");
     expect(result.html).toContain('<button type="button"');
     expect((result.html.match(/<script/g) ?? []).length).toBe(1);
+
+    const defaultRect = defaultLayerRect("static-text");
+    expect(result.html).toContain(`top: ${defaultRect.y * 1080}px;`);
+    expect(result.html).toContain(`height: ${defaultRect.h * 1080}px;`);
+    expect(result.html).toContain("<span");
+    expect(result.html).toContain("overflow: hidden;");
+    expect(result.html).not.toContain(">Shop</button>");
+    expect(result.html).not.toContain("5%");
   });
 
   test("the same layers with no clickDestination emit no clickTag and no window.open", () => {
@@ -39,6 +48,14 @@ describe("assembleHtml", () => {
     expect(result.html).not.toContain("window.open");
     expect(result.html).toContain('<button type="button"');
     expect(result.html).not.toContain("onclick");
+
+    const defaultRect = defaultLayerRect("static-text");
+    expect(result.html).toContain(`top: ${defaultRect.y * 1080}px;`);
+    expect(result.html).toContain(`height: ${defaultRect.h * 1080}px;`);
+    expect(result.html).toContain("<span");
+    expect(result.html).toContain("overflow: hidden;");
+    expect(result.html).not.toContain(">Shop</button>");
+    expect(result.html).not.toContain("5%");
   });
 
   test("an empty clickDestination is the same absence: no script and no onclick", () => {
@@ -61,14 +78,17 @@ describe("assembleHtml", () => {
   test("a headline that looks like a script is escaped and never raw", () => {
     const result = assembleHtml(
       base({
-        layers: [layer({ id: "copy", kind: "static-text" })],
+        layers: [
+          layer({ id: "picture", kind: "image" }),
+          layer({ id: "copy", kind: "static-text" }),
+        ],
         headline: '<script>alert("xss")</script>',
       }),
     );
 
     expect(result.html).not.toContain('<script>alert("xss")</script>');
     expect(result.html).toContain("&lt;script&gt;");
-    expect(result.html).toContain("<p ");
+    expect(result.html).not.toContain("<p");
   });
 
   test("a clickDestination containing a script close still round-trips through escapeScriptJson", () => {
@@ -117,6 +137,40 @@ describe("assembleHtml", () => {
     expect(result.html).not.toContain(">Shop</p>");
   });
 
+  test("unlinked static-text emits no paragraph", () => {
+    const result = assembleHtml(
+      base({
+        layers: [
+          layer({ id: "picture", kind: "image" }),
+          layer({ id: "copy", kind: "static-text" }),
+        ],
+        headline: "Shop",
+      }),
+    );
+
+    expect(result.html).not.toContain("<p");
+    expect(result.html).not.toContain(">Shop</p>");
+  });
+
+  test("linked image with unlinked copy has one button", () => {
+    const result = assembleHtml(
+      base({
+        layers: [
+          layer({ id: "picture", kind: "image", link: true }),
+          layer({ id: "copy", kind: "static-text" }),
+        ],
+        headline: "Shop",
+        clickDestination: "https://example.com/landing-page",
+      }),
+    );
+
+    expect((result.html.match(/<button/g) ?? []).length).toBe(1);
+    expect(result.html).toContain(
+      '<button type="button" onclick="window.open(window.clickTag)"><img',
+    );
+    expect(result.html).not.toContain("<p");
+  });
+
   test("a display-size frame overlay wins over the base fractions", () => {
     const result = assembleHtml(
       base({
@@ -142,6 +196,35 @@ describe("assembleHtml", () => {
     expect(result.html).not.toContain("left: 0px;");
   });
 
+  test("linked static-text uses a display-size frame overlay", () => {
+    const result = assembleHtml(
+      base({
+        canvas: { size: "300x250" },
+        clickDestination: "https://example.com/landing-page",
+        layers: [
+          layer({
+            id: "copy",
+            kind: "static-text",
+            link: true,
+            frame: {
+              x: 0,
+              y: 0,
+              w: 1,
+              h: 1,
+              anchor: "top",
+              byFamily: { size: { "300x250": { x: 0.25 } } },
+            },
+          }),
+        ],
+        headline: "Shop",
+      }),
+    );
+
+    expect(result.html).toContain("left: 75px;");
+    expect(result.html).not.toContain("top: 108px");
+    expect(result.html).not.toContain("5%");
+  });
+
   test("static-text uses the resolved face, not the browser's paragraph defaults", () => {
     const result = assembleHtml(
       base({
@@ -159,10 +242,8 @@ describe("assembleHtml", () => {
       }),
     );
 
-    expect(result.html).toContain("font-family: Lora, sans-serif");
-    expect(result.html).toContain("font-weight: 700");
-    expect(result.html).toContain("margin: 0");
-    expect(result.html).toContain("color: #ffffff");
+    expect(result.html).not.toContain("<p");
+    expect(result.html).not.toContain("Lora");
   });
 
   test("a picture layer honours an override src and a string alt, and a non-string alt is empty", () => {
@@ -189,6 +270,18 @@ describe("assembleHtml", () => {
     );
     expect(unnamed.html).toContain('alt=""');
     expect(unnamed.html).not.toContain('alt="1"');
+  });
+
+  test("image alt wins over the headline", () => {
+    const result = assembleHtml(
+      base({
+        layers: [layer({ id: "picture", kind: "image", props: { alt: "Pack" } })],
+        headline: "Shop",
+      }),
+    );
+
+    expect(result.html).toContain('alt="Pack"');
+    expect(result.html).not.toContain('alt="Shop"');
   });
 
   test("a shade layer emits nothing, and so does a disabled picture", () => {
@@ -230,8 +323,9 @@ describe("assembleHtml", () => {
     expect(result.html).toContain(
       '<div style="position: absolute; left: 108px; top: 216px; width: 540px; height: 270px;"><button type="button" onclick="window.open(window.clickTag)"><img',
     );
-    expect(result.html).toContain('<p style="position: absolute; left: 0px;');
-    expect(result.html).toContain(">Hi</p>");
+    expect(result.html).toContain('alt="Hi"');
+    expect(result.html).not.toContain("<p");
+    expect(result.html).not.toContain(">Hi</p>");
   });
 
   test("a linked image without a destination is not wrapped in a button", () => {
@@ -242,10 +336,17 @@ describe("assembleHtml", () => {
     expect(result.html).not.toContain("<button");
   });
 
-  test("an absent headline on static-text emits an empty paragraph", () => {
-    const result = assembleHtml(base({ layers: [layer({ id: "copy", kind: "static-text" })] }));
-    expect(result.html).toContain("<p ");
-    expect(result.html).toContain("></p>");
+  test("an absent headline on static-text emits no paragraph and image alt is empty", () => {
+    const result = assembleHtml(
+      base({
+        layers: [
+          layer({ id: "picture", kind: "image" }),
+          layer({ id: "copy", kind: "static-text" }),
+        ],
+      }),
+    );
+    expect(result.html).not.toContain("<p");
+    expect(result.html).toContain('alt=""');
   });
 
   test("a brandColor that is not the documented 6-digit hex shape is refused", () => {

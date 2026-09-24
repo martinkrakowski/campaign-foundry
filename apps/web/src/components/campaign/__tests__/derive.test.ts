@@ -700,7 +700,10 @@ describe("derive.ts", () => {
           { id: "logo", kind: "logo" as const },
         ];
         const state = meterState({
-          template: htmlTemplate([...measured, copy({ id: "copy-off", enabled: false })]),
+          template: htmlTemplate([
+            ...measured,
+            copy({ id: "copy-off", link: true, enabled: false }),
+          ]),
           campaignMessage: "Stay wild",
         });
         const expected = assembleHtml({
@@ -710,9 +713,9 @@ describe("derive.ts", () => {
           brandColor: "#1473E6",
           style: state.style,
         }).byteLength;
-        // The disabled copy would have emitted the same headline again.
+        // A disabled linked headline emits nothing, and enabling it adds the button.
         const withIt = assembleHtml({
-          layers: [...measured, copy({ id: "copy-off" })],
+          layers: [...measured, copy({ id: "copy-off", link: true })],
           headline: "Stay wild",
           canvas: { size: "300x250" },
           brandColor: "#1473E6",
