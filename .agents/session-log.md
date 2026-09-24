@@ -6185,3 +6185,20 @@ and source formatting, recorded here rather than fixed.
   characterization test; D171's fenced writes retire what it pins.
 - **Left open:** PT-0b1 next (the tenant seam below the routes: `pipeline.ts`, `jobs.ts`, `safe-path.ts`
   and its six adapters, the CLI). D166, D168–D172, D174 and D175 unstamped. The Google Ads UI upload.
+- **PT-0b1 done (2026-09-24):**
+  - [#572](https://github.com/martinkrakowski/campaign-foundry/pull/572) (`2f64f8fb`): asset reads
+    confine to a root the adapter is given. Four adapters (not six as the plan said) plus the video
+    compositor through `NodeCanvasCompositor.prepare`. About 170 test call sites were updated by an AST
+    codemod on the TypeScript compiler API. Goldens unchanged.
+  - [#573](https://github.com/martinkrakowski/campaign-foundry/pull/573) (`f9234f99`): `tenant.ts` and
+    `run-environment.ts` (the composition root); `pipeline.ts` reads no env and has no import-time
+    `loadEnv()`. Qodo found the environment was read after `acquireJob`, so a throw would strand a
+    running job; it now reads before the claim. CodeRabbit found the provider-selection test was
+    blind; adapter constructions are now recorded and asserted against `env.providers` alone. The
+    report store's per-call `outputRoot()` is deferred to PT-0b2 by design.
+  - The lane was split (A: packages and codemod; B: composition root, stacked) so review saw nine
+    substantive files, not 47. DoD 1's grep now lists only the composition root, `project-root.ts`,
+    and `preview-frame.post.ts` (PT-0b2).
+  - Two traps hit again and caught: `git grep -E "\b"` fed the codemod half its files, and a one-line
+    mutation on a Prettier-wrapped statement "caught" by syntax error. Check the failure is an
+    AssertionError.
