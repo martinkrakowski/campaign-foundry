@@ -17,25 +17,29 @@ import { FileSystemAudioAssetResolver } from "../FileSystemAudioAssetResolver.js
 describe("FileSystemAudioAssetResolver (AudioAssetPort adapter)", () => {
   test("resolves a readable asset's bytes completely unchanged", async () => {
     const expected = readFileSync(resolve(projectRoot(), "assets", "inputs", "reuse-bg.png"));
-    const out = await new FileSystemAudioAssetResolver().resolveAudio("assets/inputs/reuse-bg.png");
+    const out = await new FileSystemAudioAssetResolver(projectRoot()).resolveAudio(
+      "assets/inputs/reuse-bg.png",
+    );
     expect(Buffer.from(out)).toEqual(expected);
   });
 
   test("rejects an unsafe (absolute) path, never falling through silently", async () => {
-    await expect(new FileSystemAudioAssetResolver().resolveAudio("/etc/passwd")).rejects.toThrow(
-      /not a valid asset path/,
-    );
+    await expect(
+      new FileSystemAudioAssetResolver(projectRoot()).resolveAudio("/etc/passwd"),
+    ).rejects.toThrow(/not a valid asset path/);
   });
 
   test("rejects a path that escapes the confined assets tree", async () => {
     await expect(
-      new FileSystemAudioAssetResolver().resolveAudio("assets/../secrets.mp3"),
+      new FileSystemAudioAssetResolver(projectRoot()).resolveAudio("assets/../secrets.mp3"),
     ).rejects.toThrow(/not a valid asset path/);
   });
 
   test("rejects a missing audio file, naming it", async () => {
     await expect(
-      new FileSystemAudioAssetResolver().resolveAudio("assets/inputs/does-not-exist.mp3"),
+      new FileSystemAudioAssetResolver(projectRoot()).resolveAudio(
+        "assets/inputs/does-not-exist.mp3",
+      ),
     ).rejects.toThrow(/could not be read/);
   });
 });

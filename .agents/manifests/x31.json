@@ -4,9 +4,9 @@
   "mutations": [
     {
       "file": "packages/CreativeGeneration/src/infrastructure/adapters/__tests__/CanvasFfmpegVideoCompositor.byte-golden.test.ts",
-      "before": "        await new CanvasFfmpegVideoCompositor({ ffmpegPath: alias, spawn }).compositeVideo(\n          canonicalMp4Request(),\n        );",
-      "after": "        await new CanvasFfmpegVideoCompositor({ spawn }).compositeVideo(\n          canonicalMp4Request(),\n        );",
-      "because": "The byte golden used to construct CanvasFfmpegVideoCompositor without ffmpegPath, so an override honoured by the probe and stream extraction did not reach the encode under test. Reverting the constructor argument restores that split at the construction the identity test observes: the adapter falls back to its ffmpeg-static default, and the spawn recorder captures that path instead of the resolved binary's alias. (Re-anchored by ANCHORS: the recorded text was reformatted or moved, not changed — the after-text is re-wrapped the same way, and the edit it encodes, the claim and the command are untouched.)",
+      "before": "        await new CanvasFfmpegVideoCompositor({\n          ffmpegPath: alias,\n          spawn,\n          assetRoot: projectRoot(),\n        }).compositeVideo(canonicalMp4Request());",
+      "after": "        await new CanvasFfmpegVideoCompositor({\n          spawn,\n          assetRoot: projectRoot(),\n        }).compositeVideo(canonicalMp4Request());",
+      "because": "The byte golden used to construct CanvasFfmpegVideoCompositor without ffmpegPath, so an override honoured by the probe and stream extraction did not reach the encode under test. Reverting the constructor argument restores that split at the construction the identity test observes: the adapter falls back to its ffmpeg-static default, and the spawn recorder captures that path instead of the resolved binary's alias. (Re-anchored by ANCHORS: the recorded text was reformatted or moved, not changed — the after-text is re-wrapped the same way, and the edit it encodes, the claim and the command are untouched.) Re-anchored 2026-09-24 by PT-0b1: the construction gained the required assetRoot (D167) and was re-wrapped; the edit still drops only ffmpegPath.",
       "command": [
         "yarn",
         "vitest",

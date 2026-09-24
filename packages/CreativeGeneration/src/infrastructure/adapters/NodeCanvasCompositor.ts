@@ -352,7 +352,14 @@ export class NodeCanvasCompositor implements CompositorPort {
    */
   private static readonly layerDrawers = LAYER_DRAWERS;
 
-  constructor(private readonly fontFamily: string = "Inter") {
+  /**
+   * @param fontFamily the headline family (`MESSAGE_FONT`, resolved by the caller).
+   * @param assetRoot the project root whose `assets/` tree confines the logo read (D167).
+   */
+  constructor(
+    private readonly fontFamily: string,
+    private readonly assetRoot: string,
+  ) {
     registerBundledFonts();
   }
 
@@ -480,7 +487,8 @@ export class NodeCanvasCompositor implements CompositorPort {
        */
       readonly creativeType?: CreativeType;
     },
-    fontFamily: string = "Inter",
+    fontFamily: string,
+    assetRoot: string,
   ): Promise<PreparedCreative> {
     const canvas = request.canvas;
     const resolved = resolveCanvas(canvas);
@@ -559,7 +567,7 @@ export class NodeCanvasCompositor implements CompositorPort {
     // through resolveAssetPath.
     let logo: PreparedCreative["logo"];
     let logoLoaded = false;
-    const logoPath = resolveAssetPath(request.logoPath);
+    const logoPath = resolveAssetPath(request.logoPath, assetRoot);
     if (logoPath) {
       try {
         const image = await loadImage(await readFile(logoPath));
@@ -665,7 +673,7 @@ export class NodeCanvasCompositor implements CompositorPort {
   }
 
   async compositeAsset(request: CompositeRequest): Promise<CompositeResult> {
-    const prepared = await NodeCanvasCompositor.prepare(request, this.fontFamily);
+    const prepared = await NodeCanvasCompositor.prepare(request, this.fontFamily, this.assetRoot);
     const canvas = createCanvas(prepared.width, prepared.height);
     const ctx = canvas.getContext("2d");
     // Still: pose at t = 1, effect clock settled (H4). The two clocks agree

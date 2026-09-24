@@ -23,7 +23,7 @@ const ratio = (v = "1:1") => {
 describe("FileSystemSceneAssetResolver (SceneAssetPort adapter)", () => {
   test("resolves a readable scene, cover-fitted to the target ratio's exact pixel dimensions", async () => {
     const target = ratio("9:16");
-    const out = await new FileSystemSceneAssetResolver().resolveScene(
+    const out = await new FileSystemSceneAssetResolver(projectRoot()).resolveScene(
       "assets/inputs/reuse-bg.png",
       target,
     );
@@ -40,7 +40,7 @@ describe("FileSystemSceneAssetResolver (SceneAssetPort adapter)", () => {
 
   test("cover-fits to a second, differently-shaped ratio too — the dimensions track the request, not a fixed output size", async () => {
     const target = ratio("16:9");
-    const out = await new FileSystemSceneAssetResolver().resolveScene(
+    const out = await new FileSystemSceneAssetResolver(projectRoot()).resolveScene(
       "assets/inputs/reuse-bg.png",
       target,
     );
@@ -51,25 +51,34 @@ describe("FileSystemSceneAssetResolver (SceneAssetPort adapter)", () => {
 
   test("rejects an unsafe (absolute) path, never falling through silently", async () => {
     await expect(
-      new FileSystemSceneAssetResolver().resolveScene("/etc/passwd", ratio()),
+      new FileSystemSceneAssetResolver(projectRoot()).resolveScene("/etc/passwd", ratio()),
     ).rejects.toThrow(/not a valid asset path/);
   });
 
   test("rejects a path that escapes the confined assets tree", async () => {
     await expect(
-      new FileSystemSceneAssetResolver().resolveScene("assets/../secrets.png", ratio()),
+      new FileSystemSceneAssetResolver(projectRoot()).resolveScene(
+        "assets/../secrets.png",
+        ratio(),
+      ),
     ).rejects.toThrow(/not a valid asset path/);
   });
 
   test("rejects a missing scene file", async () => {
     await expect(
-      new FileSystemSceneAssetResolver().resolveScene("assets/inputs/does-not-exist.png", ratio()),
+      new FileSystemSceneAssetResolver(projectRoot()).resolveScene(
+        "assets/inputs/does-not-exist.png",
+        ratio(),
+      ),
     ).rejects.toThrow(/could not be read/);
   });
 
   test("rejects an undecodable file (not an image)", async () => {
     await expect(
-      new FileSystemSceneAssetResolver().resolveScene("assets/inputs/README.txt", ratio()),
+      new FileSystemSceneAssetResolver(projectRoot()).resolveScene(
+        "assets/inputs/README.txt",
+        ratio(),
+      ),
     ).rejects.toThrow(/could not be read/);
   });
 });
@@ -103,7 +112,7 @@ describe("FileSystemSceneAssetResolver — image-only enforcement against real a
     "a real, valid %s upload named as a beat's background is rejected, never silently accepted as a scene",
     async (name) => {
       await expect(
-        new FileSystemSceneAssetResolver().resolveScene(
+        new FileSystemSceneAssetResolver(projectRoot()).resolveScene(
           `assets/inputs/ve3b2-image-only-proof-scene/${name}`,
           ratio(),
         ),

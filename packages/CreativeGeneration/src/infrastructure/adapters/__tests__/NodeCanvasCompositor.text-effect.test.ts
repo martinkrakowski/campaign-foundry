@@ -13,6 +13,7 @@ import {
 import { CREATIVE_GEOMETRY } from "@campaignfoundry/CampaignOrchestration/creative-geometry";
 import { NodeCanvasCompositor } from "../NodeCanvasCompositor.js";
 
+import { projectRoot } from "@campaignfoundry/shared";
 const ratio = (v = "1:1") => {
   const r = AspectRatio.create(v);
   if (!r.success) throw r.error;
@@ -79,7 +80,7 @@ async function blit(
   copyT?: number,
   effectT?: number,
 ): Promise<Blit> {
-  const prepared = await NodeCanvasCompositor.prepare(req);
+  const prepared = await NodeCanvasCompositor.prepare(req, "Inter", projectRoot());
   const canvas = createCanvas(prepared.width, prepared.height);
   const ctx = canvas.getContext("2d");
   const fillText: TextOp[] = [];
@@ -163,16 +164,22 @@ function expectedPoseAtMid(kind: TextEffectKind, width: number, height: number) 
 
 describe("the text effect rides prepare (T6)", () => {
   test.each(TEXT_EFFECT_VALUES)("prepare resolves %s onto the prepared creative", async (kind) => {
-    const prepared = await NodeCanvasCompositor.prepare(request({ style: { textEffect: kind } }));
+    const prepared = await NodeCanvasCompositor.prepare(
+      request({ style: { textEffect: kind } }),
+      "Inter",
+      projectRoot(),
+    );
     expect(prepared.textEffect).toBe(kind);
     expect(prepared.style.textEffect).toBe(kind);
   });
 
   test("an absent effect resolves to undefined — the pre-effect path bit for bit (D54)", async () => {
-    const prepared = await NodeCanvasCompositor.prepare(request());
+    const prepared = await NodeCanvasCompositor.prepare(request(), "Inter", projectRoot());
     expect(prepared.textEffect).toBeUndefined();
     const explicitNone = await NodeCanvasCompositor.prepare(
       request({ style: { textEffect: undefined } }),
+      "Inter",
+      projectRoot(),
     );
     expect(explicitNone.textEffect).toBeUndefined();
   });

@@ -11,6 +11,7 @@ import {
 import { CREATIVE_GEOMETRY } from "@campaignfoundry/CampaignOrchestration/creative-geometry";
 import { NodeCanvasCompositor, scaleBasis, widthTermBasis } from "../NodeCanvasCompositor.js";
 
+import { projectRoot } from "@campaignfoundry/shared";
 const THREE_LINE =
   "Stay wild, stay hydrated, and never stop exploring the trail ahead of you today";
 
@@ -51,7 +52,7 @@ type LayoutCapture = {
 };
 
 async function captureLayout(req: CompositeRequest): Promise<LayoutCapture> {
-  const prepared = await NodeCanvasCompositor.prepare(req);
+  const prepared = await NodeCanvasCompositor.prepare(req, "Inter", projectRoot());
   const canvas = createCanvas(prepared.width, prepared.height);
   const ctx = canvas.getContext("2d");
   const lines: LayoutCapture["lines"][number][] = [];
@@ -187,6 +188,8 @@ describe("display layout (D114)", () => {
   test("pixelSize overrides resolveCanvas so the video suite can shrink a 9:16", async () => {
     const prepared = await NodeCanvasCompositor.prepare(
       request({ canvas: { ratio: "9:16" }, pixelSize: { width: 108, height: 192 }, message: "Hi" }),
+      "Inter",
+      projectRoot(),
     );
     expect(prepared.width).toBe(108);
     expect(prepared.height).toBe(192);

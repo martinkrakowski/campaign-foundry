@@ -8,6 +8,7 @@ import {
 } from "@campaignfoundry/CampaignOrchestration";
 import { NodeCanvasCompositor } from "../NodeCanvasCompositor.js";
 
+import { projectRoot } from "@campaignfoundry/shared";
 const ratio = (v = "1:1") => {
   const r = AspectRatio.create(v);
   if (!r.success) throw r.error;
@@ -47,7 +48,7 @@ interface DrawSpy {
 }
 
 async function spyDraw(req: CompositeRequest, t: number, motion?: MotionKind): Promise<DrawSpy> {
-  const prepared = await NodeCanvasCompositor.prepare(req);
+  const prepared = await NodeCanvasCompositor.prepare(req, "Inter", projectRoot());
   const canvas = createCanvas(prepared.width, prepared.height);
   const ctx = canvas.getContext("2d");
   const scales: number[][] = [];

@@ -24,8 +24,11 @@ import { resolveAssetPath } from "../safe-path.js";
  * golden-pinned adapter — refactoring those is out of this lane's scope.
  */
 export class FileSystemSceneAssetResolver implements SceneAssetPort {
+  /** @param assetRoot the project root whose `assets/` tree confines every read (D167). */
+  constructor(private readonly assetRoot: string) {}
+
   async resolveScene(path: string, ratio: AspectRatio): Promise<Uint8Array> {
-    const safePath = resolveAssetPath(path);
+    const safePath = resolveAssetPath(path, this.assetRoot);
     if (!safePath) {
       throw new Error(`Scene "${path}" is not a valid asset path.`);
     }

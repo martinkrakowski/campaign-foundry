@@ -11,6 +11,7 @@ import {
 } from "@campaignfoundry/CampaignOrchestration";
 import { NodeCanvasCompositor } from "../NodeCanvasCompositor.js";
 
+import { projectRoot } from "@campaignfoundry/shared";
 /**
  * Structural tests for the layer-list dispatch (L2a, D121/D128): the draw
  * order is the template's layer list, array position is z-order. The
@@ -80,7 +81,7 @@ function recordDrawOrder(): LayerKind[] {
 }
 
 async function drawWithRecorder(req: TemplateRequest): Promise<LayerKind[]> {
-  const prepared = await NodeCanvasCompositor.prepare(req);
+  const prepared = await NodeCanvasCompositor.prepare(req, "Inter", projectRoot());
   const ctx = createCanvas(prepared.width, prepared.height).getContext("2d");
   const order = recordDrawOrder();
   NodeCanvasCompositor.draw(ctx, prepared, 1);
@@ -93,12 +94,16 @@ describe("the compositor's draw order is the template's layer list (L2a, D121)",
   });
 
   test("without a template the resolved draw order is the image-text canonical list", async () => {
-    const prepared = await NodeCanvasCompositor.prepare(request());
+    const prepared = await NodeCanvasCompositor.prepare(request(), "Inter", projectRoot());
     expect(prepared.layers).toEqual(CANONICAL_TEMPLATES["image-text"].layers);
   });
 
   test("a creativeType without a template resolves that type's canonical layers", async () => {
-    const prepared = await NodeCanvasCompositor.prepare(request({ creativeType: "video" }));
+    const prepared = await NodeCanvasCompositor.prepare(
+      request({ creativeType: "video" }),
+      "Inter",
+      projectRoot(),
+    );
     expect(prepared.layers).toEqual(CANONICAL_TEMPLATES["video"].layers);
   });
 
@@ -142,7 +147,11 @@ describe("the compositor's draw order is the template's layer list (L2a, D121)",
         { id: "wash", kind: "fill" },
       ],
     };
-    const prepared = await NodeCanvasCompositor.prepare(request({ template }));
+    const prepared = await NodeCanvasCompositor.prepare(
+      request({ template }),
+      "Inter",
+      projectRoot(),
+    );
     const ctx = createCanvas(prepared.width, prepared.height).getContext("2d");
     const order = recordDrawOrder();
     expect(() => NodeCanvasCompositor.draw(ctx, prepared, 1)).not.toThrow();
@@ -162,7 +171,7 @@ describe("the compositor's draw order is the template's layer list (L2a, D121)",
       ],
     };
     const req = request({ template });
-    const prepared = await NodeCanvasCompositor.prepare(req);
+    const prepared = await NodeCanvasCompositor.prepare(req, "Inter", projectRoot());
     const ctx = createCanvas(prepared.width, prepared.height).getContext("2d");
     expect(() => NodeCanvasCompositor.draw(ctx, prepared, 1)).not.toThrow();
 
@@ -181,7 +190,11 @@ describe("the compositor's draw order is the template's layer list (L2a, D121)",
         { id: "logo", kind: "logo" },
       ],
     };
-    const prepared = await NodeCanvasCompositor.prepare(request({ template }));
+    const prepared = await NodeCanvasCompositor.prepare(
+      request({ template }),
+      "Inter",
+      projectRoot(),
+    );
     const ctx = createCanvas(prepared.width, prepared.height).getContext("2d");
     expect(() => NodeCanvasCompositor.draw(ctx, prepared, 1)).toThrow(
       /there is no text layer in the template at all/,
@@ -224,7 +237,7 @@ describe("the compositor's draw order is the template's layer list (L2a, D121)",
         keyBeat: 1,
       },
     };
-    const prepared = await NodeCanvasCompositor.prepare(req);
+    const prepared = await NodeCanvasCompositor.prepare(req, "Inter", projectRoot());
     const ctx = createCanvas(prepared.width, prepared.height).getContext("2d");
     const order = recordDrawOrder();
     NodeCanvasCompositor.draw(ctx, prepared, 0.5, undefined, 0.5);
@@ -263,7 +276,7 @@ describe("the compositor's draw order is the template's layer list (L2a, D121)",
         keyBeat: 1,
       },
     };
-    const prepared = await NodeCanvasCompositor.prepare(req);
+    const prepared = await NodeCanvasCompositor.prepare(req, "Inter", projectRoot());
     const ctx = createCanvas(prepared.width, prepared.height).getContext("2d");
     const order = recordDrawOrder();
     expect(() => NodeCanvasCompositor.draw(ctx, prepared, 0.5, undefined, 0.5)).not.toThrow();
@@ -291,7 +304,7 @@ describe("the compositor's draw order is the template's layer list (L2a, D121)",
         keyBeat: 1,
       },
     };
-    const prepared = await NodeCanvasCompositor.prepare(req);
+    const prepared = await NodeCanvasCompositor.prepare(req, "Inter", projectRoot());
     const ctx = createCanvas(prepared.width, prepared.height).getContext("2d");
     expect(() => NodeCanvasCompositor.draw(ctx, prepared, 0.5, undefined, 0.5)).not.toThrow();
   });
@@ -299,7 +312,7 @@ describe("the compositor's draw order is the template's layer list (L2a, D121)",
   test("a canonical-video template renders without throwing on the still path and in motion frames (VD)", async () => {
     const template: BriefTemplate = templateFromCanonical("short-video");
     const reqStill = request({ template });
-    const preparedStill = await NodeCanvasCompositor.prepare(reqStill);
+    const preparedStill = await NodeCanvasCompositor.prepare(reqStill, "Inter", projectRoot());
     const ctxStill = createCanvas(preparedStill.width, preparedStill.height).getContext("2d");
     expect(() => NodeCanvasCompositor.draw(ctxStill, preparedStill, 1)).not.toThrow();
 
@@ -315,7 +328,7 @@ describe("the compositor's draw order is the template's layer list (L2a, D121)",
         keyBeat: 1,
       },
     };
-    const preparedMotion = await NodeCanvasCompositor.prepare(reqMotion);
+    const preparedMotion = await NodeCanvasCompositor.prepare(reqMotion, "Inter", projectRoot());
     const ctxMotion = createCanvas(preparedMotion.width, preparedMotion.height).getContext("2d");
     expect(() =>
       NodeCanvasCompositor.draw(ctxMotion, preparedMotion, 0.5, "ken-burns-out", 0.5),
@@ -357,14 +370,22 @@ describe("the compositor's draw order is the template's layer list (L2a, D121)",
     };
 
     // Still path proof
-    const prepImageStill = await NodeCanvasCompositor.prepare({
-      ...baseReq,
-      template: imageTemplate,
-    });
-    const prepVideoStill = await NodeCanvasCompositor.prepare({
-      ...baseReq,
-      template: videoTemplate,
-    });
+    const prepImageStill = await NodeCanvasCompositor.prepare(
+      {
+        ...baseReq,
+        template: imageTemplate,
+      },
+      "Inter",
+      projectRoot(),
+    );
+    const prepVideoStill = await NodeCanvasCompositor.prepare(
+      {
+        ...baseReq,
+        template: videoTemplate,
+      },
+      "Inter",
+      projectRoot(),
+    );
     const canvasImageStill = createCanvas(prepImageStill.width, prepImageStill.height);
     const canvasVideoStill = createCanvas(prepVideoStill.width, prepVideoStill.height);
     NodeCanvasCompositor.draw(canvasImageStill.getContext("2d"), prepImageStill, 1);
@@ -384,14 +405,22 @@ describe("the compositor's draw order is the template's layer list (L2a, D121)",
         keyBeat: 1,
       },
     };
-    const prepImageMotion = await NodeCanvasCompositor.prepare({
-      ...motionReq,
-      template: imageTemplate,
-    });
-    const prepVideoMotion = await NodeCanvasCompositor.prepare({
-      ...motionReq,
-      template: videoTemplate,
-    });
+    const prepImageMotion = await NodeCanvasCompositor.prepare(
+      {
+        ...motionReq,
+        template: imageTemplate,
+      },
+      "Inter",
+      projectRoot(),
+    );
+    const prepVideoMotion = await NodeCanvasCompositor.prepare(
+      {
+        ...motionReq,
+        template: videoTemplate,
+      },
+      "Inter",
+      projectRoot(),
+    );
     const canvasImageMotion = createCanvas(prepImageMotion.width, prepImageMotion.height);
     const canvasVideoMotion = createCanvas(prepVideoMotion.width, prepVideoMotion.height);
     NodeCanvasCompositor.draw(
@@ -439,7 +468,7 @@ describe("the compositor's draw order is the template's layer list (L2a, D121)",
 
     // Still path: renders without throwing (the scope correction) — a logo
     // with no static-text drawn before it in this order used to be refused.
-    const preparedStill = await NodeCanvasCompositor.prepare(req);
+    const preparedStill = await NodeCanvasCompositor.prepare(req, "Inter", projectRoot());
     const ctxStill = createCanvas(preparedStill.width, preparedStill.height).getContext("2d");
     expect(() => NodeCanvasCompositor.draw(ctxStill, preparedStill, 1)).not.toThrow();
     const stillBuf = ctxStill.canvas.toBuffer("image/png");
@@ -455,7 +484,7 @@ describe("the compositor's draw order is the template's layer list (L2a, D121)",
         keyBeat: 1,
       },
     };
-    const preparedMotion = await NodeCanvasCompositor.prepare(motionReq);
+    const preparedMotion = await NodeCanvasCompositor.prepare(motionReq, "Inter", projectRoot());
     const orderCtx = createCanvas(preparedMotion.width, preparedMotion.height).getContext("2d");
     const order = recordDrawOrder();
     NodeCanvasCompositor.draw(orderCtx, preparedMotion, 1, undefined, 0.5, 1);
@@ -511,17 +540,21 @@ describe("the compositor's draw order is the template's layer list (L2a, D121)",
 
     // Still path: renders without throwing, copy tinted by the shade/accent
     // drawn after it.
-    const preparedStill = await NodeCanvasCompositor.prepare(reqReordered);
+    const preparedStill = await NodeCanvasCompositor.prepare(reqReordered, "Inter", projectRoot());
     const ctxStill = createCanvas(preparedStill.width, preparedStill.height).getContext("2d");
     NodeCanvasCompositor.draw(ctxStill, preparedStill, 1);
     const stillBuf = ctxStill.canvas.toBuffer("image/png");
 
     // Motion path, reordered: must match the still exactly — same reorder,
     // same tint over the copy, on both paths.
-    const preparedMotionReordered = await NodeCanvasCompositor.prepare({
-      ...reqReordered,
-      ...timelineFields(reqReordered.message),
-    });
+    const preparedMotionReordered = await NodeCanvasCompositor.prepare(
+      {
+        ...reqReordered,
+        ...timelineFields(reqReordered.message),
+      },
+      "Inter",
+      projectRoot(),
+    );
     const ctxMotionReordered = createCanvas(
       preparedMotionReordered.width,
       preparedMotionReordered.height,
@@ -534,10 +567,14 @@ describe("the compositor's draw order is the template's layer list (L2a, D121)",
     // canonical-order motion frame (same message, same everything else) — if
     // it didn't, the reorder wouldn't actually be reaching the pixels, and
     // the byte match above would prove nothing.
-    const preparedMotionCanonical = await NodeCanvasCompositor.prepare({
-      ...reqCanonical,
-      ...timelineFields(reqCanonical.message),
-    });
+    const preparedMotionCanonical = await NodeCanvasCompositor.prepare(
+      {
+        ...reqCanonical,
+        ...timelineFields(reqCanonical.message),
+      },
+      "Inter",
+      projectRoot(),
+    );
     const ctxMotionCanonical = createCanvas(
       preparedMotionCanonical.width,
       preparedMotionCanonical.height,
@@ -578,7 +615,7 @@ describe("the compositor's draw order is the template's layer list (L2a, D121)",
         durationSec: 8,
         timeline,
       };
-      const prepared = await NodeCanvasCompositor.prepare(req);
+      const prepared = await NodeCanvasCompositor.prepare(req, "Inter", projectRoot());
       const ctx = createCanvas(prepared.width, prepared.height).getContext("2d");
       const fillText = vi.spyOn(ctx, "fillText");
       NodeCanvasCompositor.draw(ctx, prepared, 1, undefined, 0.5, 1);
@@ -611,7 +648,7 @@ describe("the compositor's draw order is the template's layer list (L2a, D121)",
 
     const draw = async (template: BriefTemplate): Promise<number> => {
       const req = request({ template });
-      const prepared = await NodeCanvasCompositor.prepare(req);
+      const prepared = await NodeCanvasCompositor.prepare(req, "Inter", projectRoot());
       const ctx = createCanvas(prepared.width, prepared.height).getContext("2d");
       const fillText = vi.spyOn(ctx, "fillText");
       NodeCanvasCompositor.draw(ctx, prepared, 1);

@@ -19,7 +19,11 @@ import { resolveAssetPath } from "../safe-path.js";
  * keeps reuse policy in one place and out of every concrete generator.
  */
 export class AssetReusingImageGenerator implements ImageGeneratorPort {
-  constructor(private readonly generator: ImageGeneratorPort) {}
+  /** @param assetRoot the project root whose `assets/` tree confines a reused asset (D167). */
+  constructor(
+    private readonly generator: ImageGeneratorPort,
+    private readonly assetRoot: string,
+  ) {}
 
   async resolveBackground(
     product: Product,
@@ -35,7 +39,7 @@ export class AssetReusingImageGenerator implements ImageGeneratorPort {
 
   /** Cover-fit a supplied asset to the target ratio; undefined if missing/unreadable. */
   private async tryReuseAsset(path: string, ratio: AspectRatio): Promise<Uint8Array | undefined> {
-    const safePath = resolveAssetPath(path);
+    const safePath = resolveAssetPath(path, this.assetRoot);
     if (!safePath) return undefined; // unsafe/absolute path → fall through to generation
     try {
       const image = await loadImage(await readFile(safePath));

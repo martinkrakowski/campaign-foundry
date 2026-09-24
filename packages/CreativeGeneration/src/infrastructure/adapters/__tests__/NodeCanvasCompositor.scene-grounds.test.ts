@@ -8,6 +8,7 @@ import {
 } from "@campaignfoundry/CampaignOrchestration";
 import { NodeCanvasCompositor } from "../NodeCanvasCompositor.js";
 
+import { projectRoot } from "@campaignfoundry/shared";
 /**
  * VE5b1 — the renderer paints a per-beat ground when the request supplies one
  * (VE5b — Scenes in the renderer, docs/planning/2026-09-13_video-editing-features.md).
@@ -62,7 +63,7 @@ async function drawAt(
   motion?: "ken-burns-in",
   copyT?: number,
 ): Promise<Canvas> {
-  const prepared = await NodeCanvasCompositor.prepare(req);
+  const prepared = await NodeCanvasCompositor.prepare(req, "Inter", projectRoot());
   const canvas = createCanvas(prepared.width, prepared.height);
   const ctx = canvas.getContext("2d");
   NodeCanvasCompositor.draw(ctx, prepared, t, motion, copyT, 1);

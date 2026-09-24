@@ -28,6 +28,7 @@ import {
   type GoldenRun,
 } from "./compositor-golden-key.js";
 
+import { projectRoot } from "@campaignfoundry/shared";
 /**
  * Motion goldens (C1 / R-D6). `NodeCanvasCompositor.goldens.test.ts` hashes
  * only the still PNG and the restT-equals-still frame for every
@@ -138,7 +139,7 @@ describe("NodeCanvasCompositor motion goldens (C1)", () => {
           durationSec: DURATION_SEC,
           timeline: TIMELINE,
         };
-        const prepared = await NodeCanvasCompositor.prepare(request);
+        const prepared = await NodeCanvasCompositor.prepare(request, "Inter", projectRoot());
         const timeline = prepared.timeline;
         if (timeline === undefined) {
           throw new Error("expected prepare() to resolve a timeline for this request");
