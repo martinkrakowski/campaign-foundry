@@ -143,10 +143,22 @@ describe("report persistence", () => {
     await expect(readReport("camp")).resolves.toBeUndefined();
   });
 
-  test("readReport returns undefined for invalid JSON", async () => {
+  test("readReport rejects a stored report that does not parse: unreadable is not absent", async () => {
     mkdirSync(resolve(root, "reports"), { recursive: true });
     writeFileSync(resolve(root, "reports", "camp.json"), "{not json");
-    await expect(readReport("camp")).resolves.toBeUndefined();
+    await expect(readReport("camp")).rejects.toThrow(SyntaxError);
+  });
+
+  test("a guarded re-roll over a corrupt report fails and leaves its bytes as they were", async () => {
+    mkdirSync(resolve(root, "reports"), { recursive: true });
+    const path = resolve(root, "reports", "camp.json");
+    writeFileSync(path, "{not json");
+    // The guard hashes the same corrupt bytes, so it agrees; only the read can refuse.
+    const revision = await reportRevision("camp");
+    await expect(
+      writeReport(result([asset()]), { merge: true, expectedRevision: revision }),
+    ).rejects.toThrow(SyntaxError);
+    expect(readFileSync(path, "utf8")).toBe("{not json");
   });
 
   test("writes the per-campaign report only, deriving brandCompliant (density AND logo)", async () => {

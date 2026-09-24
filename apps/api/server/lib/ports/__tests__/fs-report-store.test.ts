@@ -39,4 +39,10 @@ describe("FsReportStore", () => {
     mkdirSync(resolve(root, "reports", "camp.json"), { recursive: true });
     await expect(store.getRevision("camp")).rejects.toMatchObject({ code: "EISDIR" });
   });
+
+  test("a report read that fails for any reason but absence is surfaced, not read as absent", async () => {
+    const store = new FsReportStore(root);
+    mkdirSync(resolve(root, "reports", "camp.json"), { recursive: true });
+    await expect(store.readReport("camp")).rejects.toMatchObject({ code: "EISDIR" });
+  });
 });

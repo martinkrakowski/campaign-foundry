@@ -14,7 +14,8 @@
 export interface ReportStorePort {
   /**
    * The parsed report, or `undefined` when the id is not a safe campaign id or
-   * nothing readable is stored. A stored JSON `null` returns `null`.
+   * nothing is stored. A stored JSON `null` returns `null`. A report that is
+   * stored but cannot be read or parsed rejects: it is not the same as absence.
    */
   readReport(campaignId: string): Promise<unknown>;
   /**

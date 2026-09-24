@@ -18,6 +18,23 @@
         "a swapped-in store receives every read"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/fs-report-store.ts",
+      "before": "    return JSON.parse(text);",
+      "after": "    try {\n      return JSON.parse(text);\n    } catch {\n      return undefined;\n    }",
+      "because": "a corrupt stored report reads as absent again, so a guarded re-roll (whose revision hashes the same corrupt bytes) merges over an empty base and overwrites it.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/report.test.ts",
+        "-t",
+        "a guarded re-roll over a corrupt report fails"
+      ],
+      "verdict": "caught"
     }
   ]
 }

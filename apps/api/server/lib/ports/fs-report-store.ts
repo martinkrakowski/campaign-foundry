@@ -55,11 +55,17 @@ export class FsReportStore implements ReportStorePort {
   async readReport(campaignId: string): Promise<unknown> {
     const path = campaignReportPath(this.root, campaignId);
     if (!path) return undefined;
+    let text: string;
     try {
-      return JSON.parse(await readFile(path, "utf8"));
-    } catch {
-      return undefined;
+      text = await readFile(path, "utf8");
+    } catch (error) {
+      if (isErrno(error, "ENOENT")) return undefined;
+      throw error;
     }
+    // A report that exists but does not parse is not "no report": answering undefined
+    // would let a re-roll merge over an empty base and overwrite it, since the revision
+    // guard hashes the same corrupt bytes and agrees. Could-not-read is surfaced.
+    return JSON.parse(text);
   }
 
   async getRevision(campaignId: string): Promise<string | undefined> {
