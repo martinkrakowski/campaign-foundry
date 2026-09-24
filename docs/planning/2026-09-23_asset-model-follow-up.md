@@ -1,6 +1,6 @@
 # The Asset Model, Finished — Architecture & Development Plan
 
-**Date:** 2026-09-23 · **Status:** **DRAFT r2 — wave 1 merged. AF3 [#559](https://github.com/martinkrakowski/campaign-foundry/pull/559) (`3208e55c`), AF5 [#560](https://github.com/martinkrakowski/campaign-foundry/pull/560) (`8a0067dd`). D164, D165, L3a, and D161 remain unstamped, so AF1, AF2, AF4, and AF6 were not dispatched.** r1 was
+**Date:** 2026-09-23 · **Status:** **CLOSED — every lane merged, 2026-09-24.** AF3 [#559](https://github.com/martinkrakowski/campaign-foundry/pull/559) (`3208e55c`), AF5 [#560](https://github.com/martinkrakowski/campaign-foundry/pull/560) (`8a0067dd`), AF1 [#562](https://github.com/martinkrakowski/campaign-foundry/pull/562) (`d08fa210`), AF2 [#563](https://github.com/martinkrakowski/campaign-foundry/pull/563) (`8cbcb616`), AF4 [#564](https://github.com/martinkrakowski/campaign-foundry/pull/564) (`cd9abd4e`), AF6 (this status, docs-only push). **D164 was stamped after AF1 had already shipped** (§7), and **the Google HTML5 validator check it required is still open**. D165 and D161 are stamped, and L3a is kept as is. **Still open:** the validator check, and AR6 (blocked on D64). r1 was
 reviewed the same day by Fable 5.1 against `425e59e4`. It returned four blocking or major errors in r1
 itself, all corrected here and listed in §8, because they are the kind this repository keeps
 repeating.
@@ -13,7 +13,7 @@ Definition-of-Done item that plan claims and the tree does not yet meet.
 (Use `-P` for `\b`: macOS `git grep -E` treats `\b` as matching nothing, so an `-E` count of 0 proves
 nothing. r1 made that mistake.)
 **Relates to:** D122 (the required raster fallback), D158 (one vocabulary), D160 (linkability as a
-property), D161 (unstamped), D163 (the bundle's injection guarantees), HL-D1 / HL5f
+property), D161 (stamped after the fact 2026-09-24), D163 (the bundle's injection guarantees), HL-D1 / HL5f
 (`2026-09-10_the-html-layer.md`), CE2's hit-region decision (`PreviewHitRegions.tsx:96-100`), L3a's
 draft fallback (`editor-state.ts:3303-3318`), **D64** (AR6's blocker, unchanged here).
 
@@ -81,8 +81,8 @@ DoD 3 ("the two renderers agree on what they draw") is not met while this stands
 - CI on `main` is green at `425e59e4`.
 
 **Still open, owned elsewhere:** **AR6** (`<video>` in the bundle) stays blocked on **D64**, and this
-plan does not re-plan it. **D161** is still unstamped although AR3 (#556) shipped its content; §7
-asks.
+plan does not re-plan it. **D161** was unstamped at `425e59e4` although AR3 (#556) shipped its content; the owner stamped it
+2026-09-24 (§7).
 
 ---
 
@@ -90,9 +90,9 @@ asks.
 
 | id | Decision | Why |
 | --- | --- | --- |
-| **D164** | **PROPOSED.** **One raster per html unit, and the bundle paints nothing the raster already paints.** The `<img>` stays the D122 fallback. An **unlinked** `static-text` layer emits **nothing**, the same rule `logo` already follows (`markup-assembler.ts:194-195`). The headline is in the pixels, and the `<img>` `alt` carries the copy when the image layer has no `alt` prop of its own. A **linked** `static-text` layer emits a transparent `<button>` over the band (H2): the resolved declared frame, else `defaultLayerRect("static-text")`. Its copy goes in a visually-hidden span, escaped, so the button has an accessible name. | **Recommended**, for four reasons, each measured: (1) **No double paint.** Only one renderer paints text. (2) **Weight.** A unit is `bundle + fallback` (`PackageForPlatformUseCase.use-case.ts:378`) against `HTML_MAX_BYTES` = 150 KB (`PlatformProfile.vo.ts:108`), so a second raster roughly doubles the image payload of every unit. (3) **No "hidden text" exposure.** Visually-hidden text inside an interactive control is the standard accessibility pattern. A paragraph of `color: transparent` copy (r1's proposal) reads as cloaked text. (4) **It fixes H3.** The only DOM element over the image is the linked one. **D163 holds:** the copy is still `escapeHtml`'d, and nothing new is interpolated. **Unverified, and must be checked before stamping:** that Google's HTML5 validator accepts a transparent `<button>` over an `<img>`. |
+| **D164** | **STAMPED — Owner, 2026-09-24, after the fact: AF1 (#562) shipped it the day before, unstamped. The Google HTML5 validator check below is still not done.** **One raster per html unit, and the bundle paints nothing the raster already paints.** The `<img>` stays the D122 fallback. An **unlinked** `static-text` layer emits **nothing**, the same rule `logo` already follows (`markup-assembler.ts:194-195`). The headline is in the pixels, and the `<img>` `alt` carries the copy when the image layer has no `alt` prop of its own. A **linked** `static-text` layer emits a transparent `<button>` over the band (H2): the resolved declared frame, else `defaultLayerRect("static-text")`. Its copy goes in a visually-hidden span, escaped, so the button has an accessible name. | **Recommended**, for four reasons, each measured: (1) **No double paint.** Only one renderer paints text. (2) **Weight.** A unit is `bundle + fallback` (`PackageForPlatformUseCase.use-case.ts:378`) against `HTML_MAX_BYTES` = 150 KB (`PlatformProfile.vo.ts:108`), so a second raster roughly doubles the image payload of every unit. (3) **No "hidden text" exposure.** Visually-hidden text inside an interactive control is the standard accessibility pattern. A paragraph of `color: transparent` copy (r1's proposal) reads as cloaked text. (4) **It fixes H3.** The only DOM element over the image is the linked one. **D163 holds:** the copy is still `escapeHtml`'d, and nothing new is interpolated. **Unverified, and must be checked before stamping:** that Google's HTML5 validator accepts a transparent `<button>` over an `<img>`. |
 | | *Alternative, not recommended:* render a second composite with `static-text` disabled, save it as `backdrop.png`, and paint live white text over it. | This gives live, restylable text. It costs a second render per cell, a new asset field threaded through `GeneratedAsset`, the report, packaging and the unit-weight sum, and it still depends on a font the bundle does not ship. Worth revisiting only if D64's object storage brings hosted web fonts. |
-| **D165** | **PROPOSED.** **Where a click target compiles is declared once, in the creative-type rules.** `CREATIVE_TYPE_RULES[type]` gains `linkable: readonly LayerKind[]`: `["image", "static-text"]` for `image-html`, `[]` for `image-text` and `video`. **Three readers, three different behaviours, each named:** (a) `assembleHtml` reads it for the link decision. (b) **The API refuses** `link: true` on a kind the type does not list, in `load-brief.ts`, with a message naming where it compiles. (c) **The editor** shows the checkbox only on linkable kinds, and `validate.ts` reports a linked layer elsewhere as an error that names the fix, the same way it mirrors other API refusals. **`layerLinkProblem` and `isBriefTemplate` do not change:** they stay shape-only. | D160 says linkability is a property, not a kind. It does not say every kind on every type must accept it. Today the answer lives only in `assembleHtml`'s branches, so the editor offers a control the compiler ignores (M3). **Why the domain guard stays shape-only:** `isBriefTemplate` failing is **silent** in three web consumers. `normalizeDraftState` replaces the whole template with the canonical one (`editor-state.ts:3316-3318`), `templates-api.ts:232` returns null, and `run-context.tsx:388` filters the template out. Refusing there would discard authored work without a word, which is the opposite of what this decision is for. **Changing type is safe:** `applyPreset` reseeds the template through `templateFromCanonical` (`editor-state.ts:1456`), so no linked layer survives a switch to a type that cannot compile it. **Cost:** a brief authored since AR1 (#554, 2026-09-21) with `link: true` on, say, a logo is refused by the API on its next load, and the editor shows the same error. That is two days of exposure on operator briefs, whose content is unknown. |
+| **D165** | **STAMPED — Owner, 2026-09-24. Shipped as AF4 (#564).** **Where a click target compiles is declared once, in the creative-type rules.** `CREATIVE_TYPE_RULES[type]` gains `linkable: readonly LayerKind[]`: `["image", "static-text"]` for `image-html`, `[]` for `image-text` and `video`. **Three readers, three different behaviours, each named:** (a) `assembleHtml` reads it for the link decision. (b) **The API refuses** `link: true` on a kind the type does not list, in `load-brief.ts`, with a message naming where it compiles. (c) **The editor** shows the checkbox only on linkable kinds, and `validate.ts` reports a linked layer elsewhere as an error that names the fix, the same way it mirrors other API refusals. **`layerLinkProblem` and `isBriefTemplate` do not change:** they stay shape-only. | D160 says linkability is a property, not a kind. It does not say every kind on every type must accept it. Today the answer lives only in `assembleHtml`'s branches, so the editor offers a control the compiler ignores (M3). **Why the domain guard stays shape-only:** `isBriefTemplate` failing is **silent** in three web consumers. `normalizeDraftState` replaces the whole template with the canonical one (`editor-state.ts:3316-3318`), `templates-api.ts:232` returns null, and `run-context.tsx:388` filters the template out. Refusing there would discard authored work without a word, which is the opposite of what this decision is for. **Changing type is safe:** `applyPreset` reseeds the template through `templateFromCanonical` (`editor-state.ts:1456`), so no linked layer survives a switch to a type that cannot compile it. **Cost:** a brief authored since AR1 (#554, 2026-09-21) with `link: true` on, say, a logo is refused by the API on its next load, and the editor shows the same error. That is two days of exposure on operator briefs, whose content is unknown. |
 
 ---
 
@@ -171,20 +171,21 @@ AF4 is blocked on D165 and does not hold a slot while it waits (RW-D4). Each lan
 
 ---
 
-## 7. What the owner is deciding
+## 7. What the owner decided (2026-09-24)
 
-- **D164: how an html unit avoids the double paint.** Recommended: the raster paints and the bundle
-  adds only what is clickable, with accessible text. First, check that Google's HTML5 validator
-  accepts a transparent `<button>` over an `<img>`. AF1 cannot be dispatched until D164 is stamped.
-- **D165: whether a click target on a kind that cannot compile it is refused.** Recommended: the API
-  refuses and the editor flags it, and the domain guard stays shape-only so nothing is dropped
-  silently. The cost is that a brief authored in the two days since AR1 with `link: true` on, say, a
-  logo is refused on its next load.
-- **L3a: should a restored draft carrying a retired layer kind still silently become the canonical
-  template?** Today it does, by design. The alternative is to restore it and show the same error the
-  API gives. No lane is planned either way until this is answered.
-- **D161: stamp it, or record it as never stamped.** Its content shipped as AR3 (#556). AF6 records
-  whichever it is.
+- **D164 — stamped, after the fact.** AF1 (#562) shipped the single-raster bundle on 2026-09-23 while
+  this document still listed D164 as PROPOSED and said AF1 could not be dispatched until it was
+  stamped. The owner stamped it on 2026-09-24. **The validator check this section required first
+  — that Google's HTML5 validator accepts a transparent `<button>` over an `<img>` — has not been
+  done.** It is the one open item this plan leaves, besides AR6. Recorded as fact, the way the
+  asset-model plan recorded D161. It is the second time in two plans that a lane shipped ahead of
+  its decision.
+- **D165 — stamped** as recommended, and shipped as AF4 (#564). Review of #564 found one more
+  reader of the new `template` error bucket, `StatusLine`'s section links, which is now fixed in
+  that PR.
+- **L3a — kept as is.** A restored draft carrying a retired layer kind still becomes the canonical
+  template, silently, by the recorded L3a design. No lane.
+- **D161 — stamped**, after the fact. The asset-model plan records it.
 
 ---
 

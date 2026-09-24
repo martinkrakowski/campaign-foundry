@@ -6084,3 +6084,36 @@ and source formatting, recorded here rather than fixed.
   - AF1, AF2, AF4, AF6. AF1 still needs D164 stamped and a confirmation that Google's HTML5
     validator accepts a transparent button over the image. AF2 waits on AF1. AF4 waits on D165
     plus AF1 and AF3. AF6 is the docs lane after the others, and it is not delegated.
+
+## 2026-09-24 — asset-model follow-up, wave 2 and close (AF2, AF4, AF6)
+
+- **Mode:** Implementer (finishing an orchestrated wave the owner handed back)
+- **Changes:**
+  - AF2, [#563](https://github.com/martinkrakowski/campaign-foundry/pull/563), squash `8cbcb616`.
+    The route test the Grok seat opened (it then ran out of quota) was kept and hardened twice:
+    headline absence checked in every text node, not only `<p`; then, on six valid Qodo and
+    CodeRabbit threads, the real `src` attribute, a bare file name beside `index.html`, the
+    raster's 300x250 IHDR, `alt` on the `<img>` itself, and tag-stripped body text. Three
+    `yarn mutate` replays caught. The PR body's repository-wide 100% coverage claim had never
+    been measured, and was removed.
+  - AF4, [#564](https://github.com/martinkrakowski/campaign-foundry/pull/564), squash `cd9abd4e`.
+    D165 as stamped: `CREATIVE_TYPE_RULES[type].linkable`, read by the assembler,
+    `load-brief.ts` (refusal), `validate.ts` (`template.layerLink`) and the layer sheet (box only
+    on linkable kinds, kept for a stale link so the error can be cleared). `isBriefTemplate` is
+    untouched. `af4.json` records two mutations, both caught; `af1.json` was re-anchored to the
+    `isLinked(layer)` line AF4 introduced (CI's anchor check caught the dead anchor).
+  - AF6, docs: the html-layer plan's status and HL-D1 row point to D158, AR2 and AR7; the
+    asset-model plan is closed except AR6, with D161 stamped; the follow-up plan is closed.
+- **Decisions (owner, 2026-09-24):** D165 stamped. D164 stamped after the fact, with the Google
+  validator check still pending. D161 stamped after the fact. L3a kept.
+- **Found:**
+  - AF1 (#562) merged on 2026-09-23 while the plan still said it could not be dispatched until
+    D164 was stamped, and the wave-1 entry above says the same. That is the second
+    lane-ahead-of-decision in two plans (AR3/D161 was the first).
+  - Review of #564 found `StatusLine.getIncompleteSections` ignoring the new `template` bucket,
+    so a misplaced click target showed "not applied" with no section to jump to. Fixed in the
+    PR. `treatments` is not listed there either; that predates this work and is not fixed.
+  - The messages jargon scan cannot call a formatter that takes an array; `linkableWhere` needed
+    a `SAMPLE_ARGS` entry.
+- **Left open:** the Google HTML5 validator check for D164's transparent `<button>` over
+  `<img>`, and AR6 (blocked on D64).
