@@ -6156,3 +6156,32 @@ and source formatting, recorded here rather than fixed.
   database-fronted.** Recorded in the plan that defines it and in every status line that called it
   open. AR6 and the rest of the D64 list now wait on a storage plan, which is not written yet. C7
   (re-keying assets to the surrogate id) is still a separate decision for that plan.
+
+## 2026-09-24 — platform plan: C7, D167 and D173 stamped; PT-0a done
+
+- **Mode:** Architect, then Implementer
+- **Plan:** `docs/planning/2026-09-24_platform-and-tenancy.md` (D166–D175, lanes PT-0a…PT-9), drafted after
+  the owner stated the SaaS target (orgs, teams, users, server DB, all assets cloud-hosted), reviewed
+  by Fable (r2), and committed `0fe723d7`. The owner stamped C7, D167 and D173.
+- **PT-0a merged, in three PRs:**
+  - [#569](https://github.com/martinkrakowski/campaign-foundry/pull/569) (`b3322320`): `ReportStorePort`,
+    the global `report.json` pointer retired, and a corrupt report now rejects rather than reading as
+    absent (CodeRabbit). CI's 100% coverage gate caught an unreachable catch, whose removal was also
+    the safer behaviour.
+  - [#570](https://github.com/martinkrakowski/campaign-foundry/pull/570) (`a48fcc9d`): the
+    `brief-files.ts` wrappers that turned store keys into disk paths are deleted, with their assertions
+    ported to the store's tests. **Correction to the plan:** `briefsDir` was not dead code.
+  - [#571](https://github.com/martinkrakowski/campaign-foundry/pull/571) (`ca7a9520`): `OutputStorePort`
+    for `GET /output/**`, the package listing and the zip. Across three review rounds, CodeRabbit and
+    Qodo found: the cache/jobs rule tested the raw string (`camp/../cache/…`) and missed a symlink into
+    `cache/` (it now judges the real target); `open` was detached from its entry; and the id-guard
+    tests had no fixture where the unsafe ids resolve. All were fixed with caught mutations. The
+    lexical check became unobservable and was removed, with its mutation retired.
+- **Manifests:** 6 report and 3 output mutations re-anchored to the moved code; `l12#2` and one PT-0a
+  mutation retired with reasons.
+- **Found, not fixed:** `pools.test.ts` "two overlapping PATCHes without a revision both answer 200
+  and one edit vanishes" is racy. `Promise.all` does not force the losing interleaving, so it failed
+  once on main (`a9844da5`, docs-only) and passed on rerun. The same flake class as #567's, in a
+  characterization test; D171's fenced writes retire what it pins.
+- **Left open:** PT-0b1 next (the tenant seam below the routes: `pipeline.ts`, `jobs.ts`, `safe-path.ts`
+  and its six adapters, the CLI). D166, D168–D172, D174 and D175 unstamped. The Google Ads UI upload.
