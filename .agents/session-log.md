@@ -6202,3 +6202,20 @@ and source formatting, recorded here rather than fixed.
   - Two traps hit again and caught: `git grep -E "\b"` fed the codemod half its files, and a one-line
     mutation on a Prettier-wrapped statement "caught" by syntax error. Check the failure is an
     AssertionError.
+- **PT-0c and PT-0b2 done (2026-09-24):**
+  - [#574](https://github.com/martinkrakowski/campaign-foundry/pull/574) (`27ed7d52`): `tenantRoot` scopes
+    a tenant's output root (the local operator unchanged, orgs under `orgs/<orgId>`), so the generation
+    cache is per tenant by construction.
+  - [#575](https://github.com/martinkrakowski/campaign-foundry/pull/575) (`bfbac87f`): stores take their
+    root at construction; `get*Store(scope)` builds them per root. Review found the run's job and report
+    calls still re-resolved roots (the gap #573 deferred); a `StorageScope` (tenant or captured
+    `RunEnvironment`) closes it. Review also found `GET /output` could serve `orgs/*`, and the
+    `freshRunCampaign` test helper hid captured-root regressions. All fixed with caught mutations; 11
+    anchors re-anchored. PR-Agent's `LOCAL_TENANT` defaults were declined.
+  - [#576](https://github.com/martinkrakowski/campaign-foundry/pull/576) (`1df9fdbe`): the preview's
+    adapters are built per run environment, each bundle with its own frame cache (a shared one would
+    leak another org's logo). This corrects the plan's H3 note. An unreadable environment is a
+    controlled 500.
+  - **DoD 1 met:** `process.env` below the routes is only in `config.ts`, `env.ts`, `run-environment.ts`
+    and `project-root.ts`.
+  - **Deferred to PT-6:** job polling resolves the current root, because it has no job-to-root index.
