@@ -14,6 +14,9 @@ if it is not here (or is in "Never Suggest"), do not introduce it without asking
 | @testing-library/react | UI tests | Render/query components under happy-dom; assert with `expect`. |
 | happy-dom     | Test DOM      | Vitest `environment: "happy-dom"` for the web project.           |
 | ffmpeg-static | Video encode (motion creatives) | Pinned 5.3.0 (exact, both package.jsons); GPL-licensed binary — note for client distribution |
+| PostgreSQL    | Database (store of record, D169) | D174a, stamped 2026-09-24: hosted on the owner's **Aiven** service (15 connections in all — the pool is bounded, `DATABASE_POOL_MAX`, default 5). Reached over TLS that verifies the server certificate against the service CA (`DATABASE_CA_PATH`). Schema changes are plain SQL files in `apps/api/server/lib/db/migrations/`, applied by `yarn db:migrate`. |
+| `pg`          | Postgres driver | `apps/api` only, behind the `SqlClient` interface (`lib/db/sql-client.ts`); adapters never import it. |
+| `@electric-sql/pglite` | Postgres in process, **tests only** | A real Postgres (WASM) per test, so database tests need no server and never touch the Aiven service. Single connection: it cannot test two writers racing. |
 | `yaml`        | YAML load/dump | `apps/api` (brief load + Document patch writes) and `packages/shared` (canonical `dumpBrief`). One library, one schema — the package default, YAML 1.2 — for both load and save. Alias expansion capped (`maxAliasCount`). |
 
 > Keep this table accurate. When you add a dependency (or a Hexagen template
@@ -26,6 +29,11 @@ if it is not here (or is in "Never Suggest"), do not introduce it without asking
   + happy-dom for UI). Do not add a second test runner.
 - **Pages Router** — App Router only.
 - **`any`** — use a precise type, a generic, or `unknown` with narrowing.
+- **An ORM or query builder (Prisma, Drizzle, TypeORM, Kysely, Knex)** — adapters write SQL through
+  `SqlClient`, and migrations are plain SQL files. Older project documents mention Prisma; it was never
+  adopted.
+- **Tests against a remote database** — use PGlite (`lib/db/__tests__/pglite-client.ts`). `DATABASE_URL`
+  names the owner's service; only `yarn db:ping` and `yarn db:migrate`, run by the operator, reach it.
 - A new HTTP client, date library, or state manager **before checking** whether
   the standard platform API (`fetch`, `Intl`, React state) already covers it.
 

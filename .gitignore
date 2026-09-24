@@ -58,3 +58,7 @@ SYNC-MIGRATION-REPORT.md
 # verify a change must not leave artefacts in the tree.
 __pycache__/
 *.pyc
+
+# Database CA certificates and any other key material (D174a: DATABASE_CA_PATH).
+*.pem
+certs/

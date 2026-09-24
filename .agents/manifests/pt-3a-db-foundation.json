@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "PT-3",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/db/database-config.ts",
+      "before": "  } else if (!LOCAL_HOSTS.has(url.hostname)) {",
+      "after": "  } else if (false) { // mutant: a remote host with no CA is accepted, over no TLS",
+      "because": "a remote database with no CA would be reached without TLS verification (ssl: false), exposing the connection and its password (D174a).",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/db/__tests__/database-config.test.ts",
+        "-t",
+        "without a CA is refused"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
