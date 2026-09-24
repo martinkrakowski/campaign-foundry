@@ -142,10 +142,11 @@ describe("run paths vs the capability boot race", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     setCapabilities({ motion: true });
     const res = await pending;
+    // Register the run before asserting: a failed check must not leave it running.
+    const { jobId } = (await res.json()) as { jobId?: string };
+    if (typeof jobId === "string") started.push(jobId);
     expect(res.status).toBe(202);
-    const { jobId } = (await res.json()) as { jobId: string };
     expect(jobId).toEqual(expect.any(String));
-    started.push(jobId);
   });
 
   test("a motion run on a host that cannot encode video is still refused, naming the probe reason", async () => {
