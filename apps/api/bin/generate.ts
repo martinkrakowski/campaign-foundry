@@ -2,7 +2,8 @@ import { argv } from "node:process";
 import { pathToFileURL } from "node:url";
 import { loadBrief } from "../server/lib/load-brief.js";
 import { runCampaign } from "../server/lib/pipeline.js";
-import { outputRoot } from "../server/lib/config.js";
+import { runEnvironment } from "../server/lib/run-environment.js";
+import { LOCAL_TENANT } from "../server/lib/tenant.js";
 import { writeReport } from "../server/lib/report.js";
 import { probeFfmpeg, setCapabilities } from "../server/lib/capabilities.js";
 
@@ -31,7 +32,9 @@ export async function main(briefPathArg?: string): Promise<void> {
   // without this flag a motion brief on a host with no ffmpeg parses cleanly, spends
   // image-generation budget, then dies in CanvasFfmpegVideoCompositor.
   const brief = await loadBrief(briefPath, { enforceCapabilities: true });
-  const result = await runCampaign(brief);
+  // The CLI is the local operator, through the same ports a request uses (D167).
+  const env = runEnvironment(LOCAL_TENANT);
+  const result = await runCampaign(env, brief);
 
   if (!result.success) {
     console.error(`  x  ${result.error.message}\n`);
@@ -53,7 +56,7 @@ export async function main(briefPathArg?: string): Promise<void> {
     );
   }
   const reportPath = await writeReport(result.value);
-  console.log(`\n  Done — ${assets.length} creatives + proofs in ${outputRoot()}`);
+  console.log(`\n  Done — ${assets.length} creatives + proofs in ${env.outputRoot}`);
   console.log(`  Report: ${reportPath}\n`);
 }
 

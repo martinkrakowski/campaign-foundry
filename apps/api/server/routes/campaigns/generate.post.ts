@@ -4,6 +4,8 @@ import { acquireJob, completeJob, failJob, progressJob, runJob } from "../../lib
 import { JobCapacityError } from "../../lib/ports/fs-job-store.js";
 import { parseBrief, parseRegenerateOnly } from "../../lib/load-brief.js";
 import { ALLOWED_IMAGE_MODELS, runCampaign } from "../../lib/pipeline.js";
+import { runEnvironment } from "../../lib/run-environment.js";
+import { LOCAL_TENANT } from "../../lib/tenant.js";
 import { readReport, reportRevision, writeReport } from "../../lib/report.js";
 import {
   NOT_PROBED_REASON,
@@ -156,10 +158,14 @@ export default defineEventHandler(async (event) => {
   }
 
   const jobId = claim.jobId;
+  // The run's environment is resolved here, at enqueue, and captured by the job
+  // (D167): the run keeps the location and credentials it was admitted with.
+  const env = runEnvironment(LOCAL_TENANT);
   runJob(jobId, async (signal) => {
     const expectedPolicyHash = await persistedPolicyHash(brief, reroll);
     const expectedCopyHash = await persistedCopyHash(brief, reroll);
     const result = await runCampaign(
+      env,
       brief,
       imageModel,
       regenerateOnly,

@@ -1,5 +1,4 @@
 import { join } from "node:path";
-import { loadEnv } from "./env.js";
 import {
   GenerateCampaignUseCase,
   type CampaignBrief,
@@ -10,7 +9,6 @@ import {
   type RegenerationTarget,
 } from "@campaignfoundry/CampaignOrchestration";
 import {
-  ALLOWED_FONT_FAMILIES,
   AssetReusingImageGenerator,
   CanvasFfmpegVideoCompositor,
   FileSystemAudioAssetResolver,
@@ -25,17 +23,13 @@ import {
 } from "@campaignfoundry/CreativeGeneration";
 import { BrandComplianceChecker } from "@campaignfoundry/GovernanceAndCompliance";
 import { FileSystemExporter } from "@campaignfoundry/Distribution";
-import { err, projectRoot, type Result } from "@campaignfoundry/shared";
-import { outputRoot } from "./config.js";
+import { err, type Result } from "@campaignfoundry/shared";
+import type { RunEnvironment } from "./run-environment.js";
 import { platformZones } from "./platform-zones.js";
 import { planInputFor, pooledPlanner } from "./pools.js";
 
 export { platformZones } from "./platform-zones.js";
-
-// Load .env before any process.env read below. Called (not a bare side-effect
-// import) so Nitro's bundler can't tree-shake it — that was leaving GEMINI_API_KEY
-// unset in the server and silently falling back to the procedural generator.
-loadEnv();
+export { messageFont } from "./run-environment.js";
 
 /**
  * Server-side allowlist of selectable image model ids — the security boundary for
@@ -69,13 +63,15 @@ export const ALLOWED_IMAGE_MODELS: readonly string[] = [
  * `selected` (`?model=`) still decides *which* provider. `paletteShift` is
  * applied only by ProceduralBackgroundGenerator.
  */
-function imageGenerator(selected?: string): ImageGeneratorPort {
+function imageGenerator(env: RunEnvironment, selected?: string): ImageGeneratorPort {
   const procedural = new ProceduralBackgroundGenerator();
-  const cache = new FileSystemBackgroundCache(join(outputRoot(), "cache"));
-  const geminiKey = process.env.GEMINI_API_KEY ?? process.env.GOOGLE_API_KEY;
-  const openRouterKey = process.env.OPENROUTER_API_KEY;
-  const fireflyId = process.env.FIREFLY_CLIENT_ID;
-  const fireflySecret = process.env.FIREFLY_CLIENT_SECRET;
+  const cache = new FileSystemBackgroundCache(join(env.outputRoot, "cache"));
+  const {
+    geminiKey,
+    openRouterKey,
+    fireflyClientId: fireflyId,
+    fireflyClientSecret: fireflySecret,
+  } = env.providers;
 
   // An OpenRouter generator for a given model, falling back to procedural.
   const openRouter = (model?: string): ImageGeneratorPort =>
@@ -88,11 +84,11 @@ function imageGenerator(selected?: string): ImageGeneratorPort {
     geminiKey
       ? new GeminiImageGenerator({
           apiKey: geminiKey,
-          model: process.env.IMAGEN_MODEL,
-          fallback: openRouter(process.env.OPENROUTER_IMAGE_MODEL),
+          model: env.providers.imagenModel,
+          fallback: openRouter(env.providers.openRouterImageModel),
           cache,
         })
-      : openRouter(process.env.OPENROUTER_IMAGE_MODEL);
+      : openRouter(env.providers.openRouterImageModel);
 
   // Adobe Firefly Services, degrading to the default chain when it's unavailable or
   // its credentials are absent.
@@ -112,26 +108,7 @@ function imageGenerator(selected?: string): ImageGeneratorPort {
   else if (selected && selected.includes("/")) generator = openRouter(selected);
   else generator = imagen(); // "auto" / "imagen" / unset → default chain
 
-  return new AssetReusingImageGenerator(generator, projectRoot());
-}
-
-/**
- * The deployment headline font (D59), validated against the same allowlist the
- * brief parser applies to `style.fontFamily` (both name the bundled faces
- * `fonts.ts` registers). `MESSAGE_FONT` used to pass through unvalidated while
- * the renderer can see 312 system families — a determinism hole at deployment
- * scope. An invalid value falls back to Inter with a logged warning; it is
- * never passed through. Exported for the composition test — buildPipeline reads
- * it at both compositor constructions.
- */
-export function messageFont(): string {
-  const raw = process.env.MESSAGE_FONT;
-  if (raw === undefined || raw === "") return "Inter";
-  if ((ALLOWED_FONT_FAMILIES as readonly string[]).includes(raw)) return raw;
-  console.warn(
-    `[pipeline] MESSAGE_FONT "${raw}" is not a bundled font family (allowed: ${ALLOWED_FONT_FAMILIES.join(", ")}); falling back to "Inter".`,
-  );
-  return "Inter";
+  return new AssetReusingImageGenerator(generator, env.assetRoot);
 }
 
 /**
@@ -139,27 +116,30 @@ export function messageFont(): string {
  * the use case via constructor injection; everything above depends only on ports.
  * `planInput` carries the brief's approved copy pool and the ratios its motion
  * platforms package (both resolved by `runCampaign` via `planInputFor`).
+ * `env` is the run's environment, resolved once by the caller (D167): every
+ * location, font and credential below comes from it, never from the process environment.
  */
 export function buildPipeline(
+  env: RunEnvironment,
   imageModel?: string,
   planInput: PlanInput = {},
 ): GenerateCampaignUseCase {
   return new GenerateCampaignUseCase({
-    imageGenerator: imageGenerator(imageModel),
+    imageGenerator: imageGenerator(env, imageModel),
     proceduralGenerator: new ProceduralBackgroundGenerator(),
     planner: pooledPlanner(planInput),
-    compositor: new NodeCanvasCompositor(messageFont(), projectRoot()),
+    compositor: new NodeCanvasCompositor(env.messageFont, env.assetRoot),
     // Motion variants only; the parser has already gated them on the ffmpeg probe.
     videoCompositor: new CanvasFfmpegVideoCompositor({
-      fontFamily: messageFont(),
-      assetRoot: projectRoot(),
+      fontFamily: env.messageFont,
+      assetRoot: env.assetRoot,
     }),
     // VE5b2: resolves a timeline beat's own background — motion variants only.
-    sceneAssets: new FileSystemSceneAssetResolver(projectRoot()),
+    sceneAssets: new FileSystemSceneAssetResolver(env.assetRoot),
     // VE3b2: resolves the brief's music bed (audio.path) — motion variants only.
-    audioAssets: new FileSystemAudioAssetResolver(projectRoot()),
+    audioAssets: new FileSystemAudioAssetResolver(env.assetRoot),
     compliance: new BrandComplianceChecker(),
-    exporter: new FileSystemExporter(outputRoot()),
+    exporter: new FileSystemExporter(env.outputRoot),
     now: () => new Date(),
     // D11: safe insets come from Distribution's profile table; orchestration only sees a resolver.
     platformSafeZones: platformZones,
@@ -183,6 +163,8 @@ export function buildPipeline(
  * would make every pre-existing campaign un-re-rollable.
  */
 export async function runCampaign(
+  /** Captured when the run is enqueued (D167), so it keeps its location and keys. */
+  env: RunEnvironment,
   brief: CampaignBrief,
   imageModel?: string,
   regenerateOnly?: ReadonlyArray<RegenerationTarget>,
@@ -224,7 +206,7 @@ export async function runCampaign(
           ...(signal ? { signal } : {}),
           ...(onProgress ? { onProgress } : {}),
         };
-  return buildPipeline(imageModel, planInput.value).execute(brief, options);
+  return buildPipeline(env, imageModel, planInput.value).execute(brief, options);
 }
 
 /**
@@ -232,8 +214,8 @@ export async function runCampaign(
  * to 503. `OPENROUTER_COPY_MODEL` overrides the adapter's default text model.
  * Never wired into GenerateCampaignUseCase (pools are built up front).
  */
-export function copyGenerator(): CopyGeneratorPort | undefined {
-  const apiKey = process.env.OPENROUTER_API_KEY;
+export function copyGenerator(env: RunEnvironment): CopyGeneratorPort | undefined {
+  const apiKey = env.providers.openRouterKey;
   if (!apiKey) return undefined;
-  return new OpenRouterCopyGenerator({ apiKey, model: process.env.OPENROUTER_COPY_MODEL });
+  return new OpenRouterCopyGenerator({ apiKey, model: env.providers.openRouterCopyModel });
 }

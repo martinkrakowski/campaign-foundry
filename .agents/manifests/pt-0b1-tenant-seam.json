@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "PT-0b1",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/pipeline.ts",
+      "before": "    exporter: new FileSystemExporter(env.outputRoot),",
+      "after": "    exporter: new FileSystemExporter(process.env.OUTPUT_DIR ?? \"output\"),",
+      "because": "the exporter resolves OUTPUT_DIR at build time instead of using the environment captured at enqueue, so a run built after OUTPUT_DIR moved writes into the new directory (the #567 mechanism).",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/pipeline.test.ts",
+        "-t",
+        "captured environment"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
