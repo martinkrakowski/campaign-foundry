@@ -16,11 +16,20 @@ import { SectionShell, type SectionProps } from "./IdentitySection";
  * other half of that decision: a step that renders nothing looks like a
  * failure, and a missing surface presented as an empty one is a fault this
  * repository keeps producing.
+ *
+ * It does render the template's own structural error (D165,
+ * `validateTemplate`): the error strip jumps here, so the step is where the
+ * message has to be, naming the layer to fix in the rail.
  */
-export function TemplateSection(_props: SectionProps) {
+export function TemplateSection({ errors }: SectionProps) {
   return (
     <SectionShell id="template" title="Template">
       <p className="text-[12px] text-text-muted">{messages.templateStackInRail}</p>
+      {errors.layerLink ? (
+        <p role="alert" data-field-key="layerLink" className="text-[11px] text-error">
+          {errors.layerLink}
+        </p>
+      ) : null}
     </SectionShell>
   );
 }

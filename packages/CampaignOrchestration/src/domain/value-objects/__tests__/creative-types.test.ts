@@ -3,6 +3,7 @@ import { CANONICAL_TEMPLATES } from "../creative-templates.js";
 import { ADVERTISING_UNITS } from "../advertising-units.js";
 import { LAYER_KINDS, type LayerKind } from "../layer-kinds.js";
 import {
+  isLinkableKind,
   CREATIVE_TYPES,
   CREATIVE_TYPE_RULES,
   OCCLUSION_TABLE,
@@ -118,6 +119,7 @@ describe("creative types and compatibility rules (D119, D124, D131)", () => {
         { kind: "logo", relation: "above", target: "image" },
         { kind: "shade", relation: "directly-above", target: "image" },
       ],
+      linkable: [],
       outputFamilies: ["static", "motion"],
     });
 
@@ -127,6 +129,7 @@ describe("creative types and compatibility rules (D119, D124, D131)", () => {
       required: ["image", "static-text"],
       maxOf: { logo: 1, shade: 1, accent: 1 },
       sharedBudgets: [{ kinds: ["static-text"], max: 1 }],
+      linkable: ["image", "static-text"],
       outputFamilies: ["html"],
     });
 
@@ -136,8 +139,36 @@ describe("creative types and compatibility rules (D119, D124, D131)", () => {
       required: ["video", "animated-text"],
       maxOf: { logo: 1, shade: 1 },
       sharedBudgets: [{ kinds: ["animated-text"], max: 1 }],
+      linkable: [],
       outputFamilies: ["motion"],
     });
+  });
+
+  test("linkable is a subset of accepts, and non-empty only where html is an output (D165)", () => {
+    for (const [type, rule] of Object.entries(CREATIVE_TYPE_RULES)) {
+      for (const kind of rule.linkable) {
+        expect(rule.accepts, `"${type}" declares unaccepted linkable kind "${kind}"`).toContain(
+          kind,
+        );
+      }
+      expect(rule.linkable.length > 0, `"${type}" linkable vs outputFamilies`).toBe(
+        (rule.outputFamilies as readonly string[]).includes("html"),
+      );
+    }
+  });
+
+  test("isLinkableKind reads the table: image-html image and static-text only (D165)", () => {
+    expect(isLinkableKind("image-html", "image")).toBe(true);
+    expect(isLinkableKind("image-html", "static-text")).toBe(true);
+    for (const kind of ["logo", "shade", "accent", "fill"] as const) {
+      expect(isLinkableKind("image-html", kind), kind).toBe(false);
+    }
+    for (const kind of CREATIVE_TYPE_RULES["image-text"].accepts) {
+      expect(isLinkableKind("image-text", kind), kind).toBe(false);
+    }
+    for (const kind of CREATIVE_TYPE_RULES["video"].accepts) {
+      expect(isLinkableKind("video", kind), kind).toBe(false);
+    }
   });
 
   test("declared order constraints only name kinds accepted by their creative type", () => {

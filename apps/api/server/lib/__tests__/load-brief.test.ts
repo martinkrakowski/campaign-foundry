@@ -1510,14 +1510,48 @@ describe("parseBrief", () => {
       );
     });
 
-    test("a linked layer carries link: true, and absent link behaves as not a click target", () => {
-      const template = {
-        ...base,
-        layers: base.layers.map((l, i) => (i === 1 ? { ...l, link: true } : l)),
-      };
-      const parsed = parseBrief({ ...valid, template });
-      expect(parsed.template.layers[1]?.link).toBe(true);
-      expect(parsed.template.layers[0]?.link).toBeUndefined();
+    /** A display-ad brief: the one creative type with linkable kinds (D165). */
+    const html = templateFromCanonical("display-ad");
+    const displayAd = {
+      ...valid,
+      type: "display-ad",
+      output: { formats: ["html"], platforms: ["google-display-html"] },
+    };
+    const linkedAt = (template: typeof base, kind: string) => ({
+      ...template,
+      layers: template.layers.map((l) => (l.kind === kind ? { ...l, link: true } : l)),
+    });
+
+    test("a linked image or static-text layer of a display-ad carries link: true; absent is not a click target", () => {
+      const template = linkedAt(linkedAt(html, "image"), "static-text");
+      const parsed = parseBrief({ ...displayAd, template });
+      expect(parsed.template.layers.find((l) => l.kind === "image")?.link).toBe(true);
+      expect(parsed.template.layers.find((l) => l.kind === "static-text")?.link).toBe(true);
+      expect(parsed.template.layers.find((l) => l.kind === "logo")?.link).toBeUndefined();
+    });
+
+    test("D165: link: true on a display-ad kind that is not linkable is refused, naming where it compiles", () => {
+      for (const kind of ["logo", "shade", "accent"]) {
+        const index = html.layers.findIndex((l) => l.kind === kind);
+        const message = `Campaign brief field "template.layers[${index}].link" may be true only on "image" or "static-text" layers for creative type "image-html"; got a "${kind}" layer. Remove "link".`;
+        const template = linkedAt(html, kind);
+        expect(() => parseBrief({ ...displayAd, template })).toThrow(message);
+        expect(() =>
+          parseBrief({ ...displayAd, template }, { enforceCapabilities: false }),
+        ).toThrow(message);
+      }
+    });
+
+    test("D165: link: true on any layer of a creative with no html rendition is refused, naming why", () => {
+      for (const [i, layer] of base.layers.entries()) {
+        const template = {
+          ...base,
+          layers: base.layers.map((l, j) => (j === i ? { ...l, link: true } : l)),
+        };
+        expect(() => parseBrief({ ...valid, template }), layer.kind).toThrow(
+          `Campaign brief field "template.layers[${i}].link" must not be true: creative type "image-text" has no html rendition, so no layer is a click target. Remove "link".`,
+        );
+      }
     });
 
     test("the API boundary does not strip link: false — the spelled-out default survives parseBrief", () => {

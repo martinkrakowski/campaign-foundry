@@ -76,6 +76,8 @@ const SAMPLE_ARGS = {
   templateRequiredNote: [["Image", "Static text"]],
   templateOcclusionNote: ["Shade", "Static text", "mute"],
   startFromRatioCaption: [["1:1", "9:16", "16:9"]],
+  // D165 — a list of kind labels, which the generic string args cannot .join().
+  linkableWhere: [["Image", "Static text"], "HTML"],
   timelineBeatUnderFloor: [1, 1.8, 2, 6],
   timelineDwell: [1.8],
   timelineDwellUnderFloor: [1.8, 2],

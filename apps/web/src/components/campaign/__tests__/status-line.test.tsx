@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { StatusLine } from "../StatusLine";
 import { initialEditorState } from "../editor-state";
 import * as messages from "../messages";
+import { SECTION_TITLES } from "../sections";
 
 const blank = () => initialEditorState("variation");
 
@@ -23,6 +24,22 @@ describe("StatusLine", () => {
     // The button says the label ("Identity") but scrolls by id — the one vocabulary
     // a reveal understands, and it is independent of however the label is spelled.
     expect(onScroll).toHaveBeenCalledWith("identity");
+  });
+
+  test("a misplaced click target names the Template section as a link (D165)", async () => {
+    const user = userEvent.setup();
+    const onScroll = vi.fn();
+    const base = blank();
+    const state = {
+      ...base,
+      template: {
+        ...base.template,
+        layers: base.template.layers.map((l) => (l.kind === "logo" ? { ...l, link: true } : l)),
+      },
+    };
+    render(<StatusLine state={state} attempted onScrollToSection={onScroll} />);
+    await user.click(screen.getByRole("button", { name: SECTION_TITLES.template }));
+    expect(onScroll).toHaveBeenCalledWith("template");
   });
 
   test("a failed write outranks everything else, and drops the links", () => {

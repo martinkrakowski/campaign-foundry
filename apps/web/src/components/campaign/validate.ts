@@ -5,7 +5,10 @@ import {
 // The domain's one output-family decision (X14), shared with the API boundary
 // (`validateTemplateOutputFamilies`, load-brief.ts) so Save refuses exactly
 // what the parser refuses — never a second family table in the editor.
-import { outputFamilyProblem } from "@campaignfoundry/CampaignOrchestration/creative-types";
+import {
+  isLinkableKind,
+  outputFamilyProblem,
+} from "@campaignfoundry/CampaignOrchestration/creative-types";
 // The domain's one anchor-prop/axis decision (R-D4), shared with the API boundary
 // (`validateAnchorPropAxis`, load-brief.ts) so Save refuses exactly what the API
 // refuses — `isBriefTemplate` sees only the template, never the axes.
@@ -56,6 +59,8 @@ import * as messages from "./messages";
 import {
   creativeTypeDisplayName,
   formatDisplayName,
+  layerKindDisplayName,
+  linkableDisplayName,
   modeDisplayName,
   platformDisplayName,
   ratioDisplayName,
@@ -535,6 +540,28 @@ export function validateMotion(state: EditorState): FieldErrors {
   return errors;
 }
 
+/**
+ * The template's structural errors. D165: a click target on a kind the
+ * creative type does not declare linkable is refused by the API
+ * (load-brief.ts), so Save must refuse it too, through the same table
+ * (`isLinkableKind`). The first offending layer is named; the domain guard
+ * `isBriefTemplate` never sees this case, because failing it is silent here.
+ */
+export function validateTemplate(state: EditorState): FieldErrors {
+  const errors: FieldErrors = {};
+  const misplaced = state.template.layers.find(
+    (layer) => layer.link === true && !isLinkableKind(state.template.creativeType, layer.kind),
+  );
+  if (misplaced !== undefined) {
+    errors.layerLink = messages.layerLinkMisplaced(
+      misplaced.id,
+      layerKindDisplayName(misplaced.kind),
+      linkableDisplayName(),
+    );
+  }
+  return errors;
+}
+
 export function validateState(
   state: EditorState,
   existingIds?: string[],
@@ -547,6 +574,7 @@ export function validateState(
     policy: validatePolicy(state),
     output: validateOutput(state),
     motion: validateMotion(state),
+    template: validateTemplate(state),
   };
 }
 
