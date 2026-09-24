@@ -23,6 +23,12 @@ describe("FsOutputStore", () => {
   });
 
   test("unsafe campaign or platform ids read as no packages, without touching the tree", async () => {
+    // Content where "../evil" would reach if the id guards were dropped, so a
+    // missing guard changes the answer instead of landing on an empty path.
+    mkdirSync(join(root, "evil", "instagram-feed"), { recursive: true });
+    writeFileSync(join(root, "evil", "instagram-feed", "manifest.json"), "{}");
+    mkdirSync(join(root, "packages", "camp", "evil"), { recursive: true });
+    writeFileSync(join(root, "packages", "camp", "evil", "manifest.json"), "{}");
     const store = new FsOutputStore(root);
     await expect(store.listPackageManifests("../evil")).resolves.toEqual([]);
     await expect(store.listPackageFiles("../evil", "instagram-feed")).resolves.toBeUndefined();
@@ -41,6 +47,25 @@ describe("FsOutputStore", () => {
       expect(files?.map((f) => f.name)).toEqual(["manifest.json"]);
     } finally {
       rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  test("the run cache and job records are missing however the path is spelled", async () => {
+    mkdirSync(join(root, "cache"), { recursive: true });
+    writeFileSync(join(root, "cache", "run.json"), "{}");
+    mkdirSync(join(root, "jobs"), { recursive: true });
+    writeFileSync(join(root, "jobs", "j.json"), "{}");
+    const store = new FsOutputStore(root);
+    for (const path of [
+      "cache/run.json",
+      "camp/../cache/run.json",
+      "jobs/j.json",
+      "x/../jobs/j.json",
+    ]) {
+      await expect(store.openOutput(path), path).resolves.toEqual({
+        found: false,
+        reason: "missing",
+      });
     }
   });
 });

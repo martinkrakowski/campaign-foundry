@@ -1,6 +1,6 @@
 import { constants, createReadStream } from "node:fs";
 import { open, readdir, readFile, stat, type FileHandle } from "node:fs/promises";
-import { basename, join, resolve } from "node:path";
+import { basename, join, relative, resolve, sep } from "node:path";
 import { SAFE_ID_PATTERN } from "@campaignfoundry/CampaignOrchestration";
 import { outputRoot } from "../config.js";
 import { resolveConfined, resolveConfinedForRead } from "../confined-path.js";
@@ -46,8 +46,6 @@ export class FsOutputStore implements OutputStorePort {
   }
 
   async openOutput(relativePath: string): Promise<OutputLookup> {
-    const posix = relativePath.replace(/\\/g, "/");
-    if (isHidden(posix)) return MISSING;
     const root = this.root;
     let target: string;
     if (relativePath === "") {
@@ -60,6 +58,9 @@ export class FsOutputStore implements OutputStorePort {
       } catch {
         return { found: false, reason: "invalid" };
       }
+      // Judge the hidden areas on the normalized target, not the raw string:
+      // "camp/../cache/run.json" is the run cache however it is spelled.
+      if (isHidden(relative(root, target).split(sep).join("/"))) return MISSING;
       try {
         // A symlink inside the root may aim outside it; resolveConfinedForRead validates
         // the real path and returns it, so the open below re-checks the same real path,

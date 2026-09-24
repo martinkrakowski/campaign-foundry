@@ -35,6 +35,40 @@
         "class-based store"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/fs-output-store.ts",
+      "before": "    if (!SAFE_ID_PATTERN.test(campaignId)) return [];",
+      "after": "",
+      "because": "without the id guard, ../evil normalises to <root>/evil, whose planted manifest is listed (CodeRabbit on #571: the test had no fixture to catch this).",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/fs-output-store.test.ts",
+        "-t",
+        "unsafe campaign or platform ids"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/fs-output-store.ts",
+      "before": "      if (isHidden(relative(root, target).split(sep).join(\"/\"))) return MISSING;",
+      "after": "",
+      "because": "without the normalised check, camp/../cache/run.json reaches the run cache and is served (CodeRabbit on #571).",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/fs-output-store.test.ts",
+        "-t",
+        "missing however the path is spelled"
+      ],
+      "verdict": "caught"
     }
   ]
 }
