@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach } from "vitest";
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FsDecisionStore } from "../fs-decision-store.js";
@@ -44,4 +44,18 @@ describe("FsDecisionStore", () => {
     await expect(store.writeDecisions("camp", {})).rejects.toBeDefined();
     expect(readdirSync(join(root, "decisions")).filter((n) => n.endsWith(".tmp"))).toEqual([]);
   });
+
+  test.skipIf(process.getuid?.() === 0)(
+    "a staging write that fails before its temp exists surfaces that failure, not the cleanup's",
+    async () => {
+      const store = new FsDecisionStore(root);
+      mkdirSync(join(root, "decisions"), { recursive: true });
+      chmodSync(join(root, "decisions"), 0o500); // the temp cannot be created
+      try {
+        await expect(store.writeDecisions("camp", {})).rejects.toMatchObject({ code: "EACCES" });
+      } finally {
+        chmodSync(join(root, "decisions"), 0o700);
+      }
+    },
+  );
 });

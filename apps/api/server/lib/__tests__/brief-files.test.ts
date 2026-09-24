@@ -33,9 +33,6 @@ const minimal: CampaignBrief = {
   products: [{ id: "alpha", name: "A", primaryColor: "#1473E6", logoPath: "x.png" }],
 };
 
-const validYaml =
-  "id: camp\ntargetRegion: DE\ntargetAudience: a\ncampaignMessage: Hi\nproducts:\n  - id: alpha\n  - id: beta\n";
-
 describe("dumpBrief", () => {
   test("emits sample-campaign key order and omits absent optionals", () => {
     const dumped = dumpBrief(minimal);

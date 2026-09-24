@@ -35,7 +35,7 @@ export function verdictsProblem(value: unknown): string | undefined {
   const entries = Object.entries(value);
   if (entries.length > MAX_DECISIONS) return `decisions may hold at most ${MAX_DECISIONS} keys`;
   for (const [key, verdict] of entries) {
-    if (key.length === 0 || key.length > 200 || /[\u0000-\u001f]/.test(key)) {
+    if (key.length === 0 || key.length > 200 || [...key].some((c) => c.charCodeAt(0) < 0x20)) {
       return `decision key ${JSON.stringify(key.slice(0, 40))} is not a review key`;
     }
     if (verdict !== "approved" && verdict !== "rejected") {
