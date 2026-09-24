@@ -74,41 +74,58 @@ even if the folder names change.
 
 ## Storage Ports & Cloud Storage Boundary (API)
 
-Briefs and assets in `apps/api` are isolated behind hexagonal storage ports defined in
-`apps/api/server/lib/ports/`:
+Everything `apps/api` persists goes through a port in `apps/api/server/lib/ports/`
+(`*.port.ts`), with a file adapter (`fs-*-store.ts`) today:
 
-- **`BriefStorePort`** (`brief-store.port.ts`): abstracts loading, listing, creating,
-  rewriting, replacing, and revision hashing of campaign briefs. Brief IDs serve as
-  logical store keys with no leaked filesystem or filename semantics.
-- **`AssetStorePort`** (`asset-store.port.ts`): abstracts writing, listing, and
-  copying (`copyAssets(from, to)`) of campaign assets (logos, background images).
+| Port | Holds |
+| --- | --- |
+| `BriefStorePort` | campaign briefs, revision-checked (a stale write is `ECONFLICT` → 409) |
+| `AssetStorePort` | a campaign's input assets (logos, backgrounds) |
+| `PoolStorePort` | a campaign's asset and copy pools |
+| `TemplateStorePort` | saved creative templates |
+| `JobStorePort` | run jobs: the one-run-per-campaign claim, progress, outcome |
+| `ReportStorePort` | a campaign's run report, revision-checked |
+| `OutputStorePort` | renders, proofs and packages the browser reads |
+| `DecisionStorePort` | review decisions: verdict, actor, time and run per creative |
 
 No `node:fs`, path joining, or `process.cwd()` may leak through route handlers or port
-interfaces into callers.
+interfaces into callers. A port's interface names records by id, never by path.
 
-### S3 Adapter Shape
+### Tenant context (D167)
 
-When transitioning from the local filesystem (`FsBriefStore`, `FsAssetStore`) to cloud
-storage (e.g. AWS S3, Cloudflare R2, GCS), adapters implement the exact same port interfaces:
+Location and credentials come from the tenant, never from `process.env` below the routes.
 
-```ts
-export class S3BriefStore implements BriefStorePort {
-  constructor(private readonly s3: S3Client, private readonly bucket: string, private readonly prefix = "briefs/") {}
+- A request resolves a `TenantContext { orgId, userId, roles, teamIds }` (`lib/tenant.ts`).
+  Until authentication exists (PT-1) every request is `LOCAL_TENANT`.
+- The composition root (`lib/run-environment.ts`) is the only place that reads env. It turns a
+  tenant into a `RunEnvironment` (output root, asset root, font, provider settings), and a run
+  **captures it at enqueue**, so a job's writes land where the run was admitted, whatever the
+  process looks like later.
+- Stores are built per root from a `StorageScope` (a tenant, or a run's captured environment):
+  `get*Store(scope)` in `lib/ports/index.ts`. A non-local org's root is `<root>/orgs/<orgId>`.
+- **Package adapters never see a tenant.** They are constructed with an already tenant-scoped root
+  or prefix, so `packages/*` stays tenant-agnostic and a cache is isolated by where it is built,
+  not by an org in its key.
+- The check that a record belongs to `ctx.orgId` (and, per D166, to one of the member's teams for
+  team-scoped campaigns) happens **at the port**, and a record of another org answers as absent
+  (404), never forbidden.
 
-  // Maps brief.id -> s3://bucket/briefs/<id>.yaml
-  // - listBriefs: ListObjectsV2Command + GetObjectCommand; ETag or SHA-256 digest as revision
-  // - createBrief: PutObjectCommand with If-None-Match: "*" (exclusive create)
-  // - rewriteBrief / replaceBrief: PutObjectCommand with If-Match for revision concurrency
-  // - withBriefLock: distributed lease (e.g. DynamoDB / Redis lock) or S3 conditional write
-}
+### The cloud target (docs/planning/2026-09-24_platform-and-tenancy.md)
 
-export class S3AssetStore implements AssetStorePort {
-  constructor(private readonly s3: S3Client, private readonly bucket: string, private readonly prefix = "assets/inputs/") {}
+Each port keeps its interface; the adapters change.
 
-  // Maps (briefId, name) -> s3://bucket/assets/inputs/<briefId>/<name>
-  // - writeAsset: PutObjectCommand with If-None-Match: "*"
-  // - listAssets: ListObjectsV2Command (Prefix: assets/inputs/<briefId>/) + metadata/presigned URL or data URL
-  // - copyAssets: ListObjectsV2Command + CopyObjectCommand (fromPrefix -> toPrefix)
-}
-```
-
+- **The database is the store of record** (D169; PostgreSQL, D174a). Briefs, pools, templates,
+  reports, jobs and decisions become rows. Every record has an immutable surrogate id; a slug is a
+  mutable, per-org display column (D64 b, D168). YAML is an import/export format, not a store.
+- **Object storage holds bytes only**, in one private bucket, under
+  `org/<orgId>/campaign/<campaignId>/<kind>/<assetId>` (`kind`: inputs, renders, packages).
+  **A key never contains a slug** (C7): renaming a campaign moves no object.
+- **Browsers never get a bucket path** (D170). Every byte a browser reads comes through a
+  short-lived signed URL, issued after the port's ownership check; `GET /output/**` retires.
+- **The run lock is a job row, not a file or a cache entry** (D171): a one-statement claim guarded
+  by a partial unique index on (org, campaign) while running, a heartbeat and reaper so a crashed
+  worker releases its campaign, and the run id as a fence on every guarded write.
+- **Secrets stay on the server** (D175). An org's own provider keys (BYOK) are stored encrypted,
+  are write-only from the browser, and are decrypted only where a provider is called.
+- Infrastructure config (the database URL, the bucket) is env, read once at the composition root.
+  **Credentials are never committed**; `.env*` is gitignored.

@@ -1,7 +1,7 @@
 # Run Exclusion & The Distributed Lock — Architecture & Development Plan
 
 **Date:** 2026-09-04
-**Status:** **PARTLY SHIPPED — stamped 2026-09-20.** R3 shipped **as L9** (#348) and R4 **as L10** (#356); L7 (#355), L11 (#362) and L12 (#396) are also on `main`. **Open, and this is the correctness work in this tree:** **R1** (eviction still unlocks a running campaign — `fs-job-store.ts` falls back to index 0), **R2** (no `campaignId` path segment, so two campaigns sharing a product id overwrite each other's renders), **R5** (no `AbortSignal` on `ImageGeneratorPort`), **R6** (no `RunRegistryPort`). **Ordering matters: R5 lands before R1** — D73 records that R1 alone bricks the instance. **D78 has no lane at all.** _Was: "for review"._
+**Status:** **PARTLY SHIPPED — corrected 2026-09-24 (platform plan L1).** R3 shipped **as L9** (#348) and R4 **as L10** (#356); L7 (#355), L11 (#362) and L12 (#396) are on `main`. **R2 shipped as #536** (campaigns stop overwriting each other's renders) and **R1 + R5 as #537** (a run gets a deadline; eviction no longer falls back to index 0; `ImageGeneratorPort` takes a `signal`). **Only R6 is open** (no `RunRegistryPort`), and it moves to the platform plan's PT-6 with D78's fence (D171). _Was: "R1, R2, R5, R6 open" (stamped 2026-09-20)._
 **Decision ids introduced:** D73 – D81
 **Relates to:** C4 (a second Generate adopts the run in progress), D15 (a storage port before the S3 move), D64 (the identity model — still open), D68 (typed boundary), the wave-1 plan `2026-09-03_create-moment-and-pipeline-prerequisites.md` §5.4
 

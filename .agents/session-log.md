@@ -6250,3 +6250,18 @@ and source formatting, recorded here rather than fixed.
   - Not exercised end to end: the web and API halves share the contract by inspection and their own
     tests. The first real check is approving a tile in the running app, then finding
     `output/decisions/<campaign>.json` with verdict, actor, at and run.
+- **Owner decisions and PT-0e (2026-09-24):**
+  - Stamped:
+    - D166 (i): a team is an access scope, for team sharing and editing of campaigns.
+    - D174a: PostgreSQL, hosted on the owner's Aiven service. The service allows 20 connections, so
+      the pool is bounded; the client verifies the server certificate against Aiven's CA;
+      `DATABASE_URL` is read at the composition root and never committed.
+    - D175, amended: bring-your-own-key is in, with keys encrypted server-side and write-only
+      from the browser.
+  - Added: D176 (where the key-encryption key lives) and lane PT-7b (org provider keys).
+  - Still open: D174b (auth vendor, blocks PT-1), D174c (object store, PT-4), D174d (queue, PT-6)
+    and D176 (PT-7b). PT-3 is unblocked.
+  - PT-0e: `.agents/architecture.md`'s storage section was rewritten, on the owner's instruction.
+    It now covers all eight ports, the D167 tenant context and the cloud target (C7 keys,
+    D169 – D171, D175); the slug-keyed S3 sketch is gone. The lock plan's status line now says
+    R1, R2 and R5 shipped (#536, #537); only R6 is open.
