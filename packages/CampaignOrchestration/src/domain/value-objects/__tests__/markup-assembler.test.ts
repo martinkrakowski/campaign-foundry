@@ -349,6 +349,18 @@ describe("assembleHtml", () => {
     expect(result.html).toContain('alt=""');
   });
 
+  test("box pixels are rounded to hundredths, so 0.82 of 250 prints as 205, not 205.00000000000003", () => {
+    const { html } = assembleHtml(
+      base({
+        canvas: { size: "300x250" },
+        layers: [layer({ id: "copy", kind: "static-text", link: true })],
+        headline: "Hi",
+      }),
+    );
+    expect(html).toContain("top: 25px; width: 300px; height: 205px;");
+    expect(html).not.toMatch(/\d\.\d{3,}px/);
+  });
+
   test("the head declares the resolved canvas as ad.size, which Google Ads requires", () => {
     for (const [size, width, height] of [
       ["300x250", 300, 250],
