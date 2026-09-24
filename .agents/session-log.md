@@ -6219,3 +6219,25 @@ and source formatting, recorded here rather than fixed.
   - **DoD 1 met:** `process.env` below the routes is only in `config.ts`, `env.ts`, `run-environment.ts`
     and `project-root.ts`.
   - **Deferred to PT-6:** job polling resolves the current root, because it has no job-to-root index.
+- **PT-0d done (2026-09-24), Phase 0 closed except PT-0e:**
+  - [#577](https://github.com/martinkrakowski/campaign-foundry/pull/577) (`df975038`): `DecisionStorePort` +
+    `FsDecisionStore` and `GET`/`PUT /campaigns/decisions`. Review found the lane missed two D173 clauses:
+    - each record now carries `run` (the report revision it was given against);
+    - a save must name the revision it read, and a stale one is a 409.
+    The plan row "keyed by campaign and run" was amended: a partial re-roll keeps approvals on the cells it
+    did not regenerate, so the report write retires the replaced keys instead. CodeRabbit then found
+    retirement raced saves and could fail after the report was published. A per-campaign decision lock now
+    covers the PUT and the report write, and retirement runs before the write.
+  - [#578](https://github.com/martinkrakowski/campaign-foundry/pull/578) (`0ff44ae9`): the web app reads and
+    writes decisions through the API; `cf:decisions` is removed on mount. Saves are queued, each naming
+    the previous revision; a 409 or failed save shows the server's copy with a notice on the grid.
+  - A `decisionsLoaded` gate pauses Approve, Reject and Package until the run's decisions load. The
+    advisor found a click before the load would save one verdict as the whole map and erase the rest.
+    CodeRabbit found:
+    - a click during a conflict's reload had the same effect;
+    - a re-roll whose verdict lost to another tab would retire that tab's approval;
+    - a failed load blocked review with no reason.
+    All four are fixed and hand-checked by mutation.
+  - Refuted: tenant from `event.context` (PT-1), fsync (PT-3), a messages catalog for API errors. Also
+    refuted: marking decisions loaded on a failed fetch, which reopens the wipe.
+  - Test helper `fakeDecisionsApi`/`seedDecisions` replaces 14 `localStorage` seeds.
