@@ -7,7 +7,8 @@ import {
 } from "@campaignfoundry/CampaignOrchestration";
 import { errorMessage } from "@campaignfoundry/shared";
 import { BrandComplianceChecker } from "@campaignfoundry/GovernanceAndCompliance";
-import { findBriefById, isErrno, SYMLINK_WRITE_ERROR } from "../../../lib/brief-files.js";
+import { isErrno, SYMLINK_WRITE_ERROR } from "../../../lib/brief-files.js";
+import { getBriefStore } from "../../../lib/ports/index.js";
 import { assertSafeId, parseBrief } from "../../../lib/load-brief.js";
 import { copyGenerator } from "../../../lib/pipeline.js";
 import {
@@ -158,7 +159,7 @@ export default defineEventHandler(async (event) => {
   }
 
   if (brief === undefined) {
-    const found = await findBriefById(briefId);
+    const found = await getBriefStore().findBriefById(briefId);
     if (!found) {
       setResponseStatus(event, 404);
       return { error: `Brief "${briefId}" not found.` };

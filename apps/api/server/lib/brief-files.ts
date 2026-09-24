@@ -1,11 +1,9 @@
 import { createHash } from "node:crypto";
 import { lstat, readFile } from "node:fs/promises";
-import { extname, resolve } from "node:path";
+import { extname } from "node:path";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
-import { projectRoot } from "@campaignfoundry/shared";
 import { dumpBrief } from "@campaignfoundry/shared";
 import { isAlias, isMap, parseAllDocuments, type Document, type Scalar, type YAMLMap } from "yaml";
-import { resolveConfined } from "./confined-path.js";
 import { YAML_ALIAS_CAP } from "./load-brief.js";
 import { getBriefStore } from "./ports/index.js";
 
@@ -159,15 +157,6 @@ export function serializeBrief(path: string, brief: CampaignBrief): string {
     : dumpBrief(brief);
 }
 
-export function briefsDir(): string {
-  return resolve(projectRoot(), "briefs");
-}
-
-/** Confined path for the canonical create target `briefs/<id>.yaml`. */
-export function briefYamlPath(id: string): string {
-  return resolveConfined(briefsDir(), `${id}.yaml`);
-}
-
 export function isErrno(error: unknown, code: string): boolean {
   return typeof error === "object" && error !== null && (error as { code?: unknown }).code === code;
 }
@@ -200,36 +189,6 @@ export async function pathExists(path: string): Promise<boolean> {
   } catch {
     return false;
   }
-}
-
-/**
- * First regular file at `briefs/<id>.<ext>` for `exts`, in order.
- * Missing / non-file entries are skipped; an empty result means 404.
- */
-export async function findBriefFile(
-  id: string,
-  exts: readonly string[] = BRIEF_SOURCE_EXTS,
-): Promise<string | undefined> {
-  const file = await getBriefStore().findBriefFile(id, exts);
-  return file ? resolve(briefsDir(), file) : undefined;
-}
-
-/**
- * Regular briefs/ source whose parsed `brief.id` equals `id`.
- * Filename may differ from the id (e.g. `sample-campaign.yaml` / `summer-hydration-2026`).
- * Unparseable files and non-files are skipped, matching GET /campaigns/briefs.
- */
-export async function findBriefById(
-  id: string,
-): Promise<{ path: string; brief: CampaignBrief } | undefined> {
-  const found = await getBriefStore().findBriefById(id);
-  if (!found) return undefined;
-  return { path: resolve(briefsDir(), found.file), brief: found.brief };
-}
-
-export async function findBriefFileById(id: string): Promise<string | undefined> {
-  const file = await getBriefStore().findBriefFileById(id);
-  return file ? resolve(briefsDir(), file) : undefined;
 }
 
 /** Exclusive create — fails with EEXIST if anything is already at `path`. */

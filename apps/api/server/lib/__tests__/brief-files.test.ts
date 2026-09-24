@@ -127,63 +127,23 @@ describe("brief file lookup and write", () => {
     else process.env.PROJECT_ROOT = origRoot;
   });
 
-  test("findBriefFile prefers yaml, then yml, then json, and skips non-files", async () => {
-    const { findBriefFile, BRIEF_SOURCE_EXTS } = await filesFor(dir);
-    mkdirSync(join(dir, "briefs"), { recursive: true });
-    writeFileSync(join(dir, "briefs", "both.yaml"), "id: both\n");
-    writeFileSync(join(dir, "briefs", "both.yml"), "id: both\n");
-    expect(await findBriefFile("both", BRIEF_SOURCE_EXTS)).toBe(join(dir, "briefs", "both.yaml"));
-
-    mkdirSync(join(dir, "briefs", "only-dir.yaml"), { recursive: true }); // not a file → skipped
-    writeFileSync(join(dir, "briefs", "only-dir.yml"), "id: only-dir\n");
-    expect(await findBriefFile("only-dir", [".yaml", ".yml"])).toBe(
-      join(dir, "briefs", "only-dir.yml"),
-    );
-
-    writeFileSync(join(dir, "briefs", "json-only.json"), "{}");
-    expect(await findBriefFile("json-only")).toBe(join(dir, "briefs", "json-only.json"));
-    expect(await findBriefFile("missing", BRIEF_SOURCE_EXTS)).toBeUndefined();
-  });
-
-  test("findBriefFileById matches brief.id, not filename, and skips junk", async () => {
-    const { findBriefFileById, findBriefById, isBriefSourceName } = await filesFor(dir);
-    mkdirSync(join(dir, "briefs"), { recursive: true });
-    writeFileSync(join(dir, "briefs", "sample-campaign.yaml"), validYaml);
-    writeFileSync(join(dir, "briefs", "bad.yaml"), "id: 1\nproducts: not-an-array\n");
-    writeFileSync(join(dir, "briefs", "ignore.txt"), "not a brief");
-    writeFileSync(join(dir, "briefs", "winter.json"), JSON.stringify({ ...minimal, id: "winter" }));
-    const outside = join(dir, "outside.yaml");
-    writeFileSync(outside, validYaml.replace("id: camp", "id: linked"));
-    symlinkSync(outside, join(dir, "briefs", "linked.yaml"));
-
+  test("isBriefSourceName accepts brief extensions case-insensitively and nothing else", async () => {
+    const { isBriefSourceName } = await filesFor(dir);
     expect(isBriefSourceName("sample-campaign.YAML")).toBe(true);
     expect(isBriefSourceName("ignore.txt")).toBe(false);
-    expect(await findBriefFileById("camp")).toBe(join(dir, "briefs", "sample-campaign.yaml"));
-    expect(await findBriefFileById("winter")).toBe(join(dir, "briefs", "winter.json"));
-    expect(await findBriefFileById("linked")).toBeUndefined(); // symlink, not a regular file
-    expect(await findBriefFileById("missing")).toBeUndefined();
-    expect(await findBriefById("camp")).toMatchObject({
-      path: join(dir, "briefs", "sample-campaign.yaml"),
-      brief: { id: "camp" },
-    });
-  });
-
-  test("findBriefFileById returns undefined when briefs/ is missing", async () => {
-    const { findBriefFileById } = await filesFor(dir);
-    expect(await findBriefFileById("camp")).toBeUndefined();
   });
 
   test("pathExists is true for any inode and false when missing", async () => {
-    const { pathExists, createBriefFile, briefYamlPath } = await filesFor(dir);
-    const path = briefYamlPath("camp");
+    const { pathExists, createBriefFile } = await filesFor(dir);
+    const path = join(dir, "briefs", "camp.yaml");
     expect(await pathExists(path)).toBe(false);
     await createBriefFile(path, minimal);
     expect(await pathExists(path)).toBe(true);
   });
 
   test("createBriefFile is exclusive — a second write does not overwrite", async () => {
-    const { createBriefFile, briefYamlPath } = await filesFor(dir);
-    const path = briefYamlPath("camp");
+    const { createBriefFile } = await filesFor(dir);
+    const path = join(dir, "briefs", "camp.yaml");
     await createBriefFile(path, minimal);
     const original = readFileSync(path);
     await expect(
@@ -206,8 +166,8 @@ describe("brief file lookup and write", () => {
   });
 
   test("replaceBriefFile creates when missing and rewrites a regular file", async () => {
-    const { replaceBriefFile, briefYamlPath } = await filesFor(dir);
-    const path = briefYamlPath("camp");
+    const { replaceBriefFile } = await filesFor(dir);
+    const path = join(dir, "briefs", "camp.yaml");
     await replaceBriefFile(path, minimal);
     expect(readFileSync(path, "utf8")).toContain("id: camp");
     await replaceBriefFile(path, { ...minimal, campaignMessage: "Updated" });
@@ -221,12 +181,6 @@ describe("brief file lookup and write", () => {
     writeFileSync(path, JSON.stringify(minimal));
     await rewriteBriefFile(path, { ...minimal, campaignMessage: "JSON" });
     expect(JSON.parse(readFileSync(path, "utf8"))).toMatchObject({ campaignMessage: "JSON" });
-  });
-
-  test("briefYamlPath stays under briefs/ and rejects a traversing id segment", async () => {
-    const { briefYamlPath } = await filesFor(dir);
-    expect(briefYamlPath("camp")).toBe(join(dir, "briefs", "camp.yaml"));
-    expect(() => briefYamlPath("../escape")).toThrow(/Path escapes the allowed directory/);
   });
 });
 
@@ -404,11 +358,11 @@ describe("concurrent write scenario", () => {
     try {
       vi.resetModules();
       process.env.PROJECT_ROOT = dir;
-      const { createBriefFile, withBriefLock, hashFile, rewriteBriefFile, briefYamlPath } =
+      const { createBriefFile, withBriefLock, hashFile, rewriteBriefFile } =
         await import("../brief-files.js");
       mkdirSync(join(dir, "briefs"), { recursive: true });
 
-      const path = briefYamlPath("camp");
+      const path = join(dir, "briefs", "camp.yaml");
       await createBriefFile(path, minimal);
       const revision = await hashFile(path);
 

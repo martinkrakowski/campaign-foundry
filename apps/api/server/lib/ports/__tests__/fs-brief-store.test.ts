@@ -1,5 +1,13 @@
 import { describe, test, expect, beforeEach, afterEach } from "vitest";
-import { chmodSync, mkdtempSync, writeFileSync, symlinkSync, rmSync, readFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  writeFileSync,
+  symlinkSync,
+  rmSync,
+  readFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -119,6 +127,47 @@ describe("FsBriefStore", () => {
 
     expect(await store.findBriefById("missing")).toBeUndefined();
     expect(await store.findBriefFileById("missing")).toBeUndefined();
+  });
+
+  // Ported from brief-files.test.ts when its path-returning wrappers were deleted
+  // (PT-0a): the behaviour lives in the store, so it is asserted on the store's
+  // file keys, never on disk paths.
+  const campYaml =
+    "id: camp\ntargetRegion: DE\ntargetAudience: a\ncampaignMessage: Hi\nproducts:\n  - id: alpha\n  - id: beta\n";
+
+  test("findBriefFileById matches brief.id, not filename, skipping junk, unparseable files and symlinks", async () => {
+    writeFileSync(join(dir, "sample-campaign.yaml"), campYaml);
+    writeFileSync(join(dir, "bad.yaml"), "id: 1\nproducts: not-an-array\n");
+    writeFileSync(join(dir, "ignore.txt"), "not a brief");
+    writeFileSync(join(dir, "winter.json"), JSON.stringify({ ...minimalBrief, id: "winter" }));
+    const outside = join(dir, "..", `${dir.split("/").pop()}-outside.yaml`);
+    writeFileSync(outside, campYaml.replace("id: camp", "id: linked"));
+    symlinkSync(outside, join(dir, "linked.yaml"));
+    try {
+      expect(await store.findBriefFileById("camp")).toBe("sample-campaign.yaml");
+      expect(await store.findBriefFileById("winter")).toBe("winter.json");
+      expect(await store.findBriefFileById("linked")).toBeUndefined(); // symlink, not a regular file
+      expect(await store.findBriefById("camp")).toMatchObject({
+        file: "sample-campaign.yaml",
+        brief: { id: "camp" },
+      });
+    } finally {
+      rmSync(outside, { force: true });
+    }
+  });
+
+  test("findBriefFileById and findBriefFile answer undefined when the briefs directory is missing", async () => {
+    const missing = new FsBriefStore(join(dir, "nope"));
+    expect(await missing.findBriefFileById("camp")).toBeUndefined();
+    expect(await missing.findBriefFile("camp")).toBeUndefined();
+  });
+
+  test("findBriefFile skips a directory with a brief name and falls back to json", async () => {
+    mkdirSync(join(dir, "only-dir.yaml"), { recursive: true }); // not a file → skipped
+    writeFileSync(join(dir, "only-dir.yml"), "id: only-dir\n");
+    expect(await store.findBriefFile("only-dir", [".yaml", ".yml"])).toBe("only-dir.yml");
+    writeFileSync(join(dir, "json-only.json"), "{}");
+    expect(await store.findBriefFile("json-only")).toBe("json-only.json");
   });
 
   test("findBriefFile checks extensions in order and returns relative file key", async () => {
