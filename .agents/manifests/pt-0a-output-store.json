@@ -1,0 +1,109 @@
+{
+  "version": 1,
+  "lane": "PT-0a",
+  "mutations": [
+    {
+      "file": "apps/api/server/routes/campaigns/packages/[campaignId].get.ts",
+      "before": "  const platforms = await getOutputStore().listPackageManifests(campaignId);",
+      "after": "  const platforms: readonly object[] = [];",
+      "because": "the listing stops asking the output store, so the in-memory store's manifest is never served and the route answers 404.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/__tests__/output-store-routes.test.ts",
+        "-t",
+        "the package listing and zip come from the store"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/packages/[campaignId]/[platformZip].get.ts",
+      "before": "    out.push({ name: entry.name, open: () => entry.open(), ...(await measure(entry.open())) });",
+      "after": "    out.push({ name: entry.name, open: entry.open, ...(await measure(entry.open())) });",
+      "because": "a detached open() loses this, so a class-based store's second open during zip streaming cannot read its body (Qodo on #571).",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/__tests__/output-store-routes.test.ts",
+        "-t",
+        "class-based store"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/fs-output-store.ts",
+      "before": "    if (!SAFE_ID_PATTERN.test(campaignId)) return [];",
+      "after": "    // mutated: campaign id guard dropped",
+      "because": "without the id guard, ../evil normalises to <root>/evil, whose planted manifest is listed (CodeRabbit on #571: the test had no fixture to catch this).",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/fs-output-store.test.ts",
+        "-t",
+        "unsafe campaign or platform ids"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/fs-output-store.ts",
+      "before": "      if (isHidden(relative(root, target).split(sep).join(\"/\"))) return MISSING;",
+      "after": "      // mutated: normalised hidden-area check dropped",
+      "because": "without the normalised check, camp/../cache/run.json reaches the run cache and is served (CodeRabbit on #571).",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/fs-output-store.test.ts",
+        "-t",
+        "missing however the path is spelled"
+      ],
+      "verdict": "caught",
+      "retired": "Retired 2026-09-24 in the same PR: the lexical hidden-area check it removed was itself deleted. The real-target check added for the symlink case (mutations[5]) judges every path that can reach open(), so the lexical check had no observable effect (replay: survived), and a check no test can distinguish is dead code. The normalised-spelling test still passes through the real-target check."
+    },
+    {
+      "file": "apps/api/server/lib/ports/fs-output-store.ts",
+      "before": "    if (!SAFE_ID_PATTERN.test(campaignId) || !SAFE_ID_PATTERN.test(platformId)) return undefined;",
+      "after": "    if (!SAFE_ID_PATTERN.test(campaignId)) return undefined;",
+      "because": "without the platform guard, camp/../evil normalises to packages/evil, whose planted files are listed (CodeRabbit on #571).",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/fs-output-store.test.ts",
+        "-t",
+        "unsafe campaign or platform ids"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/fs-output-store.ts",
+      "before": "        if (\n          isHidden(\n            relative(await realpath(root), target)\n              .split(sep)\n              .join(\"/\"),\n          )\n        )\n          return MISSING;",
+      "after": "        // mutated: real-target hidden check dropped",
+      "because": "without the real-target check, a symlink in public/ that points into cache/ is served (CodeRabbit on #571).",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/fs-output-store.test.ts",
+        "-t",
+        "points into the cache is missing too"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

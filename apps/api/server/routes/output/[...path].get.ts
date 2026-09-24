@@ -1,8 +1,5 @@
-import { constants, type Stats } from "node:fs";
-import { open, type FileHandle } from "node:fs/promises";
-import { extname, resolve } from "node:path";
-import { outputRoot } from "../../lib/config.js";
-import { resolveConfined, resolveConfinedForRead } from "../../lib/confined-path.js";
+import { extname } from "node:path";
+import { getOutputStore } from "../../lib/ports/index.js";
 
 const CONTENT_TYPES: Record<string, string> = {
   ".png": "image/png",
@@ -56,98 +53,38 @@ export function parseByteRange(
  * response's Content-Length from what is actually streamed.
  */
 export default defineEventHandler(async (event) => {
-  const relative = getRouterParam(event, "path") ?? "";
-  const posix = relative.replace(/\\/g, "/");
-  // The GenAI seed cache lives under output/cache and jobs under output/jobs, but neither is a downloadable creative.
-  if (
-    posix === "cache" ||
-    posix.startsWith("cache/") ||
-    posix === "jobs" ||
-    posix.startsWith("jobs/")
-  ) {
-    setResponseStatus(event, 404);
-    return { error: "Not found" };
-  }
-  const root = resolve(outputRoot());
-  let target: string;
-  if (relative === "") {
-    // resolveConfined rejects the base itself; GET /output/ targets the root directory,
-    // which open() happily reports — the isFile check below is what 404s it.
-    target = root;
-  } else {
-    try {
-      target = resolveConfined(root, relative);
-    } catch {
+  const lookup = await getOutputStore().openOutput(getRouterParam(event, "path") ?? "");
+  if (!lookup.found) {
+    if (lookup.reason === "invalid") {
       setResponseStatus(event, 400);
       return { error: "Invalid path" };
     }
-    try {
-      // A symlink inside the root may aim outside it; resolveConfinedForRead validates the
-      // real path and returns it, so the open below re-checks the same real path, not a
-      // lexical name that could have been swapped since.
-      target = await resolveConfinedForRead(root, relative);
-    } catch {
-      setResponseStatus(event, 404);
-      return { error: "Not found" };
-    }
-  }
-
-  let handle: FileHandle;
-  try {
-    handle = await open(target, constants.O_RDONLY | constants.O_NOFOLLOW);
-  } catch {
-    // Missing file, or the checked entry was swapped for a symlink before this open
-    // (ELOOP) — both answer the same 404 a plain miss would, and neither streams a byte.
     setResponseStatus(event, 404);
     return { error: "Not found" };
   }
-  let st: Stats;
-  try {
-    st = await handle.stat();
-  } catch {
-    await handle.close();
-    setResponseStatus(event, 404);
-    return { error: "Not found" };
-  }
-  if (!st.isFile()) {
-    // Directories (the root itself, or any folder under it) are not downloadable creatives;
-    // streaming one would fail with EISDIR after the 200 headers were already set.
-    await handle.close();
-    setResponseStatus(event, 404);
-    return { error: "Not found" };
-  }
-  const size = st.size;
+  const { file } = lookup;
+  const size = file.size;
   setHeader(
     event,
     "content-type",
-    CONTENT_TYPES[extname(target).toLowerCase()] ?? "application/octet-stream",
+    CONTENT_TYPES[extname(file.name).toLowerCase()] ?? "application/octet-stream",
   );
   setHeader(event, "cache-control", "no-store");
   setHeader(event, "accept-ranges", "bytes");
 
   const range = parseByteRange(getRequestHeader(event, "range"), size);
   if (range === null) {
-    await handle.close();
+    await file.close();
     setResponseStatus(event, 416);
     setHeader(event, "content-range", `bytes */${size}`);
     return { error: "Range not satisfiable" };
   }
-  const stream =
-    range === undefined
-      ? handle.createReadStream()
-      : handle.createReadStream({ start: range.start, end: range.end });
-  // FileHandle read streams close their handle when they end; this is belt-and-suspenders
-  // for every exit, including a client abort (which destroys the stream without an 'end') —
-  // calling handle.close() again once it is already closed does not throw.
-  stream.on("close", () => {
-    void handle.close();
-  });
   if (range === undefined) {
     setHeader(event, "content-length", size);
-    return sendStream(event, stream);
+    return sendStream(event, file.stream());
   }
   setResponseStatus(event, 206);
   setHeader(event, "content-range", `bytes ${range.start}-${range.end}/${size}`);
   setHeader(event, "content-length", range.end - range.start + 1);
-  return sendStream(event, stream);
+  return sendStream(event, file.stream(range));
 });
