@@ -1404,6 +1404,15 @@ export const layerLinkHelp =
   "Clicking this part of the HTML ad opens the brief's click destination. The picture does not change.";
 
 /**
+ * D165 — where a click target compiles, as a phrase: "Image or Static text
+ * layers in HTML creatives". `kinds` and `type` are display labels, read
+ * from the rules table by `linkableDisplayName`.
+ */
+export function linkableWhere(kinds: readonly string[], type: string): string {
+  return `${kinds.join(" or ")} layers in ${type} creatives`;
+}
+
+/**
  * D165 — said under a click target the layer still carries where it cannot
  * compile, so the operator can see why and untick it. The box is shown only
  * for that reason: a layer that is not linked never offers it here. `where`

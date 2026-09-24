@@ -23,6 +23,7 @@ import type { LayerKind } from "@campaignfoundry/CampaignOrchestration/layer-kin
 import { PLATFORM_PROFILES } from "@campaignfoundry/Distribution/platform-profiles";
 
 import type { CampaignMode } from "./editor-state";
+import { linkableWhere } from "./messages";
 // The leaf, never the barrel: the barrel pulls node:fs into the browser bundle.
 import {
   CAMPAIGN_TYPES,
@@ -257,9 +258,11 @@ export function creativeTypeDisplayName(type: CreativeType): string {
  */
 export function linkableDisplayName(): string {
   return CREATIVE_TYPES.filter((type) => CREATIVE_TYPE_RULES[type].linkable.length > 0)
-    .map(
-      (type) =>
-        `${CREATIVE_TYPE_RULES[type].linkable.map(layerKindDisplayName).join(" or ")} layers in ${creativeTypeDisplayName(type)} creatives`,
+    .map((type) =>
+      linkableWhere(
+        CREATIVE_TYPE_RULES[type].linkable.map(layerKindDisplayName),
+        creativeTypeDisplayName(type),
+      ),
     )
     .join("; ");
 }

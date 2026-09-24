@@ -19,6 +19,8 @@ function getIncompleteSections(state: EditorState): SectionId[] {
   if (getTotalErrorCount({ identity: errors.identity }) > 0) sections.push("identity");
   if (getTotalErrorCount({ copy: errors.copy }) > 0) sections.push("copy");
   if (getTotalErrorCount({ products: errors.products }) > 0) sections.push("products");
+  // D165: a click target where it cannot compile is the template's own error.
+  if (getTotalErrorCount({ template: errors.template }) > 0) sections.push("template");
   if (getTotalErrorCount({ output: errors.output, motion: errors.motion }) > 0)
     sections.push("output");
   if (state.mode === "variation" && getTotalErrorCount({ policy: errors.policy }) > 0)

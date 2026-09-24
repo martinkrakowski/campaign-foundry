@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "lane": "AF4",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/load-brief.ts",
+      "before": "    if (layer.link === true && !(rules.linkable as readonly string[]).includes(layer.kind)) {",
+      "after": "    if (false && !(rules.linkable as readonly string[]).includes(layer.kind)) {",
+      "because": "the boundary stops refusing a click target outside rules.linkable, so a linked logo on image-html and any linked image-text layer parse instead of being refused by name (D165).",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/load-brief.test.ts",
+        "-t",
+        "D165"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/StatusLine.tsx",
+      "before": "  if (getTotalErrorCount({ template: errors.template }) > 0) sections.push(\"template\");",
+      "after": "  if (false) sections.push(\"template\");",
+      "because": "a draft whose misplaced click target is a template error must name Template as a link; without the push the status line lists no section for it.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/status-line.test.tsx",
+        "-t",
+        "misplaced click target names the Template section"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
