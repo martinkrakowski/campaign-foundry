@@ -73,9 +73,9 @@ describe("copy pool persistence", () => {
     );
     await writePool(pool());
 
-    const { findBriefById } = await import("../brief-files.js");
-    expect(await findBriefById("camp")).toMatchObject({
-      path: join(dir, "briefs", "camp.yaml"),
+    const { getBriefStore } = await import("../ports/index.js");
+    expect(await getBriefStore().findBriefById("camp")).toMatchObject({
+      file: "camp.yaml",
       brief: { id: "camp" },
     });
     const listed = readdirSync(join(dir, "briefs"), { withFileTypes: true })
