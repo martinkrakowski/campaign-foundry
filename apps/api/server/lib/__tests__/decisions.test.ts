@@ -7,6 +7,7 @@ import {
   applyVerdicts,
   retireDecisions,
   verdictsProblem,
+  withDecisionLock,
   type DecisionRecord,
 } from "../decisions.js";
 import { getDecisionStore, resetDecisionStore } from "../ports/index.js";
@@ -70,15 +71,40 @@ describe("retireDecisions (D173)", () => {
   test("named keys go back to review and the rest keep their records; no keys retires all", async () => {
     const store = getDecisionStore(LOCAL_TENANT);
     await store.writeDecisions("camp", { a: rec("approved"), b: rec("rejected") });
-    await retireDecisions(LOCAL_TENANT, "camp", new Set(["a", "absent"]));
+    await retireDecisions(store, "camp", new Set(["a", "absent"]));
     expect({ ...(await store.readDecisions("camp")).decisions }).toEqual({ b: rec("rejected") });
-    await retireDecisions(LOCAL_TENANT, "camp");
+    await retireDecisions(store, "camp");
     expect({ ...(await store.readDecisions("camp")).decisions }).toEqual({});
   });
 
   test("retiring nothing writes nothing", async () => {
-    await retireDecisions(LOCAL_TENANT, "camp");
+    await retireDecisions(getDecisionStore(LOCAL_TENANT), "camp");
     expect((await getDecisionStore(LOCAL_TENANT).readDecisions("camp")).revision).toBeNull();
+  });
+
+  test("work under one campaign's lock runs in turn, a failure does not block the next, and campaigns do not wait on each other", async () => {
+    const order: string[] = [];
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    const first = withDecisionLock(LOCAL_TENANT, "camp", async () => {
+      order.push("first:start");
+      await held;
+      order.push("first:end");
+      throw new Error("first failed");
+    });
+    const second = withDecisionLock(LOCAL_TENANT, "camp", async (store) => {
+      order.push("second");
+      return store;
+    });
+    const other = withDecisionLock(LOCAL_TENANT, "other", async () => {
+      order.push("other");
+    });
+    await other;
+    expect(order).toEqual(["first:start", "other"]); // "second" waits; "other" does not
+    release();
+    await expect(first).rejects.toThrow("first failed");
+    await expect(second).resolves.toBe(getDecisionStore(LOCAL_TENANT));
+    expect(order).toEqual(["first:start", "other", "first:end", "second"]);
   });
 });
 

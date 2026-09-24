@@ -1,5 +1,10 @@
 import { getDecisionStore } from "./ports/index.js";
-import type { DecisionMap, DecisionRecord, Verdict } from "./ports/decision-store.port.js";
+import type {
+  DecisionMap,
+  DecisionRecord,
+  DecisionStorePort,
+  Verdict,
+} from "./ports/decision-store.port.js";
 import type { StorageScope } from "./run-environment.js";
 
 export type { DecisionMap, DecisionRecord, Verdict };
@@ -31,21 +36,54 @@ export function applyVerdicts(
   return next;
 }
 
+/** The tail of each campaign's queue of decision work, per store (so per root). */
+const lockTails = new WeakMap<DecisionStorePort, Map<string, Promise<unknown>>>();
+
 /**
- * Return regenerated creatives to review (D173): drop the decisions for `keys`,
+ * Run `work` with the campaign's decision store, after every earlier call for
+ * the same campaign and store has settled (D173).
+ *
+ * A save's compare-and-write and the report write's retirement are each a
+ * read-modify-write of one record. Queued, a save cannot land between a
+ * retirement and the report it makes way for, and two of them cannot restore
+ * what the other removed. The lock is per process: the file adapter's phase
+ * runs one API process, and the database adapter (PT-3) has transactions.
+ */
+export async function withDecisionLock<T>(
+  scope: StorageScope,
+  campaignId: string,
+  work: (store: DecisionStorePort) => Promise<T>,
+): Promise<T> {
+  const store = getDecisionStore(scope);
+  let tails = lockTails.get(store);
+  if (tails === undefined) {
+    tails = new Map();
+    lockTails.set(store, tails);
+  }
+  const run = (tails.get(campaignId) ?? Promise.resolve()).then(() => work(store));
+  const tail = run.catch(() => undefined);
+  tails.set(campaignId, tail);
+  try {
+    return await run;
+  } finally {
+    if (tails.get(campaignId) === tail) tails.delete(campaignId);
+  }
+}
+
+/**
+ * Return replaced creatives to review (D173): drop the decisions for `keys`,
  * or every decision when `keys` is undefined (a full run replaces the report).
  *
- * The report write calls this, so a stale verdict retires on the server, not
- * in whichever tab ran the job: a second tab or a reload never shows an
- * approval given to a creative that has since been replaced. Writes nothing
- * when nothing is retired.
+ * The report write calls this under `withDecisionLock`, so a stale verdict
+ * retires on the server, not in whichever tab ran the job: a second tab or a
+ * reload never shows an approval given to a creative that has since been
+ * replaced. Writes nothing when nothing is retired.
  */
 export async function retireDecisions(
-  scope: StorageScope,
+  store: DecisionStorePort,
   campaignId: string,
   keys?: ReadonlySet<string>,
 ): Promise<void> {
-  const store = getDecisionStore(scope);
   const { decisions } = await store.readDecisions(campaignId);
   const all = Object.keys(decisions);
   const retired = keys === undefined ? all : all.filter((key) => keys.has(key));

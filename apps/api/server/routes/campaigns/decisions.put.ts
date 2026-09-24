@@ -1,6 +1,10 @@
 import { SAFE_ID_PATTERN } from "@campaignfoundry/CampaignOrchestration";
-import { applyVerdicts, verdictsProblem, type Verdict } from "../../lib/decisions.js";
-import { getDecisionStore } from "../../lib/ports/index.js";
+import {
+  applyVerdicts,
+  verdictsProblem,
+  withDecisionLock,
+  type Verdict,
+} from "../../lib/decisions.js";
 import { reportRevision } from "../../lib/report.js";
 import { LOCAL_TENANT } from "../../lib/tenant.js";
 
@@ -36,26 +40,29 @@ export default defineEventHandler(async (event) => {
     setResponseStatus(event, 400);
     return { error: problem };
   }
-  const run = await reportRevision(tenant, campaignId);
-  if (run === undefined) {
-    setResponseStatus(event, 409);
-    return { error: "This campaign has no run to review." };
-  }
-  // The compare and the write are not fused on a filesystem (D79): this narrows
-  // a concurrent save's window rather than closing it, as the report guard does.
-  const store = getDecisionStore(tenant);
-  const current = await store.readDecisions(campaignId);
-  if (current.revision !== expected) {
-    setResponseStatus(event, 409);
-    return { error: "These decisions changed in another tab.", revision: current.revision };
-  }
-  const next = applyVerdicts(
-    current.decisions,
-    verdicts as Record<string, Verdict>,
-    tenant.userId,
-    new Date().toISOString(),
-    run,
-  );
-  const revision = await store.writeDecisions(campaignId, next);
-  return { decisions: next, revision };
+  // Under the campaign's decision lock, so the run a verdict is stamped with is
+  // the report it stays against: a report write retires under the same lock.
+  // The lock is per process; across processes the compare and the write are
+  // not fused on a filesystem (D79), as the report guard's are not.
+  return withDecisionLock(tenant, campaignId, async (store) => {
+    const run = await reportRevision(tenant, campaignId);
+    if (run === undefined) {
+      setResponseStatus(event, 409);
+      return { error: "This campaign has no run to review." };
+    }
+    const current = await store.readDecisions(campaignId);
+    if (current.revision !== expected) {
+      setResponseStatus(event, 409);
+      return { error: "These decisions changed in another tab.", revision: current.revision };
+    }
+    const next = applyVerdicts(
+      current.decisions,
+      verdicts as Record<string, Verdict>,
+      tenant.userId,
+      new Date().toISOString(),
+      run,
+    );
+    const revision = await store.writeDecisions(campaignId, next);
+    return { decisions: next, revision };
+  });
 });

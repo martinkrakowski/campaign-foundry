@@ -18,7 +18,14 @@ import {
 } from "@campaignfoundry/CampaignOrchestration";
 import { isPersistedAsset, readReport, reportRevision, writeReport } from "../report.js";
 import { campaignReportPath } from "../ports/fs-report-store.js";
-import { getDecisionStore, resetReportStore, setReportStore } from "../ports/index.js";
+import {
+  getDecisionStore,
+  resetDecisionStore,
+  resetReportStore,
+  setDecisionStore,
+  setReportStore,
+  type DecisionStorePort,
+} from "../ports/index.js";
 import { hashBytes } from "../brief-files.js";
 
 import { LOCAL_TENANT } from "../tenant.js";
@@ -202,6 +209,23 @@ describe("report persistence", () => {
 
     await writeReport(LOCAL_TENANT, result([beta()]));
     expect(Object.keys((await decisions.readDecisions("camp")).decisions)).toEqual([]);
+  });
+
+  test("a retirement that fails publishes no report: the run fails with nothing half-written", async () => {
+    await writeReport(LOCAL_TENANT, result([asset()]));
+    const before = await reportRevision(LOCAL_TENANT, "camp");
+    setDecisionStore({
+      readDecisions: () => Promise.reject(new Error("decisions unreadable")),
+      writeDecisions: () => Promise.reject(new Error("unreachable")),
+    } satisfies DecisionStorePort);
+    try {
+      await expect(writeReport(LOCAL_TENANT, result([beta()]))).rejects.toThrow(
+        "decisions unreadable",
+      );
+    } finally {
+      resetDecisionStore();
+    }
+    expect(await reportRevision(LOCAL_TENANT, "camp")).toBe(before);
   });
 
   test("merge from a missing prior report starts empty", async () => {
