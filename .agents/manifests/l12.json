@@ -3,10 +3,10 @@
   "lane": "l12",
   "mutations": [
     {
-      "file": "apps/api/server/lib/report.ts",
+      "file": "apps/api/server/lib/ports/fs-report-store.ts",
       "before": "    await writeFile(tmp, content);\n    await rename(tmp, dest);",
       "after": "    await writeFile(dest, content);",
-      "because": "The defect this lane fixes, restored: both report files are written in place again, with no temp sibling and no rename, so a write that is still in flight is a truncated file a concurrent reader parses. The torn-read test lands half a payload and reads it back mid-write; under the direct write that half file IS the target and JSON.parse fails, which is the 13-of-200 unreadable reports the plan measured.",
+      "because": "The defect this lane fixes, restored: both report files are written in place again, with no temp sibling and no rename, so a write that is still in flight is a truncated file a concurrent reader parses. The torn-read test lands half a payload and reads it back mid-write; under the direct write that half file IS the target and JSON.parse fails, which is the 13-of-200 unreadable reports the plan measured. Re-anchored 2026-09-24: PT-0a moved the report's file handling from report.ts into ports/fs-report-store.ts (ReportStorePort); the mutation is unchanged in meaning.",
       "command": [
         "yarn",
         "vitest",
@@ -18,10 +18,10 @@
       "verdict": "caught"
     },
     {
-      "file": "apps/api/server/lib/report.ts",
+      "file": "apps/api/server/lib/ports/fs-report-store.ts",
       "before": "    await unlink(tmp).catch(() => undefined);",
       "after": "    await unlink(tmp);",
-      "because": "A staging write that fails before its temp exists leaves nothing to unlink; without the swallow, the cleanup's ENOENT replaces the real failure and the caller is told the wrong thing. The disk-full test asserts the original error surfaces.",
+      "because": "A staging write that fails before its temp exists leaves nothing to unlink; without the swallow, the cleanup's ENOENT replaces the real failure and the caller is told the wrong thing. The disk-full test asserts the original error surfaces. Re-anchored 2026-09-24: PT-0a moved the report's file handling from report.ts into ports/fs-report-store.ts (ReportStorePort); the mutation is unchanged in meaning.",
       "command": [
         "yarn",
         "vitest",
@@ -45,7 +45,8 @@
         "api",
         "apps/api/server/lib/__tests__/report.test.ts"
       ],
-      "verdict": "caught"
+      "verdict": "caught",
+      "retired": "Retired 2026-09-24 by PT-0a: the global report.json \"latest\" pointer this mutation wrote in place no longer exists. The per-campaign report is the only destination, and its atomic write is still guarded by l12#0."
     }
   ]
 }
