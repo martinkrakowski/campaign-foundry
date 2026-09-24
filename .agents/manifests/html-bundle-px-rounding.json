@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "html-bundle-px-rounding",
+  "mutations": [
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/markup-assembler.ts",
+      "before": "  return Math.round(value * 100) / 100;",
+      "after": "  return value;",
+      "because": "unrounded, 0.82 * 250 prints as 205.00000000000003px in the linked headline band.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/markup-assembler.test.ts",
+        "-t",
+        "box pixels are rounded to hundredths"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

@@ -139,6 +139,16 @@ function layerAlt(layer: CreativeTemplateLayer, headline?: string): string {
 }
 
 /**
+ * A canvas fraction times a canvas side, rounded to hundredths of a pixel.
+ * Fractions like 0.82 are not exact in binary, so 0.82 * 250 prints as
+ * 205.00000000000003 unrounded: correct to the browser, but noise in the
+ * markup, and bytes against the 150 KB unit budget.
+ */
+function px(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
+/**
  * The positioned box. A declared frame is canvas fractions in px. Absent, an
  * image fills the canvas and a linked static-text layer sits on its default
  * rect — still `position: absolute`.
@@ -155,7 +165,7 @@ function layerBoxStyle(
     resolveLayerFrame(layer.frame, spec) ??
     (layer.kind === "static-text" ? defaultLayerRect("static-text") : undefined);
   if (frame !== undefined) {
-    return `position: absolute; left: ${frame.x * width}px; top: ${frame.y * height}px; width: ${frame.w * width}px; height: ${frame.h * height}px;`;
+    return `position: absolute; left: ${px(frame.x * width)}px; top: ${px(frame.y * height)}px; width: ${px(frame.w * width)}px; height: ${px(frame.h * height)}px;`;
   }
   return `position: absolute; left: 0px; top: 0px; width: ${width}px; height: ${height}px;`;
 }
