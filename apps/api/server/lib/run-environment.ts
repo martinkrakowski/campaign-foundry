@@ -1,8 +1,10 @@
+import { join } from "node:path";
+import { SAFE_ID_PATTERN } from "@campaignfoundry/CampaignOrchestration";
 import { ALLOWED_FONT_FAMILIES } from "@campaignfoundry/CreativeGeneration";
 import { projectRoot } from "@campaignfoundry/shared";
 import { outputRoot } from "./config.js";
 import { loadEnv } from "./env.js";
-import type { TenantContext } from "./tenant.js";
+import { LOCAL_TENANT, type TenantContext } from "./tenant.js";
 
 /**
  * The composition root's view of the process environment (D167, PT-0b1).
@@ -27,7 +29,10 @@ export interface ProviderSettings {
 
 export interface RunEnvironment {
   readonly tenant: TenantContext;
-  /** Where this tenant's runs write their output. */
+  /**
+   * Where this tenant's runs write their output, and so where every adapter built
+   * from this environment keeps its files, the generation cache included (PT-0c).
+   */
   readonly outputRoot: string;
   /** The project root whose `assets/` tree confines brief-supplied asset reads. */
   readonly assetRoot: string;
@@ -71,15 +76,30 @@ export function providerSettings(): ProviderSettings {
 }
 
 /**
- * Resolve a tenant's run environment. Today every tenant is `LOCAL_TENANT` and
- * resolves to the process's output root, so bytes land exactly where they did;
- * per-tenant roots arrive with the storage adapters (PT-3, PT-4).
+ * A tenant's output root under the process's (PT-0c, C7). The local operator keeps
+ * the root itself, so nothing on disk moves; any other org gets `orgs/<orgId>`,
+ * so what one org generates, caches or packages is never under another org's
+ * root. An org id is a path segment here, so it must be a safe id: anything else
+ * is refused rather than joined.
+ */
+export function tenantOutputRoot(root: string, tenant: TenantContext): string {
+  if (tenant.orgId === LOCAL_TENANT.orgId) return root;
+  if (!SAFE_ID_PATTERN.test(tenant.orgId)) {
+    throw new Error(`Tenant org id ${JSON.stringify(tenant.orgId)} is not a safe id.`);
+  }
+  return join(root, "orgs", tenant.orgId);
+}
+
+/**
+ * Resolve a tenant's run environment. The local operator resolves to the
+ * process's output root, so bytes land exactly where they did; another org
+ * resolves to its own root beneath it (`tenantOutputRoot`).
  */
 export function runEnvironment(tenant: TenantContext): RunEnvironment {
   loadEnv();
   return {
     tenant,
-    outputRoot: outputRoot(),
+    outputRoot: tenantOutputRoot(outputRoot(), tenant),
     assetRoot: projectRoot(),
     messageFont: messageFont(),
     providers: providerSettings(),
