@@ -4,12 +4,14 @@ import { FsPoolStore } from "./fs-pool-store.js";
 import { FsTemplateStore } from "./fs-template-store.js";
 import { FsJobStore } from "./fs-job-store.js";
 import { FsReportStore } from "./fs-report-store.js";
+import { FsOutputStore } from "./fs-output-store.js";
 import type { BriefStorePort } from "./brief-store.port.js";
 import type { AssetStorePort } from "./asset-store.port.js";
 import type { PoolStorePort } from "./pool-store.port.js";
 import type { TemplateStorePort } from "./template-store.port.js";
 import type { JobStorePort } from "./job-store.port.js";
 import type { ReportStorePort } from "./report-store.port.js";
+import type { OutputStorePort } from "./output-store.port.js";
 
 export * from "./brief-store.port.js";
 export * from "./asset-store.port.js";
@@ -17,12 +19,14 @@ export * from "./pool-store.port.js";
 export * from "./template-store.port.js";
 export * from "./job-store.port.js";
 export * from "./report-store.port.js";
+export * from "./output-store.port.js";
 export * from "./fs-brief-store.js";
 export * from "./fs-asset-store.js";
 export * from "./fs-pool-store.js";
 export * from "./fs-template-store.js";
 export * from "./fs-job-store.js";
 export * from "./fs-report-store.js";
+export * from "./fs-output-store.js";
 
 let currentBriefStore: BriefStorePort | undefined;
 let currentAssetStore: AssetStorePort | undefined;
@@ -126,4 +130,21 @@ export function setReportStore(store: ReportStorePort): void {
 
 export function resetReportStore(): void {
   currentReportStore = undefined;
+}
+
+let currentOutputStore: OutputStorePort | undefined;
+
+export function getOutputStore(): OutputStorePort {
+  if (!currentOutputStore) {
+    currentOutputStore = new FsOutputStore();
+  }
+  return currentOutputStore;
+}
+
+export function setOutputStore(store: OutputStorePort): void {
+  currentOutputStore = store;
+}
+
+export function resetOutputStore(): void {
+  currentOutputStore = undefined;
 }

@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "PT-0a",
+  "mutations": [
+    {
+      "file": "apps/api/server/routes/campaigns/packages/[campaignId].get.ts",
+      "before": "  const platforms = await getOutputStore().listPackageManifests(campaignId);",
+      "after": "  const platforms: readonly object[] = [];",
+      "because": "the listing stops asking the output store, so the in-memory store's manifest is never served and the route answers 404.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/__tests__/output-store-routes.test.ts",
+        "-t",
+        "the package listing and zip come from the store"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

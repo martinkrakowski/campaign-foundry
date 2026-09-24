@@ -1,12 +1,8 @@
-import { createReadStream } from "node:fs";
-import { readdir, stat } from "node:fs/promises";
-import { join } from "node:path";
 import { SAFE_ID_PATTERN } from "@campaignfoundry/CampaignOrchestration";
-import { outputRoot } from "../../../../lib/config.js";
-import { resolveConfinedForRead } from "../../../../lib/confined-path.js";
+import { getOutputStore, type PackageFileEntry } from "../../../../lib/ports/index.js";
 import { measure, storeZipStream, type ZipEntry } from "../store-zip.js";
 
-type FileEntry = ZipEntry & { readonly path: string };
+type FileEntry = ZipEntry & Pick<PackageFileEntry, "open">;
 
 /** Packaging swaps the platform folder with rm + rename; a walk can land in that gap. */
 const isRewriteError = (error: unknown): boolean => {
@@ -14,23 +10,12 @@ const isRewriteError = (error: unknown): boolean => {
   return code === "ENOENT" || code === "ENOTDIR";
 };
 
-/** First pass: walk the folder and take each file's size + CRC without holding the bytes. */
-async function collectEntries(dir: string): Promise<FileEntry[]> {
+/** First pass: take each file's size + CRC without holding the bytes. */
+async function measureEntries(entries: readonly PackageFileEntry[]): Promise<FileEntry[]> {
   const out: FileEntry[] = [];
-  async function walk(current: string, rel: string): Promise<void> {
-    const entries = await readdir(current, { withFileTypes: true });
-    for (const entry of entries) {
-      const nextRel = rel ? `${rel}/${entry.name}` : entry.name;
-      const full = join(current, entry.name);
-      if (entry.isDirectory()) {
-        await walk(full, nextRel);
-      } else if (entry.isFile()) {
-        out.push({ name: nextRel, path: full, ...(await measure(createReadStream(full))) });
-      }
-    }
+  for (const entry of entries) {
+    out.push({ name: entry.name, open: entry.open, ...(await measure(entry.open())) });
   }
-  await walk(dir, "");
-  out.sort((a, b) => a.name.localeCompare(b.name));
   return out;
 }
 
@@ -56,29 +41,14 @@ export default defineEventHandler(async (event) => {
     return { error: "Invalid platform id" };
   }
 
-  let platformDir: string;
+  let files: FileEntry[];
   try {
-    // The platform dir may be a symlink aiming outside the output root.
-    platformDir = await resolveConfinedForRead(outputRoot(), "packages", campaignId, platformId);
-  } catch {
-    setResponseStatus(event, 404);
-    return { error: "Not found" };
-  }
-
-  try {
-    const st = await stat(platformDir);
-    if (!st.isDirectory()) {
+    const entries = await getOutputStore().listPackageFiles(campaignId, platformId);
+    if (entries === undefined) {
       setResponseStatus(event, 404);
       return { error: "Not found" };
     }
-  } catch {
-    setResponseStatus(event, 404);
-    return { error: "Not found" };
-  }
-
-  let files: FileEntry[];
-  try {
-    files = await collectEntries(platformDir);
+    files = await measureEntries(entries);
   } catch (error) {
     if (isRewriteError(error)) {
       setResponseStatus(event, 409);
@@ -91,6 +61,6 @@ export default defineEventHandler(async (event) => {
   setHeader(event, "content-disposition", `attachment; filename="${platformId}.zip"`);
   return sendStream(
     event,
-    storeZipStream(files, (entry) => createReadStream(entry.path)),
+    storeZipStream(files, (entry) => entry.open()),
   );
 });
