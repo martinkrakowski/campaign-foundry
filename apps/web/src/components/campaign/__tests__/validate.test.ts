@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { describe, test, expect, vi } from "vitest";
 import * as messages from "@/components/campaign/messages";
+import { layerKindDisplayName, linkableDisplayName } from "@/components/campaign/display-names";
 import {
   axisProductSize,
   drawableRatios,
@@ -16,6 +17,7 @@ import {
   validateOutput,
   validateMotion,
   validateState,
+  validateTemplate,
   hasErrors,
   hasSectionErrors,
   getTotalErrorCount,
@@ -914,6 +916,7 @@ describe("aggregation", () => {
       "output",
       "policy",
       "products",
+      "template",
       "treatments",
     ]);
   });
@@ -1220,5 +1223,58 @@ describe("html weight warning (HL5c, HL-D6)", () => {
       platforms: ["instagram-feed"],
     } as EditorState;
     expect(hasSectionWarnings(validateWarnings(state), "template")).toBe(false);
+  });
+});
+
+describe("validateTemplate — a click target only where it compiles (D165)", () => {
+  const withLink = (creativeType: "image-text" | "image-html", kind: string) => {
+    const canonical = CANONICAL_TEMPLATES[creativeType];
+    return {
+      id: canonical.id,
+      version: canonical.version,
+      creativeType,
+      unit: canonical.unit,
+      layers: canonical.layers.map((l) => (l.kind === kind ? { ...l, link: true } : l)),
+    } as EditorState["template"];
+  };
+
+  test("a linked image or static-text layer of an HTML ad is valid", () => {
+    expect(validateTemplate(valid({ template: withLink("image-html", "image") }))).toEqual({});
+    expect(validateTemplate(valid({ template: withLink("image-html", "static-text") }))).toEqual(
+      {},
+    );
+  });
+
+  test("a linked logo of an HTML ad, or any linked layer of an image-text creative, is refused by name", () => {
+    for (const [type, kind] of [
+      ["image-html", "logo"],
+      ["image-html", "shade"],
+      ["image-text", "image"],
+      ["image-text", "static-text"],
+    ] as const) {
+      const state = valid({ template: withLink(type, kind) });
+      const layer = state.template.layers.find((l) => l.kind === kind)!;
+      expect(validateTemplate(state), `${type} ${kind}`).toEqual({
+        layerLink: messages.layerLinkMisplaced(
+          layer.id,
+          layerKindDisplayName(kind),
+          linkableDisplayName(),
+        ),
+      });
+      // It blocks Save like every other structural error.
+      expect(getTotalErrorCount(validateState(state))).toBeGreaterThan(0);
+    }
+  });
+
+  test("link: false is valid on any kind — only a true link is a claim", () => {
+    const canonical = CANONICAL_TEMPLATES["image-text"];
+    const template = {
+      id: canonical.id,
+      version: canonical.version,
+      creativeType: "image-text",
+      unit: canonical.unit,
+      layers: canonical.layers.map((l) => ({ ...l, link: false })),
+    } as EditorState["template"];
+    expect(validateTemplate(valid({ template }))).toEqual({});
   });
 });

@@ -7,7 +7,8 @@ import {
   FILL_ROLES,
   type BriefTemplate,
 } from "@campaignfoundry/CampaignOrchestration/brief-template";
-import { fillRoleDisplayName } from "@/components/campaign/display-names";
+import { isLinkableKind } from "@campaignfoundry/CampaignOrchestration/creative-types";
+import { fillRoleDisplayName, linkableDisplayName } from "@/components/campaign/display-names";
 import {
   editorReducer,
   initialEditorState,
@@ -293,7 +294,9 @@ describe("LayerPropsSheet — per-kind fields (D134's table, brief-template.ts L
     expect(screen.getByLabelText(messages.layerPropAltLabel)).toBeTruthy();
   });
 
-  test("shade offers the click-target checkbox and no longer says it has nothing", () => {
+  test("shade has nothing to set and says so, rather than rendering an empty sheet (D165)", () => {
+    // D160 once filled every sheet with the click-target box. D165 offers it
+    // only where it compiles, so shade — no props, no tracks — is empty again.
     render(
       <Harness
         initial={{ ...initialEditorState(), template: textTemplate() }}
@@ -301,14 +304,11 @@ describe("LayerPropsSheet — per-kind fields (D134's table, brief-template.ts L
         onClose={vi.fn()}
       />,
     );
-    // D160 gave every kind a control, so the empty sentence is unreachable —
-    // this assertion is what keeps the deleted branch from hiding behind an
-    // uncoverable coverage gap.
-    expect(screen.queryByText(messages.layerPropsNone)).toBeNull();
-    expect(screen.getByRole("checkbox", { name: messages.layerLinkLabel })).toBeTruthy();
+    expect(screen.getByText(messages.layerPropsNone)).toBeTruthy();
+    expect(screen.queryByRole("checkbox", { name: messages.layerLinkLabel })).toBeNull();
   });
 
-  test("an image-html brief's accent offers the click-target checkbox and no element editor", () => {
+  test("an image-html brief's accent offers its geometry, no click target and no element editor", () => {
     render(
       <Harness
         initial={{ ...initialEditorState(), template: htmlTemplate() }}
@@ -316,7 +316,9 @@ describe("LayerPropsSheet — per-kind fields (D134's table, brief-template.ts L
         onClose={vi.fn()}
       />,
     );
-    expect(screen.getByRole("checkbox", { name: messages.layerLinkLabel })).toBeTruthy();
+    expect(screen.getByLabelText(messages.layerPropSolidHeightLabel)).toBeTruthy();
+    expect(screen.queryByRole("checkbox", { name: messages.layerLinkLabel })).toBeNull();
+    expect(screen.queryByText(messages.layerPropsNone)).toBeNull();
     expect(screen.queryByRole("group", { name: "Add an element" })).toBeNull();
   });
 });
@@ -612,16 +614,13 @@ describe("LayerPropsSheet — the fill layer's brand role (L11, D131)", () => {
   });
 });
 
-describe("LayerPropsSheet — the click-target checkbox (D160)", () => {
+describe("LayerPropsSheet — the click-target checkbox (D160, D165)", () => {
   const VIDEO_CANONICAL = CANONICAL_TEMPLATES["video"];
 
-  /** The image-text template with `link` spelled onto the named layer. */
-  const linkedTemplate = (layerId: string, link: boolean): BriefTemplate => ({
-    id: "canonical-image-text",
-    version: TEXT_CANONICAL.version,
-    creativeType: TEXT_CANONICAL.creativeType,
-    unit: TEXT_CANONICAL.unit,
-    layers: TEXT_CANONICAL.layers.map((l) => (l.id === layerId ? { ...l, link } : l)),
+  /** A template with `link` spelled onto the named layer. */
+  const withLink = (template: BriefTemplate, layerId: string, link: boolean): BriefTemplate => ({
+    ...template,
+    layers: template.layers.map((l) => (l.id === layerId ? { ...l, link } : l)),
   });
 
   const videoTemplate = (): BriefTemplate => ({
@@ -632,55 +631,51 @@ describe("LayerPropsSheet — the click-target checkbox (D160)", () => {
     layers: VIDEO_CANONICAL.layers,
   });
 
-  test("every layer kind gets the checkbox — image-text's layers and video", () => {
-    // The rows are read from the canonical template, never a literal list —
-    // the D121 guard's own rule, applied to this file too.
-    for (const candidate of TEXT_CANONICAL.layers) {
-      render(
-        <Harness
-          initial={{ ...initialEditorState(), template: textTemplate() }}
-          layerId={candidate.id}
-          onClose={vi.fn()}
-        />,
-      );
-      expect(
-        screen.getByRole("checkbox", { name: messages.layerLinkLabel }),
-        `layer "${candidate.id}" must offer the click-target checkbox`,
-      ).toBeTruthy();
-      cleanup();
+  test("the box appears exactly on the kinds the creative type declares linkable", () => {
+    // Rows come from the canonical templates and the answer from the domain
+    // table, never a literal list — the D121 guard's own rule.
+    for (const template of [textTemplate(), htmlTemplate(), videoTemplate()]) {
+      for (const candidate of template.layers) {
+        render(
+          <Harness
+            initial={{ ...initialEditorState(), template }}
+            layerId={candidate.id}
+            onClose={vi.fn()}
+          />,
+        );
+        const expected = isLinkableKind(template.creativeType, candidate.kind);
+        expect(
+          screen.queryByRole("checkbox", { name: messages.layerLinkLabel }) !== null,
+          `${template.creativeType} layer "${candidate.id}"`,
+        ).toBe(expected);
+        cleanup();
+      }
     }
-    render(
-      <Harness
-        initial={{ ...initialEditorState(), template: videoTemplate() }}
-        layerId="video"
-        onClose={vi.fn()}
-      />,
-    );
-    expect(screen.getByRole("checkbox", { name: messages.layerLinkLabel })).toBeTruthy();
   });
 
-  test("the help line names the destination's home without naming a field", () => {
+  test("a linkable layer carries the help line and no refusal", () => {
     render(
       <Harness
-        initial={{ ...initialEditorState(), template: textTemplate() }}
-        layerId="shade"
+        initial={{ ...initialEditorState(), template: htmlTemplate() }}
+        layerId="static-text"
         onClose={vi.fn()}
       />,
     );
     expect(screen.getByText(messages.layerLinkHelp)).toBeTruthy();
+    expect(screen.queryByText(messages.layerLinkNotHere(linkableDisplayName()))).toBeNull();
   });
 
   test("the box is checked iff the layer carries link: true — a spelled false reads unchecked", () => {
     const cases: readonly [BriefTemplate, boolean][] = [
-      [textTemplate(), false],
-      [linkedTemplate("shade", true), true],
-      [linkedTemplate("shade", false), false],
+      [htmlTemplate(), false],
+      [withLink(htmlTemplate(), "image", true), true],
+      [withLink(htmlTemplate(), "image", false), false],
     ];
     for (const [template, checked] of cases) {
       render(
         <Harness
           initial={{ ...initialEditorState(), template }}
-          layerId="shade"
+          layerId="image"
           onClose={vi.fn()}
         />,
       );
@@ -696,7 +691,7 @@ describe("LayerPropsSheet — the click-target checkbox (D160)", () => {
     const dispatch = vi.fn();
     render(
       <LayerPropsSheet
-        state={{ ...initialEditorState(), template: linkedTemplate("image", true) }}
+        state={{ ...initialEditorState(), template: withLink(htmlTemplate(), "image", true) }}
         dispatch={dispatch}
         layerId="image"
         playhead={null}
@@ -712,7 +707,28 @@ describe("LayerPropsSheet — the click-target checkbox (D160)", () => {
     let latest: EditorState | undefined;
     render(
       <StateHarness
-        initial={{ ...initialEditorState(), template: textTemplate() }}
+        initial={{ ...initialEditorState(), template: htmlTemplate() }}
+        layerId="static-text"
+        onClose={vi.fn()}
+        onState={(s) => {
+          latest = s;
+        }}
+      />,
+    );
+    fireEvent.click(screen.getByRole("checkbox", { name: messages.layerLinkLabel }));
+    expect(latest!.template.layers.find((l) => l.id === "static-text")!.link).toBe(true);
+    fireEvent.click(screen.getByRole("checkbox", { name: messages.layerLinkLabel }));
+    expect(Object.keys(latest!.template.layers.find((l) => l.id === "static-text")!)).not.toContain(
+      "link",
+    );
+  });
+
+  test("a stale link where it cannot compile still shows the box, says why, and unticks away", () => {
+    // Without this, validate.ts would report an error no control can clear.
+    let latest: EditorState | undefined;
+    render(
+      <StateHarness
+        initial={{ ...initialEditorState(), template: withLink(textTemplate(), "logo", true) }}
         layerId="logo"
         onClose={vi.fn()}
         onState={(s) => {
@@ -720,12 +736,14 @@ describe("LayerPropsSheet — the click-target checkbox (D160)", () => {
         }}
       />,
     );
-    const box = screen.getByRole("checkbox", { name: messages.layerLinkLabel });
+    const box = screen.getByRole("checkbox", { name: messages.layerLinkLabel }) as HTMLInputElement;
+    expect(box.checked).toBe(true);
+    expect(screen.getByText(messages.layerLinkNotHere(linkableDisplayName()))).toBeTruthy();
+    expect(screen.queryByText(messages.layerLinkHelp)).toBeNull();
     fireEvent.click(box);
-    expect(latest!.template.layers.find((l) => l.id === "logo")!.link).toBe(true);
-    fireEvent.click(screen.getByRole("checkbox", { name: messages.layerLinkLabel }));
     expect(Object.keys(latest!.template.layers.find((l) => l.id === "logo")!)).not.toContain(
       "link",
     );
+    expect(screen.queryByRole("checkbox", { name: messages.layerLinkLabel })).toBeNull();
   });
 });

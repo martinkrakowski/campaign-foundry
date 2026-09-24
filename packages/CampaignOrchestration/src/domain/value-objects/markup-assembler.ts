@@ -27,6 +27,7 @@ import { CLICK_TAG_VARIABLE, isAbsoluteUrl } from "./click-destination.js";
 import { defaultLayerRect, resolveLayerFrame } from "./creative-geometry.js";
 import type { Style } from "./creative-style.js";
 import type { CreativeTemplateLayer } from "./creative-templates.js";
+import { isLinkableKind } from "./creative-types.js";
 import type { ToneKind } from "./Treatment.vo.js";
 
 /** HTML-escape user-authored strings for the HTML text / quoted-attribute contexts (HL-D7). */
@@ -111,6 +112,15 @@ export interface AssembledHtml {
   readonly byteLength: number;
 }
 
+/**
+ * Whether this layer compiles as a click target (D165): it carries `link` and
+ * its kind is one `image-html` declares linkable. The boundaries refuse a link
+ * anywhere else, so this is the same answer read once more, not a filter.
+ */
+function isLinked(layer: CreativeTemplateLayer): boolean {
+  return layer.link === true && isLinkableKind("image-html", layer.kind);
+}
+
 const CLICK_OPEN = ` onclick="window.open(window.${CLICK_TAG_VARIABLE})"`;
 
 /**
@@ -155,7 +165,7 @@ function pictureMarkup(
   headline?: string,
 ): string {
   const img = `<img src="${src}" alt="${layerAlt(layer, headline)}" />`;
-  if (layer.link === true && hasClick) {
+  if (isLinked(layer) && hasClick) {
     return `<div style="${box}"><button type="button"${CLICK_OPEN}>${img}</button></div>`;
   }
   return `<div style="${box}">${img}</div>`;
@@ -201,7 +211,7 @@ export function assembleHtml(options: AssembleHtmlOptions): AssembledHtml {
       );
       continue;
     }
-    if (layer.kind === "static-text" && layer.link === true) {
+    if (layer.kind === "static-text" && isLinked(layer)) {
       const box = `${layerBoxStyle(layer, options.canvas, width, height)} background: transparent; border: none; padding: 0; margin: 0;`;
       const nav = hasClick ? CLICK_OPEN : "";
       const hiddenSpan = `<span style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0);">${copy}</span>`;

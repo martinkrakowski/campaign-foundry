@@ -9,6 +9,7 @@ import { FILL_ROLES } from "@campaignfoundry/CampaignOrchestration/brief-templat
 // The domain's own list of kinds that may carry tracks (K1), so this sheet
 // offers the section exactly where `layerTracksProblem` would accept one.
 import { TRACKABLE_LAYER_KINDS } from "@campaignfoundry/CampaignOrchestration/tracks";
+import { isLinkableKind } from "@campaignfoundry/CampaignOrchestration/creative-types";
 import { Button, DialogHead, Input } from "@/components/ui";
 import {
   ANCHOR_OPTIONS,
@@ -17,7 +18,11 @@ import {
   type EditorState,
   type LayerPropsPatch,
 } from "@/components/campaign/editor-state";
-import { anchorDisplayName, fillRoleDisplayName } from "@/components/campaign/display-names";
+import {
+  anchorDisplayName,
+  fillRoleDisplayName,
+  linkableDisplayName,
+} from "@/components/campaign/display-names";
 import * as messages from "@/components/campaign/messages";
 import { TrackForm, type TrackPlayhead } from "@/components/campaign/TrackForm";
 import type { PresetCell } from "@/components/campaign/preset-tracks";
@@ -360,6 +365,23 @@ export function LayerPropsSheet({
    * on a still would be exactly the invented refusal DoD 6 warns against.
    */
   const showTracks = TRACKABLE_LAYER_KINDS.includes(layer.kind) && layer.enabled !== false;
+  /**
+   * D165 — the click-target box is offered where a click target compiles
+   * (`isLinkableKind`, the table the assembler and the API read), and
+   * nowhere else. One exception keeps a refused state fixable: a layer that
+   * already carries `link: true` where it cannot compile still shows the box,
+   * with the reason, so the operator can untick it. Hiding it would leave
+   * `validate.ts`'s error with no control that clears it.
+   */
+  const linkable = isLinkableKind(state.template.creativeType, layer.kind);
+  const showLink = linkable || layer.link === true;
+  const hasControls =
+    numericFields.length > 0 ||
+    showAnchor ||
+    layer.kind === "fill" ||
+    layer.kind === "image" ||
+    showTracks ||
+    showLink;
 
   return (
     <div
@@ -409,33 +431,42 @@ export function LayerPropsSheet({
           <TrackForm layer={layer} dispatch={dispatch} playhead={playhead} preset={preset} />
         ) : null}
         {/*
-         * D160 — the click-target checkbox, on every layer kind: linkability
-         * is a property on a layer, never a new kind, so there is no kind
-         * that does not answer the question. The control writes no URL (the
-         * destination is the brief's own `clickDestination`) and the sheet's
-         * old empty-state paragraph is gone with it — there is no kind left
-         * with nothing to offer.
+         * D160/D165 — linkability is a property on a layer, never a kind, and
+         * it is offered only where it compiles (`showLink`, above). The
+         * control writes no URL: the destination is the brief's own
+         * `clickDestination`.
          */}
-        <SheetField label={messages.layerLinkLabel}>
-          {(id) => (
-            <div className="space-y-1">
-              <input
-                id={id}
-                type="checkbox"
-                className="size-4 rounded border-border-control"
-                checked={layer.link === true}
-                onChange={(event) =>
-                  dispatch({
-                    type: "setLayerLink",
-                    layerId: layer.id,
-                    link: event.currentTarget.checked,
-                  })
-                }
-              />
-              <p className="text-[12px] text-text-muted">{messages.layerLinkHelp}</p>
-            </div>
-          )}
-        </SheetField>
+        {hasControls ? null : (
+          <p className="text-[12px] text-text-muted">{messages.layerPropsNone}</p>
+        )}
+        {showLink ? (
+          <SheetField label={messages.layerLinkLabel}>
+            {(id) => (
+              <div className="space-y-1">
+                <input
+                  id={id}
+                  type="checkbox"
+                  className="size-4 rounded border-border-control"
+                  checked={layer.link === true}
+                  onChange={(event) =>
+                    dispatch({
+                      type: "setLayerLink",
+                      layerId: layer.id,
+                      link: event.currentTarget.checked,
+                    })
+                  }
+                />
+                {linkable ? (
+                  <p className="text-[12px] text-text-muted">{messages.layerLinkHelp}</p>
+                ) : (
+                  <p className="text-[11px] text-error">
+                    {messages.layerLinkNotHere(linkableDisplayName())}
+                  </p>
+                )}
+              </div>
+            )}
+          </SheetField>
+        ) : null}
       </div>
     </div>
   );

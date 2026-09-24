@@ -80,6 +80,14 @@ export interface CreativeTypeRule {
    * Optional on the rule, absent meaning unconstrained.
    */
   readonly orderConstraints?: readonly OrderConstraint[];
+  /**
+   * The kinds on which a click target compiles (D165). A layer's `link` is a
+   * property any kind may carry (D160), but only an html rendition emits it,
+   * and only for these kinds. Every creative type declares the list (empty
+   * when the type has no html rendition), so the markup assembler, the API
+   * boundary and the editor read one answer.
+   */
+  readonly linkable: readonly LayerKind[];
   readonly outputFamilies: readonly [
     "static" | "motion" | "html",
     ...("static" | "motion" | "html")[],
@@ -97,6 +105,7 @@ export const CREATIVE_TYPE_RULES: Readonly<Record<CreativeType, CreativeTypeRule
       { kind: "logo", relation: "above", target: "image" },
       { kind: "shade", relation: "directly-above", target: "image" },
     ],
+    linkable: [],
     outputFamilies: ["static", "motion"],
   },
   "image-html": {
@@ -108,6 +117,7 @@ export const CREATIVE_TYPE_RULES: Readonly<Record<CreativeType, CreativeTypeRule
     // singular. fill stays uncapped — each fill owns its frame.
     maxOf: { logo: 1, shade: 1, accent: 1 },
     sharedBudgets: [{ kinds: ["static-text"], max: 1 }],
+    linkable: ["image", "static-text"],
     outputFamilies: ["html"],
   },
   video: {
@@ -116,9 +126,19 @@ export const CREATIVE_TYPE_RULES: Readonly<Record<CreativeType, CreativeTypeRule
     required: ["video", "animated-text"],
     maxOf: { logo: 1, shade: 1 },
     sharedBudgets: [{ kinds: ["animated-text"], max: 1 }],
+    linkable: [],
     outputFamilies: ["motion"],
   },
 };
+
+/**
+ * Whether a click target on a layer of `kind` compiles for `creativeType`
+ * (D165). The one decision the markup assembler, the brief boundary and the
+ * editor all read.
+ */
+export function isLinkableKind(creativeType: CreativeType, kind: LayerKind): boolean {
+  return CREATIVE_TYPE_RULES[creativeType].linkable.includes(kind);
+}
 
 /**
  * The one output-family decision (X14): does every format the brief asks the

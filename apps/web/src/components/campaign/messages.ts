@@ -1400,7 +1400,26 @@ export const layerLinkLabel = "Click target";
  * Where the destination lives: the brief already carries exactly one, so the
  * control says what ticking does and promises no new picture.
  */
-export const layerLinkHelp = "Opens this brief's click destination. The picture does not change.";
+export const layerLinkHelp =
+  "Clicking this part of the HTML ad opens the brief's click destination. The picture does not change.";
+
+/**
+ * D165 — said under a click target the layer still carries where it cannot
+ * compile, so the operator can see why and untick it. The box is shown only
+ * for that reason: a layer that is not linked never offers it here. `where`
+ * is `linkableDisplayName()`.
+ */
+export function layerLinkNotHere(where: string): string {
+  return `Only ${where} can be click targets. Untick this.`;
+}
+
+/**
+ * D165 — the Template step's error for the same case, naming the layer so the
+ * operator can find it in the stack. `kind` and `where` are display labels.
+ */
+export function layerLinkMisplaced(layerId: string, kind: string, where: string): string {
+  return `"${layerId}" (${kind}) is marked as a click target, but only ${where} can be. Select it and untick Click target.`;
+}
 
 /** The face a prop's control shows while the layer carries no override for it. */
 export const layerPropDefault = "Brief default";

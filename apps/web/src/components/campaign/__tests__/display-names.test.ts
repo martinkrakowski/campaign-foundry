@@ -6,6 +6,7 @@ import {
   canvasDisplayName,
   creativeTypeDisplayName,
   formatDisplayName,
+  linkableDisplayName,
   modeDisplayName,
   platformDisplayName,
   ratioDisplayName,
@@ -132,6 +133,10 @@ describe("display names", () => {
     expect(creativeTypeDisplayName("image-text")).toBe("Image & text");
     expect(creativeTypeDisplayName("image-html")).toBe("HTML");
     expect(creativeTypeDisplayName("video")).toBe("Video");
+  });
+
+  test("linkableDisplayName spells the D165 table in display words, never raw kind ids", () => {
+    expect(linkableDisplayName()).toBe("Image or Static text layers in HTML creatives");
   });
 
   test("campaignTypeOf returns the vocabulary member, else the default", () => {

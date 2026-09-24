@@ -312,6 +312,18 @@ export function validateTemplate(value: unknown, type?: CampaignType): BriefTemp
         `Campaign brief field "template.layers[${i}].${linkProblem.field}" must ${linkProblem.must}; got ${JSON.stringify(linkProblem.value)}.`,
       );
     }
+    // D165 — a click target compiles only where the creative type declares
+    // it: `rules.linkable`, the same table the markup assembler and the
+    // editor read. Refused here, never in `isBriefTemplate`: that guard
+    // failing is silent in the web (L3a's draft fallback), and a refusal
+    // must name its fix. `link: false` stays valid on any kind.
+    if (layer.link === true && !(rules.linkable as readonly string[]).includes(layer.kind)) {
+      throw new Error(
+        rules.linkable.length === 0
+          ? `Campaign brief field "template.layers[${i}].link" must not be true: creative type "${value.creativeType}" has no html rendition, so no layer is a click target. Remove "link".`
+          : `Campaign brief field "template.layers[${i}].link" may be true only on ${rules.linkable.map((k) => `"${k}"`).join(" or ")} layers for creative type "${value.creativeType}"; got a "${layer.kind}" layer. Remove "link".`,
+      );
+    }
 
     // D130 — a layer's own frame, when present, must be a canvas-relative box
     // of [0, 1] fractions, a vocabulary anchor, and an optional byFamily whose

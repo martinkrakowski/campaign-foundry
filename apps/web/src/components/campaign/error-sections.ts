@@ -69,6 +69,7 @@ export const KNOWN_KEY_PATTERNS: RegExp[] = [
   /^motion$/,
   /^duration$/,
   /^clickDestination$/,
+  /^layerLink$/,
 ];
 
 /** Check if a key matches any known pattern. */

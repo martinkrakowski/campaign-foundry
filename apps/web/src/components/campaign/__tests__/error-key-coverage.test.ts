@@ -102,6 +102,20 @@ describe("L1.1 error key coverage", () => {
     }
   });
 
+  test("a click target where it cannot compile emits a known key in a declared bucket (D165)", () => {
+    const base = initialEditorState();
+    const state = {
+      ...base,
+      template: {
+        ...base.template,
+        layers: base.template.layers.map((l) => (l.kind === "logo" ? { ...l, link: true } : l)),
+      },
+    };
+    const errors = validateState(state);
+    expect(Object.keys(errors.template ?? {})).toEqual(["layerLink"]);
+    for (const key of Object.keys(errors.template ?? {})) expect(isKnownKey(key)).toBe(true);
+  });
+
   test("motion with all output errors emits known keys", () => {
     const state = makeFixture({
       formats: ["motion"],

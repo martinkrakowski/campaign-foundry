@@ -31,7 +31,11 @@ import {
 } from "@campaignfoundry/CampaignOrchestration/campaign-types";
 // The leaf, never the barrel: the creative-type vocabulary rides the same rule
 // as its siblings above.
-import type { CreativeType } from "@campaignfoundry/CampaignOrchestration/creative-types";
+import {
+  CREATIVE_TYPES,
+  CREATIVE_TYPE_RULES,
+  type CreativeType,
+} from "@campaignfoundry/CampaignOrchestration/creative-types";
 
 /** Display name for a format key. */
 export function formatDisplayName(format: string): string {
@@ -243,6 +247,21 @@ const CREATIVE_TYPE_LABELS: Record<CreativeType, string> = {
 
 export function creativeTypeDisplayName(type: CreativeType): string {
   return CREATIVE_TYPE_LABELS[type];
+}
+
+/**
+ * Where a click target compiles (D165), spelled from `CREATIVE_TYPE_RULES`'s
+ * `linkable` lists rather than restated, so the copy cannot drift from the
+ * table the assembler and the API read: "Image or Static text layers in HTML
+ * creatives".
+ */
+export function linkableDisplayName(): string {
+  return CREATIVE_TYPES.filter((type) => CREATIVE_TYPE_RULES[type].linkable.length > 0)
+    .map(
+      (type) =>
+        `${CREATIVE_TYPE_RULES[type].linkable.map(layerKindDisplayName).join(" or ")} layers in ${creativeTypeDisplayName(type)} creatives`,
+    )
+    .join("; ");
 }
 
 /**
