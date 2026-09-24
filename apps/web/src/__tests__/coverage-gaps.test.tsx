@@ -8,6 +8,7 @@ import {
   makeAsset,
   mockPipelineApi,
   storedTemplate,
+  seedDecisions,
 } from "@/__tests__/helpers";
 import { useRun } from "@/lib/run-context";
 import { CommandBar } from "@/components/shell/CommandBar";
@@ -56,10 +57,7 @@ describe("CommandBar — states", () => {
 
   test("a re-run confirm reflects the existing run, with plural rejected copy", async () => {
     const user = userEvent.setup();
-    localStorage.setItem(
-      "cf:decisions",
-      JSON.stringify({ "alpha/1:1/default": "rejected", "beta/1:1/default": "rejected" }),
-    );
+    seedDecisions({ "alpha/1:1/default": "rejected", "beta/1:1/default": "rejected" });
     seedPersistedRun([makeAsset(), makeAsset({ productId: "beta", outputPath: "beta/1x1.png" })]);
     renderWithRun(<CommandBar onToggleTelemetry={() => {}} />);
     const regenButton = await screen.findByRole("button", { name: /Regenerate Rejected/ });
@@ -85,7 +83,7 @@ describe("RunsPage — running and rejected", () => {
 
   test("counts rejected creatives and shows the running badge", async () => {
     const user = userEvent.setup();
-    localStorage.setItem("cf:decisions", JSON.stringify({ "alpha/1:1/default": "rejected" }));
+    seedDecisions({ "alpha/1:1/default": "rejected" });
     seedSingle([makeAsset()], true);
     renderWithRun(<Harness />);
     await screen.findByText("complete");
@@ -96,7 +94,7 @@ describe("RunsPage — running and rejected", () => {
 
 describe("ExportPage — approved render without a proof", () => {
   test("renders zero proofs when an approved creative has none", async () => {
-    localStorage.setItem("cf:decisions", JSON.stringify({ "alpha/1:1/default": "approved" }));
+    seedDecisions({ "alpha/1:1/default": "approved" });
     seedPersistedRun([makeAsset({ proofPath: undefined })]);
     renderWithRun(<ExportPage />);
     await waitFor(() => expect(screen.getByText(/1 of 1 creatives approved/)).toBeTruthy());

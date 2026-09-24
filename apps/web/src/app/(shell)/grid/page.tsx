@@ -101,8 +101,19 @@ function runningMessage(progress: RunProgress | null): string {
 }
 
 export default function GridPage() {
-  const { brief, assets, decisions, decide, loading, progress, assetVersion, regeneratingKeys } =
-    useRun();
+  const {
+    brief,
+    assets,
+    decisions,
+    decide,
+    decisionsNotice,
+    decisionsLoaded,
+    reloadDecisions,
+    loading,
+    progress,
+    assetVersion,
+    regeneratingKeys,
+  } = useRun();
   const [previewKey, setPreviewKey] = useState<string | null>(null);
   // Filters and the page belong to one brief + run: a brief switch or a new run
   // (assetVersion bump) drops them back to defaults instead of hiding the new
@@ -232,6 +243,20 @@ export default function GridPage() {
         <span className="ml-auto hidden text-text-muted md:inline">
           Approved creatives are what the Export tab ships.
         </span>
+        {decisionsNotice !== null && (
+          <p role="status" className="basis-full text-warning">
+            {decisionsNotice}
+            {!decisionsLoaded && (
+              <button
+                type="button"
+                onClick={reloadDecisions}
+                className="ml-2 underline underline-offset-2 hover:text-text-emphasis"
+              >
+                Try again
+              </button>
+            )}
+          </p>
+        )}
       </div>
       <div className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-surface px-4 py-2">
         <FilterSelect
@@ -301,6 +326,8 @@ export default function GridPage() {
                           (regeneratingKeys === null || regeneratingKeys.has(assetKey(asset)))
                         }
                         decision={decisions[assetKey(asset)]}
+                        decidable={decisionsLoaded}
+                        waitingReason={decisionsNotice ?? messages.reviewDecisionsLoading}
                         onDecide={(d) => decide(assetKey(asset), d)}
                         onPreview={() => setPreviewKey(assetKey(asset))}
                       />
@@ -438,6 +465,8 @@ function Artboard({
   version,
   loading,
   decision,
+  decidable,
+  waitingReason,
   onDecide,
   onPreview,
 }: {
@@ -445,6 +474,10 @@ function Artboard({
   version: number;
   loading: boolean;
   decision?: "approved" | "rejected";
+  /** False until the run's decisions load (D173): a verdict needs the map it joins. */
+  decidable: boolean;
+  /** Why the verdict controls are paused, while they are. */
+  waitingReason: string;
   onDecide: (decision: "approved" | "rejected") => void;
   onPreview: () => void;
 }) {
@@ -583,8 +616,10 @@ function Artboard({
         <button
           type="button"
           onClick={() => onDecide("approved")}
+          disabled={!decidable}
+          title={decidable ? undefined : waitingReason}
           className={cn(
-            "rounded-full border px-4 py-1 text-xs font-medium transition-colors",
+            "rounded-full border px-4 py-1 text-xs font-medium transition-colors disabled:cursor-wait disabled:opacity-60",
             decision === "approved"
               ? "border-success bg-success/20 text-success"
               : "border-border-control text-text-muted hover:text-text-emphasis",
@@ -595,8 +630,10 @@ function Artboard({
         <button
           type="button"
           onClick={() => onDecide("rejected")}
+          disabled={!decidable}
+          title={decidable ? undefined : waitingReason}
           className={cn(
-            "rounded-full border px-4 py-1 text-xs font-medium transition-colors",
+            "rounded-full border px-4 py-1 text-xs font-medium transition-colors disabled:cursor-wait disabled:opacity-60",
             decision === "rejected"
               ? "border-error bg-error/20 text-error"
               : "border-border-control text-text-muted hover:text-text-emphasis",

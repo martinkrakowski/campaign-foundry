@@ -1,6 +1,6 @@
 import { describe, test, expect } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
-import { renderWithRun, seedPersistedRun, makeAsset } from "@/__tests__/helpers";
+import { renderWithRun, seedPersistedRun, makeAsset, seedDecisions } from "@/__tests__/helpers";
 import { nextMock } from "@/__tests__/helpers";
 import * as messages from "@/components/campaign/messages";
 import CompliancePage from "@/app/(shell)/compliance/page";
@@ -126,7 +126,7 @@ describe("ExportPage", () => {
   });
 
   test("lists approved renders and their proofs", async () => {
-    localStorage.setItem("cf:decisions", JSON.stringify({ "alpha/1:1/default": "approved" }));
+    seedDecisions({ "alpha/1:1/default": "approved" });
     seedPersistedRun([
       makeAsset(),
       makeAsset({ productId: "beta", outputPath: "beta/1x1.png", proofPath: "proofs/beta.pdf" }),
@@ -137,7 +137,7 @@ describe("ExportPage", () => {
   });
 
   test("variation labels include v<index>", async () => {
-    localStorage.setItem("cf:decisions", JSON.stringify({ "alpha/v4": "approved" }));
+    seedDecisions({ "alpha/v4": "approved" });
     seedPersistedRun([
       makeAsset({
         variantIndex: 4,
@@ -157,7 +157,7 @@ describe("RunsPage", () => {
   });
 
   test("summarizes a completed run", async () => {
-    localStorage.setItem("cf:decisions", JSON.stringify({ "alpha/1:1/default": "approved" }));
+    seedDecisions({ "alpha/1:1/default": "approved", "beta/1:1/default": "rejected" });
     seedPersistedRun([
       makeAsset({ passedCompliance: true }),
       makeAsset({ productId: "beta", passedCompliance: false }),
@@ -166,6 +166,12 @@ describe("RunsPage", () => {
     await waitFor(() => expect(screen.getByText("complete")).toBeTruthy());
     expect(screen.getByText("seed")).toBeTruthy();
     expect(screen.getByText("alpha @ 1:1 · default")).toBeTruthy();
+    // The review counts are the server's decisions, once they load (D173).
+    await waitFor(() =>
+      expect(screen.getByText("Pending review").parentElement?.textContent).toMatch(/0/),
+    );
+    expect(screen.getByText("Approved").parentElement?.textContent).toMatch(/1/);
+    expect(screen.getByText("Rejected").parentElement?.textContent).toMatch(/1/);
   });
 
   test("variation rows include v<index> in the run asset list", async () => {

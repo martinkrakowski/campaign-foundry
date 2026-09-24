@@ -5,6 +5,7 @@ import { createElement, Fragment } from "react";
 import {
   renderWithRun,
   seedPersistedRun,
+  fakeDecisionsApi,
   makeAsset,
   makeMotionAsset,
   exerciseFocusTrap,
@@ -12,8 +13,13 @@ import {
   jobOk,
   json,
   storedTemplate,
+  seedDecisions,
 } from "@/__tests__/helpers";
-import { useRun } from "@/lib/run-context";
+import {
+  DECISIONS_CONFLICT_MESSAGE,
+  DECISIONS_UNREADABLE_MESSAGE,
+  useRun,
+} from "@/lib/run-context";
 import GridPage from "../page";
 import { typeDisplayName } from "@/components/campaign/display-names";
 import * as messages from "@/components/campaign/messages";
@@ -381,7 +387,7 @@ describe("GridPage", () => {
         variation: { count: 1 },
       }),
     );
-    localStorage.setItem("cf:decisions", JSON.stringify({ "alpha/v0": "rejected" }));
+    seedDecisions({ "alpha/v0": "rejected" });
     mockPipelineApi({
       report: { halted: false, assets: [original], log: { entries: [], campaignId: "seed" } },
       job: () =>
@@ -405,10 +411,69 @@ describe("GridPage", () => {
     renderWithRun(<GridPage />);
     await screen.findByText("IMAGEN").catch(() => undefined);
     const approve = await screen.findByText("Approve");
+    await waitFor(() => expect((approve as HTMLButtonElement).disabled).toBe(false)); // decisions loaded
     await user.click(approve);
     await waitFor(() => expect(screen.getByText(/✓ 1 approved/)).toBeTruthy());
     await user.click(screen.getByText("Reject"));
     await waitFor(() => expect(screen.getByText(/✗ 1 rejected/)).toBeTruthy());
+  });
+
+  test("a decision another tab beat to the server shows the server's decisions and says why (D173, D82)", async () => {
+    const user = userEvent.setup();
+    const server = fakeDecisionsApi();
+    seedPersistedRun([makeAsset()], { decisions: server });
+    renderWithRun(<GridPage />);
+    const approve = await screen.findByText("Approve");
+    await waitFor(() => expect((approve as HTMLButtonElement).disabled).toBe(false)); // decisions loaded
+    server.saveElsewhere({ "alpha/1:1/default": "rejected" }); // the other tab
+    await user.click(approve);
+    expect((await screen.findByRole("status")).textContent).toBe(DECISIONS_CONFLICT_MESSAGE);
+    await waitFor(() => expect(screen.getByText(/✗ 1 rejected/)).toBeTruthy());
+    expect(screen.getByText(/✓ 0 approved/)).toBeTruthy();
+  });
+
+  test("Approve and Reject wait for the run's review decisions to load (D173)", async () => {
+    let release!: () => void;
+    const server = fakeDecisionsApi();
+    seedPersistedRun([makeAsset()], {
+      decisions: {
+        ...server,
+        handle: (url: string, init: RequestInit) =>
+          new Promise<Response>((res) => (release = () => res(server.handle(url, init)))),
+      } as unknown as ReturnType<typeof fakeDecisionsApi>,
+    });
+    renderWithRun(<GridPage />);
+    const approve = (await screen.findByText("Approve")) as HTMLButtonElement;
+    await waitFor(() => expect(release).toBeTypeOf("function"));
+    expect(approve.disabled).toBe(true);
+    expect(approve.title).toBe("Loading the review decisions");
+    expect((screen.getByText("Reject") as HTMLButtonElement).disabled).toBe(true);
+    release();
+    await waitFor(() => expect(approve.disabled).toBe(false));
+  });
+
+  test("decisions that could not be loaded say so on the review bar, pause the verdicts, and Try again loads them", async () => {
+    const user = userEvent.setup();
+    let down = true;
+    const server = fakeDecisionsApi({ "alpha/1:1/default": "approved" });
+    seedPersistedRun([makeAsset()], {
+      decisions: {
+        ...server,
+        handle: (url: string, init: RequestInit) =>
+          down ? json({ error: "down" }, 500) : server.handle(url, init),
+      } as ReturnType<typeof fakeDecisionsApi>,
+    });
+    renderWithRun(<GridPage />);
+    const notice = await screen.findByRole("status");
+    expect(notice.textContent).toContain(DECISIONS_UNREADABLE_MESSAGE);
+    const approve = screen.getByText("Approve") as HTMLButtonElement;
+    expect(approve.disabled).toBe(true);
+    expect(approve.title).toBe(DECISIONS_UNREADABLE_MESSAGE);
+    down = false;
+    await user.click(within(notice).getByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(screen.getByText(/✓ 1 approved/)).toBeTruthy());
+    expect(approve.disabled).toBe(false);
+    expect(screen.queryByRole("status")).toBeNull();
   });
 
   test("the Preview pill carries its own boundary, not the video's", async () => {
@@ -464,7 +529,7 @@ describe("GridPage", () => {
 
   test("spins the targeted tiles during a selective regenerate", async () => {
     const user = userEvent.setup();
-    localStorage.setItem("cf:decisions", JSON.stringify({ "alpha/1:1/default": "rejected" }));
+    seedDecisions({ "alpha/1:1/default": "rejected" });
     mockPipelineApi({
       post: () => new Promise<Response>(() => {}), // pending
       report: { halted: false, assets: [makeAsset()], log: { entries: [], campaignId: "seed" } },

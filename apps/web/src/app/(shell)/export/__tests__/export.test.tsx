@@ -8,6 +8,8 @@ import {
   makeMotionAsset,
   json,
   mockPipelineApi,
+  seedDecisions,
+  fakeDecisionsApi,
 } from "@/__tests__/helpers";
 import { API, useRun } from "@/lib/run-context";
 import { DEFAULT_CAMPAIGN_TYPE } from "@campaignfoundry/CampaignOrchestration/campaign-types";
@@ -66,7 +68,7 @@ const item = (over: Record<string, unknown> = {}) => ({
 describe("ExportPage — platform packaging", () => {
   test("shows static platform toggles, packages the selected one, and links the zip", async () => {
     const user = userEvent.setup();
-    localStorage.setItem("cf:decisions", JSON.stringify({ "alpha/1:1/default": "approved" }));
+    seedDecisions({ "alpha/1:1/default": "approved" });
     seedPersistedRun([makeAsset()]);
     mockPipelineApi({
       report: {
@@ -239,6 +241,24 @@ describe("ExportPage — platform packaging", () => {
     expect(screen.queryByRole("button", { name: "instagram-feed" })).toBeNull();
   });
 
+  test("Package waits for the run's review decisions: until they load, none is not yet known (D173)", async () => {
+    let answer!: (r: Response) => void;
+    const server = fakeDecisionsApi({ "alpha/1:1/default": "approved" });
+    seedPersistedRun([makeAsset()], {
+      decisions: {
+        ...server,
+        handle: () => new Promise<Response>((res) => (answer = res)),
+      } as unknown as ReturnType<typeof fakeDecisionsApi>,
+    });
+    renderWithRun(<ExportPage />);
+    const pkg = await screen.findByRole("button", { name: "Package" });
+    await waitFor(() => expect(answer).toBeTypeOf("function"));
+    expect((pkg as HTMLButtonElement).disabled).toBe(true);
+    expect(pkg.getAttribute("title")).toBe("Loading the review decisions");
+    answer(server.handle("", {}));
+    await waitFor(() => expect((pkg as HTMLButtonElement).disabled).toBe(false));
+  });
+
   test("a run whose html assets were rejected is not offered the html profiles (X14 fix2)", async () => {
     // Packaging sends only the approved keys once decisions exist, so the picker
     // must offer only what will actually be packaged: the rejected html row is
@@ -255,13 +275,11 @@ describe("ExportPage — platform packaging", () => {
         htmlBundlePath: "gamma/728x90/index.html",
       }),
     ];
-    localStorage.setItem(
-      "cf:decisions",
-      JSON.stringify({ "alpha/728x90/default": "approved", "gamma/728x90/default": "rejected" }),
-    );
+    seedDecisions({ "alpha/728x90/default": "approved", "gamma/728x90/default": "rejected" });
     seedPersistedRun(assets);
     renderWithRun(<ExportPage />);
     expect(await screen.findByRole("group", { name: "Platforms" })).toBeTruthy();
+    await screen.findByText(/1 of 2 creatives approved/); // the decisions have loaded
     expect(screen.getByRole("button", { name: "google-display", pressed: false })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "google-display-html" })).toBeNull();
     expect(screen.queryByRole("button", { name: "display-web-html" })).toBeNull();
@@ -274,10 +292,7 @@ describe("ExportPage — platform packaging", () => {
       makeAsset({ productId: "beta", outputPath: "beta/1x1.png" }),
       makeAsset({ productId: "gamma", outputPath: "gamma/1x1.png" }),
     ];
-    localStorage.setItem(
-      "cf:decisions",
-      JSON.stringify({ "alpha/1:1/default": "approved", "beta/1:1/default": "rejected" }),
-    );
+    seedDecisions({ "alpha/1:1/default": "approved", "beta/1:1/default": "rejected" });
     seedPersistedRun(assets);
     const bodies: unknown[] = [];
     mockPipelineApi({
@@ -410,10 +425,7 @@ describe("ExportPage — platform packaging", () => {
 describe("ExportPage — motion", () => {
   test("approved motion rows show the duration and link the mp4; motion platforms join the picker", async () => {
     const user = userEvent.setup();
-    localStorage.setItem(
-      "cf:decisions",
-      JSON.stringify({ "alpha/v1": "approved", "alpha/v2": "approved" }),
-    );
+    seedDecisions({ "alpha/v1": "approved", "alpha/v2": "approved" });
     const assets = [
       makeMotionAsset(),
       makeMotionAsset({

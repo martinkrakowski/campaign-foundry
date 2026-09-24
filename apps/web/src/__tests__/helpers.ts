@@ -1,7 +1,7 @@
 import { render, fireEvent } from "@testing-library/react";
 import { createElement, type ReactElement, type ReactNode } from "react";
-import { vi, type Mock } from "vitest";
-import { API, RunProvider, type Asset } from "@/lib/run-context";
+import { afterEach, vi, type Mock } from "vitest";
+import { API, RunProvider, assetKey, type Asset } from "@/lib/run-context";
 import { EditorDirtyProvider } from "@/lib/editor-dirty-context";
 import { EditorPanelsProvider, EditorPanelsOutlet } from "@/lib/editor-panels-context";
 import { MobileRailProvider } from "@/lib/mobile-rail-context";
@@ -119,6 +119,88 @@ type GetFn = (url: string) => Response | Promise<Response>;
 const isPlanUrl = (u: string) => u.includes("/campaigns/plan");
 const isPackagePostUrl = (u: string) => /\/campaigns\/package(?:\?|$)/.test(u);
 const isPackagesGetUrl = (u: string) => u.includes("/campaigns/packages");
+const isDecisionsUrl = (u: string) => u.includes("/campaigns/decisions");
+
+type Verdicts = Record<string, "approved" | "rejected">;
+
+let seededVerdicts: Verdicts | undefined;
+afterEach(() => {
+  seededVerdicts = undefined;
+});
+
+/**
+ * Seed the decisions the server holds for this test: every `mockPipelineApi`
+ * that does not pass its own `decisions` serves these (D173, where
+ * `cf:decisions` used to be seeded).
+ */
+export const seedDecisions = (verdicts: Verdicts) => {
+  seededVerdicts = verdicts;
+};
+
+/**
+ * The decisions endpoint as the server keeps it (D173), in memory: GET answers
+ * the stored records and their revision; PUT must name that revision (409
+ * otherwise) and answers the new one. `verdicts` seeds it.
+ */
+export const fakeDecisionsApi = (verdicts: Verdicts = {}) => {
+  let stored: Verdicts = { ...verdicts };
+  let revision: string | null = Object.keys(stored).length > 0 ? "rev-0" : null;
+  let saves = 0;
+  const answer = () =>
+    json({
+      decisions: Object.fromEntries(
+        Object.entries(stored).map(([k, verdict]) => [
+          k,
+          { verdict, actor: "local", at: "t", run: "r" },
+        ]),
+      ),
+      revision,
+    });
+  return {
+    handle(_url: string, init: RequestInit): Response {
+      if (init.method !== "PUT") return answer();
+      const body = JSON.parse(String(init.body)) as {
+        revision: string | null;
+        decisions: Verdicts;
+      };
+      if (body.revision !== revision) return json({ error: "changed", revision }, 409);
+      stored = { ...body.decisions };
+      revision = `rev-${(saves += 1)}`;
+      return answer();
+    },
+    /**
+     * A generate POST: the report write that follows retires what it replaces —
+     * the re-rolled cells, or every decision on a full run (D173).
+     */
+    retire(init: RequestInit) {
+      let body: unknown = null;
+      try {
+        body = JSON.parse(String(init.body ?? "null"));
+      } catch {
+        /* not a JSON body: treat as a full run */
+      }
+      const parsed = body as {
+        regenerateOnly?: Parameters<typeof assetKey>[0][];
+      } | null;
+      const keys = parsed?.regenerateOnly?.map(assetKey);
+      const next =
+        keys === undefined
+          ? {}
+          : Object.fromEntries(Object.entries(stored).filter(([k]) => !keys.includes(k)));
+      if (Object.keys(next).length === Object.keys(stored).length) return;
+      this.saveElsewhere(next);
+    },
+    /** What the server holds now (a method, so a spread copy still reads it live). */
+    stored(): Verdicts {
+      return { ...stored };
+    },
+    /** Another tab's save: the stored map and its revision move. */
+    saveElsewhere(next: Verdicts) {
+      stored = { ...next };
+      revision = `rev-${(saves += 1)}`;
+    },
+  };
+};
 
 const jobSnapshot = (report: MockReport): MockReport => ({
   ...report,
@@ -140,13 +222,21 @@ export const mockPipelineApi = (
     plan?: PostFn;
     packagePost?: PostFn;
     packages?: GetFn;
+    /** The decisions the server holds (a fresh fake), or a fake a test drives. */
+    decisions?: Verdicts | ReturnType<typeof fakeDecisionsApi>;
   } = {},
 ) => {
   if (!vi.isMockFunction(globalThis.fetch)) vi.spyOn(globalThis, "fetch");
   const report = opts.report ?? EMPTY_REPORT;
+  const given = opts.decisions;
+  const decisions: ReturnType<typeof fakeDecisionsApi> =
+    given !== undefined && typeof given.handle === "function"
+      ? (given as ReturnType<typeof fakeDecisionsApi>)
+      : fakeDecisionsApi((given as Verdicts | undefined) ?? seededVerdicts);
   return vi.mocked(globalThis.fetch).mockImplementation((url, init) => {
     const u = String(url);
     const req = (init ?? {}) as RequestInit;
+    if (isDecisionsUrl(u)) return Promise.resolve(decisions.handle(u, req));
     if (req.method === "POST") {
       if (isPlanUrl(u)) {
         if (opts.plan) return Promise.resolve(opts.plan(u, req));
@@ -158,6 +248,7 @@ export const mockPipelineApi = (
         if (opts.post) return Promise.resolve(opts.post(u, req));
         return Promise.resolve(json({ platforms: [] }));
       }
+      decisions.retire(req);
       return Promise.resolve(
         opts.post ? opts.post(u, req) : json({ jobId: opts.jobId ?? "job-1" }, 202),
       );
@@ -178,7 +269,13 @@ export const mockPipelineApi = (
  */
 export const seedPersistedRun = (
   assets: Asset[],
-  opts: { halted?: boolean; id?: string; policyHash?: string; seed?: number } = {},
+  opts: {
+    halted?: boolean;
+    id?: string;
+    policyHash?: string;
+    seed?: number;
+    decisions?: Verdicts | ReturnType<typeof fakeDecisionsApi>;
+  } = {},
 ) => {
   const id = opts.id ?? "seed";
   // A classic brief never produces `variantIndex` assets, so a run carrying them must
@@ -212,6 +309,7 @@ export const seedPersistedRun = (
       ...(opts.policyHash !== undefined ? { policyHash: opts.policyHash } : {}),
       ...(opts.seed !== undefined ? { seed: opts.seed } : {}),
     },
+    ...(opts.decisions !== undefined ? { decisions: opts.decisions } : {}),
   });
 };
 
