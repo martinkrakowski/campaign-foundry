@@ -6266,3 +6266,25 @@ and source formatting, recorded here rather than fixed.
     It now covers all eight ports, the D167 tenant context and the cloud target (C7 keys,
     D169 – D171, D175); the slug-keyed S3 sketch is gone. The lock plan's status line now says
     R1, R2 and R5 shipped (#536, #537); only R6 is open.
+- **PT-3 started (2026-09-24): tech-stack updated on the owner's instruction; two PRs merged:**
+  - [#579](https://github.com/martinkrakowski/campaign-foundry/pull/579) (`f0c420c4`): the database
+    foundation. New dependencies: `pg`, `@types/pg`, `@electric-sql/pglite` (tests: a real
+    Postgres in process, so the 100% gate holds everywhere and nothing reaches Aiven). Review fixes:
+    - broken and failed-rollback connections are destroyed;
+    - migrations carry checksums;
+    - the pool is capped at the service's 15;
+    - IPv6 host brackets are stripped;
+    - a 10-second connect timeout.
+  - [#580](https://github.com/martinkrakowski/campaign-foundry/pull/580) (`29b839a6`): decisions on
+    Postgres behind `STORE_BACKEND=postgres`. Qodo found:
+    - the revision check was outside the database (cross-process lost update), so there is now a CAS
+      in the write's transaction;
+    - a two-statement read, now one snapshot;
+    - revision instability from key order (`ordinal`) and time format (a canonical `at` is required);
+    - `STORE_BACKEND` in `.env.local` was missed on the first request.
+    All fixed, with the org-isolation mutation recorded and the CAS hand-checked. CodeRabbit was
+    rate-limited on the last commit.
+  - Found in the operator's root `.env.local`: `HOST` and `PORT` (the database's). Nitro's
+    production server binds `NITRO_PORT || PORT`, and `loadEnv()` applies that file. The owner was
+    told to remove or rename them. No CA path is set yet, so `db:ping` refuses until
+    `DATABASE_CA_PATH` points at Aiven's CA.
