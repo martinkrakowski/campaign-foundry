@@ -1,6 +1,6 @@
 # The Asset Model, Finished — Architecture & Development Plan
 
-**Date:** 2026-09-23 · **Status:** **CLOSED — every lane merged, 2026-09-24.** AF3 [#559](https://github.com/martinkrakowski/campaign-foundry/pull/559) (`3208e55c`), AF5 [#560](https://github.com/martinkrakowski/campaign-foundry/pull/560) (`8a0067dd`), AF1 [#562](https://github.com/martinkrakowski/campaign-foundry/pull/562) (`d08fa210`), AF2 [#563](https://github.com/martinkrakowski/campaign-foundry/pull/563) (`8cbcb616`), AF4 [#564](https://github.com/martinkrakowski/campaign-foundry/pull/564) (`cd9abd4e`), AF6 (this status, docs-only push). **D164 was stamped after AF1 had already shipped** (§7), and **the Google HTML5 validator check it required is still open**. D165 and D161 are stamped, and L3a is kept as is. **Still open:** the validator check, and AR6 (blocked on D64). r1 was
+**Date:** 2026-09-23 · **Status:** **CLOSED — every lane merged, 2026-09-24.** AF3 [#559](https://github.com/martinkrakowski/campaign-foundry/pull/559) (`3208e55c`), AF5 [#560](https://github.com/martinkrakowski/campaign-foundry/pull/560) (`8a0067dd`), AF1 [#562](https://github.com/martinkrakowski/campaign-foundry/pull/562) (`d08fa210`), AF2 [#563](https://github.com/martinkrakowski/campaign-foundry/pull/563) (`8cbcb616`), AF4 [#564](https://github.com/martinkrakowski/campaign-foundry/pull/564) (`cd9abd4e`), AF6 (this status, docs-only push). **D164 was stamped after AF1 had already shipped** (§7). **The Google HTML5 validator check it required was attempted on 2026-09-24 and is inconclusive for display ads** (§7). D165 and D161 are stamped, and L3a is kept as is. **Still open:** the validator check, and AR6 (blocked on D64). r1 was
 reviewed the same day by Fable 5.1 against `425e59e4`. It returned four blocking or major errors in r1
 itself, all corrected here and listed in §8, because they are the kind this repository keeps
 repeating.
@@ -177,12 +177,25 @@ AF4 is blocked on D165 and does not hold a slot while it waits (RW-D4). Each lan
   this document still listed D164 as PROPOSED and said AF1 could not be dispatched until it was
   stamped. The owner stamped it on 2026-09-24. **The validator check this section required first
   — that Google's HTML5 validator accepts a transparent `<button>` over an `<img>` — has not been
-  done.** It is the one open item this plan leaves, besides AR6. Recorded as fact, the way the
+  done.** It is the one open item this plan leaves, besides AR6.
+
+  **Validator run, 2026-09-24 (owner-approved upload of a synthetic bundle):** a real
+  `assembleHtml` output (image layer, linked `static-text`, clickTag to `https://example.com`, a
+  plain 300x250 PNG) was uploaded to `h5validator.appspot.com/adwords/asset` twice (results
+  `5421204784152576` and `5754646918987776`). Both runs used the **App Campaigns** (playable-ad) rule
+  set. That checkbox is on by default, and the drop upload ignored unticking it. So the two failures
+  are playable-ad rules that do not apply to a display ad: `ExitApi.exit()` missing, and 320x480
+  dimensions. **Every check that does apply to display passed:** Multiple Click Exits (the
+  transparent button plus clickTag is one exit), HTML5 Not Allowed Features, Missing asset, 4th
+  party calls, Secure URL, File Type/Count, Bundle Size and structure. **Still open:** a run under
+  the display rule set (the UPLOAD button with App Campaigns unticked, which only a person can
+  drive), and whether the bundle should carry `<meta name="ad.size" content="width=300,height=250">`.
+  The playable run recommended that tag, and nothing in the codebase emits it (`git grep ad.size` → 0). Recorded as fact, the way the
   asset-model plan recorded D161. It is the second time in two plans that a lane shipped ahead of
   its decision.
 - **D165 — stamped** as recommended, and shipped as AF4 (#564). Review of #564 found one more
   reader of the new `template` error bucket, `StatusLine`'s section links, which is now fixed in
-  that PR.
+  that PR. The same function also ignored `treatments`, a gap older than this plan; #565 fixed it.
 - **L3a — kept as is.** A restored draft carrying a retired layer kind still becomes the canonical
   template, silently, by the recorded L3a design. No lane.
 - **D161 — stamped**, after the fact. The asset-model plan records it.

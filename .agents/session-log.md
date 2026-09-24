@@ -6117,3 +6117,21 @@ and source formatting, recorded here rather than fixed.
     a `SAMPLE_ARGS` entry.
 - **Left open:** the Google HTML5 validator check for D164's transparent `<button>` over
   `<img>`, and AR6 (blocked on D64).
+
+## 2026-09-24 — asset-model follow-up: remaining items
+
+- **Mode:** Implementer
+- **Changes:**
+  - [#565](https://github.com/martinkrakowski/campaign-foundry/pull/565), squash `6623240e`.
+    `StatusLine` now names Treatments when a classic brief's only error is a treatment. Mutation
+    recorded in `.agents/manifests/status-line-treatments.json` (replayed: caught). PR-Agent's two
+    undefined-guard suggestions were refuted, because `validateState` always returns the bucket.
+  - The D164 validator check was run (owner approved one upload of a synthetic bundle; two
+    uploads were made, same zip, SHA-256 prefix `112332ec56e1e1fd`). The AdWords validator ran its
+    App Campaigns (playable) rule set both times, despite the checkbox being unticked before the
+    second run. Every check that applies to display passed, including Multiple Click Exits.
+    Recorded in the follow-up plan's §7.
+- **Left open:** a validator run under the display rule set, which needs a person (the Upload
+  button opens a native file picker); whether to emit `<meta name="ad.size">`; and AR6 (D64).
+  The bundle also prints the band height as `205.00000000000003px` (float noise, harmless, not
+  fixed).
