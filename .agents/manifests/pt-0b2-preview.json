@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "PT-0b2",
+  "mutations": [
+    {
+      "file": "apps/api/server/routes/campaigns/preview-frame.post.ts",
+      "before": "  const key = `${env.messageFont}\\0${env.assetRoot}`;",
+      "after": "  const key = env.messageFont;",
+      "because": "bundles are keyed by font alone, so two asset roots share one frame cache and an org can be served another org's cached frame, its logo included.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/preview-frame.test.ts",
+        "-t",
+        "each asset root gets its own adapters"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
