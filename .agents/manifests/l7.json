@@ -64,9 +64,9 @@
     },
     {
       "file": "apps/api/server/lib/jobs.ts",
-      "before": "await deleteJob(id).catch(() => undefined);",
+      "before": "await deleteJob(scope, id).catch(() => undefined);",
       "after": "/* do not cleanup dangling job */",
-      "because": "When recording a job failure fails due to a storage error, the dangling job must be deleted so the campaign is not blocked forever.",
+      "because": "When recording a job failure fails due to a storage error, the dangling job must be deleted so the campaign is not blocked forever. Re-anchored 2026-09-24 by PT-0b2: the calls it quotes now take the tenant (D167); the mutation is unchanged in meaning. Re-anchored 2026-09-24 in PT-0b2 review: helpers and the run take a StorageScope (a tenant or the run's captured environment); the mutation is unchanged in meaning.",
       "command": [
         "yarn",
         "vitest",

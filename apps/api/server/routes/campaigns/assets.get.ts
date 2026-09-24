@@ -3,6 +3,7 @@ import { assertSafeId } from "../../lib/load-brief.js";
 import { ASSET_NAME_PATTERN, assetContentType } from "../../lib/asset-files.js";
 import { getAssetStore } from "../../lib/ports/index.js";
 
+import { LOCAL_TENANT } from "../../lib/tenant.js";
 /**
  * GET /campaigns/assets?briefId=&name= — list assets or stream asset content.
  *
@@ -37,7 +38,7 @@ export default defineEventHandler(async (event) => {
       setResponseStatus(event, 400);
       return { error: "Invalid asset name." };
     }
-    const bytes = await getAssetStore().readAsset(briefId, name);
+    const bytes = await getAssetStore(LOCAL_TENANT).readAsset(briefId, name);
     if (!bytes) {
       setResponseStatus(event, 404);
       return { error: `Asset "${name}" not found.` };
@@ -49,7 +50,7 @@ export default defineEventHandler(async (event) => {
   }
 
   try {
-    const assets = await getAssetStore().listAssets(briefId);
+    const assets = await getAssetStore(LOCAL_TENANT).listAssets(briefId);
     return { assets };
   } catch (error) {
     console.warn(`[assets] could not read assets for brief ${briefId}: ${errorMessage(error)}`);

@@ -2,7 +2,6 @@ import { constants, createReadStream } from "node:fs";
 import { open, readdir, readFile, realpath, stat, type FileHandle } from "node:fs/promises";
 import { basename, join, relative, resolve, sep } from "node:path";
 import { SAFE_ID_PATTERN } from "@campaignfoundry/CampaignOrchestration";
-import { outputRoot } from "../config.js";
 import { resolveConfined, resolveConfinedForRead } from "../confined-path.js";
 import type {
   OutputLookup,
@@ -13,11 +12,16 @@ import type {
 
 const MISSING: OutputLookup = { found: false, reason: "missing" };
 
-/** The run cache and the job records live under the output root but are not output. */
+/**
+ * Areas under the output root that are not this store's output: the run cache,
+ * the job records, and `orgs/`, where other tenants' roots live beneath the local
+ * operator's (`tenantRoot`, review on #575). Org roots never nest, so no store
+ * has output of its own under an `orgs/` segment.
+ */
+const HIDDEN_AREAS = ["cache", "jobs", "orgs"] as const;
+
 function isHidden(posix: string): boolean {
-  return (
-    posix === "cache" || posix.startsWith("cache/") || posix === "jobs" || posix.startsWith("jobs/")
-  );
+  return HIDDEN_AREAS.some((area) => posix === area || posix.startsWith(`${area}/`));
 }
 
 /** Whether `path` is an existing directory; false for anything else, missing included. */
@@ -31,18 +35,15 @@ async function isDirectory(path: string): Promise<boolean> {
 
 /**
  * Output as files under `<outputRoot>`: renders and proofs at their relative
- * paths, packages under `packages/<campaignId>/<platformId>/`. The root is
- * resolved per call unless one is given, the same shape the other file stores use.
+ * paths, packages under `packages/<campaignId>/<platformId>/`. The root is the one
+ * the composition root built this store with (D167).
  */
 export class FsOutputStore implements OutputStorePort {
-  private readonly customRoot?: string;
+  /** Resolved once at construction; the composition root decides it (D167). */
+  private readonly root: string;
 
-  constructor(root?: string) {
-    if (root) this.customRoot = resolve(root);
-  }
-
-  private get root(): string {
-    return this.customRoot ?? resolve(outputRoot());
+  constructor(root: string) {
+    this.root = resolve(root);
   }
 
   async openOutput(relativePath: string): Promise<OutputLookup> {

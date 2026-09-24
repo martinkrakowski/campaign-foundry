@@ -20,6 +20,7 @@ import { campaignReportPath } from "../ports/fs-report-store.js";
 import { resetReportStore, setReportStore } from "../ports/index.js";
 import { hashBytes } from "../brief-files.js";
 
+import { LOCAL_TENANT } from "../tenant.js";
 // node:fs/promises is an ESM namespace (not spy-able), so the report's write path is
 // routed through an overridable hook. A test can land half a payload and pause — the
 // torn file a crash leaves behind — and let a reader run while it is on disk. Left
@@ -90,16 +91,16 @@ describe("report persistence", () => {
   });
 
   test("reportRevision is the digest of the stored bytes, and moves when they do", async () => {
-    expect(await reportRevision("camp")).toBeUndefined();
+    expect(await reportRevision(LOCAL_TENANT, "camp")).toBeUndefined();
 
-    await writeReport(result([asset()]));
-    const first = await reportRevision("camp");
+    await writeReport(LOCAL_TENANT, result([asset()]));
+    const first = await reportRevision(LOCAL_TENANT, "camp");
     // Not a field on the document: the digest of the file, absent from the payload.
     expect(typeof first).toBe("string");
     expect(readFileSync(campaignReportPath(root, "camp")!, "utf8")).not.toContain(first!);
 
-    await writeReport(result([asset({ complianceScore: 0.7 })]));
-    expect(await reportRevision("camp")).not.toBe(first);
+    await writeReport(LOCAL_TENANT, result([asset({ complianceScore: 0.7 })]));
+    expect(await reportRevision(LOCAL_TENANT, "camp")).not.toBe(first);
   });
 
   test("reportRevision digests the stored bytes, not a re-encoding of them", async () => {
@@ -114,39 +115,39 @@ describe("report persistence", () => {
     ]);
     writeFileSync(campaignReportPath(root, "camp")!, stored);
 
-    const revision = await reportRevision("camp");
+    const revision = await reportRevision(LOCAL_TENANT, "camp");
     expect(revision).toBe(hashBytes(stored));
     expect(revision).not.toBe(hashBytes(Buffer.from(stored.toString("utf8"), "utf8")));
   });
 
   test("reportRevision is undefined for an unsafe id and throws when the file cannot be read", async () => {
-    expect(await reportRevision("../evil")).toBeUndefined();
+    expect(await reportRevision(LOCAL_TENANT, "../evil")).toBeUndefined();
 
     // A directory where the report should be: not ENOENT, so it is not "nothing stored".
     mkdirSync(campaignReportPath(root, "camp")!, { recursive: true });
-    await expect(reportRevision("camp")).rejects.toThrow();
+    await expect(reportRevision(LOCAL_TENANT, "camp")).rejects.toThrow();
   });
 
   test("readReport returns the parsed per-campaign report", async () => {
-    await writeReport(result([asset()]));
-    await expect(readReport("camp")).resolves.toMatchObject({
+    await writeReport(LOCAL_TENANT, result([asset()]));
+    await expect(readReport(LOCAL_TENANT, "camp")).resolves.toMatchObject({
       halted: false,
       assets: [expect.objectContaining({ productId: "alpha" })],
     });
   });
 
   test("readReport returns undefined for an unsafe id", async () => {
-    await expect(readReport("../evil")).resolves.toBeUndefined();
+    await expect(readReport(LOCAL_TENANT, "../evil")).resolves.toBeUndefined();
   });
 
   test("readReport returns undefined when the file is missing", async () => {
-    await expect(readReport("camp")).resolves.toBeUndefined();
+    await expect(readReport(LOCAL_TENANT, "camp")).resolves.toBeUndefined();
   });
 
   test("readReport rejects a stored report that does not parse: unreadable is not absent", async () => {
     mkdirSync(resolve(root, "reports"), { recursive: true });
     writeFileSync(resolve(root, "reports", "camp.json"), "{not json");
-    await expect(readReport("camp")).rejects.toThrow(SyntaxError);
+    await expect(readReport(LOCAL_TENANT, "camp")).rejects.toThrow(SyntaxError);
   });
 
   test("a guarded re-roll over a corrupt report fails and leaves its bytes as they were", async () => {
@@ -154,15 +155,15 @@ describe("report persistence", () => {
     const path = resolve(root, "reports", "camp.json");
     writeFileSync(path, "{not json");
     // The guard hashes the same corrupt bytes, so it agrees; only the read can refuse.
-    const revision = await reportRevision("camp");
+    const revision = await reportRevision(LOCAL_TENANT, "camp");
     await expect(
-      writeReport(result([asset()]), { merge: true, expectedRevision: revision }),
+      writeReport(LOCAL_TENANT, result([asset()]), { merge: true, expectedRevision: revision }),
     ).rejects.toThrow(SyntaxError);
     expect(readFileSync(path, "utf8")).toBe("{not json");
   });
 
   test("writes the per-campaign report only, deriving brandCompliant (density AND logo)", async () => {
-    const path = await writeReport(result([asset({ logoApplied: false }), beta()]));
+    const path = await writeReport(LOCAL_TENANT, result([asset({ logoApplied: false }), beta()]));
     expect(path).toBe(resolve(root, "reports", "camp.json"));
 
     const per = readAssets(path);
@@ -173,8 +174,10 @@ describe("report persistence", () => {
   });
 
   test("merge overlays regenerated cells onto the prior report by identity", async () => {
-    await writeReport(result([asset(), beta()]));
-    const path = await writeReport(result([asset({ complianceScore: 0.9 })]), { merge: true });
+    await writeReport(LOCAL_TENANT, result([asset(), beta()]));
+    const path = await writeReport(LOCAL_TENANT, result([asset({ complianceScore: 0.9 })]), {
+      merge: true,
+    });
 
     const per = readAssets(path);
     expect(per).toHaveLength(2); // beta preserved, alpha replaced
@@ -182,21 +185,21 @@ describe("report persistence", () => {
   });
 
   test("merge from a missing prior report starts empty", async () => {
-    const path = await writeReport(result([asset()]), { merge: true });
+    const path = await writeReport(LOCAL_TENANT, result([asset()]), { merge: true });
     expect(readAssets(path)).toHaveLength(1);
   });
 
   test("a merge whose report moved under it is refused, and writes nothing", async () => {
-    await writeReport(result([asset(), beta()]));
-    const stale = await reportRevision("camp");
+    await writeReport(LOCAL_TENANT, result([asset(), beta()]));
+    const stale = await reportRevision(LOCAL_TENANT, "camp");
 
     // Another run's re-roll lands while this one is still going.
-    await writeReport(result([asset({ complianceScore: 0.7 })]), { merge: true });
-    const current = await reportRevision("camp");
+    await writeReport(LOCAL_TENANT, result([asset({ complianceScore: 0.7 })]), { merge: true });
+    const current = await reportRevision(LOCAL_TENANT, "camp");
 
     // Before this lane: both merges answered 200 and one of the two was gone.
     await expect(
-      writeReport(result([gamma()]), { merge: true, expectedRevision: stale }),
+      writeReport(LOCAL_TENANT, result([gamma()]), { merge: true, expectedRevision: stale }),
     ).rejects.toMatchObject({
       code: "ECONFLICT",
       revision: current,
@@ -210,10 +213,10 @@ describe("report persistence", () => {
   });
 
   test("a merge carrying the revision it read is accepted, and keeps the base it merged", async () => {
-    await writeReport(result([asset(), beta()]));
-    const revision = await reportRevision("camp");
+    await writeReport(LOCAL_TENANT, result([asset(), beta()]));
+    const revision = await reportRevision(LOCAL_TENANT, "camp");
 
-    const path = await writeReport(result([asset({ complianceScore: 0.9 })]), {
+    const path = await writeReport(LOCAL_TENANT, result([asset({ complianceScore: 0.9 })]), {
       merge: true,
       expectedRevision: revision,
     });
@@ -228,7 +231,10 @@ describe("report persistence", () => {
   test("a merge that started with no report is accepted while none is stored", async () => {
     // `null` is the absent case: the run began against no report, and nothing has
     // appeared since, so the write goes through.
-    const path = await writeReport(result([asset()]), { merge: true, expectedRevision: null });
+    const path = await writeReport(LOCAL_TENANT, result([asset()]), {
+      merge: true,
+      expectedRevision: null,
+    });
     expect(readAssets(path).map((a) => a.productId)).toEqual(["alpha"]);
   });
 
@@ -237,12 +243,12 @@ describe("report persistence", () => {
     // report. Absence is an expectation, so this run is refused rather than
     // overwriting a report it never saw.
     await expect(
-      writeReport(result([asset()]), { merge: true, expectedRevision: null }),
+      writeReport(LOCAL_TENANT, result([asset()]), { merge: true, expectedRevision: null }),
     ).resolves.toBe(campaignReportPath(root, "camp"));
-    const appeared = await reportRevision("camp");
+    const appeared = await reportRevision(LOCAL_TENANT, "camp");
 
     await expect(
-      writeReport(result([beta()]), { merge: true, expectedRevision: null }),
+      writeReport(LOCAL_TENANT, result([beta()]), { merge: true, expectedRevision: null }),
     ).rejects.toMatchObject({
       code: "ECONFLICT",
       revision: appeared,
@@ -256,11 +262,11 @@ describe("report persistence", () => {
   });
 
   test("without expectedRevision the write is unconditional, as both stores are", async () => {
-    await writeReport(result([asset(), beta()]));
+    await writeReport(LOCAL_TENANT, result([asset(), beta()]));
     // The report moves on disk; a write that named no revision is still not refused.
     writeFileSync(campaignReportPath(root, "camp")!, JSON.stringify({ assets: [beta()] }));
 
-    const path = await writeReport(result([gamma()]), { merge: true });
+    const path = await writeReport(LOCAL_TENANT, result([gamma()]), { merge: true });
     expect(
       readAssets(path)
         .map((a) => a.productId)
@@ -269,14 +275,15 @@ describe("report persistence", () => {
   });
 
   test("a guarded merge with no campaign id is refused as idless, before any revision check", async () => {
-    await writeReport(result([asset()]));
-    const stale = await reportRevision("camp");
-    await writeReport(result([asset({ complianceScore: 0.7 })]));
+    await writeReport(LOCAL_TENANT, result([asset()]));
+    const stale = await reportRevision(LOCAL_TENANT, "camp");
+    await writeReport(LOCAL_TENANT, result([asset({ complianceScore: 0.7 })]));
 
     // A run with no campaign id has no report to guard (PT-0a): the refusal is the
     // missing id, never a conflict against some other campaign's report.
     await expect(
       writeReport(
+        LOCAL_TENANT,
         { halted: false, assets: [asset()], log: undefined } as unknown as PipelineResult,
         { merge: true, expectedRevision: stale },
       ),
@@ -502,6 +509,7 @@ describe("report persistence", () => {
       territories: ["US"],
     };
     const path = await writeReport(
+      LOCAL_TENANT,
       result([
         asset({
           format: "motion",
@@ -513,7 +521,7 @@ describe("report persistence", () => {
     );
     const per = readAssets(path);
     expect(per[0].audioRights).toEqual(rights);
-    const stored = await readReport("camp");
+    const stored = await readReport(LOCAL_TENANT, "camp");
     const rows = (stored as { assets: unknown[] }).assets;
     expect(isPersistedAsset(rows[0])).toBe(true);
     expect((rows[0] as { audioRights: unknown }).audioRights).toEqual(rights);
@@ -605,12 +613,13 @@ describe("report persistence", () => {
       seed: 2,
       format: "static",
     });
-    await writeReport({
+    await writeReport(LOCAL_TENANT, {
       ...result([v0, v1]),
       policyHash: "abc",
       seed: 42,
     });
     const path = await writeReport(
+      LOCAL_TENANT,
       {
         ...result([asset({ ...v0, complianceScore: 0.9, seed: 99 })]),
         policyHash: "abc",
@@ -641,7 +650,7 @@ describe("report persistence", () => {
         ],
       }),
     );
-    const path = await writeReport(result([asset()]), { merge: true });
+    const path = await writeReport(LOCAL_TENANT, result([asset()]), { merge: true });
 
     expect(
       readAssets(path)
@@ -657,13 +666,13 @@ describe("report persistence", () => {
       resolve(root, "reports", "camp.json"),
       JSON.stringify({ assets: "not-an-array" }),
     );
-    const path = await writeReport(result([asset()]), { merge: true });
+    const path = await writeReport(LOCAL_TENANT, result([asset()]), { merge: true });
     expect(readAssets(path)).toHaveLength(1);
   });
 
   test("refuses a run that lacks a campaign id, writing nothing", async () => {
     await expect(
-      writeReport({
+      writeReport(LOCAL_TENANT, {
         halted: false,
         assets: [asset()],
         log: undefined,
@@ -675,7 +684,7 @@ describe("report persistence", () => {
 
   test("a reader racing a write never parses a partial report", async () => {
     // Seed a whole report, so the racing reader has a previous version to find.
-    await writeReport(result([asset()]));
+    await writeReport(LOCAL_TENANT, result([asset()]));
     const target = campaignReportPath(root, "camp")!;
     const real = await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
 
@@ -693,11 +702,13 @@ describe("report persistence", () => {
       await real.writeFile(path, bytes);
     };
 
-    const writing = writeReport(result([asset({ complianceScore: 0.9 }), beta()]));
+    const writing = writeReport(LOCAL_TENANT, result([asset({ complianceScore: 0.9 }), beta()]));
     await halfWritten;
     // The writer is mid-write and a reader runs. It must see the whole prior report,
     // never the half-payload the writer has staged.
-    await expect(readReport("camp")).resolves.toMatchObject({ assets: expect.any(Array) });
+    await expect(readReport(LOCAL_TENANT, "camp")).resolves.toMatchObject({
+      assets: expect.any(Array),
+    });
     release();
     await writing;
     expect(
@@ -708,14 +719,14 @@ describe("report persistence", () => {
   });
 
   test("a write that fails before the rename leaves the previous report intact", async () => {
-    await writeReport(result([asset()]));
+    await writeReport(LOCAL_TENANT, result([asset()]));
     const target = campaignReportPath(root, "camp")!;
     const before = readFileSync(target);
     fsHook.rename = async () => {
       throw new Error("simulated crash before the rename");
     };
 
-    await expect(writeReport(result([beta()]))).rejects.toThrow(
+    await expect(writeReport(LOCAL_TENANT, result([beta()]))).rejects.toThrow(
       "simulated crash before the rename",
     );
     // The old bytes survive and nothing half-written is left behind.
@@ -724,7 +735,7 @@ describe("report persistence", () => {
   });
 
   test("a write that fails before its temp exists surfaces that failure, not the cleanup's", async () => {
-    await writeReport(result([asset()]));
+    await writeReport(LOCAL_TENANT, result([asset()]));
     const target = campaignReportPath(root, "camp")!;
     const before = readFileSync(target);
     // The staging write itself fails, so there is no temp for the cleanup to unlink:
@@ -733,7 +744,9 @@ describe("report persistence", () => {
       throw new Error("simulated disk full");
     };
 
-    await expect(writeReport(result([beta()]))).rejects.toThrow("simulated disk full");
+    await expect(writeReport(LOCAL_TENANT, result([beta()]))).rejects.toThrow(
+      "simulated disk full",
+    );
     expect(readFileSync(target)).toEqual(before);
   });
 
@@ -746,7 +759,7 @@ describe("report persistence", () => {
       await real.rename(from, to);
     };
 
-    await writeReport(result([asset()]));
+    await writeReport(LOCAL_TENANT, result([asset()]));
 
     // The report is staged: written in place it is a torn file a reader can parse.
     expect(renames).toHaveLength(1);
@@ -788,13 +801,15 @@ describe("reports go through the report store (PT-0a)", () => {
         },
       });
 
-      await expect(writeReport(result([asset()]))).resolves.toBe("memory:camp");
-      await writeReport(result([beta()]), {
+      await expect(writeReport(LOCAL_TENANT, result([asset()]))).resolves.toBe("memory:camp");
+      await writeReport(LOCAL_TENANT, result([beta()]), {
         merge: true,
-        expectedRevision: await reportRevision("camp"),
+        expectedRevision: await reportRevision(LOCAL_TENANT, "camp"),
       });
 
-      expect(((await readReport("camp")) as { assets: unknown[] }).assets).toHaveLength(2);
+      expect(
+        ((await readReport(LOCAL_TENANT, "camp")) as { assets: unknown[] }).assets,
+      ).toHaveLength(2);
       expect(calls).toEqual([
         "write:camp",
         "revision:camp",
@@ -823,7 +838,7 @@ describe("reports go through the report store (PT-0a)", () => {
         return id;
       },
     });
-    await expect(writeReport(result([asset()]), { merge: true })).rejects.toThrow(
+    await expect(writeReport(LOCAL_TENANT, result([asset()]), { merge: true })).rejects.toThrow(
       "store unavailable",
     );
     expect(writes).toEqual([]);

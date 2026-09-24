@@ -5,6 +5,7 @@ import { isExistsError, isErrno, SYMLINK_WRITE_ERROR } from "../../lib/brief-fil
 import { parseBrief } from "../../lib/load-brief.js";
 import { getAssetStore, getBriefStore } from "../../lib/ports/index.js";
 
+import { LOCAL_TENANT } from "../../lib/tenant.js";
 /**
  * POST /campaigns/briefs — persist a campaign brief.
  *
@@ -32,8 +33,8 @@ export default defineEventHandler(async (event) => {
   const rawRevision = getQuery(event).revision;
   const expectedRevision = Array.isArray(rawRevision) ? rawRevision[0] : rawRevision;
   try {
-    const stored = await getBriefStore().withBriefLock(brief.id, async () => {
-      const existing = await getBriefStore().findBriefFileById(brief.id);
+    const stored = await getBriefStore(LOCAL_TENANT).withBriefLock(brief.id, async () => {
+      const existing = await getBriefStore(LOCAL_TENANT).findBriefFileById(brief.id);
       if (existing && !replace) {
         const existErr = new Error(`Brief "${brief.id}" already exists.`);
         (existErr as { code?: string }).code = "EEXIST";
@@ -44,7 +45,7 @@ export default defineEventHandler(async (event) => {
       const sourceBriefIds = extractSourceAssetBriefIds(brief, brief.id);
       if (sourceBriefIds.length > 0) {
         if (replace && expectedRevision !== undefined) {
-          const currentRev = await getBriefStore().getRevision(brief.id);
+          const currentRev = await getBriefStore(LOCAL_TENANT).getRevision(brief.id);
           if (currentRev !== expectedRevision) {
             const conflictErr = new Error("Brief was modified by another user.");
             (conflictErr as { code?: string; revision?: string }).code = "ECONFLICT";
@@ -53,15 +54,15 @@ export default defineEventHandler(async (event) => {
           }
         }
         for (const fromId of sourceBriefIds) {
-          const pathMap = await getAssetStore().copyAssets(fromId, brief.id);
+          const pathMap = await getAssetStore(LOCAL_TENANT).copyAssets(fromId, brief.id);
           brief = rewriteAssetPaths(brief, fromId, brief.id, pathMap);
         }
       }
 
       if (replace) {
-        return await getBriefStore().replaceBrief(brief, { expectedRevision });
+        return await getBriefStore(LOCAL_TENANT).replaceBrief(brief, { expectedRevision });
       }
-      return await getBriefStore().createBrief(brief);
+      return await getBriefStore(LOCAL_TENANT).createBrief(brief);
     });
     setResponseStatus(event, 201);
     // The stored revision rides along: the editor dispatches it into its source so the

@@ -5,6 +5,7 @@ import { CANONICAL_TEMPLATES, type CreativeTemplate } from "@campaignfoundry/Cam
 import { FsTemplateStore } from "../fs-template-store.js";
 import { getTemplateStore, resetTemplateStore, setTemplateStore } from "../index.js";
 
+import { LOCAL_TENANT } from "../../tenant.js";
 describe("FsTemplateStore", () => {
   test("listTemplates returns the three canonical seeds with layers in declared order", async () => {
     const store = new FsTemplateStore();
@@ -133,13 +134,13 @@ describe("FsTemplateStore", () => {
   test("the store is registered as a lazily-created singleton", () => {
     resetTemplateStore();
     try {
-      const first = getTemplateStore();
+      const first = getTemplateStore(LOCAL_TENANT);
       expect(first).toBeInstanceOf(FsTemplateStore);
-      expect(getTemplateStore()).toBe(first);
+      expect(getTemplateStore(LOCAL_TENANT)).toBe(first);
 
       const replacement = new FsTemplateStore();
       setTemplateStore(replacement);
-      expect(getTemplateStore()).toBe(replacement);
+      expect(getTemplateStore(LOCAL_TENANT)).toBe(replacement);
     } finally {
       resetTemplateStore();
     }

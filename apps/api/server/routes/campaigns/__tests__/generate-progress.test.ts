@@ -8,6 +8,7 @@ import { setCapabilities } from "../../../lib/capabilities.js";
 import generateHandler from "../generate.post.js";
 import jobHandler from "../jobs/[id].get.js";
 
+import { LOCAL_TENANT } from "../../../lib/tenant.js";
 /**
  * The seam under test is the route's own wiring, so the pipeline is replaced by
  * a stand-in that does exactly two things a real run does — report progress,
@@ -142,7 +143,13 @@ describe("POST /campaigns/generate — the job carries the run's real progress",
       expect(settled.error).toBe("stopped by the test");
       // Without this the test passes whether or not the rejection was ever
       // raised — the run fails for its own reasons either way.
-      expect(spy).toHaveBeenCalledWith(expect.any(String), 2, 5);
+      // The run passes its captured environment, which carries the tenant it acts for.
+      expect(spy).toHaveBeenCalledWith(
+        expect.objectContaining({ tenant: LOCAL_TENANT }),
+        expect.any(String),
+        2,
+        5,
+      );
     } finally {
       spy.mockRestore();
     }

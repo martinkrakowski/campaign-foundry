@@ -22,6 +22,7 @@ import packageHandler from "../campaigns/package.post.js";
 import jobHandler from "../campaigns/jobs/[id].get.js";
 import outputHandler from "../output/[...path].get.js";
 
+import { LOCAL_TENANT } from "../../lib/tenant.js";
 // node:fs/promises is an ESM namespace (not spy-able); route `open` through an
 // overridable hook so a test can swap the checked file for a symlink between
 // resolveConfinedForRead's check and the output route's own open (TOCTOU).
@@ -610,7 +611,7 @@ describe("POST /campaigns/generate", () => {
   });
 
   test("refuses a second run for a campaign whose job is still running with 409, handing back the running job's handle", async () => {
-    const id = await createJob("camp");
+    const id = await createJob(LOCAL_TENANT, "camp");
     try {
       const res = await call(brief());
       expect(res.status).toBe(409);
@@ -622,7 +623,7 @@ describe("POST /campaigns/generate", () => {
         campaignId: "camp",
       });
     } finally {
-      await failJob(id, "test teardown");
+      await failJob(LOCAL_TENANT, id, "test teardown");
     }
   });
 
@@ -633,7 +634,7 @@ describe("POST /campaigns/generate", () => {
     // else's running campaign to make room.
     const ids: string[] = [];
     try {
-      for (let i = 0; i < MAX_JOBS; i++) ids.push(await createJob(`other-${i}`));
+      for (let i = 0; i < MAX_JOBS; i++) ids.push(await createJob(LOCAL_TENANT, `other-${i}`));
       const res = await call(brief());
       expect(res.status).toBe(503);
       expect(res.headers.get("retry-after")).toBe("30");
@@ -641,7 +642,7 @@ describe("POST /campaigns/generate", () => {
       expect(body.error).toMatch(/job slots are running/);
       expect(body.campaignId).toBe("camp");
     } finally {
-      for (const id of ids) await failJob(id, "test teardown");
+      for (const id of ids) await failJob(LOCAL_TENANT, id, "test teardown");
     }
   });
 
@@ -673,7 +674,7 @@ describe("POST /campaigns/generate", () => {
 
 describe("GET /campaigns/jobs/:id", () => {
   test("returns a running job by id", async () => {
-    const id = await createJob("camp");
+    const id = await createJob(LOCAL_TENANT, "camp");
     const res = await jobCall(id);
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ status: "running", done: 0, total: 0, log: null });

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createApp, createRouter, toWebHandler, type EventHandler } from "h3";
 
+import { LOCAL_TENANT } from "../../../lib/tenant.js";
 const web = async (root: string) => {
   vi.resetModules();
   process.env.PROJECT_ROOT = root;
@@ -167,7 +168,7 @@ describe("GET /campaigns/assets", () => {
     const handler = await web(dir);
     const { getAssetStore } = await import("../../../lib/ports/index.js");
     const spy = vi
-      .spyOn(getAssetStore(), "listAssets")
+      .spyOn(getAssetStore(LOCAL_TENANT), "listAssets")
       .mockRejectedValueOnce(new Error("Disk error"));
 
     const res = await get(handler, "?briefId=camp");

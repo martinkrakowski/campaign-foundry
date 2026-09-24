@@ -4,9 +4,9 @@
   "mutations": [
     {
       "file": "apps/api/server/lib/report.ts",
-      "before": "  return getReportStore().readReport(campaignId);",
+      "before": "  return getReportStore(scope).readReport(campaignId);",
       "after": "  return undefined;",
-      "because": "reads that stop going through the report store return nothing, so the swapped-in store sees no read and the merged report is not found.",
+      "because": "reads that stop going through the report store return nothing, so the swapped-in store sees no read and the merged report is not found. Re-anchored 2026-09-24 by PT-0b2: the calls it quotes now take the tenant (D167); the mutation is unchanged in meaning. Re-anchored 2026-09-24 in PT-0b2 review: helpers and the run take a StorageScope (a tenant or the run's captured environment); the mutation is unchanged in meaning.",
       "command": [
         "yarn",
         "vitest",

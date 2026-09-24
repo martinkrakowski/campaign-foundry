@@ -3,7 +3,6 @@ import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { SAFE_ID_PATTERN } from "@campaignfoundry/CampaignOrchestration";
 import { hashBytes, isErrno } from "../brief-files.js";
-import { outputRoot } from "../config.js";
 import type { ReportStorePort } from "./report-store.port.js";
 
 /**
@@ -38,18 +37,15 @@ async function writeAtomic(dest: string, content: string): Promise<void> {
 }
 
 /**
- * Reports as files under `<outputRoot>/reports/<campaignId>.json`. The root is
- * resolved per call unless one is given, the same shape `FsJobStore` uses.
+ * Reports as files under `<root>/reports/<campaignId>.json`, where the root is the
+ * one the composition root built this store with (D167).
  */
 export class FsReportStore implements ReportStorePort {
-  private readonly customRoot?: string;
+  /** Resolved once at construction; the composition root decides it (D167). */
+  private readonly root: string;
 
-  constructor(root?: string) {
-    if (root) this.customRoot = resolve(root);
-  }
-
-  private get root(): string {
-    return this.customRoot ?? outputRoot();
+  constructor(root: string) {
+    this.root = resolve(root);
   }
 
   async readReport(campaignId: string): Promise<unknown> {

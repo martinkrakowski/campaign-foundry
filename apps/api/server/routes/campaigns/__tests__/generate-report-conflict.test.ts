@@ -8,6 +8,7 @@ import { setCapabilities } from "../../../lib/capabilities.js";
 import generateHandler from "../generate.post.js";
 import jobHandler from "../jobs/[id].get.js";
 
+import { LOCAL_TENANT } from "../../../lib/tenant.js";
 /**
  * The gate a run waits on inside `runCampaign`. A test that leaves it open holds the
  * run between the read it started from and the write it ends with, which is the
@@ -205,6 +206,6 @@ describe("POST /campaigns/generate — the report merge is a conditional write",
     // persisted stayed "running" and every later request for this campaign was turned
     // away as already in progress — a run nobody could ever clear. Read before the
     // claim, the failure leaves no job behind at all.
-    expect(await getRunningJobId("camp")).toBeUndefined();
+    expect(await getRunningJobId(LOCAL_TENANT, "camp")).toBeUndefined();
   });
 });

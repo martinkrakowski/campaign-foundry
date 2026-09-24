@@ -20,6 +20,7 @@ import {
 } from "@campaignfoundry/CampaignOrchestration";
 import { isBriefSourceName } from "../brief-files.js";
 
+import { LOCAL_TENANT } from "../tenant.js";
 const origRoot = process.env.PROJECT_ROOT;
 
 const pool = (over: Partial<CopyPool> = {}): CopyPool => ({
@@ -51,17 +52,17 @@ describe("copy pool persistence", () => {
   test("writePool then readPool round-trips JSON under briefs/<id>/pools.json", async () => {
     const { writePool, readPool } = await filesFor(dir);
     const value = pool();
-    const stored = await writePool(value);
-    expect((await readPool("camp"))?.pool).toEqual(value);
+    const stored = await writePool(LOCAL_TENANT, value);
+    expect((await readPool(LOCAL_TENANT, "camp"))?.pool).toEqual(value);
     const raw = readFileSync(join(dir, "briefs", "camp", "pools.json"), "utf8");
     expect(JSON.parse(raw)).toEqual(value);
     expect(stored.revision).toBe(createHash("sha256").update(raw).digest("hex"));
-    expect((await readPool("camp"))?.revision).toBe(stored.revision);
+    expect((await readPool(LOCAL_TENANT, "camp"))?.revision).toBe(stored.revision);
   });
 
   test("readPool returns undefined when the file is missing", async () => {
     const { readPool } = await filesFor(dir);
-    expect(await readPool("camp")).toBeUndefined();
+    expect(await readPool(LOCAL_TENANT, "camp")).toBeUndefined();
   });
 
   test("a briefs/<id>/ directory is not listed as a brief source", async () => {
@@ -71,10 +72,10 @@ describe("copy pool persistence", () => {
       join(dir, "briefs", "camp.yaml"),
       "id: camp\ntargetRegion: DE\ntargetAudience: a\ncampaignMessage: Hi\nproducts:\n  - id: alpha\n  - id: beta\n",
     );
-    await writePool(pool());
+    await writePool(LOCAL_TENANT, pool());
 
     const { getBriefStore } = await import("../ports/index.js");
-    expect(await getBriefStore().findBriefById("camp")).toMatchObject({
+    expect(await getBriefStore(LOCAL_TENANT).findBriefById("camp")).toMatchObject({
       file: "camp.yaml",
       brief: { id: "camp" },
     });
@@ -86,16 +87,21 @@ describe("copy pool persistence", () => {
 
   test("writePool overwrites atomically and does not leave a tmp sibling", async () => {
     const { writePool, readPool } = await filesFor(dir);
-    await writePool(pool());
-    await writePool(pool({ entries: [{ id: "h2", text: "Stay hydrated", status: "approved" }] }));
-    expect(await readPool("camp")).toMatchObject({ pool: { entries: [{ id: "h2" }] } });
+    await writePool(LOCAL_TENANT, pool());
+    await writePool(
+      LOCAL_TENANT,
+      pool({ entries: [{ id: "h2", text: "Stay hydrated", status: "approved" }] }),
+    );
+    expect(await readPool(LOCAL_TENANT, "camp")).toMatchObject({
+      pool: { entries: [{ id: "h2" }] },
+    });
     expect(readdirSync(join(dir, "briefs", "camp"))).toEqual(["pools.json"]);
   });
 
   test("cleans up the temp file when the atomic rename fails", async () => {
     const { writePool } = await filesFor(dir);
     mkdirSync(join(dir, "briefs", "camp", "pools.json"), { recursive: true });
-    await expect(writePool(pool())).rejects.toThrow();
+    await expect(writePool(LOCAL_TENANT, pool())).rejects.toThrow();
     expect(readdirSync(join(dir, "briefs", "camp")).some((name) => name.endsWith(".tmp"))).toBe(
       false,
     );
@@ -105,15 +111,15 @@ describe("copy pool persistence", () => {
     const { writePool } = await filesFor(dir);
     mkdirSync(join(dir, "briefs"), { recursive: true });
     writeFileSync(join(dir, "briefs", "camp"), "not-a-dir");
-    await expect(writePool(pool())).rejects.toThrow();
+    await expect(writePool(LOCAL_TENANT, pool())).rejects.toThrow();
   });
 
   test("readPool rejects a file that is not JSON as an invalid pool naming the file", async () => {
     const { readPool, InvalidCopyPoolError } = await filesFor(dir);
     mkdirSync(join(dir, "briefs", "camp"), { recursive: true });
     writeFileSync(join(dir, "briefs", "camp", "pools.json"), "{not-json");
-    await expect(readPool("camp")).rejects.toThrow(InvalidCopyPoolError);
-    await expect(readPool("camp")).rejects.toThrow(
+    await expect(readPool(LOCAL_TENANT, "camp")).rejects.toThrow(InvalidCopyPoolError);
+    await expect(readPool(LOCAL_TENANT, "camp")).rejects.toThrow(
       /^Copy pool briefs\/camp\/pools\.json is invalid: not JSON/,
     );
   });
@@ -121,7 +127,7 @@ describe("copy pool persistence", () => {
   test("readPool rethrows a non-ENOENT filesystem error", async () => {
     const { readPool } = await filesFor(dir);
     mkdirSync(join(dir, "briefs", "camp", "pools.json"), { recursive: true });
-    await expect(readPool("camp")).rejects.toThrow(/EISDIR/);
+    await expect(readPool(LOCAL_TENANT, "camp")).rejects.toThrow(/EISDIR/);
   });
 
   test.each([
@@ -213,8 +219,8 @@ describe("copy pool persistence", () => {
       writeFileSync(join(dir, "briefs", "camp", "pools.json"), raw);
       expect(isCopyPool(JSON.parse(raw))).toBe(false);
       expect(copyPoolProblem(JSON.parse(raw))).toBe(problem);
-      await expect(readPool("camp")).rejects.toThrow(InvalidCopyPoolError);
-      await expect(readPool("camp")).rejects.toThrow(
+      await expect(readPool(LOCAL_TENANT, "camp")).rejects.toThrow(InvalidCopyPoolError);
+      await expect(readPool(LOCAL_TENANT, "camp")).rejects.toThrow(
         `Copy pool briefs/camp/pools.json is invalid: ${problem}.`,
       );
     },
@@ -232,10 +238,13 @@ describe("copy pool persistence", () => {
   test("concurrent writePool calls use distinct temp files and both settle", async () => {
     const { writePool, readPool } = await filesFor(dir);
     await Promise.all([
-      writePool(pool()),
-      writePool(pool({ entries: [{ id: "h2", text: "Stay hydrated", status: "approved" }] })),
+      writePool(LOCAL_TENANT, pool()),
+      writePool(
+        LOCAL_TENANT,
+        pool({ entries: [{ id: "h2", text: "Stay hydrated", status: "approved" }] }),
+      ),
     ]);
-    expect((await readPool("camp"))?.pool.entries).toHaveLength(1);
+    expect((await readPool(LOCAL_TENANT, "camp"))?.pool.entries).toHaveLength(1);
     expect(readdirSync(join(dir, "briefs", "camp"))).toEqual(["pools.json"]);
   });
 
@@ -246,16 +255,16 @@ describe("copy pool persistence", () => {
     const gate = new Promise<void>((resolve) => {
       release = resolve;
     });
-    const first = withPoolLock("camp", async () => {
+    const first = withPoolLock(LOCAL_TENANT, "camp", async () => {
       await gate;
       order.push("first");
       return 1;
     });
-    const second = withPoolLock("camp", async () => {
+    const second = withPoolLock(LOCAL_TENANT, "camp", async () => {
       order.push("second");
       return 2;
     });
-    const other = withPoolLock("other", async () => {
+    const other = withPoolLock(LOCAL_TENANT, "other", async () => {
       order.push("other");
       return 3;
     });
@@ -269,21 +278,21 @@ describe("copy pool persistence", () => {
   test("withPoolLock keeps serving a brief after a section rejects", async () => {
     const { withPoolLock } = await filesFor(dir);
     await expect(
-      withPoolLock("camp", async () => {
+      withPoolLock(LOCAL_TENANT, "camp", async () => {
         throw new Error("boom");
       }),
     ).rejects.toThrow("boom");
-    expect(await withPoolLock("camp", async () => "ok")).toBe("ok");
+    expect(await withPoolLock(LOCAL_TENANT, "camp", async () => "ok")).toBe("ok");
   });
 
   test("isPoolDirSymlink is false when missing or a real dir, true for a symlink, and rethrows other errors", async () => {
     const { isPoolDirSymlink } = await filesFor(dir);
-    expect(await isPoolDirSymlink("camp")).toBe(false);
+    expect(await isPoolDirSymlink(LOCAL_TENANT, "camp")).toBe(false);
     mkdirSync(join(dir, "briefs", "camp"), { recursive: true });
-    expect(await isPoolDirSymlink("camp")).toBe(false);
+    expect(await isPoolDirSymlink(LOCAL_TENANT, "camp")).toBe(false);
     symlinkSync(join(dir, "briefs", "camp"), join(dir, "briefs", "linked"));
-    expect(await isPoolDirSymlink("linked")).toBe(true);
-    await expect(isPoolDirSymlink("../escape")).rejects.toThrow(
+    expect(await isPoolDirSymlink(LOCAL_TENANT, "linked")).toBe(true);
+    await expect(isPoolDirSymlink(LOCAL_TENANT, "../escape")).rejects.toThrow(
       /Path escapes the allowed directory/,
     );
   });
@@ -317,8 +326,8 @@ describe("planInputFor / pooledPlanner", () => {
     const { planInputFor, wantsHeadlinePool } = await filesFor(dir);
     const plain = brief({ variation: { count: 2 } });
     expect(wantsHeadlinePool(plain)).toBe(false);
-    expect(await planInputFor(plain)).toEqual({ success: true, value: {} });
-    expect(await planInputFor(brief({ variation: undefined }))).toEqual({
+    expect(await planInputFor(LOCAL_TENANT, plain)).toEqual({ success: true, value: {} });
+    expect(await planInputFor(LOCAL_TENANT, brief({ variation: undefined }))).toEqual({
       success: true,
       value: {},
     });
@@ -327,17 +336,18 @@ describe("planInputFor / pooledPlanner", () => {
   test("carries the brief's ratio selection, and only when the brief has the axis", async () => {
     const { planInputFor } = await filesFor(dir);
     const selected = brief({ variation: { count: 2, axes: { ratio: ["1:1", "16:9"] } } });
-    expect(await planInputFor(selected)).toEqual({
+    expect(await planInputFor(LOCAL_TENANT, selected)).toEqual({
       success: true,
       value: { ratios: ["1:1", "16:9"] },
     });
     // absent → the key is absent, so the policy draws every ratio as before
-    expect(await planInputFor(brief({ variation: { count: 2, axes: {} } }))).toEqual({
+    expect(await planInputFor(LOCAL_TENANT, brief({ variation: { count: 2, axes: {} } }))).toEqual({
       success: true,
       value: {},
     });
     // and it composes with the headline pool input
     const pooled = await planInputFor(
+      LOCAL_TENANT,
       brief({ variation: { count: 2, axes: { headline: "pool://copy", ratio: ["9:16"] } } }),
     );
     expect(pooled).toEqual({ success: true, value: { ratios: ["9:16"], headlines: [] } });
@@ -346,8 +356,12 @@ describe("planInputFor / pooledPlanner", () => {
   test("returns the approved texts when the brief draws from pool://copy, or an empty list without a pool", async () => {
     const { planInputFor, wantsHeadlinePool, writePool } = await filesFor(dir);
     expect(wantsHeadlinePool(brief())).toBe(true);
-    expect(await planInputFor(brief())).toEqual({ success: true, value: { headlines: [] } });
+    expect(await planInputFor(LOCAL_TENANT, brief())).toEqual({
+      success: true,
+      value: { headlines: [] },
+    });
     await writePool(
+      LOCAL_TENANT,
       pool({
         entries: [
           { id: "h1", text: "Stay wild", status: "approved" },
@@ -356,7 +370,7 @@ describe("planInputFor / pooledPlanner", () => {
         ],
       }),
     );
-    expect(await planInputFor(brief())).toEqual({
+    expect(await planInputFor(LOCAL_TENANT, brief())).toEqual({
       success: true,
       value: { headlines: ["Stay wild", "Go far"] },
     });
@@ -374,7 +388,7 @@ describe("planInputFor / pooledPlanner", () => {
         entries: [{ id: "h1", text: 1, status: "approved" }],
       }),
     );
-    const result = await planInputFor(brief());
+    const result = await planInputFor(LOCAL_TENANT, brief());
     expect(result.success).toBe(false);
     if (!result.success) {
       expect(result.error).toBeInstanceOf(InvalidCopyPoolError);
@@ -384,7 +398,7 @@ describe("planInputFor / pooledPlanner", () => {
     }
     rmSync(join(dir, "briefs", "camp", "pools.json"));
     mkdirSync(join(dir, "briefs", "camp", "pools.json"));
-    await expect(planInputFor(brief())).rejects.toThrow(/EISDIR/);
+    await expect(planInputFor(LOCAL_TENANT, brief())).rejects.toThrow(/EISDIR/);
   });
 
   test("returns an err when the pool's briefId does not match its directory", async () => {
@@ -398,7 +412,7 @@ describe("planInputFor / pooledPlanner", () => {
     };
     writeFileSync(join(dir, "briefs", "camp", "pools.json"), JSON.stringify(mismatched));
     expect(copyPoolProblem(mismatched)).toBeUndefined();
-    const result = await planInputFor(brief());
+    const result = await planInputFor(LOCAL_TENANT, brief());
     expect(result.success).toBe(false);
     if (!result.success) {
       expect(result.error).toBeInstanceOf(InvalidCopyPoolError);

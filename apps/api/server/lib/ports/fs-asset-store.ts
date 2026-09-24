@@ -1,6 +1,5 @@
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, resolve } from "node:path";
-import { projectRoot } from "@campaignfoundry/shared";
 import { resolveConfined } from "../confined-path.js";
 import { ASSET_NAME_PATTERN, assetContentType } from "../asset-files.js";
 import type { AssetEntry, AssetStorePort } from "./asset-store.port.js";
@@ -10,14 +9,11 @@ import type { AssetEntry, AssetStorePort } from "./asset-store.port.js";
  * Stores assets under `<projectRoot>/assets/inputs/<briefId>/<name>`.
  */
 export class FsAssetStore implements AssetStorePort {
-  private readonly customBaseDir?: string;
+  /** Resolved once at construction; the composition root decides it (D167). */
+  private readonly baseDir: string;
 
-  constructor(baseDir?: string) {
-    if (baseDir) this.customBaseDir = resolve(baseDir);
-  }
-
-  private get baseDir(): string {
-    return this.customBaseDir ?? resolve(projectRoot(), "assets", "inputs");
+  constructor(baseDir: string) {
+    this.baseDir = resolve(baseDir);
   }
 
   getBaseDir(): string {
