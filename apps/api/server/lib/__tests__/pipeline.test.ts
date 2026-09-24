@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -18,6 +18,48 @@ import {
   runCampaign,
 } from "../pipeline.js";
 
+import { runEnvironment, type RunEnvironment } from "../run-environment.js";
+import { LOCAL_TENANT } from "../tenant.js";
+
+/**
+ * Review on #573 (CodeRabbit): record what each GenAI adapter is constructed
+ * with, so a test can see which provider a selection built and with whose
+ * credentials. Thin subclasses: behaviour is the real adapter's.
+ */
+const constructed = vi.hoisted(() => ({
+  openRouter: [] as Array<{ apiKey: string; model?: string }>,
+  gemini: [] as Array<{ apiKey: string; model?: string }>,
+  firefly: [] as Array<{ clientId: string; clientSecret: string }>,
+}));
+vi.mock("@campaignfoundry/CreativeGeneration", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@campaignfoundry/CreativeGeneration")>();
+  class OpenRouter extends actual.OpenRouterImageGenerator {
+    constructor(options: ConstructorParameters<typeof actual.OpenRouterImageGenerator>[0]) {
+      super(options);
+      constructed.openRouter.push({ apiKey: options.apiKey, model: options.model });
+    }
+  }
+  class Gemini extends actual.GeminiImageGenerator {
+    constructor(options: ConstructorParameters<typeof actual.GeminiImageGenerator>[0]) {
+      super(options);
+      constructed.gemini.push({ apiKey: options.apiKey, model: options.model });
+    }
+  }
+  class Firefly extends actual.FireflyImageGenerator {
+    constructor(options: ConstructorParameters<typeof actual.FireflyImageGenerator>[0]) {
+      super(options);
+      constructed.firefly.push({ clientId: options.clientId, clientSecret: options.clientSecret });
+    }
+  }
+  return {
+    ...actual,
+    OpenRouterImageGenerator: OpenRouter,
+    GeminiImageGenerator: Gemini,
+    FireflyImageGenerator: Firefly,
+  };
+});
+/** The local operator's environment, resolved when called so each test's env setup applies. */
+const localEnv = () => runEnvironment(LOCAL_TENANT);
 const brief: CampaignBrief = {
   schemaVersion: BRIEF_SCHEMA_VERSION,
   template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
@@ -72,26 +114,80 @@ describe("pipeline composition root", () => {
 
   test("buildPipeline wires a use case for every generator-selection branch", () => {
     // Construction is lazy (no network), so this exercises each branch of imageGenerator().
-    expect(buildPipeline("procedural")).toBeInstanceOf(GenerateCampaignUseCase);
-    expect(buildPipeline()).toBeInstanceOf(GenerateCampaignUseCase); // default, no keys → procedural floor
-    expect(buildPipeline("firefly")).toBeInstanceOf(GenerateCampaignUseCase); // no Firefly creds → default chain
+    expect(buildPipeline(localEnv(), "procedural")).toBeInstanceOf(GenerateCampaignUseCase);
+    expect(buildPipeline(localEnv())).toBeInstanceOf(GenerateCampaignUseCase); // default, no keys → procedural floor
+    expect(buildPipeline(localEnv(), "firefly")).toBeInstanceOf(GenerateCampaignUseCase); // no Firefly creds → default chain
 
     process.env.OPENROUTER_API_KEY = "o";
-    expect(buildPipeline("x-ai/grok-imagine-image-quality")).toBeInstanceOf(
+    expect(buildPipeline(localEnv(), "x-ai/grok-imagine-image-quality")).toBeInstanceOf(
       GenerateCampaignUseCase,
     ); // explicit OpenRouter model
-    expect(buildPipeline("imagen")).toBeInstanceOf(GenerateCampaignUseCase); // no gemini → OpenRouter
+    expect(buildPipeline(localEnv(), "imagen")).toBeInstanceOf(GenerateCampaignUseCase); // no gemini → OpenRouter
 
     process.env.GEMINI_API_KEY = "g";
-    expect(buildPipeline("imagen")).toBeInstanceOf(GenerateCampaignUseCase); // Imagen + OpenRouter fallback
+    expect(buildPipeline(localEnv(), "imagen")).toBeInstanceOf(GenerateCampaignUseCase); // Imagen + OpenRouter fallback
 
     process.env.FIREFLY_CLIENT_ID = "cid";
     process.env.FIREFLY_CLIENT_SECRET = "secret";
-    expect(buildPipeline("firefly")).toBeInstanceOf(GenerateCampaignUseCase); // Firefly + chain fallback
+    expect(buildPipeline(localEnv(), "firefly")).toBeInstanceOf(GenerateCampaignUseCase); // Firefly + chain fallback
+  });
+
+  test("a run writes where its captured environment says, even after OUTPUT_DIR moves (D167, #567)", async () => {
+    const env = localEnv(); // captured at enqueue
+    const elsewhere = mkdtempSync(join(tmpdir(), "cf-pipeline-elsewhere-"));
+    process.env.OUTPUT_DIR = elsewhere; // what the next test, or the next request, would do
+    try {
+      const r = await runCampaign(env, brief, "procedural");
+      expect(r.success).toBe(true);
+      if (r.success) {
+        const written = r.value.assets[0]!.outputPath;
+        expect(existsSync(join(dir, written))).toBe(true);
+        expect(existsSync(join(elsewhere, written))).toBe(false);
+      }
+    } finally {
+      process.env.OUTPUT_DIR = dir;
+      rmSync(elsewhere, { recursive: true, force: true });
+    }
+  });
+
+  test("provider selection builds from env.providers alone, never from process.env (D167)", () => {
+    // Every key below exists only on the environment object; process.env has none.
+    const withProviders = (providers: RunEnvironment["providers"]): RunEnvironment => ({
+      ...localEnv(),
+      providers,
+    });
+    const reset = () => {
+      constructed.openRouter.length = 0;
+      constructed.gemini.length = 0;
+      constructed.firefly.length = 0;
+    };
+
+    reset();
+    buildPipeline(
+      withProviders({ openRouterKey: "or-key", openRouterImageModel: "or/model" }),
+      "imagen",
+    );
+    expect(constructed.gemini).toEqual([]);
+    expect(constructed.openRouter).toEqual([{ apiKey: "or-key", model: "or/model" }]);
+
+    reset();
+    buildPipeline(withProviders({ geminiKey: "g-key", imagenModel: "imagen-x" }), "imagen");
+    expect(constructed.gemini).toEqual([{ apiKey: "g-key", model: "imagen-x" }]);
+
+    reset();
+    buildPipeline(
+      withProviders({ fireflyClientId: "ff-id", fireflyClientSecret: "ff-secret" }),
+      "firefly",
+    );
+    expect(constructed.firefly).toEqual([{ clientId: "ff-id", clientSecret: "ff-secret" }]);
+
+    reset();
+    buildPipeline(withProviders({}), "firefly"); // no credentials anywhere: nothing GenAI is built
+    expect([constructed.openRouter, constructed.gemini, constructed.firefly]).toEqual([[], [], []]);
   });
 
   test("runCampaign executes fully offline with the procedural model", async () => {
-    const r = await runCampaign(brief, "procedural");
+    const r = await runCampaign(localEnv(), brief, "procedural");
     expect(r.success).toBe(true);
     if (r.success) {
       expect(r.value.assets).toHaveLength(6); // 2 products × 3 ratios × 1 default treatment
@@ -101,6 +197,7 @@ describe("pipeline composition root", () => {
 
   test("runCampaign generates a variation brief from the planner", async () => {
     const r = await runCampaign(
+      localEnv(),
       { ...brief, mode: "variation", variation: { count: 4, seed: 42 } },
       "procedural",
     );
@@ -138,7 +235,7 @@ describe("pipeline composition root", () => {
         mode: "variation",
         variation: { count: 2, seed: 42, axes: { headline: "pool://copy" } },
       };
-      const r = await (await freshRunCampaign())(pooled, "procedural");
+      const r = await (await freshRunCampaign())(localEnv(), pooled, "procedural");
       expect(r.success).toBe(false);
       if (!r.success) expect(r.error.message).toMatch(/briefs\/camp\/pools\.json/);
     } finally {
@@ -165,7 +262,7 @@ describe("pipeline composition root", () => {
         mode: "variation",
         variation: { count: 2, seed: 42, axes: { headline: "pool://copy" } },
       };
-      const r = await (await freshRunCampaign())(pooled, "procedural");
+      const r = await (await freshRunCampaign())(localEnv(), pooled, "procedural");
       expect(r.success).toBe(false);
       if (!r.success) {
         expect(r.error.message).toBe(
@@ -198,7 +295,7 @@ describe("pipeline composition root", () => {
       };
       const run = await freshRunCampaign();
       const compositeAsset = await spyCompositor();
-      const r = await run(pooled, "procedural");
+      const r = await run(localEnv(), pooled, "procedural");
       expect(r.success).toBe(true);
       if (r.success) {
         expect(r.value.assets).toHaveLength(2);
@@ -241,7 +338,7 @@ describe("pipeline composition root", () => {
         mode: "variation",
         variation: { count: 4, seed: 42, axes: { headline: "pool://copy" } },
       };
-      const r = await (await freshRunCampaign())(pooled, "procedural");
+      const r = await (await freshRunCampaign())(localEnv(), pooled, "procedural");
       expect(r.success).toBe(true);
       if (r.success) {
         expect(r.value.halted).toBe(true);
@@ -264,17 +361,18 @@ describe("pipeline composition root", () => {
       mode: "variation",
       variation: { count: 4, seed: 42 },
     };
-    const first = await runCampaign(vbrief, "procedural");
+    const first = await runCampaign(localEnv(), vbrief, "procedural");
     expect(first.success).toBe(true);
     if (!first.success) return;
     const hash = first.value.policyHash as string;
     const target = [{ productId: first.value.assets[0].productId, variantIndex: 0 }];
 
-    const same = await runCampaign(vbrief, "procedural", target, hash);
+    const same = await runCampaign(localEnv(), vbrief, "procedural", target, hash);
     expect(same.success).toBe(true);
     if (same.success) expect(same.value.assets).toHaveLength(1);
 
     const changed = await runCampaign(
+      localEnv(),
       { ...vbrief, variation: { count: 4, seed: 43 } },
       "procedural",
       target,
@@ -289,6 +387,7 @@ describe("pipeline composition root", () => {
     }
 
     const unplannable = await runCampaign(
+      localEnv(),
       { ...vbrief, variation: { count: 999, seed: 42 } },
       "procedural",
       target,
@@ -304,7 +403,7 @@ describe("pipeline composition root", () => {
       mode: "variation",
       variation: { count: 4, seed: 42 },
     };
-    const first = await runCampaign(vbrief, "procedural");
+    const first = await runCampaign(localEnv(), vbrief, "procedural");
     expect(first.success).toBe(true);
     if (!first.success) return;
     const policyHash = first.value.policyHash as string;
@@ -313,7 +412,7 @@ describe("pipeline composition root", () => {
     const target = [{ productId: first.value.assets[0].productId, variantIndex: 0 }];
 
     // Copy unchanged, axes unchanged: proceeds pinned on both.
-    const same = await runCampaign(vbrief, "procedural", target, policyHash, copyHash);
+    const same = await runCampaign(localEnv(), vbrief, "procedural", target, policyHash, copyHash);
     expect(same.success).toBe(true);
     if (same.success) expect(same.value.assets).toHaveLength(1);
 
@@ -321,7 +420,14 @@ describe("pipeline composition root", () => {
     // a naive policyHash-only pin would let this pass and merge new copy into a
     // report whose other cells still show the old campaignMessage. Refused.
     const copyMoved = { ...vbrief, campaignMessage: "A totally different message" };
-    const refused = await runCampaign(copyMoved, "procedural", target, policyHash, copyHash);
+    const refused = await runCampaign(
+      localEnv(),
+      copyMoved,
+      "procedural",
+      target,
+      policyHash,
+      copyHash,
+    );
     expect(refused.success).toBe(false);
     if (!refused.success) {
       expect(refused.error.message).toMatch(
@@ -333,12 +439,19 @@ describe("pipeline composition root", () => {
     // No expectedCopyHash (a report persisted before this field existed): not pinned,
     // even though the copy actually moved — the documented decision (§35): the first
     // re-roll of a pre-existing report stays unguarded on copy.
-    const noPin = await runCampaign(copyMoved, "procedural", target, policyHash, undefined);
+    const noPin = await runCampaign(
+      localEnv(),
+      copyMoved,
+      "procedural",
+      target,
+      policyHash,
+      undefined,
+    );
     expect(noPin.success).toBe(true);
   });
 
   test("runCampaign forwards regenerateOnly targets", async () => {
-    const r = await runCampaign(brief, "procedural", [
+    const r = await runCampaign(localEnv(), brief, "procedural", [
       { productId: "alpha", aspectRatio: "1:1", treatment: "default" },
     ]);
     expect(r.success).toBe(true);
@@ -347,6 +460,7 @@ describe("pipeline composition root", () => {
 
   test("variation + platforms resolves safe zones from the profile table (unknown ids ignored)", async () => {
     const r = await runCampaign(
+      localEnv(),
       {
         ...brief,
         mode: "variation",
@@ -379,14 +493,14 @@ describe("pipeline composition root", () => {
   });
 
   test("copyGenerator is undefined without OPENROUTER_API_KEY and constructed with it", () => {
-    expect(copyGenerator()).toBeUndefined();
+    expect(copyGenerator(localEnv())).toBeUndefined();
     process.env.OPENROUTER_API_KEY = "k";
-    const generator = copyGenerator();
+    const generator = copyGenerator(localEnv());
     expect(generator).toBeDefined();
     expect(generator?.model).toBe("openai/gpt-4o-mini");
     expect(typeof generator?.suggestHeadlines).toBe("function");
     process.env.OPENROUTER_COPY_MODEL = "anthropic/claude-3.5-haiku";
-    expect(copyGenerator()?.model).toBe("anthropic/claude-3.5-haiku");
+    expect(copyGenerator(localEnv())?.model).toBe("anthropic/claude-3.5-haiku");
   });
 
   describe("MESSAGE_FONT is validated against the bundled allowlist (D59)", () => {

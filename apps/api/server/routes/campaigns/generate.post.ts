@@ -4,6 +4,8 @@ import { acquireJob, completeJob, failJob, progressJob, runJob } from "../../lib
 import { JobCapacityError } from "../../lib/ports/fs-job-store.js";
 import { parseBrief, parseRegenerateOnly } from "../../lib/load-brief.js";
 import { ALLOWED_IMAGE_MODELS, runCampaign } from "../../lib/pipeline.js";
+import { runEnvironment, type RunEnvironment } from "../../lib/run-environment.js";
+import { LOCAL_TENANT } from "../../lib/tenant.js";
 import { readReport, reportRevision, writeReport } from "../../lib/report.js";
 import {
   NOT_PROBED_REASON,
@@ -125,6 +127,19 @@ export default defineEventHandler(async (event) => {
     }
   }
 
+  // The run's environment is resolved before the claim, for the same reason the
+  // revision is: once `acquireJob` persists a running job, a throw here (an
+  // unreadable .env) would leave that claim recorded with nothing to settle it.
+  // Resolved here, it is also what the job captures (D167): the run keeps the
+  // location and credentials it was admitted with.
+  let env: RunEnvironment;
+  try {
+    env = runEnvironment(LOCAL_TENANT);
+  } catch {
+    setResponseStatus(event, 500);
+    return { error: "Could not read the run environment.", campaignId: brief.id };
+  }
+
   // One run per campaign at a time: a double-click or a retry after a poll blip must
   // not start a second pipeline writing the same output paths and report. The 409
   // carries the running job's handle (`jobId`) so the second press can adopt the run
@@ -160,6 +175,7 @@ export default defineEventHandler(async (event) => {
     const expectedPolicyHash = await persistedPolicyHash(brief, reroll);
     const expectedCopyHash = await persistedCopyHash(brief, reroll);
     const result = await runCampaign(
+      env,
       brief,
       imageModel,
       regenerateOnly,

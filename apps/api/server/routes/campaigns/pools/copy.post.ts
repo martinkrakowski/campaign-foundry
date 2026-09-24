@@ -11,6 +11,8 @@ import { isErrno, SYMLINK_WRITE_ERROR } from "../../../lib/brief-files.js";
 import { getBriefStore } from "../../../lib/ports/index.js";
 import { assertSafeId, parseBrief } from "../../../lib/load-brief.js";
 import { copyGenerator } from "../../../lib/pipeline.js";
+import { runEnvironment } from "../../../lib/run-environment.js";
+import { LOCAL_TENANT } from "../../../lib/tenant.js";
 import {
   InvalidCopyPoolError,
   isPoolDirSymlink,
@@ -171,7 +173,7 @@ export default defineEventHandler(async (event) => {
     return { error: SYMLINK_WRITE_ERROR };
   }
 
-  const generator = copyGenerator();
+  const generator = copyGenerator(runEnvironment(LOCAL_TENANT));
   if (!generator) {
     setResponseStatus(event, 503);
     return { error: "OPENROUTER_API_KEY is not set" };

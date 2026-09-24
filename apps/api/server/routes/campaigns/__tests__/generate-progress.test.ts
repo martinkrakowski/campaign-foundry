@@ -29,7 +29,7 @@ vi.mock("../../../lib/pipeline.js", async (importOriginal) => {
   return {
     ...actual,
     runCampaign: async (...args: Parameters<typeof actual.runCampaign>) => {
-      run.reported = args[6];
+      run.reported = args[7];
       run.reported?.(2, 5);
       await run.gate;
       return { success: false as const, error: new Error("stopped by the test") };
