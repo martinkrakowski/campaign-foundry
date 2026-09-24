@@ -306,6 +306,69 @@ async function pollJob(
 
 export type Decision = "approved" | "rejected";
 
+/** A campaign's verdicts as the server holds them, and the revision a save must name. */
+export interface StoredDecisions {
+  readonly decisions: Record<string, Decision>;
+  readonly revision: string | null;
+}
+
+/** Said when another tab saved first: the grid now shows what the server holds (D173, D82). */
+export const DECISIONS_CONFLICT_MESSAGE =
+  "These review decisions were changed in another tab. Showing the latest; decide again if needed.";
+
+/** Said when a save did not land: the decision on screen is put back to what is recorded. */
+export const DECISIONS_UNSAVED_MESSAGE =
+  "That review decision could not be saved, so it is not recorded. Try again.";
+
+/**
+ * A campaign's review decisions from the server (D173). The records carry who
+ * decided, when and against which run; the grid needs only the verdict. Any
+ * answer that is not a decision map throws: could-not-ask is not "none".
+ */
+export async function fetchDecisions(campaignId: string): Promise<StoredDecisions> {
+  const res = await fetch(
+    `${API}/campaigns/decisions?campaignId=${encodeURIComponent(campaignId)}`,
+  );
+  if (!res.ok) throw pipelineUnreachable(res.status);
+  return narrowDecisions(await res.json());
+}
+
+/**
+ * Save a campaign's whole verdict map, naming the revision it was read at.
+ * Answers the stored map, or `"conflict"` when another tab saved first (409).
+ * Anything else throws.
+ */
+export async function saveDecisions(
+  campaignId: string,
+  revision: string | null,
+  decisions: Record<string, Decision>,
+): Promise<StoredDecisions | "conflict"> {
+  const res = await fetch(`${API}/campaigns/decisions`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ campaignId, revision, decisions }),
+  });
+  if (res.status === 409) return "conflict";
+  if (!res.ok) throw pipelineUnreachable(res.status);
+  return narrowDecisions(await res.json());
+}
+
+function narrowDecisions(body: unknown): StoredDecisions {
+  const { decisions, revision } = (body ?? {}) as { decisions?: unknown; revision?: unknown };
+  if (typeof decisions !== "object" || decisions === null || Array.isArray(decisions)) {
+    throw new Error("The pipeline API answered decisions that are not a decision map.");
+  }
+  if (revision !== null && typeof revision !== "string") {
+    throw new Error("The pipeline API answered decisions without a revision.");
+  }
+  const verdicts: Record<string, Decision> = {};
+  for (const [key, record] of Object.entries(decisions)) {
+    const verdict = (record as { verdict?: unknown } | null)?.verdict;
+    if (verdict === "approved" || verdict === "rejected") verdicts[key] = verdict;
+  }
+  return { decisions: verdicts, revision };
+}
+
 export type EstimateStatus = "idle" | "loading" | "ok" | "infeasible" | "unavailable";
 
 export type { PackagedPlatform, PlanEstimate };
@@ -347,8 +410,12 @@ export const ENCODE_MS_PER_FRAME = 7;
 export const encodeMinutes = (frames: number): string =>
   `≈ ${((frames * ENCODE_MS_PER_FRAME) / 60_000).toFixed(1)} min`;
 
-/** localStorage key for persisted HITL approve/reject decisions. */
-const DECISIONS_KEY = "cf:decisions";
+/**
+ * Where approve/reject decisions used to live, one browser only (retired by
+ * PT-0d: the server is the store of record, D173). Removed on mount so a stale
+ * copy cannot outlive the move.
+ */
+const RETIRED_DECISIONS_KEY = "cf:decisions";
 
 /** localStorage flag: the brief picker has been shown/dismissed once (don't auto-open again). */
 const BRIEF_PICKED_KEY = "cf:brief-picked";
@@ -453,6 +520,17 @@ interface RunContextValue {
   hasRun: boolean;
   decisions: Record<string, Decision>;
   decide: (key: string, decision: Decision) => void;
+  /**
+   * Why the decisions on screen are not what the reviewer last clicked: another
+   * tab saved first, or a save did not land. Null when they are.
+   */
+  decisionsNotice: string | null;
+  /**
+   * Whether the decisions on screen are the server's for the run on screen. False
+   * from a run landing or a brief switch until they load: until then "no
+   * decisions" means "not known yet", and nothing may be packaged on it.
+   */
+  decisionsLoaded: boolean;
   /**
    * Run the pipeline. With no argument the shell's active brief is POSTed, exactly as
    * always (the grid's Execute, the header's Generate over a committed brief). D35:
@@ -563,6 +641,8 @@ export function RunProvider({ children }: { children: ReactNode }) {
   const [brief, setBriefState] = useState<CampaignBrief>(DEFAULT_BRIEF);
   const [run, setRun] = useState<CommittedRun | null>(null);
   const [decisions, setDecisions] = useState<Record<string, Decision>>({});
+  const [decisionsNotice, setDecisionsNotice] = useState<string | null>(null);
+  const [decisionsLoaded, setDecisionsLoaded] = useState(false);
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState<RunProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -757,41 +837,64 @@ export function RunProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  // Persist approve/reject decisions across reloads: load (validated) once on mount,
-  // save on change. (execute clears decisions for a fresh run, which the save effect
-  // then flushes.) Best-effort — ignores private-mode/quota failures.
-  const skipFirstDecisionsSave = useRef(true);
+  // Review decisions live on the server (D173). The grid shows the verdicts of
+  // the campaign whose run is on screen; every load and save for it goes through
+  // one queue, so a save always names the revision the one before it produced,
+  // and a load cannot land between a click and its save. `decisionsEpoch` bumps
+  // whenever the server's copy replaces the screen's (a load, a conflict, a
+  // brief switch): a save queued before that is dropped, never sent over it.
+  // The campaign the run on screen was written under: the brief it ran (R6).
+  const decisionsCampaign = run?.target.id ?? null;
+  const decisionsQueue = useRef<Promise<void>>(Promise.resolve());
+  const decisionsRevision = useRef<string | null>(null);
+  const decisionsEpoch = useRef(0);
+  const decisionsRef = useRef(decisions);
+  decisionsRef.current = decisions;
+  const decisionsCampaignRef = useRef(decisionsCampaign);
+  decisionsCampaignRef.current = decisionsCampaign;
+
+  const enqueueDecisions = useCallback((work: () => Promise<void>) => {
+    // Every queued piece of work settles its own failures (a load keeps the screen, a
+    // save reloads), so the queue never rejects and one failure cannot stall the rest.
+    decisionsQueue.current = decisionsQueue.current.then(work);
+  }, []);
+
+  // Adopt the server's decisions for `campaignId`, unless the screen has moved on.
+  const loadDecisions = useCallback(
+    (campaignId: string, epoch: number) =>
+      fetchDecisions(campaignId).then(
+        (stored) => {
+          if (decisionsEpoch.current !== epoch || decisionsCampaignRef.current !== campaignId)
+            return;
+          decisionsRevision.current = stored.revision;
+          setDecisions(stored.decisions);
+          setDecisionsLoaded(true);
+        },
+        () => {
+          /* F6: could-not-ask is not absence — keep what is on screen. */
+        },
+      ),
+    [],
+  );
 
   useEffect(() => {
     try {
-      // Validate before trusting storage: a stray "null"/array/primitive must not
-      // become `decisions`, or consumers indexing decisions[key] would throw.
-      const parsed: unknown = JSON.parse(localStorage.getItem(DECISIONS_KEY) ?? "null");
-      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-        const restored: Record<string, Decision> = {};
-        for (const [key, value] of Object.entries(parsed)) {
-          if (value === "approved" || value === "rejected") restored[key] = value;
-        }
-        setDecisions(restored);
-      }
+      localStorage.removeItem(RETIRED_DECISIONS_KEY);
     } catch {
-      /* unreadable/malformed storage — start with no decisions */
+      /* storage unavailable — nothing to retire */
     }
   }, []);
 
+  // A run landing, a re-roll, a restore or a brief switch: the server's copy is the
+  // one to show (a report write has retired what it replaced).
   useEffect(() => {
-    // Skip the initial render so the empty starting state can't overwrite stored
-    // decisions before the load effect's update commits.
-    if (skipFirstDecisionsSave.current) {
-      skipFirstDecisionsSave.current = false;
-      return;
-    }
-    try {
-      localStorage.setItem(DECISIONS_KEY, JSON.stringify(decisions));
-    } catch {
-      /* storage unavailable — decisions stay in-memory for the session */
-    }
-  }, [decisions]);
+    const epoch = (decisionsEpoch.current += 1);
+    decisionsRevision.current = null;
+    setDecisionsNotice(null);
+    setDecisionsLoaded(false);
+    if (decisionsCampaign === null) return;
+    enqueueDecisions(() => loadDecisions(decisionsCampaign, epoch));
+  }, [decisionsCampaign, assetVersion, enqueueDecisions, loadDecisions]);
 
   // Shared POST to the generate endpoint. The body is either a bare brief (full run)
   // or a `{ brief, regenerateOnly }` envelope (selective re-roll). Resolves with the
@@ -942,6 +1045,10 @@ export function RunProvider({ children }: { children: ReactNode }) {
     setProgress(null);
     setError(null);
     try {
+      // The verdicts that asked for this re-roll are recorded before it goes out, so
+      // the server retires them only after it has them (D173).
+      await decisionsQueue.current;
+      if (runSeq.current !== owned) return; // a brief switch while the verdicts were saving
       const jobId = await postGenerate({ brief: target, regenerateOnly: targets });
       if (runSeq.current !== owned) return; // a brief switch (or newer run) superseded this press
       const started = beginRun();
@@ -996,14 +1103,40 @@ export function RunProvider({ children }: { children: ReactNode }) {
     }
   }, [rerollBlockedReason, run, decisions, postGenerate]);
 
-  const decide = useCallback((key: string, decision: Decision) => {
-    setDecisions((prev) => {
-      const next = { ...prev };
+  const decide = useCallback(
+    (key: string, decision: Decision) => {
+      const campaignId = decisionsCampaignRef.current;
+      if (campaignId === null) return; // no run on screen, nothing to decide on
+      const next = { ...decisionsRef.current };
       if (next[key] === decision) delete next[key];
       else next[key] = decision;
-      return next;
-    });
-  }, []);
+      decisionsRef.current = next;
+      setDecisions(next);
+      const epoch = decisionsEpoch.current;
+      enqueueDecisions(async () => {
+        if (decisionsEpoch.current !== epoch) return; // the server's copy replaced this one
+        let outcome: StoredDecisions | "conflict" | "failed";
+        try {
+          outcome = await saveDecisions(campaignId, decisionsRevision.current, next);
+        } catch {
+          outcome = "failed";
+        }
+        if (decisionsEpoch.current !== epoch) return;
+        if (typeof outcome === "object") {
+          decisionsRevision.current = outcome.revision;
+          setDecisionsNotice(null);
+          return;
+        }
+        // Another tab saved first, or this save did not land: show what is recorded.
+        const reload = (decisionsEpoch.current += 1);
+        setDecisionsNotice(
+          outcome === "conflict" ? DECISIONS_CONFLICT_MESSAGE : DECISIONS_UNSAVED_MESSAGE,
+        );
+        await loadDecisions(campaignId, reload);
+      });
+    },
+    [enqueueDecisions, loadDecisions],
+  );
 
   const setEstimate = useCallback(
     (next: { status: EstimateStatus; estimate?: PlanEstimate | null; error?: string | null }) => {
@@ -1084,6 +1217,8 @@ export function RunProvider({ children }: { children: ReactNode }) {
       hasRun: run !== null,
       decisions,
       decide,
+      decisionsNotice,
+      decisionsLoaded,
       execute,
       regenerateRejected,
       runMode,
@@ -1121,6 +1256,8 @@ export function RunProvider({ children }: { children: ReactNode }) {
       error,
       decisions,
       decide,
+      decisionsNotice,
+      decisionsLoaded,
       execute,
       regenerateRejected,
       runMode,

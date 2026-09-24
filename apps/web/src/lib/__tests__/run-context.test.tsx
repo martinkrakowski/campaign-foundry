@@ -15,9 +15,21 @@ import {
   fetchPersistedRun,
   normalizeRunResult,
   isStoredBrief,
+  DECISIONS_CONFLICT_MESSAGE,
+  DECISIONS_UNSAVED_MESSAGE,
+  fetchDecisions,
+  saveDecisions,
   type Asset,
 } from "@/lib/run-context";
-import { json, jobOk, mockPipelineApi, EMPTY_REPORT, renderWithRun } from "@/__tests__/helpers";
+import {
+  json,
+  jobOk,
+  mockPipelineApi,
+  EMPTY_REPORT,
+  renderWithRun,
+  fakeDecisionsApi,
+  seedPersistedRun,
+} from "@/__tests__/helpers";
 import { CommandBar } from "@/components/shell/CommandBar";
 
 const wrapper = ({ children }: { children: ReactNode }) =>
@@ -288,8 +300,19 @@ describe("RunProvider — execute", () => {
 });
 
 describe("RunProvider — review decisions", () => {
-  test("decide toggles approve/reject and clears on repeat", () => {
-    const { result } = setup();
+  /** A restored run for campaign "seed" whose decisions the returned fake server holds. */
+  const restored = async (verdicts: Record<string, "approved" | "rejected"> = {}) => {
+    const server = fakeDecisionsApi(verdicts);
+    seedPersistedRun([asset(), asset({ productId: "beta", outputPath: "beta/1x1.png" })], {
+      decisions: server,
+    });
+    const hook = setup();
+    await waitFor(() => expect(hook.result.current.assets).toHaveLength(2));
+    return { ...hook, server };
+  };
+
+  test("decide toggles approve/reject and clears on repeat", async () => {
+    const { result } = await restored();
     act(() => result.current.decide("k", "approved"));
     expect(result.current.decisions.k).toBe("approved");
     act(() => result.current.decide("k", "approved"));
@@ -298,14 +321,236 @@ describe("RunProvider — review decisions", () => {
     expect(result.current.decisions.k).toBe("rejected");
   });
 
-  test("persists decisions to localStorage", async () => {
+  test("decide does nothing with no run on screen: there is nothing to decide on", () => {
+    mockPipelineApi();
     const { result } = setup();
+    act(() => result.current.decide("k", "approved"));
+    expect(result.current.decisions).toEqual({});
+  });
+
+  test("each decision is saved to the server in turn, each naming the revision the one before produced (D173)", async () => {
+    const { result, server } = await restored();
     act(() => result.current.decide("alpha/1:1/default", "approved"));
-    await waitFor(() => {
-      expect(JSON.parse(localStorage.getItem("cf:decisions") ?? "{}")).toEqual({
+    act(() => result.current.decide("beta/1:1/default", "rejected"));
+    await waitFor(() =>
+      expect(server.stored).toEqual({
         "alpha/1:1/default": "approved",
-      });
+        "beta/1:1/default": "rejected",
+      }),
+    );
+    expect(result.current.decisionsNotice).toBeNull();
+  });
+
+  test("a restored run shows the decisions the server holds, and nothing is read from localStorage", async () => {
+    localStorage.setItem("cf:decisions", JSON.stringify({ "beta/1:1/default": "approved" }));
+    const { result } = await restored({ "alpha/1:1/default": "rejected" });
+    await waitFor(() =>
+      expect(result.current.decisions).toEqual({ "alpha/1:1/default": "rejected" }),
+    );
+    expect(localStorage.getItem("cf:decisions")).toBeNull(); // the retired key is removed
+  });
+
+  test("a save another tab beat is a conflict: the server's decisions replace the screen's, with a notice (D82)", async () => {
+    const { result, server } = await restored({ "alpha/1:1/default": "approved" });
+    await waitFor(() => expect(result.current.decisions["alpha/1:1/default"]).toBe("approved"));
+    server.saveElsewhere({ "beta/1:1/default": "rejected" }); // the other tab
+    act(() => result.current.decide("alpha/1:1/default", "rejected"));
+    await waitFor(() => expect(result.current.decisionsNotice).toBe(DECISIONS_CONFLICT_MESSAGE));
+    await waitFor(() =>
+      expect(result.current.decisions).toEqual({ "beta/1:1/default": "rejected" }),
+    );
+    expect(server.stored).toEqual({ "beta/1:1/default": "rejected" }); // the stale save never landed
+    // The next decision saves against the adopted revision, and clears the notice.
+    act(() => result.current.decide("alpha/1:1/default", "approved"));
+    await waitFor(() => expect(result.current.decisionsNotice).toBeNull());
+    expect(server.stored).toEqual({
+      "beta/1:1/default": "rejected",
+      "alpha/1:1/default": "approved",
     });
+  });
+
+  test("a save queued behind a conflict is dropped, not sent over the adopted decisions", async () => {
+    const { result, server } = await restored();
+    server.saveElsewhere({ "beta/1:1/default": "approved" });
+    act(() => result.current.decide("alpha/1:1/default", "rejected")); // 409
+    act(() => result.current.decide("alpha/1:1/default", "rejected")); // queued behind it
+    await waitFor(() => expect(result.current.decisionsNotice).toBe(DECISIONS_CONFLICT_MESSAGE));
+    await waitFor(() =>
+      expect(result.current.decisions).toEqual({ "beta/1:1/default": "approved" }),
+    );
+    expect(server.stored).toEqual({ "beta/1:1/default": "approved" });
+  });
+
+  test("decisions that land after a brief switch are dropped: they belong to the brief left behind", async () => {
+    let answer!: (r: Response) => void;
+    const server = fakeDecisionsApi({ "alpha/1:1/default": "approved" });
+    seedPersistedRun([asset()], {
+      decisions: {
+        ...server,
+        handle: () => new Promise<Response>((res) => (answer = res)),
+      } as unknown as ReturnType<typeof fakeDecisionsApi>,
+    });
+    const { result } = setup();
+    await waitFor(() => expect(answer).toBeTypeOf("function")); // the load is in flight
+    act(() =>
+      result.current.setBrief({
+        schemaVersion: BRIEF_SCHEMA_VERSION,
+        template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+        id: "elsewhere",
+        targetRegion: "US",
+        targetAudience: "x",
+        campaignMessage: "y",
+        products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: "a.png" }],
+      }),
+    );
+    await act(async () => {
+      answer(server.handle("", {}));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(result.current.decisions).toEqual({});
+  });
+
+  /** A fake whose PUTs wait until the test lets them through. */
+  const heldSaves = () => {
+    const server = fakeDecisionsApi();
+    const held: (() => void)[] = [];
+    const fake = {
+      ...server,
+      handle: (url: string, init: RequestInit) =>
+        init.method === "PUT"
+          ? new Promise<Response>((res) => held.push(() => res(server.handle(url, init))))
+          : server.handle(url, init),
+    } as ReturnType<typeof fakeDecisionsApi>;
+    return { fake, held, server };
+  };
+  const elsewhere = {
+    schemaVersion: BRIEF_SCHEMA_VERSION,
+    template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+    id: "elsewhere",
+    targetRegion: "US",
+    targetAudience: "x",
+    campaignMessage: "y",
+    products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: "a.png" }],
+  };
+
+  test("a save that lands after a brief switch changes nothing on the new brief's screen", async () => {
+    const { fake, held } = heldSaves();
+    seedPersistedRun([asset()], { decisions: fake });
+    const { result } = setup();
+    await waitFor(() => expect(result.current.decisionsLoaded).toBe(true));
+    act(() => result.current.decide("alpha/1:1/default", "approved"));
+    await waitFor(() => expect(held).toHaveLength(1));
+    act(() => result.current.setBrief(elsewhere));
+    await act(async () => {
+      held[0]!();
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(result.current.decisions).toEqual({});
+    expect(result.current.decisionsNotice).toBeNull();
+  });
+
+  test("a re-roll whose brief is switched away while its verdict saves is never sent", async () => {
+    const { fake, held } = heldSaves();
+    const posts: unknown[] = [];
+    mockPipelineApi({
+      decisions: fake,
+      post: (_url, init) => {
+        posts.push(JSON.parse(init.body as string));
+        return json({ jobId: "job-1" }, 202);
+      },
+      job: () => jobOk({ halted: false, assets: [asset()], log: { entries: [] } }),
+    });
+    const { result } = setup();
+    await act(async () => {
+      await result.current.execute();
+    });
+    await waitFor(() => expect(result.current.decisionsLoaded).toBe(true));
+    act(() => result.current.decide("alpha/1:1/default", "rejected"));
+    await waitFor(() => expect(held).toHaveLength(1)); // the verdict is saving
+    let regen!: Promise<void>;
+    act(() => {
+      regen = result.current.regenerateRejected();
+    });
+    act(() => result.current.setBrief(elsewhere));
+    await act(async () => {
+      held[0]!();
+      await regen;
+    });
+    expect(posts).toHaveLength(1); // the first run only: the re-roll never went out
+  });
+
+  test("a save that does not land puts the screen back to what is recorded, and says so", async () => {
+    const server = fakeDecisionsApi({ "alpha/1:1/default": "approved" });
+    const failing = {
+      ...server,
+      handle: (url: string, init: RequestInit) =>
+        init.method === "PUT" ? json({ error: "down" }, 500) : server.handle(url, init),
+    } as ReturnType<typeof fakeDecisionsApi>;
+    seedPersistedRun([asset()], { decisions: failing });
+    const { result } = setup();
+    await waitFor(() => expect(result.current.decisions["alpha/1:1/default"]).toBe("approved"));
+    act(() => result.current.decide("alpha/1:1/default", "rejected"));
+    await waitFor(() => expect(result.current.decisionsNotice).toBe(DECISIONS_UNSAVED_MESSAGE));
+    await waitFor(() => expect(result.current.decisions["alpha/1:1/default"]).toBe("approved"));
+  });
+
+  test("decisions that could not be fetched leave the screen as it is", async () => {
+    seedPersistedRun([asset()], {
+      decisions: { handle: () => json({ error: "down" }, 500) } as unknown as ReturnType<
+        typeof fakeDecisionsApi
+      >,
+    });
+    const { result } = setup();
+    await waitFor(() => expect(result.current.assets).toHaveLength(1));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(result.current.decisions).toEqual({});
+  });
+
+  test("fetchDecisions keeps approved and rejected verdicts, and refuses an answer that is not a decision map", async () => {
+    const answer = (body: unknown, status = 200) =>
+      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(json(body, status));
+    answer({
+      decisions: {
+        "alpha/1:1/default": { verdict: "approved" },
+        bad: { verdict: "bogus" },
+        nul: null,
+      },
+      revision: "r",
+    });
+    await expect(fetchDecisions("seed")).resolves.toEqual({
+      decisions: { "alpha/1:1/default": "approved" },
+      revision: "r",
+    });
+    answer({ decisions: [], revision: null });
+    await expect(fetchDecisions("seed")).rejects.toThrow(/not a decision map/);
+    answer(null);
+    await expect(fetchDecisions("seed")).rejects.toThrow(/not a decision map/);
+    answer({ decisions: {}, revision: 7 });
+    await expect(fetchDecisions("seed")).rejects.toThrow(/without a revision/);
+    answer({ error: "down" }, 500);
+    await expect(fetchDecisions("seed")).rejects.toThrow();
+  });
+
+  test("saveDecisions names the revision it read, answers a 409 as a conflict, and throws on anything else", async () => {
+    const spy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(json({ decisions: {}, revision: "r2" }))
+      .mockResolvedValueOnce(json({ error: "changed" }, 409))
+      .mockResolvedValueOnce(json({ error: "down" }, 500));
+    await expect(saveDecisions("seed", "r1", { k: "approved" })).resolves.toEqual({
+      decisions: {},
+      revision: "r2",
+    });
+    expect(JSON.parse(String(spy.mock.calls[0]![1]!.body))).toEqual({
+      campaignId: "seed",
+      revision: "r1",
+      decisions: { k: "approved" },
+    });
+    expect(spy.mock.calls[0]![1]!.method).toBe("PUT");
+    await expect(saveDecisions("seed", "r1", {})).resolves.toBe("conflict");
+    await expect(saveDecisions("seed", "r1", {})).rejects.toThrow();
   });
 
   test("regenerateRejected is a no-op when nothing is rejected", async () => {
@@ -668,6 +913,8 @@ describe("RunProvider — result-scoped actions key off the brief the run ran (R
     act(() => {
       regen = result.current.regenerateRejected();
     });
+    // The re-roll goes out once the verdict that asked for it is saved (D173).
+    await waitFor(() => expect(resolveRegen).toBeTypeOf("function"));
     act(() =>
       result.current.setBrief({
         schemaVersion: BRIEF_SCHEMA_VERSION,
@@ -830,16 +1077,6 @@ describe("RunProvider — brief picker & persistence", () => {
     const { result } = setup();
     act(() => result.current.openBriefPicker());
     expect(result.current.briefPickerOpen).toBe(true);
-  });
-
-  test("restores persisted decisions on mount, filtering invalid values", async () => {
-    localStorage.setItem(
-      "cf:decisions",
-      JSON.stringify({ "alpha/1:1/default": "approved", bad: "bogus" }),
-    );
-    const { result } = setup();
-    await waitFor(() => expect(result.current.decisions["alpha/1:1/default"]).toBe("approved"));
-    expect(result.current.decisions.bad).toBeUndefined();
   });
 
   test("restores the persisted run for the stored brief on mount", async () => {
@@ -1023,6 +1260,8 @@ describe("RunProvider — late results after a switch", () => {
     act(() => {
       regen = result.current.regenerateRejected();
     });
+    // The re-roll goes out once the verdict that asked for it is saved (D173).
+    await waitFor(() => expect(resolveRegen).toBeTypeOf("function"));
     act(() => result.current.setBrief(otherBrief)); // bumps the run token
     await act(async () => {
       resolveRegen(json({ jobId: "job-1" }, 202));
@@ -1133,6 +1372,8 @@ describe("RunProvider — log-only and superseded restores", () => {
     act(() => {
       regen = result.current.regenerateRejected();
     });
+    // The re-roll goes out once the verdict that asked for it is saved (D173).
+    await waitFor(() => expect(rejectRegen).toBeTypeOf("function"));
     act(() =>
       result.current.setBrief({
         schemaVersion: BRIEF_SCHEMA_VERSION,
@@ -1250,7 +1491,11 @@ describe("RunProvider — job polling", () => {
 
   test("a lost job shows the last saved result as such — no cache-bust, decisions kept", async () => {
     let posted = false;
+    // A lost job wrote no report, so the server retired nothing.
+    const server = fakeDecisionsApi({ "alpha/1:1/default": "rejected" });
+    server.retire = () => undefined;
     mockPipelineApi({
+      decisions: server,
       post: () => {
         posted = true;
         return json({ jobId: "job-1" }, 202);
@@ -1266,7 +1511,6 @@ describe("RunProvider — job polling", () => {
           : json(EMPTY_REPORT),
     });
     const { result } = setup();
-    act(() => result.current.decide("alpha/1:1/default", "rejected"));
     const versionBefore = result.current.assetVersion;
     await act(async () => {
       await result.current.execute();

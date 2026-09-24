@@ -5,6 +5,7 @@ import { createElement, Fragment } from "react";
 import {
   renderWithRun,
   seedPersistedRun,
+  fakeDecisionsApi,
   makeAsset,
   makeMotionAsset,
   exerciseFocusTrap,
@@ -12,8 +13,9 @@ import {
   jobOk,
   json,
   storedTemplate,
+  seedDecisions,
 } from "@/__tests__/helpers";
-import { useRun } from "@/lib/run-context";
+import { DECISIONS_CONFLICT_MESSAGE, useRun } from "@/lib/run-context";
 import GridPage from "../page";
 import { typeDisplayName } from "@/components/campaign/display-names";
 import * as messages from "@/components/campaign/messages";
@@ -381,7 +383,7 @@ describe("GridPage", () => {
         variation: { count: 1 },
       }),
     );
-    localStorage.setItem("cf:decisions", JSON.stringify({ "alpha/v0": "rejected" }));
+    seedDecisions({ "alpha/v0": "rejected" });
     mockPipelineApi({
       report: { halted: false, assets: [original], log: { entries: [], campaignId: "seed" } },
       job: () =>
@@ -409,6 +411,19 @@ describe("GridPage", () => {
     await waitFor(() => expect(screen.getByText(/✓ 1 approved/)).toBeTruthy());
     await user.click(screen.getByText("Reject"));
     await waitFor(() => expect(screen.getByText(/✗ 1 rejected/)).toBeTruthy());
+  });
+
+  test("a decision another tab beat to the server shows the server's decisions and says why (D173, D82)", async () => {
+    const user = userEvent.setup();
+    const server = fakeDecisionsApi();
+    seedPersistedRun([makeAsset()], { decisions: server });
+    renderWithRun(<GridPage />);
+    const approve = await screen.findByText("Approve");
+    server.saveElsewhere({ "alpha/1:1/default": "rejected" }); // the other tab
+    await user.click(approve);
+    expect((await screen.findByRole("status")).textContent).toBe(DECISIONS_CONFLICT_MESSAGE);
+    await waitFor(() => expect(screen.getByText(/✗ 1 rejected/)).toBeTruthy());
+    expect(screen.getByText(/✓ 0 approved/)).toBeTruthy();
   });
 
   test("the Preview pill carries its own boundary, not the video's", async () => {
@@ -464,7 +479,7 @@ describe("GridPage", () => {
 
   test("spins the targeted tiles during a selective regenerate", async () => {
     const user = userEvent.setup();
-    localStorage.setItem("cf:decisions", JSON.stringify({ "alpha/1:1/default": "rejected" }));
+    seedDecisions({ "alpha/1:1/default": "rejected" });
     mockPipelineApi({
       post: () => new Promise<Response>(() => {}), // pending
       report: { halted: false, assets: [makeAsset()], log: { entries: [], campaignId: "seed" } },

@@ -17,6 +17,7 @@ export default function ExportPage() {
     assets,
     hasRun,
     decisions,
+    decisionsLoaded,
     brief,
     ranCampaignId,
     packages,
@@ -49,8 +50,8 @@ export default function ExportPage() {
     [assets, decisions],
   );
 
-  // Decisions live in the browser, so packaging must be told which creatives passed
-  // review. Once the reviewer has decided anything, only approved keys are sent;
+  // Packaging must be told which creatives passed review (the decisions are the
+  // server's, D173, but the package call names them). Once the reviewer has decided anything, only approved keys are sent;
   // with no decisions at all the whole run is packaged (the CLI/API default).
   const hasDecisions = pending < assets.length;
   const approvedKeys = useMemo(() => approved.map(assetKey), [approved]);
@@ -227,8 +228,16 @@ export default function ExportPage() {
               activePlatform !== null &&
               void packageSelected([activePlatform], hasDecisions ? approvedKeys : undefined)
             }
-            disabled={packaging || activePlatform === null}
-            title={activePlatform === null ? "Select a platform first" : undefined}
+            // Until the run's decisions load, none is indistinguishable from not known
+            // yet, and "none" packages the whole run: wait rather than guess.
+            disabled={packaging || activePlatform === null || !decisionsLoaded}
+            title={
+              !decisionsLoaded
+                ? "Loading the review decisions"
+                : activePlatform === null
+                  ? "Select a platform first"
+                  : undefined
+            }
             className="rounded-full bg-text-emphasis px-4 py-1.5 text-[13px] font-semibold text-background transition-opacity hover:opacity-90 disabled:bg-surface-2 disabled:text-text-muted"
           >
             {packaging ? "Packaging…" : "Package"}

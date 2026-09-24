@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "PT-0d",
+  "mutations": [
+    {
+      "file": "apps/web/src/lib/run-context.tsx",
+      "before": "        if (decisionsEpoch.current !== epoch) return; // the server's copy replaced this one",
+      "after": "        // (mutant: a queued save is sent even after the server's copy replaced it)",
+      "because": "a save queued behind a conflict would be sent over the decisions just adopted from the server, erasing another tab's work (D82).",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/lib/__tests__/run-context.test.tsx",
+        "-t",
+        "queued behind a conflict"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

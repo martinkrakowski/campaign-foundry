@@ -101,8 +101,17 @@ function runningMessage(progress: RunProgress | null): string {
 }
 
 export default function GridPage() {
-  const { brief, assets, decisions, decide, loading, progress, assetVersion, regeneratingKeys } =
-    useRun();
+  const {
+    brief,
+    assets,
+    decisions,
+    decide,
+    decisionsNotice,
+    loading,
+    progress,
+    assetVersion,
+    regeneratingKeys,
+  } = useRun();
   const [previewKey, setPreviewKey] = useState<string | null>(null);
   // Filters and the page belong to one brief + run: a brief switch or a new run
   // (assetVersion bump) drops them back to defaults instead of hiding the new
@@ -232,6 +241,11 @@ export default function GridPage() {
         <span className="ml-auto hidden text-text-muted md:inline">
           Approved creatives are what the Export tab ships.
         </span>
+        {decisionsNotice !== null && (
+          <p role="status" className="basis-full text-warning">
+            {decisionsNotice}
+          </p>
+        )}
       </div>
       <div className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-surface px-4 py-2">
         <FilterSelect

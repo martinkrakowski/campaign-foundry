@@ -10,6 +10,7 @@ import {
   json,
   mockPipelineApi,
   storedTemplate,
+  seedDecisions,
 } from "@/__tests__/helpers";
 import { useRun } from "@/lib/run-context";
 import { CommandBar } from "../CommandBar";
@@ -84,7 +85,7 @@ describe("CommandBar", () => {
 
   test("shows a regenerate action once creatives are rejected", async () => {
     const user = userEvent.setup();
-    localStorage.setItem("cf:decisions", JSON.stringify({ "alpha/1:1/default": "rejected" }));
+    seedDecisions({ "alpha/1:1/default": "rejected" });
     seedPersistedRun([makeAsset(), makeAsset({ productId: "beta", outputPath: "beta/1x1.png" })]);
     renderWithRun(<CommandBar onToggleTelemetry={() => {}} />);
     const regen = await screen.findByText(/Regenerate/);
@@ -97,7 +98,7 @@ describe("CommandBar", () => {
 
   test("cannot re-roll a classic run recorded under a randomized brief — the control still answers, and says why", async () => {
     const user = userEvent.setup();
-    localStorage.setItem("cf:decisions", JSON.stringify({ "alpha/1:1/default": "rejected" }));
+    seedDecisions({ "alpha/1:1/default": "rejected" });
     // The mismatch the mode guard refuses: a persisted classic report that restores
     // under a brief on file which is a randomized campaign (R6 — the re-roll would
     // POST the recorded brief, whose mode disagrees with the classic targets).
