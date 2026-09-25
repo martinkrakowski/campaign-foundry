@@ -5,8 +5,8 @@
     {
       "file": "apps/api/server/lib/ports/pg-pool-store.ts",
       "before": "       where org_id = $1 and campaign_id = $2 and revision = $5",
-      "after": "       where org_id = $1 and campaign_id = $2 -- mutant: revision condition dropped",
-      "because": "dropping the revision condition from the compare-and-swap UPDATE makes writePool's expectedRevision check unconditional: a stale-revision write would succeed instead of conflicting, matching FsPoolStore's ECONFLICT guard only by coincidence.",
+      "after": "       where org_id = $1 and campaign_id = $2 and ($5::text is not null)",
+      "because": "replacing the revision equality check with a null check on $5 keeps the parameter referenced (no bind-count error) but makes the compare-and-swap match any row for the campaign regardless of its stored revision, so a stale-revision write would silently succeed instead of conflicting.",
       "command": [
         "yarn",
         "vitest",
