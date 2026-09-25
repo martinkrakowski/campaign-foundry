@@ -217,6 +217,9 @@ an SSRF design). Each becomes a plan once PT-3 exists. **AR6** stays blocked on 
   KEK now, KMS later).
 - **Still open:** **the email sender** for email sign-in (PT-1), the **Google OAuth client** (owner's console), and
   **the hosting platform** for the API and workers (a KMS adapter and the network paths depend on it).
+- **Staging exists (2026-09-25, #581):** the owner's LAN k3s node, `https://campaign-foundry.midnight.lan`
+  (LAN/VPN only), with CloudNativePG Postgres and Strimzi Kafka in-cluster and decisions on Postgres. It is not
+  the production host, which stays open. See `deploy/staging/README.md`.
 - **D167 and D173 are stamped (2026-09-24).** Stamp or amend **D168 – D172**. Each follows from D64, C7 and the stated SaaS target, and each is
   recorded here as the author's proposal, not a decision.
 - **PT-0e** needs the owner's instruction, because it edits `.agents/architecture.md`.

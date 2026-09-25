@@ -6288,3 +6288,17 @@ and source formatting, recorded here rather than fixed.
     production server binds `NITRO_PORT || PORT`, and `loadEnv()` applies that file. The owner was
     told to remove or rename them. No CA path is set yet, so `db:ping` refuses until
     `DATABASE_CA_PATH` points at Aiven's CA.
+- **Staging on the LAN k3s node (2026-09-25, [#581](https://github.com/martinkrakowski/campaign-foundry/pull/581), `14fbd419`):**
+  - The owner approved the cluster-wide CloudNativePG 0.29.1 and Strimzi 1.2.0 installs, after the
+    auto-mode classifier first blocked them.
+  - Harbor pushes failed TLS. The node's `certs.d` copy of Harbor's certificate had expired
+    (2026-06-14), and cert-manager's `selfsigned-issuer` reissues a new self-signed leaf at each
+    renewal. Docker's containerd store also uses the system trust store for its token request, so the
+    owner ran two sudo commands (the README reads the certificate from Harbor's Secret). The lasting
+    fix is a CA-issued Harbor certificate, which is the owner's call.
+  - First rollout: the API's TCP readiness probe could not reach its loopback-only listener. It now
+    runs an exec probe in the container.
+  - Review fixes: migrations run before the new Deployment; Kafka uses `simple` authorization (no
+    ACLs until PT-6); `.dockerignore` is recursive.
+  - Verified through the ingress: the pages and the web-to-API proxy load. A decision PUT landed in
+    Postgres with actor and run, a stale PUT got 409, and the decision survived a redeploy.
