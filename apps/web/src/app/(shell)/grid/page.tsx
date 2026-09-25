@@ -240,6 +240,11 @@ export default function GridPage() {
         <span className="text-success">✓ {review.approved} approved</span>
         <span className="text-error">✗ {review.rejected} rejected</span>
         <span className="text-text-muted">○ {review.pending} pending</span>
+        {loading && (
+          <span role="status" aria-live="polite" className="text-text-muted">
+            {messages.reviewPausedWhileRunning}
+          </span>
+        )}
         <span className="ml-auto hidden text-text-muted md:inline">
           Approved creatives are what the Export tab ships.
         </span>

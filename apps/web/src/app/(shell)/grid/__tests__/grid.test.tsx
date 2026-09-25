@@ -467,12 +467,17 @@ describe("GridPage", () => {
     renderWithRun(<Harness />);
     const approve = (await screen.findByText("Approve")) as HTMLButtonElement;
     await waitFor(() => expect(approve.disabled).toBe(false)); // decisions loaded
+    // The title alone is unreachable while the button is disabled — no focus, no
+    // announcement — so the same reason must also be a visible, announced status line.
+    expect(screen.queryByRole("status")).toBeNull();
     await user.click(screen.getByText("exec"));
     await waitFor(() => expect(approve.disabled).toBe(true));
     expect(approve.title).toBe("A run is in flight — verdicts wait until it finishes");
     expect((screen.getByText("Reject") as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByRole("status").textContent).toBe(messages.reviewPausedWhileRunning);
     finishPost(json({ jobId: "job-1" }, 202));
     await waitFor(() => expect(approve.disabled).toBe(false));
+    expect(screen.queryByRole("status")).toBeNull();
   });
 
   test("decisions that could not be loaded say so on the review bar, pause the verdicts, and Try again loads them", async () => {

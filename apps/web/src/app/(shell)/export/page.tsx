@@ -248,6 +248,11 @@ export default function ExportPage() {
           >
             {packaging ? "Packaging…" : "Package"}
           </button>
+          {loading && (
+            <span role="status" aria-live="polite" className="text-[13px] text-text-muted">
+              {messages.exportPausedWhileRunning}
+            </span>
+          )}
           {selected ? (
             <a
               href={`${API}/campaigns/packages/${encodeURIComponent(campaignId)}/${selected.platformId}.zip`}
