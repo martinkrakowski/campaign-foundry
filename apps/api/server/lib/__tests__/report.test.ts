@@ -887,4 +887,24 @@ describe("reports go through the report store (PT-0a)", () => {
     );
     expect(writes).toEqual([]);
   });
+
+  test("a store-level conflict from the write itself surfaces past the early guard (PT-3c)", async () => {
+    // The early guard's own read agrees with the caller's expectation, so it lets
+    // the write proceed — and the store's own compare-and-swap is what catches a
+    // write that landed in the gap between that read and this one (D79/D173).
+    const conflict = Object.assign(
+      new Error('Report for campaign "camp" was modified by another run.'),
+      { code: "ECONFLICT", revision: "server-revision" },
+    );
+    setReportStore({
+      readReport: async () => undefined,
+      getRevision: async () => "server-revision",
+      writeReport: async () => {
+        throw conflict;
+      },
+    });
+    await expect(
+      writeReport(LOCAL_TENANT, result([asset()]), { expectedRevision: "server-revision" }),
+    ).rejects.toBe(conflict);
+  });
 });
