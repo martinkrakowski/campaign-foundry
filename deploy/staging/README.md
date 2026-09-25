@@ -20,7 +20,7 @@ credits. To use real imagery, create a Secret with `GEMINI_API_KEY` or
 
 Object storage (D174c, Backblaze B2) is not set up: nothing uses it until PT-4.
 
-## One-time setup (cluster-wide; the owner's to run)
+## One-time setup (cluster-wide; done 2026-09-25)
 
 The two operators are cluster-scoped installs:
 
@@ -35,16 +35,26 @@ helm install strimzi oci://quay.io/strimzi-helm/strimzi-kafka-operator --version
   --set "watchNamespaces={campaign-foundry-staging}" --wait
 ```
 
-Pushing to Harbor needs the pushing Docker daemon to trust Harbor's certificate.
-Harbor serves a cert-manager self-signed certificate that is reissued on renewal,
-and the node's `/etc/docker/certs.d/registry.midnight.lan/ca.crt` expired on
-2026-06-14. Refresh it (it pins the certificate Harbor serves now, so repeat it
-after each renewal until Harbor gets a certificate from a stable CA):
+Pushing to Harbor needs the pushing Docker daemon to trust Harbor's certificate,
+in **two** places. Docker's containerd image store checks
+`/etc/docker/certs.d/<registry>/ca.crt` for the registry requests, but its login
+(token) request uses the **system** trust store. Harbor serves a cert-manager
+self-signed certificate, which is reissued at every renewal, so both copies pin the
+certificate Harbor serves now. Repeat both after each renewal, until Harbor's
+certificate comes from a stable CA (a self-signed root CA Issuer in cert-manager,
+trusted once):
 
 ```sh
+# in your own terminal: sudo asks for a password
 ssh -t m 'echo | openssl s_client -connect registry.midnight.lan:443 -servername registry.midnight.lan 2>/dev/null \
   | openssl x509 | sudo tee /etc/docker/certs.d/registry.midnight.lan/ca.crt >/dev/null'
+ssh -t m 'sudo cp /etc/docker/certs.d/registry.midnight.lan/ca.crt /usr/local/share/ca-certificates/registry.midnight.lan.crt \
+  && sudo update-ca-certificates && sudo systemctl restart docker'
 ```
+
+Restarting Docker restarts the node's Docker containers (not k3s). `curl` still
+reports "couldn't get X509-issuer name" for this certificate, because it has an
+empty subject; Docker and `openssl` verify it.
 
 ## Deploy
 
