@@ -925,4 +925,24 @@ describe("copy pool routes", () => {
     expect(unknown.status).toBe(500);
     expect(existsSync(join(dir, "briefs", "camp"))).toBe(false);
   });
+
+  test("POST maps a QuotaExceededError to 429 quota_exceeded (fix round)", async () => {
+    const { generate } = await api();
+    // Same module instance as the route (api() resets modules) so instanceof holds.
+    const { QuotaExceededError } = await import("../../../../lib/metering.js");
+    copyGeneratorMock.mockReturnValue({
+      model: "m",
+      suggestHeadlines: async () => {
+        throw new QuotaExceededError("acme");
+      },
+    });
+    const res = await generate()(
+      jsonReq("http://x/campaigns/pools/copy", "POST", { briefId: "camp" }),
+    );
+    expect(res.status).toBe(429);
+    expect(await res.json()).toEqual({
+      error: `Org "acme" has reached its monthly generation quota.`,
+      code: "quota_exceeded",
+    });
+  });
 });

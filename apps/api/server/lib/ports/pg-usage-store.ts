@@ -32,11 +32,18 @@ export class PgUsageStore implements UsageStorePort {
     return Number(rows[0]!.count);
   }
 
+  /**
+   * `null` is "no `org` row" too — indistinguishable from an explicit unlimited
+   * quota by `??` alone — so an org id nothing admitted (a typo, a deleted org, a
+   * row this migration never seeded) read as unlimited instead of refused (fix
+   * round, reviewer finding). No row now refuses: quota 0, not null.
+   */
   async quota(orgId: string): Promise<number | null> {
     const { rows } = await this.db.query<{ monthly_generation_quota: number | null }>(
       `select monthly_generation_quota from org where id = $1`,
       [orgId],
     );
-    return rows[0]?.monthly_generation_quota ?? null;
+    if (rows.length === 0) return 0;
+    return rows[0].monthly_generation_quota;
   }
 }

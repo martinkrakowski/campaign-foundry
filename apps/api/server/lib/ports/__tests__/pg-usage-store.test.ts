@@ -49,6 +49,14 @@ describe("PgUsageStore (PT-7a, D175)", () => {
     await expect(store.quota("local")).resolves.toBeNull();
   });
 
+  test("an org id with no row at all is refused, not unlimited (fix round, reviewer)", async () => {
+    // Unlike "local" above (a real row, null column), this org id names no
+    // `org` row: `null` from the column and "no row" must not read the same
+    // way, or a typo'd or deleted org id would be admitted without limit.
+    const store = new PgUsageStore(db);
+    await expect(store.quota("ghost")).resolves.toBe(0);
+  });
+
   test("countThisMonth counts this calendar month's rows for the org, in UTC", async () => {
     const store = new PgUsageStore(db);
     const now = new Date("2026-09-24T12:00:00.000Z");

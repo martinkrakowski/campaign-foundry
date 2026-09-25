@@ -1,11 +1,11 @@
-import { describe, test, expect } from "vitest";
+import { describe, test, expect, vi } from "vitest";
 import {
   AspectRatio,
   type CopyGeneratorInput,
   type CopyGeneratorPort,
   type ImageGeneratorPort,
 } from "@campaignfoundry/CampaignOrchestration";
-import { MeteredCopyGenerator, MeteredImageGenerator } from "../metering.js";
+import { MeteredCopyGenerator, MeteredImageGenerator, QuotaExceededError } from "../metering.js";
 import type { UsageRecord, UsageStorePort } from "../ports/usage-store.port.js";
 
 const ratio = (v = "1:1") => {
@@ -31,6 +31,29 @@ function fakeUsage(): UsageStorePort & { readonly records: UsageRecord[] } {
     },
     countThisMonth: async () => 0,
     quota: async () => null,
+  };
+}
+
+/**
+ * A usage store double with a fixed quota and a count that increments as
+ * records are made — for the "stops once the quota is reached" tests, where a
+ * sequence of calls has to see the count move the same way `PgUsageStore`
+ * would as each one commits.
+ */
+function statefulUsage(
+  quota: number | null,
+  startCount = 0,
+): UsageStorePort & { readonly records: UsageRecord[] } {
+  const records: UsageRecord[] = [];
+  let count = startCount;
+  return {
+    records,
+    record: async (usage) => {
+      records.push(usage);
+      count += 1;
+    },
+    countThisMonth: async () => count,
+    quota: async () => quota,
   };
 }
 
@@ -116,6 +139,69 @@ describe("MeteredImageGenerator (PT-7a, D175)", () => {
     await meter.resolveBackground(product, ratio(), context, controller.signal);
     expect(seen).toBe(controller.signal);
   });
+
+  test("refuses at the quota without calling the provider, and records nothing (fix round)", async () => {
+    const usage = statefulUsage(2, 2); // already at the quota
+    const inner: ImageGeneratorPort = {
+      resolveBackground: vi.fn(async () => ({
+        image: new Uint8Array([1]),
+        source: "imagen" as const,
+      })),
+    };
+    const meter = new MeteredImageGenerator(inner, usage, "acme", "imagen", "imagen-4.0");
+    await expect(meter.resolveBackground(product, ratio(), context)).rejects.toThrow(
+      QuotaExceededError,
+    );
+    expect(inner.resolveBackground).not.toHaveBeenCalled();
+    expect(usage.records).toEqual([]);
+  });
+
+  test("a run admitted under quota stops calling the provider once the count reaches it (fix round)", async () => {
+    // Same behaviour a multi-cell campaign run relies on: admission read the
+    // count once, before the run started (quota - 1), but every one of these
+    // calls re-checks it live.
+    const usage = statefulUsage(2, 0);
+    const inner: ImageGeneratorPort = {
+      resolveBackground: vi.fn(async () => ({
+        image: new Uint8Array([1]),
+        source: "imagen" as const,
+      })),
+    };
+    const meter = new MeteredImageGenerator(inner, usage, "acme", "imagen", "imagen-4.0");
+    await meter.resolveBackground(product, ratio(), context); // count 0 -> 1
+    await meter.resolveBackground(product, ratio(), context); // count 1 -> 2 (now at quota)
+    expect(inner.resolveBackground).toHaveBeenCalledTimes(2);
+    await expect(meter.resolveBackground(product, ratio(), context)).rejects.toThrow(
+      QuotaExceededError,
+    );
+    expect(inner.resolveBackground).toHaveBeenCalledTimes(2); // no third call
+  });
+
+  test("a usage-store record failure still returns the result and warns (fix round)", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const usage = fakeUsage();
+    usage.record = async () => {
+      throw new Error("connection reset");
+    };
+    const inner: ImageGeneratorPort = {
+      resolveBackground: async () => ({ image: new Uint8Array([1]), source: "imagen" }),
+    };
+    const meter = new MeteredImageGenerator(
+      inner,
+      usage,
+      "acme",
+      "imagen",
+      "imagen-4.0-generate-001",
+    );
+    const result = await meter.resolveBackground(product, ratio(), context);
+    expect(result).toEqual({ image: new Uint8Array([1]), source: "imagen" });
+    expect(warn).toHaveBeenCalledTimes(1);
+    const [message] = warn.mock.calls[0] as [string];
+    expect(message).toContain("acme");
+    expect(message).toContain("imagen");
+    expect(message).toContain("connection reset");
+    warn.mockRestore();
+  });
 });
 
 describe("MeteredCopyGenerator (PT-7a, D175)", () => {
@@ -162,6 +248,20 @@ describe("MeteredCopyGenerator (PT-7a, D175)", () => {
     await expect(
       meter.suggestHeadlines({ brief: {} as CopyGeneratorInput["brief"], count: 1 }),
     ).rejects.toThrow("upstream boom");
+    expect(usage.records).toEqual([]);
+  });
+
+  test("refuses at the quota without calling the provider, and records nothing (fix round)", async () => {
+    const usage = statefulUsage(1, 1); // already at the quota
+    const inner: CopyGeneratorPort = {
+      model: "openai/gpt-4o-mini",
+      suggestHeadlines: vi.fn(async () => ["Stay wild"]),
+    };
+    const meter = new MeteredCopyGenerator(inner, usage, "acme", "openrouter");
+    await expect(
+      meter.suggestHeadlines({ brief: {} as CopyGeneratorInput["brief"], count: 1 }),
+    ).rejects.toThrow(QuotaExceededError);
+    expect(inner.suggestHeadlines).not.toHaveBeenCalled();
     expect(usage.records).toEqual([]);
   });
 });
