@@ -10,7 +10,8 @@ import { authOptions } from "./options.js";
 import { LogMailer } from "./log-mailer.js";
 import { ResendMailer } from "./resend-mailer.js";
 
-type Auth = ReturnType<typeof betterAuth>;
+/** Derived from `build`, not `betterAuth` itself — see the note above it. */
+export type Auth = ReturnType<typeof build>;
 
 let shared: Auth | undefined;
 let sharedPool: pg.Pool | undefined;
@@ -39,7 +40,12 @@ function pool(): pg.Pool {
  * `auth()`, never at import (a server on `AUTH_MODE=local` must boot with none
  * of this set).
  */
-function build(): Auth {
+// No return-type annotation, deliberately (see the same note in options.ts):
+// `betterAuth()`'s generic infers each plugin's endpoints from the literal
+// options type. `type Auth` is derived FROM this function, not the other way
+// round, so the generic default (`ReturnType<typeof betterAuth>` with no
+// arguments) never enters the picture.
+function build() {
   const settings = authSettings();
   if (!settings.secret) {
     throw new Error("BETTER_AUTH_SECRET is not set (required when AUTH_MODE=better-auth).");

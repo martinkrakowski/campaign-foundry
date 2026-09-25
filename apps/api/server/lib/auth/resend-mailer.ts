@@ -32,7 +32,9 @@ export class ResendMailer implements MailerPort {
     });
     if (!response.ok) {
       const body = await response.text().catch(() => "");
-      throw new Error(`Resend refused the email (${response.status}): ${body || response.statusText}`);
+      throw new Error(
+        `Resend refused the email (${response.status}): ${body || response.statusText}`,
+      );
     }
   }
 }

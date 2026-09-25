@@ -9,7 +9,10 @@ import type { TenantContext } from "../tenant.js";
  *
  * `undefined` means no membership at all — the caller's 403.
  */
-export async function memberTenant(db: SqlClient, userId: string): Promise<TenantContext | undefined> {
+export async function memberTenant(
+  db: SqlClient,
+  userId: string,
+): Promise<TenantContext | undefined> {
   const members = await db.query<{ org_id: string; role: string }>(
     "select org_id, role from member where user_id = $1 order by org_id",
     [userId],

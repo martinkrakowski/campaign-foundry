@@ -30,7 +30,13 @@ async function bootstrap(db: SqlClient, email: string): Promise<void> {
     );
     const member = existing.rows[0];
     if (member) {
-      if (member.role.split(",").map((r) => r.trim()).includes("owner")) return;
+      if (
+        member.role
+          .split(",")
+          .map((r) => r.trim())
+          .includes("owner")
+      )
+        return;
       await tx.query("update member set role = $1 where id = $2", ["owner", member.id]);
       return;
     }

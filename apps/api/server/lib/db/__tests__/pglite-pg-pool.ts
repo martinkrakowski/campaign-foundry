@@ -42,7 +42,11 @@ export function pglitePgPool(db: PGlite): PgPool {
     if (params === undefined) {
       const results = await db.exec(text);
       const last = results.at(-1);
-      return { rows: last?.rows ?? [], rowCount: last?.affectedRows ?? null, command: commandOf(text) };
+      return {
+        rows: last?.rows ?? [],
+        rowCount: last?.affectedRows ?? null,
+        command: commandOf(text),
+      };
     }
     const result = await db.query<Record<string, unknown>>(text, params);
     return { rows: result.rows, rowCount: result.affectedRows ?? null, command: commandOf(text) };

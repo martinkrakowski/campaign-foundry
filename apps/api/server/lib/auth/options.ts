@@ -41,7 +41,14 @@ export interface AuthDeps {
  * stays the same immutable surrogate id `tenantRoot` and every other port
  * already key on (D174b(1)).
  */
-export function authOptions(deps: AuthDeps): BetterAuthOptions {
+// No return-type annotation, deliberately: `betterAuth()` infers each plugin's
+// endpoints (e.g. `auth.api.signInMagicLink`) from the literal type of the
+// `plugins` array it is called with. Annotating this function's return as the
+// general `BetterAuthOptions` would widen that array away before `betterAuth()`
+// ever sees it, and every plugin-specific method on `auth.api` would vanish
+// from the type (though not the runtime, which is why this only shows up in
+// `tsc`, not in a test).
+export function authOptions(deps: AuthDeps) {
   return {
     // `PgPool` is deliberately looser than Kysely's own `PostgresPool`/
     // `PostgresQueryResult` types (e.g. `command` as `string`, not the literal
@@ -142,7 +149,12 @@ export function authOptions(deps: AuthDeps): BetterAuthOptions {
           },
           member: {
             modelName: "member",
-            fields: { organizationId: "org_id", userId: "user_id", role: "role", createdAt: "created_at" },
+            fields: {
+              organizationId: "org_id",
+              userId: "user_id",
+              role: "role",
+              createdAt: "created_at",
+            },
           },
           invitation: {
             modelName: "invitation",
@@ -159,7 +171,12 @@ export function authOptions(deps: AuthDeps): BetterAuthOptions {
           },
           team: {
             modelName: "team",
-            fields: { name: "name", organizationId: "org_id", createdAt: "created_at", updatedAt: "updated_at" },
+            fields: {
+              name: "name",
+              organizationId: "org_id",
+              createdAt: "created_at",
+              updatedAt: "updated_at",
+            },
           },
           teamMember: {
             modelName: "team_member",
