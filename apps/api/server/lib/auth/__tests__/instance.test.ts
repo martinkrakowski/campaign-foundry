@@ -153,6 +153,16 @@ describe("auth() (PT-1a)", () => {
       const instance = auth();
       expect(instance.options.advanced?.useSecureCookies).toBe(false);
     });
+
+    test("sets useSecureCookies: false when WEB_ORIGIN is an invalid URL", () => {
+      process.env.BETTER_AUTH_SECRET = "s".repeat(32);
+      process.env.BETTER_AUTH_URL = "http://127.0.0.1:3001";
+      process.env.DATABASE_URL = "postgres://user:pass@localhost:5432/db";
+      process.env.WEB_ORIGIN = "not-a-valid-url";
+
+      const instance = auth();
+      expect(instance.options.advanced?.useSecureCookies).toBe(false);
+    });
   });
 
   describe("its own pool", () => {
