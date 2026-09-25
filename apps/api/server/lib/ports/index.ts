@@ -3,10 +3,13 @@ import { storeBackend } from "../config.js";
 import { database } from "../db/database.js";
 import { scopeRoots, scopeTenant, type StorageScope } from "../run-environment.js";
 import { FsBriefStore } from "./fs-brief-store.js";
+import { PgBriefStore } from "./pg-brief-store.js";
 import { FsAssetStore } from "./fs-asset-store.js";
 import { FsPoolStore } from "./fs-pool-store.js";
+import { PgPoolStore } from "./pg-pool-store.js";
 import { FsTemplateStore } from "./fs-template-store.js";
 import { FsJobStore } from "./fs-job-store.js";
+import { PgJobStore } from "./pg-job-store.js";
 import { FsReportStore } from "./fs-report-store.js";
 import { PgReportStore } from "./pg-report-store.js";
 import { FsOutputStore } from "./fs-output-store.js";
@@ -34,10 +37,13 @@ export * from "./output-store.port.js";
 export * from "./decision-store.port.js";
 export * from "./usage-store.port.js";
 export * from "./fs-brief-store.js";
+export * from "./pg-brief-store.js";
 export * from "./fs-asset-store.js";
 export * from "./fs-pool-store.js";
+export * from "./pg-pool-store.js";
 export * from "./fs-template-store.js";
 export * from "./fs-job-store.js";
+export * from "./pg-job-store.js";
 export * from "./fs-report-store.js";
 export * from "./pg-report-store.js";
 export * from "./fs-output-store.js";
@@ -86,17 +92,42 @@ class Registry<T> {
   }
 }
 
+// With STORE_BACKEND=postgres (PT-3d), one store per (org, user): the store's
+// actor is the user, so the registry key must carry both — unlike decisions,
+// where the store never needs to know who is writing. The trade-off this
+// leaves: two users' saves on one brief serialise only through the
+// compare-and-swap in the write's own transaction (the loser gets 409, D82),
+// never through the in-process lock chain — that chain only ever sees its own
+// process's callers, one per (org, user) store.
 const briefs = new Registry<BriefStorePort>(
-  (t) => join(scopeRoots(t).projectRoot, "briefs"),
-  (dir) => new FsBriefStore(dir),
+  (t) =>
+    storeBackend() === "postgres"
+      ? JSON.stringify(["postgres", scopeTenant(t).orgId, scopeTenant(t).userId])
+      : join(scopeRoots(t).projectRoot, "briefs"),
+  (key) => {
+    // A filesystem root is always an absolute path and never starts with "[".
+    // The postgres key is JSON, not string concatenation, so no character an
+    // org or user id contains (":" included) can make one pair alias another.
+    if (!key.startsWith("[")) return new FsBriefStore(key);
+    const [, orgId, userId] = JSON.parse(key) as [string, string, string];
+    return new PgBriefStore(database(), orgId, userId);
+  },
 );
 const assets = new Registry<AssetStorePort>(
   (t) => join(scopeRoots(t).projectRoot, "assets", "inputs"),
   (dir) => new FsAssetStore(dir),
 );
+// With STORE_BACKEND=postgres (PT-3e), one store per org over the process's
+// database; otherwise one per project root's briefs directory, on files.
 const pools = new Registry<PoolStorePort>(
-  (t) => join(scopeRoots(t).projectRoot, "briefs"),
-  (dir) => new FsPoolStore(dir),
+  (t) =>
+    storeBackend() === "postgres"
+      ? `postgres:${scopeTenant(t).orgId}`
+      : join(scopeRoots(t).projectRoot, "briefs"),
+  (key) =>
+    key.startsWith("postgres:")
+      ? new PgPoolStore(database(), key.slice("postgres:".length))
+      : new FsPoolStore(key),
 );
 // The canonical templates are platform-owned and in memory (M3): one store for
 // every tenant until org templates exist.
@@ -104,9 +135,15 @@ const templates = new Registry<TemplateStorePort>(
   () => "canonical",
   () => new FsTemplateStore(),
 );
+// With STORE_BACKEND=postgres (PT-6a), one lease-backed store per org over the
+// process's database; otherwise one per output root, on files (unchanged).
 const jobs = new Registry<JobStorePort>(
-  (t) => join(scopeRoots(t).outputRoot, "jobs"),
-  (dir) => new FsJobStore(dir),
+  (t) =>
+    storeBackend() === "postgres"
+      ? PG + scopeTenant(t).orgId
+      : join(scopeRoots(t).outputRoot, "jobs"),
+  (key) =>
+    key.startsWith(PG) ? new PgJobStore(database(), key.slice(PG.length)) : new FsJobStore(key),
 );
 // With STORE_BACKEND=postgres (PT-3c), one store per org over the process's
 // database; otherwise one per output root, on files.

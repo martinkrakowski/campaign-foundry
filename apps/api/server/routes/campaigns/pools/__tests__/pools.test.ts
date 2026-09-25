@@ -712,8 +712,47 @@ describe("copy pool routes", () => {
     // Two module registries, so two stores and two lock chains: the in-process
     // lock cannot serialise what it does not share — the shape of two processes.
     const patchA = (await import("../[briefId].patch.js")).default as EventHandler;
+    const { getPoolStore: getPoolStoreA } = await import("../../../../lib/ports/index.js");
+    const { LOCAL_TENANT: tenantA } = await import("../../../../lib/tenant.js");
     vi.resetModules();
     const patchB = (await import("../[briefId].patch.js")).default as EventHandler;
+    const { getPoolStore: getPoolStoreB } = await import("../../../../lib/ports/index.js");
+    const { LOCAL_TENANT: tenantB } = await import("../../../../lib/tenant.js");
+
+    // Force the interleaving the title claims instead of hoping Promise.all
+    // schedules it: hold A's write until B has read (so both PATCHes read the
+    // pool before either writes — a "lost update" needs that), then hold B's
+    // write until A's has landed (so B's write is the one that lands last, and
+    // A's edit is deterministically the one that vanishes, every run).
+    const storeA = getPoolStoreA(tenantA);
+    const storeB = getPoolStoreB(tenantB);
+    let releaseAWrite: () => void = () => undefined;
+    const bHasRead = new Promise<void>((resolve) => {
+      releaseAWrite = resolve;
+    });
+    let releaseBWrite: () => void = () => undefined;
+    const aHasWritten = new Promise<void>((resolve) => {
+      releaseBWrite = resolve;
+    });
+    const originalReadB = storeB.readPool.bind(storeB);
+    vi.spyOn(storeB, "readPool").mockImplementation(async (briefId) => {
+      const result = await originalReadB(briefId);
+      releaseAWrite();
+      return result;
+    });
+    const originalWriteA = storeA.writePool.bind(storeA);
+    vi.spyOn(storeA, "writePool").mockImplementation(async (pool, options) => {
+      await bHasRead;
+      const result = await originalWriteA(pool, options);
+      releaseBWrite();
+      return result;
+    });
+    const originalWriteB = storeB.writePool.bind(storeB);
+    vi.spyOn(storeB, "writePool").mockImplementation(async (pool, options) => {
+      await aHasWritten;
+      return originalWriteB(pool, options);
+    });
+
     const a = mount([{ method: "patch", path: "/campaigns/pools/:briefId", handler: patchA }]);
     const b = mount([{ method: "patch", path: "/campaigns/pools/:briefId", handler: patchB }]);
     const reject = (id: string) =>
@@ -725,10 +764,10 @@ describe("copy pool routes", () => {
     const body = (await (await get()(new Request("http://x/campaigns/pools/camp"))).json()) as {
       pool: { entries: Array<{ id: string; status: string }> };
     };
-    // Both writers were told their edit landed; only one of them is there.
+    // Both writers were told their edit landed; only B's (forced to write
+    // last, above) is there — A's has vanished.
     const rejected = body.pool.entries.filter((e) => e.status === "rejected").map((e) => e.id);
-    expect(rejected).toHaveLength(1);
-    expect(["h1", "h2"]).toContain(rejected[0]);
+    expect(rejected).toEqual(["h2"]);
   });
 
   test("a PATCH carrying a stale revision is refused with 409 and the fresh one, losing neither edit", async () => {

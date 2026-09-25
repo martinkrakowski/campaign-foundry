@@ -256,6 +256,44 @@ describe("report persistence", () => {
     expect(per.map((a) => a.productId)).not.toContain("gamma");
   });
 
+  test("a merge refused for a stale expectedRevision leaves campaign decisions intact", async () => {
+    const decided = { verdict: "approved" as const, actor: "local", at: "t", run: "r" };
+    const decisions = getDecisionStore(LOCAL_TENANT);
+    await writeReport(LOCAL_TENANT, result([asset(), beta()]));
+    const stale = await reportRevision(LOCAL_TENANT, "camp");
+
+    // Another run moves the report revision
+    await writeReport(LOCAL_TENANT, result([beta({ complianceScore: 0.7 })]), { merge: true });
+    const current = await reportRevision(LOCAL_TENANT, "camp");
+
+    const alphaKey = assetIdentity(asset());
+    const betaKey = assetIdentity(beta());
+    await decisions.writeDecisions("camp", {
+      [alphaKey]: decided,
+      [betaKey]: decided,
+    });
+    const before = await decisions.readDecisions("camp");
+
+    // Re-roll of alpha with stale revision is refused by early guard before retireDecisions
+    await expect(
+      writeReport(LOCAL_TENANT, result([asset({ complianceScore: 0.9 })]), {
+        merge: true,
+        expectedRevision: stale,
+      }),
+    ).rejects.toMatchObject({
+      code: "ECONFLICT",
+      revision: current,
+      message: 'Report for campaign "camp" was modified by another run.',
+    });
+
+    const after = await decisions.readDecisions("camp");
+    expect(after.decisions).toEqual({
+      [alphaKey]: decided,
+      [betaKey]: decided,
+    });
+    expect(after.revision).toBe(before.revision);
+  });
+
   test("a merge carrying the revision it read is accepted, and keeps the base it merged", async () => {
     await writeReport(LOCAL_TENANT, result([asset(), beta()]));
     const revision = await reportRevision(LOCAL_TENANT, "camp");
@@ -303,6 +341,42 @@ describe("report persistence", () => {
     expect(readAssets(resolve(root, "reports", "camp.json")).map((a) => a.productId)).toEqual([
       "alpha",
     ]);
+  });
+
+  test("a merge refused because a report appeared while expectedRevision was null leaves campaign decisions intact", async () => {
+    const decided = { verdict: "approved" as const, actor: "local", at: "t", run: "r" };
+    const decisions = getDecisionStore(LOCAL_TENANT);
+
+    // Initial report lands while another run is in flight
+    await writeReport(LOCAL_TENANT, result([asset(), beta()]));
+    const appeared = await reportRevision(LOCAL_TENANT, "camp");
+
+    const alphaKey = assetIdentity(asset());
+    const betaKey = assetIdentity(beta());
+    await decisions.writeDecisions("camp", {
+      [alphaKey]: decided,
+      [betaKey]: decided,
+    });
+    const before = await decisions.readDecisions("camp");
+
+    // In-flight run started against no report attempts to re-roll alpha: refused before retireDecisions
+    await expect(
+      writeReport(LOCAL_TENANT, result([asset({ complianceScore: 0.9 })]), {
+        merge: true,
+        expectedRevision: null,
+      }),
+    ).rejects.toMatchObject({
+      code: "ECONFLICT",
+      revision: appeared,
+      message: 'Report for campaign "camp" was modified by another run.',
+    });
+
+    const after = await decisions.readDecisions("camp");
+    expect(after.decisions).toEqual({
+      [alphaKey]: decided,
+      [betaKey]: decided,
+    });
+    expect(after.revision).toBe(before.revision);
   });
 
   test("without expectedRevision the write is unconditional, as both stores are", async () => {

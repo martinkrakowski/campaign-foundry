@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "PT-3",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/ports/pg-brief-store.ts",
+      "before": "      if (options?.expectedRevision && options.expectedRevision !== current.revision) {",
+      "after": "      if (false && options?.expectedRevision && options.expectedRevision !== current.revision) {",
+      "because": "dropping the revision condition lets a stale rewriteBrief land unconditionally, defeating the second-tab conflict guard (D82) the CAS exists to give",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/pg-brief-store.test.ts",
+        "-t",
+        "stale expectedRevision"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
