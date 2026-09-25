@@ -1,0 +1,346 @@
+import { describe, test, expect, beforeEach, afterEach } from "vitest";
+import { PipelineExecutionLog } from "@campaignfoundry/CampaignOrchestration";
+import type { SqlClient } from "../../db/sql-client.js";
+import { migratedDatabase } from "../../db/__tests__/pglite-client.js";
+import { JOB_TTL_MS, JobCapacityError, MAX_JOBS } from "../fs-job-store.js";
+import type { JobResult } from "../job-store.port.js";
+import { HEARTBEAT_INTERVAL_MS, JobLeaseLostError, LEASE_MS, PgJobStore } from "../pg-job-store.js";
+
+const payload = (over: Partial<JobResult> = {}): JobResult => ({
+  halted: false,
+  assets: [],
+  log: new PipelineExecutionLog("camp", () => new Date("2026-01-01T00:00:00.000Z")),
+  ...over,
+});
+
+/** Insert a job row directly, bypassing the store, so a test can pre-seed a
+ * lease in whatever state it needs (running-and-live, running-and-lapsed,
+ * settled) without going through `acquireJob` first. */
+async function seed(
+  db: SqlClient,
+  row: {
+    id: string;
+    orgId: string;
+    campaignId: string;
+    status?: "running" | "completed" | "failed";
+    leaseOffsetMs?: number;
+    settled?: boolean;
+  },
+): Promise<void> {
+  await db.query(
+    `insert into job (id, org_id, campaign_id, status, lease_expires_at, heartbeat_at, settled_at)
+     values ($1, $2, $3, $4, now() + ($5 || ' milliseconds')::interval, now(), $6)`,
+    [
+      row.id,
+      row.orgId,
+      row.campaignId,
+      row.status ?? "running",
+      row.leaseOffsetMs ?? LEASE_MS,
+      row.settled ? new Date() : null,
+    ],
+  );
+}
+
+describe("PgJobStore (PT-6a, D171)", () => {
+  let db: SqlClient;
+  beforeEach(async () => {
+    db = await migratedDatabase();
+    await db.query("insert into org (id, name) values ($1, $2)", ["acme", "Acme"]);
+  });
+  afterEach(async () => {
+    await db.end();
+  });
+
+  test("claim acquires on an empty table", async () => {
+    const store = new PgJobStore(db, "local");
+    const claim = await store.acquireJob("camp");
+    expect(claim).toEqual({ acquired: true, jobId: expect.any(String) });
+  });
+
+  test("createJob accepts a custom id", async () => {
+    const store = new PgJobStore(db, "local");
+    const id = await store.createJob("camp", "my-id");
+    expect(id).toBe("my-id");
+    expect(await store.getJob("my-id")).toEqual({
+      status: "running",
+      done: 0,
+      total: 0,
+      log: null,
+    });
+  });
+
+  test("claim returns the incumbent when running", async () => {
+    const store = new PgJobStore(db, "local");
+    const first = await store.acquireJob("camp");
+    expect(first.acquired).toBe(true);
+    const second = await store.acquireJob("camp");
+    expect(second).toEqual({
+      acquired: false,
+      runningJobId: first.acquired ? first.jobId : undefined,
+    });
+    // createJob follows the same rule.
+    expect(await store.createJob("camp")).toBe(first.acquired ? first.jobId : undefined);
+  });
+
+  test("claim after the reaper failed a lapsed lease acquires", async () => {
+    const store = new PgJobStore(db, "local");
+    await seed(db, { id: "lapsed", orgId: "local", campaignId: "camp", leaseOffsetMs: -1_000 });
+
+    const claim = await store.acquireJob("camp");
+    expect(claim).toEqual({ acquired: true, jobId: expect.any(String) });
+    expect(claim.acquired && claim.jobId).not.toBe("lapsed");
+
+    const { rows } = await db.query<{ status: string; error: string | null }>(
+      "select status, error from job where id = $1",
+      ["lapsed"],
+    );
+    expect(rows[0]).toMatchObject({ status: "failed" });
+    expect(rows[0]!.error).toMatch(/Lease expired/);
+  });
+
+  test("a lapsed lease belonging to another org never blocks this org's claim", async () => {
+    await seed(db, { id: "other", orgId: "acme", campaignId: "camp", leaseOffsetMs: -1_000 });
+    const store = new PgJobStore(db, "local");
+    await expect(store.acquireJob("camp")).resolves.toEqual({
+      acquired: true,
+      jobId: expect.any(String),
+    });
+    // The other org's lapsed row is untouched: reaping is scoped per store.
+    const { rows } = await db.query<{ status: string }>("select status from job where id = $1", [
+      "other",
+    ]);
+    expect(rows[0]).toEqual({ status: "running" });
+  });
+
+  test("heartbeat extends the lease", async () => {
+    const store = new PgJobStore(db, "local");
+    const claim = await store.acquireJob("camp");
+    const id = claim.acquired ? claim.jobId : "";
+    const before = await db.query<{ t: Date }>("select lease_expires_at as t from job where id = $1", [
+      id,
+    ]);
+    await store.heartbeat(id);
+    const after = await db.query<{ t: Date }>("select lease_expires_at as t from job where id = $1", [
+      id,
+    ]);
+    expect(after.rows[0]!.t.getTime()).toBeGreaterThan(before.rows[0]!.t.getTime());
+  });
+
+  test("heartbeat on a job that no longer holds its lease is a silent no-op", async () => {
+    const store = new PgJobStore(db, "local");
+    await seed(db, { id: "gone", orgId: "local", campaignId: "camp", status: "failed", settled: true });
+    await expect(store.heartbeat("gone")).resolves.toBeUndefined();
+    await expect(store.heartbeat("never-existed")).resolves.toBeUndefined();
+  });
+
+  test("progressJob refuses once the row no longer holds the lease", async () => {
+    const store = new PgJobStore(db, "local");
+    await seed(db, { id: "reaped", orgId: "local", campaignId: "camp", status: "failed", settled: true });
+    await expect(store.progressJob("reaped", 1, 2)).rejects.toBeInstanceOf(JobLeaseLostError);
+    await expect(store.progressJob("never-existed", 1, 2)).rejects.toThrow(/no longer holds its lease/);
+  });
+
+  test("completeJob refuses once the row no longer holds the lease", async () => {
+    const store = new PgJobStore(db, "local");
+    await seed(db, { id: "reaped", orgId: "local", campaignId: "camp", status: "failed", settled: true });
+    await expect(store.completeJob("reaped", payload())).rejects.toBeInstanceOf(JobLeaseLostError);
+  });
+
+  test("failJob refuses once the row no longer holds the lease", async () => {
+    const store = new PgJobStore(db, "local");
+    await seed(db, {
+      id: "done",
+      orgId: "local",
+      campaignId: "camp",
+      status: "completed",
+      settled: true,
+    });
+    await expect(store.failJob("done", "boom")).rejects.toBeInstanceOf(JobLeaseLostError);
+  });
+
+  test("progressJob records done/total for a job that still holds its lease", async () => {
+    const store = new PgJobStore(db, "local");
+    const claim = await store.acquireJob("camp");
+    const id = claim.acquired ? claim.jobId : "";
+    await store.progressJob(id, 2, 5);
+    expect(await store.getJob(id)).toEqual({ status: "running", done: 2, total: 5, log: null });
+  });
+
+  test("completeJob records assets.length and the log/result payload", async () => {
+    const store = new PgJobStore(db, "local");
+    const claim = await store.acquireJob("camp");
+    const id = claim.acquired ? claim.jobId : "";
+    const log = new PipelineExecutionLog("camp", () => new Date("2026-01-01T00:00:00.000Z"));
+    log.record("build", "started", "info");
+    const result = payload({ assets: [{}, {}] as unknown as JobResult["assets"], log });
+    await store.completeJob(id, result);
+
+    const job = await store.getJob(id);
+    expect(job).toMatchObject({ status: "completed", done: 2, total: 2 });
+    // A different process boundary than the file store's in-memory cache: the
+    // log comes back as the plain data `toJSON` describes, not a live instance.
+    // Nothing downstream needs the class — the poll route returns it as JSON.
+    expect(job?.log).toMatchObject({ campaignId: "camp", entries: [expect.objectContaining({ stage: "build" })] });
+    expect(job?.result?.log).toEqual(job?.log);
+  });
+
+  test("completeJob uses 0/0 when the run halted", async () => {
+    const store = new PgJobStore(db, "local");
+    const claim = await store.acquireJob("camp");
+    const id = claim.acquired ? claim.jobId : "";
+    await store.completeJob(
+      id,
+      payload({ halted: true, assets: [{}] as unknown as JobResult["assets"] }),
+    );
+    expect(await store.getJob(id)).toMatchObject({ status: "completed", done: 0, total: 0 });
+  });
+
+  test("failJob records the error without a result", async () => {
+    const store = new PgJobStore(db, "local");
+    const claim = await store.acquireJob("camp");
+    const id = claim.acquired ? claim.jobId : "";
+    await store.failJob(id, "out of memory");
+    expect(await store.getJob(id)).toEqual({
+      status: "failed",
+      done: 0,
+      total: 0,
+      log: null,
+      error: "out of memory",
+    });
+  });
+
+  test("getJob and getStoredJob answer undefined for an unknown id", async () => {
+    const store = new PgJobStore(db, "local");
+    expect(await store.getJob("nope")).toBeUndefined();
+    expect(await store.getStoredJob("nope")).toBeUndefined();
+  });
+
+  test("hasRunningJob and getRunningJobId track active campaigns", async () => {
+    const store = new PgJobStore(db, "local");
+    expect(await store.hasRunningJob("camp")).toBe(false);
+    expect(await store.getRunningJobId("camp")).toBeUndefined();
+
+    const claim = await store.acquireJob("camp");
+    const id = claim.acquired ? claim.jobId : "";
+    expect(await store.hasRunningJob("camp")).toBe(true);
+    expect(await store.getRunningJobId("camp")).toBe(id);
+    expect(await store.hasRunningJob("other")).toBe(false);
+
+    await store.completeJob(id, payload());
+    expect(await store.hasRunningJob("camp")).toBe(false);
+    expect(await store.getRunningJobId("camp")).toBeUndefined();
+  });
+
+  test("deleteJob removes the row; a second delete is a safe no-op", async () => {
+    const store = new PgJobStore(db, "local");
+    const claim = await store.acquireJob("camp");
+    const id = claim.acquired ? claim.jobId : "";
+    await store.completeJob(id, payload());
+    expect(await store.getJob(id)).toBeDefined();
+    await store.deleteJob(id);
+    expect(await store.getJob(id)).toBeUndefined();
+    await expect(store.deleteJob(id)).resolves.toBeUndefined();
+  });
+
+  test("listJobs returns this org's jobs ordered by creation", async () => {
+    const store = new PgJobStore(db, "local");
+    const first = await store.acquireJob("camp1");
+    const second = await store.acquireJob("camp2");
+    const list = await store.listJobs();
+    expect(list.map((j) => j.id)).toEqual([
+      first.acquired ? first.jobId : "",
+      second.acquired ? second.jobId : "",
+    ]);
+  });
+
+  test("a settled job expires after JOB_TTL_MS; a running one does not", async () => {
+    const store = new PgJobStore(db, "local");
+    await seed(db, {
+      id: "settled",
+      orgId: "local",
+      campaignId: "a",
+      status: "completed",
+      settled: true,
+    });
+    // Backdate settledAt past the TTL directly (no fake timers against a real clock column).
+    await db.query("update job set settled_at = now() - ($1 || ' milliseconds')::interval where id = $2", [
+      JOB_TTL_MS + 1,
+      "settled",
+    ]);
+    const running = await store.acquireJob("b");
+    expect(await store.getJob("settled")).toBeUndefined();
+    expect((await store.getJob(running.acquired ? running.jobId : ""))?.status).toBe("running");
+  });
+
+  test("the store is capped at MAX_JOBS per org, evicting settled jobs before running ones", async () => {
+    const store = new PgJobStore(db, "local");
+    const runner1 = await store.acquireJob("runner1");
+    const runner1Id = runner1.acquired ? runner1.jobId : "";
+    const settled = await store.acquireJob("settled");
+    const settledId = settled.acquired ? settled.jobId : "";
+    await store.failJob(settledId, "x");
+    const kept: string[] = [runner1Id];
+    for (let i = 2; i < MAX_JOBS; i++) {
+      const c = await store.acquireJob(`c${i}`);
+      kept.push(c.acquired ? c.jobId : "");
+    }
+
+    const next = await store.acquireJob("next");
+    expect(await store.getJob(settledId)).toBeUndefined();
+    for (const id of kept) {
+      expect((await store.getJob(id))?.status).toBe("running");
+    }
+    expect((await store.getJob(next.acquired ? next.jobId : ""))?.status).toBe("running");
+  });
+
+  test("when every job of an org is still running, the store REFUSES rather than evicting one", async () => {
+    const store = new PgJobStore(db, "local");
+    const oldest = await store.acquireJob("c0");
+    const oldestId = oldest.acquired ? oldest.jobId : "";
+    for (let i = 1; i < MAX_JOBS; i++) await store.acquireJob(`c${i}`);
+    await expect(store.acquireJob("overflow")).rejects.toThrow(JobCapacityError);
+    expect(await store.getJob(oldestId)).toBeDefined();
+  });
+
+  test("another org's jobs are invisible, and capacity is counted per org", async () => {
+    const local = new PgJobStore(db, "local");
+    const acme = new PgJobStore(db, "acme");
+    const claim = await local.acquireJob("camp");
+    const id = claim.acquired ? claim.jobId : "";
+
+    expect(await acme.getJob(id)).toBeUndefined();
+    expect(await acme.hasRunningJob("camp")).toBe(false);
+    // The same campaign id is a different lock per org.
+    await expect(acme.acquireJob("camp")).resolves.toEqual({
+      acquired: true,
+      jobId: expect.any(String),
+    });
+    expect(await local.hasRunningJob("camp")).toBe(true);
+  });
+
+  test("clear forgets only this org's jobs", async () => {
+    const local = new PgJobStore(db, "local");
+    const acme = new PgJobStore(db, "acme");
+    const localClaim = await local.acquireJob("camp");
+    const acmeClaim = await acme.acquireJob("camp");
+    await local.clear();
+    expect(await local.getJob(localClaim.acquired ? localClaim.jobId : "")).toBeUndefined();
+    expect(await acme.getJob(acmeClaim.acquired ? acmeClaim.jobId : "")).toBeDefined();
+  });
+
+  test("withJobLock runs its function directly: the row is the lock, not an in-process chain", async () => {
+    const store = new PgJobStore(db, "local");
+    const order: number[] = [];
+    await store.withJobLock("camp", async () => {
+      order.push(1);
+    });
+    await store.withJobLock("camp", async () => {
+      order.push(2);
+    });
+    expect(order).toEqual([1, 2]);
+  });
+
+  test("HEARTBEAT_INTERVAL_MS is comfortably inside LEASE_MS, so a missed beat or two never costs the lease", () => {
+    expect(HEARTBEAT_INTERVAL_MS).toBeLessThan(LEASE_MS);
+  });
+});

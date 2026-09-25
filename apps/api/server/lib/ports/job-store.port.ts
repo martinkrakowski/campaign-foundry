@@ -118,3 +118,24 @@ export interface JobStorePort {
 }
 
 export type JobRegistryPort = JobStorePort;
+
+/**
+ * R6 of the lock plan (D73 – D81, bound by D171): a job row is not only a job's
+ * record, it is the run's lease, adoption handle and poll target, so the run
+ * registry the lock plan called for is this same port with one more capability —
+ * extending the lease a claim holds. `JobStorePort` stays the type every route
+ * and `lib/jobs.ts` helper is written against (it needs no lease knowledge);
+ * `RunRegistryPort` is what a lease-backed adapter (`PgJobStore`, PT-6a)
+ * implements, and `runJob` narrows to it (`"heartbeat" in store`) to keep a
+ * claim alive for as long as its work runs. A single-process store (`FsJobStore`)
+ * excludes runs with its in-memory lock chain instead and never lapses a lease,
+ * so it implements `JobStorePort` only.
+ */
+export interface RunRegistryPort extends JobStorePort {
+  /**
+   * Extend the lease a running job holds, so a live worker's campaign survives
+   * the reaper. A no-op if the job no longer holds one (already settled or
+   * already reaped): heartbeating a lease you no longer hold proves nothing.
+   */
+  heartbeat(id: string): Promise<void>;
+}
