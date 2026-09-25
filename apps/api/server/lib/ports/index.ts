@@ -3,6 +3,7 @@ import { storeBackend } from "../config.js";
 import { database } from "../db/database.js";
 import { scopeRoots, scopeTenant, type StorageScope } from "../run-environment.js";
 import { FsBriefStore } from "./fs-brief-store.js";
+import { PgBriefStore } from "./pg-brief-store.js";
 import { FsAssetStore } from "./fs-asset-store.js";
 import { FsPoolStore } from "./fs-pool-store.js";
 import { FsTemplateStore } from "./fs-template-store.js";
@@ -29,6 +30,7 @@ export * from "./report-store.port.js";
 export * from "./output-store.port.js";
 export * from "./decision-store.port.js";
 export * from "./fs-brief-store.js";
+export * from "./pg-brief-store.js";
 export * from "./fs-asset-store.js";
 export * from "./fs-pool-store.js";
 export * from "./fs-template-store.js";
@@ -78,9 +80,27 @@ class Registry<T> {
   }
 }
 
+// With STORE_BACKEND=postgres (PT-3d), one store per (org, user): the store's
+// actor is the user, so the registry key must carry both — unlike decisions,
+// where the store never needs to know who is writing. The trade-off this
+// leaves: two users' saves on one brief serialise only through the
+// compare-and-swap in the write's own transaction (the loser gets 409, D82),
+// never through the in-process lock chain — that chain only ever sees its own
+// process's callers, one per (org, user) store.
+const BRIEFS_PG = "postgres:";
 const briefs = new Registry<BriefStorePort>(
-  (t) => join(scopeRoots(t).projectRoot, "briefs"),
-  (dir) => new FsBriefStore(dir),
+  (t) =>
+    storeBackend() === "postgres"
+      ? `${BRIEFS_PG}${scopeTenant(t).orgId}:${scopeTenant(t).userId}`
+      : join(scopeRoots(t).projectRoot, "briefs"),
+  (key) => {
+    if (!key.startsWith(BRIEFS_PG)) return new FsBriefStore(key);
+    // `org.id`'s CHECK constraint excludes ":", so splitting at the first one
+    // is unambiguous even though `userId` is unconstrained.
+    const rest = key.slice(BRIEFS_PG.length);
+    const sep = rest.indexOf(":");
+    return new PgBriefStore(database(), rest.slice(0, sep), rest.slice(sep + 1));
+  },
 );
 const assets = new Registry<AssetStorePort>(
   (t) => join(scopeRoots(t).projectRoot, "assets", "inputs"),
