@@ -34,7 +34,13 @@ describe("PgUsageStore (PT-7a, D175)", () => {
       key_owner: string;
     }>("select org_id, provider, model, units, key_owner from usage where org_id = $1", ["local"]);
     expect(rows).toEqual([
-      { org_id: "local", provider: "imagen", model: "imagen-4.0-generate-001", units: 1, key_owner: "platform" },
+      {
+        org_id: "local",
+        provider: "imagen",
+        model: "imagen-4.0-generate-001",
+        units: 1,
+        key_owner: "platform",
+      },
     ]);
   });
 
@@ -46,8 +52,20 @@ describe("PgUsageStore (PT-7a, D175)", () => {
   test("countThisMonth counts this calendar month's rows for the org, in UTC", async () => {
     const store = new PgUsageStore(db);
     const now = new Date("2026-09-24T12:00:00.000Z");
-    await store.record({ orgId: "local", provider: "imagen", model: "m", units: 1, keyOwner: "platform" });
-    await store.record({ orgId: "local", provider: "imagen", model: "m", units: 1, keyOwner: "platform" });
+    await store.record({
+      orgId: "local",
+      provider: "imagen",
+      model: "m",
+      units: 1,
+      keyOwner: "platform",
+    });
+    await store.record({
+      orgId: "local",
+      provider: "imagen",
+      model: "m",
+      units: 1,
+      keyOwner: "platform",
+    });
     await expect(store.countThisMonth("local", now)).resolves.toBe(2);
   });
 
@@ -59,8 +77,16 @@ describe("PgUsageStore (PT-7a, D175)", () => {
        values ($1, $2, $3, $4, $5, $6)`,
       ["local", "imagen", "m", 1, "platform", "2026-08-31T23:59:59.999Z"],
     );
-    await store.record({ orgId: "local", provider: "imagen", model: "m", units: 1, keyOwner: "platform" });
-    await expect(store.countThisMonth("local", new Date("2026-09-01T00:00:00.000Z"))).resolves.toBe(1);
+    await store.record({
+      orgId: "local",
+      provider: "imagen",
+      model: "m",
+      units: 1,
+      keyOwner: "platform",
+    });
+    await expect(store.countThisMonth("local", new Date("2026-09-01T00:00:00.000Z"))).resolves.toBe(
+      1,
+    );
   });
 
   test("countThisMonth reaches exactly the quota after enough recorded rows, and no further", async () => {
@@ -70,18 +96,48 @@ describe("PgUsageStore (PT-7a, D175)", () => {
     const quota = await store.quota("local");
     expect(quota).toBe(2);
     expect(await store.countThisMonth("local", now)).toBe(0); // below quota
-    await store.record({ orgId: "local", provider: "imagen", model: "m", units: 1, keyOwner: "platform" });
+    await store.record({
+      orgId: "local",
+      provider: "imagen",
+      model: "m",
+      units: 1,
+      keyOwner: "platform",
+    });
     expect(await store.countThisMonth("local", now)).toBe(1); // still below quota
-    await store.record({ orgId: "local", provider: "imagen", model: "m", units: 1, keyOwner: "platform" });
+    await store.record({
+      orgId: "local",
+      provider: "imagen",
+      model: "m",
+      units: 1,
+      keyOwner: "platform",
+    });
     expect(await store.countThisMonth("local", now)).toBe(2); // exactly the quota
   });
 
   test("usage is isolated per org: one org's rows and quota never leak into another's count", async () => {
     const store = new PgUsageStore(db);
     await db.query("update org set monthly_generation_quota = $2 where id = $1", ["acme", 5]);
-    await store.record({ orgId: "local", provider: "imagen", model: "m", units: 1, keyOwner: "platform" });
-    await store.record({ orgId: "local", provider: "imagen", model: "m", units: 1, keyOwner: "platform" });
-    await store.record({ orgId: "acme", provider: "imagen", model: "m", units: 1, keyOwner: "platform" });
+    await store.record({
+      orgId: "local",
+      provider: "imagen",
+      model: "m",
+      units: 1,
+      keyOwner: "platform",
+    });
+    await store.record({
+      orgId: "local",
+      provider: "imagen",
+      model: "m",
+      units: 1,
+      keyOwner: "platform",
+    });
+    await store.record({
+      orgId: "acme",
+      provider: "imagen",
+      model: "m",
+      units: 1,
+      keyOwner: "platform",
+    });
     const now = new Date("2026-09-24T12:00:00.000Z");
     await expect(store.countThisMonth("local", now)).resolves.toBe(2);
     await expect(store.countThisMonth("acme", now)).resolves.toBe(1);
