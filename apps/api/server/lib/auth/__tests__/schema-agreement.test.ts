@@ -103,4 +103,41 @@ describe("Better Auth against PGlite (PT-1a, D174b(2))", () => {
     expect(plan.unsafeChanges).toEqual([]);
     await sql.end();
   });
+
+  test("0008_auth is additive: applies on top of an existing org column from 0007 without assuming 0005-0007 exist", async () => {
+    const raw = new PGlite();
+    const sql = pgClient(DUMMY_CONFIG, () => pglitePgPool(raw));
+    const all = await loadMigrations();
+    const prior = all.filter((m) => m.id < "0008_auth");
+    await migrate(sql, prior);
+
+    // Simulate 0007 having added an org column prior to 0008
+    await sql.exec("alter table org add column quota integer;");
+
+    await migrate(sql, all);
+
+    const columns = await sql.query<{ column_name: string }>(
+      "select column_name from information_schema.columns where table_name = 'org'",
+    );
+    const names = new Set(columns.rows.map((r) => r.column_name));
+    expect(names.has("quota")).toBe(true);
+    expect(names.has("slug")).toBe(true);
+    expect(names.has("logo")).toBe(true);
+    expect(names.has("metadata")).toBe(true);
+
+    const instance = betterAuth(
+      authOptions({
+        database: pglitePgPool(raw),
+        secret: "a".repeat(32),
+        baseURL: "http://127.0.0.1:3001",
+        mailer: new LogMailer(),
+      }),
+    );
+    const plan = await getMigrations(instance.options, { throwOnUnsafe: false });
+    expect(plan.toBeCreated).toEqual([]);
+    expect(plan.toBeAdded).toEqual([]);
+    expect(plan.toBeAddedIndexes).toEqual([]);
+    expect(plan.unsafeChanges).toEqual([]);
+    await sql.end();
+  });
 });

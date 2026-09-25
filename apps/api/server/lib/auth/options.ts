@@ -29,6 +29,13 @@ export interface AuthDeps {
   readonly baseURL: string;
   /** Origins the web app is reachable at, trusted for the proxied requests item 10 names. */
   readonly trustedOrigins?: readonly string[];
+  /**
+   * Whether session cookies carry the `Secure` attribute (finding 2). In
+   * production the API runs behind a reverse proxy over plain HTTP internally,
+   * while browsers reach the web app over HTTPS. Derived from `WEB_ORIGIN`'s
+   * protocol (true when HTTPS).
+   */
+  readonly useSecureCookies?: boolean;
   readonly mailer: MailerPort;
   readonly google?: GoogleCredentials;
 }
@@ -49,6 +56,9 @@ export interface AuthDeps {
 // from the type (though not the runtime, which is why this only shows up in
 // `tsc`, not in a test).
 export function authOptions(deps: AuthDeps) {
+  if (deps.secret.length < 32) {
+    throw new Error("BETTER_AUTH_SECRET must be at least 32 characters long.");
+  }
   return {
     // `PgPool` is deliberately looser than Kysely's own `PostgresPool`/
     // `PostgresQueryResult` types (e.g. `command` as `string`, not the literal
@@ -63,6 +73,7 @@ export function authOptions(deps: AuthDeps) {
     baseURL: deps.baseURL,
     trustedOrigins: deps.trustedOrigins ? [...deps.trustedOrigins] : undefined,
     advanced: {
+      ...(deps.useSecureCookies !== undefined ? { useSecureCookies: deps.useSecureCookies } : {}),
       database: {
         // Every model's id, org included: SAFE_ID_PATTERN, not Better Auth's
         // default mixed-case alphabet (item 7).

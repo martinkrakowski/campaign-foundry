@@ -1,8 +1,10 @@
-import { describe, test, expect, afterEach, beforeEach } from "vitest";
+import { describe, test, expect, afterEach, beforeEach, vi } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { auth, resetAuth, setAuth, type Auth } from "../instance.js";
+import { AUTH_POOL_MAX, auth, authPool, resetAuth, setAuth, type Auth } from "../instance.js";
+import { authOptions } from "../options.js";
+import { LogMailer } from "../log-mailer.js";
 
 const KEYS = [
   "BETTER_AUTH_SECRET",
@@ -20,13 +22,13 @@ const KEYS = [
 describe("auth() (PT-1a)", () => {
   const saved = Object.fromEntries(KEYS.map((k) => [k, process.env[k]]));
 
-  beforeEach(() => {
-    resetAuth();
+  beforeEach(async () => {
+    await resetAuth();
     for (const k of KEYS) delete process.env[k];
   });
 
-  afterEach(() => {
-    resetAuth();
+  afterEach(async () => {
+    await resetAuth();
     for (const k of KEYS) {
       if (saved[k] === undefined) delete process.env[k];
       else process.env[k] = saved[k];
@@ -37,6 +39,23 @@ describe("auth() (PT-1a)", () => {
     expect(() => auth()).toThrow(
       "BETTER_AUTH_SECRET is not set (required when AUTH_MODE=better-auth).",
     );
+  });
+
+  test("refuses to build with a BETTER_AUTH_SECRET shorter than 32 characters, naming the setting and never the value", () => {
+    process.env.BETTER_AUTH_SECRET = "super-secret-short";
+    expect(() => auth()).toThrow("BETTER_AUTH_SECRET must be at least 32 characters long.");
+    expect(() => auth()).not.toThrow(/super-secret-short/);
+  });
+
+  test("authOptions refuses a secret shorter than 32 characters", () => {
+    expect(() =>
+      authOptions({
+        database: {} as never,
+        secret: "short",
+        baseURL: "http://127.0.0.1:3001",
+        mailer: new LogMailer(),
+      }),
+    ).toThrow("BETTER_AUTH_SECRET must be at least 32 characters long.");
   });
 
   test("refuses to build without BETTER_AUTH_URL", () => {
@@ -104,6 +123,38 @@ describe("auth() (PT-1a)", () => {
     expect(auth()).toBe(fake);
   });
 
+  describe("cookie security behind proxy (Finding 2)", () => {
+    test("sets useSecureCookies: true when WEB_ORIGIN is https", () => {
+      process.env.BETTER_AUTH_SECRET = "s".repeat(32);
+      process.env.BETTER_AUTH_URL = "http://127.0.0.1:3001";
+      process.env.DATABASE_URL = "postgres://user:pass@localhost:5432/db";
+      process.env.WEB_ORIGIN = "https://app.example.com";
+
+      const instance = auth();
+      expect(instance.options.advanced?.useSecureCookies).toBe(true);
+    });
+
+    test("sets useSecureCookies: false when WEB_ORIGIN is http", () => {
+      process.env.BETTER_AUTH_SECRET = "s".repeat(32);
+      process.env.BETTER_AUTH_URL = "http://127.0.0.1:3001";
+      process.env.DATABASE_URL = "postgres://user:pass@localhost:5432/db";
+      process.env.WEB_ORIGIN = "http://localhost:3000";
+
+      const instance = auth();
+      expect(instance.options.advanced?.useSecureCookies).toBe(false);
+    });
+
+    test("sets useSecureCookies: false when WEB_ORIGIN is absent", () => {
+      process.env.BETTER_AUTH_SECRET = "s".repeat(32);
+      process.env.BETTER_AUTH_URL = "http://127.0.0.1:3001";
+      process.env.DATABASE_URL = "postgres://user:pass@localhost:5432/db";
+      delete process.env.WEB_ORIGIN;
+
+      const instance = auth();
+      expect(instance.options.advanced?.useSecureCookies).toBe(false);
+    });
+  });
+
   describe("its own pool", () => {
     let dir: string | undefined;
     afterEach(() => {
@@ -120,6 +171,32 @@ describe("auth() (PT-1a)", () => {
       process.env.DATABASE_CA_PATH = join(dir, "ca.pem");
 
       expect(() => auth()).not.toThrow();
+    });
+
+    test("is capped at AUTH_POOL_MAX (2), ignoring larger DATABASE_POOL_MAX (Finding 3)", () => {
+      process.env.BETTER_AUTH_SECRET = "s".repeat(32);
+      process.env.BETTER_AUTH_URL = "http://127.0.0.1:3001";
+      process.env.DATABASE_URL = "postgres://user:pass@localhost:5432/db";
+      process.env.DATABASE_POOL_MAX = "10";
+
+      auth();
+      const p = authPool();
+      expect(p).toBeDefined();
+      expect(p?.options.max).toBe(AUTH_POOL_MAX);
+    });
+
+    test("resetAuth ends the shared pool before discarding it (Finding 6)", async () => {
+      process.env.BETTER_AUTH_SECRET = "s".repeat(32);
+      process.env.BETTER_AUTH_URL = "http://127.0.0.1:3001";
+      process.env.DATABASE_URL = "postgres://user:pass@localhost:5432/db";
+
+      auth();
+      const p = authPool();
+      expect(p).toBeDefined();
+      const endSpy = vi.spyOn(p!, "end");
+      await resetAuth();
+      expect(endSpy).toHaveBeenCalled();
+      expect(authPool()).toBeUndefined();
     });
   });
 });

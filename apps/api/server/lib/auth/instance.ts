@@ -4,11 +4,13 @@ import { betterAuth } from "better-auth";
 import pg from "pg";
 import { projectRoot } from "@campaignfoundry/shared";
 import { authSettings, databaseSettings } from "../config.js";
-import { databaseConfig } from "../db/database-config.js";
+import { AUTH_POOL_MAX, databaseConfig } from "../db/database-config.js";
 import { poolOptions } from "../db/pg-client.js";
 import { authOptions } from "./options.js";
 import { LogMailer } from "./log-mailer.js";
 import { ResendMailer } from "./resend-mailer.js";
+
+export { AUTH_POOL_MAX, BETTER_AUTH_POOL_MAX } from "../db/database-config.js";
 
 /** Derived from `build`, not `betterAuth` itself — see the note above it. */
 export type Auth = ReturnType<typeof build>;
@@ -20,17 +22,24 @@ function readCa(path: string): string {
   return readFileSync(resolve(projectRoot(), path), "utf8");
 }
 
+function isHttps(origin?: string): boolean {
+  if (!origin) return false;
+  try {
+    return new URL(origin).protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 /**
- * Better Auth's own connection pool (PT-1a). A second, separate `pg.Pool` from
- * the one `db/database.ts` builds for the stores: Better Auth's Kysely adapter
- * needs a `pg.Pool`-shaped object (`connect`/`query`/`end`/`on`), not a
- * `SqlClient`, so it cannot share the process's `SqlClient` pool directly.
- * Both pools are sized from the same `DATABASE_POOL_MAX`, so the operator's
- * accounting for the Aiven service's 15-connection budget must include this
- * one too — recorded under Deviations in the PR, not solved here.
+ * Better Auth's own connection pool (PT-1a, Finding 3). Sized to AUTH_POOL_MAX (2),
+ * an explicit small cap rather than DATABASE_POOL_MAX, so the store pool (up to 13)
+ * and Better Auth's pool (2) together never exceed the Aiven service's 15-connection
+ * budget (MAX_POOL). Total per process: DATABASE_POOL_MAX + AUTH_POOL_MAX <= MAX_POOL.
  */
 function pool(): pg.Pool {
-  sharedPool ??= new pg.Pool(poolOptions(databaseConfig(databaseSettings(), readCa)));
+  const config = databaseConfig(databaseSettings(), readCa);
+  sharedPool ??= new pg.Pool(poolOptions({ ...config, max: AUTH_POOL_MAX }));
   return sharedPool;
 }
 
@@ -49,6 +58,9 @@ function build() {
   const settings = authSettings();
   if (!settings.secret) {
     throw new Error("BETTER_AUTH_SECRET is not set (required when AUTH_MODE=better-auth).");
+  }
+  if (settings.secret.length < 32) {
+    throw new Error("BETTER_AUTH_SECRET must be at least 32 characters long.");
   }
   if (!settings.baseURL) {
     throw new Error("BETTER_AUTH_URL is not set (required when AUTH_MODE=better-auth).");
@@ -69,6 +81,7 @@ function build() {
       secret: settings.secret,
       baseURL: settings.baseURL,
       trustedOrigins: settings.webOrigin ? [settings.webOrigin] : undefined,
+      useSecureCookies: isHttps(settings.webOrigin),
       mailer,
       google,
     }),
@@ -86,8 +99,15 @@ export function setAuth(instance: Auth): void {
   shared = instance;
 }
 
-/** Forget the instance and its pool (the next `auth()` builds fresh from the environment). */
-export function resetAuth(): void {
+/** The shared connection pool, if built (for tests). */
+export function authPool(): pg.Pool | undefined {
+  return sharedPool;
+}
+
+/** Forget the instance and its pool, closing the pool before discarding it (Finding 6). */
+export async function resetAuth(): Promise<void> {
+  const poolToClose = sharedPool;
   shared = undefined;
   sharedPool = undefined;
+  await poolToClose?.end();
 }

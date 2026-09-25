@@ -3,11 +3,13 @@
 -- plugin needs, mapped onto `org` (0001) rather than a second table (D174b(1)).
 --
 -- This SQL is hand-translated from Better Auth's own Kysely migration plan
--- (`getMigrations`, run against a PGlite database carrying only 0001-0007), so
--- the schema-agreement test (`lib/auth/__tests__/schema-agreement.test.ts`) can
--- assert Better Auth finds nothing left to create once this migration has run.
+-- (`getMigrations`), so the schema-agreement test
+-- (`lib/auth/__tests__/schema-agreement.test.ts`) can assert Better Auth finds
+-- nothing left to create once this migration has run. It applies on top of
+-- whatever 0001-0007 exist, and is additive to 0007's org column; it does not
+-- assume 0005, 0006 or 0007 exist.
 -- Every table and column name below is a `fields`/`modelName` mapping given to
--- `betterAuth()` in `lib/auth/config.ts`; changing a name in one place without
+-- `betterAuth()` in `lib/auth/options.ts`; changing a name in one place without
 -- the other is exactly what that test exists to catch.
 
 -- `org` gains the columns Better Auth's organisation model requires. The id
