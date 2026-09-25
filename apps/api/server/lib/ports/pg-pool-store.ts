@@ -135,6 +135,10 @@ export class PgPoolStore implements PoolStorePort {
   }
 
   async copyPool(fromCampaignId: string, toCampaignId: string): Promise<CopyPool | undefined> {
+    // Validated before the read, the same order `FsPoolStore.copyPool` checks
+    // `isPoolDirSymlink(toBriefId)` in: an unsafe destination is refused even
+    // when the source has no pool to copy.
+    assertSafeCampaignId(toCampaignId);
     const stored = await this.readPool(fromCampaignId);
     if (!stored) return undefined;
     // The stored pool names the campaign it belongs to; a byte copy would hand

@@ -8,12 +8,7 @@ import { migratedDatabase } from "../../db/__tests__/pglite-client.js";
 import { resetDatabase, setDatabase } from "../../db/database.js";
 import { LOCAL_TENANT, type TenantContext } from "../../tenant.js";
 import { runEnvironment } from "../../run-environment.js";
-import {
-  getPoolStore,
-  resetPoolStore,
-  setPoolStore,
-  type PoolStorePort,
-} from "../index.js";
+import { getPoolStore, resetPoolStore, setPoolStore, type PoolStorePort } from "../index.js";
 import { InvalidCopyPoolError } from "../pool-store.port.js";
 import { FsPoolStore } from "../fs-pool-store.js";
 import { PgPoolStore } from "../pg-pool-store.js";
@@ -97,7 +92,9 @@ describe("PgPoolStore (PT-3e, D169)", () => {
   test("a write without an expectation is unconditional, overwriting whatever is stored", async () => {
     const store = new PgPoolStore(db, "local");
     await store.writePool(pool());
-    await store.writePool(pool({ entries: [{ id: "h2", text: "Stay hydrated", status: "approved" }] }));
+    await store.writePool(
+      pool({ entries: [{ id: "h2", text: "Stay hydrated", status: "approved" }] }),
+    );
     const third = await store.writePool(pool({ entries: [] }));
     expect((await store.readPool("camp"))?.pool.entries).toEqual([]);
     expect(third.pool.entries).toEqual([]);
@@ -112,6 +109,13 @@ describe("PgPoolStore (PT-3e, D169)", () => {
     expect((await store.readPool("copy"))?.pool.briefId).toBe("copy");
     // The source is untouched.
     expect((await store.readPool("camp"))?.pool.briefId).toBe("camp");
+  });
+
+  test("copyPool refuses an unsafe destination id exactly as the fs store does, even with no source pool", async () => {
+    const store = new PgPoolStore(db, "local");
+    await expect(store.copyPool("absent", "../evil")).rejects.toThrow(
+      /Path escapes the allowed directory/,
+    );
   });
 
   test("deletePool removes the row and is a no-op when it is already absent", async () => {
