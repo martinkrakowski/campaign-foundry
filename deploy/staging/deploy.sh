@@ -5,7 +5,23 @@
 # .env.local, operator briefs or certificates can reach a layer — on the
 # cluster's own amd64 node through a Docker context over SSH, and pushed to
 # Harbor. The manifests are rendered here and applied on the node.
+#
+#   yarn deploy:staging          asks before building (needs a terminal)
+#   yarn deploy:staging --yes    deploys without asking (scripts, agents)
+#
+# Anything else is refused, so a stray `--help` or typo never deploys.
 set -eu
+
+CONFIRMED=no
+for arg in "$@"; do
+  case "$arg" in
+    --yes) CONFIRMED=yes ;;
+    *)
+      echo "usage: yarn deploy:staging [--yes]" >&2
+      exit 2
+      ;;
+  esac
+done
 
 cd "$(git rev-parse --show-toplevel)"
 if [ -n "$(git status --porcelain)" ]; then
@@ -19,6 +35,23 @@ CONTEXT="${STAGING_DOCKER_CONTEXT:-midnight}"
 NODE="${STAGING_SSH:-m}"
 NS=campaign-foundry-staging
 remote() { ssh "$NODE" "KUBECONFIG=/etc/rancher/k3s/k3s.yaml $*"; }
+
+if [ "$CONFIRMED" != yes ]; then
+  if [ ! -t 0 ]; then
+    echo "deploy.sh: no terminal to confirm on; pass --yes to deploy $TAG to staging." >&2
+    exit 1
+  fi
+  printf 'Deploy %s (%s) to staging (https://campaign-foundry.midnight.lan)? [y/N] ' \
+    "$TAG" "$(git log -1 --format=%s)"
+  read -r answer
+  case "$answer" in
+    y | Y | yes) ;;
+    *)
+      echo "Not deployed."
+      exit 1
+      ;;
+  esac
+fi
 
 echo "==> build $IMAGE on $CONTEXT"
 git archive --format=tar HEAD | docker --context "$CONTEXT" build -t "$IMAGE" -

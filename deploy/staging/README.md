@@ -68,6 +68,10 @@ From a clean checkout of the commit to ship (Docker logged in to Harbor, a
 yarn deploy:staging   # runs deploy/staging/deploy.sh
 ```
 
+It shows the commit and asks before building. Without a terminal (a script, CI or an
+agent) it refuses unless given `--yes`, and any other argument is refused, so a stray
+`--help` never deploys.
+
 It builds on the node, pushes, applies `deploy/staging`, waits for Postgres, runs
 the migrations (`jobs/migrate.yaml`), and restarts the app.
 
