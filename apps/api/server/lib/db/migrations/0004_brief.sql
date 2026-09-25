@@ -14,10 +14,14 @@ create table campaign (
   unique (org_id, slug)
 );
 
+-- `body` is `text`, not `jsonb`: a jsonb column re-serialises the payload
+-- (nested key order, whitespace), which would silently reorder a brief's
+-- nested objects (e.g. `products[0]`'s keys) on every round trip — `text`
+-- keeps exactly the `JSON.stringify(brief)` bytes the store wrote.
 create table brief_version (
   campaign_id uuid not null references campaign (id),
   version int not null,
-  body jsonb not null,
+  body text not null,
   revision text not null,
   actor text not null,
   created_at timestamptz not null default now(),

@@ -18,7 +18,13 @@ interface BriefVersionRow {
   readonly campaign_id: string;
   readonly version: number;
   readonly revision: string;
-  readonly body: Record<string, unknown>;
+  /** The exact `JSON.stringify(brief)` bytes the write stored; see the migration. */
+  readonly body: string;
+}
+
+/** `body` is validated by `parseBriefText` right after this call; a bad row simply fails to parse. */
+function parseBody(body: string): Record<string, unknown> {
+  return JSON.parse(body) as Record<string, unknown>;
 }
 
 function notFound(id: string): Error {
@@ -75,11 +81,7 @@ export class PgBriefStore implements BriefStorePort {
   }
 
   async listBriefs(): Promise<readonly StoredBrief[]> {
-    const { rows } = await this.db.query<{
-      slug: string;
-      body: Record<string, unknown>;
-      revision: string;
-    }>(
+    const { rows } = await this.db.query<{ slug: string; body: string; revision: string }>(
       `select slug, body, revision from (
          select distinct on (c.id) c.id, c.slug, bv.body, bv.revision
            from campaign c
@@ -96,7 +98,7 @@ export class PgBriefStore implements BriefStorePort {
       try {
         briefs.push({
           file,
-          brief: parseBriefText(file, dumpBrief(row.body)),
+          brief: parseBriefText(file, dumpBrief(parseBody(row.body))),
           revision: row.revision,
         });
       } catch (error) {
@@ -112,16 +114,26 @@ export class PgBriefStore implements BriefStorePort {
     const row = await this.currentRow(id);
     if (!row) return undefined;
     const file = `${id}.yaml`;
-    return { file, brief: parseBriefText(file, dumpBrief(row.body)), revision: row.revision };
+    return {
+      file,
+      brief: parseBriefText(file, dumpBrief(parseBody(row.body))),
+      revision: row.revision,
+    };
   }
 
   async findBriefFileById(id: string): Promise<string | undefined> {
     return (await this.currentRow(id)) ? `${id}.yaml` : undefined;
   }
 
-  async findBriefFile(id: string): Promise<string | undefined> {
-    // No non-test caller (PT-3d spec): every campaign is stored under exactly
-    // one key, its slug, so this answers the same as findBriefFileById.
+  async findBriefFile(
+    id: string,
+    exts: readonly string[] = BRIEF_SOURCE_EXTS,
+  ): Promise<string | undefined> {
+    // Every campaign is stored under exactly one key, its slug at ".yaml" — so
+    // this can only ever answer that key, and only when ".yaml" is among the
+    // extensions the caller accepts (the fs store's own contract: an id with
+    // no file at an allowed extension is not found).
+    if (!exts.includes(".yaml")) return undefined;
     return this.findBriefFileById(id);
   }
 
@@ -129,7 +141,7 @@ export class PgBriefStore implements BriefStorePort {
     const slug = slugOf(fileOrKey);
     const row = await this.currentRow(slug);
     if (!row) throw notFound(fileOrKey);
-    return parseBriefText(`${slug}.yaml`, dumpBrief(row.body), opts);
+    return parseBriefText(`${slug}.yaml`, dumpBrief(parseBody(row.body)), opts);
   }
 
   async createBrief(brief: CampaignBrief): Promise<StoredBrief> {
@@ -151,7 +163,7 @@ export class PgBriefStore implements BriefStorePort {
       const revision = hashBytes(Buffer.from(yaml, "utf8"));
       await tx.query(
         `insert into brief_version (campaign_id, version, body, revision, actor)
-         values ($1, 1, $2::jsonb, $3, $4)`,
+         values ($1, 1, $2, $3, $4)`,
         [campaignId, JSON.stringify(brief), revision, this.actor],
       );
       return { file: `${brief.id}.yaml`, brief, revision };
@@ -193,7 +205,7 @@ export class PgBriefStore implements BriefStorePort {
       const revision = hashBytes(Buffer.from(yaml, "utf8"));
       await tx.query(
         `insert into brief_version (campaign_id, version, body, revision, actor)
-         values ($1, $2, $3::jsonb, $4, $5)`,
+         values ($1, $2, $3, $4, $5)`,
         [campaignId, current.version + 1, JSON.stringify(brief), revision, this.actor],
       );
       return { file: `${brief.id}.yaml`, brief, revision };
