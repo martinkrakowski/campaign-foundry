@@ -10,6 +10,7 @@ import { BrandComplianceChecker } from "@campaignfoundry/GovernanceAndCompliance
 import { isErrno, SYMLINK_WRITE_ERROR } from "../../../lib/brief-files.js";
 import { getBriefStore } from "../../../lib/ports/index.js";
 import { assertSafeId, parseBrief } from "../../../lib/load-brief.js";
+import { QuotaExceededError } from "../../../lib/metering.js";
 import { copyGenerator } from "../../../lib/pipeline.js";
 import { runEnvironment } from "../../../lib/run-environment.js";
 import { requestTenant } from "../../../lib/tenant.js";
@@ -183,6 +184,14 @@ export default defineEventHandler(async (event) => {
   try {
     suggested = await generator.suggestHeadlines({ brief, count });
   } catch (error) {
+    // The org crossed its monthly quota between admission and this call (or
+    // this call was never behind an admission check at all — see
+    // QuotaExceededError's doc in lib/metering.ts). Same shape as
+    // generate.post.ts's admission refusal, so callers handle both the same way.
+    if (error instanceof QuotaExceededError) {
+      setResponseStatus(event, 429);
+      return { error: error.message, code: "quota_exceeded" };
+    }
     if (!(error instanceof CopyGeneratorError)) throw error;
     const failure = mapGeneratorError(error);
     setResponseStatus(event, failure.status);

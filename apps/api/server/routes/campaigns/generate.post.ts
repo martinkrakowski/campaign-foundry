@@ -2,6 +2,7 @@ import { setResponseHeader } from "h3";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { acquireJob, completeJob, failJob, progressJob, runJob } from "../../lib/jobs.js";
 import { JobCapacityError } from "../../lib/ports/fs-job-store.js";
+import { getUsageStore } from "../../lib/ports/index.js";
 import { parseBrief, parseRegenerateOnly } from "../../lib/load-brief.js";
 import { ALLOWED_IMAGE_MODELS, runCampaign } from "../../lib/pipeline.js";
 import { runEnvironment, type RunEnvironment } from "../../lib/run-environment.js";
@@ -141,6 +142,23 @@ export default defineEventHandler(async (event) => {
       setResponseStatus(event, 500);
       return { error: `Could not read the stored report for campaign "${brief.id}".` };
     }
+  }
+
+  // Admission (PT-7a, D175): an org over its monthly generation quota is
+  // refused before any provider call — before the job claim below, so a
+  // refused run makes no provider call and creates no job. Quota is a column
+  // on `org` (0007), read through the port, never env; null is unlimited.
+  // With STORE_BACKEND=fs the usage port is a no-op (unlimited, uncounted),
+  // so only the Postgres backend can ever refuse here (D175: only it can
+  // admit an org other than the operator's at all).
+  const usage = getUsageStore(env);
+  const quota = await usage.quota(env.tenant.orgId);
+  if (quota !== null && (await usage.countThisMonth(env.tenant.orgId, new Date())) >= quota) {
+    setResponseStatus(event, 429);
+    return {
+      error: `Campaign "${brief.id}" would exceed its org's monthly generation quota.`,
+      code: "quota_exceeded",
+    };
   }
 
   // One run per campaign at a time: a double-click or a retry after a poll blip must

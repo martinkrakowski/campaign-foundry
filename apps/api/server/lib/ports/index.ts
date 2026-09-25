@@ -9,11 +9,14 @@ import { FsPoolStore } from "./fs-pool-store.js";
 import { PgPoolStore } from "./pg-pool-store.js";
 import { FsTemplateStore } from "./fs-template-store.js";
 import { FsJobStore } from "./fs-job-store.js";
+import { PgJobStore } from "./pg-job-store.js";
 import { FsReportStore } from "./fs-report-store.js";
 import { PgReportStore } from "./pg-report-store.js";
 import { FsOutputStore } from "./fs-output-store.js";
 import { FsDecisionStore } from "./fs-decision-store.js";
 import { PgDecisionStore } from "./pg-decision-store.js";
+import { FsUsageStore } from "./fs-usage-store.js";
+import { PgUsageStore } from "./pg-usage-store.js";
 import type { BriefStorePort } from "./brief-store.port.js";
 import type { AssetStorePort } from "./asset-store.port.js";
 import type { PoolStorePort } from "./pool-store.port.js";
@@ -22,6 +25,7 @@ import type { JobStorePort } from "./job-store.port.js";
 import type { ReportStorePort } from "./report-store.port.js";
 import type { OutputStorePort } from "./output-store.port.js";
 import type { DecisionStorePort } from "./decision-store.port.js";
+import type { UsageStorePort } from "./usage-store.port.js";
 
 export * from "./brief-store.port.js";
 export * from "./asset-store.port.js";
@@ -31,6 +35,7 @@ export * from "./job-store.port.js";
 export * from "./report-store.port.js";
 export * from "./output-store.port.js";
 export * from "./decision-store.port.js";
+export * from "./usage-store.port.js";
 export * from "./fs-brief-store.js";
 export * from "./pg-brief-store.js";
 export * from "./fs-asset-store.js";
@@ -38,11 +43,14 @@ export * from "./fs-pool-store.js";
 export * from "./pg-pool-store.js";
 export * from "./fs-template-store.js";
 export * from "./fs-job-store.js";
+export * from "./pg-job-store.js";
 export * from "./fs-report-store.js";
 export * from "./pg-report-store.js";
 export * from "./fs-output-store.js";
 export * from "./fs-decision-store.js";
 export * from "./pg-decision-store.js";
+export * from "./fs-usage-store.js";
+export * from "./pg-usage-store.js";
 
 /**
  * The store registry (PT-0b2, D167 stamped). Every getter takes the scope a
@@ -127,9 +135,15 @@ const templates = new Registry<TemplateStorePort>(
   () => "canonical",
   () => new FsTemplateStore(),
 );
+// With STORE_BACKEND=postgres (PT-6a), one lease-backed store per org over the
+// process's database; otherwise one per output root, on files (unchanged).
 const jobs = new Registry<JobStorePort>(
-  (t) => join(scopeRoots(t).outputRoot, "jobs"),
-  (dir) => new FsJobStore(dir),
+  (t) =>
+    storeBackend() === "postgres"
+      ? PG + scopeTenant(t).orgId
+      : join(scopeRoots(t).outputRoot, "jobs"),
+  (key) =>
+    key.startsWith(PG) ? new PgJobStore(database(), key.slice(PG.length)) : new FsJobStore(key),
 );
 // With STORE_BACKEND=postgres (PT-3c), one store per org over the process's
 // database; otherwise one per output root, on files.
@@ -154,6 +168,14 @@ const decisions = new Registry<DecisionStorePort>(
     key.startsWith(PG)
       ? new PgDecisionStore(database(), key.slice(PG.length))
       : new FsDecisionStore(key),
+);
+
+// Usage rows every org shares (PT-7a): unlike decisions, the adapter is not
+// scoped to one org (its methods take `orgId` per call), so the whole
+// registry is one store per backend, not per tenant root.
+const usage = new Registry<UsageStorePort>(
+  () => storeBackend(),
+  (backend) => (backend === "postgres" ? new PgUsageStore(database()) : new FsUsageStore()),
 );
 
 export const getBriefStore = (scope: StorageScope): BriefStorePort => briefs.get(scope);
@@ -191,3 +213,7 @@ export const resetOutputStore = (): void => outputs.reset();
 export const getDecisionStore = (scope: StorageScope): DecisionStorePort => decisions.get(scope);
 export const setDecisionStore = (store: DecisionStorePort): void => decisions.set(store);
 export const resetDecisionStore = (): void => decisions.reset();
+
+export const getUsageStore = (scope: StorageScope): UsageStorePort => usage.get(scope);
+export const setUsageStore = (store: UsageStorePort): void => usage.set(store);
+export const resetUsageStore = (): void => usage.reset();

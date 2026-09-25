@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "PT-7a-metering",
+  "mutations": [
+    {
+      "file": "apps/api/server/routes/campaigns/generate.post.ts",
+      "before": "  if (quota !== null && (await usage.countThisMonth(env.tenant.orgId, new Date())) >= quota) {",
+      "after": "  if (quota !== null && (await usage.countThisMonth(env.tenant.orgId, new Date())) > quota) {",
+      "because": "off-by-one on the quota comparison would admit a run exactly at quota instead of refusing it (D175)",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/generate-quota.test.ts",
+        "-t",
+        "a run at exactly the quota is refused with 429, no provider call and no job"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

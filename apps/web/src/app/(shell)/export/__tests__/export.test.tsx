@@ -12,6 +12,7 @@ import {
   fakeDecisionsApi,
 } from "@/__tests__/helpers";
 import { API, useRun } from "@/lib/run-context";
+import * as messages from "@/components/campaign/messages";
 import { DEFAULT_CAMPAIGN_TYPE } from "@campaignfoundry/CampaignOrchestration/campaign-types";
 import { templateFromCanonical } from "@campaignfoundry/CampaignOrchestration/brief-template";
 import ExportPage from "../page";
@@ -257,6 +258,34 @@ describe("ExportPage — platform packaging", () => {
     expect(pkg.getAttribute("title")).toBe("Loading the review decisions");
     answer(server.handle("", {}));
     await waitFor(() => expect((pkg as HTMLButtonElement).disabled).toBe(false));
+  });
+
+  test("Package is disabled while a run is in flight, and says why", async () => {
+    const user = userEvent.setup();
+    seedPersistedRun([makeAsset()]);
+    mockPipelineApi({
+      report: {
+        halted: false,
+        assets: [makeAsset()],
+        log: { entries: [], campaignId: "seed" },
+      },
+      post: () => new Promise<Response>(() => {}), // never resolves → the run stays in flight
+    });
+    renderWithRun(
+      <>
+        <RunDraft />
+        <ExportPage />
+      </>,
+    );
+    const pkg = (await screen.findByRole("button", { name: "Package" })) as HTMLButtonElement;
+    await waitFor(() => expect(pkg.disabled).toBe(false)); // decisions loaded, a platform picked
+    // The title alone is unreachable while the button is disabled — no focus, no
+    // announcement — so the same reason must also be a visible, announced status line.
+    expect(screen.queryByRole("status")).toBeNull();
+    await user.click(screen.getByText("run draft"));
+    await waitFor(() => expect(pkg.disabled).toBe(true));
+    expect(pkg.title).toBe("A run is in flight — export waits until it finishes");
+    expect(screen.getByRole("status").textContent).toBe(messages.exportPausedWhileRunning);
   });
 
   test("a run whose html assets were rejected is not offered the html profiles (X14 fix2)", async () => {
