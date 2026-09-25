@@ -326,8 +326,12 @@ export default function GridPage() {
                           (regeneratingKeys === null || regeneratingKeys.has(assetKey(asset)))
                         }
                         decision={decisions[assetKey(asset)]}
-                        decidable={decisionsLoaded}
-                        waitingReason={decisionsNotice ?? messages.reviewDecisionsLoading}
+                        decidable={decisionsLoaded && !loading}
+                        waitingReason={
+                          loading
+                            ? messages.reviewPausedWhileRunning
+                            : (decisionsNotice ?? messages.reviewDecisionsLoading)
+                        }
                         onDecide={(d) => decide(assetKey(asset), d)}
                         onPreview={() => setPreviewKey(assetKey(asset))}
                       />
@@ -474,7 +478,8 @@ function Artboard({
   version: number;
   loading: boolean;
   decision?: "approved" | "rejected";
-  /** False until the run's decisions load (D173): a verdict needs the map it joins. */
+  /** False until the run's decisions load (D173) or while a run is in flight: a verdict
+   * needs the map it joins, and a run is rewriting both the cells and that map. */
   decidable: boolean;
   /** Why the verdict controls are paused, while they are. */
   waitingReason: string;
