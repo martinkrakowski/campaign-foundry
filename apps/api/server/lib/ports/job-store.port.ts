@@ -126,8 +126,9 @@ export type JobRegistryPort = JobStorePort;
  * extending the lease a claim holds. `JobStorePort` stays the type every route
  * and `lib/jobs.ts` helper is written against (it needs no lease knowledge);
  * `RunRegistryPort` is what a lease-backed adapter (`PgJobStore`, PT-6a)
- * implements, and `runJob` narrows to it (`"heartbeat" in store`) to keep a
- * claim alive for as long as its work runs. A single-process store (`FsJobStore`)
+ * implements, and `runJob` narrows to it (a `typeof store.heartbeat ===
+ * "function"` guard) to keep a claim alive for as long as its work runs. A
+ * single-process store (`FsJobStore`)
  * excludes runs with its in-memory lock chain instead and never lapses a lease,
  * so it implements `JobStorePort` only.
  */

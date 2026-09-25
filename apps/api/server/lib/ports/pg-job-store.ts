@@ -34,6 +34,14 @@ function asInterval(ms: number): string {
   return `${ms} milliseconds`;
 }
 
+/**
+ * What a lapsed lease reads as, whether the reaper already wrote it (a row
+ * this org has since reaped) or a read is inferring it from `lease_expires_at`
+ * before any claim has run the reaper (item 5). One string, so the two never
+ * drift: `reap` passes it as a parameter rather than a second literal.
+ */
+const LEASE_EXPIRED_MESSAGE = "Lease expired: the worker holding it stopped heartbeating.";
+
 interface JobRow {
   id: string;
   campaign_id: string;
@@ -46,6 +54,21 @@ interface JobRow {
   created_at: Date;
   settled_at: Date | null;
   seq: number | string;
+  lease_expires_at: Date | null;
+}
+
+/**
+ * A running row whose lease has lapsed reads as failed (item 5): without this,
+ * a dead worker's job would still poll "running" until some unrelated claim
+ * for this org happens to run the reaper. Read-only — the row itself becomes
+ * `'failed'` for real the next time this org's reaper runs, with the same
+ * message, so a poller never sees two different explanations for the same row.
+ */
+function lapsedAsFailed(row: JobRow, now: Date): JobRow {
+  if (row.status !== "running" || row.lease_expires_at === null || row.lease_expires_at > now) {
+    return row;
+  }
+  return { ...row, status: "failed", error: LEASE_EXPIRED_MESSAGE };
 }
 
 function toJob(row: JobRow): Job {
@@ -78,7 +101,7 @@ function toStoredJob(row: JobRow): StoredJob {
  * a settled row past `JOB_TTL_MS` reads as gone, the same as a file store's
  * passive expiry, without a background sweep.
  */
-const SELECT_COLUMNS = `id, campaign_id, status, done, total, log, result, error, created_at, settled_at, seq`;
+const SELECT_COLUMNS = `id, campaign_id, status, done, total, log, result, error, created_at, settled_at, seq, lease_expires_at`;
 
 /**
  * Jobs as rows (PT-6a, D171), one org's: the run's lease, adoption handle and
@@ -99,11 +122,9 @@ export class PgJobStore implements RunRegistryPort {
    */
   private async reap(tx: SqlQuery): Promise<void> {
     await tx.query(
-      `update job set status = 'failed',
-              error = 'Lease expired: the worker holding it stopped heartbeating.',
-              settled_at = now()
+      `update job set status = 'failed', error = $2, settled_at = now()
        where org_id = $1 and status = 'running' and lease_expires_at < now()`,
-      [this.orgId],
+      [this.orgId, LEASE_EXPIRED_MESSAGE],
     );
   }
 
@@ -139,12 +160,45 @@ export class PgJobStore implements RunRegistryPort {
     }
   }
 
+  /**
+   * A per-org transaction-scoped advisory lock (item 3): serializes every
+   * `acquireJob` for this org across processes, so `reap` → the incumbent
+   * check → capacity eviction → the claim run as one critical section. Without
+   * it two concurrent claims for DIFFERENT campaigns could both count the same
+   * headroom (both see `n < MAX_JOBS` and both admit, overshooting it) or both
+   * evict the same oldest settled row (one finds nothing left and refuses a
+   * claim capacity had room for). `hashtext` turns the org id into the lock's
+   * bigint key; released automatically at commit or rollback, so a claim that
+   * throws never leaves it held.
+   */
+  private async lockOrg(tx: SqlQuery): Promise<void> {
+    await tx.query("select pg_advisory_xact_lock(hashtext('job:' || $1))", [this.orgId]);
+  }
+
+  /** The running row for `campaignId`, if any — the claim's incumbent, and `getRunningJobId`. */
+  private async runningIncumbent(q: SqlQuery, campaignId: string): Promise<string | undefined> {
+    const { rows } = await q.query<{ id: string }>(
+      `select id from job where org_id = $1 and campaign_id = $2 and status = 'running' limit 1`,
+      [this.orgId, campaignId],
+    );
+    return rows[0]?.id;
+  }
+
   async acquireJob(
     campaignId: string,
     customId?: string,
   ): Promise<{ acquired: true; jobId: string } | { acquired: false; runningJobId: string }> {
     return this.db.transaction(async (tx) => {
+      await this.lockOrg(tx);
       await this.reap(tx);
+      // The incumbent, before any capacity decision (item 1): a retry for a
+      // campaign this org is already running must adopt it even when the org
+      // is at `MAX_JOBS` — evicting to make room for a row that would just
+      // conflict with the one already there, then throwing `JobCapacityError`
+      // instead of returning the incumbent, is the file store's actual
+      // behaviour and this must match it.
+      const incumbent = await this.runningIncumbent(tx, campaignId);
+      if (incumbent !== undefined) return { acquired: false, runningJobId: incumbent };
       await this.evictToFit(tx);
       const id = customId ?? randomUUID();
       // The one statement (item 2): an insert whose conflict target is the
@@ -153,7 +207,11 @@ export class PgJobStore implements RunRegistryPort {
       // exists so `returning` always answers — `do nothing` answers nothing on
       // the conflict path. `xmax = 0` is true only for a row this statement
       // itself inserted: the classic way to tell "I inserted" from "I found the
-      // incumbent" out of one `returning`.
+      // incumbent" out of one `returning`. With the org lock held, no other
+      // transaction for this org can be here at the same time, so the conflict
+      // path is now a belt-and-braces check, not the only thing preventing a
+      // double-admit — but it is also what a two-connection race without the
+      // lock (an older client, a future bypass) still falls back on safely.
       const { rows } = await tx.query<{ id: string; acquired: boolean }>(
         `insert into job (id, org_id, campaign_id, status, lease_expires_at, heartbeat_at)
          values ($1, $2, $3, 'running', now() + $4::interval, now())
@@ -175,11 +233,7 @@ export class PgJobStore implements RunRegistryPort {
   }
 
   async getRunningJobId(campaignId: string): Promise<string | undefined> {
-    const { rows } = await this.db.query<{ id: string }>(
-      `select id from job where org_id = $1 and campaign_id = $2 and status = 'running' limit 1`,
-      [this.orgId, campaignId],
-    );
-    return rows[0]?.id;
+    return this.runningIncumbent(this.db, campaignId);
   }
 
   async hasRunningJob(campaignId: string): Promise<boolean> {
@@ -194,7 +248,7 @@ export class PgJobStore implements RunRegistryPort {
       [id, this.orgId, asInterval(JOB_TTL_MS)],
     );
     const row = rows[0];
-    return row ? toStoredJob(row) : undefined;
+    return row ? toStoredJob(lapsedAsFailed(row, new Date())) : undefined;
   }
 
   async getJob(id: string): Promise<Job | undefined> {
@@ -203,19 +257,28 @@ export class PgJobStore implements RunRegistryPort {
 
   /**
    * Extend the claim's lease. Silent when the row no longer holds one (already
-   * settled, or reaped): a heartbeat is upkeep, not a claim, and there is
-   * nothing here for a caller to act on — the next fenced write is where a lost
-   * lease actually surfaces.
+   * settled, reaped, or the lease itself already lapsed — item 2: a heartbeat
+   * that arrives late must not renew a lease that has already run out, even
+   * before some other claim's reaper gets around to writing `'failed'`). A
+   * heartbeat is upkeep, not a claim, and there is nothing here for a caller
+   * to act on — the next fenced write is where a lost lease actually surfaces.
    */
   async heartbeat(id: string): Promise<void> {
     await this.db.query(
       `update job set heartbeat_at = now(), lease_expires_at = now() + $3::interval
-       where id = $1 and org_id = $2 and status = 'running'`,
+       where id = $1 and org_id = $2 and status = 'running' and lease_expires_at > now()`,
       [id, this.orgId, asInterval(LEASE_MS)],
     );
   }
 
-  /** A fenced write (item 5): refused once the row is no longer this claim's to write. */
+  /**
+   * A fenced write (item 5, extended by item 2): refused once the row is no
+   * longer this claim's to write — settled, reaped, or its lease has simply
+   * lapsed. `status = 'running'` alone is not enough: a delayed worker's write
+   * can arrive after its own lease expired but before anyone's reaper has
+   * caught up (the reaper only runs inside another claim), so the write must
+   * check the lease itself rather than trust a status nobody has updated yet.
+   */
   private async fencedUpdate(id: string, sql: string, params: readonly unknown[]): Promise<void> {
     const { rows } = await this.db.query<{ id: string }>(sql, params);
     if (rows.length === 0) throw new JobLeaseLostError(id);
@@ -225,7 +288,7 @@ export class PgJobStore implements RunRegistryPort {
     await this.fencedUpdate(
       id,
       `update job set done = $3, total = $4
-       where id = $1 and org_id = $2 and status = 'running'
+       where id = $1 and org_id = $2 and status = 'running' and lease_expires_at > now()
        returning id`,
       [id, this.orgId, done, total],
     );
@@ -236,7 +299,7 @@ export class PgJobStore implements RunRegistryPort {
     await this.fencedUpdate(
       id,
       `update job set status = 'completed', done = $3, total = $3, log = $4, result = $5, settled_at = now()
-       where id = $1 and org_id = $2 and status = 'running'
+       where id = $1 and org_id = $2 and status = 'running' and lease_expires_at > now()
        returning id`,
       [id, this.orgId, n, payload.log, payload],
     );
@@ -246,7 +309,7 @@ export class PgJobStore implements RunRegistryPort {
     await this.fencedUpdate(
       id,
       `update job set status = 'failed', done = 0, total = 0, log = null, error = $3, settled_at = now()
-       where id = $1 and org_id = $2 and status = 'running'
+       where id = $1 and org_id = $2 and status = 'running' and lease_expires_at > now()
        returning id`,
       [id, this.orgId, error],
     );
@@ -264,7 +327,8 @@ export class PgJobStore implements RunRegistryPort {
        order by created_at asc, seq asc`,
       [this.orgId, asInterval(JOB_TTL_MS)],
     );
-    return rows.map(toStoredJob);
+    const now = new Date();
+    return rows.map((row) => toStoredJob(lapsedAsFailed(row, now)));
   }
 
   /** Test seam: forget every job this org's store holds. */
