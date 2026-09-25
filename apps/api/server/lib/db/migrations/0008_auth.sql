@@ -117,6 +117,7 @@ create table member (
 );
 create index member_org_id_idx on member (org_id);
 create index member_user_id_idx on member (user_id);
+create unique index member_org_id_user_id_uidx on member (org_id, user_id);
 
 create table invitation (
   id text primary key,

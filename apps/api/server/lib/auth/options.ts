@@ -15,16 +15,13 @@ export interface AuthDeps {
   readonly database: PgPool;
   readonly secret: string;
   /**
-   * The API's own reachable origin (`BETTER_AUTH_URL`). Magic-link and OAuth
-   * callback URLs are absolute and navigated to directly by the browser (an
-   * email click, a provider redirect), so they are built from the API's own
-   * address, not the web app's `/api/pipeline` proxy path — Better Auth folds
-   * any path component out of `baseURL` at init and rebuilds links from the
-   * origin plus `basePath` alone, so a proxy path given here would be silently
-   * dropped anyway. `basePath` stays Better Auth's default, `/api/auth`,
-   * because that is the path Next's rewrite hands the API *after* stripping
-   * `/api/pipeline` (`next.config.ts:36`) — the one path the server actually
-   * receives, proxied or not.
+   * The web app's origin (`WEB_ORIGIN`). The browser reaches the API only
+   * through the web app, whose proxy maps `/api/pipeline/*` to the API root and
+   * `/api/auth/*` to `/api/auth/*` (`next.config.ts`). Setting `baseURL` to the
+   * web origin ensures Better Auth constructs magic-link and OAuth callback URLs
+   * that point to the web app where browsers can reach them, while `basePath`
+   * stays `/api/auth`. This ensures sign-in links, cookies, and subsequent API
+   * requests all live on the same web origin.
    */
   readonly baseURL: string;
   /** Origins the web app is reachable at, trusted for the proxied requests item 10 names. */
@@ -71,6 +68,7 @@ export function authOptions(deps: AuthDeps) {
     database: deps.database as unknown as BetterAuthOptions["database"],
     secret: deps.secret,
     baseURL: deps.baseURL,
+    basePath: "/api/auth",
     trustedOrigins: deps.trustedOrigins ? [...deps.trustedOrigins] : undefined,
     advanced: {
       ...(deps.useSecureCookies !== undefined ? { useSecureCookies: deps.useSecureCookies } : {}),

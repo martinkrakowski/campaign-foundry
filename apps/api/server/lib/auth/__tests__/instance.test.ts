@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { AUTH_POOL_MAX, auth, authPool, resetAuth, setAuth, type Auth } from "../instance.js";
 import { authOptions } from "../options.js";
 import { LogMailer } from "../log-mailer.js";
+import { ResendMailer } from "../resend-mailer.js";
 
 const KEYS = [
   "BETTER_AUTH_SECRET",
@@ -33,6 +34,7 @@ describe("auth() (PT-1a)", () => {
       if (saved[k] === undefined) delete process.env[k];
       else process.env[k] = saved[k];
     }
+    vi.restoreAllMocks();
   });
 
   test("refuses to build without BETTER_AUTH_SECRET", () => {
@@ -52,39 +54,59 @@ describe("auth() (PT-1a)", () => {
       authOptions({
         database: {} as never,
         secret: "short",
-        baseURL: "http://127.0.0.1:3001",
+        baseURL: "http://127.0.0.1:3000",
         mailer: new LogMailer(),
       }),
     ).toThrow("BETTER_AUTH_SECRET must be at least 32 characters long.");
   });
 
-  test("refuses to build without BETTER_AUTH_URL", () => {
+  test("refuses to build without WEB_ORIGIN", () => {
     process.env.BETTER_AUTH_SECRET = "s".repeat(32);
-    expect(() => auth()).toThrow(
-      "BETTER_AUTH_URL is not set (required when AUTH_MODE=better-auth).",
-    );
+    expect(() => auth()).toThrow("WEB_ORIGIN is not set (required when AUTH_MODE=better-auth).");
+  });
+
+  test("baseURL is WEB_ORIGIN", () => {
+    process.env.BETTER_AUTH_SECRET = "s".repeat(32);
+    process.env.WEB_ORIGIN = "http://127.0.0.1:3000";
+    process.env.DATABASE_URL = "postgres://user:pass@localhost:5432/db";
+
+    const instance = auth();
+    expect(instance.options.baseURL).toBe("http://127.0.0.1:3000");
   });
 
   test("refuses to build with a RESEND_API_KEY but no EMAIL_FROM", () => {
     process.env.BETTER_AUTH_SECRET = "s".repeat(32);
-    process.env.BETTER_AUTH_URL = "http://127.0.0.1:3001";
+    process.env.WEB_ORIGIN = "http://127.0.0.1:3000";
     process.env.RESEND_API_KEY = "re_test";
     expect(() => auth()).toThrow("EMAIL_FROM is not set (required alongside RESEND_API_KEY).");
   });
 
-  test("builds with a LogMailer when no RESEND_API_KEY is set, and with no Google provider", () => {
+  test("builds with a LogMailer when no RESEND_API_KEY is set, and with no Google provider", async () => {
     process.env.BETTER_AUTH_SECRET = "s".repeat(32);
-    process.env.BETTER_AUTH_URL = "http://127.0.0.1:3001";
+    process.env.WEB_ORIGIN = "http://127.0.0.1:3000";
     process.env.DATABASE_URL = "postgres://user:pass@localhost:5432/db";
+
+    const logSpy = vi.spyOn(LogMailer.prototype, "send").mockImplementation(async () => {});
+    const resendSpy = vi.spyOn(ResendMailer.prototype, "send").mockImplementation(async () => {});
 
     const instance = auth();
 
     expect(instance.options.socialProviders).toBeUndefined();
+
+    const plugin = instance.options.plugins?.find((p) => p.id === "magic-link") as unknown as {
+      options: { sendMagicLink: (data: { email: string; url: string }) => Promise<void> };
+    };
+    await plugin.options.sendMagicLink({
+      email: "user@example.com",
+      url: "http://example.com/magic",
+    });
+
+    expect(logSpy).toHaveBeenCalledWith(expect.objectContaining({ to: "user@example.com" }));
+    expect(resendSpy).not.toHaveBeenCalled();
   });
 
-  test("builds with a ResendMailer and Google when both settings are complete", () => {
+  test("builds with a ResendMailer and Google when both settings are complete", async () => {
     process.env.BETTER_AUTH_SECRET = "s".repeat(32);
-    process.env.BETTER_AUTH_URL = "http://127.0.0.1:3001";
     process.env.DATABASE_URL = "postgres://user:pass@localhost:5432/db";
     process.env.RESEND_API_KEY = "re_test";
     process.env.EMAIL_FROM = "noreply@example.com";
@@ -92,17 +114,31 @@ describe("auth() (PT-1a)", () => {
     process.env.GOOGLE_CLIENT_SECRET = "client-secret";
     process.env.WEB_ORIGIN = "http://127.0.0.1:3000";
 
+    const logSpy = vi.spyOn(LogMailer.prototype, "send").mockImplementation(async () => {});
+    const resendSpy = vi.spyOn(ResendMailer.prototype, "send").mockImplementation(async () => {});
+
     const instance = auth();
 
     expect(instance.options.socialProviders?.google).toEqual(
       expect.objectContaining({ clientId: "client-id", clientSecret: "client-secret" }),
     );
     expect(instance.options.trustedOrigins).toEqual(["http://127.0.0.1:3000"]);
+
+    const plugin = instance.options.plugins?.find((p) => p.id === "magic-link") as unknown as {
+      options: { sendMagicLink: (data: { email: string; url: string }) => Promise<void> };
+    };
+    await plugin.options.sendMagicLink({
+      email: "user@example.com",
+      url: "http://example.com/magic",
+    });
+
+    expect(resendSpy).toHaveBeenCalledWith(expect.objectContaining({ to: "user@example.com" }));
+    expect(logSpy).not.toHaveBeenCalled();
   });
 
   test("Google is not enabled when only one of its two settings is present", () => {
     process.env.BETTER_AUTH_SECRET = "s".repeat(32);
-    process.env.BETTER_AUTH_URL = "http://127.0.0.1:3001";
+    process.env.WEB_ORIGIN = "http://127.0.0.1:3000";
     process.env.DATABASE_URL = "postgres://user:pass@localhost:5432/db";
     process.env.GOOGLE_CLIENT_ID = "client-id";
 
@@ -111,7 +147,7 @@ describe("auth() (PT-1a)", () => {
 
   test("is built once and cached across calls", () => {
     process.env.BETTER_AUTH_SECRET = "s".repeat(32);
-    process.env.BETTER_AUTH_URL = "http://127.0.0.1:3001";
+    process.env.WEB_ORIGIN = "http://127.0.0.1:3000";
     process.env.DATABASE_URL = "postgres://user:pass@localhost:5432/db";
 
     expect(auth()).toBe(auth());
@@ -126,7 +162,6 @@ describe("auth() (PT-1a)", () => {
   describe("cookie security behind proxy (Finding 2)", () => {
     test("sets useSecureCookies: true when WEB_ORIGIN is https", () => {
       process.env.BETTER_AUTH_SECRET = "s".repeat(32);
-      process.env.BETTER_AUTH_URL = "http://127.0.0.1:3001";
       process.env.DATABASE_URL = "postgres://user:pass@localhost:5432/db";
       process.env.WEB_ORIGIN = "https://app.example.com";
 
@@ -136,7 +171,6 @@ describe("auth() (PT-1a)", () => {
 
     test("sets useSecureCookies: false when WEB_ORIGIN is http", () => {
       process.env.BETTER_AUTH_SECRET = "s".repeat(32);
-      process.env.BETTER_AUTH_URL = "http://127.0.0.1:3001";
       process.env.DATABASE_URL = "postgres://user:pass@localhost:5432/db";
       process.env.WEB_ORIGIN = "http://localhost:3000";
 
@@ -144,24 +178,14 @@ describe("auth() (PT-1a)", () => {
       expect(instance.options.advanced?.useSecureCookies).toBe(false);
     });
 
-    test("sets useSecureCookies: false when WEB_ORIGIN is absent", () => {
+    test("refuses to build when WEB_ORIGIN is an invalid URL", () => {
       process.env.BETTER_AUTH_SECRET = "s".repeat(32);
-      process.env.BETTER_AUTH_URL = "http://127.0.0.1:3001";
-      process.env.DATABASE_URL = "postgres://user:pass@localhost:5432/db";
-      delete process.env.WEB_ORIGIN;
-
-      const instance = auth();
-      expect(instance.options.advanced?.useSecureCookies).toBe(false);
-    });
-
-    test("sets useSecureCookies: false when WEB_ORIGIN is an invalid URL", () => {
-      process.env.BETTER_AUTH_SECRET = "s".repeat(32);
-      process.env.BETTER_AUTH_URL = "http://127.0.0.1:3001";
       process.env.DATABASE_URL = "postgres://user:pass@localhost:5432/db";
       process.env.WEB_ORIGIN = "not-a-valid-url";
 
-      const instance = auth();
-      expect(instance.options.advanced?.useSecureCookies).toBe(false);
+      expect(() => auth()).toThrow(
+        'WEB_ORIGIN must be a valid http or https URL, not "not-a-valid-url".',
+      );
     });
   });
 
@@ -176,7 +200,7 @@ describe("auth() (PT-1a)", () => {
       dir = mkdtempSync(join(tmpdir(), "cf-auth-ca-"));
       writeFileSync(join(dir, "ca.pem"), "PEM");
       process.env.BETTER_AUTH_SECRET = "s".repeat(32);
-      process.env.BETTER_AUTH_URL = "http://127.0.0.1:3001";
+      process.env.WEB_ORIGIN = "http://127.0.0.1:3000";
       process.env.DATABASE_URL = "postgres://user:pass@db.example.com:5432/db";
       process.env.DATABASE_CA_PATH = join(dir, "ca.pem");
 
@@ -185,7 +209,7 @@ describe("auth() (PT-1a)", () => {
 
     test("is capped at AUTH_POOL_MAX (2), ignoring larger DATABASE_POOL_MAX (Finding 3)", () => {
       process.env.BETTER_AUTH_SECRET = "s".repeat(32);
-      process.env.BETTER_AUTH_URL = "http://127.0.0.1:3001";
+      process.env.WEB_ORIGIN = "http://127.0.0.1:3000";
       process.env.DATABASE_URL = "postgres://user:pass@localhost:5432/db";
       process.env.DATABASE_POOL_MAX = "10";
 
@@ -195,9 +219,25 @@ describe("auth() (PT-1a)", () => {
       expect(p?.options.max).toBe(AUTH_POOL_MAX);
     });
 
+    test("handles idle connection errors with console.warn (Finding 3)", () => {
+      process.env.BETTER_AUTH_SECRET = "s".repeat(32);
+      process.env.WEB_ORIGIN = "http://127.0.0.1:3000";
+      process.env.DATABASE_URL = "postgres://user:pass@localhost:5432/db";
+
+      auth();
+      const p = authPool();
+      expect(p).toBeDefined();
+
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      p!.emit("error", new Error("connection terminated unexpectedly"));
+      expect(warnSpy).toHaveBeenCalledWith(
+        "[auth] an idle connection failed: connection terminated unexpectedly",
+      );
+    });
+
     test("resetAuth ends the shared pool before discarding it (Finding 6)", async () => {
       process.env.BETTER_AUTH_SECRET = "s".repeat(32);
-      process.env.BETTER_AUTH_URL = "http://127.0.0.1:3001";
+      process.env.WEB_ORIGIN = "http://127.0.0.1:3000";
       process.env.DATABASE_URL = "postgres://user:pass@localhost:5432/db";
 
       auth();

@@ -39,7 +39,13 @@ function isHttps(origin?: string): boolean {
  */
 function pool(): pg.Pool {
   const config = databaseConfig(databaseSettings(), readCa);
-  sharedPool ??= new pg.Pool(poolOptions({ ...config, max: AUTH_POOL_MAX }));
+  if (!sharedPool) {
+    const p = new pg.Pool(poolOptions({ ...config, max: AUTH_POOL_MAX }));
+    p.on("error", (error) => {
+      console.warn(`[auth] an idle connection failed: ${error.message}`);
+    });
+    sharedPool = p;
+  }
   return sharedPool;
 }
 
@@ -62,8 +68,16 @@ function build() {
   if (settings.secret.length < 32) {
     throw new Error("BETTER_AUTH_SECRET must be at least 32 characters long.");
   }
-  if (!settings.baseURL) {
-    throw new Error("BETTER_AUTH_URL is not set (required when AUTH_MODE=better-auth).");
+  if (!settings.webOrigin) {
+    throw new Error("WEB_ORIGIN is not set (required when AUTH_MODE=better-auth).");
+  }
+  try {
+    const parsed = new URL(settings.webOrigin);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      throw new Error();
+    }
+  } catch {
+    throw new Error(`WEB_ORIGIN must be a valid http or https URL, not "${settings.webOrigin}".`);
   }
   if (settings.resendApiKey && !settings.emailFrom) {
     throw new Error("EMAIL_FROM is not set (required alongside RESEND_API_KEY).");
@@ -79,8 +93,8 @@ function build() {
     authOptions({
       database: pool(),
       secret: settings.secret,
-      baseURL: settings.baseURL,
-      trustedOrigins: settings.webOrigin ? [settings.webOrigin] : undefined,
+      baseURL: settings.webOrigin,
+      trustedOrigins: [settings.webOrigin],
       useSecureCookies: isHttps(settings.webOrigin),
       mailer,
       google,

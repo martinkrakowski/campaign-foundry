@@ -77,6 +77,42 @@ describe("auth:bootstrap (PT-1a item 6)", () => {
     await db.end();
   });
 
+  test("bootstrap twice concurrently yields exactly one membership", async () => {
+    const db = await migratedDatabase();
+    const keepOpen: SqlClient = { ...db, end: async () => undefined };
+    await insertUser(db, "u1", "concurrent@example.com");
+
+    await Promise.all([
+      main("concurrent@example.com", () => keepOpen, log),
+      main("concurrent@example.com", () => keepOpen, log),
+    ]);
+
+    const { rows } = await db.query<{ id: string; role: string }>(
+      "select id, role from member where org_id = 'local' and user_id = 'u1'",
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.role).toBe("owner");
+    await db.end();
+  });
+
+  test("preserves composite role when user is already owner", async () => {
+    const db = await migratedDatabase();
+    const keepOpen: SqlClient = { ...db, end: async () => undefined };
+    await insertUser(db, "u1", "admin-owner@example.com");
+    await db.query(
+      "insert into member (id, org_id, user_id, role, created_at) values ('m1', 'local', 'u1', 'admin, owner', now())",
+    );
+
+    await main("admin-owner@example.com", () => keepOpen, log);
+
+    const { rows } = await db.query<{ id: string; role: string }>(
+      "select id, role from member where org_id = 'local' and user_id = 'u1'",
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.role).toBe("admin, owner");
+    await db.end();
+  });
+
   test("closes the connection even when bootstrap throws", async () => {
     const db = await migratedDatabase();
     const end = vi.spyOn(db, "end");

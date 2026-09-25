@@ -41,7 +41,7 @@ async function bootstrap(db: SqlClient, email: string): Promise<void> {
       return;
     }
     await tx.query(
-      "insert into member (id, org_id, user_id, role, created_at) values ($1, 'local', $2, 'owner', now())",
+      "insert into member (id, org_id, user_id, role, created_at) values ($1, 'local', $2, 'owner', now()) on conflict (org_id, user_id) do nothing",
       [safeId(), user.id],
     );
   });
