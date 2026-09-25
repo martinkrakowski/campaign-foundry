@@ -4,9 +4,9 @@
   "mutations": [
     {
       "file": "apps/api/server/lib/ports/index.ts",
-      "before": "  (t) => scopeRoots(t).outputRoot,\n  (root) => new FsReportStore(root),",
-      "after": "  (t) => scopeRoots(\"outputRoot\" in t ? t : { ...t, orgId: \"local\" }).outputRoot,\n  (root) => new FsReportStore(root),",
-      "because": "the report registry ignores the org, so two orgs share one report store and one org's report is readable by another (D167). Re-anchored 2026-09-24 in PT-0b2 review: helpers and the run take a StorageScope (a tenant or the run's captured environment); the mutation is unchanged in meaning.",
+      "before": "const reports = new Registry<ReportStorePort>(\n  (t) => (storeBackend() === \"postgres\" ? PG + scopeTenant(t).orgId : scopeRoots(t).outputRoot),",
+      "after": "const reports = new Registry<ReportStorePort>(\n  (t) => (storeBackend() === \"postgres\" ? PG + scopeTenant(t).orgId : scopeRoots(\"outputRoot\" in t ? t : { ...t, orgId: \"local\" }).outputRoot),",
+      "because": "the report registry ignores the org, so two orgs share one report store and one org's report is readable by another (D167). Re-anchored 2026-09-24 in PT-0b2 review: helpers and the run take a StorageScope (a tenant or the run's captured environment); the mutation is unchanged in meaning. Re-anchored 2026-09-25 by PT-3c: the locate function gained a postgres branch (STORE_BACKEND=postgres, mirroring decisions); the fs branch and the mutation's meaning are unchanged.",
       "command": [
         "yarn",
         "vitest",

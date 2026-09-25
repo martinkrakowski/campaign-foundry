@@ -256,6 +256,10 @@ export async function writeReport(
   // publishes nothing and a failed write only returns creatives to review.
   return withDecisionLock(scope, campaignId, async (decisions) => {
     await retireDecisions(decisions, campaignId, merge ? new Set(fresh.map(keyOf)) : undefined);
-    return store.writeReport(campaignId, payload);
+    // The store repeats the compare-and-swap in its own atomic step (PT-3c), so
+    // the cross-process race this guard only narrows (D79 on files) is closed
+    // too. `expectedRevision` is passed through exactly — never `?? undefined`,
+    // which would turn `null` ("nothing stored yet") into "do not check".
+    return store.writeReport(campaignId, payload, expectedRevision);
   });
 }

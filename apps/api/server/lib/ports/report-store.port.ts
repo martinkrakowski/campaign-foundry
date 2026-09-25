@@ -26,10 +26,33 @@ export interface ReportStorePort {
   getRevision(campaignId: string): Promise<string | undefined>;
   /**
    * Store `payload` as the campaign's report, atomically: a concurrent reader
-   * sees the previous report or this one, never a torn file. Unconditional —
-   * the revision guard is the caller's, so a refused run does no work at all.
-   * Rejects when the id is not a safe campaign id. Returns a human-readable
-   * locator of what was written (the CLI prints it).
+   * sees the previous report or this one, never a torn file. Rejects when the
+   * id is not a safe campaign id. Returns a human-readable locator of what
+   * was written (the CLI prints it).
+   *
+   * `expectedRevision` (PT-3c, mirroring `DecisionStorePort.writeDecisions`):
+   * `undefined` (the default) is unconditional — the revision guard is
+   * `report.ts`'s own, so a refused run does no work at all. `null` writes
+   * only while nothing is stored yet. A string writes only while it is still
+   * the stored revision. The compare and the write are one atomic step in the
+   * store, closing the cross-process race `report.ts`'s guard only narrows
+   * (D79 on files). A mismatch throws `ReportConflictError`.
    */
-  writeReport(campaignId: string, payload: string): Promise<string>;
+  writeReport(
+    campaignId: string,
+    payload: string,
+    expectedRevision?: string | null,
+  ): Promise<string>;
+}
+
+/** A write whose expected revision is no longer the stored one (D173's shape, D79). */
+export class ReportConflictError extends Error {
+  readonly code = "ECONFLICT";
+  constructor(
+    campaignId: string,
+    /** The revision stored now (undefined: none). */
+    readonly revision: string | undefined,
+  ) {
+    super(`Report for campaign "${campaignId}" was modified by another run.`);
+  }
 }
