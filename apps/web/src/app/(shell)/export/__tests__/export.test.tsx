@@ -259,6 +259,30 @@ describe("ExportPage — platform packaging", () => {
     await waitFor(() => expect((pkg as HTMLButtonElement).disabled).toBe(false));
   });
 
+  test("Package is disabled while a run is in flight, and says why", async () => {
+    const user = userEvent.setup();
+    seedPersistedRun([makeAsset()]);
+    mockPipelineApi({
+      report: {
+        halted: false,
+        assets: [makeAsset()],
+        log: { entries: [], campaignId: "seed" },
+      },
+      post: () => new Promise<Response>(() => {}), // never resolves → the run stays in flight
+    });
+    renderWithRun(
+      <>
+        <RunDraft />
+        <ExportPage />
+      </>,
+    );
+    const pkg = (await screen.findByRole("button", { name: "Package" })) as HTMLButtonElement;
+    await waitFor(() => expect(pkg.disabled).toBe(false)); // decisions loaded, a platform picked
+    await user.click(screen.getByText("run draft"));
+    await waitFor(() => expect(pkg.disabled).toBe(true));
+    expect(pkg.title).toBe("A run is in flight — export waits until it finishes");
+  });
+
   test("a run whose html assets were rejected is not offered the html profiles (X14 fix2)", async () => {
     // Packaging sends only the approved keys once decisions exist, so the picker
     // must offer only what will actually be packaged: the rejected html row is

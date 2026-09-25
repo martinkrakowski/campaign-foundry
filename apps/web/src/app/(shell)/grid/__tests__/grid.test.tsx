@@ -452,6 +452,29 @@ describe("GridPage", () => {
     await waitFor(() => expect(approve.disabled).toBe(false));
   });
 
+  test("Approve and Reject pause while a run is in flight, name the run as why, and return after it", async () => {
+    const user = userEvent.setup();
+    let finishPost!: (res: Response) => void;
+    seedPersistedRun([makeAsset()]);
+    mockPipelineApi({
+      report: {
+        halted: false,
+        assets: [makeAsset()],
+        log: { entries: [], campaignId: "seed" },
+      },
+      post: () => new Promise<Response>((res) => (finishPost = res)), // held open → the run is in flight
+    });
+    renderWithRun(<Harness />);
+    const approve = (await screen.findByText("Approve")) as HTMLButtonElement;
+    await waitFor(() => expect(approve.disabled).toBe(false)); // decisions loaded
+    await user.click(screen.getByText("exec"));
+    await waitFor(() => expect(approve.disabled).toBe(true));
+    expect(approve.title).toBe("A run is in flight — verdicts wait until it finishes");
+    expect((screen.getByText("Reject") as HTMLButtonElement).disabled).toBe(true);
+    finishPost(json({ jobId: "job-1" }, 202));
+    await waitFor(() => expect(approve.disabled).toBe(false));
+  });
+
   test("decisions that could not be loaded say so on the review bar, pause the verdicts, and Try again loads them", async () => {
     const user = userEvent.setup();
     let down = true;
