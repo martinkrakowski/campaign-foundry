@@ -19,6 +19,7 @@ export default function ExportPage() {
     hasRun,
     decisions,
     decisionsLoaded,
+    loading,
     brief,
     ranCampaignId,
     packages,
@@ -230,19 +231,28 @@ export default function ExportPage() {
               void packageSelected([activePlatform], hasDecisions ? approvedKeys : undefined)
             }
             // Until the run's decisions load, none is indistinguishable from not known
-            // yet, and "none" packages the whole run: wait rather than guess.
-            disabled={packaging || activePlatform === null || !decisionsLoaded}
+            // yet, and "none" packages the whole run: wait rather than guess. While a run
+            // is in flight the approved set is not final either — the queue it copies
+            // from is still being rewritten.
+            disabled={packaging || loading || activePlatform === null || !decisionsLoaded}
             title={
-              !decisionsLoaded
-                ? messages.reviewDecisionsLoading
-                : activePlatform === null
-                  ? "Select a platform first"
-                  : undefined
+              loading
+                ? messages.exportPausedWhileRunning
+                : !decisionsLoaded
+                  ? messages.reviewDecisionsLoading
+                  : activePlatform === null
+                    ? "Select a platform first"
+                    : undefined
             }
             className="rounded-full bg-text-emphasis px-4 py-1.5 text-[13px] font-semibold text-background transition-opacity hover:opacity-90 disabled:bg-surface-2 disabled:text-text-muted"
           >
             {packaging ? "Packaging…" : "Package"}
           </button>
+          {loading && (
+            <span role="status" aria-live="polite" className="text-[13px] text-text-muted">
+              {messages.exportPausedWhileRunning}
+            </span>
+          )}
           {selected ? (
             <a
               href={`${API}/campaigns/packages/${encodeURIComponent(campaignId)}/${selected.platformId}.zip`}
