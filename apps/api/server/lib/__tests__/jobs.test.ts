@@ -276,10 +276,9 @@ describe("jobs port facade", () => {
     // FsJobStore has no `heartbeat`; a lease-backed store does (PgJobStore, PT-6a).
     // Adding one to the shared instance is enough to flip `isRunRegistry` without
     // standing up a whole fake store.
-    const store = (await import("../ports/index.js")).getJobStore(LOCAL_TENANT) as unknown as Record<
-      string,
-      unknown
-    >;
+    const store = (await import("../ports/index.js")).getJobStore(
+      LOCAL_TENANT,
+    ) as unknown as Record<string, unknown>;
     const heartbeat = vi
       .fn(async () => undefined)
       .mockRejectedValueOnce(new Error("heartbeat write failed"));

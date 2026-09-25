@@ -2,9 +2,15 @@ import { describe, test, expect, beforeEach, afterEach } from "vitest";
 import { PipelineExecutionLog } from "@campaignfoundry/CampaignOrchestration";
 import type { SqlClient } from "../../db/sql-client.js";
 import { migratedDatabase } from "../../db/__tests__/pglite-client.js";
-import { JOB_TTL_MS, JobCapacityError, MAX_JOBS } from "../fs-job-store.js";
+import { resetDatabase, setDatabase } from "../../db/database.js";
+import { runEnvironment } from "../../run-environment.js";
+import { LOCAL_TENANT, type TenantContext } from "../../tenant.js";
+import { getJobStore, resetJobStore } from "../index.js";
+import { FsJobStore, JOB_TTL_MS, JobCapacityError, MAX_JOBS } from "../fs-job-store.js";
 import type { JobResult } from "../job-store.port.js";
 import { HEARTBEAT_INTERVAL_MS, JobLeaseLostError, LEASE_MS, PgJobStore } from "../pg-job-store.js";
+
+const acme: TenantContext = { ...LOCAL_TENANT, orgId: "acme", userId: "u1" };
 
 const payload = (over: Partial<JobResult> = {}): JobResult => ({
   halted: false,
@@ -116,33 +122,55 @@ describe("PgJobStore (PT-6a, D171)", () => {
     const store = new PgJobStore(db, "local");
     const claim = await store.acquireJob("camp");
     const id = claim.acquired ? claim.jobId : "";
-    const before = await db.query<{ t: Date }>("select lease_expires_at as t from job where id = $1", [
-      id,
-    ]);
+    const before = await db.query<{ t: Date }>(
+      "select lease_expires_at as t from job where id = $1",
+      [id],
+    );
     await store.heartbeat(id);
-    const after = await db.query<{ t: Date }>("select lease_expires_at as t from job where id = $1", [
-      id,
-    ]);
+    const after = await db.query<{ t: Date }>(
+      "select lease_expires_at as t from job where id = $1",
+      [id],
+    );
     expect(after.rows[0]!.t.getTime()).toBeGreaterThan(before.rows[0]!.t.getTime());
   });
 
   test("heartbeat on a job that no longer holds its lease is a silent no-op", async () => {
     const store = new PgJobStore(db, "local");
-    await seed(db, { id: "gone", orgId: "local", campaignId: "camp", status: "failed", settled: true });
+    await seed(db, {
+      id: "gone",
+      orgId: "local",
+      campaignId: "camp",
+      status: "failed",
+      settled: true,
+    });
     await expect(store.heartbeat("gone")).resolves.toBeUndefined();
     await expect(store.heartbeat("never-existed")).resolves.toBeUndefined();
   });
 
   test("progressJob refuses once the row no longer holds the lease", async () => {
     const store = new PgJobStore(db, "local");
-    await seed(db, { id: "reaped", orgId: "local", campaignId: "camp", status: "failed", settled: true });
+    await seed(db, {
+      id: "reaped",
+      orgId: "local",
+      campaignId: "camp",
+      status: "failed",
+      settled: true,
+    });
     await expect(store.progressJob("reaped", 1, 2)).rejects.toBeInstanceOf(JobLeaseLostError);
-    await expect(store.progressJob("never-existed", 1, 2)).rejects.toThrow(/no longer holds its lease/);
+    await expect(store.progressJob("never-existed", 1, 2)).rejects.toThrow(
+      /no longer holds its lease/,
+    );
   });
 
   test("completeJob refuses once the row no longer holds the lease", async () => {
     const store = new PgJobStore(db, "local");
-    await seed(db, { id: "reaped", orgId: "local", campaignId: "camp", status: "failed", settled: true });
+    await seed(db, {
+      id: "reaped",
+      orgId: "local",
+      campaignId: "camp",
+      status: "failed",
+      settled: true,
+    });
     await expect(store.completeJob("reaped", payload())).rejects.toBeInstanceOf(JobLeaseLostError);
   });
 
@@ -180,7 +208,10 @@ describe("PgJobStore (PT-6a, D171)", () => {
     // A different process boundary than the file store's in-memory cache: the
     // log comes back as the plain data `toJSON` describes, not a live instance.
     // Nothing downstream needs the class — the poll route returns it as JSON.
-    expect(job?.log).toMatchObject({ campaignId: "camp", entries: [expect.objectContaining({ stage: "build" })] });
+    expect(job?.log).toMatchObject({
+      campaignId: "camp",
+      entries: [expect.objectContaining({ stage: "build" })],
+    });
     expect(job?.result?.log).toEqual(job?.log);
   });
 
@@ -263,10 +294,10 @@ describe("PgJobStore (PT-6a, D171)", () => {
       settled: true,
     });
     // Backdate settledAt past the TTL directly (no fake timers against a real clock column).
-    await db.query("update job set settled_at = now() - ($1 || ' milliseconds')::interval where id = $2", [
-      JOB_TTL_MS + 1,
-      "settled",
-    ]);
+    await db.query(
+      "update job set settled_at = now() - ($1 || ' milliseconds')::interval where id = $2",
+      [JOB_TTL_MS + 1, "settled"],
+    );
     const running = await store.acquireJob("b");
     expect(await store.getJob("settled")).toBeUndefined();
     expect((await store.getJob(running.acquired ? running.jobId : ""))?.status).toBe("running");
@@ -342,5 +373,40 @@ describe("PgJobStore (PT-6a, D171)", () => {
 
   test("HEARTBEAT_INTERVAL_MS is comfortably inside LEASE_MS, so a missed beat or two never costs the lease", () => {
     expect(HEARTBEAT_INTERVAL_MS).toBeLessThan(LEASE_MS);
+  });
+});
+
+describe("STORE_BACKEND=postgres puts jobs in the database, one lease-backed store per org (PT-6a)", () => {
+  const saved = process.env.STORE_BACKEND;
+  afterEach(() => {
+    if (saved === undefined) delete process.env.STORE_BACKEND;
+    else process.env.STORE_BACKEND = saved;
+    resetJobStore();
+    resetDatabase();
+  });
+
+  test("the default is the file store", () => {
+    delete process.env.STORE_BACKEND;
+    expect(getJobStore(LOCAL_TENANT)).toBeInstanceOf(FsJobStore);
+  });
+
+  test("postgres builds a database store per org; a run's scope is its tenant's org", async () => {
+    const database = await migratedDatabase();
+    setDatabase(database);
+    await database.query("insert into org (id, name) values ($1, $2)", ["acme", "Acme"]);
+    process.env.STORE_BACKEND = "postgres";
+    const local = getJobStore(LOCAL_TENANT);
+    expect(local).toBeInstanceOf(PgJobStore);
+    // Cached: the same tenant gets the same store, so heartbeat and the claim
+    // share one instance across the life of a request.
+    expect(getJobStore(LOCAL_TENANT)).toBe(local);
+    expect(getJobStore(acme)).not.toBe(local);
+    // A run's captured environment resolves to its tenant's org, not a fresh one.
+    expect(getJobStore(runEnvironment(LOCAL_TENANT))).toBe(local);
+
+    const claim = await local.acquireJob("camp");
+    expect(claim.acquired).toBe(true);
+    expect(await getJobStore(acme).getJob(claim.acquired ? claim.jobId : "")).toBeUndefined();
+    await database.end();
   });
 });

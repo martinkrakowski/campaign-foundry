@@ -1,13 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { SqlClient, SqlQuery } from "../db/sql-client.js";
 import { JOB_TTL_MS, JobCapacityError, MAX_JOBS } from "./fs-job-store.js";
-import type {
-  Job,
-  JobResult,
-  JobStatus,
-  RunRegistryPort,
-  StoredJob,
-} from "./job-store.port.js";
+import type { Job, JobResult, JobStatus, RunRegistryPort, StoredJob } from "./job-store.port.js";
 
 /**
  * How long a claim's lease lasts without a heartbeat (D171). Well above
