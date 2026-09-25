@@ -27,7 +27,9 @@ describe("ResendMailer (PT-1a item 8, D174b(3))", () => {
   test("surfaces a non-2xx response", async () => {
     const fetchImpl = vi
       .fn()
-      .mockResolvedValue(new Response("domain not verified", { status: 422, statusText: "Unprocessable" }));
+      .mockResolvedValue(
+        new Response("domain not verified", { status: 422, statusText: "Unprocessable" }),
+      );
     const mailer = new ResendMailer("re_key", "noreply@example.com", fetchImpl);
 
     await expect(
@@ -36,7 +38,9 @@ describe("ResendMailer (PT-1a item 8, D174b(3))", () => {
   });
 
   test("falls back to the status text when the error body is empty", async () => {
-    const fetchImpl = vi.fn().mockResolvedValue(new Response("", { status: 500, statusText: "Server Error" }));
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(new Response("", { status: 500, statusText: "Server Error" }));
     const mailer = new ResendMailer("re_key", "noreply@example.com", fetchImpl);
 
     await expect(

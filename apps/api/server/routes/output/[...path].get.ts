@@ -54,7 +54,9 @@ export function parseByteRange(
  * response's Content-Length from what is actually streamed.
  */
 export default defineEventHandler(async (event) => {
-  const lookup = await getOutputStore(requestTenant(event)).openOutput(getRouterParam(event, "path") ?? "");
+  const lookup = await getOutputStore(requestTenant(event)).openOutput(
+    getRouterParam(event, "path") ?? "",
+  );
   if (!lookup.found) {
     if (lookup.reason === "invalid") {
       setResponseStatus(event, 400);

@@ -29,7 +29,7 @@ function isAllowlisted(method: string, pathname: string): boolean {
  */
 export default defineEventHandler(async (event) => {
   if (authMode() !== "better-auth") return;
-  const pathname = event.path.split("?")[0] ?? event.path;
+  const pathname = event.path.split("?")[0];
   if (isAllowlisted(event.method, pathname)) return;
 
   const session = await auth().api.getSession({ headers: event.headers });

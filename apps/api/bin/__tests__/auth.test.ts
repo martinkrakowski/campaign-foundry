@@ -29,6 +29,7 @@ describe("auth:bootstrap (PT-1a item 6)", () => {
     const open = vi.fn();
     await expect(main(undefined, open, log)).rejects.toThrow(USAGE);
     expect(open).not.toHaveBeenCalled();
+    await expect(main(undefined)).rejects.toThrow(USAGE); // the defaults are never reached
   });
 
   test("a user who has never signed in is refused, by name", async () => {

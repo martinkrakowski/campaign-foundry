@@ -123,7 +123,9 @@ describe("authMode (PT-1a)", () => {
     process.env.AUTH_MODE = "better-auth";
     expect(authMode()).toBe("better-auth");
     process.env.AUTH_MODE = "oauth2-proxy";
-    expect(() => authMode()).toThrow('AUTH_MODE must be "local" or "better-auth", not "oauth2-proxy".');
+    expect(() => authMode()).toThrow(
+      'AUTH_MODE must be "local" or "better-auth", not "oauth2-proxy".',
+    );
   });
 });
 

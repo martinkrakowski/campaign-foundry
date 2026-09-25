@@ -1,4 +1,7 @@
 import { describe, test, expect, afterEach, beforeEach } from "vitest";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { auth, resetAuth, setAuth, type Auth } from "../instance.js";
 
 const KEYS = [
@@ -38,7 +41,9 @@ describe("auth() (PT-1a)", () => {
 
   test("refuses to build without BETTER_AUTH_URL", () => {
     process.env.BETTER_AUTH_SECRET = "s".repeat(32);
-    expect(() => auth()).toThrow("BETTER_AUTH_URL is not set (required when AUTH_MODE=better-auth).");
+    expect(() => auth()).toThrow(
+      "BETTER_AUTH_URL is not set (required when AUTH_MODE=better-auth).",
+    );
   });
 
   test("refuses to build with a RESEND_API_KEY but no EMAIL_FROM", () => {
@@ -97,5 +102,24 @@ describe("auth() (PT-1a)", () => {
     const fake = { marker: "fake" } as unknown as Auth;
     setAuth(fake);
     expect(auth()).toBe(fake);
+  });
+
+  describe("its own pool", () => {
+    let dir: string | undefined;
+    afterEach(() => {
+      if (dir) rmSync(dir, { recursive: true, force: true });
+      dir = undefined;
+    });
+
+    test("reads the CA file for a remote DATABASE_URL, same as the CLI's pool", () => {
+      dir = mkdtempSync(join(tmpdir(), "cf-auth-ca-"));
+      writeFileSync(join(dir, "ca.pem"), "PEM");
+      process.env.BETTER_AUTH_SECRET = "s".repeat(32);
+      process.env.BETTER_AUTH_URL = "http://127.0.0.1:3001";
+      process.env.DATABASE_URL = "postgres://user:pass@db.example.com:5432/db";
+      process.env.DATABASE_CA_PATH = join(dir, "ca.pem");
+
+      expect(() => auth()).not.toThrow();
+    });
   });
 });

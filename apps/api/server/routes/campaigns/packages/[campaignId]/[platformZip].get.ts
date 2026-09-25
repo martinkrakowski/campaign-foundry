@@ -46,7 +46,10 @@ export default defineEventHandler(async (event) => {
 
   let files: FileEntry[];
   try {
-    const entries = await getOutputStore(requestTenant(event)).listPackageFiles(campaignId, platformId);
+    const entries = await getOutputStore(requestTenant(event)).listPackageFiles(
+      campaignId,
+      platformId,
+    );
     if (entries === undefined) {
       setResponseStatus(event, 404);
       return { error: "Not found" };

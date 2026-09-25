@@ -2,7 +2,11 @@ import { describe, test, expect } from "vitest";
 import { migratedDatabase } from "../../db/__tests__/pglite-client.js";
 import { memberTenant } from "../membership.js";
 
-async function insertUser(db: Awaited<ReturnType<typeof migratedDatabase>>, id: string, email: string) {
+async function insertUser(
+  db: Awaited<ReturnType<typeof migratedDatabase>>,
+  id: string,
+  email: string,
+) {
   await db.query(
     'insert into "user" (id, name, email, email_verified, created_at, updated_at) values ($1, $1, $2, true, now(), now())',
     [id, email],
@@ -60,7 +64,9 @@ describe("memberTenant (PT-1a item 3)", () => {
   test("more than one org resolves deterministically, by org id", async () => {
     const db = await migratedDatabase();
     await insertUser(db, "u1", "u1@example.com");
-    await db.query("insert into org (id, name, slug, created_at) values ('zeta', 'Zeta', 'zeta', now())");
+    await db.query(
+      "insert into org (id, name, slug, created_at) values ('zeta', 'Zeta', 'zeta', now())",
+    );
     await db.query(
       "insert into member (id, org_id, user_id, role, created_at) values ($1, 'zeta', $2, 'owner', now())",
       ["m1", "u1"],
