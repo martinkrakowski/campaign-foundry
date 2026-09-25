@@ -5,6 +5,7 @@ import { databaseConfig } from "../../db/database-config.js";
 import { pgClient, poolOptions } from "../../db/pg-client.js";
 import { loadMigrations, migrate } from "../../db/migrate.js";
 import type { SqlClient } from "../../db/sql-client.js";
+import { JobCapacityError, MAX_JOBS } from "../fs-job-store.js";
 import { PgJobStore } from "../pg-job-store.js";
 
 /**
@@ -86,5 +87,33 @@ describe.skipIf(!url)("PgJobStore.acquireJob races two real connections (PT-6a)"
     const [a, b] = await Promise.all([store.acquireJob(campaignId), store.acquireJob(campaignId)]);
     const acquiredCount = [a, b].filter((o) => o.acquired).length;
     expect(acquiredCount).toBe(1);
+  });
+
+  test("two DISTINCT campaigns racing at MAX_JOBS-1 admit exactly one under real concurrency (finding 3)", async () => {
+    // Without the per-org advisory lock, both connections can read the same
+    // `count(*) < MAX_JOBS` snapshot before either commits its insert, and both
+    // admit — the count-then-insert race this test exists to close. Two
+    // DISTINCT campaigns, so neither claim can be the other's incumbent: the
+    // only thing that can refuse one is capacity.
+    const store = new PgJobStore(db, "local");
+    await store.clear();
+    for (let i = 0; i < MAX_JOBS - 1; i++) {
+      await db.query(
+        `insert into job (id, org_id, campaign_id, status, lease_expires_at, heartbeat_at)
+         values ($1, $2, $3, 'running', now() + interval '60 seconds', now())`,
+        [`filler-${i}`, "local", `filler-camp-${i}`],
+      );
+    }
+    const campA = `distinct-a-${randomUUID()}`;
+    const campB = `distinct-b-${randomUUID()}`;
+    const results = await Promise.allSettled([store.acquireJob(campA), store.acquireJob(campB)]);
+    const admitted = results.filter(
+      (r): r is PromiseFulfilledResult<Awaited<ReturnType<typeof store.acquireJob>>> =>
+        r.status === "fulfilled" && r.value.acquired,
+    );
+    const refused = results.filter((r): r is PromiseRejectedResult => r.status === "rejected");
+    expect(admitted).toHaveLength(1);
+    expect(refused).toHaveLength(1);
+    expect(refused[0]!.reason).toBeInstanceOf(JobCapacityError);
   });
 });

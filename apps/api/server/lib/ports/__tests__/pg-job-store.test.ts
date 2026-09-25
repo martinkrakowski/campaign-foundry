@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, afterEach } from "vitest";
+import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
 import { PipelineExecutionLog } from "@campaignfoundry/CampaignOrchestration";
 import type { SqlClient } from "../../db/sql-client.js";
 import { migratedDatabase } from "../../db/__tests__/pglite-client.js";
@@ -118,6 +118,64 @@ describe("PgJobStore (PT-6a, D171)", () => {
     expect(rows[0]).toEqual({ status: "running" });
   });
 
+  test("a retry for a campaign already running adopts the incumbent even at MAX_JOBS, never a capacity error (finding 1)", async () => {
+    const store = new PgJobStore(db, "local");
+    const first = await store.acquireJob("camp");
+    const firstId = first.acquired ? first.jobId : "";
+    for (let i = 1; i < MAX_JOBS; i++) await store.acquireJob(`c${i}`);
+    // The org is now at MAX_JOBS, every row running. A retry for "camp" must
+    // adopt the incumbent, not evict to make room for a row that would only
+    // conflict with the one already there and then throw JobCapacityError —
+    // that is the bug: the file store returns the incumbent first.
+    await expect(store.acquireJob("camp")).resolves.toEqual({
+      acquired: false,
+      runningJobId: firstId,
+    });
+  });
+
+  test("acquireJob takes the org's advisory lock inside its own transaction (finding 3)", async () => {
+    const store = new PgJobStore(db, "local");
+    const seenSql: string[] = [];
+    const originalTransaction = db.transaction.bind(db);
+    const spy = vi.spyOn(db, "transaction").mockImplementation((work) =>
+      originalTransaction((tx) => {
+        const wrapped: typeof tx = {
+          ...tx,
+          query: (<R>(text: string, params?: readonly unknown[]) => {
+            seenSql.push(text);
+            return tx.query<R>(text, params);
+          }) as typeof tx.query,
+        };
+        return work(wrapped);
+      }),
+    );
+    try {
+      await store.acquireJob("camp");
+    } finally {
+      spy.mockRestore();
+    }
+    expect(seenSql.some((sql) => sql.includes("pg_advisory_xact_lock"))).toBe(true);
+  });
+
+  test("a lapsed running row polls as failed without any claim ever reaping it (finding 5)", async () => {
+    const store = new PgJobStore(db, "local");
+    await seed(db, { id: "ghost", orgId: "local", campaignId: "camp", leaseOffsetMs: -1_000 });
+
+    expect(await store.getJob("ghost")).toMatchObject({
+      status: "failed",
+      error: expect.stringContaining("Lease expired"),
+    });
+    expect((await store.listJobs()).find((j) => j.id === "ghost")?.job).toMatchObject({
+      status: "failed",
+    });
+    // Read-time only: nothing wrote the row. The next real claim's reaper is
+    // still what settles it for good.
+    const row = await db.query<{ status: string }>("select status from job where id = $1", [
+      "ghost",
+    ]);
+    expect(row.rows[0]).toEqual({ status: "running" });
+  });
+
   test("heartbeat extends the lease", async () => {
     const store = new PgJobStore(db, "local");
     const claim = await store.acquireJob("camp");
@@ -184,6 +242,34 @@ describe("PgJobStore (PT-6a, D171)", () => {
       settled: true,
     });
     await expect(store.failJob("done", "boom")).rejects.toBeInstanceOf(JobLeaseLostError);
+  });
+
+  test("a lapsed-but-not-yet-reaped lease refuses heartbeat and every fenced write, not just status = 'running' (finding 2)", async () => {
+    const store = new PgJobStore(db, "local");
+    await seed(db, { id: "lapsed", orgId: "local", campaignId: "camp", leaseOffsetMs: -1_000 });
+
+    const before = await db.query<{ t: Date }>(
+      "select lease_expires_at as t from job where id = $1",
+      ["lapsed"],
+    );
+    // Silent, like any other "no longer holds it" case — but it must not renew.
+    await expect(store.heartbeat("lapsed")).resolves.toBeUndefined();
+    const after = await db.query<{ t: Date }>(
+      "select lease_expires_at as t from job where id = $1",
+      ["lapsed"],
+    );
+    expect(after.rows[0]!.t.getTime()).toBe(before.rows[0]!.t.getTime());
+
+    await expect(store.progressJob("lapsed", 1, 2)).rejects.toBeInstanceOf(JobLeaseLostError);
+    await expect(store.completeJob("lapsed", payload())).rejects.toBeInstanceOf(JobLeaseLostError);
+    await expect(store.failJob("lapsed", "boom")).rejects.toBeInstanceOf(JobLeaseLostError);
+
+    // Nobody's reaper has run: the row is still 'running' in the database, and
+    // the fence caught this on the lease alone.
+    const row = await db.query<{ status: string }>("select status from job where id = $1", [
+      "lapsed",
+    ]);
+    expect(row.rows[0]).toEqual({ status: "running" });
   });
 
   test("progressJob records done/total for a job that still holds its lease", async () => {
@@ -284,7 +370,7 @@ describe("PgJobStore (PT-6a, D171)", () => {
     ]);
   });
 
-  test("a settled job expires after JOB_TTL_MS; a running one does not", async () => {
+  test("a settled job expires after JOB_TTL_MS on READ; a running one does not (finding 4: no acquireJob before the assertion, or evictToFit's purge — not the read filter — is what the test would be measuring)", async () => {
     const store = new PgJobStore(db, "local");
     await seed(db, {
       id: "settled",
@@ -298,9 +384,15 @@ describe("PgJobStore (PT-6a, D171)", () => {
       "update job set settled_at = now() - ($1 || ' milliseconds')::interval where id = $2",
       [JOB_TTL_MS + 1, "settled"],
     );
-    const running = await store.acquireJob("b");
+    await seed(db, { id: "running", orgId: "local", campaignId: "b" });
+
+    // No acquireJob call above this line: its own evictToFit would delete the
+    // expired row as a side effect, and the assertions below would pass for
+    // that reason even if getStoredJob's own TTL `where` clause were broken.
     expect(await store.getJob("settled")).toBeUndefined();
-    expect((await store.getJob(running.acquired ? running.jobId : ""))?.status).toBe("running");
+    expect(await store.getStoredJob("settled")).toBeUndefined();
+    expect((await store.getJob("running"))?.status).toBe("running");
+    expect((await store.listJobs()).map((j) => j.id)).toEqual(["running"]);
   });
 
   test("the store is capped at MAX_JOBS per org, evicting settled jobs before running ones", async () => {

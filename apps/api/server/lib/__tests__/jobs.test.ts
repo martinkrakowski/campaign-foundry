@@ -283,6 +283,10 @@ describe("jobs port facade", () => {
       .fn(async () => undefined)
       .mockRejectedValueOnce(new Error("heartbeat write failed"));
     store.heartbeat = heartbeat;
+    // Finding 6: a heartbeat failure must not vanish silently — it is logged
+    // (no structured logger reaches this module; console.warn is pg-client.ts's
+    // own pattern for a background failure nothing awaits).
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     try {
       const id = await createJob(LOCAL_TENANT, "camp");
       let resolveWork: (() => void) | undefined;
@@ -297,6 +301,8 @@ describe("jobs port facade", () => {
       await vi.advanceTimersByTimeAsync(HEARTBEAT_INTERVAL_MS * 2);
       expect(heartbeat).toHaveBeenCalledWith(id);
       expect(heartbeat.mock.calls.length).toBeGreaterThanOrEqual(2);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining(`heartbeat failed for job ${id}`));
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("heartbeat write failed"));
 
       resolveWork?.();
       await vi.advanceTimersByTimeAsync(0); // flush the settle so the interval is cleared
@@ -305,6 +311,7 @@ describe("jobs port facade", () => {
       expect(heartbeat.mock.calls.length).toBe(callsAtSettle);
     } finally {
       delete store.heartbeat;
+      warn.mockRestore();
       vi.useRealTimers();
     }
   });
