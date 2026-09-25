@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "FU-mid-run-verdicts",
+  "mutations": [
+    {
+      "file": "apps/web/src/app/(shell)/grid/page.tsx",
+      "before": "decidable={decisionsLoaded && !loading}",
+      "after": "decidable={decisionsLoaded}",
+      "because": "dropping the in-flight guard lets a verdict be clicked while a run is rewriting the cells and the decisions that join them (mid-run verdicts).",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/grid/__tests__/grid.test.tsx",
+        "-t",
+        "pause while a run is in flight"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

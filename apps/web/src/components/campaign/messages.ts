@@ -1703,6 +1703,16 @@ const GRID_RUN_WORK = "resolving assets, compositing brand layers, and checking 
 /** A verdict control waiting on the run's review decisions to load (D173). */
 export const reviewDecisionsLoading = "Loading the review decisions";
 
+/**
+ * The verdict controls and the export action while a run is in flight. The run
+ * replaces both the creatives and the decisions that join them, so a verdict
+ * clicked now lands on a cell that may not exist when it finishes.
+ */
+export const reviewPausedWhileRunning = "A run is in flight — verdicts wait until it finishes";
+
+/** The export page's counterpart, where the paused action is the queue, not the verdicts. */
+export const exportPausedWhileRunning = "A run is in flight — export waits until it finishes";
+
 export const gridRunIdle =
   "Execute the pipeline below to resolve missing assets, composite brand layers, and run brand-compliance checks.";
 
