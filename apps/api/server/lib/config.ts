@@ -41,3 +41,51 @@ export function storeBackend(): StoreBackend {
   if (value === "postgres") return "postgres";
   throw new Error(`STORE_BACKEND must be "fs" or "postgres", not "${value}".`);
 }
+
+/** Who a request is authenticated by (PT-1a, D174b). */
+export type AuthMode = "local" | "better-auth";
+
+/**
+ * `AUTH_MODE`: `local` (the default: every request is `LOCAL_TENANT`, as
+ * before PT-1) or `better-auth`. Explicit, like `STORE_BACKEND`, and read
+ * beside it — never inferred from `BETTER_AUTH_SECRET`'s presence, for the
+ * same reason: an operator's `.env.local` may carry a secret before the
+ * database is migrated for it.
+ */
+export function authMode(): AuthMode {
+  loadEnv();
+  const value = process.env.AUTH_MODE;
+  if (value === undefined || value === "" || value === "local") return "local";
+  if (value === "better-auth") return "better-auth";
+  throw new Error(`AUTH_MODE must be "local" or "better-auth", not "${value}".`);
+}
+
+/** Every other `better-auth` setting (PT-1a item 1), raw: `lib/auth/` validates them. */
+export interface AuthSettings {
+  /** `BETTER_AUTH_SECRET`: signs sessions and tokens. */
+  readonly secret?: string;
+  /** `BETTER_AUTH_URL`: the API's own reachable origin (`lib/auth/options.ts`). */
+  readonly baseURL?: string;
+  /** `WEB_ORIGIN`: the web app's origin, trusted for requests its `/api/pipeline/*` proxy forwards. */
+  readonly webOrigin?: string;
+  /** `RESEND_API_KEY`: absent means mail only logs (`LogMailer`). */
+  readonly resendApiKey?: string;
+  /** `EMAIL_FROM`: the address Resend sends as. */
+  readonly emailFrom?: string;
+  /** `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`: both required to enable Google sign-in (item 9). */
+  readonly googleClientId?: string;
+  readonly googleClientSecret?: string;
+}
+
+export function authSettings(): AuthSettings {
+  loadEnv();
+  return {
+    secret: process.env.BETTER_AUTH_SECRET,
+    baseURL: process.env.BETTER_AUTH_URL,
+    webOrigin: process.env.WEB_ORIGIN,
+    resendApiKey: process.env.RESEND_API_KEY,
+    emailFrom: process.env.EMAIL_FROM,
+    googleClientId: process.env.GOOGLE_CLIENT_ID,
+    googleClientSecret: process.env.GOOGLE_CLIENT_SECRET,
+  };
+}
