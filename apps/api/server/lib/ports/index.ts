@@ -8,6 +8,7 @@ import { FsPoolStore } from "./fs-pool-store.js";
 import { FsTemplateStore } from "./fs-template-store.js";
 import { FsJobStore } from "./fs-job-store.js";
 import { FsReportStore } from "./fs-report-store.js";
+import { PgReportStore } from "./pg-report-store.js";
 import { FsOutputStore } from "./fs-output-store.js";
 import { FsDecisionStore } from "./fs-decision-store.js";
 import { PgDecisionStore } from "./pg-decision-store.js";
@@ -38,6 +39,7 @@ export * from "./fs-pool-store.js";
 export * from "./fs-template-store.js";
 export * from "./fs-job-store.js";
 export * from "./fs-report-store.js";
+export * from "./pg-report-store.js";
 export * from "./fs-output-store.js";
 export * from "./fs-decision-store.js";
 export * from "./pg-decision-store.js";
@@ -106,9 +108,14 @@ const jobs = new Registry<JobStorePort>(
   (t) => join(scopeRoots(t).outputRoot, "jobs"),
   (dir) => new FsJobStore(dir),
 );
+// With STORE_BACKEND=postgres (PT-3c), one store per org over the process's
+// database; otherwise one per output root, on files.
 const reports = new Registry<ReportStorePort>(
-  (t) => scopeRoots(t).outputRoot,
-  (root) => new FsReportStore(root),
+  (t) => (storeBackend() === "postgres" ? PG + scopeTenant(t).orgId : scopeRoots(t).outputRoot),
+  (key) =>
+    key.startsWith(PG)
+      ? new PgReportStore(database(), key.slice(PG.length))
+      : new FsReportStore(key),
 );
 const outputs = new Registry<OutputStorePort>(
   (t) => scopeRoots(t).outputRoot,

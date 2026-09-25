@@ -59,8 +59,11 @@ spec:
               value: /data
             - name: OUTPUT_DIR
               value: /data/output
+            # fs until PT-8 imports the seeded file data (briefs, pools, reports):
+            # with postgres, every store that has a Postgres adapter reads its own,
+            # still empty, tables, and staging would show no briefs.
             - name: STORE_BACKEND
-              value: postgres
+              value: fs
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:

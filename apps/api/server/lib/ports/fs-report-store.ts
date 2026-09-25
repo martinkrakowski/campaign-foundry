@@ -3,7 +3,7 @@ import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { SAFE_ID_PATTERN } from "@campaignfoundry/CampaignOrchestration";
 import { hashBytes, isErrno } from "../brief-files.js";
-import type { ReportStorePort } from "./report-store.port.js";
+import { ReportConflictError, type ReportStorePort } from "./report-store.port.js";
 
 /**
  * Resolve the per-campaign report path under `<root>/reports/<campaignId>.json`,
@@ -75,10 +75,23 @@ export class FsReportStore implements ReportStorePort {
     }
   }
 
-  async writeReport(campaignId: string, payload: string): Promise<string> {
+  async writeReport(
+    campaignId: string,
+    payload: string,
+    expectedRevision?: string | null,
+  ): Promise<string> {
     const path = campaignReportPath(this.root, campaignId);
     if (!path) {
       throw new Error(`Report campaign id ${JSON.stringify(campaignId)} is not a safe id.`);
+    }
+    if (expectedRevision !== undefined) {
+      // Compared, then written — not fused into one step (D79: no such primitive
+      // on a filesystem), so this narrows the cross-process race rather than
+      // closing it; `PgReportStore`'s compare-and-swap closes it.
+      const current = await this.getRevision(campaignId);
+      if (current !== (expectedRevision ?? undefined)) {
+        throw new ReportConflictError(campaignId, current);
+      }
     }
     await mkdir(resolve(this.root, "reports"), { recursive: true });
     await writeAtomic(path, payload);
