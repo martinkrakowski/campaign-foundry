@@ -332,6 +332,31 @@ describe("jobs port facade", () => {
     }
   });
 
+  test("a non-Error heartbeat rejection is still logged, stringified", async () => {
+    vi.useFakeTimers();
+    const store = (await import("../ports/index.js")).getJobStore(
+      LOCAL_TENANT,
+    ) as unknown as Record<string, unknown>;
+    // Not an Error on purpose: exercises the `String(error)` fallback.
+    const heartbeat = vi.fn(async () => {
+      throw "plain string rejection";
+    });
+    store.heartbeat = heartbeat;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const id = await createJob(LOCAL_TENANT, "camp");
+      runJob(LOCAL_TENANT, id, async () => {
+        await new Promise(() => {});
+      });
+      await vi.advanceTimersByTimeAsync(HEARTBEAT_INTERVAL_MS);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("plain string rejection"));
+    } finally {
+      delete store.heartbeat;
+      warn.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
   test("runJob does not delete a job whose failJob lost the lease: the reaper already settled it honestly", async () => {
     const store = (await import("../ports/index.js")).getJobStore(LOCAL_TENANT);
     const failSpy = vi

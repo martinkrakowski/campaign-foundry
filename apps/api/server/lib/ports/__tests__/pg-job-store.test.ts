@@ -157,6 +157,36 @@ describe("PgJobStore (PT-6a, D171)", () => {
     expect(seenSql.some((sql) => sql.includes("pg_advisory_xact_lock"))).toBe(true);
   });
 
+  test("the insert's own conflict path still answers the incumbent if it is ever reached (belt-and-braces behind the lock and the pre-check)", async () => {
+    // Finding 1 and the finding-3 advisory lock together mean the insert's own
+    // ON CONFLICT DO UPDATE path is no longer reachable through acquireJob's
+    // normal flow — the pre-check (runningIncumbent) always finds a live
+    // incumbent first. That path still exists on purpose (an older client, a
+    // future bypass of the pre-check), so it must still answer correctly: force
+    // the pre-check to miss, the way an actual bypass would, and prove the
+    // insert's own conflict handling still returns the incumbent rather than a
+    // duplicate row or a constraint error.
+    const store = new PgJobStore(db, "local");
+    const first = await store.acquireJob("camp");
+    const firstId = first.acquired ? first.jobId : "";
+    const spy = vi
+      .spyOn(
+        store as unknown as {
+          runningIncumbent: (...args: unknown[]) => Promise<string | undefined>;
+        },
+        "runningIncumbent",
+      )
+      .mockResolvedValueOnce(undefined);
+    try {
+      await expect(store.acquireJob("camp")).resolves.toEqual({
+        acquired: false,
+        runningJobId: firstId,
+      });
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   test("a lapsed running row polls as failed without any claim ever reaping it (finding 5)", async () => {
     const store = new PgJobStore(db, "local");
     await seed(db, { id: "ghost", orgId: "local", campaignId: "camp", leaseOffsetMs: -1_000 });
