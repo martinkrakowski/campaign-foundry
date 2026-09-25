@@ -74,9 +74,9 @@ describe("PgReportStore (PT-3c, D169)", () => {
 
   test("a string expectation against a campaign with no row is a conflict at a null revision", async () => {
     const store = new PgReportStore(db, "local");
-    await expect(store.writeReport("fresh", '{"assets":[]}', "no-such-revision")).rejects.toMatchObject(
-      { code: "ECONFLICT", revision: undefined },
-    );
+    await expect(
+      store.writeReport("fresh", '{"assets":[]}', "no-such-revision"),
+    ).rejects.toMatchObject({ code: "ECONFLICT", revision: undefined });
   });
 
   test("another org's reports are invisible, and its own are separate", async () => {
