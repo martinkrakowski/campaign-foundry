@@ -1,0 +1,23 @@
+# PostgreSQL (D174a), run by CloudNativePG. The operator issues the server
+# certificate and its CA (Secret cf-pg-ca), which the app verifies against: the
+# API refuses a non-local database it cannot verify (databaseConfig). The app's
+# credentials and URL are in the Secret cf-pg-app, which the operator generates.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: cf-pg
+spec:
+  instances: 1
+  storage:
+    size: 10Gi
+    storageClass: local-path
+  bootstrap:
+    initdb:
+      database: campaign_foundry
+      owner: campaign_foundry
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 1Gi
