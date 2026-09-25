@@ -11,6 +11,7 @@
     "generate": "tsx apps/api/bin/generate.ts",
     "db:ping": "tsx apps/api/bin/db.ts ping",
     "db:migrate": "tsx apps/api/bin/db.ts migrate",
+    "deploy:staging": "sh deploy/staging/deploy.sh",
     "wave:status": "tsx tools/wave-status/bin.ts",
     "wave:status:print": "tsx tools/wave-status/cli.ts",
     "sweep": "tsx tools/sweep/cli.ts",

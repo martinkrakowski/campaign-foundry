@@ -65,7 +65,7 @@ From a clean checkout of the commit to ship (Docker logged in to Harbor, a
 `midnight` Docker context: `docker context create midnight --docker host=ssh://m`):
 
 ```sh
-deploy/staging/deploy.sh
+yarn deploy:staging   # runs deploy/staging/deploy.sh
 ```
 
 It builds on the node, pushes, applies `deploy/staging`, waits for Postgres, runs
