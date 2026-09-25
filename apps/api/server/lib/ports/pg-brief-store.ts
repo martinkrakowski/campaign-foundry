@@ -94,7 +94,11 @@ export class PgBriefStore implements BriefStorePort {
     for (const row of rows) {
       const file = `${row.slug}.yaml`;
       try {
-        briefs.push({ file, brief: parseBriefText(file, dumpBrief(row.body)), revision: row.revision });
+        briefs.push({
+          file,
+          brief: parseBriefText(file, dumpBrief(row.body)),
+          revision: row.revision,
+        });
       } catch (error) {
         // A row that no longer parses is skipped, the way the file store skips a
         // bad file — never dropped from the org silently, just kept out of the list.

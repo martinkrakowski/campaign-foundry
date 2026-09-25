@@ -247,6 +247,15 @@ describe("PgBriefStore (PT-3d, D168, D169)", () => {
     await Promise.all([p1, p2]);
     expect(order).toEqual(["pOther", "p1", "p2"]);
   });
+
+  test("a rejected fn does not poison withBriefLock's chain for the next caller", async () => {
+    await expect(
+      store.withBriefLock("camp", async () => {
+        throw new Error("boom");
+      }),
+    ).rejects.toThrow("boom");
+    await expect(store.withBriefLock("camp", async () => "after")).resolves.toBe("after");
+  });
 });
 
 describe("STORE_BACKEND=postgres puts briefs in the database, one store per (org, user) (PT-3d)", () => {
