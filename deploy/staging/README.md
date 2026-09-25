@@ -12,7 +12,7 @@ issuer). Production hosting is still open
 |---|---|---|
 | Web + API | `app.yaml`: one Pod, two containers from one image | The web app proxies `/api/pipeline/*` to `127.0.0.1:3001`, fixed at build time; sharing the Pod keeps that right. |
 | Files | PVC `campaign-foundry-data` (local-path, 20Gi) at `/data` | Briefs, input assets, fonts and output. Seeded from the image's samples on first start. |
-| PostgreSQL | CloudNativePG `Cluster` `cf-pg` | TLS; the app verifies against the operator's CA (`cf-pg-ca`). Decisions live here (`STORE_BACKEND=postgres`). Separate from the Aiven database. |
+| PostgreSQL | CloudNativePG `Cluster` `cf-pg` | TLS; the app verifies against the operator's CA (`cf-pg-ca`). Every store with a Postgres adapter keeps its records here (`STORE_BACKEND=postgres`; see `lib/ports/index.ts`). Separate from the Aiven database. |
 | Kafka | Strimzi `Kafka` `cf-kafka`, KRaft, one node | TLS listener with client-certificate auth, as on Aiven. `KafkaUser` `campaign-foundry`. Unused until PT-6. |
 
 No image-provider keys are configured, so renders are procedural and spend no
