@@ -25,6 +25,8 @@ import { BrandComplianceChecker } from "@campaignfoundry/GovernanceAndCompliance
 import { FileSystemExporter } from "@campaignfoundry/Distribution";
 import { err, type Result } from "@campaignfoundry/shared";
 import type { RunEnvironment } from "./run-environment.js";
+import { MeteredCopyGenerator, MeteredImageGenerator } from "./metering.js";
+import { getUsageStore } from "./ports/index.js";
 import { platformZones } from "./platform-zones.js";
 import { planInputFor, pooledPlanner } from "./pools.js";
 
@@ -47,6 +49,25 @@ export const ALLOWED_IMAGE_MODELS: readonly string[] = [
 ];
 
 /**
+ * Each adapter's default model id, for the usage row a metered call records
+ * (PT-7a, D175): `BackgroundResult` carries no model id, and the adapters
+ * don't expose the one they resolved to publicly, so this mirrors the
+ * default each one falls back to when its own `model` option is unset. Kept
+ * in sync here the same way `ALLOWED_IMAGE_MODELS` above is kept in sync with
+ * the UI catalog — a parallel constant, not a shared import, because the
+ * adapters live in `packages/*` and metering must not (D167).
+ */
+const IMAGEN_DEFAULT_MODEL = "imagen-4.0-generate-001";
+const OPENROUTER_IMAGE_DEFAULT_MODEL = "x-ai/grok-imagine-image-quality";
+/** Firefly v3 generate has no model option to override. */
+const FIREFLY_MODEL = "v3";
+
+/** `model` if set, else `fallback` — the same "unset or empty → default" rule each adapter applies internally. */
+function resolvedModel(model: string | undefined, fallback: string): string {
+  return model && model.length > 0 ? model : fallback;
+}
+
+/**
  * Resolve the image generator, wrapped by input-asset reuse. The primary source is
  * chosen by `selected` (the UI's model picker); procedural is always the floor.
  *
@@ -66,6 +87,8 @@ export const ALLOWED_IMAGE_MODELS: readonly string[] = [
 function imageGenerator(env: RunEnvironment, selected?: string): ImageGeneratorPort {
   const procedural = new ProceduralBackgroundGenerator();
   const cache = new FileSystemBackgroundCache(join(env.outputRoot, "cache"));
+  const usage = getUsageStore(env);
+  const orgId = env.tenant.orgId;
   const {
     geminiKey,
     openRouterKey,
@@ -74,32 +97,57 @@ function imageGenerator(env: RunEnvironment, selected?: string): ImageGeneratorP
   } = env.providers;
 
   // An OpenRouter generator for a given model, falling back to procedural.
+  // Metered (PT-7a): every non-cached background it resolves — whether called
+  // directly or as another provider's fallback — records one usage row.
   const openRouter = (model?: string): ImageGeneratorPort =>
     openRouterKey
-      ? new OpenRouterImageGenerator({ apiKey: openRouterKey, model, fallback: procedural, cache })
+      ? new MeteredImageGenerator(
+          new OpenRouterImageGenerator({
+            apiKey: openRouterKey,
+            model,
+            fallback: procedural,
+            cache,
+          }),
+          usage,
+          orgId,
+          "openrouter",
+          resolvedModel(model, OPENROUTER_IMAGE_DEFAULT_MODEL),
+        )
       : procedural;
 
   // Imagen with the OpenRouter default as its first fallback, then procedural.
   const imagen = (): ImageGeneratorPort =>
     geminiKey
-      ? new GeminiImageGenerator({
-          apiKey: geminiKey,
-          model: env.providers.imagenModel,
-          fallback: openRouter(env.providers.openRouterImageModel),
-          cache,
-        })
+      ? new MeteredImageGenerator(
+          new GeminiImageGenerator({
+            apiKey: geminiKey,
+            model: env.providers.imagenModel,
+            fallback: openRouter(env.providers.openRouterImageModel),
+            cache,
+          }),
+          usage,
+          orgId,
+          "imagen",
+          resolvedModel(env.providers.imagenModel, IMAGEN_DEFAULT_MODEL),
+        )
       : openRouter(env.providers.openRouterImageModel);
 
   // Adobe Firefly Services, degrading to the default chain when it's unavailable or
   // its credentials are absent.
   const firefly = (): ImageGeneratorPort =>
     fireflyId && fireflySecret
-      ? new FireflyImageGenerator({
-          clientId: fireflyId,
-          clientSecret: fireflySecret,
-          fallback: imagen(),
-          cache,
-        })
+      ? new MeteredImageGenerator(
+          new FireflyImageGenerator({
+            clientId: fireflyId,
+            clientSecret: fireflySecret,
+            fallback: imagen(),
+            cache,
+          }),
+          usage,
+          orgId,
+          "firefly",
+          FIREFLY_MODEL,
+        )
       : imagen();
 
   let generator: ImageGeneratorPort;
@@ -217,5 +265,10 @@ export async function runCampaign(
 export function copyGenerator(env: RunEnvironment): CopyGeneratorPort | undefined {
   const apiKey = env.providers.openRouterKey;
   if (!apiKey) return undefined;
-  return new OpenRouterCopyGenerator({ apiKey, model: env.providers.openRouterCopyModel });
+  return new MeteredCopyGenerator(
+    new OpenRouterCopyGenerator({ apiKey, model: env.providers.openRouterCopyModel }),
+    getUsageStore(env),
+    env.tenant.orgId,
+    "openrouter",
+  );
 }
