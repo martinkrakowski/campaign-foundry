@@ -77,6 +77,14 @@ describe("auth-boot-guard (PT-1a item 4, Finding 4)", () => {
     );
   });
 
+  test("refuses to boot AUTH_MODE=better-auth when WEB_ORIGIN protocol is not http or https", () => {
+    setValidBetterAuthEnv();
+    process.env.WEB_ORIGIN = "ftp://example.com";
+    expect(() => plugin({} as never)).toThrow(
+      'WEB_ORIGIN must be a valid http or https URL, not "ftp://example.com".',
+    );
+  });
+
   test("refuses to boot AUTH_MODE=better-auth with RESEND_API_KEY but no EMAIL_FROM", () => {
     setValidBetterAuthEnv();
     process.env.RESEND_API_KEY = "re_test_key";

@@ -187,6 +187,16 @@ describe("auth() (PT-1a)", () => {
         'WEB_ORIGIN must be a valid http or https URL, not "not-a-valid-url".',
       );
     });
+
+    test("refuses to build when WEB_ORIGIN protocol is not http or https", () => {
+      process.env.BETTER_AUTH_SECRET = "s".repeat(32);
+      process.env.DATABASE_URL = "postgres://user:pass@localhost:5432/db";
+      process.env.WEB_ORIGIN = "ftp://example.com";
+
+      expect(() => auth()).toThrow(
+        'WEB_ORIGIN must be a valid http or https URL, not "ftp://example.com".',
+      );
+    });
   });
 
   describe("its own pool", () => {

@@ -22,13 +22,8 @@ function readCa(path: string): string {
   return readFileSync(resolve(projectRoot(), path), "utf8");
 }
 
-function isHttps(origin?: string): boolean {
-  if (!origin) return false;
-  try {
-    return new URL(origin).protocol === "https:";
-  } catch {
-    return false;
-  }
+function isHttps(origin: string): boolean {
+  return new URL(origin).protocol === "https:";
 }
 
 /**
@@ -39,13 +34,11 @@ function isHttps(origin?: string): boolean {
  */
 function pool(): pg.Pool {
   const config = databaseConfig(databaseSettings(), readCa);
-  if (!sharedPool) {
-    const p = new pg.Pool(poolOptions({ ...config, max: AUTH_POOL_MAX }));
-    p.on("error", (error) => {
-      console.warn(`[auth] an idle connection failed: ${error.message}`);
-    });
-    sharedPool = p;
-  }
+  const p = new pg.Pool(poolOptions({ ...config, max: AUTH_POOL_MAX }));
+  p.on("error", (error) => {
+    console.warn(`[auth] an idle connection failed: ${error.message}`);
+  });
+  sharedPool = p;
   return sharedPool;
 }
 

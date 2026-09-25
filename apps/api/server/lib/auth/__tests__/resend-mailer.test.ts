@@ -80,4 +80,13 @@ describe("ResendMailer (PT-1a item 8, D174b(3))", () => {
     expect(timeoutSpy).toHaveBeenCalledWith(RESEND_TIMEOUT_MS);
     timeoutSpy.mockRestore();
   });
+
+  test("re-throws generic network errors that are not timeouts", async () => {
+    const fetchImpl = vi.fn().mockRejectedValue(new Error("network connection reset"));
+    const mailer = new ResendMailer("re_key", "noreply@example.com", fetchImpl);
+
+    await expect(
+      mailer.send({ to: "person@example.com", subject: "Sign in", html: "<p>hi</p>" }),
+    ).rejects.toThrow("network connection reset");
+  });
 });
