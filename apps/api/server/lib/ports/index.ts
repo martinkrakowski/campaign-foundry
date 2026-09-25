@@ -5,6 +5,7 @@ import { scopeRoots, scopeTenant, type StorageScope } from "../run-environment.j
 import { FsBriefStore } from "./fs-brief-store.js";
 import { FsAssetStore } from "./fs-asset-store.js";
 import { FsPoolStore } from "./fs-pool-store.js";
+import { PgPoolStore } from "./pg-pool-store.js";
 import { FsTemplateStore } from "./fs-template-store.js";
 import { FsJobStore } from "./fs-job-store.js";
 import { FsReportStore } from "./fs-report-store.js";
@@ -31,6 +32,7 @@ export * from "./decision-store.port.js";
 export * from "./fs-brief-store.js";
 export * from "./fs-asset-store.js";
 export * from "./fs-pool-store.js";
+export * from "./pg-pool-store.js";
 export * from "./fs-template-store.js";
 export * from "./fs-job-store.js";
 export * from "./fs-report-store.js";
@@ -86,9 +88,17 @@ const assets = new Registry<AssetStorePort>(
   (t) => join(scopeRoots(t).projectRoot, "assets", "inputs"),
   (dir) => new FsAssetStore(dir),
 );
+// With STORE_BACKEND=postgres (PT-3e), one store per org over the process's
+// database; otherwise one per project root's briefs directory, on files.
 const pools = new Registry<PoolStorePort>(
-  (t) => join(scopeRoots(t).projectRoot, "briefs"),
-  (dir) => new FsPoolStore(dir),
+  (t) =>
+    storeBackend() === "postgres"
+      ? `postgres:${scopeTenant(t).orgId}`
+      : join(scopeRoots(t).projectRoot, "briefs"),
+  (key) =>
+    key.startsWith("postgres:")
+      ? new PgPoolStore(database(), key.slice("postgres:".length))
+      : new FsPoolStore(key),
 );
 // The canonical templates are platform-owned and in memory (M3): one store for
 // every tenant until org templates exist.
