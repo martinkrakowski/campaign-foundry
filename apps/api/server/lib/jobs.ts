@@ -133,7 +133,17 @@ export function runJob(
   let heartbeatTimer: NodeJS.Timeout | undefined;
   if (isRunRegistry(store)) {
     heartbeatTimer = setInterval(() => {
-      void store.heartbeat(id).catch(() => undefined);
+      // Swallowed, not surfaced to `work`: a missed heartbeat should not fail a
+      // run that is otherwise progressing fine — the lease itself is what
+      // decides that (the next fenced write refuses once it lapses). Logged
+      // (no structured logger reaches this module) so a run that silently loses
+      // its lease this way leaves a trail, per `pg-client.ts`'s own pattern for
+      // a background failure nothing awaits.
+      void store.heartbeat(id).catch((error: unknown) => {
+        console.warn(
+          `[jobs] heartbeat failed for job ${id}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      });
     }, HEARTBEAT_INTERVAL_MS);
     heartbeatTimer.unref();
   }
