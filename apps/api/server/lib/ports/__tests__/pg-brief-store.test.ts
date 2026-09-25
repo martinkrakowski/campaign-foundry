@@ -66,12 +66,34 @@ describe("PgBriefStore (PT-3d, D168, D169)", () => {
     );
     await db.query(
       `insert into brief_version (campaign_id, version, body, revision, actor)
-       values ($1, 1, $2::jsonb, $3, $4)`,
+       values ($1, 1, $2, $3, $4)`,
       [rows[0]!.id, JSON.stringify({ id: "bad" }), "deadbeef", "local"],
     );
 
     const list = await store.listBriefs();
     expect(list.map((entry) => entry.brief.id)).toEqual(["good"]);
+  });
+
+  // jsonb re-serialises a nested object's own keys into its own order on
+  // storage — the bug this test guards against. `body` is `text`, storing
+  // exactly the `JSON.stringify(brief)` bytes the write took, so a round trip
+  // through createBrief/rewriteBrief/readBrief never reorders a product's keys.
+  test("a brief with non-alphabetical nested keys reads back with the same key order it was written with", async () => {
+    const withOrderedProduct: CampaignBrief = {
+      ...minimalBrief,
+      products: [
+        {
+          logoPath: "logo.png",
+          id: "prod-1",
+          primaryColor: "#1473E6",
+          name: "Product 1",
+        } as CampaignBrief["products"][0],
+      ],
+    };
+    await store.createBrief(withOrderedProduct);
+    const read = await store.readBrief("test-camp");
+    expect(Object.keys(read.products[0]!)).toEqual(["logoPath", "id", "primaryColor", "name"]);
+    expect(JSON.stringify(read.products[0])).toBe(JSON.stringify(withOrderedProduct.products[0]));
   });
 
   test("findBriefById finds a brief by its slug, and findBriefFileById answers its file key", async () => {
@@ -82,9 +104,15 @@ describe("PgBriefStore (PT-3d, D168, D169)", () => {
     expect(await store.findBriefFileById("test-camp")).toBe("test-camp.yaml");
   });
 
-  test("findBriefFile answers the same file key as findBriefFileById", async () => {
+  test("findBriefFile answers the file key when .yaml is among the accepted extensions, by default or explicitly", async () => {
     await store.createBrief(minimalBrief);
     expect(await store.findBriefFile("test-camp")).toBe("test-camp.yaml");
+    expect(await store.findBriefFile("test-camp", [".yml", ".yaml"])).toBe("test-camp.yaml");
+  });
+
+  test("findBriefFile answers undefined when .yaml is not among the accepted extensions, even for an existing brief", async () => {
+    await store.createBrief(minimalBrief);
+    expect(await store.findBriefFile("test-camp", [".yml", ".json"])).toBeUndefined();
   });
 
   test("an unknown id answers absent everywhere, and readBrief and rewriteBrief refuse it as not found", async () => {
@@ -293,6 +321,33 @@ describe("STORE_BACKEND=postgres puts briefs in the database, one store per (org
         where c.org_id = 'local' and c.slug = 'test-camp'`,
     );
     expect(rows).toEqual([{ actor: "u2" }]);
+
+    await db.end();
+  });
+
+  // A ":" in an id must not let one (org, user) pair alias another. Naive
+  // string concatenation ("postgres:" + orgId + ":" + userId) collides here:
+  // ctxA's "local" + "x:y" and ctxB's "local:x" + "y" both concatenate to the
+  // identical string "postgres:local:x:y". JSON-encoding the triple, decoded
+  // with JSON.parse, cannot: a quoted string's ":" is never a delimiter.
+  test("an orgId or userId containing ':' round-trips to its own store, not a colliding one", async () => {
+    const db = await migratedDatabase();
+    setDatabase(db);
+    process.env.STORE_BACKEND = "postgres";
+
+    const ctxA = { ...LOCAL_TENANT, orgId: "local", userId: "x:y" };
+    const ctxB = { ...LOCAL_TENANT, orgId: "local:x", userId: "y" };
+    expect(getBriefStore(ctxA)).not.toBe(getBriefStore(ctxB));
+
+    // The realistic side (a real, FK-valid org) decodes correctly: the actor
+    // written is exactly the colon-bearing userId, not a truncation of it.
+    await getBriefStore(ctxA).createBrief(minimalBrief);
+    const { rows } = await db.query<{ actor: string }>(
+      `select bv.actor from brief_version bv
+         join campaign c on c.id = bv.campaign_id
+        where c.org_id = 'local' and c.slug = 'test-camp'`,
+    );
+    expect(rows).toEqual([{ actor: "x:y" }]);
 
     await db.end();
   });
