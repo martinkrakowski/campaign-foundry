@@ -3,7 +3,8 @@
 Campaign Foundry's staging environment runs on the owner's k3s node `midnight`
 (`ssh m`), reachable only on the local network or the VPN, at
 **https://campaign-foundry.midnight.lan** (TLS from the cluster's self-signed
-issuer). Production hosting is still open (plan §7); this is not it.
+issuer). Production hosting is still open
+(`docs/planning/2026-09-24_platform-and-tenancy.md`, §7 "What the owner is deciding"); this is not it.
 
 ## What runs (namespace `campaign-foundry-staging`)
 
@@ -45,9 +46,11 @@ certificate comes from a stable CA (a self-signed root CA Issuer in cert-manager
 trusted once):
 
 ```sh
-# in your own terminal: sudo asks for a password
-ssh -t m 'echo | openssl s_client -connect registry.midnight.lan:443 -servername registry.midnight.lan 2>/dev/null \
-  | openssl x509 | sudo tee /etc/docker/certs.d/registry.midnight.lan/ca.crt >/dev/null'
+# in your own terminal: sudo asks for a password. The certificate is read from
+# Harbor's own Kubernetes Secret over the authenticated cluster API, not from the
+# network, so an intercepted TLS connection cannot plant a trust root.
+ssh -t m 'KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl -n registry get secret harbor-ingress -o jsonpath="{.data.tls\.crt}" \
+  | base64 -d | openssl x509 | sudo tee /etc/docker/certs.d/registry.midnight.lan/ca.crt >/dev/null'
 ssh -t m 'sudo cp /etc/docker/certs.d/registry.midnight.lan/ca.crt /usr/local/share/ca-certificates/registry.midnight.lan.crt \
   && sudo update-ca-certificates && sudo systemctl restart docker'
 ```

@@ -25,10 +25,13 @@ git archive --format=tar HEAD | docker --context "$CONTEXT" build -t "$IMAGE" -
 echo "==> push"
 docker --context "$CONTEXT" push "$IMAGE"
 
-echo "==> apply"
-kubectl kustomize deploy/staging |
-  sed "s#registry.midnight.lan/library/campaign-foundry:latest#$IMAGE#" |
-  remote kubectl apply -f -
+# The new app must not start before its migrations have run: everything but the
+# Deployment is applied first, then the migration, and only then the Deployment.
+RENDERED=$(kubectl kustomize deploy/staging | sed "s#registry.midnight.lan/library/campaign-foundry:latest#$IMAGE#")
+only_app() { node -e 'const d=require("fs").readFileSync(0,"utf8").split(/\n---\n/);process.stdout.write(d.filter(x=>/^kind: Deployment$/m.test(x)===(process.argv[1]==="app")).join("\n---\n"))' "$1"; }
+
+echo "==> apply services"
+printf '%s\n' "$RENDERED" | only_app services | remote kubectl apply -f -
 
 echo "==> wait for Postgres"
 remote kubectl -n "$NS" wait cluster/cf-pg --for=condition=Ready --timeout=10m
@@ -39,6 +42,6 @@ sed "s#IMAGE_TAG#$TAG#" deploy/staging/jobs/migrate.yaml | remote kubectl apply 
 remote kubectl -n "$NS" wait job/cf-migrate --for=condition=complete --timeout=5m
 
 echo "==> roll out"
-remote kubectl -n "$NS" rollout restart deployment/campaign-foundry
+printf '%s\n' "$RENDERED" | only_app app | remote kubectl apply -f -
 remote kubectl -n "$NS" rollout status deployment/campaign-foundry --timeout=10m
 echo "==> https://campaign-foundry.midnight.lan ($TAG)"
