@@ -45,6 +45,24 @@ jobs:
     concurrency:
       group: ci-${{ github.ref }}-${{ github.event_name }}
       cancel-in-progress: true
+    # A real Postgres for the PT-6a concurrency proof: PGlite is one connection,
+    # so it cannot show two workers racing a claim (TEST_DATABASE_URL below).
+    # Every other database test still runs on PGlite — this service exists for
+    # that one gated test file, not as a second way to run the suite.
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v5
         with:
@@ -204,6 +222,9 @@ jobs:
         run: "yarn test:cov"
         env:
           NODE_ENV: test
+          # The PT-6a concurrency test is skipped unless this is set; every other
+          # database test runs on PGlite and never touches this service.
+          TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
 
       # Tests live in __tests__/ next to their modules, but Nitro scans apps/api/server/
       # recursively. A *.test.ts file landing there gets registered as a route and crashes

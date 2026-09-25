@@ -9,6 +9,7 @@ import { FsPoolStore } from "./fs-pool-store.js";
 import { PgPoolStore } from "./pg-pool-store.js";
 import { FsTemplateStore } from "./fs-template-store.js";
 import { FsJobStore } from "./fs-job-store.js";
+import { PgJobStore } from "./pg-job-store.js";
 import { FsReportStore } from "./fs-report-store.js";
 import { PgReportStore } from "./pg-report-store.js";
 import { FsOutputStore } from "./fs-output-store.js";
@@ -38,6 +39,7 @@ export * from "./fs-pool-store.js";
 export * from "./pg-pool-store.js";
 export * from "./fs-template-store.js";
 export * from "./fs-job-store.js";
+export * from "./pg-job-store.js";
 export * from "./fs-report-store.js";
 export * from "./pg-report-store.js";
 export * from "./fs-output-store.js";
@@ -127,9 +129,15 @@ const templates = new Registry<TemplateStorePort>(
   () => "canonical",
   () => new FsTemplateStore(),
 );
+// With STORE_BACKEND=postgres (PT-6a), one lease-backed store per org over the
+// process's database; otherwise one per output root, on files (unchanged).
 const jobs = new Registry<JobStorePort>(
-  (t) => join(scopeRoots(t).outputRoot, "jobs"),
-  (dir) => new FsJobStore(dir),
+  (t) =>
+    storeBackend() === "postgres"
+      ? PG + scopeTenant(t).orgId
+      : join(scopeRoots(t).outputRoot, "jobs"),
+  (key) =>
+    key.startsWith(PG) ? new PgJobStore(database(), key.slice(PG.length)) : new FsJobStore(key),
 );
 // With STORE_BACKEND=postgres (PT-3c), one store per org over the process's
 // database; otherwise one per output root, on files.

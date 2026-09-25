@@ -1,11 +1,31 @@
 import { JOB_TTL_MS } from "./ports/fs-job-store.js";
 import { getJobStore } from "./ports/index.js";
+import { HEARTBEAT_INTERVAL_MS, JobLeaseLostError } from "./ports/pg-job-store.js";
 import type { StorageScope } from "./run-environment.js";
 import { LOCAL_TENANT } from "./tenant.js";
-import type { Job, JobResult, JobStatus, StoredJob } from "./ports/job-store.port.js";
+import type {
+  Job,
+  JobResult,
+  JobStatus,
+  JobStorePort,
+  RunRegistryPort,
+  StoredJob,
+} from "./ports/job-store.port.js";
 
 export type { JobStatus, JobResult, Job, StoredJob };
 export { MAX_JOBS, JOB_TTL_MS } from "./ports/fs-job-store.js";
+export { HEARTBEAT_INTERVAL_MS, LEASE_MS } from "./ports/pg-job-store.js";
+
+/**
+ * A lease-backed store (`PgJobStore`, PT-6a) also implements `heartbeat`; a
+ * single-process store (`FsJobStore`) excludes runs with its own in-memory lock
+ * chain and never lapses a lease, so it has nothing to extend. A type guard
+ * rather than `"heartbeat" in store`, so the check reads the same regardless of
+ * which structural-narrowing behaviour a given TypeScript version gives `in`.
+ */
+function isRunRegistry(store: JobStorePort): store is RunRegistryPort {
+  return typeof (store as Partial<RunRegistryPort>).heartbeat === "function";
+}
 
 export async function acquireJob(
   scope: StorageScope,
@@ -104,6 +124,29 @@ export function runJob(
     RUN_DEADLINE_MS,
   );
   timer.unref();
+  // The heartbeat (D171 item 3): only a lease-backed store has one to extend.
+  // `runJob` is the only place that knows a run's lifetime, so it is the one
+  // place that can keep a lease alive for exactly as long as work runs — a
+  // tick from the pipeline's own progress callback would be silent for
+  // whatever stretch of work reports no progress, which is not a lease.
+  const store = getJobStore(scope);
+  let heartbeatTimer: NodeJS.Timeout | undefined;
+  if (isRunRegistry(store)) {
+    heartbeatTimer = setInterval(() => {
+      // Swallowed, not surfaced to `work`: a missed heartbeat should not fail a
+      // run that is otherwise progressing fine — the lease itself is what
+      // decides that (the next fenced write refuses once it lapses). Logged
+      // (no structured logger reaches this module) so a run that silently loses
+      // its lease this way leaves a trail, per `pg-client.ts`'s own pattern for
+      // a background failure nothing awaits.
+      void store.heartbeat(id).catch((error: unknown) => {
+        console.warn(
+          `[jobs] heartbeat failed for job ${id}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      });
+    }, HEARTBEAT_INTERVAL_MS);
+    heartbeatTimer.unref();
+  }
   // The deadline must be TERMINAL, and aborting the signal alone is not.
   // Every image adapter has a fallback, so an aborted provider call degrades to
   // the procedural generator and RESOLVES - the run then carries on compositing,
@@ -132,11 +175,20 @@ export function runJob(
     } catch (reason) {
       try {
         await failJob(scope, id, reason instanceof Error ? reason.message : "Job failed");
-      } catch {
-        await deleteJob(scope, id).catch(() => undefined);
+      } catch (failError) {
+        // A fenced store throws the same `JobLeaseLostError` here when the
+        // reaper already failed this row (or another worker's claim replaced
+        // it): that is a real, correctly-settled "failed" record, and
+        // deleting it would turn it into a 404. This fallback exists for a
+        // genuine storage error — a row stuck "running" with nothing able to
+        // settle it — so only delete when the failure was not a lost lease.
+        if (!(failError instanceof JobLeaseLostError)) {
+          await deleteJob(scope, id).catch(() => undefined);
+        }
       }
     } finally {
       clearTimeout(timer);
+      if (heartbeatTimer) clearInterval(heartbeatTimer);
     }
   })();
 }

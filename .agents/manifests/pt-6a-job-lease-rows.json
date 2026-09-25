@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "PT-6a",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/ports/pg-job-store.ts",
+      "before": "where org_id = $1 and status = 'running' and lease_expires_at < now()",
+      "after": "where org_id = $1 and status = 'running'",
+      "because": "the reaper must fail only a RUNNING job whose lease has lapsed; drop the lapse check and every running job is failed on the next claim, so acquireJob stops returning the incumbent for a live campaign",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/pg-job-store.test.ts",
+        "-t",
+        "claim returns the incumbent when running"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

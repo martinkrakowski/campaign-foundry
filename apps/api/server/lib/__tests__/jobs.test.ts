@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import { PipelineExecutionLog } from "@campaignfoundry/CampaignOrchestration";
 import {
   JOB_TTL_MS,
+  HEARTBEAT_INTERVAL_MS,
   RUN_DEADLINE_MS,
   MAX_JOBS,
   acquireJob,
@@ -18,6 +19,7 @@ import {
   runJob,
   type JobResult,
 } from "../jobs.js";
+import { JobLeaseLostError } from "../ports/pg-job-store.js";
 
 import { LOCAL_TENANT } from "../tenant.js";
 const payload = (over: Partial<JobResult> = {}): JobResult => ({
@@ -267,6 +269,111 @@ describe("jobs port facade", () => {
     expect(await getJob(LOCAL_TENANT, id)).toBeDefined();
     await deleteJob(LOCAL_TENANT, id);
     expect(await getJob(LOCAL_TENANT, id)).toBeUndefined();
+  });
+
+  test("runJob heartbeats a lease-backed store while work runs, and stops once it settles (D171 item 3)", async () => {
+    vi.useFakeTimers();
+    // FsJobStore has no `heartbeat`; a lease-backed store does (PgJobStore, PT-6a).
+    // Adding one to the shared instance is enough to flip `isRunRegistry` without
+    // standing up a whole fake store.
+    const store = (await import("../ports/index.js")).getJobStore(
+      LOCAL_TENANT,
+    ) as unknown as Record<string, unknown>;
+    const heartbeat = vi
+      .fn(async () => undefined)
+      .mockRejectedValueOnce(new Error("heartbeat write failed"));
+    store.heartbeat = heartbeat;
+    // Finding 6: a heartbeat failure must not vanish silently — it is logged
+    // (no structured logger reaches this module; console.warn is pg-client.ts's
+    // own pattern for a background failure nothing awaits).
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const id = await createJob(LOCAL_TENANT, "camp");
+      let resolveWork: (() => void) | undefined;
+      runJob(
+        LOCAL_TENANT,
+        id,
+        () =>
+          new Promise<void>((resolve) => {
+            resolveWork = resolve;
+          }),
+      );
+      await vi.advanceTimersByTimeAsync(HEARTBEAT_INTERVAL_MS * 2);
+      expect(heartbeat).toHaveBeenCalledWith(id);
+      expect(heartbeat.mock.calls.length).toBeGreaterThanOrEqual(2);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining(`heartbeat failed for job ${id}`));
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("heartbeat write failed"));
+
+      resolveWork?.();
+      await vi.advanceTimersByTimeAsync(0); // flush the settle so the interval is cleared
+      const callsAtSettle = heartbeat.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(HEARTBEAT_INTERVAL_MS * 3);
+      expect(heartbeat.mock.calls.length).toBe(callsAtSettle);
+    } finally {
+      delete store.heartbeat;
+      warn.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  test("runJob never heartbeats a store with no lease to extend", async () => {
+    vi.useFakeTimers();
+    try {
+      const id = await createJob(LOCAL_TENANT, "camp");
+      runJob(LOCAL_TENANT, id, async () => {
+        await new Promise(() => {});
+      });
+      // No throw, no interval fires against a store with no `heartbeat`: there is
+      // nothing to assert a call on, so this only needs to not blow up.
+      await vi.advanceTimersByTimeAsync(HEARTBEAT_INTERVAL_MS * 2);
+      expect((await getJob(LOCAL_TENANT, id))?.status).toBe("running");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("a non-Error heartbeat rejection is still logged, stringified", async () => {
+    vi.useFakeTimers();
+    const store = (await import("../ports/index.js")).getJobStore(
+      LOCAL_TENANT,
+    ) as unknown as Record<string, unknown>;
+    // Not an Error on purpose: exercises the `String(error)` fallback.
+    const heartbeat = vi.fn(async () => {
+      throw "plain string rejection";
+    });
+    store.heartbeat = heartbeat;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const id = await createJob(LOCAL_TENANT, "camp");
+      runJob(LOCAL_TENANT, id, async () => {
+        await new Promise(() => {});
+      });
+      await vi.advanceTimersByTimeAsync(HEARTBEAT_INTERVAL_MS);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("plain string rejection"));
+    } finally {
+      delete store.heartbeat;
+      warn.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  test("runJob does not delete a job whose failJob lost the lease: the reaper already settled it honestly", async () => {
+    const store = (await import("../ports/index.js")).getJobStore(LOCAL_TENANT);
+    const failSpy = vi
+      .spyOn(store, "failJob")
+      .mockRejectedValueOnce(new JobLeaseLostError("some-id"));
+    // Earlier tests in this file spy on the same shared store without restoring,
+    // so `deleteJob`'s call history already carries their calls — compare a delta.
+    const deleteSpy = vi.spyOn(store, "deleteJob");
+    const callsBefore = deleteSpy.mock.calls.length;
+    const id = await createJob(LOCAL_TENANT, "camp");
+    runJob(LOCAL_TENANT, id, async () => {
+      throw new Error("work failed");
+    });
+    await vi.waitFor(() => expect(failSpy).toHaveBeenCalled());
+    // Give a wrongly-present delete a chance to happen before asserting its absence.
+    await new Promise((r) => setTimeout(r, 20));
+    expect(deleteSpy.mock.calls.length).toBe(callsBefore);
   });
 
   test("handle minted survives across separate processes", async () => {
