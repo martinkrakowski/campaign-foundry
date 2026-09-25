@@ -171,6 +171,35 @@ an SSRF design). Each becomes a plan once PT-3 exists. **AR6** stays blocked on 
 
 ---
 
+### 4.1 Wave `platform-and-tenancy-w01` (defined 2026-09-25)
+
+Everything that can start without the owner. Each lane is one PR on the foundation from #579 and #580
+(`SqlClient`, PGlite tests, `STORE_BACKEND=postgres` opt-in, the per-org registry pattern, and a revision
+compare-and-swap inside the write's own transaction, as `PgDecisionStore` does).
+
+**Migration numbers are assigned here, and PRs merge in this order.** `migrate` refuses a migration
+that sorts before one already applied. A lane that finishes early waits its turn, and staging is not
+deployed mid-wave out of order.
+
+| Lane | Delivers | Migration | Owns | Must not |
+|---|---|---|---|---|
+| **PT-3c-reports-on-postgres** | `PgReportStore` behind `ReportStorePort`: one row per (org, campaign) with the report body and revision. The revision is the SHA-256 of the payload the file store writes, so a PT-8 import keeps it. `writeReport`'s expected-revision guard moves into the write's transaction (`ECONFLICT` unchanged). | `0003_report` | new `pg-report-store.ts`; the report registry in `ports/index.ts`; `report.ts` (the guard only) | change the report JSON shape clients read |
+| **PT-3d-briefs-on-postgres** | `PgBriefStore`: a `campaign` row (surrogate `id uuid`, `slug` unique per org, `team_id` nullable for D166) and `brief_version` rows (body, revision, actor, time), a new version on every write. The revision is the SHA-256 of the canonical YAML (`dumpBrief`); `withBriefLock` becomes a row lock. **First** grep every caller of `StoredBrief.file`, `findBriefFile`, `readBrief(fileOrKey)` and `exists`, and define what `file` means in Postgres from what they do with it. Routes keep the slug until PT-5. | `0004_brief` | new `pg-brief-store.ts`; the brief registry | move routes to ids (PT-5); touch asset references (C4, PT-4) |
+| **PT-3e-pools-on-postgres** | `PgPoolStore`: (org, campaign) with the pool document and a revision, and the compare-and-swap in the write. `campaign_id` stays the slug, with no foreign key yet, as `decision` does. | `0005_pool` | new `pg-pool-store.ts`; the pool registry | change pool semantics |
+| **PT-6a-job-lease-rows** | The D171 core without Kafka: a `job` table, a one-statement claim (a partial unique index on (org, campaign) while running, falling through to the holder), heartbeat and reaper, and the run id as a fence on guarded writes. `RunRegistryPort` (R6) with a Postgres adapter behind `STORE_BACKEND`. The two-worker test needs a real server: add a Postgres service to `ci.yml` and a `TEST_DATABASE_URL`-gated test, **additive to** PGlite coverage (the gate stays 100% without it). Also fixes `GET /campaigns/jobs/:id`'s root lookup (a job row carries its org). | `0006_job` | new job adapter and port; `lib/jobs.ts`; `ci.yml` (service only) | add a Kafka client (PT-6b) |
+| **PT-7a-metering** | A `usage` row per generation (org, provider, model, units, platform key or the org's), and a per-org quota check before a run is admitted on platform keys (D175). No org other than `local` is admitted anyway until this ships. | `0007_usage` | new usage port and adapter; `pipeline.ts` (construction and admission only) | store or read org keys (PT-7b) |
+| **FU-mid-run-verdicts** | Approve, Reject and Package are paused while a run is in flight (`decisionsLoaded && !loading`), so a mid-run verdict can no longer 409 with the false "another tab" notice (session log, PT-0d follow-up). | — | `grid/page.tsx`, `export/page.tsx` | change the decisions API |
+| **FU-pools-race-test** | Make `pools.test.ts`' "two overlapping PATCHes without a revision" test force the losing interleaving, not hope for it (it failed once on `a9844da5`). | — | `pools.test.ts` only | change pool code |
+
+No lane may add a dependency. Every lane runs the full gate (`yarn lint && yarn typecheck && yarn test:cov`
+and `scripts/verify-manifests.sh`) and records one mutation.
+
+**Not in this wave, and why:** PT-1 (the owner's email-sender choice), PT-2 (PT-1), PT-4 (PT-3d, and B2
+credentials), PT-5 (PT-3d), PT-6b Kafka delivery (PT-6a and a client-library choice), PT-7b (PT-2), PT-8 and
+PT-9 (PT-3, PT-4).
+
+---
+
 ## 5. What this plan refuses
 
 - **It does not put tenancy in the domain or package layers.** `CampaignOrchestration`,
