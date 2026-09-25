@@ -1,0 +1,16 @@
+# Staging on the owner's LAN k3s node (VPN or local network only). Applied by
+# deploy.sh, which sets the image tag to the commit it built. Requires the
+# CloudNativePG and Strimzi operators (see README.md).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: campaign-foundry-staging
+resources:
+  - namespace.yaml
+  - postgres.yaml
+  - kafka.yaml
+  - data-pvc.yaml
+  - app.yaml
+images:
+  - name: campaign-foundry
+    newName: registry.midnight.lan/library/campaign-foundry
+    newTag: latest

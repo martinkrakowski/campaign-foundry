@@ -1,0 +1,13 @@
+# The app's files: briefs, input assets and fonts (seeded from the image on first
+# start), and rendered output. The file stores still hold everything but review
+# decisions (PT-3), so this must survive a redeploy.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: campaign-foundry-data
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 20Gi

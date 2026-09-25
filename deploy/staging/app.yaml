@@ -1,0 +1,159 @@
+# The app: the web front end and the API in one Pod. The web app's proxy to the
+# API (`/api/pipeline/*` → `http://127.0.0.1:3001`, next.config.ts) is fixed at
+# build time, and sharing the Pod's network makes that address right with no
+# per-environment image. One replica: the data volume is ReadWriteOnce and the
+# file stores assume one process (D79).
+#
+# No image-provider keys are set: staging renders procedurally and spends no
+# credits. Add GEMINI_API_KEY / OPENROUTER_API_KEY through a Secret deliberately.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: campaign-foundry
+  labels:
+    app: campaign-foundry
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: campaign-foundry
+  template:
+    metadata:
+      labels:
+        app: campaign-foundry
+    spec:
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      initContainers:
+        # Seed the data volume from the image: sample briefs and input assets only
+        # where absent (an operator's edits survive), fonts always (they ship
+        # with the code).
+        - name: seed-data
+          image: campaign-foundry
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              mkdir -p /data/briefs /data/assets /data/output
+              cp -rn /app/briefs/. /data/briefs/
+              cp -rn /app/assets/. /data/assets/
+              cp -r /app/assets/fonts/. /data/assets/fonts/
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      containers:
+        - name: api
+          image: campaign-foundry
+          command: ["node", "apps/api/.output/server/index.mjs"]
+          env:
+            - name: NITRO_HOST
+              value: "127.0.0.1"
+            - name: NITRO_PORT
+              value: "3001"
+            - name: PROJECT_ROOT
+              value: /data
+            - name: OUTPUT_DIR
+              value: /data/output
+            - name: STORE_BACKEND
+              value: postgres
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: cf-pg-app
+                  key: uri
+            - name: DATABASE_CA_PATH
+              value: /etc/campaign-foundry/db/ca.crt
+            - name: DATABASE_POOL_MAX
+              value: "3"
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: db-ca
+              mountPath: /etc/campaign-foundry/db
+              readOnly: true
+          # The API listens on loopback only (the web container reaches it there), so
+          # the kubelet cannot dial it on the Pod IP; the check runs in the container.
+          readinessProbe:
+            exec:
+              command:
+                - node
+                - -e
+                - 'require("net").connect(3001, "127.0.0.1").on("connect", () => process.exit(0)).on("error", () => process.exit(1))'
+            periodSeconds: 10
+            timeoutSeconds: 5
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              memory: 4Gi
+        - name: web
+          image: campaign-foundry
+          command:
+            ["node", "node_modules/next/dist/bin/next", "start", "apps/web", "-H", "0.0.0.0", "-p", "3000"]
+          ports:
+            - name: http
+              containerPort: 3000
+          readinessProbe:
+            tcpSocket:
+              port: 3000
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 1Gi
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: campaign-foundry-data
+        - name: db-ca
+          secret:
+            secretName: cf-pg-ca
+            items:
+              - key: ca.crt
+                path: ca.crt
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: campaign-foundry
+spec:
+  selector:
+    app: campaign-foundry
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+# Reachable only where *.midnight.lan resolves: the local network and the VPN.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: campaign-foundry
+  annotations:
+    cert-manager.io/cluster-issuer: selfsigned-issuer
+    traefik.ingress.kubernetes.io/router.entrypoints: web,websecure
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: campaign-foundry.midnight.lan
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: campaign-foundry
+                port:
+                  name: http
+  tls:
+    - hosts:
+        - campaign-foundry.midnight.lan
+      secretName: campaign-foundry-tls

@@ -1,0 +1,41 @@
+# Apply the database migrations the image ships (yarn db:migrate), before the
+# app is rolled out. deploy.sh replaces the image tag and waits for completion.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: cf-migrate
+  namespace: campaign-foundry-staging
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+      containers:
+        - name: migrate
+          image: registry.midnight.lan/library/campaign-foundry:IMAGE_TAG
+          command: ["node", "node_modules/tsx/dist/cli.mjs", "apps/api/bin/db.ts", "migrate"]
+          env:
+            - name: PROJECT_ROOT
+              value: /app
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: cf-pg-app
+                  key: uri
+            - name: DATABASE_CA_PATH
+              value: /etc/campaign-foundry/db/ca.crt
+          volumeMounts:
+            - name: db-ca
+              mountPath: /etc/campaign-foundry/db
+              readOnly: true
+      volumes:
+        - name: db-ca
+          secret:
+            secretName: cf-pg-ca
+            items:
+              - key: ca.crt
+                path: ca.crt
