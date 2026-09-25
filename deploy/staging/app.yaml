@@ -76,10 +76,16 @@ spec:
             - name: db-ca
               mountPath: /etc/campaign-foundry/db
               readOnly: true
+          # The API listens on loopback only (the web container reaches it there), so
+          # the kubelet cannot dial it on the Pod IP; the check runs in the container.
           readinessProbe:
-            tcpSocket:
-              port: 3001
+            exec:
+              command:
+                - node
+                - -e
+                - 'require("net").connect(3001, "127.0.0.1").on("connect", () => process.exit(0)).on("error", () => process.exit(1))'
             periodSeconds: 10
+            timeoutSeconds: 5
           resources:
             requests:
               cpu: 250m
