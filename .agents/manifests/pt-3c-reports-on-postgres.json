@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "PT-3c",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/ports/pg-report-store.ts",
+      "before": "             where org_id = $1 and campaign_id = $2 and revision = $3 returning 1",
+      "after": "             where org_id = $1 and campaign_id = $2 and $3::text is not null returning 1",
+      "because": "the update's revision check is dropped (an always-true condition replaces it), so a write against a stale revision succeeds instead of being refused, and the second of two overlapping writes silently overwrites the first (D173's compare-and-swap).",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/pg-report-store.test.ts",
+        "-t",
+        "a stale string is refused with the current revision, and writes nothing"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

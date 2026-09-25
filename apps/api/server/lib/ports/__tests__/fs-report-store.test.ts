@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:f
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { FsReportStore } from "../fs-report-store.js";
+import { ReportConflictError } from "../report-store.port.js";
 
 describe("FsReportStore", () => {
   let root: string;
@@ -44,5 +45,30 @@ describe("FsReportStore", () => {
     const store = new FsReportStore(root);
     mkdirSync(resolve(root, "reports", "camp.json"), { recursive: true });
     await expect(store.readReport("camp")).rejects.toMatchObject({ code: "EISDIR" });
+  });
+
+  test("expectedRevision null writes only while nothing is stored, and a match writes", async () => {
+    const store = new FsReportStore(root);
+    const first = await store.writeReport("camp", '{"assets":[]}', null);
+    const firstRevision = await store.getRevision("camp");
+    await expect(store.writeReport("camp", '{"assets":[1]}', null)).rejects.toBeInstanceOf(
+      ReportConflictError,
+    );
+    const second = await store.writeReport("camp", '{"assets":[1]}', firstRevision);
+    expect(second).toBe(first);
+    await expect(store.readReport("camp")).resolves.toEqual({ assets: [1] });
+  });
+
+  test("a stale expectedRevision is refused with the current revision, and writes nothing", async () => {
+    const store = new FsReportStore(root);
+    await store.writeReport("camp", '{"assets":[]}', null);
+    const first = await store.getRevision("camp");
+    await store.writeReport("camp", '{"assets":[1]}', first);
+    const second = await store.getRevision("camp");
+    await expect(store.writeReport("camp", '{"assets":[2]}', first)).rejects.toMatchObject({
+      code: "ECONFLICT",
+      revision: second,
+    });
+    await expect(store.readReport("camp")).resolves.toEqual({ assets: [1] });
   });
 });
