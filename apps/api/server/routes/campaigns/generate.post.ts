@@ -5,7 +5,7 @@ import { JobCapacityError } from "../../lib/ports/fs-job-store.js";
 import { parseBrief, parseRegenerateOnly } from "../../lib/load-brief.js";
 import { ALLOWED_IMAGE_MODELS, runCampaign } from "../../lib/pipeline.js";
 import { runEnvironment, type RunEnvironment } from "../../lib/run-environment.js";
-import { LOCAL_TENANT } from "../../lib/tenant.js";
+import { requestTenant } from "../../lib/tenant.js";
 import { readReport, reportRevision, writeReport } from "../../lib/report.js";
 import {
   NOT_PROBED_REASON,
@@ -126,7 +126,7 @@ export default defineEventHandler(async (event) => {
   // beside the run's assets however the process configuration moves meanwhile.
   let env: RunEnvironment;
   try {
-    env = runEnvironment(LOCAL_TENANT);
+    env = runEnvironment(requestTenant(event));
   } catch {
     setResponseStatus(event, 500);
     return { error: "Could not read the run environment.", campaignId: brief.id };

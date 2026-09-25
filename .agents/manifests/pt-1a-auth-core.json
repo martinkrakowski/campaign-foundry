@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "PT-1a-auth-core",
+  "mutations": [
+    {
+      "file": "apps/api/server/middleware/tenant.ts",
+      "before": "  if (!tenant) {",
+      "after": "  if (false) {",
+      "because": "skipping the membership check lets a signed-in user with no membership through, instead of the 403 no_membership PT-1b needs to route on",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/middleware/__tests__/tenant.test.ts",
+        "-t",
+        "no membership is 403"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

@@ -8,7 +8,7 @@ import {
   waitForCapabilities,
 } from "../../lib/capabilities.js";
 
-import { LOCAL_TENANT } from "../../lib/tenant.js";
+import { requestTenant } from "../../lib/tenant.js";
 /**
  * POST /campaigns/plan — dry-run the variation planner (no generation).
  *
@@ -39,7 +39,7 @@ export default defineEventHandler(async (event) => {
     return { error: "not a variation brief" };
   }
 
-  const input = await planInputFor(LOCAL_TENANT, brief);
+  const input = await planInputFor(requestTenant(event), brief);
   if (!input.success) {
     setResponseStatus(event, 422);
     return { error: input.error.message };

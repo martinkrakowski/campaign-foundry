@@ -3,7 +3,7 @@ import { isErrno, SYMLINK_WRITE_ERROR } from "../../../lib/brief-files.js";
 import { assertSafeId, parseBrief } from "../../../lib/load-brief.js";
 import { getBriefStore } from "../../../lib/ports/index.js";
 
-import { LOCAL_TENANT } from "../../../lib/tenant.js";
+import { requestTenant } from "../../../lib/tenant.js";
 /**
  * PUT /campaigns/briefs/:id — replace the briefs/ file whose `brief.id` equals the
  * path id (yaml, yml, or json). Path id must equal `brief.id`. 404 if no file has
@@ -36,8 +36,8 @@ export default defineEventHandler(async (event) => {
   const expectedRevision = Array.isArray(rawRevision) ? rawRevision[0] : rawRevision;
 
   try {
-    const stored = await getBriefStore(LOCAL_TENANT).withBriefLock(id, async () => {
-      return await getBriefStore(LOCAL_TENANT).rewriteBrief(brief, { expectedRevision });
+    const stored = await getBriefStore(requestTenant(event)).withBriefLock(id, async () => {
+      return await getBriefStore(requestTenant(event)).rewriteBrief(brief, { expectedRevision });
     });
     // The new revision rides along: the editor dispatches it into its source, so the
     // next save guards conditionally instead of replaying the load-time revision and

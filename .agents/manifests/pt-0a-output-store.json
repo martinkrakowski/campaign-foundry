@@ -4,9 +4,9 @@
   "mutations": [
     {
       "file": "apps/api/server/routes/campaigns/packages/[campaignId].get.ts",
-      "before": "  const platforms = await getOutputStore(LOCAL_TENANT).listPackageManifests(campaignId);",
+      "before": "  const platforms = await getOutputStore(requestTenant(event)).listPackageManifests(campaignId);",
       "after": "  const platforms: readonly object[] = [];",
-      "because": "the listing stops asking the output store, so the in-memory store's manifest is never served and the route answers 404. Re-anchored 2026-09-24 by PT-0b2: the calls it quotes now take the tenant (D167); the mutation is unchanged in meaning.",
+      "because": "the listing stops asking the output store, so the in-memory store's manifest is never served and the route answers 404. Re-anchored 2026-09-24 by PT-0b2: the calls it quotes now take the tenant (D167); the mutation is unchanged in meaning. Re-anchored again 2026-09-25 by PT-1a: LOCAL_TENANT is now requestTenant(event) (item 2, the mechanical swap); the mutation is unchanged in meaning.",
       "command": [
         "yarn",
         "vitest",

@@ -13,7 +13,7 @@ import {
 } from "../../../../lib/pools.js";
 import { getAssetStore, getBriefStore } from "../../../../lib/ports/index.js";
 
-import { LOCAL_TENANT } from "../../../../lib/tenant.js";
+import { requestTenant } from "../../../../lib/tenant.js";
 /** The duplicate contract's overrides: `targetRegion` and `targetAudience` only. */
 function overrideValues(overrides: unknown): Record<string, unknown> {
   if (overrides === undefined || overrides === null) return {};
@@ -68,13 +68,13 @@ export default defineEventHandler(async (event) => {
     return { error: errorMessage(error) };
   }
 
-  const source = await getBriefStore(LOCAL_TENANT).findBriefById(id);
+  const source = await getBriefStore(requestTenant(event)).findBriefById(id);
   if (!source) {
     setResponseStatus(event, 404);
     return { error: `Brief "${id}" not found.` };
   }
 
-  if (await isPoolDirSymlink(LOCAL_TENANT, newId)) {
+  if (await isPoolDirSymlink(requestTenant(event), newId)) {
     setResponseStatus(event, 400);
     return { error: SYMLINK_WRITE_ERROR };
   }
@@ -97,8 +97,8 @@ export default defineEventHandler(async (event) => {
   }
 
   try {
-    const created = await getBriefStore(LOCAL_TENANT).withBriefLock(newId, async () => {
-      if (await getBriefStore(LOCAL_TENANT).findBriefById(newId)) {
+    const created = await getBriefStore(requestTenant(event)).withBriefLock(newId, async () => {
+      if (await getBriefStore(requestTenant(event)).findBriefById(newId)) {
         const existErr = new Error(`Brief "${newId}" already exists.`);
         (existErr as { code?: string }).code = "EEXIST";
         throw existErr;
@@ -109,27 +109,27 @@ export default defineEventHandler(async (event) => {
       // the destination brief absent). createBrief is exclusive (wx); writing
       // the dest pool first left an orphan when the dest file existed but was
       // unparseable — findBriefById skips those, then wx turns into a 409.
-      const sourcePool = await readPool(LOCAL_TENANT, id);
+      const sourcePool = await readPool(requestTenant(event), id);
 
       // Copy assets from source brief to new brief, and any referenced brief-scoped assets
-      const sourceMap = await getAssetStore(LOCAL_TENANT).copyAssets(id, newId);
+      const sourceMap = await getAssetStore(requestTenant(event)).copyAssets(id, newId);
       brief = rewriteAssetPaths(brief, id, newId, sourceMap);
       const additionalSourceIds = extractSourceAssetBriefIds(brief, newId);
       for (const fromId of additionalSourceIds) {
-        const addMap = await getAssetStore(LOCAL_TENANT).copyAssets(fromId, newId);
+        const addMap = await getAssetStore(requestTenant(event)).copyAssets(fromId, newId);
         brief = rewriteAssetPaths(brief, fromId, newId, addMap);
       }
 
-      const created = await getBriefStore(LOCAL_TENANT).createBrief(brief);
+      const created = await getBriefStore(requestTenant(event)).createBrief(brief);
       // The dest pool write (or the stale-pool delete when the source has none)
       // runs under withPoolLock(newId) as well as the brief lock: they are
       // different maps, so without it a concurrent POST /campaigns/pools/:newId
       // could interleave. The source pool needs no lock: writePool renames atomically.
-      await withPoolLock(LOCAL_TENANT, newId, async () => {
+      await withPoolLock(requestTenant(event), newId, async () => {
         if (sourcePool) {
-          await copyPool(LOCAL_TENANT, id, newId);
+          await copyPool(requestTenant(event), id, newId);
         } else {
-          await deletePool(LOCAL_TENANT, newId);
+          await deletePool(requestTenant(event), newId);
         }
       });
       return created;

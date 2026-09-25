@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { resolve } from "node:path";
 import { projectRoot } from "@campaignfoundry/shared";
-import { databaseSettings, outputRoot, storeBackend } from "../config.js";
+import { authMode, authSettings, databaseSettings, outputRoot, storeBackend } from "../config.js";
 
 describe("outputRoot", () => {
   const orig = process.env.OUTPUT_DIR;
@@ -103,5 +103,75 @@ describe("the database settings are read after the env files load (PT-3)", () =>
     const fresh = await import("../config.js");
     expect(fresh.storeBackend()).toBe("postgres");
     expect(fresh.databaseSettings().url).toBe("postgres://me@localhost/cf");
+  });
+});
+
+describe("authMode (PT-1a)", () => {
+  const saved = process.env.AUTH_MODE;
+  afterEach(() => {
+    if (saved === undefined) delete process.env.AUTH_MODE;
+    else process.env.AUTH_MODE = saved;
+  });
+
+  test("is local unless AUTH_MODE says better-auth, and refuses anything else", () => {
+    delete process.env.AUTH_MODE;
+    expect(authMode()).toBe("local");
+    for (const value of ["", "local"]) {
+      process.env.AUTH_MODE = value;
+      expect(authMode()).toBe("local");
+    }
+    process.env.AUTH_MODE = "better-auth";
+    expect(authMode()).toBe("better-auth");
+    process.env.AUTH_MODE = "oauth2-proxy";
+    expect(() => authMode()).toThrow('AUTH_MODE must be "local" or "better-auth", not "oauth2-proxy".');
+  });
+});
+
+describe("authSettings (PT-1a item 1)", () => {
+  const keys = [
+    "BETTER_AUTH_SECRET",
+    "BETTER_AUTH_URL",
+    "WEB_ORIGIN",
+    "RESEND_API_KEY",
+    "EMAIL_FROM",
+    "GOOGLE_CLIENT_ID",
+    "GOOGLE_CLIENT_SECRET",
+  ] as const;
+  const saved = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
+  afterEach(() => {
+    for (const k of keys) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+  });
+
+  test("reads every setting, raw, and is empty when none are set", () => {
+    for (const k of keys) delete process.env[k];
+    expect(authSettings()).toEqual({
+      secret: undefined,
+      baseURL: undefined,
+      webOrigin: undefined,
+      resendApiKey: undefined,
+      emailFrom: undefined,
+      googleClientId: undefined,
+      googleClientSecret: undefined,
+    });
+
+    process.env.BETTER_AUTH_SECRET = "s".repeat(32);
+    process.env.BETTER_AUTH_URL = "http://127.0.0.1:3001";
+    process.env.WEB_ORIGIN = "http://127.0.0.1:3000";
+    process.env.RESEND_API_KEY = "re_test";
+    process.env.EMAIL_FROM = "noreply@example.com";
+    process.env.GOOGLE_CLIENT_ID = "client-id";
+    process.env.GOOGLE_CLIENT_SECRET = "client-secret";
+    expect(authSettings()).toEqual({
+      secret: "s".repeat(32),
+      baseURL: "http://127.0.0.1:3001",
+      webOrigin: "http://127.0.0.1:3000",
+      resendApiKey: "re_test",
+      emailFrom: "noreply@example.com",
+      googleClientId: "client-id",
+      googleClientSecret: "client-secret",
+    });
   });
 });

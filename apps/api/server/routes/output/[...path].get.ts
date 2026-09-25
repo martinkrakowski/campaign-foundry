@@ -1,7 +1,7 @@
 import { extname } from "node:path";
 import { getOutputStore } from "../../lib/ports/index.js";
 
-import { LOCAL_TENANT } from "../../lib/tenant.js";
+import { requestTenant } from "../../lib/tenant.js";
 const CONTENT_TYPES: Record<string, string> = {
   ".png": "image/png",
   ".pdf": "application/pdf",
@@ -54,7 +54,7 @@ export function parseByteRange(
  * response's Content-Length from what is actually streamed.
  */
 export default defineEventHandler(async (event) => {
-  const lookup = await getOutputStore(LOCAL_TENANT).openOutput(getRouterParam(event, "path") ?? "");
+  const lookup = await getOutputStore(requestTenant(event)).openOutput(getRouterParam(event, "path") ?? "");
   if (!lookup.found) {
     if (lookup.reason === "invalid") {
       setResponseStatus(event, 400);

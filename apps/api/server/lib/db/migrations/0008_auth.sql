@@ -20,9 +20,14 @@ alter table org add constraint org_id_check check (id ~ '^[a-z0-9][a-z0-9-]{0,63
 alter table org add column slug text;
 alter table org add column logo text;
 alter table org add column metadata text;
--- Backfill before the not-null: 'local' is the only row 0001 ever inserted.
+-- Backfill 'local', the only row 0001 ever inserted (D168: id and slug agree
+-- for the operator's own org until it is renamed). `slug` stays nullable
+-- rather than not-null: an org row a pre-0008 test or import inserted through
+-- raw SQL (id and name only, exactly 0001's shape) must not start failing an
+-- insert it has always been entitled to make; Better Auth's own writes always
+-- supply one (its schema requires it as input), and a standard unique index
+-- allows any number of nulls, so this loses no real uniqueness guarantee.
 update org set slug = id where slug is null;
-alter table org alter column slug set not null;
 create unique index org_slug_uidx on org (slug);
 
 create table "user" (

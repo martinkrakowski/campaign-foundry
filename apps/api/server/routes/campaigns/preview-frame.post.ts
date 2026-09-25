@@ -27,7 +27,7 @@ import { parseBrief } from "../../lib/load-brief.js";
 import { LruCache } from "../../lib/preview-cache.js";
 import { platformZones } from "../../lib/platform-zones.js";
 import { runEnvironment, type RunEnvironment } from "../../lib/run-environment.js";
-import { LOCAL_TENANT } from "../../lib/tenant.js";
+import { requestTenant } from "../../lib/tenant.js";
 
 /**
  * POST /campaigns/preview-frame — render ONE preview frame from the REAL
@@ -221,7 +221,7 @@ export default defineEventHandler(async (event) => {
   // unreadable .env is a controlled 500, not a framework error (review on #576).
   let env: RunEnvironment;
   try {
-    env = runEnvironment(LOCAL_TENANT);
+    env = runEnvironment(requestTenant(event));
   } catch {
     setResponseStatus(event, 500);
     return { error: "Could not read the run environment." };
