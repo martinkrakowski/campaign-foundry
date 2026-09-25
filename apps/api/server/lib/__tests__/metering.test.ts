@@ -80,6 +80,22 @@ describe("MeteredImageGenerator (PT-7a, D175)", () => {
     expect(usage.records).toEqual([]);
   });
 
+  test("records nothing when the result came from a further fallback, not this layer (no double-count)", async () => {
+    // A raw adapter's own `fallback` option is itself a metered generator: when
+    // this layer's inner adapter fails internally, it returns its fallback's
+    // result unchanged — so a result whose `source` is a DIFFERENT provider means
+    // that fallback already recorded its own row, and this layer must not record
+    // a second one for work it never did.
+    const usage = fakeUsage();
+    const inner: ImageGeneratorPort = {
+      resolveBackground: async () => ({ image: new Uint8Array([1]), source: "imagen" }),
+    };
+    const meter = new MeteredImageGenerator(inner, usage, "acme", "firefly", "v3");
+    const result = await meter.resolveBackground(product, ratio(), context);
+    expect(result.source).toBe("imagen"); // the fallback's result, passed through unchanged
+    expect(usage.records).toEqual([]); // firefly did no work; nothing to bill it for
+  });
+
   test("passes the run's abort signal through to the wrapped adapter", async () => {
     const usage = fakeUsage();
     const controller = new AbortController();
@@ -105,7 +121,10 @@ describe("MeteredImageGenerator (PT-7a, D175)", () => {
 describe("MeteredCopyGenerator (PT-7a, D175)", () => {
   test("publishes the wrapped generator's model", () => {
     const usage = fakeUsage();
-    const inner: CopyGeneratorPort = { model: "openai/gpt-4o-mini", suggestHeadlines: async () => [] };
+    const inner: CopyGeneratorPort = {
+      model: "openai/gpt-4o-mini",
+      suggestHeadlines: async () => [],
+    };
     const meter = new MeteredCopyGenerator(inner, usage, "local", "openrouter");
     expect(meter.model).toBe("openai/gpt-4o-mini");
   });
@@ -121,7 +140,13 @@ describe("MeteredCopyGenerator (PT-7a, D175)", () => {
     const headlines = await meter.suggestHeadlines(input);
     expect(headlines).toEqual(["Stay wild", "Go far", "Never settle"]);
     expect(usage.records).toEqual([
-      { orgId: "local", provider: "openrouter", model: "openai/gpt-4o-mini", units: 3, keyOwner: "platform" },
+      {
+        orgId: "local",
+        provider: "openrouter",
+        model: "openai/gpt-4o-mini",
+        units: 3,
+        keyOwner: "platform",
+      },
     ]);
   });
 

@@ -102,7 +102,12 @@ function imageGenerator(env: RunEnvironment, selected?: string): ImageGeneratorP
   const openRouter = (model?: string): ImageGeneratorPort =>
     openRouterKey
       ? new MeteredImageGenerator(
-          new OpenRouterImageGenerator({ apiKey: openRouterKey, model, fallback: procedural, cache }),
+          new OpenRouterImageGenerator({
+            apiKey: openRouterKey,
+            model,
+            fallback: procedural,
+            cache,
+          }),
           usage,
           orgId,
           "openrouter",
