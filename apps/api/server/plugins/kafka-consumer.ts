@@ -18,11 +18,12 @@ export interface NitroApp {
 export function createKafkaConsumerPlugin(
   consumerFactory: (settings: KafkaSettings) => ConsumerInstance = (s) => new RunConsumer(s),
   logger: Pick<Console, "error"> = console,
+  resolveSettings: () => KafkaSettings | undefined = kafkaSettings,
 ) {
   return defineNitroPlugin((nitroApp) => {
     let settings: KafkaSettings | undefined;
     try {
-      settings = kafkaSettings();
+      settings = resolveSettings();
     } catch (err: unknown) {
       logger.error(
         `[kafka-plugin] Error reading Kafka settings: ${err instanceof Error ? err.message : String(err)}`,

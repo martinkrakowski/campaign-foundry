@@ -92,4 +92,17 @@ describe("run-delivery-registry (PT-6b2, D171, D174d)", () => {
     resetRunDelivery();
     expect(disconnectSpy).toHaveBeenCalledTimes(1);
   });
+
+  test("closeRunDelivery does nothing if no instance is present", async () => {
+    resetRunDelivery();
+    await expect(closeRunDelivery()).resolves.toBeUndefined();
+  });
+
+  test("resetRunDelivery swallows disconnect errors", async () => {
+    process.env.KAFKA_BROKERS = "broker1:9092";
+    const delivery = getRunDelivery(LOCAL_TENANT) as KafkaRunDelivery;
+    vi.spyOn(delivery, "disconnect").mockRejectedValue(new Error("disconnect error"));
+    resetRunDelivery();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  });
 });

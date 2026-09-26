@@ -196,4 +196,57 @@ describe("kafka-consumer Nitro plugin (PT-6b2, D174d)", () => {
     );
     expect(mockConsumerStart).not.toHaveBeenCalled();
   });
+
+  test("kafkaSettings non-Error throw is logged and does not throw", async () => {
+    const errorMock = vi.fn();
+    const logger = { error: errorMock };
+    const plugin = createKafkaConsumerPlugin(
+      undefined,
+      logger,
+      () => {
+        throw "string settings error";
+      },
+    );
+
+    plugin({} as never);
+
+    expect(errorMock).toHaveBeenCalledWith(
+      expect.stringContaining("Error reading Kafka settings: string settings error"),
+    );
+  });
+
+  test("rejected start with non-Error is logged", async () => {
+    process.env.KAFKA_BROKERS = "broker1:9092";
+    process.env.KAFKA_CONSUME = "true";
+
+    const errorMock = vi.fn();
+    const logger = { error: errorMock };
+    const customConsumer: ConsumerInstance = {
+      start: vi.fn().mockRejectedValue("string start failure"),
+      stop: vi.fn().mockResolvedValue(undefined),
+    };
+    const plugin = createKafkaConsumerPlugin(() => customConsumer, logger);
+
+    plugin({} as never);
+
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(errorMock).toHaveBeenCalledWith(
+      expect.stringContaining("Error starting Kafka consumer: string start failure"),
+    );
+  });
+
+  test("nitroApp with hooks object but no hook function", async () => {
+    process.env.KAFKA_BROKERS = "broker1:9092";
+    process.env.KAFKA_CONSUME = "true";
+
+    const customConsumer: ConsumerInstance = {
+      start: vi.fn().mockResolvedValue(undefined),
+      stop: vi.fn().mockResolvedValue(undefined),
+    };
+    const plugin = createKafkaConsumerPlugin(() => customConsumer);
+    plugin({ hooks: {} } as never);
+
+    expect(customConsumer.start).toHaveBeenCalledTimes(1);
+  });
 });
