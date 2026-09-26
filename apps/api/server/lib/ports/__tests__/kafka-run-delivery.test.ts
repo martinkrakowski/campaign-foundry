@@ -73,7 +73,10 @@ describe("KafkaRunDelivery (PT-6b2, D174d)", () => {
     const request = sampleRequest();
 
     await delivery.deliver(request);
+    // Second delivery: verify connected branch is skipped
+    await delivery.deliver(request);
 
+    expect(mockProducerConnect).toHaveBeenCalledTimes(1);
     expect(mockProducerSend).toHaveBeenCalledWith({
       topic: "cf.run-requests",
       messages: [
@@ -83,6 +86,14 @@ describe("KafkaRunDelivery (PT-6b2, D174d)", () => {
         },
       ],
     });
+
+    // Disconnect when connected
+    await delivery.disconnect();
+    expect(mockProducerDisconnect).toHaveBeenCalledTimes(1);
+
+    // Disconnect when not connected
+    await delivery.disconnect();
+    expect(mockProducerDisconnect).toHaveBeenCalledTimes(1);
   });
 
   test("rethrows when broker publish fails so caller can delete queued row", async () => {
@@ -91,5 +102,67 @@ describe("KafkaRunDelivery (PT-6b2, D174d)", () => {
     const request = sampleRequest();
 
     await expect(delivery.deliver(request)).rejects.toThrow("Kafka broker unavailable");
+  });
+
+  test("throws when initialized without settings and kafkaSettings() is undefined", () => {
+    delete process.env.KAFKA_BROKERS;
+    expect(() => new KafkaRunDelivery()).toThrow(
+      "Cannot initialize KafkaRunDelivery without Kafka settings.",
+    );
+  });
+
+  test("uses kafkaSettings() and configures SSL when settings are omitted", () => {
+    const orig = process.env.KAFKA_BROKERS;
+    process.env.KAFKA_BROKERS = "broker1:9092";
+    try {
+      new KafkaRunDelivery();
+      expect(mockKafkaConstructor).toHaveBeenCalledWith(
+        expect.objectContaining({
+          brokers: ["broker1:9092"],
+          ssl: undefined,
+        }),
+      );
+    } finally {
+      if (orig === undefined) delete process.env.KAFKA_BROKERS;
+      else process.env.KAFKA_BROKERS = orig;
+    }
+  });
+
+  test("configures SSL options with ca, cert, and key when provided", () => {
+    const sslSettings: KafkaSettings = {
+      ...settings,
+      ssl: {
+        ca: "CA-DATA",
+        cert: "CERT-DATA",
+        key: "KEY-DATA",
+      },
+    };
+    new KafkaRunDelivery(sslSettings);
+    expect(mockKafkaConstructor).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ssl: {
+          rejectUnauthorized: true,
+          ca: ["CA-DATA"],
+          cert: "CERT-DATA",
+          key: "KEY-DATA",
+        },
+      }),
+    );
+  });
+
+  test("accepts injected kafkaClient or producer", () => {
+    const customProducer = {
+      connect: vi.fn().mockResolvedValue(undefined),
+      send: vi.fn().mockResolvedValue([]),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+    };
+    const deliveryWithProducer = new KafkaRunDelivery(settings, undefined, customProducer as never);
+    expect(deliveryWithProducer).toBeDefined();
+
+    const customKafka = {
+      producer: vi.fn().mockReturnValue(customProducer),
+    };
+    const deliveryWithKafka = new KafkaRunDelivery(settings, customKafka as never);
+    expect(deliveryWithKafka).toBeDefined();
   });
 });
