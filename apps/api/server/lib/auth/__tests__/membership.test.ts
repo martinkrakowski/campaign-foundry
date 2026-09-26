@@ -138,6 +138,27 @@ describe("memberTenant (PT-1a item 3)", () => {
       expect(tenant?.orgId).toBe("local");
     });
 
+    test("an existing org the user is not a member of cannot be made active", async () => {
+      const db = await migratedDatabase();
+      await insertUser(db, "u1", "u1@example.com");
+      await insertUser(db, "u2", "u2@example.com");
+      await db.query(
+        "insert into org (id, name, slug, created_at) values ('beta', 'Beta', 'beta', now())",
+      );
+      await db.query(
+        "insert into member (id, org_id, user_id, role, created_at) values ($1, 'local', $2, 'viewer', now())",
+        ["m1", "u1"],
+      );
+      await db.query(
+        "insert into member (id, org_id, user_id, role, created_at) values ($1, 'beta', $2, 'owner', now())",
+        ["m2", "u2"],
+      );
+
+      const tenant = await memberTenant(db, "u1", "beta");
+      expect(tenant?.orgId).toBe("local");
+      expect(tenant?.roles).toEqual(["viewer"]);
+    });
+
     test("no active org falls back", async () => {
       const db = await migratedDatabase();
       await insertUser(db, "u1", "u1@example.com");

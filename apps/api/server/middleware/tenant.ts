@@ -6,8 +6,8 @@ import { database } from "../lib/db/database.js";
 /**
  * Requests no session is required for (PT-1a item 3): Better Auth's own
  * routes (sign-in, callbacks, session polling), the health check, and the
- * capability probe the web app polls at boot (it reveals only host
- * capabilities, never tenant data).
+ * capability probe the web app polls at boot (it reveals host capabilities,
+ * the auth mode and whether Google sign-in is configured, never tenant data).
  */
 function isAllowlisted(method: string, pathname: string): boolean {
   if (pathname === "/api/auth" || pathname.startsWith("/api/auth/")) return true;
