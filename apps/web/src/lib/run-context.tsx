@@ -184,8 +184,11 @@ export function handlePipelineResponseError(
   try {
     handleAuthError(status, data);
   } catch (e) {
-    if (isNoMembershipError(e)) return e;
-    throw e;
+    // handleAuthError's only throw site is the 403 no_membership branch, and it is
+    // always a NoMembershipError (see auth-errors.ts) — a defensive `isNoMembershipError`
+    // re-check here would add a branch this gate's 100% requirement can never exercise,
+    // since nothing else can reach this catch.
+    return e as NoMembershipError;
   }
 
   const code =

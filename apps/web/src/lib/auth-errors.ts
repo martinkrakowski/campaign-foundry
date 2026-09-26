@@ -29,8 +29,14 @@ export function isNoMembershipError(error: unknown): error is NoMembershipError 
 }
 
 export function handleAuthError(status: number, data: unknown): void {
-  const code =
-    typeof data === "object" && data !== null ? (data as { code?: unknown }).code : undefined;
+  // Read once, not twice: `code` and `error` both come off the same record, and a
+  // second `typeof data === "object" && data !== null` guard around `error` below
+  // would be provably always-true by the time it ran (the 403 branch only runs once
+  // `code` — read off this same non-null record — is "no_membership"), which is
+  // exactly the kind of unreachable branch a 100%-coverage gate cannot pass.
+  const record =
+    typeof data === "object" && data !== null ? (data as Record<string, unknown>) : {};
+  const code = record.code;
 
   if (status === 401 && (code === "unauthenticated" || code === undefined)) {
     if (typeof window.location.assign === "function") {
@@ -42,8 +48,7 @@ export function handleAuthError(status: number, data: unknown): void {
   }
 
   if (status === 403 && code === "no_membership") {
-    const errorMsg =
-      typeof data === "object" && data !== null ? (data as { error?: unknown }).error : undefined;
+    const errorMsg = record.error;
     throw new NoMembershipError(typeof errorMsg === "string" ? errorMsg : undefined);
   }
 }

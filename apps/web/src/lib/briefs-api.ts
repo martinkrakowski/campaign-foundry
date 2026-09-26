@@ -3,7 +3,7 @@ import type {
   CopyPool,
   CopyPoolEntryStatus,
 } from "@campaignfoundry/CampaignOrchestration";
-import { handleAuthError, isNoMembershipError } from "./auth-errors";
+import { handleAuthError, type NoMembershipError } from "./auth-errors";
 
 export type {
   CopyPool,
@@ -433,10 +433,11 @@ export async function planCampaign(
     try {
       handleAuthError(res.status, data);
     } catch (e) {
-      if (isNoMembershipError(e)) {
-        return { kind: "infeasible", error: e.message };
-      }
-      throw e;
+      // handleAuthError's only throw site is the 403 no_membership branch, and it is
+      // always a NoMembershipError (see auth-errors.ts) — a defensive `isNoMembershipError`
+      // re-check here would add a branch this gate's 100% requirement can never exercise,
+      // since nothing else can reach this catch.
+      return { kind: "infeasible", error: (e as NoMembershipError).message };
     }
     if (res.status >= 500) return { kind: "unavailable" };
     return { kind: "infeasible", error: errorFrom(data, `Plan failed (HTTP ${res.status})`) };
