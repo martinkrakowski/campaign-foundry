@@ -13,7 +13,7 @@ import { assertSafeId, parseBrief } from "../../../lib/load-brief.js";
 import { QuotaExceededError } from "../../../lib/metering.js";
 import { copyGenerator } from "../../../lib/pipeline.js";
 import { runEnvironment } from "../../../lib/run-environment.js";
-import { LOCAL_TENANT } from "../../../lib/tenant.js";
+import { requestTenant } from "../../../lib/tenant.js";
 import {
   InvalidCopyPoolError,
   isPoolDirSymlink,
@@ -162,19 +162,19 @@ export default defineEventHandler(async (event) => {
   }
 
   if (brief === undefined) {
-    const found = await getBriefStore(LOCAL_TENANT).findBriefById(briefId);
+    const found = await getBriefStore(requestTenant(event)).findBriefById(briefId);
     if (!found) {
       setResponseStatus(event, 404);
       return { error: `Brief "${briefId}" not found.` };
     }
     brief = found.brief;
   }
-  if (await isPoolDirSymlink(LOCAL_TENANT, briefId)) {
+  if (await isPoolDirSymlink(requestTenant(event), briefId)) {
     setResponseStatus(event, 400);
     return { error: SYMLINK_WRITE_ERROR };
   }
 
-  const generator = copyGenerator(runEnvironment(LOCAL_TENANT));
+  const generator = copyGenerator(runEnvironment(requestTenant(event)));
   if (!generator) {
     setResponseStatus(event, 503);
     return { error: "OPENROUTER_API_KEY is not set" };
@@ -210,10 +210,10 @@ export default defineEventHandler(async (event) => {
 
   // The slow LLM call is done; read→merge→write is serialised per brief so a
   // concurrent request's entries are merged into, never overwritten.
-  return withPoolLock(LOCAL_TENANT, briefId, async () => {
+  return withPoolLock(requestTenant(event), briefId, async () => {
     let stored;
     try {
-      stored = await readPool(LOCAL_TENANT, briefId);
+      stored = await readPool(requestTenant(event), briefId);
     } catch (error) {
       if (!(error instanceof InvalidCopyPoolError)) throw error;
       setResponseStatus(event, 422);
@@ -235,7 +235,7 @@ export default defineEventHandler(async (event) => {
     };
     const next = mergePool(existing ?? incoming, incoming);
     try {
-      const written = await writePool(LOCAL_TENANT, next, { expectedRevision });
+      const written = await writePool(requestTenant(event), next, { expectedRevision });
       setResponseStatus(event, 201);
       return { pool: written.pool, revision: written.revision, added: headlines.length };
     } catch (error) {

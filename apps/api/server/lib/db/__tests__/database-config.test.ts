@@ -1,5 +1,5 @@
 import { describe, test, expect, vi } from "vitest";
-import { DEFAULT_POOL_MAX, MAX_POOL, databaseConfig } from "../database-config.js";
+import { DEFAULT_POOL_MAX, MAX_POOL, AUTH_POOL_MAX, databaseConfig } from "../database-config.js";
 
 const remote =
   "postgres://avnadmin:s3cr%40t@db.example.aivencloud.com:12194/defaultdb?sslmode=require";
@@ -51,11 +51,21 @@ describe("databaseConfig (D174a)", () => {
   test("DATABASE_POOL_MAX bounds the pool; empty is the default; anything else is refused", () => {
     const local = "postgres://me@localhost/cf";
     expect(databaseConfig({ url: local, poolMax: "3" }, noCa).max).toBe(3);
-    expect(databaseConfig({ url: local, poolMax: String(MAX_POOL) }, noCa).max).toBe(15);
+    expect(
+      databaseConfig({ url: local, poolMax: String(MAX_POOL - AUTH_POOL_MAX) }, noCa).max,
+    ).toBe(MAX_POOL - AUTH_POOL_MAX);
     expect(databaseConfig({ url: local, poolMax: "" }, noCa).max).toBe(DEFAULT_POOL_MAX);
-    for (const bad of ["0", "16", "2.5", "many"]) {
+    for (const bad of ["0", "14", "15", "16", "2.5", "many"]) {
       expect(() => databaseConfig({ url: local, poolMax: bad }, noCa)).toThrow(/DATABASE_POOL_MAX/);
     }
+  });
+
+  test("DATABASE_POOL_MAX + AUTH_POOL_MAX above MAX_POOL is refused to protect per-process budget", () => {
+    const local = "postgres://me@localhost/cf";
+    expect(databaseConfig({ url: local, poolMax: "13" }, noCa).max).toBe(13);
+    expect(() => databaseConfig({ url: local, poolMax: "14" }, noCa)).toThrow(
+      /DATABASE_POOL_MAX must be a whole number from 1 to 13 \(allowing 2 connections for auth within the service's 15 capacity\)/,
+    );
   });
 
   test("a missing, malformed or incomplete URL is refused", () => {

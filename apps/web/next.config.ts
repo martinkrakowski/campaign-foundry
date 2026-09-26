@@ -33,7 +33,10 @@ const nextConfig: NextConfig = {
     return config;
   },
   async rewrites() {
-    return [{ source: "/api/pipeline/:path*", destination: `${API_ORIGIN}/:path*` }];
+    return [
+      { source: "/api/pipeline/:path*", destination: `${API_ORIGIN}/:path*` },
+      { source: "/api/auth/:path*", destination: `${API_ORIGIN}/api/auth/:path*` },
+    ];
   },
 };
 

@@ -11,7 +11,7 @@ import { isExistsError } from "../../lib/brief-files.js";
 import { assertSafeId } from "../../lib/load-brief.js";
 import { getAssetStore } from "../../lib/ports/index.js";
 
-import { LOCAL_TENANT } from "../../lib/tenant.js";
+import { requestTenant } from "../../lib/tenant.js";
 /**
  * POST /campaigns/assets — store a PNG/JPEG/MP3/M4A under `assets/inputs/<briefId>/<name>`.
  *
@@ -73,14 +73,14 @@ export default defineEventHandler(async (event) => {
   }
 
   try {
-    const result = await getAssetStore(LOCAL_TENANT).writeAsset(briefId, name, bytes);
+    const result = await getAssetStore(requestTenant(event)).writeAsset(briefId, name, bytes);
     setResponseStatus(event, 201);
     return { path: result.path };
   } catch (error) {
     if (isExistsError(error)) {
       setResponseStatus(event, 409);
       return {
-        error: `Asset "${getAssetStore(LOCAL_TENANT).assetRelPath(briefId, name)}" already exists.`,
+        error: `Asset "${getAssetStore(requestTenant(event)).assetRelPath(briefId, name)}" already exists.`,
       };
     }
     throw error;

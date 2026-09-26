@@ -1,7 +1,7 @@
 import { errorMessage } from "@campaignfoundry/shared";
 import { getTemplateStore } from "../../lib/ports/index.js";
 
-import { LOCAL_TENANT } from "../../lib/tenant.js";
+import { requestTenant } from "../../lib/tenant.js";
 /**
  * GET /campaigns/templates — list every template record in the library, one
  * entry per version (D123, L7). A store read failure is a 500, never an
@@ -10,7 +10,7 @@ import { LOCAL_TENANT } from "../../lib/tenant.js";
  */
 export default defineEventHandler(async (event) => {
   try {
-    const templates = await getTemplateStore(LOCAL_TENANT).listTemplates();
+    const templates = await getTemplateStore(requestTenant(event)).listTemplates();
     return { templates };
   } catch (error) {
     console.warn(`[templates] could not read templates: ${errorMessage(error)}`);

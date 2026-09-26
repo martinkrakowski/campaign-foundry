@@ -2,7 +2,7 @@ import { errorMessage } from "@campaignfoundry/shared";
 import { assertSafeId } from "../../../lib/load-brief.js";
 import { InvalidCopyPoolError, readPool } from "../../../lib/pools.js";
 
-import { LOCAL_TENANT } from "../../../lib/tenant.js";
+import { requestTenant } from "../../../lib/tenant.js";
 /**
  * GET /campaigns/pools/:briefId — return the persisted copy pool with the
  * revision of the bytes it was read from, or 404. A hand-edited file that is
@@ -21,7 +21,7 @@ export default defineEventHandler(async (event) => {
 
   let stored;
   try {
-    stored = await readPool(LOCAL_TENANT, briefId);
+    stored = await readPool(requestTenant(event), briefId);
   } catch (error) {
     if (!(error instanceof InvalidCopyPoolError)) throw error;
     setResponseStatus(event, 422);

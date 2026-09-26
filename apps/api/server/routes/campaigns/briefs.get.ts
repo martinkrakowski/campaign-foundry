@@ -1,7 +1,7 @@
 import { errorMessage } from "@campaignfoundry/shared";
 import { getBriefStore } from "../../lib/ports/index.js";
 
-import { LOCAL_TENANT } from "../../lib/tenant.js";
+import { requestTenant } from "../../lib/tenant.js";
 /**
  * GET /campaigns/briefs — list the campaign briefs available in the brief store,
  * each parsed so the UI's brief picker can show a summary and load one without a
@@ -11,7 +11,7 @@ import { LOCAL_TENANT } from "../../lib/tenant.js";
  */
 export default defineEventHandler(async (event) => {
   try {
-    const briefs = await getBriefStore(LOCAL_TENANT).listBriefs();
+    const briefs = await getBriefStore(requestTenant(event)).listBriefs();
     return { briefs };
   } catch (error) {
     console.warn(`[briefs] could not read briefs: ${errorMessage(error)}`);

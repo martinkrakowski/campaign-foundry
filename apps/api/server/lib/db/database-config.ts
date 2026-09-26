@@ -38,6 +38,14 @@ export const DEFAULT_POOL_MAX = 5;
 /** The most one process may hold: the whole of the Aiven service's capacity. */
 export const MAX_POOL = 15;
 
+/**
+ * Better Auth's dedicated connection pool budget (PT-1a, Finding 3). Kept small (2)
+ * so the store pool (up to 13) and auth pool (2) together never exceed the service's
+ * total capacity of 15 (MAX_POOL). Total per process: DATABASE_POOL_MAX + AUTH_POOL_MAX <= MAX_POOL.
+ */
+export const AUTH_POOL_MAX = 2;
+export const BETTER_AUTH_POOL_MAX = AUTH_POOL_MAX;
+
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
 
 /** Turn the raw settings into a driver config, or throw naming what is wrong (never the password). */
@@ -74,9 +82,9 @@ export function databaseConfig(
   let max = DEFAULT_POOL_MAX;
   if (settings.poolMax !== undefined && settings.poolMax !== "") {
     max = Number(settings.poolMax);
-    if (!Number.isInteger(max) || max < 1 || max > MAX_POOL) {
+    if (!Number.isInteger(max) || max < 1 || max + AUTH_POOL_MAX > MAX_POOL) {
       throw new Error(
-        `DATABASE_POOL_MAX must be a whole number from 1 to ${MAX_POOL} (the service's capacity), not "${settings.poolMax}".`,
+        `DATABASE_POOL_MAX must be a whole number from 1 to ${MAX_POOL - AUTH_POOL_MAX} (allowing ${AUTH_POOL_MAX} connections for auth within the service's ${MAX_POOL} capacity), not "${settings.poolMax}".`,
       );
     }
   }

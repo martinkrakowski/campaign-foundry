@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, test, expect, beforeAll, beforeEach, afterEach, vi } from "vitest";
 import {
   chmodSync,
   mkdtempSync,
@@ -53,6 +53,17 @@ const origRoot = process.env.PROJECT_ROOT;
 
 describe("copy pool routes", () => {
   let dir: string;
+
+  // Load the route graph once, outside any test's 5 s budget. `api()` resets
+  // the module registry per test, but transformed sources and external
+  // dependencies stay cached, so only the first import pays the cold cost. On
+  // a loaded CI runner that cost alone ran the first test past its timeout.
+  beforeAll(async () => {
+    await import("../copy.post.js");
+    await import("../[briefId].get.js");
+    await import("../[briefId].patch.js");
+    await import("../../briefs.get.js");
+  });
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "cf-pool-routes-"));

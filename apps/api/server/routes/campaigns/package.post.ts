@@ -3,7 +3,7 @@ import { getCapabilities } from "../../lib/capabilities.js";
 import { storageRoots } from "../../lib/run-environment.js";
 import { isPersistedAsset, type PersistedAsset, readReport } from "../../lib/report.js";
 
-import { LOCAL_TENANT } from "../../lib/tenant.js";
+import { requestTenant } from "../../lib/tenant.js";
 /** Upper bound on `include` entries — a run is at most a few hundred creatives. */
 const MAX_INCLUDE = 1000;
 
@@ -86,7 +86,7 @@ export default defineEventHandler(async (event) => {
     return { error: error instanceof Error ? error.message : "Invalid package request" };
   }
 
-  const report = await readReport(LOCAL_TENANT, campaignId);
+  const report = await readReport(requestTenant(event), campaignId);
   if (report === undefined) {
     setResponseStatus(event, 404);
     return { error: "Campaign report not found" };
@@ -99,7 +99,7 @@ export default defineEventHandler(async (event) => {
   }
 
   const result = await new PackageForPlatformUseCase(
-    new FileSystemPackageStore(storageRoots(LOCAL_TENANT).outputRoot, campaignId),
+    new FileSystemPackageStore(storageRoots(requestTenant(event)).outputRoot, campaignId),
   ).execute({
     campaignId,
     assets: parsed.assets,

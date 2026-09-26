@@ -1,6 +1,6 @@
 import { SAFE_ID_PATTERN } from "@campaignfoundry/CampaignOrchestration";
 import { getDecisionStore } from "../../lib/ports/index.js";
-import { LOCAL_TENANT } from "../../lib/tenant.js";
+import { requestTenant } from "../../lib/tenant.js";
 
 /**
  * GET /campaigns/decisions?campaignId= — a campaign's review decisions (D173),
@@ -14,5 +14,5 @@ export default defineEventHandler(async (event) => {
     setResponseStatus(event, 400);
     return { error: "Invalid campaign id" };
   }
-  return getDecisionStore(LOCAL_TENANT).readDecisions(campaignId);
+  return getDecisionStore(requestTenant(event)).readDecisions(campaignId);
 });

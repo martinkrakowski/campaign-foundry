@@ -7,7 +7,7 @@ import {
 } from "../../lib/decisions.js";
 import { DecisionConflictError } from "../../lib/ports/index.js";
 import { reportRevision } from "../../lib/report.js";
-import { LOCAL_TENANT } from "../../lib/tenant.js";
+import { requestTenant } from "../../lib/tenant.js";
 
 /**
  * PUT /campaigns/decisions — replace a campaign's review decisions with the
@@ -23,7 +23,7 @@ import { LOCAL_TENANT } from "../../lib/tenant.js";
  * review. Answers the stored decisions and their new revision.
  */
 export default defineEventHandler(async (event) => {
-  const tenant = LOCAL_TENANT;
+  const tenant = requestTenant(event);
   const body: unknown = await readBody(event);
   const campaignId = (body as { campaignId?: unknown } | null)?.campaignId;
   if (typeof campaignId !== "string" || !SAFE_ID_PATTERN.test(campaignId)) {

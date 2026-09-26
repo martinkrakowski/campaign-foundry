@@ -15,7 +15,7 @@ import {
   writePool,
 } from "../../../lib/pools.js";
 
-import { LOCAL_TENANT } from "../../../lib/tenant.js";
+import { requestTenant } from "../../../lib/tenant.js";
 interface EntryPatch {
   readonly id: string;
   readonly status: CopyPoolEntryStatus;
@@ -123,7 +123,7 @@ export default defineEventHandler(async (event) => {
     return { error: errorMessage(error) };
   }
 
-  if (await isPoolDirSymlink(LOCAL_TENANT, briefId)) {
+  if (await isPoolDirSymlink(requestTenant(event), briefId)) {
     setResponseStatus(event, 400);
     return { error: SYMLINK_WRITE_ERROR };
   }
@@ -131,10 +131,10 @@ export default defineEventHandler(async (event) => {
   const rawRevision = getQuery(event).revision;
   const expectedRevision = Array.isArray(rawRevision) ? rawRevision[0] : rawRevision;
 
-  return withPoolLock(LOCAL_TENANT, briefId, async () => {
+  return withPoolLock(requestTenant(event), briefId, async () => {
     let stored;
     try {
-      stored = await readPool(LOCAL_TENANT, briefId);
+      stored = await readPool(requestTenant(event), briefId);
     } catch (error) {
       if (!(error instanceof InvalidCopyPoolError)) throw error;
       setResponseStatus(event, 422);
@@ -174,7 +174,7 @@ export default defineEventHandler(async (event) => {
 
     const next: CopyPool = { ...pool, entries };
     try {
-      const written = await writePool(LOCAL_TENANT, next, { expectedRevision });
+      const written = await writePool(requestTenant(event), next, { expectedRevision });
       return { pool: written.pool, revision: written.revision };
     } catch (error) {
       if (!isErrno(error, "ECONFLICT")) throw error;
