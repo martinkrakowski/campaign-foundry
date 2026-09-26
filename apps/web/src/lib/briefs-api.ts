@@ -439,6 +439,19 @@ export async function planCampaign(
       // since nothing else can reach this catch.
       return { kind: "infeasible", error: (e as NoMembershipError).message };
     }
+    // handleAuthError's 401 branch does NOT throw — it starts a `window.location`
+    // navigation and returns, which does not halt this function. Falling through to
+    // the generic branch below would resolve `{ kind: "infeasible", error: "Plan
+    // failed (HTTP 401)" }`, and `CommandBar` renders that in red immediately — a
+    // real flash of an alarming, wrong message for however long the redirect takes
+    // to actually unload the page. `unavailable` is the same quiet "could not work
+    // out the estimate" state a 404/500/network failure already resolves to, and
+    // nothing here is actionable once the redirect has started.
+    const code =
+      typeof data === "object" && data !== null ? (data as { code?: unknown }).code : undefined;
+    if (res.status === 401 && (code === "unauthenticated" || code === undefined)) {
+      return { kind: "unavailable" };
+    }
     if (res.status >= 500) return { kind: "unavailable" };
     return { kind: "infeasible", error: errorFrom(data, `Plan failed (HTTP ${res.status})`) };
   }

@@ -824,13 +824,22 @@ describe("briefs-api 401 and 403 handling", () => {
   // builds around this call, so a throw here would be an unhandled rejection. A 401
   // must still redirect, and a 403 must still read as something other than "this
   // brief's variation plan is infeasible" — both without ever rejecting.
-  test("planCampaign redirects on 401 and resolves infeasible with the membership message on 403, never throwing", async () => {
+  test("planCampaign redirects on 401 and resolves unavailable, not infeasible", async () => {
+    // `handleAuthError`'s 401 branch starts the redirect and returns without
+    // throwing, so this function keeps running for the one tick before the
+    // navigation actually unloads the page. Resolving `infeasible` here used to
+    // render "Plan failed (HTTP 401)" in red in CommandBar for that tick — `plan.error`
+    // is rendered unconditionally, with no gate on "is a redirect in flight". Resolving
+    // `unavailable` instead — the same quiet state a 404/500/network failure already
+    // uses — means there is nothing actionable to flash before the redirect lands.
     const assign = vi.fn();
     vi.stubGlobal("window", { ...window, location: { ...window.location, assign } });
     mockFetch(() => json({ error: "Sign in required.", code: "unauthenticated" }, 401));
-    await expect(planCampaign(brief)).resolves.toMatchObject({ kind: "infeasible" });
+    await expect(planCampaign(brief)).resolves.toEqual({ kind: "unavailable" });
     expect(assign).toHaveBeenCalledWith("/sign-in");
+  });
 
+  test("planCampaign resolves infeasible with the membership message on 403, never throwing", async () => {
     mockFetch(() =>
       json({ error: "This account belongs to no organisation.", code: "no_membership" }, 403),
     );
@@ -838,5 +847,19 @@ describe("briefs-api 401 and 403 handling", () => {
       kind: "infeasible",
       error: "This account belongs to no organisation.",
     });
+  });
+
+  test("planCampaign resolves infeasible (not unavailable) for a 401 with an unrelated code", async () => {
+    // Only the redirect-triggering codes (`unauthenticated`, or none) get the
+    // `unavailable` treatment above — an expired-token-style 401 that does NOT
+    // redirect must keep surfacing as a real, actionable plan failure.
+    const assign = vi.fn();
+    vi.stubGlobal("window", { ...window, location: { ...window.location, assign } });
+    mockFetch(() => json({ error: "Token expired.", code: "expired_token" }, 401));
+    await expect(planCampaign(brief)).resolves.toEqual({
+      kind: "infeasible",
+      error: "Token expired.",
+    });
+    expect(assign).not.toHaveBeenCalled();
   });
 });
