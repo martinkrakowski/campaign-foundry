@@ -330,4 +330,3 @@ describe("keyEncryptionSettings (PT-7b1)", () => {
     expect(() => keyEncryptionSettings()).toThrow(/empty entry found/);
   });
 });
-

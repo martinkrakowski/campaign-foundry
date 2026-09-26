@@ -140,16 +140,12 @@ export function keyEncryptionSettings(): KeyEncryptionSettings | undefined {
     }
 
     if (!/^[A-Za-z0-9+/]+=*$/.test(keyBase64)) {
-      throw new Error(
-        `Invalid base64 key in KEY_ENCRYPTION_KEYS for version "${version}".`,
-      );
+      throw new Error(`Invalid base64 key in KEY_ENCRYPTION_KEYS for version "${version}".`);
     }
 
     const decoded = Buffer.from(keyBase64, "base64");
     if (decoded.toString("base64") !== keyBase64) {
-      throw new Error(
-        `Invalid base64 key in KEY_ENCRYPTION_KEYS for version "${version}".`,
-      );
+      throw new Error(`Invalid base64 key in KEY_ENCRYPTION_KEYS for version "${version}".`);
     }
 
     if (decoded.length !== 32) {
@@ -163,9 +159,7 @@ export function keyEncryptionSettings(): KeyEncryptionSettings | undefined {
 
   const currentVersion = process.env.KEY_ENCRYPTION_KEY_CURRENT?.trim();
   if (!currentVersion) {
-    throw new Error(
-      "KEY_ENCRYPTION_KEY_CURRENT is required when KEY_ENCRYPTION_KEYS is set.",
-    );
+    throw new Error("KEY_ENCRYPTION_KEY_CURRENT is required when KEY_ENCRYPTION_KEYS is set.");
   }
 
   if (!keys.has(currentVersion)) {
@@ -179,4 +173,3 @@ export function keyEncryptionSettings(): KeyEncryptionSettings | undefined {
     keys,
   };
 }
-
