@@ -1,6 +1,6 @@
 import { setResponseHeader } from "h3";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
-import { enqueueJob } from "../../lib/jobs.js";
+import { deleteJob, enqueueJob } from "../../lib/jobs.js";
 import { JobCapacityError } from "../../lib/ports/fs-job-store.js";
 import { getRunDelivery, getUsageStore } from "../../lib/ports/index.js";
 import { parseBrief, parseRegenerateOnly } from "../../lib/load-brief.js";
@@ -166,7 +166,22 @@ export default defineEventHandler(async (event) => {
     reroll,
     expectedRevision,
   };
-  await getRunDelivery().deliver(request);
+  try {
+    await getRunDelivery(env).deliver(request);
+  } catch {
+    // `deliver` can throw after `enqueueJob` already stored the queued row
+    // above (most likely `startQueuedJob` itself, e.g. a database error) —
+    // without this, h3 would answer 500 while the row stayed queued, and
+    // every retry for this campaign got a 409 from that still-active row for
+    // up to QUEUED_TTL_MS (the hazard the comment above names). Delete it so
+    // the row's claim on this campaign disappears with the response that
+    // reports it failed, and a retry is admitted right away. No `.catch` here:
+    // a delete failure is a real storage error, and h3's own handling still
+    // answers it with a 500.
+    await deleteJob(env, jobId);
+    setResponseStatus(event, 500);
+    return { error: `Could not start the run for campaign "${brief.id}".`, campaignId: brief.id };
+  }
   setResponseStatus(event, 202);
   return { jobId };
 });
