@@ -3446,11 +3446,20 @@ describe("RunProvider — running job awareness on reload and brief switch", () 
     const persistedPromise = new Promise<Response>((r) => {
       resolvePersisted = r;
     });
+    // Set only once adoptJob actually asks for the persisted report — assigning
+    // `resolvePersisted` above happens synchronously in the Promise executor, so
+    // waiting on that alone would pass before the request is ever made and this
+    // test could not fail if the runSeq check after the re-read (below) were
+    // removed (coderabbit).
+    let persistedRequested = false;
     mockPipelineApi({
       result: (url) => {
         if (url.includes("/campaigns/jobs?campaignId=active-campaign"))
           return json({ jobId: "job-x" });
-        if (url.includes("campaignId=active-campaign")) return persistedPromise;
+        if (url.includes("campaignId=active-campaign")) {
+          persistedRequested = true;
+          return persistedPromise;
+        }
         return json(EMPTY_REPORT); // the switched-to brief's own (unrelated) lookups
       },
       job: () =>
@@ -3466,7 +3475,7 @@ describe("RunProvider — running job awareness on reload and brief switch", () 
     });
     // The job has completed and adoptJob is now re-reading the persisted report
     // (hung above); switch briefs before that read resolves.
-    await waitFor(() => expect(typeof resolvePersisted).toBe("function"));
+    await waitFor(() => expect(persistedRequested).toBe(true));
     act(() =>
       result.current.setBrief({
         schemaVersion: BRIEF_SCHEMA_VERSION,
