@@ -13,6 +13,7 @@ import {
   assetCanvas,
   assetLabel,
   fetchPersistedRun,
+  fetchRunningJob,
   normalizeRunResult,
   isStoredBrief,
   DECISIONS_CONFLICT_MESSAGE,
@@ -171,6 +172,47 @@ describe("fetchPersistedRun — could not ask vs there is nothing (D83/F6)", () 
     });
     const d = await fetchPersistedRun("seed");
     expect(d?.assets).toHaveLength(1);
+  });
+});
+
+describe("fetchRunningJob — 404 and network failure tolerance", () => {
+  test("returns null for an empty campaignId", async () => {
+    await expect(fetchRunningJob("")).resolves.toBeNull();
+  });
+
+  test("returns null when server answers 404", async () => {
+    mockPipelineApi({
+      result: () => json({ error: "No running job" }, 404),
+    });
+    await expect(fetchRunningJob("seed")).resolves.toBeNull();
+  });
+
+  test("returns null when server answers 500", async () => {
+    mockPipelineApi({
+      result: () => json({ error: "boom" }, 500),
+    });
+    await expect(fetchRunningJob("seed")).resolves.toBeNull();
+  });
+
+  test("returns null on a network rejection", async () => {
+    mockPipelineApi({
+      result: () => Promise.reject(new Error("network failure")),
+    });
+    await expect(fetchRunningJob("seed")).resolves.toBeNull();
+  });
+
+  test("returns null when body carries no jobId string", async () => {
+    mockPipelineApi({
+      result: () => json({ notAJobId: 123 }),
+    });
+    await expect(fetchRunningJob("seed")).resolves.toBeNull();
+  });
+
+  test("returns jobId string when 200 with jobId", async () => {
+    mockPipelineApi({
+      result: () => json({ jobId: "job-xyz-123" }),
+    });
+    await expect(fetchRunningJob("seed")).resolves.toBe("job-xyz-123");
   });
 });
 
@@ -2865,6 +2907,25 @@ describe("RunProvider — running job awareness on reload and brief switch", () 
     await waitFor(() => expect(result.current.assets).toHaveLength(1));
     expect(result.current.loading).toBe(false);
     expect(result.current.hasRun).toBe(true);
+  });
+
+  test("setBrief when no job is running (404) leaves the page as today", async () => {
+    mockPipelineApi({
+      result: (url) => {
+        if (url.includes("/campaigns/jobs?campaignId=active-campaign")) {
+          return json({ error: "No running job" }, 404);
+        }
+        return json(EMPTY_REPORT);
+      },
+    });
+
+    const { result } = setup();
+    act(() => {
+      result.current.setBrief(activeBrief);
+    });
+    await waitFor(() => expect(result.current.brief.id).toBe("active-campaign"));
+    expect(result.current.loading).toBe(false);
+    expect(result.current.assets).toHaveLength(0);
   });
 });
 

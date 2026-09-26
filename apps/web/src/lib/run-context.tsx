@@ -248,6 +248,23 @@ export async function fetchPersistedRun(campaignId: string): Promise<RunResult |
   return null;
 }
 
+/**
+ * Look up any job currently running for a campaign (D171, FU-server-job-awareness).
+ * Returns the job id if one holds the campaign, or null on 404 (no running job) or
+ * network failure — so restore can adopt an in-flight run without failing the page.
+ */
+export async function fetchRunningJob(campaignId: string): Promise<string | null> {
+  if (!campaignId) return null;
+  try {
+    const res = await fetch(`${API}/campaigns/jobs?campaignId=${encodeURIComponent(campaignId)}`);
+    if (res.status === 404 || !res.ok) return null;
+    const data = parseJson(await res.text());
+    return typeof data?.jobId === "string" ? data.jobId : null;
+  } catch {
+    return null;
+  }
+}
+
 type PollOutcome = { kind: "completed"; result: RunResult } | { kind: "lost" };
 
 /** How far the running job has got, as its last well-formed snapshot reported it. */
@@ -716,6 +733,54 @@ export function RunProvider({ children }: { children: ReactNode }) {
     return { seq: (runSeq.current += 1), signal: controller.signal };
   };
 
+  /**
+   * Adopt a running job for a brief target: set loading, beginRun, poll the job, and
+   * commit its result (or handle lost/error), guarded by runSeq against superseding
+   * brief switches or newer runs. Shared between execute (postGenerate 202/409) and
+   * restore (mount effect and setBrief discovering an in-flight run).
+   */
+  const adoptJob = useCallback(
+    async (target: CampaignBrief, jobId: string) => {
+      setLoading(true);
+      setProgress(null);
+      setError(null);
+      const started = beginRun();
+      const owned = started.seq;
+      try {
+        const outcome = await pollJob(jobId, started.signal, setProgress);
+        if (runSeq.current !== owned) return; // a brief switch (or newer run) superseded this
+        if (outcome.kind === "lost") {
+          // The job vanished mid-run. Whatever is on disk is the *previous* run, so show
+          // it without pretending it is new: no cache-bust, review decisions kept. It
+          // shares the target's campaign id, so the target is recorded unchanged.
+          // F6: a failed re-read is not "nothing was saved" either — and the
+          // interruption notice below already names the fact and the remedy, so a
+          // failed read keeps that notice instead of being conflated with absence.
+          const persisted = await fetchPersistedRun(target.id).catch(() => null);
+          if (runSeq.current !== owned) return;
+          if (persisted) setRun({ result: persisted, target });
+          setError(LOST_JOB_MESSAGE);
+          return;
+        }
+        // Commit the result beside the brief it actually ran — the draft handed in when
+        // there was one, so every result-scoped action can key off it (R6).
+        setRun({ result: outcome.result, target });
+        setAssetVersion((v) => v + 1);
+        setDecisions({});
+        setError(null); // the result replaces any stale complaint about this run
+      } catch (e) {
+        if (runSeq.current !== owned) return;
+        setError(e instanceof Error ? e.message : "Generation failed");
+      } finally {
+        if (runSeq.current === owned) {
+          setLoading(false);
+          setProgress(null);
+        }
+      }
+    },
+    [],
+  );
+
   // Loading or committing a brief swaps which run the grid should show. Only ever called
   // as a deliberate commit — the editor's Save and the picker's select — never per
   // keystroke, so this won't wipe the grid mid-edit. Behaviour:
@@ -778,9 +843,20 @@ export function RunProvider({ children }: { children: ReactNode }) {
         .catch(() => {
           /* F6: could-not-ask is not absence — restore nothing, claim nothing. A
              later successful fetch (a run, a re-roll, a brief switch) heals it. */
+        })
+        .finally(() => {
+          if (briefIdRef.current !== next.id) return;
+          void fetchRunningJob(next.id)
+            .then((jobId) => {
+              if (briefIdRef.current !== next.id || !jobId) return;
+              void adoptJob(next, jobId);
+            })
+            .catch(() => {
+              /* A 404, or a network failure, leaves the page as today. */
+            });
         });
     },
-    [run],
+    [adoptJob, run],
   );
 
   // Derived, not stored: "applied" is a statement about the brief the shell holds, and
@@ -815,9 +891,13 @@ export function RunProvider({ children }: { children: ReactNode }) {
     // shell and let Generate spend image-generation credits on it.
     if (briefDecidedRef.current) return;
     let startBrief = DEFAULT_BRIEF;
+    let restored = false;
     try {
       const parsed: unknown = JSON.parse(localStorage.getItem(BRIEF_KEY) ?? "null");
-      if (isStoredBrief(parsed)) startBrief = parsed;
+      if (isStoredBrief(parsed)) {
+        startBrief = parsed;
+        restored = true;
+      }
     } catch {
       /* unreadable/malformed storage — start from DEFAULT_BRIEF */
     }
@@ -836,6 +916,17 @@ export function RunProvider({ children }: { children: ReactNode }) {
       })
       .catch(() => {
         /* F6: could-not-ask is not absence — restore nothing, claim nothing. */
+      })
+      .finally(() => {
+        if (!restored || !active || briefIdRef.current !== startBrief.id) return;
+        void fetchRunningJob(startBrief.id)
+          .then((jobId) => {
+            if (!active || briefIdRef.current !== startBrief.id || !jobId) return;
+            void adoptJob(startBrief, jobId);
+          })
+          .catch(() => {
+            /* A 404, or a network failure, leaves the page as today. */
+          });
       });
     return () => {
       active = false;
@@ -967,40 +1058,15 @@ export function RunProvider({ children }: { children: ReactNode }) {
       try {
         const jobId = await postGenerate(target);
         if (runSeq.current !== owned) return; // a brief switch (or newer run) superseded this press
-        const started = beginRun();
-        owned = started.seq;
-        const outcome = await pollJob(jobId, started.signal, setProgress);
-        if (runSeq.current !== owned) return; // a brief switch (or newer run) superseded this
-        if (outcome.kind === "lost") {
-          // The job vanished mid-run. Whatever is on disk is the *previous* run, so show
-          // it without pretending it is new: no cache-bust, review decisions kept. It
-          // shares the target's campaign id, so the target is recorded unchanged.
-          // F6: a failed re-read is not "nothing was saved" either — and the
-          // interruption notice below already names the fact and the remedy, so a
-          // failed read keeps that notice instead of being conflated with absence.
-          const persisted = await fetchPersistedRun(target.id).catch(() => null);
-          if (runSeq.current !== owned) return;
-          if (persisted) setRun({ result: persisted, target });
-          setError(LOST_JOB_MESSAGE);
-          return;
-        }
-        // Commit the result beside the brief it actually ran — the draft handed in when
-        // there was one, so every result-scoped action can key off it (R6).
-        setRun({ result: outcome.result, target });
-        setAssetVersion((v) => v + 1);
-        setDecisions({});
-        setError(null); // the result replaces any stale complaint about this run
+        await adoptJob(target, jobId);
       } catch (e) {
         if (runSeq.current !== owned) return;
         setError(e instanceof Error ? e.message : "Generation failed");
-      } finally {
-        if (runSeq.current === owned) {
-          setLoading(false);
-          setProgress(null);
-        }
+        setLoading(false);
+        setProgress(null);
       }
     },
-    [brief, postGenerate],
+    [adoptJob, brief, postGenerate],
   );
 
   const runMode = useMemo<"brief" | "variation" | null>(() => {
