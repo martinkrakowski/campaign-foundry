@@ -5,8 +5,21 @@ import { accessSync, constants } from "node:fs";
 // invisible to the tracer, so production boot died with "Cannot find module
 // 'ffmpeg-static'" before the probe below could warn. See nitro.config.ts.
 import ffmpegStatic from "ffmpeg-static";
+import { authMode, authSettings, type AuthMode } from "./config.js";
 
 export type Capabilities = { motion: boolean; reason?: string };
+
+export interface AuthCapabilities {
+  mode: AuthMode;
+  google: boolean;
+}
+
+export function getAuthCapabilities(): AuthCapabilities {
+  const mode = authMode();
+  const settings = authSettings();
+  const google = Boolean(settings.googleClientId && settings.googleClientSecret);
+  return { mode, google };
+}
 
 export type ProbeSpawn = (
   command: string,
