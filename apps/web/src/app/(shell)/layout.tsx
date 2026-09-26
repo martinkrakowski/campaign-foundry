@@ -45,6 +45,7 @@ export default function ShellLayout({ children }: { children: ReactNode }) {
             <MobileRailProvider>
               <div className="flex h-full flex-col">
                 <Header />
+                <MembershipNotice />
                 <div className="relative z-0 flex flex-1 gap-4 overflow-hidden bg-background p-4">
                   <Sidebar />
                   <EditorColumns showOrchestrator={showOrchestrator}>{children}</EditorColumns>
@@ -296,6 +297,28 @@ function MobileRailOverlay(): ReactNode {
       </div>
       <div className="flex flex-1 flex-col gap-3 overflow-y-auto p-4">{rail.content}</div>
     </div>
+  );
+}
+
+/**
+ * PT-1b2 item 5 — a 403 `no_membership` shows a "no organisation yet" state,
+ * distinct from the pipeline-unreachable message `CommandBar`'s status line
+ * reports. `membershipError` is set by whichever fetch first hits a 403 for
+ * this account — the initial mount's persisted-run restore, or a later
+ * `setBrief` — and every one of those can run on any shell route, not just
+ * `/grid` where `CommandBar` lives. So this renders here, above every route,
+ * rather than folded into the grid-only orchestrator bar.
+ */
+function MembershipNotice() {
+  const { membershipError } = useRun();
+  if (membershipError === null) return null;
+  return (
+    <p
+      role="alert"
+      className="shrink-0 border-b border-border bg-surface-2 px-4 py-2 text-center text-[12px] text-error"
+    >
+      {membershipError}
+    </p>
   );
 }
 

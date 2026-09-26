@@ -3,6 +3,7 @@ import type {
   CopyPool,
   CopyPoolEntryStatus,
 } from "@campaignfoundry/CampaignOrchestration";
+import { handleAuthError, type NoMembershipError } from "./auth-errors";
 
 export type {
   CopyPool,
@@ -30,6 +31,11 @@ export interface HostCapabilities {
   reason?: string;
   /** The probe's ffmpeg version, when it could read one. Additive: absent on older hosts. */
   version?: string;
+  /** Auth capabilities reported by the host (PT-1b1, PT-1b2). */
+  auth?: {
+    mode: "local" | "better-auth";
+    google: boolean;
+  };
 }
 
 /** Delay between retries while the probe's answer is still "not probed". */
@@ -73,6 +79,18 @@ export async function getCapabilities(): Promise<HostCapabilities | null> {
   if (typeof motion !== "boolean") return null;
   const reason = (data as { reason?: unknown }).reason;
   const version = (data as { version?: unknown }).version;
+  const rawAuth = (data as { auth?: unknown }).auth;
+  const auth =
+    typeof rawAuth === "object" &&
+    rawAuth !== null &&
+    ((rawAuth as { mode?: unknown }).mode === "local" ||
+      (rawAuth as { mode?: unknown }).mode === "better-auth") &&
+    typeof (rawAuth as { google?: unknown }).google === "boolean"
+      ? {
+          mode: (rawAuth as { mode: "local" | "better-auth" }).mode,
+          google: (rawAuth as { google: boolean }).google,
+        }
+      : undefined;
   // Rebuilding the object rather than passing `data` through is deliberate — it is
   // untrusted JSON — but every field the UI shows has to be carried across, or the
   // component that renders it is dead code that still reaches 100% coverage.
@@ -80,6 +98,7 @@ export async function getCapabilities(): Promise<HostCapabilities | null> {
     motion,
     ...(typeof reason === "string" ? { reason } : {}),
     ...(typeof version === "string" ? { version } : {}),
+    ...(auth !== undefined ? { auth } : {}),
   };
 }
 
@@ -153,12 +172,15 @@ export class BriefsApiError extends Error {
    * write instead of the user reloading.
    */
   readonly revision?: string;
+  /** Error code from the API (e.g. "unauthenticated" or "no_membership"). */
+  readonly code?: string;
 
-  constructor(message: string, status: number, revision?: string) {
+  constructor(message: string, status: number, revision?: string, code?: string) {
     super(message);
     this.name = "BriefsApiError";
     this.status = status;
     if (revision !== undefined) this.revision = revision;
+    if (code !== undefined) this.code = code;
   }
 }
 
@@ -205,10 +227,20 @@ async function requestJson(url: string, init?: RequestInit): Promise<unknown> {
       typeof (data as { revision?: unknown }).revision === "string"
         ? (data as { revision: string }).revision
         : undefined;
+    const code =
+      typeof data === "object" &&
+      data !== null &&
+      typeof (data as { code?: unknown }).code === "string"
+        ? (data as { code: string }).code
+        : undefined;
+
+    handleAuthError(res.status, data);
+
     throw new BriefsApiError(
       errorFrom(data, `Request failed (HTTP ${res.status})`),
       res.status,
       revision,
+      code,
     );
   }
   return data;
@@ -346,6 +378,7 @@ export async function listAssets(
   if (res.status === 404) return { assets: [] };
   const data = await parseJsonBody(res);
   if (!res.ok) {
+    handleAuthError(res.status, data);
     throw new BriefsApiError(errorFrom(data, `Request failed (HTTP ${res.status})`), res.status);
   }
   if (
@@ -389,6 +422,36 @@ export async function planCampaign(
     return { kind: "infeasible", error: errorFrom(data, "Variation plan is not feasible.") };
   }
   if (!res.ok) {
+    // This function's contract (see the doc comment above) is to never throw a
+    // wizard-breaking error — every caller (`CommandBar`, `useVariationPlan`) degrades
+    // on the resolved `PlanResult` instead of a rejection, and at least one of them
+    // (`CommandBar`) has no `.catch` on the promise it builds from this call. A 401
+    // still needs the same redirect every other pipeline call makes, and a 403
+    // no_membership still needs to read as something other than "this brief is
+    // infeasible" — `handleAuthError` gives us both, but it throws for the 403 case,
+    // so that throw is caught right here and folded back into the non-throwing shape.
+    try {
+      handleAuthError(res.status, data);
+    } catch (e) {
+      // handleAuthError's only throw site is the 403 no_membership branch, and it is
+      // always a NoMembershipError (see auth-errors.ts) — a defensive `isNoMembershipError`
+      // re-check here would add a branch this gate's 100% requirement can never exercise,
+      // since nothing else can reach this catch.
+      return { kind: "infeasible", error: (e as NoMembershipError).message };
+    }
+    // handleAuthError's 401 branch does NOT throw — it starts a `window.location`
+    // navigation and returns, which does not halt this function. Falling through to
+    // the generic branch below would resolve `{ kind: "infeasible", error: "Plan
+    // failed (HTTP 401)" }`, and `CommandBar` renders that in red immediately — a
+    // real flash of an alarming, wrong message for however long the redirect takes
+    // to actually unload the page. `unavailable` is the same quiet "could not work
+    // out the estimate" state a 404/500/network failure already resolves to, and
+    // nothing here is actionable once the redirect has started.
+    const code =
+      typeof data === "object" && data !== null ? (data as { code?: unknown }).code : undefined;
+    if (res.status === 401 && (code === "unauthenticated" || code === undefined)) {
+      return { kind: "unavailable" };
+    }
     if (res.status >= 500) return { kind: "unavailable" };
     return { kind: "infeasible", error: errorFrom(data, `Plan failed (HTTP ${res.status})`) };
   }
@@ -514,6 +577,7 @@ export async function listPackages(
   if (res.status === 404) return { platforms: [] };
   const data = await parseJsonBody(res);
   if (!res.ok) {
+    handleAuthError(res.status, data);
     throw new BriefsApiError(errorFrom(data, `Request failed (HTTP ${res.status})`), res.status);
   }
   return { platforms: asPackagedPlatforms(data) };
@@ -568,6 +632,7 @@ export async function getPool(briefId: string, signal?: AbortSignal): Promise<St
   if (res.status === 404) return null;
   const data = await parseJsonBody(res);
   if (!res.ok) {
+    handleAuthError(res.status, data);
     throw new BriefsApiError(errorFrom(data, `Request failed (HTTP ${res.status})`), res.status);
   }
   return asStoredPool(data);

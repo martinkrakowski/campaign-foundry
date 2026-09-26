@@ -1,17 +1,43 @@
-import { describe, test, expect, afterEach, beforeEach } from "vitest";
-import { render, screen, within, fireEvent } from "@testing-library/react";
+import { describe, test, expect, afterEach, beforeEach, vi } from "vitest";
+import { render, screen, within, fireEvent, act, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createElement, useEffect, type ReactElement } from "react";
 import { nextMock, renderWithRun, ShellProviders } from "@/__tests__/helpers";
 import { useEditorDirty } from "@/lib/editor-dirty-context";
 import { modelChanged, telemetryButton } from "@/components/campaign/messages";
-import { Header } from "../Header";
+import * as briefsApi from "@/lib/briefs-api";
+import { authClient } from "@/lib/auth-client";
+import { Header, MobileAuthSection, BetterAuthSection } from "../Header";
+
+vi.mock("@/lib/auth-client", () => ({
+  authClient: {
+    useSession: vi.fn(() => ({ data: null, isPending: false })),
+    useListOrganizations: vi.fn(() => ({ data: null, isPending: false })),
+    useActiveOrganization: vi.fn(() => ({ data: null, isPending: false })),
+    organization: {
+      setActive: vi.fn(),
+      list: vi.fn(),
+    },
+    signOut: vi.fn(),
+  },
+}));
+
+// `window.location` is shared by every test in this file exactly like `<html>` above —
+// a handful of tests overwrite `.assign`/`.reload` with a spy directly (jsdom's own
+// Location throws "Not implemented" for both), which is a property assignment, not a
+// `vi.spyOn` mock `cleanup()` or `restoreAllMocks` would ever touch. Captured once, so
+// a later test's real navigation call reaches this original rather than a stale spy
+// from an earlier test.
+const originalAssign = window.location.assign.bind(window.location);
+const originalReload = window.location.reload.bind(window.location);
 
 // The theme toggle writes to <html>, which is shared by every test in this file and is
 // not the element `cleanup()` unmounts — the next test would inherit a light theme.
 afterEach(() => {
   document.documentElement.classList.add("dark");
   localStorage.clear();
+  window.location.assign = originalAssign;
+  window.location.reload = originalReload;
 });
 
 /** Raises the editor's dirty flag, so any guarded navigation has to prompt. */
@@ -44,8 +70,12 @@ describe("Header", () => {
 
     await user.click(screen.getByLabelText("Open menu"));
 
-    expect(screen.getByRole("dialog", { name: "Menu" })).toBeTruthy();
+    const dialog = screen.getByRole("dialog", { name: "Menu" });
+    expect(dialog).toBeTruthy();
     expect(screen.getByLabelText("Open menu").getAttribute("aria-expanded")).toBe("true");
+
+    await user.click(within(dialog).getByLabelText("Close menu"));
+    expect(screen.queryByRole("dialog", { name: "Menu" })).toBeNull();
   });
 
   test("the mode badge is an eyebrow on the tracking token, keeping its own 10px size", () => {
@@ -181,5 +211,743 @@ describe("Header — the brand mark and the telemetry control", () => {
     await user.click(within(dialog).getByText("Procedural (offline)"));
 
     expect(screen.getByRole("status").textContent).toBe(modelChanged("Procedural (offline)"));
+  });
+});
+
+describe("Header — auth and organization switching (PT-1b2)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  test("under local auth mode, the header is unchanged with no user menu or org switcher", async () => {
+    vi.spyOn(briefsApi, "getCapabilities").mockResolvedValue({
+      motion: true,
+      auth: { mode: "local", google: false },
+    });
+
+    renderWithRun(<Header />);
+
+    // Wait to ensure capabilities have resolved
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(screen.queryByRole("button", { name: "User menu" })).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "Switch organization" })).toBeNull();
+
+    const bar = screen.getByRole("banner");
+    const popupVerbs = within(bar)
+      .getAllByRole("button")
+      .filter((el) => el.getAttribute("aria-haspopup") === "dialog")
+      .map((el) => el.getAttribute("aria-label") ?? el.getAttribute("title"));
+    expect(popupVerbs).toEqual(["Change image model", "Open menu"]);
+
+    // PT-1b2 item 4: under local auth, neither `BetterAuthSection` nor
+    // `BetterAuthMobileControls` mounts, so the better-auth session/org hooks — each a
+    // live subscription, not a free read — are never called. Open the mobile menu too:
+    // its `authControls` slot must stay empty rather than mounting the mobile variant.
+    expect(authClient.useSession).not.toHaveBeenCalled();
+    expect(authClient.useListOrganizations).not.toHaveBeenCalled();
+    expect(authClient.useActiveOrganization).not.toHaveBeenCalled();
+
+    const user = userEvent.setup();
+    await user.click(screen.getByLabelText("Open menu"));
+    const dialog = await screen.findByRole("dialog", { name: "Menu" });
+    expect(within(dialog).queryByTestId("mobile-auth-controls")).toBeNull();
+    expect(authClient.useSession).not.toHaveBeenCalled();
+    expect(authClient.useListOrganizations).not.toHaveBeenCalled();
+    expect(authClient.useActiveOrganization).not.toHaveBeenCalled();
+  });
+
+  test("under better-auth mode with 1 org, renders user menu but no org switcher", async () => {
+    const user = userEvent.setup();
+    const assignSpy = vi.fn();
+    window.location.assign = assignSpy;
+
+    vi.spyOn(briefsApi, "getCapabilities").mockResolvedValue({
+      motion: true,
+      auth: { mode: "better-auth", google: false },
+    });
+    vi.mocked(authClient.useSession).mockReturnValue({
+      data: { user: { email: "user@example.com" } },
+      isPending: false,
+    } as never);
+    vi.mocked(authClient.useListOrganizations).mockReturnValue({
+      data: [{ id: "org-1", name: "Solo Org" }],
+      isPending: false,
+    } as never);
+    vi.mocked(authClient.useActiveOrganization).mockReturnValue({
+      data: { id: "org-1", name: "Solo Org" },
+      isPending: false,
+    } as never);
+    const signOutSpy = vi.spyOn(authClient, "signOut").mockResolvedValue({} as never);
+
+    renderWithRun(<Header />);
+
+    const userMenuButton = await screen.findByRole("button", { name: "User menu" });
+    expect(userMenuButton.textContent).toContain("user@example.com");
+    expect(screen.queryByRole("combobox", { name: "Switch organization" })).toBeNull();
+
+    // Open user menu
+    await user.click(userMenuButton);
+    expect(screen.getByRole("menu", { name: "User menu" })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: "Sign out" })).toBeTruthy();
+
+    // Click outside closes menu
+    fireEvent.mouseDown(document.body);
+    expect(screen.queryByRole("menu", { name: "User menu" })).toBeNull();
+
+    // Open and press non-Escape key doesn't close
+    await user.click(userMenuButton);
+    expect(screen.getByRole("menu", { name: "User menu" })).toBeTruthy();
+    fireEvent.keyDown(document, { key: "x" });
+    expect(screen.getByRole("menu", { name: "User menu" })).toBeTruthy();
+
+    // Escape closes menu
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("menu", { name: "User menu" })).toBeNull();
+
+    // Open and sign out
+    await user.click(userMenuButton);
+    await user.click(screen.getByRole("menuitem", { name: "Sign out" }));
+
+    expect(signOutSpy).toHaveBeenCalledTimes(1);
+    expect(assignSpy).toHaveBeenCalledWith("/sign-in");
+  });
+
+  test("under better-auth mode with multiple orgs, renders org switcher that switches org and reloads", async () => {
+    const user = userEvent.setup();
+    const reloadSpy = vi.fn();
+    window.location.reload = reloadSpy;
+
+    vi.spyOn(briefsApi, "getCapabilities").mockResolvedValue({
+      motion: true,
+      auth: { mode: "better-auth", google: false },
+    });
+    vi.mocked(authClient.useSession).mockReturnValue({
+      data: { user: { email: "multi@example.com" } },
+      isPending: false,
+    } as never);
+    vi.mocked(authClient.useListOrganizations).mockReturnValue({
+      data: [
+        { id: "org-1", name: "Primary Org" },
+        { id: "org-2", name: "Secondary Org" },
+      ],
+      isPending: false,
+    } as never);
+    vi.mocked(authClient.useActiveOrganization).mockReturnValue({
+      data: { id: "org-1", name: "Primary Org" },
+      isPending: false,
+    } as never);
+    const setActiveSpy = vi
+      .spyOn(authClient.organization, "setActive")
+      .mockResolvedValue({} as never);
+
+    renderWithRun(<Header />);
+
+    const switcher = await screen.findByRole("combobox", { name: "Switch organization" });
+    expect(switcher).toBeTruthy();
+
+    await user.selectOptions(switcher, "org-2");
+
+    expect(setActiveSpy).toHaveBeenCalledWith({ organizationId: "org-2" });
+    expect(reloadSpy).toHaveBeenCalledTimes(1);
+  });
+
+  test("a resolved setActive error blocks the reload and shows the failure, not a stale success", async () => {
+    // Better Auth's client actions resolve `{ data, error }` rather than throwing.
+    // The old handler awaited and reloaded unconditionally — an authorization or
+    // validation failure on `setActive` reloaded into the PREVIOUS organization as
+    // though the switch had worked, with nothing telling the user it had not.
+    const user = userEvent.setup();
+    const reloadSpy = vi.fn();
+    window.location.reload = reloadSpy;
+
+    vi.spyOn(briefsApi, "getCapabilities").mockResolvedValue({
+      motion: true,
+      auth: { mode: "better-auth", google: false },
+    });
+    vi.mocked(authClient.useSession).mockReturnValue({
+      data: { user: { email: "multi@example.com" } },
+      isPending: false,
+    } as never);
+    vi.mocked(authClient.useListOrganizations).mockReturnValue({
+      data: [
+        { id: "org-1", name: "Primary Org" },
+        { id: "org-2", name: "Secondary Org" },
+      ],
+      isPending: false,
+    } as never);
+    vi.mocked(authClient.useActiveOrganization).mockReturnValue({
+      data: { id: "org-1", name: "Primary Org" },
+      isPending: false,
+    } as never);
+    vi.spyOn(authClient.organization, "setActive").mockResolvedValue({
+      error: { message: "You do not have access to that organisation" },
+    } as never);
+
+    renderWithRun(<Header />);
+
+    const switcher = await screen.findByRole("combobox", { name: "Switch organization" });
+    await user.selectOptions(switcher, "org-2");
+
+    await screen.findByText("You do not have access to that organisation");
+    expect(reloadSpy).not.toHaveBeenCalled();
+  });
+
+  test("a rejected setActive blocks the reload and shows a fallback for a non-Error rejection", async () => {
+    const user = userEvent.setup();
+    const reloadSpy = vi.fn();
+    window.location.reload = reloadSpy;
+
+    vi.spyOn(briefsApi, "getCapabilities").mockResolvedValue({
+      motion: true,
+      auth: { mode: "better-auth", google: false },
+    });
+    vi.mocked(authClient.useSession).mockReturnValue({
+      data: { user: { email: "multi@example.com" } },
+      isPending: false,
+    } as never);
+    vi.mocked(authClient.useListOrganizations).mockReturnValue({
+      data: [
+        { id: "org-1", name: "Primary Org" },
+        { id: "org-2", name: "Secondary Org" },
+      ],
+      isPending: false,
+    } as never);
+    vi.mocked(authClient.useActiveOrganization).mockReturnValue({
+      data: { id: "org-1", name: "Primary Org" },
+      isPending: false,
+    } as never);
+    vi.spyOn(authClient.organization, "setActive").mockRejectedValue("network down");
+
+    renderWithRun(<Header />);
+
+    const switcher = await screen.findByRole("combobox", { name: "Switch organization" });
+    await user.selectOptions(switcher, "org-2");
+
+    await screen.findByText("Could not switch organisation.");
+    expect(reloadSpy).not.toHaveBeenCalled();
+  });
+
+  test("a rejected setActive shows the rejection's own message when it is an Error", async () => {
+    const user = userEvent.setup();
+    const reloadSpy = vi.fn();
+    window.location.reload = reloadSpy;
+
+    vi.spyOn(briefsApi, "getCapabilities").mockResolvedValue({
+      motion: true,
+      auth: { mode: "better-auth", google: false },
+    });
+    vi.mocked(authClient.useSession).mockReturnValue({
+      data: { user: { email: "multi@example.com" } },
+      isPending: false,
+    } as never);
+    vi.mocked(authClient.useListOrganizations).mockReturnValue({
+      data: [
+        { id: "org-1", name: "Primary Org" },
+        { id: "org-2", name: "Secondary Org" },
+      ],
+      isPending: false,
+    } as never);
+    vi.mocked(authClient.useActiveOrganization).mockReturnValue({
+      data: { id: "org-1", name: "Primary Org" },
+      isPending: false,
+    } as never);
+    vi.spyOn(authClient.organization, "setActive").mockRejectedValue(new Error("Network down"));
+
+    renderWithRun(<Header />);
+
+    const switcher = await screen.findByRole("combobox", { name: "Switch organization" });
+    await user.selectOptions(switcher, "org-2");
+
+    await screen.findByText("Network down");
+    expect(reloadSpy).not.toHaveBeenCalled();
+  });
+
+  test("a resolved setActive error with no message falls back to a fixed sentence", async () => {
+    const user = userEvent.setup();
+    const reloadSpy = vi.fn();
+    window.location.reload = reloadSpy;
+
+    vi.spyOn(briefsApi, "getCapabilities").mockResolvedValue({
+      motion: true,
+      auth: { mode: "better-auth", google: false },
+    });
+    vi.mocked(authClient.useSession).mockReturnValue({
+      data: { user: { email: "multi@example.com" } },
+      isPending: false,
+    } as never);
+    vi.mocked(authClient.useListOrganizations).mockReturnValue({
+      data: [
+        { id: "org-1", name: "Primary Org" },
+        { id: "org-2", name: "Secondary Org" },
+      ],
+      isPending: false,
+    } as never);
+    vi.mocked(authClient.useActiveOrganization).mockReturnValue({
+      data: { id: "org-1", name: "Primary Org" },
+      isPending: false,
+    } as never);
+    vi.spyOn(authClient.organization, "setActive").mockResolvedValue({ error: {} } as never);
+
+    renderWithRun(<Header />);
+
+    const switcher = await screen.findByRole("combobox", { name: "Switch organization" });
+    await user.selectOptions(switcher, "org-2");
+
+    await screen.findByText("Could not switch organisation.");
+    expect(reloadSpy).not.toHaveBeenCalled();
+  });
+
+  test("a resolved signOut error keeps the session live instead of redirecting to /sign-in", async () => {
+    // Same mechanism as setActive: a resolved `{ error }` from `signOut` was
+    // ignored and the code redirected to /sign-in unconditionally, leaving the
+    // session cookie valid while the interface behaved as if the user had signed out.
+    const user = userEvent.setup();
+    const assignSpy = vi.fn();
+    window.location.assign = assignSpy;
+
+    vi.spyOn(briefsApi, "getCapabilities").mockResolvedValue({
+      motion: true,
+      auth: { mode: "better-auth", google: false },
+    });
+    vi.mocked(authClient.useSession).mockReturnValue({
+      data: { user: { email: "user@example.com" } },
+      isPending: false,
+    } as never);
+    vi.mocked(authClient.useListOrganizations).mockReturnValue({
+      data: [{ id: "org-1", name: "Solo Org" }],
+      isPending: false,
+    } as never);
+    vi.mocked(authClient.useActiveOrganization).mockReturnValue({
+      data: { id: "org-1", name: "Solo Org" },
+      isPending: false,
+    } as never);
+    vi.spyOn(authClient, "signOut").mockResolvedValue({
+      error: { message: "Session already ended" },
+    } as never);
+
+    renderWithRun(<Header />);
+
+    const userMenuButton = await screen.findByRole("button", { name: "User menu" });
+    await user.click(userMenuButton);
+    await user.click(screen.getByRole("menuitem", { name: "Sign out" }));
+
+    await screen.findByText("Session already ended");
+    expect(assignSpy).not.toHaveBeenCalled();
+  });
+
+  test("a rejected signOut keeps the session live and shows the rejection's own message", async () => {
+    const user = userEvent.setup();
+    const assignSpy = vi.fn();
+    window.location.assign = assignSpy;
+
+    vi.spyOn(briefsApi, "getCapabilities").mockResolvedValue({
+      motion: true,
+      auth: { mode: "better-auth", google: false },
+    });
+    vi.mocked(authClient.useSession).mockReturnValue({
+      data: { user: { email: "user@example.com" } },
+      isPending: false,
+    } as never);
+    vi.mocked(authClient.useListOrganizations).mockReturnValue({
+      data: [{ id: "org-1", name: "Solo Org" }],
+      isPending: false,
+    } as never);
+    vi.mocked(authClient.useActiveOrganization).mockReturnValue({
+      data: { id: "org-1", name: "Solo Org" },
+      isPending: false,
+    } as never);
+    vi.spyOn(authClient, "signOut").mockRejectedValue(new Error("Network down"));
+
+    renderWithRun(<Header />);
+
+    const userMenuButton = await screen.findByRole("button", { name: "User menu" });
+    await user.click(userMenuButton);
+    await user.click(screen.getByRole("menuitem", { name: "Sign out" }));
+
+    await screen.findByText("Network down");
+    expect(assignSpy).not.toHaveBeenCalled();
+  });
+
+  test("a rejected signOut falls back to a fixed message for a non-Error rejection", async () => {
+    const user = userEvent.setup();
+    const assignSpy = vi.fn();
+    window.location.assign = assignSpy;
+
+    vi.spyOn(briefsApi, "getCapabilities").mockResolvedValue({
+      motion: true,
+      auth: { mode: "better-auth", google: false },
+    });
+    vi.mocked(authClient.useSession).mockReturnValue({
+      data: { user: { email: "user@example.com" } },
+      isPending: false,
+    } as never);
+    vi.mocked(authClient.useListOrganizations).mockReturnValue({
+      data: [{ id: "org-1", name: "Solo Org" }],
+      isPending: false,
+    } as never);
+    vi.mocked(authClient.useActiveOrganization).mockReturnValue({
+      data: { id: "org-1", name: "Solo Org" },
+      isPending: false,
+    } as never);
+    vi.spyOn(authClient, "signOut").mockRejectedValue("connection reset");
+
+    renderWithRun(<Header />);
+
+    const userMenuButton = await screen.findByRole("button", { name: "User menu" });
+    await user.click(userMenuButton);
+    await user.click(screen.getByRole("menuitem", { name: "Sign out" }));
+
+    await screen.findByText("Could not sign out.");
+    expect(assignSpy).not.toHaveBeenCalled();
+  });
+
+  test("a resolved signOut error with no message falls back to a fixed sentence", async () => {
+    const user = userEvent.setup();
+    const assignSpy = vi.fn();
+    window.location.assign = assignSpy;
+
+    vi.spyOn(briefsApi, "getCapabilities").mockResolvedValue({
+      motion: true,
+      auth: { mode: "better-auth", google: false },
+    });
+    vi.mocked(authClient.useSession).mockReturnValue({
+      data: { user: { email: "user@example.com" } },
+      isPending: false,
+    } as never);
+    vi.mocked(authClient.useListOrganizations).mockReturnValue({
+      data: [{ id: "org-1", name: "Solo Org" }],
+      isPending: false,
+    } as never);
+    vi.mocked(authClient.useActiveOrganization).mockReturnValue({
+      data: { id: "org-1", name: "Solo Org" },
+      isPending: false,
+    } as never);
+    vi.spyOn(authClient, "signOut").mockResolvedValue({ error: {} } as never);
+
+    renderWithRun(<Header />);
+
+    const userMenuButton = await screen.findByRole("button", { name: "User menu" });
+    await user.click(userMenuButton);
+    await user.click(screen.getByRole("menuitem", { name: "Sign out" }));
+
+    await screen.findByText("Could not sign out.");
+    expect(assignSpy).not.toHaveBeenCalled();
+  });
+
+  test("under better-auth mode, mobile menu includes user email, sign out, and org switcher", async () => {
+    const user = userEvent.setup();
+    const reloadSpy = vi.fn();
+    const assignSpy = vi.fn();
+    window.location.reload = reloadSpy;
+    window.location.assign = assignSpy;
+
+    vi.spyOn(briefsApi, "getCapabilities").mockResolvedValue({
+      motion: true,
+      auth: { mode: "better-auth", google: false },
+    });
+    vi.mocked(authClient.useSession).mockReturnValue({
+      data: { user: { email: "mobile@example.com" } },
+      isPending: false,
+    } as never);
+    vi.mocked(authClient.useListOrganizations).mockReturnValue({
+      data: [
+        { id: "org-1", name: "Mobile Org 1" },
+        { id: "org-2", name: "Mobile Org 2" },
+      ],
+      isPending: false,
+    } as never);
+    vi.mocked(authClient.useActiveOrganization).mockReturnValue({
+      data: { id: "org-1", name: "Mobile Org 1" },
+      isPending: false,
+    } as never);
+    const setActiveSpy = vi
+      .spyOn(authClient.organization, "setActive")
+      .mockResolvedValue({} as never);
+    const signOutSpy = vi.spyOn(authClient, "signOut").mockResolvedValue({} as never);
+
+    renderWithRun(<Header />);
+
+    // Open mobile menu
+    await user.click(screen.getByLabelText("Open menu"));
+
+    const dialog = await screen.findByRole("dialog", { name: "Menu" });
+    expect(within(dialog).getByText("mobile@example.com")).toBeTruthy();
+
+    const mobileSwitcher = within(dialog).getByRole("combobox", { name: "Switch organization" });
+    await user.selectOptions(mobileSwitcher, "org-2");
+    expect(setActiveSpy).toHaveBeenCalledWith({ organizationId: "org-2" });
+    expect(reloadSpy).toHaveBeenCalledTimes(1);
+
+    const signOutBtn = within(dialog).getByRole("button", { name: "Sign out" });
+    await user.click(signOutBtn);
+    expect(signOutSpy).toHaveBeenCalledTimes(1);
+    expect(assignSpy).toHaveBeenCalledWith("/sign-in");
+  });
+
+  test("mobile sign-out failure shows the alert inside the mobile menu, not the desktop surface", async () => {
+    const user = userEvent.setup();
+    const assignSpy = vi.fn();
+    window.location.assign = assignSpy;
+
+    vi.spyOn(briefsApi, "getCapabilities").mockResolvedValue({
+      motion: true,
+      auth: { mode: "better-auth", google: false },
+    });
+    vi.mocked(authClient.useSession).mockReturnValue({
+      data: { user: { email: "mobile@example.com" } },
+      isPending: false,
+    } as never);
+    vi.mocked(authClient.useListOrganizations).mockReturnValue({
+      data: [{ id: "org-1", name: "Mobile Org 1" }],
+      isPending: false,
+    } as never);
+    vi.mocked(authClient.useActiveOrganization).mockReturnValue({
+      data: { id: "org-1", name: "Mobile Org 1" },
+      isPending: false,
+    } as never);
+    vi.spyOn(authClient, "signOut").mockResolvedValue({
+      error: { message: "Sign-out failed" },
+    } as never);
+
+    renderWithRun(<Header />);
+
+    await user.click(screen.getByLabelText("Open menu"));
+    const dialog = await screen.findByRole("dialog", { name: "Menu" });
+    await user.click(within(dialog).getByRole("button", { name: "Sign out" }));
+
+    const alert = await within(dialog).findByRole("alert");
+    expect(alert.textContent).toBe("Sign-out failed");
+    expect(assignSpy).not.toHaveBeenCalled();
+  });
+
+  test("user menu renders fallback label when email is undefined", async () => {
+    vi.spyOn(briefsApi, "getCapabilities").mockResolvedValue({
+      motion: true,
+      auth: { mode: "better-auth", google: false },
+    });
+    vi.mocked(authClient.useSession).mockReturnValue({
+      data: null,
+      isPending: false,
+    } as never);
+
+    renderWithRun(<Header />);
+
+    const userMenuButton = await screen.findByRole("button", { name: "User menu" });
+    expect(userMenuButton.textContent).toContain("Account");
+  });
+
+  test("desktop tab navigation triggers guardedPush when editor is dirty", async () => {
+    const user = userEvent.setup();
+    renderDirty(<Header />);
+
+    await user.click(screen.getByRole("link", { name: "Grid" }));
+    expect(screen.getByRole("dialog", { name: "Unsaved edits" })).toBeTruthy();
+  });
+
+  test("signing out while dirty asks for confirmation before signing out, same guard as the tabs", async () => {
+    // Sign-out reloads to /sign-in — exactly the kind of navigation `handleTabClick`
+    // already guards for the route tabs above. Without routing it through the same
+    // `guardedAction`, it discarded unsaved brief edits with no prompt at all.
+    const user = userEvent.setup();
+    const assignSpy = vi.fn();
+    window.location.assign = assignSpy;
+
+    vi.spyOn(briefsApi, "getCapabilities").mockResolvedValue({
+      motion: true,
+      auth: { mode: "better-auth", google: false },
+    });
+    vi.mocked(authClient.useSession).mockReturnValue({
+      data: { user: { email: "user@example.com" } },
+      isPending: false,
+    } as never);
+    vi.mocked(authClient.useListOrganizations).mockReturnValue({
+      data: [{ id: "org-1", name: "Solo Org" }],
+      isPending: false,
+    } as never);
+    vi.mocked(authClient.useActiveOrganization).mockReturnValue({
+      data: { id: "org-1", name: "Solo Org" },
+      isPending: false,
+    } as never);
+    const signOutSpy = vi.spyOn(authClient, "signOut").mockResolvedValue({} as never);
+
+    renderDirty(<Header />);
+
+    const userMenuButton = await screen.findByRole("button", { name: "User menu" });
+    await user.click(userMenuButton);
+    await user.click(screen.getByRole("menuitem", { name: "Sign out" }));
+
+    // Queued behind the guard — neither the API call nor the navigation has run yet.
+    expect(screen.getByRole("dialog", { name: "Unsaved edits" })).toBeTruthy();
+    expect(signOutSpy).not.toHaveBeenCalled();
+    expect(assignSpy).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Leave" }));
+
+    await waitFor(() => expect(signOutSpy).toHaveBeenCalledTimes(1));
+    expect(assignSpy).toHaveBeenCalledWith("/sign-in");
+  });
+
+  test("switching organisation while dirty asks for confirmation before switching, same guard as the tabs", async () => {
+    const user = userEvent.setup();
+    const reloadSpy = vi.fn();
+    window.location.reload = reloadSpy;
+
+    vi.spyOn(briefsApi, "getCapabilities").mockResolvedValue({
+      motion: true,
+      auth: { mode: "better-auth", google: false },
+    });
+    vi.mocked(authClient.useSession).mockReturnValue({
+      data: { user: { email: "multi@example.com" } },
+      isPending: false,
+    } as never);
+    vi.mocked(authClient.useListOrganizations).mockReturnValue({
+      data: [
+        { id: "org-1", name: "Primary Org" },
+        { id: "org-2", name: "Secondary Org" },
+      ],
+      isPending: false,
+    } as never);
+    vi.mocked(authClient.useActiveOrganization).mockReturnValue({
+      data: { id: "org-1", name: "Primary Org" },
+      isPending: false,
+    } as never);
+    const setActiveSpy = vi
+      .spyOn(authClient.organization, "setActive")
+      .mockResolvedValue({} as never);
+
+    renderDirty(<Header />);
+
+    const switcher = await screen.findByRole("combobox", { name: "Switch organization" });
+    await user.selectOptions(switcher, "org-2");
+
+    expect(screen.getByRole("dialog", { name: "Unsaved edits" })).toBeTruthy();
+    expect(setActiveSpy).not.toHaveBeenCalled();
+    expect(reloadSpy).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Leave" }));
+
+    await waitFor(() => expect(setActiveSpy).toHaveBeenCalledWith({ organizationId: "org-2" }));
+    expect(reloadSpy).toHaveBeenCalledTimes(1);
+  });
+
+  test("does not update capabilities if unmounted before promise resolves", async () => {
+    // As in the sign-in page's identical test: React 19 (this app's version) drops a
+    // late setState on an unmounted component silently, with no dedicated warning to
+    // assert on — the honest maximum here is that resolving after unmount raises no
+    // React `act` warning and nothing throws.
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    let resolveCaps!: (caps: briefsApi.HostCapabilities) => void;
+    vi.spyOn(briefsApi, "getCapabilities").mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveCaps = resolve;
+        }),
+    );
+
+    const { unmount } = renderWithRun(<Header />);
+    unmount();
+    await act(async () => {
+      resolveCaps({ motion: true, auth: { mode: "better-auth", google: false } });
+      await Promise.resolve();
+    });
+
+    expect(consoleError).not.toHaveBeenCalled();
+    consoleError.mockRestore();
+  });
+
+  test("a rejected capabilities probe leaves the rest of the header usable, with no unhandled rejection", async () => {
+    // Identical mechanism to the sign-in page: the mount effect had no `.catch`, so a
+    // rejected `getCapabilities()` was an unhandled rejection vitest fails the run on.
+    // Without the `.catch`, this test fails the suite rather than the assertion below.
+    vi.spyOn(briefsApi, "getCapabilities").mockRejectedValue(new Error("probe unreachable"));
+
+    renderWithRun(<Header />);
+
+    await screen.findByLabelText("Open menu");
+    expect(screen.queryByRole("button", { name: "User menu" })).toBeNull();
+  });
+
+  test("MobileAuthSection renders directly — no portal, no dialog lookup (PT-1b2 item 5)", () => {
+    // It used to return null until a `useEffect` found `[role="dialog"][aria-label="Menu"]`
+    // in the document and portalled into it. Now it is an ordinary component MobileMenu
+    // renders through its `authControls` slot, so it paints synchronously wherever it is
+    // mounted — including standalone, with no dialog anywhere in the document.
+    render(
+      <MobileAuthSection
+        email="test@example.com"
+        organizations={[]}
+        onSwitchOrg={vi.fn()}
+        onSignOut={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("mobile-auth-controls")).toBeTruthy();
+    expect(screen.getByText("test@example.com")).toBeTruthy();
+  });
+
+  test("clicking inside user menu does not close it", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(briefsApi, "getCapabilities").mockResolvedValue({
+      motion: true,
+      auth: { mode: "better-auth", google: false },
+    });
+    vi.mocked(authClient.useSession).mockReturnValue({
+      data: { user: { email: "inside@example.com" } },
+      isPending: false,
+    } as never);
+
+    renderWithRun(<Header />);
+
+    const userMenuButton = await screen.findByRole("button", { name: "User menu" });
+    await user.click(userMenuButton);
+
+    const emailHeader = screen.getByText("inside@example.com", { selector: "div" });
+    fireEvent.mouseDown(emailHeader);
+
+    expect(screen.getByRole("menu", { name: "User menu" })).toBeTruthy();
+  });
+
+  test("desktop tab navigation when clean does not prevent default", async () => {
+    const user = userEvent.setup();
+    renderWithRun(<Header />);
+
+    await user.click(screen.getByRole("link", { name: "Grid" }));
+    expect(screen.queryByRole("dialog", { name: "Unsaved edits" })).toBeNull();
+  });
+
+  test("desktop tab navigation ignores modified clicks when dirty", () => {
+    renderDirty(<Header />);
+
+    fireEvent.click(screen.getByRole("link", { name: "Grid" }), { metaKey: true });
+    expect(screen.queryByRole("dialog", { name: "Unsaved edits" })).toBeNull();
+  });
+
+  test("BetterAuthSection falls back to first organization id when activeOrg has none", () => {
+    vi.mocked(authClient.useSession).mockReturnValue({
+      data: { user: { email: "orgs@example.com" } },
+      isPending: false,
+    } as never);
+    vi.mocked(authClient.useListOrganizations).mockReturnValue({
+      data: [
+        { id: "fallback-org", name: "Fallback Org" },
+        { id: "other-org", name: "Other Org" },
+      ],
+      isPending: false,
+    } as never);
+    vi.mocked(authClient.useActiveOrganization).mockReturnValue({
+      data: null,
+      isPending: false,
+    } as never);
+
+    // `useBetterAuthState` now reads `useGuardedNavigation` (the org-switch/sign-out
+    // guard fix below), which throws outside an `EditorDirtyProvider` — the same
+    // reason `renderWithRun` exists rather than a bare `render` for every other
+    // BetterAuthSection/MobileAuthSection test in this file.
+    renderWithRun(<BetterAuthSection />);
+
+    const select = screen.getByRole("combobox", {
+      name: "Switch organization",
+    }) as HTMLSelectElement;
+    expect(select.value).toBe("fallback-org");
   });
 });
