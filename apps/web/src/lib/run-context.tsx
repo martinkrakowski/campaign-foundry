@@ -159,6 +159,42 @@ function pipelineUnreachable(status: number, error?: string): Error {
   );
 }
 
+export const NO_ORGANISATION_YET_MESSAGE = "This account belongs to no organisation.";
+
+/**
+ * Handle pipeline API responses that are not OK (PT-1b2 item 5).
+ * A 401 unauthenticated routes to /sign-in, and a 403 no_membership shows a
+ * "no organisation yet" state rather than the pipeline-unreachable error.
+ */
+export function handlePipelineResponseError(
+  status: number,
+  data: unknown,
+  includeErrorInFallback = false,
+): Error {
+  const code =
+    typeof data === "object" && data !== null
+      ? (data as { code?: unknown }).code
+      : undefined;
+  const errorMsg =
+    typeof data === "object" && data !== null
+      ? (data as { error?: unknown }).error
+      : undefined;
+  const msgStr = typeof errorMsg === "string" ? errorMsg : undefined;
+
+  if (status === 401 && (code === "unauthenticated" || code === undefined)) {
+    if (typeof window !== "undefined") {
+      window.location.assign?.("/sign-in") ?? (window.location.href = "/sign-in");
+    }
+    return new Error(msgStr ?? "Sign in required.");
+  }
+
+  if (status === 403 && code === "no_membership") {
+    return new Error(msgStr ?? NO_ORGANISATION_YET_MESSAGE);
+  }
+
+  return pipelineUnreachable(status, includeErrorInFallback ? msgStr : undefined);
+}
+
 /**
  * The one "is there a real persisted run for this brief?" rule, shared by the mount
  * restore, setBrief, and lost-job recovery. A present `log` marks a real run (a halted,
@@ -240,7 +276,11 @@ export function normalizeRunResult(result: RunResult): RunResult {
  */
 export async function fetchPersistedRun(campaignId: string): Promise<RunResult | null> {
   const res = await fetch(`${API}/campaigns/result?campaignId=${encodeURIComponent(campaignId)}`);
-  if (!res.ok) throw pipelineUnreachable(res.status);
+  if (!res.ok) {
+    const raw = await res.text();
+    const data = parseJson(raw);
+    throw handlePipelineResponseError(res.status, data);
+  }
   const d = (await res.json()) as RunResult;
   // The one place persisted JSON becomes a RunResult, so the one place to narrow it.
   if (d?.log?.campaignId === campaignId && (d.assets?.length || d.log))
@@ -273,6 +313,9 @@ async function pollJob(
     const res = await fetch(`${API}/campaigns/jobs/${encodeURIComponent(jobId)}`, { signal });
     if (res.status === 404) return { kind: "lost" };
     const data = parseJson(await res.text());
+    if (res.status === 401 || (res.status === 403 && data?.code === "no_membership")) {
+      throw handlePipelineResponseError(res.status, data);
+    }
     if (res.ok && data?.status === "failed") {
       throw new Error(typeof data.error === "string" ? data.error : "Generation failed");
     }
@@ -284,10 +327,7 @@ async function pollJob(
     if (!res.ok || !data) {
       transient += 1;
       if (transient >= JOB_POLL_MAX_TRANSIENT) {
-        throw pipelineUnreachable(
-          res.status,
-          typeof data?.error === "string" ? data.error : undefined,
-        );
+        throw handlePipelineResponseError(res.status, data, true);
       }
     } else {
       transient = 0; // a well-formed "running" snapshot
@@ -333,7 +373,11 @@ export async function fetchDecisions(campaignId: string): Promise<StoredDecision
   const res = await fetch(
     `${API}/campaigns/decisions?campaignId=${encodeURIComponent(campaignId)}`,
   );
-  if (!res.ok) throw pipelineUnreachable(res.status);
+  if (!res.ok) {
+    const raw = await res.text();
+    const data = parseJson(raw);
+    throw handlePipelineResponseError(res.status, data);
+  }
   return narrowDecisions(await res.json());
 }
 
@@ -353,7 +397,11 @@ export async function saveDecisions(
     body: JSON.stringify({ campaignId, revision, decisions }),
   });
   if (res.status === 409) return "conflict";
-  if (!res.ok) throw pipelineUnreachable(res.status);
+  if (!res.ok) {
+    const raw = await res.text();
+    const data = parseJson(raw);
+    throw handlePipelineResponseError(res.status, data);
+  }
   return narrowDecisions(await res.json());
 }
 
@@ -775,7 +823,10 @@ export function RunProvider({ children }: { children: ReactNode }) {
           setRun({ result: d, target: next });
           if (d.assets?.length) setAssetVersion((v) => v + 1);
         })
-        .catch(() => {
+        .catch((err) => {
+          if (err instanceof Error && /organisation/i.test(err.message)) {
+            setError(err.message);
+          }
           /* F6: could-not-ask is not absence — restore nothing, claim nothing. A
              later successful fetch (a run, a re-roll, a brief switch) heals it. */
         });
@@ -834,7 +885,10 @@ export function RunProvider({ children }: { children: ReactNode }) {
         setRun({ result: d, target: startBrief });
         if (d.assets?.length) setAssetVersion((v) => v + 1);
       })
-      .catch(() => {
+      .catch((err) => {
+        if (err instanceof Error && /organisation/i.test(err.message)) {
+          setError(err.message);
+        }
         /* F6: could-not-ask is not absence — restore nothing, claim nothing. */
       });
     return () => {
@@ -940,10 +994,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
           `Unexpected response from the pipeline API (HTTP ${res.status}, expected 202 with a job id) — the API and UI versions differ.`,
         );
       }
-      throw pipelineUnreachable(
-        res.status,
-        typeof data?.error === "string" ? data.error : undefined,
-      );
+      throw handlePipelineResponseError(res.status, data, true);
     },
     [selectedModel],
   );

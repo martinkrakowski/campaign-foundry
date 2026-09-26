@@ -171,12 +171,15 @@ export class BriefsApiError extends Error {
    * write instead of the user reloading.
    */
   readonly revision?: string;
+  /** Error code from the API (e.g. "unauthenticated" or "no_membership"). */
+  readonly code?: string;
 
-  constructor(message: string, status: number, revision?: string) {
+  constructor(message: string, status: number, revision?: string, code?: string) {
     super(message);
     this.name = "BriefsApiError";
     this.status = status;
     if (revision !== undefined) this.revision = revision;
+    if (code !== undefined) this.code = code;
   }
 }
 
@@ -223,10 +226,24 @@ async function requestJson(url: string, init?: RequestInit): Promise<unknown> {
       typeof (data as { revision?: unknown }).revision === "string"
         ? (data as { revision: string }).revision
         : undefined;
+    const code =
+      typeof data === "object" &&
+      data !== null &&
+      typeof (data as { code?: unknown }).code === "string"
+        ? (data as { code: string }).code
+        : undefined;
+
+    if (res.status === 401 && (code === "unauthenticated" || code === undefined)) {
+      if (typeof window !== "undefined") {
+        window.location.assign?.("/sign-in") ?? (window.location.href = "/sign-in");
+      }
+    }
+
     throw new BriefsApiError(
       errorFrom(data, `Request failed (HTTP ${res.status})`),
       res.status,
       revision,
+      code,
     );
   }
   return data;

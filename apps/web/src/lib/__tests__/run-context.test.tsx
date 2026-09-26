@@ -20,6 +20,8 @@ import {
   DECISIONS_UNREADABLE_MESSAGE,
   fetchDecisions,
   saveDecisions,
+  handlePipelineResponseError,
+  NO_ORGANISATION_YET_MESSAGE,
   type Asset,
 } from "@/lib/run-context";
 import {
@@ -2781,5 +2783,105 @@ describe("run-context 401 and 403 pipeline error handling", () => {
     });
     await expect(fetchPersistedRun("camp")).rejects.toThrow(/organisation/i);
     await expect(fetchPersistedRun("camp")).rejects.not.toThrow(/Pipeline API unreachable/);
+  });
+
+  test("fetchDecisions and saveDecisions handle 401 and 403", async () => {
+    const assign = vi.fn();
+    vi.stubGlobal("window", { ...window, location: { ...window.location, assign } });
+
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(
+      json({ error: "Sign in required.", code: "unauthenticated" }, 401),
+    );
+    await expect(fetchDecisions("camp")).rejects.toThrow();
+    expect(assign).toHaveBeenCalledWith("/sign-in");
+
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(
+      json({ error: "This account belongs to no organisation.", code: "no_membership" }, 403),
+    );
+    await expect(fetchDecisions("camp")).rejects.toThrow(/organisation/i);
+
+    assign.mockClear();
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(
+      json({ error: "Sign in required.", code: "unauthenticated" }, 401),
+    );
+    await expect(saveDecisions("camp", null, {})).rejects.toThrow();
+    expect(assign).toHaveBeenCalledWith("/sign-in");
+
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(
+      json({ error: "This account belongs to no organisation.", code: "no_membership" }, 403),
+    );
+    await expect(saveDecisions("camp", null, {})).rejects.toThrow(/organisation/i);
+  });
+
+  test("execute on 401 routes to /sign-in and on 403 shows no organisation yet state", async () => {
+    const assign = vi.fn();
+    vi.stubGlobal("window", { ...window, location: { ...window.location, assign } });
+
+    mockPipelineApi({
+      post: () => json({ error: "Sign in required.", code: "unauthenticated" }, 401),
+    });
+    const { result } = setup();
+    await act(async () => {
+      await result.current.execute();
+    });
+    expect(assign).toHaveBeenCalledWith("/sign-in");
+
+    mockPipelineApi({
+      post: () =>
+        json({ error: "This account belongs to no organisation.", code: "no_membership" }, 403),
+    });
+    await act(async () => {
+      await result.current.execute();
+    });
+    expect(result.current.error).toBe("This account belongs to no organisation.");
+    expect(result.current.error).not.toMatch(/Pipeline API unreachable/);
+  });
+
+  test("pollJob on 401 routes to /sign-in and on 403 fails run with organisation error", async () => {
+    const assign = vi.fn();
+    vi.stubGlobal("window", { ...window, location: { ...window.location, assign } });
+
+    mockPipelineApi({
+      post: () => json({ jobId: "job-1" }, 202),
+      job: () => json({ error: "Sign in required.", code: "unauthenticated" }, 401),
+    });
+    const { result } = setup();
+    await act(async () => {
+      await result.current.execute();
+    });
+    expect(assign).toHaveBeenCalledWith("/sign-in");
+
+    mockPipelineApi({
+      post: () => json({ jobId: "job-2" }, 202),
+      job: () =>
+        json({ error: "This account belongs to no organisation.", code: "no_membership" }, 403),
+    });
+    await act(async () => {
+      await result.current.execute();
+    });
+    expect(result.current.error).toBe("This account belongs to no organisation.");
+  });
+
+  test("setBrief catches organisation error and sets context error", async () => {
+    mockPipelineApi({
+      result: () =>
+        json({ error: "This account belongs to no organisation.", code: "no_membership" }, 403),
+    });
+    const { result } = setup();
+    await act(async () => {
+      result.current.setBrief({ ...result.current.brief, id: "other-camp" });
+    });
+    expect(result.current.error).toBe("This account belongs to no organisation.");
+  });
+
+  test("handlePipelineResponseError handles href fallback and undefined messages", () => {
+    const loc = { href: "" } as unknown as Location;
+    vi.stubGlobal("window", { ...window, location: loc });
+    const err401 = handlePipelineResponseError(401, null);
+    expect(err401.message).toBe("Sign in required.");
+    expect(loc.href).toBe("/sign-in");
+
+    const err403 = handlePipelineResponseError(403, { code: "no_membership" });
+    expect(err403.message).toBe(NO_ORGANISATION_YET_MESSAGE);
   });
 });
