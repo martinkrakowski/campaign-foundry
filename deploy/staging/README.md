@@ -62,17 +62,22 @@ empty subject; Docker and `openssl` verify it.
 ### Auth secret (once, owner)
 
 Staging runs Better Auth (`AUTH_MODE=better-auth`), which needs a secret of at least 32
-characters. It is generated on the node, so it never touches a laptop or the repo:
+characters. It is generated on the node, so it never touches a laptop or the repo. On a fresh
+cluster, create the namespace first (the deploy would otherwise create it):
 
 ```sh
+ssh m 'KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl create namespace campaign-foundry-staging --dry-run=client -o yaml | KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl apply -f -'
 ssh m 'KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl -n campaign-foundry-staging create secret generic campaign-foundry-auth --from-literal=secret="$(openssl rand -hex 32)"'
 ```
 
-`deploy.sh` refuses to roll out while it is missing.
+`deploy.sh` checks it before building anything, and refuses while it is missing, has no
+`secret` key, or is shorter than 32 characters.
 
 ### First sign-in (once, owner)
 
-With no `RESEND_API_KEY`, the magic link is written to the API log. Request it on
+With no `RESEND_API_KEY`, the magic link is written to the API log. **Anyone who can read
+that log can sign in as whoever requested a link**, so on staging log access is account
+access; set `RESEND_API_KEY` (and `EMAIL_FROM`) to send real mail instead. Request it on
 https://campaign-foundry.midnight.lan/sign-in, then read it:
 
 ```sh
@@ -82,7 +87,7 @@ ssh m 'KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl -n campaign-foundry-staging 
 After that first sign-in, make the account the owner of the `local` org:
 
 ```sh
-ssh m 'KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl -n campaign-foundry-staging exec deploy/campaign-foundry -c api -- yarn auth:bootstrap you@example.com'
+ssh m 'KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl -n campaign-foundry-staging exec deploy/campaign-foundry -c api -- node node_modules/tsx/dist/cli.mjs apps/api/bin/auth-cli.ts you@example.com'
 ```
 
 ## Deploy
