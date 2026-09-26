@@ -14,20 +14,8 @@ export const LEASE_MS = 60_000;
 /** How often `runJob` (`lib/jobs.ts`) refreshes a claim's lease while it runs. */
 export const HEARTBEAT_INTERVAL_MS = 15_000;
 
-/**
- * Thrown by a fenced write (`progressJob`, `completeJob`, `failJob`) when the
- * job row no longer holds the lease it was minted with: the reaper already
- * failed it, or it was already settled. The write is refused rather than
- * silently dropped, because unlike a progress tick (advisory, and already
- * swallowed by its only caller) a completion or failure is the one thing that
- * must never land on a campaign another worker has since claimed.
- */
-export class JobLeaseLostError extends Error {
-  constructor(id: string) {
-    super(`Job "${id}" no longer holds its lease (it was reaped or already settled).`);
-    this.name = "JobLeaseLostError";
-  }
-}
+export { JobLeaseLostError } from "./job-store.port.js";
+
 
 /** A millisecond duration as the text `pg`/PGlite parse into an `interval`. */
 function asInterval(ms: number): string {

@@ -5,7 +5,9 @@ import { join } from "node:path";
 import type { SqlClient } from "../../db/sql-client.js";
 import { migratedDatabase } from "../../db/__tests__/pglite-client.js";
 import { DecisionConflictError, type DecisionRecord } from "../decision-store.port.js";
+import { JobLeaseLostError } from "../job-store.port.js";
 import { FsDecisionStore } from "../fs-decision-store.js";
+
 import { PgDecisionStore } from "../pg-decision-store.js";
 
 const rec = (verdict: "approved" | "rejected", run = "run-1"): DecisionRecord => ({
@@ -157,4 +159,34 @@ describe("PgDecisionStore (PT-3, D173)", () => {
       new PgDecisionStore(db, "ghost").writeDecisions("camp", { a: rec("approved") }),
     ).rejects.toThrow();
   });
+
+  test("a pg decisions write is refused for a lapsed lease (pre-seeded job row), and accepted for a live one", async () => {
+    const store = new PgDecisionStore(db, "local");
+    const map = { "alpha/1:1/default": rec("approved") };
+
+    await db.query(
+      `insert into job (id, org_id, campaign_id, status, lease_expires_at)
+       values ($1, 'local', 'camp', 'running', now() - interval '10 seconds')`,
+      ["lapsed-run"],
+    );
+    await expect(
+      store.writeDecisions("camp", map, undefined, { runId: "lapsed-run" }),
+    ).rejects.toBeInstanceOf(JobLeaseLostError);
+
+    await db.query(
+      `insert into job (id, org_id, campaign_id, status, lease_expires_at)
+       values ($1, 'local', 'camp-live', 'running', now() + interval '60 seconds')`,
+      ["live-run"],
+    );
+    await expect(
+      store.writeDecisions("camp-live", map, undefined, { runId: "live-run" }),
+    ).resolves.toBeDefined();
+  });
+
+  test("no fence leaves behaviour unchanged", async () => {
+    const store = new PgDecisionStore(db, "local");
+    const map = { "alpha/1:1/default": rec("approved") };
+    await expect(store.writeDecisions("camp-no-fence", map)).resolves.toBeDefined();
+  });
 });
+

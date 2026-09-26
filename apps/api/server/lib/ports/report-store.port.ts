@@ -37,13 +37,20 @@ export interface ReportStorePort {
    * the stored revision. The compare and the write are one atomic step in the
    * store, closing the cross-process race `report.ts`'s guard only narrows
    * (D79 on files). A mismatch throws `ReportConflictError`.
+   *
+   * `fence` (PT-6a2, D171, D78): optional run id that fences the write. When
+   * provided, the write is refused (throws `JobLeaseLostError`) if the run no
+   * longer holds its lease (not running or lease lapsed). Without a fence,
+   * today's behaviour is preserved (the CLI and direct writes pass none).
    */
   writeReport(
     campaignId: string,
     payload: string,
     expectedRevision?: string | null,
+    fence?: { runId: string },
   ): Promise<string>;
 }
+
 
 /** A write whose expected revision is no longer the stored one (D173's shape, D79). */
 export class ReportConflictError extends Error {

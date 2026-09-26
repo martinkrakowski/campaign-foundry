@@ -20,12 +20,15 @@ import { isPersistedAsset, readReport, reportRevision, writeReport } from "../re
 import { campaignReportPath } from "../ports/fs-report-store.js";
 import {
   getDecisionStore,
+  getJobStore,
   resetDecisionStore,
   resetReportStore,
   setDecisionStore,
   setReportStore,
   type DecisionStorePort,
 } from "../ports/index.js";
+import { JobLeaseLostError } from "../ports/job-store.port.js";
+
 import { hashBytes } from "../brief-files.js";
 
 import { LOCAL_TENANT } from "../tenant.js";
@@ -981,4 +984,15 @@ describe("reports go through the report store (PT-0a)", () => {
       writeReport(LOCAL_TENANT, result([asset()]), { expectedRevision: "server-revision" }),
     ).rejects.toBe(conflict);
   });
+
+  test("the fs late write refused after failJob", async () => {
+    const jobStore = getJobStore(LOCAL_TENANT);
+    const jobId = await jobStore.createJob("camp");
+    await jobStore.failJob(jobId, "deadline exceeded");
+
+    await expect(
+      writeReport(LOCAL_TENANT, result([asset()]), { fence: { runId: jobId } }),
+    ).rejects.toBeInstanceOf(JobLeaseLostError);
+  });
 });
+

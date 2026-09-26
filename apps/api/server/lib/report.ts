@@ -191,7 +191,15 @@ async function readPersistedAssets(
 export async function writeReport(
   scope: StorageScope,
   result: PipelineResult,
-  { merge = false, expectedRevision }: { merge?: boolean; expectedRevision?: string | null } = {},
+  {
+    merge = false,
+    expectedRevision,
+    fence,
+  }: {
+    merge?: boolean;
+    expectedRevision?: string | null;
+    fence?: { runId: string };
+  } = {},
 ): Promise<string> {
   // The campaign id is the report's identity: the use case always stamps the brief id,
   // and a run without one has no report to write (the "latest" pointer is gone).

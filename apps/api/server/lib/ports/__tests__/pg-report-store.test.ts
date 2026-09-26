@@ -7,7 +7,9 @@ import { migratedDatabase } from "../../db/__tests__/pglite-client.js";
 import { resetDatabase, setDatabase } from "../../db/database.js";
 import { FsReportStore } from "../fs-report-store.js";
 import { ReportConflictError } from "../report-store.port.js";
+import { JobLeaseLostError } from "../job-store.port.js";
 import { PgReportStore } from "../pg-report-store.js";
+
 import { getReportStore, resetReportStore } from "../index.js";
 import { LOCAL_TENANT, type TenantContext } from "../../tenant.js";
 
@@ -113,7 +115,39 @@ describe("PgReportStore (PT-3c, D169)", () => {
     );
     await expect(store.readReport("camp")).rejects.toThrow(SyntaxError);
   });
+
+  test("a pg report write is refused for a lapsed lease (pre-seeded job row), and accepted for a live one", async () => {
+    const store = new PgReportStore(db, "local");
+    const payload = JSON.stringify({ assets: [{ productId: "alpha" }] });
+
+    await db.query(
+      `insert into job (id, org_id, campaign_id, status, lease_expires_at)
+       values ($1, 'local', 'camp', 'running', now() - interval '10 seconds')`,
+      ["lapsed-run"],
+    );
+    await expect(
+      store.writeReport("camp", payload, undefined, { runId: "lapsed-run" }),
+    ).rejects.toBeInstanceOf(JobLeaseLostError);
+
+    await db.query(
+      `insert into job (id, org_id, campaign_id, status, lease_expires_at)
+       values ($1, 'local', 'camp-live', 'running', now() + interval '60 seconds')`,
+      ["live-run"],
+    );
+    await expect(
+      store.writeReport("camp-live", payload, undefined, { runId: "live-run" }),
+    ).resolves.toBe("reports/camp-live.json");
+  });
+
+  test("no fence leaves behaviour unchanged", async () => {
+    const store = new PgReportStore(db, "local");
+    const payload = JSON.stringify({ assets: [{ productId: "alpha" }] });
+    await expect(store.writeReport("camp-no-fence", payload)).resolves.toBe(
+      "reports/camp-no-fence.json",
+    );
+  });
 });
+
 
 describe("STORE_BACKEND=postgres puts reports in the database, one store per org (PT-3c)", () => {
   const saved = process.env.STORE_BACKEND;

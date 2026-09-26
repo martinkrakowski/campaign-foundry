@@ -39,6 +39,7 @@ export class PgReportStore implements ReportStorePort {
     campaignId: string,
     payload: string,
     expectedRevision?: string | null,
+    fence?: { runId: string },
   ): Promise<string> {
     if (!SAFE_ID_PATTERN.test(campaignId)) {
       throw new Error(`Report campaign id ${JSON.stringify(campaignId)} is not a safe id.`);

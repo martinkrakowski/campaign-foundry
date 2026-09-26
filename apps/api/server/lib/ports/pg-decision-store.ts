@@ -69,6 +69,7 @@ export class PgDecisionStore implements DecisionStorePort {
     campaignId: string,
     decisions: DecisionMap,
     expectedRevision?: string | null,
+    fence?: { runId: string },
   ): Promise<string> {
     if (!SAFE_ID_PATTERN.test(campaignId)) {
       throw new Error(`Decisions campaign id ${JSON.stringify(campaignId)} is not a safe id.`);

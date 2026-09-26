@@ -7,6 +7,8 @@ import {
   type Verdict,
 } from "./ports/decision-store.port.js";
 import type { StorageScope } from "./run-environment.js";
+import { LOCAL_TENANT } from "./tenant.js";
+
 
 export type { DecisionMap, DecisionRecord, Verdict };
 
@@ -84,6 +86,8 @@ export async function retireDecisions(
   store: DecisionStorePort,
   campaignId: string,
   keys?: ReadonlySet<string>,
+  fence?: { runId: string },
+  scope: StorageScope = LOCAL_TENANT,
 ): Promise<void> {
   // Written against the revision it read, so a save from another process that
   // lands in between is never overwritten: the retirement reads again and retries.

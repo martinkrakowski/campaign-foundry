@@ -12,8 +12,10 @@ import {
   withDecisionLock,
   type DecisionRecord,
 } from "../decisions.js";
-import { getDecisionStore, resetDecisionStore } from "../ports/index.js";
+import { getDecisionStore, getJobStore, resetDecisionStore } from "../ports/index.js";
+import { JobLeaseLostError } from "../ports/job-store.port.js";
 import { LOCAL_TENANT } from "../tenant.js";
+
 
 const at1 = "2026-09-01T00:00:00.000Z";
 const rec = (verdict: "approved" | "rejected"): DecisionRecord => ({
@@ -167,4 +169,17 @@ describe("retireDecisions against a concurrent save (PT-3)", () => {
     };
     await expect(retireDecisions(broken, "camp")).rejects.toThrow("disk full");
   });
+
+  test("retireDecisions is refused after failJob when fence is provided", async () => {
+    const jobStore = getJobStore(LOCAL_TENANT);
+    const jobId = await jobStore.createJob("camp");
+    await jobStore.failJob(jobId, "deadline exceeded");
+
+    const store = getDecisionStore(LOCAL_TENANT);
+    await store.writeDecisions("camp", { a: rec("approved") });
+    await expect(
+      retireDecisions(store, "camp", undefined, { runId: jobId }),
+    ).rejects.toBeInstanceOf(JobLeaseLostError);
+  });
 });
+

@@ -12,7 +12,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PipelineExecutionLog } from "@campaignfoundry/CampaignOrchestration";
 import { FsJobStore, JobCapacityError, JOB_TTL_MS, MAX_JOBS } from "../fs-job-store.js";
-import type { JobResult, StoredJob } from "../job-store.port.js";
+import { JobLeaseLostError, type JobResult, type StoredJob } from "../job-store.port.js";
+
 
 const payload = (over: Partial<JobResult> = {}): JobResult => ({
   halted: false,
@@ -445,4 +446,13 @@ describe("FsJobStore", () => {
       }
     },
   );
+
+  test("fs completeJob after failJob refused", async () => {
+    const id = await store.createJob("camp");
+    await store.failJob(id, "deadline exceeded");
+    await expect(store.completeJob(id, payload())).rejects.toBeInstanceOf(JobLeaseLostError);
+    await expect(store.failJob(id, "another failure")).rejects.toBeInstanceOf(JobLeaseLostError);
+  });
 });
+
+
