@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "lane": "FU-server-job-awareness",
+  "mutations": [
+    {
+      "file": "apps/web/src/lib/run-context.tsx",
+      "before": "        void adoptJob(startBrief, jobId, { adopted: true });",
+      "after": "          void startBrief; void jobId;",
+      "because": "skipping the adoption call after restoring a brief prevents the web client from adopting an in-flight background run",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/lib/__tests__/run-context.test.tsx",
+        "-t",
+        "reload adopts a running job"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/lib/run-context.tsx",
+      "before": "    async (target: CampaignBrief, jobId: string, opts: { adopted?: boolean } = {}) => {\n      setLoading(true);",
+      "after": "    async (target: CampaignBrief, jobId: string, opts: { adopted?: boolean } = {}) => {",
+      "because": "failing to set loading when adopting a running job lets the UI show settled controls while background work is still polling",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/lib/__tests__/run-context.test.tsx",
+        "-t",
+        "reload adopts a running job"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
