@@ -1,5 +1,5 @@
 import { describe, test, expect, afterEach, beforeEach, vi } from "vitest";
-import { render, screen, within, fireEvent, act } from "@testing-library/react";
+import { render, screen, within, fireEvent, act, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createElement, useEffect, type ReactElement } from "react";
 import { nextMock, renderWithRun, ShellProviders } from "@/__tests__/helpers";
@@ -745,6 +745,92 @@ describe("Header — auth and organization switching (PT-1b2)", () => {
     expect(screen.getByRole("dialog", { name: "Unsaved edits" })).toBeTruthy();
   });
 
+  test("signing out while dirty asks for confirmation before signing out, same guard as the tabs", async () => {
+    // Sign-out reloads to /sign-in — exactly the kind of navigation `handleTabClick`
+    // already guards for the route tabs above. Without routing it through the same
+    // `guardedAction`, it discarded unsaved brief edits with no prompt at all.
+    const user = userEvent.setup();
+    const assignSpy = vi.fn();
+    window.location.assign = assignSpy;
+
+    vi.spyOn(briefsApi, "getCapabilities").mockResolvedValue({
+      motion: true,
+      auth: { mode: "better-auth", google: false },
+    });
+    vi.mocked(authClient.useSession).mockReturnValue({
+      data: { user: { email: "user@example.com" } },
+      isPending: false,
+    } as never);
+    vi.mocked(authClient.useListOrganizations).mockReturnValue({
+      data: [{ id: "org-1", name: "Solo Org" }],
+      isPending: false,
+    } as never);
+    vi.mocked(authClient.useActiveOrganization).mockReturnValue({
+      data: { id: "org-1", name: "Solo Org" },
+      isPending: false,
+    } as never);
+    const signOutSpy = vi.spyOn(authClient, "signOut").mockResolvedValue({} as never);
+
+    renderDirty(<Header />);
+
+    const userMenuButton = await screen.findByRole("button", { name: "User menu" });
+    await user.click(userMenuButton);
+    await user.click(screen.getByRole("menuitem", { name: "Sign out" }));
+
+    // Queued behind the guard — neither the API call nor the navigation has run yet.
+    expect(screen.getByRole("dialog", { name: "Unsaved edits" })).toBeTruthy();
+    expect(signOutSpy).not.toHaveBeenCalled();
+    expect(assignSpy).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Leave" }));
+
+    await waitFor(() => expect(signOutSpy).toHaveBeenCalledTimes(1));
+    expect(assignSpy).toHaveBeenCalledWith("/sign-in");
+  });
+
+  test("switching organisation while dirty asks for confirmation before switching, same guard as the tabs", async () => {
+    const user = userEvent.setup();
+    const reloadSpy = vi.fn();
+    window.location.reload = reloadSpy;
+
+    vi.spyOn(briefsApi, "getCapabilities").mockResolvedValue({
+      motion: true,
+      auth: { mode: "better-auth", google: false },
+    });
+    vi.mocked(authClient.useSession).mockReturnValue({
+      data: { user: { email: "multi@example.com" } },
+      isPending: false,
+    } as never);
+    vi.mocked(authClient.useListOrganizations).mockReturnValue({
+      data: [
+        { id: "org-1", name: "Primary Org" },
+        { id: "org-2", name: "Secondary Org" },
+      ],
+      isPending: false,
+    } as never);
+    vi.mocked(authClient.useActiveOrganization).mockReturnValue({
+      data: { id: "org-1", name: "Primary Org" },
+      isPending: false,
+    } as never);
+    const setActiveSpy = vi
+      .spyOn(authClient.organization, "setActive")
+      .mockResolvedValue({} as never);
+
+    renderDirty(<Header />);
+
+    const switcher = await screen.findByRole("combobox", { name: "Switch organization" });
+    await user.selectOptions(switcher, "org-2");
+
+    expect(screen.getByRole("dialog", { name: "Unsaved edits" })).toBeTruthy();
+    expect(setActiveSpy).not.toHaveBeenCalled();
+    expect(reloadSpy).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Leave" }));
+
+    await waitFor(() => expect(setActiveSpy).toHaveBeenCalledWith({ organizationId: "org-2" }));
+    expect(reloadSpy).toHaveBeenCalledTimes(1);
+  });
+
   test("does not update capabilities if unmounted before promise resolves", async () => {
     // As in the sign-in page's identical test: React 18 drops a late setState on an
     // unmounted component silently, with no dedicated warning to assert on — the
@@ -853,7 +939,11 @@ describe("Header — auth and organization switching (PT-1b2)", () => {
       isPending: false,
     } as never);
 
-    render(<BetterAuthSection />);
+    // `useBetterAuthState` now reads `useGuardedNavigation` (the org-switch/sign-out
+    // guard fix below), which throws outside an `EditorDirtyProvider` — the same
+    // reason `renderWithRun` exists rather than a bare `render` for every other
+    // BetterAuthSection/MobileAuthSection test in this file.
+    renderWithRun(<BetterAuthSection />);
 
     const select = screen.getByRole("combobox", {
       name: "Switch organization",

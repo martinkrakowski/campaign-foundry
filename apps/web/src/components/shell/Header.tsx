@@ -375,12 +375,16 @@ function useBetterAuthState() {
   // fetch is the other, rarer failure path, so both are caught here. Neither may
   // reload or navigate: the previous organisation/session is still the live one.
   const [authError, setAuthError] = useState<string | null>(null);
+  // A reload (switch) or a navigation to /sign-in (sign-out) discards whatever the
+  // operator hasn't saved, exactly like the tab links `handleTabClick` guards below —
+  // so both gestures go through the same guard, never the API call directly.
+  const { guardedAction } = useGuardedNavigation();
 
   const email = session?.data?.user?.email;
   const organizations = orgs?.data;
   const activeOrgId = activeOrg?.data?.id ?? organizations?.[0]?.id;
 
-  const handleSwitchOrg = async (orgId: string) => {
+  const switchOrg = async (orgId: string) => {
     try {
       const res = await authClient.organization.setActive({ organizationId: orgId });
       if (res?.error) {
@@ -394,7 +398,7 @@ function useBetterAuthState() {
     }
   };
 
-  const handleSignOut = async () => {
+  const signOutNow = async () => {
     try {
       const res = await authClient.signOut();
       if (res?.error) {
@@ -406,6 +410,18 @@ function useBetterAuthState() {
     } catch (err) {
       setAuthError(err instanceof Error ? err.message : "Could not sign out.");
     }
+  };
+
+  // Neither the API call nor its error state runs until the operator has actually
+  // agreed to leave: while dirty, `guardedAction` queues the whole gesture behind
+  // the one shared confirm dialog (never stacked) and runs it on confirm; clean, it
+  // runs immediately — unchanged from before this guard existed.
+  const handleSwitchOrg = (orgId: string): void => {
+    guardedAction(() => void switchOrg(orgId));
+  };
+
+  const handleSignOut = (): void => {
+    guardedAction(() => void signOutNow());
   };
 
   return { email, organizations, activeOrgId, authError, handleSwitchOrg, handleSignOut };
@@ -428,7 +444,7 @@ export function BetterAuthSection() {
         <select
           aria-label="Switch organization"
           value={activeOrgId}
-          onChange={(e) => void handleSwitchOrg(e.target.value)}
+          onChange={(e) => handleSwitchOrg(e.target.value)}
           className="h-8 rounded-md border border-border-control bg-surface-2 px-2 font-mono text-xs text-text-primary focus:outline-none focus:ring-1 focus:ring-brand-primary"
         >
           {organizations?.map((org) => (
@@ -438,7 +454,7 @@ export function BetterAuthSection() {
           ))}
         </select>
       )}
-      <UserMenu email={email} onSignOut={() => void handleSignOut()} />
+      <UserMenu email={email} onSignOut={handleSignOut} />
     </div>
   );
 }
@@ -454,8 +470,8 @@ export function BetterAuthMobileControls() {
       organizations={organizations}
       activeOrgId={activeOrgId}
       authError={authError}
-      onSwitchOrg={(id) => void handleSwitchOrg(id)}
-      onSignOut={() => void handleSignOut()}
+      onSwitchOrg={handleSwitchOrg}
+      onSignOut={handleSignOut}
     />
   );
 }
