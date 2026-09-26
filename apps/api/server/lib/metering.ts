@@ -8,6 +8,7 @@ import type {
   ImageGeneratorPort,
   Product,
 } from "@campaignfoundry/CampaignOrchestration";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { errorMessage } from "@campaignfoundry/shared";
 import type { UsageStorePort } from "./ports/usage-store.port.js";
 
@@ -33,6 +34,13 @@ export class QuotaExceededError extends Error {
   }
 }
 
+interface ReservationScope {
+  readonly id: string;
+  taken: boolean;
+}
+
+const reservationScope = new AsyncLocalStorage<ReservationScope>();
+
 /**
  * A usage-store failure must not fail a generation the provider already produced
  * and the caller already paid for (PT-7a, fix round): the row is unrecoverable
@@ -49,7 +57,7 @@ async function settleUsage(
     await usage.settle(reservationId, record);
   } catch (error) {
     console.warn(
-      `[metering] could not settle usage (reservation ${reservationId}, org ${record.orgId}, provider ${record.provider}, model ${record.model}, units ${record.units}): ${errorMessage(error)}`,
+      `[metering] could not settle usage; reservation ${reservationId} may be orphaned (org ${record.orgId}, provider ${record.provider}, model ${record.model}, units ${record.units}): ${errorMessage(error)}`,
     );
   }
 }
@@ -64,7 +72,7 @@ async function releaseUsage(usage: UsageStorePort, reservationId: string): Promi
     await usage.release(reservationId);
   } catch (error) {
     console.warn(
-      `[metering] could not release usage reservation ${reservationId}: ${errorMessage(error)}`,
+      `[metering] could not release usage reservation ${reservationId}; reservation may be orphaned: ${errorMessage(error)}`,
     );
   }
 }
@@ -101,13 +109,28 @@ export class MeteredImageGenerator implements ImageGeneratorPort {
     context: BackgroundContext,
     signal?: AbortSignal,
   ): Promise<BackgroundResult> {
-    const reservationId = await this.usage.reserve(this.orgId);
-    if (reservationId === null) {
-      throw new QuotaExceededError(this.orgId);
+    const parentScope = reservationScope.getStore();
+    let reservationId: string;
+    let reservedBySelf = false;
+
+    if (parentScope && !parentScope.taken) {
+      parentScope.taken = true;
+      reservationId = parentScope.id;
+    } else {
+      const reserved = await this.usage.reserve(this.orgId);
+      if (reserved === null) {
+        throw new QuotaExceededError(this.orgId);
+      }
+      reservationId = reserved;
+      reservedBySelf = true;
     }
+
+    const currentScope: ReservationScope = { id: reservationId, taken: false };
     let settled = false;
     try {
-      const result = await this.inner.resolveBackground(product, ratio, context, signal);
+      const result = await reservationScope.run(currentScope, () =>
+        this.inner.resolveBackground(product, ratio, context, signal),
+      );
       // A cached result served no live call, so it billed nothing (D175: "every
       // generation" — a seed-cache hit is not one). And this layer only records
       // when it was the one that actually produced the result — never when a
@@ -126,7 +149,12 @@ export class MeteredImageGenerator implements ImageGeneratorPort {
       return result;
     } finally {
       if (!settled) {
-        await releaseUsage(this.usage, reservationId);
+        if (parentScope && !currentScope.taken) {
+          parentScope.taken = false;
+        }
+        if (reservedBySelf && !currentScope.taken) {
+          await releaseUsage(this.usage, reservationId);
+        }
       }
     }
   }
