@@ -139,6 +139,7 @@ function mapGeneratorError(error: CopyGeneratorError): HttpFailure {
  * revision instead of an overwrite that drops another writer's entries.
  */
 export default defineEventHandler(async (event) => {
+  const scope = requestTenant(event);
   let brief: CampaignBrief | undefined;
   let briefId: string;
   let count: number;
@@ -162,19 +163,19 @@ export default defineEventHandler(async (event) => {
   }
 
   if (brief === undefined) {
-    const found = await getBriefStore(requestTenant(event)).findBriefById(briefId);
+    const found = await getBriefStore(scope).findBriefById(briefId);
     if (!found) {
       setResponseStatus(event, 404);
       return { error: `Brief "${briefId}" not found.` };
     }
     brief = found.brief;
   }
-  if (await isPoolDirSymlink(requestTenant(event), briefId)) {
+  if (await isPoolDirSymlink(scope, briefId)) {
     setResponseStatus(event, 400);
     return { error: SYMLINK_WRITE_ERROR };
   }
 
-  const generator = copyGenerator(runEnvironment(requestTenant(event)));
+  const generator = copyGenerator(runEnvironment(scope));
   if (!generator) {
     setResponseStatus(event, 503);
     return { error: "OPENROUTER_API_KEY is not set" };
@@ -210,10 +211,10 @@ export default defineEventHandler(async (event) => {
 
   // The slow LLM call is done; read→merge→write is serialised per brief so a
   // concurrent request's entries are merged into, never overwritten.
-  return withPoolLock(requestTenant(event), briefId, async () => {
+  return withPoolLock(scope, briefId, async () => {
     let stored;
     try {
-      stored = await readPool(requestTenant(event), briefId);
+      stored = await readPool(scope, briefId);
     } catch (error) {
       if (!(error instanceof InvalidCopyPoolError)) throw error;
       setResponseStatus(event, 422);
@@ -235,7 +236,7 @@ export default defineEventHandler(async (event) => {
     };
     const next = mergePool(existing ?? incoming, incoming);
     try {
-      const written = await writePool(requestTenant(event), next, { expectedRevision });
+      const written = await writePool(scope, next, { expectedRevision });
       setResponseStatus(event, 201);
       return { pool: written.pool, revision: written.revision, added: headlines.length };
     } catch (error) {
