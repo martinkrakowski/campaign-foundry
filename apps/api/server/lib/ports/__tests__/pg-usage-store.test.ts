@@ -195,10 +195,9 @@ describe("PgUsageStore (PT-7a, D175)", () => {
 
     await store.release(recordedId);
 
-    const { rows: after } = await db.query<{ id: string }>(
-      "select id from usage where id = $1",
-      [recordedId],
-    );
+    const { rows: after } = await db.query<{ id: string }>("select id from usage where id = $1", [
+      recordedId,
+    ]);
     expect(after).toHaveLength(1);
   });
 
