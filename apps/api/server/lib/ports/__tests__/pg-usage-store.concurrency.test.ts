@@ -26,7 +26,7 @@ describe.skipIf(!url)("PgUsageStore.reserve races two real connections (PT-7a2, 
   let db: SqlClient;
 
   beforeAll(async () => {
-    const config = databaseConfig({ url, poolMax: "2" }, () => {
+    const config = databaseConfig({ url, poolMax: "5" }, () => {
       throw new Error("a local TEST_DATABASE_URL needs no CA");
     });
     db = pgClient(
@@ -42,38 +42,44 @@ describe.skipIf(!url)("PgUsageStore.reserve races two real connections (PT-7a2, 
     await db.end();
   });
 
-  test("two concurrent reserve calls against quota - 1 admit exactly one", async () => {
-    // Lowercase, digits and hyphens only: 0008 tightened `org_id_check` to that form.
-    const orgId = `org-${randomUUID().slice(0, 18)}`;
-    await db.query("insert into org (id, name, monthly_generation_quota) values ($1, $2, $3)", [
-      orgId,
-      "Racy Org",
-      2,
-    ]);
-
+  test("three concurrent reserve calls against quota - 1 admit exactly one across 10 fresh orgs", async () => {
     const store = new PgUsageStore(db);
-    // Pre-seed 1 recorded row so the org is at quota - 1 (1 out of 2)
-    await store.record({
-      orgId,
-      provider: "imagen",
-      model: "imagen-4.0",
-      units: 1,
-      keyOwner: "platform",
-    });
+    for (let i = 0; i < 10; i++) {
+      // Lowercase, digits and hyphens only: 0008 tightened `org_id_check` to that form.
+      const orgId = `org-${i}-${randomUUID().slice(0, 18)}`;
+      await db.query("insert into org (id, name, monthly_generation_quota) values ($1, $2, $3)", [
+        orgId,
+        `Racy Org ${i}`,
+        2,
+      ]);
 
-    // Two concurrent reserve calls on separate pooled connections
-    const [res1, res2] = await Promise.all([store.reserve(orgId), store.reserve(orgId)]);
-    const admitted = [res1, res2].filter((id): id is string => typeof id === "string");
-    const refused = [res1, res2].filter((id) => id === null);
+      // Pre-seed 1 recorded row so the org is at quota - 1 (1 out of 2)
+      await store.record({
+        orgId,
+        provider: "imagen",
+        model: "imagen-4.0",
+        units: 1,
+        keyOwner: "platform",
+      });
 
-    expect(admitted).toHaveLength(1);
-    expect(refused).toHaveLength(1);
+      // Three concurrent reserve calls on separate pooled connections
+      const [res1, res2, res3] = await Promise.all([
+        store.reserve(orgId),
+        store.reserve(orgId),
+        store.reserve(orgId),
+      ]);
+      const admitted = [res1, res2, res3].filter((id): id is string => typeof id === "string");
+      const refused = [res1, res2, res3].filter((id) => id === null);
 
-    // Verify exactly 2 rows exist (1 recorded, 1 reserved)
-    const { rows } = await db.query<{ count: string }>(
-      `select count(*)::text as count from usage where org_id = $1`,
-      [orgId],
-    );
-    expect(Number(rows[0]!.count)).toBe(2);
+      expect(admitted).toHaveLength(1);
+      expect(refused).toHaveLength(2);
+
+      // Verify exactly 2 rows exist (1 recorded, 1 reserved)
+      const { rows } = await db.query<{ count: string }>(
+        `select count(*)::text as count from usage where org_id = $1`,
+        [orgId],
+      );
+      expect(Number(rows[0]!.count)).toBe(2);
+    }
   });
 });
