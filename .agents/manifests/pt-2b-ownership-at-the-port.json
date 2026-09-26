@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "PT-2b",
+  "mutations": [
+    {
+      "file": "apps/api/server/routes/campaigns/decisions.put.ts",
+      "before": "  await assertOwnedCampaign(tenant, campaignId);",
+      "after": "  // mutant: skip assertOwnedCampaign",
+      "because": "without assertOwnedCampaign, PUT /campaigns/decisions does not verify the campaign belongs to the caller's org before attempting review updates.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/__tests__/ownership-cross-tenant.test.ts",
+        "-t",
+        "PUT /campaigns/decisions answers 404 for another org's campaign on fs"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
