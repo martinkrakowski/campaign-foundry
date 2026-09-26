@@ -2,7 +2,8 @@ import { errorMessage } from "@campaignfoundry/shared";
 import { assertSafeId } from "../../../lib/load-brief.js";
 import { InvalidCopyPoolError, readPool } from "../../../lib/pools.js";
 
-import { requestTenant } from "../../../lib/tenant.js";
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+import { LOCAL_TENANT, requestTenant } from "../../../lib/tenant.js";
 /**
  * GET /campaigns/pools/:briefId — return the persisted copy pool with the
  * revision of the bytes it was read from, or 404. A hand-edited file that is
