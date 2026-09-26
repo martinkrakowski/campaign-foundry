@@ -491,6 +491,58 @@ describe("RunConsumer (PT-6b2, D171, D174d)", () => {
     expect(mockConsumerDisconnect).toHaveBeenCalledTimes(1);
   });
 
+  test("start() disconnects and resets running when subscribe rejects, so a later start() retries", async () => {
+    mockConsumerSubscribe.mockRejectedValueOnce(new Error("subscribe failed"));
+
+    const consumer = new RunConsumer(settings);
+    await expect(consumer.start()).rejects.toThrow("subscribe failed");
+
+    // Cleaned up rather than left connected-but-not-running forever.
+    expect(mockConsumerDisconnect).toHaveBeenCalledTimes(1);
+
+    // running was reset to false, so a later start() actually reconnects
+    // instead of treating the failed attempt as still in progress.
+    mockConsumerSubscribe.mockResolvedValueOnce(undefined);
+    await consumer.start();
+    expect(mockConsumerConnect).toHaveBeenCalledTimes(2);
+  });
+
+  test("start() failure swallows a cleanup disconnect that also rejects", async () => {
+    mockConsumerSubscribe.mockRejectedValueOnce(new Error("subscribe failed"));
+    mockConsumerDisconnect.mockRejectedValueOnce(new Error("disconnect also failed"));
+
+    const consumer = new RunConsumer(settings);
+    await expect(consumer.start()).rejects.toThrow("subscribe failed");
+  });
+
+  test("stop() during a pending connect() disconnects the consumer once startup catches up", async () => {
+    let resolveConnect!: () => void;
+    mockConsumerConnect.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveConnect = resolve;
+        }),
+    );
+
+    const consumer = new RunConsumer(settings);
+    const startPromise = consumer.start();
+
+    // The synchronous prefix of start() (before its first await) has already
+    // set `running = true`, so this stop() is not a no-op: it disconnects
+    // and flips the flag back, even though connect() has not resolved yet.
+    await consumer.stop();
+    expect(mockConsumerDisconnect).toHaveBeenCalledTimes(1);
+
+    // Let startup catch up: connect(), subscribe(), and run() all still
+    // proceed underneath the stop() that already ran.
+    resolveConnect();
+    await startPromise;
+
+    // start() notices `running` is false once run() settles and disconnects
+    // again, rather than leaving a live consumer session past shutdown.
+    expect(mockConsumerDisconnect).toHaveBeenCalledTimes(2);
+  });
+
   test("throws when initialized without settings and kafkaSettings() returns undefined", () => {
     delete process.env.KAFKA_BROKERS;
     expect(() => new RunConsumer()).toThrow(

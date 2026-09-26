@@ -78,17 +78,37 @@ export class RunConsumer {
 
   async start(): Promise<void> {
     if (this.running) return;
-    await this.consumer.connect();
-    await this.consumer.subscribe({ topic: this.topic, fromBeginning: true });
+    // Set before the first await so a concurrent `stop()` (e.g. a Nitro
+    // close hook firing while `connect()` is still pending) sees a
+    // consumer that is already "running" and disconnects it, rather than
+    // finding `running` still false and treating stop() as a no-op.
     this.running = true;
-    await this.consumer.run({
-      autoCommit: false,
-      eachMessage: async (payload: EachMessagePayload) => {
-        await this.handleMessage(payload, async (topic, partition, offset) => {
-          await this.consumer.commitOffsets([{ topic, partition, offset }]);
-        });
-      },
-    });
+    try {
+      await this.consumer.connect();
+      await this.consumer.subscribe({ topic: this.topic, fromBeginning: true });
+      await this.consumer.run({
+        autoCommit: false,
+        eachMessage: async (payload: EachMessagePayload) => {
+          await this.handleMessage(payload, async (topic, partition, offset) => {
+            await this.consumer.commitOffsets([{ topic, partition, offset }]);
+          });
+        },
+      });
+      if (!this.running) {
+        // A `stop()` landed while startup was still in flight: it already
+        // flipped the flag and disconnected, but connect()/subscribe()/run()
+        // kept going underneath it and re-established a live session after
+        // shutdown began. Undo it — kafkajs's disconnect is safe to call
+        // again on an already-disconnected consumer.
+        await this.consumer.disconnect();
+      }
+    } catch (error) {
+      this.running = false;
+      // Best-effort: the startup error is what the caller needs, not a
+      // failure from cleaning up after it.
+      await this.consumer.disconnect().catch(() => undefined);
+      throw error;
+    }
   }
 
   async handleMessage(
