@@ -2,11 +2,7 @@ import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
 import { LOCAL_TENANT } from "../../tenant.js";
 import { InProcessRunDelivery } from "../in-process-run-delivery.js";
 import { KafkaRunDelivery } from "../kafka-run-delivery.js";
-import {
-  getRunDelivery,
-  setRunDelivery,
-  resetRunDelivery,
-} from "../run-delivery-registry.js";
+import { getRunDelivery, setRunDelivery, resetRunDelivery } from "../run-delivery-registry.js";
 import type { RunDeliveryPort } from "../run-delivery.port.js";
 
 vi.mock("kafkajs", () => ({

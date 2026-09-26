@@ -44,11 +44,7 @@ export class RunConsumer {
   private readonly topic: string;
   private running = false;
 
-  constructor(
-    settings?: KafkaSettings,
-    kafkaClient?: Kafka,
-    consumer?: Consumer,
-  ) {
+  constructor(settings?: KafkaSettings, kafkaClient?: Kafka, consumer?: Consumer) {
     const config = settings ?? kafkaSettings();
     if (!config) {
       throw new Error("Cannot initialize RunConsumer without Kafka settings.");

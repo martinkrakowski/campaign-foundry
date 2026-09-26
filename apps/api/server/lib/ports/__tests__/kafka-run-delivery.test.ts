@@ -68,7 +68,9 @@ describe("KafkaRunDelivery (PT-6b2, D174d)", () => {
   });
 
   test("publishes serialized RunRequest keyed <orgId>:<campaignId> and awaits broker ack", async () => {
-    mockProducerSend.mockResolvedValue([{ topicName: "cf.run-requests", partition: 0, errorCode: 0 }]);
+    mockProducerSend.mockResolvedValue([
+      { topicName: "cf.run-requests", partition: 0, errorCode: 0 },
+    ]);
     const delivery = new KafkaRunDelivery(settings);
     const request = sampleRequest();
 

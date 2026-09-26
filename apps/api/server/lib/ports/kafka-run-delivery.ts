@@ -16,11 +16,7 @@ export class KafkaRunDelivery implements RunDeliveryPort {
   private readonly topic: string;
   private connected = false;
 
-  constructor(
-    settings?: KafkaSettings,
-    kafkaClient?: Kafka,
-    producer?: Producer,
-  ) {
+  constructor(settings?: KafkaSettings, kafkaClient?: Kafka, producer?: Producer) {
     const config = settings ?? kafkaSettings();
     if (!config) {
       throw new Error("Cannot initialize KafkaRunDelivery without Kafka settings.");

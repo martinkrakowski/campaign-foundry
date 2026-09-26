@@ -104,7 +104,9 @@ describe("RunConsumer (PT-6b2, D171, D174d)", () => {
 
     startQueuedJobSpy = vi.spyOn(jobs, "startQueuedJob");
     runJobSpy = vi.spyOn(jobs, "runJob").mockImplementation(() => {});
-    executeRunRequestSpy = vi.spyOn(runRequestModule, "executeRunRequest").mockResolvedValue(undefined);
+    executeRunRequestSpy = vi
+      .spyOn(runRequestModule, "executeRunRequest")
+      .mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -179,7 +181,9 @@ describe("RunConsumer (PT-6b2, D171, D174d)", () => {
     expect(commitMock).toHaveBeenCalledWith("cf.run-requests", 0, "16");
     expect(callOrder).toEqual(["startQueuedJob", "commitOffset"]);
     expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining('Dropping duplicate or expired run request for job "00000000-0000-0000-0000-000000000001"'),
+      expect.stringContaining(
+        'Dropping duplicate or expired run request for job "00000000-0000-0000-0000-000000000001"',
+      ),
     );
   });
 
@@ -247,7 +251,9 @@ describe("RunConsumer (PT-6b2, D171, D174d)", () => {
     expect(startQueuedJobSpy).not.toHaveBeenCalled();
     expect(runJobSpy).not.toHaveBeenCalled();
     expect(commitMock).toHaveBeenCalledWith("cf.run-requests", 0, "41");
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Dropping malformed JSON message"));
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Dropping malformed JSON message"),
+    );
   });
 
   test("malformed message missing required fields: logs and commits offset without starting job", async () => {
@@ -269,7 +275,9 @@ describe("RunConsumer (PT-6b2, D171, D174d)", () => {
     expect(startQueuedJobSpy).not.toHaveBeenCalled();
     expect(runJobSpy).not.toHaveBeenCalled();
     expect(commitMock).toHaveBeenCalledWith("cf.run-requests", 0, "51");
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Dropping malformed RunRequest message"));
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Dropping malformed RunRequest message"),
+    );
   });
 
   test("start and stop lifecycle: connects, subscribes, runs with autoCommit false, and disconnects", async () => {
@@ -277,7 +285,10 @@ describe("RunConsumer (PT-6b2, D171, D174d)", () => {
     await consumer.start();
 
     expect(mockConsumerConnect).toHaveBeenCalledTimes(1);
-    expect(mockConsumerSubscribe).toHaveBeenCalledWith({ topic: "cf.run-requests", fromBeginning: false });
+    expect(mockConsumerSubscribe).toHaveBeenCalledWith({
+      topic: "cf.run-requests",
+      fromBeginning: false,
+    });
     expect(mockConsumerRun).toHaveBeenCalledWith(
       expect.objectContaining({
         autoCommit: false,
@@ -316,7 +327,9 @@ describe("RunConsumer (PT-6b2, D171, D174d)", () => {
 
   test("throws when initialized without settings and kafkaSettings() returns undefined", () => {
     delete process.env.KAFKA_BROKERS;
-    expect(() => new RunConsumer()).toThrow("Cannot initialize RunConsumer without Kafka settings.");
+    expect(() => new RunConsumer()).toThrow(
+      "Cannot initialize RunConsumer without Kafka settings.",
+    );
   });
 
   test("constructs with default kafkaSettings and SSL options", () => {

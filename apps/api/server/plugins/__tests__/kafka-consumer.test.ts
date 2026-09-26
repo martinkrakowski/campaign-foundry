@@ -1,5 +1,9 @@
 import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
-import defaultPlugin, { createKafkaConsumerPlugin, type ConsumerInstance, type NitroApp } from "../kafka-consumer.js";
+import defaultPlugin, {
+  createKafkaConsumerPlugin,
+  type ConsumerInstance,
+  type NitroApp,
+} from "../kafka-consumer.js";
 
 const mockConsumerStart = vi.hoisted(() => vi.fn());
 const mockConsumerStop = vi.hoisted(() => vi.fn());
