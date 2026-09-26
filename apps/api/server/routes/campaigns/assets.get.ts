@@ -2,7 +2,7 @@ import { errorMessage } from "@campaignfoundry/shared";
 import { assertSafeId } from "../../lib/load-brief.js";
 import { ASSET_NAME_PATTERN, assetContentType } from "../../lib/asset-files.js";
 import { campaignKnown } from "../../lib/ownership.js";
-import { getAssetStore } from "../../lib/ports/index.js";
+import { getAssetStore, getBriefStore } from "../../lib/ports/index.js";
 
 import { requestTenant } from "../../lib/tenant.js";
 /**
@@ -40,6 +40,16 @@ export default defineEventHandler(async (event) => {
     if (typeof name !== "string" || !ASSET_NAME_PATTERN.test(name)) {
       setResponseStatus(event, 400);
       return { error: "Invalid asset name." };
+    }
+    // D166 (PT-2c): a campaign hidden from this caller by team answers the same
+    // "Asset ... not found" 404 as a missing asset, so the body never says which
+    // applies. Only team visibility is checked here, not the listing: an unsaved
+    // draft has no stored brief, and listing every asset just to read one lets an
+    // unrelated file's disappearance turn a readable request into a 500.
+    const briefs = getBriefStore(scope);
+    if (briefs.supportsTeams && (await briefs.campaignVisibility(briefId)) === "hidden") {
+      setResponseStatus(event, 404);
+      return { error: `Asset "${name}" not found.` };
     }
     const bytes = await getAssetStore(scope).readAsset(briefId, name);
     if (!bytes) {

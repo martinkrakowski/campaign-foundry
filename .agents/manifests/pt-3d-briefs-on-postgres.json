@@ -4,8 +4,8 @@
   "mutations": [
     {
       "file": "apps/api/server/lib/ports/pg-brief-store.ts",
-      "before": "      if (options?.expectedRevision && options.expectedRevision !== current.revision) {",
-      "after": "      if (false && options?.expectedRevision && options.expectedRevision !== current.revision) {",
+      "before": "      if (expectedRevision && expectedRevision !== current.revision) {",
+      "after": "      if (false && expectedRevision && expectedRevision !== current.revision) {",
       "because": "dropping the revision condition lets a stale rewriteBrief land unconditionally, defeating the second-tab conflict guard (D82) the CAS exists to give",
       "command": [
         "yarn",

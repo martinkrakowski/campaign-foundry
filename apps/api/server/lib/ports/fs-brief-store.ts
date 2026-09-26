@@ -5,7 +5,12 @@ import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { errorMessage } from "@campaignfoundry/shared";
 import { resolveConfined } from "../confined-path.js";
 import { parseBriefText, type ParseBriefOptions } from "../load-brief.js";
-import type { BriefStorePort, StoredBrief } from "./brief-store.port.js";
+import {
+  TeamsNotSupportedError,
+  type BriefStorePort,
+  type BriefWriteOptions,
+  type StoredBrief,
+} from "./brief-store.port.js";
 import {
   BRIEF_SOURCE_EXTS,
   hashBytes,
@@ -17,10 +22,23 @@ import {
 } from "../brief-files.js";
 
 /**
+ * D166 item 5: this backend has no team column at all — a non-undefined
+ * `teamId` (a team id to assign, or `null` to clear one) is refused outright
+ * rather than silently ignored, since silently dropping it would tell the
+ * caller their assignment took effect when it did not.
+ */
+function assertNoTeam(teamId: string | null | undefined): void {
+  if (teamId !== undefined) throw new TeamsNotSupportedError();
+}
+
+/**
  * Filesystem implementation of BriefStorePort.
  * Stores briefs under `<projectRoot>/briefs/*.yaml` (or .yml / .json).
  */
 export class FsBriefStore implements BriefStorePort {
+  /** No team column at all (D166 item 5) — see `BriefStorePort.supportsTeams`. */
+  readonly supportsTeams = false;
+
   /** Resolved once at construction; the composition root decides it (D167). */
   private readonly dir: string;
   private readonly lockChains = new Map<string, Promise<unknown>>();
@@ -98,7 +116,8 @@ export class FsBriefStore implements BriefStorePort {
     return parseBriefText(filePath, raw, opts);
   }
 
-  async createBrief(brief: CampaignBrief): Promise<StoredBrief> {
+  async createBrief(brief: CampaignBrief, options?: BriefWriteOptions): Promise<StoredBrief> {
+    assertNoTeam(options?.teamId);
     const filePath = resolveConfined(this.dir, `${brief.id}.yaml`);
     try {
       const st = await lstat(filePath);
@@ -122,10 +141,8 @@ export class FsBriefStore implements BriefStorePort {
    * order and quoting the operator wrote survive; an unparseable file refuses
    * the write (fail closed) rather than falling back to a whole-object dump.
    */
-  async rewriteBrief(
-    brief: CampaignBrief,
-    options?: { expectedRevision?: string },
-  ): Promise<StoredBrief> {
+  async rewriteBrief(brief: CampaignBrief, options?: BriefWriteOptions): Promise<StoredBrief> {
+    assertNoTeam(options?.teamId);
     const file = await this.findBriefFileById(brief.id);
     if (!file) {
       // Check if there is an inode (e.g. symlink) at canonical path
@@ -181,10 +198,8 @@ export class FsBriefStore implements BriefStorePort {
     return { file: basename(filePath), brief, revision };
   }
 
-  async replaceBrief(
-    brief: CampaignBrief,
-    options?: { expectedRevision?: string },
-  ): Promise<StoredBrief> {
+  async replaceBrief(brief: CampaignBrief, options?: BriefWriteOptions): Promise<StoredBrief> {
+    assertNoTeam(options?.teamId);
     const file = await this.findBriefFileById(brief.id);
     const candidate = resolveConfined(this.dir, file ?? `${brief.id}.yaml`);
     try {
@@ -199,10 +214,15 @@ export class FsBriefStore implements BriefStorePort {
       return await this.rewriteBrief(brief, options);
     } catch (error) {
       if (isErrno(error, "ENOENT")) {
-        return await this.createBrief(brief);
+        return await this.createBrief(brief, options);
       }
       throw error;
     }
+  }
+
+  /** Never "hidden": the filesystem store has no team column (D166 item 5). */
+  async campaignVisibility(id: string): Promise<"absent" | "visible"> {
+    return (await this.findBriefFileById(id)) ? "visible" : "absent";
   }
 
   async getRevision(fileOrId: string): Promise<string | undefined> {

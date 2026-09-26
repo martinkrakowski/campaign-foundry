@@ -7,7 +7,8 @@ import {
 } from "@campaignfoundry/CampaignOrchestration";
 import { dumpBrief } from "@campaignfoundry/shared";
 import type { SqlClient } from "../../db/sql-client.js";
-import { migratedDatabase } from "../../db/__tests__/pglite-client.js";
+import { migratedDatabase, pgliteClient } from "../../db/__tests__/pglite-client.js";
+import { loadMigrations, migrate } from "../../db/migrate.js";
 import { resetDatabase, setDatabase } from "../../db/database.js";
 import { hashBytes } from "../../brief-files.js";
 import { LOCAL_TENANT } from "../../tenant.js";
@@ -350,5 +351,268 @@ describe("STORE_BACKEND=postgres puts briefs in the database, one store per (org
     expect(rows).toEqual([{ actor: "x:y" }]);
 
     await db.end();
+  });
+});
+
+/** Insert both test teams with the columns 0008 requires ("memberCount" quoted camelCase). */
+async function seedTeams(db: SqlClient, orgId = "local"): Promise<void> {
+  await db.query(
+    `insert into team (id, name, "memberCount", org_id, created_at) values
+       ($1, $2, 0, $3, now()),
+       ($4, $5, 0, $3, now())`,
+    ["t1", "Team One", orgId, "t2", "Team Two"],
+  );
+}
+
+describe("Team scope on Postgres (D166, PT-2c)", () => {
+  let db: SqlClient;
+
+  beforeEach(async () => {
+    db = await migratedDatabase();
+    await seedTeams(db);
+  });
+  afterEach(async () => {
+    await db.end();
+  });
+
+  test("a campaign with no team is visible to any caller, regardless of role or team", async () => {
+    const owner = new PgBriefStore(db, "local", "owner", ["owner"], []);
+    await owner.createBrief(brief("org-wide"));
+
+    const stranger = new PgBriefStore(db, "local", "u2", [], []);
+    expect((await stranger.findBriefById("org-wide"))?.brief.id).toBe("org-wide");
+    expect((await stranger.listBriefs()).map((b) => b.brief.id)).toContain("org-wide");
+  });
+
+  test("a member of the campaign's own team sees it, findBriefById and listBriefs both", async () => {
+    const owner = new PgBriefStore(db, "local", "owner", ["owner"], []);
+    await owner.createBrief(brief("t1-camp"), { teamId: "t1" });
+
+    const member = new PgBriefStore(db, "local", "u1", [], ["t1"]);
+    expect((await member.findBriefById("t1-camp"))?.brief.id).toBe("t1-camp");
+    expect((await member.listBriefs()).map((b) => b.brief.id)).toContain("t1-camp");
+  });
+
+  // The mutation manifest anchors on listBriefs' team predicate: drop it and
+  // this test's listBriefs assertion fails, because the outsider's listing
+  // would then include a campaign belonging to a team they are not in.
+  test("a member of another team cannot see the campaign, in findBriefById or listBriefs", async () => {
+    const owner = new PgBriefStore(db, "local", "owner", ["owner"], []);
+    await owner.createBrief(brief("t1-camp"), { teamId: "t1" });
+
+    const outsider = new PgBriefStore(db, "local", "u2", [], ["t2"]);
+    expect(await outsider.findBriefById("t1-camp")).toBeUndefined();
+    expect((await outsider.listBriefs()).map((b) => b.brief.id)).not.toContain("t1-camp");
+  });
+
+  test("owner and admin roles see every campaign regardless of team", async () => {
+    const owner = new PgBriefStore(db, "local", "owner", ["owner"], []);
+    await owner.createBrief(brief("t1-camp"), { teamId: "t1" });
+
+    const admin = new PgBriefStore(db, "local", "admin-user", ["admin"], []);
+    expect((await admin.findBriefById("t1-camp"))?.brief.id).toBe("t1-camp");
+    expect((await owner.findBriefById("t1-camp"))?.brief.id).toBe("t1-camp");
+    // D166 item 6: the same admin visibility rule holds for listBriefs, not
+    // only findBriefById.
+    expect((await admin.listBriefs()).map((b) => b.brief.id)).toContain("t1-camp");
+    expect((await owner.listBriefs()).map((b) => b.brief.id)).toContain("t1-camp");
+  });
+
+  // D166 item 6: the migration's "on delete set null" (0011_campaign_team.sql)
+  // un-scopes a team's campaigns to org-wide rather than orphaning or
+  // blocking the team delete.
+  test("deleting a team sets its campaigns' team_id to null", async () => {
+    const owner = new PgBriefStore(db, "local", "owner", ["owner"], []);
+    await owner.createBrief(brief("t1-camp"), { teamId: "t1" });
+
+    await db.query(`delete from team where id = $1`, ["t1"]);
+
+    const { rows } = await db.query<{ team_id: string | null }>(
+      `select team_id from campaign where org_id = 'local' and slug = 't1-camp'`,
+    );
+    expect(rows[0]!.team_id).toBeNull();
+
+    // Now visible to everyone again, org-wide.
+    const stranger = new PgBriefStore(db, "local", "u2", [], []);
+    expect((await stranger.findBriefById("t1-camp"))?.brief.id).toBe("t1-camp");
+  });
+
+  test("createBrief with a team from another org refuses (EFORBIDDEN), and writes nothing", async () => {
+    await db.query("insert into org (id, name) values ($1, $2)", ["acme", "Acme"]);
+    await db.query(
+      `insert into team (id, name, "memberCount", org_id, created_at) values ($1, $2, 0, $3, now())`,
+      ["acme-team", "Acme Team", "acme"],
+    );
+    const owner = new PgBriefStore(db, "local", "owner", ["owner"], []);
+
+    await expect(
+      owner.createBrief(brief("cross-org"), { teamId: "acme-team" }),
+    ).rejects.toMatchObject({
+      code: "EFORBIDDEN",
+    });
+    expect(await owner.findBriefById("cross-org")).toBeUndefined();
+  });
+
+  // D166 item 6 (PT-2c, qodo thread U1bo): the FK on campaign.team_id must
+  // itself refuse a cross-org link — not just assertTeamInOrg, which a direct
+  // SQL write, an import, or a future writer could bypass entirely.
+  test("the database itself refuses a cross-org campaign/team link (composite FK), bypassing assertTeamInOrg", async () => {
+    await db.query("insert into org (id, name) values ($1, $2)", ["acme", "Acme"]);
+    await db.query(
+      `insert into team (id, name, "memberCount", org_id, created_at) values ($1, $2, 0, $3, now())`,
+      ["acme-team", "Acme Team", "acme"],
+    );
+    const owner = new PgBriefStore(db, "local", "owner", ["owner"], []);
+    await owner.createBrief(brief("direct-camp"));
+    const { rows } = await db.query<{ id: string }>(
+      `select id from campaign where org_id = 'local' and slug = 'direct-camp'`,
+    );
+
+    await expect(
+      db.query(`update campaign set team_id = $1 where id = $2`, ["acme-team", rows[0]!.id]),
+    ).rejects.toThrow();
+  });
+
+  test("createBrief with an unknown team id refuses the same way", async () => {
+    const owner = new PgBriefStore(db, "local", "owner", ["owner"], []);
+    await expect(owner.createBrief(brief("no-team"), { teamId: "ghost" })).rejects.toMatchObject({
+      code: "EFORBIDDEN",
+    });
+  });
+
+  test("createBrief with teamId null behaves exactly like createBrief with no options", async () => {
+    const owner = new PgBriefStore(db, "local", "owner", ["owner"], []);
+    const created = await owner.createBrief(brief("still-org-wide"), { teamId: null });
+    expect(created.brief.id).toBe("still-org-wide");
+    const stranger = new PgBriefStore(db, "local", "u2", [], []);
+    expect((await stranger.findBriefById("still-org-wide"))?.brief.id).toBe("still-org-wide");
+  });
+
+  test("rewriteBrief with a teamId assigns it; a plain rewriteBrief leaves an assigned team untouched", async () => {
+    const owner = new PgBriefStore(db, "local", "owner", ["owner"], []);
+    await owner.createBrief(brief("camp", "v1"));
+    await owner.rewriteBrief(brief("camp", "v2"), { teamId: "t1" });
+
+    const member = new PgBriefStore(db, "local", "u1", [], ["t1"]);
+    expect((await member.findBriefById("camp"))?.brief.campaignMessage).toBe("v2");
+
+    await owner.rewriteBrief(brief("camp", "v3"));
+    expect((await member.findBriefById("camp"))?.brief.campaignMessage).toBe("v3");
+  });
+
+  test("rewriteBrief with a team from another org refuses and leaves the campaign unchanged", async () => {
+    const owner = new PgBriefStore(db, "local", "owner", ["owner"], []);
+    await owner.createBrief(brief("camp", "v1"));
+
+    await expect(
+      owner.rewriteBrief(brief("camp", "v2"), { teamId: "ghost" }),
+    ).rejects.toMatchObject({
+      code: "EFORBIDDEN",
+    });
+    expect((await owner.findBriefById("camp"))?.brief.campaignMessage).toBe("v1");
+  });
+
+  test("rewriteBrief, with or without a teamId, refuses a campaign hidden from the caller by team, as not found", async () => {
+    const owner = new PgBriefStore(db, "local", "owner", ["owner"], []);
+    await owner.createBrief(brief("t2-camp"), { teamId: "t2" });
+
+    const outsider = new PgBriefStore(db, "local", "u1", [], ["t1"]);
+    await expect(outsider.rewriteBrief(brief("t2-camp", "hacked"))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    await expect(
+      outsider.rewriteBrief(brief("t2-camp", "hacked"), { teamId: "t1" }),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+    expect((await owner.findBriefById("t2-camp"))?.brief.campaignMessage).toBe(
+      "Build great things",
+    );
+  });
+
+  test("replaceBrief creates with a team when the slug is missing, and rewrites with it when present", async () => {
+    const owner = new PgBriefStore(db, "local", "owner", ["owner"], []);
+    const created = await owner.replaceBrief(brief("replaced"), { teamId: "t1" });
+    expect(created.brief.id).toBe("replaced");
+
+    const t1Member = new PgBriefStore(db, "local", "u1", [], ["t1"]);
+    expect((await t1Member.findBriefById("replaced"))?.brief.id).toBe("replaced");
+
+    await owner.replaceBrief(brief("replaced", "v2"), { teamId: "t2" });
+    expect(await t1Member.findBriefById("replaced")).toBeUndefined();
+  });
+
+  test("rewriteBrief with teamId null clears an already-assigned team back to org-wide", async () => {
+    const owner = new PgBriefStore(db, "local", "owner", ["owner"], []);
+    await owner.createBrief(brief("camp", "v1"), { teamId: "t1" });
+    await owner.rewriteBrief(brief("camp", "v2"), { teamId: null });
+
+    const { rows } = await db.query<{ team_id: string | null }>(
+      `select team_id from campaign where org_id = 'local' and slug = 'camp'`,
+    );
+    expect(rows[0]!.team_id).toBeNull();
+  });
+
+  test("replaceBrief creates org-wide (null) when the slug is missing and no teamId was given", async () => {
+    const owner = new PgBriefStore(db, "local", "owner", ["owner"], []);
+    const created = await owner.replaceBrief(brief("fresh"), { teamId: undefined });
+    expect(created.brief.id).toBe("fresh");
+
+    const { rows } = await db.query<{ team_id: string | null }>(
+      `select team_id from campaign where org_id = 'local' and slug = 'fresh'`,
+    );
+    expect(rows[0]!.team_id).toBeNull();
+  });
+
+  test("replaceBrief propagates a non-ENOENT error such as ECONFLICT instead of falling to create", async () => {
+    const owner = new PgBriefStore(db, "local", "owner", ["owner"], []);
+    await owner.createBrief(brief("camp"));
+    await expect(
+      owner.replaceBrief(brief("camp", "v2"), { teamId: "t1", expectedRevision: "wrong-revision" }),
+    ).rejects.toMatchObject({ code: "ECONFLICT" });
+  });
+
+  test("campaignVisibility tells 'absent' from 'hidden' from 'visible'", async () => {
+    const owner = new PgBriefStore(db, "local", "owner", ["owner"], []);
+    await owner.createBrief(brief("t2-only"), { teamId: "t2" });
+
+    const outsider = new PgBriefStore(db, "local", "u1", [], ["t1"]);
+    expect(await outsider.campaignVisibility("t2-only")).toBe("hidden");
+    expect(await outsider.campaignVisibility("never-created")).toBe("absent");
+    expect(await owner.campaignVisibility("t2-only")).toBe("visible");
+  });
+});
+
+describe("0011_campaign_team migration (D166, PT-2c)", () => {
+  test("an existing null team_id survives the migration; the column becomes text with a team FK", async () => {
+    const db = pgliteClient();
+    try {
+      const all = await loadMigrations();
+      const upTo0010 = all.filter((m) => !m.id.startsWith("0011"));
+      await migrate(db, upTo0010);
+
+      const { rows: inserted } = await db.query<{ id: string }>(
+        `insert into campaign (org_id, slug) values ('local', 'pre-migration') returning id`,
+      );
+
+      expect(await migrate(db, all)).toEqual(["0011_campaign_team"]);
+
+      const { rows } = await db.query<{ team_id: string | null }>(
+        `select team_id from campaign where id = $1`,
+        [inserted[0]!.id],
+      );
+      expect(rows[0]!.team_id).toBeNull();
+
+      const { rows: col } = await db.query<{ data_type: string }>(
+        `select data_type from information_schema.columns
+          where table_name = 'campaign' and column_name = 'team_id'`,
+      );
+      expect(col[0]!.data_type).toBe("text");
+
+      const { rows: fk } = await db.query<{ conname: string }>(
+        `select conname from pg_constraint where conname = 'campaign_team_id_fkey'`,
+      );
+      expect(fk).toHaveLength(1);
+    } finally {
+      await db.end();
+    }
   });
 });

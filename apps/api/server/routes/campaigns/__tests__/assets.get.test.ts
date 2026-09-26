@@ -188,6 +188,24 @@ describe("GET /campaigns/assets", () => {
     expect(body.assets).toEqual([expect.objectContaining({ name: "bed.mp3", type: "audio/mpeg" })]);
   });
 
+  // The named fetch reads the one file it names; a failure listing the other
+  // assets (an unrelated file vanishing mid-listing) must not turn it into a 500.
+  test("named-asset fetch does not depend on listing the campaign's assets", async () => {
+    const briefDir = join(dir, "assets", "inputs", "camp");
+    mkdirSync(briefDir, { recursive: true });
+    writeFileSync(join(briefDir, "logo.png"), png);
+    const handler = await web(dir);
+    const { getAssetStore } = await import("../../../lib/ports/index.js");
+    const spy = vi
+      .spyOn(getAssetStore(LOCAL_TENANT), "listAssets")
+      .mockRejectedValue(new Error("Disk error"));
+
+    const res = await get(handler, "?briefId=camp&name=logo.png");
+    expect(res.status).toBe(200);
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
   test("returns empty list on store list failure", async () => {
     const handler = await web(dir);
     const { getAssetStore } = await import("../../../lib/ports/index.js");

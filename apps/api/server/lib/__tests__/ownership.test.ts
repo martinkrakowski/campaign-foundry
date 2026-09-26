@@ -9,7 +9,10 @@ import {
   type CampaignBrief,
 } from "@campaignfoundry/CampaignOrchestration";
 import { resetProjectRoot } from "@campaignfoundry/shared";
-import { LOCAL_TENANT } from "../tenant.js";
+import type { SqlClient } from "../db/sql-client.js";
+import { migratedDatabase } from "../db/__tests__/pglite-client.js";
+import { resetDatabase, setDatabase } from "../db/database.js";
+import { LOCAL_TENANT, type TenantContext } from "../tenant.js";
 import {
   getAssetStore,
   getBriefStore,
@@ -18,7 +21,14 @@ import {
   resetBriefStore,
   resetReportStore,
 } from "../ports/index.js";
-import { assertOwnedCampaign, campaignKnown, CampaignNotFoundError } from "../ownership.js";
+import { PgBriefStore } from "../ports/pg-brief-store.js";
+import {
+  assertOwnedCampaign,
+  assertSourceVisible,
+  campaignKnown,
+  canAssignTeam,
+  CampaignNotFoundError,
+} from "../ownership.js";
 
 const sampleBrief: CampaignBrief = {
   schemaVersion: BRIEF_SCHEMA_VERSION,
@@ -221,5 +231,193 @@ describe("campaignKnown (Rule A and L1)", () => {
     vi.spyOn(assetStore, "listAssets").mockRejectedValueOnce(new Error("asset read failed"));
 
     await expect(campaignKnown(LOCAL_TENANT, "unsaved")).rejects.toBe(reportError);
+  });
+});
+
+describe("canAssignTeam (D166, PT-2c item 3)", () => {
+  test("owner and admin may assign any team, including one the caller has no membership in", () => {
+    expect(
+      canAssignTeam({ orgId: "local", userId: "u", roles: ["owner"], teamIds: [] }, "t9"),
+    ).toBe(true);
+    expect(
+      canAssignTeam({ orgId: "local", userId: "u", roles: ["admin"], teamIds: [] }, "t9"),
+    ).toBe(true);
+  });
+
+  test("a plain member may assign only a team they belong to", () => {
+    const tenant: TenantContext = { orgId: "local", userId: "u", roles: [], teamIds: ["t1"] };
+    expect(canAssignTeam(tenant, "t1")).toBe(true);
+    expect(canAssignTeam(tenant, "t2")).toBe(false);
+  });
+
+  // D166 item 5: clearing (null) widens visibility to the whole org, unlike
+  // assigning a specific team, which only ever narrows it to a team the
+  // caller already belongs to — so a plain member may not clear it.
+  test("owner and admin may clear a team (null); a plain member may not", () => {
+    expect(
+      canAssignTeam({ orgId: "local", userId: "u", roles: ["owner"], teamIds: [] }, null),
+    ).toBe(true);
+    expect(
+      canAssignTeam({ orgId: "local", userId: "u", roles: ["admin"], teamIds: [] }, null),
+    ).toBe(true);
+    expect(canAssignTeam({ orgId: "local", userId: "u", roles: [], teamIds: ["t1"] }, null)).toBe(
+      false,
+    );
+  });
+});
+
+describe("campaignKnown hides a team-restricted campaign even when a report exists (D166, PT-2c item 4)", () => {
+  const savedBackend = process.env.STORE_BACKEND;
+  let db: SqlClient;
+
+  beforeEach(async () => {
+    db = await migratedDatabase();
+    setDatabase(db);
+    process.env.STORE_BACKEND = "postgres";
+    resetBriefStore();
+    resetReportStore();
+    await db.query(
+      `insert into team (id, name, "memberCount", org_id, created_at) values ($1, $2, 0, $3, now())`,
+      ["t2", "Team Two", "local"],
+    );
+  });
+
+  afterEach(async () => {
+    resetBriefStore();
+    resetReportStore();
+    resetDatabase();
+    if (savedBackend === undefined) delete process.env.STORE_BACKEND;
+    else process.env.STORE_BACKEND = savedBackend;
+    await db.end();
+  });
+
+  test('GET result\'s campaignKnown(..., "report") answers 404 for a campaign hidden by team', async () => {
+    const owner: TenantContext = { orgId: "local", userId: "owner", roles: ["owner"], teamIds: [] };
+    const ownerStore = getBriefStore(owner);
+    expect(ownerStore).toBeInstanceOf(PgBriefStore);
+    await (ownerStore as PgBriefStore).createBrief(
+      { ...sampleBrief, id: "t2-camp" },
+      {
+        teamId: "t2",
+      },
+    );
+    await getReportStore(owner).writeReport("t2-camp", JSON.stringify({ assets: [] }));
+
+    // Sanity: the owner (sees every team) reads it as known.
+    await expect(campaignKnown(owner, "t2-camp", "report")).resolves.toBeUndefined();
+
+    // A caller in a different team cannot see the campaign, even though the
+    // report is right there in the org's scope.
+    const outsider: TenantContext = {
+      orgId: "local",
+      userId: "u2",
+      roles: [],
+      teamIds: ["t1"],
+    };
+    await expect(campaignKnown(outsider, "t2-camp", "report")).rejects.toThrow(
+      CampaignNotFoundError,
+    );
+  });
+
+  test("an unsaved draft with only a report (no campaign row at all) still reads as known", async () => {
+    await getReportStore(LOCAL_TENANT).writeReport("draft-only", JSON.stringify({ assets: [] }));
+    await expect(campaignKnown(LOCAL_TENANT, "draft-only", "report")).resolves.toBeUndefined();
+  });
+
+  // D166 item 1 (HIGH, fail-open): a visibility check that cannot be decided
+  // must fail CLOSED, never fall through to the report/asset fast path — that
+  // fast path only proves something exists in the ORG's scope, never that
+  // THIS caller's team may see it. The old behaviour swallowed a
+  // campaignVisibility failure into readFailure and kept going, so a report
+  // sitting in the org's scope granted a non-owner caller access to a
+  // campaign whose visibility could not actually be verified. Reverting the
+  // fix (re-wrapping the campaignVisibility call in a try/catch that folds
+  // into readFailure) makes this test fail: it starts resolving instead of
+  // rejecting.
+  test("a campaignVisibility failure fails closed for a non-owner caller, rather than granting access", async () => {
+    const owner: TenantContext = { orgId: "local", userId: "owner", roles: ["owner"], teamIds: [] };
+    await (getBriefStore(owner) as PgBriefStore).createBrief({ ...sampleBrief, id: "flaky" });
+    await getReportStore(owner).writeReport("flaky", JSON.stringify({ assets: [] }));
+
+    const outsider: TenantContext = {
+      orgId: "local",
+      userId: "outsider",
+      roles: [],
+      teamIds: ["t1"],
+    };
+    const readError = new Error("connection reset");
+    vi.spyOn(PgBriefStore.prototype, "campaignVisibility").mockRejectedValueOnce(readError);
+
+    await expect(campaignKnown(outsider, "flaky", "report")).rejects.toBe(readError);
+  });
+
+  // The owner side of the same failure: an owner sees every campaign
+  // regardless of team, but campaignVisibility cannot know that without
+  // querying — a storage failure still surfaces rather than being swallowed,
+  // for any caller, not only a non-owner one.
+  test("a campaignVisibility failure surfaces for an owner caller too", async () => {
+    const owner: TenantContext = { orgId: "local", userId: "owner", roles: ["owner"], teamIds: [] };
+    await (getBriefStore(owner) as PgBriefStore).createBrief({ ...sampleBrief, id: "flaky-owner" });
+    await getReportStore(owner).writeReport("flaky-owner", JSON.stringify({ assets: [] }));
+    const readError = new Error("connection reset");
+    vi.spyOn(PgBriefStore.prototype, "campaignVisibility").mockRejectedValueOnce(readError);
+
+    await expect(campaignKnown(owner, "flaky-owner", "report")).rejects.toBe(readError);
+  });
+});
+
+describe("assertSourceVisible (D166, PT-2c item 2)", () => {
+  const savedBackend = process.env.STORE_BACKEND;
+  let db: SqlClient;
+
+  beforeEach(async () => {
+    db = await migratedDatabase();
+    setDatabase(db);
+    process.env.STORE_BACKEND = "postgres";
+    resetBriefStore();
+    await db.query(
+      `insert into team (id, name, "memberCount", org_id, created_at) values ($1, $2, 0, $3, now())`,
+      ["t2", "Team Two", "local"],
+    );
+  });
+
+  afterEach(async () => {
+    resetBriefStore();
+    resetDatabase();
+    if (savedBackend === undefined) delete process.env.STORE_BACKEND;
+    else process.env.STORE_BACKEND = savedBackend;
+    await db.end();
+  });
+
+  test("refuses (404) a source id that exists but is hidden from the caller by team", async () => {
+    const owner: TenantContext = { orgId: "local", userId: "owner", roles: ["owner"], teamIds: [] };
+    await (getBriefStore(owner) as PgBriefStore).createBrief(
+      { ...sampleBrief, id: "t2-source" },
+      { teamId: "t2" },
+    );
+
+    const outsider: TenantContext = {
+      orgId: "local",
+      userId: "u2",
+      roles: [],
+      teamIds: ["t1"],
+    };
+    await expect(assertSourceVisible(outsider, "t2-source")).rejects.toThrow(CampaignNotFoundError);
+  });
+
+  test("lets a merely absent source id through unchanged (a bare asset directory, never a saved campaign)", async () => {
+    const outsider: TenantContext = {
+      orgId: "local",
+      userId: "u2",
+      roles: [],
+      teamIds: ["t1"],
+    };
+    await expect(assertSourceVisible(outsider, "never-created")).resolves.toBeUndefined();
+  });
+
+  test("lets a visible source id through unchanged", async () => {
+    const owner: TenantContext = { orgId: "local", userId: "owner", roles: ["owner"], teamIds: [] };
+    await (getBriefStore(owner) as PgBriefStore).createBrief({ ...sampleBrief, id: "org-wide" });
+    await expect(assertSourceVisible(owner, "org-wide")).resolves.toBeUndefined();
   });
 });
