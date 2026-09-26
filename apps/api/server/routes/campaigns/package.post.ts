@@ -75,6 +75,7 @@ function persistedAssetsFrom(
  * list of asset identities the reviewer approved; omitted packages every asset.
  */
 export default defineEventHandler(async (event) => {
+  const scope = requestTenant(event);
   let campaignId: string;
   let platforms: readonly string[];
   let include: readonly string[] | undefined;
@@ -86,7 +87,7 @@ export default defineEventHandler(async (event) => {
     return { error: error instanceof Error ? error.message : "Invalid package request" };
   }
 
-  const report = await readReport(requestTenant(event), campaignId);
+  const report = await readReport(scope, campaignId);
   if (report === undefined) {
     setResponseStatus(event, 404);
     return { error: "Campaign report not found" };
@@ -99,7 +100,7 @@ export default defineEventHandler(async (event) => {
   }
 
   const result = await new PackageForPlatformUseCase(
-    new FileSystemPackageStore(storageRoots(requestTenant(event)).outputRoot, campaignId),
+    new FileSystemPackageStore(storageRoots(scope).outputRoot, campaignId),
   ).execute({
     campaignId,
     assets: parsed.assets,

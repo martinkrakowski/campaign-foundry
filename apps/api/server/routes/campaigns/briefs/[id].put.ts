@@ -10,6 +10,7 @@ import { requestTenant } from "../../../lib/tenant.js";
  * that id. The file is rewritten in its own format; YAML comments are lost.
  */
 export default defineEventHandler(async (event) => {
+  const scope = requestTenant(event);
   let id: string;
   try {
     id = String(getRouterParam(event, "id"));
@@ -36,8 +37,8 @@ export default defineEventHandler(async (event) => {
   const expectedRevision = Array.isArray(rawRevision) ? rawRevision[0] : rawRevision;
 
   try {
-    const stored = await getBriefStore(requestTenant(event)).withBriefLock(id, async () => {
-      return await getBriefStore(requestTenant(event)).rewriteBrief(brief, { expectedRevision });
+    const stored = await getBriefStore(scope).withBriefLock(id, async () => {
+      return await getBriefStore(scope).rewriteBrief(brief, { expectedRevision });
     });
     // The new revision rides along: the editor dispatches it into its source, so the
     // next save guards conditionally instead of replaying the load-time revision and
