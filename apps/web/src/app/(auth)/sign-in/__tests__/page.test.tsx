@@ -275,10 +275,11 @@ describe("SignInPage", () => {
   });
 
   test("does not set capabilities if unmounted before promise resolves", async () => {
-    // React 18 silently drops a setState call on an unmounted component — there is no
-    // "component is unmounted" warning to catch, so the honest maximum assertion here
-    // is that resolving late causes no React `act` warning (which DOES fire for a state
-    // update React can't attribute to a render) and no unhandled rejection.
+    // React 19 (this app's version) silently drops a setState call on an unmounted
+    // component — there is no "component is unmounted" warning to catch, so the honest
+    // maximum assertion here is that resolving late causes no React `act` warning
+    // (which DOES fire for a state update React can't attribute to a render) and no
+    // unhandled rejection.
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
     let resolveCaps!: (caps: briefsApi.HostCapabilities) => void;
     vi.spyOn(briefsApi, "getCapabilities").mockImplementation(

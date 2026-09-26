@@ -832,10 +832,10 @@ describe("Header — auth and organization switching (PT-1b2)", () => {
   });
 
   test("does not update capabilities if unmounted before promise resolves", async () => {
-    // As in the sign-in page's identical test: React 18 drops a late setState on an
-    // unmounted component silently, with no dedicated warning to assert on — the
-    // honest maximum here is that resolving after unmount raises no React `act`
-    // warning and nothing throws.
+    // As in the sign-in page's identical test: React 19 (this app's version) drops a
+    // late setState on an unmounted component silently, with no dedicated warning to
+    // assert on — the honest maximum here is that resolving after unmount raises no
+    // React `act` warning and nothing throws.
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
     let resolveCaps!: (caps: briefsApi.HostCapabilities) => void;
     vi.spyOn(briefsApi, "getCapabilities").mockImplementation(
