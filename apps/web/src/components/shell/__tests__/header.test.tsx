@@ -1,5 +1,5 @@
 import { describe, test, expect, afterEach, beforeEach, vi } from "vitest";
-import { render, screen, within, fireEvent } from "@testing-library/react";
+import { render, screen, within, fireEvent, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createElement, useEffect, type ReactElement } from "react";
 import { nextMock, renderWithRun, ShellProviders } from "@/__tests__/helpers";
@@ -22,11 +22,22 @@ vi.mock("@/lib/auth-client", () => ({
   },
 }));
 
+// `window.location` is shared by every test in this file exactly like `<html>` above —
+// a handful of tests overwrite `.assign`/`.reload` with a spy directly (jsdom's own
+// Location throws "Not implemented" for both), which is a property assignment, not a
+// `vi.spyOn` mock `cleanup()` or `restoreAllMocks` would ever touch. Captured once, so
+// a later test's real navigation call reaches this original rather than a stale spy
+// from an earlier test.
+const originalAssign = window.location.assign.bind(window.location);
+const originalReload = window.location.reload.bind(window.location);
+
 // The theme toggle writes to <html>, which is shared by every test in this file and is
 // not the element `cleanup()` unmounts — the next test would inherit a light theme.
 afterEach(() => {
   document.documentElement.classList.add("dark");
   localStorage.clear();
+  window.location.assign = originalAssign;
+  window.location.reload = originalReload;
 });
 
 /** Raises the editor's dirty flag, so any guarded navigation has to prompt. */
@@ -228,6 +239,22 @@ describe("Header — auth and organization switching (PT-1b2)", () => {
       .filter((el) => el.getAttribute("aria-haspopup") === "dialog")
       .map((el) => el.getAttribute("aria-label") ?? el.getAttribute("title"));
     expect(popupVerbs).toEqual(["Change image model", "Open menu"]);
+
+    // PT-1b2 item 4: under local auth, neither `BetterAuthSection` nor
+    // `BetterAuthMobileControls` mounts, so the better-auth session/org hooks — each a
+    // live subscription, not a free read — are never called. Open the mobile menu too:
+    // its `authControls` slot must stay empty rather than mounting the mobile variant.
+    expect(authClient.useSession).not.toHaveBeenCalled();
+    expect(authClient.useListOrganizations).not.toHaveBeenCalled();
+    expect(authClient.useActiveOrganization).not.toHaveBeenCalled();
+
+    const user = userEvent.setup();
+    await user.click(screen.getByLabelText("Open menu"));
+    const dialog = await screen.findByRole("dialog", { name: "Menu" });
+    expect(within(dialog).queryByTestId("mobile-auth-controls")).toBeNull();
+    expect(authClient.useSession).not.toHaveBeenCalled();
+    expect(authClient.useListOrganizations).not.toHaveBeenCalled();
+    expect(authClient.useActiveOrganization).not.toHaveBeenCalled();
   });
 
   test("under better-auth mode with 1 org, renders user menu but no org switcher", async () => {
@@ -400,7 +427,12 @@ describe("Header — auth and organization switching (PT-1b2)", () => {
   });
 
   test("does not update capabilities if unmounted before promise resolves", async () => {
-    let resolveCaps: (caps: briefsApi.HostCapabilities) => void;
+    // As in the sign-in page's identical test: React 18 drops a late setState on an
+    // unmounted component silently, with no dedicated warning to assert on — the
+    // honest maximum here is that resolving after unmount raises no React `act`
+    // warning and nothing throws.
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    let resolveCaps!: (caps: briefsApi.HostCapabilities) => void;
     vi.spyOn(briefsApi, "getCapabilities").mockImplementation(
       () =>
         new Promise((resolve) => {
@@ -410,11 +442,21 @@ describe("Header — auth and organization switching (PT-1b2)", () => {
 
     const { unmount } = renderWithRun(<Header />);
     unmount();
-    resolveCaps!({ motion: true, auth: { mode: "better-auth", google: false } });
+    await act(async () => {
+      resolveCaps({ motion: true, auth: { mode: "better-auth", google: false } });
+      await Promise.resolve();
+    });
+
+    expect(consoleError).not.toHaveBeenCalled();
+    consoleError.mockRestore();
   });
 
-  test("MobileAuthSection returns null when dialog is not mounted", () => {
-    const { container } = render(
+  test("MobileAuthSection renders directly — no portal, no dialog lookup (PT-1b2 item 5)", () => {
+    // It used to return null until a `useEffect` found `[role="dialog"][aria-label="Menu"]`
+    // in the document and portalled into it. Now it is an ordinary component MobileMenu
+    // renders through its `authControls` slot, so it paints synchronously wherever it is
+    // mounted — including standalone, with no dialog anywhere in the document.
+    render(
       <MobileAuthSection
         email="test@example.com"
         organizations={[]}
@@ -422,7 +464,8 @@ describe("Header — auth and organization switching (PT-1b2)", () => {
         onSignOut={vi.fn()}
       />,
     );
-    expect(container.firstChild).toBeNull();
+    expect(screen.getByTestId("mobile-auth-controls")).toBeTruthy();
+    expect(screen.getByText("test@example.com")).toBeTruthy();
   });
 
   test("clicking inside user menu does not close it", async () => {
@@ -479,7 +522,7 @@ describe("Header — auth and organization switching (PT-1b2)", () => {
       isPending: false,
     } as never);
 
-    render(<BetterAuthSection menuOpen={false} />);
+    render(<BetterAuthSection />);
 
     const select = screen.getByRole("combobox", {
       name: "Switch organization",

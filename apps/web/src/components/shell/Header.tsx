@@ -9,7 +9,6 @@ import { modelChanged, telemetryButton } from "@/components/campaign/messages";
 import { useRun } from "@/lib/run-context";
 import { getCapabilities, type HostCapabilities } from "@/lib/briefs-api";
 import { authClient } from "@/lib/auth-client";
-import { createPortal } from "react-dom";
 import { ModelSelector } from "./ModelSelector";
 import { TELEMETRY_DRAWER_ID } from "./TelemetryDrawer";
 import { MobileMenu } from "./MobileMenu";
@@ -158,7 +157,7 @@ export function Header() {
           </svg>
         </IconButton>
         <ThemeToggle />
-        {capabilities?.auth?.mode === "better-auth" && <BetterAuthSection menuOpen={menuOpen} />}
+        {capabilities?.auth?.mode === "better-auth" && <BetterAuthSection />}
         {/* SG-D10: the run verb stood here. It is in the editor's own action bar now,
             in one slot with Validate — the placement the owner retracted as an error. */}
         {/* Hamburger — mobile only. */}
@@ -197,7 +196,16 @@ export function Header() {
         </p>
       )}
 
-      <MobileMenu open={menuOpen} onClose={closeMenu} tabs={TABS} />
+      <MobileMenu
+        open={menuOpen}
+        onClose={closeMenu}
+        tabs={TABS}
+        authControls={
+          menuOpen && capabilities?.auth?.mode === "better-auth" ? (
+            <BetterAuthMobileControls />
+          ) : null
+        }
+      />
     </header>
   );
 }
@@ -277,6 +285,13 @@ export function UserMenu({
   );
 }
 
+/**
+ * The mobile menu's auth block — user email, sign-out, and (with more than one
+ * organisation) the org switcher. A plain component, not a portal: it is handed to
+ * `MobileMenu` through its `authControls` slot (PT-1b2 item 5) rather than reaching
+ * for the dialog by querying `[role="dialog"][aria-label="Menu"]` — a portal keyed on
+ * a CSS selector is one Header markup change away from silently finding nothing.
+ */
 export function MobileAuthSection({
   email,
   organizations,
@@ -290,20 +305,9 @@ export function MobileAuthSection({
   readonly onSwitchOrg: (orgId: string) => void;
   readonly onSignOut: () => void;
 }) {
-  const [container, setContainer] = useState<Element | null>(null);
-
-  useEffect(() => {
-    const dialog = document.querySelector('[role="dialog"][aria-label="Menu"]');
-    if (dialog) {
-      setContainer(dialog);
-    }
-  }, []);
-
-  if (!container) return null;
-
   const hasMultipleOrgs = Boolean(organizations && organizations.length > 1);
 
-  return createPortal(
+  return (
     <div data-testid="mobile-auth-controls" className="border-t border-border bg-surface p-4">
       {hasMultipleOrgs && (
         <div className="mb-3">
@@ -338,12 +342,20 @@ export function MobileAuthSection({
           Sign out
         </button>
       </div>
-    </div>,
-    container,
+    </div>
   );
 }
 
-export function BetterAuthSection({ menuOpen }: { readonly menuOpen: boolean }) {
+/**
+ * The session/org state and handlers `BetterAuthSection` (desktop) and
+ * `BetterAuthMobileControls` (handed to `MobileMenu`) both need. Each is its own
+ * component, mounted only under better-auth mode, so each calling this — and so
+ * `authClient`'s own hooks — from its own top level never risks a conditional hook
+ * call; the two independent subscriptions this costs are the trade for not lifting
+ * the state through Header (which would call these hooks unconditionally, defeating
+ * item 4's "not under local auth" contract).
+ */
+function useBetterAuthState() {
   const session = authClient.useSession();
   const orgs = authClient.useListOrganizations();
   const activeOrg = authClient.useActiveOrganization();
@@ -351,7 +363,6 @@ export function BetterAuthSection({ menuOpen }: { readonly menuOpen: boolean }) 
   const email = session?.data?.user?.email;
   const organizations = orgs?.data;
   const activeOrgId = activeOrg?.data?.id ?? organizations?.[0]?.id;
-  const hasMultipleOrgs = Boolean(organizations && organizations.length > 1);
 
   const handleSwitchOrg = async (orgId: string) => {
     await authClient.organization.setActive({ organizationId: orgId });
@@ -363,35 +374,48 @@ export function BetterAuthSection({ menuOpen }: { readonly menuOpen: boolean }) 
     window.location.assign("/sign-in");
   };
 
-  return (
-    <>
-      <div className="hidden items-center gap-3 lg:flex">
-        {hasMultipleOrgs && (
-          <select
-            aria-label="Switch organization"
-            value={activeOrgId}
-            onChange={(e) => void handleSwitchOrg(e.target.value)}
-            className="h-8 rounded-md border border-border-control bg-surface-2 px-2 font-mono text-xs text-text-primary focus:outline-none focus:ring-1 focus:ring-brand-primary"
-          >
-            {organizations?.map((org) => (
-              <option key={org.id} value={org.id}>
-                {org.name}
-              </option>
-            ))}
-          </select>
-        )}
-        <UserMenu email={email} onSignOut={() => void handleSignOut()} />
-      </div>
+  return { email, organizations, activeOrgId, handleSwitchOrg, handleSignOut };
+}
 
-      {menuOpen && (
-        <MobileAuthSection
-          email={email}
-          organizations={organizations}
-          activeOrgId={activeOrgId}
-          onSwitchOrg={(id) => void handleSwitchOrg(id)}
-          onSignOut={() => void handleSignOut()}
-        />
+/** Desktop-only: the org switcher (when there's more than one) and the user menu. */
+export function BetterAuthSection() {
+  const { email, organizations, activeOrgId, handleSwitchOrg, handleSignOut } =
+    useBetterAuthState();
+  const hasMultipleOrgs = Boolean(organizations && organizations.length > 1);
+
+  return (
+    <div className="hidden items-center gap-3 lg:flex">
+      {hasMultipleOrgs && (
+        <select
+          aria-label="Switch organization"
+          value={activeOrgId}
+          onChange={(e) => void handleSwitchOrg(e.target.value)}
+          className="h-8 rounded-md border border-border-control bg-surface-2 px-2 font-mono text-xs text-text-primary focus:outline-none focus:ring-1 focus:ring-brand-primary"
+        >
+          {organizations?.map((org) => (
+            <option key={org.id} value={org.id}>
+              {org.name}
+            </option>
+          ))}
+        </select>
       )}
-    </>
+      <UserMenu email={email} onSignOut={() => void handleSignOut()} />
+    </div>
+  );
+}
+
+/** The `authControls` Header hands `MobileMenu` under better-auth mode. */
+export function BetterAuthMobileControls() {
+  const { email, organizations, activeOrgId, handleSwitchOrg, handleSignOut } =
+    useBetterAuthState();
+
+  return (
+    <MobileAuthSection
+      email={email}
+      organizations={organizations}
+      activeOrgId={activeOrgId}
+      onSwitchOrg={(id) => void handleSwitchOrg(id)}
+      onSignOut={() => void handleSignOut()}
+    />
   );
 }
