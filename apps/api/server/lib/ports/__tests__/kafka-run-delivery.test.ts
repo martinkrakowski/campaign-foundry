@@ -26,26 +26,27 @@ vi.mock("kafkajs", () => {
   };
 });
 
-const sampleBrief = (): CampaignBrief => ({
-  id: "camp-deliv-kafka",
-  targetRegion: "DE",
-  targetAudience: "test-audience",
-  campaignMessage: "Quality test run",
-  mode: "generation",
-  assets: [],
-  products: [
-    {
-      id: "alpha",
-      name: "Alpha",
-      primaryColor: "#1473E6",
-      logoPath: "assets/inputs/hydra-logo.png",
-    },
-  ],
-});
+import { parseBrief } from "../../load-brief.js";
+
+const sampleBrief = (): CampaignBrief =>
+  parseBrief({
+    id: "camp-deliv-kafka",
+    targetRegion: "DE",
+    targetAudience: "test-audience",
+    campaignMessage: "Quality test run",
+    products: [
+      {
+        id: "alpha",
+        name: "Alpha",
+        primaryColor: "#1473E6",
+        logoPath: "assets/inputs/hydra-logo.png",
+      },
+    ],
+  });
 
 const sampleRequest = (): RunRequest => ({
   jobId: "00000000-0000-0000-0000-000000000001",
-  tenant: { orgId: "org-1", userId: "user-1", roles: ["admin"] },
+  tenant: { orgId: "org-1", userId: "user-1", roles: ["admin"], teamIds: [] },
   brief: sampleBrief(),
   reroll: false,
 });

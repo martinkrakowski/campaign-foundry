@@ -45,7 +45,7 @@ describe("kafka-consumer Nitro plugin (PT-6b2, D174d)", () => {
       },
     };
 
-    await defaultPlugin(nitroApp);
+    await defaultPlugin(nitroApp as never);
 
     expect(mockConsumerStart).toHaveBeenCalledTimes(1);
     expect(nitroApp.hooks?.hook).toHaveBeenCalledWith("close", expect.any(Function));
@@ -63,13 +63,13 @@ describe("kafka-consumer Nitro plugin (PT-6b2, D174d)", () => {
       hooks: { hook: vi.fn() },
     };
 
-    await defaultPlugin(nitroApp);
+    await defaultPlugin(nitroApp as never);
 
     expect(mockConsumerStart).not.toHaveBeenCalled();
     expect(nitroApp.hooks?.hook).not.toHaveBeenCalled();
 
     process.env.KAFKA_CONSUME = "false";
-    await defaultPlugin(nitroApp);
+    await defaultPlugin(nitroApp as never);
     expect(mockConsumerStart).not.toHaveBeenCalled();
   });
 
@@ -81,7 +81,7 @@ describe("kafka-consumer Nitro plugin (PT-6b2, D174d)", () => {
       hooks: { hook: vi.fn() },
     };
 
-    await defaultPlugin(nitroApp);
+    await defaultPlugin(nitroApp as never);
 
     expect(mockConsumerStart).not.toHaveBeenCalled();
   });
@@ -90,10 +90,10 @@ describe("kafka-consumer Nitro plugin (PT-6b2, D174d)", () => {
     process.env.KAFKA_BROKERS = "broker1:9092";
     process.env.KAFKA_CONSUME = "true";
 
-    await defaultPlugin(undefined);
+    await defaultPlugin(undefined as never);
     expect(mockConsumerStart).toHaveBeenCalledTimes(1);
 
-    await defaultPlugin({} as NitroApp);
+    await defaultPlugin({} as never);
     expect(mockConsumerStart).toHaveBeenCalledTimes(2);
   });
 
@@ -116,7 +116,7 @@ describe("kafka-consumer Nitro plugin (PT-6b2, D174d)", () => {
       },
     };
 
-    await plugin(nitroApp);
+    await plugin(nitroApp as never);
     expect(customConsumer.start).toHaveBeenCalledTimes(1);
 
     await closeHook!();

@@ -17,15 +17,18 @@ export interface NitroApp {
 export function createKafkaConsumerPlugin(
   consumerFactory: (settings: KafkaSettings) => ConsumerInstance = (s) => new RunConsumer(s),
 ) {
-  return defineNitroPlugin(async (nitroApp?: NitroApp) => {
+  return defineNitroPlugin(async (nitroApp) => {
     const settings = kafkaSettings();
     if (!settings?.consume) return;
 
     const consumer = consumerFactory(settings);
     await consumer.start();
 
-    if (nitroApp?.hooks?.hook) {
-      nitroApp.hooks.hook("close", async () => {
+    const appWithHooks = nitroApp as
+      | { hooks?: { hook?: (name: "close", cb: () => Promise<void> | void) => void } }
+      | undefined;
+    if (appWithHooks?.hooks?.hook) {
+      appWithHooks.hooks.hook("close", async () => {
         await consumer.stop();
       });
     }
