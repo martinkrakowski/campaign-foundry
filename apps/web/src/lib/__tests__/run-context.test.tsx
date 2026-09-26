@@ -718,6 +718,11 @@ describe("RunProvider — review decisions", () => {
   test("regenerateRejected is a no-op when nothing is rejected", async () => {
     mockPipelineApi();
     const { result } = setup();
+    // Let the mount restore's own job/result discovery settle first, so its calls
+    // aren't mistaken for ones regenerateRejected made.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
     const before = vi.mocked(globalThis.fetch).mock.calls.length;
     await act(async () => {
       await result.current.regenerateRejected();
@@ -2390,8 +2395,12 @@ describe("RunProvider — estimate and packaging", () => {
       listing = result.current.loadPackages();
     });
     await waitFor(() => expect(resolveList).toEqual(expect.any(Function)));
-    const signal = (vi.mocked(globalThis.fetch).mock.calls.at(-1)?.[1] as RequestInit | undefined)
-      ?.signal;
+    // Found by URL, not position: mount's own (unrelated) job/result discovery calls
+    // race this one and can land after it in the mock's call log.
+    const packagesCall = vi
+      .mocked(globalThis.fetch)
+      .mock.calls.find(([u]) => String(u).includes("/campaigns/packages"));
+    const signal = (packagesCall?.[1] as RequestInit | undefined)?.signal;
     expect(signal?.aborted).toBe(false);
     act(() => result.current.setBrief(otherBrief));
     expect(signal?.aborted).toBe(true);
@@ -2977,20 +2986,12 @@ describe("RunProvider — running job awareness on reload and brief switch", () 
     localStorage.setItem("cf:brief-picked", "1");
     localStorage.setItem("cf:brief", JSON.stringify(localBrief));
 
-    let resolveMountResult!: (r: Response) => void;
-    const mountResultPromise = new Promise<Response>((r) => {
-      resolveMountResult = r;
-    });
-
     let jobQueries = 0;
     mockPipelineApi({
       result: (url) => {
         if (url.includes("/campaigns/jobs?campaignId=active-campaign")) {
           jobQueries += 1;
           return json({ jobId: "job-active-1" });
-        }
-        if (url.includes("/campaigns/result?campaignId=active-campaign")) {
-          return mountResultPromise;
         }
         return json(EMPTY_REPORT);
       },
@@ -3007,11 +3008,15 @@ describe("RunProvider — running job awareness on reload and brief switch", () 
       result.current.setBrief(editorBrief);
     });
 
-    resolveMountResult(json(EMPTY_REPORT));
-
     await waitFor(() => expect(result.current.assets).toHaveLength(1));
     expect(result.current.brief.campaignMessage).toBe("from-editor");
-    expect(jobQueries).toBe(1);
+    // Both the mount restore and setBrief ask independently (job lookup is
+    // unconditional, not gated behind a guard) — the guard only decides whose
+    // ANSWER is used. Mount's own answer must be discarded: `briefDecidedRef`
+    // is already true by the time its callback runs (setBrief set it
+    // synchronously), so only setBrief's adoption ever commits — one result, under
+    // the edited brief, not the stale localStorage one mount started restoring.
+    expect(jobQueries).toBe(2);
     expect(result.current.loading).toBe(false);
   });
 
@@ -3077,4 +3082,100 @@ describe("RunProvider — running job awareness on reload and brief switch", () 
     expect(result.current.hasRun).toBe(false);
     expect(result.current.loading).toBe(false);
   });
+
+  test('mount restore discovers a job for the unrestored default brief too (coderabbit "Discover jobs for the default brief after reload")', async () => {
+    // No localStorage: the shell starts on DEFAULT_BRIEF ("summer-hydration-2026"),
+    // which Generate can run exactly like any other campaign (nothing gates it on
+    // `briefApplied`) — so a reload mid-run must discover it too.
+    let queriedJob = false;
+    let resolveJob!: (r: Response) => void;
+    const jobPromise = new Promise<Response>((r) => {
+      resolveJob = r;
+    });
+    mockPipelineApi({
+      result: (url) => {
+        if (url.includes("/campaigns/jobs?campaignId=summer-hydration-2026")) {
+          queriedJob = true;
+          return json({ jobId: "job-default-1" });
+        }
+        return json(EMPTY_REPORT);
+      },
+      job: () => jobPromise,
+    });
+
+    const { result } = setup();
+    await waitFor(() => expect(queriedJob).toBe(true));
+    await waitFor(() => expect(result.current.loading).toBe(true));
+    act(() => {
+      resolveJob(
+        jobOk({
+          halted: false,
+          assets: [asset({ productId: "p1" })],
+          log: { entries: [], campaignId: "summer-hydration-2026" },
+        }),
+      );
+    });
+    await waitFor(() => expect(result.current.assets).toHaveLength(1));
+  });
+
+  test('mount restore reads the persisted report AFTER checking for a job, closing the restore/lookup gap (qodo #1, coderabbit "Close the gap between result restoration and job lookup")', async () => {
+    localStorage.setItem("cf:brief-picked", "1");
+    localStorage.setItem("cf:brief", JSON.stringify(activeBrief));
+    let calls = 0;
+    mockPipelineApi({
+      result: (url) => {
+        if (!url.includes("campaignId=active-campaign")) return json(EMPTY_REPORT); // unrelated
+        // Counted across BOTH endpoints: only the FIRST request this provider makes
+        // about this campaign sees the pre-settlement (empty) report; every later
+        // one sees the real one — modelling a job whose report write lands between
+        // the two requests. Reading the report before checking the job (the old
+        // order) makes THAT the first request and it is stuck stale; checking the
+        // job first (this order) makes the report read the second request, and it
+        // lands after the write.
+        const callIndex = calls++;
+        if (url.includes("/campaigns/jobs?campaignId=active-campaign")) {
+          return json({ error: "No running job" }, 404); // the job already settled
+        }
+        return callIndex === 0
+          ? json(EMPTY_REPORT)
+          : json({
+              halted: false,
+              assets: [asset({ productId: "p1" })],
+              log: { entries: [], campaignId: "active-campaign" },
+            });
+      },
+    });
+
+    const { result } = setup();
+    await waitFor(() => expect(result.current.assets).toHaveLength(1));
+    expect(result.current.loading).toBe(false);
+  });
+
+  test("setBrief reads the persisted report AFTER checking for a job, closing the same restore/lookup gap", async () => {
+    let calls = 0;
+    mockPipelineApi({
+      result: (url) => {
+        if (!url.includes("campaignId=active-campaign")) return json(EMPTY_REPORT); // unrelated
+        const callIndex = calls++;
+        if (url.includes("/campaigns/jobs?campaignId=active-campaign")) {
+          return json({ error: "No running job" }, 404);
+        }
+        return callIndex === 0
+          ? json(EMPTY_REPORT)
+          : json({
+              halted: false,
+              assets: [asset({ productId: "p1" })],
+              log: { entries: [], campaignId: "active-campaign" },
+            });
+      },
+    });
+
+    const { result } = setup();
+    act(() => {
+      result.current.setBrief(activeBrief);
+    });
+    await waitFor(() => expect(result.current.assets).toHaveLength(1));
+    expect(result.current.loading).toBe(false);
+  });
+
 });
