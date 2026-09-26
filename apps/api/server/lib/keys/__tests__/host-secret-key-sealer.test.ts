@@ -230,42 +230,48 @@ describe("HostSecretKeySealer (PT-7b1)", () => {
     }
   });
 
-  describe("construction ergonomics and guards", () => {
-    test("supports construction from Record<string, Buffer>", () => {
-      const sealer = new HostSecretKeySealer({ v1: v1Key }, "v1");
-      const sealed = sealer.seal("test-record", CTX);
-      expect(sealer.open(sealed, CTX)).toBe("test-record");
+  describe("construction guards", () => {
+    test("keeps a private copy of the keyring", () => {
+      const keys = new Map([["v1", v1Key]]);
+      const sealer = new HostSecretKeySealer({ currentVersion: "v1", keys });
+      keys.delete("v1");
+      const sealed = sealer.seal("still-sealable", CTX);
+      expect(sealer.open(sealed, CTX)).toBe("still-sealable");
     });
 
-    test("supports construction from Map with separate currentVersion", () => {
-      const sealer = new HostSecretKeySealer(new Map([["v1", v1Key]]), "v1");
-      const sealed = sealer.seal("test-map", CTX);
-      expect(sealer.open(sealed, CTX)).toBe("test-map");
+    test("accepts any ReadonlyMap, not only a native Map", () => {
+      const inner = new Map([["v1", v1Key]]);
+      const readonlyView: ReadonlyMap<string, Buffer> = {
+        get: (k) => inner.get(k),
+        has: (k) => inner.has(k),
+        forEach: (cb) => inner.forEach(cb),
+        get size() {
+          return inner.size;
+        },
+        entries: () => inner.entries(),
+        keys: () => inner.keys(),
+        values: () => inner.values(),
+        [Symbol.iterator]: () => inner[Symbol.iterator](),
+      };
+      const sealer = new HostSecretKeySealer({ currentVersion: "v1", keys: readonlyView });
+      expect(sealer.open(sealer.seal("readonly-view", CTX), CTX)).toBe("readonly-view");
     });
 
-    test("refuses when currentVersion is not in keys", () => {
+    test("refuses a key that is not 32 bytes, without echoing it", () => {
+      const shortKey = Buffer.alloc(16, 7);
+      expect(
+        () => new HostSecretKeySealer({ currentVersion: "v1", keys: new Map([["v1", shortKey]]) }),
+      ).toThrow('Key encryption key "v1" must be 32 bytes.');
+    });
+
+    test("refuses when the current version is not in the keyring", () => {
       expect(
         () =>
           new HostSecretKeySealer({
             currentVersion: "v2",
             keys: new Map([["v1", v1Key]]),
           }),
-      ).toThrow('Current key encryption version "v2" not found in keys.');
-    });
-
-    test("supports KeyEncryptionSettings with plain object keys", () => {
-      const sealer = new HostSecretKeySealer({
-        currentVersion: "v1",
-        keys: { v1: v1Key } as unknown as ReadonlyMap<string, Buffer>,
-      });
-      const sealed = sealer.seal("plain-object-in-settings", CTX);
-      expect(sealer.open(sealed, CTX)).toBe("plain-object-in-settings");
-    });
-
-    test("refuses when currentVersion is missing in direct construction", () => {
-      expect(
-        () => new HostSecretKeySealer(new Map([["v1", v1Key]]) as unknown as KeyEncryptionSettings),
-      ).toThrow("currentVersion is required");
+      ).toThrow("The current key encryption version is not in the keyring.");
     });
   });
 });

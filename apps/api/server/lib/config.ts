@@ -130,8 +130,9 @@ export function keyEncryptionSettings(): KeyEncryptionSettings | undefined {
     const keyBase64 = entry.slice(colonIndex + 1).trim();
 
     if (!/^v\d+$/.test(version)) {
+      // Never echo it: a misplaced key in the version position must not reach a log.
       throw new Error(
-        `Malformed KEY_ENCRYPTION_KEYS entry: version must follow "v<n>" format, got "${version}".`,
+        'Malformed KEY_ENCRYPTION_KEYS entry: a version must follow the "v<n>" format.',
       );
     }
 
@@ -163,8 +164,11 @@ export function keyEncryptionSettings(): KeyEncryptionSettings | undefined {
   }
 
   if (!keys.has(currentVersion)) {
+    // Echo it only when it has a version's shape: anything else may be a misplaced key.
     throw new Error(
-      `KEY_ENCRYPTION_KEY_CURRENT "${currentVersion}" not found in KEY_ENCRYPTION_KEYS.`,
+      /^v\d+$/.test(currentVersion)
+        ? `KEY_ENCRYPTION_KEY_CURRENT "${currentVersion}" not found in KEY_ENCRYPTION_KEYS.`
+        : 'KEY_ENCRYPTION_KEY_CURRENT is not a version ("v<n>") in KEY_ENCRYPTION_KEYS.',
     );
   }
 

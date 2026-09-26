@@ -6,7 +6,7 @@
       "file": "apps/api/server/lib/keys/host-secret-key-sealer.ts",
       "before": "      decipher.setAuthTag(tag);",
       "after": "      // mutant: skip setAuthTag in open",
-      "because": "skipping setAuthTag in open disables auth tag verification on decrypted data",
+      "because": "without setAuthTag, AES-GCM final() has no tag to verify against and throws, so every open fails (the untampered round trip catches it); a truncated tag is refused earlier by the tag.length check",
       "command": [
         "yarn",
         "vitest",

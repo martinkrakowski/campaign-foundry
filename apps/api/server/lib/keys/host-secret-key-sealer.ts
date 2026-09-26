@@ -35,36 +35,18 @@ export class HostSecretKeySealer implements KeySealerPort {
   private readonly keys: ReadonlyMap<string, Buffer>;
   private readonly currentVersion: string;
 
-  constructor(
-    keysOrSettings:
-      | KeyEncryptionSettings
-      | ReadonlyMap<string, Buffer>
-      | Map<string, Buffer>
-      | Record<string, Buffer>,
-    currentVersion?: string,
-  ) {
-    if (
-      keysOrSettings &&
-      typeof (keysOrSettings as KeyEncryptionSettings).currentVersion === "string" &&
-      "keys" in keysOrSettings
-    ) {
-      const settings = keysOrSettings as KeyEncryptionSettings;
-      this.currentVersion = settings.currentVersion;
-      const k = settings.keys;
-      this.keys = k instanceof Map ? k : new Map(Object.entries(k));
-    } else {
-      if (!currentVersion) {
-        throw new Error("currentVersion is required when providing keys directly.");
+  constructor(settings: KeyEncryptionSettings) {
+    // A private copy: a caller mutating its own map later cannot change the
+    // keyring, and any ReadonlyMap (not only a native Map) is read by iteration.
+    this.keys = new Map(settings.keys);
+    this.currentVersion = settings.currentVersion;
+    for (const [version, key] of this.keys) {
+      if (key.length !== KEY_LENGTH) {
+        throw new Error(`Key encryption key "${version}" must be ${KEY_LENGTH} bytes.`);
       }
-      this.currentVersion = currentVersion;
-      this.keys =
-        keysOrSettings instanceof Map
-          ? keysOrSettings
-          : new Map(Object.entries(keysOrSettings as Record<string, Buffer>));
     }
-
     if (!this.keys.has(this.currentVersion)) {
-      throw new Error(`Current key encryption version "${this.currentVersion}" not found in keys.`);
+      throw new Error("The current key encryption version is not in the keyring.");
     }
   }
 

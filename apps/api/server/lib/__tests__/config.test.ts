@@ -320,7 +320,34 @@ describe("keyEncryptionSettings (PT-7b1)", () => {
     process.env.KEY_ENCRYPTION_KEYS = `notv:${b64_1}`;
     process.env.KEY_ENCRYPTION_KEY_CURRENT = "notv";
 
-    expect(() => keyEncryptionSettings()).toThrow(/version must follow "v<n>" format/);
+    expect(() => keyEncryptionSettings()).toThrow(/a version must follow the "v<n>" format/);
+  });
+
+  test("hazard: a key misplaced in the version position is never echoed", () => {
+    process.env.KEY_ENCRYPTION_KEYS = `${b64_1}:v1`;
+    process.env.KEY_ENCRYPTION_KEY_CURRENT = "v1";
+
+    expect(() => keyEncryptionSettings()).toThrow(/a version must follow/);
+    try {
+      keyEncryptionSettings();
+      expect.unreachable("keyEncryptionSettings should have thrown");
+    } catch (error) {
+      expect((error as Error).message).not.toContain(b64_1);
+    }
+  });
+
+  test("hazard: a key misplaced in KEY_ENCRYPTION_KEY_CURRENT is never echoed", () => {
+    process.env.KEY_ENCRYPTION_KEYS = `v1:${b64_1}`;
+    process.env.KEY_ENCRYPTION_KEY_CURRENT = b64_1;
+
+    try {
+      keyEncryptionSettings();
+      expect.unreachable("keyEncryptionSettings should have thrown");
+    } catch (error) {
+      expect((error as Error).message).toBe(
+        'KEY_ENCRYPTION_KEY_CURRENT is not a version ("v<n>") in KEY_ENCRYPTION_KEYS.',
+      );
+    }
   });
 
   test("hazard: empty entry throws clear error", () => {
