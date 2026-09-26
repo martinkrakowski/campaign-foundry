@@ -329,4 +329,11 @@ describe("keyEncryptionSettings (PT-7b1)", () => {
 
     expect(() => keyEncryptionSettings()).toThrow(/empty entry found/);
   });
+
+  test("hazard: base64 with invalid padding throws clear error", () => {
+    process.env.KEY_ENCRYPTION_KEYS = "v1:AAAAA=";
+    process.env.KEY_ENCRYPTION_KEY_CURRENT = "v1";
+
+    expect(() => keyEncryptionSettings()).toThrow(/Invalid base64 key/);
+  });
 });

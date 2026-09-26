@@ -1,5 +1,5 @@
 import { describe, test, expect } from "vitest";
-import { randomBytes } from "node:crypto";
+import { createCipheriv, randomBytes } from "node:crypto";
 import { HostSecretKeySealer } from "../host-secret-key-sealer.js";
 import type { SealedKey } from "../key-sealer.port.js";
 import type { KeyEncryptionSettings } from "../../config.js";
@@ -149,6 +149,24 @@ describe("HostSecretKeySealer (PT-7b1)", () => {
 
       const tampered = { ...sealed, dekIv: flipBit(sealed.dekIv) };
       expect(() => sealer.open(tampered)).toThrow(/Failed to unseal data encryption key/);
+    });
+
+    test("tamper: unsealed data key with invalid length fails open", () => {
+      const shortDek = Buffer.alloc(16);
+      const dekIv = randomBytes(12);
+      const dekCipher = createCipheriv("aes-256-gcm", v1Key, dekIv);
+      const sealedShortDek = Buffer.concat([dekCipher.update(shortDek), dekCipher.final()]);
+      const dekTag = dekCipher.getAuthTag();
+
+      const sealed = sealer.seal("hello");
+      const malformedSealed: SealedKey = {
+        ...sealed,
+        sealedDek: sealedShortDek.toString("base64"),
+        dekIv: dekIv.toString("base64"),
+        dekTag: dekTag.toString("base64"),
+      };
+
+      expect(() => sealer.open(malformedSealed)).toThrow(/Failed to unseal data encryption key/);
     });
   });
 

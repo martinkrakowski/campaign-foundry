@@ -54,10 +54,7 @@ export class HostSecretKeySealer implements KeySealerPort {
   }
 
   seal(plaintext: string): SealedKey {
-    const currentKek = this.keys.get(this.currentVersion);
-    if (!currentKek) {
-      throw new Error(`Current key encryption version "${this.currentVersion}" not found in keys.`);
-    }
+    const currentKek = this.keys.get(this.currentVersion)!;
 
     // 1. Generate fresh 32-byte DEK and 12-byte IV for payload
     const dek = randomBytes(KEY_LENGTH);
