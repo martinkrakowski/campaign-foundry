@@ -651,12 +651,66 @@ describe("PgJobStore (PT-6a, D171)", () => {
     expect(QUEUED_TTL_MS).toBe(JOB_TTL_MS);
     await store.enqueueJob("camp-other");
 
-    const oldJob = await store.getStoredJob(oldId);
-    expect(oldJob?.job.status).toBe("failed");
-    expect(oldJob?.job.error).toMatch(/expired|timed out/i);
+    // Straight to the table (finding 4): `getStoredJob`/`listJobs` read
+    // through `lapsedAsFailed`, which reports a stale queued row as "failed"
+    // on ITS OWN even when the reaper never touched the row — asserting
+    // through them here would pass whether or not `reap()`'s queued branch
+    // above exists at all. Only a direct `select` proves the reaper wrote it.
+    const oldRow = await db.query<{ status: string; error: string | null }>(
+      "select status, error from job where id = $1",
+      [oldId],
+    );
+    expect(oldRow.rows[0]).toMatchObject({ status: "failed" });
+    expect(oldRow.rows[0]!.error).toMatch(/expired|timed out/i);
 
-    const freshJob = await store.getStoredJob(freshId);
-    expect(freshJob?.job.status).toBe("queued");
+    const freshRow = await db.query<{ status: string }>("select status from job where id = $1", [
+      freshId,
+    ]);
+    expect(freshRow.rows[0]).toEqual({ status: "queued" });
+  });
+
+  test("the reaper is what lets a stale queued row's campaign be re-enqueued (finding 4)", async () => {
+    // `runningIncumbent` already excludes a stale queued row from blocking a
+    // NEW campaign (its `created_at > now() - QUEUED_TTL_MS` clause), so that
+    // alone does not exercise the reaper. The partial unique index enforcing
+    // "at most one active row per campaign" still sees the stale row as
+    // `status = 'queued'` until something writes it — so a re-enqueue for the
+    // SAME campaign only succeeds if `reap()` flipped it to 'failed' first;
+    // without the reaper this would insert-conflict and answer
+    // `acquired: false` with the stale row's own id.
+    const store = new PgJobStore(db, "local");
+    const staleId = "33333333-3333-3333-3333-333333333333";
+    await db.query(
+      `insert into job (id, org_id, campaign_id, status, created_at)
+       values ($1, 'local', 'camp-stale', 'queued', now() - interval '11 minutes')`,
+      [staleId],
+    );
+
+    const retry = await store.enqueueJob("camp-stale");
+    expect(retry).toEqual({ acquired: true, jobId: expect.any(String) });
+    expect(retry.acquired && retry.jobId).not.toBe(staleId);
+
+    const staleRow = await db.query<{ status: string }>("select status from job where id = $1", [
+      staleId,
+    ]);
+    expect(staleRow.rows[0]).toEqual({ status: "failed" });
+  });
+
+  test("startQueuedJob refuses a queued row past QUEUED_TTL_MS even before any reaper has run (finding 5)", async () => {
+    const store = new PgJobStore(db, "local");
+    const staleId = "44444444-4444-4444-4444-444444444444";
+    await db.query(
+      `insert into job (id, org_id, campaign_id, status, created_at)
+       values ($1, 'local', 'camp-stale-start', 'queued', now() - interval '11 minutes')`,
+      [staleId],
+    );
+
+    await expect(store.startQueuedJob(staleId)).resolves.toBe(false);
+
+    const row = await db.query<{ status: string }>("select status from job where id = $1", [
+      staleId,
+    ]);
+    expect(row.rows[0]).toEqual({ status: "queued" });
   });
 });
 

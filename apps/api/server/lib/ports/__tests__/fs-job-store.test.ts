@@ -615,6 +615,34 @@ describe("FsJobStore", () => {
     expect(stored?.job.error).toMatch(/expired/i);
   });
 
+  test("a stale queued row's on-read expiry is what lets its campaign be re-enqueued (finding 4)", async () => {
+    // Same shape as "getStoredJob marks an expired queued job as failed on a
+    // cold disk read" above, but the point here is `enqueueJob`, not
+    // `getStoredJob` directly: `enqueueJob` finds the incumbent through
+    // `getRunningJobId` -> `listJobs` -> `getStoredJob` for each entry, so the
+    // SAME on-read staleness check has to run inside that path too. If it did
+    // not, the stale row would still read as "queued" there and block a
+    // second `enqueueJob` for the same campaign with `acquired: false`.
+    const enq = await store.enqueueJob("camp");
+    expect(enq.acquired).toBe(true);
+    if (!enq.acquired) return;
+
+    const raw = JSON.parse(readFileSync(store.jobPath(enq.jobId), "utf8")) as StoredJob;
+    writeFileSync(
+      store.jobPath(enq.jobId),
+      JSON.stringify({ ...raw, createdAt: Date.now() - QUEUED_TTL_MS - 1 }),
+      "utf8",
+    );
+    (store as unknown as { memoryCache: Map<string, unknown> }).memoryCache.clear();
+
+    const retry = await store.enqueueJob("camp");
+    expect(retry).toEqual({ acquired: true, jobId: expect.any(String) });
+    expect(retry.acquired && retry.jobId).not.toBe(enq.jobId);
+
+    const stale = await store.getStoredJob(enq.jobId);
+    expect(stale?.job.status).toBe("failed");
+  });
+
   test("deleteJob clears a still-pending queued-expiry timer", async () => {
     const enq = await store.enqueueJob("camp");
     expect(enq.acquired).toBe(true);
