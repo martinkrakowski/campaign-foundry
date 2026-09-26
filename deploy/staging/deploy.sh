@@ -74,6 +74,15 @@ remote kubectl -n "$NS" delete job cf-migrate --ignore-not-found
 sed "s#IMAGE_TAG#$TAG#" deploy/staging/jobs/migrate.yaml | remote kubectl apply -f -
 remote kubectl -n "$NS" wait job/cf-migrate --for=condition=complete --timeout=5m
 
+# Better Auth needs its secret before the app rolls out. It is created once, on
+# the node, by the owner (README "Auth secret"), so it is never committed or
+# passed through this machine; the deploy only checks that it exists.
+echo "==> auth secret"
+if ! remote kubectl -n "$NS" get secret campaign-foundry-auth >/dev/null 2>&1; then
+  echo "deploy.sh: secret campaign-foundry-auth is missing; create it once (deploy/staging/README.md, \"Auth secret\") and deploy again." >&2
+  exit 1
+fi
+
 echo "==> roll out"
 printf '%s\n' "$RENDERED" | only_app app | remote kubectl apply -f -
 remote kubectl -n "$NS" rollout status deployment/campaign-foundry --timeout=10m
