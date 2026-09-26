@@ -1,5 +1,10 @@
 import { describe, test, expect, vi, afterEach } from "vitest";
-import { resetProviderKeyStore } from "../../../../lib/ports/index.js";
+import {
+  ProviderKeyUnavailableError,
+  resetProviderKeyStore,
+  setProviderKeyStore,
+  type ProviderKeyPort,
+} from "../../../../lib/ports/index.js";
 import type { TenantContext } from "../../../../lib/tenant.js";
 import {
   ACME_TENANT,
@@ -316,5 +321,82 @@ describe("provider-keys routes (PT-7b2, D175, D176)", () => {
       errorSpy.mockRestore();
       await harness.cleanup();
     }
+  });
+});
+
+describe("each route translates ProviderKeyUnavailableError to 503, and propagates any other error", () => {
+  const fake = (overrides: Partial<ProviderKeyPort>): ProviderKeyPort => ({
+    put: async () => {
+      throw new Error("unexpected store failure");
+    },
+    list: async () => {
+      throw new Error("unexpected store failure");
+    },
+    revoke: async () => {
+      throw new Error("unexpected store failure");
+    },
+    open: async () => {
+      throw new Error("unexpected store failure");
+    },
+    ...overrides,
+  });
+
+  afterEach(resetProviderKeyStore);
+
+  test("GET (list): 503 naming what's missing on ProviderKeyUnavailableError, 500 on anything else", async () => {
+    setProviderKeyStore(
+      fake({
+        list: async () => {
+          throw new ProviderKeyUnavailableError("provider keys need STORE_BACKEND=postgres");
+        },
+      }),
+    );
+    const unavailable = await list(LOCAL_TENANT);
+    expect(unavailable.status).toBe(503);
+    expect(await unavailable.json()).toEqual({
+      error: "provider keys need STORE_BACKEND=postgres",
+    });
+
+    setProviderKeyStore(fake({}));
+    const other = await list(LOCAL_TENANT);
+    expect(other.status).toBe(500);
+  });
+
+  test("GET /:provider: 503 on ProviderKeyUnavailableError, 500 on anything else", async () => {
+    setProviderKeyStore(
+      fake({
+        list: async () => {
+          throw new ProviderKeyUnavailableError("provider keys need STORE_BACKEND=postgres");
+        },
+      }),
+    );
+    const unavailable = await getOne("gemini", LOCAL_TENANT);
+    expect(unavailable.status).toBe(503);
+
+    setProviderKeyStore(fake({}));
+    const other = await getOne("gemini", LOCAL_TENANT);
+    expect(other.status).toBe(500);
+  });
+
+  test("PUT: 500 (propagated), not 503, when the store fails for a reason other than no KEK", async () => {
+    setProviderKeyStore(fake({}));
+    const res = await put("gemini", { key: "sk-fake-key-0000" }, LOCAL_TENANT);
+    expect(res.status).toBe(500);
+  });
+
+  test("DELETE: 503 on ProviderKeyUnavailableError, 500 on anything else", async () => {
+    setProviderKeyStore(
+      fake({
+        revoke: async () => {
+          throw new ProviderKeyUnavailableError("provider keys need STORE_BACKEND=postgres");
+        },
+      }),
+    );
+    const unavailable = await del("gemini", LOCAL_TENANT);
+    expect(unavailable.status).toBe(503);
+
+    setProviderKeyStore(fake({}));
+    const other = await del("gemini", LOCAL_TENANT);
+    expect(other.status).toBe(500);
   });
 });
