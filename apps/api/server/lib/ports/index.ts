@@ -111,17 +111,33 @@ class Registry<T> {
 // never through the in-process lock chain — that chain only ever sees its own
 // process's callers, one per (org, user) store.
 const briefs = new Registry<BriefStorePort>(
-  (t) =>
-    storeBackend() === "postgres"
-      ? JSON.stringify(["postgres", scopeTenant(t).orgId, scopeTenant(t).userId])
-      : join(scopeRoots(t).projectRoot, "briefs"),
+  (t) => {
+    if (storeBackend() !== "postgres") return join(scopeRoots(t).projectRoot, "briefs");
+    const tenant = scopeTenant(t);
+    // Sorted (D166, PT-2c): two callers with the same roles/teamIds in a
+    // different array order must share one cached store, not mint a
+    // duplicate per permutation — `visible()` only ever tests membership.
+    return JSON.stringify([
+      "postgres",
+      tenant.orgId,
+      tenant.userId,
+      [...tenant.roles].sort(),
+      [...tenant.teamIds].sort(),
+    ]);
+  },
   (key) => {
     // A filesystem root is always an absolute path and never starts with "[".
     // The postgres key is JSON, not string concatenation, so no character an
     // org or user id contains (":" included) can make one pair alias another.
     if (!key.startsWith("[")) return new FsBriefStore(key);
-    const [, orgId, userId] = JSON.parse(key) as [string, string, string];
-    return new PgBriefStore(database(), orgId, userId);
+    const [, orgId, userId, roles, teamIds] = JSON.parse(key) as [
+      string,
+      string,
+      string,
+      string[],
+      string[],
+    ];
+    return new PgBriefStore(database(), orgId, userId, roles, teamIds);
   },
 );
 const assets = new Registry<AssetStorePort>(

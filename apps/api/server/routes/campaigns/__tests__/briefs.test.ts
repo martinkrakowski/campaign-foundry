@@ -441,6 +441,28 @@ describe("authoring briefs", () => {
     spy.mockRestore();
   });
 
+  // The route's own supportsTeams check (briefs.post.ts, D166 PT-2c) already
+  // refuses every teamId the fs backend could see, so this request omits
+  // teamId entirely and forces createBrief itself to throw — defense in
+  // depth: the store contract can still change out from under the route
+  // (a bug in a future backend's supportsTeams, say), and this maps that
+  // straight to 400 exactly like the early check does.
+  test("POST maps a TeamsNotSupportedError from the store itself to 400", async () => {
+    const { create } = await api();
+    // Imported AFTER api()'s vi.resetModules(), same as getBriefStore below —
+    // a TeamsNotSupportedError built from the pre-reset module is a different
+    // class than the route's own import and would fail its instanceof check.
+    const { getBriefStore, TeamsNotSupportedError } = await import("../../../lib/ports/index.js");
+    const spy = vi
+      .spyOn(getBriefStore(LOCAL_TENANT), "createBrief")
+      .mockRejectedValueOnce(new TeamsNotSupportedError());
+    const res = await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: new TeamsNotSupportedError().message });
+    expect(existsSync(campYaml())).toBe(false);
+    spy.mockRestore();
+  });
+
   test("POST returns 400 with errorMessage when body parsing throws a non-Error", async () => {
     const { create } = await api();
     const g = globalThis as Record<string, unknown>;
@@ -582,6 +604,27 @@ describe("authoring briefs", () => {
     );
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error: "Refusing to write through a symlink." });
+    expect(readFileSync(campYaml())).toEqual(original);
+    spy.mockRestore();
+  });
+
+  // Same defense-in-depth as the POST test above: the request omits teamId so
+  // the route's own supportsTeams early check never fires, and rewriteBrief
+  // itself is forced to throw, proving the route's own error-mapping catch
+  // still works even though the early check makes it unreachable in practice.
+  test("PUT maps a TeamsNotSupportedError from the store itself to 400", async () => {
+    const { create, update } = await api();
+    await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
+    const original = readFileSync(campYaml());
+    const { getBriefStore, TeamsNotSupportedError } = await import("../../../lib/ports/index.js");
+    const spy = vi
+      .spyOn(getBriefStore(LOCAL_TENANT), "rewriteBrief")
+      .mockRejectedValueOnce(new TeamsNotSupportedError());
+    const res = await update()(
+      jsonReq("http://x/campaigns/briefs/camp", "PUT", brief({ campaignMessage: "Nope" })),
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: new TeamsNotSupportedError().message });
     expect(readFileSync(campYaml())).toEqual(original);
     spy.mockRestore();
   });

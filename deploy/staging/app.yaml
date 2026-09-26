@@ -83,11 +83,31 @@ spec:
               value: /etc/campaign-foundry/db/ca.crt
             - name: DATABASE_POOL_MAX
               value: "3"
+            # Kafka delivery (PT-6b2/PT-6b3): runs are published to cf.run-requests and
+            # this single API process consumes them (the owner's single-node choice).
+            # Certificates are mounted under PROJECT_ROOT/certs, the only place
+            # kafkaSettings() reads them from.
+            - name: KAFKA_BROKERS
+              value: cf-kafka-kafka-bootstrap:9093
+            - name: KAFKA_CONSUME
+              value: "true"
+            - name: KAFKA_CA_PATH
+              value: certs/kafka-ca/ca.crt
+            - name: KAFKA_CLIENT_CERT_PATH
+              value: certs/kafka/user.crt
+            - name: KAFKA_CLIENT_KEY_PATH
+              value: certs/kafka/user.key
           volumeMounts:
             - name: data
               mountPath: /data
             - name: db-ca
               mountPath: /etc/campaign-foundry/db
+              readOnly: true
+            - name: kafka-user
+              mountPath: /data/certs/kafka
+              readOnly: true
+            - name: kafka-ca
+              mountPath: /data/certs/kafka-ca
               readOnly: true
           # The API listens on loopback only (the web container reaches it there), so
           # the kubelet cannot dial it on the Pod IP; the check runs in the container.
@@ -129,6 +149,20 @@ spec:
         - name: db-ca
           secret:
             secretName: cf-pg-ca
+            items:
+              - key: ca.crt
+                path: ca.crt
+        - name: kafka-user
+          secret:
+            secretName: campaign-foundry
+            items:
+              - key: user.crt
+                path: user.crt
+              - key: user.key
+                path: user.key
+        - name: kafka-ca
+          secret:
+            secretName: cf-kafka-cluster-ca-cert
             items:
               - key: ca.crt
                 path: ca.crt

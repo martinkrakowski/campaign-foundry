@@ -1,13 +1,20 @@
 import { errorMessage } from "@campaignfoundry/shared";
 import { isErrno, SYMLINK_WRITE_ERROR } from "../../../lib/brief-files.js";
 import { assertSafeId, parseBrief } from "../../../lib/load-brief.js";
-import { getBriefStore } from "../../../lib/ports/index.js";
+import { getBriefStore, TeamsNotSupportedError } from "../../../lib/ports/index.js";
+import { canAssignTeam } from "../../../lib/ownership.js";
 
 import { requestTenant } from "../../../lib/tenant.js";
 /**
  * PUT /campaigns/briefs/:id — replace the briefs/ file whose `brief.id` equals the
  * path id (yaml, yml, or json). Path id must equal `brief.id`. 404 if no file has
  * that id. The file is rewritten in its own format; YAML comments are lost.
+ *
+ * `teamId` (D166, PT-2c item 3): see `briefs.post.ts`'s docstring — same
+ * sibling-of-the-brief shape, same permission and backend rules. Absent means
+ * "leave the campaign's team exactly as it is" (a plain save must not reset
+ * an assigned team to org-wide). `null` (item 5) clears an assigned team back
+ * to org-wide, under the same `canAssignTeam` permission.
  */
 export default defineEventHandler(async (event) => {
   const scope = requestTenant(event);
@@ -21,8 +28,18 @@ export default defineEventHandler(async (event) => {
   }
 
   let brief;
+  let teamId: string | null | undefined;
   try {
-    brief = parseBrief(await readBody(event));
+    const rawBody: unknown = await readBody(event);
+    if (typeof rawBody !== "object" || rawBody === null || Array.isArray(rawBody)) {
+      throw new Error("Campaign brief must be an object.");
+    }
+    const { teamId: rawTeamId, ...briefBody } = rawBody as Record<string, unknown>;
+    if (rawTeamId !== undefined && rawTeamId !== null && typeof rawTeamId !== "string") {
+      throw new Error('"teamId" must be a string or null.');
+    }
+    teamId = rawTeamId as string | null | undefined;
+    brief = parseBrief(briefBody);
   } catch (error) {
     setResponseStatus(event, 400);
     return { error: errorMessage(error) };
@@ -33,12 +50,33 @@ export default defineEventHandler(async (event) => {
     return { error: `Path id "${id}" does not match brief.id "${brief.id}".` };
   }
 
+  const store = getBriefStore(scope);
+  // Checked before canAssignTeam, matching briefs.post.ts (D166, PT-2c,
+  // coderabbit thread U_YF): an fs backend (item 5) answers 400 for any
+  // teamId, rather than 403 for one this caller could not have assigned
+  // anyway. PUT does no Save-as asset copying, so this is a consistency fix
+  // here, not an orphan-file one — the ordering keeps the two routes' rules
+  // identical rather than diverging only because PUT has nothing to copy.
+  if (teamId !== undefined && !store.supportsTeams) {
+    setResponseStatus(event, 400);
+    return { error: new TeamsNotSupportedError().message };
+  }
+  if (teamId !== undefined && !canAssignTeam(scope, teamId)) {
+    setResponseStatus(event, 403);
+    return {
+      error:
+        teamId === null
+          ? "Not authorized to clear this campaign's team."
+          : `Not authorized to assign team "${teamId}".`,
+    };
+  }
+
   const rawRevision = getQuery(event).revision;
   const expectedRevision = Array.isArray(rawRevision) ? rawRevision[0] : rawRevision;
 
   try {
-    const stored = await getBriefStore(scope).withBriefLock(id, async () => {
-      return await getBriefStore(scope).rewriteBrief(brief, { expectedRevision });
+    const stored = await store.withBriefLock(id, async () => {
+      return await store.rewriteBrief(brief, { expectedRevision, teamId });
     });
     // The new revision rides along: the editor dispatches it into its source, so the
     // next save guards conditionally instead of replaying the load-time revision and
@@ -48,6 +86,10 @@ export default defineEventHandler(async (event) => {
     if (errorMessage(error) === SYMLINK_WRITE_ERROR) {
       setResponseStatus(event, 400);
       return { error: errorMessage(error) };
+    }
+    if (error instanceof TeamsNotSupportedError) {
+      setResponseStatus(event, 400);
+      return { error: error.message };
     }
     if (isErrno(error, "ENOENT")) {
       setResponseStatus(event, 404);
@@ -59,6 +101,10 @@ export default defineEventHandler(async (event) => {
         error: "Brief was modified by another user.",
         revision: (error as { revision?: string }).revision,
       };
+    }
+    if (isErrno(error, "EFORBIDDEN")) {
+      setResponseStatus(event, 403);
+      return { error: errorMessage(error) };
     }
     throw error;
   }
