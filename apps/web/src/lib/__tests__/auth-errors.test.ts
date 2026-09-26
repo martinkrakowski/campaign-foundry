@@ -70,6 +70,7 @@ describe("auth-errors", () => {
 
     try {
       handleAuthError(403, { code: "no_membership", error: "Custom server message" });
+      expect.unreachable("handleAuthError must throw for a 403 no_membership");
     } catch (e) {
       expect(e).toBeInstanceOf(NoMembershipError);
       expect((e as NoMembershipError).message).toBe("Custom server message");
