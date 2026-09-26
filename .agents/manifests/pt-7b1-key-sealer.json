@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "PT-7b1-key-sealer",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/keys/host-secret-key-sealer.ts",
+      "before": "      decipher.setAuthTag(tag);",
+      "after": "      // mutant: skip setAuthTag in open",
+      "because": "skipping setAuthTag in open disables auth tag verification on decrypted data",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/keys/__tests__/host-secret-key-sealer.test.ts",
+        "-t",
+        "tamper: tampered auth tag fails open"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
