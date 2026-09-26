@@ -459,9 +459,7 @@ describe("the run deadline is terminal (review, #537)", () => {
       runJob(LOCAL_TENANT, id, async () => workPromise);
 
       await vi.advanceTimersByTimeAsync(RUN_DEADLINE_MS + 1);
-      await vi.waitFor(async () =>
-        expect((await getJob(LOCAL_TENANT, id))?.status).toBe("failed"),
-      );
+      await vi.waitFor(async () => expect((await getJob(LOCAL_TENANT, id))?.status).toBe("failed"));
 
       rejectWork(new JobLeaseLostError(id));
       await vi.advanceTimersByTimeAsync(10);

@@ -12,7 +12,12 @@ import {
   withDecisionLock,
   type DecisionRecord,
 } from "../decisions.js";
-import { getDecisionStore, getJobStore, resetDecisionStore, resetJobStore } from "../ports/index.js";
+import {
+  getDecisionStore,
+  getJobStore,
+  resetDecisionStore,
+  resetJobStore,
+} from "../ports/index.js";
 import { JobLeaseLostError } from "../ports/job-store.port.js";
 import { LOCAL_TENANT } from "../tenant.js";
 

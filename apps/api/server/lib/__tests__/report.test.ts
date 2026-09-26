@@ -988,7 +988,6 @@ describe("reports go through the report store (PT-0a)", () => {
       writeReport(LOCAL_TENANT, result([asset()]), { expectedRevision: "server-revision" }),
     ).rejects.toBe(conflict);
   });
-
 });
 
 describe("writeReport run fence (PT-6a2)", () => {
