@@ -3225,6 +3225,76 @@ describe("RunProvider — running job awareness on reload and brief switch", () 
     expect(result.current.loading).toBe(false);
   });
 
+  test("setBrief skips job discovery for the already-displayed brief while already polling one for it", async () => {
+    let jobLookups = 0;
+    mockPipelineApi({
+      result: (url) =>
+        url.includes("/campaigns/jobs?campaignId=active-campaign")
+          ? json({ error: "No running job" }, 404)
+          : json({
+              halted: false,
+              assets: [asset({ productId: "p1" })],
+              log: { entries: [], campaignId: "active-campaign" },
+            }),
+    });
+    const { result } = setup();
+    act(() => {
+      result.current.setBrief(activeBrief);
+    });
+    await waitFor(() => expect(result.current.assets).toHaveLength(1));
+    expect(result.current.loading).toBe(false);
+
+    // Another client starts a run; the job GET hangs, so once adopted `loading`
+    // stays true for the rest of this test.
+    let resolvePoll!: (r: Response) => void;
+    const pollPromise = new Promise<Response>((r) => {
+      resolvePoll = r;
+    });
+    mockPipelineApi({
+      result: (url) => {
+        if (url.includes("/campaigns/jobs?campaignId=active-campaign")) {
+          jobLookups += 1;
+          return json({ jobId: "job-in-flight" });
+        }
+        return json({
+          halted: false,
+          assets: [asset({ productId: "p1" })],
+          log: { entries: [], campaignId: "active-campaign" },
+        });
+      },
+      job: () => pollPromise,
+    });
+
+    // Re-select the same brief again; this discovers job-in-flight and starts
+    // polling it.
+    act(() => {
+      result.current.setBrief(activeBrief);
+    });
+    await waitFor(() => expect(result.current.loading).toBe(true));
+    const lookupsAfterAdopt = jobLookups;
+
+    // Re-select it a third time WHILE still polling that same job: the run on
+    // screen still names this campaign, so branch (1) fires again, but this tab
+    // is already polling a job for it — discovery must be skipped, not doubled.
+    act(() => {
+      result.current.setBrief(activeBrief);
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(jobLookups).toBe(lookupsAfterAdopt);
+    expect(result.current.loading).toBe(true);
+
+    resolvePoll(
+      jobOk({
+        halted: false,
+        assets: [asset({ productId: "p2" })],
+        log: { entries: [], campaignId: "active-campaign" },
+      }),
+    );
+    await waitFor(() => expect(result.current.loading).toBe(false));
+  });
+
   test("unmounting during setBrief's job discovery leaves no orphaned poller (github-actions #71u)", async () => {
     let resolveJobLookup!: (r: Response) => void;
     const jobLookupPromise = new Promise<Response>((r) => {
