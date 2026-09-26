@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "PT-1b2-sign-in-ui",
+  "mutations": [
+    {
+      "file": "apps/web/src/app/(auth)/sign-in/page.tsx",
+      "before": "        {capabilities?.auth?.google ? (",
+      "after": "        {true ? ( /* mutant: show google button regardless of auth.google */",
+      "because": "without checking auth.google, the Google sign-in button is displayed even when the host capability auth.google is false",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(auth)/sign-in/__tests__/page.test.tsx",
+        "-t",
+        "hides 'Continue with Google' button when auth.google is false"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
