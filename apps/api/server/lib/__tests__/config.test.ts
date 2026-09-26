@@ -1,5 +1,5 @@
 import { describe, test, expect, afterEach, beforeEach, vi } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { resolve } from "node:path";
@@ -8,6 +8,7 @@ import {
   authMode,
   authSettings,
   databaseSettings,
+  kafkaSettings,
   keyEncryptionSettings,
   outputRoot,
   storeBackend,
@@ -362,5 +363,148 @@ describe("keyEncryptionSettings (PT-7b1)", () => {
     process.env.KEY_ENCRYPTION_KEY_CURRENT = "v1";
 
     expect(() => keyEncryptionSettings()).toThrow(/Invalid base64 key/);
+  });
+});
+
+describe("kafkaSettings (PT-6b2, D174d)", () => {
+  const envKeys = [
+    "KAFKA_BROKERS",
+    "KAFKA_CLIENT_CERT_PATH",
+    "KAFKA_CLIENT_KEY_PATH",
+    "KAFKA_CA_PATH",
+    "KAFKA_TOPIC",
+    "KAFKA_GROUP_ID",
+    "KAFKA_CONSUME",
+  ] as const;
+  const saved = Object.fromEntries(envKeys.map((k) => [k, process.env[k]]));
+  const certsDir = resolve(projectRoot(), "certs");
+
+  afterEach(() => {
+    for (const k of envKeys) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+    rmSync(certsDir, { recursive: true, force: true });
+  });
+
+  test("returns undefined when KAFKA_BROKERS is unset or empty", () => {
+    delete process.env.KAFKA_BROKERS;
+    expect(kafkaSettings()).toBeUndefined();
+
+    process.env.KAFKA_BROKERS = "   ";
+    expect(kafkaSettings()).toBeUndefined();
+  });
+
+  test("parses brokers and applies default topic, groupId, and consume", () => {
+    process.env.KAFKA_BROKERS = "kafka1:9092, kafka2:9092";
+    delete process.env.KAFKA_TOPIC;
+    delete process.env.KAFKA_GROUP_ID;
+    delete process.env.KAFKA_CONSUME;
+
+    const settings = kafkaSettings();
+    expect(settings).toEqual({
+      brokers: ["kafka1:9092", "kafka2:9092"],
+      topic: "cf.run-requests",
+      groupId: "cf-workers",
+      consume: false,
+    });
+  });
+
+  test("respects explicit topic, groupId, and consume=true", () => {
+    process.env.KAFKA_BROKERS = "kafka1:9092";
+    process.env.KAFKA_TOPIC = "custom.topic";
+    process.env.KAFKA_GROUP_ID = "custom-group";
+    process.env.KAFKA_CONSUME = "true";
+
+    const settings = kafkaSettings();
+    expect(settings).toEqual({
+      brokers: ["kafka1:9092"],
+      topic: "custom.topic",
+      groupId: "custom-group",
+      consume: true,
+    });
+  });
+
+  test("reads CA, client cert, and client key from files under certs/", () => {
+    process.env.KAFKA_BROKERS = "kafka1:9092";
+    mkdirSync(certsDir, { recursive: true });
+    writeFileSync(join(certsDir, "ca.pem"), "TEST-CA-PEM");
+    writeFileSync(join(certsDir, "client.crt"), "TEST-CLIENT-CRT");
+    writeFileSync(join(certsDir, "client.key"), "TEST-CLIENT-KEY");
+
+    process.env.KAFKA_CA_PATH = "certs/ca.pem";
+    process.env.KAFKA_CLIENT_CERT_PATH = "certs/client.crt";
+    process.env.KAFKA_CLIENT_KEY_PATH = "certs/client.key";
+
+    const settings = kafkaSettings();
+    expect(settings).toEqual({
+      brokers: ["kafka1:9092"],
+      topic: "cf.run-requests",
+      groupId: "cf-workers",
+      consume: false,
+      caPath: "certs/ca.pem",
+      clientCertPath: "certs/client.crt",
+      clientKeyPath: "certs/client.key",
+      ssl: {
+        ca: "TEST-CA-PEM",
+        cert: "TEST-CLIENT-CRT",
+        key: "TEST-CLIENT-KEY",
+      },
+    });
+  });
+
+  test("hazard: empty broker entry in KAFKA_BROKERS throws clear error", () => {
+    process.env.KAFKA_BROKERS = "kafka1:9092, ,kafka2:9092";
+    expect(() => kafkaSettings()).toThrow(/Malformed KAFKA_BROKERS/);
+
+    process.env.KAFKA_BROKERS = "kafka1:9092,";
+    expect(() => kafkaSettings()).toThrow(/Malformed KAFKA_BROKERS/);
+  });
+
+  test("hazard: client cert without key throws clear error", () => {
+    process.env.KAFKA_BROKERS = "kafka1:9092";
+    process.env.KAFKA_CLIENT_CERT_PATH = "certs/client.crt";
+    delete process.env.KAFKA_CLIENT_KEY_PATH;
+
+    expect(() => kafkaSettings()).toThrow(
+      /KAFKA_CLIENT_CERT_PATH and KAFKA_CLIENT_KEY_PATH must both be provided/,
+    );
+  });
+
+  test("hazard: client key without cert throws clear error", () => {
+    process.env.KAFKA_BROKERS = "kafka1:9092";
+    process.env.KAFKA_CLIENT_KEY_PATH = "certs/client.key";
+    delete process.env.KAFKA_CLIENT_CERT_PATH;
+
+    expect(() => kafkaSettings()).toThrow(
+      /KAFKA_CLIENT_CERT_PATH and KAFKA_CLIENT_KEY_PATH must both be provided/,
+    );
+  });
+
+  test("hazard: inline cert content is rejected", () => {
+    process.env.KAFKA_BROKERS = "kafka1:9092";
+    process.env.KAFKA_CA_PATH = "-----BEGIN CERTIFICATE-----\nMIIB...";
+
+    expect(() => kafkaSettings()).toThrow(/never inline cert content/);
+  });
+
+  test("hazard: cert path outside certs/ is rejected", () => {
+    process.env.KAFKA_BROKERS = "kafka1:9092";
+    process.env.KAFKA_CA_PATH = "/etc/ssl/certs/ca.pem";
+
+    expect(() => kafkaSettings()).toThrow(/must be a file path under certs\//);
+
+    process.env.KAFKA_CA_PATH = "certs/../secret.pem";
+    expect(() => kafkaSettings()).toThrow(/must be a file path under certs\//);
+
+    process.env.KAFKA_CA_PATH = "certs";
+    expect(() => kafkaSettings()).toThrow(/must be a file path under certs\//);
+  });
+
+  test("hazard: missing cert file throws clear error", () => {
+    process.env.KAFKA_BROKERS = "kafka1:9092";
+    process.env.KAFKA_CA_PATH = "certs/missing-ca.pem";
+
+    expect(() => kafkaSettings()).toThrow(/Failed to read KAFKA_CA_PATH/);
   });
 });

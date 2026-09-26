@@ -1,4 +1,5 @@
-import { resolve } from "node:path";
+import { readFileSync } from "node:fs";
+import { isAbsolute, relative, resolve } from "node:path";
 import { projectRoot } from "@campaignfoundry/shared";
 import type { DatabaseSettings } from "./db/database-config.js";
 import { loadEnv } from "./env.js";
@@ -175,5 +176,106 @@ export function keyEncryptionSettings(): KeyEncryptionSettings | undefined {
   return {
     currentVersion,
     keys,
+  };
+}
+
+/** TLS configuration for Kafka connection. */
+export interface KafkaSslConfig {
+  readonly ca?: string;
+  readonly cert?: string;
+  readonly key?: string;
+}
+
+/** Settings for Kafka run delivery and consumption (PT-6b2, D174d). */
+export interface KafkaSettings {
+  readonly brokers: readonly string[];
+  readonly topic: string;
+  readonly groupId: string;
+  readonly consume: boolean;
+  readonly ssl?: KafkaSslConfig;
+  readonly clientCertPath?: string;
+  readonly clientKeyPath?: string;
+  readonly caPath?: string;
+}
+
+function readCertFile(envVar: string, rawPath: string): string {
+  if (rawPath.includes("-----BEGIN") || rawPath.includes("\n") || rawPath.includes("\r")) {
+    throw new Error(`${envVar} must be a file path under certs/, never inline cert content.`);
+  }
+  const certsDir = resolve(projectRoot(), "certs");
+  const resolved = resolve(projectRoot(), rawPath);
+  const rel = relative(certsDir, resolved);
+  if (rel.startsWith("..") || isAbsolute(rel) || rel === "") {
+    throw new Error(`${envVar} must be a file path under certs/, got "${rawPath}".`);
+  }
+  try {
+    return readFileSync(resolved, "utf8");
+  } catch (error: unknown) {
+    throw new Error(
+      `Failed to read ${envVar} at "${rawPath}": ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+/**
+ * Kafka settings for delivering and consuming run requests (PT-6b2, D174d).
+ *
+ * Reads `KAFKA_BROKERS`, `KAFKA_CLIENT_CERT_PATH`, `KAFKA_CLIENT_KEY_PATH`,
+ * `KAFKA_CA_PATH`, `KAFKA_TOPIC` (default `cf.run-requests`), `KAFKA_GROUP_ID`
+ * (default `cf-workers`), and `KAFKA_CONSUME` (`true` turns on the in-API consumer).
+ *
+ * Unset brokers mean Kafka is off and `undefined` is returned.
+ * Every cert is read from a file path under `certs/`, never inline.
+ */
+export function kafkaSettings(): KafkaSettings | undefined {
+  loadEnv();
+  const rawBrokers = process.env.KAFKA_BROKERS;
+  if (rawBrokers === undefined || rawBrokers.trim() === "") {
+    return undefined;
+  }
+
+  const brokerEntries = rawBrokers.split(",").map((b) => b.trim());
+  for (const entry of brokerEntries) {
+    if (entry === "") {
+      throw new Error("Malformed KAFKA_BROKERS: empty broker entry found.");
+    }
+  }
+
+  const topic = process.env.KAFKA_TOPIC?.trim() || "cf.run-requests";
+  const groupId = process.env.KAFKA_GROUP_ID?.trim() || "cf-workers";
+  const consume = process.env.KAFKA_CONSUME === "true";
+
+  const caPath = process.env.KAFKA_CA_PATH?.trim();
+  const certPath = process.env.KAFKA_CLIENT_CERT_PATH?.trim();
+  const keyPath = process.env.KAFKA_CLIENT_KEY_PATH?.trim();
+
+  if ((certPath && !keyPath) || (!certPath && keyPath)) {
+    throw new Error(
+      "KAFKA_CLIENT_CERT_PATH and KAFKA_CLIENT_KEY_PATH must both be provided for client certificate authentication.",
+    );
+  }
+
+  const ca = caPath ? readCertFile("KAFKA_CA_PATH", caPath) : undefined;
+  const cert = certPath ? readCertFile("KAFKA_CLIENT_CERT_PATH", certPath) : undefined;
+  const key = keyPath ? readCertFile("KAFKA_CLIENT_KEY_PATH", keyPath) : undefined;
+
+  const ssl: KafkaSslConfig | undefined =
+    ca || cert || key
+      ? {
+          ...(ca ? { ca } : {}),
+          ...(cert ? { cert } : {}),
+          ...(key ? { key } : {}),
+        }
+      : undefined;
+
+  return {
+    brokers: brokerEntries,
+    topic,
+    groupId,
+    consume,
+    ...(ssl ? { ssl } : {}),
+    ...(certPath ? { clientCertPath: certPath } : {}),
+    ...(keyPath ? { clientKeyPath: keyPath } : {}),
+    ...(caPath ? { caPath } : {}),
   };
 }
