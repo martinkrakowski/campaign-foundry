@@ -152,6 +152,23 @@ describe("GET / PUT /campaigns/decisions (D173)", () => {
     });
   });
 
+  test("reviewing an unsaved campaign with a report succeeds and reads back (H1 / H2)", async () => {
+    await getReportStore(LOCAL_TENANT).writeReport("unsaved-camp", JSON.stringify({ assets: [] }));
+    const putRes = await put({
+      campaignId: "unsaved-camp",
+      revision: null,
+      decisions: { "p1/1x1/bold": "approved" },
+    });
+    expect(putRes.status).toBe(200);
+    const putBody = (await putRes.json()) as Stored;
+    expect(putBody.decisions["p1/1x1/bold"]?.verdict).toBe("approved");
+
+    const getRes = await get("?campaignId=unsaved-camp");
+    expect(getRes.status).toBe(200);
+    const getBody = (await getRes.json()) as Stored;
+    expect(getBody.decisions["p1/1x1/bold"]?.verdict).toBe("approved");
+  });
+
   test("a `__proto__` key is refused at the body parser, and a `toString` key is an ordinary review key", async () => {
     const proto = await putRaw(
       '{"campaignId":"camp","revision":null,"decisions":{"__proto__":"approved"}}',

@@ -749,6 +749,17 @@ describe("GET /campaigns/result", () => {
     expect(res.status).toBe(404);
   });
 
+  test("returns 200 for an owned unsaved draft with a report on disk (PT-2b / H1)", async () => {
+    mkdirSync(resolve(dir, "reports"), { recursive: true });
+    writeFileSync(
+      resolve(dir, "reports", "unsaved-draft.json"),
+      JSON.stringify({ halted: false, assets: [], log: { campaignId: "unsaved-draft" } }),
+    );
+    const res = await call("?campaignId=unsaved-draft");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ log: { campaignId: "unsaved-draft" } });
+  });
+
   test("returns 404 for an unsafe id (PT-2b)", async () => {
     const res = await call("?campaignId=../evil");
     expect(res.status).toBe(404);
@@ -1274,6 +1285,7 @@ describe("POST /campaigns/package", () => {
   test("returns 404 for an unsafe campaign id", async () => {
     const res = await call({ campaignId: "../evil", platforms: ["instagram-feed"] });
     expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: "Campaign report not found" });
   });
 
   test("returns 422 naming tiktok when a hidden platform is requested", async () => {
@@ -1373,5 +1385,29 @@ describe("POST /campaigns/package", () => {
     const res = await call({ campaignId: "camp", platforms: ["instagram-feed"] });
     expect(res.status).toBe(422);
     expect(await res.json()).toEqual({ error: "Campaign report assets must be an array" });
+  });
+
+  test("packages an unsaved campaign run that has no stored brief (H3)", async () => {
+    mkdirSync(resolve(dir, "reports"), { recursive: true });
+    writeFileSync(
+      resolve(dir, "reports", "unsaved-pkg.json"),
+      JSON.stringify({
+        assets: [
+          {
+            productId: "p1",
+            aspectRatio: "1:1",
+            treatment: "bold",
+            outputPath: "unsaved-pkg/p1-1x1.png",
+          },
+        ],
+      }),
+    );
+    mkdirSync(resolve(dir, "unsaved-pkg"), { recursive: true });
+    writeFileSync(resolve(dir, "unsaved-pkg", "p1-1x1.png"), "PNG-DATA");
+
+    const res = await call({ campaignId: "unsaved-pkg", platforms: ["instagram-feed"] });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { platforms: Array<{ platformId: string }> };
+    expect(body.platforms[0].platformId).toBe("instagram-feed");
   });
 });

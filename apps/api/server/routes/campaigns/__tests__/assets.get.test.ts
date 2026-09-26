@@ -77,6 +77,25 @@ describe("GET /campaigns/assets", () => {
     expect(await res.json()).toEqual({ assets: [] });
   });
 
+  test("lists assets for an unsaved brief with assets and no stored brief (H5)", async () => {
+    const briefDir = join(dir, "assets", "inputs", "unsaved-brief");
+    mkdirSync(briefDir, { recursive: true });
+    writeFileSync(join(briefDir, "logo.png"), png);
+
+    const handler = await web(dir);
+    const res = await get(handler, "?briefId=unsaved-brief");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { assets: Array<{ name: string }> };
+    expect(body.assets).toHaveLength(1);
+    expect(body.assets[0].name).toBe("logo.png");
+  });
+
+  test("returns 404 for an unknown brief with no assets and no stored brief (Rule A)", async () => {
+    const handler = await web(dir);
+    const res = await get(handler, "?briefId=nonexistent");
+    expect(res.status).toBe(404);
+  });
+
   test("returns listed assets sorted by name with type, size, and fetchable thumbnail URL", async () => {
     const briefDir = join(dir, "assets", "inputs", "camp");
     mkdirSync(briefDir, { recursive: true });

@@ -75,6 +75,17 @@ describe("POST /campaigns/assets", () => {
     expect(readFileSync(join(dir, "assets", "inputs", "hydra-logo.png"), "utf8")).toBe("DEMO-LOGO");
   });
 
+  test("stores an asset for a new unsaved brief with no stored brief (H5)", async () => {
+    const res = await post(
+      await web(dir),
+      upload({ briefId: "new-unsaved", name: "logo.png" }),
+    );
+    expect(res.status).toBe(201);
+    expect(await res.json()).toEqual({ path: "assets/inputs/new-unsaved/logo.png" });
+    expect(existsSync(join(dir, "briefs", "new-unsaved.yaml"))).toBe(false);
+    expect(existsSync(join(dir, "assets", "inputs", "new-unsaved", "logo.png"))).toBe(true);
+  });
+
   test("stores a JPEG named .jpg", async () => {
     const res = await post(
       await web(dir),

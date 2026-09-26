@@ -1,4 +1,6 @@
-import { describe, test, expect } from "vitest";
+import { describe, test, expect, vi } from "vitest";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   BRIEF_SCHEMA_VERSION,
   DEFAULT_CAMPAIGN_TYPE,
@@ -8,7 +10,8 @@ import {
 } from "@campaignfoundry/CampaignOrchestration";
 import { writeReport } from "../../lib/report.js";
 import { writePool } from "../../lib/pools.js";
-import { getBriefStore } from "../../lib/ports/index.js";
+import { getAssetStore, getBriefStore } from "../../lib/ports/index.js";
+import * as pipeline from "../../lib/pipeline.js";
 import resultGetHandler from "../campaigns/result.get.js";
 import decisionsGetHandler from "../campaigns/decisions.get.js";
 import decisionsPutHandler from "../campaigns/decisions.put.js";
@@ -185,8 +188,8 @@ describe("PT-2b: cross-tenant ownership at the port (item 2 and item 4)", () => 
     }
   });
 
-  // (4) PUT /campaigns/decisions: 404 for another org's campaign
-  test("PUT /campaigns/decisions answers 404 for another org's campaign on fs", async () => {
+  // (4) PUT /campaigns/decisions: 409 for another org's campaign (no run in caller's scope), 200 for owning org
+  test("PUT /campaigns/decisions answers 409 for another org's campaign on fs", async () => {
     const harness = setupFsHarness();
     try {
       await getBriefStore(LOCAL_TENANT).createBrief(sampleBrief);
@@ -208,13 +211,31 @@ describe("PT-2b: cross-tenant ownership at the port (item 2 and item 4)", () => 
           }),
         }),
       );
-      expect(resAcme.status).toBe(404);
+      expect(resAcme.status).toBe(409);
+
+      const callLocal = mountTenantRoute(decisionsPutHandler, {
+        method: "PUT",
+        path: "/campaigns/decisions",
+        tenant: LOCAL_TENANT,
+      });
+      const resLocal = await callLocal(
+        new Request("http://x/campaigns/decisions", {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            campaignId: "camp",
+            revision: null,
+            decisions: { "p1/1x1/bold": "approved" },
+          }),
+        }),
+      );
+      expect(resLocal.status).toBe(200);
     } finally {
       harness.cleanup();
     }
   });
 
-  test("PUT /campaigns/decisions answers 404 for another org's campaign on postgres", async () => {
+  test("PUT /campaigns/decisions answers 409 for another org's campaign on postgres", async () => {
     const harness = await setupPgHarness();
     try {
       await getBriefStore(LOCAL_TENANT).createBrief(sampleBrief);
@@ -236,18 +257,38 @@ describe("PT-2b: cross-tenant ownership at the port (item 2 and item 4)", () => 
           }),
         }),
       );
-      expect(resAcme.status).toBe(404);
+      expect(resAcme.status).toBe(409);
+
+      const callLocal = mountTenantRoute(decisionsPutHandler, {
+        method: "PUT",
+        path: "/campaigns/decisions",
+        tenant: LOCAL_TENANT,
+      });
+      const resLocal = await callLocal(
+        new Request("http://x/campaigns/decisions", {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            campaignId: "camp",
+            revision: null,
+            decisions: { "p1/1x1/bold": "approved" },
+          }),
+        }),
+      );
+      expect(resLocal.status).toBe(200);
     } finally {
       await harness.cleanup();
     }
   });
 
-  // (4) POST /campaigns/package: 404 for another org's campaign
+  // (4) POST /campaigns/package: 404 for another org's campaign, 200 for owning org (M1)
   test("POST /campaigns/package answers 404 for another org's campaign on fs", async () => {
     const harness = setupFsHarness();
     try {
       await getBriefStore(LOCAL_TENANT).createBrief(sampleBrief);
       await writeReport(LOCAL_TENANT, makeReport());
+      mkdirSync(join(harness.localRoots.outputRoot, "p1"), { recursive: true });
+      writeFileSync(join(harness.localRoots.outputRoot, "p1", "1x1.png"), PNG);
 
       const callAcme = mountTenantRoute(packagePostHandler, {
         method: "POST",
@@ -262,14 +303,32 @@ describe("PT-2b: cross-tenant ownership at the port (item 2 and item 4)", () => 
         }),
       );
       expect(resAcme.status).toBe(404);
+
+      const callLocal = mountTenantRoute(packagePostHandler, {
+        method: "POST",
+        path: "/campaigns/package",
+        tenant: LOCAL_TENANT,
+      });
+      const resLocal = await callLocal(
+        new Request("http://x/campaigns/package", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ campaignId: "camp", platforms: ["instagram-feed"] }),
+        }),
+      );
+      expect(resLocal.status).toBe(200);
     } finally {
       harness.cleanup();
     }
   });
 
-  // (4) POST /campaigns/pools/copy: 404 for another org's campaign
+  // (4) POST /campaigns/pools/copy: 404 for another org's campaign, 201 for owning org (M1)
   test("POST /campaigns/pools/copy answers 404 for another org's campaign on fs", async () => {
     const harness = setupFsHarness();
+    const copySpy = vi.spyOn(pipeline, "copyGenerator").mockReturnValue({
+      model: "test-model",
+      suggestHeadlines: async () => ["Great headline"],
+    });
     try {
       await getBriefStore(LOCAL_TENANT).createBrief(sampleBrief);
 
@@ -286,13 +345,32 @@ describe("PT-2b: cross-tenant ownership at the port (item 2 and item 4)", () => 
         }),
       );
       expect(resAcme.status).toBe(404);
+
+      const callLocal = mountTenantRoute(poolsCopyHandler, {
+        method: "POST",
+        path: "/campaigns/pools/copy",
+        tenant: LOCAL_TENANT,
+      });
+      const resLocal = await callLocal(
+        new Request("http://x/campaigns/pools/copy", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ briefId: "camp" }),
+        }),
+      );
+      expect(resLocal.status).toBe(201);
     } finally {
+      copySpy.mockRestore();
       harness.cleanup();
     }
   });
 
   test("POST /campaigns/pools/copy answers 404 for another org's campaign on postgres", async () => {
     const harness = await setupPgHarness();
+    const copySpy = vi.spyOn(pipeline, "copyGenerator").mockReturnValue({
+      model: "test-model",
+      suggestHeadlines: async () => ["Great headline"],
+    });
     try {
       await getBriefStore(LOCAL_TENANT).createBrief(sampleBrief);
 
@@ -309,12 +387,27 @@ describe("PT-2b: cross-tenant ownership at the port (item 2 and item 4)", () => 
         }),
       );
       expect(resAcme.status).toBe(404);
+
+      const callLocal = mountTenantRoute(poolsCopyHandler, {
+        method: "POST",
+        path: "/campaigns/pools/copy",
+        tenant: LOCAL_TENANT,
+      });
+      const resLocal = await callLocal(
+        new Request("http://x/campaigns/pools/copy", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ briefId: "camp" }),
+        }),
+      );
+      expect(resLocal.status).toBe(201);
     } finally {
+      copySpy.mockRestore();
       await harness.cleanup();
     }
   });
 
-  // (4) PATCH /campaigns/pools/:briefId: 404 for another org's campaign
+  // (4) PATCH /campaigns/pools/:briefId: 404 for another org's campaign, 200 for owning org (M1)
   test("PATCH /campaigns/pools/:briefId answers 404 for another org's campaign on fs", async () => {
     const harness = setupFsHarness();
     try {
@@ -339,6 +432,20 @@ describe("PT-2b: cross-tenant ownership at the port (item 2 and item 4)", () => 
         }),
       );
       expect(resAcme.status).toBe(404);
+
+      const callLocal = mountTenantRoute(poolsPatchHandler, {
+        method: "PATCH",
+        path: "/campaigns/pools/:briefId",
+        tenant: LOCAL_TENANT,
+      });
+      const resLocal = await callLocal(
+        new Request("http://x/campaigns/pools/camp", {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ entries: [{ id: "h1", status: "rejected" }] }),
+        }),
+      );
+      expect(resLocal.status).toBe(200);
     } finally {
       harness.cleanup();
     }
@@ -368,12 +475,26 @@ describe("PT-2b: cross-tenant ownership at the port (item 2 and item 4)", () => 
         }),
       );
       expect(resAcme.status).toBe(404);
+
+      const callLocal = mountTenantRoute(poolsPatchHandler, {
+        method: "PATCH",
+        path: "/campaigns/pools/:briefId",
+        tenant: LOCAL_TENANT,
+      });
+      const resLocal = await callLocal(
+        new Request("http://x/campaigns/pools/camp", {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ entries: [{ id: "h1", status: "rejected" }] }),
+        }),
+      );
+      expect(resLocal.status).toBe(200);
     } finally {
       await harness.cleanup();
     }
   });
 
-  // (4) POST /campaigns/briefs/:id/duplicate: 404 for another org's source campaign
+  // (4) POST /campaigns/briefs/:id/duplicate: 404 for another org's source campaign, 201 for owning org (M1)
   test("POST /campaigns/briefs/:id/duplicate answers 404 for another org's source campaign on fs", async () => {
     const harness = setupFsHarness();
     try {
@@ -392,6 +513,20 @@ describe("PT-2b: cross-tenant ownership at the port (item 2 and item 4)", () => 
         }),
       );
       expect(resAcme.status).toBe(404);
+
+      const callLocal = mountTenantRoute(briefDuplicateHandler, {
+        method: "POST",
+        path: "/campaigns/briefs/:id/duplicate",
+        tenant: LOCAL_TENANT,
+      });
+      const resLocal = await callLocal(
+        new Request("http://x/campaigns/briefs/camp/duplicate", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ newId: "camp-copy" }),
+        }),
+      );
+      expect(resLocal.status).toBe(201);
     } finally {
       harness.cleanup();
     }
@@ -415,17 +550,29 @@ describe("PT-2b: cross-tenant ownership at the port (item 2 and item 4)", () => 
         }),
       );
       expect(resAcme.status).toBe(404);
+
+      const callLocal = mountTenantRoute(briefDuplicateHandler, {
+        method: "POST",
+        path: "/campaigns/briefs/:id/duplicate",
+        tenant: LOCAL_TENANT,
+      });
+      const resLocal = await callLocal(
+        new Request("http://x/campaigns/briefs/camp/duplicate", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ newId: "camp-copy" }),
+        }),
+      );
+      expect(resLocal.status).toBe(201);
     } finally {
       await harness.cleanup();
     }
   });
 
-  // (4) POST /campaigns/assets: 404 for another org's campaign
-  test("POST /campaigns/assets answers 404 for another org's campaign on fs", async () => {
+  // POST /campaigns/assets: writes are isolated per tenant on fs
+  test("POST /campaigns/assets writes are isolated per tenant on fs", async () => {
     const harness = setupFsHarness();
     try {
-      await getBriefStore(LOCAL_TENANT).createBrief(sampleBrief);
-
       const callAcme = mountTenantRoute(assetsPostHandler, {
         method: "POST",
         path: "/campaigns/assets",
@@ -442,7 +589,11 @@ describe("PT-2b: cross-tenant ownership at the port (item 2 and item 4)", () => 
           }),
         }),
       );
-      expect(resAcme.status).toBe(404);
+      expect(resAcme.status).toBe(201);
+
+      // Acme has the asset; Local does not
+      expect(await getAssetStore(ACME_TENANT).readAsset("camp", "logo.png")).toBeDefined();
+      expect(await getAssetStore(LOCAL_TENANT).readAsset("camp", "logo.png")).toBeUndefined();
     } finally {
       harness.cleanup();
     }
