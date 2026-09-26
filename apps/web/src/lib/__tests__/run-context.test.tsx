@@ -3221,9 +3221,7 @@ describe("RunProvider — running job awareness on reload and brief switch", () 
     act(() => {
       result.current.setBrief(activeBrief);
     });
-    await waitFor(() =>
-      expect(result.current.assets.some((a) => a.productId === "p2")).toBe(true),
-    );
+    await waitFor(() => expect(result.current.assets.some((a) => a.productId === "p2")).toBe(true));
     expect(result.current.loading).toBe(false);
   });
 
