@@ -2813,9 +2813,7 @@ describe("RunProvider — running job awareness on reload and brief switch", () 
     targetRegion: "US",
     targetAudience: "x",
     campaignMessage: "y",
-    products: [
-      { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "a.png" },
-    ],
+    products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: "a.png" }],
   };
 
   test("reload adopts a running job: queries running job, sets loading, polls and commits", async () => {
@@ -2928,4 +2926,3 @@ describe("RunProvider — running job awareness on reload and brief switch", () 
     expect(result.current.assets).toHaveLength(0);
   });
 });
-

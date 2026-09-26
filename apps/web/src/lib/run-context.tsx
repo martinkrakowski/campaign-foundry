@@ -739,47 +739,44 @@ export function RunProvider({ children }: { children: ReactNode }) {
    * brief switches or newer runs. Shared between execute (postGenerate 202/409) and
    * restore (mount effect and setBrief discovering an in-flight run).
    */
-  const adoptJob = useCallback(
-    async (target: CampaignBrief, jobId: string) => {
-      setLoading(true);
-      setProgress(null);
-      setError(null);
-      const started = beginRun();
-      const owned = started.seq;
-      try {
-        const outcome = await pollJob(jobId, started.signal, setProgress);
-        if (runSeq.current !== owned) return; // a brief switch (or newer run) superseded this
-        if (outcome.kind === "lost") {
-          // The job vanished mid-run. Whatever is on disk is the *previous* run, so show
-          // it without pretending it is new: no cache-bust, review decisions kept. It
-          // shares the target's campaign id, so the target is recorded unchanged.
-          // F6: a failed re-read is not "nothing was saved" either — and the
-          // interruption notice below already names the fact and the remedy, so a
-          // failed read keeps that notice instead of being conflated with absence.
-          const persisted = await fetchPersistedRun(target.id).catch(() => null);
-          if (runSeq.current !== owned) return;
-          if (persisted) setRun({ result: persisted, target });
-          setError(LOST_JOB_MESSAGE);
-          return;
-        }
-        // Commit the result beside the brief it actually ran — the draft handed in when
-        // there was one, so every result-scoped action can key off it (R6).
-        setRun({ result: outcome.result, target });
-        setAssetVersion((v) => v + 1);
-        setDecisions({});
-        setError(null); // the result replaces any stale complaint about this run
-      } catch (e) {
+  const adoptJob = useCallback(async (target: CampaignBrief, jobId: string) => {
+    setLoading(true);
+    setProgress(null);
+    setError(null);
+    const started = beginRun();
+    const owned = started.seq;
+    try {
+      const outcome = await pollJob(jobId, started.signal, setProgress);
+      if (runSeq.current !== owned) return; // a brief switch (or newer run) superseded this
+      if (outcome.kind === "lost") {
+        // The job vanished mid-run. Whatever is on disk is the *previous* run, so show
+        // it without pretending it is new: no cache-bust, review decisions kept. It
+        // shares the target's campaign id, so the target is recorded unchanged.
+        // F6: a failed re-read is not "nothing was saved" either — and the
+        // interruption notice below already names the fact and the remedy, so a
+        // failed read keeps that notice instead of being conflated with absence.
+        const persisted = await fetchPersistedRun(target.id).catch(() => null);
         if (runSeq.current !== owned) return;
-        setError(e instanceof Error ? e.message : "Generation failed");
-      } finally {
-        if (runSeq.current === owned) {
-          setLoading(false);
-          setProgress(null);
-        }
+        if (persisted) setRun({ result: persisted, target });
+        setError(LOST_JOB_MESSAGE);
+        return;
       }
-    },
-    [],
-  );
+      // Commit the result beside the brief it actually ran — the draft handed in when
+      // there was one, so every result-scoped action can key off it (R6).
+      setRun({ result: outcome.result, target });
+      setAssetVersion((v) => v + 1);
+      setDecisions({});
+      setError(null); // the result replaces any stale complaint about this run
+    } catch (e) {
+      if (runSeq.current !== owned) return;
+      setError(e instanceof Error ? e.message : "Generation failed");
+    } finally {
+      if (runSeq.current === owned) {
+        setLoading(false);
+        setProgress(null);
+      }
+    }
+  }, []);
 
   // Loading or committing a brief swaps which run the grid should show. Only ever called
   // as a deliberate commit — the editor's Save and the picker's select — never per
