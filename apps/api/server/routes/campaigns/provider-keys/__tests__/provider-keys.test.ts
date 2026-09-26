@@ -69,13 +69,12 @@ const del = (provider: string, tenant: TenantContext) =>
   })(new Request(`http://x/campaigns/provider-keys/${provider}`, { method: "DELETE" }));
 
 describe("provider-keys routes (PT-7b2, D175, D176)", () => {
-  // The shared registry (lib/ports/index.ts) caches a PgProviderKeyStore per
-  // org id; the harness's own resetAllStores() (tenant-harness.ts, not owned
-  // by this lane) does not know this slot exists, so a stale store bound to
-  // the previous test's now-closed PGlite instance would otherwise survive.
+  // tenant-harness.ts's resetAllStores() now resets the provider-key store
+  // too, so setupPgHarness()/cleanup() alone keeps the shared registry
+  // (lib/ports/index.ts, which caches a PgProviderKeyStore per org id) from
+  // holding a stale store bound to a previous test's closed PGlite instance.
   afterEach(() => {
     restoreKek();
-    resetProviderKeyStore();
   });
 
   test("owner registers a key; any member (and the owner) can list and read it back", async () => {
