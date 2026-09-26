@@ -4,7 +4,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { resolve } from "node:path";
 import { projectRoot } from "@campaignfoundry/shared";
-import { authMode, authSettings, databaseSettings, outputRoot, storeBackend } from "../config.js";
+import {
+  authMode,
+  authSettings,
+  databaseSettings,
+  keyEncryptionSettings,
+  outputRoot,
+  storeBackend,
+} from "../config.js";
 
 describe("outputRoot", () => {
   const orig = process.env.OUTPUT_DIR;
@@ -177,3 +184,150 @@ describe("authSettings (PT-1a item 1)", () => {
     });
   });
 });
+
+describe("keyEncryptionSettings (PT-7b1)", () => {
+  const keys = ["KEY_ENCRYPTION_KEYS", "KEY_ENCRYPTION_KEY_CURRENT"] as const;
+  const saved = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
+
+  afterEach(() => {
+    for (const k of keys) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+  });
+
+  const b64_1 = Buffer.alloc(32, 1).toString("base64");
+  const b64_2 = Buffer.alloc(32, 2).toString("base64");
+
+  test("unset means no BYOK (returns undefined)", () => {
+    delete process.env.KEY_ENCRYPTION_KEYS;
+    delete process.env.KEY_ENCRYPTION_KEY_CURRENT;
+    expect(keyEncryptionSettings()).toBeUndefined();
+
+    process.env.KEY_ENCRYPTION_KEYS = "";
+    expect(keyEncryptionSettings()).toBeUndefined();
+
+    process.env.KEY_ENCRYPTION_KEYS = "   ";
+    expect(keyEncryptionSettings()).toBeUndefined();
+  });
+
+  test("valid keys and current version are parsed correctly", () => {
+    process.env.KEY_ENCRYPTION_KEYS = `v1:${b64_1},v2:${b64_2}`;
+    process.env.KEY_ENCRYPTION_KEY_CURRENT = "v1";
+
+    const settings = keyEncryptionSettings();
+    expect(settings).toBeDefined();
+    expect(settings?.currentVersion).toBe("v1");
+    expect(settings?.keys.get("v1")).toEqual(Buffer.alloc(32, 1));
+    expect(settings?.keys.get("v2")).toEqual(Buffer.alloc(32, 2));
+  });
+
+  test("hazard: handles whitespace around entries and versions", () => {
+    process.env.KEY_ENCRYPTION_KEYS = `  v1:${b64_1}  ,   v2:${b64_2}  `;
+    process.env.KEY_ENCRYPTION_KEY_CURRENT = "  v2  ";
+
+    const settings = keyEncryptionSettings();
+    expect(settings).toBeDefined();
+    expect(settings?.currentVersion).toBe("v2");
+    expect(settings?.keys.size).toBe(2);
+  });
+
+  test("hazard: missing colon throws clear error without key material", () => {
+    process.env.KEY_ENCRYPTION_KEYS = `v1${b64_1}`;
+    process.env.KEY_ENCRYPTION_KEY_CURRENT = "v1";
+
+    expect(() => keyEncryptionSettings()).toThrow(/missing colon separator/);
+    try {
+      keyEncryptionSettings();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      expect(msg).not.toContain(b64_1);
+    }
+  });
+
+  test("hazard: bad base64 throws clear error without key material", () => {
+    process.env.KEY_ENCRYPTION_KEYS = "v1:not-valid-base64!!!";
+    process.env.KEY_ENCRYPTION_KEY_CURRENT = "v1";
+
+    expect(() => keyEncryptionSettings()).toThrow(/Invalid base64 key/);
+    try {
+      keyEncryptionSettings();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      expect(msg).not.toContain("not-valid-base64!!!");
+    }
+  });
+
+  test("hazard: key decoding to 31 bytes throws clear error", () => {
+    const b64_31 = Buffer.alloc(31, 1).toString("base64");
+    process.env.KEY_ENCRYPTION_KEYS = `v1:${b64_31}`;
+    process.env.KEY_ENCRYPTION_KEY_CURRENT = "v1";
+
+    expect(() => keyEncryptionSettings()).toThrow(/must decode to exactly 32 bytes \(got 31\)/);
+    try {
+      keyEncryptionSettings();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      expect(msg).not.toContain(b64_31);
+    }
+  });
+
+  test("hazard: key decoding to 33 bytes throws clear error", () => {
+    const b64_33 = Buffer.alloc(33, 1).toString("base64");
+    process.env.KEY_ENCRYPTION_KEYS = `v1:${b64_33}`;
+    process.env.KEY_ENCRYPTION_KEY_CURRENT = "v1";
+
+    expect(() => keyEncryptionSettings()).toThrow(/must decode to exactly 32 bytes \(got 33\)/);
+    try {
+      keyEncryptionSettings();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      expect(msg).not.toContain(b64_33);
+    }
+  });
+
+  test("hazard: duplicate version throws clear error", () => {
+    process.env.KEY_ENCRYPTION_KEYS = `v1:${b64_1},v1:${b64_2}`;
+    process.env.KEY_ENCRYPTION_KEY_CURRENT = "v1";
+
+    expect(() => keyEncryptionSettings()).toThrow(/Duplicate key encryption version "v1"/);
+  });
+
+  test("hazard: current version missing throws clear error", () => {
+    process.env.KEY_ENCRYPTION_KEYS = `v1:${b64_1}`;
+    delete process.env.KEY_ENCRYPTION_KEY_CURRENT;
+
+    expect(() => keyEncryptionSettings()).toThrow(
+      "KEY_ENCRYPTION_KEY_CURRENT is required when KEY_ENCRYPTION_KEYS is set.",
+    );
+
+    process.env.KEY_ENCRYPTION_KEY_CURRENT = "   ";
+    expect(() => keyEncryptionSettings()).toThrow(
+      "KEY_ENCRYPTION_KEY_CURRENT is required when KEY_ENCRYPTION_KEYS is set.",
+    );
+  });
+
+  test("hazard: current version not in list throws clear error", () => {
+    process.env.KEY_ENCRYPTION_KEYS = `v1:${b64_1}`;
+    process.env.KEY_ENCRYPTION_KEY_CURRENT = "v2";
+
+    expect(() => keyEncryptionSettings()).toThrow(
+      'KEY_ENCRYPTION_KEY_CURRENT "v2" not found in KEY_ENCRYPTION_KEYS.',
+    );
+  });
+
+  test("hazard: malformed version format throws clear error", () => {
+    process.env.KEY_ENCRYPTION_KEYS = `notv:${b64_1}`;
+    process.env.KEY_ENCRYPTION_KEY_CURRENT = "notv";
+
+    expect(() => keyEncryptionSettings()).toThrow(/version must follow "v<n>" format/);
+  });
+
+  test("hazard: empty entry throws clear error", () => {
+    process.env.KEY_ENCRYPTION_KEYS = `v1:${b64_1},`;
+    process.env.KEY_ENCRYPTION_KEY_CURRENT = "v1";
+
+    expect(() => keyEncryptionSettings()).toThrow(/empty entry found/);
+  });
+});
+
