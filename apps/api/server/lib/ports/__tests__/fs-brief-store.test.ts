@@ -312,6 +312,40 @@ describe("FsBriefStore", () => {
     expect(await store.exists("../../escape.yaml")).toBe(false);
   });
 
+  // D166 item 4/5: the filesystem backend has no team column, so
+  // campaignVisibility only ever answers "absent" or "visible" — never
+  // "hidden" — and any non-undefined teamId is refused outright.
+  test("campaignVisibility answers 'visible' or 'absent', never 'hidden'", async () => {
+    expect(await store.campaignVisibility("test-camp")).toBe("absent");
+    await store.createBrief(minimalBrief);
+    expect(await store.campaignVisibility("test-camp")).toBe("visible");
+  });
+
+  test("createBrief, rewriteBrief and replaceBrief all throw TeamsNotSupportedError for a non-undefined teamId", async () => {
+    await expect(store.createBrief(minimalBrief, { teamId: "t1" })).rejects.toMatchObject({
+      name: "TeamsNotSupportedError",
+      statusCode: 400,
+    });
+    await expect(store.createBrief(minimalBrief, { teamId: null })).rejects.toMatchObject({
+      name: "TeamsNotSupportedError",
+    });
+
+    await store.createBrief(minimalBrief);
+    await expect(store.rewriteBrief(minimalBrief, { teamId: "t1" })).rejects.toMatchObject({
+      name: "TeamsNotSupportedError",
+    });
+    await expect(store.replaceBrief(minimalBrief, { teamId: "t1" })).rejects.toMatchObject({
+      name: "TeamsNotSupportedError",
+    });
+
+    // A plain write (teamId omitted entirely) is unaffected.
+    const rewritten = await store.rewriteBrief({
+      ...minimalBrief,
+      campaignMessage: "Still fine",
+    });
+    expect(rewritten.brief.campaignMessage).toBe("Still fine");
+  });
+
   test("createBrief refuses to write through a symlink", async () => {
     const outside = join(dir, "outside-create.yaml");
     writeFileSync(outside, "id: linked-create\n");
