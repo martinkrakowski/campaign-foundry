@@ -257,7 +257,7 @@ export async function fetchRunningJob(campaignId: string): Promise<string | null
   if (!campaignId) return null;
   try {
     const res = await fetch(`${API}/campaigns/jobs?campaignId=${encodeURIComponent(campaignId)}`);
-    if (res.status === 404 || !res.ok) return null;
+    if (!res.ok) return null;
     const data = parseJson(await res.text());
     return typeof data?.jobId === "string" ? data.jobId : null;
   } catch {
@@ -903,7 +903,8 @@ export function RunProvider({ children }: { children: ReactNode }) {
     // this initial fetch. The restored run's target is the brief it is restored under.
     void fetchPersistedRun(startBrief.id)
       .then((d) => {
-        if (!active || briefIdRef.current !== startBrief.id || !d) return;
+        if (!active || briefDecidedRef.current || briefIdRef.current !== startBrief.id || !d)
+          return;
         setRun({ result: d, target: startBrief });
         if (d.assets?.length) setAssetVersion((v) => v + 1);
       })
@@ -911,9 +912,21 @@ export function RunProvider({ children }: { children: ReactNode }) {
         /* F6: could-not-ask is not absence — restore nothing, claim nothing. */
       })
       .finally(() => {
-        if (!restored || !active || briefIdRef.current !== startBrief.id) return;
+        if (
+          !restored ||
+          !active ||
+          briefDecidedRef.current ||
+          briefIdRef.current !== startBrief.id
+        )
+          return;
         void fetchRunningJob(startBrief.id).then((jobId) => {
-          if (!active || briefIdRef.current !== startBrief.id || !jobId) return;
+          if (
+            !active ||
+            briefDecidedRef.current ||
+            briefIdRef.current !== startBrief.id ||
+            !jobId
+          )
+            return;
           void adoptJob(startBrief, jobId);
         });
       });
