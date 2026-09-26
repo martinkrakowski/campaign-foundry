@@ -51,11 +51,17 @@ export interface DecisionStorePort {
    * the stored revision is still that one, checked in the same atomic step as the
    * write, and otherwise throws a `DecisionConflictError` carrying the current
    * revision: a save from a stale read never lands, whichever process made it.
+   *
+   * `fence` (PT-6a2, D171, D78): optional run id that fences the write. When
+   * provided, the write is refused (throws `JobLeaseLostError`) if the run no
+   * longer holds its lease (not running or lease lapsed). Without a fence,
+   * today's behaviour is preserved (the decisions PUT passes none).
    */
   writeDecisions(
     campaignId: string,
     decisions: DecisionMap,
     expectedRevision?: string | null,
+    fence?: { runId: string },
   ): Promise<string>;
 }
 

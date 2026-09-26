@@ -21,6 +21,18 @@ export interface Job {
 }
 
 /**
+ * Thrown by a fenced write (`progressJob`, `completeJob`, `failJob`, or a fenced
+ * report/decision write) when the job row no longer holds the lease it was minted
+ * with: the reaper already failed it, its deadline expired, or it was already settled.
+ */
+export class JobLeaseLostError extends Error {
+  constructor(id: string) {
+    super(`Job "${id}" no longer holds its lease (it was reaped or already settled).`);
+    this.name = "JobLeaseLostError";
+  }
+}
+
+/**
  * A job as persisted in storage with its metadata.
  */
 export interface StoredJob {

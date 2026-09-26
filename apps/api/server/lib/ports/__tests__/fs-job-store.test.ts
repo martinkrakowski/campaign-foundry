@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PipelineExecutionLog } from "@campaignfoundry/CampaignOrchestration";
 import { FsJobStore, JobCapacityError, JOB_TTL_MS, MAX_JOBS } from "../fs-job-store.js";
-import type { JobResult, StoredJob } from "../job-store.port.js";
+import { JobLeaseLostError, type JobResult, type StoredJob } from "../job-store.port.js";
 
 const payload = (over: Partial<JobResult> = {}): JobResult => ({
   halted: false,
@@ -278,11 +278,24 @@ describe("FsJobStore", () => {
     expect(await store.getJob(id)).toBeUndefined();
   });
 
-  test("expireLater clears existing timer if job settles again", async () => {
+  test("completeJob and failJob after job is settled throw JobLeaseLostError", async () => {
     const id = await store.createJob("camp");
     await store.failJob(id, "first");
-    await store.failJob(id, "second");
-    expect(await store.getJob(id)).toMatchObject({ status: "failed", error: "second" });
+    await expect(store.failJob(id, "second")).rejects.toBeInstanceOf(JobLeaseLostError);
+    await expect(store.completeJob(id, payload())).rejects.toBeInstanceOf(JobLeaseLostError);
+  });
+
+  test("a reused custom id keeps its own retention, not the earlier entry's timer", async () => {
+    vi.useFakeTimers();
+    await store.createJob("camp", "reused");
+    await store.failJob("reused", "first");
+    vi.advanceTimersByTime(JOB_TTL_MS - 1000);
+    await store.createJob("camp", "reused");
+    await store.failJob("reused", "second");
+    // The first entry's timer would fire here and delete the replacement.
+    vi.advanceTimersByTime(2000);
+    expect(await store.getJob("reused")).toMatchObject({ status: "failed", error: "second" });
+    vi.useRealTimers();
   });
 
   test("expireLater catches deleteJob rejection without unhandled rejection", async () => {

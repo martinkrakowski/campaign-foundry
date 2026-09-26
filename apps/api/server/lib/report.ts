@@ -5,7 +5,13 @@ import type {
   PipelineResult,
 } from "@campaignfoundry/CampaignOrchestration";
 import { retireDecisions, withDecisionLock } from "./decisions.js";
-import { getReportStore, type ReportStorePort } from "./ports/index.js";
+import {
+  getJobStore,
+  getReportStore,
+  type DecisionStorePort,
+  type ReportStorePort,
+} from "./ports/index.js";
+import { JobLeaseLostError } from "./ports/job-store.port.js";
 import type { StorageScope } from "./run-environment.js";
 
 /** Persisted asset = the entity plus the derived `brandCompliant` view field. */
@@ -191,7 +197,15 @@ async function readPersistedAssets(
 export async function writeReport(
   scope: StorageScope,
   result: PipelineResult,
-  { merge = false, expectedRevision }: { merge?: boolean; expectedRevision?: string | null } = {},
+  {
+    merge = false,
+    expectedRevision,
+    fence,
+  }: {
+    merge?: boolean;
+    expectedRevision?: string | null;
+    fence?: { runId: string };
+  } = {},
 ): Promise<string> {
   // The campaign id is the report's identity: the use case always stamps the brief id,
   // and a run without one has no report to write (the "latest" pointer is gone).
@@ -255,11 +269,33 @@ export async function writeReport(
   // report it makes way for, and before the write, so a failed retirement
   // publishes nothing and a failed write only returns creatives to review.
   return withDecisionLock(scope, campaignId, async (decisions) => {
-    await retireDecisions(decisions, campaignId, merge ? new Set(fresh.map(keyOf)) : undefined);
+    if (fence === undefined) return publish(decisions);
+    // The check and the writes run inside the job's own lock chain, which
+    // `failJob` and `completeJob` also take on the fs backend, so a deadline
+    // cannot fail the run between the check and the write. PgReportStore and
+    // PgDecisionStore check the fence again inside their write transactions.
+    const jobs = getJobStore(scope);
+    return jobs.withJobLock(fence.runId, async () => {
+      const entry = await jobs.getStoredJob(fence.runId);
+      if (entry?.job.status !== "running") {
+        throw new JobLeaseLostError(fence.runId);
+      }
+      return publish(decisions);
+    });
+  });
+
+  async function publish(decisions: DecisionStorePort): Promise<string> {
+    await retireDecisions(
+      decisions,
+      campaignId,
+      merge ? new Set(fresh.map(keyOf)) : undefined,
+      fence,
+      scope,
+    );
     // The store repeats the compare-and-swap in its own atomic step (PT-3c), so
     // the cross-process race this guard only narrows (D79 on files) is closed
     // too. `expectedRevision` is passed through exactly — never `?? undefined`,
     // which would turn `null` ("nothing stored yet") into "do not check".
-    return store.writeReport(campaignId, payload, expectedRevision);
-  });
+    return store.writeReport(campaignId, payload, expectedRevision, fence);
+  }
 }

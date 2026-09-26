@@ -1,4 +1,4 @@
-import { getDecisionStore } from "./ports/index.js";
+import { getDecisionStore, getJobStore } from "./ports/index.js";
 import {
   DecisionConflictError,
   type DecisionMap,
@@ -6,7 +6,10 @@ import {
   type DecisionStorePort,
   type Verdict,
 } from "./ports/decision-store.port.js";
+import { JobLeaseLostError } from "./ports/job-store.port.js";
+
 import type { StorageScope } from "./run-environment.js";
+import { LOCAL_TENANT } from "./tenant.js";
 
 export type { DecisionMap, DecisionRecord, Verdict };
 
@@ -84,6 +87,8 @@ export async function retireDecisions(
   store: DecisionStorePort,
   campaignId: string,
   keys?: ReadonlySet<string>,
+  fence?: { runId: string },
+  scope: StorageScope = LOCAL_TENANT,
 ): Promise<void> {
   // Written against the revision it read, so a save from another process that
   // lands in between is never overwritten: the retirement reads again and retries.
@@ -92,10 +97,19 @@ export async function retireDecisions(
     const all = Object.keys(decisions);
     const retired = keys === undefined ? all : all.filter((key) => keys.has(key));
     if (retired.length === 0) return;
+    if (fence !== undefined) {
+      // Before the store write, refuse unless the job store entry for runId is running.
+      // This is not atomic, which is acceptable on the single-process fs backend;
+      // PgDecisionStore checks the fence atomically inside its write transaction.
+      const entry = await getJobStore(scope).getStoredJob(fence.runId);
+      if (entry?.job.status !== "running") {
+        throw new JobLeaseLostError(fence.runId);
+      }
+    }
     const next = Object.create(null) as Record<string, DecisionRecord>;
     for (const key of all) if (!retired.includes(key)) next[key] = decisions[key];
     try {
-      await store.writeDecisions(campaignId, next, revision);
+      await store.writeDecisions(campaignId, next, revision, fence);
       return;
     } catch (error) {
       if (!(error instanceof DecisionConflictError) || attempt >= RETIRE_ATTEMPTS) throw error;

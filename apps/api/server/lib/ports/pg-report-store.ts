@@ -2,6 +2,7 @@ import { SAFE_ID_PATTERN } from "@campaignfoundry/CampaignOrchestration";
 import { hashBytes } from "../brief-files.js";
 import type { SqlClient, SqlQuery } from "../db/sql-client.js";
 import { ReportConflictError, type ReportStorePort } from "./report-store.port.js";
+import { JobLeaseLostError } from "./job-store.port.js";
 
 /**
  * Reports as rows (PT-3, D169), one org's: the store is built for an org, so
@@ -39,6 +40,7 @@ export class PgReportStore implements ReportStorePort {
     campaignId: string,
     payload: string,
     expectedRevision?: string | null,
+    fence?: { runId: string },
   ): Promise<string> {
     if (!SAFE_ID_PATTERN.test(campaignId)) {
       throw new Error(`Report campaign id ${JSON.stringify(campaignId)} is not a safe id.`);
@@ -46,9 +48,18 @@ export class PgReportStore implements ReportStorePort {
     // The same digest the file store takes of the bytes it writes (D80): equal
     // payloads get equal revisions in either store, so a PT-8 import keeps it.
     const revision = hashBytes(Buffer.from(payload, "utf8"));
-    await this.db.transaction((tx) =>
-      this.claim(tx, campaignId, payload, revision, expectedRevision),
-    );
+    await this.db.transaction(async (tx) => {
+      if (fence !== undefined) {
+        const { rows } = await tx.query(
+          `select 1 from job where id = $1 and org_id = $2 and campaign_id = $3 and status = 'running' and lease_expires_at > now() for share`,
+          [fence.runId, this.orgId, campaignId],
+        );
+        if (rows.length === 0) {
+          throw new JobLeaseLostError(fence.runId);
+        }
+      }
+      await this.claim(tx, campaignId, payload, revision, expectedRevision);
+    });
     return `reports/${campaignId}.json`;
   }
 

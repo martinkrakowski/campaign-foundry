@@ -71,6 +71,7 @@ export class FsDecisionStore implements DecisionStorePort {
     campaignId: string,
     decisions: DecisionMap,
     expectedRevision?: string | null,
+    _fence?: { runId: string },
   ): Promise<string> {
     const path = decisionsPath(this.root, campaignId);
     if (!path) {
