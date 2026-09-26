@@ -118,5 +118,50 @@ describe("tenant middleware (PT-1a item 3)", () => {
         tenant: { orgId: "local", userId: "u1", roles: ["owner"], teamIds: [] },
       });
     });
+
+    test("honours session activeOrganizationId when the user is a member of that org", async () => {
+      await insertUser("u1", "u1@example.com");
+      await db.query(
+        "insert into org (id, name, slug, created_at) values ('zeta', 'Zeta', 'zeta', now())",
+      );
+      await db.query(
+        "insert into member (id, org_id, user_id, role, created_at) values ($1, 'local', $2, 'viewer', now())",
+        ["m1", "u1"],
+      );
+      await db.query(
+        "insert into member (id, org_id, user_id, role, created_at) values ($1, 'zeta', $2, 'admin', now())",
+        ["m2", "u1"],
+      );
+      getSessionMock.mockResolvedValue({
+        user: { id: "u1" },
+        session: { activeOrganizationId: "zeta" },
+      });
+
+      const res = await testApp()(new Request("http://x/campaigns/briefs"));
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({
+        tenant: { orgId: "zeta", userId: "u1", roles: ["admin"], teamIds: [] },
+      });
+    });
+
+    test("falls back to first membership when session activeOrganizationId is a non-member org", async () => {
+      await insertUser("u1", "u1@example.com");
+      await db.query(
+        "insert into member (id, org_id, user_id, role, created_at) values ($1, 'local', $2, 'viewer', now())",
+        ["m1", "u1"],
+      );
+      getSessionMock.mockResolvedValue({
+        user: { id: "u1" },
+        session: { activeOrganizationId: "other-org" },
+      });
+
+      const res = await testApp()(new Request("http://x/campaigns/briefs"));
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({
+        tenant: { orgId: "local", userId: "u1", roles: ["viewer"], teamIds: [] },
+      });
+    });
   });
 });

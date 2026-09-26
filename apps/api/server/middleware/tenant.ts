@@ -6,8 +6,8 @@ import { database } from "../lib/db/database.js";
 /**
  * Requests no session is required for (PT-1a item 3): Better Auth's own
  * routes (sign-in, callbacks, session polling), the health check, and the
- * capability probe the web app polls at boot (it reveals only host
- * capabilities, never tenant data).
+ * capability probe the web app polls at boot (it reveals host capabilities,
+ * the auth mode and whether Google sign-in is configured, never tenant data).
  */
 function isAllowlisted(method: string, pathname: string): boolean {
   if (pathname === "/api/auth" || pathname.startsWith("/api/auth/")) return true;
@@ -38,7 +38,9 @@ export default defineEventHandler(async (event) => {
     return { error: "Sign in required.", code: "unauthenticated" };
   }
 
-  const tenant = await memberTenant(database(), session.user.id);
+  const activeOrgId = (session.session as { activeOrganizationId?: string | null } | undefined)
+    ?.activeOrganizationId;
+  const tenant = await memberTenant(database(), session.user.id, activeOrgId);
   if (!tenant) {
     setResponseStatus(event, 403);
     return { error: "This account belongs to no organisation.", code: "no_membership" };

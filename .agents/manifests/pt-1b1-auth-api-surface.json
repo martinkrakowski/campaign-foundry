@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "PT-1b1-auth-api-surface",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/auth/membership.ts",
+      "before": "  const member =\n    (activeOrganizationId\n      ? members.rows.find((m) => m.org_id === activeOrganizationId)\n      : undefined) ?? members.rows[0]!;",
+      "after": "  const member = members.rows[0]!;",
+      "because": "ignoring the active org always selects the first membership by org id, preventing users from acting in the active organization selected in their session",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/auth/__tests__/membership.test.ts",
+        "-t",
+        "an active org the user belongs to wins"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
