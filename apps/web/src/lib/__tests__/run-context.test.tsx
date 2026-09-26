@@ -167,6 +167,11 @@ describe("fetchPersistedRun — could not ask vs there is nothing (D83/F6)", () 
     await expect(fetchPersistedRun("seed")).resolves.toBeNull();
   });
 
+  test("a 404 from the server resolves as an absent run (PT-2b)", async () => {
+    mockPipelineApi({ result: () => json({ error: "Campaign not found" }, 404) });
+    await expect(fetchPersistedRun("seed")).resolves.toBeNull();
+  });
+
   test("a 200 carrying the campaign's own run resolves with it", async () => {
     mockPipelineApi({
       result: () =>
@@ -695,6 +700,11 @@ describe("RunProvider — review decisions", () => {
     await expect(fetchDecisions("seed")).rejects.toThrow(/without a revision/);
     answer({ error: "down" }, 500);
     await expect(fetchDecisions("seed")).rejects.toThrow();
+    answer({ error: "Campaign not found" }, 404);
+    await expect(fetchDecisions("seed")).resolves.toEqual({
+      decisions: {},
+      revision: null,
+    });
   });
 
   test("saveDecisions names the revision it read, answers a 409 as a conflict, and throws on anything else", async () => {

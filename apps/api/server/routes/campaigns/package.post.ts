@@ -1,5 +1,10 @@
-import { FileSystemPackageStore, PackageForPlatformUseCase } from "@campaignfoundry/Distribution";
+import {
+  FileSystemPackageStore,
+  PackageForPlatformUseCase,
+  type PackageStorePort,
+} from "@campaignfoundry/Distribution";
 import { getCapabilities } from "../../lib/capabilities.js";
+import { getOutputStore } from "../../lib/ports/index.js";
 import { storageRoots } from "../../lib/run-environment.js";
 import { isPersistedAsset, type PersistedAsset, readReport } from "../../lib/report.js";
 
@@ -99,9 +104,27 @@ export default defineEventHandler(async (event) => {
     return { error: parsed.error };
   }
 
-  const result = await new PackageForPlatformUseCase(
-    new FileSystemPackageStore(storageRoots(scope).outputRoot, campaignId),
-  ).execute({
+  const outputStore = getOutputStore(scope);
+  const fsPackageStore = new FileSystemPackageStore(storageRoots(scope).outputRoot, campaignId);
+  const packageStore: PackageStorePort = {
+    async readAsset(relativePath: string): Promise<Uint8Array> {
+      const lookup = await outputStore.openOutput(relativePath);
+      if (!lookup.found) {
+        throw new Error(`Asset not found: ${relativePath}`);
+      }
+      const chunks: Buffer[] = [];
+      const stream = lookup.file.stream();
+      for await (const chunk of stream) {
+        chunks.push(Buffer.from(chunk));
+      }
+      return Buffer.concat(chunks);
+    },
+    writePackaged: (platformId, relativePath, bytes) =>
+      fsPackageStore.writePackaged(platformId, relativePath, bytes),
+    writeManifest: (platformId, manifest) => fsPackageStore.writeManifest(platformId, manifest),
+  };
+
+  const result = await new PackageForPlatformUseCase(packageStore).execute({
     campaignId,
     assets: parsed.assets,
     platforms,
