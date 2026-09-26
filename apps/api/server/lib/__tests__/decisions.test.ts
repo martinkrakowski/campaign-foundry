@@ -180,4 +180,25 @@ describe("retireDecisions against a concurrent save (PT-3)", () => {
       retireDecisions(store, "camp", undefined, { runId: jobId }),
     ).rejects.toBeInstanceOf(JobLeaseLostError);
   });
+
+  test("retireDecisions succeeds with fence when job is running", async () => {
+    const jobStore = getJobStore(LOCAL_TENANT);
+    const jobId = await jobStore.createJob("camp-live");
+
+    const store = getDecisionStore(LOCAL_TENANT);
+    await store.writeDecisions("camp-live", { a: rec("approved") });
+    await expect(
+      retireDecisions(store, "camp-live", undefined, { runId: jobId }),
+    ).resolves.toBeUndefined();
+    const { decisions } = await store.readDecisions("camp-live");
+    expect(Object.keys(decisions)).toHaveLength(0);
+  });
+
+  test("retireDecisions is refused when job does not exist", async () => {
+    const store = getDecisionStore(LOCAL_TENANT);
+    await store.writeDecisions("camp-no-job", { a: rec("approved") });
+    await expect(
+      retireDecisions(store, "camp-no-job", undefined, { runId: "nonexistent" }),
+    ).rejects.toBeInstanceOf(JobLeaseLostError);
+  });
 });

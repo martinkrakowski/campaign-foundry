@@ -994,4 +994,19 @@ describe("reports go through the report store (PT-0a)", () => {
       writeReport(LOCAL_TENANT, result([asset()]), { fence: { runId: jobId } }),
     ).rejects.toBeInstanceOf(JobLeaseLostError);
   });
+
+  test("the fs write accepted for a live running job", async () => {
+    const jobStore = getJobStore(LOCAL_TENANT);
+    const jobId = await jobStore.createJob("camp");
+
+    await expect(
+      writeReport(LOCAL_TENANT, result([asset()]), { fence: { runId: jobId } }),
+    ).resolves.toMatch(/reports\/camp\.json$/);
+  });
+
+  test("the fs write refused when job does not exist", async () => {
+    await expect(
+      writeReport(LOCAL_TENANT, result([asset()]), { fence: { runId: "nonexistent" } }),
+    ).rejects.toBeInstanceOf(JobLeaseLostError);
+  });
 });
