@@ -749,45 +749,72 @@ export function RunProvider({ children }: { children: ReactNode }) {
    * commit its result (or handle lost/error), guarded by runSeq against superseding
    * brief switches or newer runs. Shared between execute (postGenerate 202/409) and
    * restore (mount effect and setBrief discovering an in-flight run).
+   *
+   * `adopted` marks a job this tab never posted (discovered via `fetchRunningJob`,
+   * not started by `execute`'s own POST): this tab does not know whether it was a
+   * full run or a selective re-roll, and a re-roll's own completed payload carries
+   * only the regenerated cells — the server has already merged them into the full
+   * persisted report by the time it answers "completed" (`generate.post.ts` writes
+   * the report, then completes the job). Committing the job's payload directly would
+   * replace the whole grid with that partial result, dropping every untouched
+   * creative (greptile "Re-roll adoption drops creatives"). `execute` knows exactly
+   * what it started, so its own call is left unmarked and keeps the old behaviour.
    */
-  const adoptJob = useCallback(async (target: CampaignBrief, jobId: string) => {
-    setLoading(true);
-    setProgress(null);
-    setError(null);
-    const started = beginRun();
-    const owned = started.seq;
-    try {
-      const outcome = await pollJob(jobId, started.signal, setProgress);
-      if (runSeq.current !== owned) return; // a brief switch (or newer run) superseded this
-      if (outcome.kind === "lost") {
-        // The job vanished mid-run. Whatever is on disk is the *previous* run, so show
-        // it without pretending it is new: no cache-bust, review decisions kept. It
-        // shares the target's campaign id, so the target is recorded unchanged.
-        // F6: a failed re-read is not "nothing was saved" either — and the
-        // interruption notice below already names the fact and the remedy, so a
-        // failed read keeps that notice instead of being conflated with absence.
-        const persisted = await fetchPersistedRun(target.id).catch(() => null);
+  const adoptJob = useCallback(
+    async (target: CampaignBrief, jobId: string, opts: { adopted?: boolean } = {}) => {
+      setLoading(true);
+      setProgress(null);
+      setError(null);
+      const started = beginRun();
+      const owned = started.seq;
+      try {
+        const outcome = await pollJob(jobId, started.signal, setProgress);
+        if (runSeq.current !== owned) return; // a brief switch (or newer run) superseded this
+        if (outcome.kind === "lost") {
+          // The job vanished mid-run. Whatever is on disk is the *previous* run, so show
+          // it without pretending it is new: no cache-bust, review decisions kept. It
+          // shares the target's campaign id, so the target is recorded unchanged.
+          // F6: a failed re-read is not "nothing was saved" either — and the
+          // interruption notice below already names the fact and the remedy, so a
+          // failed read keeps that notice instead of being conflated with absence.
+          const persisted = await fetchPersistedRun(target.id).catch(() => null);
+          if (runSeq.current !== owned) return;
+          if (persisted) setRun({ result: persisted, target });
+          setError(LOST_JOB_MESSAGE);
+          return;
+        }
+        if (opts.adopted) {
+          const persisted = await fetchPersistedRun(target.id).catch(() => null);
+          if (runSeq.current !== owned) return;
+          if (persisted) {
+            setRun({ result: persisted, target });
+            setAssetVersion((v) => v + 1);
+            setError(null);
+            return;
+          }
+          // The job just answered "completed", so a failed or empty read here is
+          // F6's "could not ask", never "nothing was saved" — fall through and show
+          // the job's own result rather than leave the grid on whatever it had
+          // before.
+        }
+        // Commit the result beside the brief it actually ran — the draft handed in when
+        // there was one, so every result-scoped action can key off it (R6).
+        setRun({ result: outcome.result, target });
+        setAssetVersion((v) => v + 1);
+        setDecisions({});
+        setError(null); // the result replaces any stale complaint about this run
+      } catch (e) {
         if (runSeq.current !== owned) return;
-        if (persisted) setRun({ result: persisted, target });
-        setError(LOST_JOB_MESSAGE);
-        return;
+        setError(e instanceof Error ? e.message : "Generation failed");
+      } finally {
+        if (runSeq.current === owned) {
+          setLoading(false);
+          setProgress(null);
+        }
       }
-      // Commit the result beside the brief it actually ran — the draft handed in when
-      // there was one, so every result-scoped action can key off it (R6).
-      setRun({ result: outcome.result, target });
-      setAssetVersion((v) => v + 1);
-      setDecisions({});
-      setError(null); // the result replaces any stale complaint about this run
-    } catch (e) {
-      if (runSeq.current !== owned) return;
-      setError(e instanceof Error ? e.message : "Generation failed");
-    } finally {
-      if (runSeq.current === owned) {
-        setLoading(false);
-        setProgress(null);
-      }
-    }
-  }, []);
+    },
+    [],
+  );
 
   // Loading or committing a brief swaps which run the grid should show. Only ever called
   // as a deliberate commit — the editor's Save and the picker's select — never per
@@ -826,7 +853,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
         if (!loadingRef.current) {
           void fetchRunningJob(next.id).then((jobId) => {
             if (!mountedRef.current || briefIdRef.current !== next.id || !jobId) return;
-            void adoptJob(next, jobId);
+            void adoptJob(next, jobId, { adopted: true });
           });
         }
         return;
@@ -868,7 +895,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
       void fetchRunningJob(next.id).then((jobId) => {
         if (!mountedRef.current || briefIdRef.current !== next.id) return; // superseded, or unmounted
         if (jobId) {
-          void adoptJob(next, jobId);
+          void adoptJob(next, jobId, { adopted: true });
           return;
         }
         void fetchPersistedRun(next.id)
@@ -954,7 +981,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
     void fetchRunningJob(startBrief.id).then((jobId) => {
       if (!active || briefDecidedRef.current || briefIdRef.current !== startBrief.id) return;
       if (jobId) {
-        void adoptJob(startBrief, jobId);
+        void adoptJob(startBrief, jobId, { adopted: true });
         return;
       }
       void fetchPersistedRun(startBrief.id)

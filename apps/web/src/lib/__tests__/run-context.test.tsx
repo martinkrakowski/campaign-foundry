@@ -3197,14 +3197,16 @@ describe("RunProvider — running job awareness on reload and brief switch", () 
     expect(result.current.loading).toBe(false);
 
     // Another client starts a run for this same campaign while this tab shows the
-    // (now stale) completed run — nothing here is polling it.
+    // (now stale) completed run — nothing here is polling it. By the time the job
+    // answers "completed" the server has already written its report (generate.post.ts:
+    // writeReport, then completeJob), so the persisted read below reflects the new run.
     mockPipelineApi({
       result: (url) =>
         url.includes("/campaigns/jobs?campaignId=active-campaign")
           ? json({ jobId: "job-elsewhere" })
           : json({
               halted: false,
-              assets: [asset({ productId: "p1" })],
+              assets: [asset({ productId: "p2" })],
               log: { entries: [], campaignId: "active-campaign" },
             }),
       job: () =>
@@ -3327,5 +3329,42 @@ describe("RunProvider — running job awareness on reload and brief switch", () 
       await new Promise((r) => setTimeout(r, 0));
     });
     expect(polls).toBe(0);
+  });
+  test('adopting a job commits the persisted report, not the job\'s own (possibly partial) result (greptile "Re-roll adoption drops creatives")', async () => {
+    // The job being adopted is a selective re-roll: its own completed payload
+    // carries only the one regenerated cell, but the server has already merged
+    // it into the full persisted report (generate.post.ts: writeReport, then
+    // completeJob) — which also still carries the other cells' verdicts.
+    mockPipelineApi({
+      result: (url) =>
+        url.includes("/campaigns/jobs?campaignId=active-campaign")
+          ? json({ jobId: "job-reroll" })
+          : json({
+              halted: false,
+              assets: [
+                asset({ productId: "p1" }),
+                asset({ productId: "p2" }),
+                asset({ productId: "p3" }),
+                asset({ productId: "p4" }),
+              ],
+              log: { entries: [], campaignId: "active-campaign" },
+            }),
+      job: () =>
+        jobOk({
+          halted: false,
+          assets: [asset({ productId: "p2" })],
+          log: { entries: [], campaignId: "active-campaign" },
+        }),
+      decisions: { "p1/1:1/default": "approved", "p3/1:1/default": "rejected" },
+    });
+
+    const { result } = setup();
+    act(() => {
+      result.current.setBrief(activeBrief);
+    });
+    await waitFor(() => expect(result.current.assets).toHaveLength(4));
+    expect(result.current.assets.map((a) => a.productId).sort()).toEqual(["p1", "p2", "p3", "p4"]);
+    await waitFor(() => expect(result.current.decisions["p1/1:1/default"]).toBe("approved"));
+    expect(result.current.decisions["p3/1:1/default"]).toBe("rejected");
   });
 });
