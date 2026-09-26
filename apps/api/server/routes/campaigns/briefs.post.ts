@@ -20,6 +20,7 @@ import { requestTenant } from "../../lib/tenant.js";
  * while leaving root-level shared assets (`assets/inputs/*.png`) untouched (L5.5).
  */
 export default defineEventHandler(async (event) => {
+  const scope = requestTenant(event);
   let brief: CampaignBrief;
   try {
     brief = parseBrief(await readBody(event));
@@ -33,8 +34,8 @@ export default defineEventHandler(async (event) => {
   const rawRevision = getQuery(event).revision;
   const expectedRevision = Array.isArray(rawRevision) ? rawRevision[0] : rawRevision;
   try {
-    const stored = await getBriefStore(requestTenant(event)).withBriefLock(brief.id, async () => {
-      const existing = await getBriefStore(requestTenant(event)).findBriefFileById(brief.id);
+    const stored = await getBriefStore(scope).withBriefLock(brief.id, async () => {
+      const existing = await getBriefStore(scope).findBriefFileById(brief.id);
       if (existing && !replace) {
         const existErr = new Error(`Brief "${brief.id}" already exists.`);
         (existErr as { code?: string }).code = "EEXIST";
@@ -45,7 +46,7 @@ export default defineEventHandler(async (event) => {
       const sourceBriefIds = extractSourceAssetBriefIds(brief, brief.id);
       if (sourceBriefIds.length > 0) {
         if (replace && expectedRevision !== undefined) {
-          const currentRev = await getBriefStore(requestTenant(event)).getRevision(brief.id);
+          const currentRev = await getBriefStore(scope).getRevision(brief.id);
           if (currentRev !== expectedRevision) {
             const conflictErr = new Error("Brief was modified by another user.");
             (conflictErr as { code?: string; revision?: string }).code = "ECONFLICT";
@@ -54,15 +55,15 @@ export default defineEventHandler(async (event) => {
           }
         }
         for (const fromId of sourceBriefIds) {
-          const pathMap = await getAssetStore(requestTenant(event)).copyAssets(fromId, brief.id);
+          const pathMap = await getAssetStore(scope).copyAssets(fromId, brief.id);
           brief = rewriteAssetPaths(brief, fromId, brief.id, pathMap);
         }
       }
 
       if (replace) {
-        return await getBriefStore(requestTenant(event)).replaceBrief(brief, { expectedRevision });
+        return await getBriefStore(scope).replaceBrief(brief, { expectedRevision });
       }
-      return await getBriefStore(requestTenant(event)).createBrief(brief);
+      return await getBriefStore(scope).createBrief(brief);
     });
     setResponseStatus(event, 201);
     // The stored revision rides along: the editor dispatches it into its source so the

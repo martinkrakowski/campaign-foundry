@@ -1,7 +1,7 @@
 import { describe, test, expect, vi, afterEach } from "vitest";
 import { renderHook, act, waitFor, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { createElement, type ReactNode } from "react";
+import { createElement, useEffect, type ReactNode } from "react";
 import { assetIdentity } from "@campaignfoundry/CampaignOrchestration";
 import { BRIEF_SCHEMA_VERSION } from "@campaignfoundry/CampaignOrchestration/brief-schema-version";
 import { DEFAULT_CAMPAIGN_TYPE } from "@campaignfoundry/CampaignOrchestration/campaign-types";
@@ -13,6 +13,7 @@ import {
   assetCanvas,
   assetLabel,
   fetchPersistedRun,
+  fetchRunningJob,
   normalizeRunResult,
   isStoredBrief,
   DECISIONS_CONFLICT_MESSAGE,
@@ -173,6 +174,47 @@ describe("fetchPersistedRun — could not ask vs there is nothing (D83/F6)", () 
     });
     const d = await fetchPersistedRun("seed");
     expect(d?.assets).toHaveLength(1);
+  });
+});
+
+describe("fetchRunningJob — 404 and network failure tolerance", () => {
+  test("returns null for an empty campaignId", async () => {
+    await expect(fetchRunningJob("")).resolves.toBeNull();
+  });
+
+  test("returns null when server answers 404", async () => {
+    mockPipelineApi({
+      result: () => json({ error: "No running job" }, 404),
+    });
+    await expect(fetchRunningJob("seed")).resolves.toBeNull();
+  });
+
+  test("returns null when server answers 500", async () => {
+    mockPipelineApi({
+      result: () => json({ error: "boom" }, 500),
+    });
+    await expect(fetchRunningJob("seed")).resolves.toBeNull();
+  });
+
+  test("returns null on a network rejection", async () => {
+    mockPipelineApi({
+      result: () => Promise.reject(new Error("network failure")),
+    });
+    await expect(fetchRunningJob("seed")).resolves.toBeNull();
+  });
+
+  test("returns null when body carries no jobId string", async () => {
+    mockPipelineApi({
+      result: () => json({ notAJobId: 123 }),
+    });
+    await expect(fetchRunningJob("seed")).resolves.toBeNull();
+  });
+
+  test("returns jobId string when 200 with jobId", async () => {
+    mockPipelineApi({
+      result: () => json({ jobId: "job-xyz-123" }),
+    });
+    await expect(fetchRunningJob("seed")).resolves.toBe("job-xyz-123");
   });
 });
 
@@ -678,6 +720,11 @@ describe("RunProvider — review decisions", () => {
   test("regenerateRejected is a no-op when nothing is rejected", async () => {
     mockPipelineApi();
     const { result } = setup();
+    // Let the mount restore's own job/result discovery settle first, so its calls
+    // aren't mistaken for ones regenerateRejected made.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
     const before = vi.mocked(globalThis.fetch).mock.calls.length;
     await act(async () => {
       await result.current.regenerateRejected();
@@ -2350,8 +2397,12 @@ describe("RunProvider — estimate and packaging", () => {
       listing = result.current.loadPackages();
     });
     await waitFor(() => expect(resolveList).toEqual(expect.any(Function)));
-    const signal = (vi.mocked(globalThis.fetch).mock.calls.at(-1)?.[1] as RequestInit | undefined)
-      ?.signal;
+    // Found by URL, not position: mount's own (unrelated) job/result discovery calls
+    // race this one and can land after it in the mock's call log.
+    const packagesCall = vi
+      .mocked(globalThis.fetch)
+      .mock.calls.find(([u]) => String(u).includes("/campaigns/packages"));
+    const signal = (packagesCall?.[1] as RequestInit | undefined)?.signal;
     expect(signal?.aborted).toBe(false);
     act(() => result.current.setBrief(otherBrief));
     expect(signal?.aborted).toBe(true);
@@ -3000,5 +3051,853 @@ describe("run-context 401 and 403 pipeline error handling", () => {
 
     const err403 = handlePipelineResponseError(403, { code: "no_membership" });
     expect(err403.message).toBe(NO_ORGANISATION_YET_MESSAGE);
+  });
+});
+
+describe("RunProvider — running job awareness on reload and brief switch", () => {
+  const activeBrief = {
+    schemaVersion: BRIEF_SCHEMA_VERSION,
+    template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+    id: "active-campaign",
+    targetRegion: "US",
+    targetAudience: "x",
+    campaignMessage: "y",
+    products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: "a.png" }],
+  };
+
+  test("reload adopts a running job: queries running job, sets loading, polls and commits", async () => {
+    localStorage.setItem("cf:brief-picked", "1");
+    localStorage.setItem("cf:brief", JSON.stringify(activeBrief));
+    let queriedJob = false;
+    let resolveJob!: (res: Response) => void;
+    const jobPromise = new Promise<Response>((r) => {
+      resolveJob = r;
+    });
+    mockPipelineApi({
+      result: (url) => {
+        if (url.includes("/campaigns/jobs?campaignId=active-campaign")) {
+          queriedJob = true;
+          return json({ jobId: "job-reload-1" });
+        }
+        return json(EMPTY_REPORT);
+      },
+      job: () => jobPromise,
+    });
+
+    const { result } = setup();
+    await waitFor(() => expect(queriedJob).toBe(true));
+    await waitFor(() => expect(result.current.loading).toBe(true));
+    act(() => {
+      resolveJob(
+        jobOk({
+          halted: false,
+          assets: [asset({ productId: "p1" })],
+          log: { entries: [], campaignId: "active-campaign" },
+        }),
+      );
+    });
+    await waitFor(() => expect(result.current.assets).toHaveLength(1));
+    expect(result.current.hasRun).toBe(true);
+    expect(result.current.loading).toBe(false);
+  });
+
+  test("reload when no job is running (404) leaves the page as today", async () => {
+    localStorage.setItem("cf:brief-picked", "1");
+    localStorage.setItem("cf:brief", JSON.stringify(activeBrief));
+    let queriedJob = false;
+    mockPipelineApi({
+      result: (url) => {
+        if (url.includes("/campaigns/jobs?campaignId=active-campaign")) {
+          queriedJob = true;
+          return json({ error: "No running job" }, 404);
+        }
+        return json(EMPTY_REPORT);
+      },
+    });
+
+    const { result } = setup();
+    await waitFor(() => expect(queriedJob).toBe(true));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(result.current.loading).toBe(false);
+    expect(result.current.assets).toHaveLength(0);
+    expect(result.current.error).toBeNull();
+  });
+
+  test("reload with network failure leaves the page as today", async () => {
+    localStorage.setItem("cf:brief-picked", "1");
+    localStorage.setItem("cf:brief", JSON.stringify(activeBrief));
+    let queriedJob = false;
+    mockPipelineApi({
+      result: (url) => {
+        if (url.includes("/campaigns/jobs?campaignId=active-campaign")) {
+          queriedJob = true;
+          return Promise.reject(new Error("network blip"));
+        }
+        return json(EMPTY_REPORT);
+      },
+    });
+
+    const { result } = setup();
+    await waitFor(() => expect(queriedJob).toBe(true));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(result.current.loading).toBe(false);
+    expect(result.current.assets).toHaveLength(0);
+    expect(result.current.error).toBeNull();
+  });
+
+  test("setBrief adopts a running job for the target brief", async () => {
+    let queriedJob = false;
+    mockPipelineApi({
+      result: (url) => {
+        if (url.includes("/campaigns/jobs?campaignId=active-campaign")) {
+          queriedJob = true;
+          return json({ jobId: "job-setbrief-1" });
+        }
+        return json(EMPTY_REPORT);
+      },
+      job: () =>
+        jobOk({
+          halted: false,
+          assets: [asset({ productId: "p1" })],
+          log: { entries: [], campaignId: "active-campaign" },
+        }),
+    });
+
+    const { result } = setup();
+    act(() => {
+      result.current.setBrief(activeBrief);
+    });
+    await waitFor(() => expect(queriedJob).toBe(true));
+    await waitFor(() => expect(result.current.assets).toHaveLength(1));
+    expect(result.current.loading).toBe(false);
+    expect(result.current.hasRun).toBe(true);
+  });
+
+  test("setBrief when no job is running (404) leaves the page as today", async () => {
+    let queriedJob = false;
+    mockPipelineApi({
+      result: (url) => {
+        if (url.includes("/campaigns/jobs?campaignId=active-campaign")) {
+          queriedJob = true;
+          return json({ error: "No running job" }, 404);
+        }
+        return json(EMPTY_REPORT);
+      },
+    });
+
+    const { result } = setup();
+    act(() => {
+      result.current.setBrief(activeBrief);
+    });
+    await waitFor(() => expect(queriedJob).toBe(true));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(result.current.loading).toBe(false);
+    expect(result.current.assets).toHaveLength(0);
+    expect(result.current.error).toBeNull();
+  });
+
+  test("adoptJob uses the generic message when polling rejects with a non-Error", async () => {
+    localStorage.setItem("cf:brief-picked", "1");
+    localStorage.setItem("cf:brief", JSON.stringify(activeBrief));
+    mockPipelineApi({
+      result: (url) => {
+        if (url.includes("/campaigns/jobs?campaignId=active-campaign")) {
+          return json({ jobId: "job-reload-1" });
+        }
+        return json(EMPTY_REPORT);
+      },
+      job: () => Promise.reject("string rejection"),
+    });
+
+    const { result } = setup();
+    await waitFor(() => expect(result.current.error).toBe("Generation failed"));
+    expect(result.current.loading).toBe(false);
+  });
+
+  test("setBrief racing mount restore prevents mount path from adopting stale brief", async () => {
+    const localBrief = { ...activeBrief, campaignMessage: "from-local-storage" };
+    const editorBrief = { ...activeBrief, campaignMessage: "from-editor" };
+    localStorage.setItem("cf:brief-picked", "1");
+    localStorage.setItem("cf:brief", JSON.stringify(localBrief));
+
+    let jobQueries = 0;
+    mockPipelineApi({
+      result: (url) => {
+        if (url.includes("/campaigns/jobs?campaignId=active-campaign")) {
+          jobQueries += 1;
+          return json({ jobId: "job-active-1" });
+        }
+        return json(EMPTY_REPORT);
+      },
+      job: () =>
+        jobOk({
+          halted: false,
+          assets: [asset({ productId: "p1" })],
+          log: { entries: [], campaignId: "active-campaign" },
+        }),
+    });
+
+    const { result } = setup();
+    act(() => {
+      result.current.setBrief(editorBrief);
+    });
+
+    await waitFor(() => expect(result.current.assets).toHaveLength(1));
+    expect(result.current.brief.campaignMessage).toBe("from-editor");
+    // Both the mount restore and setBrief ask independently (job lookup is
+    // unconditional, not gated behind a guard) — the guard only decides whose
+    // ANSWER is used. Mount's own answer must be discarded: `briefDecidedRef`
+    // is already true by the time its callback runs (setBrief set it
+    // synchronously), so only setBrief's adoption ever commits — one result, under
+    // the edited brief, not the stale localStorage one mount started restoring.
+    expect(jobQueries).toBe(2);
+    expect(result.current.loading).toBe(false);
+  });
+
+  test("switching to a different brief while an adoption is polling never commits the stale job into the new brief", async () => {
+    const otherBrief = {
+      schemaVersion: BRIEF_SCHEMA_VERSION,
+      template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+      id: "other-campaign",
+      targetRegion: "FR",
+      targetAudience: "other-aud",
+      campaignMessage: "other-msg",
+      products: [{ id: "p2", name: "P2", primaryColor: "#222222", logoPath: "b.png" }],
+    };
+
+    let resolveActiveJob!: (r: Response) => void;
+    const activeJobPromise = new Promise<Response>((r) => {
+      resolveActiveJob = r;
+    });
+
+    mockPipelineApi({
+      result: (url) => {
+        if (url.includes("/campaigns/jobs?campaignId=active-campaign")) {
+          return json({ jobId: "job-active" });
+        }
+        if (url.includes("/campaigns/jobs?campaignId=other-campaign")) {
+          return json({ error: "No running job" }, 404);
+        }
+        return json(EMPTY_REPORT);
+      },
+      job: (url) => {
+        if (url.includes("job-active")) {
+          return activeJobPromise;
+        }
+        return json({ error: "Not found" }, 404);
+      },
+    });
+
+    const { result } = setup();
+    act(() => {
+      result.current.setBrief(activeBrief);
+    });
+
+    await waitFor(() => expect(result.current.loading).toBe(true));
+
+    act(() => {
+      result.current.setBrief(otherBrief);
+    });
+
+    resolveActiveJob(
+      jobOk({
+        halted: false,
+        assets: [asset({ productId: "p1" })],
+        log: { entries: [], campaignId: "active-campaign" },
+      }),
+    );
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect(result.current.brief.id).toBe("other-campaign");
+    expect(result.current.assets).toHaveLength(0);
+    expect(result.current.hasRun).toBe(false);
+    expect(result.current.loading).toBe(false);
+  });
+
+  test('mount restore discovers a job for the unrestored default brief too (coderabbit "Discover jobs for the default brief after reload")', async () => {
+    // No localStorage: the shell starts on DEFAULT_BRIEF ("summer-hydration-2026"),
+    // which Generate can run exactly like any other campaign (nothing gates it on
+    // `briefApplied`) — so a reload mid-run must discover it too.
+    let queriedJob = false;
+    let resolveJob!: (r: Response) => void;
+    const jobPromise = new Promise<Response>((r) => {
+      resolveJob = r;
+    });
+    mockPipelineApi({
+      result: (url) => {
+        if (url.includes("/campaigns/jobs?campaignId=summer-hydration-2026")) {
+          queriedJob = true;
+          return json({ jobId: "job-default-1" });
+        }
+        return json(EMPTY_REPORT);
+      },
+      job: () => jobPromise,
+    });
+
+    const { result } = setup();
+    await waitFor(() => expect(queriedJob).toBe(true));
+    await waitFor(() => expect(result.current.loading).toBe(true));
+    act(() => {
+      resolveJob(
+        jobOk({
+          halted: false,
+          assets: [asset({ productId: "p1" })],
+          log: { entries: [], campaignId: "summer-hydration-2026" },
+        }),
+      );
+    });
+    await waitFor(() => expect(result.current.assets).toHaveLength(1));
+  });
+
+  test('mount restore reads the persisted report AFTER checking for a job, closing the restore/lookup gap (qodo #1, coderabbit "Close the gap between result restoration and job lookup")', async () => {
+    localStorage.setItem("cf:brief-picked", "1");
+    localStorage.setItem("cf:brief", JSON.stringify(activeBrief));
+    let calls = 0;
+    mockPipelineApi({
+      result: (url) => {
+        if (!url.includes("campaignId=active-campaign")) return json(EMPTY_REPORT); // unrelated
+        // Counted across BOTH endpoints: only the FIRST request this provider makes
+        // about this campaign sees the pre-settlement (empty) report; every later
+        // one sees the real one — modelling a job whose report write lands between
+        // the two requests. Reading the report before checking the job (the old
+        // order) makes THAT the first request and it is stuck stale; checking the
+        // job first (this order) makes the report read the second request, and it
+        // lands after the write.
+        const callIndex = calls++;
+        if (url.includes("/campaigns/jobs?campaignId=active-campaign")) {
+          return json({ error: "No running job" }, 404); // the job already settled
+        }
+        return callIndex === 0
+          ? json(EMPTY_REPORT)
+          : json({
+              halted: false,
+              assets: [asset({ productId: "p1" })],
+              log: { entries: [], campaignId: "active-campaign" },
+            });
+      },
+    });
+
+    const { result } = setup();
+    await waitFor(() => expect(result.current.assets).toHaveLength(1));
+    expect(result.current.loading).toBe(false);
+  });
+
+  test("setBrief reads the persisted report AFTER checking for a job, closing the same restore/lookup gap", async () => {
+    let calls = 0;
+    mockPipelineApi({
+      result: (url) => {
+        if (!url.includes("campaignId=active-campaign")) return json(EMPTY_REPORT); // unrelated
+        const callIndex = calls++;
+        if (url.includes("/campaigns/jobs?campaignId=active-campaign")) {
+          return json({ error: "No running job" }, 404);
+        }
+        return callIndex === 0
+          ? json(EMPTY_REPORT)
+          : json({
+              halted: false,
+              assets: [asset({ productId: "p1" })],
+              log: { entries: [], campaignId: "active-campaign" },
+            });
+      },
+    });
+
+    const { result } = setup();
+    act(() => {
+      result.current.setBrief(activeBrief);
+    });
+    await waitFor(() => expect(result.current.assets).toHaveLength(1));
+    expect(result.current.loading).toBe(false);
+  });
+
+  test('setBrief discovers a job for the already-displayed brief when it is not already polling (qodo #2, "Same-campaign jobs remain unadopted")', async () => {
+    mockPipelineApi({
+      result: (url) =>
+        url.includes("/campaigns/jobs?campaignId=active-campaign")
+          ? json({ error: "No running job" }, 404)
+          : json({
+              halted: false,
+              assets: [asset({ productId: "p1" })],
+              log: { entries: [], campaignId: "active-campaign" },
+            }),
+    });
+    const { result } = setup();
+    act(() => {
+      result.current.setBrief(activeBrief);
+    });
+    await waitFor(() => expect(result.current.assets).toHaveLength(1));
+    expect(result.current.loading).toBe(false);
+
+    // Another client starts a run for this same campaign while this tab shows the
+    // (now stale) completed run — nothing here is polling it. By the time the job
+    // answers "completed" the server has already written its report (generate.post.ts:
+    // writeReport, then completeJob), so the persisted read below reflects the new run.
+    mockPipelineApi({
+      result: (url) =>
+        url.includes("/campaigns/jobs?campaignId=active-campaign")
+          ? json({ jobId: "job-elsewhere" })
+          : json({
+              halted: false,
+              assets: [asset({ productId: "p2" })],
+              log: { entries: [], campaignId: "active-campaign" },
+            }),
+      job: () =>
+        jobOk({
+          halted: false,
+          assets: [asset({ productId: "p2" })],
+          log: { entries: [], campaignId: "active-campaign" },
+        }),
+    });
+
+    // Re-selecting the SAME brief (the picker, Save) must still discover the job —
+    // the run on screen already matches this campaign, which used to short-circuit
+    // before job discovery ever ran.
+    act(() => {
+      result.current.setBrief(activeBrief);
+    });
+    await waitFor(() => expect(result.current.assets.some((a) => a.productId === "p2")).toBe(true));
+    expect(result.current.loading).toBe(false);
+  });
+
+  test("setBrief skips job discovery for the already-displayed brief while already polling one for it", async () => {
+    let jobLookups = 0;
+    mockPipelineApi({
+      result: (url) =>
+        url.includes("/campaigns/jobs?campaignId=active-campaign")
+          ? json({ error: "No running job" }, 404)
+          : json({
+              halted: false,
+              assets: [asset({ productId: "p1" })],
+              log: { entries: [], campaignId: "active-campaign" },
+            }),
+    });
+    const { result } = setup();
+    act(() => {
+      result.current.setBrief(activeBrief);
+    });
+    await waitFor(() => expect(result.current.assets).toHaveLength(1));
+    expect(result.current.loading).toBe(false);
+
+    // Another client starts a run; the job GET hangs, so once adopted `loading`
+    // stays true for the rest of this test.
+    let resolvePoll!: (r: Response) => void;
+    const pollPromise = new Promise<Response>((r) => {
+      resolvePoll = r;
+    });
+    mockPipelineApi({
+      result: (url) => {
+        if (url.includes("/campaigns/jobs?campaignId=active-campaign")) {
+          jobLookups += 1;
+          return json({ jobId: "job-in-flight" });
+        }
+        return json({
+          halted: false,
+          assets: [asset({ productId: "p1" })],
+          log: { entries: [], campaignId: "active-campaign" },
+        });
+      },
+      job: () => pollPromise,
+    });
+
+    // Re-select the same brief again; this discovers job-in-flight and starts
+    // polling it.
+    act(() => {
+      result.current.setBrief(activeBrief);
+    });
+    await waitFor(() => expect(result.current.loading).toBe(true));
+    const lookupsAfterAdopt = jobLookups;
+
+    // Re-select it a third time WHILE still polling that same job: the run on
+    // screen still names this campaign, so branch (1) fires again, but this tab
+    // is already polling a job for it — discovery must be skipped, not doubled.
+    act(() => {
+      result.current.setBrief(activeBrief);
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(jobLookups).toBe(lookupsAfterAdopt);
+    expect(result.current.loading).toBe(true);
+
+    resolvePoll(
+      jobOk({
+        halted: false,
+        assets: [asset({ productId: "p2" })],
+        log: { entries: [], campaignId: "active-campaign" },
+      }),
+    );
+    await waitFor(() => expect(result.current.loading).toBe(false));
+  });
+
+  test("unmounting during setBrief's job discovery leaves no orphaned poller (github-actions #71u)", async () => {
+    let resolveJobLookup!: (r: Response) => void;
+    const jobLookupPromise = new Promise<Response>((r) => {
+      resolveJobLookup = r;
+    });
+    let polls = 0;
+    mockPipelineApi({
+      result: (url) =>
+        url.includes("/campaigns/jobs?campaignId=active-campaign")
+          ? jobLookupPromise
+          : json(EMPTY_REPORT),
+      job: () => {
+        polls += 1;
+        return jobOk({
+          halted: false,
+          assets: [asset({ productId: "p1" })],
+          log: { entries: [], campaignId: "active-campaign" },
+        });
+      },
+    });
+
+    const { result, unmount } = setup();
+    act(() => {
+      result.current.setBrief(activeBrief);
+    });
+    unmount();
+    await act(async () => {
+      resolveJobLookup(json({ jobId: "job-orphan" }));
+      await new Promise((r) => setTimeout(r, 0));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(polls).toBe(0);
+  });
+
+  test('unmounting when a child effect committed the brief before the mount effect ran leaves no orphaned poller (coderabbit "Register the unmount cleanup before the briefDecidedRef early return")', async () => {
+    // React runs a child's effects before its parent's — the editor route's own
+    // load effect calls `setBrief` from a child of `RunProvider`, so
+    // `briefDecidedRef.current` is already true by the time the provider's own
+    // mount effect runs. That is the NORMAL ordering, not an edge case; the mount
+    // effect's early return for it must still register a cleanup.
+    function EarlyBriefSetter() {
+      const { setBrief } = useRun();
+      useEffect(() => {
+        setBrief(activeBrief);
+      }, []);
+      return null;
+    }
+    let resolveJobLookup!: (r: Response) => void;
+    const jobLookupPromise = new Promise<Response>((r) => {
+      resolveJobLookup = r;
+    });
+    let polls = 0;
+    mockPipelineApi({
+      result: (url) =>
+        url.includes("/campaigns/jobs?campaignId=active-campaign")
+          ? jobLookupPromise
+          : json(EMPTY_REPORT),
+      job: () => {
+        polls += 1;
+        return jobOk({
+          halted: false,
+          assets: [asset({ productId: "p1" })],
+          log: { entries: [], campaignId: "active-campaign" },
+        });
+      },
+    });
+
+    const { result, unmount } = renderHook(() => useRun(), {
+      wrapper: ({ children }) =>
+        createElement(RunProvider, null, createElement(EarlyBriefSetter), children),
+    });
+    await waitFor(() => expect(result.current.brief.id).toBe("active-campaign"));
+    unmount();
+    await act(async () => {
+      resolveJobLookup(json({ jobId: "job-orphan" }));
+      await new Promise((r) => setTimeout(r, 0));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(polls).toBe(0);
+  });
+
+  test('adopting a job commits the persisted report, not the job\'s own (possibly partial) result (greptile "Re-roll adoption drops creatives")', async () => {
+    // The job being adopted is a selective re-roll: its own completed payload
+    // carries only the one regenerated cell, but the server has already merged
+    // it into the full persisted report (generate.post.ts: writeReport, then
+    // completeJob) — which also still carries the other cells' verdicts.
+    mockPipelineApi({
+      result: (url) =>
+        url.includes("/campaigns/jobs?campaignId=active-campaign")
+          ? json({ jobId: "job-reroll" })
+          : json({
+              halted: false,
+              assets: [
+                asset({ productId: "p1" }),
+                asset({ productId: "p2" }),
+                asset({ productId: "p3" }),
+                asset({ productId: "p4" }),
+              ],
+              log: { entries: [], campaignId: "active-campaign" },
+            }),
+      job: () =>
+        jobOk({
+          halted: false,
+          assets: [asset({ productId: "p2" })],
+          log: { entries: [], campaignId: "active-campaign" },
+        }),
+      decisions: { "p1/1:1/default": "approved", "p3/1:1/default": "rejected" },
+    });
+
+    const { result } = setup();
+    act(() => {
+      result.current.setBrief(activeBrief);
+    });
+    await waitFor(() => expect(result.current.assets).toHaveLength(4));
+    expect(result.current.assets.map((a) => a.productId).sort()).toEqual(["p1", "p2", "p3", "p4"]);
+    await waitFor(() => expect(result.current.decisions["p1/1:1/default"]).toBe("approved"));
+    expect(result.current.decisions["p3/1:1/default"]).toBe("rejected");
+  });
+
+  test("an adopted job whose persisted-report re-read fails falls back to the job's own result", async () => {
+    // F6: a failed read is "could not ask", not "nothing was saved" — the grid
+    // shows the job's own payload rather than staying empty.
+    mockPipelineApi({
+      result: (url) => {
+        if (url.includes("/campaigns/jobs?campaignId=active-campaign")) {
+          return json({ jobId: "job-x" });
+        }
+        return Promise.reject(new Error("down"));
+      },
+      job: () =>
+        jobOk({
+          halted: false,
+          assets: [asset({ productId: "p1" })],
+          log: { entries: [], campaignId: "active-campaign" },
+        }),
+    });
+    const { result } = setup();
+    act(() => {
+      result.current.setBrief(activeBrief);
+    });
+    await waitFor(() => expect(result.current.assets).toHaveLength(1));
+    expect(result.current.assets[0]!.productId).toBe("p1");
+  });
+
+  test("a brief switch while an adopted job's persisted-report re-read is in flight drops the stale read", async () => {
+    let resolvePersisted!: (r: Response) => void;
+    const persistedPromise = new Promise<Response>((r) => {
+      resolvePersisted = r;
+    });
+    // Set only once adoptJob actually asks for the persisted report — assigning
+    // `resolvePersisted` above happens synchronously in the Promise executor, so
+    // waiting on that alone would pass before the request is ever made and this
+    // test could not fail if the runSeq check after the re-read (below) were
+    // removed (coderabbit).
+    let persistedRequested = false;
+    mockPipelineApi({
+      result: (url) => {
+        if (url.includes("/campaigns/jobs?campaignId=active-campaign"))
+          return json({ jobId: "job-x" });
+        if (url.includes("campaignId=active-campaign")) {
+          persistedRequested = true;
+          return persistedPromise;
+        }
+        return json(EMPTY_REPORT); // the switched-to brief's own (unrelated) lookups
+      },
+      job: () =>
+        jobOk({
+          halted: false,
+          assets: [asset({ productId: "p1" })],
+          log: { entries: [], campaignId: "active-campaign" },
+        }),
+    });
+    const { result } = setup();
+    act(() => {
+      result.current.setBrief(activeBrief);
+    });
+    // The job has completed and adoptJob is now re-reading the persisted report
+    // (hung above); switch briefs before that read resolves.
+    await waitFor(() => expect(persistedRequested).toBe(true));
+    act(() =>
+      result.current.setBrief({
+        schemaVersion: BRIEF_SCHEMA_VERSION,
+        template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+        id: "switched-during-adopt",
+        targetRegion: "US",
+        targetAudience: "x",
+        campaignMessage: "y",
+        products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: "a.png" }],
+      }),
+    );
+    await act(async () => {
+      resolvePersisted(
+        json({
+          halted: false,
+          assets: [asset({ productId: "p1" })],
+          log: { entries: [], campaignId: "active-campaign" },
+        }),
+      );
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(result.current.brief.id).toBe("switched-during-adopt");
+    expect(result.current.assets).toHaveLength(0);
+  });
+
+  test('a failed decisions reload after an adopted full run shows no old verdicts (greptile "Old verdicts remain visible")', async () => {
+    let down = false;
+    const server = fakeDecisionsApi({ "p1/1:1/default": "approved" });
+    const decisions = {
+      ...server,
+      handle: (url: string, init: RequestInit) =>
+        down ? json({ error: "down" }, 500) : server.handle(url, init),
+    } as ReturnType<typeof fakeDecisionsApi>;
+
+    mockPipelineApi({
+      result: (url) =>
+        url.includes("/campaigns/jobs?campaignId=active-campaign")
+          ? json({ error: "No running job" }, 404)
+          : json({
+              halted: false,
+              assets: [asset({ productId: "p1" })],
+              log: { entries: [], campaignId: "active-campaign" },
+            }),
+      decisions,
+    });
+    const { result } = setup();
+    act(() => {
+      result.current.setBrief(activeBrief);
+    });
+    await waitFor(() => expect(result.current.decisions["p1/1:1/default"]).toBe("approved"));
+
+    // A full run completes elsewhere — the job's own payload is the entire set (no
+    // merge happened), and the decisions endpoint has since gone down.
+    down = true;
+    mockPipelineApi({
+      result: (url) =>
+        url.includes("/campaigns/jobs?campaignId=active-campaign")
+          ? json({ jobId: "job-full" })
+          : json({
+              halted: false,
+              assets: [asset({ productId: "p1" })],
+              log: { entries: [], campaignId: "active-campaign" },
+            }),
+      job: () =>
+        jobOk({
+          halted: false,
+          assets: [asset({ productId: "p1" })],
+          log: { entries: [], campaignId: "active-campaign" },
+        }),
+      decisions,
+    });
+    act(() => {
+      result.current.setBrief(activeBrief);
+    });
+    await waitFor(() => expect(result.current.decisionsNotice).toBe(DECISIONS_UNREADABLE_MESSAGE));
+    expect(result.current.decisions).toEqual({});
+  });
+
+  test("an adopted job commits when the persisted report has no assets array (coderabbit)", async () => {
+    // `fetchPersistedRun` accepts a report with a `log` and no `assets` (D83/F6:
+    // halted, log-only runs count) — the length comparison must not throw on it.
+    mockPipelineApi({
+      result: (url) =>
+        url.includes("/campaigns/jobs?campaignId=active-campaign")
+          ? json({ jobId: "job-x" })
+          : json({ halted: false, log: { entries: [], campaignId: "active-campaign" } }),
+      job: () =>
+        jobOk({
+          halted: false,
+          assets: [asset({ productId: "p1" })],
+          log: { entries: [], campaignId: "active-campaign" },
+        }),
+    });
+    const { result } = setup();
+    act(() => {
+      result.current.setBrief(activeBrief);
+    });
+    await waitFor(() => expect(result.current.hasRun).toBe(true));
+    expect(result.current.error).toBeNull();
+    expect(result.current.assets).toEqual([]);
+  });
+
+  test("an adopted job commits when its own completed payload has no assets array (coderabbit)", async () => {
+    // The job payload (`outcome.result`) is an untrusted cast (`pollJob`) — the length
+    // comparison must not throw when it lacks `assets` either.
+    mockPipelineApi({
+      result: (url) =>
+        url.includes("/campaigns/jobs?campaignId=active-campaign")
+          ? json({ jobId: "job-x" })
+          : json({
+              halted: false,
+              assets: [asset({ productId: "p1" })],
+              log: { entries: [], campaignId: "active-campaign" },
+            }),
+      job: () => jobOk({ halted: false, log: { entries: [], campaignId: "active-campaign" } }),
+    });
+    const { result } = setup();
+    act(() => {
+      result.current.setBrief(activeBrief);
+    });
+    await waitFor(() => expect(result.current.assets).toHaveLength(1));
+    expect(result.current.error).toBeNull();
+  });
+
+  test('a job lookup that resolves after a newer run has started for the same campaign does not adopt the stale job or clobber the newer one (greptile "Stale lookup replaces newer run")', async () => {
+    let resolveLookup!: (r: Response) => void;
+    const lookupPromise = new Promise<Response>((r) => {
+      resolveLookup = r;
+    });
+    let newJobPolls = 0;
+    let staleJobPolled = false;
+    mockPipelineApi({
+      result: (url) =>
+        url.includes("/campaigns/jobs?campaignId=active-campaign")
+          ? lookupPromise
+          : json(EMPTY_REPORT),
+      post: () => json({ jobId: "new-job" }, 202),
+      job: (url) => {
+        if (url.includes("new-job")) {
+          newJobPolls += 1;
+          return jobOk({
+            halted: false,
+            assets: [asset({ productId: "p-new" })],
+            log: { entries: [], campaignId: "active-campaign" },
+          });
+        }
+        if (url.includes("stale-job")) {
+          staleJobPolled = true;
+          return jobOk({
+            halted: false,
+            assets: [asset({ productId: "p-stale" })],
+            log: { entries: [], campaignId: "active-campaign" },
+          });
+        }
+        return json({ error: "Not found" }, 404);
+      },
+    });
+
+    const { result } = setup();
+    act(() => {
+      result.current.setBrief(activeBrief);
+    });
+    // The lookup started by setBrief is still pending (mocked to hang). Start a
+    // newer run for the same campaign before it resolves.
+    await act(async () => {
+      await result.current.execute();
+    });
+    expect(result.current.assets.map((a) => a.productId)).toEqual(["p-new"]);
+    expect(newJobPolls).toBe(1);
+    expect(result.current.loading).toBe(false);
+
+    // The stale lookup now answers with a job that was running before this tab
+    // ever asked about it.
+    act(() => {
+      resolveLookup(json({ jobId: "stale-job" }));
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(staleJobPolled).toBe(false);
+    expect(result.current.assets.map((a) => a.productId)).toEqual(["p-new"]);
+    expect(result.current.loading).toBe(false);
   });
 });

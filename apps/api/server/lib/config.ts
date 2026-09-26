@@ -89,3 +89,91 @@ export function authSettings(): AuthSettings {
     googleClientSecret: process.env.GOOGLE_CLIENT_SECRET,
   };
 }
+
+/** Key encryption settings for org provider keys (PT-7b1, D175, D176). */
+export interface KeyEncryptionSettings {
+  readonly currentVersion: string;
+  readonly keys: ReadonlyMap<string, Buffer>;
+}
+
+/**
+ * Key encryption settings for envelope encryption of org provider keys (PT-7b1, D175, D176).
+ *
+ * `KEY_ENCRYPTION_KEYS`: comma-separated list of `v<n>:<base64 32 bytes>`.
+ * `KEY_ENCRYPTION_KEY_CURRENT`: names the version that seals new keys.
+ *
+ * Unset means "no BYOK" (returns undefined). Refuses with clear errors (never
+ * echoing key material) on malformed entries, non-32-byte keys, duplicate
+ * versions, or a current version not present in the list.
+ */
+export function keyEncryptionSettings(): KeyEncryptionSettings | undefined {
+  loadEnv();
+  const rawKeys = process.env.KEY_ENCRYPTION_KEYS;
+  if (rawKeys === undefined || rawKeys.trim() === "") {
+    return undefined;
+  }
+
+  const keys = new Map<string, Buffer>();
+  const entries = rawKeys.split(",").map((entry) => entry.trim());
+
+  for (const entry of entries) {
+    if (entry === "") {
+      throw new Error("Malformed KEY_ENCRYPTION_KEYS: empty entry found.");
+    }
+
+    const colonIndex = entry.indexOf(":");
+    if (colonIndex === -1) {
+      throw new Error("Malformed KEY_ENCRYPTION_KEYS entry: missing colon separator.");
+    }
+
+    const version = entry.slice(0, colonIndex).trim();
+    const keyBase64 = entry.slice(colonIndex + 1).trim();
+
+    if (!/^v\d+$/.test(version)) {
+      // Never echo it: a misplaced key in the version position must not reach a log.
+      throw new Error(
+        'Malformed KEY_ENCRYPTION_KEYS entry: a version must follow the "v<n>" format.',
+      );
+    }
+
+    if (keys.has(version)) {
+      throw new Error(`Duplicate key encryption version "${version}" in KEY_ENCRYPTION_KEYS.`);
+    }
+
+    if (!/^[A-Za-z0-9+/]+=*$/.test(keyBase64)) {
+      throw new Error(`Invalid base64 key in KEY_ENCRYPTION_KEYS for version "${version}".`);
+    }
+
+    const decoded = Buffer.from(keyBase64, "base64");
+    if (decoded.toString("base64") !== keyBase64) {
+      throw new Error(`Invalid base64 key in KEY_ENCRYPTION_KEYS for version "${version}".`);
+    }
+
+    if (decoded.length !== 32) {
+      throw new Error(
+        `KEY_ENCRYPTION_KEYS key for version "${version}" must decode to exactly 32 bytes (got ${decoded.length}).`,
+      );
+    }
+
+    keys.set(version, decoded);
+  }
+
+  const currentVersion = process.env.KEY_ENCRYPTION_KEY_CURRENT?.trim();
+  if (!currentVersion) {
+    throw new Error("KEY_ENCRYPTION_KEY_CURRENT is required when KEY_ENCRYPTION_KEYS is set.");
+  }
+
+  if (!keys.has(currentVersion)) {
+    // Echo it only when it has a version's shape: anything else may be a misplaced key.
+    throw new Error(
+      /^v\d+$/.test(currentVersion)
+        ? `KEY_ENCRYPTION_KEY_CURRENT "${currentVersion}" not found in KEY_ENCRYPTION_KEYS.`
+        : 'KEY_ENCRYPTION_KEY_CURRENT is not a version ("v<n>") in KEY_ENCRYPTION_KEYS.',
+    );
+  }
+
+  return {
+    currentVersion,
+    keys,
+  };
+}

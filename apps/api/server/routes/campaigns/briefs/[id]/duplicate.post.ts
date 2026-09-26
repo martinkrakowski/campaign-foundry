@@ -44,6 +44,7 @@ function overrideValues(overrides: unknown): Record<string, unknown> {
  * duplicated `pool://copy` source otherwise plans against a file that never existed.
  */
 export default defineEventHandler(async (event) => {
+  const scope = requestTenant(event);
   let id: string;
   try {
     id = String(getRouterParam(event, "id"));
@@ -68,13 +69,13 @@ export default defineEventHandler(async (event) => {
     return { error: errorMessage(error) };
   }
 
-  const source = await getBriefStore(requestTenant(event)).findBriefById(id);
+  const source = await getBriefStore(scope).findBriefById(id);
   if (!source) {
     setResponseStatus(event, 404);
     return { error: `Brief "${id}" not found.` };
   }
 
-  if (await isPoolDirSymlink(requestTenant(event), newId)) {
+  if (await isPoolDirSymlink(scope, newId)) {
     setResponseStatus(event, 400);
     return { error: SYMLINK_WRITE_ERROR };
   }
@@ -97,8 +98,8 @@ export default defineEventHandler(async (event) => {
   }
 
   try {
-    const created = await getBriefStore(requestTenant(event)).withBriefLock(newId, async () => {
-      if (await getBriefStore(requestTenant(event)).findBriefById(newId)) {
+    const created = await getBriefStore(scope).withBriefLock(newId, async () => {
+      if (await getBriefStore(scope).findBriefById(newId)) {
         const existErr = new Error(`Brief "${newId}" already exists.`);
         (existErr as { code?: string }).code = "EEXIST";
         throw existErr;
@@ -109,27 +110,27 @@ export default defineEventHandler(async (event) => {
       // the destination brief absent). createBrief is exclusive (wx); writing
       // the dest pool first left an orphan when the dest file existed but was
       // unparseable — findBriefById skips those, then wx turns into a 409.
-      const sourcePool = await readPool(requestTenant(event), id);
+      const sourcePool = await readPool(scope, id);
 
       // Copy assets from source brief to new brief, and any referenced brief-scoped assets
-      const sourceMap = await getAssetStore(requestTenant(event)).copyAssets(id, newId);
+      const sourceMap = await getAssetStore(scope).copyAssets(id, newId);
       brief = rewriteAssetPaths(brief, id, newId, sourceMap);
       const additionalSourceIds = extractSourceAssetBriefIds(brief, newId);
       for (const fromId of additionalSourceIds) {
-        const addMap = await getAssetStore(requestTenant(event)).copyAssets(fromId, newId);
+        const addMap = await getAssetStore(scope).copyAssets(fromId, newId);
         brief = rewriteAssetPaths(brief, fromId, newId, addMap);
       }
 
-      const created = await getBriefStore(requestTenant(event)).createBrief(brief);
+      const created = await getBriefStore(scope).createBrief(brief);
       // The dest pool write (or the stale-pool delete when the source has none)
       // runs under withPoolLock(newId) as well as the brief lock: they are
       // different maps, so without it a concurrent POST /campaigns/pools/:newId
       // could interleave. The source pool needs no lock: writePool renames atomically.
-      await withPoolLock(requestTenant(event), newId, async () => {
+      await withPoolLock(scope, newId, async () => {
         if (sourcePool) {
-          await copyPool(requestTenant(event), id, newId);
+          await copyPool(scope, id, newId);
         } else {
-          await deletePool(requestTenant(event), newId);
+          await deletePool(scope, newId);
         }
       });
       return created;

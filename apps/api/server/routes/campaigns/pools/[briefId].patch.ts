@@ -106,6 +106,7 @@ function collidingId(
  * overwrite that silently drops another writer's edit.
  */
 export default defineEventHandler(async (event) => {
+  const scope = requestTenant(event);
   let briefId: string;
   try {
     briefId = String(getRouterParam(event, "briefId"));
@@ -123,7 +124,7 @@ export default defineEventHandler(async (event) => {
     return { error: errorMessage(error) };
   }
 
-  if (await isPoolDirSymlink(requestTenant(event), briefId)) {
+  if (await isPoolDirSymlink(scope, briefId)) {
     setResponseStatus(event, 400);
     return { error: SYMLINK_WRITE_ERROR };
   }
@@ -131,10 +132,10 @@ export default defineEventHandler(async (event) => {
   const rawRevision = getQuery(event).revision;
   const expectedRevision = Array.isArray(rawRevision) ? rawRevision[0] : rawRevision;
 
-  return withPoolLock(requestTenant(event), briefId, async () => {
+  return withPoolLock(scope, briefId, async () => {
     let stored;
     try {
-      stored = await readPool(requestTenant(event), briefId);
+      stored = await readPool(scope, briefId);
     } catch (error) {
       if (!(error instanceof InvalidCopyPoolError)) throw error;
       setResponseStatus(event, 422);
@@ -174,7 +175,7 @@ export default defineEventHandler(async (event) => {
 
     const next: CopyPool = { ...pool, entries };
     try {
-      const written = await writePool(requestTenant(event), next, { expectedRevision });
+      const written = await writePool(scope, next, { expectedRevision });
       return { pool: written.pool, revision: written.revision };
     } catch (error) {
       if (!isErrno(error, "ECONFLICT")) throw error;
