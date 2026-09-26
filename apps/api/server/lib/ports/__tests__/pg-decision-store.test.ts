@@ -189,4 +189,3 @@ describe("PgDecisionStore (PT-3, D173)", () => {
     await expect(store.writeDecisions("camp-no-fence", map)).resolves.toBeDefined();
   });
 });
-

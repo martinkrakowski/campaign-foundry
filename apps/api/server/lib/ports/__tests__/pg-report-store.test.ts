@@ -148,7 +148,6 @@ describe("PgReportStore (PT-3c, D169)", () => {
   });
 });
 
-
 describe("STORE_BACKEND=postgres puts reports in the database, one store per org (PT-3c)", () => {
   const saved = process.env.STORE_BACKEND;
   afterEach(() => {

@@ -5,7 +5,8 @@ import type {
   PipelineResult,
 } from "@campaignfoundry/CampaignOrchestration";
 import { retireDecisions, withDecisionLock } from "./decisions.js";
-import { getReportStore, type ReportStorePort } from "./ports/index.js";
+import { getJobStore, getReportStore, type ReportStorePort } from "./ports/index.js";
+import { JobLeaseLostError } from "./ports/job-store.port.js";
 import type { StorageScope } from "./run-environment.js";
 
 /** Persisted asset = the entity plus the derived `brandCompliant` view field. */
@@ -263,11 +264,26 @@ export async function writeReport(
   // report it makes way for, and before the write, so a failed retirement
   // publishes nothing and a failed write only returns creatives to review.
   return withDecisionLock(scope, campaignId, async (decisions) => {
-    await retireDecisions(decisions, campaignId, merge ? new Set(fresh.map(keyOf)) : undefined);
+    if (fence !== undefined) {
+      // Before the store write, refuse unless the job store entry for runId is running.
+      // This is not atomic, which is acceptable on the single-process fs backend;
+      // PgReportStore / PgDecisionStore check the fence atomically inside their write transactions.
+      const entry = await getJobStore(scope).getStoredJob(fence.runId);
+      if (entry?.job.status !== "running") {
+        throw new JobLeaseLostError(fence.runId);
+      }
+    }
+    await retireDecisions(
+      decisions,
+      campaignId,
+      merge ? new Set(fresh.map(keyOf)) : undefined,
+      fence,
+      scope,
+    );
     // The store repeats the compare-and-swap in its own atomic step (PT-3c), so
     // the cross-process race this guard only narrows (D79 on files) is closed
     // too. `expectedRevision` is passed through exactly — never `?? undefined`,
     // which would turn `null` ("nothing stored yet") into "do not check".
-    return store.writeReport(campaignId, payload, expectedRevision);
+    return store.writeReport(campaignId, payload, expectedRevision, fence);
   });
 }

@@ -65,7 +65,6 @@ export interface DecisionStorePort {
   ): Promise<string>;
 }
 
-
 /** A write whose expected revision is no longer the stored one (D82). */
 export class DecisionConflictError extends Error {
   readonly code = "ECONFLICT";

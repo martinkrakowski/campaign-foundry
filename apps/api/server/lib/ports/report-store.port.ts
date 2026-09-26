@@ -51,7 +51,6 @@ export interface ReportStorePort {
   ): Promise<string>;
 }
 
-
 /** A write whose expected revision is no longer the stored one (D173's shape, D79). */
 export class ReportConflictError extends Error {
   readonly code = "ECONFLICT";

@@ -9,6 +9,7 @@ import {
   type DecisionStorePort,
   type StoredDecisions,
 } from "./decision-store.port.js";
+import { JobLeaseLostError } from "./job-store.port.js";
 
 /**
  * The revision of a decision map: the SHA-256 of the bytes the file store writes
@@ -91,6 +92,15 @@ export class PgDecisionStore implements DecisionStorePort {
     });
     const revision = revisionOf(decisions);
     await this.db.transaction(async (tx) => {
+      if (fence !== undefined) {
+        const { rows: fenceRows } = await tx.query(
+          `select 1 from job where id = $1 and org_id = $2 and campaign_id = $3 and status = 'running' and lease_expires_at > now() for share`,
+          [fence.runId, this.orgId, campaignId],
+        );
+        if (fenceRows.length === 0) {
+          throw new JobLeaseLostError(fence.runId);
+        }
+      }
       await this.claim(tx, campaignId, revision, expectedRevision);
       await tx.query("delete from decision where org_id = $1 and campaign_id = $2", [
         this.orgId,

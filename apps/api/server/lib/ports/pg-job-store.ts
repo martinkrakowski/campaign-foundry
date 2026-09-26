@@ -1,7 +1,14 @@
 import { randomUUID } from "node:crypto";
 import type { SqlClient, SqlQuery } from "../db/sql-client.js";
 import { JOB_TTL_MS, JobCapacityError, MAX_JOBS } from "./fs-job-store.js";
-import type { Job, JobResult, JobStatus, RunRegistryPort, StoredJob } from "./job-store.port.js";
+import {
+  JobLeaseLostError,
+  type Job,
+  type JobResult,
+  type JobStatus,
+  type RunRegistryPort,
+  type StoredJob,
+} from "./job-store.port.js";
 
 /**
  * How long a claim's lease lasts without a heartbeat (D171). Well above
@@ -15,7 +22,6 @@ export const LEASE_MS = 60_000;
 export const HEARTBEAT_INTERVAL_MS = 15_000;
 
 export { JobLeaseLostError } from "./job-store.port.js";
-
 
 /** A millisecond duration as the text `pg`/PGlite parse into an `interval`. */
 function asInterval(ms: number): string {
@@ -166,7 +172,7 @@ export class PgJobStore implements RunRegistryPort {
   /** The running row for `campaignId`, if any — the claim's incumbent, and `getRunningJobId`. */
   private async runningIncumbent(q: SqlQuery, campaignId: string): Promise<string | undefined> {
     const { rows } = await q.query<{ id: string }>(
-      `select id from job where org_id = $1 and campaign_id = $2 and status = 'running' limit 1`,
+      `select id from job where org_id = $1 and campaign_id = $2 and status = 'running' and lease_expires_at > now() limit 1`,
       [this.orgId, campaignId],
     );
     return rows[0]?.id;

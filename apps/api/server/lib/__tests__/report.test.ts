@@ -995,4 +995,3 @@ describe("reports go through the report store (PT-0a)", () => {
     ).rejects.toBeInstanceOf(JobLeaseLostError);
   });
 });
-

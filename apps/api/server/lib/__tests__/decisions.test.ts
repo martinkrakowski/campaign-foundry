@@ -16,7 +16,6 @@ import { getDecisionStore, getJobStore, resetDecisionStore } from "../ports/inde
 import { JobLeaseLostError } from "../ports/job-store.port.js";
 import { LOCAL_TENANT } from "../tenant.js";
 
-
 const at1 = "2026-09-01T00:00:00.000Z";
 const rec = (verdict: "approved" | "rejected"): DecisionRecord => ({
   verdict,
@@ -182,4 +181,3 @@ describe("retireDecisions against a concurrent save (PT-3)", () => {
     ).rejects.toBeInstanceOf(JobLeaseLostError);
   });
 });
-

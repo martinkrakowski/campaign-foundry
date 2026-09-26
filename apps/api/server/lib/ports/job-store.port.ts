@@ -32,7 +32,6 @@ export class JobLeaseLostError extends Error {
   }
 }
 
-
 /**
  * A job as persisted in storage with its metadata.
  */
