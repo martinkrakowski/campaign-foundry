@@ -3,7 +3,7 @@ import { dumpBrief, errorMessage } from "@campaignfoundry/shared";
 import { BRIEF_SOURCE_EXTS, hashBytes, isErrno } from "../brief-files.js";
 import type { SqlClient, SqlQuery } from "../db/sql-client.js";
 import { parseBriefText, type ParseBriefOptions } from "../load-brief.js";
-import type { BriefStorePort, StoredBrief } from "./brief-store.port.js";
+import type { BriefStorePort, BriefWriteOptions, StoredBrief } from "./brief-store.port.js";
 
 /** A file key ("<slug>.yaml") and the bare slug name the same row; strip a known extension. */
 function slugOf(fileOrId: string): string {
@@ -74,6 +74,9 @@ function assertSafeSlug(id: string): void {
  * org by construction; another org's campaign is invisible, not forbidden.
  */
 export class PgBriefStore implements BriefStorePort {
+  /** Team columns and `campaignVisibility("hidden")` — see `BriefStorePort.supportsTeams`. */
+  readonly supportsTeams = true;
+
   private readonly lockChains = new Map<string, Promise<unknown>>();
 
   /**
@@ -118,22 +121,25 @@ export class PgBriefStore implements BriefStorePort {
   }
 
   /**
-   * Team-hidden from this caller: a campaign row exists in this org for `id`,
-   * but its team is not one this caller's role or memberships can see. Used
-   * only by `lib/ownership.ts` `campaignKnown` (D166 item 4) to tell "never
-   * created" (which must still fall through to that function's report/asset
-   * fallback for an unsaved draft) from "exists but hidden" (which must 404
-   * immediately, even when a report or asset exists in the org's scope) —
-   * `findBriefById` alone cannot: team scope already makes it answer
-   * undefined for both.
+   * "absent" | "visible" | "hidden" (D166 item 4, `BriefStorePort`): tells
+   * "never created" (a campaign row does not exist at all — `lib/ownership.ts`
+   * `campaignKnown` must still fall through to its report/asset fallback for
+   * an unsaved draft) from "exists but hidden" (a row exists whose team the
+   * caller's role or memberships cannot see — `campaignKnown` must 404
+   * immediately, even when a report or asset exists in the org's scope), from
+   * plain "visible". `findBriefById` alone cannot make this distinction:
+   * team scope already makes it answer `undefined` for both "absent" and
+   * "hidden". Also used by the brief write routes (item 3) to answer 409 on
+   * a hidden or already-visible target before any write or asset copy runs.
    */
-  async hiddenFromCaller(id: string): Promise<boolean> {
+  async campaignVisibility(id: string): Promise<"absent" | "visible" | "hidden"> {
     const { rows } = await this.db.query<{ team_id: string | null }>(
       `select team_id from campaign where org_id = $1 and slug = $2`,
       [this.orgId, id],
     );
     const row = rows[0];
-    return row !== undefined && !this.visible(row.team_id);
+    if (!row) return "absent";
+    return this.visible(row.team_id) ? "visible" : "hidden";
   }
 
   async listBriefs(): Promise<readonly StoredBrief[]> {
@@ -229,11 +235,10 @@ export class PgBriefStore implements BriefStorePort {
   }
 
   /**
-   * `teamId` is the interface's `createBrief`'s permanent `null` (D166: "It is
-   * null by default"); `createBriefWithTeam` is the Postgres-only entry point
-   * `pg-brief-store`'s own callers use once the route has already run the
-   * caller-side permission check (D166 item 3) — never part of
-   * `BriefStorePort`, since the fs backend has no team column to set (item 5).
+   * `teamId` is `null` unless the route has already run the caller-side
+   * permission check (D166 item 3) and passed one through `createBrief`'s
+   * `options.teamId`. The fs backend has no team column to set (item 5) and
+   * refuses any non-undefined `teamId` instead.
    */
   private async createBriefInternal(
     brief: CampaignBrief,
@@ -265,12 +270,8 @@ export class PgBriefStore implements BriefStorePort {
     });
   }
 
-  async createBrief(brief: CampaignBrief): Promise<StoredBrief> {
-    return this.createBriefInternal(brief, null);
-  }
-
-  async createBriefWithTeam(brief: CampaignBrief, teamId: string | null): Promise<StoredBrief> {
-    return this.createBriefInternal(brief, teamId);
+  async createBrief(brief: CampaignBrief, options?: BriefWriteOptions): Promise<StoredBrief> {
+    return this.createBriefInternal(brief, options?.teamId ?? null);
   }
 
   /**
@@ -281,11 +282,11 @@ export class PgBriefStore implements BriefStorePort {
    * short write, not `withBriefLock`'s `fn` — so it cannot deadlock against a
    * `fn` that calls back into this store on another pooled connection.
    *
-   * `teamId` is `undefined` for the interface's own `rewriteBrief` — leave the
-   * column exactly as it is, so a plain save never resets an assigned team —
-   * and `rewriteBriefWithTeam` (Postgres-only, D166 item 3) passes the value
-   * the route already authorized, `null` included, to set it. The row's
-   * current team is read here too so a campaign hidden from this caller by
+   * `teamId` is `undefined` when `rewriteBrief`'s own caller passes no
+   * `options.teamId` — leave the column exactly as it is, so a plain save
+   * never resets an assigned team — and any other value (a team id, or `null`
+   * to clear one, D166 item 3) is the value the route already authorized. The
+   * row's current team is read here too so a campaign hidden from this caller by
    * team (D166) answers `notFound`, the same as a genuinely missing row —
    * without it, a member of another team could rewrite, or even reassign, a
    * campaign they cannot otherwise see at all.
@@ -330,51 +331,26 @@ export class PgBriefStore implements BriefStorePort {
     });
   }
 
-  async rewriteBrief(
-    brief: CampaignBrief,
-    options?: { expectedRevision?: string },
-  ): Promise<StoredBrief> {
-    return this.rewriteBriefInternal(brief, options?.expectedRevision, undefined);
-  }
-
-  async rewriteBriefWithTeam(
-    brief: CampaignBrief,
-    teamId: string | null | undefined,
-    options?: { expectedRevision?: string },
-  ): Promise<StoredBrief> {
-    return this.rewriteBriefInternal(brief, options?.expectedRevision, teamId);
-  }
-
-  async replaceBrief(
-    brief: CampaignBrief,
-    options?: { expectedRevision?: string },
-  ): Promise<StoredBrief> {
-    try {
-      return await this.rewriteBrief(brief, options);
-    } catch (error) {
-      if (isErrno(error, "ENOENT")) return this.createBrief(brief);
-      throw error;
-    }
+  async rewriteBrief(brief: CampaignBrief, options?: BriefWriteOptions): Promise<StoredBrief> {
+    return this.rewriteBriefInternal(brief, options?.expectedRevision, options?.teamId);
   }
 
   /**
-   * `replaceBrief`'s own ENOENT-falls-to-create shape, with the team the route
-   * already authorized (D166 item 3) carried down either path. `teamId` keeps
-   * `rewriteBriefWithTeam`'s "`undefined` leaves it as it is" for the common
-   * existing-campaign case — a replace-save with no `teamId` in the request
-   * must not reset an already-assigned team to org-wide. Only when there is no
-   * existing row to leave alone (ENOENT, a fresh slug) does `undefined` become
-   * `createBriefWithTeam`'s `null` default.
+   * `replaceBrief`'s own ENOENT-falls-to-create shape carries the team the
+   * route already authorized (D166 item 3) down either path. `rewriteBrief`'s
+   * "`options.teamId` undefined leaves it as it is" keeps an already-assigned
+   * team in place for the common existing-campaign case — a replace-save with
+   * no `teamId` in the request must not reset it to org-wide. Only when there
+   * is no existing row to leave alone (ENOENT, a fresh slug) does `undefined`
+   * become `createBrief`'s `null` default.
    */
-  async replaceBriefWithTeam(
-    brief: CampaignBrief,
-    teamId: string | null | undefined,
-    options?: { expectedRevision?: string },
-  ): Promise<StoredBrief> {
+  async replaceBrief(brief: CampaignBrief, options?: BriefWriteOptions): Promise<StoredBrief> {
     try {
-      return await this.rewriteBriefWithTeam(brief, teamId, options);
+      return await this.rewriteBrief(brief, options);
     } catch (error) {
-      if (isErrno(error, "ENOENT")) return this.createBriefWithTeam(brief, teamId ?? null);
+      if (isErrno(error, "ENOENT")) {
+        return this.createBrief(brief, { teamId: options?.teamId ?? null });
+      }
       throw error;
     }
   }

@@ -12,7 +12,11 @@ import {
   withPoolLock,
 } from "../../../../lib/pools.js";
 import { getAssetStore, getBriefStore } from "../../../../lib/ports/index.js";
-import { assertOwnedCampaign, CampaignNotFoundError } from "../../../../lib/ownership.js";
+import {
+  assertOwnedCampaign,
+  assertSourceVisible,
+  CampaignNotFoundError,
+} from "../../../../lib/ownership.js";
 
 import { requestTenant } from "../../../../lib/tenant.js";
 /** The duplicate contract's overrides: `targetRegion` and `targetAudience` only. */
@@ -43,6 +47,16 @@ function overrideValues(overrides: unknown): Record<string, unknown> {
  * and rewrites logoPath and inputAsset, while leaving shared root assets untouched (L5.5).
  * The copy pool is copied too (D71/C9), rewritten to name the new brief — a
  * duplicated `pool://copy` source otherwise plans against a file that never existed.
+ *
+ * D166 item 2: the source brief's own asset-scoped fields may in turn name a
+ * THIRD campaign's id as an asset source (`extractSourceAssetBriefIds`) —
+ * each such id is checked with `assertSourceVisible` before its assets are
+ * copied, same as `briefs.post.ts`'s "Save as…".
+ *
+ * D166 item 3: `newId`'s own visibility is checked with `campaignVisibility`
+ * before any copy or write, rather than relying on `createBrief`'s eventual
+ * EEXIST — an existing-but-hidden `newId` must never have its asset directory
+ * written into ahead of that conflict.
  */
 export default defineEventHandler(async (event) => {
   const scope = requestTenant(event);
@@ -105,7 +119,12 @@ export default defineEventHandler(async (event) => {
 
   try {
     const created = await getBriefStore(scope).withBriefLock(newId, async () => {
-      if (await getBriefStore(scope).findBriefById(newId)) {
+      // D166 item 3: checked via campaignVisibility, not findBriefById, so an
+      // existing-but-hidden newId also 409s here — BEFORE any copy — instead
+      // of surviving this check (findBriefById answers undefined for a hidden
+      // campaign too) and having its asset directory written into ahead of
+      // createBrief's eventual EEXIST.
+      if ((await getBriefStore(scope).campaignVisibility(newId)) !== "absent") {
         const existErr = new Error(`Brief "${newId}" already exists.`);
         (existErr as { code?: string }).code = "EEXIST";
         throw existErr;
@@ -122,6 +141,11 @@ export default defineEventHandler(async (event) => {
       const sourceMap = await getAssetStore(scope).copyAssets(id, newId);
       brief = rewriteAssetPaths(brief, id, newId, sourceMap);
       const additionalSourceIds = extractSourceAssetBriefIds(brief, newId);
+      // D166 item 2: each additional source id must not be hidden from THIS
+      // caller by team before its assets are copied.
+      for (const fromId of additionalSourceIds) {
+        await assertSourceVisible(scope, fromId);
+      }
       for (const fromId of additionalSourceIds) {
         const addMap = await getAssetStore(scope).copyAssets(fromId, newId);
         brief = rewriteAssetPaths(brief, fromId, newId, addMap);
@@ -153,6 +177,11 @@ export default defineEventHandler(async (event) => {
     if (isExistsError(error)) {
       setResponseStatus(event, 409);
       return { error: `Brief "${newId}" already exists.` };
+    }
+    // D166 item 2: an additional source id hidden from this caller by team.
+    if (error instanceof CampaignNotFoundError) {
+      setResponseStatus(event, 404);
+      return { error: `Brief "${error.campaignId}" not found.` };
     }
     if (!(error instanceof InvalidCopyPoolError)) throw error;
     setResponseStatus(event, 422);

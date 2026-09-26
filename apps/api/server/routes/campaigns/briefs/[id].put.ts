@@ -1,8 +1,7 @@
 import { errorMessage } from "@campaignfoundry/shared";
 import { isErrno, SYMLINK_WRITE_ERROR } from "../../../lib/brief-files.js";
 import { assertSafeId, parseBrief } from "../../../lib/load-brief.js";
-import { getBriefStore } from "../../../lib/ports/index.js";
-import { PgBriefStore } from "../../../lib/ports/pg-brief-store.js";
+import { getBriefStore, TeamsNotSupportedError } from "../../../lib/ports/index.js";
 import { canAssignTeam } from "../../../lib/ownership.js";
 
 import { requestTenant } from "../../../lib/tenant.js";
@@ -14,7 +13,8 @@ import { requestTenant } from "../../../lib/tenant.js";
  * `teamId` (D166, PT-2c item 3): see `briefs.post.ts`'s docstring — same
  * sibling-of-the-brief shape, same permission and backend rules. Absent means
  * "leave the campaign's team exactly as it is" (a plain save must not reset
- * an assigned team to org-wide).
+ * an assigned team to org-wide). `null` (item 5) clears an assigned team back
+ * to org-wide, under the same `canAssignTeam` permission.
  */
 export default defineEventHandler(async (event) => {
   const scope = requestTenant(event);
@@ -28,17 +28,17 @@ export default defineEventHandler(async (event) => {
   }
 
   let brief;
-  let teamId: string | undefined;
+  let teamId: string | null | undefined;
   try {
     const rawBody: unknown = await readBody(event);
     if (typeof rawBody !== "object" || rawBody === null || Array.isArray(rawBody)) {
       throw new Error("Campaign brief must be an object.");
     }
     const { teamId: rawTeamId, ...briefBody } = rawBody as Record<string, unknown>;
-    if (rawTeamId !== undefined && typeof rawTeamId !== "string") {
-      throw new Error('"teamId" must be a string.');
+    if (rawTeamId !== undefined && rawTeamId !== null && typeof rawTeamId !== "string") {
+      throw new Error('"teamId" must be a string or null.');
     }
-    teamId = rawTeamId as string | undefined;
+    teamId = rawTeamId as string | null | undefined;
     brief = parseBrief(briefBody);
   } catch (error) {
     setResponseStatus(event, 400);
@@ -51,15 +51,14 @@ export default defineEventHandler(async (event) => {
   }
 
   const store = getBriefStore(scope);
-  if (teamId !== undefined) {
-    if (!(store instanceof PgBriefStore)) {
-      setResponseStatus(event, 400);
-      return { error: "Assigning a team requires the Postgres backend." };
-    }
-    if (!canAssignTeam(scope, teamId)) {
-      setResponseStatus(event, 403);
-      return { error: `Not authorized to assign team "${teamId}".` };
-    }
+  if (teamId !== undefined && !canAssignTeam(scope, teamId)) {
+    setResponseStatus(event, 403);
+    return {
+      error:
+        teamId === null
+          ? "Not authorized to clear this campaign's team."
+          : `Not authorized to assign team "${teamId}".`,
+    };
   }
 
   const rawRevision = getQuery(event).revision;
@@ -67,9 +66,7 @@ export default defineEventHandler(async (event) => {
 
   try {
     const stored = await store.withBriefLock(id, async () => {
-      return store instanceof PgBriefStore
-        ? await store.rewriteBriefWithTeam(brief, teamId, { expectedRevision })
-        : await store.rewriteBrief(brief, { expectedRevision });
+      return await store.rewriteBrief(brief, { expectedRevision, teamId });
     });
     // The new revision rides along: the editor dispatches it into its source, so the
     // next save guards conditionally instead of replaying the load-time revision and
@@ -79,6 +76,10 @@ export default defineEventHandler(async (event) => {
     if (errorMessage(error) === SYMLINK_WRITE_ERROR) {
       setResponseStatus(event, 400);
       return { error: errorMessage(error) };
+    }
+    if (error instanceof TeamsNotSupportedError) {
+      setResponseStatus(event, 400);
+      return { error: error.message };
     }
     if (isErrno(error, "ENOENT")) {
       setResponseStatus(event, 404);

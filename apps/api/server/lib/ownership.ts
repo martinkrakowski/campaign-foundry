@@ -1,7 +1,6 @@
 import type { StorageScope } from "./run-environment.js";
 import type { StoredBrief } from "./ports/brief-store.port.js";
 import { getAssetStore, getBriefStore, getReportStore } from "./ports/index.js";
-import { PgBriefStore } from "./ports/pg-brief-store.js";
 import type { TenantContext } from "./tenant.js";
 
 /**
@@ -11,11 +10,16 @@ import type { TenantContext } from "./tenant.js";
  * check: `PgBriefStore`'s `assertTeamInOrg` still refuses a team from another
  * org (or a typo'd id), which this cannot see. Shared by the brief create and
  * replace routes so the rule reads once.
+ *
+ * `teamId: null` (D166 item 5) means clearing an assigned team back to
+ * org-wide — which WIDENS visibility from one team to the whole org, unlike
+ * assigning a specific team, which only ever narrows it to teams the caller
+ * already belongs to. That is a more sensitive move than a plain member's own
+ * "one of my own teams" grant covers, so clearing is `owner`/`admin` only.
  */
-export function canAssignTeam(tenant: TenantContext, teamId: string): boolean {
-  return tenant.roles.includes("owner") || tenant.roles.includes("admin")
-    ? true
-    : tenant.teamIds.includes(teamId);
+export function canAssignTeam(tenant: TenantContext, teamId: string | null): boolean {
+  if (tenant.roles.includes("owner") || tenant.roles.includes("admin")) return true;
+  return teamId !== null && tenant.teamIds.includes(teamId);
 }
 
 /**
@@ -53,6 +57,27 @@ export async function assertOwnedCampaign(
   return brief;
 }
 
+/**
+ * Refuse (404) a source campaign id that EXISTS but is hidden from the caller
+ * by team (D166 item 2) — never one that is merely absent. "Save as…" and
+ * duplicate copy brief-scoped assets by directory name
+ * (`assets/inputs/<id>/*`), and on the filesystem backend that name need
+ * never have been a saved campaign at all (a demo asset dropped straight into
+ * the directory, say) — `campaignVisibility` answers "absent" for that case,
+ * same as for a typo, and this must let it through unchanged. What it must
+ * catch is a request naming another team's real, existing campaign as an
+ * asset source to exfiltrate its files into the caller's own campaign.
+ */
+export async function assertSourceVisible(scope: StorageScope, campaignId: string): Promise<void> {
+  const briefStore = getBriefStore(scope);
+  // Same L1 reasoning as campaignKnown: skip the call entirely on a backend
+  // that can never answer "hidden" (the fs backend, item 5), rather than
+  // paying for a directory scan whose answer this can never use.
+  if (briefStore.supportsTeams && (await briefStore.campaignVisibility(campaignId)) === "hidden") {
+    throw new CampaignNotFoundError(campaignId);
+  }
+}
+
 export type KnownResourceKind = "report" | "asset";
 
 /**
@@ -83,12 +108,25 @@ export type KnownResourceKind = "report" | "asset";
  * D166 (PT-2c, item 4): a campaign hidden from the caller by its team must
  * read as unknown even when a report or asset exists in the org's scope —
  * neither store carries a team column, so their existence alone no longer
- * proves the caller may see THIS campaign. Checked first, Postgres-only
- * (`hiddenFromCaller`; the fs backend has no teams, item 5): a database
- * failure there folds into the same `readFailure` the report/asset checks
- * use below rather than becoming a false 404, and a genuinely unsaved draft
- * (no campaign row at all) is not "hidden" — it falls through to the
- * report/asset fast path exactly as before.
+ * proves the caller may see THIS campaign. Checked first, via the port's own
+ * `campaignVisibility`, but only when `supportsTeams` says the backend can
+ * ever answer "hidden" at all (Postgres) — the filesystem backend's
+ * `campaignVisibility` would answer correctly regardless (never "hidden",
+ * item 5), but calling it costs a full directory scan on every read, which is
+ * exactly what L1 (below) exists to avoid; `supportsTeams` lets this skip the
+ * call rather than the correctness. A genuinely unsaved draft (no campaign
+ * row at all) answers "absent", not "hidden", so it still falls through to
+ * the report/asset fast path exactly as before.
+ *
+ * D166 (PT-2c, item 1): this check is deliberately NOT wrapped in a
+ * try/catch that folds a failure into `readFailure` and keeps going — a
+ * visibility check that cannot be decided must fail CLOSED. Swallowing a
+ * `campaignVisibility` storage failure here and falling through to the
+ * report/asset fast path let it grant access to a campaign that failure
+ * itself made unverifiable: the report/asset shortcut only proves something
+ * exists in the ORG's scope, never that THIS caller's team may see it. So a
+ * `campaignVisibility` rejection propagates straight out of this function,
+ * uncaught, before either fast path ever runs.
  */
 export async function campaignKnown(
   scope: StorageScope,
@@ -98,15 +136,8 @@ export async function campaignKnown(
   let readFailure: unknown;
 
   const briefStore = getBriefStore(scope);
-  if (briefStore instanceof PgBriefStore) {
-    try {
-      if (await briefStore.hiddenFromCaller(campaignId)) {
-        throw new CampaignNotFoundError(campaignId);
-      }
-    } catch (error) {
-      if (error instanceof CampaignNotFoundError) throw error;
-      readFailure ??= error;
-    }
+  if (briefStore.supportsTeams && (await briefStore.campaignVisibility(campaignId)) === "hidden") {
+    throw new CampaignNotFoundError(campaignId);
   }
 
   const reportKnown = async (): Promise<boolean> => {

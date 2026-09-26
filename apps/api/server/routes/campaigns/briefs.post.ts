@@ -3,9 +3,8 @@ import { errorMessage } from "@campaignfoundry/shared";
 import { extractSourceAssetBriefIds, rewriteAssetPaths } from "../../lib/asset-files.js";
 import { isExistsError, isErrno, SYMLINK_WRITE_ERROR } from "../../lib/brief-files.js";
 import { parseBrief } from "../../lib/load-brief.js";
-import { getAssetStore, getBriefStore } from "../../lib/ports/index.js";
-import { PgBriefStore } from "../../lib/ports/pg-brief-store.js";
-import { canAssignTeam } from "../../lib/ownership.js";
+import { getAssetStore, getBriefStore, TeamsNotSupportedError } from "../../lib/ports/index.js";
+import { assertSourceVisible, CampaignNotFoundError, canAssignTeam } from "../../lib/ownership.js";
 
 import { requestTenant } from "../../lib/tenant.js";
 /**
@@ -29,7 +28,20 @@ import { requestTenant } from "../../lib/tenant.js";
  * bytes would only widen that gap). Absent means "no team" (null, the
  * default). Present, it must be a string the caller may assign — `owner`/
  * `admin`, or a member of that team — or the answer is 403; on the fs
- * backend, which has no team column (item 5), it is 400.
+ * backend, which has no team column (item 5), the store itself throws
+ * `TeamsNotSupportedError`, mapped below to 400.
+ *
+ * D166 item 2: a "Save as…" `logoPath`/`inputAsset` may name ANY campaign id
+ * as its asset source — `extractSourceAssetBriefIds` reads it straight off
+ * the request body, not off anything this caller is known to own. Each
+ * source id is checked with `assertSourceVisible` before any `copyAssets`
+ * runs, so naming a campaign hidden by team 404s instead of exfiltrating its
+ * assets into the new one.
+ *
+ * D166 item 3: the target id's own visibility is checked with
+ * `campaignVisibility`, before any copy or write, rather than relying on
+ * `createBrief`'s eventual EEXIST — an existing-but-hidden target must never
+ * have its asset directory written into ahead of that conflict.
  */
 export default defineEventHandler(async (event) => {
   const scope = requestTenant(event);
@@ -52,15 +64,9 @@ export default defineEventHandler(async (event) => {
   }
 
   const store = getBriefStore(scope);
-  if (teamId !== undefined) {
-    if (!(store instanceof PgBriefStore)) {
-      setResponseStatus(event, 400);
-      return { error: "Assigning a team requires the Postgres backend." };
-    }
-    if (!canAssignTeam(scope, teamId)) {
-      setResponseStatus(event, 403);
-      return { error: `Not authorized to assign team "${teamId}".` };
-    }
+  if (teamId !== undefined && !canAssignTeam(scope, teamId)) {
+    setResponseStatus(event, 403);
+    return { error: `Not authorized to assign team "${teamId}".` };
   }
 
   const rawReplace = getQuery(event).replace;
@@ -69,8 +75,12 @@ export default defineEventHandler(async (event) => {
   const expectedRevision = Array.isArray(rawRevision) ? rawRevision[0] : rawRevision;
   try {
     const stored = await store.withBriefLock(brief.id, async () => {
-      const existing = await store.findBriefFileById(brief.id);
-      if (existing && !replace) {
+      // D166 item 3: the target's visibility is checked (and, when it is
+      // hidden or already visible-and-not-replacing, refused) BEFORE any
+      // asset copy or write below — never after, which would let a copy land
+      // in a hidden campaign's asset directory ahead of the eventual EEXIST.
+      const targetVisibility = await store.campaignVisibility(brief.id);
+      if (targetVisibility === "hidden" || (targetVisibility === "visible" && !replace)) {
         const existErr = new Error(`Brief "${brief.id}" already exists.`);
         (existErr as { code?: string }).code = "EEXIST";
         throw existErr;
@@ -79,6 +89,14 @@ export default defineEventHandler(async (event) => {
       // Copy any brief-scoped assets and rewrite paths only after validation succeeds (Save as…)
       const sourceBriefIds = extractSourceAssetBriefIds(brief, brief.id);
       if (sourceBriefIds.length > 0) {
+        // D166 item 2: each source id must not be hidden from THIS caller by
+        // team before its assets are copied — a request can name any campaign
+        // id in a logoPath/inputAsset, including another team's real
+        // campaign. Checked before the copy loop, and before the revision
+        // guard below, so a hidden source 404s without copying anything.
+        for (const fromId of sourceBriefIds) {
+          await assertSourceVisible(scope, fromId);
+        }
         if (replace && expectedRevision !== undefined) {
           const currentRev = await store.getRevision(brief.id);
           if (currentRev !== expectedRevision) {
@@ -95,16 +113,13 @@ export default defineEventHandler(async (event) => {
       }
 
       if (replace) {
-        // teamId undefined here means "leave the campaign's team as it is"
-        // (replaceBriefWithTeam's own contract) — never `?? null`, which would
-        // reset an already-assigned team to org-wide on every plain re-save.
-        return store instanceof PgBriefStore
-          ? await store.replaceBriefWithTeam(brief, teamId, { expectedRevision })
-          : await store.replaceBrief(brief, { expectedRevision });
+        // teamId undefined here means "leave the campaign's team as it is" —
+        // never `?? null`, which would reset an already-assigned team to
+        // org-wide on every plain re-save. The fs backend throws
+        // TeamsNotSupportedError if teamId is anything but undefined.
+        return await store.replaceBrief(brief, { expectedRevision, teamId });
       }
-      return store instanceof PgBriefStore
-        ? await store.createBriefWithTeam(brief, teamId ?? null)
-        : await store.createBrief(brief);
+      return await store.createBrief(brief, { teamId });
     });
     setResponseStatus(event, 201);
     // The stored revision rides along: the editor dispatches it into its source so the
@@ -115,6 +130,14 @@ export default defineEventHandler(async (event) => {
     if (errorMessage(error) === SYMLINK_WRITE_ERROR) {
       setResponseStatus(event, 400);
       return { error: errorMessage(error) };
+    }
+    if (error instanceof CampaignNotFoundError) {
+      setResponseStatus(event, 404);
+      return { error: error.message };
+    }
+    if (error instanceof TeamsNotSupportedError) {
+      setResponseStatus(event, 400);
+      return { error: error.message };
     }
     if (isExistsError(error)) {
       setResponseStatus(event, 409);

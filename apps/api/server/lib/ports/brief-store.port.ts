@@ -12,6 +12,36 @@ export interface StoredBrief {
 }
 
 /**
+ * Team assignment options shared by `createBrief`, `rewriteBrief` and
+ * `replaceBrief` (D166, PT-2c item 4). `teamId` is Postgres-only: `undefined`
+ * means "leave as it is" for a rewrite/replace, or "no team" (null) for a
+ * fresh create; an explicit value (a team id, or `null` to clear) is a
+ * caller-authorized assignment. A backend with no team column (the
+ * filesystem store) throws `TeamsNotSupportedError` for any non-undefined
+ * `teamId` rather than silently ignoring it.
+ */
+export interface BriefWriteOptions {
+  readonly expectedRevision?: string;
+  readonly teamId?: string | null;
+}
+
+/**
+ * Thrown when `teamId` is passed to a backend with no team column (the
+ * filesystem store, D166 item 5): teams are Postgres-only. Carries
+ * statusCode 400 so routes map it without an `instanceof` check on the
+ * concrete adapter (`.agents/architecture.md`).
+ */
+export class TeamsNotSupportedError extends Error {
+  readonly statusCode = 400;
+  readonly status = 400;
+
+  constructor() {
+    super("Assigning a team requires the Postgres backend.");
+    this.name = "TeamsNotSupportedError";
+  }
+}
+
+/**
  * Port for loading, finding, listing, creating, and updating campaign briefs.
  *
  * This port is the boundary between the HTTP routes / application layer and
@@ -19,6 +49,17 @@ export interface StoredBrief {
  * No node:fs, path joining, or process.cwd() may leak through this interface.
  */
 export interface BriefStorePort {
+  /**
+   * Cheap, synchronous capability flag (D166 item 4): true only for a backend
+   * that can assign a team and therefore answer `campaignVisibility` with
+   * "hidden" (`PgBriefStore`). `lib/ownership.ts`'s `campaignKnown` gates its
+   * `campaignVisibility` call on this rather than calling it unconditionally,
+   * so the filesystem backend's read path never pays for a directory scan it
+   * cannot need an answer from (L1) — `campaignVisibility` itself would still
+   * answer correctly (never "hidden") if called, this only skips the call.
+   */
+  readonly supportsTeams: boolean;
+
   /**
    * List all campaign briefs in the store.
    * Malformed or unparseable files are skipped.
@@ -49,20 +90,23 @@ export interface BriefStorePort {
   /**
    * Exclusively create a new brief in storage.
    * Fails with an EEXIST error if a brief or file with the same id already exists.
+   * `options.teamId` (D166 item 4): see `BriefWriteOptions`.
    */
-  createBrief(brief: CampaignBrief): Promise<StoredBrief>;
+  createBrief(brief: CampaignBrief, options?: BriefWriteOptions): Promise<StoredBrief>;
 
   /**
    * Rewrite an existing brief in its own format.
    * If expectedRevision is provided, verifies revision match before writing;
    * otherwise throws an error with code ECONFLICT.
+   * `options.teamId` (D166 item 4): see `BriefWriteOptions`.
    */
-  rewriteBrief(brief: CampaignBrief, options?: { expectedRevision?: string }): Promise<StoredBrief>;
+  rewriteBrief(brief: CampaignBrief, options?: BriefWriteOptions): Promise<StoredBrief>;
 
   /**
    * Replace an existing brief or create it if missing (used for ?replace=1).
+   * `options.teamId` (D166 item 4): see `BriefWriteOptions`.
    */
-  replaceBrief(brief: CampaignBrief, options?: { expectedRevision?: string }): Promise<StoredBrief>;
+  replaceBrief(brief: CampaignBrief, options?: BriefWriteOptions): Promise<StoredBrief>;
 
   /**
    * Compute the revision hash of a brief file / key.
@@ -73,6 +117,17 @@ export interface BriefStorePort {
    * True if a brief or file exists at the given file name, key, or path.
    */
   exists(fileOrId: string): Promise<boolean>;
+
+  /**
+   * Whether a campaign is unknown ("absent"), visible to the caller
+   * ("visible"), or exists but is hidden from the caller by team (D166 item
+   * 4) — "hidden" only ever from `PgBriefStore`, since the filesystem store
+   * has no team column (item 5) and never distinguishes hidden from absent.
+   * Used by `lib/ownership.ts` (fail closed on a storage failure — see D166
+   * item 1) and by the brief write routes to answer 404/409 on a hidden or
+   * existing target before any write or asset copy runs.
+   */
+  campaignVisibility(id: string): Promise<"absent" | "visible" | "hidden">;
 
   /**
    * Execute a critical section with per-brief concurrency locking.
