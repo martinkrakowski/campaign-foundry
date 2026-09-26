@@ -183,7 +183,7 @@ export function handlePipelineResponseError(
 
   if (status === 401 && (code === "unauthenticated" || code === undefined)) {
     if (typeof window !== "undefined") {
-      window.location.assign?.("/sign-in") ?? (window.location.href = "/sign-in");
+      window.location.assign("/sign-in");
     }
     return new Error(msgStr ?? "Sign in required.");
   }
