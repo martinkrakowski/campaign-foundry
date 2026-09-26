@@ -313,15 +313,21 @@ describe("FsJobStore", () => {
   });
 
   test("expireQueuedLater catches a getStoredJob rejection without unhandled rejection", async () => {
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", onUnhandled);
     vi.useFakeTimers();
     try {
       const enq = await store.enqueueJob("camp");
       expect(enq.acquired).toBe(true);
       if (!enq.acquired) return;
-      vi.spyOn(store, "getStoredJob").mockRejectedValueOnce(new Error("read error"));
+      const read = vi.spyOn(store, "getStoredJob").mockRejectedValueOnce(new Error("read error"));
       await vi.advanceTimersByTimeAsync(QUEUED_TTL_MS + 1);
+      expect(read).toHaveBeenCalledWith(enq.jobId);
+      expect(unhandled).toEqual([]);
     } finally {
       vi.useRealTimers();
+      process.off("unhandledRejection", onUnhandled);
     }
   });
 
