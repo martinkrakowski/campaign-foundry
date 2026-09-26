@@ -43,20 +43,42 @@ export class KafkaRunDelivery implements RunDeliveryPort {
     }
   }
 
-  async deliver(request: RunRequest): Promise<void> {
-    if (!this.connected) {
-      await this.producer.connect();
-      this.connected = true;
+  private connectPromise: Promise<void> | null = null;
+
+  private async ensureConnected(): Promise<void> {
+    if (this.connected) return;
+    if (!this.connectPromise) {
+      this.connectPromise = (async () => {
+        try {
+          await this.producer.connect();
+          this.connected = true;
+        } finally {
+          this.connectPromise = null;
+        }
+      })();
     }
+    await this.connectPromise;
+  }
+
+  async deliver(request: RunRequest): Promise<void> {
+    await this.ensureConnected();
     const key = `${request.tenant.orgId}:${request.brief.id}`;
     const value = JSON.stringify(request);
     await this.producer.send({
       topic: this.topic,
+      acks: -1,
       messages: [{ key, value }],
     });
   }
 
   async disconnect(): Promise<void> {
+    if (this.connectPromise) {
+      try {
+        await this.connectPromise;
+      } catch {
+        // connect error during shutdown is swallowed
+      }
+    }
     if (this.connected) {
       await this.producer.disconnect();
       this.connected = false;

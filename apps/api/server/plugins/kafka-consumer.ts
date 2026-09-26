@@ -1,4 +1,5 @@
 import { kafkaSettings, type KafkaSettings } from "../lib/config.js";
+import { closeRunDelivery } from "../lib/ports/run-delivery-registry.js";
 import { RunConsumer } from "../lib/run-consumer.js";
 
 export interface ConsumerInstance {
@@ -16,13 +17,21 @@ export interface NitroApp {
 
 export function createKafkaConsumerPlugin(
   consumerFactory: (settings: KafkaSettings) => ConsumerInstance = (s) => new RunConsumer(s),
+  logger: Pick<Console, "error"> = console,
 ) {
-  return defineNitroPlugin(async (nitroApp) => {
-    const settings = kafkaSettings();
+  return defineNitroPlugin((nitroApp) => {
+    let settings: KafkaSettings | undefined;
+    try {
+      settings = kafkaSettings();
+    } catch (err: unknown) {
+      logger.error(
+        `[kafka-plugin] Error reading Kafka settings: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return;
+    }
     if (!settings?.consume) return;
 
     const consumer = consumerFactory(settings);
-    await consumer.start();
 
     const appWithHooks = nitroApp as
       | { hooks?: { hook?: (name: "close", cb: () => Promise<void> | void) => void } }
@@ -30,8 +39,15 @@ export function createKafkaConsumerPlugin(
     if (appWithHooks?.hooks?.hook) {
       appWithHooks.hooks.hook("close", async () => {
         await consumer.stop();
+        await closeRunDelivery();
       });
     }
+
+    consumer.start().catch((err: unknown) => {
+      logger.error(
+        `[kafka-plugin] Error starting Kafka consumer: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    });
   });
 }
 

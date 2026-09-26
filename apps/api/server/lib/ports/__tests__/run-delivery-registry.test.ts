@@ -2,7 +2,12 @@ import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
 import { LOCAL_TENANT } from "../../tenant.js";
 import { InProcessRunDelivery } from "../in-process-run-delivery.js";
 import { KafkaRunDelivery } from "../kafka-run-delivery.js";
-import { getRunDelivery, setRunDelivery, resetRunDelivery } from "../run-delivery-registry.js";
+import {
+  getRunDelivery,
+  setRunDelivery,
+  resetRunDelivery,
+  closeRunDelivery,
+} from "../run-delivery-registry.js";
 import type { RunDeliveryPort } from "../run-delivery.port.js";
 
 vi.mock("kafkajs", () => ({
@@ -68,5 +73,23 @@ describe("run-delivery-registry (PT-6b2, D171, D174d)", () => {
     const first = getRunDelivery(LOCAL_TENANT);
     const second = getRunDelivery(LOCAL_TENANT);
     expect(first).toBe(second);
+  });
+
+  test("closeRunDelivery disconnects instance if present", async () => {
+    process.env.KAFKA_BROKERS = "broker1:9092";
+    const delivery = getRunDelivery(LOCAL_TENANT) as KafkaRunDelivery;
+    const disconnectSpy = vi.spyOn(delivery, "disconnect").mockResolvedValue(undefined);
+
+    await closeRunDelivery();
+    expect(disconnectSpy).toHaveBeenCalledTimes(1);
+  });
+
+  test("resetRunDelivery triggers disconnect if instance present", () => {
+    process.env.KAFKA_BROKERS = "broker1:9092";
+    const delivery = getRunDelivery(LOCAL_TENANT) as KafkaRunDelivery;
+    const disconnectSpy = vi.spyOn(delivery, "disconnect").mockResolvedValue(undefined);
+
+    resetRunDelivery();
+    expect(disconnectSpy).toHaveBeenCalledTimes(1);
   });
 });

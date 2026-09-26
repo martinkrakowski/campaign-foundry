@@ -82,6 +82,7 @@ describe("KafkaRunDelivery (PT-6b2, D174d)", () => {
     expect(mockProducerConnect).toHaveBeenCalledTimes(1);
     expect(mockProducerSend).toHaveBeenCalledWith({
       topic: "cf.run-requests",
+      acks: -1,
       messages: [
         {
           key: "org-1:camp-deliv-kafka",
@@ -96,6 +97,44 @@ describe("KafkaRunDelivery (PT-6b2, D174d)", () => {
 
     // Disconnect when not connected
     await delivery.disconnect();
+    expect(mockProducerDisconnect).toHaveBeenCalledTimes(1);
+  });
+
+  test("two concurrent first deliver calls connect once", async () => {
+    let resolveConnect!: () => void;
+    mockProducerConnect.mockReturnValue(
+      new Promise<void>((resolve) => {
+        resolveConnect = resolve;
+      }),
+    );
+    mockProducerSend.mockResolvedValue([]);
+
+    const delivery = new KafkaRunDelivery(settings);
+    const p1 = delivery.deliver(sampleRequest());
+    const p2 = delivery.deliver(sampleRequest());
+
+    expect(mockProducerConnect).toHaveBeenCalledTimes(1);
+
+    resolveConnect();
+    await Promise.all([p1, p2]);
+
+    expect(mockProducerConnect).toHaveBeenCalledTimes(1);
+    expect(mockProducerSend).toHaveBeenCalledTimes(2);
+  });
+
+  test("disconnect while connect is pending settles safely", async () => {
+    let resolveConnect!: () => void;
+    mockProducerConnect.mockReturnValue(
+      new Promise<void>((resolve) => {
+        resolveConnect = resolve;
+      }),
+    );
+    const delivery = new KafkaRunDelivery(settings);
+    const p1 = delivery.deliver(sampleRequest());
+    const p2 = delivery.disconnect();
+
+    resolveConnect();
+    await Promise.all([p1, p2]);
     expect(mockProducerDisconnect).toHaveBeenCalledTimes(1);
   });
 

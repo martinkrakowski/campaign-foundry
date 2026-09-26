@@ -122,4 +122,78 @@ describe("kafka-consumer Nitro plugin (PT-6b2, D174d)", () => {
     await closeHook!();
     expect(customConsumer.stop).toHaveBeenCalledTimes(1);
   });
+
+  test("rejected start is logged and not unhandled", async () => {
+    process.env.KAFKA_BROKERS = "broker1:9092";
+    process.env.KAFKA_CONSUME = "true";
+
+    const errorMock = vi.fn();
+    const logger = { error: errorMock };
+    const customConsumer: ConsumerInstance = {
+      start: vi.fn().mockRejectedValue(new Error("broker connection refused")),
+      stop: vi.fn().mockResolvedValue(undefined),
+    };
+    const plugin = createKafkaConsumerPlugin(() => customConsumer, logger);
+
+    plugin({} as never);
+
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(customConsumer.start).toHaveBeenCalledTimes(1);
+    expect(errorMock).toHaveBeenCalledWith(
+      expect.stringContaining("Error starting Kafka consumer: broker connection refused"),
+    );
+  });
+
+  test("close before start resolves still stops the consumer", async () => {
+    process.env.KAFKA_BROKERS = "broker1:9092";
+    process.env.KAFKA_CONSUME = "true";
+
+    let resolveStart: () => void;
+    const startPromise = new Promise<void>((r) => {
+      resolveStart = r;
+    });
+
+    const customConsumer: ConsumerInstance = {
+      start: vi.fn().mockReturnValue(startPromise),
+      stop: vi.fn().mockResolvedValue(undefined),
+    };
+
+    let closeHook: (() => Promise<void>) | undefined;
+    const nitroApp: NitroApp = {
+      hooks: {
+        hook: vi.fn().mockImplementation((name, cb) => {
+          if (name === "close") closeHook = cb;
+        }),
+      },
+    };
+
+    const plugin = createKafkaConsumerPlugin(() => customConsumer);
+    plugin(nitroApp as never);
+
+    expect(customConsumer.start).toHaveBeenCalledTimes(1);
+    expect(closeHook).toBeDefined();
+
+    await closeHook!();
+    expect(customConsumer.stop).toHaveBeenCalledTimes(1);
+
+    resolveStart!();
+    await startPromise;
+  });
+
+  test("kafkaSettings throw is logged and does not result in unhandled rejection", async () => {
+    process.env.KAFKA_BROKERS = "broker1:9092, ,broker2:9092";
+    process.env.KAFKA_CONSUME = "true";
+
+    const errorMock = vi.fn();
+    const logger = { error: errorMock };
+    const plugin = createKafkaConsumerPlugin(undefined, logger);
+
+    plugin({} as never);
+
+    expect(errorMock).toHaveBeenCalledWith(
+      expect.stringContaining("Error reading Kafka settings: Malformed KAFKA_BROKERS"),
+    );
+    expect(mockConsumerStart).not.toHaveBeenCalled();
+  });
 });
