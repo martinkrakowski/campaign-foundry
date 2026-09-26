@@ -43,7 +43,8 @@ describe.skipIf(!url)("PgUsageStore.reserve races two real connections (PT-7a2, 
   });
 
   test("two concurrent reserve calls against quota - 1 admit exactly one", async () => {
-    const orgId = `org_${randomUUID().replaceAll("-", "_").slice(0, 16)}`;
+    // Lowercase, digits and hyphens only: 0008 tightened `org_id_check` to that form.
+    const orgId = `org-${randomUUID().slice(0, 18)}`;
     await db.query("insert into org (id, name, monthly_generation_quota) values ($1, $2, $3)", [
       orgId,
       "Racy Org",
