@@ -9,6 +9,7 @@
   ],
   "scripts": {
     "generate": "tsx apps/api/bin/generate.ts",
+    "worker": "tsx apps/api/bin/worker.ts",
     "db:ping": "tsx apps/api/bin/db.ts ping",
     "db:migrate": "tsx apps/api/bin/db.ts migrate",
     "auth:bootstrap": "tsx apps/api/bin/auth-cli.ts",

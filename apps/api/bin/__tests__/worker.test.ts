@@ -60,6 +60,150 @@ describe("worker bin main() (PT-6b2, D174d)", () => {
     expect(mockConsumer.stop).toHaveBeenCalledTimes(1);
   });
 
+  test("SIGTERM stops consumer, ends database pool, and exits", async () => {
+    const mockConsumer: WorkerConsumer = {
+      start: vi.fn().mockResolvedValue(undefined),
+      stop: vi.fn().mockResolvedValue(undefined),
+    };
+    const mockExit = vi.fn();
+    const listeners: Record<string, () => void> = {};
+    const mockProcess = {
+      on: vi.fn().mockImplementation((event: string, handler: () => void) => {
+        listeners[event] = handler;
+      }),
+      removeListener: vi.fn(),
+      exitCode: undefined,
+      exit: mockExit,
+    };
+    const mockEndDb = vi.fn().mockResolvedValue(undefined);
+    const logs: string[] = [];
+    const mockLogger = {
+      log: vi.fn().mockImplementation((m: string) => logs.push(m)),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
+
+    await main(
+      () => validSettings,
+      () => mockConsumer,
+      mockProcess as never,
+      mockLogger,
+      mockEndDb,
+    );
+
+    await listeners["SIGTERM"]!();
+
+    expect(mockConsumer.stop).toHaveBeenCalledTimes(1);
+    expect(mockEndDb).toHaveBeenCalledTimes(1);
+    expect(logs).toContain("[worker] Database pool ended.");
+    expect(mockExit).toHaveBeenCalledWith(0);
+  });
+
+  test("endDb error handling when ending database pool", async () => {
+    const mockConsumer: WorkerConsumer = {
+      start: vi.fn().mockResolvedValue(undefined),
+      stop: vi.fn().mockResolvedValue(undefined),
+    };
+    const mockExit = vi.fn();
+    const listeners: Record<string, () => void> = {};
+    const mockProcess = {
+      on: vi.fn().mockImplementation((event: string, handler: () => void) => {
+        listeners[event] = handler;
+      }),
+      removeListener: vi.fn(),
+      exitCode: undefined,
+      exit: mockExit,
+    };
+    const mockEndDb = vi.fn().mockRejectedValue(new Error("pool drain failed"));
+    const errors: string[] = [];
+    const mockLogger = {
+      log: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn().mockImplementation((m: string) => errors.push(m)),
+    };
+
+    await main(
+      () => validSettings,
+      () => mockConsumer,
+      mockProcess as never,
+      mockLogger,
+      mockEndDb,
+    );
+
+    await listeners["SIGTERM"]!();
+
+    expect(mockConsumer.stop).toHaveBeenCalledTimes(1);
+    expect(mockEndDb).toHaveBeenCalledTimes(1);
+    expect(errors).toContain("[worker] Error ending database pool: pool drain failed");
+    expect(mockExit).toHaveBeenCalledWith(0);
+  });
+
+  test("endDb non-Error handling", async () => {
+    const mockConsumer: WorkerConsumer = {
+      start: vi.fn().mockResolvedValue(undefined),
+      stop: vi.fn().mockResolvedValue(undefined),
+    };
+    const listeners: Record<string, () => void> = {};
+    const mockProcess = {
+      on: vi.fn().mockImplementation((event: string, handler: () => void) => {
+        listeners[event] = handler;
+      }),
+      removeListener: vi.fn(),
+      exitCode: undefined,
+    };
+    const mockEndDb = vi.fn().mockRejectedValue("string db error");
+    const errors: string[] = [];
+    const mockLogger = {
+      log: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn().mockImplementation((m: string) => errors.push(m)),
+    };
+
+    await main(
+      () => validSettings,
+      () => mockConsumer,
+      mockProcess as never,
+      mockLogger,
+      mockEndDb,
+    );
+
+    await listeners["SIGTERM"]!();
+
+    expect(errors).toContain("[worker] Error ending database pool: string db error");
+  });
+
+  test("default endDb runs without error even if database is unconfigured", async () => {
+    const mockConsumer: WorkerConsumer = {
+      start: vi.fn().mockResolvedValue(undefined),
+      stop: vi.fn().mockResolvedValue(undefined),
+    };
+    const listeners: Record<string, () => void> = {};
+    const mockProcess = {
+      on: vi.fn().mockImplementation((event: string, handler: () => void) => {
+        listeners[event] = handler;
+      }),
+      removeListener: vi.fn(),
+      exitCode: undefined,
+    };
+    const logs: string[] = [];
+    const mockLogger = {
+      log: vi.fn().mockImplementation((m: string) => logs.push(m)),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
+
+    await main(
+      () => validSettings,
+      () => mockConsumer,
+      mockProcess as never,
+      mockLogger,
+    );
+
+    await listeners["SIGTERM"]!();
+    expect(mockConsumer.stop).toHaveBeenCalledTimes(1);
+    expect(logs).toContain("[worker] Database pool ended.");
+  });
+
   test("SIGTERM trigger and consumer.stop error handling", async () => {
     const mockConsumer: WorkerConsumer = {
       start: vi.fn().mockResolvedValue(undefined),

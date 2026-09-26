@@ -1,5 +1,6 @@
 import { pathToFileURL } from "node:url";
 import { kafkaSettings, type KafkaSettings } from "../server/lib/config.js";
+import { database } from "../server/lib/db/database.js";
 import { loadEnv } from "../server/lib/env.js";
 import { RunConsumer } from "../server/lib/run-consumer.js";
 
@@ -11,8 +12,17 @@ export interface WorkerConsumer {
 export async function main(
   resolveSettings: () => KafkaSettings | undefined = kafkaSettings,
   consumerFactory: (settings: KafkaSettings) => WorkerConsumer = (s) => new RunConsumer(s),
-  processRef: Pick<NodeJS.Process, "on" | "removeListener" | "exitCode"> = process,
+  processRef: Pick<NodeJS.Process, "on" | "removeListener" | "exitCode"> & {
+    exit?: (code?: number) => void;
+  } = process,
   logger: Pick<Console, "log" | "warn" | "error"> = console,
+  endDb: () => Promise<void> | void = async () => {
+    try {
+      await database().end();
+    } catch {
+      // Database not configured or already ended
+    }
+  },
 ): Promise<{ consumer: WorkerConsumer; shutdown: (signal: string) => Promise<void> }> {
   loadEnv();
   const settings = resolveSettings();
@@ -40,10 +50,21 @@ export async function main(
         `[worker] Error stopping consumer: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
+    try {
+      await endDb();
+      logger.log("[worker] Database pool ended.");
+    } catch (err: unknown) {
+      logger.error(
+        `[worker] Error ending database pool: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    if (processRef.exit) {
+      processRef.exit(0);
+    }
   };
 
-  const sigintHandler = () => void shutdown("SIGINT");
-  const sigtermHandler = () => void shutdown("SIGTERM");
+  const sigintHandler = () => shutdown("SIGINT");
+  const sigtermHandler = () => shutdown("SIGTERM");
 
   processRef.on("SIGINT", sigintHandler);
   processRef.on("SIGTERM", sigtermHandler);
