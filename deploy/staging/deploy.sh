@@ -77,6 +77,12 @@ only_app() { node -e 'const d=require("fs").readFileSync(0,"utf8").split(/\n---\
 echo "==> apply services"
 printf '%s\n' "$RENDERED" | only_app services | remote kubectl apply -f -
 
+# The API consumes cf.run-requests at boot (KAFKA_CONSUME=true), so the topic and
+# the user's ACLs must be ready before the new app starts.
+echo "==> wait for Kafka"
+remote kubectl -n "$NS" wait kafkatopic/cf.run-requests --for=condition=Ready --timeout=5m
+remote kubectl -n "$NS" wait kafkauser/campaign-foundry --for=condition=Ready --timeout=5m
+
 echo "==> wait for Postgres"
 remote kubectl -n "$NS" wait cluster/cf-pg --for=condition=Ready --timeout=10m
 
