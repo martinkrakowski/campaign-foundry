@@ -21,18 +21,43 @@ const product = {
 };
 const context = { campaignMessage: "m", targetAudience: "Urban", targetRegion: "DE" };
 
-/** A usage store double that records every call it was given, and nothing else. */
-function fakeUsage(): UsageStorePort & { readonly records: UsageRecord[] } {
+/** A usage store double that records every call it was given, and tracks reservations. */
+function fakeUsage(): UsageStorePort & {
+  readonly records: UsageRecord[];
+  readonly reservations: string[];
+  readonly settled: { id: string; record: UsageRecord }[];
+  readonly released: string[];
+} {
   const records: UsageRecord[] = [];
+  const reservations: string[] = [];
+  const settled: { id: string; record: UsageRecord }[] = [];
+  const released: string[] = [];
+  let nextId = 1;
   return {
     records,
+    reservations,
+    settled,
+    released,
+    reserve: async () => {
+      const id = `res-${nextId++}`;
+      reservations.push(id);
+      return id;
+    },
+    settle: async (id, record) => {
+      settled.push({ id, record });
+      records.push(record);
+    },
+    release: async (id) => {
+      released.push(id);
+    },
     record: async (usage) => {
       records.push(usage);
     },
     countThisMonth: async () => 0,
     quota: async () => null,
-  };
+  } as any;
 }
+
 
 /**
  * A usage store double with a fixed quota and a count that increments as
@@ -202,7 +227,53 @@ describe("MeteredImageGenerator (PT-7a, D175)", () => {
     expect(message).toContain("connection reset");
     warn.mockRestore();
   });
+
+  test("releases reservation on provider failure (PT-7a2, D175)", async () => {
+    const usage = fakeUsage();
+    const inner: ImageGeneratorPort = {
+      resolveBackground: async () => {
+        throw new Error("provider error");
+      },
+    };
+    const meter = new MeteredImageGenerator(inner, usage, "acme", "imagen", "imagen-4.0");
+    await expect(meter.resolveBackground(product, ratio(), context)).rejects.toThrow(
+      "provider error",
+    );
+    expect(usage.reservations).toHaveLength(1);
+    expect(usage.released).toEqual([usage.reservations[0]]);
+    expect(usage.settled).toHaveLength(0);
+  });
+
+  test("releases reservation on cached result (PT-7a2, D175)", async () => {
+    const usage = fakeUsage();
+    const inner: ImageGeneratorPort = {
+      resolveBackground: async () => ({
+        image: new Uint8Array([1]),
+        source: "imagen",
+        cached: true,
+      }),
+    };
+    const meter = new MeteredImageGenerator(inner, usage, "acme", "imagen", "imagen-4.0");
+    await meter.resolveBackground(product, ratio(), context);
+    expect(usage.reservations).toHaveLength(1);
+    expect(usage.released).toEqual([usage.reservations[0]]);
+    expect(usage.settled).toHaveLength(0);
+  });
+
+  test("releases reservation on fallback-owned result (PT-7a2, D175)", async () => {
+    const usage = fakeUsage();
+    const inner: ImageGeneratorPort = {
+      resolveBackground: async () => ({ image: new Uint8Array([1]), source: "imagen" }),
+    };
+    const meter = new MeteredImageGenerator(inner, usage, "acme", "firefly", "v3");
+    const result = await meter.resolveBackground(product, ratio(), context);
+    expect(result.source).toBe("imagen");
+    expect(usage.reservations).toHaveLength(1);
+    expect(usage.released).toEqual([usage.reservations[0]]);
+    expect(usage.settled).toHaveLength(0);
+  });
 });
+
 
 describe("MeteredCopyGenerator (PT-7a, D175)", () => {
   test("publishes the wrapped generator's model", () => {
@@ -264,4 +335,22 @@ describe("MeteredCopyGenerator (PT-7a, D175)", () => {
     expect(inner.suggestHeadlines).not.toHaveBeenCalled();
     expect(usage.records).toEqual([]);
   });
+
+  test("releases reservation on copy provider failure (PT-7a2, D175)", async () => {
+    const usage = fakeUsage();
+    const inner: CopyGeneratorPort = {
+      model: "openai/gpt-4o-mini",
+      suggestHeadlines: async () => {
+        throw new Error("copy failure");
+      },
+    };
+    const meter = new MeteredCopyGenerator(inner, usage, "acme", "openrouter");
+    await expect(
+      meter.suggestHeadlines({ brief: {} as CopyGeneratorInput["brief"], count: 1 }),
+    ).rejects.toThrow("copy failure");
+    expect(usage.reservations).toHaveLength(1);
+    expect(usage.released).toEqual([usage.reservations[0]]);
+    expect(usage.settled).toHaveLength(0);
+  });
 });
+

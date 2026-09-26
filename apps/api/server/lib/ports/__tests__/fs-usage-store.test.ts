@@ -18,4 +18,23 @@ describe("FsUsageStore (STORE_BACKEND=fs, PT-7a)", () => {
     const store = new FsUsageStore();
     await expect(store.quota("local")).resolves.toBeNull();
   });
+
+  test("the fs store never refuses: reserve returns an id, settle and release are no-ops (PT-7a2, D175)", async () => {
+    const store = new FsUsageStore();
+    const id1 = await (store as any).reserve("local");
+    expect(typeof id1).toBe("string");
+    const id2 = await (store as any).reserve("local");
+    expect(typeof id2).toBe("string");
+    await expect(
+      (store as any).settle(id1, {
+        orgId: "local",
+        provider: "imagen",
+        model: "imagen-4.0-generate-001",
+        units: 1,
+        keyOwner: "platform",
+      }),
+    ).resolves.toBeUndefined();
+    await expect((store as any).release(id2)).resolves.toBeUndefined();
+  });
 });
+

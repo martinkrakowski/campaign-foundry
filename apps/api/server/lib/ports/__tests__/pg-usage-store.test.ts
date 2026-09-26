@@ -152,7 +152,68 @@ describe("PgUsageStore (PT-7a, D175)", () => {
     await expect(store.quota("local")).resolves.toBeNull();
     await expect(store.quota("acme")).resolves.toBe(5);
   });
+
+  test("reserve at quota returns null (PT-7a2, D175)", async () => {
+    const store = new PgUsageStore(db);
+    await db.query("update org set monthly_generation_quota = 1 where id = $1", ["local"]);
+    const id1 = await (store as any).reserve("local");
+    expect(id1).toEqual(expect.any(String));
+    const id2 = await (store as any).reserve("local");
+    expect(id2).toBeNull();
+  });
+
+  test("a released reservation frees its slot (PT-7a2, D175)", async () => {
+    const store = new PgUsageStore(db);
+    await db.query("update org set monthly_generation_quota = 1 where id = $1", ["local"]);
+    const id = await (store as any).reserve("local");
+    expect(id).toEqual(expect.any(String));
+    expect(await (store as any).reserve("local")).toBeNull();
+    await (store as any).release(id);
+    const id2 = await (store as any).reserve("local");
+    expect(id2).toEqual(expect.any(String));
+  });
+
+  test("a reservation older than the TTL no longer counts (PT-7a2, D175)", async () => {
+    const store = new PgUsageStore(db);
+    await db.query("update org set monthly_generation_quota = 1 where id = $1", ["local"]);
+    const id = await (store as any).reserve("local");
+    expect(id).toEqual(expect.any(String));
+    expect(await (store as any).reserve("local")).toBeNull();
+    await db.query("update usage set created_at = now() - interval '2 hours' where id = $1", [id]);
+    const id2 = await (store as any).reserve("local");
+    expect(id2).toEqual(expect.any(String));
+  });
+
+  test("settle turns it into a recorded row with the fields (PT-7a2, D175)", async () => {
+    const store = new PgUsageStore(db);
+    const id = await (store as any).reserve("local");
+    expect(id).toEqual(expect.any(String));
+    await (store as any).settle(id, {
+      orgId: "local",
+      provider: "imagen",
+      model: "imagen-4.0",
+      units: 1,
+      keyOwner: "platform",
+    });
+    const { rows } = await db.query<{
+      status: string;
+      provider: string;
+      model: string;
+      units: number;
+      key_owner: string;
+    }>("select status, provider, model, units, key_owner from usage where id = $1", [id]);
+    expect(rows).toEqual([
+      {
+        status: "recorded",
+        provider: "imagen",
+        model: "imagen-4.0",
+        units: 1,
+        key_owner: "platform",
+      },
+    ]);
+  });
 });
+
 
 describe("STORE_BACKEND selects the usage adapter (PT-7a)", () => {
   const saved = process.env.STORE_BACKEND;
