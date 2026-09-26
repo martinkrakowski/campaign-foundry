@@ -2881,6 +2881,23 @@ describe("run-context 401 and 403 pipeline error handling", () => {
     expect(err401.message).toBe("Sign in required.");
     expect(loc.href).toBe("/sign-in");
 
+    const assign = vi.fn();
+    vi.stubGlobal("window", { ...window, location: { ...window.location, assign } });
+    const err401Auth = handlePipelineResponseError(401, {
+      code: "unauthenticated",
+      error: "Auth required",
+    });
+    expect(err401Auth.message).toBe("Auth required");
+    expect(assign).toHaveBeenCalledWith("/sign-in");
+
+    assign.mockClear();
+    const err401Other = handlePipelineResponseError(401, {
+      code: "other_code",
+      error: "Token expired",
+    });
+    expect(assign).not.toHaveBeenCalled();
+    expect(err401Other.message).toContain("Pipeline API unreachable");
+
     const err403 = handlePipelineResponseError(403, { code: "no_membership" });
     expect(err403.message).toBe(NO_ORGANISATION_YET_MESSAGE);
   });

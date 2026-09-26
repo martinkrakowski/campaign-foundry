@@ -178,12 +178,10 @@ export function handlePipelineResponseError(
   const msgStr = typeof errorMsg === "string" ? errorMsg : undefined;
 
   if (status === 401 && (code === "unauthenticated" || code === undefined)) {
-    if (typeof window !== "undefined") {
-      if (typeof window.location.assign === "function") {
-        window.location.assign("/sign-in");
-      } else {
-        window.location.href = "/sign-in";
-      }
+    if (typeof window.location.assign === "function") {
+      window.location.assign("/sign-in");
+    } else {
+      window.location.href = "/sign-in";
     }
     return new Error(msgStr ?? "Sign in required.");
   }

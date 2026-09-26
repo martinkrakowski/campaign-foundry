@@ -744,9 +744,17 @@ describe("briefs-api 401 and 403 handling", () => {
   test("a 401 unauthenticated falls back to setting location.href when assign is not a function", async () => {
     const loc = { href: "" } as unknown as Location;
     vi.stubGlobal("window", { ...window, location: loc });
-    mockFetch(() => json({ error: "Sign in required.", code: "unauthenticated" }, 401));
+    mockFetch(() => json({ error: "Sign in required." }, 401));
     await expect(listBriefs()).rejects.toThrow();
     expect(loc.href).toBe("/sign-in");
+  });
+
+  test("a 401 with other code does not redirect to /sign-in", async () => {
+    const assign = vi.fn();
+    vi.stubGlobal("window", { ...window, location: { ...window.location, assign } });
+    mockFetch(() => json({ error: "Other error.", code: "other" }, 401));
+    await expect(listBriefs()).rejects.toThrow();
+    expect(assign).not.toHaveBeenCalled();
   });
 
   test("a 403 no_membership surfaces organisation error and not pipeline unreachable", async () => {

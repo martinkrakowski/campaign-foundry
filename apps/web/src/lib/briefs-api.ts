@@ -234,12 +234,10 @@ async function requestJson(url: string, init?: RequestInit): Promise<unknown> {
         : undefined;
 
     if (res.status === 401 && (code === "unauthenticated" || code === undefined)) {
-      if (typeof window !== "undefined") {
-        if (typeof window.location.assign === "function") {
-          window.location.assign("/sign-in");
-        } else {
-          window.location.href = "/sign-in";
-        }
+      if (typeof window.location.assign === "function") {
+        window.location.assign("/sign-in");
+      } else {
+        window.location.href = "/sign-in";
       }
     }
 
