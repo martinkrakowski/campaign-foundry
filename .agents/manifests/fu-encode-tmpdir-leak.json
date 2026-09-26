@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "FU-encode-tmpdir-leak",
+  "mutations": [
+    {
+      "file": "packages/CreativeGeneration/src/infrastructure/adapters/CanvasFfmpegVideoCompositor.ts",
+      "before": "    await encodeGate.acquire();\n    let workDir: string | undefined;\n    try {\n      // The mp4 muxer needs a seekable output to write a finalized `moov` with real\n      // durations; on `pipe:1` it can only emit fragmented mp4 (`empty_moov`), which\n      // players report as duration 0 and platform uploaders reject. Encode to a temp\n      // file and read it back instead.\n      workDir = await mkdtemp(join(tmpdir(), \"cf-encode-\"));\n      const outPath = join(workDir, \"out.mp4\");",
+      "after": "    await encodeGate.acquire();\n    // The mp4 muxer needs a seekable output to write a finalized `moov` with real\n    // durations; on `pipe:1` it can only emit fragmented mp4 (`empty_moov`), which\n    // players report as duration 0 and platform uploaders reject. Encode to a temp\n    // file and read it back instead.\n    const workDir = await mkdtemp(join(tmpdir(), \"cf-encode-\"));\n    const outPath = join(workDir, \"out.mp4\");\n    try {",
+      "because": "moving mkdtemp outside the try leaks an encodeGate slot when mkdtemp fails",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CreativeGeneration/src/infrastructure/adapters/__tests__/CanvasFfmpegVideoCompositor.test.ts",
+        "-t",
+        "a failing mkdtemp releases the gate"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

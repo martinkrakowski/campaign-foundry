@@ -11,8 +11,7 @@ vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs/promises")>();
   return {
     ...actual,
-    mkdtemp: (prefix: string) =>
-      fsHook.mkdtemp ? fsHook.mkdtemp(prefix) : actual.mkdtemp(prefix),
+    mkdtemp: (prefix: string) => (fsHook.mkdtemp ? fsHook.mkdtemp(prefix) : actual.mkdtemp(prefix)),
   };
 });
 import { join } from "node:path";

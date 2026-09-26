@@ -113,15 +113,18 @@ beforeEach(() => {
 });
 
 async function teardown(settleTimeoutMs = 9_000): Promise<void> {
-  for (const jobId of started.splice(0)) await settle(jobId, settleTimeoutMs);
-  await resetJobs();
-  probeWait.timeoutMs = defaultWait;
-  setCapabilities({ motion: false, reason: NOT_PROBED_REASON });
-  if (origOut === undefined) delete process.env.OUTPUT_DIR;
-  else process.env.OUTPUT_DIR = origOut;
-  if (origRoot === undefined) delete process.env.PROJECT_ROOT;
-  else process.env.PROJECT_ROOT = origRoot;
-  rmSync(dir, { recursive: true, force: true });
+  try {
+    for (const jobId of started.splice(0)) await settle(jobId, settleTimeoutMs);
+  } finally {
+    await resetJobs();
+    probeWait.timeoutMs = defaultWait;
+    setCapabilities({ motion: false, reason: NOT_PROBED_REASON });
+    if (origOut === undefined) delete process.env.OUTPUT_DIR;
+    else process.env.OUTPUT_DIR = origOut;
+    if (origRoot === undefined) delete process.env.PROJECT_ROOT;
+    else process.env.PROJECT_ROOT = origRoot;
+    rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 afterEach(async () => {
