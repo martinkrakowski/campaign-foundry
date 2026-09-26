@@ -1,8 +1,8 @@
 import { errorMessage } from "@campaignfoundry/shared";
 import { assertSafeId } from "../../lib/load-brief.js";
 import { ASSET_NAME_PATTERN, assetContentType } from "../../lib/asset-files.js";
-import { campaignKnown, CampaignNotFoundError } from "../../lib/ownership.js";
-import { getAssetStore } from "../../lib/ports/index.js";
+import { campaignKnown } from "../../lib/ownership.js";
+import { getAssetStore, getBriefStore } from "../../lib/ports/index.js";
 
 import { requestTenant } from "../../lib/tenant.js";
 /**
@@ -41,19 +41,13 @@ export default defineEventHandler(async (event) => {
       setResponseStatus(event, 400);
       return { error: "Invalid asset name." };
     }
-    // D166 (PT-2c, thread greptile Uiug): a campaign hidden from this caller
-    // by team must 404 a named-asset fetch exactly like the listing path
-    // below, not stream the bytes to anyone who knows the campaign id and the
-    // asset's filename. Caught (unlike the listing path's own campaignKnown
-    // call below) and folded into the same "Asset ... not found" body the
-    // route already answers for a visible campaign's missing asset — the
-    // response must not tell a caller which of "no such campaign", "hidden by
-    // team", or "no such asset" applies (cross-tenant-reads.test.ts pins this
-    // route's 404 body shape).
-    try {
-      await campaignKnown(scope, briefId, "asset");
-    } catch (error) {
-      if (!(error instanceof CampaignNotFoundError)) throw error;
+    // D166 (PT-2c): a campaign hidden from this caller by team answers the same
+    // "Asset ... not found" 404 as a missing asset, so the body never says which
+    // applies. Only team visibility is checked here, not the listing: an unsaved
+    // draft has no stored brief, and listing every asset just to read one lets an
+    // unrelated file's disappearance turn a readable request into a 500.
+    const briefs = getBriefStore(scope);
+    if (briefs.supportsTeams && (await briefs.campaignVisibility(briefId)) === "hidden") {
       setResponseStatus(event, 404);
       return { error: `Asset "${name}" not found.` };
     }

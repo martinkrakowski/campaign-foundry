@@ -188,19 +188,21 @@ describe("GET /campaigns/assets", () => {
     expect(body.assets).toEqual([expect.objectContaining({ name: "bed.mp3", type: "audio/mpeg" })]);
   });
 
-  // The named-fetch path's campaignKnown catch (assets.get.ts) only folds a
-  // CampaignNotFoundError into the route's own 404 body — a genuine storage
-  // failure (no brief to fall back to either) must still surface as an error,
-  // not a false "not found".
-  test("named-asset fetch surfaces a genuine storage failure instead of a false 404", async () => {
+  // The named fetch reads the one file it names; a failure listing the other
+  // assets (an unrelated file vanishing mid-listing) must not turn it into a 500.
+  test("named-asset fetch does not depend on listing the campaign's assets", async () => {
+    const briefDir = join(dir, "assets", "inputs", "camp");
+    mkdirSync(briefDir, { recursive: true });
+    writeFileSync(join(briefDir, "logo.png"), png);
     const handler = await web(dir);
     const { getAssetStore } = await import("../../../lib/ports/index.js");
     const spy = vi
       .spyOn(getAssetStore(LOCAL_TENANT), "listAssets")
-      .mockRejectedValueOnce(new Error("Disk error"));
+      .mockRejectedValue(new Error("Disk error"));
 
-    const res = await get(handler, "?briefId=nonexistent&name=logo.png");
-    expect(res.status).toBe(500);
+    const res = await get(handler, "?briefId=camp&name=logo.png");
+    expect(res.status).toBe(200);
+    expect(spy).not.toHaveBeenCalled();
     spy.mockRestore();
   });
 
