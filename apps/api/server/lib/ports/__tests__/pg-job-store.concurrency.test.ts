@@ -118,7 +118,11 @@ describe.skipIf(!url)("PgJobStore.acquireJob races two real connections (PT-6a)"
   });
 
   test("a queued row blocks a second enqueue under real concurrency (new unique index, PT-6b1)", async () => {
-    const store = new PgJobStore(db, "local");
+    // Its own org: earlier tests in this file fill `local` up to MAX_JOBS, and
+    // capacity is per org, so sharing it would fail the enqueue for capacity.
+    const orgId = `queued-race-${randomUUID().slice(0, 18)}`;
+    await db.query("insert into org (id, name) values ($1, $2)", [orgId, "Queued race"]);
+    const store = new PgJobStore(db, orgId);
     const campaignId = `queued-race-${randomUUID()}`;
 
     const [a, b] = await Promise.all([store.enqueueJob(campaignId), store.enqueueJob(campaignId)]);
