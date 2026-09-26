@@ -52,4 +52,15 @@ describe("projectRoot", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  test("re-resolves after resetProjectRoot", async () => {
+    process.env.PROJECT_ROOT = resolve(tmpdir(), "first");
+    const { projectRoot, resetProjectRoot } = await import("../project-root.js");
+    resetProjectRoot();
+    const first = projectRoot();
+    expect(first).toBe(resolve(tmpdir(), "first"));
+    process.env.PROJECT_ROOT = resolve(tmpdir(), "second");
+    resetProjectRoot();
+    expect(projectRoot()).toBe(resolve(tmpdir(), "second"));
+  });
 });
