@@ -162,6 +162,11 @@ describe("PgUsageStore (PT-7a, D175)", () => {
     expect(id2).toBeNull();
   });
 
+  test("reserve for a non-existent org returns null (missing org means quota 0)", async () => {
+    const store = new PgUsageStore(db);
+    await expect(store.reserve("ghost")).resolves.toBeNull();
+  });
+
   test("a released reservation frees its slot (PT-7a2, D175)", async () => {
     const store = new PgUsageStore(db);
     await db.query("update org set monthly_generation_quota = 1 where id = $1", ["local"]);
