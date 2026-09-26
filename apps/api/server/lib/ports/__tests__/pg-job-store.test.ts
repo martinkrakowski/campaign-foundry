@@ -7,7 +7,7 @@ import { runEnvironment } from "../../run-environment.js";
 import { LOCAL_TENANT, type TenantContext } from "../../tenant.js";
 import { getJobStore, resetJobStore } from "../index.js";
 import { FsJobStore, JOB_TTL_MS, JobCapacityError, MAX_JOBS } from "../fs-job-store.js";
-import type { JobResult } from "../job-store.port.js";
+import { QUEUED_TTL_MS, type JobResult } from "../job-store.port.js";
 import { HEARTBEAT_INTERVAL_MS, JobLeaseLostError, LEASE_MS, PgJobStore } from "../pg-job-store.js";
 
 const acme: TenantContext = { ...LOCAL_TENANT, orgId: "acme", userId: "u1" };
@@ -187,6 +187,31 @@ describe("PgJobStore (PT-6a, D171)", () => {
     }
   });
 
+  test("enqueueJob's own conflict path still answers the incumbent if it is ever reached", async () => {
+    // Same belt-and-braces proof as acquireJob's above, for the queued insert's
+    // own `on conflict … do update` path (item 2): force the pre-check to miss
+    // and confirm the insert's conflict handling still returns the incumbent.
+    const store = new PgJobStore(db, "local");
+    const first = await store.enqueueJob("camp");
+    const firstId = first.acquired ? first.jobId : "";
+    const spy = vi
+      .spyOn(
+        store as unknown as {
+          runningIncumbent: (...args: unknown[]) => Promise<string | undefined>;
+        },
+        "runningIncumbent",
+      )
+      .mockResolvedValueOnce(undefined);
+    try {
+      await expect(store.enqueueJob("camp")).resolves.toEqual({
+        acquired: false,
+        runningJobId: firstId,
+      });
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   test("a lapsed running row polls as failed without any claim ever reaping it (finding 5)", async () => {
     const store = new PgJobStore(db, "local");
     await seed(db, { id: "ghost", orgId: "local", campaignId: "camp", leaseOffsetMs: -1_000 });
@@ -204,6 +229,30 @@ describe("PgJobStore (PT-6a, D171)", () => {
       "ghost",
     ]);
     expect(row.rows[0]).toEqual({ status: "running" });
+  });
+
+  test("a lapsed queued row polls as failed without any claim ever reaping it", async () => {
+    const store = new PgJobStore(db, "local");
+    // Direct insert, past QUEUED_TTL_MS, bypassing enqueueJob so no reap() runs.
+    await db.query(
+      `insert into job (id, org_id, campaign_id, status, created_at)
+       values ($1, 'local', 'camp', 'queued', now() - interval '11 minutes')`,
+      ["ghost-queued"],
+    );
+
+    expect(await store.getJob("ghost-queued")).toMatchObject({
+      status: "failed",
+      error: expect.stringContaining("expired"),
+    });
+    expect((await store.listJobs()).find((j) => j.id === "ghost-queued")?.job).toMatchObject({
+      status: "failed",
+    });
+    // Read-time only: nothing wrote the row. The next real claim's reaper is
+    // still what settles it for good.
+    const row = await db.query<{ status: string }>("select status from job where id = $1", [
+      "ghost-queued",
+    ]);
+    expect(row.rows[0]).toEqual({ status: "queued" });
   });
 
   test("heartbeat extends the lease", async () => {
@@ -505,6 +554,163 @@ describe("PgJobStore (PT-6a, D171)", () => {
 
   test("HEARTBEAT_INTERVAL_MS is comfortably inside LEASE_MS, so a missed beat or two never costs the lease", () => {
     expect(HEARTBEAT_INTERVAL_MS).toBeLessThan(LEASE_MS);
+  });
+
+  test("enqueueJob inserts a queued row and reports status as queued in stored job", async () => {
+    const store = new PgJobStore(db, "local");
+    const res = await store.enqueueJob("camp");
+    expect(res.acquired).toBe(true);
+    if (!res.acquired) return;
+    const stored = await store.getStoredJob(res.jobId);
+    expect(stored?.job.status).toBe("queued");
+  });
+
+  test("a queued row blocks a second enqueue and returns the incumbent jobId", async () => {
+    const store = new PgJobStore(db, "local");
+    const first = await store.enqueueJob("camp");
+    expect(first.acquired).toBe(true);
+    if (!first.acquired) return;
+    const second = await store.enqueueJob("camp");
+    expect(second.acquired).toBe(false);
+    if (second.acquired) return;
+    expect(second.runningJobId).toBe(first.jobId);
+  });
+
+  test("a queued row blocks acquireJob and returns the incumbent jobId", async () => {
+    const store = new PgJobStore(db, "local");
+    const enq = await store.enqueueJob("camp");
+    expect(enq.acquired).toBe(true);
+    if (!enq.acquired) return;
+    const acq = await store.acquireJob("camp");
+    expect(acq.acquired).toBe(false);
+    if (acq.acquired) return;
+    expect(acq.runningJobId).toBe(enq.jobId);
+  });
+
+  test("a running row blocks enqueueJob and returns the incumbent jobId", async () => {
+    const store = new PgJobStore(db, "local");
+    const acq = await store.acquireJob("camp");
+    expect(acq.acquired).toBe(true);
+    if (!acq.acquired) return;
+    const enq = await store.enqueueJob("camp");
+    expect(enq.acquired).toBe(false);
+    if (enq.acquired) return;
+    expect(enq.runningJobId).toBe(acq.jobId);
+  });
+
+  test("startQueuedJob transitions a queued row to running and sets lease", async () => {
+    const store = new PgJobStore(db, "local");
+    const enq = await store.enqueueJob("camp");
+    expect(enq.acquired).toBe(true);
+    if (!enq.acquired) return;
+
+    const started = await store.startQueuedJob(enq.jobId);
+    expect(started).toBe(true);
+
+    const stored = await store.getStoredJob(enq.jobId);
+    expect(stored?.job.status).toBe("running");
+  });
+
+  test("duplicate delivery: second startQueuedJob returns false and nothing runs twice", async () => {
+    const store = new PgJobStore(db, "local");
+    const enq = await store.enqueueJob("camp");
+    expect(enq.acquired).toBe(true);
+    if (!enq.acquired) return;
+
+    const first = await store.startQueuedJob(enq.jobId);
+    expect(first).toBe(true);
+
+    // Second call on already running job returns false
+    const second = await store.startQueuedJob(enq.jobId);
+    expect(second).toBe(false);
+
+    // Call on unknown id returns false
+    const unknown = await store.startQueuedJob("00000000-0000-0000-0000-000000000000");
+    expect(unknown).toBe(false);
+  });
+
+  test("reaper fails a queued row older than QUEUED_TTL_MS", async () => {
+    const store = new PgJobStore(db, "local");
+    // Insert a queued row created 11 minutes ago (past QUEUED_TTL_MS of 10 min)
+    const oldId = "11111111-1111-1111-1111-111111111111";
+    await db.query(
+      `insert into job (id, org_id, campaign_id, status, created_at, lease_expires_at, heartbeat_at)
+       values ($1, 'local', 'camp-old', 'queued', now() - interval '11 minutes', now() + interval '10 minutes', now())`,
+      [oldId],
+    );
+
+    // Insert a fresh queued row
+    const freshId = "22222222-2222-2222-2222-222222222222";
+    await db.query(
+      `insert into job (id, org_id, campaign_id, status, created_at, lease_expires_at, heartbeat_at)
+       values ($1, 'local', 'camp-fresh', 'queued', now(), now() + interval '10 minutes', now())`,
+      [freshId],
+    );
+
+    // Calling enqueueJob triggers reap()
+    expect(QUEUED_TTL_MS).toBe(JOB_TTL_MS);
+    await store.enqueueJob("camp-other");
+
+    // Straight to the table (finding 4): `getStoredJob`/`listJobs` read
+    // through `lapsedAsFailed`, which reports a stale queued row as "failed"
+    // on ITS OWN even when the reaper never touched the row — asserting
+    // through them here would pass whether or not `reap()`'s queued branch
+    // above exists at all. Only a direct `select` proves the reaper wrote it.
+    const oldRow = await db.query<{ status: string; error: string | null }>(
+      "select status, error from job where id = $1",
+      [oldId],
+    );
+    expect(oldRow.rows[0]).toMatchObject({ status: "failed" });
+    expect(oldRow.rows[0]!.error).toMatch(/expired|timed out/i);
+
+    const freshRow = await db.query<{ status: string }>("select status from job where id = $1", [
+      freshId,
+    ]);
+    expect(freshRow.rows[0]).toEqual({ status: "queued" });
+  });
+
+  test("the reaper is what lets a stale queued row's campaign be re-enqueued (finding 4)", async () => {
+    // `runningIncumbent` already excludes a stale queued row from blocking a
+    // NEW campaign (its `created_at > now() - QUEUED_TTL_MS` clause), so that
+    // alone does not exercise the reaper. The partial unique index enforcing
+    // "at most one active row per campaign" still sees the stale row as
+    // `status = 'queued'` until something writes it — so a re-enqueue for the
+    // SAME campaign only succeeds if `reap()` flipped it to 'failed' first;
+    // without the reaper this would insert-conflict and answer
+    // `acquired: false` with the stale row's own id.
+    const store = new PgJobStore(db, "local");
+    const staleId = "33333333-3333-3333-3333-333333333333";
+    await db.query(
+      `insert into job (id, org_id, campaign_id, status, created_at)
+       values ($1, 'local', 'camp-stale', 'queued', now() - interval '11 minutes')`,
+      [staleId],
+    );
+
+    const retry = await store.enqueueJob("camp-stale");
+    expect(retry).toEqual({ acquired: true, jobId: expect.any(String) });
+    expect(retry.acquired && retry.jobId).not.toBe(staleId);
+
+    const staleRow = await db.query<{ status: string }>("select status from job where id = $1", [
+      staleId,
+    ]);
+    expect(staleRow.rows[0]).toEqual({ status: "failed" });
+  });
+
+  test("startQueuedJob refuses a queued row past QUEUED_TTL_MS even before any reaper has run (finding 5)", async () => {
+    const store = new PgJobStore(db, "local");
+    const staleId = "44444444-4444-4444-4444-444444444444";
+    await db.query(
+      `insert into job (id, org_id, campaign_id, status, created_at)
+       values ($1, 'local', 'camp-stale-start', 'queued', now() - interval '11 minutes')`,
+      [staleId],
+    );
+
+    await expect(store.startQueuedJob(staleId)).resolves.toBe(false);
+
+    const row = await db.query<{ status: string }>("select status from job where id = $1", [
+      staleId,
+    ]);
+    expect(row.rows[0]).toEqual({ status: "queued" });
   });
 });
 

@@ -12,7 +12,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PipelineExecutionLog } from "@campaignfoundry/CampaignOrchestration";
 import { FsJobStore, JobCapacityError, JOB_TTL_MS, MAX_JOBS } from "../fs-job-store.js";
-import { JobLeaseLostError, type JobResult, type StoredJob } from "../job-store.port.js";
+import {
+  JobLeaseLostError,
+  QUEUED_TTL_MS,
+  type JobResult,
+  type StoredJob,
+} from "../job-store.port.js";
 
 const payload = (over: Partial<JobResult> = {}): JobResult => ({
   halted: false,
@@ -307,6 +312,25 @@ describe("FsJobStore", () => {
     vi.useRealTimers();
   });
 
+  test("expireQueuedLater catches a getStoredJob rejection without unhandled rejection", async () => {
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", onUnhandled);
+    vi.useFakeTimers();
+    try {
+      const enq = await store.enqueueJob("camp");
+      expect(enq.acquired).toBe(true);
+      if (!enq.acquired) return;
+      const read = vi.spyOn(store, "getStoredJob").mockRejectedValueOnce(new Error("read error"));
+      await vi.advanceTimersByTimeAsync(QUEUED_TTL_MS + 1);
+      expect(read).toHaveBeenCalledWith(enq.jobId);
+      expect(unhandled).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+      process.off("unhandledRejection", onUnhandled);
+    }
+  });
+
   test("acquireJob conditionally creates a new job or returns running incumbent", async () => {
     const first = await store.acquireJob("camp");
     expect(first.acquired).toBe(true);
@@ -458,4 +482,182 @@ describe("FsJobStore", () => {
       }
     },
   );
+
+  test("enqueueJob creates a queued job and returns { acquired: true, jobId }", async () => {
+    const res = await store.enqueueJob("camp");
+    expect(res.acquired).toBe(true);
+    if (!res.acquired) return;
+    const stored = await store.getStoredJob(res.jobId);
+    expect(stored?.job.status).toBe("queued");
+  });
+
+  test("a queued row blocks a second enqueueJob and acquireJob", async () => {
+    const first = await store.enqueueJob("camp");
+    expect(first.acquired).toBe(true);
+    if (!first.acquired) return;
+
+    const second = await store.enqueueJob("camp");
+    expect(second.acquired).toBe(false);
+    if (second.acquired) return;
+    expect(second.runningJobId).toBe(first.jobId);
+
+    const acq = await store.acquireJob("camp");
+    expect(acq.acquired).toBe(false);
+    if (acq.acquired) return;
+    expect(acq.runningJobId).toBe(first.jobId);
+  });
+
+  test("a running row blocks enqueueJob", async () => {
+    const acq = await store.acquireJob("camp");
+    expect(acq.acquired).toBe(true);
+    if (!acq.acquired) return;
+
+    const enq = await store.enqueueJob("camp");
+    expect(enq.acquired).toBe(false);
+    if (enq.acquired) return;
+    expect(enq.runningJobId).toBe(acq.jobId);
+  });
+
+  test("startQueuedJob moves a queued job to running and duplicate delivery returns false", async () => {
+    const enq = await store.enqueueJob("camp");
+    expect(enq.acquired).toBe(true);
+    if (!enq.acquired) return;
+
+    const started = await store.startQueuedJob(enq.jobId);
+    expect(started).toBe(true);
+
+    const stored = await store.getStoredJob(enq.jobId);
+    expect(stored?.job.status).toBe("running");
+
+    // Second call returns false (already running)
+    const second = await store.startQueuedJob(enq.jobId);
+    expect(second).toBe(false);
+
+    // Unknown id returns false
+    expect(await store.startQueuedJob("00000000-0000-0000-0000-000000000000")).toBe(false);
+  });
+
+  test("startQueuedJob still starts a queued row that was never registered with a queued-expiry timer", async () => {
+    // A row can be "queued" in storage with no live timer for it — a fresh
+    // FsJobStore over the same directory after a process restart, or (as
+    // here) any write that did not go through enqueueJob. startQueuedJob must
+    // not assume the bookkeeping map always has an entry to clear.
+    const id = "cold-queued-id";
+    const entry: StoredJob = {
+      id,
+      campaignId: "camp",
+      job: { status: "queued", done: 0, total: 0, log: null },
+      createdAt: Date.now(),
+      seq: 0,
+    };
+    writeFileSync(store.jobPath(id), JSON.stringify(entry), "utf8");
+
+    expect(await store.startQueuedJob(id)).toBe(true);
+    expect((await store.getJob(id))?.status).toBe("running");
+  });
+
+  test("a reused queued id clears the earlier queued-expiry timer", async () => {
+    vi.useFakeTimers();
+    try {
+      const first = await store.enqueueJob("camp-a", "reused-queued");
+      expect(first.acquired).toBe(true);
+
+      // Same custom id, a different campaign: the incumbent check is per
+      // campaignId, so this succeeds while "reused-queued" is still queued
+      // for camp-a, overwrites its entry and re-registers its queued-expiry
+      // timer — the earlier timer must be cleared first, the same rule
+      // `expireLater` already follows for a settled row's retention timer.
+      const second = await store.enqueueJob("camp-b", "reused-queued");
+      expect(second.acquired).toBe(true);
+
+      await vi.advanceTimersByTimeAsync(QUEUED_TTL_MS + 1);
+
+      const stored = await store.getStoredJob("reused-queued");
+      expect(stored?.campaignId).toBe("camp-b");
+      expect(stored?.job.status).toBe("failed");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("queued job expires and is marked failed after QUEUED_TTL_MS", async () => {
+    vi.useFakeTimers();
+    try {
+      const enq = await store.enqueueJob("camp");
+      expect(enq.acquired).toBe(true);
+      if (!enq.acquired) return;
+
+      await vi.advanceTimersByTimeAsync(QUEUED_TTL_MS + 1);
+
+      const stored = await store.getStoredJob(enq.jobId);
+      expect(stored?.job.status).toBe("failed");
+      expect(stored?.job.error).toMatch(/expired|timed out/i);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("getStoredJob marks an expired queued job as failed on a cold disk read", async () => {
+    // The TTL timer above fires and rewrites the entry itself, so it never
+    // exercises getStoredJob's OWN staleness check on a read that finds
+    // nothing cached — the path a second process (a fresh store over the same
+    // dir) or a cache-evicted read takes. Backdating createdAt on disk leaves
+    // the queued-expiry timer pending in real time (it never fires during
+    // this test), so only that on-read check can be what marks it failed.
+    const enq = await store.enqueueJob("camp");
+    expect(enq.acquired).toBe(true);
+    if (!enq.acquired) return;
+
+    const raw = JSON.parse(readFileSync(store.jobPath(enq.jobId), "utf8")) as StoredJob;
+    writeFileSync(
+      store.jobPath(enq.jobId),
+      JSON.stringify({ ...raw, createdAt: Date.now() - QUEUED_TTL_MS - 1 }),
+      "utf8",
+    );
+    (store as unknown as { memoryCache: Map<string, unknown> }).memoryCache.clear();
+
+    const stored = await store.getStoredJob(enq.jobId);
+    expect(stored?.job.status).toBe("failed");
+    expect(stored?.job.error).toMatch(/expired/i);
+  });
+
+  test("a stale queued row's on-read expiry is what lets its campaign be re-enqueued (finding 4)", async () => {
+    // Same shape as "getStoredJob marks an expired queued job as failed on a
+    // cold disk read" above, but the point here is `enqueueJob`, not
+    // `getStoredJob` directly: `enqueueJob` finds the incumbent through
+    // `getRunningJobId` -> `listJobs` -> `getStoredJob` for each entry, so the
+    // SAME on-read staleness check has to run inside that path too. If it did
+    // not, the stale row would still read as "queued" there and block a
+    // second `enqueueJob` for the same campaign with `acquired: false`.
+    const enq = await store.enqueueJob("camp");
+    expect(enq.acquired).toBe(true);
+    if (!enq.acquired) return;
+
+    const raw = JSON.parse(readFileSync(store.jobPath(enq.jobId), "utf8")) as StoredJob;
+    writeFileSync(
+      store.jobPath(enq.jobId),
+      JSON.stringify({ ...raw, createdAt: Date.now() - QUEUED_TTL_MS - 1 }),
+      "utf8",
+    );
+    (store as unknown as { memoryCache: Map<string, unknown> }).memoryCache.clear();
+
+    const retry = await store.enqueueJob("camp");
+    expect(retry).toEqual({ acquired: true, jobId: expect.any(String) });
+    expect(retry.acquired && retry.jobId).not.toBe(enq.jobId);
+
+    const stale = await store.getStoredJob(enq.jobId);
+    expect(stale?.job.status).toBe("failed");
+  });
+
+  test("deleteJob clears a still-pending queued-expiry timer", async () => {
+    const enq = await store.enqueueJob("camp");
+    expect(enq.acquired).toBe(true);
+    if (!enq.acquired) return;
+
+    // The queued TTL timer set by enqueueJob is still pending (real time,
+    // never advanced): deleting the job here must clear it rather than leave
+    // it to fire later against an id that no longer exists.
+    await store.deleteJob(enq.jobId);
+    expect(await store.getJob(enq.jobId)).toBeUndefined();
+  });
 });

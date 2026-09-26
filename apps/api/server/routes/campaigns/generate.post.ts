@@ -1,13 +1,15 @@
 import { setResponseHeader } from "h3";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
-import { acquireJob, completeJob, failJob, progressJob, runJob } from "../../lib/jobs.js";
+import { deleteJob, enqueueJob } from "../../lib/jobs.js";
 import { JobCapacityError } from "../../lib/ports/fs-job-store.js";
 import { getUsageStore } from "../../lib/ports/index.js";
+import { getRunDelivery } from "../../lib/ports/run-delivery-registry.js";
 import { parseBrief, parseRegenerateOnly } from "../../lib/load-brief.js";
-import { ALLOWED_IMAGE_MODELS, runCampaign } from "../../lib/pipeline.js";
+import { ALLOWED_IMAGE_MODELS } from "../../lib/pipeline.js";
 import { runEnvironment, type RunEnvironment } from "../../lib/run-environment.js";
+import type { RunRequest } from "../../lib/run-request.js";
 import { requestTenant } from "../../lib/tenant.js";
-import { readReport, reportRevision, writeReport } from "../../lib/report.js";
+import { reportRevision } from "../../lib/report.js";
 import {
   NOT_PROBED_REASON,
   PROBE_PENDING_ERROR,
@@ -31,42 +33,6 @@ import {
  * invalid brief.
  */
 
-/** The persisted report's policyHash for a variation re-roll, else undefined (no pin). */
-async function persistedPolicyHash(
-  env: RunEnvironment,
-  brief: CampaignBrief,
-  reroll: boolean,
-): Promise<string | undefined> {
-  if (!reroll || brief.mode !== "variation") return undefined;
-  const report = await readReport(env, brief.id);
-  const hash =
-    typeof report === "object" && report !== null
-      ? (report as { policyHash?: unknown }).policyHash
-      : undefined;
-  return typeof hash === "string" ? hash : undefined;
-}
-
-/**
- * The persisted report's copy hash (§35) for a variation re-roll, else undefined
- * (no pin) — same shape as `persistedPolicyHash`, read from the same report. A
- * report persisted before this field existed has no `copyHash` key, so this
- * returns `undefined` for it too: the first re-roll of such a report is not
- * pinned on copy, by the same "absent hash is no pin" rule `persistedPolicyHash`
- * already follows.
- */
-async function persistedCopyHash(
-  env: RunEnvironment,
-  brief: CampaignBrief,
-  reroll: boolean,
-): Promise<string | undefined> {
-  if (!reroll || brief.mode !== "variation") return undefined;
-  const report = await readReport(env, brief.id);
-  const hash =
-    typeof report === "object" && report !== null
-      ? (report as { copyHash?: unknown }).copyHash
-      : undefined;
-  return typeof hash === "string" ? hash : undefined;
-}
 export default defineEventHandler(async (event) => {
   const capabilities = await waitForCapabilities();
   if (capabilities.reason === NOT_PROBED_REASON) {
@@ -110,7 +76,7 @@ export default defineEventHandler(async (event) => {
   // folds nothing in, so it writes unconditionally.
   //
   // The revision is read before the job is claimed, not inside `runJob` and not after
-  // `acquireJob`: `reportRevision` rethrows everything that is not ENOENT (a report
+  // `enqueueJob`: `reportRevision` rethrows everything that is not ENOENT (a report
   // nobody can read is not "nothing stored"), and once the job is persisted that
   // rejection leaves it recorded and "running" — a claim no later request for this
   // campaign could ever clear. Read first, the same failure is a 500 and leaves
@@ -120,7 +86,7 @@ export default defineEventHandler(async (event) => {
   // passes, so an absent report has to be its own value or a run that started with none
   // would overwrite one that appeared while it was running.
   // The run's environment is resolved first, before the revision read and the
-  // claim: once `acquireJob` persists a running job, a throw here (an unreadable
+  // claim: once `enqueueJob` persists a queued job, a throw here (an unreadable
   // .env) would leave that claim recorded with nothing to settle it. It is also
   // what the run carries everywhere (D167): the revision read, the claim, the
   // job's updates and the report write all use its captured roots, so they land
@@ -171,9 +137,9 @@ export default defineEventHandler(async (event) => {
   // the caller should try again rather than treat it as a broken server - the
   // one thing it must NOT do is what the old code did, which was delete somebody
   // else's running campaign to make room.
-  let claim: Awaited<ReturnType<typeof acquireJob>>;
+  let claim: Awaited<ReturnType<typeof enqueueJob>>;
   try {
-    claim = await acquireJob(env, brief.id);
+    claim = await enqueueJob(env, brief.id);
   } catch (error) {
     if (error instanceof JobCapacityError) {
       setResponseStatus(event, 503);
@@ -192,47 +158,31 @@ export default defineEventHandler(async (event) => {
   }
 
   const jobId = claim.jobId;
-  runJob(env, jobId, async (signal) => {
-    const expectedPolicyHash = await persistedPolicyHash(env, brief, reroll);
-    const expectedCopyHash = await persistedCopyHash(env, brief, reroll);
-    const result = await runCampaign(
-      env,
-      brief,
-      imageModel,
-      regenerateOnly,
-      expectedPolicyHash,
-      expectedCopyHash,
-      signal,
-      // The tick is synchronous and the store is not, so the write is queued
-      // rather than awaited — the pipeline must not stall on a job file. Order
-      // survives anyway: `progressJob` runs inside the store's per-id lock
-      // chain, which settles calls in the order they were made. A failed write
-      // is dropped on purpose: progress is advisory, and a run that finished
-      // must not be failed by a counter that could not be persisted.
-      (done, total) => {
-        void progressJob(env, jobId, done, total).catch(() => undefined);
-      },
-    );
-    if (!result.success) {
-      await failJob(env, jobId, result.error.message);
-      return;
-    }
-    // A selective run produced only the regenerated cells — merge them into the
-    // persisted report so the full campaign survives a partial run. `runJob` fails the
-    // job with the message if the merge is refused.
-    await writeReport(env, result.value, {
-      merge: reroll,
-      expectedRevision,
-      fence: { runId: jobId },
-    });
-    await completeJob(env, jobId, {
-      halted: result.value.halted,
-      assets: result.value.assets,
-      log: result.value.log,
-      policyHash: result.value.policyHash,
-      seed: result.value.seed,
-    });
-  });
+  const request: RunRequest = {
+    jobId,
+    tenant: env.tenant,
+    brief,
+    imageModel,
+    regenerateOnly,
+    reroll,
+    expectedRevision,
+  };
+  try {
+    await getRunDelivery(env).deliver(request);
+  } catch {
+    // `deliver` can throw after `enqueueJob` already stored the queued row
+    // above (most likely `startQueuedJob` itself, e.g. a database error) —
+    // without this, h3 would answer 500 while the row stayed queued, and
+    // every retry for this campaign got a 409 from that still-active row for
+    // up to QUEUED_TTL_MS (the hazard the comment above names). Delete it so
+    // the row's claim on this campaign disappears with the response that
+    // reports it failed, and a retry is admitted right away. No `.catch` here:
+    // a delete failure is a real storage error, and h3's own handling still
+    // answers it with a 500.
+    await deleteJob(env, jobId);
+    setResponseStatus(event, 500);
+    return { error: `Could not start the run for campaign "${brief.id}".`, campaignId: brief.id };
+  }
   setResponseStatus(event, 202);
   return { jobId };
 });

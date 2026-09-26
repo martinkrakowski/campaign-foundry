@@ -650,7 +650,7 @@ describe("POST /campaigns/generate", () => {
     // The 503 arm must not have turned into a catch-all: a broken store is a
     // broken server and should read as one.
     const jobs = await import("../../lib/jobs.js");
-    const spy = vi.spyOn(jobs, "acquireJob").mockRejectedValueOnce(new Error("disk went away"));
+    const spy = vi.spyOn(jobs, "enqueueJob").mockRejectedValueOnce(new Error("disk went away"));
     try {
       const res = await call(brief());
       // h3 turns an unhandled throw into a 500 - which is exactly right here,
