@@ -453,6 +453,26 @@ describe("Team scope on Postgres (D166, PT-2c)", () => {
     expect(await owner.findBriefById("cross-org")).toBeUndefined();
   });
 
+  // D166 item 6 (PT-2c, qodo thread U1bo): the FK on campaign.team_id must
+  // itself refuse a cross-org link — not just assertTeamInOrg, which a direct
+  // SQL write, an import, or a future writer could bypass entirely.
+  test("the database itself refuses a cross-org campaign/team link (composite FK), bypassing assertTeamInOrg", async () => {
+    await db.query("insert into org (id, name) values ($1, $2)", ["acme", "Acme"]);
+    await db.query(
+      `insert into team (id, name, "memberCount", org_id, created_at) values ($1, $2, 0, $3, now())`,
+      ["acme-team", "Acme Team", "acme"],
+    );
+    const owner = new PgBriefStore(db, "local", "owner", ["owner"], []);
+    await owner.createBrief(brief("direct-camp"));
+    const { rows } = await db.query<{ id: string }>(
+      `select id from campaign where org_id = 'local' and slug = 'direct-camp'`,
+    );
+
+    await expect(
+      db.query(`update campaign set team_id = $1 where id = $2`, ["acme-team", rows[0]!.id]),
+    ).rejects.toThrow();
+  });
+
   test("createBrief with an unknown team id refuses the same way", async () => {
     const owner = new PgBriefStore(db, "local", "owner", ["owner"], []);
     await expect(owner.createBrief(brief("no-team"), { teamId: "ghost" })).rejects.toMatchObject({
