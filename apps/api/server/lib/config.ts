@@ -198,6 +198,18 @@ export interface KafkaSettings {
   readonly caPath?: string;
 }
 
+function looksLikePath(value: string): boolean {
+  if (value.length > 256 || value.includes("=") || value.startsWith("MII")) {
+    return false;
+  }
+  return (
+    value.includes("/") ||
+    value.includes("\\") ||
+    /\.[a-z0-9]+$/i.test(value) ||
+    value === "certs"
+  );
+}
+
 function readCertFile(envVar: string, rawPath: string): string {
   if (rawPath.includes("-----BEGIN") || rawPath.includes("\n") || rawPath.includes("\r")) {
     throw new Error(`${envVar} must be a file path under certs/, never inline cert content.`);
@@ -206,7 +218,10 @@ function readCertFile(envVar: string, rawPath: string): string {
   const resolved = resolve(projectRoot(), rawPath);
   const rel = relative(certsDir, resolved);
   if (rel.startsWith("..") || isAbsolute(rel) || rel === "") {
-    throw new Error(`${envVar} must be a file path under certs/, got "${rawPath}".`);
+    if (looksLikePath(rawPath)) {
+      throw new Error(`${envVar} must be a file path under certs/, got "${rawPath}".`);
+    }
+    throw new Error(`${envVar} must be a file path under certs/.`);
   }
   try {
     return readFileSync(resolved, "utf8");

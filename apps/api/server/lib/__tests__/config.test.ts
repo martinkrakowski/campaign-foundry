@@ -1,5 +1,15 @@
-import { describe, test, expect, afterEach, beforeEach, vi } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { describe, test, expect, afterEach, beforeEach, beforeAll, afterAll, vi } from "vitest";
+import { randomUUID } from "node:crypto";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmdirSync,
+  rmSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { resolve } from "node:path";
@@ -379,12 +389,66 @@ describe("kafkaSettings (PT-6b2, D174d)", () => {
   const saved = Object.fromEntries(envKeys.map((k) => [k, process.env[k]]));
   const certsDir = resolve(projectRoot(), "certs");
 
+  let certsDirExisted = false;
+  const createdFiles: string[] = [];
+
+  function writeFixture(name: string, content: string): string {
+    if (!existsSync(certsDir)) {
+      mkdirSync(certsDir, { recursive: true });
+    }
+    const fullPath = join(certsDir, name);
+    writeFileSync(fullPath, content);
+    createdFiles.push(fullPath);
+    return `certs/${name}`;
+  }
+
+  let suiteSentinelPath: string | undefined;
+
+  beforeAll(() => {
+    if (!existsSync(certsDir)) {
+      mkdirSync(certsDir, { recursive: true });
+    }
+    suiteSentinelPath = join(certsDir, `sentinel-${randomUUID()}.txt`);
+    writeFileSync(suiteSentinelPath, "OPERATOR-CA-SENTINEL-SURVIVES");
+  });
+
+  afterAll(() => {
+    if (suiteSentinelPath) {
+      try {
+        expect(existsSync(suiteSentinelPath)).toBe(true);
+        expect(readFileSync(suiteSentinelPath, "utf8")).toBe(
+          "OPERATOR-CA-SENTINEL-SURVIVES",
+        );
+      } finally {
+        if (existsSync(suiteSentinelPath)) {
+          unlinkSync(suiteSentinelPath);
+        }
+      }
+    }
+  });
+
+  beforeEach(() => {
+    certsDirExisted = existsSync(certsDir);
+  });
+
   afterEach(() => {
     for (const k of envKeys) {
       if (saved[k] === undefined) delete process.env[k];
       else process.env[k] = saved[k];
     }
-    rmSync(certsDir, { recursive: true, force: true });
+    while (createdFiles.length > 0) {
+      const f = createdFiles.pop()!;
+      if (existsSync(f)) {
+        unlinkSync(f);
+      }
+    }
+    if (!certsDirExisted && existsSync(certsDir)) {
+      try {
+        rmdirSync(certsDir);
+      } catch {
+        // Non-empty (e.g. operator certs or sentinel present), leave it intact.
+      }
+    }
   });
 
   test("returns undefined when KAFKA_BROKERS is unset or empty", () => {
@@ -425,16 +489,26 @@ describe("kafkaSettings (PT-6b2, D174d)", () => {
     });
   });
 
+  test("KAFKA_CONSUME=TRUE and 1 both result in consume: false", () => {
+    process.env.KAFKA_BROKERS = "kafka1:9092";
+
+    process.env.KAFKA_CONSUME = "TRUE";
+    expect(kafkaSettings()?.consume).toBe(false);
+
+    process.env.KAFKA_CONSUME = "1";
+    expect(kafkaSettings()?.consume).toBe(false);
+  });
+
   test("reads CA, client cert, and client key from files under certs/", () => {
     process.env.KAFKA_BROKERS = "kafka1:9092";
-    mkdirSync(certsDir, { recursive: true });
-    writeFileSync(join(certsDir, "ca.pem"), "TEST-CA-PEM");
-    writeFileSync(join(certsDir, "client.crt"), "TEST-CLIENT-CRT");
-    writeFileSync(join(certsDir, "client.key"), "TEST-CLIENT-KEY");
+    const id = randomUUID();
+    const caRel = writeFixture(`kafka-test-${id}-ca.pem`, "TEST-CA-PEM");
+    const certRel = writeFixture(`kafka-test-${id}-client.crt`, "TEST-CLIENT-CRT");
+    const keyRel = writeFixture(`kafka-test-${id}-client.key`, "TEST-CLIENT-KEY");
 
-    process.env.KAFKA_CA_PATH = "certs/ca.pem";
-    process.env.KAFKA_CLIENT_CERT_PATH = "certs/client.crt";
-    process.env.KAFKA_CLIENT_KEY_PATH = "certs/client.key";
+    process.env.KAFKA_CA_PATH = caRel;
+    process.env.KAFKA_CLIENT_CERT_PATH = certRel;
+    process.env.KAFKA_CLIENT_KEY_PATH = keyRel;
 
     const settings = kafkaSettings();
     expect(settings).toEqual({
@@ -442,9 +516,9 @@ describe("kafkaSettings (PT-6b2, D174d)", () => {
       topic: "cf.run-requests",
       groupId: "cf-workers",
       consume: false,
-      caPath: "certs/ca.pem",
-      clientCertPath: "certs/client.crt",
-      clientKeyPath: "certs/client.key",
+      caPath: caRel,
+      clientCertPath: certRel,
+      clientKeyPath: keyRel,
       ssl: {
         ca: "TEST-CA-PEM",
         cert: "TEST-CLIENT-CRT",
@@ -455,9 +529,9 @@ describe("kafkaSettings (PT-6b2, D174d)", () => {
 
   test("reads CA only without client cert and key", () => {
     process.env.KAFKA_BROKERS = "kafka1:9092";
-    mkdirSync(certsDir, { recursive: true });
-    writeFileSync(join(certsDir, "ca.pem"), "TEST-CA-PEM");
-    process.env.KAFKA_CA_PATH = "certs/ca.pem";
+    const id = randomUUID();
+    const caRel = writeFixture(`kafka-test-${id}-ca.pem`, "TEST-CA-PEM");
+    process.env.KAFKA_CA_PATH = caRel;
     delete process.env.KAFKA_CLIENT_CERT_PATH;
     delete process.env.KAFKA_CLIENT_KEY_PATH;
 
@@ -467,7 +541,7 @@ describe("kafkaSettings (PT-6b2, D174d)", () => {
       topic: "cf.run-requests",
       groupId: "cf-workers",
       consume: false,
-      caPath: "certs/ca.pem",
+      caPath: caRel,
       ssl: {
         ca: "TEST-CA-PEM",
       },
@@ -476,12 +550,12 @@ describe("kafkaSettings (PT-6b2, D174d)", () => {
 
   test("reads client cert and key without CA", () => {
     process.env.KAFKA_BROKERS = "kafka1:9092";
-    mkdirSync(certsDir, { recursive: true });
-    writeFileSync(join(certsDir, "client.crt"), "TEST-CLIENT-CRT");
-    writeFileSync(join(certsDir, "client.key"), "TEST-CLIENT-KEY");
+    const id = randomUUID();
+    const certRel = writeFixture(`kafka-test-${id}-client.crt`, "TEST-CLIENT-CRT");
+    const keyRel = writeFixture(`kafka-test-${id}-client.key`, "TEST-CLIENT-KEY");
     delete process.env.KAFKA_CA_PATH;
-    process.env.KAFKA_CLIENT_CERT_PATH = "certs/client.crt";
-    process.env.KAFKA_CLIENT_KEY_PATH = "certs/client.key";
+    process.env.KAFKA_CLIENT_CERT_PATH = certRel;
+    process.env.KAFKA_CLIENT_KEY_PATH = keyRel;
 
     const settings = kafkaSettings();
     expect(settings).toEqual({
@@ -489,13 +563,42 @@ describe("kafkaSettings (PT-6b2, D174d)", () => {
       topic: "cf.run-requests",
       groupId: "cf-workers",
       consume: false,
-      clientCertPath: "certs/client.crt",
-      clientKeyPath: "certs/client.key",
+      clientCertPath: certRel,
+      clientKeyPath: keyRel,
       ssl: {
         cert: "TEST-CLIENT-CRT",
         key: "TEST-CLIENT-KEY",
       },
     });
+  });
+
+  test("a sentinel file placed in certs/ before the suite survives it", () => {
+    if (!existsSync(certsDir)) {
+      mkdirSync(certsDir, { recursive: true });
+    }
+    const sentinelName = `operator-sentinel-${randomUUID()}.pem`;
+    const sentinelPath = join(certsDir, sentinelName);
+    writeFileSync(sentinelPath, "AIVEN-DATABASE-CA-DO-NOT-DELETE");
+
+    try {
+      const id = randomUUID();
+      const caRel = writeFixture(`kafka-test-${id}-ca.pem`, "TEST-CA-PEM");
+      process.env.KAFKA_BROKERS = "kafka1:9092";
+      process.env.KAFKA_CA_PATH = caRel;
+
+      const settings = kafkaSettings();
+      expect(settings?.ssl?.ca).toBe("TEST-CA-PEM");
+
+      // Sentinel file was not removed
+      expect(existsSync(sentinelPath)).toBe(true);
+      expect(readFileSync(sentinelPath, "utf8")).toBe(
+        "AIVEN-DATABASE-CA-DO-NOT-DELETE",
+      );
+    } finally {
+      if (existsSync(sentinelPath)) {
+        unlinkSync(sentinelPath);
+      }
+    }
   });
 
   test("hazard: empty broker entry in KAFKA_BROKERS throws clear error", () => {
@@ -531,6 +634,33 @@ describe("kafkaSettings (PT-6b2, D174d)", () => {
     process.env.KAFKA_CA_PATH = "-----BEGIN CERTIFICATE-----\nMIIB...";
 
     expect(() => kafkaSettings()).toThrow(/never inline cert content/);
+  });
+
+  test("hazard: inline key material without header is not echoed in error", () => {
+    process.env.KAFKA_BROKERS = "kafka1:9092";
+    const id = randomUUID();
+    const certRel = writeFixture(`kafka-test-${id}-client.crt`, "TEST-CLIENT-CRT");
+    const inlineKey = "MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQC7";
+    process.env.KAFKA_CLIENT_KEY_PATH = inlineKey;
+    process.env.KAFKA_CLIENT_CERT_PATH = certRel;
+
+    expect(() => kafkaSettings()).toThrow(/must be a file path under certs\/\./);
+    try {
+      kafkaSettings();
+    } catch (err: unknown) {
+      expect((err as Error).message).not.toContain(inlineKey);
+      expect((err as Error).message).not.toContain("MIIEvg");
+    }
+
+    // Base64 with padding is also not echoed as a path
+    const b64Key = "ZXhhbXBsZS1rZXktZGF0YQ==";
+    process.env.KAFKA_CLIENT_KEY_PATH = b64Key;
+    expect(() => kafkaSettings()).toThrow(/must be a file path under certs\/\./);
+    try {
+      kafkaSettings();
+    } catch (err: unknown) {
+      expect((err as Error).message).not.toContain(b64Key);
+    }
   });
 
   test("hazard: cert path outside certs/ is rejected", () => {
