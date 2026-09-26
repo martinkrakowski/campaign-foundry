@@ -2902,6 +2902,66 @@ describe("run-context 401 and 403 pipeline error handling", () => {
     expect(result.current.error).toBeNull();
   });
 
+  test("a 403 that resolves after a later brief switch does not set a stale membership notice", async () => {
+    // The switched-away-from brief's own fetchPersistedRun is still in flight when the
+    // user moves on — its `.catch` had no staleness guard, so a slow 403 landing after
+    // the switch would set membershipError for a brief that is no longer active.
+    let resolveStale!: (res: Response) => void;
+    const stale = new Promise<Response>((resolve) => {
+      resolveStale = resolve;
+    });
+    mockPipelineApi({
+      result: (u) => (u.includes("campaignId=stale-camp") ? stale : json(EMPTY_REPORT)),
+    });
+    const { result } = setup();
+
+    act(() => {
+      result.current.setBrief({ ...result.current.brief, id: "stale-camp" });
+    });
+    act(() => {
+      result.current.setBrief({ ...result.current.brief, id: "fresh-camp" });
+    });
+    await waitFor(() => expect(result.current.brief.id).toBe("fresh-camp"));
+
+    await act(async () => {
+      resolveStale(
+        json({ error: "This account belongs to no organisation.", code: "no_membership" }, 403),
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(result.current.membershipError).toBeNull();
+  });
+
+  test("a completed run after a 403 on the same brief clears the stale membership notice", async () => {
+    // F6's own comment claims "a later successful fetch (a run, a re-roll, a brief
+    // switch) heals it" — a completed `execute` is one of those, and nothing actually
+    // cleared membershipError on it before this fix.
+    mockPipelineApi({
+      result: () =>
+        json({ error: "This account belongs to no organisation.", code: "no_membership" }, 403),
+    });
+    const { result } = setup();
+    await act(async () => {
+      result.current.setBrief({ ...result.current.brief, id: "camp-1" });
+    });
+    await waitFor(() => {
+      expect(result.current.membershipError).toBe(NO_ORGANISATION_YET_MESSAGE);
+    });
+
+    mockPipelineApi({
+      job: () =>
+        jobOk({ halted: false, assets: [asset()], log: { entries: [], campaignId: "camp-1" } }),
+    });
+    await act(async () => {
+      await result.current.execute();
+    });
+
+    expect(result.current.membershipError).toBeNull();
+  });
+
   test("the initial mount's own persisted-run fetch sets membershipError the same way", async () => {
     mockPipelineApi({
       result: () =>

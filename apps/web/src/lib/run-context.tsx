@@ -841,11 +841,20 @@ export function RunProvider({ children }: { children: ReactNode }) {
       setDecisions({});
       void fetchPersistedRun(next.id)
         .then((d) => {
-          if (briefIdRef.current !== next.id || !d) return; // superseded, or no run on disk
+          if (briefIdRef.current !== next.id) return; // superseded by a later switch
+          // A successful read is proof of membership for this brief — heals a stale
+          // 403 from an earlier, since-resolved failure (F6: "a later successful fetch
+          // heals it"), whether or not this brief happens to have a run on disk.
+          setMembershipError(null);
+          if (!d) return; // no run on disk
           setRun({ result: d, target: next });
           if (d.assets?.length) setAssetVersion((v) => v + 1);
         })
         .catch((err) => {
+          // Superseded by a later switch: that switch's own call already cleared
+          // `membershipError` at the top of `setBrief` and owns whatever this fetch's
+          // late answer would say — never let an abandoned brief's failure land here.
+          if (briefIdRef.current !== next.id) return;
           // A typed check on `code`, not a match against the server's own message text
           // (PT-1b2 item 3) — a reworded server string ("organization") must still land
           // here, and it is the `NO_ORGANISATION_YET_MESSAGE` constant that is shown,
@@ -907,11 +916,20 @@ export function RunProvider({ children }: { children: ReactNode }) {
     // this initial fetch. The restored run's target is the brief it is restored under.
     void fetchPersistedRun(startBrief.id)
       .then((d) => {
-        if (!active || briefIdRef.current !== startBrief.id || !d) return;
+        if (!active || briefIdRef.current !== startBrief.id) return; // superseded
+        // A successful read is proof of membership for this brief — heals a stale
+        // 403 from an earlier, since-resolved failure (F6: "a later successful fetch
+        // heals it"), whether or not this brief happens to have a run on disk.
+        setMembershipError(null);
+        if (!d) return; // no run on disk
         setRun({ result: d, target: startBrief });
         if (d.assets?.length) setAssetVersion((v) => v + 1);
       })
       .catch((err) => {
+        // Unmounted, or superseded by a brief switch: that switch's own call already
+        // cleared `membershipError` at the top of `setBrief` and owns whatever this
+        // fetch's late answer would say — never let an abandoned mount restore land here.
+        if (!active || briefIdRef.current !== startBrief.id) return;
         // See the identical guard in `setBrief`'s own `fetchPersistedRun` catch above:
         // a typed check, never a match against the server's own message text.
         if (isNoMembershipError(err)) {
@@ -1069,6 +1087,10 @@ export function RunProvider({ children }: { children: ReactNode }) {
         setAssetVersion((v) => v + 1);
         setDecisions({});
         setError(null); // the result replaces any stale complaint about this run
+        // A completed run is proof of membership (a 401/403 would have thrown out of
+        // postGenerate/pollJob instead), so it heals a stale membership error the same
+        // way a successful fetchPersistedRun does (F6).
+        setMembershipError(null);
       } catch (e) {
         if (runSeq.current !== owned) return;
         setError(e instanceof Error ? e.message : "Generation failed");
@@ -1187,6 +1209,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
       });
       setAssetVersion((v) => v + 1);
       setError(null); // the re-rolled grid replaces any stale complaint about this run
+      setMembershipError(null); // a completed re-roll is proof of membership too (F6)
       // Regenerated creatives return to review: clear their (rejected) decisions. The
       // server retired them at the report write and the reload below is authoritative;
       // this is the optimistic mirror, so the tiles do not flash their old verdict.
