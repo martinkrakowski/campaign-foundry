@@ -25,6 +25,7 @@ export interface SealedKey {
  * ciphertext with AES-256-GCM authentication.
  */
 export interface KeySealerPort {
-  seal(plaintext: string): SealedKey;
-  open(sealed: SealedKey): string;
+  /** `context` names what the key belongs to (`<orgId>:<provider>`); `open` must pass the same one. */
+  seal(plaintext: string, context: string): SealedKey;
+  open(sealed: SealedKey, context: string): string;
 }

@@ -4,6 +4,8 @@ import { HostSecretKeySealer } from "../host-secret-key-sealer.js";
 import type { SealedKey } from "../key-sealer.port.js";
 import type { KeyEncryptionSettings } from "../../config.js";
 
+const CTX = "local:gemini";
+
 function makeKek(byteVal: number = 1): Buffer {
   return Buffer.alloc(32, byteVal);
 }
@@ -20,7 +22,7 @@ describe("HostSecretKeySealer (PT-7b1)", () => {
   test("round trip: seals and opens plaintext correctly", () => {
     const sealer = new HostSecretKeySealer(singleKeySettings);
     const plaintext = "sk-antigravity-provider-secret-key-xyz-12345";
-    const sealed = sealer.seal(plaintext);
+    const sealed = sealer.seal(plaintext, CTX);
 
     expect(sealed.kekVersion).toBe("v1");
     expect(typeof sealed.ciphertext).toBe("string");
@@ -30,31 +32,31 @@ describe("HostSecretKeySealer (PT-7b1)", () => {
     expect(typeof sealed.dekIv).toBe("string");
     expect(typeof sealed.dekTag).toBe("string");
 
-    const opened = sealer.open(sealed);
+    const opened = sealer.open(sealed, CTX);
     expect(opened).toBe(plaintext);
   });
 
   test("round trip: handles empty string and unicode characters", () => {
     const sealer = new HostSecretKeySealer(singleKeySettings);
 
-    const emptySealed = sealer.seal("");
-    expect(sealer.open(emptySealed)).toBe("");
+    const emptySealed = sealer.seal("", CTX);
+    expect(sealer.open(emptySealed, CTX)).toBe("");
 
     const unicode = "🔑 Secret provider key with emojis 🚀 and accents: éàçü";
-    const unicodeSealed = sealer.seal(unicode);
-    expect(sealer.open(unicodeSealed)).toBe(unicode);
+    const unicodeSealed = sealer.seal(unicode, CTX);
+    expect(sealer.open(unicodeSealed, CTX)).toBe(unicode);
   });
 
   test("a new data key per seal: two seals of the same text differ", () => {
     const sealer = new HostSecretKeySealer(singleKeySettings);
     const text = "repeatable-text-for-encryption";
 
-    const seal1 = sealer.seal(text);
-    const seal2 = sealer.seal(text);
+    const seal1 = sealer.seal(text, CTX);
+    const seal2 = sealer.seal(text, CTX);
 
     // Both decrypt to the same original text
-    expect(sealer.open(seal1)).toBe(text);
-    expect(sealer.open(seal2)).toBe(text);
+    expect(sealer.open(seal1, CTX)).toBe(text);
+    expect(sealer.open(seal2, CTX)).toBe(text);
 
     // All cryptographic components must differ due to fresh DEK and fresh IVs
     expect(seal1.sealedDek).not.toBe(seal2.sealedDek);
@@ -72,7 +74,7 @@ describe("HostSecretKeySealer (PT-7b1)", () => {
     });
 
     const secret = "persisted-provider-secret-token";
-    const sealedUnderV1 = v1Sealer.seal(secret);
+    const sealedUnderV1 = v1Sealer.seal(secret, CTX);
     expect(sealedUnderV1.kekVersion).toBe("v1");
 
     // Rotate: now v2 is current, but v1 is still in the keyring
@@ -85,12 +87,12 @@ describe("HostSecretKeySealer (PT-7b1)", () => {
     });
 
     // Opening a key sealed under v1 still works
-    expect(rotatedSealer.open(sealedUnderV1)).toBe(secret);
+    expect(rotatedSealer.open(sealedUnderV1, CTX)).toBe(secret);
 
     // A new seal uses v2
-    const sealedUnderV2 = rotatedSealer.seal("newly-enrolled-key");
+    const sealedUnderV2 = rotatedSealer.seal("newly-enrolled-key", CTX);
     expect(sealedUnderV2.kekVersion).toBe("v2");
-    expect(rotatedSealer.open(sealedUnderV2)).toBe("newly-enrolled-key");
+    expect(rotatedSealer.open(sealedUnderV2, CTX)).toBe("newly-enrolled-key");
   });
 
   describe("tamper cases", () => {
@@ -104,51 +106,51 @@ describe("HostSecretKeySealer (PT-7b1)", () => {
     }
 
     test("tamper: tampered ciphertext fails open", () => {
-      const sealed = sealer.seal(text);
-      expect(sealer.open(sealed)).toBe(text);
+      const sealed = sealer.seal(text, CTX);
+      expect(sealer.open(sealed, CTX)).toBe(text);
 
       const tampered = { ...sealed, ciphertext: flipBit(sealed.ciphertext) };
-      expect(() => sealer.open(tampered)).toThrow(/Failed to decrypt ciphertext/);
+      expect(() => sealer.open(tampered, CTX)).toThrow(/Failed to decrypt ciphertext/);
     });
 
     test("tamper: tampered auth tag fails open", () => {
-      const sealed = sealer.seal(text);
-      expect(sealer.open(sealed)).toBe(text);
+      const sealed = sealer.seal(text, CTX);
+      expect(sealer.open(sealed, CTX)).toBe(text);
 
       const tampered = { ...sealed, tag: flipBit(sealed.tag) };
-      expect(() => sealer.open(tampered)).toThrow(/Failed to decrypt ciphertext/);
+      expect(() => sealer.open(tampered, CTX)).toThrow(/Failed to decrypt ciphertext/);
     });
 
     test("tamper: tampered iv fails open", () => {
-      const sealed = sealer.seal(text);
-      expect(sealer.open(sealed)).toBe(text);
+      const sealed = sealer.seal(text, CTX);
+      expect(sealer.open(sealed, CTX)).toBe(text);
 
       const tampered = { ...sealed, iv: flipBit(sealed.iv) };
-      expect(() => sealer.open(tampered)).toThrow(/Failed to decrypt ciphertext/);
+      expect(() => sealer.open(tampered, CTX)).toThrow(/Failed to decrypt ciphertext/);
     });
 
     test("tamper: tampered sealedDek fails open", () => {
-      const sealed = sealer.seal(text);
-      expect(sealer.open(sealed)).toBe(text);
+      const sealed = sealer.seal(text, CTX);
+      expect(sealer.open(sealed, CTX)).toBe(text);
 
       const tampered = { ...sealed, sealedDek: flipBit(sealed.sealedDek) };
-      expect(() => sealer.open(tampered)).toThrow(/Failed to unseal data encryption key/);
+      expect(() => sealer.open(tampered, CTX)).toThrow(/Failed to unseal data encryption key/);
     });
 
     test("tamper: tampered dekTag fails open", () => {
-      const sealed = sealer.seal(text);
-      expect(sealer.open(sealed)).toBe(text);
+      const sealed = sealer.seal(text, CTX);
+      expect(sealer.open(sealed, CTX)).toBe(text);
 
       const tampered = { ...sealed, dekTag: flipBit(sealed.dekTag) };
-      expect(() => sealer.open(tampered)).toThrow(/Failed to unseal data encryption key/);
+      expect(() => sealer.open(tampered, CTX)).toThrow(/Failed to unseal data encryption key/);
     });
 
     test("tamper: tampered dekIv fails open", () => {
-      const sealed = sealer.seal(text);
-      expect(sealer.open(sealed)).toBe(text);
+      const sealed = sealer.seal(text, CTX);
+      expect(sealer.open(sealed, CTX)).toBe(text);
 
       const tampered = { ...sealed, dekIv: flipBit(sealed.dekIv) };
-      expect(() => sealer.open(tampered)).toThrow(/Failed to unseal data encryption key/);
+      expect(() => sealer.open(tampered, CTX)).toThrow(/Failed to unseal data encryption key/);
     });
 
     test("tamper: unsealed data key with invalid length fails open", () => {
@@ -158,7 +160,7 @@ describe("HostSecretKeySealer (PT-7b1)", () => {
       const sealedShortDek = Buffer.concat([dekCipher.update(shortDek), dekCipher.final()]);
       const dekTag = dekCipher.getAuthTag();
 
-      const sealed = sealer.seal("hello");
+      const sealed = sealer.seal("hello", CTX);
       const malformedSealed: SealedKey = {
         ...sealed,
         sealedDek: sealedShortDek.toString("base64"),
@@ -166,20 +168,22 @@ describe("HostSecretKeySealer (PT-7b1)", () => {
         dekTag: dekTag.toString("base64"),
       };
 
-      expect(() => sealer.open(malformedSealed)).toThrow(/Failed to unseal data encryption key/);
+      expect(() => sealer.open(malformedSealed, CTX)).toThrow(
+        /Failed to unseal data encryption key/,
+      );
     });
   });
 
   test("unknown kekVersion fails open", () => {
     const sealer = new HostSecretKeySealer(singleKeySettings);
-    const sealed = sealer.seal("some-plaintext");
+    const sealed = sealer.seal("some-plaintext", CTX);
 
     const unknownVersionSealed: SealedKey = {
       ...sealed,
       kekVersion: "v999",
     };
 
-    expect(() => sealer.open(unknownVersionSealed)).toThrow(
+    expect(() => sealer.open(unknownVersionSealed, CTX)).toThrow(
       'Unknown key encryption version: "v999".',
     );
   });
@@ -187,7 +191,7 @@ describe("HostSecretKeySealer (PT-7b1)", () => {
   test("no error message or SealedKey field contains the plaintext or key material", () => {
     const sealer = new HostSecretKeySealer(singleKeySettings);
     const sensitive = "VERY-SENSITIVE-PLAINTEXT-NEVER-LEAK";
-    const sealed = sealer.seal(sensitive);
+    const sealed = sealer.seal(sensitive, CTX);
 
     // 1. None of the SealedKey fields contains the plaintext
     for (const [key, value] of Object.entries(sealed)) {
@@ -203,11 +207,11 @@ describe("HostSecretKeySealer (PT-7b1)", () => {
     const kekHex = v1Key.toString("hex");
 
     const errorsToTrigger: Array<() => void> = [
-      () => sealer.open({ ...sealed, ciphertext: "badct" }),
-      () => sealer.open({ ...sealed, tag: "badtag" }),
-      () => sealer.open({ ...sealed, sealedDek: "baddek" }),
-      () => sealer.open({ ...sealed, dekTag: "baddektag" }),
-      () => sealer.open({ ...sealed, kekVersion: "vUnknown" }),
+      () => sealer.open({ ...sealed, ciphertext: "badct" }, CTX),
+      () => sealer.open({ ...sealed, tag: "badtag" }, CTX),
+      () => sealer.open({ ...sealed, sealedDek: "baddek" }, CTX),
+      () => sealer.open({ ...sealed, dekTag: "baddektag" }, CTX),
+      () => sealer.open({ ...sealed, kekVersion: "vUnknown" }, CTX),
     ];
 
     for (const trigger of errorsToTrigger) {
@@ -226,14 +230,14 @@ describe("HostSecretKeySealer (PT-7b1)", () => {
   describe("construction ergonomics and guards", () => {
     test("supports construction from Record<string, Buffer>", () => {
       const sealer = new HostSecretKeySealer({ v1: v1Key }, "v1");
-      const sealed = sealer.seal("test-record");
-      expect(sealer.open(sealed)).toBe("test-record");
+      const sealed = sealer.seal("test-record", CTX);
+      expect(sealer.open(sealed, CTX)).toBe("test-record");
     });
 
     test("supports construction from Map with separate currentVersion", () => {
       const sealer = new HostSecretKeySealer(new Map([["v1", v1Key]]), "v1");
-      const sealed = sealer.seal("test-map");
-      expect(sealer.open(sealed)).toBe("test-map");
+      const sealed = sealer.seal("test-map", CTX);
+      expect(sealer.open(sealed, CTX)).toBe("test-map");
     });
 
     test("refuses when currentVersion is not in keys", () => {
@@ -251,8 +255,8 @@ describe("HostSecretKeySealer (PT-7b1)", () => {
         currentVersion: "v1",
         keys: { v1: v1Key } as unknown as ReadonlyMap<string, Buffer>,
       });
-      const sealed = sealer.seal("plain-object-in-settings");
-      expect(sealer.open(sealed)).toBe("plain-object-in-settings");
+      const sealed = sealer.seal("plain-object-in-settings", CTX);
+      expect(sealer.open(sealed, CTX)).toBe("plain-object-in-settings");
     });
 
     test("refuses when currentVersion is missing in direct construction", () => {
@@ -260,5 +264,28 @@ describe("HostSecretKeySealer (PT-7b1)", () => {
         () => new HostSecretKeySealer(new Map([["v1", v1Key]]) as unknown as KeyEncryptionSettings),
       ).toThrow("currentVersion is required");
     });
+  });
+});
+
+describe("HostSecretKeySealer binds the context it sealed for (PT-7b1)", () => {
+  const settings = { currentVersion: "v1", keys: new Map([["v1", makeKek(1)]]) };
+
+  test("a sealed key does not open for another org or provider", () => {
+    const sealer = new HostSecretKeySealer(settings);
+    const sealed = sealer.seal("sk-secret", "acme:gemini");
+    expect(sealer.open(sealed, "acme:gemini")).toBe("sk-secret");
+    expect(() => sealer.open(sealed, "local:gemini")).toThrow(
+      /Failed to unseal data encryption key/,
+    );
+    expect(() => sealer.open(sealed, "acme:openrouter")).toThrow(
+      /Failed to unseal data encryption key/,
+    );
+  });
+
+  test("an empty context is refused on seal and on open", () => {
+    const sealer = new HostSecretKeySealer(settings);
+    expect(() => sealer.seal("sk-secret", "")).toThrow(/non-empty context/);
+    const sealed = sealer.seal("sk-secret", "acme:gemini");
+    expect(() => sealer.open(sealed, "")).toThrow(/non-empty context/);
   });
 });

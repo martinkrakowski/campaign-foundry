@@ -7,6 +7,21 @@ const IV_LENGTH = 12; // 96-bit IV standard for AES-GCM
 const KEY_LENGTH = 32; // 256-bit key
 
 /**
+ * The context a key is sealed for (PT-7b2 passes `<orgId>:<provider>`), bound in as
+ * GCM additional data: a sealed key moved to another org's or provider's row no
+ * longer opens. The data key's seal also binds the KEK version, so a sealed key
+ * relabelled to another version fails too.
+ */
+function contextAad(context: string): Buffer {
+  if (context === "") throw new Error("A sealed key needs a non-empty context.");
+  return Buffer.from(context, "utf8");
+}
+
+function dekAad(kekVersion: string, aad: Buffer): Buffer {
+  return Buffer.concat([Buffer.from(`${kekVersion}\n`, "utf8"), aad]);
+}
+
+/**
  * Envelope-encrypts provider keys using a host-secret key-encryption key (KEK) (D175, D176).
  *
  * Each `seal` creates a fresh random 32-byte data encryption key (DEK) and 12-byte IV,
@@ -53,7 +68,8 @@ export class HostSecretKeySealer implements KeySealerPort {
     }
   }
 
-  seal(plaintext: string): SealedKey {
+  seal(plaintext: string, context: string): SealedKey {
+    const aad = contextAad(context);
     const currentKek = this.keys.get(this.currentVersion)!;
 
     // 1. Generate fresh 32-byte DEK and 12-byte IV for payload
@@ -62,12 +78,14 @@ export class HostSecretKeySealer implements KeySealerPort {
 
     // 2. Encrypt plaintext with DEK
     const cipher = createCipheriv(ALGORITHM, dek, iv);
+    cipher.setAAD(aad);
     const ciphertext = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
     const tag = cipher.getAuthTag();
 
     // 3. Seal DEK with current KEK using a fresh 12-byte IV
     const dekIv = randomBytes(IV_LENGTH);
     const dekCipher = createCipheriv(ALGORITHM, currentKek, dekIv);
+    dekCipher.setAAD(dekAad(this.currentVersion, aad));
     const sealedDek = Buffer.concat([dekCipher.update(dek), dekCipher.final()]);
     const dekTag = dekCipher.getAuthTag();
 
@@ -82,7 +100,8 @@ export class HostSecretKeySealer implements KeySealerPort {
     };
   }
 
-  open(sealed: SealedKey): string {
+  open(sealed: SealedKey, context: string): string {
+    const aad = contextAad(context);
     const kek = this.keys.get(sealed.kekVersion);
     if (!kek) {
       throw new Error(`Unknown key encryption version: "${sealed.kekVersion}".`);
@@ -99,6 +118,7 @@ export class HostSecretKeySealer implements KeySealerPort {
       }
 
       const dekDecipher = createDecipheriv(ALGORITHM, kek, dekIv);
+      dekDecipher.setAAD(dekAad(sealed.kekVersion, aad));
       dekDecipher.setAuthTag(dekTag);
       dek = Buffer.concat([dekDecipher.update(sealedDek), dekDecipher.final()]);
       if (dek.length !== KEY_LENGTH) {
@@ -120,6 +140,7 @@ export class HostSecretKeySealer implements KeySealerPort {
       }
 
       const decipher = createDecipheriv(ALGORITHM, dek, iv);
+      decipher.setAAD(aad);
       decipher.setAuthTag(tag);
       return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString("utf8");
     } catch {
