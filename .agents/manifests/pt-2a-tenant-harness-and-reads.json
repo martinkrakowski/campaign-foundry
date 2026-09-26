@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "PT-2a",
+  "mutations": [
+    {
+      "file": "apps/api/server/routes/campaigns/pools/[briefId].get.ts",
+      "before": "    stored = await readPool(requestTenant(event), briefId);",
+      "after": "    stored = await readPool(LOCAL_TENANT, briefId);",
+      "because": "without requestTenant(event), GET pools/:briefId uses LOCAL_TENANT and serves another org's copy pool (D166: the org is the isolation boundary).",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/__tests__/cross-tenant-reads.test.ts",
+        "-t",
+        "GET /campaigns/pools/:briefId answers 404 for another org's pool on fs"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
