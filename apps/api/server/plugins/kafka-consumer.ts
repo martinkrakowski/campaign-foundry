@@ -39,8 +39,16 @@ export function createKafkaConsumerPlugin(
       | undefined;
     if (appWithHooks?.hooks?.hook) {
       appWithHooks.hooks.hook("close", async () => {
-        await consumer.stop();
-        await closeRunDelivery();
+        // A failed consumer disconnect must not leave the delivery producer open.
+        try {
+          await consumer.stop();
+        } catch (err: unknown) {
+          logger.error(
+            `[kafka-plugin] Error stopping Kafka consumer: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        } finally {
+          await closeRunDelivery();
+        }
       });
     }
 

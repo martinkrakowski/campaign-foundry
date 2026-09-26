@@ -7,6 +7,11 @@ import defaultPlugin, {
 
 const mockConsumerStart = vi.hoisted(() => vi.fn());
 const mockConsumerStop = vi.hoisted(() => vi.fn());
+const mockCloseRunDelivery = vi.hoisted(() => vi.fn());
+
+vi.mock("../../lib/ports/run-delivery-registry.js", () => ({
+  closeRunDelivery: mockCloseRunDelivery,
+}));
 
 vi.mock("../../lib/run-consumer.js", () => ({
   RunConsumer: class {
@@ -22,6 +27,7 @@ describe("kafka-consumer Nitro plugin (PT-6b2, D174d)", () => {
   beforeEach(() => {
     mockConsumerStart.mockReset().mockResolvedValue(undefined);
     mockConsumerStop.mockReset().mockResolvedValue(undefined);
+    mockCloseRunDelivery.mockReset().mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -121,6 +127,58 @@ describe("kafka-consumer Nitro plugin (PT-6b2, D174d)", () => {
 
     await closeHook!();
     expect(customConsumer.stop).toHaveBeenCalledTimes(1);
+  });
+
+  test("a failed consumer stop still closes the delivery producer", async () => {
+    process.env.KAFKA_BROKERS = "broker1:9092";
+    process.env.KAFKA_CONSUME = "true";
+
+    const errorMock = vi.fn();
+    const customConsumer: ConsumerInstance = {
+      start: vi.fn().mockResolvedValue(undefined),
+      stop: vi.fn().mockRejectedValue(new Error("disconnect failed")),
+    };
+    const plugin = createKafkaConsumerPlugin(() => customConsumer, { error: errorMock });
+
+    let closeHook: (() => Promise<void>) | undefined;
+    const nitroApp: NitroApp = {
+      hooks: {
+        hook: vi.fn().mockImplementation((name, cb) => {
+          if (name === "close") closeHook = cb;
+        }),
+      },
+    };
+
+    await plugin(nitroApp as never);
+    await expect(closeHook!()).resolves.toBeUndefined();
+    expect(mockCloseRunDelivery).toHaveBeenCalledTimes(1);
+    expect(errorMock).toHaveBeenCalledWith(expect.stringContaining("disconnect failed"));
+  });
+
+  test("a non-Error consumer stop failure is logged as a string", async () => {
+    process.env.KAFKA_BROKERS = "broker1:9092";
+    process.env.KAFKA_CONSUME = "true";
+
+    const errorMock = vi.fn();
+    const customConsumer: ConsumerInstance = {
+      start: vi.fn().mockResolvedValue(undefined),
+      stop: vi.fn().mockRejectedValue("socket gone"),
+    };
+    const plugin = createKafkaConsumerPlugin(() => customConsumer, { error: errorMock });
+
+    let closeHook: (() => Promise<void>) | undefined;
+    const nitroApp: NitroApp = {
+      hooks: {
+        hook: vi.fn().mockImplementation((name, cb) => {
+          if (name === "close") closeHook = cb;
+        }),
+      },
+    };
+
+    await plugin(nitroApp as never);
+    await closeHook!();
+    expect(errorMock).toHaveBeenCalledWith(expect.stringContaining("socket gone"));
+    expect(mockCloseRunDelivery).toHaveBeenCalledTimes(1);
   });
 
   test("rejected start is logged and not unhandled", async () => {
