@@ -3,9 +3,9 @@
   "lane": "PT-6b2",
   "mutations": [
     {
-      "file": "apps/api/server/lib/run-consumer.ts",
-      "before": "    const started = await startQueuedJob(env, request.jobId);",
-      "after": "    const started = true; // mutant: skip startQueuedJob check",
+      "file": "apps/api/server/lib/run-request.ts",
+      "before": "  const started = await startQueuedJob(env, request.jobId);",
+      "after": "  const started = true; // mutant: skip startQueuedJob check",
       "because": "without the startQueuedJob check, a duplicate or replayed Kafka message runs a second generation pipeline for an already claimed or completed job",
       "command": [
         "yarn",

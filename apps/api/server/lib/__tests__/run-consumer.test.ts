@@ -1,4 +1,7 @@
 import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { EachMessagePayload } from "kafkajs";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { isRunRequest, RunConsumer } from "../run-consumer.js";
@@ -75,6 +78,69 @@ describe("isRunRequest validator", () => {
   test("rejects missing or invalid tenant", () => {
     expect(isRunRequest({ ...sampleRequest(), tenant: null })).toBe(false);
     expect(isRunRequest({ ...sampleRequest(), tenant: { orgId: "" } })).toBe(false);
+  });
+
+  test("rejects unsafe orgId such as path traversal or uppercase", () => {
+    expect(
+      isRunRequest({
+        ...sampleRequest(),
+        tenant: { orgId: "../x", userId: "user-1", roles: ["admin"], teamIds: [] },
+      }),
+    ).toBe(false);
+    expect(
+      isRunRequest({
+        ...sampleRequest(),
+        tenant: { orgId: "Org-Upper", userId: "user-1", roles: ["admin"], teamIds: [] },
+      }),
+    ).toBe(false);
+    expect(
+      isRunRequest({
+        ...sampleRequest(),
+        tenant: { orgId: "invalid/id", userId: "user-1", roles: ["admin"], teamIds: [] },
+      }),
+    ).toBe(false);
+  });
+
+  test("rejects unsafe userId or non-string userId", () => {
+    expect(
+      isRunRequest({
+        ...sampleRequest(),
+        tenant: { orgId: "org-1", userId: "../user", roles: ["admin"], teamIds: [] },
+      }),
+    ).toBe(false);
+    expect(
+      isRunRequest({
+        ...sampleRequest(),
+        tenant: { orgId: "org-1", userId: 123 as never, roles: ["admin"], teamIds: [] },
+      }),
+    ).toBe(false);
+  });
+
+  test("rejects non-array or non-string roles and teamIds", () => {
+    expect(
+      isRunRequest({
+        ...sampleRequest(),
+        tenant: { orgId: "org-1", userId: "user-1", roles: "admin" as never, teamIds: [] },
+      }),
+    ).toBe(false);
+    expect(
+      isRunRequest({
+        ...sampleRequest(),
+        tenant: { orgId: "org-1", userId: "user-1", roles: [123] as never, teamIds: [] },
+      }),
+    ).toBe(false);
+    expect(
+      isRunRequest({
+        ...sampleRequest(),
+        tenant: { orgId: "org-1", userId: "user-1", roles: ["admin"], teamIds: "team-1" as never },
+      }),
+    ).toBe(false);
+    expect(
+      isRunRequest({
+        ...sampleRequest(),
+        tenant: { orgId: "org-1", userId: "user-1", roles: ["admin"], teamIds: [null] as never },
+      }),
+    ).toBe(false);
   });
 
   test("rejects missing or invalid brief", () => {
@@ -188,10 +254,110 @@ describe("RunConsumer (PT-6b2, D171, D174d)", () => {
     );
   });
 
-  test("replay after completion: drops run and commits offset", async () => {
-    startQueuedJobSpy.mockResolvedValue(false);
+  test("replay after completion: drops run and commits offset using real FsJobStore", async () => {
+    startQueuedJobSpy.mockRestore();
+    runJobSpy.mockRestore();
+
+    const tmpOutput = mkdtempSync(join(tmpdir(), "cf-replay-store-"));
+    const origOutput = process.env.OUTPUT_DIR;
+    process.env.OUTPUT_DIR = tmpOutput;
+
+    try {
+      const tenant = {
+        orgId: "org-replay",
+        userId: "user-replay",
+        roles: ["admin"],
+        teamIds: [],
+      };
+      const brief = sampleBrief();
+
+      // 1. Enqueue job
+      const claim = await jobs.enqueueJob(tenant, brief.id);
+      expect(claim.acquired).toBe(true);
+      if (!claim.acquired) throw new Error("Expected job to be acquired");
+      const jobId = claim.jobId;
+
+      // 2. Start queued job
+      const started = await jobs.startQueuedJob(tenant, jobId);
+      expect(started).toBe(true);
+
+      // 3. Complete job
+      await jobs.completeJob(tenant, jobId, {
+        halted: false,
+        assets: [],
+        log: null,
+      });
+
+      const finishedJob = await jobs.getJob(tenant, jobId);
+      expect(finishedJob?.status).toBe("completed");
+
+      // 4. Replay the message via consumer
+      const commitMock = vi.fn().mockResolvedValue(undefined);
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      const consumer = new RunConsumer(settings);
+      const request: RunRequest = {
+        jobId,
+        tenant,
+        brief,
+        reroll: false,
+      };
+      const payload = {
+        topic: "cf.run-requests",
+        partition: 0,
+        message: {
+          offset: "20",
+          value: Buffer.from(JSON.stringify(request)),
+        },
+      } as unknown as EachMessagePayload;
+
+      await consumer.handleMessage(payload, commitMock);
+
+      expect(commitMock).toHaveBeenCalledWith("cf.run-requests", 0, "21");
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining(
+          `Dropping duplicate or expired run request for job "${jobId}"`,
+        ),
+      );
+    } finally {
+      await jobs.resetJobs();
+      rmSync(tmpOutput, { recursive: true, force: true });
+      if (origOutput === undefined) delete process.env.OUTPUT_DIR;
+      else process.env.OUTPUT_DIR = origOutput;
+    }
+  });
+
+  test("message with unsafe orgId: committed and startQueuedJob is not called", async () => {
     const commitMock = vi.fn().mockResolvedValue(undefined);
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const consumer = new RunConsumer(settings);
+    const request = {
+      ...sampleRequest(),
+      tenant: { orgId: "../x", userId: "user-1", roles: ["admin"], teamIds: [] },
+    };
+    const payload = {
+      topic: "cf.run-requests",
+      partition: 0,
+      message: {
+        offset: "25",
+        value: Buffer.from(JSON.stringify(request)),
+      },
+    } as unknown as EachMessagePayload;
+
+    await consumer.handleMessage(payload, commitMock);
+
+    expect(startQueuedJobSpy).not.toHaveBeenCalled();
+    expect(runJobSpy).not.toHaveBeenCalled();
+    expect(commitMock).toHaveBeenCalledWith("cf.run-requests", 0, "26");
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Dropping malformed RunRequest message"),
+    );
+  });
+
+  test("startQueuedJob that rejects (database down) is NOT committed so it is retried", async () => {
+    startQueuedJobSpy.mockRejectedValue(new Error("Database connection refused"));
+    const commitMock = vi.fn().mockResolvedValue(undefined);
 
     const consumer = new RunConsumer(settings);
     const request = sampleRequest();
@@ -199,16 +365,17 @@ describe("RunConsumer (PT-6b2, D171, D174d)", () => {
       topic: "cf.run-requests",
       partition: 0,
       message: {
-        offset: "20",
+        offset: "28",
         value: Buffer.from(JSON.stringify(request)),
       },
     } as unknown as EachMessagePayload;
 
-    await consumer.handleMessage(payload, commitMock);
+    await expect(consumer.handleMessage(payload, commitMock)).rejects.toThrow(
+      "Database connection refused",
+    );
 
-    expect(runJobSpy).not.toHaveBeenCalled();
-    expect(commitMock).toHaveBeenCalledWith("cf.run-requests", 0, "21");
-    expect(warnSpy).toHaveBeenCalled();
+    expect(startQueuedJobSpy).toHaveBeenCalledTimes(1);
+    expect(commitMock).not.toHaveBeenCalled();
   });
 
   test("malformed message with empty value: logs and commits offset without starting job", async () => {
@@ -288,7 +455,7 @@ describe("RunConsumer (PT-6b2, D171, D174d)", () => {
     expect(mockConsumerConnect).toHaveBeenCalledTimes(1);
     expect(mockConsumerSubscribe).toHaveBeenCalledWith({
       topic: "cf.run-requests",
-      fromBeginning: false,
+      fromBeginning: true,
     });
     expect(mockConsumerRun).toHaveBeenCalledWith(
       expect.objectContaining({

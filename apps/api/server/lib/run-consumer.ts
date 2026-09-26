@@ -1,8 +1,7 @@
 import { Kafka, type Consumer, type EachMessagePayload } from "kafkajs";
+import { SAFE_ID_PATTERN } from "@campaignfoundry/CampaignOrchestration";
 import { kafkaSettings, type KafkaSettings } from "./config.js";
-import { runJob, startQueuedJob } from "./jobs.js";
-import { executeRunRequest, type RunRequest } from "./run-request.js";
-import { runEnvironment } from "./run-environment.js";
+import { startOrDrop, type RunRequest } from "./run-request.js";
 
 /** Validates whether an unknown parsed payload matches the RunRequest interface. */
 export function isRunRequest(value: unknown): value is RunRequest {
@@ -13,7 +12,13 @@ export function isRunRequest(value: unknown): value is RunRequest {
     typeof req.tenant !== "object" ||
     req.tenant === null ||
     typeof req.tenant.orgId !== "string" ||
-    req.tenant.orgId.trim() === ""
+    !SAFE_ID_PATTERN.test(req.tenant.orgId) ||
+    typeof req.tenant.userId !== "string" ||
+    !SAFE_ID_PATTERN.test(req.tenant.userId) ||
+    !Array.isArray(req.tenant.roles) ||
+    !req.tenant.roles.every((r) => typeof r === "string") ||
+    !Array.isArray(req.tenant.teamIds) ||
+    !req.tenant.teamIds.every((t) => typeof t === "string")
   ) {
     return false;
   }
@@ -74,7 +79,7 @@ export class RunConsumer {
   async start(): Promise<void> {
     if (this.running) return;
     await this.consumer.connect();
-    await this.consumer.subscribe({ topic: this.topic, fromBeginning: false });
+    await this.consumer.subscribe({ topic: this.topic, fromBeginning: true });
     this.running = true;
     await this.consumer.run({
       autoCommit: false,
@@ -121,15 +126,7 @@ export class RunConsumer {
     }
 
     const request = parsed;
-    const env = runEnvironment(request.tenant);
-    const started = await startQueuedJob(env, request.jobId);
-    if (!started) {
-      console.warn(
-        `[run-consumer] Dropping duplicate or expired run request for job "${request.jobId}"`,
-      );
-    } else {
-      runJob(env, request.jobId, (signal) => executeRunRequest(request, signal));
-    }
+    await startOrDrop(request);
     await commitOffset();
   }
 
