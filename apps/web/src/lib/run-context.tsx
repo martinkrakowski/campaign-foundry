@@ -912,20 +912,10 @@ export function RunProvider({ children }: { children: ReactNode }) {
         /* F6: could-not-ask is not absence — restore nothing, claim nothing. */
       })
       .finally(() => {
-        if (
-          !restored ||
-          !active ||
-          briefDecidedRef.current ||
-          briefIdRef.current !== startBrief.id
-        )
+        if (!restored || !active || briefDecidedRef.current || briefIdRef.current !== startBrief.id)
           return;
         void fetchRunningJob(startBrief.id).then((jobId) => {
-          if (
-            !active ||
-            briefDecidedRef.current ||
-            briefIdRef.current !== startBrief.id ||
-            !jobId
-          )
+          if (!active || briefDecidedRef.current || briefIdRef.current !== startBrief.id || !jobId)
             return;
           void adoptJob(startBrief, jobId);
         });
