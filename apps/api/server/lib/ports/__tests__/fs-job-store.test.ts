@@ -518,6 +518,49 @@ describe("FsJobStore", () => {
     expect(await store.startQueuedJob("00000000-0000-0000-0000-000000000000")).toBe(false);
   });
 
+  test("startQueuedJob still starts a queued row that was never registered with a queued-expiry timer", async () => {
+    // A row can be "queued" in storage with no live timer for it — a fresh
+    // FsJobStore over the same directory after a process restart, or (as
+    // here) any write that did not go through enqueueJob. startQueuedJob must
+    // not assume the bookkeeping map always has an entry to clear.
+    const id = "cold-queued-id";
+    const entry: StoredJob = {
+      id,
+      campaignId: "camp",
+      job: { status: "queued", done: 0, total: 0, log: null },
+      createdAt: Date.now(),
+      seq: 0,
+    };
+    writeFileSync(store.jobPath(id), JSON.stringify(entry), "utf8");
+
+    expect(await store.startQueuedJob(id)).toBe(true);
+    expect((await store.getJob(id))?.status).toBe("running");
+  });
+
+  test("a reused queued id clears the earlier queued-expiry timer", async () => {
+    vi.useFakeTimers();
+    try {
+      const first = await store.enqueueJob("camp-a", "reused-queued");
+      expect(first.acquired).toBe(true);
+
+      // Same custom id, a different campaign: the incumbent check is per
+      // campaignId, so this succeeds while "reused-queued" is still queued
+      // for camp-a, overwrites its entry and re-registers its queued-expiry
+      // timer — the earlier timer must be cleared first, the same rule
+      // `expireLater` already follows for a settled row's retention timer.
+      const second = await store.enqueueJob("camp-b", "reused-queued");
+      expect(second.acquired).toBe(true);
+
+      await vi.advanceTimersByTimeAsync(QUEUED_TTL_MS + 1);
+
+      const stored = await store.getStoredJob("reused-queued");
+      expect(stored?.campaignId).toBe("camp-b");
+      expect(stored?.job.status).toBe("failed");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   test("queued job expires and is marked failed after QUEUED_TTL_MS", async () => {
     vi.useFakeTimers();
     try {
