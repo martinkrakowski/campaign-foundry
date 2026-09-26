@@ -1,6 +1,6 @@
 import { setResponseHeader } from "h3";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
-import { acquireJob, enqueueJob } from "../../lib/jobs.js";
+import { enqueueJob } from "../../lib/jobs.js";
 import { JobCapacityError } from "../../lib/ports/fs-job-store.js";
 import { getRunDelivery, getUsageStore } from "../../lib/ports/index.js";
 import { parseBrief, parseRegenerateOnly } from "../../lib/load-brief.js";
@@ -75,7 +75,7 @@ export default defineEventHandler(async (event) => {
   // folds nothing in, so it writes unconditionally.
   //
   // The revision is read before the job is claimed, not inside `runJob` and not after
-  // `acquireJob`: `reportRevision` rethrows everything that is not ENOENT (a report
+  // `enqueueJob`: `reportRevision` rethrows everything that is not ENOENT (a report
   // nobody can read is not "nothing stored"), and once the job is persisted that
   // rejection leaves it recorded and "running" — a claim no later request for this
   // campaign could ever clear. Read first, the same failure is a 500 and leaves
@@ -85,7 +85,7 @@ export default defineEventHandler(async (event) => {
   // passes, so an absent report has to be its own value or a run that started with none
   // would overwrite one that appeared while it was running.
   // The run's environment is resolved first, before the revision read and the
-  // claim: once `acquireJob` persists a running job, a throw here (an unreadable
+  // claim: once `enqueueJob` persists a queued job, a throw here (an unreadable
   // .env) would leave that claim recorded with nothing to settle it. It is also
   // what the run carries everywhere (D167): the revision read, the claim, the
   // job's updates and the report write all use its captured roots, so they land
@@ -138,10 +138,7 @@ export default defineEventHandler(async (event) => {
   // else's running campaign to make room.
   let claim: Awaited<ReturnType<typeof enqueueJob>>;
   try {
-    claim =
-      (acquireJob as { mock?: unknown }).mock !== undefined
-        ? await acquireJob(env, brief.id)
-        : await enqueueJob(env, brief.id);
+    claim = await enqueueJob(env, brief.id);
   } catch (error) {
     if (error instanceof JobCapacityError) {
       setResponseStatus(event, 503);
