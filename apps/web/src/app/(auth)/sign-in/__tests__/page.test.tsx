@@ -1,5 +1,5 @@
 import { describe, test, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import SignInPage from "../page";
 import * as briefsApi from "@/lib/briefs-api";
@@ -113,17 +113,30 @@ describe("SignInPage", () => {
   });
 
   test("hides 'Continue with Google' button when auth.google is false", async () => {
-    vi.spyOn(briefsApi, "getCapabilities").mockResolvedValue({
-      motion: true,
-      auth: { mode: "better-auth", google: false },
-    });
+    // A deferred promise, resolved only once the assertion below has run: the button
+    // is ALSO absent before capabilities resolve (nothing has said auth.google yet),
+    // so asserting absence too early is vacuous — it would pass just as readily under
+    // a mutant that drops the `.google` check entirely (`capabilities?.auth ?`), since
+    // that mutant only diverges from the real code once `capabilities` is non-null.
+    // Wait the resolution out, THEN assert the button stays gone.
+    let resolveCaps!: (caps: briefsApi.HostCapabilities) => void;
+    vi.spyOn(briefsApi, "getCapabilities").mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveCaps = resolve;
+        }),
+    );
 
     render(<SignInPage />);
 
-    // Wait for capabilities to resolve
-    await waitFor(() => {
-      expect(screen.queryByRole("button", { name: /Continue with Google/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Continue with Google/i })).toBeNull();
+
+    await act(async () => {
+      resolveCaps({ motion: true, auth: { mode: "better-auth", google: false } });
+      await Promise.resolve();
     });
+
+    expect(screen.queryByRole("button", { name: /Continue with Google/i })).toBeNull();
   });
 
   test("handles Google sign-in failure with error display", async () => {
@@ -207,7 +220,12 @@ describe("SignInPage", () => {
   });
 
   test("does not set capabilities if unmounted before promise resolves", async () => {
-    let resolveCaps: (caps: briefsApi.HostCapabilities) => void;
+    // React 18 silently drops a setState call on an unmounted component — there is no
+    // "component is unmounted" warning to catch, so the honest maximum assertion here
+    // is that resolving late causes no React `act` warning (which DOES fire for a state
+    // update React can't attribute to a render) and no unhandled rejection.
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    let resolveCaps!: (caps: briefsApi.HostCapabilities) => void;
     vi.spyOn(briefsApi, "getCapabilities").mockImplementation(
       () =>
         new Promise((resolve) => {
@@ -217,6 +235,12 @@ describe("SignInPage", () => {
 
     const { unmount } = render(<SignInPage />);
     unmount();
-    resolveCaps!({ motion: true, auth: { mode: "better-auth", google: true } });
+    await act(async () => {
+      resolveCaps({ motion: true, auth: { mode: "better-auth", google: true } });
+      await Promise.resolve();
+    });
+
+    expect(consoleError).not.toHaveBeenCalled();
+    consoleError.mockRestore();
   });
 });

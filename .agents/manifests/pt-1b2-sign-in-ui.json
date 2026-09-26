@@ -5,8 +5,8 @@
     {
       "file": "apps/web/src/app/(auth)/sign-in/page.tsx",
       "before": "        {capabilities?.auth?.google ? (",
-      "after": "        {true ? ( /* mutant: show google button regardless of auth.google */",
-      "because": "without checking auth.google, the Google sign-in button is displayed even when the host capability auth.google is false",
+      "after": "        {capabilities?.auth ? ( /* mutant: drop the .google check, gate on auth alone */",
+      "because": "without checking auth.google specifically, the Google sign-in button is displayed as soon as any auth capability object is present, even when auth.google is false",
       "command": [
         "yarn",
         "vitest",
