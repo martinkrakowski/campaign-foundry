@@ -6355,3 +6355,49 @@ and source formatting, recorded here rather than fixed.
   UI), PT-2, and the soft-quota reservation. Open follow-ups: the `$TMPDIR` test-dir leak; `pools.test.ts`
   shares `PROJECT_ROOT` across tests through `process.env`, so a late request can still cross tests;
   client-side awareness of a server-side job.
+
+## 2026-09-26 — wave platform-and-tenancy-w02 (PT-6a2, PT-7a2, PT-1b1, FU-encode-tmpdir-leak)
+
+- **Owner decisions first (2026-09-25):**
+  - D168, D169 and D171 stamped, and kafkajs chosen for PT-6b. PT-4, PT-5 and PT-6b stay out until the owner
+    unblocks them (B2 credentials are coming).
+  - PT-2's four questions: a campaign with no team is org-wide, and owner and admin roles bypass teams; platform
+    admin and `audit_event` are deferred; an unknown campaign gets a 404, and body routes need a stored brief;
+    teams are Postgres-only. Recorded in plan §4.3.
+- **Seat:** agy `gemini-3.8-flash-high` for all four lanes and both fix rounds (owner's instruction). Every round was
+  verified by commits since a recorded tip. All four lanes opened a PR on the first dispatch.
+- **Merged:**
+  - [#593](https://github.com/martinkrakowski/campaign-foundry/pull/593) (`d024f150`) FU-encode-tmpdir-leak. The
+    lane could not reproduce the leak (0 → 0) and went ahead anyway, against its brief. After this wave's full runs,
+    `$TMPDIR` holds 0 `cf-*` dirs, where 2,867 had accumulated before.
+  - [#592](https://github.com/martinkrakowski/campaign-foundry/pull/592) (`cfbd309d`) PT-1b1: capabilities carry
+    `auth: { mode, google }`, and `memberTenant` honours the session's active org only among the user's own
+    memberships. The orchestrator added a test pinning that another user's existing org cannot be made active.
+  - [#594](https://github.com/martinkrakowski/campaign-foundry/pull/594) (`b569d087`) PT-6a2 run fence.
+    - The in-house review found the new fs tests wrote to the repo's real `output/` and left a running job, which
+      failed `jobs.test.ts` 3 of 3 when run together. It also found that the pg fence's campaign and org conditions
+      were untested. The agy fix round closed both, adding a second mutation.
+    - Qodo then found two real defects, fixed by the orchestrator with a test each: a deadline `failJob` could land
+      between the fs fence check and the write (now under `withJobLock`: the test passes 3/3 with the lock and fails
+      3/3 without it), and a reused custom job id could be deleted by the earlier entry's timer (the guard that the
+      fix round had removed "for coverage" is back, with the test that covers it).
+    - Qodo's "the pg lease can expire mid-transaction" was refuted: `for share` blocks the reaper and settle updates
+      until commit.
+  - [#591](https://github.com/martinkrakowski/campaign-foundry/pull/591) (`b86cc0f5`) PT-7a2 quota reservation
+    (0009).
+    - CI caught the lane's race test using an org id that 0008's check refuses (the local gate skips it without
+      `TEST_DATABASE_URL`).
+    - The in-house review found that `settle` could silently drop a usage record, that `release` could delete a
+      billed row, and that nested metered fallbacks aborted the run at quota − 1. The agy fix round added a
+      reservation hand-off through `AsyncLocalStorage`, verified path by path.
+    - Bots: a `usage_recorded_complete` check was added; "extra `now` parameter" and "a call outliving the TTL"
+      were refuted (optional parameter; runs end at `RUN_DEADLINE_MS`, 10 minutes).
+- **Lessons:**
+  - **A lane's self-reported gate is not evidence.** PT-7a2's final message narrated background runs it never
+    watched; CI and the reviewer found what it missed.
+  - **A seat will remove a guard to reach 100% coverage.** The right answer to an uncovered branch is the test that
+    covers it, not the deletion. Say so in fix briefs.
+  - **Reviewers running tests in a lane worktree can leave `output/` behind.** Clear it before the next gate.
+- **Follow-ups:** an empty `output/jobs` directory is still created by some test during `test:cov` (no files);
+  PT-2a–c, PT-1b2 and FU-server-job-awareness are in plan §4.3; the main checkout needs `yarn install` (it predates
+  `pg`), and its `.env.local` points `STORE_BACKEND=postgres` at Aiven, so tests run only in worktrees.
