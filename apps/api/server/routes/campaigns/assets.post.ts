@@ -24,6 +24,7 @@ import { requestTenant } from "../../lib/tenant.js";
  * 2 MiB (checked before decode and again after), 409 if the file already exists.
  */
 export default defineEventHandler(async (event) => {
+  const scope = requestTenant(event);
   let briefId: string;
   let name: string;
   let bytes: Buffer;
@@ -73,14 +74,14 @@ export default defineEventHandler(async (event) => {
   }
 
   try {
-    const result = await getAssetStore(requestTenant(event)).writeAsset(briefId, name, bytes);
+    const result = await getAssetStore(scope).writeAsset(briefId, name, bytes);
     setResponseStatus(event, 201);
     return { path: result.path };
   } catch (error) {
     if (isExistsError(error)) {
       setResponseStatus(event, 409);
       return {
-        error: `Asset "${getAssetStore(requestTenant(event)).assetRelPath(briefId, name)}" already exists.`,
+        error: `Asset "${getAssetStore(scope).assetRelPath(briefId, name)}" already exists.`,
       };
     }
     throw error;

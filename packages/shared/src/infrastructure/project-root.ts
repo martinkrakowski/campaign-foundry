@@ -30,3 +30,8 @@ export function projectRoot(): string {
     dir = parent;
   }
 }
+
+/** Drop the cached project root so subsequent calls re-resolve (e.g. across test environments). */
+export function resetProjectRoot(): void {
+  cached = undefined;
+}
