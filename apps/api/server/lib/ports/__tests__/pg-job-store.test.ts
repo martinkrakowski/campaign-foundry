@@ -8,12 +8,7 @@ import { LOCAL_TENANT, type TenantContext } from "../../tenant.js";
 import { getJobStore, resetJobStore } from "../index.js";
 import { FsJobStore, JOB_TTL_MS, JobCapacityError, MAX_JOBS } from "../fs-job-store.js";
 import { QUEUED_TTL_MS, type JobResult } from "../job-store.port.js";
-import {
-  HEARTBEAT_INTERVAL_MS,
-  JobLeaseLostError,
-  LEASE_MS,
-  PgJobStore,
-} from "../pg-job-store.js";
+import { HEARTBEAT_INTERVAL_MS, JobLeaseLostError, LEASE_MS, PgJobStore } from "../pg-job-store.js";
 
 const acme: TenantContext = { ...LOCAL_TENANT, orgId: "acme", userId: "u1" };
 
