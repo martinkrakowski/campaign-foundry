@@ -315,9 +315,7 @@ describe("RunConsumer (PT-6b2, D171, D174d)", () => {
 
       expect(commitMock).toHaveBeenCalledWith("cf.run-requests", 0, "21");
       expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining(
-          `Dropping duplicate or expired run request for job "${jobId}"`,
-        ),
+        expect.stringContaining(`Dropping duplicate or expired run request for job "${jobId}"`),
       );
     } finally {
       await jobs.resetJobs();

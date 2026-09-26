@@ -203,10 +203,7 @@ function looksLikePath(value: string): boolean {
     return false;
   }
   return (
-    value.includes("/") ||
-    value.includes("\\") ||
-    /\.[a-z0-9]+$/i.test(value) ||
-    value === "certs"
+    value.includes("/") || value.includes("\\") || /\.[a-z0-9]+$/i.test(value) || value === "certs"
   );
 }
 

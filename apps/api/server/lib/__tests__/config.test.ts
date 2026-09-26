@@ -416,9 +416,7 @@ describe("kafkaSettings (PT-6b2, D174d)", () => {
     if (suiteSentinelPath) {
       try {
         expect(existsSync(suiteSentinelPath)).toBe(true);
-        expect(readFileSync(suiteSentinelPath, "utf8")).toBe(
-          "OPERATOR-CA-SENTINEL-SURVIVES",
-        );
+        expect(readFileSync(suiteSentinelPath, "utf8")).toBe("OPERATOR-CA-SENTINEL-SURVIVES");
       } finally {
         if (existsSync(suiteSentinelPath)) {
           unlinkSync(suiteSentinelPath);
@@ -591,9 +589,7 @@ describe("kafkaSettings (PT-6b2, D174d)", () => {
 
       // Sentinel file was not removed
       expect(existsSync(sentinelPath)).toBe(true);
-      expect(readFileSync(sentinelPath, "utf8")).toBe(
-        "AIVEN-DATABASE-CA-DO-NOT-DELETE",
-      );
+      expect(readFileSync(sentinelPath, "utf8")).toBe("AIVEN-DATABASE-CA-DO-NOT-DELETE");
     } finally {
       if (existsSync(sentinelPath)) {
         unlinkSync(sentinelPath);

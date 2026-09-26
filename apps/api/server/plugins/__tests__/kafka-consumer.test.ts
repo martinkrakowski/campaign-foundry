@@ -200,13 +200,9 @@ describe("kafka-consumer Nitro plugin (PT-6b2, D174d)", () => {
   test("kafkaSettings non-Error throw is logged and does not throw", async () => {
     const errorMock = vi.fn();
     const logger = { error: errorMock };
-    const plugin = createKafkaConsumerPlugin(
-      undefined,
-      logger,
-      () => {
-        throw "string settings error";
-      },
-    );
+    const plugin = createKafkaConsumerPlugin(undefined, logger, () => {
+      throw "string settings error";
+    });
 
     plugin({} as never);
 

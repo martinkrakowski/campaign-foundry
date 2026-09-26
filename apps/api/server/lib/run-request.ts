@@ -141,4 +141,3 @@ export async function startOrDrop(request: RunRequest): Promise<boolean> {
   runJob(env, request.jobId, (signal) => self.executeRunRequest(request, signal));
   return true;
 }
-

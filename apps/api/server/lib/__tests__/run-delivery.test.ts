@@ -12,6 +12,7 @@ import {
   setRunDelivery,
   resetRunDelivery,
 } from "../ports/run-delivery-registry.js";
+import type { RunDeliveryPort } from "../ports/run-delivery.port.js";
 import { executeRunRequest, startOrDrop, type RunRequest } from "../run-request.js";
 import { readReport } from "../report.js";
 import jobHandler from "../../routes/campaigns/jobs/[id].get.js";

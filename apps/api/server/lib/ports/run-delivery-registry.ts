@@ -43,13 +43,21 @@ export const setRunDelivery = (delivery: RunDeliveryPort): void => {
 };
 
 export const closeRunDelivery = async (): Promise<void> => {
-  if (instance && "disconnect" in instance && typeof (instance as KafkaRunDelivery).disconnect === "function") {
+  if (
+    instance &&
+    "disconnect" in instance &&
+    typeof (instance as KafkaRunDelivery).disconnect === "function"
+  ) {
     await (instance as KafkaRunDelivery).disconnect();
   }
 };
 
 export const resetRunDelivery = (): void => {
-  if (instance && "disconnect" in instance && typeof (instance as KafkaRunDelivery).disconnect === "function") {
+  if (
+    instance &&
+    "disconnect" in instance &&
+    typeof (instance as KafkaRunDelivery).disconnect === "function"
+  ) {
     void (instance as KafkaRunDelivery).disconnect().catch(() => {});
   }
   override = undefined;
