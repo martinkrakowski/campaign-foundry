@@ -6401,3 +6401,35 @@ and source formatting, recorded here rather than fixed.
 - **Follow-ups:** an empty `output/jobs` directory is still created by some test during `test:cov` (no files);
   PT-2a–c, PT-1b2 and FU-server-job-awareness are in plan §4.3; the main checkout needs `yarn install` (it predates
   `pg`), and its `.env.local` points `STORE_BACKEND=postgres` at Aiven, so tests run only in worktrees.
+
+## 2026-09-26 — PT-1b2-sign-in-ui: PR #597 review-thread sweep
+
+- **Scope:** swept all 18 unresolved bot threads on #597 (github-actions, qodo-code-review, coderabbitai). Fixed,
+  with a test each: the Google sign-in loading flag stuck on a resolved (non-throwing) `signIn.social` error or even
+  a plain success (`48e07e4a`); `handleSwitchOrg`/`handleSignOut` reloading/redirecting past a resolved `{ error }`
+  from `authClient.organization.setActive`/`signOut` (`47f2911b`). Confirmed already fixed by earlier commits
+  (`642f53a0`, `6dbce2b3b`/`28d784eb`), cited by sha. Refuted with a mechanism: `fetchPersistedRun`'s generic
+  fallback text is pinned by a named D83/F6 test; a mount-catch "surface all errors" suggestion contradicted the F6
+  "could-not-ask is not absence" contract at that exact line; four message-catalog (DESIGN.md §6.1) findings were
+  real but out of this lane's enumerated scope (no gate fails on them, and Header already carries tracked,
+  unmigrated debt from earlier lanes) — filed as a follow-up rather than a 40-file sweep diff; two "unmount test
+  checks nothing" findings were right that React 18 gives no observable to assert past what's already pinned, asked
+  for a concrete differentiating input; a hard-coded `/grid` redirect is a valid enhancement but opens an
+  open-redirect surface needing its own reviewed lane.
+- **Second round — three new `greptile-apps` threads appeared after the push above** (not in the original sweep,
+  flagged to the orchestrator rather than silently absorbed): two were real and in PT-1b2's scope, fixed with a
+  test each. `membershipError` was captured by run-context but never rendered anywhere — item 5's "403 shows a
+  no-organisation state" was unmet; added `MembershipNotice` to `(shell)/layout.tsx`, above every route rather than
+  folded into `CommandBar`'s grid-only status line (`eb577216`). The org switch and sign-out handlers bypassed the
+  unsaved-edits guard (`useGuardedNavigation`/`guardedAction`) the route tabs already use; both now queue the whole
+  gesture — API call included — behind the same shared confirm dialog while dirty (`0ef354d8`).
+- **Third — deferred, not fixed:** `.agents/tech-stack.md` does not yet list `better-auth` under `apps/web` (added
+  in PT-1b1/PT-1b2). Per AGENTS.md, `.agents/*.md` is owner-edit-only outside `session-log.md`; replied to the
+  thread that this is deferred to the owner and recorded here rather than editing the spec file.
+- **Gate:** `yarn lint && yarn typecheck && yarn format:check`, `yarn test:cov --maxWorkers=4` (100%
+  stmts/branches/funcs/lines both rounds), `MANIFEST_DIFF_BASE=origin/main sh scripts/verify-manifests.sh` — green
+  both rounds, under the wave gate lock, released immediately after each. PR #596 (fix/server-job-awareness,
+  reorders run-context.tsx's restore path) was checked before the final gate and was still open — no merge was
+  needed; whoever merges #596 into this branch next should keep both #596's adoption-ordering/guards and this
+  lane's 401/403 handling + `membershipError` in run-context.tsx.
+- **Not merged** — PR #597 review only.
