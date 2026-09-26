@@ -118,7 +118,7 @@ export default defineEventHandler(async (event) => {
       const chunks: Buffer[] = [];
       const stream = lookup.file.stream();
       for await (const chunk of stream) {
-        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+        chunks.push(Buffer.from(chunk));
       }
       return Buffer.concat(chunks);
     },

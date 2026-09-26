@@ -273,6 +273,24 @@ describe("copy pool routes", () => {
     expect(existsSync(join(dir, "briefs", "missing"))).toBe(false);
   });
 
+  test("POST surfaces an unexpected error during brief ownership check with 500", async () => {
+    copyGeneratorMock.mockReturnValue(fakeGenerator(["Hi"]));
+    const { generate } = await api();
+    const { getBriefStore } = await import("../../../../lib/ports/index.js");
+    const { LOCAL_TENANT } = await import("../../../../lib/tenant.js");
+    const spy = vi
+      .spyOn(getBriefStore(LOCAL_TENANT), "findBriefById")
+      .mockRejectedValueOnce(new Error("disk failure"));
+    try {
+      const res = await generate()(
+        jsonReq("http://x/campaigns/pools/copy", "POST", { briefId: "camp" }),
+      );
+      expect(res.status).toBe(500);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   test("POST returns 503 when OPENROUTER_API_KEY is missing", async () => {
     const { generate } = await api();
     const res = await generate()(
