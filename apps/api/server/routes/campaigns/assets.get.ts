@@ -33,8 +33,6 @@ export default defineEventHandler(async (event) => {
     return { error: errorMessage(error) };
   }
 
-  await assertOwnedCampaign(scope, briefId);
-
   const rawName = getQuery(event).name;
   const name = Array.isArray(rawName) ? rawName[0] : rawName;
 
@@ -53,6 +51,8 @@ export default defineEventHandler(async (event) => {
     setHeader(event, "content-length", bytes.length);
     return bytes;
   }
+
+  await assertOwnedCampaign(scope, briefId);
 
   try {
     const assets = await getAssetStore(scope).listAssets(briefId);
