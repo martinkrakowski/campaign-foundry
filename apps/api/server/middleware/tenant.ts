@@ -38,7 +38,11 @@ export default defineEventHandler(async (event) => {
     return { error: "Sign in required.", code: "unauthenticated" };
   }
 
-  const tenant = await memberTenant(database(), session.user.id);
+  const tenant = await memberTenant(
+    database(),
+    session.user.id,
+    session.session?.activeOrganizationId,
+  );
   if (!tenant) {
     setResponseStatus(event, 403);
     return { error: "This account belongs to no organisation.", code: "no_membership" };

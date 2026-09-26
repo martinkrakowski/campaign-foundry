@@ -12,13 +12,17 @@ import type { TenantContext } from "../tenant.js";
 export async function memberTenant(
   db: SqlClient,
   userId: string,
+  activeOrganizationId?: string | null,
 ): Promise<TenantContext | undefined> {
   const members = await db.query<{ org_id: string; role: string }>(
     "select org_id, role from member where user_id = $1 order by org_id",
     [userId],
   );
-  const member = members.rows[0];
-  if (!member) return undefined;
+  if (members.rows.length === 0) return undefined;
+  const member =
+    (activeOrganizationId
+      ? members.rows.find((m) => m.org_id === activeOrganizationId)
+      : undefined) ?? members.rows[0]!;
   const teams = await db.query<{ team_id: string }>(
     `select tm.team_id from team_member tm
        join team t on t.id = tm.team_id
