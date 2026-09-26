@@ -9,6 +9,7 @@ import {
 import { ADVERTISING_UNITS } from "@campaignfoundry/CampaignOrchestration/advertising-units";
 import { CREATIVE_TYPES } from "@campaignfoundry/CampaignOrchestration/creative-types";
 import { LAYER_KINDS } from "@campaignfoundry/CampaignOrchestration/layer-kinds";
+import { handleAuthError } from "./auth-errors";
 
 /**
  * The web client for the creative template library (TM1, D123).
@@ -85,6 +86,7 @@ async function requestJson(url: string): Promise<unknown> {
     throw new TemplatesApiError("Network error", res.status);
   }
   if (!res.ok) {
+    handleAuthError(res.status, data);
     throw new TemplatesApiError(errorFrom(data, `Request failed (HTTP ${res.status})`), res.status);
   }
   return data;

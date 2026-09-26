@@ -1,4 +1,4 @@
-import { describe, test, expect, vi } from "vitest";
+import { describe, test, expect, vi, afterEach } from "vitest";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { DEFAULT_CAMPAIGN_TYPE } from "@campaignfoundry/CampaignOrchestration/campaign-types";
 import { templateFromCanonical } from "@campaignfoundry/CampaignOrchestration/brief-template";
@@ -733,6 +733,13 @@ describe("getCapabilities carries every field the UI renders", () => {
 });
 
 describe("briefs-api 401 and 403 handling", () => {
+  // These tests stub `window` wholesale to capture a redirect without a real
+  // navigation — undo it after each, or a later test that reads `window.location`
+  // for real (elsewhere in this file) inherits the previous test's stub.
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   test("a 401 unauthenticated routes to /sign-in", async () => {
     const assign = vi.fn();
     vi.stubGlobal("window", { ...window, location: { ...window.location, assign } });
@@ -764,6 +771,72 @@ describe("briefs-api 401 and 403 handling", () => {
     await expect(listBriefs()).rejects.toMatchObject({
       code: "no_membership",
       status: 403,
+    });
+  });
+
+  // PT-1b2 item 2: every pipeline call site handles a 401/403 the same way, not just
+  // `requestJson` (exercised above through `listBriefs`) — one test per remaining site.
+  test("listAssets redirects on 401 and surfaces the typed membership error on 403", async () => {
+    const assign = vi.fn();
+    vi.stubGlobal("window", { ...window, location: { ...window.location, assign } });
+    mockFetch(() => json({ error: "Sign in required.", code: "unauthenticated" }, 401));
+    await expect(listAssets("camp")).rejects.toThrow();
+    expect(assign).toHaveBeenCalledWith("/sign-in");
+
+    mockFetch(() =>
+      json({ error: "This account belongs to no organisation.", code: "no_membership" }, 403),
+    );
+    await expect(listAssets("camp")).rejects.toMatchObject({ code: "no_membership", status: 403 });
+  });
+
+  test("listPackages redirects on 401 and surfaces the typed membership error on 403", async () => {
+    const assign = vi.fn();
+    vi.stubGlobal("window", { ...window, location: { ...window.location, assign } });
+    mockFetch(() => json({ error: "Sign in required.", code: "unauthenticated" }, 401));
+    await expect(listPackages("camp")).rejects.toThrow();
+    expect(assign).toHaveBeenCalledWith("/sign-in");
+
+    mockFetch(() =>
+      json({ error: "This account belongs to no organisation.", code: "no_membership" }, 403),
+    );
+    await expect(listPackages("camp")).rejects.toMatchObject({
+      code: "no_membership",
+      status: 403,
+    });
+  });
+
+  test("getPool redirects on 401 and surfaces the typed membership error on 403", async () => {
+    const assign = vi.fn();
+    vi.stubGlobal("window", { ...window, location: { ...window.location, assign } });
+    mockFetch(() => json({ error: "Sign in required.", code: "unauthenticated" }, 401));
+    await expect(getPool("camp")).rejects.toThrow();
+    expect(assign).toHaveBeenCalledWith("/sign-in");
+
+    mockFetch(() =>
+      json({ error: "This account belongs to no organisation.", code: "no_membership" }, 403),
+    );
+    await expect(getPool("camp")).rejects.toMatchObject({ code: "no_membership", status: 403 });
+  });
+
+  // `planCampaign`'s own doc comment promises it never throws a wizard-breaking
+  // error — its callers (`CommandBar`, `useVariationPlan`) degrade on the resolved
+  // `PlanResult`, and `CommandBar` in particular has no `.catch` on the promise it
+  // builds around this call, so a throw here would be an unhandled rejection. A 401
+  // must still redirect, and a 403 must still read as something other than "this
+  // brief's variation plan is infeasible" — both without ever rejecting.
+  test("planCampaign redirects on 401 and resolves infeasible with the membership message on 403, never throwing", async () => {
+    const assign = vi.fn();
+    vi.stubGlobal("window", { ...window, location: { ...window.location, assign } });
+    mockFetch(() => json({ error: "Sign in required.", code: "unauthenticated" }, 401));
+    await expect(planCampaign(brief)).resolves.toMatchObject({ kind: "infeasible" });
+    expect(assign).toHaveBeenCalledWith("/sign-in");
+
+    mockFetch(() =>
+      json({ error: "This account belongs to no organisation.", code: "no_membership" }, 403),
+    );
+    await expect(planCampaign(brief)).resolves.toEqual({
+      kind: "infeasible",
+      error: "This account belongs to no organisation.",
     });
   });
 });

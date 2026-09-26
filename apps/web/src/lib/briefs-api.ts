@@ -3,6 +3,7 @@ import type {
   CopyPool,
   CopyPoolEntryStatus,
 } from "@campaignfoundry/CampaignOrchestration";
+import { handleAuthError, isNoMembershipError } from "./auth-errors";
 
 export type {
   CopyPool,
@@ -233,13 +234,7 @@ async function requestJson(url: string, init?: RequestInit): Promise<unknown> {
         ? (data as { code: string }).code
         : undefined;
 
-    if (res.status === 401 && (code === "unauthenticated" || code === undefined)) {
-      if (typeof window.location.assign === "function") {
-        window.location.assign("/sign-in");
-      } else {
-        window.location.href = "/sign-in";
-      }
-    }
+    handleAuthError(res.status, data);
 
     throw new BriefsApiError(
       errorFrom(data, `Request failed (HTTP ${res.status})`),
@@ -383,6 +378,7 @@ export async function listAssets(
   if (res.status === 404) return { assets: [] };
   const data = await parseJsonBody(res);
   if (!res.ok) {
+    handleAuthError(res.status, data);
     throw new BriefsApiError(errorFrom(data, `Request failed (HTTP ${res.status})`), res.status);
   }
   if (
@@ -426,6 +422,22 @@ export async function planCampaign(
     return { kind: "infeasible", error: errorFrom(data, "Variation plan is not feasible.") };
   }
   if (!res.ok) {
+    // This function's contract (see the doc comment above) is to never throw a
+    // wizard-breaking error — every caller (`CommandBar`, `useVariationPlan`) degrades
+    // on the resolved `PlanResult` instead of a rejection, and at least one of them
+    // (`CommandBar`) has no `.catch` on the promise it builds from this call. A 401
+    // still needs the same redirect every other pipeline call makes, and a 403
+    // no_membership still needs to read as something other than "this brief is
+    // infeasible" — `handleAuthError` gives us both, but it throws for the 403 case,
+    // so that throw is caught right here and folded back into the non-throwing shape.
+    try {
+      handleAuthError(res.status, data);
+    } catch (e) {
+      if (isNoMembershipError(e)) {
+        return { kind: "infeasible", error: e.message };
+      }
+      throw e;
+    }
     if (res.status >= 500) return { kind: "unavailable" };
     return { kind: "infeasible", error: errorFrom(data, `Plan failed (HTTP ${res.status})`) };
   }
@@ -551,6 +563,7 @@ export async function listPackages(
   if (res.status === 404) return { platforms: [] };
   const data = await parseJsonBody(res);
   if (!res.ok) {
+    handleAuthError(res.status, data);
     throw new BriefsApiError(errorFrom(data, `Request failed (HTTP ${res.status})`), res.status);
   }
   return { platforms: asPackagedPlatforms(data) };
@@ -605,6 +618,7 @@ export async function getPool(briefId: string, signal?: AbortSignal): Promise<St
   if (res.status === 404) return null;
   const data = await parseJsonBody(res);
   if (!res.ok) {
+    handleAuthError(res.status, data);
     throw new BriefsApiError(errorFrom(data, `Request failed (HTTP ${res.status})`), res.status);
   }
   return asStoredPool(data);
