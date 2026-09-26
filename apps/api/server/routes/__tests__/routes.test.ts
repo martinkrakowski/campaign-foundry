@@ -23,6 +23,7 @@ import jobHandler from "../campaigns/jobs/[id].get.js";
 import outputHandler from "../output/[...path].get.js";
 
 import { LOCAL_TENANT } from "../../lib/tenant.js";
+import { resetProjectRoot } from "@campaignfoundry/shared";
 // node:fs/promises is an ESM namespace (not spy-able); route `open` through an
 // overridable hook so a test can swap the checked file for a symlink between
 // resolveConfinedForRead's check and the output route's own open (TOCTOU).
@@ -68,14 +69,22 @@ const KEYS = ["GEMINI_API_KEY", "GOOGLE_API_KEY", "OPENROUTER_API_KEY"];
 let dir: string;
 const snap: Record<string, string | undefined> = {};
 const origOut = process.env.OUTPUT_DIR;
+const origRoot = process.env.PROJECT_ROOT;
 
 beforeEach(() => {
+  resetProjectRoot();
   for (const k of KEYS) {
     snap[k] = process.env[k];
     delete process.env[k];
   }
   dir = mkdtempSync(join(tmpdir(), "cf-routes-"));
   process.env.OUTPUT_DIR = dir;
+  process.env.PROJECT_ROOT = dir;
+  mkdirSync(join(dir, "briefs"), { recursive: true });
+  writeFileSync(
+    join(dir, "briefs", "camp.yaml"),
+    "id: camp\ntargetRegion: DE\ntargetAudience: a\ncampaignMessage: Hi\nproducts:\n  - id: alpha\n    name: A\n    primaryColor: '#1473E6'\n    logoPath: assets/inputs/hydra-logo.png\n  - id: beta\n    name: B\n    primaryColor: '#E0218A'\n    logoPath: assets/inputs/trail-logo.png\n",
+  );
 });
 afterEach(async () => {
   await resetJobs();
@@ -87,6 +96,9 @@ afterEach(async () => {
   }
   if (origOut === undefined) delete process.env.OUTPUT_DIR;
   else process.env.OUTPUT_DIR = origOut;
+  if (origRoot === undefined) delete process.env.PROJECT_ROOT;
+  else process.env.PROJECT_ROOT = origRoot;
+  resetProjectRoot();
 });
 
 describe("GET /", () => {
@@ -731,21 +743,36 @@ describe("GET /campaigns/result", () => {
     });
   });
 
-  test("returns the empty result for an unknown id", async () => {
+  test("returns 404 for an unknown id (PT-2b)", async () => {
     seed();
-    expect(await (await call("?campaignId=missing")).json()).toEqual({
-      halted: false,
-      assets: [],
-      log: null,
-    });
+    const res = await call("?campaignId=missing");
+    expect(res.status).toBe(404);
   });
 
-  test("returns the empty result for an unsafe id", async () => {
-    expect(await (await call("?campaignId=../evil")).json()).toEqual({
-      halted: false,
-      assets: [],
-      log: null,
-    });
+  test("returns 200 for an owned unsaved draft with a report on disk (PT-2b / H1)", async () => {
+    mkdirSync(resolve(dir, "reports"), { recursive: true });
+    writeFileSync(
+      resolve(dir, "reports", "unsaved-draft.json"),
+      JSON.stringify({ halted: false, assets: [], log: { campaignId: "unsaved-draft" } }),
+    );
+    const res = await call("?campaignId=unsaved-draft");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ log: { campaignId: "unsaved-draft" } });
+  });
+
+  test("returns 404 for an unsafe id (PT-2b)", async () => {
+    const res = await call("?campaignId=../evil");
+    expect(res.status).toBe(404);
+  });
+
+  test("returns the empty result for an owned campaign with no run yet (PT-2b)", async () => {
+    writeFileSync(
+      resolve(dir, "briefs", "norun.yaml"),
+      "id: norun\ntargetRegion: DE\ntargetAudience: a\ncampaignMessage: Hi\nproducts:\n  - id: alpha\n    name: A\n",
+    );
+    const res = await call("?campaignId=norun");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ halted: false, assets: [], log: null });
   });
 
   test("returns the empty result for a repeated (array) id param", async () => {
@@ -1358,5 +1385,29 @@ describe("POST /campaigns/package", () => {
     const res = await call({ campaignId: "camp", platforms: ["instagram-feed"] });
     expect(res.status).toBe(422);
     expect(await res.json()).toEqual({ error: "Campaign report assets must be an array" });
+  });
+
+  test("packages an unsaved campaign run that has no stored brief (H3)", async () => {
+    mkdirSync(resolve(dir, "reports"), { recursive: true });
+    writeFileSync(
+      resolve(dir, "reports", "unsaved-pkg.json"),
+      JSON.stringify({
+        assets: [
+          {
+            productId: "p1",
+            aspectRatio: "1:1",
+            treatment: "bold",
+            outputPath: "unsaved-pkg/p1-1x1.png",
+          },
+        ],
+      }),
+    );
+    mkdirSync(resolve(dir, "unsaved-pkg"), { recursive: true });
+    writeFileSync(resolve(dir, "unsaved-pkg", "p1-1x1.png"), "PNG-DATA");
+
+    const res = await call({ campaignId: "unsaved-pkg", platforms: ["instagram-feed"] });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { platforms: Array<{ platformId: string }> };
+    expect(body.platforms[0].platformId).toBe("instagram-feed");
   });
 });

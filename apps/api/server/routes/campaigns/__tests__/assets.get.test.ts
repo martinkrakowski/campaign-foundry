@@ -35,6 +35,11 @@ describe("GET /campaigns/assets", () => {
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "cf-assets-get-"));
+    mkdirSync(join(dir, "briefs"), { recursive: true });
+    writeFileSync(
+      join(dir, "briefs", "camp.yaml"),
+      "id: camp\nstatus: draft\nmode: brief\ntargetRegion: US\ntargetAudience: dev\ncampaignMessage: msg\nproducts:\n  - id: p1\n    name: P1\naspectRatios:\n  - 1:1\ntreatments:\n  - id: bold\n    name: Bold\n    layout: headline-bottom\n    tone: bold\n",
+    );
   });
 
   afterEach(() => {
@@ -70,6 +75,25 @@ describe("GET /campaigns/assets", () => {
     const res = await get(handler, "?briefId=camp");
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ assets: [] });
+  });
+
+  test("lists assets for an unsaved brief with assets and no stored brief (H5)", async () => {
+    const briefDir = join(dir, "assets", "inputs", "unsaved-brief");
+    mkdirSync(briefDir, { recursive: true });
+    writeFileSync(join(briefDir, "logo.png"), png);
+
+    const handler = await web(dir);
+    const res = await get(handler, "?briefId=unsaved-brief");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { assets: Array<{ name: string }> };
+    expect(body.assets).toHaveLength(1);
+    expect(body.assets[0].name).toBe("logo.png");
+  });
+
+  test("returns 404 for an unknown brief with no assets and no stored brief (Rule A)", async () => {
+    const handler = await web(dir);
+    const res = await get(handler, "?briefId=nonexistent");
+    expect(res.status).toBe(404);
   });
 
   test("returns listed assets sorted by name with type, size, and fetchable thumbnail URL", async () => {
@@ -169,7 +193,7 @@ describe("GET /campaigns/assets", () => {
     const { getAssetStore } = await import("../../../lib/ports/index.js");
     const spy = vi
       .spyOn(getAssetStore(LOCAL_TENANT), "listAssets")
-      .mockRejectedValueOnce(new Error("Disk error"));
+      .mockRejectedValue(new Error("Disk error"));
 
     const res = await get(handler, "?briefId=camp");
     expect(res.status).toBe(200);

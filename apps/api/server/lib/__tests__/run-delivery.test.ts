@@ -13,7 +13,7 @@ import {
   resetRunDelivery,
 } from "../ports/run-delivery-registry.js";
 import type { RunDeliveryPort } from "../ports/run-delivery.port.js";
-import { executeRunRequest, type RunRequest } from "../run-request.js";
+import { executeRunRequest, startOrDrop, type RunRequest } from "../run-request.js";
 import { readReport } from "../report.js";
 import jobHandler from "../../routes/campaigns/jobs/[id].get.js";
 import generateHandler from "../../routes/campaigns/generate.post.js";
@@ -408,5 +408,22 @@ describe("RunRequest serialisation and delivery (PT-6b1, D171, D174d)", () => {
     const rerollCall = runCampaignSpy.mock.calls[0]!;
     expect(rerollCall[4]).toBe(seededReport.policyHash);
     expect(rerollCall[5]).toBe(seededReport.copyHash);
+  });
+
+  test("startOrDrop returns false and logs warning when runEnvironment throws", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const request: RunRequest = {
+      jobId: "00000000-0000-0000-0000-000000000001",
+      tenant: { orgId: "../invalid", userId: "u1" } as never,
+      brief: sampleBrief(),
+      imageModel: "procedural",
+      reroll: false,
+    };
+    const res = await startOrDrop(request);
+    expect(res).toBe(false);
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Dropping run request with unresolvable environment"),
+    );
+    warnSpy.mockRestore();
   });
 });

@@ -8,7 +8,6 @@ import {
 import { errorMessage } from "@campaignfoundry/shared";
 import { BrandComplianceChecker } from "@campaignfoundry/GovernanceAndCompliance";
 import { isErrno, SYMLINK_WRITE_ERROR } from "../../../lib/brief-files.js";
-import { getBriefStore } from "../../../lib/ports/index.js";
 import { assertSafeId, parseBrief } from "../../../lib/load-brief.js";
 import { QuotaExceededError } from "../../../lib/metering.js";
 import { copyGenerator } from "../../../lib/pipeline.js";
@@ -21,6 +20,7 @@ import {
   withPoolLock,
   writePool,
 } from "../../../lib/pools.js";
+import { assertOwnedCampaign, CampaignNotFoundError } from "../../../lib/ownership.js";
 
 const DEFAULT_COUNT = 10;
 const MAX_COUNT = 25;
@@ -163,12 +163,16 @@ export default defineEventHandler(async (event) => {
   }
 
   if (brief === undefined) {
-    const found = await getBriefStore(scope).findBriefById(briefId);
-    if (!found) {
-      setResponseStatus(event, 404);
-      return { error: `Brief "${briefId}" not found.` };
+    try {
+      const found = await assertOwnedCampaign(scope, briefId);
+      brief = found.brief;
+    } catch (error) {
+      if (error instanceof CampaignNotFoundError) {
+        setResponseStatus(event, 404);
+        return { error: `Brief "${briefId}" not found.` };
+      }
+      throw error;
     }
-    brief = found.brief;
   }
   if (await isPoolDirSymlink(scope, briefId)) {
     setResponseStatus(event, 400);

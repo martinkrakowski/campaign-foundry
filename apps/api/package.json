@@ -8,6 +8,7 @@
     "dev": "nitro dev --host 127.0.0.1 --port 3001",
     "preview": "node .output/server/index.mjs",
     "prepare": "nitro prepare",
+    "worker": "tsx bin/worker.ts",
     "lint": "eslint server --ext .ts",
     "typecheck": "nitro prepare && tsc --noEmit"
   },
@@ -19,6 +20,7 @@
     "@campaignfoundry/shared": "workspace:*",
     "better-auth": "^1.7.6",
     "ffmpeg-static": "5.3.0",
+    "kafkajs": "^2.2.4",
     "nitropack": "^2.13.0",
     "pg": "^8.23.0",
     "yaml": "^2.9.0"
