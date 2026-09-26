@@ -154,13 +154,16 @@ describe("HostSecretKeySealer (PT-7b1)", () => {
     });
 
     test("tamper: unsealed data key with invalid length fails open", () => {
+      const sealed = sealer.seal("hello", CTX);
       const shortDek = Buffer.alloc(16);
       const dekIv = randomBytes(12);
       const dekCipher = createCipheriv("aes-256-gcm", v1Key, dekIv);
+      // The same additional data the sealer binds, so authentication passes and
+      // the length check is what refuses it.
+      dekCipher.setAAD(Buffer.from(`${sealed.kekVersion}\n${CTX}`, "utf8"));
       const sealedShortDek = Buffer.concat([dekCipher.update(shortDek), dekCipher.final()]);
       const dekTag = dekCipher.getAuthTag();
 
-      const sealed = sealer.seal("hello", CTX);
       const malformedSealed: SealedKey = {
         ...sealed,
         sealedDek: sealedShortDek.toString("base64"),
