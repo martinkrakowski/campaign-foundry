@@ -9,6 +9,7 @@ import {
 } from "../../lib/asset-files.js";
 import { isExistsError } from "../../lib/brief-files.js";
 import { assertSafeId } from "../../lib/load-brief.js";
+import { assertOwnedCampaign } from "../../lib/ownership.js";
 import { getAssetStore } from "../../lib/ports/index.js";
 
 import { requestTenant } from "../../lib/tenant.js";
@@ -72,6 +73,8 @@ export default defineEventHandler(async (event) => {
     setResponseStatus(event, 400);
     return { error: "Asset must be a PNG or JPEG image." };
   }
+
+  await assertOwnedCampaign(scope, briefId);
 
   try {
     const result = await getAssetStore(scope).writeAsset(briefId, name, bytes);

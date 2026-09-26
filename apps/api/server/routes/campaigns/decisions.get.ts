@@ -1,4 +1,5 @@
 import { SAFE_ID_PATTERN } from "@campaignfoundry/CampaignOrchestration";
+import { assertOwnedCampaign } from "../../lib/ownership.js";
 import { getDecisionStore } from "../../lib/ports/index.js";
 import { requestTenant } from "../../lib/tenant.js";
 
@@ -6,7 +7,7 @@ import { requestTenant } from "../../lib/tenant.js";
  * GET /campaigns/decisions?campaignId= — a campaign's review decisions (D173),
  * each with its verdict, who gave it, when and against which run, plus the
  * `revision` a save must name. `{ decisions: {}, revision: null }` when none
- * are recorded; 400 for a missing or unsafe id.
+ * are recorded; 400 for a missing or unsafe id; 404 when unowned (PT-2b).
  */
 export default defineEventHandler(async (event) => {
   const campaignId = getQuery(event).campaignId;
@@ -14,5 +15,7 @@ export default defineEventHandler(async (event) => {
     setResponseStatus(event, 400);
     return { error: "Invalid campaign id" };
   }
-  return getDecisionStore(requestTenant(event)).readDecisions(campaignId);
+  const scope = requestTenant(event);
+  await assertOwnedCampaign(scope, campaignId);
+  return getDecisionStore(scope).readDecisions(campaignId);
 });

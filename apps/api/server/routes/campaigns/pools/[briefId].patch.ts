@@ -7,6 +7,7 @@ import { errorMessage } from "@campaignfoundry/shared";
 import { BrandComplianceChecker } from "@campaignfoundry/GovernanceAndCompliance";
 import { isErrno, SYMLINK_WRITE_ERROR } from "../../../lib/brief-files.js";
 import { assertSafeId } from "../../../lib/load-brief.js";
+import { assertOwnedCampaign } from "../../../lib/ownership.js";
 import {
   InvalidCopyPoolError,
   isPoolDirSymlink,
@@ -123,6 +124,8 @@ export default defineEventHandler(async (event) => {
     setResponseStatus(event, 400);
     return { error: errorMessage(error) };
   }
+
+  await assertOwnedCampaign(scope, briefId);
 
   if (await isPoolDirSymlink(scope, briefId)) {
     setResponseStatus(event, 400);

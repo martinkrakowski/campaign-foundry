@@ -1,6 +1,7 @@
+import { assertOwnedCampaign } from "../../lib/ownership.js";
 import { readReport } from "../../lib/report.js";
-
 import { requestTenant } from "../../lib/tenant.js";
+
 /** The empty "no run yet" result the UI treats as "never ran". */
 const EMPTY = { halted: false, assets: [], log: null };
 
@@ -18,6 +19,8 @@ export default defineEventHandler(async (event) => {
   // A present campaignId must be a single string. Repeated params yield string[] —
   // treat that (and any non-string, and absence) as no campaign → empty.
   if (typeof campaignId !== "string") return EMPTY;
-  const report = await readReport(requestTenant(event), campaignId);
+  const scope = requestTenant(event);
+  await assertOwnedCampaign(scope, campaignId);
+  const report = await readReport(scope, campaignId);
   return report === undefined ? EMPTY : report;
 });

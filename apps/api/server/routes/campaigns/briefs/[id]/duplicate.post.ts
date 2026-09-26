@@ -12,6 +12,7 @@ import {
   withPoolLock,
 } from "../../../../lib/pools.js";
 import { getAssetStore, getBriefStore } from "../../../../lib/ports/index.js";
+import { assertOwnedCampaign, CampaignNotFoundError } from "../../../../lib/ownership.js";
 
 import { requestTenant } from "../../../../lib/tenant.js";
 /** The duplicate contract's overrides: `targetRegion` and `targetAudience` only. */
@@ -69,10 +70,15 @@ export default defineEventHandler(async (event) => {
     return { error: errorMessage(error) };
   }
 
-  const source = await getBriefStore(scope).findBriefById(id);
-  if (!source) {
-    setResponseStatus(event, 404);
-    return { error: `Brief "${id}" not found.` };
+  let source;
+  try {
+    source = await assertOwnedCampaign(scope, id);
+  } catch (error) {
+    if (error instanceof CampaignNotFoundError) {
+      setResponseStatus(event, 404);
+      return { error: `Brief "${id}" not found.` };
+    }
+    throw error;
   }
 
   if (await isPoolDirSymlink(scope, newId)) {

@@ -54,6 +54,11 @@ describe("POST /campaigns/assets", () => {
     dir = mkdtempSync(join(tmpdir(), "cf-assets-"));
     mkdirSync(join(dir, "assets", "inputs"), { recursive: true });
     writeFileSync(join(dir, "assets", "inputs", "hydra-logo.png"), "DEMO-LOGO");
+    mkdirSync(join(dir, "briefs"), { recursive: true });
+    writeFileSync(
+      join(dir, "briefs", "camp.yaml"),
+      "id: camp\nstatus: draft\nmode: brief\ntargetRegion: US\ntargetAudience: dev\ncampaignMessage: msg\nproducts:\n  - id: p1\n    name: P1\naspectRatios:\n  - 1:1\ntreatments:\n  - id: bold\n    name: Bold\n    layout: headline-bottom\n    tone: bold\n",
+    );
   });
   afterEach(() => {
     rmSync(dir, { recursive: true, force: true });

@@ -1,6 +1,7 @@
 import { errorMessage } from "@campaignfoundry/shared";
 import { assertSafeId } from "../../lib/load-brief.js";
 import { ASSET_NAME_PATTERN, assetContentType } from "../../lib/asset-files.js";
+import { assertOwnedCampaign } from "../../lib/ownership.js";
 import { getAssetStore } from "../../lib/ports/index.js";
 
 import { requestTenant } from "../../lib/tenant.js";
@@ -10,12 +11,13 @@ import { requestTenant } from "../../lib/tenant.js";
  * When `name` is omitted:
  * - Returns `{ assets: AssetEntry[] }` listing assets under `assets/inputs/<briefId>/`.
  * - Each entry has `name`, `type`, `size`, and `thumbnailUrl` (fetchable endpoint URL).
- * - Missing/unreadable directory returns `{ assets: [] }` (200 OK).
+ * - Missing/unreadable directory returns `{ assets: [] }` (200 OK) for owned campaigns.
+ * - Missing or unowned campaign returns 404 (PT-2b).
  *
  * When `name` is supplied:
  * - Returns raw binary with matching `content-type` (image/png, image/jpeg, audio/mpeg,
  *   or audio/mp4 — VE3b2).
- * - Missing asset returns 404.
+ * - Missing asset or unowned campaign returns 404.
  * - Invalid briefId or name returns 400.
  */
 export default defineEventHandler(async (event) => {
@@ -30,6 +32,8 @@ export default defineEventHandler(async (event) => {
     setResponseStatus(event, 400);
     return { error: errorMessage(error) };
   }
+
+  await assertOwnedCampaign(scope, briefId);
 
   const rawName = getQuery(event).name;
   const name = Array.isArray(rawName) ? rawName[0] : rawName;

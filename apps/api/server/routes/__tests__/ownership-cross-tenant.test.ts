@@ -1,11 +1,14 @@
 import { describe, test, expect } from "vitest";
-import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
-import { dumpBrief } from "../../lib/brief-files.js";
+import {
+  BRIEF_SCHEMA_VERSION,
+  DEFAULT_CAMPAIGN_TYPE,
+  templateFromCanonical,
+  type CampaignBrief,
+  PipelineExecutionLog,
+} from "@campaignfoundry/CampaignOrchestration";
 import { writeReport } from "../../lib/report.js";
 import { writePool } from "../../lib/pools.js";
-import { getAssetStore, getBriefStore, getDecisionStore } from "../../lib/ports/index.js";
+import { getBriefStore } from "../../lib/ports/index.js";
 import resultGetHandler from "../campaigns/result.get.js";
 import decisionsGetHandler from "../campaigns/decisions.get.js";
 import decisionsPutHandler from "../campaigns/decisions.put.js";
@@ -29,14 +32,34 @@ const PNG = Buffer.from(
 );
 
 const sampleBrief: CampaignBrief = {
+  schemaVersion: BRIEF_SCHEMA_VERSION,
+  template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
   id: "camp",
-  name: "Camp",
-  status: "draft",
-  mode: "classic",
-  products: [{ id: "p1", name: "P1" }],
-  aspectRatios: ["1:1"],
-  treatments: ["bold"],
+  mode: "brief",
+  targetRegion: "US",
+  targetAudience: "developers",
+  campaignMessage: "Build faster",
+  products: [{ id: "p1", name: "P1", primaryColor: "#1473E6", logoPath: "logo.png" }],
+  treatments: [{ id: "bold", layout: "headline-bottom", tone: "bold" }],
 };
+
+const makeReport = () => ({
+  halted: false,
+  assets: [
+    {
+      productId: "p1",
+      aspectRatio: "1:1" as const,
+      outputPath: "p1/1x1.png",
+      proofPath: "proofs/p1.pdf",
+      complianceScore: 0.9,
+      passedCompliance: true,
+      logoApplied: true,
+      treatment: "default",
+      backgroundSource: "procedural" as const,
+    },
+  ],
+  log: new PipelineExecutionLog("camp", () => new Date("2026-01-01T00:00:00.000Z")),
+});
 
 describe("PT-2b: cross-tenant ownership at the port (item 2 and item 4)", () => {
   // (2) GET /campaigns/result: 404 for unowned campaign, 200 empty for own campaign with no run
@@ -167,11 +190,7 @@ describe("PT-2b: cross-tenant ownership at the port (item 2 and item 4)", () => 
     const harness = setupFsHarness();
     try {
       await getBriefStore(LOCAL_TENANT).createBrief(sampleBrief);
-      await writeReport(LOCAL_TENANT, {
-        halted: false,
-        assets: [{ productId: "p1", outputPath: "p1/1x1.png" } as any],
-        log: { campaignId: "camp" },
-      });
+      await writeReport(LOCAL_TENANT, makeReport());
 
       const callAcme = mountTenantRoute(decisionsPutHandler, {
         method: "PUT",
@@ -199,11 +218,7 @@ describe("PT-2b: cross-tenant ownership at the port (item 2 and item 4)", () => 
     const harness = await setupPgHarness();
     try {
       await getBriefStore(LOCAL_TENANT).createBrief(sampleBrief);
-      await writeReport(LOCAL_TENANT, {
-        halted: false,
-        assets: [{ productId: "p1", outputPath: "p1/1x1.png" } as any],
-        log: { campaignId: "camp" },
-      });
+      await writeReport(LOCAL_TENANT, makeReport());
 
       const callAcme = mountTenantRoute(decisionsPutHandler, {
         method: "PUT",
@@ -232,11 +247,7 @@ describe("PT-2b: cross-tenant ownership at the port (item 2 and item 4)", () => 
     const harness = setupFsHarness();
     try {
       await getBriefStore(LOCAL_TENANT).createBrief(sampleBrief);
-      await writeReport(LOCAL_TENANT, {
-        halted: false,
-        assets: [{ productId: "p1", outputPath: "p1/1x1.png" } as any],
-        log: { campaignId: "camp" },
-      });
+      await writeReport(LOCAL_TENANT, makeReport());
 
       const callAcme = mountTenantRoute(packagePostHandler, {
         method: "POST",
@@ -256,7 +267,7 @@ describe("PT-2b: cross-tenant ownership at the port (item 2 and item 4)", () => 
     }
   });
 
-  // (4) POST /campaigns/pools/copy: 404 for another org's campaign (body-driven brief)
+  // (4) POST /campaigns/pools/copy: 404 for another org's campaign
   test("POST /campaigns/pools/copy answers 404 for another org's campaign on fs", async () => {
     const harness = setupFsHarness();
     try {
@@ -271,7 +282,7 @@ describe("PT-2b: cross-tenant ownership at the port (item 2 and item 4)", () => 
         new Request("http://x/campaigns/pools/copy", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ brief: sampleBrief }),
+          body: JSON.stringify({ briefId: "camp" }),
         }),
       );
       expect(resAcme.status).toBe(404);
@@ -294,7 +305,7 @@ describe("PT-2b: cross-tenant ownership at the port (item 2 and item 4)", () => 
         new Request("http://x/campaigns/pools/copy", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ brief: sampleBrief }),
+          body: JSON.stringify({ briefId: "camp" }),
         }),
       );
       expect(resAcme.status).toBe(404);
