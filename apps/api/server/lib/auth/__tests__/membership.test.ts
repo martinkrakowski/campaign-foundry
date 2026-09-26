@@ -206,10 +206,9 @@ describe("memberTenant (PT-1a item 3)", () => {
       const cookie = verifyRes.headers.get("set-cookie")!;
 
       // Retrieve user from database
-      const userRows = await sql.query<{ id: string }>(
-        'select id from "user" where email = $1',
-        ["person@example.com"],
-      );
+      const userRows = await sql.query<{ id: string }>('select id from "user" where email = $1', [
+        "person@example.com",
+      ]);
       const userId = userRows.rows[0]!.id;
 
       // Seed organizations and memberships
@@ -226,7 +225,7 @@ describe("memberTenant (PT-1a item 3)", () => {
       );
 
       // Set activeOrganizationId on the session in the database
-      await sql.query('update session set "activeOrganizationId" = \'zeta\'');
+      await sql.query("update session set \"activeOrganizationId\" = 'zeta'");
 
       // Call Better Auth getSession
       const session = await instance.api.getSession({
@@ -237,7 +236,11 @@ describe("memberTenant (PT-1a item 3)", () => {
       expect(session?.session.activeOrganizationId).toBe("zeta");
 
       // Verify memberTenant picks the active org
-      const tenant = await memberTenant(sql, session!.user.id, session!.session.activeOrganizationId);
+      const tenant = await memberTenant(
+        sql,
+        session!.user.id,
+        session!.session.activeOrganizationId,
+      );
       expect(tenant?.orgId).toBe("zeta");
       expect(tenant?.roles).toEqual(["owner"]);
 

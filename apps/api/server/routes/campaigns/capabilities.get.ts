@@ -22,7 +22,9 @@ export type CampaignCapabilitiesResponse = Capabilities & {
  * reason `"not probed"` as retry-able and refetch before disabling anything, or it will
  * report motion as unavailable on a host that supports it.
  */
-export default defineEventHandler((): CampaignCapabilitiesResponse => ({
-  ...getCapabilities(),
-  auth: getAuthCapabilities(),
-}));
+export default defineEventHandler(
+  (): CampaignCapabilitiesResponse => ({
+    ...getCapabilities(),
+    auth: getAuthCapabilities(),
+  }),
+);
