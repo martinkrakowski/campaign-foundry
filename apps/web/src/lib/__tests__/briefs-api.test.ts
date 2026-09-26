@@ -699,6 +699,31 @@ describe("getCapabilities carries every field the UI renders", () => {
       motion: true,
       auth: { mode: "better-auth", google: true },
     });
+
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      json({ motion: true, auth: { mode: "local", google: false } }) as unknown as Response,
+    );
+    await expect(getCapabilities()).resolves.toEqual({
+      motion: true,
+      auth: { mode: "local", google: false },
+    });
+  });
+
+  test("malformed auth capabilities are dropped rather than forwarded", async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      json({ motion: true, auth: "invalid" }) as unknown as Response,
+    );
+    await expect(getCapabilities()).resolves.toEqual({ motion: true });
+
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      json({ motion: true, auth: { mode: "other", google: true } }) as unknown as Response,
+    );
+    await expect(getCapabilities()).resolves.toEqual({ motion: true });
+
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      json({ motion: true, auth: { mode: "local", google: "invalid" } }) as unknown as Response,
+    );
+    await expect(getCapabilities()).resolves.toEqual({ motion: true });
   });
 
   test("a host that reports no version simply has none", async () => {

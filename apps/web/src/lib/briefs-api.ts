@@ -30,6 +30,11 @@ export interface HostCapabilities {
   reason?: string;
   /** The probe's ffmpeg version, when it could read one. Additive: absent on older hosts. */
   version?: string;
+  /** Auth capabilities reported by the host (PT-1b1, PT-1b2). */
+  auth?: {
+    mode: "local" | "better-auth";
+    google: boolean;
+  };
 }
 
 /** Delay between retries while the probe's answer is still "not probed". */
@@ -73,6 +78,18 @@ export async function getCapabilities(): Promise<HostCapabilities | null> {
   if (typeof motion !== "boolean") return null;
   const reason = (data as { reason?: unknown }).reason;
   const version = (data as { version?: unknown }).version;
+  const rawAuth = (data as { auth?: unknown }).auth;
+  const auth =
+    typeof rawAuth === "object" &&
+    rawAuth !== null &&
+    ((rawAuth as { mode?: unknown }).mode === "local" ||
+      (rawAuth as { mode?: unknown }).mode === "better-auth") &&
+    typeof (rawAuth as { google?: unknown }).google === "boolean"
+      ? {
+          mode: (rawAuth as { mode: "local" | "better-auth" }).mode,
+          google: (rawAuth as { google: boolean }).google,
+        }
+      : undefined;
   // Rebuilding the object rather than passing `data` through is deliberate — it is
   // untrusted JSON — but every field the UI shows has to be carried across, or the
   // component that renders it is dead code that still reaches 100% coverage.
@@ -80,6 +97,7 @@ export async function getCapabilities(): Promise<HostCapabilities | null> {
     motion,
     ...(typeof reason === "string" ? { reason } : {}),
     ...(typeof version === "string" ? { version } : {}),
+    ...(auth !== undefined ? { auth } : {}),
   };
 }
 
