@@ -57,6 +57,23 @@ export class ProviderKeyUnavailableError extends Error {
   }
 }
 
+/**
+ * Thrown by `put` when the partial unique index on `(org_id, provider) where
+ * revoked_at is null` catches two concurrent registrations for the same
+ * provider (pg `23505`): the loser's revoke-then-insert raced a winner's, not
+ * because either key is unusable. Carries `statusCode`/`status` 409 so a
+ * route that lets it propagate answers 409, and the caller should just retry.
+ */
+export class ProviderKeyConflictError extends Error {
+  readonly statusCode = 409;
+  readonly status = 409;
+
+  constructor(message = "replaced concurrently; retry") {
+    super(message);
+    this.name = "ProviderKeyConflictError";
+  }
+}
+
 /** The org's `owner` and `admin` roles manage keys (register, replace, revoke); members' runs use them (PT-7b2). */
 export function canManageProviderKeys(tenant: TenantContext): boolean {
   return tenant.roles.includes("owner") || tenant.roles.includes("admin");
