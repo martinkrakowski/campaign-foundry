@@ -193,7 +193,7 @@ describe("GET /campaigns/assets", () => {
     const { getAssetStore } = await import("../../../lib/ports/index.js");
     const spy = vi
       .spyOn(getAssetStore(LOCAL_TENANT), "listAssets")
-      .mockRejectedValueOnce(new Error("Disk error"));
+      .mockRejectedValue(new Error("Disk error"));
 
     const res = await get(handler, "?briefId=camp");
     expect(res.status).toBe(200);
