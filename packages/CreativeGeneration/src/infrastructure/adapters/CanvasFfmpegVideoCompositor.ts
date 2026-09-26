@@ -199,13 +199,14 @@ export class CanvasFfmpegVideoCompositor implements VideoCompositorPort {
     ffmpegPath: string,
   ): Promise<Uint8Array> {
     await encodeGate.acquire();
-    // The mp4 muxer needs a seekable output to write a finalized `moov` with real
-    // durations; on `pipe:1` it can only emit fragmented mp4 (`empty_moov`), which
-    // players report as duration 0 and platform uploaders reject. Encode to a temp
-    // file and read it back instead.
-    const workDir = await mkdtemp(join(tmpdir(), "cf-encode-"));
-    const outPath = join(workDir, "out.mp4");
+    let workDir: string | undefined;
     try {
+      // The mp4 muxer needs a seekable output to write a finalized `moov` with real
+      // durations; on `pipe:1` it can only emit fragmented mp4 (`empty_moov`), which
+      // players report as duration 0 and platform uploaders reject. Encode to a temp
+      // file and read it back instead.
+      workDir = await mkdtemp(join(tmpdir(), "cf-encode-"));
+      const outPath = join(workDir, "out.mp4");
       let audio: { readonly path: string; readonly durationSec: number } | undefined;
       if (request.audio) {
         // No extension: ffmpeg probes the second input by content (RIFF/WAVE,
@@ -300,7 +301,9 @@ export class CanvasFfmpegVideoCompositor implements VideoCompositorPort {
       return new Uint8Array(await readFile(outPath));
     } finally {
       encodeGate.release();
-      await rm(workDir, { recursive: true, force: true });
+      if (workDir !== undefined) {
+        await rm(workDir, { recursive: true, force: true });
+      }
     }
   }
 }

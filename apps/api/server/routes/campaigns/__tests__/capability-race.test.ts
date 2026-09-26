@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createApp, createRouter, toWebHandler, type EventHandler } from "h3";
@@ -9,7 +9,7 @@ import {
   probeWait,
   setCapabilities,
 } from "../../../lib/capabilities.js";
-import { getJob, resetJobs } from "../../../lib/jobs.js";
+import { createJob, getJob, resetJobs } from "../../../lib/jobs.js";
 import planHandler from "../plan.post.js";
 import generateHandler from "../generate.post.js";
 
@@ -86,8 +86,8 @@ const motionBrief = () => ({
  */
 const started: string[] = [];
 
-async function settle(jobId: string): Promise<void> {
-  const deadline = Date.now() + 9_000;
+async function settle(jobId: string, timeoutMs = 9_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const job = await getJob(LOCAL_TENANT, jobId);
     if (job === undefined || job.status !== "running") return;
@@ -112,16 +112,23 @@ beforeEach(() => {
   setCapabilities({ motion: false, reason: NOT_PROBED_REASON });
 });
 
+async function teardown(settleTimeoutMs = 9_000): Promise<void> {
+  try {
+    for (const jobId of started.splice(0)) await settle(jobId, settleTimeoutMs);
+  } finally {
+    await resetJobs();
+    probeWait.timeoutMs = defaultWait;
+    setCapabilities({ motion: false, reason: NOT_PROBED_REASON });
+    if (origOut === undefined) delete process.env.OUTPUT_DIR;
+    else process.env.OUTPUT_DIR = origOut;
+    if (origRoot === undefined) delete process.env.PROJECT_ROOT;
+    else process.env.PROJECT_ROOT = origRoot;
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 afterEach(async () => {
-  for (const jobId of started.splice(0)) await settle(jobId);
-  await resetJobs();
-  probeWait.timeoutMs = defaultWait;
-  setCapabilities({ motion: false, reason: NOT_PROBED_REASON });
-  if (origOut === undefined) delete process.env.OUTPUT_DIR;
-  else process.env.OUTPUT_DIR = origOut;
-  if (origRoot === undefined) delete process.env.PROJECT_ROOT;
-  else process.env.PROJECT_ROOT = origRoot;
-  rmSync(dir, { recursive: true, force: true });
+  await teardown();
 });
 
 describe("run paths vs the capability boot race", () => {
@@ -179,5 +186,16 @@ describe("run paths vs the capability boot race", () => {
     expect(retried.status).toBe(200);
     const body = (await retried.json()) as { variants: Array<{ motion?: string }> };
     expect(body.variants.some((v) => v.motion !== undefined)).toBe(true);
+  });
+
+  test("a settle timeout still removes the dir", async () => {
+    const testDir = dir;
+    expect(existsSync(testDir)).toBe(true);
+    const jobId = await createJob(LOCAL_TENANT, "timeout-campaign");
+    started.push(jobId);
+    await expect(teardown(20)).rejects.toThrow(/did not settle before teardown/);
+    expect(existsSync(testDir)).toBe(false);
+    expect(process.env.OUTPUT_DIR).toBe(origOut);
+    expect(process.env.PROJECT_ROOT).toBe(origRoot);
   });
 });
