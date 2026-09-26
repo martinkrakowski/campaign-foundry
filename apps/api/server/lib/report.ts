@@ -5,7 +5,12 @@ import type {
   PipelineResult,
 } from "@campaignfoundry/CampaignOrchestration";
 import { retireDecisions, withDecisionLock } from "./decisions.js";
-import { getJobStore, getReportStore, type ReportStorePort } from "./ports/index.js";
+import {
+  getJobStore,
+  getReportStore,
+  type DecisionStorePort,
+  type ReportStorePort,
+} from "./ports/index.js";
 import { JobLeaseLostError } from "./ports/job-store.port.js";
 import type { StorageScope } from "./run-environment.js";
 
@@ -264,15 +269,22 @@ export async function writeReport(
   // report it makes way for, and before the write, so a failed retirement
   // publishes nothing and a failed write only returns creatives to review.
   return withDecisionLock(scope, campaignId, async (decisions) => {
-    if (fence !== undefined) {
-      // Before the store write, refuse unless the job store entry for runId is running.
-      // This is not atomic, which is acceptable on the single-process fs backend;
-      // PgReportStore / PgDecisionStore check the fence atomically inside their write transactions.
-      const entry = await getJobStore(scope).getStoredJob(fence.runId);
+    if (fence === undefined) return publish(decisions);
+    // The check and the writes run inside the job's own lock chain, which
+    // `failJob` and `completeJob` also take on the fs backend, so a deadline
+    // cannot fail the run between the check and the write. PgReportStore and
+    // PgDecisionStore check the fence again inside their write transactions.
+    const jobs = getJobStore(scope);
+    return jobs.withJobLock(fence.runId, async () => {
+      const entry = await jobs.getStoredJob(fence.runId);
       if (entry?.job.status !== "running") {
         throw new JobLeaseLostError(fence.runId);
       }
-    }
+      return publish(decisions);
+    });
+  });
+
+  async function publish(decisions: DecisionStorePort): Promise<string> {
     await retireDecisions(
       decisions,
       campaignId,
@@ -285,5 +297,5 @@ export async function writeReport(
     // too. `expectedRevision` is passed through exactly — never `?? undefined`,
     // which would turn `null` ("nothing stored yet") into "do not check".
     return store.writeReport(campaignId, payload, expectedRevision, fence);
-  });
+  }
 }

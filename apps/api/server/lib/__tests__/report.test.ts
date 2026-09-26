@@ -1035,6 +1035,18 @@ describe("writeReport run fence (PT-6a2)", () => {
     }
   });
 
+  test("a deadline failJob already in flight is not overtaken by the fenced write", async () => {
+    const jobStore = getJobStore(LOCAL_TENANT);
+    const jobId = await jobStore.createJob("camp");
+
+    const failed = jobStore.failJob(jobId, "deadline exceeded");
+    const write = writeReport(LOCAL_TENANT, result([asset()]), { fence: { runId: jobId } });
+
+    await failed;
+    await expect(write).rejects.toBeInstanceOf(JobLeaseLostError);
+    expect(existsSync(join(root, "reports", "camp.json"))).toBe(false);
+  });
+
   test("the fs write refused when job does not exist", async () => {
     await expect(
       writeReport(LOCAL_TENANT, result([asset()]), { fence: { runId: "nonexistent" } }),

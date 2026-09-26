@@ -285,6 +285,19 @@ describe("FsJobStore", () => {
     await expect(store.completeJob(id, payload())).rejects.toBeInstanceOf(JobLeaseLostError);
   });
 
+  test("a reused custom id keeps its own retention, not the earlier entry's timer", async () => {
+    vi.useFakeTimers();
+    await store.createJob("camp", "reused");
+    await store.failJob("reused", "first");
+    vi.advanceTimersByTime(JOB_TTL_MS - 1000);
+    await store.createJob("camp", "reused");
+    await store.failJob("reused", "second");
+    // The first entry's timer would fire here and delete the replacement.
+    vi.advanceTimersByTime(2000);
+    expect(await store.getJob("reused")).toMatchObject({ status: "failed", error: "second" });
+    vi.useRealTimers();
+  });
+
   test("expireLater catches deleteJob rejection without unhandled rejection", async () => {
     vi.useFakeTimers();
     const id = await store.createJob("camp");

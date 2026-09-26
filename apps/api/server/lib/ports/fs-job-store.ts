@@ -112,6 +112,10 @@ export class FsJobStore implements JobStorePort {
   }
 
   private expireLater(id: string): void {
+    // A custom id can be reused once its job has settled (`acquireJob`), so the
+    // earlier entry's timer must not outlive it and delete the replacement.
+    const existing = this.timers.get(id);
+    if (existing) clearTimeout(existing);
     const timer = setTimeout(() => {
       void this.deleteJob(id).catch(() => undefined);
     }, JOB_TTL_MS);
