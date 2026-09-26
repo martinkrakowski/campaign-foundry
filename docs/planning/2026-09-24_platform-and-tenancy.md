@@ -285,6 +285,46 @@ writes and body-driven routes, with `package.post.ts` moved onto the output port
 **Next (w04):** PT-2b (ownership at the port for writes and the body-driven routes; `package.post.ts` onto the
 output port; `result` and `decisions` 404 for another org's campaign, with the web reading it as none); PT-2c (team scope); PT-7b (org provider keys, after PT-2); PT-6b (Kafka delivery with kafkajs).
 
+### 4.4 Wave `platform-and-tenancy-w04` (defined 2026-09-26, beside w03)
+
+**PT-7b and PT-6b, settled by the owner on 2026-09-26** (from the scope pass against `619cb3b6`):
+- **BYOK is exempt from the quota (D175).** A generation on the org's own key is still metered: a usage row with
+  `key_owner = 'org'`. It skips reservation and the quota check, and platform-key generations are gated as now.
+- **The org's `owner` and `admin` roles manage keys:** register, replace and revoke. Members' runs use the keys but
+  cannot read or change them.
+- **Queued job row (PT-6b).** `0010` adds a `queued` status. The API inserts the queued row, which keeps its
+  synchronous 409 (already running) and 503 (full) answers, then publishes the job id. The worker moves the row from
+  queued to running in one conditional `update … where id = $1 and status = 'queued' returning`, so a duplicate or
+  replayed message finds nothing and is dropped. The offset is committed only after that decision.
+- **The API consumes when enabled.** A setting turns on an in-process consumer in the API, and `bin/worker.ts`
+  serves scaled deployments. The in-process `runJob` path stays the default until Kafka is configured. Separate
+  worker pods need shared asset storage, which means PT-4 (B2).
+
+**Defaults the orchestrator took; the owner can still overrule any of them:**
+- **KEK:** `KEY_ENCRYPTION_KEYS` holds versioned base64 32-byte keys (`v1:…,v2:…`), and
+  `KEY_ENCRYPTION_KEY_CURRENT` names the version that seals new keys. Both are read only in `config.ts`, and
+  rotation re-seals with a `bin/` command.
+- **Providers:** Gemini, OpenRouter and Firefly, with Firefly's client id and secret sealed together as one key.
+- **The file backend refuses BYOK:** it needs Postgres, as Better Auth already does.
+- **Kafka:** topic `cf.run-requests`, keyed by `<orgId>:<campaignId>`, 3 partitions, consumer group `cf-workers`.
+  A worker unseals an org key at consume time from the key id and version captured at enqueue, so plaintext never
+  enters a message, and a key revoked after enqueue is refused at run time.
+- **Order:** PT-7b follows PT-2b's ownership checks.
+
+**Part A: dispatched beside w03, because neither lane touches a w03 file.** PT-6b1 takes migration `0010`, and
+PT-7b2 (part B) takes `0011`.
+
+| Lane | Delivers | Migration | Owns | Must not |
+|---|---|---|---|---|
+| **PT-7b1-key-sealer** | **Envelope encryption for org provider keys (D175, D176): the sealer only, with no store and no routes yet.** **Enumerated:** (1) `lib/keys/key-sealer.port.ts`: `KeySealerPort` with `seal(plaintext: string): SealedKey` and `open(sealed: SealedKey): string`. `SealedKey` holds `{ ciphertext, iv, tag, sealedDek, dekIv, dekTag, kekVersion }` as base64 strings plus the version. (2) `lib/keys/host-secret-key-sealer.ts`: `HostSecretKeySealer` makes a fresh random 32-byte data key per `seal`, encrypts the plaintext with it (AES-256-GCM), and seals the data key with the current KEK (AES-256-GCM); `open` picks the KEK by `kekVersion`. (3) `config.ts` `keyEncryptionSettings()`: `KEY_ENCRYPTION_KEYS` is a comma-separated list of `v<n>:<base64 32 bytes>`, and `KEY_ENCRYPTION_KEY_CURRENT` names the version that seals. It refuses with a clear error (never echoing a key) on a malformed entry, a key that does not decode to exactly 32 bytes, a duplicate version, or a current version not in the list. Unset means "no BYOK" (returns undefined), and env is read only here. (4) A tampered `ciphertext`, `tag` or `sealedDek` fails `open` with an error that carries no key material, and so does an unknown `kekVersion`. **Tests:** round trip; a new data key per seal (two seals of the same text differ); open after rotation (seal under v1, make v2 current, open still works, and a new seal uses v2); each tamper case; unknown version; each config hazard (whitespace around entries, a missing colon, bad base64, 31 or 33 bytes, a duplicate, current missing); no error message or `SealedKey` field contains the plaintext. | none | `lib/keys/*`, `config.ts` (the new function only), their tests | add a dependency (use `node:crypto`); touch a route or store |
+| **PT-6b1-queued-run-delivery** | **A run becomes a serialisable request delivered through a port, with a queued job row, still in process (D171, D174d; owner, 2026-09-26: the queued row).** Today `generate.post.ts` claims with `acquireJob` and runs a closure through `runJob`, and a closure cannot cross Kafka. **Enumerated:** (1) `0010_job_queued.sql`: the status check gains `'queued'`; `job_running_campaign` is replaced by `job_active_campaign on job (org_id, campaign_id) where status in ('queued', 'running')`, a plain `create unique index`, since migrations run in one transaction. (2) The job store port gains `enqueueJob(campaignId)`, which inserts a `queued` row with the same one-statement conflict answer as `acquireJob` (`{ acquired, jobId }` or the active incumbent). It also gains `startQueuedJob(id): Promise<boolean>`, which moves exactly one queued row to running and sets its lease (pg: `update job set status = 'running', lease_expires_at = now() + …, heartbeat_at = now() where id = $1 and org_id = $2 and status = 'queued' returning id`), so a second call returns false. The reaper also fails a queued row older than `QUEUED_TTL_MS` (a named constant equal to `JOB_TTL_MS`). `acquireJob`'s conflict target, its incumbent lookup and `getRunningJobId` follow the new index, so a queued run counts as in flight everywhere a running one does. `FsJobStore` implements both in process. (3) The public `Job` from `GET /campaigns/jobs/:id` reports a queued row as `running` with `done: 0`, so the web client is unchanged. (4) `lib/run-request.ts`: a serialisable `RunRequest` (`jobId`, `tenant` (the `TenantContext`), `brief`, `imageModel`, `regenerateOnly`, `reroll`, `expectedRevision`), and `executeRunRequest(request)`, which rebuilds the `RunEnvironment` from the tenant and does exactly what the `runJob` closure in `generate.post.ts` does today, including the report fence. (5) `lib/ports/run-delivery.port.ts`: `RunDeliveryPort.deliver(request)`. `InProcessRunDelivery` calls `startQueuedJob` and, if it returns false, drops the request and logs it; otherwise it calls `runJob(env, jobId, () => executeRunRequest(request))`. The registry selects it (the only adapter for now). (6) `generate.post.ts` enqueues, then delivers; its 409 and 503 answers are unchanged. **Tests:** each item. Include a duplicate delivery (the second `startQueuedJob` returns false and nothing runs twice), a queued row reaped after its TTL, a queued row blocking a second enqueue (409), the public status mapping, and a round trip through `JSON.stringify`/`JSON.parse` for a `RunRequest`, proving it is serialisable. **Re-anchor** `l7`, `l11`, `pt-6a-job-lease-rows`, `pt-6a2-run-fence` and `pt-7a-metering` where their anchors move. | `0010_job_queued` | `0010`, the job store port and both adapters, `lib/jobs.ts`, the new `run-request.ts` and `run-delivery.port.ts` (plus its in-process adapter), the jobs slot of `ports/index.ts`, `generate.post.ts` (its claim and run region), `routes/campaigns/jobs/[id].get.ts` (the status mapping only), their tests | add kafkajs (PT-6b2); change the admission (quota) region of `generate.post.ts` |
+
+**Part B: after w03 merges, in order.** PT-2b (ownership at the port for writes and the body-driven routes;
+`package.post.ts` moves onto the output port; `result` and `decisions` return 404 for another org's campaign, and
+the web reads it as none). PT-2c (team scope). PT-7b2 (key store and routes, `0011`, after PT-2b). PT-7b3 (run
+wiring and the settings UI). PT-6b2 (the kafkajs producer and consumer, the API consumer behind a setting, and
+`bin/worker.ts`). PT-6b3 (staging topic, ACLs and certificates).
+
 ---
 
 ## 5. What this plan refuses
