@@ -34,8 +34,7 @@ export function handleAuthError(status: number, data: unknown): void {
   // would be provably always-true by the time it ran (the 403 branch only runs once
   // `code` — read off this same non-null record — is "no_membership"), which is
   // exactly the kind of unreachable branch a 100%-coverage gate cannot pass.
-  const record =
-    typeof data === "object" && data !== null ? (data as Record<string, unknown>) : {};
+  const record = typeof data === "object" && data !== null ? (data as Record<string, unknown>) : {};
   const code = record.code;
 
   if (status === 401 && (code === "unauthenticated" || code === undefined)) {
