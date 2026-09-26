@@ -4,7 +4,7 @@
   "mutations": [
     {
       "file": "apps/web/src/lib/run-context.tsx",
-      "before": "          void adoptJob(startBrief, jobId);",
+      "before": "        void adoptJob(startBrief, jobId);",
       "after": "          void startBrief; void jobId;",
       "because": "skipping the adoption call after restoring a brief prevents the web client from adopting an in-flight background run",
       "command": [
