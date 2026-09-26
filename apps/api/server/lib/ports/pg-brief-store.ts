@@ -359,19 +359,22 @@ export class PgBriefStore implements BriefStorePort {
 
   /**
    * `replaceBrief`'s own ENOENT-falls-to-create shape, with the team the route
-   * already authorized (D166 item 3) carried down either path: a hidden or
-   * genuinely missing slug creates fresh with `teamId` (`null` included), an
-   * existing one is rewritten with it.
+   * already authorized (D166 item 3) carried down either path. `teamId` keeps
+   * `rewriteBriefWithTeam`'s "`undefined` leaves it as it is" for the common
+   * existing-campaign case — a replace-save with no `teamId` in the request
+   * must not reset an already-assigned team to org-wide. Only when there is no
+   * existing row to leave alone (ENOENT, a fresh slug) does `undefined` become
+   * `createBriefWithTeam`'s `null` default.
    */
   async replaceBriefWithTeam(
     brief: CampaignBrief,
-    teamId: string | null,
+    teamId: string | null | undefined,
     options?: { expectedRevision?: string },
   ): Promise<StoredBrief> {
     try {
       return await this.rewriteBriefWithTeam(brief, teamId, options);
     } catch (error) {
-      if (isErrno(error, "ENOENT")) return this.createBriefWithTeam(brief, teamId);
+      if (isErrno(error, "ENOENT")) return this.createBriefWithTeam(brief, teamId ?? null);
       throw error;
     }
   }

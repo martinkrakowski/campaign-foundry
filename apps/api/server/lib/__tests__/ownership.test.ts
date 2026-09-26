@@ -302,4 +302,18 @@ describe("campaignKnown hides a team-restricted campaign even when a report exis
     await getReportStore(LOCAL_TENANT).writeReport("draft-only", JSON.stringify({ assets: [] }));
     await expect(campaignKnown(LOCAL_TENANT, "draft-only", "report")).resolves.toBeUndefined();
   });
+
+  // A failure inside hiddenFromCaller (a dropped connection, say) must fold into
+  // the same readFailure the report/asset checks use, not become a false 404 —
+  // and must not stop the report/asset fast path from still answering "known".
+  test("a hiddenFromCaller failure does not turn a known campaign into a false 404", async () => {
+    const owner: TenantContext = { orgId: "local", userId: "owner", roles: ["owner"], teamIds: [] };
+    await (getBriefStore(owner) as PgBriefStore).createBrief({ ...sampleBrief, id: "flaky" });
+    await getReportStore(owner).writeReport("flaky", JSON.stringify({ assets: [] }));
+    vi.spyOn(PgBriefStore.prototype, "hiddenFromCaller").mockRejectedValueOnce(
+      new Error("connection reset"),
+    );
+
+    await expect(campaignKnown(owner, "flaky", "report")).resolves.toBeUndefined();
+  });
 });

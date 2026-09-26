@@ -95,8 +95,11 @@ export default defineEventHandler(async (event) => {
       }
 
       if (replace) {
+        // teamId undefined here means "leave the campaign's team as it is"
+        // (replaceBriefWithTeam's own contract) — never `?? null`, which would
+        // reset an already-assigned team to org-wide on every plain re-save.
         return store instanceof PgBriefStore
-          ? await store.replaceBriefWithTeam(brief, teamId ?? null, { expectedRevision })
+          ? await store.replaceBriefWithTeam(brief, teamId, { expectedRevision })
           : await store.replaceBrief(brief, { expectedRevision });
       }
       return store instanceof PgBriefStore

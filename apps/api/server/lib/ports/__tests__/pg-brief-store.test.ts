@@ -493,6 +493,25 @@ describe("Team scope on Postgres (D166, PT-2c)", () => {
     expect(await t1Member.findBriefById("replaced")).toBeUndefined();
   });
 
+  test("rewriteBriefWithTeam with teamId null clears an already-assigned team back to org-wide", async () => {
+    const owner = new PgBriefStore(db, "local", "owner", ["owner"], []);
+    await owner.createBriefWithTeam(brief("camp", "v1"), "t1");
+    await owner.rewriteBriefWithTeam(brief("camp", "v2"), null);
+
+    const { rows } = await db.query<{ team_id: string | null }>(
+      `select team_id from campaign where org_id = 'local' and slug = 'camp'`,
+    );
+    expect(rows[0]!.team_id).toBeNull();
+  });
+
+  test("replaceBriefWithTeam propagates a non-ENOENT error such as ECONFLICT instead of falling to create", async () => {
+    const owner = new PgBriefStore(db, "local", "owner", ["owner"], []);
+    await owner.createBrief(brief("camp"));
+    await expect(
+      owner.replaceBriefWithTeam(brief("camp", "v2"), "t1", { expectedRevision: "wrong-revision" }),
+    ).rejects.toMatchObject({ code: "ECONFLICT" });
+  });
+
   test("hiddenFromCaller tells 'never created' from 'exists but hidden'", async () => {
     const owner = new PgBriefStore(db, "local", "owner", ["owner"], []);
     await owner.createBriefWithTeam(brief("t2-only"), "t2");

@@ -215,4 +215,127 @@ describe("POST/PUT /campaigns/briefs — teamId (D166, PT-2c item 3)", () => {
       await harness.cleanup();
     }
   });
+
+  test("PUT with a teamId on the fs backend answers 400 (item 5: teams are Postgres-only)", async () => {
+    const harness = setupFsHarness();
+    try {
+      const res = await mount(LOCAL_TENANT).update(putReq({ ...sampleBrief, teamId: "t1" }));
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toMatch(/Postgres/);
+    } finally {
+      harness.cleanup();
+    }
+  });
+
+  test("PUT with a team the caller may not assign answers 403, and leaves the brief unchanged", async () => {
+    const harness = await setupPgHarness();
+    try {
+      await harness.db.query(
+        `insert into team (id, name, "memberCount", org_id, created_at) values ($1, $2, 0, $3, now())`,
+        ["t2", "Team Two", "local"],
+      );
+      await mount(owner).create(postReq(sampleBrief));
+
+      const res = await mount(t1Member).update(
+        putReq({ ...sampleBrief, teamId: "t2", campaignMessage: "hacked" }),
+      );
+      expect(res.status).toBe(403);
+
+      const { rows } = await harness.db.query<{ body: string }>(
+        `select bv.body from brief_version bv join campaign c on c.id = bv.campaign_id
+          where c.org_id = 'local' and c.slug = 'camp' order by bv.version desc limit 1`,
+      );
+      expect(JSON.parse(rows[0]!.body).campaignMessage).toBe("Build faster");
+    } finally {
+      await harness.cleanup();
+    }
+  });
+
+  test("PUT with a team unknown to this org answers 403 (EFORBIDDEN) even for an owner", async () => {
+    const harness = await setupPgHarness();
+    try {
+      await mount(owner).create(postReq(sampleBrief));
+
+      const res = await mount(owner).update(
+        putReq({ ...sampleBrief, teamId: "ghost", campaignMessage: "v2" }),
+      );
+      expect(res.status).toBe(403);
+
+      const { rows } = await harness.db.query<{ body: string }>(
+        `select bv.body from brief_version bv join campaign c on c.id = bv.campaign_id
+          where c.org_id = 'local' and c.slug = 'camp' order by bv.version desc limit 1`,
+      );
+      expect(JSON.parse(rows[0]!.body).campaignMessage).toBe("Build faster");
+    } finally {
+      await harness.cleanup();
+    }
+  });
+
+  test("POST ?replace=1 with a team on Postgres rewrites the existing campaign's team", async () => {
+    const harness = await setupPgHarness();
+    try {
+      await harness.db.query(
+        `insert into team (id, name, "memberCount", org_id, created_at) values
+           ($1, $2, 0, $3, now()), ($4, $5, 0, $3, now())`,
+        ["t1", "Team One", "local", "t2", "Team Two"],
+      );
+      await mount(owner).create(postReq({ ...sampleBrief, teamId: "t1" }));
+
+      const res = await mount(owner).create(
+        postReq({ ...sampleBrief, teamId: "t2", campaignMessage: "v2" }, "?replace=1"),
+      );
+      expect(res.status).toBe(201);
+
+      const { rows } = await harness.db.query<{ team_id: string | null }>(
+        `select team_id from campaign where org_id = 'local' and slug = 'camp'`,
+      );
+      expect(rows[0]!.team_id).toBe("t2");
+    } finally {
+      await harness.cleanup();
+    }
+  });
+
+  test("POST ?replace=1 with no teamId on Postgres leaves the campaign's team untouched", async () => {
+    const harness = await setupPgHarness();
+    try {
+      await harness.db.query(
+        `insert into team (id, name, "memberCount", org_id, created_at) values ($1, $2, 0, $3, now())`,
+        ["t1", "Team One", "local"],
+      );
+      await mount(owner).create(postReq({ ...sampleBrief, teamId: "t1" }));
+
+      const res = await mount(owner).create(
+        postReq({ ...sampleBrief, campaignMessage: "v2" }, "?replace=1"),
+      );
+      expect(res.status).toBe(201);
+
+      const { rows } = await harness.db.query<{ team_id: string | null }>(
+        `select team_id from campaign where org_id = 'local' and slug = 'camp'`,
+      );
+      expect(rows[0]!.team_id).toBe("t1");
+    } finally {
+      await harness.cleanup();
+    }
+  });
+
+  test("PUT with a non-object body answers 400 rather than throwing", async () => {
+    const harness = setupFsHarness();
+    try {
+      const res = await mount(LOCAL_TENANT).update(putReq(["not", "an", "object"]));
+      expect(res.status).toBe(400);
+    } finally {
+      harness.cleanup();
+    }
+  });
+
+  test("PUT with a non-string teamId answers 400 before parsing the brief", async () => {
+    const harness = setupFsHarness();
+    try {
+      const res = await mount(LOCAL_TENANT).update(putReq({ ...sampleBrief, teamId: 7 }));
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toMatch(/teamId/);
+    } finally {
+      harness.cleanup();
+    }
+  });
 });
