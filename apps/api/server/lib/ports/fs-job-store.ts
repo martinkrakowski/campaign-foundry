@@ -112,8 +112,6 @@ export class FsJobStore implements JobStorePort {
   }
 
   private expireLater(id: string): void {
-    const existing = this.timers.get(id);
-    if (existing) clearTimeout(existing);
     const timer = setTimeout(() => {
       void this.deleteJob(id).catch(() => undefined);
     }, JOB_TTL_MS);
