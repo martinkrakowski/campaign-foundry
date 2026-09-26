@@ -43,21 +43,20 @@ function fakeUsage(): UsageStorePort & {
       reservations.push(id);
       return id;
     },
-    settle: async (id, record) => {
+    settle: async (id: string, record: UsageRecord) => {
       settled.push({ id, record });
       records.push(record);
     },
-    release: async (id) => {
+    release: async (id: string) => {
       released.push(id);
     },
-    record: async (usage) => {
+    record: async (usage: UsageRecord) => {
       records.push(usage);
     },
     countThisMonth: async () => 0,
     quota: async () => null,
-  } as any;
+  };
 }
-
 
 /**
  * A usage store double with a fixed quota and a count that increments as
@@ -71,8 +70,20 @@ function statefulUsage(
 ): UsageStorePort & { readonly records: UsageRecord[] } {
   const records: UsageRecord[] = [];
   let count = startCount;
+  let nextId = 1;
   return {
     records,
+    reserve: async () => {
+      if (quota !== null && count >= quota) return null;
+      count += 1;
+      return `res-${nextId++}`;
+    },
+    settle: async (_id, usage) => {
+      records.push(usage);
+    },
+    release: async () => {
+      count -= 1;
+    },
     record: async (usage) => {
       records.push(usage);
       count += 1;
@@ -202,10 +213,10 @@ describe("MeteredImageGenerator (PT-7a, D175)", () => {
     expect(inner.resolveBackground).toHaveBeenCalledTimes(2); // no third call
   });
 
-  test("a usage-store record failure still returns the result and warns (fix round)", async () => {
+  test("a usage-store settle failure still returns the result and warns (fix round)", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const usage = fakeUsage();
-    usage.record = async () => {
+    usage.settle = async () => {
       throw new Error("connection reset");
     };
     const inner: ImageGeneratorPort = {
@@ -225,6 +236,29 @@ describe("MeteredImageGenerator (PT-7a, D175)", () => {
     expect(message).toContain("acme");
     expect(message).toContain("imagen");
     expect(message).toContain("connection reset");
+    warn.mockRestore();
+  });
+
+  test("a usage-store release failure still returns the result and warns", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const usage = fakeUsage();
+    usage.release = async () => {
+      throw new Error("release failed");
+    };
+    const inner: ImageGeneratorPort = {
+      resolveBackground: async () => ({
+        image: new Uint8Array([1]),
+        source: "imagen",
+        cached: true,
+      }),
+    };
+    const meter = new MeteredImageGenerator(inner, usage, "acme", "imagen", "imagen-4.0");
+    const result = await meter.resolveBackground(product, ratio(), context);
+    expect(result.cached).toBe(true);
+    expect(warn).toHaveBeenCalledTimes(1);
+    const [message] = warn.mock.calls[0] as [string];
+    expect(message).toContain("could not release usage reservation");
+    expect(message).toContain("release failed");
     warn.mockRestore();
   });
 
@@ -273,7 +307,6 @@ describe("MeteredImageGenerator (PT-7a, D175)", () => {
     expect(usage.settled).toHaveLength(0);
   });
 });
-
 
 describe("MeteredCopyGenerator (PT-7a, D175)", () => {
   test("publishes the wrapped generator's model", () => {
@@ -353,4 +386,3 @@ describe("MeteredCopyGenerator (PT-7a, D175)", () => {
     expect(usage.settled).toHaveLength(0);
   });
 });
-
