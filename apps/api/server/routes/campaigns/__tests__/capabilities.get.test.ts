@@ -55,12 +55,20 @@ describe("GET /campaigns/capabilities", () => {
   });
 
   describe("auth capabilities under each mode and with Google on and off", () => {
+    beforeEach(() => {
+      setCapabilities({ motion: false, reason: "not probed" });
+    });
+
     test("mode local with Google off", async () => {
       process.env.AUTH_MODE = "local";
       const handler = await handlerFor();
       const res = await mount(handler)(new Request("http://localhost/campaigns/capabilities"));
       expect(res.status).toBe(200);
-      expect((await res.json()).auth).toEqual({ mode: "local", google: false });
+      expect(await res.json()).toEqual({
+        motion: false,
+        reason: "not probed",
+        auth: { mode: "local", google: false },
+      });
     });
 
     test("mode local with Google on when both settings are present", async () => {
@@ -70,7 +78,11 @@ describe("GET /campaigns/capabilities", () => {
       const handler = await handlerFor();
       const res = await mount(handler)(new Request("http://localhost/campaigns/capabilities"));
       expect(res.status).toBe(200);
-      expect((await res.json()).auth).toEqual({ mode: "local", google: true });
+      expect(await res.json()).toEqual({
+        motion: false,
+        reason: "not probed",
+        auth: { mode: "local", google: true },
+      });
     });
 
     test("mode better-auth with Google off", async () => {
@@ -78,7 +90,11 @@ describe("GET /campaigns/capabilities", () => {
       const handler = await handlerFor();
       const res = await mount(handler)(new Request("http://localhost/campaigns/capabilities"));
       expect(res.status).toBe(200);
-      expect((await res.json()).auth).toEqual({ mode: "better-auth", google: false });
+      expect(await res.json()).toEqual({
+        motion: false,
+        reason: "not probed",
+        auth: { mode: "better-auth", google: false },
+      });
     });
 
     test("mode better-auth with Google on when both settings are present", async () => {
@@ -88,7 +104,11 @@ describe("GET /campaigns/capabilities", () => {
       const handler = await handlerFor();
       const res = await mount(handler)(new Request("http://localhost/campaigns/capabilities"));
       expect(res.status).toBe(200);
-      expect((await res.json()).auth).toEqual({ mode: "better-auth", google: true });
+      expect(await res.json()).toEqual({
+        motion: false,
+        reason: "not probed",
+        auth: { mode: "better-auth", google: true },
+      });
     });
 
     test("google is false when only GOOGLE_CLIENT_ID is set", async () => {
@@ -96,7 +116,11 @@ describe("GET /campaigns/capabilities", () => {
       const handler = await handlerFor();
       const res = await mount(handler)(new Request("http://localhost/campaigns/capabilities"));
       expect(res.status).toBe(200);
-      expect((await res.json()).auth).toEqual({ mode: "local", google: false });
+      expect(await res.json()).toEqual({
+        motion: false,
+        reason: "not probed",
+        auth: { mode: "local", google: false },
+      });
     });
 
     test("google is false when only GOOGLE_CLIENT_SECRET is set", async () => {
@@ -104,7 +128,11 @@ describe("GET /campaigns/capabilities", () => {
       const handler = await handlerFor();
       const res = await mount(handler)(new Request("http://localhost/campaigns/capabilities"));
       expect(res.status).toBe(200);
-      expect((await res.json()).auth).toEqual({ mode: "local", google: false });
+      expect(await res.json()).toEqual({
+        motion: false,
+        reason: "not probed",
+        auth: { mode: "local", google: false },
+      });
     });
   });
 });
