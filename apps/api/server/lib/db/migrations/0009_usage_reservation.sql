@@ -16,3 +16,10 @@ alter table usage alter column provider drop not null;
 alter table usage alter column model drop not null;
 alter table usage alter column units drop not null;
 alter table usage alter column key_owner drop not null;
+
+-- A recorded row is a billed generation: it must carry every field. Only a
+-- reserved row may leave them empty until it settles.
+alter table usage add constraint usage_recorded_complete check (
+  status = 'reserved'
+  or (provider is not null and model is not null and units is not null and key_owner is not null)
+);

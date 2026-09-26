@@ -82,7 +82,7 @@ function statefulUsage(
       records.push(usage);
     },
     release: async () => {
-      count -= 1;
+      count = Math.max(0, count - 1);
     },
     record: async (usage) => {
       records.push(usage);

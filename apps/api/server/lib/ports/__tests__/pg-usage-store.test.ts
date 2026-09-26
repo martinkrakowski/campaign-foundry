@@ -44,6 +44,13 @@ describe("PgUsageStore (PT-7a, D175)", () => {
     ]);
   });
 
+  test("a recorded row must carry every field; only a reserved row may leave them empty", async () => {
+    await db.query("insert into usage (org_id, status) values ('local', 'reserved')");
+    await expect(
+      db.query("insert into usage (org_id, status) values ('local', 'recorded')"),
+    ).rejects.toThrow(/usage_recorded_complete/);
+  });
+
   test("an org with no quota column set reads as unlimited", async () => {
     const store = new PgUsageStore(db);
     await expect(store.quota("local")).resolves.toBeNull();
