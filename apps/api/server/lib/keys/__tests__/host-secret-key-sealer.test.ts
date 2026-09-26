@@ -246,6 +246,15 @@ describe("HostSecretKeySealer (PT-7b1)", () => {
       ).toThrow('Current key encryption version "v2" not found in keys.');
     });
 
+    test("supports KeyEncryptionSettings with plain object keys", () => {
+      const sealer = new HostSecretKeySealer({
+        currentVersion: "v1",
+        keys: { v1: v1Key } as unknown as ReadonlyMap<string, Buffer>,
+      });
+      const sealed = sealer.seal("plain-object-in-settings");
+      expect(sealer.open(sealed)).toBe("plain-object-in-settings");
+    });
+
     test("refuses when currentVersion is missing in direct construction", () => {
       expect(
         () => new HostSecretKeySealer(new Map([["v1", v1Key]]) as unknown as KeyEncryptionSettings),
