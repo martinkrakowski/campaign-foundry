@@ -1,5 +1,5 @@
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
-import { completeJob, failJob, progressJob } from "./jobs.js";
+import { completeJob, failJob, progressJob, runJob, startQueuedJob } from "./jobs.js";
 import type { parseRegenerateOnly } from "./load-brief.js";
 import { runCampaign } from "./pipeline.js";
 import { readReport, writeReport } from "./report.js";
@@ -104,4 +104,40 @@ export async function executeRunRequest(request: RunRequest, signal?: AbortSigna
     policyHash: result.value.policyHash,
     seed: result.value.seed,
   });
+}
+
+import * as self from "./run-request.js";
+
+/**
+ * Shared start-or-drop logic for run delivery (PT-6b1, PT-6b2, D171, D174d).
+ * Used by both InProcessRunDelivery and RunConsumer to ensure identical behavior.
+ *
+ * Resolves the run environment, attempts to claim the queued job via `startQueuedJob`,
+ * and if claimed executes `runJob` with `executeRunRequest`.
+ *
+ * If environment resolution fails, the error is logged and false is returned so caller
+ * can safely drop and commit.
+ * If `startQueuedJob` rejects (e.g. database down), the error is propagated so it can be retried.
+ */
+export async function startOrDrop(request: RunRequest): Promise<boolean> {
+  let env: RunEnvironment;
+  try {
+    env = runEnvironment(request.tenant);
+  } catch (error) {
+    console.warn(
+      `[run-delivery] Dropping run request with unresolvable environment for job "${request.jobId}": ${(error as Error).message}`,
+    );
+    return false;
+  }
+
+  const started = await startQueuedJob(env, request.jobId);
+  if (!started) {
+    console.warn(
+      `[run-delivery] Dropping duplicate or expired run request for job "${request.jobId}"`,
+    );
+    return false;
+  }
+
+  runJob(env, request.jobId, (signal) => self.executeRunRequest(request, signal));
+  return true;
 }
