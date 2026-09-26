@@ -12,13 +12,13 @@ import {
 } from "./provider-key.port.js";
 
 /**
- * `keyEncryptionSettings()` and `HostSecretKeySealer`'s constructor both throw
- * a plain `Error` for a malformed `KEY_ENCRYPTION_KEYS`/`KEY_ENCRYPTION_KEY_CURRENT`
- * (wrong key length, duplicate version, current version missing from the
- * keyring): a config mistake, not an unexpected failure, so it must answer
- * 503 like "not configured at all" rather than an unhandled 500. Their
- * messages never include raw key material — only version names and byte
- * counts — so re-wrapping the message here is still safe to surface.
+ * `keyEncryptionSettings()` throws a plain `Error` for a malformed
+ * `KEY_ENCRYPTION_KEYS`/`KEY_ENCRYPTION_KEY_CURRENT` (wrong key length,
+ * duplicate version, current version missing from the keyring): a config
+ * mistake, not an unexpected failure, so it must answer 503 like "not
+ * configured at all" rather than an unhandled 500. Its messages never
+ * include raw key material — only version names and byte counts — so
+ * re-wrapping the message here is still safe to surface.
  */
 function toUnavailable(error: unknown): ProviderKeyUnavailableError {
   const detail = error instanceof Error ? error.message : "unknown error";
@@ -52,11 +52,10 @@ function sealer(): HostSecretKeySealer {
       "KEY_ENCRYPTION_KEYS is not set: org provider keys cannot be sealed or opened.",
     );
   }
-  try {
-    return new HostSecretKeySealer(settings);
-  } catch (error) {
-    throw toUnavailable(error);
-  }
+  // HostSecretKeySealer's own constructor checks (key length, current version
+  // present) mirror keyEncryptionSettings()'s, so settings that already
+  // passed it never trip these — nothing further to wrap here.
+  return new HostSecretKeySealer(settings);
 }
 
 interface ProviderKeyRow {

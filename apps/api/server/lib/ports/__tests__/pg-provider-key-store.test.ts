@@ -5,18 +5,12 @@ import { ProviderKeyConflictError, ProviderKeyUnavailableError } from "../provid
 import { PgProviderKeyStore } from "../pg-provider-key-store.js";
 
 /**
- * A `SqlClient` whose transaction's `insert` fails with a pg `23505` (unique
- * violation), the way two concurrent PUTs for the same provider would race
- * the partial unique index on `(org_id, provider) where revoked_at is null`
+ * A `SqlClient` whose transaction's `insert` always fails with `insertError`
  * — without needing genuine concurrency against PGlite's single connection.
  */
-function conflictingDb(): SqlClient {
+function failingInsertDb(insertError: unknown): SqlClient {
   const query: SqlQuery["query"] = async (text: string) => {
-    if (text.trim().toLowerCase().startsWith("insert")) {
-      throw Object.assign(new Error("duplicate key value violates unique constraint"), {
-        code: "23505",
-      });
-    }
+    if (text.trim().toLowerCase().startsWith("insert")) throw insertError;
     return { rows: [] };
   };
   return {
@@ -25,6 +19,19 @@ function conflictingDb(): SqlClient {
     transaction: async (work) => work({ query, exec: async () => {} }),
     end: async () => {},
   };
+}
+
+/**
+ * A `SqlClient` whose transaction's `insert` fails with a pg `23505` (unique
+ * violation), the way two concurrent PUTs for the same provider would race
+ * the partial unique index on `(org_id, provider) where revoked_at is null`.
+ */
+function conflictingDb(): SqlClient {
+  return failingInsertDb(
+    Object.assign(new Error("duplicate key value violates unique constraint"), {
+      code: "23505",
+    }),
+  );
 }
 
 const KEK_KEYS = ["KEY_ENCRYPTION_KEYS", "KEY_ENCRYPTION_KEY_CURRENT"] as const;
@@ -173,6 +180,20 @@ describe("PgProviderKeyStore (PT-7b2, D175, D176)", () => {
     );
     await expect(store.put("gemini", "sk-fake-key-0000", "user-1")).rejects.toThrow(
       "replaced concurrently; retry",
+    );
+  });
+
+  test("put propagates an insert failure that isn't a unique-index violation, unwrapped", async () => {
+    setKek();
+    const store = new PgProviderKeyStore(
+      failingInsertDb(Object.assign(new Error("connection terminated"), { code: "57P01" })),
+      "local",
+    );
+    await expect(store.put("gemini", "sk-fake-key-0000", "user-1")).rejects.toThrow(
+      "connection terminated",
+    );
+    await expect(store.put("gemini", "sk-fake-key-0000", "user-1")).rejects.not.toBeInstanceOf(
+      ProviderKeyConflictError,
     );
   });
 
