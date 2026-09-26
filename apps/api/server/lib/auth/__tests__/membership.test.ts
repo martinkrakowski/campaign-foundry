@@ -233,14 +233,12 @@ describe("memberTenant (PT-1a item 3)", () => {
       });
 
       expect(session).not.toBeNull();
-      expect(session?.session.activeOrganizationId).toBe("zeta");
+      const activeOrgId = (session?.session as { activeOrganizationId?: string | null } | undefined)
+        ?.activeOrganizationId;
+      expect(activeOrgId).toBe("zeta");
 
       // Verify memberTenant picks the active org
-      const tenant = await memberTenant(
-        sql,
-        session!.user.id,
-        session!.session.activeOrganizationId,
-      );
+      const tenant = await memberTenant(sql, session!.user.id, activeOrgId);
       expect(tenant?.orgId).toBe("zeta");
       expect(tenant?.roles).toEqual(["owner"]);
 
