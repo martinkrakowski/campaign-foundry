@@ -3,6 +3,25 @@
 Re-probe before trusting any row: `grok models`, `agy models`, `opencode models`. Two of these
 fail with a misleading error rather than "no such model".
 
+## Seat defaults — owner's instruction, 2026-09-25 (wave platform-and-tenancy-w01): agy for every lane
+
+**This supersedes the 2026-09-15 implementer and remediator rows below; every other seat in that table stands.**
+The owner's words: *"use gemini-3.8-flash (agy cli tool) for all lanes"*, given mid-wave after a qwen/opencode lane died
+(the host's disk had filled with ~2,900 leaked `cf-*` test dirs in `$TMPDIR`; an environment failure, not a seat one).
+
+| Seat | Default | Command / how |
+|---|---|---|
+| **Implementer / remediator** | **agy gemini-3.8-flash-high** | `agy --print "$(cat BRIEF)" --dangerously-skip-permissions --effort high --model gemini-3.8-flash-high --print-timeout 90m --output-format json`, launched detached in the lane worktree with an `EXIT` marker and an **absolute** brief path |
+
+What this still requires, all of it earned on this seat:
+- **Record the tip before every round** and count `"$BEFORE"..HEAD` after it. `EXIT 0` and `"status":"SUCCESS"` are
+  not evidence (PE1, 2026-09-19, zero commits).
+- **Watch only the log's `EXIT` marker.** A waiter that `pgrep -f`s a pattern contained in its own command line matches
+  itself and never returns; two waiters deadlocked that way in w01.
+- **Re-verify each claimed fix at the tip**, not from the round's summary. In w01 the #589 round-2 fix did land every
+  finding it named (the mounted `/api/auth` handler, the `WEB_ORIGIN`-derived `baseURL`, the `member (org_id, user_id)`
+  unique index, the mailer assertions), and each was checked in the file before its thread was resolved.
+
 ## Seat defaults — owner's decision, 2026-09-15: the orchestrator's recommendation, measured
 
 **This supersedes every seat table below** (they stay as the record). Chosen from this session's measurements:

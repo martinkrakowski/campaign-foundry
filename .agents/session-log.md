@@ -6302,3 +6302,56 @@ and source formatting, recorded here rather than fixed.
     ACLs until PT-6); `.dockerignore` is recursive.
   - Verified through the ingress: the pages and the web-to-API proxy load. A decision PUT landed in
     Postgres with actor and run, a stale PUT got 409, and the decision survived a redeploy.
+
+## 2026-09-25 — wave platform-and-tenancy-w01 (PT-3c/d/e, PT-6a, PT-7a, PT-1a + two follow-ups)
+
+- **Decisions stamped before dispatch:** D174b (Better Auth; Google and email, email through Resend), D174c
+  (Backblaze B2), D174d (Kafka on Aiven, delivery only), D176 (host-secret KEK behind a `KeySealerPort`;
+  hosting undecided). Staging on the LAN k3s node was deployed first (#581) and then pinned to
+  `STORE_BACKEND=fs` until PT-8 imports its data (`b5a3bb99`).
+- **Merged, in migration order (0003 → 0008):**
+  - [#584](https://github.com/martinkrakowski/campaign-foundry/pull/584) (`7a2a27c1`) PT-3c reports on Postgres.
+  - [#585](https://github.com/martinkrakowski/campaign-foundry/pull/585) (`548c30b5`) PT-3d briefs on Postgres.
+  - [#582](https://github.com/martinkrakowski/campaign-foundry/pull/582) (`e43be164`) PT-3e pools on Postgres.
+  - [#586](https://github.com/martinkrakowski/campaign-foundry/pull/586) (`e15a6c21`) PT-6a job lease rows:
+    one-statement claim, heartbeat, reaper, fence on its own writes; a Postgres service in `ci.yml` for the
+    two-connection claim race.
+  - [#587](https://github.com/martinkrakowski/campaign-foundry/pull/587) (`a783422e`) PT-7a metering: a quota
+    check per generation, `QuotaExceededError` → 429 on the copy route, a failed usage write only warns,
+    a missing org has quota 0.
+  - [#589](https://github.com/martinkrakowski/campaign-foundry/pull/589) (`d1e5678d`) PT-1a Better Auth core,
+    off by default (`AUTH_MODE=local`). Round 2 fixed what the first review missed: the `/api/auth` handler was
+    never mounted, and `baseURL` must derive from `WEB_ORIGIN`. Also `member (org_id, user_id)` unique (the
+    arbiter bootstrap's `on conflict` needs), `account (provider_id, account_id)` unique (CodeRabbit, after the CI fix: concurrent link requests could both insert), `AUTH_POOL_MAX=2` inside the 15-connection budget, and a
+    32-character secret minimum. Qodo's "0008 rejects existing org ids" was refuted: `local` is the only
+    org row anywhere, and `migrate()` rolls a failure back whole.
+  - Follow-ups: [#583](https://github.com/martinkrakowski/campaign-foundry/pull/583) (`99e54517`) verdicts
+    and packaging pause while a run is in flight; [#588](https://github.com/martinkrakowski/campaign-foundry/pull/588)
+    (`fee8568f`) the overlapping-PATCH race test forces its interleaving;
+    [#590](https://github.com/martinkrakowski/campaign-foundry/pull/590) (`77fb0d72`) pins decision retention
+    on refused report merges: l11 mutations #1 and #6 had survived on main since #584, and all 8 now reproduce.
+- **What went wrong, and the rule each left:**
+  - **ENOSPC mid-wave.** 2,867 leaked `cf-encode-*`/`cf-caprace-*` dirs (9.9 GB) in `$TMPDIR` filled the disk,
+    and a qwen lane died writing. `df` and prune before a parallel wave; the leak itself is a follow-up.
+  - **Load 90–121** from unlocked targeted runs. The gate lock now covers `yarn mutate` and any multi-file
+    vitest run, not only the full gate.
+  - **Seats.** The owner moved every lane to agy `gemini-3.8-flash-high` mid-wave (recorded in `cast.md`).
+    Every round was verified by commits since the recorded tip, never by its exit status.
+  - **Waiters that `pgrep -f` their own pattern** matched themselves and never returned. Wait on a PID or a
+    log marker.
+  - **An attribution trailer reached main.** `a783422e`'s squash body carries a bare `Claude-Session:` line from
+    a lane commit; the pre-merge grep matched only `co-authored|generated with`. Left on main (published
+    history); the check now also matches `claude-session|claude\.ai/code`.
+  - **#589's push-event CI failed twice while its PR-event CI passed on the same SHA.** Environments were
+    identical and the file order the same. The first `pools.test.ts` test imported the route graph cold
+    inside its 5 s budget (≈1.2–2.0 s in CI normally), and its late request then wrote into the next test's
+    `PROJECT_ROOT` (200 instead of 201). An externally pasted analysis proposed a status-code change and a
+    lock rewrite. Both were already the code's behaviour (201 only when `added > 0`; `withPoolLock` already
+    recovers from rejection), so neither was applied. Fix: a `beforeAll` import warms the caches that
+    survive `vi.resetModules` (`87a4ea93`, test 1 ≈520 ms → ≈30 ms); the timeout is unchanged.
+  - **The main checkout's `.env.local` sets `STORE_BACKEND=postgres` and the Aiven URL.** A timing run there
+    was saved only by a missing `pg` install. Tests run in worktrees only.
+- **Next wave:** PT-6a2 (the run id as a fence on report and decision writes) first. Then PT-1b (sign-in
+  UI), PT-2, and the soft-quota reservation. Open follow-ups: the `$TMPDIR` test-dir leak; `pools.test.ts`
+  shares `PROJECT_ROOT` across tests through `process.env`, so a late request can still cross tests;
+  client-side awareness of a server-side job.
