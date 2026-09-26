@@ -139,6 +139,35 @@ describe("PgReportStore (PT-3c, D169)", () => {
     ).resolves.toBe("reports/camp-live.json");
   });
 
+  test("a pg report write refuses a fence from a live run for a different campaign", async () => {
+    const store = new PgReportStore(db, "local");
+    const payload = JSON.stringify({ assets: [{ productId: "alpha" }] });
+
+    await db.query(
+      `insert into job (id, org_id, campaign_id, status, lease_expires_at)
+       values ($1, 'local', 'camp-a', 'running', now() + interval '60 seconds')`,
+      ["live-run-camp-a"],
+    );
+    await expect(
+      store.writeReport("camp-b", payload, undefined, { runId: "live-run-camp-a" }),
+    ).rejects.toBeInstanceOf(JobLeaseLostError);
+  });
+
+  test("a pg report write refuses a fence from a live run in another org", async () => {
+    await db.query("insert into org (id, name) values ($1, $2)", ["acme", "Acme"]);
+    const store = new PgReportStore(db, "local");
+    const payload = JSON.stringify({ assets: [{ productId: "alpha" }] });
+
+    await db.query(
+      `insert into job (id, org_id, campaign_id, status, lease_expires_at)
+       values ($1, 'acme', 'camp-same', 'running', now() + interval '60 seconds')`,
+      ["live-run-acme"],
+    );
+    await expect(
+      store.writeReport("camp-same", payload, undefined, { runId: "live-run-acme" }),
+    ).rejects.toBeInstanceOf(JobLeaseLostError);
+  });
+
   test("no fence leaves behaviour unchanged", async () => {
     const store = new PgReportStore(db, "local");
     const payload = JSON.stringify({ assets: [{ productId: "alpha" }] });
