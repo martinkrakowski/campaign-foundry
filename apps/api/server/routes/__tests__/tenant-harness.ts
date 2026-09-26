@@ -1,7 +1,9 @@
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createApp, createRouter, defineEventHandler, toWebHandler, type EventHandler } from "h3";
+import { afterAll } from "vitest";
+import { resetProjectRoot } from "@campaignfoundry/shared";
 import { resetDatabase, setDatabase } from "../../lib/db/database.js";
 import { migratedDatabase } from "../../lib/db/__tests__/pglite-client.js";
 import type { SqlClient } from "../../lib/db/sql-client.js";
@@ -17,6 +19,25 @@ import {
   resetUsageStore,
 } from "../../lib/ports/index.js";
 import type { TenantContext } from "../../lib/tenant.js";
+
+const createdTenantDirs = new Set<string>();
+
+/**
+ * Assert that all temporary directories created by the harness have been removed
+ * and not recreated by late writes.
+ */
+export function assertNoLeakedTenantDirs(): void {
+  const leaked = [...createdTenantDirs].filter((dir) => existsSync(dir));
+  if (leaked.length > 0) {
+    throw new Error(
+      `Leaked ${leaked.length} tenant temp director${leaked.length === 1 ? "y" : "ies"}:\n${leaked.join("\n")}`,
+    );
+  }
+}
+
+afterAll(() => {
+  assertNoLeakedTenantDirs();
+});
 
 export { LOCAL_TENANT, type TenantContext } from "../../lib/tenant.js";
 
@@ -41,8 +62,9 @@ export interface RouteRegistration {
   handler: EventHandler;
 }
 
-/** Reset in-memory registries for all stores. */
+/** Reset in-memory registries for all stores and monorepo project root. */
 export function resetAllStores(): void {
+  resetProjectRoot();
   resetBriefStore();
   resetAssetStore();
   resetPoolStore();
@@ -122,6 +144,7 @@ export function setupFsHarness(): FsHarness {
   const origStoreBackend = process.env.STORE_BACKEND;
 
   const tmpDir = mkdtempSync(join(tmpdir(), "cf-tenant-fs-"));
+  createdTenantDirs.add(tmpDir);
   const projectRoot = join(tmpDir, "project");
   const outputRoot = join(tmpDir, "output");
 
@@ -137,6 +160,7 @@ export function setupFsHarness(): FsHarness {
   process.env.OUTPUT_DIR = outputRoot;
   delete process.env.STORE_BACKEND;
 
+  resetProjectRoot();
   resetAllStores();
 
   return {
@@ -157,6 +181,7 @@ export function setupFsHarness(): FsHarness {
       if (origStoreBackend === undefined) delete process.env.STORE_BACKEND;
       else process.env.STORE_BACKEND = origStoreBackend;
 
+      resetProjectRoot();
       rmSync(tmpDir, { recursive: true, force: true });
     },
   };
@@ -181,6 +206,7 @@ export async function setupPgHarness(): Promise<PgHarness> {
   const origStoreBackend = process.env.STORE_BACKEND;
 
   const tmpDir = mkdtempSync(join(tmpdir(), "cf-tenant-pg-"));
+  createdTenantDirs.add(tmpDir);
   const projectRoot = join(tmpDir, "project");
   const outputRoot = join(tmpDir, "output");
 
@@ -201,6 +227,7 @@ export async function setupPgHarness(): Promise<PgHarness> {
     "Acme",
   ]);
 
+  resetProjectRoot();
   resetAllStores();
 
   return {
@@ -223,6 +250,7 @@ export async function setupPgHarness(): Promise<PgHarness> {
       if (origStoreBackend === undefined) delete process.env.STORE_BACKEND;
       else process.env.STORE_BACKEND = origStoreBackend;
 
+      resetProjectRoot();
       rmSync(tmpDir, { recursive: true, force: true });
     },
   };

@@ -8,6 +8,7 @@ import { requestTenant } from "../../lib/tenant.js";
 import {
   ACME_TENANT,
   LOCAL_TENANT,
+  assertNoLeakedTenantDirs,
   mountTenantRoute,
   setupFsHarness,
   setupPgHarness,
@@ -85,5 +86,15 @@ describe("tenant-harness (PT-2a item 1)", () => {
     const pg = await setupTenantHarness("postgres");
     expect(pg.backend).toBe("postgres");
     await pg.cleanup();
+  });
+
+  test("assertNoLeakedTenantDirs detects uncleaned temp directories", () => {
+    const harness = setupFsHarness();
+    try {
+      expect(() => assertNoLeakedTenantDirs()).toThrow(/Leaked 1 tenant temp director/);
+    } finally {
+      harness.cleanup();
+      expect(() => assertNoLeakedTenantDirs()).not.toThrow();
+    }
   });
 });
