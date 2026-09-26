@@ -453,6 +453,51 @@ describe("kafkaSettings (PT-6b2, D174d)", () => {
     });
   });
 
+  test("reads CA only without client cert and key", () => {
+    process.env.KAFKA_BROKERS = "kafka1:9092";
+    mkdirSync(certsDir, { recursive: true });
+    writeFileSync(join(certsDir, "ca.pem"), "TEST-CA-PEM");
+    process.env.KAFKA_CA_PATH = "certs/ca.pem";
+    delete process.env.KAFKA_CLIENT_CERT_PATH;
+    delete process.env.KAFKA_CLIENT_KEY_PATH;
+
+    const settings = kafkaSettings();
+    expect(settings).toEqual({
+      brokers: ["kafka1:9092"],
+      topic: "cf.run-requests",
+      groupId: "cf-workers",
+      consume: false,
+      caPath: "certs/ca.pem",
+      ssl: {
+        ca: "TEST-CA-PEM",
+      },
+    });
+  });
+
+  test("reads client cert and key without CA", () => {
+    process.env.KAFKA_BROKERS = "kafka1:9092";
+    mkdirSync(certsDir, { recursive: true });
+    writeFileSync(join(certsDir, "client.crt"), "TEST-CLIENT-CRT");
+    writeFileSync(join(certsDir, "client.key"), "TEST-CLIENT-KEY");
+    delete process.env.KAFKA_CA_PATH;
+    process.env.KAFKA_CLIENT_CERT_PATH = "certs/client.crt";
+    process.env.KAFKA_CLIENT_KEY_PATH = "certs/client.key";
+
+    const settings = kafkaSettings();
+    expect(settings).toEqual({
+      brokers: ["kafka1:9092"],
+      topic: "cf.run-requests",
+      groupId: "cf-workers",
+      consume: false,
+      clientCertPath: "certs/client.crt",
+      clientKeyPath: "certs/client.key",
+      ssl: {
+        cert: "TEST-CLIENT-CRT",
+        key: "TEST-CLIENT-KEY",
+      },
+    });
+  });
+
   test("hazard: empty broker entry in KAFKA_BROKERS throws clear error", () => {
     process.env.KAFKA_BROKERS = "kafka1:9092, ,kafka2:9092";
     expect(() => kafkaSettings()).toThrow(/Malformed KAFKA_BROKERS/);

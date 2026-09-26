@@ -210,10 +210,8 @@ function readCertFile(envVar: string, rawPath: string): string {
   }
   try {
     return readFileSync(resolved, "utf8");
-  } catch (error: unknown) {
-    throw new Error(
-      `Failed to read ${envVar} at "${rawPath}": ${error instanceof Error ? error.message : String(error)}`,
-    );
+  } catch (error) {
+    throw new Error(`Failed to read ${envVar} at "${rawPath}": ${(error as Error).message}`);
   }
 }
 

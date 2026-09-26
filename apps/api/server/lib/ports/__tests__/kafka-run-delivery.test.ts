@@ -153,6 +153,27 @@ describe("KafkaRunDelivery (PT-6b2, D174d)", () => {
     );
   });
 
+  test("configures SSL options without ca when ca is not provided", () => {
+    const sslSettings: KafkaSettings = {
+      ...settings,
+      ssl: {
+        cert: "CERT-DATA",
+        key: "KEY-DATA",
+      },
+    };
+    new KafkaRunDelivery(sslSettings);
+    expect(mockKafkaConstructor).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ssl: {
+          rejectUnauthorized: true,
+          ca: undefined,
+          cert: "CERT-DATA",
+          key: "KEY-DATA",
+        },
+      }),
+    );
+  });
+
   test("accepts injected kafkaClient or producer", () => {
     const customProducer = {
       connect: vi.fn().mockResolvedValue(undefined),

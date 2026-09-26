@@ -62,4 +62,11 @@ describe("run-delivery-registry (PT-6b2, D171, D174d)", () => {
     const second = getRunDelivery(LOCAL_TENANT);
     expect(second).toBeInstanceOf(InProcessRunDelivery);
   });
+
+  test("caches and returns the same instance on consecutive calls", () => {
+    delete process.env.KAFKA_BROKERS;
+    const first = getRunDelivery(LOCAL_TENANT);
+    const second = getRunDelivery(LOCAL_TENANT);
+    expect(first).toBe(second);
+  });
 });

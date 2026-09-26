@@ -104,9 +104,9 @@ export class RunConsumer {
     let parsed: unknown;
     try {
       parsed = JSON.parse(raw);
-    } catch (error: unknown) {
+    } catch (error) {
       console.warn(
-        `[run-consumer] Dropping malformed JSON message at offset ${message.offset}: ${error instanceof Error ? error.message : String(error)}`,
+        `[run-consumer] Dropping malformed JSON message at offset ${message.offset}: ${(error as Error).message}`,
       );
       await commitOffset();
       return;

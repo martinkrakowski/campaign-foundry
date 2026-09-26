@@ -373,6 +373,27 @@ describe("RunConsumer (PT-6b2, D171, D174d)", () => {
     );
   });
 
+  test("configures SSL without ca when ca is not provided", () => {
+    const sslSettings: KafkaSettings = {
+      ...settings,
+      ssl: {
+        cert: "CERT-DATA",
+        key: "KEY-DATA",
+      },
+    };
+    new RunConsumer(sslSettings);
+    expect(mockKafkaConstructor).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ssl: {
+          rejectUnauthorized: true,
+          ca: undefined,
+          cert: "CERT-DATA",
+          key: "KEY-DATA",
+        },
+      }),
+    );
+  });
+
   test("accepts injected consumer or kafka client", () => {
     const customConsumer = {
       connect: vi.fn(),
