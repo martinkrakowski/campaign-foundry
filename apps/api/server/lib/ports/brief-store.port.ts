@@ -36,7 +36,9 @@ export class TeamsNotSupportedError extends Error {
   readonly status = 400;
 
   constructor() {
-    super("Assigning a team requires the Postgres backend.");
+    // Product-facing text (the editor shows this API error unchanged, D166
+    // qodo thread U1be) — never name the concrete storage backend here.
+    super("Assigning a team isn't supported in this workspace.");
     this.name = "TeamsNotSupportedError";
   }
 }
