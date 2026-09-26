@@ -21,8 +21,7 @@ import {
  * re-wrapping the message here is still safe to surface.
  */
 function toUnavailable(error: unknown): ProviderKeyUnavailableError {
-  const detail = error instanceof Error ? error.message : "unknown error";
-  return new ProviderKeyUnavailableError(`KEY_ENCRYPTION_KEYS is misconfigured: ${detail}`);
+  return new ProviderKeyUnavailableError(`KEY_ENCRYPTION_KEYS is misconfigured: ${String(error)}`);
 }
 
 /** `error.code`, when `error` has one (pg and PGlite both attach the SQLSTATE as a string). */

@@ -197,6 +197,42 @@ describe("PgProviderKeyStore (PT-7b2, D175, D176)", () => {
     );
   });
 
+  test("put's unique-violation check only fires for a real pg 23505: a non-object, null, or codeless/non-string-code error is rethrown as-is", async () => {
+    setKek();
+
+    await expect(
+      new PgProviderKeyStore(failingInsertDb("just a string"), "local").put(
+        "gemini",
+        "sk-fake-key-0000",
+        "user-1",
+      ),
+    ).rejects.toBe("just a string");
+
+    await expect(
+      new PgProviderKeyStore(failingInsertDb(null), "local").put(
+        "gemini",
+        "sk-fake-key-0000",
+        "user-1",
+      ),
+    ).rejects.toBeNull();
+
+    await expect(
+      new PgProviderKeyStore(failingInsertDb({ message: "no code field" }), "local").put(
+        "gemini",
+        "sk-fake-key-0000",
+        "user-1",
+      ),
+    ).rejects.toEqual({ message: "no code field" });
+
+    await expect(
+      new PgProviderKeyStore(failingInsertDb({ code: 12345 }), "local").put(
+        "gemini",
+        "sk-fake-key-0000",
+        "user-1",
+      ),
+    ).rejects.toEqual({ code: 12345 });
+  });
+
   test("put wraps a malformed KEK (wrong key length) as ProviderKeyUnavailableError, with no key material in the message", async () => {
     const badKey = Buffer.alloc(16, 9).toString("base64"); // 16 bytes, not the required 32
     process.env.KEY_ENCRYPTION_KEYS = `v1:${badKey}`;
