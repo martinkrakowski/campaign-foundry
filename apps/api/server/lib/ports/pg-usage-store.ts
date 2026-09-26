@@ -94,20 +94,24 @@ export class PgUsageStore implements UsageStorePort {
 
   /** Settle a reserved slot into a recorded row with generation details. */
   async settle(id: string, record: UsageRecord): Promise<void> {
-    await this.db.query(
+    const { rows } = await this.db.query<{ id: string }>(
       `update usage
        set status = 'recorded',
            provider = $2,
            model = $3,
            units = $4,
            key_owner = $5
-       where id = $1`,
-      [id, record.provider, record.model, record.units, record.keyOwner],
+       where id = $1 and org_id = $6 and status = 'reserved'
+       returning id`,
+      [id, record.provider, record.model, record.units, record.keyOwner, record.orgId],
     );
+    if (rows.length === 0) {
+      await this.record(record);
+    }
   }
 
   /** Release an unused reservation by deleting the reserved row. */
   async release(id: string): Promise<void> {
-    await this.db.query(`delete from usage where id = $1`, [id]);
+    await this.db.query(`delete from usage where id = $1 and status = 'reserved'`, [id]);
   }
 }

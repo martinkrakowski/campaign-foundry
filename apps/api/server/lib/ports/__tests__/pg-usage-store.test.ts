@@ -178,6 +178,30 @@ describe("PgUsageStore (PT-7a, D175)", () => {
     expect(id2).toEqual(expect.any(String));
   });
 
+  test("release of a recorded row's id leaves it in place", async () => {
+    const store = new PgUsageStore(db);
+    await store.record({
+      orgId: "local",
+      provider: "imagen",
+      model: "imagen-4.0",
+      units: 1,
+      keyOwner: "platform",
+    });
+    const { rows: before } = await db.query<{ id: string }>(
+      "select id from usage where org_id = 'local' and status = 'recorded'",
+    );
+    expect(before).toHaveLength(1);
+    const recordedId = String(before[0].id);
+
+    await store.release(recordedId);
+
+    const { rows: after } = await db.query<{ id: string }>(
+      "select id from usage where id = $1",
+      [recordedId],
+    );
+    expect(after).toHaveLength(1);
+  });
+
   test("a reservation older than the TTL no longer counts (PT-7a2, D175)", async () => {
     const store = new PgUsageStore(db);
     await db.query("update org set monthly_generation_quota = 1 where id = $1", ["local"]);
@@ -189,7 +213,7 @@ describe("PgUsageStore (PT-7a, D175)", () => {
     expect(id2).toEqual(expect.any(String));
   });
 
-  test("settle turns it into a recorded row with the fields (PT-7a2, D175)", async () => {
+  test("settle of a live reservation updates it", async () => {
     const store = new PgUsageStore(db);
     const id = await store.reserve("local");
     expect(id).toEqual(expect.any(String));
@@ -216,6 +240,93 @@ describe("PgUsageStore (PT-7a, D175)", () => {
         key_owner: "platform",
       },
     ]);
+  });
+
+  test("settle of an unknown id inserts a recorded row", async () => {
+    const store = new PgUsageStore(db);
+    await store.settle("999999", {
+      orgId: "local",
+      provider: "openrouter",
+      model: "google/gemini-2.5-flash",
+      units: 1,
+      keyOwner: "platform",
+    });
+    const { rows } = await db.query<{
+      status: string;
+      provider: string;
+      model: string;
+      units: number;
+      key_owner: string;
+    }>(
+      "select status, provider, model, units, key_owner from usage where org_id = 'local' and provider = 'openrouter'",
+    );
+    expect(rows).toEqual([
+      {
+        status: "recorded",
+        provider: "openrouter",
+        model: "google/gemini-2.5-flash",
+        units: 1,
+        key_owner: "platform",
+      },
+    ]);
+  });
+
+  test("settle cannot touch another org's row", async () => {
+    const store = new PgUsageStore(db);
+    const acmeReservationId = await store.reserve("acme");
+    expect(acmeReservationId).toEqual(expect.any(String));
+
+    // local attempts to settle acme's reservation id
+    await store.settle(acmeReservationId!, {
+      orgId: "local",
+      provider: "imagen",
+      model: "imagen-4.0",
+      units: 1,
+      keyOwner: "platform",
+    });
+
+    // Acme's reservation remains untouched in 'reserved' status
+    const { rows: acmeRows } = await db.query<{ status: string; org_id: string }>(
+      "select status, org_id from usage where id = $1",
+      [acmeReservationId],
+    );
+    expect(acmeRows).toEqual([{ status: "reserved", org_id: "acme" }]);
+
+    // A recorded row was inserted for local instead
+    const { rows: localRows } = await db.query<{ status: string; provider: string }>(
+      "select status, provider from usage where org_id = 'local' and status = 'recorded'",
+    );
+    expect(localRows).toHaveLength(1);
+    expect(localRows[0]).toEqual({ status: "recorded", provider: "imagen" });
+  });
+
+  test("countThisMonth: a live reservation counts, a reservation older than RESERVATION_TTL_MS does not, and a recorded row from last month does not", async () => {
+    const store = new PgUsageStore(db);
+    const now = new Date("2026-09-24T12:00:00.000Z");
+
+    // 1. A live reservation (30 mins old, within TTL)
+    await db.query(
+      `insert into usage (org_id, status, created_at)
+       values ($1, 'reserved', $2)`,
+      ["local", new Date(now.getTime() - 30 * 60 * 1000).toISOString()],
+    );
+
+    // 2. An expired reservation older than RESERVATION_TTL_MS (2 hours old)
+    await db.query(
+      `insert into usage (org_id, status, created_at)
+       values ($1, 'reserved', $2)`,
+      ["local", new Date(now.getTime() - 2 * 60 * 60 * 1000).toISOString()],
+    );
+
+    // 3. A recorded row from last month (August)
+    await db.query(
+      `insert into usage (org_id, provider, model, units, key_owner, status, created_at)
+       values ($1, 'imagen', 'm', 1, 'platform', 'recorded', $2)`,
+      ["local", "2026-08-31T23:59:59.999Z"],
+    );
+
+    // Only the single live reservation should be counted
+    await expect(store.countThisMonth("local", now)).resolves.toBe(1);
   });
 });
 
