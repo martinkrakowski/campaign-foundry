@@ -140,4 +140,44 @@ describe("tenant-harness (PT-2a item 1)", () => {
       expect(() => assertNoLeakedTenantDirs()).not.toThrow();
     });
   });
+
+  test("setupPgHarness restores state even when closing the database fails", async () => {
+    const root = process.env.PROJECT_ROOT;
+    await expect(
+      setupPgHarness(async () => {
+        const db = await migratedDatabase();
+        return {
+          ...db,
+          query: async () => {
+            throw new Error("seed failed");
+          },
+          end: async () => {
+            await db.end();
+            throw new Error("close failed");
+          },
+        };
+      }),
+    ).rejects.toThrow("close failed");
+    expect(process.env.PROJECT_ROOT).toBe(root);
+    expect(() => assertNoLeakedTenantDirs()).not.toThrow();
+  });
+
+  test("cleanup restores state even when closing the database fails", async () => {
+    const root = process.env.PROJECT_ROOT;
+    let fail = false;
+    const harness = await setupPgHarness(async () => {
+      const db = await migratedDatabase();
+      return {
+        ...db,
+        end: async () => {
+          await db.end();
+          if (fail) throw new Error("close failed");
+        },
+      };
+    });
+    fail = true;
+    await expect(harness.cleanup()).rejects.toThrow("close failed");
+    expect(process.env.PROJECT_ROOT).toBe(root);
+    expect(() => assertNoLeakedTenantDirs()).not.toThrow();
+  });
 });

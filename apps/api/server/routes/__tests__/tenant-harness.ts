@@ -247,8 +247,11 @@ export async function setupPgHarness(
     ]);
   } catch (error) {
     resetDatabase();
-    await db?.end();
-    restore();
+    try {
+      await db?.end();
+    } finally {
+      restore();
+    }
     throw error;
   }
   const ready = db;
@@ -265,8 +268,11 @@ export async function setupPgHarness(
     async cleanup() {
       resetAllStores();
       resetDatabase();
-      await ready.end();
-      restore();
+      try {
+        await ready.end();
+      } finally {
+        restore();
+      }
     },
   };
 }
