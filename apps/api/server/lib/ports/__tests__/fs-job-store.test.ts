@@ -534,4 +534,40 @@ describe("FsJobStore", () => {
       vi.useRealTimers();
     }
   });
+
+  test("getStoredJob marks an expired queued job as failed on a cold disk read", async () => {
+    // The TTL timer above fires and rewrites the entry itself, so it never
+    // exercises getStoredJob's OWN staleness check on a read that finds
+    // nothing cached — the path a second process (a fresh store over the same
+    // dir) or a cache-evicted read takes. Backdating createdAt on disk leaves
+    // the queued-expiry timer pending in real time (it never fires during
+    // this test), so only that on-read check can be what marks it failed.
+    const enq = await store.enqueueJob("camp");
+    expect(enq.acquired).toBe(true);
+    if (!enq.acquired) return;
+
+    const raw = JSON.parse(readFileSync(store.jobPath(enq.jobId), "utf8")) as StoredJob;
+    writeFileSync(
+      store.jobPath(enq.jobId),
+      JSON.stringify({ ...raw, createdAt: Date.now() - QUEUED_TTL_MS - 1 }),
+      "utf8",
+    );
+    (store as unknown as { memoryCache: Map<string, unknown> }).memoryCache.clear();
+
+    const stored = await store.getStoredJob(enq.jobId);
+    expect(stored?.job.status).toBe("failed");
+    expect(stored?.job.error).toMatch(/expired/i);
+  });
+
+  test("deleteJob clears a still-pending queued-expiry timer", async () => {
+    const enq = await store.enqueueJob("camp");
+    expect(enq.acquired).toBe(true);
+    if (!enq.acquired) return;
+
+    // The queued TTL timer set by enqueueJob is still pending (real time,
+    // never advanced): deleting the job here must clear it rather than leave
+    // it to fire later against an id that no longer exists.
+    await store.deleteJob(enq.jobId);
+    expect(await store.getJob(enq.jobId)).toBeUndefined();
+  });
 });

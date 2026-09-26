@@ -206,6 +206,30 @@ describe("PgJobStore (PT-6a, D171)", () => {
     expect(row.rows[0]).toEqual({ status: "running" });
   });
 
+  test("a lapsed queued row polls as failed without any claim ever reaping it", async () => {
+    const store = new PgJobStore(db, "local");
+    // Direct insert, past QUEUED_TTL_MS, bypassing enqueueJob so no reap() runs.
+    await db.query(
+      `insert into job (id, org_id, campaign_id, status, created_at)
+       values ($1, 'local', 'camp', 'queued', now() - interval '11 minutes')`,
+      ["ghost-queued"],
+    );
+
+    expect(await store.getJob("ghost-queued")).toMatchObject({
+      status: "failed",
+      error: expect.stringContaining("expired"),
+    });
+    expect((await store.listJobs()).find((j) => j.id === "ghost-queued")?.job).toMatchObject({
+      status: "failed",
+    });
+    // Read-time only: nothing wrote the row. The next real claim's reaper is
+    // still what settles it for good.
+    const row = await db.query<{ status: string }>("select status from job where id = $1", [
+      "ghost-queued",
+    ]);
+    expect(row.rows[0]).toEqual({ status: "queued" });
+  });
+
   test("heartbeat extends the lease", async () => {
     const store = new PgJobStore(db, "local");
     const claim = await store.acquireJob("camp");
