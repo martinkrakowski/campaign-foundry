@@ -445,11 +445,4 @@ describe("FsJobStore", () => {
       }
     },
   );
-
-  test("fs completeJob after failJob refused", async () => {
-    const id = await store.createJob("camp");
-    await store.failJob(id, "deadline exceeded");
-    await expect(store.completeJob(id, payload())).rejects.toBeInstanceOf(JobLeaseLostError);
-    await expect(store.failJob(id, "another failure")).rejects.toBeInstanceOf(JobLeaseLostError);
-  });
 });

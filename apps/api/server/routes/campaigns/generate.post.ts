@@ -218,6 +218,8 @@ export default defineEventHandler(async (event) => {
       return;
     }
     // A selective run produced only the regenerated cells — merge them into the
+    // persisted report so the full campaign survives a partial run. `runJob` fails the
+    // job with the message if the merge is refused.
     await writeReport(env, result.value, {
       merge: reroll,
       expectedRevision,
