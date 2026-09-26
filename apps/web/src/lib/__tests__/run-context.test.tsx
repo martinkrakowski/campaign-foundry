@@ -1,7 +1,7 @@
 import { describe, test, expect, vi, afterEach } from "vitest";
 import { renderHook, act, waitFor, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { createElement, type ReactNode } from "react";
+import { createElement, useEffect, type ReactNode } from "react";
 import { assetIdentity } from "@campaignfoundry/CampaignOrchestration";
 import { BRIEF_SCHEMA_VERSION } from "@campaignfoundry/CampaignOrchestration/brief-schema-version";
 import { DEFAULT_CAMPAIGN_TYPE } from "@campaignfoundry/CampaignOrchestration/campaign-types";
@@ -3330,6 +3330,54 @@ describe("RunProvider — running job awareness on reload and brief switch", () 
     });
     expect(polls).toBe(0);
   });
+
+  test('unmounting when a child effect committed the brief before the mount effect ran leaves no orphaned poller (coderabbit "Register the unmount cleanup before the briefDecidedRef early return")', async () => {
+    // React runs a child's effects before its parent's — the editor route's own
+    // load effect calls `setBrief` from a child of `RunProvider`, so
+    // `briefDecidedRef.current` is already true by the time the provider's own
+    // mount effect runs. That is the NORMAL ordering, not an edge case; the mount
+    // effect's early return for it must still register a cleanup.
+    function EarlyBriefSetter() {
+      const { setBrief } = useRun();
+      useEffect(() => {
+        setBrief(activeBrief);
+      }, []);
+      return null;
+    }
+    let resolveJobLookup!: (r: Response) => void;
+    const jobLookupPromise = new Promise<Response>((r) => {
+      resolveJobLookup = r;
+    });
+    let polls = 0;
+    mockPipelineApi({
+      result: (url) =>
+        url.includes("/campaigns/jobs?campaignId=active-campaign")
+          ? jobLookupPromise
+          : json(EMPTY_REPORT),
+      job: () => {
+        polls += 1;
+        return jobOk({
+          halted: false,
+          assets: [asset({ productId: "p1" })],
+          log: { entries: [], campaignId: "active-campaign" },
+        });
+      },
+    });
+
+    const { result, unmount } = renderHook(() => useRun(), {
+      wrapper: ({ children }) =>
+        createElement(RunProvider, null, createElement(EarlyBriefSetter), children),
+    });
+    await waitFor(() => expect(result.current.brief.id).toBe("active-campaign"));
+    unmount();
+    await act(async () => {
+      resolveJobLookup(json({ jobId: "job-orphan" }));
+      await new Promise((r) => setTimeout(r, 0));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(polls).toBe(0);
+  });
+
   test('adopting a job commits the persisted report, not the job\'s own (possibly partial) result (greptile "Re-roll adoption drops creatives")', async () => {
     // The job being adopted is a selective re-roll: its own completed payload
     // carries only the one regenerated cell, but the server has already merged

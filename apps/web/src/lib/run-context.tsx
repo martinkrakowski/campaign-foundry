@@ -980,11 +980,24 @@ export function RunProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let active = true;
     mountedRef.current = true; // StrictMode re-runs this effect; the ref must recover
+    // Every path below returns this, including the early one: a bare `return`
+    // registers no cleanup at all, and the editor route's own child effect calls
+    // `setBrief` (which sets `briefDecidedRef.current`) before this provider effect
+    // runs (comment above, D37) — the NORMAL ordering, not an edge case — so the
+    // early return used to be the common path that left this whole effect's
+    // `active`/`mountedRef`/`pollAbort` cleanup unregistered on unmount, letting a
+    // `setBrief` discovery still in flight start an orphaned poller after unmount
+    // (coderabbit, extending `41b0bac2`'s fix to the path it missed).
+    const cleanup = () => {
+      active = false;
+      mountedRef.current = false;
+      pollAbort.current?.abort(); // unmount: no poller may outlive the provider
+    };
     // Something has already decided which brief is active — the blank route releasing
     // the campaign, most importantly. `cf:brief` is a *last-opened* pointer, not an
     // application (D37), so restoring it here would put a released brief back on the
     // shell and let Generate spend image-generation credits on it.
-    if (briefDecidedRef.current) return;
+    if (briefDecidedRef.current) return cleanup;
     let startBrief = DEFAULT_BRIEF;
     try {
       const parsed: unknown = JSON.parse(localStorage.getItem(BRIEF_KEY) ?? "null");
@@ -1044,11 +1057,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
           /* F6: could-not-ask is not absence — restore nothing, claim nothing. */
         });
     });
-    return () => {
-      active = false;
-      mountedRef.current = false;
-      pollAbort.current?.abort(); // unmount: no poller may outlive the provider
-    };
+    return cleanup;
   }, []);
 
   // Review decisions live on the server (D173). The grid shows the verdicts of
