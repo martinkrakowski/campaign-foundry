@@ -1,13 +1,23 @@
 import { describe, test, expect, vi, afterEach } from "vitest";
 import { resetProviderKeyStore } from "../../../../lib/ports/index.js";
 import type { TenantContext } from "../../../../lib/tenant.js";
-import { ACME_TENANT, LOCAL_TENANT, mountTenantRoute, setupPgHarness } from "../../../__tests__/tenant-harness.js";
+import {
+  ACME_TENANT,
+  LOCAL_TENANT,
+  mountTenantRoute,
+  setupPgHarness,
+} from "../../../__tests__/tenant-harness.js";
 import getOneHandler from "../[provider].get.js";
 import putHandler from "../[provider].put.js";
 import deleteHandler from "../[provider].delete.js";
 import listHandler from "../index.get.js";
 
-const MEMBER: TenantContext = { orgId: "local", userId: "u-member", roles: ["member"], teamIds: [] };
+const MEMBER: TenantContext = {
+  orgId: "local",
+  userId: "u-member",
+  roles: ["member"],
+  teamIds: [],
+};
 const ADMIN: TenantContext = { orgId: "local", userId: "u-admin", roles: ["admin"], teamIds: [] };
 
 const KEK_KEYS = ["KEY_ENCRYPTION_KEYS", "KEY_ENCRYPTION_KEY_CURRENT"] as const;
@@ -244,7 +254,7 @@ describe("provider-keys routes (PT-7b2, D175, D176)", () => {
     try {
       await put("gemini", { key: "sk-fake-first-0001" }, LOCAL_TENANT);
       const replaced = await put("gemini", { key: "sk-fake-second-0002" }, LOCAL_TENANT);
-      expect((await replaced.json() as { last4: string }).last4).toBe("0002");
+      expect(((await replaced.json()) as { last4: string }).last4).toBe("0002");
 
       const del1 = await del("gemini", LOCAL_TENANT);
       expect(del1.status).toBe(200);
