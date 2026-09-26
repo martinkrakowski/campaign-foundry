@@ -236,6 +236,8 @@ describe("MeteredImageGenerator (PT-7a, D175)", () => {
     expect(message).toContain("acme");
     expect(message).toContain("imagen");
     expect(message).toContain("connection reset");
+    expect(message).toContain("may be orphaned");
+    expect(message).toContain(usage.reservations[0]);
     warn.mockRestore();
   });
 
@@ -259,6 +261,8 @@ describe("MeteredImageGenerator (PT-7a, D175)", () => {
     const [message] = warn.mock.calls[0] as [string];
     expect(message).toContain("could not release usage reservation");
     expect(message).toContain("release failed");
+    expect(message).toContain("may be orphaned");
+    expect(message).toContain(usage.reservations[0]);
     warn.mockRestore();
   });
 
@@ -305,6 +309,193 @@ describe("MeteredImageGenerator (PT-7a, D175)", () => {
     expect(usage.reservations).toHaveLength(1);
     expect(usage.released).toEqual([usage.reservations[0]]);
     expect(usage.settled).toHaveLength(0);
+  });
+
+  describe("nested fallback reservation hand-off via AsyncLocalStorage", () => {
+    test("at quota - 1, the outer provider fails and the fallback succeeds: the run succeeds, exactly one row is recorded under the fallback's provider, and nothing stays reserved", async () => {
+      // quota is 2, current count is 1 (so at quota - 1)
+      const usage = statefulUsage(2, 1);
+      const fallbackInner: ImageGeneratorPort = {
+        resolveBackground: vi.fn(async () => ({
+          image: new Uint8Array([2]),
+          source: "imagen" as const,
+        })),
+      };
+      const fallbackMeter = new MeteredImageGenerator(
+        fallbackInner,
+        usage,
+        "acme",
+        "imagen",
+        "imagen-4.0",
+      );
+
+      const outerInner: ImageGeneratorPort = {
+        resolveBackground: async (p, r, c, s) => {
+          // Outer provider fails, calls fallback
+          return fallbackMeter.resolveBackground(p, r, c, s);
+        },
+      };
+      const outerMeter = new MeteredImageGenerator(
+        outerInner,
+        usage,
+        "acme",
+        "firefly",
+        "firefly-v3",
+      );
+
+      const result = await outerMeter.resolveBackground(product, ratio(), context);
+      expect(result.source).toBe("imagen");
+      expect(usage.records).toEqual([
+        {
+          orgId: "acme",
+          provider: "imagen",
+          model: "imagen-4.0",
+          units: 1,
+          keyOwner: "platform",
+        },
+      ]);
+      // Quota was 2; 1 initial + 1 settled = 2. A subsequent reserve at quota returns null.
+      expect(await usage.reserve("acme")).toBeNull();
+    });
+
+    test("both fail: the reservation is released and nothing is recorded", async () => {
+      const usage = fakeUsage();
+      const fallbackInner: ImageGeneratorPort = {
+        resolveBackground: vi.fn(async () => {
+          throw new Error("fallback failure");
+        }),
+      };
+      const fallbackMeter = new MeteredImageGenerator(
+        fallbackInner,
+        usage,
+        "acme",
+        "imagen",
+        "imagen-4.0",
+      );
+
+      const outerInner: ImageGeneratorPort = {
+        resolveBackground: async (p, r, c, s) => {
+          return fallbackMeter.resolveBackground(p, r, c, s);
+        },
+      };
+      const outerMeter = new MeteredImageGenerator(
+        outerInner,
+        usage,
+        "acme",
+        "firefly",
+        "firefly-v3",
+      );
+
+      await expect(outerMeter.resolveBackground(product, ratio(), context)).rejects.toThrow(
+        "fallback failure",
+      );
+      expect(usage.records).toEqual([]);
+      expect(usage.settled).toEqual([]);
+      expect(usage.reservations).toHaveLength(1);
+      expect(usage.released).toEqual([usage.reservations[0]]);
+    });
+
+    test("the outer succeeds: one row under the outer provider", async () => {
+      const usage = fakeUsage();
+      const fallbackInner: ImageGeneratorPort = {
+        resolveBackground: vi.fn(async () => ({
+          image: new Uint8Array([2]),
+          source: "imagen" as const,
+        })),
+      };
+      const fallbackMeter = new MeteredImageGenerator(
+        fallbackInner,
+        usage,
+        "acme",
+        "imagen",
+        "imagen-4.0",
+      );
+
+      const outerInner: ImageGeneratorPort = {
+        resolveBackground: vi.fn(async (p, r, c, s) => {
+          try {
+            return {
+              image: new Uint8Array([1]),
+              source: "firefly" as const,
+            };
+          } catch {
+            return fallbackMeter.resolveBackground(p, r, c, s);
+          }
+        }),
+      };
+      const outerMeter = new MeteredImageGenerator(
+        outerInner,
+        usage,
+        "acme",
+        "firefly",
+        "firefly-v3",
+      );
+
+      const result = await outerMeter.resolveBackground(product, ratio(), context);
+      expect(result.source).toBe("firefly");
+      expect(fallbackInner.resolveBackground).not.toHaveBeenCalled();
+      expect(usage.records).toEqual([
+        {
+          orgId: "acme",
+          provider: "firefly",
+          model: "firefly-v3",
+          units: 1,
+          keyOwner: "platform",
+        },
+      ]);
+      expect(usage.settled).toHaveLength(1);
+      expect(usage.released).toHaveLength(0);
+    });
+
+    test("two independent top-level calls in parallel do not share a scope", async () => {
+      const usage = fakeUsage();
+
+      const makeMeter = (id: string) => {
+        const fallback = new MeteredImageGenerator(
+          {
+            resolveBackground: async () => ({
+              image: new Uint8Array([1]),
+              source: "imagen" as const,
+            }),
+          },
+          usage,
+          "acme",
+          "imagen",
+          `imagen-${id}`,
+        );
+        const outer = new MeteredImageGenerator(
+          {
+            resolveBackground: async (p, r, c, s) => {
+              // Yield event loop to ensure parallel interleaved execution
+              await new Promise((resolve) => setTimeout(resolve, 5));
+              return fallback.resolveBackground(p, r, c, s);
+            },
+          },
+          usage,
+          "acme",
+          "firefly",
+          `firefly-${id}`,
+        );
+        return outer;
+      };
+
+      const meter1 = makeMeter("1");
+      const meter2 = makeMeter("2");
+
+      const [res1, res2] = await Promise.all([
+        meter1.resolveBackground(product, ratio(), context),
+        meter2.resolveBackground(product, ratio(), context),
+      ]);
+
+      expect(res1.source).toBe("imagen");
+      expect(res2.source).toBe("imagen");
+      // Two distinct reservations were made and each settled by its own fallback
+      expect(usage.reservations).toHaveLength(2);
+      expect(usage.settled).toHaveLength(2);
+      expect(usage.released).toHaveLength(0);
+      expect(usage.settled.map((s) => s.id)).toEqual(usage.reservations);
+      expect(usage.settled.map((s) => s.record.model)).toEqual(["imagen-1", "imagen-2"]);
+    });
   });
 });
 
