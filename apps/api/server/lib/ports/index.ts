@@ -36,6 +36,7 @@ export * from "./report-store.port.js";
 export * from "./output-store.port.js";
 export * from "./decision-store.port.js";
 export * from "./usage-store.port.js";
+export * from "./run-delivery.port.js";
 export * from "./fs-brief-store.js";
 export * from "./pg-brief-store.js";
 export * from "./fs-asset-store.js";

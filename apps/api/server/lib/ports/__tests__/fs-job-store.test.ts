@@ -11,8 +11,13 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PipelineExecutionLog } from "@campaignfoundry/CampaignOrchestration";
-import { FsJobStore, JobCapacityError, JOB_TTL_MS, MAX_JOBS } from "../fs-job-store.js";
-import { JobLeaseLostError, type JobResult, type StoredJob } from "../job-store.port.js";
+import {
+  FsJobStore,
+  JobCapacityError,
+  JOB_TTL_MS,
+  MAX_JOBS,
+} from "../fs-job-store.js";
+import { JobLeaseLostError, QUEUED_TTL_MS, type JobResult, type StoredJob } from "../job-store.port.js";
 
 const payload = (over: Partial<JobResult> = {}): JobResult => ({
   halted: false,
@@ -458,4 +463,75 @@ describe("FsJobStore", () => {
       }
     },
   );
+
+  test("enqueueJob creates a queued job and returns { acquired: true, jobId }", async () => {
+    const res = await store.enqueueJob("camp");
+    expect(res.acquired).toBe(true);
+    if (!res.acquired) return;
+    const stored = await store.getStoredJob(res.jobId);
+    expect(stored?.job.status).toBe("queued");
+  });
+
+  test("a queued row blocks a second enqueueJob and acquireJob", async () => {
+    const first = await store.enqueueJob("camp");
+    expect(first.acquired).toBe(true);
+    if (!first.acquired) return;
+
+    const second = await store.enqueueJob("camp");
+    expect(second.acquired).toBe(false);
+    if (second.acquired) return;
+    expect(second.runningJobId).toBe(first.jobId);
+
+    const acq = await store.acquireJob("camp");
+    expect(acq.acquired).toBe(false);
+    if (acq.acquired) return;
+    expect(acq.runningJobId).toBe(first.jobId);
+  });
+
+  test("a running row blocks enqueueJob", async () => {
+    const acq = await store.acquireJob("camp");
+    expect(acq.acquired).toBe(true);
+    if (!acq.acquired) return;
+
+    const enq = await store.enqueueJob("camp");
+    expect(enq.acquired).toBe(false);
+    if (enq.acquired) return;
+    expect(enq.runningJobId).toBe(acq.jobId);
+  });
+
+  test("startQueuedJob moves a queued job to running and duplicate delivery returns false", async () => {
+    const enq = await store.enqueueJob("camp");
+    expect(enq.acquired).toBe(true);
+    if (!enq.acquired) return;
+
+    const started = await store.startQueuedJob(enq.jobId);
+    expect(started).toBe(true);
+
+    const stored = await store.getStoredJob(enq.jobId);
+    expect(stored?.job.status).toBe("running");
+
+    // Second call returns false (already running)
+    const second = await store.startQueuedJob(enq.jobId);
+    expect(second).toBe(false);
+
+    // Unknown id returns false
+    expect(await store.startQueuedJob("00000000-0000-0000-0000-000000000000")).toBe(false);
+  });
+
+  test("queued job expires and is marked failed after QUEUED_TTL_MS", async () => {
+    vi.useFakeTimers();
+    try {
+      const enq = await store.enqueueJob("camp");
+      expect(enq.acquired).toBe(true);
+      if (!enq.acquired) return;
+
+      await vi.advanceTimersByTimeAsync(QUEUED_TTL_MS + 1);
+
+      const stored = await store.getStoredJob(enq.jobId);
+      expect(stored?.job.status).toBe("failed");
+      expect(stored?.job.error).toMatch(/expired|timed out/i);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

@@ -1,6 +1,12 @@
 import type { PipelineResult } from "@campaignfoundry/CampaignOrchestration";
 
-export type JobStatus = "running" | "completed" | "failed";
+export type JobStatus = "queued" | "running" | "completed" | "failed";
+
+/**
+ * TTL for a queued job row before the reaper fails it (PT-6b1, D171).
+ * Equal to JOB_TTL_MS (10 minutes).
+ */
+export const QUEUED_TTL_MS = 10 * 60_000;
 
 /** The `{ halted, assets, log }` payload a completed run returns. */
 export interface JobResult {
@@ -72,6 +78,23 @@ export interface JobStorePort {
     campaignId: string,
     customId?: string,
   ): Promise<{ acquired: true; jobId: string } | { acquired: false; runningJobId: string }>;
+
+  /**
+   * Conditionally enqueue a queued job slot for a campaign.
+   * If an active job (queued or running) already exists for this campaign, returns { acquired: false, runningJobId }.
+   * If no active job exists, creates the queued job and returns { acquired: true, jobId }.
+   */
+  enqueueJob(
+    campaignId: string,
+    customId?: string,
+  ): Promise<{ acquired: true; jobId: string } | { acquired: false; runningJobId: string }>;
+
+  /**
+   * Move a queued job to running and set its lease.
+   * Returns true if the job was queued and moved to running; false if it was not queued
+   * (e.g. already running, already settled, or reaped).
+   */
+  startQueuedJob(id: string): Promise<boolean>;
 
   /**
    * Create a new running job for a campaign.

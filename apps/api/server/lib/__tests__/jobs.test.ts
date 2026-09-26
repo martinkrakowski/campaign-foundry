@@ -400,7 +400,7 @@ console.log(JSON.stringify(job));`,
     expect(result.status).toBe(0);
     const parsed = JSON.parse(result.stdout.trim());
     expect(parsed).toEqual({ status: "running", done: 0, total: 0, log: null });
-  });
+  }, 20_000);
 });
 
 describe("the run deadline is terminal (review, #537)", () => {

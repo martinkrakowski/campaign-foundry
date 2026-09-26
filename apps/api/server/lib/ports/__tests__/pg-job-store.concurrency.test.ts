@@ -116,4 +116,25 @@ describe.skipIf(!url)("PgJobStore.acquireJob races two real connections (PT-6a)"
     expect(refused).toHaveLength(1);
     expect(refused[0]!.reason).toBeInstanceOf(JobCapacityError);
   });
+
+  test("a queued row blocks a second enqueue under real concurrency (new unique index, PT-6b1)", async () => {
+    const store = new PgJobStore(db, "local");
+    const campaignId = `queued-race-${randomUUID()}`;
+
+    const [a, b] = await Promise.all([store.enqueueJob(campaignId), store.enqueueJob(campaignId)]);
+    const outcomes = [a, b];
+    const acquired = outcomes.filter((o) => o.acquired);
+    const refused = outcomes.filter((o) => !o.acquired);
+    expect(acquired).toHaveLength(1);
+    expect(refused).toHaveLength(1);
+
+    const winnerId = acquired[0]!.acquired ? acquired[0]!.jobId : undefined;
+    const loserSaw = refused[0]!.acquired ? undefined : refused[0]!.runningJobId;
+    expect(loserSaw).toBe(winnerId);
+
+    const { rows } = await db.query<{ status: string }>("select status from job where id = $1", [
+      winnerId,
+    ]);
+    expect(rows[0]?.status).toBe("queued");
+  });
 });

@@ -7,8 +7,13 @@ import { runEnvironment } from "../../run-environment.js";
 import { LOCAL_TENANT, type TenantContext } from "../../tenant.js";
 import { getJobStore, resetJobStore } from "../index.js";
 import { FsJobStore, JOB_TTL_MS, JobCapacityError, MAX_JOBS } from "../fs-job-store.js";
-import type { JobResult } from "../job-store.port.js";
-import { HEARTBEAT_INTERVAL_MS, JobLeaseLostError, LEASE_MS, PgJobStore } from "../pg-job-store.js";
+import { QUEUED_TTL_MS, type JobResult } from "../job-store.port.js";
+import {
+  HEARTBEAT_INTERVAL_MS,
+  JobLeaseLostError,
+  LEASE_MS,
+  PgJobStore,
+} from "../pg-job-store.js";
 
 const acme: TenantContext = { ...LOCAL_TENANT, orgId: "acme", userId: "u1" };
 
@@ -505,6 +510,109 @@ describe("PgJobStore (PT-6a, D171)", () => {
 
   test("HEARTBEAT_INTERVAL_MS is comfortably inside LEASE_MS, so a missed beat or two never costs the lease", () => {
     expect(HEARTBEAT_INTERVAL_MS).toBeLessThan(LEASE_MS);
+  });
+
+  test("enqueueJob inserts a queued row and reports status as queued in stored job", async () => {
+    const store = new PgJobStore(db, "local");
+    const res = await store.enqueueJob("camp");
+    expect(res.acquired).toBe(true);
+    if (!res.acquired) return;
+    const stored = await store.getStoredJob(res.jobId);
+    expect(stored?.job.status).toBe("queued");
+  });
+
+  test("a queued row blocks a second enqueue and returns the incumbent jobId", async () => {
+    const store = new PgJobStore(db, "local");
+    const first = await store.enqueueJob("camp");
+    expect(first.acquired).toBe(true);
+    if (!first.acquired) return;
+    const second = await store.enqueueJob("camp");
+    expect(second.acquired).toBe(false);
+    if (second.acquired) return;
+    expect(second.runningJobId).toBe(first.jobId);
+  });
+
+  test("a queued row blocks acquireJob and returns the incumbent jobId", async () => {
+    const store = new PgJobStore(db, "local");
+    const enq = await store.enqueueJob("camp");
+    expect(enq.acquired).toBe(true);
+    if (!enq.acquired) return;
+    const acq = await store.acquireJob("camp");
+    expect(acq.acquired).toBe(false);
+    if (acq.acquired) return;
+    expect(acq.runningJobId).toBe(enq.jobId);
+  });
+
+  test("a running row blocks enqueueJob and returns the incumbent jobId", async () => {
+    const store = new PgJobStore(db, "local");
+    const acq = await store.acquireJob("camp");
+    expect(acq.acquired).toBe(true);
+    if (!acq.acquired) return;
+    const enq = await store.enqueueJob("camp");
+    expect(enq.acquired).toBe(false);
+    if (enq.acquired) return;
+    expect(enq.runningJobId).toBe(acq.jobId);
+  });
+
+  test("startQueuedJob transitions a queued row to running and sets lease", async () => {
+    const store = new PgJobStore(db, "local");
+    const enq = await store.enqueueJob("camp");
+    expect(enq.acquired).toBe(true);
+    if (!enq.acquired) return;
+
+    const started = await store.startQueuedJob(enq.jobId);
+    expect(started).toBe(true);
+
+    const stored = await store.getStoredJob(enq.jobId);
+    expect(stored?.job.status).toBe("running");
+  });
+
+  test("duplicate delivery: second startQueuedJob returns false and nothing runs twice", async () => {
+    const store = new PgJobStore(db, "local");
+    const enq = await store.enqueueJob("camp");
+    expect(enq.acquired).toBe(true);
+    if (!enq.acquired) return;
+
+    const first = await store.startQueuedJob(enq.jobId);
+    expect(first).toBe(true);
+
+    // Second call on already running job returns false
+    const second = await store.startQueuedJob(enq.jobId);
+    expect(second).toBe(false);
+
+    // Call on unknown id returns false
+    const unknown = await store.startQueuedJob("00000000-0000-0000-0000-000000000000");
+    expect(unknown).toBe(false);
+  });
+
+  test("reaper fails a queued row older than QUEUED_TTL_MS", async () => {
+    const store = new PgJobStore(db, "local");
+    // Insert a queued row created 11 minutes ago (past QUEUED_TTL_MS of 10 min)
+    const oldId = "11111111-1111-1111-1111-111111111111";
+    await db.query(
+      `insert into job (id, org_id, campaign_id, status, created_at, lease_expires_at, heartbeat_at)
+       values ($1, 'local', 'camp-old', 'queued', now() - interval '11 minutes', now() + interval '10 minutes', now())`,
+      [oldId],
+    );
+
+    // Insert a fresh queued row
+    const freshId = "22222222-2222-2222-2222-222222222222";
+    await db.query(
+      `insert into job (id, org_id, campaign_id, status, created_at, lease_expires_at, heartbeat_at)
+       values ($1, 'local', 'camp-fresh', 'queued', now(), now() + interval '10 minutes', now())`,
+      [freshId],
+    );
+
+    // Calling enqueueJob triggers reap()
+    expect(QUEUED_TTL_MS).toBe(JOB_TTL_MS);
+    await store.enqueueJob("camp-other");
+
+    const oldJob = await store.getStoredJob(oldId);
+    expect(oldJob?.job.status).toBe("failed");
+    expect(oldJob?.job.error).toMatch(/expired|timed out/i);
+
+    const freshJob = await store.getStoredJob(freshId);
+    expect(freshJob?.job.status).toBe("queued");
   });
 });
 

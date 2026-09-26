@@ -13,5 +13,12 @@ export default defineEventHandler(async (event) => {
     setResponseStatus(event, 404);
     return { error: "Job not found" };
   }
+  if (job.status === "queued") {
+    return {
+      ...job,
+      status: "running",
+      done: 0,
+    };
+  }
   return job;
 });
