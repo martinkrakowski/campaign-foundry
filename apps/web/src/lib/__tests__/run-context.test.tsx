@@ -3178,4 +3178,86 @@ describe("RunProvider — running job awareness on reload and brief switch", () 
     expect(result.current.loading).toBe(false);
   });
 
+  test('setBrief discovers a job for the already-displayed brief when it is not already polling (qodo #2, "Same-campaign jobs remain unadopted")', async () => {
+    mockPipelineApi({
+      result: (url) =>
+        url.includes("/campaigns/jobs?campaignId=active-campaign")
+          ? json({ error: "No running job" }, 404)
+          : json({
+              halted: false,
+              assets: [asset({ productId: "p1" })],
+              log: { entries: [], campaignId: "active-campaign" },
+            }),
+    });
+    const { result } = setup();
+    act(() => {
+      result.current.setBrief(activeBrief);
+    });
+    await waitFor(() => expect(result.current.assets).toHaveLength(1));
+    expect(result.current.loading).toBe(false);
+
+    // Another client starts a run for this same campaign while this tab shows the
+    // (now stale) completed run — nothing here is polling it.
+    mockPipelineApi({
+      result: (url) =>
+        url.includes("/campaigns/jobs?campaignId=active-campaign")
+          ? json({ jobId: "job-elsewhere" })
+          : json({
+              halted: false,
+              assets: [asset({ productId: "p1" })],
+              log: { entries: [], campaignId: "active-campaign" },
+            }),
+      job: () =>
+        jobOk({
+          halted: false,
+          assets: [asset({ productId: "p2" })],
+          log: { entries: [], campaignId: "active-campaign" },
+        }),
+    });
+
+    // Re-selecting the SAME brief (the picker, Save) must still discover the job —
+    // the run on screen already matches this campaign, which used to short-circuit
+    // before job discovery ever ran.
+    act(() => {
+      result.current.setBrief(activeBrief);
+    });
+    await waitFor(() =>
+      expect(result.current.assets.some((a) => a.productId === "p2")).toBe(true),
+    );
+    expect(result.current.loading).toBe(false);
+  });
+
+  test("unmounting during setBrief's job discovery leaves no orphaned poller (github-actions #71u)", async () => {
+    let resolveJobLookup!: (r: Response) => void;
+    const jobLookupPromise = new Promise<Response>((r) => {
+      resolveJobLookup = r;
+    });
+    let polls = 0;
+    mockPipelineApi({
+      result: (url) =>
+        url.includes("/campaigns/jobs?campaignId=active-campaign")
+          ? jobLookupPromise
+          : json(EMPTY_REPORT),
+      job: () => {
+        polls += 1;
+        return jobOk({
+          halted: false,
+          assets: [asset({ productId: "p1" })],
+          log: { entries: [], campaignId: "active-campaign" },
+        });
+      },
+    });
+
+    const { result, unmount } = setup();
+    act(() => {
+      result.current.setBrief(activeBrief);
+    });
+    unmount();
+    await act(async () => {
+      resolveJobLookup(json({ jobId: "job-orphan" }));
+      await new Promise((r) => setTimeout(r, 0));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(polls).toBe(0);
+  });
 });

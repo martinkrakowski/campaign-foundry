@@ -700,6 +700,17 @@ export function RunProvider({ children }: { children: ReactNode }) {
   // effects run after their children's, so without this the last-opened record would
   // overwrite a release that has already happened.
   const briefDecidedRef = useRef(false);
+  // True for the life of this provider instance; the mount effect flips it false on
+  // cleanup. `setBrief`'s job-discovery chain is not bounded by that effect's own
+  // `active` closure (only the mount path is), so without this a discovery started
+  // just before unmount can still resolve into a fresh `beginRun()` poller with
+  // nothing left to abort it (github-actions #71u).
+  const mountedRef = useRef(true);
+  // Mirrors `loading` for `setBrief`'s early-return branch (below), which must not
+  // start a second discovery while this tab is already polling a job for the brief
+  // on screen — a plain render-time assignment, the same pattern `decisionsRef` uses.
+  const loadingRef = useRef(false);
+  loadingRef.current = loading;
 
   // Monotonic run token. Bumped when a run actually starts (beginRun, after the POST
   // answers with a job to poll) and when a brief switch invalidates any in-flight run;
@@ -806,8 +817,20 @@ export function RunProvider({ children }: { children: ReactNode }) {
       // (1) Already showing this brief's run — leave the grid (and decisions) intact.
       // The run's recorded target is left alone too: the run on screen was produced by
       // the brief as it was when it ran, and a re-roll must keep regenerating under
-      // that — never under this newer same-id edit (R6).
-      if (run?.result.log?.campaignId === next.id) return;
+      // that — never under this newer same-id edit (R6). Still worth a job check: a
+      // different client can start a run for this same campaign after this brief's
+      // result last landed here, and re-selecting it (Save, the picker) must discover
+      // that too — unless this tab is already polling one for it, which `loading`
+      // names (qodo #2, "same-campaign jobs remain unadopted").
+      if (run?.result.log?.campaignId === next.id) {
+        if (!loadingRef.current) {
+          void fetchRunningJob(next.id).then((jobId) => {
+            if (!mountedRef.current || briefIdRef.current !== next.id || !jobId) return;
+            void adoptJob(next, jobId);
+          });
+        }
+        return;
+      }
       setEstimateData(null);
       setEstimateError(null);
       setEstimateStatus("idle");
@@ -843,14 +866,20 @@ export function RunProvider({ children }: { children: ReactNode }) {
       setRun(null);
       setDecisions({});
       void fetchRunningJob(next.id).then((jobId) => {
-        if (briefIdRef.current !== next.id) return; // superseded
+        if (!mountedRef.current || briefIdRef.current !== next.id) return; // superseded, or unmounted
         if (jobId) {
           void adoptJob(next, jobId);
           return;
         }
         void fetchPersistedRun(next.id)
           .then((d) => {
-            if (briefIdRef.current !== next.id || runSeq.current !== owned || !d) return;
+            if (
+              !mountedRef.current ||
+              briefIdRef.current !== next.id ||
+              runSeq.current !== owned ||
+              !d
+            )
+              return;
             setRun({ result: d, target: next });
             if (d.assets?.length) setAssetVersion((v) => v + 1);
           })
@@ -889,6 +918,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
   // The brief lives in localStorage (the report alone can't reconstruct messages/colours/logos).
   useEffect(() => {
     let active = true;
+    mountedRef.current = true; // StrictMode re-runs this effect; the ref must recover
     // Something has already decided which brief is active — the blank route releasing
     // the campaign, most importantly. `cf:brief` is a *last-opened* pointer, not an
     // application (D37), so restoring it here would put a released brief back on the
@@ -946,6 +976,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
     });
     return () => {
       active = false;
+      mountedRef.current = false;
       pollAbort.current?.abort(); // unmount: no poller may outlive the provider
     };
   }, []);
