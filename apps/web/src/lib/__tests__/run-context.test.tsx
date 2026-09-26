@@ -3368,6 +3368,82 @@ describe("RunProvider — running job awareness on reload and brief switch", () 
     expect(result.current.decisions["p3/1:1/default"]).toBe("rejected");
   });
 
+  test("an adopted job whose persisted-report re-read fails falls back to the job's own result", async () => {
+    // F6: a failed read is "could not ask", not "nothing was saved" — the grid
+    // shows the job's own payload rather than staying empty.
+    mockPipelineApi({
+      result: (url) => {
+        if (url.includes("/campaigns/jobs?campaignId=active-campaign")) {
+          return json({ jobId: "job-x" });
+        }
+        return Promise.reject(new Error("down"));
+      },
+      job: () =>
+        jobOk({
+          halted: false,
+          assets: [asset({ productId: "p1" })],
+          log: { entries: [], campaignId: "active-campaign" },
+        }),
+    });
+    const { result } = setup();
+    act(() => {
+      result.current.setBrief(activeBrief);
+    });
+    await waitFor(() => expect(result.current.assets).toHaveLength(1));
+    expect(result.current.assets[0]!.productId).toBe("p1");
+  });
+
+  test("a brief switch while an adopted job's persisted-report re-read is in flight drops the stale read", async () => {
+    let resolvePersisted!: (r: Response) => void;
+    const persistedPromise = new Promise<Response>((r) => {
+      resolvePersisted = r;
+    });
+    mockPipelineApi({
+      result: (url) => {
+        if (url.includes("/campaigns/jobs?campaignId=active-campaign"))
+          return json({ jobId: "job-x" });
+        if (url.includes("campaignId=active-campaign")) return persistedPromise;
+        return json(EMPTY_REPORT); // the switched-to brief's own (unrelated) lookups
+      },
+      job: () =>
+        jobOk({
+          halted: false,
+          assets: [asset({ productId: "p1" })],
+          log: { entries: [], campaignId: "active-campaign" },
+        }),
+    });
+    const { result } = setup();
+    act(() => {
+      result.current.setBrief(activeBrief);
+    });
+    // The job has completed and adoptJob is now re-reading the persisted report
+    // (hung above); switch briefs before that read resolves.
+    await waitFor(() => expect(typeof resolvePersisted).toBe("function"));
+    act(() =>
+      result.current.setBrief({
+        schemaVersion: BRIEF_SCHEMA_VERSION,
+        template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+        id: "switched-during-adopt",
+        targetRegion: "US",
+        targetAudience: "x",
+        campaignMessage: "y",
+        products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: "a.png" }],
+      }),
+    );
+    await act(async () => {
+      resolvePersisted(
+        json({
+          halted: false,
+          assets: [asset({ productId: "p1" })],
+          log: { entries: [], campaignId: "active-campaign" },
+        }),
+      );
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(result.current.brief.id).toBe("switched-during-adopt");
+    expect(result.current.assets).toHaveLength(0);
+  });
+
   test('a job lookup that resolves after a newer run has started for the same campaign does not adopt the stale job or clobber the newer one (greptile "Stale lookup replaces newer run")', async () => {
     let resolveLookup!: (r: Response) => void;
     const lookupPromise = new Promise<Response>((r) => {
