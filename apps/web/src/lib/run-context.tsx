@@ -1048,7 +1048,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
       // presses racing, the first to get a job claims the run and the other drops out
       // silently here (its 409, when the server sent one, named the very job being
       // polled), so exactly one run is ever adopted and one result committed.
-      let owned = runSeq.current;
+      const owned = runSeq.current;
       setLoading(true);
       setProgress(null);
       setError(null);
