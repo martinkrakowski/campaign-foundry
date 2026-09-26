@@ -4,8 +4,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createApp, createRouter, toWebHandler } from "h3";
 import {
+  BRIEF_SCHEMA_VERSION,
+  DEFAULT_CAMPAIGN_TYPE,
+  templateFromCanonical,
+  type CampaignBrief,
+} from "@campaignfoundry/CampaignOrchestration";
+import { resetProjectRoot } from "@campaignfoundry/shared";
+import {
   DecisionConflictError,
+  getBriefStore,
   getReportStore,
+  resetBriefStore,
   resetDecisionStore,
   resetReportStore,
   setDecisionStore,
@@ -39,23 +48,44 @@ const put = (body: unknown) => putRaw(JSON.stringify(body));
 type Record_ = { verdict: string; actor: string; at: string; run: string };
 type Stored = { decisions: Record<string, Record_>; revision: string | null };
 
+const sampleBrief: CampaignBrief = {
+  schemaVersion: BRIEF_SCHEMA_VERSION,
+  template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+  id: "camp",
+  mode: "brief",
+  targetRegion: "US",
+  targetAudience: "developers",
+  campaignMessage: "Build faster",
+  products: [{ id: "p1", name: "P1", primaryColor: "#1473E6", logoPath: "logo.png" }],
+  treatments: [{ id: "bold", layout: "headline-bottom", tone: "bold" }],
+};
+
 describe("GET / PUT /campaigns/decisions (D173)", () => {
   let dir: string;
   const origOut = process.env.OUTPUT_DIR;
+  const origRoot = process.env.PROJECT_ROOT;
   const runReport = (assets: number) =>
     getReportStore(LOCAL_TENANT).writeReport("camp", JSON.stringify({ assets: Array(assets) }));
   beforeEach(async () => {
+    resetProjectRoot();
     dir = mkdtempSync(join(tmpdir(), "cf-decisions-route-"));
     process.env.OUTPUT_DIR = dir;
+    process.env.PROJECT_ROOT = dir;
     resetDecisionStore();
     resetReportStore();
+    resetBriefStore();
+    await getBriefStore(LOCAL_TENANT).createBrief(sampleBrief);
     await runReport(1);
   });
   afterEach(() => {
     resetDecisionStore();
     resetReportStore();
+    resetBriefStore();
     if (origOut === undefined) delete process.env.OUTPUT_DIR;
     else process.env.OUTPUT_DIR = origOut;
+    if (origRoot === undefined) delete process.env.PROJECT_ROOT;
+    else process.env.PROJECT_ROOT = origRoot;
+    resetProjectRoot();
     rmSync(dir, { recursive: true, force: true });
   });
 
@@ -113,12 +143,30 @@ describe("GET / PUT /campaigns/decisions (D173)", () => {
   });
 
   test("a campaign with no run has nothing to decide on: 409, and nothing stored", async () => {
+    await getBriefStore(LOCAL_TENANT).createBrief({ ...sampleBrief, id: "other" });
     const res = await put({ campaignId: "other", revision: null, decisions: { a: "approved" } });
     expect(res.status).toBe(409);
     expect(await (await get("?campaignId=other")).json()).toEqual({
       decisions: {},
       revision: null,
     });
+  });
+
+  test("reviewing an unsaved campaign with a report succeeds and reads back (H1 / H2)", async () => {
+    await getReportStore(LOCAL_TENANT).writeReport("unsaved-camp", JSON.stringify({ assets: [] }));
+    const putRes = await put({
+      campaignId: "unsaved-camp",
+      revision: null,
+      decisions: { "p1/1x1/bold": "approved" },
+    });
+    expect(putRes.status).toBe(200);
+    const putBody = (await putRes.json()) as Stored;
+    expect(putBody.decisions["p1/1x1/bold"]?.verdict).toBe("approved");
+
+    const getRes = await get("?campaignId=unsaved-camp");
+    expect(getRes.status).toBe(200);
+    const getBody = (await getRes.json()) as Stored;
+    expect(getBody.decisions["p1/1x1/bold"]?.verdict).toBe("approved");
   });
 
   test("a `__proto__` key is refused at the body parser, and a `toString` key is an ordinary review key", async () => {
@@ -160,11 +208,14 @@ describe("GET / PUT /campaigns/decisions on Postgres (PT-3)", () => {
     setDatabase(await migratedDatabase());
     resetDecisionStore();
     resetReportStore();
+    resetBriefStore();
+    await getBriefStore(LOCAL_TENANT).createBrief(sampleBrief);
     await getReportStore(LOCAL_TENANT).writeReport("camp", JSON.stringify({ assets: [] }));
   });
   afterEach(() => {
     resetDecisionStore();
     resetReportStore();
+    resetBriefStore();
     resetDatabase();
     if (origBackend === undefined) delete process.env.STORE_BACKEND;
     else process.env.STORE_BACKEND = origBackend;
@@ -189,17 +240,27 @@ describe("GET / PUT /campaigns/decisions on Postgres (PT-3)", () => {
 describe("PUT /campaigns/decisions when the store refuses the write (PT-3)", () => {
   let dir: string;
   const origOut = process.env.OUTPUT_DIR;
+  const origRoot = process.env.PROJECT_ROOT;
   beforeEach(async () => {
+    resetProjectRoot();
     dir = mkdtempSync(join(tmpdir(), "cf-decisions-refused-"));
     process.env.OUTPUT_DIR = dir;
+    process.env.PROJECT_ROOT = dir;
+    resetDecisionStore();
     resetReportStore();
+    resetBriefStore();
+    await getBriefStore(LOCAL_TENANT).createBrief(sampleBrief);
     await getReportStore(LOCAL_TENANT).writeReport("camp", JSON.stringify({ assets: [] }));
   });
   afterEach(() => {
     resetDecisionStore();
     resetReportStore();
+    resetBriefStore();
     if (origOut === undefined) delete process.env.OUTPUT_DIR;
     else process.env.OUTPUT_DIR = origOut;
+    if (origRoot === undefined) delete process.env.PROJECT_ROOT;
+    else process.env.PROJECT_ROOT = origRoot;
+    resetProjectRoot();
     rmSync(dir, { recursive: true, force: true });
   });
 

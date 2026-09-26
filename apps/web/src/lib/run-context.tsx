@@ -289,6 +289,7 @@ export function normalizeRunResult(result: RunResult): RunResult {
  */
 export async function fetchPersistedRun(campaignId: string): Promise<RunResult | null> {
   const res = await fetch(`${API}/campaigns/result?campaignId=${encodeURIComponent(campaignId)}`);
+  if (res.status === 404) return null;
   if (!res.ok) {
     const raw = await res.text();
     const data = parseJson(raw);
@@ -403,6 +404,7 @@ export async function fetchDecisions(campaignId: string): Promise<StoredDecision
   const res = await fetch(
     `${API}/campaigns/decisions?campaignId=${encodeURIComponent(campaignId)}`,
   );
+  if (res.status === 404) return { decisions: {}, revision: null };
   if (!res.ok) {
     const raw = await res.text();
     const data = parseJson(raw);
