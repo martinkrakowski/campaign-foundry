@@ -3367,4 +3367,65 @@ describe("RunProvider — running job awareness on reload and brief switch", () 
     await waitFor(() => expect(result.current.decisions["p1/1:1/default"]).toBe("approved"));
     expect(result.current.decisions["p3/1:1/default"]).toBe("rejected");
   });
+
+  test('a job lookup that resolves after a newer run has started for the same campaign does not adopt the stale job or clobber the newer one (greptile "Stale lookup replaces newer run")', async () => {
+    let resolveLookup!: (r: Response) => void;
+    const lookupPromise = new Promise<Response>((r) => {
+      resolveLookup = r;
+    });
+    let newJobPolls = 0;
+    let staleJobPolled = false;
+    mockPipelineApi({
+      result: (url) =>
+        url.includes("/campaigns/jobs?campaignId=active-campaign")
+          ? lookupPromise
+          : json(EMPTY_REPORT),
+      post: () => json({ jobId: "new-job" }, 202),
+      job: (url) => {
+        if (url.includes("new-job")) {
+          newJobPolls += 1;
+          return jobOk({
+            halted: false,
+            assets: [asset({ productId: "p-new" })],
+            log: { entries: [], campaignId: "active-campaign" },
+          });
+        }
+        if (url.includes("stale-job")) {
+          staleJobPolled = true;
+          return jobOk({
+            halted: false,
+            assets: [asset({ productId: "p-stale" })],
+            log: { entries: [], campaignId: "active-campaign" },
+          });
+        }
+        return json({ error: "Not found" }, 404);
+      },
+    });
+
+    const { result } = setup();
+    act(() => {
+      result.current.setBrief(activeBrief);
+    });
+    // The lookup started by setBrief is still pending (mocked to hang). Start a
+    // newer run for the same campaign before it resolves.
+    await act(async () => {
+      await result.current.execute();
+    });
+    expect(result.current.assets.map((a) => a.productId)).toEqual(["p-new"]);
+    expect(newJobPolls).toBe(1);
+    expect(result.current.loading).toBe(false);
+
+    // The stale lookup now answers with a job that was running before this tab
+    // ever asked about it.
+    act(() => {
+      resolveLookup(json({ jobId: "stale-job" }));
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(staleJobPolled).toBe(false);
+    expect(result.current.assets.map((a) => a.productId)).toEqual(["p-new"]);
+    expect(result.current.loading).toBe(false);
+  });
 });

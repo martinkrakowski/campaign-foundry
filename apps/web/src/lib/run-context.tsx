@@ -851,8 +851,20 @@ export function RunProvider({ children }: { children: ReactNode }) {
       // names (qodo #2, "same-campaign jobs remain unadopted").
       if (run?.result.log?.campaignId === next.id) {
         if (!loadingRef.current) {
+          // Captured before the lookup starts: a run that starts for this campaign
+          // while it's in flight (this tab's own Generate, or another discovery)
+          // moves this, so a lookup that resolves afterward is dropped instead of
+          // adopting a job that is no longer the one running (greptile "Stale lookup
+          // replaces newer run").
+          const owned = runSeq.current;
           void fetchRunningJob(next.id).then((jobId) => {
-            if (!mountedRef.current || briefIdRef.current !== next.id || !jobId) return;
+            if (
+              !mountedRef.current ||
+              briefIdRef.current !== next.id ||
+              runSeq.current !== owned ||
+              !jobId
+            )
+              return;
             void adoptJob(next, jobId, { adopted: true });
           });
         }
@@ -893,7 +905,13 @@ export function RunProvider({ children }: { children: ReactNode }) {
       setRun(null);
       setDecisions({});
       void fetchRunningJob(next.id).then((jobId) => {
-        if (!mountedRef.current || briefIdRef.current !== next.id) return; // superseded, or unmounted
+        // `runSeq.current !== owned` here also catches a newer run (this tab's own
+        // Generate, or another discovery) that started while this lookup was still
+        // in flight — without it, adopting now would abort that run's poller and
+        // replace its result with a stale one (greptile "Stale lookup replaces
+        // newer run").
+        if (!mountedRef.current || briefIdRef.current !== next.id || runSeq.current !== owned)
+          return; // superseded, or unmounted
         if (jobId) {
           void adoptJob(next, jobId, { adopted: true });
           return;
@@ -979,7 +997,16 @@ export function RunProvider({ children }: { children: ReactNode }) {
     // jobs for the default brief after reload", and the same "Close the gap…" finding
     // this mirrors from setBrief).
     void fetchRunningJob(startBrief.id).then((jobId) => {
-      if (!active || briefDecidedRef.current || briefIdRef.current !== startBrief.id) return;
+      // `runSeq.current !== owned` also catches a run that started (this tab's own
+      // Generate, or another discovery) while this lookup was still in flight — see
+      // setBrief's identical guard (greptile "Stale lookup replaces newer run").
+      if (
+        !active ||
+        briefDecidedRef.current ||
+        briefIdRef.current !== startBrief.id ||
+        runSeq.current !== owned
+      )
+        return;
       if (jobId) {
         void adoptJob(startBrief, jobId, { adopted: true });
         return;
