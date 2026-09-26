@@ -1,9 +1,11 @@
 import { InProcessRunDelivery } from "./in-process-run-delivery.js";
+import { KafkaRunDelivery } from "./kafka-run-delivery.js";
+import { kafkaSettings } from "../config.js";
 import type { RunDeliveryPort } from "./run-delivery.port.js";
 import type { StorageScope } from "../run-environment.js";
 
 /**
- * The run-delivery registry (PT-6b1, D171, D174d) — deliberately kept out of
+ * The run-delivery registry (PT-6b1, D171, D174d, PT-6b2) — deliberately kept out of
  * `ports/index.ts`.
  *
  * `InProcessRunDelivery` reaches through `run-request.js` into `jobs.js` and
@@ -19,16 +21,20 @@ import type { StorageScope } from "../run-environment.js";
  * One adapter for the whole process (no per-scope keying, unlike the other
  * registries in `ports/index.ts`): in-process delivery runs in the same
  * process as the route that admits the job, so there is nothing to key per
- * tenant — a Kafka adapter (PT-6b2) would be the same, scoped by topic rather
- * than by root. A bare module-level pair is enough; `set`/`reset` match the
- * same test seam every other store has.
+ * tenant — Kafka delivery (PT-6b2) is the same, scoped by topic rather
+ * than by root. When `kafkaSettings()` is defined, `KafkaRunDelivery` is
+ * selected; otherwise `InProcessRunDelivery` is selected. A bare module-level
+ * pair is enough; `set`/`reset` match the same test seam every other store has.
  */
 let override: RunDeliveryPort | undefined;
 let instance: RunDeliveryPort | undefined;
 
 export const getRunDelivery = (_scope: StorageScope): RunDeliveryPort => {
   if (override) return override;
-  if (!instance) instance = new InProcessRunDelivery();
+  if (!instance) {
+    const kafka = kafkaSettings();
+    instance = kafka ? new KafkaRunDelivery(kafka) : new InProcessRunDelivery();
+  }
   return instance;
 };
 
