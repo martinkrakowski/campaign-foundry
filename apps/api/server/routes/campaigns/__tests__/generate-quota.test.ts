@@ -47,6 +47,11 @@ function usageDouble(
     },
     countThisMonth: async () => countThisMonth,
     quota: async () => quota,
+    reserve: async () => (quota !== null && countThisMonth >= quota ? null : "res-1"),
+    settle: async (_id, usage) => {
+      records.push(usage);
+    },
+    release: async () => {},
   };
 }
 

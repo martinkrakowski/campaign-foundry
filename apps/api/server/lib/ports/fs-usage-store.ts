@@ -18,4 +18,16 @@ export class FsUsageStore implements UsageStorePort {
   async quota(_orgId: string): Promise<number | null> {
     return null;
   }
+
+  async reserve(_orgId: string): Promise<string | null> {
+    return "fs-reservation";
+  }
+
+  async settle(_id: string, _record: UsageRecord): Promise<void> {
+    // No-op on the fs backend: the local operator stays unmetered.
+  }
+
+  async release(_id: string): Promise<void> {
+    // No-op on the fs backend: the local operator stays unmetered.
+  }
 }

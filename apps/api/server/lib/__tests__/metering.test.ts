@@ -21,12 +21,36 @@ const product = {
 };
 const context = { campaignMessage: "m", targetAudience: "Urban", targetRegion: "DE" };
 
-/** A usage store double that records every call it was given, and nothing else. */
-function fakeUsage(): UsageStorePort & { readonly records: UsageRecord[] } {
+/** A usage store double that records every call it was given, and tracks reservations. */
+function fakeUsage(): UsageStorePort & {
+  readonly records: UsageRecord[];
+  readonly reservations: string[];
+  readonly settled: { id: string; record: UsageRecord }[];
+  readonly released: string[];
+} {
   const records: UsageRecord[] = [];
+  const reservations: string[] = [];
+  const settled: { id: string; record: UsageRecord }[] = [];
+  const released: string[] = [];
+  let nextId = 1;
   return {
     records,
-    record: async (usage) => {
+    reservations,
+    settled,
+    released,
+    reserve: async () => {
+      const id = `res-${nextId++}`;
+      reservations.push(id);
+      return id;
+    },
+    settle: async (id: string, record: UsageRecord) => {
+      settled.push({ id, record });
+      records.push(record);
+    },
+    release: async (id: string) => {
+      released.push(id);
+    },
+    record: async (usage: UsageRecord) => {
       records.push(usage);
     },
     countThisMonth: async () => 0,
@@ -46,8 +70,20 @@ function statefulUsage(
 ): UsageStorePort & { readonly records: UsageRecord[] } {
   const records: UsageRecord[] = [];
   let count = startCount;
+  let nextId = 1;
   return {
     records,
+    reserve: async () => {
+      if (quota !== null && count >= quota) return null;
+      count += 1;
+      return `res-${nextId++}`;
+    },
+    settle: async (_id, usage) => {
+      records.push(usage);
+    },
+    release: async () => {
+      count = Math.max(0, count - 1);
+    },
     record: async (usage) => {
       records.push(usage);
       count += 1;
@@ -177,10 +213,10 @@ describe("MeteredImageGenerator (PT-7a, D175)", () => {
     expect(inner.resolveBackground).toHaveBeenCalledTimes(2); // no third call
   });
 
-  test("a usage-store record failure still returns the result and warns (fix round)", async () => {
+  test("a usage-store settle failure still returns the result and warns (fix round)", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const usage = fakeUsage();
-    usage.record = async () => {
+    usage.settle = async () => {
       throw new Error("connection reset");
     };
     const inner: ImageGeneratorPort = {
@@ -200,7 +236,266 @@ describe("MeteredImageGenerator (PT-7a, D175)", () => {
     expect(message).toContain("acme");
     expect(message).toContain("imagen");
     expect(message).toContain("connection reset");
+    expect(message).toContain("may be orphaned");
+    expect(message).toContain(usage.reservations[0]);
     warn.mockRestore();
+  });
+
+  test("a usage-store release failure still returns the result and warns", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const usage = fakeUsage();
+    usage.release = async () => {
+      throw new Error("release failed");
+    };
+    const inner: ImageGeneratorPort = {
+      resolveBackground: async () => ({
+        image: new Uint8Array([1]),
+        source: "imagen",
+        cached: true,
+      }),
+    };
+    const meter = new MeteredImageGenerator(inner, usage, "acme", "imagen", "imagen-4.0");
+    const result = await meter.resolveBackground(product, ratio(), context);
+    expect(result.cached).toBe(true);
+    expect(warn).toHaveBeenCalledTimes(1);
+    const [message] = warn.mock.calls[0] as [string];
+    expect(message).toContain("could not release usage reservation");
+    expect(message).toContain("release failed");
+    expect(message).toContain("may be orphaned");
+    expect(message).toContain(usage.reservations[0]);
+    warn.mockRestore();
+  });
+
+  test("releases reservation on provider failure (PT-7a2, D175)", async () => {
+    const usage = fakeUsage();
+    const inner: ImageGeneratorPort = {
+      resolveBackground: async () => {
+        throw new Error("provider error");
+      },
+    };
+    const meter = new MeteredImageGenerator(inner, usage, "acme", "imagen", "imagen-4.0");
+    await expect(meter.resolveBackground(product, ratio(), context)).rejects.toThrow(
+      "provider error",
+    );
+    expect(usage.reservations).toHaveLength(1);
+    expect(usage.released).toEqual([usage.reservations[0]]);
+    expect(usage.settled).toHaveLength(0);
+  });
+
+  test("releases reservation on cached result (PT-7a2, D175)", async () => {
+    const usage = fakeUsage();
+    const inner: ImageGeneratorPort = {
+      resolveBackground: async () => ({
+        image: new Uint8Array([1]),
+        source: "imagen",
+        cached: true,
+      }),
+    };
+    const meter = new MeteredImageGenerator(inner, usage, "acme", "imagen", "imagen-4.0");
+    await meter.resolveBackground(product, ratio(), context);
+    expect(usage.reservations).toHaveLength(1);
+    expect(usage.released).toEqual([usage.reservations[0]]);
+    expect(usage.settled).toHaveLength(0);
+  });
+
+  test("releases reservation on fallback-owned result (PT-7a2, D175)", async () => {
+    const usage = fakeUsage();
+    const inner: ImageGeneratorPort = {
+      resolveBackground: async () => ({ image: new Uint8Array([1]), source: "imagen" }),
+    };
+    const meter = new MeteredImageGenerator(inner, usage, "acme", "firefly", "v3");
+    const result = await meter.resolveBackground(product, ratio(), context);
+    expect(result.source).toBe("imagen");
+    expect(usage.reservations).toHaveLength(1);
+    expect(usage.released).toEqual([usage.reservations[0]]);
+    expect(usage.settled).toHaveLength(0);
+  });
+
+  describe("nested fallback reservation hand-off via AsyncLocalStorage", () => {
+    test("at quota - 1, the outer provider fails and the fallback succeeds: the run succeeds, exactly one row is recorded under the fallback's provider, and nothing stays reserved", async () => {
+      // quota is 2, current count is 1 (so at quota - 1)
+      const usage = statefulUsage(2, 1);
+      const fallbackInner: ImageGeneratorPort = {
+        resolveBackground: vi.fn(async () => ({
+          image: new Uint8Array([2]),
+          source: "imagen" as const,
+        })),
+      };
+      const fallbackMeter = new MeteredImageGenerator(
+        fallbackInner,
+        usage,
+        "acme",
+        "imagen",
+        "imagen-4.0",
+      );
+
+      const outerInner: ImageGeneratorPort = {
+        resolveBackground: async (p, r, c, s) => {
+          // Outer provider fails, calls fallback
+          return fallbackMeter.resolveBackground(p, r, c, s);
+        },
+      };
+      const outerMeter = new MeteredImageGenerator(
+        outerInner,
+        usage,
+        "acme",
+        "firefly",
+        "firefly-v3",
+      );
+
+      const result = await outerMeter.resolveBackground(product, ratio(), context);
+      expect(result.source).toBe("imagen");
+      expect(usage.records).toEqual([
+        {
+          orgId: "acme",
+          provider: "imagen",
+          model: "imagen-4.0",
+          units: 1,
+          keyOwner: "platform",
+        },
+      ]);
+      // Quota was 2; 1 initial + 1 settled = 2. A subsequent reserve at quota returns null.
+      expect(await usage.reserve("acme")).toBeNull();
+    });
+
+    test("both fail: the reservation is released and nothing is recorded", async () => {
+      const usage = fakeUsage();
+      const fallbackInner: ImageGeneratorPort = {
+        resolveBackground: vi.fn(async () => {
+          throw new Error("fallback failure");
+        }),
+      };
+      const fallbackMeter = new MeteredImageGenerator(
+        fallbackInner,
+        usage,
+        "acme",
+        "imagen",
+        "imagen-4.0",
+      );
+
+      const outerInner: ImageGeneratorPort = {
+        resolveBackground: async (p, r, c, s) => {
+          return fallbackMeter.resolveBackground(p, r, c, s);
+        },
+      };
+      const outerMeter = new MeteredImageGenerator(
+        outerInner,
+        usage,
+        "acme",
+        "firefly",
+        "firefly-v3",
+      );
+
+      await expect(outerMeter.resolveBackground(product, ratio(), context)).rejects.toThrow(
+        "fallback failure",
+      );
+      expect(usage.records).toEqual([]);
+      expect(usage.settled).toEqual([]);
+      expect(usage.reservations).toHaveLength(1);
+      expect(usage.released).toEqual([usage.reservations[0]]);
+    });
+
+    test("the outer succeeds: one row under the outer provider", async () => {
+      const usage = fakeUsage();
+      const fallbackInner: ImageGeneratorPort = {
+        resolveBackground: vi.fn(async () => ({
+          image: new Uint8Array([2]),
+          source: "imagen" as const,
+        })),
+      };
+      const fallbackMeter = new MeteredImageGenerator(
+        fallbackInner,
+        usage,
+        "acme",
+        "imagen",
+        "imagen-4.0",
+      );
+
+      const outerInner: ImageGeneratorPort = {
+        resolveBackground: vi.fn(async (p, r, c, s) => {
+          try {
+            return {
+              image: new Uint8Array([1]),
+              source: "firefly" as const,
+            };
+          } catch {
+            return fallbackMeter.resolveBackground(p, r, c, s);
+          }
+        }),
+      };
+      const outerMeter = new MeteredImageGenerator(
+        outerInner,
+        usage,
+        "acme",
+        "firefly",
+        "firefly-v3",
+      );
+
+      const result = await outerMeter.resolveBackground(product, ratio(), context);
+      expect(result.source).toBe("firefly");
+      expect(fallbackInner.resolveBackground).not.toHaveBeenCalled();
+      expect(usage.records).toEqual([
+        {
+          orgId: "acme",
+          provider: "firefly",
+          model: "firefly-v3",
+          units: 1,
+          keyOwner: "platform",
+        },
+      ]);
+      expect(usage.settled).toHaveLength(1);
+      expect(usage.released).toHaveLength(0);
+    });
+
+    test("two independent top-level calls in parallel do not share a scope", async () => {
+      const usage = fakeUsage();
+
+      const makeMeter = (id: string) => {
+        const fallback = new MeteredImageGenerator(
+          {
+            resolveBackground: async () => ({
+              image: new Uint8Array([1]),
+              source: "imagen" as const,
+            }),
+          },
+          usage,
+          "acme",
+          "imagen",
+          `imagen-${id}`,
+        );
+        const outer = new MeteredImageGenerator(
+          {
+            resolveBackground: async (p, r, c, s) => {
+              // Yield event loop to ensure parallel interleaved execution
+              await new Promise((resolve) => setTimeout(resolve, 5));
+              return fallback.resolveBackground(p, r, c, s);
+            },
+          },
+          usage,
+          "acme",
+          "firefly",
+          `firefly-${id}`,
+        );
+        return outer;
+      };
+
+      const meter1 = makeMeter("1");
+      const meter2 = makeMeter("2");
+
+      const [res1, res2] = await Promise.all([
+        meter1.resolveBackground(product, ratio(), context),
+        meter2.resolveBackground(product, ratio(), context),
+      ]);
+
+      expect(res1.source).toBe("imagen");
+      expect(res2.source).toBe("imagen");
+      // Two distinct reservations were made and each settled by its own fallback
+      expect(usage.reservations).toHaveLength(2);
+      expect(usage.settled).toHaveLength(2);
+      expect(usage.released).toHaveLength(0);
+      expect(usage.settled.map((s) => s.id)).toEqual(usage.reservations);
+      expect(usage.settled.map((s) => s.record.model)).toEqual(["imagen-1", "imagen-2"]);
+    });
   });
 });
 
@@ -263,5 +558,22 @@ describe("MeteredCopyGenerator (PT-7a, D175)", () => {
     ).rejects.toThrow(QuotaExceededError);
     expect(inner.suggestHeadlines).not.toHaveBeenCalled();
     expect(usage.records).toEqual([]);
+  });
+
+  test("releases reservation on copy provider failure (PT-7a2, D175)", async () => {
+    const usage = fakeUsage();
+    const inner: CopyGeneratorPort = {
+      model: "openai/gpt-4o-mini",
+      suggestHeadlines: async () => {
+        throw new Error("copy failure");
+      },
+    };
+    const meter = new MeteredCopyGenerator(inner, usage, "acme", "openrouter");
+    await expect(
+      meter.suggestHeadlines({ brief: {} as CopyGeneratorInput["brief"], count: 1 }),
+    ).rejects.toThrow("copy failure");
+    expect(usage.reservations).toHaveLength(1);
+    expect(usage.released).toEqual([usage.reservations[0]]);
+    expect(usage.settled).toHaveLength(0);
   });
 });

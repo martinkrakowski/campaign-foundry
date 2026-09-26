@@ -23,6 +23,13 @@ export interface UsageRecord {
   readonly keyOwner: KeyOwner;
 }
 
+/**
+ * How long an unsettled reservation counts toward this month's quota (PT-7a2,
+ * D175). A crashed worker or dropped run stops consuming quota after this
+ * window without needing an explicit cleanup pass.
+ */
+export const RESERVATION_TTL_MS = 60 * 60 * 1000;
+
 export interface UsageStorePort {
   /** Record one generation. Never called for a cached result — the provider was not called. */
   record(usage: UsageRecord): Promise<void>;
@@ -34,4 +41,19 @@ export interface UsageStorePort {
   countThisMonth(orgId: string, now: Date): Promise<number>;
   /** The org's monthly generation quota, or null for unlimited. */
   quota(orgId: string): Promise<number | null>;
+  /**
+   * Reserve one generation slot for `orgId` (PT-7a2, D175). Returns a
+   * reservation id, or null when the org is at or over its monthly quota.
+   */
+  reserve(orgId: string): Promise<string | null>;
+  /**
+   * Settle a reserved slot into a recorded row with its generation details
+   * (PT-7a2, D175).
+   */
+  settle(id: string, record: UsageRecord): Promise<void>;
+  /**
+   * Release a previously reserved slot (PT-7a2, D175), freeing it for another
+   * generation (e.g. on provider error, cached result, or fallback).
+   */
+  release(id: string): Promise<void>;
 }
