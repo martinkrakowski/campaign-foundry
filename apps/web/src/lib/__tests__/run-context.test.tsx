@@ -2957,18 +2957,38 @@ describe("run-context 401 and 403 pipeline error handling", () => {
     // The switched-away-from brief's own fetchPersistedRun is still in flight when the
     // user moves on — its `.catch` had no staleness guard, so a slow 403 landing after
     // the switch would set membershipError for a brief that is no longer active.
+    // setBrief now asks `/campaigns/jobs?campaignId=` (fetchRunningJob) BEFORE
+    // `/campaigns/result?campaignId=` (fetchPersistedRun) — the job lookup must resolve
+    // "no running job" quickly so the deferred 403 lands on the persisted-run read,
+    // which is the call whose `.catch` this test exercises.
     let resolveStale!: (res: Response) => void;
     const stale = new Promise<Response>((resolve) => {
       resolveStale = resolve;
     });
     mockPipelineApi({
-      result: (u) => (u.includes("campaignId=stale-camp") ? stale : json(EMPTY_REPORT)),
+      result: (u) => {
+        if (u.includes("/campaigns/result?campaignId=stale-camp")) return stale;
+        return json(EMPTY_REPORT);
+      },
     });
     const { result } = setup();
 
     act(() => {
       result.current.setBrief({ ...result.current.brief, id: "stale-camp" });
     });
+
+    // Wait until the job-discovery-first chain has actually reached the persisted-run
+    // read for "stale-camp" (where `stale` is parked) before switching away — `brief.id`
+    // itself flips synchronously inside setBrief, so waiting on that alone would let
+    // the switch below race ahead of the very fetch this test means to outlive.
+    await waitFor(() => {
+      expect(
+        vi
+          .mocked(globalThis.fetch)
+          .mock.calls.some(([u]) => String(u).includes("/campaigns/result?campaignId=stale-camp")),
+      ).toBe(true);
+    });
+
     act(() => {
       result.current.setBrief({ ...result.current.brief, id: "fresh-camp" });
     });
