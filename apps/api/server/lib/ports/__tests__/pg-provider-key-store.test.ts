@@ -1,8 +1,31 @@
 import { describe, test, expect, beforeEach, afterEach } from "vitest";
-import type { SqlClient } from "../../db/sql-client.js";
+import type { SqlClient, SqlQuery } from "../../db/sql-client.js";
 import { migratedDatabase } from "../../db/__tests__/pglite-client.js";
-import { ProviderKeyUnavailableError } from "../provider-key.port.js";
+import { ProviderKeyConflictError, ProviderKeyUnavailableError } from "../provider-key.port.js";
 import { PgProviderKeyStore } from "../pg-provider-key-store.js";
+
+/**
+ * A `SqlClient` whose transaction's `insert` fails with a pg `23505` (unique
+ * violation), the way two concurrent PUTs for the same provider would race
+ * the partial unique index on `(org_id, provider) where revoked_at is null`
+ * — without needing genuine concurrency against PGlite's single connection.
+ */
+function conflictingDb(): SqlClient {
+  const query: SqlQuery["query"] = async (text: string) => {
+    if (text.trim().toLowerCase().startsWith("insert")) {
+      throw Object.assign(new Error("duplicate key value violates unique constraint"), {
+        code: "23505",
+      });
+    }
+    return { rows: [] };
+  };
+  return {
+    query,
+    exec: async () => {},
+    transaction: async (work) => work({ query, exec: async () => {} }),
+    end: async () => {},
+  };
+}
 
 const KEK_KEYS = ["KEY_ENCRYPTION_KEYS", "KEY_ENCRYPTION_KEY_CURRENT"] as const;
 const savedKek = Object.fromEntries(KEK_KEYS.map((k) => [k, process.env[k]]));
@@ -140,6 +163,42 @@ describe("PgProviderKeyStore (PT-7b2, D175, D176)", () => {
       last4: "here",
       createdAt: list[0]!.createdAt,
     });
+  });
+
+  test("put maps a unique-index violation (two concurrent registrations racing) to ProviderKeyConflictError, not a raw 500", async () => {
+    setKek();
+    const store = new PgProviderKeyStore(conflictingDb(), "local");
+    await expect(store.put("gemini", "sk-fake-key-0000", "user-1")).rejects.toBeInstanceOf(
+      ProviderKeyConflictError,
+    );
+    await expect(store.put("gemini", "sk-fake-key-0000", "user-1")).rejects.toThrow(
+      "replaced concurrently; retry",
+    );
+  });
+
+  test("put wraps a malformed KEK (wrong key length) as ProviderKeyUnavailableError, with no key material in the message", async () => {
+    const badKey = Buffer.alloc(16, 9).toString("base64"); // 16 bytes, not the required 32
+    process.env.KEY_ENCRYPTION_KEYS = `v1:${badKey}`;
+    process.env.KEY_ENCRYPTION_KEY_CURRENT = "v1";
+    const store = new PgProviderKeyStore(db, "local");
+    await expect(store.put("gemini", "sk-fake-key-0000", "user-1")).rejects.toBeInstanceOf(
+      ProviderKeyUnavailableError,
+    );
+    try {
+      await store.put("gemini", "sk-fake-key-0000", "user-1");
+      expect.unreachable("expected put to reject");
+    } catch (error) {
+      expect((error as Error).message).not.toContain(badKey);
+      expect((error as Error).message).not.toContain("sk-fake-key-0000");
+    }
+  });
+
+  test("open wraps a malformed KEK (current version missing from the keyring) as ProviderKeyUnavailableError", async () => {
+    setKek();
+    const store = new PgProviderKeyStore(db, "local");
+    await store.put("gemini", "sk-fake-key-0000", "user-1");
+    process.env.KEY_ENCRYPTION_KEY_CURRENT = "v9"; // not in KEY_ENCRYPTION_KEYS
+    await expect(store.open("gemini")).rejects.toBeInstanceOf(ProviderKeyUnavailableError);
   });
 
   test("a rotated KEK still opens a key sealed under the old version", async () => {

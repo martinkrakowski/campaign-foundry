@@ -5,6 +5,7 @@ import {
   encodeFireflyPlaintext,
   isProvider,
   last4Of,
+  ProviderKeyConflictError,
   ProviderKeyUnavailableError,
 } from "../provider-key.port.js";
 
@@ -61,5 +62,15 @@ describe("ProviderKeyUnavailableError (PT-7b2)", () => {
     expect(error.status).toBe(503);
     expect(error.message).toBe("KEY_ENCRYPTION_KEYS is not set.");
     expect(error.name).toBe("ProviderKeyUnavailableError");
+  });
+});
+
+describe("ProviderKeyConflictError (PT-7b2)", () => {
+  test("carries a 409 status and a default retry message", () => {
+    const error = new ProviderKeyConflictError();
+    expect(error.statusCode).toBe(409);
+    expect(error.status).toBe(409);
+    expect(error.message).toBe("replaced concurrently; retry");
+    expect(error.name).toBe("ProviderKeyConflictError");
   });
 });

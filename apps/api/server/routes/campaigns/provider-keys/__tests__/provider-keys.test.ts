@@ -1,5 +1,6 @@
 import { describe, test, expect, vi, afterEach } from "vitest";
 import {
+  ProviderKeyConflictError,
   ProviderKeyUnavailableError,
   resetProviderKeyStore,
   setProviderKeyStore,
@@ -211,6 +212,43 @@ describe("provider-keys routes (PT-7b2, D175, D176)", () => {
     }
   });
 
+  test("PUT rejects a key shorter than 8 characters, whitespace-only, or over the length cap (400), and stores nothing", async () => {
+    setKek();
+    const harness = await setupPgHarness();
+    try {
+      const short = await put("gemini", { key: "abc" }, LOCAL_TENANT);
+      expect(short.status).toBe(400);
+      expect(await (await list(LOCAL_TENANT)).json()).toEqual([]);
+
+      const whitespaceOnly = await put("gemini", { key: "        " }, LOCAL_TENANT);
+      expect(whitespaceOnly.status).toBe(400);
+
+      const tooLong = await put("gemini", { key: "a".repeat(4097) }, LOCAL_TENANT);
+      expect(tooLong.status).toBe(400);
+
+      // Firefly's clientId and clientSecret are held to the same bound.
+      const shortFireflySecret = await put(
+        "firefly",
+        { clientId: "a-long-enough-client-id", clientSecret: "short" },
+        LOCAL_TENANT,
+      );
+      expect(shortFireflySecret.status).toBe(400);
+
+      const shortFireflyId = await put(
+        "firefly",
+        { clientId: "short", clientSecret: "a-long-enough-client-secret" },
+        LOCAL_TENANT,
+      );
+      expect(shortFireflyId.status).toBe(400);
+
+      // A valid, exactly-minimum-length key is still accepted.
+      const exactlyMin = await put("gemini", { key: "12345678" }, LOCAL_TENANT);
+      expect(exactlyMin.status).toBe(200);
+    } finally {
+      await harness.cleanup();
+    }
+  });
+
   test("GET /:provider and DELETE /:provider both reject an unknown provider (400)", async () => {
     setKek();
     const harness = await setupPgHarness();
@@ -283,6 +321,24 @@ describe("provider-keys routes (PT-7b2, D175, D176)", () => {
       const body = (await res.json()) as { error: string };
       expect(body.error).toMatch(/KEY_ENCRYPTION_KEYS/);
       expect(body.error).not.toContain("sk-fake-key-0000");
+    } finally {
+      await harness.cleanup();
+    }
+  });
+
+  test("PUT answers 503, not 500, when the configured KEK is malformed (wrong key length), and leaks no key material", async () => {
+    restoreKek();
+    const badKey = Buffer.alloc(16, 9).toString("base64"); // 16 bytes, not the required 32
+    process.env.KEY_ENCRYPTION_KEYS = `v1:${badKey}`;
+    process.env.KEY_ENCRYPTION_KEY_CURRENT = "v1";
+    const harness = await setupPgHarness();
+    try {
+      const res = await put("gemini", { key: "sk-fake-key-0000" }, LOCAL_TENANT);
+      expect(res.status).toBe(503);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).not.toContain(badKey);
+      expect(body.error).not.toContain("sk-fake-key-0000");
+      expect(await (await list(LOCAL_TENANT)).json()).toEqual([]);
     } finally {
       await harness.cleanup();
     }
@@ -381,6 +437,19 @@ describe("each route translates ProviderKeyUnavailableError to 503, and propagat
     setProviderKeyStore(fake({}));
     const res = await put("gemini", { key: "sk-fake-key-0000" }, LOCAL_TENANT);
     expect(res.status).toBe(500);
+  });
+
+  test("PUT: 409 when the store reports a concurrent-write conflict (ProviderKeyConflictError)", async () => {
+    setProviderKeyStore(
+      fake({
+        put: async () => {
+          throw new ProviderKeyConflictError();
+        },
+      }),
+    );
+    const res = await put("gemini", { key: "sk-fake-key-0000" }, LOCAL_TENANT);
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: "replaced concurrently; retry" });
   });
 
   test("DELETE: 503 on ProviderKeyUnavailableError, 500 on anything else", async () => {
