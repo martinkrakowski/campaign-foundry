@@ -22,6 +22,7 @@ import {
   getDecisionStore,
   getJobStore,
   resetDecisionStore,
+  resetJobStore,
   resetReportStore,
   setDecisionStore,
   setReportStore,
@@ -985,6 +986,27 @@ describe("reports go through the report store (PT-0a)", () => {
     ).rejects.toBe(conflict);
   });
 
+});
+
+describe("writeReport run fence (PT-6a2)", () => {
+  let root: string;
+  const orig = process.env.OUTPUT_DIR;
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), "cf-report-fence-"));
+    process.env.OUTPUT_DIR = root;
+    resetJobStore();
+    resetReportStore();
+    resetDecisionStore();
+  });
+  afterEach(() => {
+    resetJobStore();
+    resetReportStore();
+    resetDecisionStore();
+    if (orig === undefined) delete process.env.OUTPUT_DIR;
+    else process.env.OUTPUT_DIR = orig;
+    rmSync(root, { recursive: true, force: true });
+  });
+
   test("the fs late write refused after failJob", async () => {
     const jobStore = getJobStore(LOCAL_TENANT);
     const jobId = await jobStore.createJob("camp");
@@ -997,11 +1019,18 @@ describe("reports go through the report store (PT-0a)", () => {
 
   test("the fs write accepted for a live running job", async () => {
     const jobStore = getJobStore(LOCAL_TENANT);
-    const jobId = await jobStore.createJob("camp");
+    let jobId: string | undefined;
+    try {
+      jobId = await jobStore.createJob("camp");
 
-    await expect(
-      writeReport(LOCAL_TENANT, result([asset()]), { fence: { runId: jobId } }),
-    ).resolves.toMatch(/reports\/camp\.json$/);
+      await expect(
+        writeReport(LOCAL_TENANT, result([asset()]), { fence: { runId: jobId } }),
+      ).resolves.toMatch(/reports\/camp\.json$/);
+    } finally {
+      if (jobId) {
+        await jobStore.deleteJob(jobId).catch(() => undefined);
+      }
+    }
   });
 
   test("the fs write refused when job does not exist", async () => {

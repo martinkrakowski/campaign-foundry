@@ -12,7 +12,7 @@ import {
   withDecisionLock,
   type DecisionRecord,
 } from "../decisions.js";
-import { getDecisionStore, getJobStore, resetDecisionStore } from "../ports/index.js";
+import { getDecisionStore, getJobStore, resetDecisionStore, resetJobStore } from "../ports/index.js";
 import { JobLeaseLostError } from "../ports/job-store.port.js";
 import { LOCAL_TENANT } from "../tenant.js";
 
@@ -168,6 +168,24 @@ describe("retireDecisions against a concurrent save (PT-3)", () => {
     };
     await expect(retireDecisions(broken, "camp")).rejects.toThrow("disk full");
   });
+});
+
+describe("retireDecisions run fence (PT-6a2)", () => {
+  let root: string;
+  const orig = process.env.OUTPUT_DIR;
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), "cf-retire-fence-"));
+    process.env.OUTPUT_DIR = root;
+    resetDecisionStore();
+    resetJobStore();
+  });
+  afterEach(() => {
+    resetDecisionStore();
+    resetJobStore();
+    if (orig === undefined) delete process.env.OUTPUT_DIR;
+    else process.env.OUTPUT_DIR = orig;
+    rmSync(root, { recursive: true, force: true });
+  });
 
   test("retireDecisions is refused after failJob when fence is provided", async () => {
     const jobStore = getJobStore(LOCAL_TENANT);
@@ -183,15 +201,22 @@ describe("retireDecisions against a concurrent save (PT-3)", () => {
 
   test("retireDecisions succeeds with fence when job is running", async () => {
     const jobStore = getJobStore(LOCAL_TENANT);
-    const jobId = await jobStore.createJob("camp-live");
+    let jobId: string | undefined;
+    try {
+      jobId = await jobStore.createJob("camp-live");
 
-    const store = getDecisionStore(LOCAL_TENANT);
-    await store.writeDecisions("camp-live", { a: rec("approved") });
-    await expect(
-      retireDecisions(store, "camp-live", undefined, { runId: jobId }),
-    ).resolves.toBeUndefined();
-    const { decisions } = await store.readDecisions("camp-live");
-    expect(Object.keys(decisions)).toHaveLength(0);
+      const store = getDecisionStore(LOCAL_TENANT);
+      await store.writeDecisions("camp-live", { a: rec("approved") });
+      await expect(
+        retireDecisions(store, "camp-live", undefined, { runId: jobId }),
+      ).resolves.toBeUndefined();
+      const { decisions } = await store.readDecisions("camp-live");
+      expect(Object.keys(decisions)).toHaveLength(0);
+    } finally {
+      if (jobId) {
+        await jobStore.deleteJob(jobId).catch(() => undefined);
+      }
+    }
   });
 
   test("retireDecisions is refused when job does not exist", async () => {
