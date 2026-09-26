@@ -1,7 +1,7 @@
 import { errorMessage } from "@campaignfoundry/shared";
 import { assertSafeId } from "../../lib/load-brief.js";
 import { ASSET_NAME_PATTERN, assetContentType } from "../../lib/asset-files.js";
-import { assertOwnedCampaign } from "../../lib/ownership.js";
+import { campaignKnown } from "../../lib/ownership.js";
 import { getAssetStore } from "../../lib/ports/index.js";
 
 import { requestTenant } from "../../lib/tenant.js";
@@ -52,7 +52,7 @@ export default defineEventHandler(async (event) => {
     return bytes;
   }
 
-  await assertOwnedCampaign(scope, briefId);
+  await campaignKnown(scope, briefId, "asset");
 
   try {
     const assets = await getAssetStore(scope).listAssets(briefId);

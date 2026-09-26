@@ -5,7 +5,6 @@ import {
   withDecisionLock,
   type Verdict,
 } from "../../lib/decisions.js";
-import { assertOwnedCampaign } from "../../lib/ownership.js";
 import { DecisionConflictError } from "../../lib/ports/index.js";
 import { reportRevision } from "../../lib/report.js";
 import { requestTenant } from "../../lib/tenant.js";
@@ -42,7 +41,6 @@ export default defineEventHandler(async (event) => {
     setResponseStatus(event, 400);
     return { error: problem };
   }
-  await assertOwnedCampaign(tenant, campaignId);
   // Under the campaign's decision lock, so the run a verdict is stamped with is
   // the report it stays against: a report write retires under the same lock.
   // The lock is per process; across processes the store's own compare-and-swap

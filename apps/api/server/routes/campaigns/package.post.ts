@@ -4,7 +4,6 @@ import {
   type PackageStorePort,
 } from "@campaignfoundry/Distribution";
 import { getCapabilities } from "../../lib/capabilities.js";
-import { assertOwnedCampaign } from "../../lib/ownership.js";
 import { getOutputStore } from "../../lib/ports/index.js";
 import { storageRoots } from "../../lib/run-environment.js";
 import { isPersistedAsset, type PersistedAsset, readReport } from "../../lib/report.js";
@@ -92,8 +91,6 @@ export default defineEventHandler(async (event) => {
     setResponseStatus(event, 400);
     return { error: error instanceof Error ? error.message : "Invalid package request" };
   }
-
-  await assertOwnedCampaign(scope, campaignId);
 
   const report = await readReport(scope, campaignId);
   if (report === undefined) {
