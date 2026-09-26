@@ -172,13 +172,9 @@ export function handlePipelineResponseError(
   includeErrorInFallback = false,
 ): Error {
   const code =
-    typeof data === "object" && data !== null
-      ? (data as { code?: unknown }).code
-      : undefined;
+    typeof data === "object" && data !== null ? (data as { code?: unknown }).code : undefined;
   const errorMsg =
-    typeof data === "object" && data !== null
-      ? (data as { error?: unknown }).error
-      : undefined;
+    typeof data === "object" && data !== null ? (data as { error?: unknown }).error : undefined;
   const msgStr = typeof errorMsg === "string" ? errorMsg : undefined;
 
   if (status === 401 && (code === "unauthenticated" || code === undefined)) {
