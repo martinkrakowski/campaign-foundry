@@ -3,10 +3,10 @@
   "lane": "PT-2b",
   "mutations": [
     {
-      "file": "apps/api/server/routes/campaigns/decisions.put.ts",
-      "before": "  await assertOwnedCampaign(tenant, campaignId);",
-      "after": "  // mutant: skip assertOwnedCampaign",
-      "because": "without assertOwnedCampaign, PUT /campaigns/decisions does not verify the campaign belongs to the caller's org before attempting review updates.",
+      "file": "apps/api/server/routes/campaigns/result.get.ts",
+      "before": "  await campaignKnown(scope, campaignId, \"report\");",
+      "after": "  // mutant: skip campaignKnown",
+      "because": "without campaignKnown, GET /campaigns/result returns an empty 200 rather than 404 for an unowned campaign.",
       "command": [
         "yarn",
         "vitest",
@@ -15,7 +15,7 @@
         "api",
         "apps/api/server/routes/__tests__/ownership-cross-tenant.test.ts",
         "-t",
-        "PUT /campaigns/decisions answers 404 for another org's campaign on fs"
+        "GET /campaigns/result answers 404 for another org's campaign on fs"
       ],
       "verdict": "caught"
     }
