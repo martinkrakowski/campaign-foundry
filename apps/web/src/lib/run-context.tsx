@@ -843,14 +843,10 @@ export function RunProvider({ children }: { children: ReactNode }) {
         })
         .finally(() => {
           if (briefIdRef.current !== next.id) return;
-          void fetchRunningJob(next.id)
-            .then((jobId) => {
-              if (briefIdRef.current !== next.id || !jobId) return;
-              void adoptJob(next, jobId);
-            })
-            .catch(() => {
-              /* A 404, or a network failure, leaves the page as today. */
-            });
+          void fetchRunningJob(next.id).then((jobId) => {
+            if (briefIdRef.current !== next.id || !jobId) return;
+            void adoptJob(next, jobId);
+          });
         });
     },
     [adoptJob, run],
@@ -916,14 +912,10 @@ export function RunProvider({ children }: { children: ReactNode }) {
       })
       .finally(() => {
         if (!restored || !active || briefIdRef.current !== startBrief.id) return;
-        void fetchRunningJob(startBrief.id)
-          .then((jobId) => {
-            if (!active || briefIdRef.current !== startBrief.id || !jobId) return;
-            void adoptJob(startBrief, jobId);
-          })
-          .catch(() => {
-            /* A 404, or a network failure, leaves the page as today. */
-          });
+        void fetchRunningJob(startBrief.id).then((jobId) => {
+          if (!active || briefIdRef.current !== startBrief.id || !jobId) return;
+          void adoptJob(startBrief, jobId);
+        });
       });
     return () => {
       active = false;

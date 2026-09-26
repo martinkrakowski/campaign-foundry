@@ -2925,4 +2925,22 @@ describe("RunProvider — running job awareness on reload and brief switch", () 
     expect(result.current.loading).toBe(false);
     expect(result.current.assets).toHaveLength(0);
   });
+
+  test("adoptJob uses the generic message when polling rejects with a non-Error", async () => {
+    localStorage.setItem("cf:brief-picked", "1");
+    localStorage.setItem("cf:brief", JSON.stringify(activeBrief));
+    mockPipelineApi({
+      result: (url) => {
+        if (url.includes("/campaigns/jobs?campaignId=active-campaign")) {
+          return json({ jobId: "job-reload-1" });
+        }
+        return json(EMPTY_REPORT);
+      },
+      job: () => Promise.reject("string rejection"),
+    });
+
+    const { result } = setup();
+    await waitFor(() => expect(result.current.error).toBe("Generation failed"));
+    expect(result.current.loading).toBe(false);
+  });
 });
