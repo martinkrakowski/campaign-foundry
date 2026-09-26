@@ -6504,3 +6504,53 @@ and source formatting, recorded here rather than fixed.
   foreground and released immediately after. Pushed at `8bd91e42`; replied to and resolved
   `PRRT_kwDOSzP1zc6mSljV`.
 - **All 33 review threads on #597 are resolved.** Not merged — left for the owner.
+
+## 2026-09-26 — waves platform-and-tenancy-w03 and w04 part A (PT-2a, PT-1b2, FU-server-job-awareness, PT-7b1, PT-6b1)
+
+- **Owner decisions:**
+  - **PT-2:** a campaign with no team is visible to the whole org, and owner and admin roles bypass teams; platform admin and `audit_event` are deferred; an unknown campaign gets a 404, and body routes need a stored brief; teams are Postgres-only.
+  - **PT-7b:** BYOK is metered but exempt from the quota; owners and admins manage keys.
+  - **PT-6b:** a queued job row (migration `0010`); the API consumes when Kafka is enabled.
+  - The `tech-stack.md` row for `better-auth` in `apps/web` (`f74bbdf5`).
+- **Merged:**
+  - [#595](https://github.com/martinkrakowski/campaign-foundry/pull/595) (`7a43d694`) PT-2a: the cross-tenant harness, the scope resolved once per request in eight routes, and cross-org 404 tests on the id-taking reads.
+    - The harness's own temp-dir leak came from `projectRoot()`'s module cache surviving between tests; it now resets, and an `afterAll` guard fails on any leaked dir.
+    - `packages/shared` gained a `resetProjectRoot()` export.
+    - The harness restores its state even when setup, or closing the database, throws.
+    - The assets list's 404 moves to PT-2b.
+  - [#598](https://github.com/martinkrakowski/campaign-foundry/pull/598) (`6f47c0ba`) PT-7b1 key sealer:
+    - AES-256-GCM envelope with a fresh data key per seal and versioned KEKs from `KEY_ENCRYPTION_KEYS`.
+    - The orchestrator bound a context (`<orgId>:<provider>`) into both GCM seals as additional data, so a sealed key moved to another org's row no longer opens.
+    - The bots then found that config errors echoed a misplaced key and that the constructor trusted foreign maps; both fixed.
+  - [#596](https://github.com/martinkrakowski/campaign-foundry/pull/596) (`bcab4d8b`) FU-server-job-awareness: `GET /campaigns/jobs?campaignId=`, and the client adopts a running job after a reload. Across five review rounds:
+    - an adopted re-roll re-reads the persisted report instead of committing its partial payload;
+    - a stale lookup can no longer override a newer run;
+    - the unmount cleanup is registered on every path (the normal editor order used to skip it);
+    - several vacuous tests were made to fail without their fix.
+  - [#599](https://github.com/martinkrakowski/campaign-foundry/pull/599) (`a1c0a311`) PT-6b1:
+    - The `0010` queued status, `enqueueJob`/`startQueuedJob`, a serialisable `RunRequest` with `executeRunRequest` (line for line the old closure), and a `RunDeliveryPort` with an in-process adapter in its own registry.
+    - The lane removed a production branch on `acquireJob.mock` (test-spy detection).
+    - Review fixes:
+      - a `deliver` throw deletes the queued row;
+      - pg `startQueuedJob` checks the TTL;
+      - the reaper and the duplicate-delivery refusal are proven essential;
+      - an import cycle is proven gone by a test.
+    - CI caught the new `TEST_DATABASE_URL` race test sharing org `local`, which earlier tests fill to `MAX_JOBS`; it now uses its own org.
+  - [#597](https://github.com/martinkrakowski/campaign-foundry/pull/597) (`327f2941`) PT-1b2:
+    - The sign-in page (magic link, and Google when configured), the header user menu and org switcher, and one shared 401/403 handler at every pipeline call site.
+    - A typed `NoMembershipError` with a visible notice that is guarded against staleness and cleared on success.
+    - Org switching and sign-out go through the unsaved-edits guard.
+    - 33 review threads over six rounds, including a `planCampaign` 401 flash that an existing test pinned as expected behaviour.
+- **Seats:** agy ran the first dispatch of every lane. Its account quota ran out twice (`429 … Individual quota reached`), killing every concurrent run, most with no commits. On the owner's instruction, the Sonnet reserve took over, continuing from each worktree's recorded tip, and handed back when agy answered. More than about three concurrent agy runs exhausts the quota.
+- **Process failures, and the rule each leaves:**
+  - **The gate lock was held while idle twice.** An agent's background acquire loop took the lock and the agent never resumed. Acquire in the foreground immediately before the steps.
+  - **The lock's 40-minute stale threshold** let one lane take the lock from another that was still in `test:cov` under load. The lock needs a heartbeat, or a longer threshold measured against a loaded host.
+  - **One agent ran `test:cov` unlocked** after misreading a wrapper's exit code (load 80). The rule: check `gate.sh`'s own exit code, not the wrapper's.
+  - **Review bots posted a new round after almost every push:** Qodo, CodeRabbit and greptile, which is newly active. Most rounds held real defects. The cap that worked: one more round per PR after the first sweep, then stop and report.
+  - **Two agents deleted "unreachable" branches to reach coverage.** Both were verified as genuinely dead. The brief rule "never delete a guard to reach coverage" held.
+- **Follow-ups:**
+  - The reroll revision contract: an adopted re-roll cannot know the submitted brief revision without the job carrying it (store change).
+  - The message-catalog debt in the web shell.
+  - A `?next=` return URL after sign-in, which needs open-redirect review.
+  - A structural import cycle through `ports/index` remains, pre-existing.
+  - `apps/api` has no structured logger, so `console.warn` is the convention.
