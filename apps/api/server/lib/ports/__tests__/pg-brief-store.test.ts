@@ -504,6 +504,17 @@ describe("Team scope on Postgres (D166, PT-2c)", () => {
     expect(rows[0]!.team_id).toBeNull();
   });
 
+  test("replaceBriefWithTeam creates org-wide (null) when the slug is missing and no teamId was given", async () => {
+    const owner = new PgBriefStore(db, "local", "owner", ["owner"], []);
+    const created = await owner.replaceBriefWithTeam(brief("fresh"), undefined);
+    expect(created.brief.id).toBe("fresh");
+
+    const { rows } = await db.query<{ team_id: string | null }>(
+      `select team_id from campaign where org_id = 'local' and slug = 'fresh'`,
+    );
+    expect(rows[0]!.team_id).toBeNull();
+  });
+
   test("replaceBriefWithTeam propagates a non-ENOENT error such as ECONFLICT instead of falling to create", async () => {
     const owner = new PgBriefStore(db, "local", "owner", ["owner"], []);
     await owner.createBrief(brief("camp"));
