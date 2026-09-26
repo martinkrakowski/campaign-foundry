@@ -796,7 +796,11 @@ export function RunProvider({ children }: { children: ReactNode }) {
             // full-run path further down — decisions are cleared here rather than left
             // showing old verdicts on new creatives that happen to share their identity
             // keys if that reload then fails (greptile "Old verdicts remain visible").
-            if (outcome.result.assets.length >= persisted.assets.length) {
+            // `?.length ?? 0` on both sides: `fetchPersistedRun` accepts a report with a
+            // `log` and no `assets` array, and `outcome.result` is an untrusted cast of
+            // the job payload — either missing `assets` would otherwise throw here and
+            // leave a completed run uncommitted (coderabbit).
+            if ((outcome.result.assets?.length ?? 0) >= (persisted.assets?.length ?? 0)) {
               setDecisions({});
             }
             setRun({ result: persisted, target });

@@ -3497,6 +3497,52 @@ describe("RunProvider — running job awareness on reload and brief switch", () 
     expect(result.current.decisions).toEqual({});
   });
 
+  test("an adopted job commits when the persisted report has no assets array (coderabbit)", async () => {
+    // `fetchPersistedRun` accepts a report with a `log` and no `assets` (D83/F6:
+    // halted, log-only runs count) — the length comparison must not throw on it.
+    mockPipelineApi({
+      result: (url) =>
+        url.includes("/campaigns/jobs?campaignId=active-campaign")
+          ? json({ jobId: "job-x" })
+          : json({ halted: false, log: { entries: [], campaignId: "active-campaign" } }),
+      job: () =>
+        jobOk({
+          halted: false,
+          assets: [asset({ productId: "p1" })],
+          log: { entries: [], campaignId: "active-campaign" },
+        }),
+    });
+    const { result } = setup();
+    act(() => {
+      result.current.setBrief(activeBrief);
+    });
+    await waitFor(() => expect(result.current.hasRun).toBe(true));
+    expect(result.current.error).toBeNull();
+    expect(result.current.assets).toEqual([]);
+  });
+
+  test("an adopted job commits when its own completed payload has no assets array (coderabbit)", async () => {
+    // The job payload (`outcome.result`) is an untrusted cast (`pollJob`) — the length
+    // comparison must not throw when it lacks `assets` either.
+    mockPipelineApi({
+      result: (url) =>
+        url.includes("/campaigns/jobs?campaignId=active-campaign")
+          ? json({ jobId: "job-x" })
+          : json({
+              halted: false,
+              assets: [asset({ productId: "p1" })],
+              log: { entries: [], campaignId: "active-campaign" },
+            }),
+      job: () => jobOk({ halted: false, log: { entries: [], campaignId: "active-campaign" } }),
+    });
+    const { result } = setup();
+    act(() => {
+      result.current.setBrief(activeBrief);
+    });
+    await waitFor(() => expect(result.current.assets).toHaveLength(1));
+    expect(result.current.error).toBeNull();
+  });
+
   test('a job lookup that resolves after a newer run has started for the same campaign does not adopt the stale job or clobber the newer one (greptile "Stale lookup replaces newer run")', async () => {
     let resolveLookup!: (r: Response) => void;
     const lookupPromise = new Promise<Response>((r) => {
