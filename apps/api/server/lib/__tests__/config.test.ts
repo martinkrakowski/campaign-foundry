@@ -7,6 +7,7 @@ import {
   readFileSync,
   rmdirSync,
   rmSync,
+  symlinkSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -388,8 +389,13 @@ describe("kafkaSettings (PT-6b2, D174d)", () => {
   ] as const;
   const saved = Object.fromEntries(envKeys.map((k) => [k, process.env[k]]));
   const certsDir = resolve(projectRoot(), "certs");
+  // Read before `beforeAll` (below) ever creates the directory, so this is
+  // true only when some earlier test run or the operator already had
+  // certs/. `beforeEach` used to recompute this after `beforeAll`'s own
+  // mkdir, which made it always true and left an empty certs/ behind on
+  // every fresh checkout.
+  const certsDirPreexisted = existsSync(certsDir);
 
-  let certsDirExisted = false;
   const createdFiles: string[] = [];
 
   function writeFixture(name: string, content: string): string {
@@ -423,10 +429,15 @@ describe("kafkaSettings (PT-6b2, D174d)", () => {
         }
       }
     }
-  });
-
-  beforeEach(() => {
-    certsDirExisted = existsSync(certsDir);
+    // Only remove the directory this suite itself created (`beforeAll`
+    // above): an operator's pre-existing certs/ is never ours to remove.
+    if (!certsDirPreexisted && existsSync(certsDir)) {
+      try {
+        rmdirSync(certsDir);
+      } catch {
+        // Non-empty (e.g. a concurrent suite's own certs/ use), leave it intact.
+      }
+    }
   });
 
   afterEach(() => {
@@ -438,13 +449,6 @@ describe("kafkaSettings (PT-6b2, D174d)", () => {
       const f = createdFiles.pop()!;
       if (existsSync(f)) {
         unlinkSync(f);
-      }
-    }
-    if (!certsDirExisted && existsSync(certsDir)) {
-      try {
-        rmdirSync(certsDir);
-      } catch {
-        // Non-empty (e.g. operator certs or sentinel present), leave it intact.
       }
     }
   });
@@ -670,6 +674,31 @@ describe("kafkaSettings (PT-6b2, D174d)", () => {
 
     process.env.KAFKA_CA_PATH = "certs";
     expect(() => kafkaSettings()).toThrow(/must be a file path under certs\//);
+  });
+
+  test("hazard: a symlink under certs/ pointing outside it is rejected", () => {
+    process.env.KAFKA_BROKERS = "kafka1:9092";
+    const outsideDir = mkdtempSync(join(tmpdir(), "cf-cert-escape-"));
+    const outsideFile = join(outsideDir, "secret.pem");
+    writeFileSync(outsideFile, "SECRET-OUTSIDE-CERTS");
+    const id = randomUUID();
+    if (!existsSync(certsDir)) {
+      mkdirSync(certsDir, { recursive: true });
+    }
+    const linkPath = join(certsDir, `kafka-test-${id}-ca-link.pem`);
+    symlinkSync(outsideFile, linkPath);
+    process.env.KAFKA_CA_PATH = `certs/kafka-test-${id}-ca-link.pem`;
+
+    try {
+      expect(() => kafkaSettings()).toThrow(/must be a file path under certs\//);
+    } finally {
+      // Not via `createdFiles`: once the target is gone, `existsSync` on a
+      // dangling symlink follows it and reports false, so the shared
+      // afterEach's `existsSync` guard would skip unlinking it. Remove the
+      // link itself first, then its target.
+      unlinkSync(linkPath);
+      rmSync(outsideDir, { recursive: true, force: true });
+    }
   });
 
   test("hazard: missing cert file throws clear error", () => {

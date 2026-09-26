@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import { isAbsolute, relative, resolve } from "node:path";
 import { projectRoot } from "@campaignfoundry/shared";
 import type { DatabaseSettings } from "./db/database-config.js";
@@ -220,11 +220,27 @@ function readCertFile(envVar: string, rawPath: string): string {
     }
     throw new Error(`${envVar} must be a file path under certs/.`);
   }
+  // `relative` above only rejects lexical traversal in the given path
+  // (`../`); a file that is itself lexically under certs/ but is a symlink
+  // to somewhere else would pass that check and still be followed by
+  // `readFileSync`. Resolve the real target and re-check containment
+  // against it, so the confinement covers the file actually read.
+  let realPath: string;
+  let content: string;
   try {
-    return readFileSync(resolved, "utf8");
+    realPath = realpathSync(resolved);
+    content = readFileSync(realPath, "utf8");
   } catch (error) {
     throw new Error(`Failed to read ${envVar} at "${rawPath}": ${(error as Error).message}`);
   }
+  // certs/ itself may be a symlink on an operator machine, so resolve it
+  // too rather than comparing a real path against a lexical one.
+  const realCertsDir = realpathSync(certsDir);
+  const realRel = relative(realCertsDir, realPath);
+  if (realRel.startsWith("..") || isAbsolute(realRel) || realRel === "") {
+    throw new Error(`${envVar} must be a file path under certs/, got "${rawPath}".`);
+  }
+  return content;
 }
 
 /**
