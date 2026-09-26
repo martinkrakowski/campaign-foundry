@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "FU-server-job-awareness",
+  "mutations": [
+    {
+      "file": "apps/web/src/lib/run-context.tsx",
+      "before": "            void adoptJob(startBrief, jobId);",
+      "after": "            void startBrief; void jobId;",
+      "because": "skipping the adoption call after restoring a brief prevents the web client from adopting an in-flight background run",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/lib/__tests__/run-context.test.tsx",
+        "-t",
+        "reload adopts a running job"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
