@@ -24,6 +24,14 @@ import {
   type PackagedPlatform,
   type PlanEstimate,
 } from "./briefs-api";
+import {
+  handleAuthError,
+  NO_ORGANISATION_YET_MESSAGE,
+  NoMembershipError,
+  isNoMembershipError,
+} from "./auth-errors";
+
+export { NO_ORGANISATION_YET_MESSAGE, NoMembershipError, isNoMembershipError };
 
 /** Base path for the Nitro pipeline API (proxied by next.config rewrites). */
 export const API = "/api/pipeline";
@@ -160,6 +168,47 @@ function pipelineUnreachable(status: number, error?: string): Error {
 }
 
 /**
+ * Handle pipeline API responses that are not OK (PT-1b2 item 5).
+ * A 401 unauthenticated routes to /sign-in, and a 403 no_membership shows a
+ * "no organisation yet" state rather than the pipeline-unreachable error.
+ */
+export function handlePipelineResponseError(
+  status: number,
+  data: unknown,
+  includeErrorInFallback = false,
+): Error {
+  // `handleAuthError` throws for a 403 no_membership — this function's own contract
+  // (the `: Error` return type, and every call site's `throw handlePipelineResponseError(...)`)
+  // is to hand the error BACK rather than throw it itself, so that throw is caught
+  // right here and returned like every other branch below.
+  try {
+    handleAuthError(status, data);
+  } catch (e) {
+    // handleAuthError's only throw site is the 403 no_membership branch, and it is
+    // always a NoMembershipError (see auth-errors.ts) — a defensive `isNoMembershipError`
+    // re-check here would add a branch this gate's 100% requirement can never exercise,
+    // since nothing else can reach this catch.
+    return e as NoMembershipError;
+  }
+
+  const code =
+    typeof data === "object" && data !== null ? (data as { code?: unknown }).code : undefined;
+  const errorMsg =
+    typeof data === "object" && data !== null ? (data as { error?: unknown }).error : undefined;
+  const msgStr = typeof errorMsg === "string" ? errorMsg : undefined;
+
+  // Only the same codes `handleAuthError` itself redirects on read as "sign in
+  // required" — a 401 with a different code (an expired token mid-request, say) is
+  // not that, and must keep falling through to the generic pipeline-unreachable
+  // message rather than claiming a redirect that never happened.
+  if (status === 401 && (code === "unauthenticated" || code === undefined)) {
+    return new Error(msgStr ?? "Sign in required.");
+  }
+
+  return pipelineUnreachable(status, includeErrorInFallback ? msgStr : undefined);
+}
+
+/**
  * The one "is there a real persisted run for this brief?" rule, shared by the mount
  * restore, setBrief, and lost-job recovery. A present `log` marks a real run (a halted,
  * log-only run counts); the API's "no run yet" default has assets:[] and log:null.
@@ -240,7 +289,11 @@ export function normalizeRunResult(result: RunResult): RunResult {
  */
 export async function fetchPersistedRun(campaignId: string): Promise<RunResult | null> {
   const res = await fetch(`${API}/campaigns/result?campaignId=${encodeURIComponent(campaignId)}`);
-  if (!res.ok) throw pipelineUnreachable(res.status);
+  if (!res.ok) {
+    const raw = await res.text();
+    const data = parseJson(raw);
+    throw handlePipelineResponseError(res.status, data);
+  }
   const d = (await res.json()) as RunResult;
   // The one place persisted JSON becomes a RunResult, so the one place to narrow it.
   if (d?.log?.campaignId === campaignId && (d.assets?.length || d.log))
@@ -290,6 +343,9 @@ async function pollJob(
     const res = await fetch(`${API}/campaigns/jobs/${encodeURIComponent(jobId)}`, { signal });
     if (res.status === 404) return { kind: "lost" };
     const data = parseJson(await res.text());
+    if (res.status === 401 || (res.status === 403 && data?.code === "no_membership")) {
+      throw handlePipelineResponseError(res.status, data);
+    }
     if (res.ok && data?.status === "failed") {
       throw new Error(typeof data.error === "string" ? data.error : "Generation failed");
     }
@@ -301,10 +357,7 @@ async function pollJob(
     if (!res.ok || !data) {
       transient += 1;
       if (transient >= JOB_POLL_MAX_TRANSIENT) {
-        throw pipelineUnreachable(
-          res.status,
-          typeof data?.error === "string" ? data.error : undefined,
-        );
+        throw handlePipelineResponseError(res.status, data, true);
       }
     } else {
       transient = 0; // a well-formed "running" snapshot
@@ -350,7 +403,11 @@ export async function fetchDecisions(campaignId: string): Promise<StoredDecision
   const res = await fetch(
     `${API}/campaigns/decisions?campaignId=${encodeURIComponent(campaignId)}`,
   );
-  if (!res.ok) throw pipelineUnreachable(res.status);
+  if (!res.ok) {
+    const raw = await res.text();
+    const data = parseJson(raw);
+    throw handlePipelineResponseError(res.status, data);
+  }
   return narrowDecisions(await res.json());
 }
 
@@ -370,7 +427,11 @@ export async function saveDecisions(
     body: JSON.stringify({ campaignId, revision, decisions }),
   });
   if (res.status === 409) return "conflict";
-  if (!res.ok) throw pipelineUnreachable(res.status);
+  if (!res.ok) {
+    const raw = await res.text();
+    const data = parseJson(raw);
+    throw handlePipelineResponseError(res.status, data);
+  }
   return narrowDecisions(await res.json());
 }
 
@@ -538,6 +599,13 @@ interface RunContextValue {
    */
   progress: RunProgress | null;
   error: string | null;
+  /**
+   * Organisation membership error (PT-1b2 item 3). A typed `NoMembershipError`
+   * (detected on `code`, never on the server's message text) lands here, in its
+   * own state — never in `error`, the pipeline-unreachable slot — holding the
+   * fixed `NO_ORGANISATION_YET_MESSAGE` regardless of how the server worded it.
+   */
+  membershipError: string | null;
   hasRun: boolean;
   decisions: Record<string, Decision>;
   decide: (key: string, decision: Decision) => void;
@@ -669,6 +737,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState<RunProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [membershipError, setMembershipError] = useState<string | null>(null);
   const [assetVersion, setAssetVersion] = useState(0);
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
   const [regeneratingKeys, setRegeneratingKeys] = useState<ReadonlySet<string> | null>(null);
@@ -777,15 +846,43 @@ export function RunProvider({ children }: { children: ReactNode }) {
           // F6: a failed re-read is not "nothing was saved" either — and the
           // interruption notice below already names the fact and the remedy, so a
           // failed read keeps that notice instead of being conflated with absence.
-          const persisted = await fetchPersistedRun(target.id).catch(() => null);
+          //
+          // A 403 no_membership on this re-read is the same fact `setBrief` and the
+          // mount restore already name in `membershipError`, never a nameless failed
+          // read — folding it into `null` (as this used to) hid a real membership
+          // denial behind LOST_JOB_MESSAGE (greptile "membership denial is hidden").
+          let deniedMembership = false;
+          const persisted = await fetchPersistedRun(target.id).catch((err) => {
+            if (isNoMembershipError(err)) deniedMembership = true;
+            return null;
+          });
           if (runSeq.current !== owned) return;
+          if (deniedMembership) {
+            setMembershipError(NO_ORGANISATION_YET_MESSAGE);
+            return;
+          }
           if (persisted) setRun({ result: persisted, target });
           setError(LOST_JOB_MESSAGE);
           return;
         }
         if (opts.adopted) {
-          const persisted = await fetchPersistedRun(target.id).catch(() => null);
+          // A 403 no_membership on this re-read must read as exactly that, never as
+          // "no run on disk" — folding it into `null` (as this used to) would commit
+          // the job's own (possibly partial, for a re-roll) payload and heal the
+          // notice below, both dishonest when the read that would justify either one
+          // just failed with a membership denial (greptile "membership denial is
+          // hidden").
+          let deniedMembership = false;
+          const persisted = await fetchPersistedRun(target.id).catch((err) => {
+            if (isNoMembershipError(err)) deniedMembership = true;
+            return null;
+          });
           if (runSeq.current !== owned) return;
+          if (deniedMembership) {
+            // Show the denial, commit nothing, leave the grid exactly as it was.
+            setMembershipError(NO_ORGANISATION_YET_MESSAGE);
+            return;
+          }
           if (persisted) {
             // A re-roll's own completed payload (`outcome.result.assets`) carries only
             // the regenerated cells — strictly fewer than the full persisted report it
@@ -806,6 +903,11 @@ export function RunProvider({ children }: { children: ReactNode }) {
             setRun({ result: persisted, target });
             setAssetVersion((v) => v + 1);
             setError(null);
+            // A completed, adopted run is proof of membership for this brief (a
+            // 401/403 would have thrown out of pollJob/fetchPersistedRun instead), so
+            // it heals a stale membership error the same way a successful
+            // fetchPersistedRun restore does (F6).
+            setMembershipError(null);
             return;
           }
           // The job just answered "completed", so a failed or empty read here is
@@ -819,6 +921,10 @@ export function RunProvider({ children }: { children: ReactNode }) {
         setAssetVersion((v) => v + 1);
         setDecisions({});
         setError(null); // the result replaces any stale complaint about this run
+        // A completed run is proof of membership (a 401/403 would have thrown out of
+        // postGenerate/pollJob instead), so it heals a stale membership error the same
+        // way a successful fetchPersistedRun does (F6).
+        setMembershipError(null);
       } catch (e) {
         if (runSeq.current !== owned) return;
         setError(e instanceof Error ? e.message : "Generation failed");
@@ -846,6 +952,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
       briefDecidedRef.current = true;
       setBriefState(next);
       setError(null);
+      setMembershipError(null);
       // Record the last-opened brief so a reload restores it (and its run) instead of
       // DEFAULT, and so the bare /brief route can hand the visitor back to it. D37:
       // this is a convenience record, never an address — the blank brief releases the
@@ -925,7 +1032,9 @@ export function RunProvider({ children }: { children: ReactNode }) {
         // Generate, or another discovery) that started while this lookup was still
         // in flight — without it, adopting now would abort that run's poller and
         // replace its result with a stale one (greptile "Stale lookup replaces
-        // newer run").
+        // newer run"). The same condition also answers "superseded" for
+        // `membershipError`: a switch away already cleared it at the top of
+        // `setBrief`, and owns whatever this lookup's late answer would say.
         if (!mountedRef.current || briefIdRef.current !== next.id || runSeq.current !== owned)
           return; // superseded, or unmounted
         if (jobId) {
@@ -934,17 +1043,26 @@ export function RunProvider({ children }: { children: ReactNode }) {
         }
         void fetchPersistedRun(next.id)
           .then((d) => {
-            if (
-              !mountedRef.current ||
-              briefIdRef.current !== next.id ||
-              runSeq.current !== owned ||
-              !d
-            )
-              return;
+            if (!mountedRef.current || briefIdRef.current !== next.id || runSeq.current !== owned)
+              return; // superseded, or unmounted
+            // A successful read is proof of membership for this brief — heals a stale
+            // 403 from an earlier, since-resolved failure (F6: "a later successful
+            // fetch heals it"), whether or not this brief happens to have a run on disk.
+            setMembershipError(null);
+            if (!d) return; // no run on disk
             setRun({ result: d, target: next });
             if (d.assets?.length) setAssetVersion((v) => v + 1);
           })
-          .catch(() => {
+          .catch((err) => {
+            if (!mountedRef.current || briefIdRef.current !== next.id || runSeq.current !== owned)
+              return; // superseded, or unmounted
+            // A typed check on `code`, not a match against the server's own message text
+            // (PT-1b2 item 3) — a reworded server string ("organization") must still land
+            // here, and it is the `NO_ORGANISATION_YET_MESSAGE` constant that is shown,
+            // never the raw server text, so the copy stays ours to own.
+            if (isNoMembershipError(err)) {
+              setMembershipError(NO_ORGANISATION_YET_MESSAGE);
+            }
             /* F6: could-not-ask is not absence — restore nothing, claim nothing. A
                later successful fetch (a run, a re-roll, a brief switch) heals it. */
           });
@@ -1046,14 +1164,30 @@ export function RunProvider({ children }: { children: ReactNode }) {
             !active ||
             briefDecidedRef.current ||
             briefIdRef.current !== startBrief.id ||
-            runSeq.current !== owned ||
-            !d
+            runSeq.current !== owned
           )
             return;
+          // A successful read is proof of membership for this brief — heals a stale
+          // 403 from an earlier, since-resolved failure (F6: "a later successful
+          // fetch heals it"), whether or not this brief happens to have a run on disk.
+          setMembershipError(null);
+          if (!d) return; // no run on disk
           setRun({ result: d, target: startBrief });
           if (d.assets?.length) setAssetVersion((v) => v + 1);
         })
-        .catch(() => {
+        .catch((err) => {
+          if (
+            !active ||
+            briefDecidedRef.current ||
+            briefIdRef.current !== startBrief.id ||
+            runSeq.current !== owned
+          )
+            return;
+          // See the identical guard in `setBrief`'s own `fetchPersistedRun` catch above:
+          // a typed check, never a match against the server's own message text.
+          if (isNoMembershipError(err)) {
+            setMembershipError(NO_ORGANISATION_YET_MESSAGE);
+          }
           /* F6: could-not-ask is not absence — restore nothing, claim nothing. */
         });
     });
@@ -1157,10 +1291,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
           `Unexpected response from the pipeline API (HTTP ${res.status}, expected 202 with a job id) — the API and UI versions differ.`,
         );
       }
-      throw pipelineUnreachable(
-        res.status,
-        typeof data?.error === "string" ? data.error : undefined,
-      );
+      throw handlePipelineResponseError(res.status, data, true);
     },
     [selectedModel],
   );
@@ -1300,6 +1431,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
       });
       setAssetVersion((v) => v + 1);
       setError(null); // the re-rolled grid replaces any stale complaint about this run
+      setMembershipError(null); // a completed re-roll is proof of membership too (F6)
       // Regenerated creatives return to review: clear their (rejected) decisions. The
       // server retired them at the report write and the reload below is authoritative;
       // this is the optimistic mirror, so the tiles do not flash their old verdict.
@@ -1451,6 +1583,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
       loading,
       progress,
       error,
+      membershipError,
       hasRun: run !== null,
       decisions,
       decide,
@@ -1492,6 +1625,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
       loading,
       progress,
       error,
+      membershipError,
       decisions,
       decide,
       decisionsNotice,

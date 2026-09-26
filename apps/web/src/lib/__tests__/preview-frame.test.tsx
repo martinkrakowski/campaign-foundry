@@ -8,6 +8,7 @@ import {
   usePreviewFrame,
   briefBackgroundIsStandIn,
   previewFetchKey,
+  fetchPreviewFrame,
 } from "../preview-frame";
 
 const brief = (over: Partial<CampaignBrief> = {}): CampaignBrief => ({
@@ -60,6 +61,7 @@ const deferredFetch = (): {
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.unstubAllGlobals();
 });
 
 describe("usePreviewFrame — the debounced, cancellable fetch", () => {
@@ -195,6 +197,43 @@ describe("usePreviewFrame — the debounced, cancellable fetch", () => {
     });
     expect(result.current.frame).toBeNull();
     expect(result.current.failed).toBe(true);
+  });
+
+  // PT-1b2 item 2: `fetchPreviewFrame` is one of the pipeline call sites that must
+  // route a 401 to /sign-in and surface a 403 no_membership as the shared typed error
+  // — tested directly (not through the debounced hook) so the assertion is on the
+  // function's own behaviour, one call site.
+  test("fetchPreviewFrame redirects to /sign-in on a 401 unauthenticated answer", async () => {
+    const assign = vi.fn();
+    vi.stubGlobal("window", { ...window, location: { ...window.location, assign } });
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      new Response(JSON.stringify({ code: "unauthenticated" }), {
+        status: 401,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    await expect(
+      fetchPreviewFrame(brief(), cell(), new AbortController().signal),
+    ).rejects.toThrow();
+    expect(assign).toHaveBeenCalledWith("/sign-in");
+  });
+
+  test("fetchPreviewFrame surfaces a typed membership error on a 403 no_membership answer", async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          code: "no_membership",
+          error: "This account belongs to no organisation.",
+        }),
+        { status: 403, headers: { "content-type": "application/json" } },
+      ),
+    );
+    await expect(
+      fetchPreviewFrame(brief(), cell(), new AbortController().signal),
+    ).rejects.toMatchObject({
+      code: "no_membership",
+      status: 403,
+    });
   });
 
   test("a response without the cache-key header still renders, with an empty key", async () => {

@@ -1,4 +1,4 @@
-import { describe, test, expect, vi } from "vitest";
+import { describe, test, expect, vi, afterEach } from "vitest";
 import type { CreativeTemplate } from "@campaignfoundry/CampaignOrchestration";
 import { CANONICAL_TEMPLATES } from "@campaignfoundry/CampaignOrchestration/creative-templates";
 import {
@@ -256,5 +256,33 @@ describe("pinnableTemplate", () => {
 
   test("a canonical id whose creativeType disagrees with it is not pinnable", () => {
     expect(pinnableTemplate(record({ creativeType: "video" }))).toBeNull();
+  });
+});
+
+// PT-1b2 item 2: `requestJson` (the shared fetch helper behind every templates-api
+// call, including `listTemplates` used here) must route a 401 to /sign-in and surface
+// a 403 no_membership as the shared typed error, exactly like every other pipeline
+// call site (`briefs-api.ts`, `preview-frame.ts`).
+describe("templates-api 401 and 403 handling", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  test("a 401 unauthenticated routes to /sign-in", async () => {
+    const assign = vi.fn();
+    vi.stubGlobal("window", { ...window, location: { ...window.location, assign } });
+    mockFetch(() => json({ error: "Sign in required.", code: "unauthenticated" }, 401));
+    await expect(listTemplates()).rejects.toThrow();
+    expect(assign).toHaveBeenCalledWith("/sign-in");
+  });
+
+  test("a 403 no_membership surfaces the typed membership error", async () => {
+    mockFetch(() =>
+      json({ error: "This account belongs to no organisation.", code: "no_membership" }, 403),
+    );
+    await expect(listTemplates()).rejects.toMatchObject({
+      code: "no_membership",
+      status: 403,
+    });
   });
 });

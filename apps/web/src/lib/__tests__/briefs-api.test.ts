@@ -1,4 +1,4 @@
-import { describe, test, expect, vi } from "vitest";
+import { describe, test, expect, vi, afterEach } from "vitest";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { DEFAULT_CAMPAIGN_TYPE } from "@campaignfoundry/CampaignOrchestration/campaign-types";
 import { templateFromCanonical } from "@campaignfoundry/CampaignOrchestration/brief-template";
@@ -691,8 +691,175 @@ describe("getCapabilities carries every field the UI renders", () => {
     await expect(getCapabilities()).resolves.toEqual({ motion: true, version: "7.1.1" });
   });
 
+  test("the host's auth capabilities survive the trip to the client", async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      json({ motion: true, auth: { mode: "better-auth", google: true } }) as unknown as Response,
+    );
+    await expect(getCapabilities()).resolves.toEqual({
+      motion: true,
+      auth: { mode: "better-auth", google: true },
+    });
+
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      json({ motion: true, auth: { mode: "local", google: false } }) as unknown as Response,
+    );
+    await expect(getCapabilities()).resolves.toEqual({
+      motion: true,
+      auth: { mode: "local", google: false },
+    });
+  });
+
+  test("malformed auth capabilities are dropped rather than forwarded", async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      json({ motion: true, auth: "invalid" }) as unknown as Response,
+    );
+    await expect(getCapabilities()).resolves.toEqual({ motion: true });
+
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      json({ motion: true, auth: { mode: "other", google: true } }) as unknown as Response,
+    );
+    await expect(getCapabilities()).resolves.toEqual({ motion: true });
+
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      json({ motion: true, auth: { mode: "local", google: "invalid" } }) as unknown as Response,
+    );
+    await expect(getCapabilities()).resolves.toEqual({ motion: true });
+  });
+
   test("a host that reports no version simply has none", async () => {
     vi.mocked(globalThis.fetch).mockResolvedValue(json({ motion: true }) as unknown as Response);
     await expect(getCapabilities()).resolves.toEqual({ motion: true });
+  });
+});
+
+describe("briefs-api 401 and 403 handling", () => {
+  // These tests stub `window` wholesale to capture a redirect without a real
+  // navigation — undo it after each, or a later test that reads `window.location`
+  // for real (elsewhere in this file) inherits the previous test's stub.
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  test("a 401 unauthenticated routes to /sign-in", async () => {
+    const assign = vi.fn();
+    vi.stubGlobal("window", { ...window, location: { ...window.location, assign } });
+    mockFetch(() => json({ error: "Sign in required.", code: "unauthenticated" }, 401));
+    await expect(listBriefs()).rejects.toThrow();
+    expect(assign).toHaveBeenCalledWith("/sign-in");
+  });
+
+  test("a 401 unauthenticated falls back to setting location.href when assign is not a function", async () => {
+    const loc = { href: "" } as unknown as Location;
+    vi.stubGlobal("window", { ...window, location: loc });
+    mockFetch(() => json({ error: "Sign in required." }, 401));
+    await expect(listBriefs()).rejects.toThrow();
+    expect(loc.href).toBe("/sign-in");
+  });
+
+  test("a 401 with other code does not redirect to /sign-in", async () => {
+    const assign = vi.fn();
+    vi.stubGlobal("window", { ...window, location: { ...window.location, assign } });
+    mockFetch(() => json({ error: "Other error.", code: "other" }, 401));
+    await expect(listBriefs()).rejects.toThrow();
+    expect(assign).not.toHaveBeenCalled();
+  });
+
+  test("a 403 no_membership surfaces organisation error and not pipeline unreachable", async () => {
+    mockFetch(() =>
+      json({ error: "This account belongs to no organisation.", code: "no_membership" }, 403),
+    );
+    await expect(listBriefs()).rejects.toMatchObject({
+      code: "no_membership",
+      status: 403,
+    });
+  });
+
+  // PT-1b2 item 2: every pipeline call site handles a 401/403 the same way, not just
+  // `requestJson` (exercised above through `listBriefs`) — one test per remaining site.
+  test("listAssets redirects on 401 and surfaces the typed membership error on 403", async () => {
+    const assign = vi.fn();
+    vi.stubGlobal("window", { ...window, location: { ...window.location, assign } });
+    mockFetch(() => json({ error: "Sign in required.", code: "unauthenticated" }, 401));
+    await expect(listAssets("camp")).rejects.toThrow();
+    expect(assign).toHaveBeenCalledWith("/sign-in");
+
+    mockFetch(() =>
+      json({ error: "This account belongs to no organisation.", code: "no_membership" }, 403),
+    );
+    await expect(listAssets("camp")).rejects.toMatchObject({ code: "no_membership", status: 403 });
+  });
+
+  test("listPackages redirects on 401 and surfaces the typed membership error on 403", async () => {
+    const assign = vi.fn();
+    vi.stubGlobal("window", { ...window, location: { ...window.location, assign } });
+    mockFetch(() => json({ error: "Sign in required.", code: "unauthenticated" }, 401));
+    await expect(listPackages("camp")).rejects.toThrow();
+    expect(assign).toHaveBeenCalledWith("/sign-in");
+
+    mockFetch(() =>
+      json({ error: "This account belongs to no organisation.", code: "no_membership" }, 403),
+    );
+    await expect(listPackages("camp")).rejects.toMatchObject({
+      code: "no_membership",
+      status: 403,
+    });
+  });
+
+  test("getPool redirects on 401 and surfaces the typed membership error on 403", async () => {
+    const assign = vi.fn();
+    vi.stubGlobal("window", { ...window, location: { ...window.location, assign } });
+    mockFetch(() => json({ error: "Sign in required.", code: "unauthenticated" }, 401));
+    await expect(getPool("camp")).rejects.toThrow();
+    expect(assign).toHaveBeenCalledWith("/sign-in");
+
+    mockFetch(() =>
+      json({ error: "This account belongs to no organisation.", code: "no_membership" }, 403),
+    );
+    await expect(getPool("camp")).rejects.toMatchObject({ code: "no_membership", status: 403 });
+  });
+
+  // `planCampaign`'s own doc comment promises it never throws a wizard-breaking
+  // error — its callers (`CommandBar`, `useVariationPlan`) degrade on the resolved
+  // `PlanResult`, and `CommandBar` in particular has no `.catch` on the promise it
+  // builds around this call, so a throw here would be an unhandled rejection. A 401
+  // must still redirect, and a 403 must still read as something other than "this
+  // brief's variation plan is infeasible" — both without ever rejecting.
+  test("planCampaign redirects on 401 and resolves unavailable, not infeasible", async () => {
+    // `handleAuthError`'s 401 branch starts the redirect and returns without
+    // throwing, so this function keeps running for the one tick before the
+    // navigation actually unloads the page. Resolving `infeasible` here used to
+    // render "Plan failed (HTTP 401)" in red in CommandBar for that tick — `plan.error`
+    // is rendered unconditionally, with no gate on "is a redirect in flight". Resolving
+    // `unavailable` instead — the same quiet state a 404/500/network failure already
+    // uses — means there is nothing actionable to flash before the redirect lands.
+    const assign = vi.fn();
+    vi.stubGlobal("window", { ...window, location: { ...window.location, assign } });
+    mockFetch(() => json({ error: "Sign in required.", code: "unauthenticated" }, 401));
+    await expect(planCampaign(brief)).resolves.toEqual({ kind: "unavailable" });
+    expect(assign).toHaveBeenCalledWith("/sign-in");
+  });
+
+  test("planCampaign resolves infeasible with the membership message on 403, never throwing", async () => {
+    mockFetch(() =>
+      json({ error: "This account belongs to no organisation.", code: "no_membership" }, 403),
+    );
+    await expect(planCampaign(brief)).resolves.toEqual({
+      kind: "infeasible",
+      error: "This account belongs to no organisation.",
+    });
+  });
+
+  test("planCampaign resolves infeasible (not unavailable) for a 401 with an unrelated code", async () => {
+    // Only the redirect-triggering codes (`unauthenticated`, or none) get the
+    // `unavailable` treatment above — an expired-token-style 401 that does NOT
+    // redirect must keep surfacing as a real, actionable plan failure.
+    const assign = vi.fn();
+    vi.stubGlobal("window", { ...window, location: { ...window.location, assign } });
+    mockFetch(() => json({ error: "Token expired.", code: "expired_token" }, 401));
+    await expect(planCampaign(brief)).resolves.toEqual({
+      kind: "infeasible",
+      error: "Token expired.",
+    });
+    expect(assign).not.toHaveBeenCalled();
   });
 });

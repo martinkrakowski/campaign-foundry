@@ -435,6 +435,7 @@ __metadata:
     "@typescript-eslint/eslint-plugin": "npm:^8.0.0"
     "@typescript-eslint/parser": "npm:^8.0.0"
     autoprefixer: "npm:^10.4.0"
+    better-auth: "npm:^1.7.6"
     clsx: "npm:^2.1.0"
     eslint: "npm:^9.0.0"
     js-yaml: "npm:^5.4.1"

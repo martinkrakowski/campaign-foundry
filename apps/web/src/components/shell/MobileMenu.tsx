@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/cn";
@@ -20,6 +20,13 @@ interface MobileMenuProps {
   open: boolean;
   onClose: () => void;
   tabs: readonly NavTab[];
+  /**
+   * The auth block (email, sign out, org switcher) Header hands in under better-auth
+   * mode (PT-1b2 item 5) — a slot rather than a portal keyed on this dialog's own
+   * `[role="dialog"][aria-label="Menu"]`, so it renders as an ordinary child of this
+   * tree instead of reaching for it from outside.
+   */
+  authControls?: ReactNode;
 }
 
 /**
@@ -28,7 +35,7 @@ interface MobileMenuProps {
  * sits above the whole shell. Closes on a link tap, the × button, or Escape; traps
  * focus and locks body scroll while open.
  */
-export function MobileMenu({ open, onClose, tabs }: MobileMenuProps) {
+export function MobileMenu({ open, onClose, tabs, authControls }: MobileMenuProps) {
   const pathname = usePathname();
   const { guardedPush } = useGuardedNavigation();
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -200,6 +207,8 @@ export function MobileMenu({ open, onClose, tabs }: MobileMenuProps) {
 
       {/* Pinned footer: open the brief picker (closing the menu first so it's visible). */}
       <BrowseBriefsButton onActivate={onClose} />
+
+      {authControls}
     </div>,
     document.body,
   );

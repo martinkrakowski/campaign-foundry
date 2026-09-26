@@ -6401,3 +6401,106 @@ and source formatting, recorded here rather than fixed.
 - **Follow-ups:** an empty `output/jobs` directory is still created by some test during `test:cov` (no files);
   PT-2a–c, PT-1b2 and FU-server-job-awareness are in plan §4.3; the main checkout needs `yarn install` (it predates
   `pg`), and its `.env.local` points `STORE_BACKEND=postgres` at Aiven, so tests run only in worktrees.
+
+## 2026-09-26 — PT-1b2-sign-in-ui: PR #597 review-thread sweep
+
+- **Scope:** swept all 18 unresolved bot threads on #597 (github-actions, qodo-code-review, coderabbitai). Fixed,
+  with a test each: the Google sign-in loading flag stuck on a resolved (non-throwing) `signIn.social` error or even
+  a plain success (`48e07e4a`); `handleSwitchOrg`/`handleSignOut` reloading/redirecting past a resolved `{ error }`
+  from `authClient.organization.setActive`/`signOut` (`47f2911b`). Confirmed already fixed by earlier commits
+  (`642f53a0`, `6dbce2b3b`/`28d784eb`), cited by sha. Refuted with a mechanism: `fetchPersistedRun`'s generic
+  fallback text is pinned by a named D83/F6 test; a mount-catch "surface all errors" suggestion contradicted the F6
+  "could-not-ask is not absence" contract at that exact line; four message-catalog (DESIGN.md §6.1) findings were
+  real but out of this lane's enumerated scope (no gate fails on them, and Header already carries tracked,
+  unmigrated debt from earlier lanes) — filed as a follow-up rather than a 40-file sweep diff; two "unmount test
+  checks nothing" findings were right that React 18 gives no observable to assert past what's already pinned, asked
+  for a concrete differentiating input; a hard-coded `/grid` redirect is a valid enhancement but opens an
+  open-redirect surface needing its own reviewed lane.
+- **Second round — three new `greptile-apps` threads appeared after the push above** (not in the original sweep,
+  flagged to the orchestrator rather than silently absorbed): two were real and in PT-1b2's scope, fixed with a
+  test each. `membershipError` was captured by run-context but never rendered anywhere — item 5's "403 shows a
+  no-organisation state" was unmet; added `MembershipNotice` to `(shell)/layout.tsx`, above every route rather than
+  folded into `CommandBar`'s grid-only status line (`eb577216`). The org switch and sign-out handlers bypassed the
+  unsaved-edits guard (`useGuardedNavigation`/`guardedAction`) the route tabs already use; both now queue the whole
+  gesture — API call included — behind the same shared confirm dialog while dirty (`0ef354d8`).
+- **Third — deferred, not fixed:** `.agents/tech-stack.md` does not yet list `better-auth` under `apps/web` (added
+  in PT-1b1/PT-1b2). Per AGENTS.md, `.agents/*.md` is owner-edit-only outside `session-log.md`; replied to the
+  thread that this is deferred to the owner and recorded here rather than editing the spec file.
+- **Gate:** `yarn lint && yarn typecheck && yarn format:check`, `yarn test:cov --maxWorkers=4` (100%
+  stmts/branches/funcs/lines both rounds), `MANIFEST_DIFF_BASE=origin/main sh scripts/verify-manifests.sh` — green
+  both rounds, under the wave gate lock, released immediately after each. PR #596 (fix/server-job-awareness,
+  reorders run-context.tsx's restore path) was checked before the final gate and was still open — no merge was
+  needed; whoever merges #596 into this branch next should keep both #596's adoption-ordering/guards and this
+  lane's 401/403 handling + `membershipError` in run-context.tsx.
+- **Not merged** — PR #597 review only.
+
+## 2026-09-26 — PT-1b2-sign-in-ui: PR #597, rounds four and five, and the #596 merge
+
+- **Round four (coderabbitai, real, this lane's code):** three findings folded in. `page.test.tsx`/`header.test.tsx`
+  unmount-test comments said "React 18"; the app pins `react@^19.0.0` — corrected (`642e31ea`), refutation of "the
+  test checks nothing" otherwise unchanged (no concrete differentiating assertion proposed). `auth-errors.test.ts`'s
+  custom-message 403 case used a bare `try { … } catch { assert }` with no proof the call actually threw — added
+  `expect.unreachable(...)`, matching the existing `templates-api.test.ts:156` pattern (`1f61f9b1`).
+  `briefs-api.ts`'s `planCampaign`: confirmed a redirecting 401 (`handleAuthError`'s 401 branch starts the redirect
+  and returns without throwing) fell through to resolve `{ kind: "infeasible", error: "Plan failed (HTTP 401)" }`,
+  which `CommandBar` renders in red unconditionally — a real flash before the redirect lands. An existing test had
+  been pinning exactly this as expected. Fixed to resolve `unavailable` for the redirect-triggering codes only,
+  leaving a non-redirecting 401 code genuinely `infeasible` (`125e29bc`).
+- **Round five (greptile-apps, real, exposed by this lane's own `MembershipNotice`):** `membershipError` could go
+  stale (the `.catch` branches on `fetchPersistedRun` had no staleness guard their `.then` siblings already had)
+  and never healed (only `setBrief` itself ever cleared it — a successful run or restore on the same brief did
+  not). Fixed at `065e01f2`, pre-merge: staleness guards added to both `.catch` branches (mount effect and
+  `setBrief`), and `setMembershipError(null)` added to every successful-read/run site (`fetchPersistedRun`'s two
+  restore paths, a completed `execute`, a completed `regenerateRejected`).
+- **The #596 merge, order flipped twice more:** #596 (`fix/server-job-awareness`) landed on main first after all
+  (`bcab4d8b`, alongside #595 and #598). `git merge origin/main` conflicted in exactly the two files predicted
+  ahead of time — `run-context.tsx` and its test — nowhere else (#595/#598 don't touch web). Three real conflicts
+  in `run-context.tsx`, all the same shape: #596 restructured `setBrief`'s and the mount effect's restore path to
+  ask `fetchRunningJob` (a new endpoint, job-discovery-first) before `fetchPersistedRun`, and extracted `execute`'s
+  inline success-commit block into a shared `adoptJob(target, jobId, opts)` (used by the new job-discovery call
+  sites too, via `opts.adopted`) — the exact code my membership guards/clears had just touched.
+  - **Decision, all three:** kept #596's structure as the backbone (job-discovery-first, `adoptJob`,
+    `mountedRef`/`loadingRef`) and layered the membership handling onto its equivalent call sites, upgrading my
+    guards to #596's stronger one (`!mountedRef.current || briefIdRef.current !== <brief>.id || runSeq.current !==
+    owned`) rather than keeping my narrower `briefIdRef.current !== <brief>.id` alone. `setMembershipError(null)`
+    moved from `execute`'s old inline block into `adoptJob`'s two success paths (the normal commit and the
+    `opts.adopted` early-return). #596's own `.catch(() => {...})` on the inner `fetchPersistedRun` calls had lost
+    the `err` parameter and the `isNoMembershipError` check entirely (its branch predates this lane's 401/403 work
+    on main) — restored both.
+  - **Not touched:** the "lost job" branch inside `adoptJob` (`fetchPersistedRun(...).catch(() => null)` swallows
+    the error, so success vs. a 403 can't be told apart there without deeper restructuring — left alone, out of
+    the explicit ask). `regenerateRejected` was untouched by #596 — my earlier edit there merged with no conflict.
+  - **`.agents/session-log.md`:** no conflict — #596/#595/#598 don't append their own entries on their branches, so
+    both this file's existing entries and the new one below it are simply present; "keep both" was trivial.
+- **A merge-induced test regression, caught by re-running the gate rather than trusting the merge:** the stale-403
+  test above keyed its deferred mock response on `campaignId` alone. After the merge, `setBrief` calls
+  `fetchRunningJob` (`/campaigns/jobs?campaignId=`) before `fetchPersistedRun` (`/campaigns/result?campaignId=`) —
+  the mock's first matching call now consumed the deferred response, so the intended `.catch` path was never
+  reached. The test still passed (vacuously — nothing had set `membershipError` at all), but coverage caught it
+  (`run-context.tsx:1030` uncovered) where the assertion didn't. Fixed by keying on the full endpoint URL and
+  waiting for that exact fetch to fire before switching briefs (`3fb2dac7`); re-verified with the mutation test
+  (guard removed → test fails) both before and after the fix, not just after.
+- **Gate:** ran the full suite (`yarn lint && yarn typecheck && yarn format:check`, `yarn test:cov --maxWorkers=4`,
+  `MANIFEST_DIFF_BASE=origin/main sh scripts/verify-manifests.sh`) three times across rounds four/five/the merge —
+  100% stmts/branches/funcs/lines every green run, including once with a real coverage failure (the merge-induced
+  test gap above) caught and fixed before the final push. Also ran `--project web` and `--project api` in full
+  after the merge, independent of the coverage run, to confirm both #596's and this lane's test suites pass
+  together (2899 web + 1497 api, all green). Gate lock acquired in the foreground and released immediately after
+  each round; never held idle.
+- **Not merged** — PR #597 review only. Branch `feat/sign-in-ui` now includes #595/#596/#598 by merge.
+
+## 2026-09-26 — PT-1b2-sign-in-ui: PR #597, round six (final)
+
+- **greptile-apps, real, one finding, fixed at `8bd91e42`:** `adoptJob`'s re-read of the persisted report (the
+  `opts.adopted` path, deliberately left alone in round five) folded ANY failure — including a 403 no_membership —
+  into `null` via `.catch(() => null)`, then fell through as "no report on disk": committed the job's own (possibly
+  partial, for a re-roll) payload AND unconditionally healed `membershipError`. The lost-job read had the identical
+  shape. Both catches now capture `isNoMembershipError` before discarding the error: on a denial, set
+  `membershipError`, commit nothing, return; every other failure keeps today's fallback unchanged.
+- **Tests, both mutation-verified** (guard reverted → fails; restored → passes): the adopted-path denial (asserts
+  the job's own payload — 1 asset — is never committed, `hasRun` stays false) and the lost-job-path denial (asserts
+  `LOST_JOB_MESSAGE` is not shown in its place).
+- **Gate:** green (100% stmts/branches/funcs/lines, lint/typecheck/format/manifest-verify), lock acquired in the
+  foreground and released immediately after. Pushed at `8bd91e42`; replied to and resolved
+  `PRRT_kwDOSzP1zc6mSljV`.
+- **All 33 review threads on #597 are resolved.** Not merged — left for the owner.

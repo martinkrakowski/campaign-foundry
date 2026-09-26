@@ -21,6 +21,8 @@ import {
   DECISIONS_UNREADABLE_MESSAGE,
   fetchDecisions,
   saveDecisions,
+  handlePipelineResponseError,
+  NO_ORGANISATION_YET_MESSAGE,
   type Asset,
 } from "@/lib/run-context";
 import {
@@ -2814,6 +2816,264 @@ describe("normalizeRunResult — D136 advisories are persisted JSON", () => {
   });
 });
 
+describe("run-context 401 and 403 pipeline error handling", () => {
+  // Several tests here stub `window` wholesale (`vi.stubGlobal`) to capture a redirect
+  // without a real navigation — undo it after each, or a later test in this file that
+  // reads `window.location` for real gets the previous test's stub instead.
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  test("fetchPersistedRun on 401 unauthenticated routes to /sign-in", async () => {
+    const assign = vi.fn();
+    vi.stubGlobal("window", { ...window, location: { ...window.location, assign } });
+    mockPipelineApi({
+      result: () => json({ error: "Sign in required.", code: "unauthenticated" }, 401),
+    });
+    await expect(fetchPersistedRun("camp")).rejects.toThrow();
+    expect(assign).toHaveBeenCalledWith("/sign-in");
+  });
+
+  test("fetchPersistedRun on 403 no_membership surfaces organisation error and not pipeline unreachable", async () => {
+    mockPipelineApi({
+      result: () =>
+        json({ error: "This account belongs to no organisation.", code: "no_membership" }, 403),
+    });
+    await expect(fetchPersistedRun("camp")).rejects.toThrow(/organisation/i);
+    await expect(fetchPersistedRun("camp")).rejects.not.toThrow(/Pipeline API unreachable/);
+  });
+
+  test("fetchDecisions and saveDecisions handle 401 and 403", async () => {
+    const assign = vi.fn();
+    vi.stubGlobal("window", { ...window, location: { ...window.location, assign } });
+
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(
+      json({ error: "Sign in required.", code: "unauthenticated" }, 401),
+    );
+    await expect(fetchDecisions("camp")).rejects.toThrow();
+    expect(assign).toHaveBeenCalledWith("/sign-in");
+
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(
+      json({ error: "This account belongs to no organisation.", code: "no_membership" }, 403),
+    );
+    await expect(fetchDecisions("camp")).rejects.toThrow(/organisation/i);
+
+    assign.mockClear();
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(
+      json({ error: "Sign in required.", code: "unauthenticated" }, 401),
+    );
+    await expect(saveDecisions("camp", null, {})).rejects.toThrow();
+    expect(assign).toHaveBeenCalledWith("/sign-in");
+
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(
+      json({ error: "This account belongs to no organisation.", code: "no_membership" }, 403),
+    );
+    await expect(saveDecisions("camp", null, {})).rejects.toThrow(/organisation/i);
+  });
+
+  test("execute on 401 routes to /sign-in and on 403 shows no organisation yet state", async () => {
+    const assign = vi.fn();
+    vi.stubGlobal("window", { ...window, location: { ...window.location, assign } });
+
+    mockPipelineApi({
+      post: () => json({ error: "Sign in required.", code: "unauthenticated" }, 401),
+    });
+    const { result } = setup();
+    await act(async () => {
+      await result.current.execute();
+    });
+    expect(assign).toHaveBeenCalledWith("/sign-in");
+
+    mockPipelineApi({
+      post: () =>
+        json({ error: "This account belongs to no organisation.", code: "no_membership" }, 403),
+    });
+    await act(async () => {
+      await result.current.execute();
+    });
+    expect(result.current.error).toBe("This account belongs to no organisation.");
+    expect(result.current.error).not.toMatch(/Pipeline API unreachable/);
+  });
+
+  test("pollJob on 401 routes to /sign-in and on 403 fails run with organisation error", async () => {
+    const assign = vi.fn();
+    vi.stubGlobal("window", { ...window, location: { ...window.location, assign } });
+
+    mockPipelineApi({
+      post: () => json({ jobId: "job-1" }, 202),
+      job: () => json({ error: "Sign in required.", code: "unauthenticated" }, 401),
+    });
+    const { result } = setup();
+    await act(async () => {
+      await result.current.execute();
+    });
+    expect(assign).toHaveBeenCalledWith("/sign-in");
+
+    mockPipelineApi({
+      post: () => json({ jobId: "job-2" }, 202),
+      job: () =>
+        json({ error: "This account belongs to no organisation.", code: "no_membership" }, 403),
+    });
+    await act(async () => {
+      await result.current.execute();
+    });
+    expect(result.current.error).toBe("This account belongs to no organisation.");
+  });
+
+  test("setBrief catches a 403 no_membership as a typed membership error, in its own state", async () => {
+    mockPipelineApi({
+      result: () =>
+        json({ error: "This account belongs to no organisation.", code: "no_membership" }, 403),
+    });
+    const { result } = setup();
+    await act(async () => {
+      result.current.setBrief({ ...result.current.brief, id: "other-camp" });
+    });
+    // PT-1b2 item 3: the fixed constant, in `membershipError` — never the pipeline
+    // `error` slot, and never the server's own message text (which this asserts by
+    // being IN a distinct field, not by string content).
+    expect(result.current.membershipError).toBe(NO_ORGANISATION_YET_MESSAGE);
+    expect(result.current.error).toBeNull();
+  });
+
+  test("setBrief detects a 403 no_membership by code, not by matching the server's wording", async () => {
+    // The old detection was `/organisation/i.test(err.message)` against the server's
+    // own string — a server that reworded it to American spelling ("organization")
+    // would silently fail to match and the state would never show. This response uses
+    // that exact reworded spelling; only a `code`-based check catches it.
+    mockPipelineApi({
+      result: () =>
+        json({ error: "This account belongs to no organization.", code: "no_membership" }, 403),
+    });
+    const { result } = setup();
+    await act(async () => {
+      result.current.setBrief({ ...result.current.brief, id: "reworded-camp" });
+    });
+    expect(result.current.membershipError).toBe(NO_ORGANISATION_YET_MESSAGE);
+    expect(result.current.error).toBeNull();
+  });
+
+  test("a 403 that resolves after a later brief switch does not set a stale membership notice", async () => {
+    // The switched-away-from brief's own fetchPersistedRun is still in flight when the
+    // user moves on — its `.catch` had no staleness guard, so a slow 403 landing after
+    // the switch would set membershipError for a brief that is no longer active.
+    // setBrief now asks `/campaigns/jobs?campaignId=` (fetchRunningJob) BEFORE
+    // `/campaigns/result?campaignId=` (fetchPersistedRun) — the job lookup must resolve
+    // "no running job" quickly so the deferred 403 lands on the persisted-run read,
+    // which is the call whose `.catch` this test exercises.
+    let resolveStale!: (res: Response) => void;
+    const stale = new Promise<Response>((resolve) => {
+      resolveStale = resolve;
+    });
+    mockPipelineApi({
+      result: (u) => {
+        if (u.includes("/campaigns/result?campaignId=stale-camp")) return stale;
+        return json(EMPTY_REPORT);
+      },
+    });
+    const { result } = setup();
+
+    act(() => {
+      result.current.setBrief({ ...result.current.brief, id: "stale-camp" });
+    });
+
+    // Wait until the job-discovery-first chain has actually reached the persisted-run
+    // read for "stale-camp" (where `stale` is parked) before switching away — `brief.id`
+    // itself flips synchronously inside setBrief, so waiting on that alone would let
+    // the switch below race ahead of the very fetch this test means to outlive.
+    await waitFor(() => {
+      expect(
+        vi
+          .mocked(globalThis.fetch)
+          .mock.calls.some(([u]) => String(u).includes("/campaigns/result?campaignId=stale-camp")),
+      ).toBe(true);
+    });
+
+    act(() => {
+      result.current.setBrief({ ...result.current.brief, id: "fresh-camp" });
+    });
+    await waitFor(() => expect(result.current.brief.id).toBe("fresh-camp"));
+
+    await act(async () => {
+      resolveStale(
+        json({ error: "This account belongs to no organisation.", code: "no_membership" }, 403),
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(result.current.membershipError).toBeNull();
+  });
+
+  test("a completed run after a 403 on the same brief clears the stale membership notice", async () => {
+    // F6's own comment claims "a later successful fetch (a run, a re-roll, a brief
+    // switch) heals it" — a completed `execute` is one of those, and nothing actually
+    // cleared membershipError on it before this fix.
+    mockPipelineApi({
+      result: () =>
+        json({ error: "This account belongs to no organisation.", code: "no_membership" }, 403),
+    });
+    const { result } = setup();
+    await act(async () => {
+      result.current.setBrief({ ...result.current.brief, id: "camp-1" });
+    });
+    await waitFor(() => {
+      expect(result.current.membershipError).toBe(NO_ORGANISATION_YET_MESSAGE);
+    });
+
+    mockPipelineApi({
+      job: () =>
+        jobOk({ halted: false, assets: [asset()], log: { entries: [], campaignId: "camp-1" } }),
+    });
+    await act(async () => {
+      await result.current.execute();
+    });
+
+    expect(result.current.membershipError).toBeNull();
+  });
+
+  test("the initial mount's own persisted-run fetch sets membershipError the same way", async () => {
+    mockPipelineApi({
+      result: () =>
+        json({ error: "This account belongs to no organisation.", code: "no_membership" }, 403),
+    });
+    const { result } = setup();
+    await waitFor(() => {
+      expect(result.current.membershipError).toBe(NO_ORGANISATION_YET_MESSAGE);
+    });
+    expect(result.current.error).toBeNull();
+  });
+
+  test("handlePipelineResponseError handles href fallback and undefined messages", () => {
+    const loc = { href: "" } as unknown as Location;
+    vi.stubGlobal("window", { ...window, location: loc });
+    const err401 = handlePipelineResponseError(401, null);
+    expect(err401.message).toBe("Sign in required.");
+    expect(loc.href).toBe("/sign-in");
+
+    const assign = vi.fn();
+    vi.stubGlobal("window", { ...window, location: { ...window.location, assign } });
+    const err401Auth = handlePipelineResponseError(401, {
+      code: "unauthenticated",
+      error: "Auth required",
+    });
+    expect(err401Auth.message).toBe("Auth required");
+    expect(assign).toHaveBeenCalledWith("/sign-in");
+
+    assign.mockClear();
+    const err401Other = handlePipelineResponseError(401, {
+      code: "other_code",
+      error: "Token expired",
+    });
+    expect(assign).not.toHaveBeenCalled();
+    expect(err401Other.message).toContain("Pipeline API unreachable");
+
+    const err403 = handlePipelineResponseError(403, { code: "no_membership" });
+    expect(err403.message).toBe(NO_ORGANISATION_YET_MESSAGE);
+  });
+});
+
 describe("RunProvider — running job awareness on reload and brief switch", () => {
   const activeBrief = {
     schemaVersion: BRIEF_SCHEMA_VERSION,
@@ -2858,6 +3118,94 @@ describe("RunProvider — running job awareness on reload and brief switch", () 
     });
     await waitFor(() => expect(result.current.assets).toHaveLength(1));
     expect(result.current.hasRun).toBe(true);
+    expect(result.current.loading).toBe(false);
+  });
+
+  test("an adopted job's completed re-read returning 403 no_membership shows the notice and commits nothing", async () => {
+    // greptile "membership denial is hidden": the re-read `adoptJob` makes for an
+    // adopted job used to fold ANY failure — including a 403 no_membership — into
+    // `null`, then fell through and committed the job's own (possibly partial, for a
+    // re-roll) payload while also healing any stale membershipError. A membership
+    // denial must never be treated as "no run on disk".
+    localStorage.setItem("cf:brief-picked", "1");
+    localStorage.setItem("cf:brief", JSON.stringify(activeBrief));
+    let queriedJob = false;
+    let resolveJob!: (res: Response) => void;
+    const jobPromise = new Promise<Response>((r) => {
+      resolveJob = r;
+    });
+    mockPipelineApi({
+      result: (url) => {
+        if (url.includes("/campaigns/jobs?campaignId=active-campaign")) {
+          queriedJob = true;
+          return json({ jobId: "job-reload-1" });
+        }
+        if (url.includes("/campaigns/result?campaignId=active-campaign")) {
+          return json(
+            { error: "This account belongs to no organisation.", code: "no_membership" },
+            403,
+          );
+        }
+        return json(EMPTY_REPORT);
+      },
+      job: () => jobPromise,
+    });
+
+    const { result } = setup();
+    await waitFor(() => expect(queriedJob).toBe(true));
+    await waitFor(() => expect(result.current.loading).toBe(true));
+    act(() => {
+      resolveJob(
+        jobOk({
+          halted: false,
+          assets: [asset({ productId: "p1" })],
+          log: { entries: [], campaignId: "active-campaign" },
+        }),
+      );
+    });
+
+    await waitFor(() => {
+      expect(result.current.membershipError).toBe(NO_ORGANISATION_YET_MESSAGE);
+    });
+    // The job's own completed payload (1 asset) is never committed on a denial.
+    expect(result.current.assets).toHaveLength(0);
+    expect(result.current.hasRun).toBe(false);
+    expect(result.current.loading).toBe(false);
+    expect(result.current.error).toBeNull();
+  });
+
+  test("an adopted job that's lost, with the re-read returning 403 no_membership, shows the notice instead of LOST_JOB_MESSAGE", async () => {
+    // Same fix, the "lost" outcome's own re-read: a membership denial here used to be
+    // folded into `null` too, surfacing as a plain "job interrupted" error with no
+    // mention of the real cause.
+    localStorage.setItem("cf:brief-picked", "1");
+    localStorage.setItem("cf:brief", JSON.stringify(activeBrief));
+    let queriedJob = false;
+    mockPipelineApi({
+      result: (url) => {
+        if (url.includes("/campaigns/jobs?campaignId=active-campaign")) {
+          queriedJob = true;
+          return json({ jobId: "job-lost-1" });
+        }
+        if (url.includes("/campaigns/result?campaignId=active-campaign")) {
+          return json(
+            { error: "This account belongs to no organisation.", code: "no_membership" },
+            403,
+          );
+        }
+        return json(EMPTY_REPORT);
+      },
+      job: () => json({ error: "not found" }, 404),
+    });
+
+    const { result } = setup();
+    await waitFor(() => expect(queriedJob).toBe(true));
+
+    await waitFor(() => {
+      expect(result.current.membershipError).toBe(NO_ORGANISATION_YET_MESSAGE);
+    });
+    expect(result.current.error).toBeNull();
+    expect(result.current.assets).toHaveLength(0);
     expect(result.current.loading).toBe(false);
   });
 

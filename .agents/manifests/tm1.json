@@ -4,7 +4,7 @@
   "mutations": [
     {
       "file": "apps/web/src/lib/templates-api.ts",
-      "before": "  if (!res.ok) {\n    throw new TemplatesApiError(errorFrom(data, `Request failed (HTTP ${res.status})`), res.status);\n  }",
+      "before": "  if (!res.ok) {\n    handleAuthError(res.status, data);\n    throw new TemplatesApiError(errorFrom(data, `Request failed (HTTP ${res.status})`), res.status);\n  }",
       "after": "  if (!res.ok) {\n    return { templates: [] };\n  }",
       "because": "The repo's recurring defect, on the side of the wire where it had not been closed yet. `templates.get.ts` refuses it in its own doc comment -- \"a store read failure is a 500, never an empty list -- an empty answer reads as 'no templates yet' to the library page\" -- and a client that answers `[]` for that 500 restores the exact ambiguity one layer up. It is the SHAPE `briefs-api` already ships (`listBriefs` returns `[]` for a malformed body), so it is what a lane following that file's pattern would write, and it looks harmless: the modal renders, nothing throws, and a reviewer sees the honest empty state. Caught only by the test that drives BOTH a 500 and an empty library over the same component and requires the rendered text to DIFFER -- either single-state test would stay green, because each one alone is satisfied by whichever message is shown for both.",
       "command": [

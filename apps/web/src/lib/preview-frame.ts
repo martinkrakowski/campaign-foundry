@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CampaignBrief, PreviewCellSelection } from "@campaignfoundry/CampaignOrchestration";
+import { handleAuthError } from "./auth-errors";
 
 /** Same path as `briefs-api`'s `API`. Local so this module stays dependency-free. */
 const API = "/api/pipeline";
@@ -104,7 +105,16 @@ export async function fetchPreviewFrame(
     body: JSON.stringify({ brief, cell }),
     signal,
   });
-  if (!res.ok) throw new Error(`Preview frame request failed (${res.status}).`);
+  if (!res.ok) {
+    let data: unknown;
+    try {
+      data = await res.json();
+    } catch {
+      data = null;
+    }
+    handleAuthError(res.status, data);
+    throw new Error(`Preview frame request failed (${res.status}).`);
+  }
   const bytes = new Uint8Array(await res.arrayBuffer());
   return {
     dataUrl: toDataUrl(bytes),

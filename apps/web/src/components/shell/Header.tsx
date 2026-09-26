@@ -2,11 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/cn";
 import { Eyebrow, IconButton, ThemeToggle } from "@/components/ui";
 import { modelChanged, telemetryButton } from "@/components/campaign/messages";
 import { useRun } from "@/lib/run-context";
+import { getCapabilities, type HostCapabilities } from "@/lib/briefs-api";
+import { authClient } from "@/lib/auth-client";
 import { ModelSelector } from "./ModelSelector";
 import { TELEMETRY_DRAWER_ID } from "./TelemetryDrawer";
 import { MobileMenu } from "./MobileMenu";
@@ -38,6 +40,22 @@ export function Header() {
   const [notice, setNotice] = useState<string | null>(null);
   const { guardedPush, isDirty } = useGuardedNavigation();
   const { telemetryOpen, toggleTelemetry } = useRun();
+  const [capabilities, setCapabilities] = useState<HostCapabilities | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    void getCapabilities()
+      .then((caps) => {
+        if (active) setCapabilities(caps);
+      })
+      .catch(() => {
+        /* No auth chrome without capabilities — the rest of the header still works. */
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
   // Stable identity so MobileMenu's focus/scroll-lock effect only runs on open/close,
   // not on unrelated Header re-renders.
   const closeMenu = useCallback(() => setMenuOpen(false), []);
@@ -143,6 +161,7 @@ export function Header() {
           </svg>
         </IconButton>
         <ThemeToggle />
+        {capabilities?.auth?.mode === "better-auth" && <BetterAuthSection />}
         {/* SG-D10: the run verb stood here. It is in the editor's own action bar now,
             in one slot with Validate — the placement the owner retracted as an error. */}
         {/* Hamburger — mobile only. */}
@@ -181,7 +200,278 @@ export function Header() {
         </p>
       )}
 
-      <MobileMenu open={menuOpen} onClose={closeMenu} tabs={TABS} />
+      <MobileMenu
+        open={menuOpen}
+        onClose={closeMenu}
+        tabs={TABS}
+        authControls={
+          menuOpen && capabilities?.auth?.mode === "better-auth" ? (
+            <BetterAuthMobileControls />
+          ) : null
+        }
+      />
     </header>
+  );
+}
+
+export function UserMenu({
+  email,
+  onSignOut,
+}: {
+  readonly email?: string;
+  readonly onSignOut: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onClickOutside = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onClickOutside);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onClickOutside);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
+  return (
+    <div ref={menuRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((prev) => !prev)}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        aria-label="User menu"
+        className="flex h-8 items-center gap-1.5 rounded-md border border-border-control bg-surface-2 px-2.5 font-mono text-xs text-text-primary transition-colors hover:bg-surface-3"
+      >
+        <span className="max-w-[140px] truncate">{email ?? "Account"}</span>
+        <svg
+          className={cn("size-3 text-text-muted transition-transform", open && "rotate-180")}
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          aria-hidden
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+
+      {open && (
+        <div
+          role="menu"
+          aria-label="User menu"
+          className="absolute right-0 top-full z-50 mt-1 min-w-[10rem] rounded-md border border-border bg-surface p-1 shadow-lg"
+        >
+          {email && (
+            <div className="truncate border-b border-border px-3 py-1.5 text-xs text-text-secondary">
+              {email}
+            </div>
+          )}
+          <button
+            type="button"
+            role="menuitem"
+            onClick={onSignOut}
+            className="flex w-full items-center rounded px-3 py-1.5 text-left text-xs text-text-primary transition-colors hover:bg-surface-2 hover:text-error"
+          >
+            Sign out
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The mobile menu's auth block — user email, sign-out, and (with more than one
+ * organisation) the org switcher. A plain component, not a portal: it is handed to
+ * `MobileMenu` through its `authControls` slot (PT-1b2 item 5) rather than reaching
+ * for the dialog by querying `[role="dialog"][aria-label="Menu"]` — a portal keyed on
+ * a CSS selector is one Header markup change away from silently finding nothing.
+ */
+export function MobileAuthSection({
+  email,
+  organizations,
+  activeOrgId,
+  authError,
+  onSwitchOrg,
+  onSignOut,
+}: {
+  readonly email?: string;
+  readonly organizations?: Array<{ id: string; name: string }> | null;
+  readonly activeOrgId?: string;
+  readonly authError?: string | null;
+  readonly onSwitchOrg: (orgId: string) => void;
+  readonly onSignOut: () => void;
+}) {
+  const hasMultipleOrgs = Boolean(organizations && organizations.length > 1);
+
+  return (
+    <div data-testid="mobile-auth-controls" className="border-t border-border bg-surface p-4">
+      {authError && (
+        <p role="alert" className="mb-3 text-xs text-error">
+          {authError}
+        </p>
+      )}
+      {hasMultipleOrgs && (
+        <div className="mb-3">
+          <label
+            htmlFor="mobile-org-select"
+            className="mb-1 block text-xs font-medium text-text-muted"
+          >
+            Organization
+          </label>
+          <select
+            id="mobile-org-select"
+            aria-label="Switch organization"
+            value={activeOrgId}
+            onChange={(e) => onSwitchOrg(e.target.value)}
+            className="h-8 w-full rounded border border-border bg-surface-2 px-2 text-xs text-text-primary focus:outline-none focus:ring-1 focus:ring-brand-primary"
+          >
+            {organizations?.map((org) => (
+              <option key={org.id} value={org.id}>
+                {org.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+      <div className="flex items-center justify-between text-xs">
+        <span className="truncate font-mono text-text-secondary">{email}</span>
+        <button
+          type="button"
+          onClick={onSignOut}
+          className="rounded px-2 py-1 text-text-muted transition-colors hover:text-error"
+        >
+          Sign out
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The session/org state and handlers `BetterAuthSection` (desktop) and
+ * `BetterAuthMobileControls` (handed to `MobileMenu`) both need. Each is its own
+ * component, mounted only under better-auth mode, so each calling this — and so
+ * `authClient`'s own hooks — from its own top level never risks a conditional hook
+ * call; the two independent subscriptions this costs are the trade for not lifting
+ * the state through Header (which would call these hooks unconditionally, defeating
+ * item 4's "not under local auth" contract).
+ */
+function useBetterAuthState() {
+  const session = authClient.useSession();
+  const orgs = authClient.useListOrganizations();
+  const activeOrg = authClient.useActiveOrganization();
+  // Better Auth's client actions resolve `{ data, error }` rather than throwing (the
+  // same shape `handleMagicLink` already reads on the sign-in page) — a rejected
+  // fetch is the other, rarer failure path, so both are caught here. Neither may
+  // reload or navigate: the previous organisation/session is still the live one.
+  const [authError, setAuthError] = useState<string | null>(null);
+  // A reload (switch) or a navigation to /sign-in (sign-out) discards whatever the
+  // operator hasn't saved, exactly like the tab links `handleTabClick` guards below —
+  // so both gestures go through the same guard, never the API call directly.
+  const { guardedAction } = useGuardedNavigation();
+
+  const email = session?.data?.user?.email;
+  const organizations = orgs?.data;
+  const activeOrgId = activeOrg?.data?.id ?? organizations?.[0]?.id;
+
+  const switchOrg = async (orgId: string) => {
+    try {
+      const res = await authClient.organization.setActive({ organizationId: orgId });
+      if (res?.error) {
+        setAuthError(res.error.message || "Could not switch organisation.");
+        return;
+      }
+      setAuthError(null);
+      window.location.reload();
+    } catch (err) {
+      setAuthError(err instanceof Error ? err.message : "Could not switch organisation.");
+    }
+  };
+
+  const signOutNow = async () => {
+    try {
+      const res = await authClient.signOut();
+      if (res?.error) {
+        setAuthError(res.error.message || "Could not sign out.");
+        return;
+      }
+      setAuthError(null);
+      window.location.assign("/sign-in");
+    } catch (err) {
+      setAuthError(err instanceof Error ? err.message : "Could not sign out.");
+    }
+  };
+
+  // Neither the API call nor its error state runs until the operator has actually
+  // agreed to leave: while dirty, `guardedAction` queues the whole gesture behind
+  // the one shared confirm dialog (never stacked) and runs it on confirm; clean, it
+  // runs immediately — unchanged from before this guard existed.
+  const handleSwitchOrg = (orgId: string): void => {
+    guardedAction(() => void switchOrg(orgId));
+  };
+
+  const handleSignOut = (): void => {
+    guardedAction(() => void signOutNow());
+  };
+
+  return { email, organizations, activeOrgId, authError, handleSwitchOrg, handleSignOut };
+}
+
+/** Desktop-only: the org switcher (when there's more than one) and the user menu. */
+export function BetterAuthSection() {
+  const { email, organizations, activeOrgId, authError, handleSwitchOrg, handleSignOut } =
+    useBetterAuthState();
+  const hasMultipleOrgs = Boolean(organizations && organizations.length > 1);
+
+  return (
+    <div className="hidden items-center gap-3 lg:flex">
+      {authError && (
+        <span role="alert" className="text-xs text-error">
+          {authError}
+        </span>
+      )}
+      {hasMultipleOrgs && (
+        <select
+          aria-label="Switch organization"
+          value={activeOrgId}
+          onChange={(e) => handleSwitchOrg(e.target.value)}
+          className="h-8 rounded-md border border-border-control bg-surface-2 px-2 font-mono text-xs text-text-primary focus:outline-none focus:ring-1 focus:ring-brand-primary"
+        >
+          {organizations?.map((org) => (
+            <option key={org.id} value={org.id}>
+              {org.name}
+            </option>
+          ))}
+        </select>
+      )}
+      <UserMenu email={email} onSignOut={handleSignOut} />
+    </div>
+  );
+}
+
+/** The `authControls` Header hands `MobileMenu` under better-auth mode. */
+export function BetterAuthMobileControls() {
+  const { email, organizations, activeOrgId, authError, handleSwitchOrg, handleSignOut } =
+    useBetterAuthState();
+
+  return (
+    <MobileAuthSection
+      email={email}
+      organizations={organizations}
+      activeOrgId={activeOrgId}
+      authError={authError}
+      onSwitchOrg={handleSwitchOrg}
+      onSignOut={handleSignOut}
+    />
   );
 }
