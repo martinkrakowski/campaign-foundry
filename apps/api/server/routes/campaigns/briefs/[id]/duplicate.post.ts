@@ -137,15 +137,25 @@ export default defineEventHandler(async (event) => {
       // unparseable — findBriefById skips those, then wx turns into a 409.
       const sourcePool = await readPool(scope, id);
 
-      // Copy assets from source brief to new brief, and any referenced brief-scoped assets
-      const sourceMap = await getAssetStore(scope).copyAssets(id, newId);
-      brief = rewriteAssetPaths(brief, id, newId, sourceMap);
-      const additionalSourceIds = extractSourceAssetBriefIds(brief, newId);
-      // D166 item 2: each additional source id must not be hidden from THIS
-      // caller by team before its assets are copied.
+      // D166 item 2 (PT-2c, greptile thread U90U): every additional source id
+      // — extracted from the ORIGINAL brief, before the primary source's own
+      // paths below are rewritten off `id` — is checked for visibility BEFORE
+      // any copy runs, including the primary source's `copyAssets(id, newId)`
+      // just below. Checking it only after that first copy let a hidden
+      // second source's 404 leave the primary source's files already written
+      // into `newId`'s asset directory, with no brief ever created to own
+      // them — checking everything first, copying everything after, matches
+      // briefs.post.ts's Save-as loop.
+      const additionalSourceIds = extractSourceAssetBriefIds(brief, newId).filter(
+        (fromId) => fromId !== id,
+      );
       for (const fromId of additionalSourceIds) {
         await assertSourceVisible(scope, fromId);
       }
+
+      // Copy assets from source brief to new brief, and any referenced brief-scoped assets
+      const sourceMap = await getAssetStore(scope).copyAssets(id, newId);
+      brief = rewriteAssetPaths(brief, id, newId, sourceMap);
       for (const fromId of additionalSourceIds) {
         const addMap = await getAssetStore(scope).copyAssets(fromId, newId);
         brief = rewriteAssetPaths(brief, fromId, newId, addMap);
