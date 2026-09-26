@@ -2766,6 +2766,13 @@ describe("normalizeRunResult — D136 advisories are persisted JSON", () => {
 });
 
 describe("run-context 401 and 403 pipeline error handling", () => {
+  // Several tests here stub `window` wholesale (`vi.stubGlobal`) to capture a redirect
+  // without a real navigation — undo it after each, or a later test in this file that
+  // reads `window.location` for real gets the previous test's stub instead.
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   test("fetchPersistedRun on 401 unauthenticated routes to /sign-in", async () => {
     const assign = vi.fn();
     vi.stubGlobal("window", { ...window, location: { ...window.location, assign } });
@@ -2862,7 +2869,7 @@ describe("run-context 401 and 403 pipeline error handling", () => {
     expect(result.current.error).toBe("This account belongs to no organisation.");
   });
 
-  test("setBrief catches organisation error and sets context error", async () => {
+  test("setBrief catches a 403 no_membership as a typed membership error, in its own state", async () => {
     mockPipelineApi({
       result: () =>
         json({ error: "This account belongs to no organisation.", code: "no_membership" }, 403),
@@ -2871,7 +2878,40 @@ describe("run-context 401 and 403 pipeline error handling", () => {
     await act(async () => {
       result.current.setBrief({ ...result.current.brief, id: "other-camp" });
     });
-    expect(result.current.error).toBe("This account belongs to no organisation.");
+    // PT-1b2 item 3: the fixed constant, in `membershipError` — never the pipeline
+    // `error` slot, and never the server's own message text (which this asserts by
+    // being IN a distinct field, not by string content).
+    expect(result.current.membershipError).toBe(NO_ORGANISATION_YET_MESSAGE);
+    expect(result.current.error).toBeNull();
+  });
+
+  test("setBrief detects a 403 no_membership by code, not by matching the server's wording", async () => {
+    // The old detection was `/organisation/i.test(err.message)` against the server's
+    // own string — a server that reworded it to American spelling ("organization")
+    // would silently fail to match and the state would never show. This response uses
+    // that exact reworded spelling; only a `code`-based check catches it.
+    mockPipelineApi({
+      result: () =>
+        json({ error: "This account belongs to no organization.", code: "no_membership" }, 403),
+    });
+    const { result } = setup();
+    await act(async () => {
+      result.current.setBrief({ ...result.current.brief, id: "reworded-camp" });
+    });
+    expect(result.current.membershipError).toBe(NO_ORGANISATION_YET_MESSAGE);
+    expect(result.current.error).toBeNull();
+  });
+
+  test("the initial mount's own persisted-run fetch sets membershipError the same way", async () => {
+    mockPipelineApi({
+      result: () =>
+        json({ error: "This account belongs to no organisation.", code: "no_membership" }, 403),
+    });
+    const { result } = setup();
+    await waitFor(() => {
+      expect(result.current.membershipError).toBe(NO_ORGANISATION_YET_MESSAGE);
+    });
+    expect(result.current.error).toBeNull();
   });
 
   test("handlePipelineResponseError handles href fallback and undefined messages", () => {

@@ -24,6 +24,14 @@ import {
   type PackagedPlatform,
   type PlanEstimate,
 } from "./briefs-api";
+import {
+  handleAuthError,
+  NO_ORGANISATION_YET_MESSAGE,
+  NoMembershipError,
+  isNoMembershipError,
+} from "./auth-errors";
+
+export { NO_ORGANISATION_YET_MESSAGE, NoMembershipError, isNoMembershipError };
 
 /** Base path for the Nitro pipeline API (proxied by next.config rewrites). */
 export const API = "/api/pipeline";
@@ -159,8 +167,6 @@ function pipelineUnreachable(status: number, error?: string): Error {
   );
 }
 
-export const NO_ORGANISATION_YET_MESSAGE = "This account belongs to no organisation.";
-
 /**
  * Handle pipeline API responses that are not OK (PT-1b2 item 5).
  * A 401 unauthenticated routes to /sign-in, and a 403 no_membership shows a
@@ -171,23 +177,29 @@ export function handlePipelineResponseError(
   data: unknown,
   includeErrorInFallback = false,
 ): Error {
+  // `handleAuthError` throws for a 403 no_membership — this function's own contract
+  // (the `: Error` return type, and every call site's `throw handlePipelineResponseError(...)`)
+  // is to hand the error BACK rather than throw it itself, so that throw is caught
+  // right here and returned like every other branch below.
+  try {
+    handleAuthError(status, data);
+  } catch (e) {
+    if (isNoMembershipError(e)) return e;
+    throw e;
+  }
+
   const code =
     typeof data === "object" && data !== null ? (data as { code?: unknown }).code : undefined;
   const errorMsg =
     typeof data === "object" && data !== null ? (data as { error?: unknown }).error : undefined;
   const msgStr = typeof errorMsg === "string" ? errorMsg : undefined;
 
+  // Only the same codes `handleAuthError` itself redirects on read as "sign in
+  // required" — a 401 with a different code (an expired token mid-request, say) is
+  // not that, and must keep falling through to the generic pipeline-unreachable
+  // message rather than claiming a redirect that never happened.
   if (status === 401 && (code === "unauthenticated" || code === undefined)) {
-    if (typeof window.location.assign === "function") {
-      window.location.assign("/sign-in");
-    } else {
-      window.location.href = "/sign-in";
-    }
     return new Error(msgStr ?? "Sign in required.");
-  }
-
-  if (status === 403 && code === "no_membership") {
-    return new Error(msgStr ?? NO_ORGANISATION_YET_MESSAGE);
   }
 
   return pipelineUnreachable(status, includeErrorInFallback ? msgStr : undefined);
@@ -567,6 +579,13 @@ interface RunContextValue {
    */
   progress: RunProgress | null;
   error: string | null;
+  /**
+   * Organisation membership error (PT-1b2 item 3). A typed `NoMembershipError`
+   * (detected on `code`, never on the server's message text) lands here, in its
+   * own state — never in `error`, the pipeline-unreachable slot — holding the
+   * fixed `NO_ORGANISATION_YET_MESSAGE` regardless of how the server worded it.
+   */
+  membershipError: string | null;
   hasRun: boolean;
   decisions: Record<string, Decision>;
   decide: (key: string, decision: Decision) => void;
@@ -698,6 +717,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState<RunProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [membershipError, setMembershipError] = useState<string | null>(null);
   const [assetVersion, setAssetVersion] = useState(0);
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
   const [regeneratingKeys, setRegeneratingKeys] = useState<ReadonlySet<string> | null>(null);
@@ -776,6 +796,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
       briefDecidedRef.current = true;
       setBriefState(next);
       setError(null);
+      setMembershipError(null);
       // Record the last-opened brief so a reload restores it (and its run) instead of
       // DEFAULT, and so the bare /brief route can hand the visitor back to it. D37:
       // this is a convenience record, never an address — the blank brief releases the
@@ -822,8 +843,12 @@ export function RunProvider({ children }: { children: ReactNode }) {
           if (d.assets?.length) setAssetVersion((v) => v + 1);
         })
         .catch((err) => {
-          if (err instanceof Error && /organisation/i.test(err.message)) {
-            setError(err.message);
+          // A typed check on `code`, not a match against the server's own message text
+          // (PT-1b2 item 3) — a reworded server string ("organization") must still land
+          // here, and it is the `NO_ORGANISATION_YET_MESSAGE` constant that is shown,
+          // never the raw server text, so the copy stays ours to own.
+          if (isNoMembershipError(err)) {
+            setMembershipError(NO_ORGANISATION_YET_MESSAGE);
           }
           /* F6: could-not-ask is not absence — restore nothing, claim nothing. A
              later successful fetch (a run, a re-roll, a brief switch) heals it. */
@@ -884,8 +909,10 @@ export function RunProvider({ children }: { children: ReactNode }) {
         if (d.assets?.length) setAssetVersion((v) => v + 1);
       })
       .catch((err) => {
-        if (err instanceof Error && /organisation/i.test(err.message)) {
-          setError(err.message);
+        // See the identical guard in `setBrief`'s own `fetchPersistedRun` catch above:
+        // a typed check, never a match against the server's own message text.
+        if (isNoMembershipError(err)) {
+          setMembershipError(NO_ORGANISATION_YET_MESSAGE);
         }
         /* F6: could-not-ask is not absence — restore nothing, claim nothing. */
       });
@@ -1308,6 +1335,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
       loading,
       progress,
       error,
+      membershipError,
       hasRun: run !== null,
       decisions,
       decide,
@@ -1349,6 +1377,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
       loading,
       progress,
       error,
+      membershipError,
       decisions,
       decide,
       decisionsNotice,
