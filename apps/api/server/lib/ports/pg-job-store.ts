@@ -3,6 +3,7 @@ import type { SqlClient, SqlQuery } from "../db/sql-client.js";
 import { JOB_TTL_MS, JobCapacityError, MAX_JOBS } from "./fs-job-store.js";
 import {
   JobLeaseLostError,
+  QUEUED_TTL_MS,
   type Job,
   type JobResult,
   type JobStatus,
@@ -35,6 +36,7 @@ function asInterval(ms: number): string {
  * drift: `reap` passes it as a parameter rather than a second literal.
  */
 const LEASE_EXPIRED_MESSAGE = "Lease expired: the worker holding it stopped heartbeating.";
+const QUEUED_EXPIRED_MESSAGE = "Queued run expired before a worker started it.";
 
 interface JobRow {
   id: string;
@@ -59,10 +61,13 @@ interface JobRow {
  * message, so a poller never sees two different explanations for the same row.
  */
 function lapsedAsFailed(row: JobRow, now: Date): JobRow {
-  if (row.status !== "running" || row.lease_expires_at === null || row.lease_expires_at > now) {
-    return row;
+  if (row.status === "running" && (row.lease_expires_at === null || row.lease_expires_at <= now)) {
+    return { ...row, status: "failed", error: LEASE_EXPIRED_MESSAGE };
   }
-  return { ...row, status: "failed", error: LEASE_EXPIRED_MESSAGE };
+  if (row.status === "queued" && now.getTime() - row.created_at.getTime() >= QUEUED_TTL_MS) {
+    return { ...row, status: "failed", error: QUEUED_EXPIRED_MESSAGE };
+  }
+  return row;
 }
 
 function toJob(row: JobRow): Job {
@@ -109,10 +114,8 @@ export class PgJobStore implements RunRegistryPort {
   ) {}
 
   /**
-   * Fail every running row of this org whose lease has lapsed — a separate
-   * statement, run before the claim (item 4), so a claim never has to reason
-   * about a stale lease itself: by the time it runs, a lapsed row has already
-   * left `where status = 'running'`, the claim's conflict target.
+   * Fail every running row of this org whose lease has lapsed, and every queued
+   * row older than QUEUED_TTL_MS (item 2).
    */
   private async reap(tx: SqlQuery): Promise<void> {
     await tx.query(
@@ -120,14 +123,19 @@ export class PgJobStore implements RunRegistryPort {
        where org_id = $1 and status = 'running' and lease_expires_at < now()`,
       [this.orgId, LEASE_EXPIRED_MESSAGE],
     );
+    await tx.query(
+      `update job set status = 'failed', error = $2, settled_at = now()
+       where org_id = $1 and status = 'queued' and created_at <= now() - $3::interval`,
+      [this.orgId, QUEUED_EXPIRED_MESSAGE, asInterval(QUEUED_TTL_MS)],
+    );
   }
 
   /**
    * `fs-job-store.ts`'s `evictToFit`, in SQL: settled jobs past `JOB_TTL_MS` are
    * purged outright (they already read as gone, item 6), then the oldest
    * settled row is retired while the org is at `MAX_JOBS`. When every row is
-   * running, refuse rather than evict one out from under a live worker — the
-   * same capacity signal the file store gives (`JobCapacityError`).
+   * active (queued or running), refuse rather than evict one out from under a
+   * live worker — the same capacity signal the file store gives (`JobCapacityError`).
    */
   private async evictToFit(tx: SqlQuery): Promise<void> {
     await tx.query(
@@ -144,7 +152,7 @@ export class PgJobStore implements RunRegistryPort {
       if (n < MAX_JOBS) return;
       const evicted = await tx.query<{ id: string }>(
         `delete from job where id = (
-           select id from job where org_id = $1 and status != 'running'
+           select id from job where org_id = $1 and status not in ('queued', 'running')
            order by created_at asc, seq asc limit 1
          )
          returning id`,
@@ -169,11 +177,16 @@ export class PgJobStore implements RunRegistryPort {
     await tx.query("select pg_advisory_xact_lock(hashtext('job:' || $1))", [this.orgId]);
   }
 
-  /** The running row for `campaignId`, if any — the claim's incumbent, and `getRunningJobId`. */
+  /** The active row for `campaignId`, if any — the claim's incumbent, and `getRunningJobId`. */
   private async runningIncumbent(q: SqlQuery, campaignId: string): Promise<string | undefined> {
     const { rows } = await q.query<{ id: string }>(
-      `select id from job where org_id = $1 and campaign_id = $2 and status = 'running' and lease_expires_at > now() limit 1`,
-      [this.orgId, campaignId],
+      `select id from job where org_id = $1 and campaign_id = $2
+         and (
+           (status = 'running' and lease_expires_at > now())
+           or (status = 'queued' and created_at > now() - $3::interval)
+         )
+       limit 1`,
+      [this.orgId, campaignId, asInterval(QUEUED_TTL_MS)],
     );
     return rows[0]?.id;
   }
@@ -209,7 +222,7 @@ export class PgJobStore implements RunRegistryPort {
       const { rows } = await tx.query<{ id: string; acquired: boolean }>(
         `insert into job (id, org_id, campaign_id, status, lease_expires_at, heartbeat_at)
          values ($1, $2, $3, 'running', now() + $4::interval, now())
-         on conflict (org_id, campaign_id) where status = 'running'
+         on conflict (org_id, campaign_id) where status in ('queued', 'running')
          do update set campaign_id = excluded.campaign_id
          returning id, (xmax = 0) as acquired`,
         [id, this.orgId, campaignId, asInterval(LEASE_MS)],
@@ -219,6 +232,51 @@ export class PgJobStore implements RunRegistryPort {
         ? { acquired: true, jobId: row.id }
         : { acquired: false, runningJobId: row.id };
     });
+  }
+
+  async enqueueJob(
+    campaignId: string,
+    customId?: string,
+  ): Promise<{ acquired: true; jobId: string } | { acquired: false; runningJobId: string }> {
+    return this.db.transaction(async (tx) => {
+      await this.lockOrg(tx);
+      await this.reap(tx);
+      const incumbent = await this.runningIncumbent(tx, campaignId);
+      if (incumbent !== undefined) return { acquired: false, runningJobId: incumbent };
+      await this.evictToFit(tx);
+      const id = customId ?? randomUUID();
+      const { rows } = await tx.query<{ id: string; acquired: boolean }>(
+        `insert into job (id, org_id, campaign_id, status)
+         values ($1, $2, $3, 'queued')
+         on conflict (org_id, campaign_id) where status in ('queued', 'running')
+         do update set campaign_id = excluded.campaign_id
+         returning id, (xmax = 0) as acquired`,
+        [id, this.orgId, campaignId],
+      );
+      const row = rows[0]!;
+      return row.acquired
+        ? { acquired: true, jobId: row.id }
+        : { acquired: false, runningJobId: row.id };
+    });
+  }
+
+  /**
+   * A queued row past QUEUED_TTL_MS reads as failed (`lapsedAsFailed`) and the
+   * fs adapter's own `startQueuedJob` refuses it for the same reason (it reads
+   * through `getStoredJob` first, which performs that same conversion) — this
+   * adapter's `where` must say the same thing directly, since it updates the
+   * row without reading it through `lapsedAsFailed` first (finding 5). Without
+   * this, an unreaped stale queued row polls as failed but a late delivery
+   * could still flip it to running underneath that answer.
+   */
+  async startQueuedJob(id: string): Promise<boolean> {
+    const { rows } = await this.db.query<{ id: string }>(
+      `update job set status = 'running', lease_expires_at = now() + $3::interval, heartbeat_at = now()
+       where id = $1 and org_id = $2 and status = 'queued' and created_at > now() - $4::interval
+       returning id`,
+      [id, this.orgId, asInterval(LEASE_MS), asInterval(QUEUED_TTL_MS)],
+    );
+    return rows.length > 0;
   }
 
   async createJob(campaignId: string, customId?: string): Promise<string> {

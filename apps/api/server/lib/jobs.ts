@@ -14,6 +14,7 @@ import type {
 
 export type { JobStatus, JobResult, Job, StoredJob };
 export { MAX_JOBS, JOB_TTL_MS } from "./ports/fs-job-store.js";
+export { QUEUED_TTL_MS } from "./ports/job-store.port.js";
 export { HEARTBEAT_INTERVAL_MS, LEASE_MS } from "./ports/pg-job-store.js";
 
 /**
@@ -32,6 +33,18 @@ export async function acquireJob(
   campaignId: string,
 ): Promise<{ acquired: true; jobId: string } | { acquired: false; runningJobId: string }> {
   return getJobStore(scope).acquireJob(campaignId);
+}
+
+export async function enqueueJob(
+  scope: StorageScope,
+  campaignId: string,
+  customId?: string,
+): Promise<{ acquired: true; jobId: string } | { acquired: false; runningJobId: string }> {
+  return getJobStore(scope).enqueueJob(campaignId, customId);
+}
+
+export async function startQueuedJob(scope: StorageScope, id: string): Promise<boolean> {
+  return getJobStore(scope).startQueuedJob(id);
 }
 
 export async function createJob(scope: StorageScope, campaignId: string): Promise<string> {

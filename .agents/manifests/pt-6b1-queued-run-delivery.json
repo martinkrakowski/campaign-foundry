@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "PT-6b1",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/ports/pg-job-store.ts",
+      "before": "       where id = $1 and org_id = $2 and status = 'queued'",
+      "after": "       where id = $1 and org_id = $2",
+      "because": "dropping 'and status = \\'queued\\'' from startQueuedJob allows an already running job to be claimed again, so duplicate delivery does not detect that the job has already been claimed (D171, D174d)",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/pg-job-store.test.ts",
+        "-t",
+        "duplicate delivery: second startQueuedJob returns false and nothing runs twice"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

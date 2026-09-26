@@ -5,6 +5,7 @@ import { isErrno } from "../brief-files.js";
 import { resolveConfined } from "../confined-path.js";
 import {
   JobLeaseLostError,
+  QUEUED_TTL_MS,
   type Job,
   type JobResult,
   type JobStorePort,
@@ -15,6 +16,8 @@ import {
 export const MAX_JOBS = 50;
 /** How long a settled job stays pollable after it completes or fails. */
 export const JOB_TTL_MS = 10 * 60_000;
+
+const QUEUED_EXPIRED_MESSAGE = "Queued run expired before a worker started it.";
 
 /**
  * Every slot is a live run, so there is nothing to retire (R1).
@@ -52,6 +55,7 @@ export class FsJobStore implements JobStorePort {
   private readonly dir: string;
   private readonly lockChains = new Map<string, Promise<unknown>>();
   private readonly timers = new Map<string, NodeJS.Timeout>();
+  private readonly queuedTimers = new Map<string, NodeJS.Timeout>();
   private readonly memoryCache = new Map<string, CacheItem>();
 
   constructor(dir: string) {
@@ -102,7 +106,9 @@ export class FsJobStore implements JobStorePort {
   private async evictToFit(): Promise<void> {
     const jobs = (await this.listJobs()).slice();
     while (jobs.length >= MAX_JOBS) {
-      const settledIndex = jobs.findIndex((entry) => entry.job.status !== "running");
+      const settledIndex = jobs.findIndex(
+        (entry) => entry.job.status !== "running" && entry.job.status !== "queued",
+      );
       if (settledIndex === -1) {
         throw new JobCapacityError(jobs.length);
       }
@@ -121,6 +127,25 @@ export class FsJobStore implements JobStorePort {
     }, JOB_TTL_MS);
     timer.unref();
     this.timers.set(id, timer);
+  }
+
+  private expireQueuedLater(id: string): void {
+    const existing = this.queuedTimers.get(id);
+    if (existing) clearTimeout(existing);
+    const timer = setTimeout(() => {
+      // `getStoredJob`'s own on-read staleness check (below) performs exactly
+      // this "still queued past its TTL → failed" write as a side effect — it
+      // must, so a caller polling this id sees it as failed even before this
+      // timer fires. By the time this callback runs, elapsed time is always
+      // >= QUEUED_TTL_MS, so that check is always true here; a second,
+      // duplicate write from this callback could never run (getStoredJob
+      // would already have changed the status to something other than
+      // "queued"), so this exists only to settle a row nobody ever polls —
+      // the same reason `expireLater`'s own callback exists for a settled row.
+      void this.withJobLock(id, () => this.getStoredJob(id)).catch(() => undefined);
+    }, QUEUED_TTL_MS);
+    timer.unref();
+    this.queuedTimers.set(id, timer);
   }
 
   async getStoredJob(id: string): Promise<StoredJob | undefined> {
@@ -143,6 +168,25 @@ export class FsJobStore implements JobStorePort {
       ) {
         await this.deleteJob(id);
         return undefined;
+      }
+      if (
+        cached.entry.job.status === "queued" &&
+        Date.now() - cached.entry.createdAt >= QUEUED_TTL_MS
+      ) {
+        const updated: StoredJob = {
+          ...cached.entry,
+          job: {
+            status: "failed",
+            done: 0,
+            total: 0,
+            log: null,
+            error: QUEUED_EXPIRED_MESSAGE,
+          },
+          settledAt: Date.now(),
+        };
+        await this.writeJobEntry(updated);
+        this.expireLater(id);
+        return updated;
       }
       return cached.entry;
     }
@@ -167,6 +211,22 @@ export class FsJobStore implements JobStorePort {
     if (entry.settledAt !== undefined && Date.now() - entry.settledAt >= JOB_TTL_MS) {
       await this.deleteJob(id);
       return undefined;
+    }
+    if (entry.job.status === "queued" && Date.now() - entry.createdAt >= QUEUED_TTL_MS) {
+      const updated: StoredJob = {
+        ...entry,
+        job: {
+          status: "failed",
+          done: 0,
+          total: 0,
+          log: null,
+          error: QUEUED_EXPIRED_MESSAGE,
+        },
+        settledAt: Date.now(),
+      };
+      await this.writeJobEntry(updated);
+      this.expireLater(id);
+      return updated;
     }
     this.memoryCache.set(id, { entry, mtimeMs: st.mtimeMs });
     return entry;
@@ -202,6 +262,53 @@ export class FsJobStore implements JobStorePort {
     });
   }
 
+  async enqueueJob(
+    campaignId: string,
+    customId?: string,
+  ): Promise<{ acquired: true; jobId: string } | { acquired: false; runningJobId: string }> {
+    return this.withJobLock(campaignId, async () => {
+      const runningId = await this.getRunningJobId(campaignId);
+      if (runningId !== undefined) {
+        return { acquired: false, runningJobId: runningId };
+      }
+      return this.withJobLock("__capacity__", async () => {
+        await this.evictToFit();
+        const id = customId ?? crypto.randomUUID();
+        const entry: StoredJob = {
+          id,
+          campaignId,
+          job: { status: "queued", done: 0, total: 0, log: null },
+          createdAt: Date.now(),
+          seq: ++globalJobSeq,
+        };
+        await this.writeJobEntry(entry);
+        this.expireQueuedLater(id);
+        return { acquired: true, jobId: id };
+      });
+    });
+  }
+
+  async startQueuedJob(id: string): Promise<boolean> {
+    return this.withJobLock(id, async () => {
+      const entry = await this.getStoredJob(id);
+      if (!entry || entry.job.status !== "queued") return false;
+      const timer = this.queuedTimers.get(id);
+      if (timer) {
+        clearTimeout(timer);
+        this.queuedTimers.delete(id);
+      }
+      const updated: StoredJob = {
+        ...entry,
+        job: {
+          ...entry.job,
+          status: "running",
+        },
+      };
+      await this.writeJobEntry(updated);
+      return true;
+    });
+  }
+
   async createJob(campaignId: string, customId?: string): Promise<string> {
     const claim = await this.acquireJob(campaignId, customId);
     return claim.acquired ? claim.jobId : claim.runningJobId;
@@ -210,7 +317,10 @@ export class FsJobStore implements JobStorePort {
   async getRunningJobId(campaignId: string): Promise<string | undefined> {
     const jobs = await this.listJobs();
     for (const entry of jobs) {
-      if (entry.campaignId === campaignId && entry.job.status === "running") {
+      if (
+        entry.campaignId === campaignId &&
+        (entry.job.status === "running" || entry.job.status === "queued")
+      ) {
         return entry.id;
       }
     }
@@ -284,6 +394,11 @@ export class FsJobStore implements JobStorePort {
       clearTimeout(timer);
       this.timers.delete(id);
     }
+    const qTimer = this.queuedTimers.get(id);
+    if (qTimer) {
+      clearTimeout(qTimer);
+      this.queuedTimers.delete(id);
+    }
     try {
       await unlink(this.jobPath(id));
     } catch (error) {
@@ -319,6 +434,10 @@ export class FsJobStore implements JobStorePort {
       clearTimeout(timer);
     }
     this.timers.clear();
+    for (const [, timer] of this.queuedTimers) {
+      clearTimeout(timer);
+    }
+    this.queuedTimers.clear();
     try {
       const files = await readdir(this.dir);
       for (const file of files) {

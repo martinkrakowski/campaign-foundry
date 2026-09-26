@@ -4,9 +4,9 @@
   "mutations": [
     {
       "file": "apps/api/server/lib/ports/fs-job-store.ts",
-      "before": "await this.writeJobEntry(entry);",
-      "after": "/* do not persist to storage */",
-      "because": "The defect this lane fixes, restored: if createJob does not persist the minted handle to storage, the handle only exists in the local process and any other process fails to resolve it (404 / lost).",
+      "before": "          job: { status: \"running\", done: 0, total: 0, log: null },\n          createdAt: Date.now(),\n          seq: ++globalJobSeq,\n        };\n        await this.writeJobEntry(entry);",
+      "after": "          job: { status: \"running\", done: 0, total: 0, log: null },\n          createdAt: Date.now(),\n          seq: ++globalJobSeq,\n        };\n        /* do not persist to storage */",
+      "because": "The defect this lane fixes, restored: if createJob does not persist the minted handle to storage, the handle only exists in the local process and any other process fails to resolve it (404 / lost). Re-anchored 2026-09-26 by PT-6b1: enqueueJob also writes an entry; anchor narrowed to acquireJob's running entry.",
       "command": [
         "yarn",
         "vitest",
@@ -34,9 +34,9 @@
     },
     {
       "file": "apps/api/server/lib/ports/fs-job-store.ts",
-      "before": "const settledIndex = jobs.findIndex((entry) => entry.job.status !== \"running\");",
-      "after": "const settledIndex = -1;",
-      "because": "Eviction must drop settled jobs before running ones; disabling the settled check causes running jobs to be prematurely evicted.",
+      "before": "      const settledIndex = jobs.findIndex(\n        (entry) => entry.job.status !== \"running\" && entry.job.status !== \"queued\",\n      );",
+      "after": "      const settledIndex = -1;",
+      "because": "Eviction must drop settled jobs before running ones; disabling the settled check causes running jobs to be prematurely evicted. Re-anchored 2026-09-26 by PT-6b1: settled check excludes queued rows as well as running ones.",
       "command": [
         "yarn",
         "vitest",

@@ -36,6 +36,7 @@ export * from "./report-store.port.js";
 export * from "./output-store.port.js";
 export * from "./decision-store.port.js";
 export * from "./usage-store.port.js";
+export * from "./run-delivery.port.js";
 export * from "./fs-brief-store.js";
 export * from "./pg-brief-store.js";
 export * from "./fs-asset-store.js";
@@ -51,6 +52,10 @@ export * from "./fs-decision-store.js";
 export * from "./pg-decision-store.js";
 export * from "./fs-usage-store.js";
 export * from "./pg-usage-store.js";
+// `in-process-run-delivery.js` is deliberately NOT re-exported here — it, and
+// the run-delivery registry that wires it up, live in
+// `run-delivery-registry.ts` instead (see that file's docstring for why:
+// folding it into this barrel closes a cycle back on itself).
 
 /**
  * The store registry (PT-0b2, D167 stamped). Every getter takes the scope a
@@ -177,6 +182,9 @@ const usage = new Registry<UsageStorePort>(
   () => storeBackend(),
   (backend) => (backend === "postgres" ? new PgUsageStore(database()) : new FsUsageStore()),
 );
+
+// `getRunDelivery`/`setRunDelivery`/`resetRunDelivery` live in
+// `run-delivery-registry.ts`, not here — see that file's docstring.
 
 export const getBriefStore = (scope: StorageScope): BriefStorePort => briefs.get(scope);
 export const setBriefStore = (store: BriefStorePort): void => briefs.set(store);
