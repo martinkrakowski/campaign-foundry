@@ -378,6 +378,16 @@ describe("PgJobStore (PT-6a, D171)", () => {
     expect(await store.getRunningJobId("camp")).toBeUndefined();
   });
 
+  test("getRunningJobId ignores a lapsed row", async () => {
+    const store = new PgJobStore(db, "local");
+    await db.query(
+      `insert into job (id, org_id, campaign_id, status, lease_expires_at)
+       values ($1, 'local', 'camp', 'running', now() - interval '10 seconds')`,
+      ["lapsed-job-1"],
+    );
+    expect(await store.getRunningJobId("camp")).toBeUndefined();
+  });
+
   test("deleteJob removes the row; a second delete is a safe no-op", async () => {
     const store = new PgJobStore(db, "local");
     const claim = await store.acquireJob("camp");

@@ -20,15 +20,22 @@ import { isPersistedAsset, readReport, reportRevision, writeReport } from "../re
 import { campaignReportPath } from "../ports/fs-report-store.js";
 import {
   getDecisionStore,
+  getJobStore,
   resetDecisionStore,
+  resetJobStore,
   resetReportStore,
   setDecisionStore,
   setReportStore,
   type DecisionStorePort,
 } from "../ports/index.js";
+import { JobLeaseLostError } from "../ports/job-store.port.js";
+
 import { hashBytes } from "../brief-files.js";
 
 import { LOCAL_TENANT } from "../tenant.js";
+import type { SqlClient } from "../db/sql-client.js";
+import { migratedDatabase } from "../db/__tests__/pglite-client.js";
+import { resetDatabase, setDatabase } from "../db/database.js";
 // node:fs/promises is an ESM namespace (not spy-able), so the report's write path is
 // routed through an overridable hook. A test can land half a payload and pause — the
 // torn file a crash leaves behind — and let a reader run while it is on disk. Left
@@ -980,5 +987,121 @@ describe("reports go through the report store (PT-0a)", () => {
     await expect(
       writeReport(LOCAL_TENANT, result([asset()]), { expectedRevision: "server-revision" }),
     ).rejects.toBe(conflict);
+  });
+});
+
+describe("writeReport run fence (PT-6a2)", () => {
+  let root: string;
+  const orig = process.env.OUTPUT_DIR;
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), "cf-report-fence-"));
+    process.env.OUTPUT_DIR = root;
+    resetJobStore();
+    resetReportStore();
+    resetDecisionStore();
+  });
+  afterEach(() => {
+    resetJobStore();
+    resetReportStore();
+    resetDecisionStore();
+    if (orig === undefined) delete process.env.OUTPUT_DIR;
+    else process.env.OUTPUT_DIR = orig;
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  test("the fs late write refused after failJob", async () => {
+    const jobStore = getJobStore(LOCAL_TENANT);
+    const jobId = await jobStore.createJob("camp");
+    await jobStore.failJob(jobId, "deadline exceeded");
+
+    await expect(
+      writeReport(LOCAL_TENANT, result([asset()]), { fence: { runId: jobId } }),
+    ).rejects.toBeInstanceOf(JobLeaseLostError);
+  });
+
+  test("the fs write accepted for a live running job", async () => {
+    const jobStore = getJobStore(LOCAL_TENANT);
+    let jobId: string | undefined;
+    try {
+      jobId = await jobStore.createJob("camp");
+
+      await expect(
+        writeReport(LOCAL_TENANT, result([asset()]), { fence: { runId: jobId } }),
+      ).resolves.toMatch(/reports\/camp\.json$/);
+    } finally {
+      if (jobId) {
+        await jobStore.deleteJob(jobId).catch(() => undefined);
+      }
+    }
+  });
+
+  test("a deadline failJob already in flight is not overtaken by the fenced write", async () => {
+    const jobStore = getJobStore(LOCAL_TENANT);
+    const jobId = await jobStore.createJob("camp");
+
+    const failed = jobStore.failJob(jobId, "deadline exceeded");
+    const write = writeReport(LOCAL_TENANT, result([asset()]), { fence: { runId: jobId } });
+
+    await failed;
+    await expect(write).rejects.toBeInstanceOf(JobLeaseLostError);
+    expect(existsSync(join(root, "reports", "camp.json"))).toBe(false);
+  });
+
+  test("the fs write refused when job does not exist", async () => {
+    await expect(
+      writeReport(LOCAL_TENANT, result([asset()]), { fence: { runId: "nonexistent" } }),
+    ).rejects.toBeInstanceOf(JobLeaseLostError);
+  });
+});
+
+describe("writeReport pg fence with decisions (PT-6a2)", () => {
+  let db: SqlClient;
+  const origBackend = process.env.STORE_BACKEND;
+
+  beforeEach(async () => {
+    db = await migratedDatabase();
+    setDatabase(db);
+    process.env.STORE_BACKEND = "postgres";
+    resetJobStore();
+    resetReportStore();
+    resetDecisionStore();
+  });
+
+  afterEach(async () => {
+    resetJobStore();
+    resetReportStore();
+    resetDecisionStore();
+    resetDatabase();
+    if (origBackend === undefined) delete process.env.STORE_BACKEND;
+    else process.env.STORE_BACKEND = origBackend;
+    await db.end();
+  });
+
+  test("writeReport with lapsed run rejects and leaves existing decisions unchanged", async () => {
+    const decisionStore = getDecisionStore(LOCAL_TENANT);
+    const initialDecisions = {
+      "alpha/1:1/default": {
+        verdict: "approved" as const,
+        actor: "alice",
+        at: "2026-09-01T00:00:00.000Z",
+        run: "run-init",
+      },
+    };
+    await decisionStore.writeDecisions("camp", initialDecisions);
+
+    // Seed a lapsed job row
+    await db.query(
+      `insert into job (id, org_id, campaign_id, status, lease_expires_at)
+       values ($1, 'local', 'camp', 'running', now() - interval '10 seconds')`,
+      ["lapsed-run"],
+    );
+
+    await expect(
+      writeReport(LOCAL_TENANT, result([asset()]), { fence: { runId: "lapsed-run" } }),
+    ).rejects.toBeInstanceOf(JobLeaseLostError);
+
+    // Verify decisions are unchanged
+    const { decisions } = await decisionStore.readDecisions("camp");
+    expect(decisions).toEqual(initialDecisions);
   });
 });

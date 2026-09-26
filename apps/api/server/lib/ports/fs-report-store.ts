@@ -79,6 +79,7 @@ export class FsReportStore implements ReportStorePort {
     campaignId: string,
     payload: string,
     expectedRevision?: string | null,
+    _fence?: { runId: string },
   ): Promise<string> {
     const path = campaignReportPath(this.root, campaignId);
     if (!path) {

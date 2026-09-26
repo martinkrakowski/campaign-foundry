@@ -3,7 +3,13 @@ import { mkdir, readdir, readFile, rename, stat, unlink, writeFile } from "node:
 import { dirname, resolve } from "node:path";
 import { isErrno } from "../brief-files.js";
 import { resolveConfined } from "../confined-path.js";
-import type { Job, JobResult, JobStorePort, StoredJob } from "./job-store.port.js";
+import {
+  JobLeaseLostError,
+  type Job,
+  type JobResult,
+  type JobStorePort,
+  type StoredJob,
+} from "./job-store.port.js";
 
 /** Most jobs kept in storage; the oldest are evicted first (terminal ones before running). */
 export const MAX_JOBS = 50;
@@ -106,6 +112,8 @@ export class FsJobStore implements JobStorePort {
   }
 
   private expireLater(id: string): void {
+    // A custom id can be reused once its job has settled (`acquireJob`), so the
+    // earlier entry's timer must not outlive it and delete the replacement.
     const existing = this.timers.get(id);
     if (existing) clearTimeout(existing);
     const timer = setTimeout(() => {
@@ -230,6 +238,7 @@ export class FsJobStore implements JobStorePort {
     return this.withJobLock(id, async () => {
       const entry = await this.getStoredJob(id);
       if (!entry) return;
+      if (entry.job.status !== "running") throw new JobLeaseLostError(id);
       const n = payload.halted ? 0 : payload.assets.length;
       const updated: StoredJob = {
         ...entry,
@@ -251,6 +260,7 @@ export class FsJobStore implements JobStorePort {
     return this.withJobLock(id, async () => {
       const entry = await this.getStoredJob(id);
       if (!entry) return;
+      if (entry.job.status !== "running") throw new JobLeaseLostError(id);
       const updated: StoredJob = {
         ...entry,
         job: {

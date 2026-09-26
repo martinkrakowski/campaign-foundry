@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "lane": "PT-6a2-run-fence",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/ports/pg-report-store.ts",
+      "before": "          `select 1 from job where id = $1 and org_id = $2 and campaign_id = $3 and status = 'running' and lease_expires_at > now() for share`,",
+      "after": "          `select 1 from job where id = $1 and org_id = $2 and campaign_id = $3 and status = 'running' for share`,",
+      "because": "without the lease_expires_at check, a report write with a fence succeeds even if the job lease has lapsed",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/pg-report-store.test.ts",
+        "-t",
+        "a pg report write is refused for a lapsed lease"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/pg-report-store.ts",
+      "before": "          `select 1 from job where id = $1 and org_id = $2 and campaign_id = $3 and status = 'running' and lease_expires_at > now() for share`,",
+      "after": "          `select 1 from job where id = $1 and org_id = $2 and status = 'running' and lease_expires_at > now() for share`,",
+      "because": "without the campaign_id check, a report write with a fence succeeds even if the job was for a different campaign",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/pg-report-store.test.ts",
+        "-t",
+        "a pg report write refuses a fence from a live run for a different campaign"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
