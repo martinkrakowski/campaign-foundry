@@ -41,6 +41,11 @@ export default defineEventHandler(async (event) => {
       setResponseStatus(event, 400);
       return { error: "Invalid asset name." };
     }
+    // D166 (PT-2c, thread greptile Uiug): a campaign hidden from this caller
+    // by team must 404 a named-asset fetch exactly like the listing path
+    // below, not stream the bytes to anyone who knows the campaign id and the
+    // asset's filename.
+    await campaignKnown(scope, briefId, "asset");
     const bytes = await getAssetStore(scope).readAsset(briefId, name);
     if (!bytes) {
       setResponseStatus(event, 404);
