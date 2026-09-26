@@ -6488,3 +6488,19 @@ and source formatting, recorded here rather than fixed.
   together (2899 web + 1497 api, all green). Gate lock acquired in the foreground and released immediately after
   each round; never held idle.
 - **Not merged** — PR #597 review only. Branch `feat/sign-in-ui` now includes #595/#596/#598 by merge.
+
+## 2026-09-26 — PT-1b2-sign-in-ui: PR #597, round six (final)
+
+- **greptile-apps, real, one finding, fixed at `8bd91e42`:** `adoptJob`'s re-read of the persisted report (the
+  `opts.adopted` path, deliberately left alone in round five) folded ANY failure — including a 403 no_membership —
+  into `null` via `.catch(() => null)`, then fell through as "no report on disk": committed the job's own (possibly
+  partial, for a re-roll) payload AND unconditionally healed `membershipError`. The lost-job read had the identical
+  shape. Both catches now capture `isNoMembershipError` before discarding the error: on a denial, set
+  `membershipError`, commit nothing, return; every other failure keeps today's fallback unchanged.
+- **Tests, both mutation-verified** (guard reverted → fails; restored → passes): the adopted-path denial (asserts
+  the job's own payload — 1 asset — is never committed, `hasRun` stays false) and the lost-job-path denial (asserts
+  `LOST_JOB_MESSAGE` is not shown in its place).
+- **Gate:** green (100% stmts/branches/funcs/lines, lint/typecheck/format/manifest-verify), lock acquired in the
+  foreground and released immediately after. Pushed at `8bd91e42`; replied to and resolved
+  `PRRT_kwDOSzP1zc6mSljV`.
+- **All 33 review threads on #597 are resolved.** Not merged — left for the owner.
