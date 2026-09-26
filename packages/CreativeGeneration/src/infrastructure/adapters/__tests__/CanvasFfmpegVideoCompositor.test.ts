@@ -3,6 +3,17 @@ import { spawn as realSpawn, spawnSync } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
+
+const fsHook = vi.hoisted(() => ({
+  mkdtemp: undefined as undefined | ((prefix: string) => Promise<string>),
+}));
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  return {
+    ...actual,
+    mkdtemp: (prefix: string) => (fsHook.mkdtemp ? fsHook.mkdtemp(prefix) : actual.mkdtemp(prefix)),
+  };
+});
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { createCanvas, loadImage } from "@napi-rs/canvas";
@@ -200,7 +211,10 @@ const skipReason = ffmpegOk
   : `ffmpeg-static binary cannot execute${ffmpegProbe?.error ? ` (${ffmpegProbe.error.message})` : ffmpegProbe ? ` (exited ${ffmpegProbe.status})` : " (path is null)"}`;
 
 describe("CanvasFfmpegVideoCompositor", () => {
-  afterEach(() => vi.restoreAllMocks());
+  afterEach(() => {
+    vi.restoreAllMocks();
+    fsHook.mkdtemp = undefined;
+  });
 
   // Local machines without a working binary may skip the real-binary tests;
   // CI must never skip them silently, or a broken binary would ship green.
@@ -684,6 +698,44 @@ describe("CanvasFfmpegVideoCompositor", () => {
     expect(MAX_CONCURRENT_ENCODES).toBe(2);
     expect(maxActive).toBeLessThanOrEqual(2);
     expect(maxActive).toBe(2);
+  });
+
+  test("a failing mkdtemp releases the gate", async () => {
+    const compositor = new CanvasFfmpegVideoCompositor({
+      spawn: fakeFfmpeg({}),
+      ffmpegPath: "/opt/ffmpeg",
+      assetRoot: projectRoot(),
+    });
+    fsHook.mkdtemp = async () => {
+      throw new Error("simulated mkdtemp failure");
+    };
+
+    await expect(compositor.compositeVideo(videoRequest())).rejects.toThrow(
+      "simulated mkdtemp failure",
+    );
+    fsHook.mkdtemp = undefined;
+
+    let active = 0;
+    let maxActive = 0;
+    const spawn: FfmpegSpawn = (command, args, options) => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      const inner = fakeFfmpeg({ delayMs: 40 })(command, args, options);
+      inner.once("close", () => {
+        active -= 1;
+      });
+      return inner;
+    };
+    const healthy = new CanvasFfmpegVideoCompositor({
+      spawn,
+      ffmpegPath: "/opt/ffmpeg",
+      assetRoot: projectRoot(),
+    });
+    await Promise.all([
+      healthy.compositeVideo(videoRequest({ sampleAt: [] })),
+      healthy.compositeVideo(videoRequest({ sampleAt: [] })),
+    ]);
+    expect(maxActive).toBe(MAX_CONCURRENT_ENCODES);
   });
 
   test("passes the key beat's mid-window as the poster copy clock, for every motion kind (D7)", async () => {

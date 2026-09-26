@@ -1,5 +1,6 @@
-import { describe, test, expect, beforeEach } from "vitest";
+import { describe, test, expect, beforeEach, afterEach } from "vitest";
 import {
+  getAuthCapabilities,
   getCapabilities,
   resolveFfmpegBinary,
   setCapabilities,
@@ -95,5 +96,46 @@ describe("resolveFfmpegBinary", () => {
     const out = resolveFfmpegBinary();
     if (out.path === null) expect(out.reason).toMatch(/^ffmpeg-static binary is not available/);
     else expect(out.path).toMatch(/ffmpeg/);
+  });
+});
+
+describe("getAuthCapabilities", () => {
+  const ENV_KEYS = ["AUTH_MODE", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"] as const;
+  const saved = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
+
+  beforeEach(() => {
+    for (const k of ENV_KEYS) delete process.env[k];
+  });
+
+  afterEach(() => {
+    for (const k of ENV_KEYS) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+  });
+
+  test("defaults to local mode with Google off", () => {
+    expect(getAuthCapabilities()).toEqual({ mode: "local", google: false });
+  });
+
+  test("reflects better-auth mode", () => {
+    process.env.AUTH_MODE = "better-auth";
+    expect(getAuthCapabilities()).toEqual({ mode: "better-auth", google: false });
+  });
+
+  test("google is true only when both google client id and secret are set", () => {
+    process.env.GOOGLE_CLIENT_ID = "id";
+    process.env.GOOGLE_CLIENT_SECRET = "secret";
+    expect(getAuthCapabilities()).toEqual({ mode: "local", google: true });
+  });
+
+  test("google is false when only client id is set", () => {
+    process.env.GOOGLE_CLIENT_ID = "id";
+    expect(getAuthCapabilities()).toEqual({ mode: "local", google: false });
+  });
+
+  test("google is false when only client secret is set", () => {
+    process.env.GOOGLE_CLIENT_SECRET = "secret";
+    expect(getAuthCapabilities()).toEqual({ mode: "local", google: false });
   });
 });
