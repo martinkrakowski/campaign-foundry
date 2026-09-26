@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { defineEventHandler } from "h3";
 import { database } from "../../lib/db/database.js";
 import { storeBackend } from "../../lib/config.js";
+import { migratedDatabase } from "../../lib/db/__tests__/pglite-client.js";
 import { requestTenant } from "../../lib/tenant.js";
 import {
   ACME_TENANT,
@@ -96,5 +97,47 @@ describe("tenant-harness (PT-2a item 1)", () => {
       harness.cleanup();
       expect(() => assertNoLeakedTenantDirs()).not.toThrow();
     }
+  });
+
+  describe("setupPgHarness restores state when a setup step throws", () => {
+    const env = () => ({
+      root: process.env.PROJECT_ROOT,
+      out: process.env.OUTPUT_DIR,
+      backend: process.env.STORE_BACKEND,
+    });
+
+    test("when the database cannot be created", async () => {
+      const before = env();
+      await expect(
+        setupPgHarness(async () => {
+          throw new Error("migrate failed");
+        }),
+      ).rejects.toThrow("migrate failed");
+      expect(env()).toEqual(before);
+      expect(() => assertNoLeakedTenantDirs()).not.toThrow();
+    });
+
+    test("when seeding the org fails, closing the database it opened", async () => {
+      const before = env();
+      let closed = false;
+      await expect(
+        setupPgHarness(async () => {
+          const db = await migratedDatabase();
+          return {
+            ...db,
+            query: async () => {
+              throw new Error("seed failed");
+            },
+            end: async () => {
+              closed = true;
+              await db.end();
+            },
+          };
+        }),
+      ).rejects.toThrow("seed failed");
+      expect(closed).toBe(true);
+      expect(env()).toEqual(before);
+      expect(() => assertNoLeakedTenantDirs()).not.toThrow();
+    });
   });
 });

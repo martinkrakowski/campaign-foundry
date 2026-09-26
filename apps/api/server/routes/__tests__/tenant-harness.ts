@@ -200,7 +200,9 @@ export interface PgHarness {
  * Set up the PostgreSQL backend using migratedDatabase(), STORE_BACKEND=postgres,
  * and mocking database() via setDatabase().
  */
-export async function setupPgHarness(): Promise<PgHarness> {
+export async function setupPgHarness(
+  makeDb: () => ReturnType<typeof migratedDatabase> = migratedDatabase,
+): Promise<PgHarness> {
   const origProjectRoot = process.env.PROJECT_ROOT;
   const origOutputDir = process.env.OUTPUT_DIR;
   const origStoreBackend = process.env.STORE_BACKEND;
@@ -219,39 +221,52 @@ export async function setupPgHarness(): Promise<PgHarness> {
   process.env.OUTPUT_DIR = outputRoot;
   process.env.STORE_BACKEND = "postgres";
 
-  const db = await migratedDatabase();
-  setDatabase(db);
+  const restore = () => {
+    if (origProjectRoot === undefined) delete process.env.PROJECT_ROOT;
+    else process.env.PROJECT_ROOT = origProjectRoot;
 
-  await db.query("insert into org (id, name) values ($1, $2) on conflict do nothing", [
-    "acme",
-    "Acme",
-  ]);
+    if (origOutputDir === undefined) delete process.env.OUTPUT_DIR;
+    else process.env.OUTPUT_DIR = origOutputDir;
+
+    if (origStoreBackend === undefined) delete process.env.STORE_BACKEND;
+    else process.env.STORE_BACKEND = origStoreBackend;
+
+    resetProjectRoot();
+    rmSync(tmpDir, { recursive: true, force: true });
+  };
+
+  // A setup step that throws must not leave Postgres mode, the changed roots
+  // or the temp dir behind for the next test in this worker.
+  let db: Awaited<ReturnType<typeof migratedDatabase>> | undefined;
+  try {
+    db = await makeDb();
+    setDatabase(db);
+    await db.query("insert into org (id, name) values ($1, $2) on conflict do nothing", [
+      "acme",
+      "Acme",
+    ]);
+  } catch (error) {
+    resetDatabase();
+    await db?.end();
+    restore();
+    throw error;
+  }
+  const ready = db;
 
   resetProjectRoot();
   resetAllStores();
 
   return {
     backend: "postgres",
-    db,
+    db: ready,
     tmpDir,
     projectRoot,
     outputRoot,
     async cleanup() {
       resetAllStores();
       resetDatabase();
-      await db.end();
-
-      if (origProjectRoot === undefined) delete process.env.PROJECT_ROOT;
-      else process.env.PROJECT_ROOT = origProjectRoot;
-
-      if (origOutputDir === undefined) delete process.env.OUTPUT_DIR;
-      else process.env.OUTPUT_DIR = origOutputDir;
-
-      if (origStoreBackend === undefined) delete process.env.STORE_BACKEND;
-      else process.env.STORE_BACKEND = origStoreBackend;
-
-      resetProjectRoot();
-      rmSync(tmpDir, { recursive: true, force: true });
+      await ready.end();
+      restore();
     },
   };
 }
