@@ -260,12 +260,21 @@ export class PgJobStore implements RunRegistryPort {
     });
   }
 
+  /**
+   * A queued row past QUEUED_TTL_MS reads as failed (`lapsedAsFailed`) and the
+   * fs adapter's own `startQueuedJob` refuses it for the same reason (it reads
+   * through `getStoredJob` first, which performs that same conversion) — this
+   * adapter's `where` must say the same thing directly, since it updates the
+   * row without reading it through `lapsedAsFailed` first (finding 5). Without
+   * this, an unreaped stale queued row polls as failed but a late delivery
+   * could still flip it to running underneath that answer.
+   */
   async startQueuedJob(id: string): Promise<boolean> {
     const { rows } = await this.db.query<{ id: string }>(
       `update job set status = 'running', lease_expires_at = now() + $3::interval, heartbeat_at = now()
-       where id = $1 and org_id = $2 and status = 'queued'
+       where id = $1 and org_id = $2 and status = 'queued' and created_at > now() - $4::interval
        returning id`,
-      [id, this.orgId, asInterval(LEASE_MS)],
+      [id, this.orgId, asInterval(LEASE_MS), asInterval(QUEUED_TTL_MS)],
     );
     return rows.length > 0;
   }
