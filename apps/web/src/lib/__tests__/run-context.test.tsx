@@ -2762,3 +2762,24 @@ describe("normalizeRunResult — D136 advisories are persisted JSON", () => {
     expect(row!.occlusionAdvisories).toBeUndefined();
   });
 });
+
+describe("run-context 401 and 403 pipeline error handling", () => {
+  test("fetchPersistedRun on 401 unauthenticated routes to /sign-in", async () => {
+    const assign = vi.fn();
+    vi.stubGlobal("window", { ...window, location: { ...window.location, assign } });
+    mockPipelineApi({
+      result: () => json({ error: "Sign in required.", code: "unauthenticated" }, 401),
+    });
+    await expect(fetchPersistedRun("camp")).rejects.toThrow();
+    expect(assign).toHaveBeenCalledWith("/sign-in");
+  });
+
+  test("fetchPersistedRun on 403 no_membership surfaces organisation error and not pipeline unreachable", async () => {
+    mockPipelineApi({
+      result: () =>
+        json({ error: "This account belongs to no organisation.", code: "no_membership" }, 403),
+    });
+    await expect(fetchPersistedRun("camp")).rejects.toThrow(/organisation/i);
+    await expect(fetchPersistedRun("camp")).rejects.not.toThrow(/Pipeline API unreachable/);
+  });
+});

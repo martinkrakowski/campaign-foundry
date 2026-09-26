@@ -691,8 +691,38 @@ describe("getCapabilities carries every field the UI renders", () => {
     await expect(getCapabilities()).resolves.toEqual({ motion: true, version: "7.1.1" });
   });
 
+  test("the host's auth capabilities survive the trip to the client", async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      json({ motion: true, auth: { mode: "better-auth", google: true } }) as unknown as Response,
+    );
+    await expect(getCapabilities()).resolves.toEqual({
+      motion: true,
+      auth: { mode: "better-auth", google: true },
+    });
+  });
+
   test("a host that reports no version simply has none", async () => {
     vi.mocked(globalThis.fetch).mockResolvedValue(json({ motion: true }) as unknown as Response);
     await expect(getCapabilities()).resolves.toEqual({ motion: true });
+  });
+});
+
+describe("briefs-api 401 and 403 handling", () => {
+  test("a 401 unauthenticated routes to /sign-in", async () => {
+    const assign = vi.fn();
+    vi.stubGlobal("window", { ...window, location: { ...window.location, assign } });
+    mockFetch(() => json({ error: "Sign in required.", code: "unauthenticated" }, 401));
+    await expect(listBriefs()).rejects.toThrow();
+    expect(assign).toHaveBeenCalledWith("/sign-in");
+  });
+
+  test("a 403 no_membership surfaces organisation error and not pipeline unreachable", async () => {
+    mockFetch(() =>
+      json({ error: "This account belongs to no organisation.", code: "no_membership" }, 403),
+    );
+    await expect(listBriefs()).rejects.toMatchObject({
+      code: "no_membership",
+      status: 403,
+    });
   });
 });
