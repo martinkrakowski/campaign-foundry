@@ -429,6 +429,10 @@ describe("the run deadline is terminal (review, #537)", () => {
     }
   });
 
+  afterEach(async () => {
+    await resetJobs();
+  });
+
   test("work that finishes first is untouched by the deadline", async () => {
     const id = await createJob(LOCAL_TENANT, "camp");
     runJob(LOCAL_TENANT, id, async () => {
@@ -437,5 +441,38 @@ describe("the run deadline is terminal (review, #537)", () => {
     await vi.waitFor(async () =>
       expect((await getJob(LOCAL_TENANT, id))?.status).toBe("completed"),
     );
+  });
+
+  test("a job where deadline fails the job first and work then rejects with JobLeaseLostError stays failed and slot is released", async () => {
+    vi.useFakeTimers();
+    let unhandled: unknown = undefined;
+    const onUnhandled = (err: unknown) => {
+      unhandled = err;
+    };
+    process.on("unhandledRejection", onUnhandled);
+    try {
+      const id = await createJob(LOCAL_TENANT, "camp");
+      let rejectWork!: (err: Error) => void;
+      const workPromise = new Promise<void>((_, reject) => {
+        rejectWork = reject;
+      });
+      runJob(LOCAL_TENANT, id, async () => workPromise);
+
+      await vi.advanceTimersByTimeAsync(RUN_DEADLINE_MS + 1);
+      await vi.waitFor(async () =>
+        expect((await getJob(LOCAL_TENANT, id))?.status).toBe("failed"),
+      );
+
+      rejectWork(new JobLeaseLostError(id));
+      await vi.advanceTimersByTimeAsync(10);
+      await Promise.resolve();
+
+      expect(unhandled).toBeUndefined();
+      expect((await getJob(LOCAL_TENANT, id))?.status).toBe("failed");
+      expect(await hasRunningJob(LOCAL_TENANT, "camp")).toBe(false);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+      vi.useRealTimers();
+    }
   });
 });
