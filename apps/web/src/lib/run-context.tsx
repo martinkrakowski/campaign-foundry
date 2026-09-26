@@ -787,6 +787,18 @@ export function RunProvider({ children }: { children: ReactNode }) {
           const persisted = await fetchPersistedRun(target.id).catch(() => null);
           if (runSeq.current !== owned) return;
           if (persisted) {
+            // A re-roll's own completed payload (`outcome.result.assets`) carries only
+            // the regenerated cells — strictly fewer than the full persisted report it
+            // was merged into — so the decisions on screen for every untouched cell are
+            // still correct and are kept until the reload below lands (R6). Anything
+            // else (a full run, or a re-roll that happened to touch every visible cell)
+            // means nothing on screen survived, so — exactly like execute()'s own
+            // full-run path further down — decisions are cleared here rather than left
+            // showing old verdicts on new creatives that happen to share their identity
+            // keys if that reload then fails (greptile "Old verdicts remain visible").
+            if (outcome.result.assets.length >= persisted.assets.length) {
+              setDecisions({});
+            }
             setRun({ result: persisted, target });
             setAssetVersion((v) => v + 1);
             setError(null);

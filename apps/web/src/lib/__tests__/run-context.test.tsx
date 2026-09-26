@@ -3444,6 +3444,59 @@ describe("RunProvider — running job awareness on reload and brief switch", () 
     expect(result.current.assets).toHaveLength(0);
   });
 
+  test('a failed decisions reload after an adopted full run shows no old verdicts (greptile "Old verdicts remain visible")', async () => {
+    let down = false;
+    const server = fakeDecisionsApi({ "p1/1:1/default": "approved" });
+    const decisions = {
+      ...server,
+      handle: (url: string, init: RequestInit) =>
+        down ? json({ error: "down" }, 500) : server.handle(url, init),
+    } as ReturnType<typeof fakeDecisionsApi>;
+
+    mockPipelineApi({
+      result: (url) =>
+        url.includes("/campaigns/jobs?campaignId=active-campaign")
+          ? json({ error: "No running job" }, 404)
+          : json({
+              halted: false,
+              assets: [asset({ productId: "p1" })],
+              log: { entries: [], campaignId: "active-campaign" },
+            }),
+      decisions,
+    });
+    const { result } = setup();
+    act(() => {
+      result.current.setBrief(activeBrief);
+    });
+    await waitFor(() => expect(result.current.decisions["p1/1:1/default"]).toBe("approved"));
+
+    // A full run completes elsewhere — the job's own payload is the entire set (no
+    // merge happened), and the decisions endpoint has since gone down.
+    down = true;
+    mockPipelineApi({
+      result: (url) =>
+        url.includes("/campaigns/jobs?campaignId=active-campaign")
+          ? json({ jobId: "job-full" })
+          : json({
+              halted: false,
+              assets: [asset({ productId: "p1" })],
+              log: { entries: [], campaignId: "active-campaign" },
+            }),
+      job: () =>
+        jobOk({
+          halted: false,
+          assets: [asset({ productId: "p1" })],
+          log: { entries: [], campaignId: "active-campaign" },
+        }),
+      decisions,
+    });
+    act(() => {
+      result.current.setBrief(activeBrief);
+    });
+    await waitFor(() => expect(result.current.decisionsNotice).toBe(DECISIONS_UNREADABLE_MESSAGE));
+    expect(result.current.decisions).toEqual({});
+  });
+
   test('a job lookup that resolves after a newer run has started for the same campaign does not adopt the stale job or clobber the newer one (greptile "Stale lookup replaces newer run")', async () => {
     let resolveLookup!: (r: Response) => void;
     const lookupPromise = new Promise<Response>((r) => {
