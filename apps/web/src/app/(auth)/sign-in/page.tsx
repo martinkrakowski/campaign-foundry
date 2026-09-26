@@ -15,9 +15,13 @@ export default function SignInPage() {
 
   useEffect(() => {
     let active = true;
-    void getCapabilities().then((caps) => {
-      if (active) setCapabilities(caps);
-    });
+    void getCapabilities()
+      .then((caps) => {
+        if (active) setCapabilities(caps);
+      })
+      .catch(() => {
+        /* No Google button without capabilities — the form still works. */
+      });
     return () => {
       active = false;
     };
@@ -51,12 +55,16 @@ export default function SignInPage() {
     setGoogleLoading(true);
     setError(null);
     try {
-      await authClient.signIn.social({
+      const res = await authClient.signIn.social({
         provider: "google",
         callbackURL: "/grid",
       });
+      if (res?.error) {
+        setError(res.error.message || "Failed to sign in with Google.");
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to sign in with Google.");
+    } finally {
       setGoogleLoading(false);
     }
   };

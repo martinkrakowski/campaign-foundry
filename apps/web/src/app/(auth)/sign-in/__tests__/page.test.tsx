@@ -110,6 +110,61 @@ describe("SignInPage", () => {
       provider: "google",
       callbackURL: "/grid",
     });
+
+    // The loading flag was only ever cleared in the catch branch — a successful
+    // resolution left it (and the disabled button) stuck forever. `finally` fixes it.
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: /Continue with Google/i }).hasAttribute("disabled"),
+      ).toBe(false);
+    });
+  });
+
+  test("shows an error and re-enables the button when Google sign-in resolves with an error", async () => {
+    // Better Auth's client actions resolve `{ data, error }` rather than throwing —
+    // the same shape `authClient.signIn.magicLink` already reports through. The old
+    // handler only ever awaited the promise and checked nothing, so this path left
+    // the button disabled with no error shown.
+    const user = userEvent.setup();
+    vi.spyOn(briefsApi, "getCapabilities").mockResolvedValue({
+      motion: true,
+      auth: { mode: "better-auth", google: true },
+    });
+    vi.spyOn(authClient.signIn, "social").mockResolvedValue({
+      error: { message: "Account already linked to a different provider" },
+    } as never);
+
+    render(<SignInPage />);
+
+    const googleBtn = await screen.findByRole("button", { name: /Continue with Google/i });
+    await user.click(googleBtn);
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert").textContent).toBe(
+        "Account already linked to a different provider",
+      );
+    });
+    expect(
+      screen.getByRole("button", { name: /Continue with Google/i }).hasAttribute("disabled"),
+    ).toBe(false);
+  });
+
+  test("falls back to a generic message when Google sign-in's resolved error has no message", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(briefsApi, "getCapabilities").mockResolvedValue({
+      motion: true,
+      auth: { mode: "better-auth", google: true },
+    });
+    vi.spyOn(authClient.signIn, "social").mockResolvedValue({ error: {} } as never);
+
+    render(<SignInPage />);
+
+    const googleBtn = await screen.findByRole("button", { name: /Continue with Google/i });
+    await user.click(googleBtn);
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert").textContent).toBe("Failed to sign in with Google.");
+    });
   });
 
   test("hides 'Continue with Google' button when auth.google is false", async () => {
@@ -242,5 +297,20 @@ describe("SignInPage", () => {
 
     expect(consoleError).not.toHaveBeenCalled();
     consoleError.mockRestore();
+  });
+
+  test("a rejected capabilities probe leaves the form usable, with no unhandled rejection", async () => {
+    // The mount effect had no `.catch` — a rejected `getCapabilities()` (a network
+    // blip, a probe route down) was an unhandled rejection vitest fails the run on.
+    // The fix is the discriminator: without the `.catch`, this test fails the suite
+    // rather than the assertion below.
+    vi.spyOn(briefsApi, "getCapabilities").mockRejectedValue(new Error("probe unreachable"));
+
+    render(<SignInPage />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Continue with email/i })).toBeTruthy();
+    });
+    expect(screen.queryByRole("button", { name: /Continue with Google/i })).toBeNull();
   });
 });
