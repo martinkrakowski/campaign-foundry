@@ -2762,3 +2762,109 @@ describe("normalizeRunResult — D136 advisories are persisted JSON", () => {
     expect(row!.occlusionAdvisories).toBeUndefined();
   });
 });
+
+describe("RunProvider — running job awareness on reload and brief switch", () => {
+  const activeBrief = {
+    schemaVersion: BRIEF_SCHEMA_VERSION,
+    template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+    id: "active-campaign",
+    targetRegion: "US",
+    targetAudience: "x",
+    campaignMessage: "y",
+    products: [
+      { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "a.png" },
+    ],
+  };
+
+  test("reload adopts a running job: queries running job, sets loading, polls and commits", async () => {
+    localStorage.setItem("cf:brief-picked", "1");
+    localStorage.setItem("cf:brief", JSON.stringify(activeBrief));
+    let queriedJob = false;
+    mockPipelineApi({
+      result: (url) => {
+        if (url.includes("/campaigns/jobs?campaignId=active-campaign")) {
+          queriedJob = true;
+          return json({ jobId: "job-reload-1" });
+        }
+        return json(EMPTY_REPORT);
+      },
+      job: () =>
+        jobOk({
+          halted: false,
+          assets: [asset({ productId: "p1" })],
+          log: { entries: [], campaignId: "active-campaign" },
+        }),
+    });
+
+    const { result } = setup();
+    await waitFor(() => expect(queriedJob).toBe(true));
+    await waitFor(() => expect(result.current.assets).toHaveLength(1));
+    expect(result.current.hasRun).toBe(true);
+    expect(result.current.loading).toBe(false);
+  });
+
+  test("reload when no job is running (404) leaves the page as today", async () => {
+    localStorage.setItem("cf:brief-picked", "1");
+    localStorage.setItem("cf:brief", JSON.stringify(activeBrief));
+    mockPipelineApi({
+      result: (url) => {
+        if (url.includes("/campaigns/jobs?campaignId=active-campaign")) {
+          return json({ error: "No running job" }, 404);
+        }
+        return json(EMPTY_REPORT);
+      },
+    });
+
+    const { result } = setup();
+    await waitFor(() => expect(result.current.brief.id).toBe("active-campaign"));
+    expect(result.current.loading).toBe(false);
+    expect(result.current.assets).toHaveLength(0);
+  });
+
+  test("reload with network failure leaves the page as today", async () => {
+    localStorage.setItem("cf:brief-picked", "1");
+    localStorage.setItem("cf:brief", JSON.stringify(activeBrief));
+    mockPipelineApi({
+      result: (url) => {
+        if (url.includes("/campaigns/jobs?campaignId=active-campaign")) {
+          return Promise.reject(new Error("network blip"));
+        }
+        return json(EMPTY_REPORT);
+      },
+    });
+
+    const { result } = setup();
+    await waitFor(() => expect(result.current.brief.id).toBe("active-campaign"));
+    expect(result.current.loading).toBe(false);
+    expect(result.current.assets).toHaveLength(0);
+  });
+
+  test("setBrief adopts a running job for the target brief", async () => {
+    let queriedJob = false;
+    mockPipelineApi({
+      result: (url) => {
+        if (url.includes("/campaigns/jobs?campaignId=active-campaign")) {
+          queriedJob = true;
+          return json({ jobId: "job-setbrief-1" });
+        }
+        return json(EMPTY_REPORT);
+      },
+      job: () =>
+        jobOk({
+          halted: false,
+          assets: [asset({ productId: "p1" })],
+          log: { entries: [], campaignId: "active-campaign" },
+        }),
+    });
+
+    const { result } = setup();
+    act(() => {
+      result.current.setBrief(activeBrief);
+    });
+    await waitFor(() => expect(queriedJob).toBe(true));
+    await waitFor(() => expect(result.current.assets).toHaveLength(1));
+    expect(result.current.loading).toBe(false);
+    expect(result.current.hasRun).toBe(true);
+  });
+});
+
