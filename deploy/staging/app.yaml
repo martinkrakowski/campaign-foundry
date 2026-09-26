@@ -59,11 +59,21 @@ spec:
               value: /data
             - name: OUTPUT_DIR
               value: /data/output
-            # fs until PT-8 imports the seeded file data (briefs, pools, reports):
-            # with postgres, every store that has a Postgres adapter reads its own,
-            # still empty, tables, and staging would show no briefs.
+            # Postgres (owner, 2026-09-26: staging is where the platform is proven).
+            # It starts empty; the seeded file data comes back with PT-8's import.
             - name: STORE_BACKEND
-              value: fs
+              value: postgres
+            # Better Auth: sign-in is required. With no RESEND_API_KEY the magic link
+            # is written to the API log (LogMailer); read it with kubectl logs.
+            - name: AUTH_MODE
+              value: better-auth
+            - name: WEB_ORIGIN
+              value: https://campaign-foundry.midnight.lan
+            - name: BETTER_AUTH_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: campaign-foundry-auth
+                  key: secret
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:

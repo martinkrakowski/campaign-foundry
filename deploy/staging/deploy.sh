@@ -53,6 +53,17 @@ if [ "$CONFIRMED" != yes ]; then
   esac
 fi
 
+# Better Auth needs a secret of at least 32 characters, or the API refuses to
+# boot and the Recreate rollout leaves staging down. It is created once, on the
+# node, by the owner (README "Auth secret"). Checked before anything is built,
+# pushed or migrated; only its length leaves the node, never its value.
+echo "==> auth secret"
+SECRET_LEN=$(remote "kubectl -n $NS get secret campaign-foundry-auth -o jsonpath={.data.secret} 2>/dev/null | base64 -d 2>/dev/null | wc -c" | tr -d ' ')
+if [ "${SECRET_LEN:-0}" -lt 32 ]; then
+  echo "deploy.sh: secret campaign-foundry-auth is missing, has no \"secret\" key, or is shorter than 32 characters; create it (deploy/staging/README.md, \"Auth secret\") and deploy again." >&2
+  exit 1
+fi
+
 echo "==> build $IMAGE on $CONTEXT"
 git archive --format=tar HEAD | docker --context "$CONTEXT" build -t "$IMAGE" -
 echo "==> push"
