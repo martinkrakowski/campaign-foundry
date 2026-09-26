@@ -551,7 +551,9 @@ describe("copy pool routes", () => {
       }),
     );
     expect(patchRes.status).toBe(200);
-    const body = (await patchRes.json()) as { pool: { entries: Array<{ id: string; status: string }> } };
+    const body = (await patchRes.json()) as {
+      pool: { entries: Array<{ id: string; status: string }> };
+    };
     expect(body.pool.entries[0]?.status).toBe("rejected");
   });
 

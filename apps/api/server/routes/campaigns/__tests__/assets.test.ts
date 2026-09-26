@@ -76,10 +76,7 @@ describe("POST /campaigns/assets", () => {
   });
 
   test("stores an asset for a new unsaved brief with no stored brief (H5)", async () => {
-    const res = await post(
-      await web(dir),
-      upload({ briefId: "new-unsaved", name: "logo.png" }),
-    );
+    const res = await post(await web(dir), upload({ briefId: "new-unsaved", name: "logo.png" }));
     expect(res.status).toBe(201);
     expect(await res.json()).toEqual({ path: "assets/inputs/new-unsaved/logo.png" });
     expect(existsSync(join(dir, "briefs", "new-unsaved.yaml"))).toBe(false);
