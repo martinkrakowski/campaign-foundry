@@ -51,6 +51,16 @@ export default defineEventHandler(async (event) => {
   }
 
   const store = getBriefStore(scope);
+  // Checked before canAssignTeam, matching briefs.post.ts (D166, PT-2c,
+  // coderabbit thread U_YF): an fs backend (item 5) answers 400 for any
+  // teamId, rather than 403 for one this caller could not have assigned
+  // anyway. PUT does no Save-as asset copying, so this is a consistency fix
+  // here, not an orphan-file one — the ordering keeps the two routes' rules
+  // identical rather than diverging only because PUT has nothing to copy.
+  if (teamId !== undefined && !store.supportsTeams) {
+    setResponseStatus(event, 400);
+    return { error: new TeamsNotSupportedError().message };
+  }
   if (teamId !== undefined && !canAssignTeam(scope, teamId)) {
     setResponseStatus(event, 403);
     return {

@@ -64,6 +64,15 @@ export default defineEventHandler(async (event) => {
   }
 
   const store = getBriefStore(scope);
+  // Checked before canAssignTeam, and — the point of this order (D166, PT-2c,
+  // coderabbit thread U_YF) — before ANY of the Save-as asset copying below:
+  // on the fs backend (item 5), copying first and only then hitting
+  // createBrief/replaceBrief's own TeamsNotSupportedError left orphaned files
+  // in a campaign that was never created.
+  if (teamId !== undefined && !store.supportsTeams) {
+    setResponseStatus(event, 400);
+    return { error: new TeamsNotSupportedError().message };
+  }
   if (teamId !== undefined && !canAssignTeam(scope, teamId)) {
     setResponseStatus(event, 403);
     return { error: `Not authorized to assign team "${teamId}".` };
