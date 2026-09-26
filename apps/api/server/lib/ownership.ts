@@ -51,38 +51,56 @@ export type KnownResourceKind = "report" | "asset";
  * Checks the cheap scoped read first (report or asset existence) and falls back
  * to findBriefById only when it misses, so the fs full-directory brief scan does
  * not run on every read (L1).
+ *
+ * Neither `getRevision` nor `listAssets` ever throws to say "not found" — both
+ * ports answer that with `undefined` / an empty list. A rejection is always a
+ * genuine storage failure (a dropped pg connection, an EACCES). Such a failure
+ * still falls back to the brief check (a flaky report read should not fail an
+ * otherwise-known campaign), but if the brief check *also* comes up empty —
+ * true for an unsaved draft, which by design has no stored brief — the
+ * failure is surfaced instead of being swallowed into a false 404. Answering
+ * 404 there would tell the caller the campaign does not exist when the truth
+ * is that this scope could not be checked, and the web client treats that 404
+ * as "no run" / "no decisions" — a storage failure must not look like an
+ * unsaved draft's work having disappeared.
  */
 export async function campaignKnown(
   scope: StorageScope,
   campaignId: string,
   kind?: KnownResourceKind,
 ): Promise<void> {
-  if (kind === "asset") {
-    try {
-      const assets = await getAssetStore(scope).listAssets(campaignId);
-      if (assets.length > 0) return;
-    } catch {
-      // fall back to stored brief check
-    }
-  } else {
+  let readFailure: unknown;
+
+  const reportKnown = async (): Promise<boolean> => {
     try {
       const revision = await getReportStore(scope).getRevision(campaignId);
-      if (revision !== undefined) return;
-    } catch {
-      // fall back to stored brief check
+      return revision !== undefined;
+    } catch (error) {
+      readFailure ??= error;
+      return false;
     }
-    if (kind === undefined) {
-      try {
-        const assets = await getAssetStore(scope).listAssets(campaignId);
-        if (assets.length > 0) return;
-      } catch {
-        // fall back to stored brief check
-      }
+  };
+
+  const assetKnown = async (): Promise<boolean> => {
+    try {
+      const assets = await getAssetStore(scope).listAssets(campaignId);
+      return assets.length > 0;
+    } catch (error) {
+      readFailure ??= error;
+      return false;
     }
+  };
+
+  if (kind === "asset") {
+    if (await assetKnown()) return;
+  } else {
+    if (await reportKnown()) return;
+    if (kind === undefined && (await assetKnown())) return;
   }
 
   const brief = await getBriefStore(scope).findBriefById(campaignId);
   if (brief) return;
 
+  if (readFailure !== undefined) throw readFailure;
   throw new CampaignNotFoundError(campaignId);
 }

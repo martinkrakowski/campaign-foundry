@@ -190,4 +190,36 @@ describe("campaignKnown (Rule A and L1)", () => {
 
     await expect(campaignKnown(LOCAL_TENANT, "camp")).resolves.toBeUndefined();
   });
+
+  // A storage failure must surface, not be masked as "campaign not found" (greptile,
+  // PR #601 thread on ownership.ts:73): an unsaved draft has no stored brief by
+  // design, so if the scoped read that would have proven it exists rejects instead
+  // of cleanly answering "not stored", falling through to the brief check and then
+  // to CampaignNotFoundError would turn a real 500 into a false 404 — and the web
+  // client already treats that 404 as "no run" / "no decisions".
+  test("surfaces the original error when report read fails and no brief exists (kind=report)", async () => {
+    const reportStore = getReportStore(LOCAL_TENANT);
+    const readError = new Error("connection reset");
+    vi.spyOn(reportStore, "getRevision").mockRejectedValueOnce(readError);
+
+    await expect(campaignKnown(LOCAL_TENANT, "unsaved", "report")).rejects.toBe(readError);
+  });
+
+  test("surfaces the original error when listAssets fails and no brief exists (kind=asset)", async () => {
+    const assetStore = getAssetStore(LOCAL_TENANT);
+    const readError = new Error("connection reset");
+    vi.spyOn(assetStore, "listAssets").mockRejectedValueOnce(readError);
+
+    await expect(campaignKnown(LOCAL_TENANT, "unsaved", "asset")).rejects.toBe(readError);
+  });
+
+  test("surfaces the first error when kind is omitted, both scoped reads fail, and no brief exists", async () => {
+    const reportStore = getReportStore(LOCAL_TENANT);
+    const assetStore = getAssetStore(LOCAL_TENANT);
+    const reportError = new Error("report read failed");
+    vi.spyOn(reportStore, "getRevision").mockRejectedValueOnce(reportError);
+    vi.spyOn(assetStore, "listAssets").mockRejectedValueOnce(new Error("asset read failed"));
+
+    await expect(campaignKnown(LOCAL_TENANT, "unsaved")).rejects.toBe(reportError);
+  });
 });
