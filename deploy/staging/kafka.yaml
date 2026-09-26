@@ -2,8 +2,8 @@
 # combined controller+broker. The only listener is TLS with client-certificate
 # authentication, the same shape as Aiven's, so PT-6's code targets one
 # connection model. Authorization is `simple`: a client may do only what its
-# KafkaUser's ACLs allow, and the app's user has none yet, so it can do nothing
-# until PT-6 grants its topics. Nothing consumes Kafka yet; no topics are created.
+# KafkaUser's ACLs allow. PT-6b3 grants the app its run-request topic and its
+# consumer group; the API publishes and, with KAFKA_CONSUME=true, consumes.
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaNodePool
 metadata:
@@ -65,3 +65,29 @@ metadata:
 spec:
   authentication:
     type: tls
+  authorization:
+    type: simple
+    acls:
+      - resource:
+          type: topic
+          name: cf.run-requests
+          patternType: literal
+        operations: [Describe, Read, Write]
+      - resource:
+          type: group
+          name: cf-workers
+          patternType: literal
+        operations: [Describe, Read]
+---
+# Run requests (PT-6b2): keyed <orgId>:<campaignId>, so one campaign's requests
+# stay ordered on one partition. The Postgres job row is the lease; Kafka only
+# delivers, and a duplicate or replay loses startQueuedJob and is dropped.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: cf.run-requests
+  labels:
+    strimzi.io/cluster: cf-kafka
+spec:
+  partitions: 3
+  replicas: 1
