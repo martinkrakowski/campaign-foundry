@@ -2820,6 +2820,10 @@ describe("RunProvider — running job awareness on reload and brief switch", () 
     localStorage.setItem("cf:brief-picked", "1");
     localStorage.setItem("cf:brief", JSON.stringify(activeBrief));
     let queriedJob = false;
+    let resolveJob!: (res: Response) => void;
+    const jobPromise = new Promise<Response>((r) => {
+      resolveJob = r;
+    });
     mockPipelineApi({
       result: (url) => {
         if (url.includes("/campaigns/jobs?campaignId=active-campaign")) {
@@ -2828,16 +2832,21 @@ describe("RunProvider — running job awareness on reload and brief switch", () 
         }
         return json(EMPTY_REPORT);
       },
-      job: () =>
+      job: () => jobPromise,
+    });
+
+    const { result } = setup();
+    await waitFor(() => expect(queriedJob).toBe(true));
+    await waitFor(() => expect(result.current.loading).toBe(true));
+    act(() => {
+      resolveJob(
         jobOk({
           halted: false,
           assets: [asset({ productId: "p1" })],
           log: { entries: [], campaignId: "active-campaign" },
         }),
+      );
     });
-
-    const { result } = setup();
-    await waitFor(() => expect(queriedJob).toBe(true));
     await waitFor(() => expect(result.current.assets).toHaveLength(1));
     expect(result.current.hasRun).toBe(true);
     expect(result.current.loading).toBe(false);
@@ -2846,9 +2855,11 @@ describe("RunProvider — running job awareness on reload and brief switch", () 
   test("reload when no job is running (404) leaves the page as today", async () => {
     localStorage.setItem("cf:brief-picked", "1");
     localStorage.setItem("cf:brief", JSON.stringify(activeBrief));
+    let queriedJob = false;
     mockPipelineApi({
       result: (url) => {
         if (url.includes("/campaigns/jobs?campaignId=active-campaign")) {
+          queriedJob = true;
           return json({ error: "No running job" }, 404);
         }
         return json(EMPTY_REPORT);
@@ -2856,17 +2867,23 @@ describe("RunProvider — running job awareness on reload and brief switch", () 
     });
 
     const { result } = setup();
-    await waitFor(() => expect(result.current.brief.id).toBe("active-campaign"));
+    await waitFor(() => expect(queriedJob).toBe(true));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
     expect(result.current.loading).toBe(false);
     expect(result.current.assets).toHaveLength(0);
+    expect(result.current.error).toBeNull();
   });
 
   test("reload with network failure leaves the page as today", async () => {
     localStorage.setItem("cf:brief-picked", "1");
     localStorage.setItem("cf:brief", JSON.stringify(activeBrief));
+    let queriedJob = false;
     mockPipelineApi({
       result: (url) => {
         if (url.includes("/campaigns/jobs?campaignId=active-campaign")) {
+          queriedJob = true;
           return Promise.reject(new Error("network blip"));
         }
         return json(EMPTY_REPORT);
@@ -2874,9 +2891,13 @@ describe("RunProvider — running job awareness on reload and brief switch", () 
     });
 
     const { result } = setup();
-    await waitFor(() => expect(result.current.brief.id).toBe("active-campaign"));
+    await waitFor(() => expect(queriedJob).toBe(true));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
     expect(result.current.loading).toBe(false);
     expect(result.current.assets).toHaveLength(0);
+    expect(result.current.error).toBeNull();
   });
 
   test("setBrief adopts a running job for the target brief", async () => {
@@ -2908,9 +2929,11 @@ describe("RunProvider — running job awareness on reload and brief switch", () 
   });
 
   test("setBrief when no job is running (404) leaves the page as today", async () => {
+    let queriedJob = false;
     mockPipelineApi({
       result: (url) => {
         if (url.includes("/campaigns/jobs?campaignId=active-campaign")) {
+          queriedJob = true;
           return json({ error: "No running job" }, 404);
         }
         return json(EMPTY_REPORT);
@@ -2921,9 +2944,13 @@ describe("RunProvider — running job awareness on reload and brief switch", () 
     act(() => {
       result.current.setBrief(activeBrief);
     });
-    await waitFor(() => expect(result.current.brief.id).toBe("active-campaign"));
+    await waitFor(() => expect(queriedJob).toBe(true));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
     expect(result.current.loading).toBe(false);
     expect(result.current.assets).toHaveLength(0);
+    expect(result.current.error).toBeNull();
   });
 
   test("adoptJob uses the generic message when polling rejects with a non-Error", async () => {
@@ -2941,6 +2968,113 @@ describe("RunProvider — running job awareness on reload and brief switch", () 
 
     const { result } = setup();
     await waitFor(() => expect(result.current.error).toBe("Generation failed"));
+    expect(result.current.loading).toBe(false);
+  });
+
+  test("setBrief racing mount restore prevents mount path from adopting stale brief", async () => {
+    const localBrief = { ...activeBrief, campaignMessage: "from-local-storage" };
+    const editorBrief = { ...activeBrief, campaignMessage: "from-editor" };
+    localStorage.setItem("cf:brief-picked", "1");
+    localStorage.setItem("cf:brief", JSON.stringify(localBrief));
+
+    let resolveMountResult!: (r: Response) => void;
+    const mountResultPromise = new Promise<Response>((r) => {
+      resolveMountResult = r;
+    });
+
+    let jobQueries = 0;
+    mockPipelineApi({
+      result: (url) => {
+        if (url.includes("/campaigns/jobs?campaignId=active-campaign")) {
+          jobQueries += 1;
+          return json({ jobId: "job-active-1" });
+        }
+        if (url.includes("/campaigns/result?campaignId=active-campaign")) {
+          return mountResultPromise;
+        }
+        return json(EMPTY_REPORT);
+      },
+      job: () =>
+        jobOk({
+          halted: false,
+          assets: [asset({ productId: "p1" })],
+          log: { entries: [], campaignId: "active-campaign" },
+        }),
+    });
+
+    const { result } = setup();
+    act(() => {
+      result.current.setBrief(editorBrief);
+    });
+
+    resolveMountResult(json(EMPTY_REPORT));
+
+    await waitFor(() => expect(result.current.assets).toHaveLength(1));
+    expect(result.current.brief.campaignMessage).toBe("from-editor");
+    expect(jobQueries).toBe(1);
+    expect(result.current.loading).toBe(false);
+  });
+
+  test("switching to a different brief while an adoption is polling never commits the stale job into the new brief", async () => {
+    const otherBrief = {
+      schemaVersion: BRIEF_SCHEMA_VERSION,
+      template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+      id: "other-campaign",
+      targetRegion: "FR",
+      targetAudience: "other-aud",
+      campaignMessage: "other-msg",
+      products: [{ id: "p2", name: "P2", primaryColor: "#222222", logoPath: "b.png" }],
+    };
+
+    let resolveActiveJob!: (r: Response) => void;
+    const activeJobPromise = new Promise<Response>((r) => {
+      resolveActiveJob = r;
+    });
+
+    mockPipelineApi({
+      result: (url) => {
+        if (url.includes("/campaigns/jobs?campaignId=active-campaign")) {
+          return json({ jobId: "job-active" });
+        }
+        if (url.includes("/campaigns/jobs?campaignId=other-campaign")) {
+          return json({ error: "No running job" }, 404);
+        }
+        return json(EMPTY_REPORT);
+      },
+      job: (url) => {
+        if (url.includes("job-active")) {
+          return activeJobPromise;
+        }
+        return json({ error: "Not found" }, 404);
+      },
+    });
+
+    const { result } = setup();
+    act(() => {
+      result.current.setBrief(activeBrief);
+    });
+
+    await waitFor(() => expect(result.current.loading).toBe(true));
+
+    act(() => {
+      result.current.setBrief(otherBrief);
+    });
+
+    resolveActiveJob(
+      jobOk({
+        halted: false,
+        assets: [asset({ productId: "p1" })],
+        log: { entries: [], campaignId: "active-campaign" },
+      }),
+    );
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect(result.current.brief.id).toBe("other-campaign");
+    expect(result.current.assets).toHaveLength(0);
+    expect(result.current.hasRun).toBe(false);
     expect(result.current.loading).toBe(false);
   });
 });
