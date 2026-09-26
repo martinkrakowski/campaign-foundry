@@ -1,6 +1,22 @@
 import type { StorageScope } from "./run-environment.js";
 import type { StoredBrief } from "./ports/brief-store.port.js";
 import { getAssetStore, getBriefStore, getReportStore } from "./ports/index.js";
+import { PgBriefStore } from "./ports/pg-brief-store.js";
+import type { TenantContext } from "./tenant.js";
+
+/**
+ * The route-side half of D166 item 3's permission check: `owner`/`admin` may
+ * assign any team, anyone else only one of their own — using the tenant's own
+ * `roles`/`teamIds`, with no store call. It is deliberately not the whole
+ * check: `PgBriefStore`'s `assertTeamInOrg` still refuses a team from another
+ * org (or a typo'd id), which this cannot see. Shared by the brief create and
+ * replace routes so the rule reads once.
+ */
+export function canAssignTeam(tenant: TenantContext, teamId: string): boolean {
+  return tenant.roles.includes("owner") || tenant.roles.includes("admin")
+    ? true
+    : tenant.teamIds.includes(teamId);
+}
 
 /**
  * Thrown when an operation is requested on a campaign that does not exist
@@ -63,6 +79,16 @@ export type KnownResourceKind = "report" | "asset";
  * is that this scope could not be checked, and the web client treats that 404
  * as "no run" / "no decisions" — a storage failure must not look like an
  * unsaved draft's work having disappeared.
+ *
+ * D166 (PT-2c, item 4): a campaign hidden from the caller by its team must
+ * read as unknown even when a report or asset exists in the org's scope —
+ * neither store carries a team column, so their existence alone no longer
+ * proves the caller may see THIS campaign. Checked first, Postgres-only
+ * (`hiddenFromCaller`; the fs backend has no teams, item 5): a database
+ * failure there folds into the same `readFailure` the report/asset checks
+ * use below rather than becoming a false 404, and a genuinely unsaved draft
+ * (no campaign row at all) is not "hidden" — it falls through to the
+ * report/asset fast path exactly as before.
  */
 export async function campaignKnown(
   scope: StorageScope,
@@ -70,6 +96,18 @@ export async function campaignKnown(
   kind?: KnownResourceKind,
 ): Promise<void> {
   let readFailure: unknown;
+
+  const briefStore = getBriefStore(scope);
+  if (briefStore instanceof PgBriefStore) {
+    try {
+      if (await briefStore.hiddenFromCaller(campaignId)) {
+        throw new CampaignNotFoundError(campaignId);
+      }
+    } catch (error) {
+      if (error instanceof CampaignNotFoundError) throw error;
+      readFailure ??= error;
+    }
+  }
 
   const reportKnown = async (): Promise<boolean> => {
     try {
@@ -98,7 +136,7 @@ export async function campaignKnown(
     if (kind === undefined && (await assetKnown())) return;
   }
 
-  const brief = await getBriefStore(scope).findBriefById(campaignId);
+  const brief = await briefStore.findBriefById(campaignId);
   if (brief) return;
 
   if (readFailure !== undefined) throw readFailure;

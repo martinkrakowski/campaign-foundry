@@ -9,7 +9,10 @@ import {
   type CampaignBrief,
 } from "@campaignfoundry/CampaignOrchestration";
 import { resetProjectRoot } from "@campaignfoundry/shared";
-import { LOCAL_TENANT } from "../tenant.js";
+import type { SqlClient } from "../db/sql-client.js";
+import { migratedDatabase } from "../db/__tests__/pglite-client.js";
+import { resetDatabase, setDatabase } from "../db/database.js";
+import { LOCAL_TENANT, type TenantContext } from "../tenant.js";
 import {
   getAssetStore,
   getBriefStore,
@@ -18,7 +21,13 @@ import {
   resetBriefStore,
   resetReportStore,
 } from "../ports/index.js";
-import { assertOwnedCampaign, campaignKnown, CampaignNotFoundError } from "../ownership.js";
+import { PgBriefStore } from "../ports/pg-brief-store.js";
+import {
+  assertOwnedCampaign,
+  campaignKnown,
+  canAssignTeam,
+  CampaignNotFoundError,
+} from "../ownership.js";
 
 const sampleBrief: CampaignBrief = {
   schemaVersion: BRIEF_SCHEMA_VERSION,
@@ -221,5 +230,76 @@ describe("campaignKnown (Rule A and L1)", () => {
     vi.spyOn(assetStore, "listAssets").mockRejectedValueOnce(new Error("asset read failed"));
 
     await expect(campaignKnown(LOCAL_TENANT, "unsaved")).rejects.toBe(reportError);
+  });
+});
+
+describe("canAssignTeam (D166, PT-2c item 3)", () => {
+  test("owner and admin may assign any team, including one the caller has no membership in", () => {
+    expect(
+      canAssignTeam({ orgId: "local", userId: "u", roles: ["owner"], teamIds: [] }, "t9"),
+    ).toBe(true);
+    expect(
+      canAssignTeam({ orgId: "local", userId: "u", roles: ["admin"], teamIds: [] }, "t9"),
+    ).toBe(true);
+  });
+
+  test("a plain member may assign only a team they belong to", () => {
+    const tenant: TenantContext = { orgId: "local", userId: "u", roles: [], teamIds: ["t1"] };
+    expect(canAssignTeam(tenant, "t1")).toBe(true);
+    expect(canAssignTeam(tenant, "t2")).toBe(false);
+  });
+});
+
+describe("campaignKnown hides a team-restricted campaign even when a report exists (D166, PT-2c item 4)", () => {
+  const savedBackend = process.env.STORE_BACKEND;
+  let db: SqlClient;
+
+  beforeEach(async () => {
+    db = await migratedDatabase();
+    setDatabase(db);
+    process.env.STORE_BACKEND = "postgres";
+    resetBriefStore();
+    resetReportStore();
+    await db.query(
+      `insert into team (id, name, "memberCount", org_id, created_at) values ($1, $2, 0, $3, now())`,
+      ["t2", "Team Two", "local"],
+    );
+  });
+
+  afterEach(async () => {
+    resetBriefStore();
+    resetReportStore();
+    resetDatabase();
+    if (savedBackend === undefined) delete process.env.STORE_BACKEND;
+    else process.env.STORE_BACKEND = savedBackend;
+    await db.end();
+  });
+
+  test('GET result\'s campaignKnown(..., "report") answers 404 for a campaign hidden by team', async () => {
+    const owner: TenantContext = { orgId: "local", userId: "owner", roles: ["owner"], teamIds: [] };
+    const ownerStore = getBriefStore(owner);
+    expect(ownerStore).toBeInstanceOf(PgBriefStore);
+    await (ownerStore as PgBriefStore).createBriefWithTeam({ ...sampleBrief, id: "t2-camp" }, "t2");
+    await getReportStore(owner).writeReport("t2-camp", JSON.stringify({ assets: [] }));
+
+    // Sanity: the owner (sees every team) reads it as known.
+    await expect(campaignKnown(owner, "t2-camp", "report")).resolves.toBeUndefined();
+
+    // A caller in a different team cannot see the campaign, even though the
+    // report is right there in the org's scope.
+    const outsider: TenantContext = {
+      orgId: "local",
+      userId: "u2",
+      roles: [],
+      teamIds: ["t1"],
+    };
+    await expect(campaignKnown(outsider, "t2-camp", "report")).rejects.toThrow(
+      CampaignNotFoundError,
+    );
+  });
+
+  test("an unsaved draft with only a report (no campaign row at all) still reads as known", async () => {
+    await getReportStore(LOCAL_TENANT).writeReport("draft-only", JSON.stringify({ assets: [] }));
+    await expect(campaignKnown(LOCAL_TENANT, "draft-only", "report")).resolves.toBeUndefined();
   });
 });

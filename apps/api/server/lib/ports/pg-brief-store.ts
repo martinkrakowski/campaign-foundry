@@ -1,7 +1,7 @@
 import { SAFE_ID_PATTERN, type CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { dumpBrief, errorMessage } from "@campaignfoundry/shared";
 import { BRIEF_SOURCE_EXTS, hashBytes, isErrno } from "../brief-files.js";
-import type { SqlClient } from "../db/sql-client.js";
+import type { SqlClient, SqlQuery } from "../db/sql-client.js";
 import { parseBriefText, type ParseBriefOptions } from "../load-brief.js";
 import type { BriefStorePort, StoredBrief } from "./brief-store.port.js";
 
@@ -20,6 +20,8 @@ interface BriefVersionRow {
   readonly revision: string;
   /** The exact `JSON.stringify(brief)` bytes the write stored; see the migration. */
   readonly body: string;
+  /** D166: null (org-wide) or the team the campaign belongs to; see `visible`. */
+  readonly team_id: string | null;
 }
 
 /** `body` is validated by `parseBriefText` right after this call; a bad row simply fails to parse. */
@@ -30,6 +32,20 @@ function parseBody(body: string): Record<string, unknown> {
 function notFound(id: string): Error {
   const err = new Error(`Brief "${id}" not found.`);
   (err as { code?: string }).code = "ENOENT";
+  return err;
+}
+
+/**
+ * Thrown when a caller may not assign a campaign to `teamId` (D166 item 3):
+ * either the route's own cheap check (`teamId` is not one of the caller's own
+ * teams and the caller is neither `owner` nor `admin`) or this store's
+ * authoritative one (the id names no team in this org at all — a foreign
+ * team, or a typo — which the FK alone would only catch as a 500). Routes map
+ * this to 403, the same way `isErrno(error, "ECONFLICT")` maps to 409.
+ */
+function forbiddenTeam(teamId: string): Error {
+  const err = new Error(`Not authorized to assign team "${teamId}".`);
+  (err as { code?: string }).code = "EFORBIDDEN";
   return err;
 }
 
@@ -60,16 +76,35 @@ function assertSafeSlug(id: string): void {
 export class PgBriefStore implements BriefStorePort {
   private readonly lockChains = new Map<string, Promise<unknown>>();
 
+  /**
+   * `roles` and `teamIds` default to none (an admin-less, team-less caller):
+   * every existing call site (PT-3d's tests, and any lane that never assigns a
+   * team) still sees exactly the org-wide campaigns team scope always allowed,
+   * since a campaign with no team is visible regardless of role or team.
+   */
   constructor(
     private readonly db: SqlClient,
     private readonly orgId: string,
     private readonly actor: string,
+    private readonly roles: readonly string[] = [],
+    private readonly teamIds: readonly string[] = [],
   ) {}
 
-  /** The campaign's latest version in this org, or undefined if no brief has that slug. */
+  /**
+   * Team scope (D166 item 2): a campaign with no team is visible to the whole
+   * org; the org's `owner` and `admin` roles see every campaign regardless of
+   * team; anyone else sees a campaign only through their own teams.
+   */
+  private visible(teamId: string | null): boolean {
+    if (teamId === null) return true;
+    if (this.roles.includes("owner") || this.roles.includes("admin")) return true;
+    return this.teamIds.includes(teamId);
+  }
+
+  /** The campaign's latest version in this org, or undefined if no brief has that slug or it is hidden from this caller by team (D166). */
   private async currentRow(slug: string): Promise<BriefVersionRow | undefined> {
     const { rows } = await this.db.query<BriefVersionRow>(
-      `select bv.campaign_id, bv.version, bv.revision, bv.body
+      `select bv.campaign_id, bv.version, bv.revision, bv.body, c.team_id
          from campaign c
          join brief_version bv on bv.campaign_id = c.id
         where c.org_id = $1 and c.slug = $2
@@ -77,13 +112,39 @@ export class PgBriefStore implements BriefStorePort {
         limit 1`,
       [this.orgId, slug],
     );
-    return rows[0];
+    const row = rows[0];
+    if (!row || !this.visible(row.team_id)) return undefined;
+    return row;
+  }
+
+  /**
+   * Team-hidden from this caller: a campaign row exists in this org for `id`,
+   * but its team is not one this caller's role or memberships can see. Used
+   * only by `lib/ownership.ts` `campaignKnown` (D166 item 4) to tell "never
+   * created" (which must still fall through to that function's report/asset
+   * fallback for an unsaved draft) from "exists but hidden" (which must 404
+   * immediately, even when a report or asset exists in the org's scope) —
+   * `findBriefById` alone cannot: team scope already makes it answer
+   * undefined for both.
+   */
+  async hiddenFromCaller(id: string): Promise<boolean> {
+    const { rows } = await this.db.query<{ team_id: string | null }>(
+      `select team_id from campaign where org_id = $1 and slug = $2`,
+      [this.orgId, id],
+    );
+    const row = rows[0];
+    return row !== undefined && !this.visible(row.team_id);
   }
 
   async listBriefs(): Promise<readonly StoredBrief[]> {
-    const { rows } = await this.db.query<{ slug: string; body: string; revision: string }>(
-      `select slug, body, revision from (
-         select distinct on (c.id) c.id, c.slug, bv.body, bv.revision
+    const { rows } = await this.db.query<{
+      slug: string;
+      body: string;
+      revision: string;
+      team_id: string | null;
+    }>(
+      `select slug, body, revision, team_id from (
+         select distinct on (c.id) c.id, c.slug, c.team_id, bv.body, bv.revision
            from campaign c
            join brief_version bv on bv.campaign_id = c.id
           where c.org_id = $1
@@ -94,6 +155,12 @@ export class PgBriefStore implements BriefStorePort {
     );
     const briefs: StoredBrief[] = [];
     for (const row of rows) {
+      // D166 item 2: a campaign hidden from this caller by team is skipped
+      // exactly like a row that fails to parse below — dropped from THIS
+      // listing, never from the org. The mutation manifest anchors on this
+      // predicate: drop it and the other-team-hidden test lists a campaign
+      // it must not.
+      if (!this.visible(row.team_id)) continue;
       const file = `${row.slug}.yaml`;
       try {
         briefs.push({
@@ -144,14 +211,42 @@ export class PgBriefStore implements BriefStorePort {
     return parseBriefText(`${slug}.yaml`, dumpBrief(parseBody(row.body)), opts);
   }
 
-  async createBrief(brief: CampaignBrief): Promise<StoredBrief> {
+  /**
+   * D166 item 3's authoritative check, inside the same transaction as the
+   * write it guards: `teamId` must name a team of THIS org. The route's own
+   * cheap check (the caller is `owner`/`admin`, or `teamId` is one of the
+   * caller's own teams) cannot catch an owner or admin naming another org's
+   * team (or a typo'd id) — `team.id` is a bare `text` primary key, not scoped
+   * to an org, so the `campaign.team_id` FK alone would only turn that into an
+   * opaque 500. `null` (no team) is never checked.
+   */
+  private async assertTeamInOrg(tx: SqlQuery, teamId: string): Promise<void> {
+    const { rows } = await tx.query<{ found: number }>(
+      `select 1 as found from team where id = $1 and org_id = $2`,
+      [teamId, this.orgId],
+    );
+    if (rows.length === 0) throw forbiddenTeam(teamId);
+  }
+
+  /**
+   * `teamId` is the interface's `createBrief`'s permanent `null` (D166: "It is
+   * null by default"); `createBriefWithTeam` is the Postgres-only entry point
+   * `pg-brief-store`'s own callers use once the route has already run the
+   * caller-side permission check (D166 item 3) — never part of
+   * `BriefStorePort`, since the fs backend has no team column to set (item 5).
+   */
+  private async createBriefInternal(
+    brief: CampaignBrief,
+    teamId: string | null,
+  ): Promise<StoredBrief> {
     assertSafeSlug(brief.id);
     return this.db.transaction(async (tx) => {
+      if (teamId !== null) await this.assertTeamInOrg(tx, teamId);
       const { rows } = await tx.query<{ id: string }>(
-        `insert into campaign (org_id, slug) values ($1, $2)
+        `insert into campaign (org_id, slug, team_id) values ($1, $2, $3)
          on conflict (org_id, slug) do nothing
          returning id`,
-        [this.orgId, brief.id],
+        [this.orgId, brief.id, teamId],
       );
       const campaignId = rows[0]?.id;
       if (!campaignId) {
@@ -170,6 +265,14 @@ export class PgBriefStore implements BriefStorePort {
     });
   }
 
+  async createBrief(brief: CampaignBrief): Promise<StoredBrief> {
+    return this.createBriefInternal(brief, null);
+  }
+
+  async createBriefWithTeam(brief: CampaignBrief, teamId: string | null): Promise<StoredBrief> {
+    return this.createBriefInternal(brief, teamId);
+  }
+
   /**
    * The compare-and-swap (D79) inside the write's own transaction: `select …
    * for update` on the campaign row serialises every writer targeting this
@@ -177,29 +280,44 @@ export class PgBriefStore implements BriefStorePort {
    * snapshot. This is never a lock held around caller code — the store's own
    * short write, not `withBriefLock`'s `fn` — so it cannot deadlock against a
    * `fn` that calls back into this store on another pooled connection.
+   *
+   * `teamId` is `undefined` for the interface's own `rewriteBrief` — leave the
+   * column exactly as it is, so a plain save never resets an assigned team —
+   * and `rewriteBriefWithTeam` (Postgres-only, D166 item 3) passes the value
+   * the route already authorized, `null` included, to set it. The row's
+   * current team is read here too so a campaign hidden from this caller by
+   * team (D166) answers `notFound`, the same as a genuinely missing row —
+   * without it, a member of another team could rewrite, or even reassign, a
+   * campaign they cannot otherwise see at all.
    */
-  async rewriteBrief(
+  private async rewriteBriefInternal(
     brief: CampaignBrief,
-    options?: { expectedRevision?: string },
+    expectedRevision: string | undefined,
+    teamId: string | null | undefined,
   ): Promise<StoredBrief> {
     assertSafeSlug(brief.id);
     return this.db.transaction(async (tx) => {
-      const { rows: campaigns } = await tx.query<{ id: string }>(
-        `select id from campaign where org_id = $1 and slug = $2 for update`,
+      const { rows: campaigns } = await tx.query<{ id: string; team_id: string | null }>(
+        `select id, team_id from campaign where org_id = $1 and slug = $2 for update`,
         [this.orgId, brief.id],
       );
-      const campaignId = campaigns[0]?.id;
-      if (!campaignId) throw notFound(brief.id);
+      const campaignRow = campaigns[0];
+      if (!campaignRow || !this.visible(campaignRow.team_id)) throw notFound(brief.id);
+      const campaignId = campaignRow.id;
       const { rows: versions } = await tx.query<{ version: number; revision: string }>(
         `select version, revision from brief_version where campaign_id = $1 order by version desc limit 1`,
         [campaignId],
       );
       const current = versions[0]!; // createBrief always writes version 1
-      if (options?.expectedRevision && options.expectedRevision !== current.revision) {
+      if (expectedRevision && expectedRevision !== current.revision) {
         const err = new Error("Brief was modified by another user.");
         (err as { code?: string; revision?: string }).code = "ECONFLICT";
         (err as { revision?: string }).revision = current.revision;
         throw err;
+      }
+      if (teamId !== undefined) {
+        if (teamId !== null) await this.assertTeamInOrg(tx, teamId);
+        await tx.query(`update campaign set team_id = $1 where id = $2`, [teamId, campaignId]);
       }
       const yaml = dumpBrief(brief);
       const revision = hashBytes(Buffer.from(yaml, "utf8"));
@@ -212,6 +330,21 @@ export class PgBriefStore implements BriefStorePort {
     });
   }
 
+  async rewriteBrief(
+    brief: CampaignBrief,
+    options?: { expectedRevision?: string },
+  ): Promise<StoredBrief> {
+    return this.rewriteBriefInternal(brief, options?.expectedRevision, undefined);
+  }
+
+  async rewriteBriefWithTeam(
+    brief: CampaignBrief,
+    teamId: string | null | undefined,
+    options?: { expectedRevision?: string },
+  ): Promise<StoredBrief> {
+    return this.rewriteBriefInternal(brief, options?.expectedRevision, teamId);
+  }
+
   async replaceBrief(
     brief: CampaignBrief,
     options?: { expectedRevision?: string },
@@ -220,6 +353,25 @@ export class PgBriefStore implements BriefStorePort {
       return await this.rewriteBrief(brief, options);
     } catch (error) {
       if (isErrno(error, "ENOENT")) return this.createBrief(brief);
+      throw error;
+    }
+  }
+
+  /**
+   * `replaceBrief`'s own ENOENT-falls-to-create shape, with the team the route
+   * already authorized (D166 item 3) carried down either path: a hidden or
+   * genuinely missing slug creates fresh with `teamId` (`null` included), an
+   * existing one is rewritten with it.
+   */
+  async replaceBriefWithTeam(
+    brief: CampaignBrief,
+    teamId: string | null,
+    options?: { expectedRevision?: string },
+  ): Promise<StoredBrief> {
+    try {
+      return await this.rewriteBriefWithTeam(brief, teamId, options);
+    } catch (error) {
+      if (isErrno(error, "ENOENT")) return this.createBriefWithTeam(brief, teamId);
       throw error;
     }
   }
