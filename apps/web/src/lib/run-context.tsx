@@ -846,15 +846,43 @@ export function RunProvider({ children }: { children: ReactNode }) {
           // F6: a failed re-read is not "nothing was saved" either — and the
           // interruption notice below already names the fact and the remedy, so a
           // failed read keeps that notice instead of being conflated with absence.
-          const persisted = await fetchPersistedRun(target.id).catch(() => null);
+          //
+          // A 403 no_membership on this re-read is the same fact `setBrief` and the
+          // mount restore already name in `membershipError`, never a nameless failed
+          // read — folding it into `null` (as this used to) hid a real membership
+          // denial behind LOST_JOB_MESSAGE (greptile "membership denial is hidden").
+          let deniedMembership = false;
+          const persisted = await fetchPersistedRun(target.id).catch((err) => {
+            if (isNoMembershipError(err)) deniedMembership = true;
+            return null;
+          });
           if (runSeq.current !== owned) return;
+          if (deniedMembership) {
+            setMembershipError(NO_ORGANISATION_YET_MESSAGE);
+            return;
+          }
           if (persisted) setRun({ result: persisted, target });
           setError(LOST_JOB_MESSAGE);
           return;
         }
         if (opts.adopted) {
-          const persisted = await fetchPersistedRun(target.id).catch(() => null);
+          // A 403 no_membership on this re-read must read as exactly that, never as
+          // "no run on disk" — folding it into `null` (as this used to) would commit
+          // the job's own (possibly partial, for a re-roll) payload and heal the
+          // notice below, both dishonest when the read that would justify either one
+          // just failed with a membership denial (greptile "membership denial is
+          // hidden").
+          let deniedMembership = false;
+          const persisted = await fetchPersistedRun(target.id).catch((err) => {
+            if (isNoMembershipError(err)) deniedMembership = true;
+            return null;
+          });
           if (runSeq.current !== owned) return;
+          if (deniedMembership) {
+            // Show the denial, commit nothing, leave the grid exactly as it was.
+            setMembershipError(NO_ORGANISATION_YET_MESSAGE);
+            return;
+          }
           if (persisted) {
             // A re-roll's own completed payload (`outcome.result.assets`) carries only
             // the regenerated cells — strictly fewer than the full persisted report it

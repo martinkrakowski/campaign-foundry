@@ -3121,6 +3121,94 @@ describe("RunProvider — running job awareness on reload and brief switch", () 
     expect(result.current.loading).toBe(false);
   });
 
+  test("an adopted job's completed re-read returning 403 no_membership shows the notice and commits nothing", async () => {
+    // greptile "membership denial is hidden": the re-read `adoptJob` makes for an
+    // adopted job used to fold ANY failure — including a 403 no_membership — into
+    // `null`, then fell through and committed the job's own (possibly partial, for a
+    // re-roll) payload while also healing any stale membershipError. A membership
+    // denial must never be treated as "no run on disk".
+    localStorage.setItem("cf:brief-picked", "1");
+    localStorage.setItem("cf:brief", JSON.stringify(activeBrief));
+    let queriedJob = false;
+    let resolveJob!: (res: Response) => void;
+    const jobPromise = new Promise<Response>((r) => {
+      resolveJob = r;
+    });
+    mockPipelineApi({
+      result: (url) => {
+        if (url.includes("/campaigns/jobs?campaignId=active-campaign")) {
+          queriedJob = true;
+          return json({ jobId: "job-reload-1" });
+        }
+        if (url.includes("/campaigns/result?campaignId=active-campaign")) {
+          return json(
+            { error: "This account belongs to no organisation.", code: "no_membership" },
+            403,
+          );
+        }
+        return json(EMPTY_REPORT);
+      },
+      job: () => jobPromise,
+    });
+
+    const { result } = setup();
+    await waitFor(() => expect(queriedJob).toBe(true));
+    await waitFor(() => expect(result.current.loading).toBe(true));
+    act(() => {
+      resolveJob(
+        jobOk({
+          halted: false,
+          assets: [asset({ productId: "p1" })],
+          log: { entries: [], campaignId: "active-campaign" },
+        }),
+      );
+    });
+
+    await waitFor(() => {
+      expect(result.current.membershipError).toBe(NO_ORGANISATION_YET_MESSAGE);
+    });
+    // The job's own completed payload (1 asset) is never committed on a denial.
+    expect(result.current.assets).toHaveLength(0);
+    expect(result.current.hasRun).toBe(false);
+    expect(result.current.loading).toBe(false);
+    expect(result.current.error).toBeNull();
+  });
+
+  test("an adopted job that's lost, with the re-read returning 403 no_membership, shows the notice instead of LOST_JOB_MESSAGE", async () => {
+    // Same fix, the "lost" outcome's own re-read: a membership denial here used to be
+    // folded into `null` too, surfacing as a plain "job interrupted" error with no
+    // mention of the real cause.
+    localStorage.setItem("cf:brief-picked", "1");
+    localStorage.setItem("cf:brief", JSON.stringify(activeBrief));
+    let queriedJob = false;
+    mockPipelineApi({
+      result: (url) => {
+        if (url.includes("/campaigns/jobs?campaignId=active-campaign")) {
+          queriedJob = true;
+          return json({ jobId: "job-lost-1" });
+        }
+        if (url.includes("/campaigns/result?campaignId=active-campaign")) {
+          return json(
+            { error: "This account belongs to no organisation.", code: "no_membership" },
+            403,
+          );
+        }
+        return json(EMPTY_REPORT);
+      },
+      job: () => json({ error: "not found" }, 404),
+    });
+
+    const { result } = setup();
+    await waitFor(() => expect(queriedJob).toBe(true));
+
+    await waitFor(() => {
+      expect(result.current.membershipError).toBe(NO_ORGANISATION_YET_MESSAGE);
+    });
+    expect(result.current.error).toBeNull();
+    expect(result.current.assets).toHaveLength(0);
+    expect(result.current.loading).toBe(false);
+  });
+
   test("reload when no job is running (404) leaves the page as today", async () => {
     localStorage.setItem("cf:brief-picked", "1");
     localStorage.setItem("cf:brief", JSON.stringify(activeBrief));
