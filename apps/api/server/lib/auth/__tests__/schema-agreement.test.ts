@@ -104,6 +104,22 @@ describe("Better Auth against PGlite (PT-1a, D174b(2))", () => {
     await sql.end();
   });
 
+  test("0008_auth refuses a second account row for the same provider identity", async () => {
+    const { sql } = await migratedPglite();
+    await sql.exec(
+      "insert into \"user\" (id, name, email, email_verified, updated_at) values ('u1', 'U', 'u1@example.com', false, now())",
+    );
+    const link = (id: string) =>
+      sql.query(
+        "insert into account (id, account_id, provider_id, user_id, updated_at) values ($1, 'g-123', 'google', 'u1', now())",
+        [id],
+      );
+
+    await link("a1");
+    await expect(link("a2")).rejects.toThrow(/account_provider_id_account_id_uidx/);
+    await sql.end();
+  });
+
   test("0008_auth is additive: applies on top of an existing org column from 0007 without assuming 0005-0007 exist", async () => {
     const raw = new PGlite();
     const sql = pgClient(DUMMY_CONFIG, () => pglitePgPool(raw));

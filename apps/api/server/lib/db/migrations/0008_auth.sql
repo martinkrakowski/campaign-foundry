@@ -75,6 +75,9 @@ create table account (
   updated_at timestamptz not null
 );
 create index account_user_id_idx on account (user_id);
+-- Better Auth checks for an existing account before inserting one, so two
+-- concurrent link requests could both find none; this makes the second fail.
+create unique index account_provider_id_account_id_uidx on account (provider_id, account_id);
 
 create table verification (
   id text primary key,
