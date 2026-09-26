@@ -44,9 +44,13 @@ export function Header() {
 
   useEffect(() => {
     let active = true;
-    void getCapabilities().then((caps) => {
-      if (active) setCapabilities(caps);
-    });
+    void getCapabilities()
+      .then((caps) => {
+        if (active) setCapabilities(caps);
+      })
+      .catch(() => {
+        /* No auth chrome without capabilities — the rest of the header still works. */
+      });
     return () => {
       active = false;
     };
@@ -296,12 +300,14 @@ export function MobileAuthSection({
   email,
   organizations,
   activeOrgId,
+  authError,
   onSwitchOrg,
   onSignOut,
 }: {
   readonly email?: string;
   readonly organizations?: Array<{ id: string; name: string }> | null;
   readonly activeOrgId?: string;
+  readonly authError?: string | null;
   readonly onSwitchOrg: (orgId: string) => void;
   readonly onSignOut: () => void;
 }) {
@@ -309,6 +315,11 @@ export function MobileAuthSection({
 
   return (
     <div data-testid="mobile-auth-controls" className="border-t border-border bg-surface p-4">
+      {authError && (
+        <p role="alert" className="mb-3 text-xs text-error">
+          {authError}
+        </p>
+      )}
       {hasMultipleOrgs && (
         <div className="mb-3">
           <label
@@ -359,32 +370,60 @@ function useBetterAuthState() {
   const session = authClient.useSession();
   const orgs = authClient.useListOrganizations();
   const activeOrg = authClient.useActiveOrganization();
+  // Better Auth's client actions resolve `{ data, error }` rather than throwing (the
+  // same shape `handleMagicLink` already reads on the sign-in page) — a rejected
+  // fetch is the other, rarer failure path, so both are caught here. Neither may
+  // reload or navigate: the previous organisation/session is still the live one.
+  const [authError, setAuthError] = useState<string | null>(null);
 
   const email = session?.data?.user?.email;
   const organizations = orgs?.data;
   const activeOrgId = activeOrg?.data?.id ?? organizations?.[0]?.id;
 
   const handleSwitchOrg = async (orgId: string) => {
-    await authClient.organization.setActive({ organizationId: orgId });
-    window.location.reload();
+    try {
+      const res = await authClient.organization.setActive({ organizationId: orgId });
+      if (res?.error) {
+        setAuthError(res.error.message || "Could not switch organisation.");
+        return;
+      }
+      setAuthError(null);
+      window.location.reload();
+    } catch (err) {
+      setAuthError(err instanceof Error ? err.message : "Could not switch organisation.");
+    }
   };
 
   const handleSignOut = async () => {
-    await authClient.signOut();
-    window.location.assign("/sign-in");
+    try {
+      const res = await authClient.signOut();
+      if (res?.error) {
+        setAuthError(res.error.message || "Could not sign out.");
+        return;
+      }
+      setAuthError(null);
+      window.location.assign("/sign-in");
+    } catch (err) {
+      setAuthError(err instanceof Error ? err.message : "Could not sign out.");
+    }
   };
 
-  return { email, organizations, activeOrgId, handleSwitchOrg, handleSignOut };
+  return { email, organizations, activeOrgId, authError, handleSwitchOrg, handleSignOut };
 }
 
 /** Desktop-only: the org switcher (when there's more than one) and the user menu. */
 export function BetterAuthSection() {
-  const { email, organizations, activeOrgId, handleSwitchOrg, handleSignOut } =
+  const { email, organizations, activeOrgId, authError, handleSwitchOrg, handleSignOut } =
     useBetterAuthState();
   const hasMultipleOrgs = Boolean(organizations && organizations.length > 1);
 
   return (
     <div className="hidden items-center gap-3 lg:flex">
+      {authError && (
+        <span role="alert" className="text-xs text-error">
+          {authError}
+        </span>
+      )}
       {hasMultipleOrgs && (
         <select
           aria-label="Switch organization"
@@ -406,7 +445,7 @@ export function BetterAuthSection() {
 
 /** The `authControls` Header hands `MobileMenu` under better-auth mode. */
 export function BetterAuthMobileControls() {
-  const { email, organizations, activeOrgId, handleSwitchOrg, handleSignOut } =
+  const { email, organizations, activeOrgId, authError, handleSwitchOrg, handleSignOut } =
     useBetterAuthState();
 
   return (
@@ -414,6 +453,7 @@ export function BetterAuthMobileControls() {
       email={email}
       organizations={organizations}
       activeOrgId={activeOrgId}
+      authError={authError}
       onSwitchOrg={(id) => void handleSwitchOrg(id)}
       onSignOut={() => void handleSignOut()}
     />
