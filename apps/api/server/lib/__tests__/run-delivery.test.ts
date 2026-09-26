@@ -7,7 +7,11 @@ import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { LOCAL_TENANT } from "../tenant.js";
 import { createJob, enqueueJob, getJob, getRunningJobId, resetJobs } from "../jobs.js";
 import { InProcessRunDelivery } from "../ports/in-process-run-delivery.js";
-import { getRunDelivery, setRunDelivery, resetRunDelivery } from "../ports/index.js";
+import {
+  getRunDelivery,
+  setRunDelivery,
+  resetRunDelivery,
+} from "../ports/run-delivery-registry.js";
 import type { RunDeliveryPort } from "../ports/run-delivery.port.js";
 import { executeRunRequest, type RunRequest } from "../run-request.js";
 import { readReport } from "../report.js";
@@ -20,15 +24,11 @@ import { setCapabilities } from "../capabilities.js";
 // `runCampaign` (lib/pipeline.ts) spied with a call-through: a reroll test
 // (finding 7b) asserts the policy/copy hashes it was actually invoked with,
 // rather than only the job's terminal status, and the duplicate-delivery test
-// (finding 3) asserts "nothing runs twice" by call count — a call-through spy
-// here rather than on `runJob` (lib/jobs.ts) itself, because `jobs.ts` is
-// reached from `lib/ports/index.ts` through the SAME short cycle
-// `InProcessRunDelivery` sits in (`ports/index -> in-process-run-delivery ->
-// jobs -> ports/index`, finding 6's own cycle): mocking `jobs.js` from this
-// file resolves that cyclic `import("../jobs.js")` back to the real,
-// un-mocked module instead of this test's mock, so `runJob` itself is not
-// reliably spyable here. `pipeline.ts` sits one hop further out
-// (`in-process-run-delivery -> run-request -> pipeline`) and mocks cleanly.
+// (finding 3) asserts "nothing runs twice" by call count. `pipeline.ts` is
+// the call `runCampaign` sits behind, one hop out from `run-request.ts`
+// (`in-process-run-delivery -> run-request -> pipeline`) — spying there
+// covers both assertions without reaching into `jobs.ts`'s own lock-chain
+// and timer bookkeeping.
 const runCampaignSpy = vi.hoisted(() => vi.fn());
 vi.mock("../pipeline.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../pipeline.js")>();

@@ -17,7 +17,6 @@ import { FsDecisionStore } from "./fs-decision-store.js";
 import { PgDecisionStore } from "./pg-decision-store.js";
 import { FsUsageStore } from "./fs-usage-store.js";
 import { PgUsageStore } from "./pg-usage-store.js";
-import { InProcessRunDelivery } from "./in-process-run-delivery.js";
 import type { BriefStorePort } from "./brief-store.port.js";
 import type { AssetStorePort } from "./asset-store.port.js";
 import type { PoolStorePort } from "./pool-store.port.js";
@@ -27,7 +26,6 @@ import type { ReportStorePort } from "./report-store.port.js";
 import type { OutputStorePort } from "./output-store.port.js";
 import type { DecisionStorePort } from "./decision-store.port.js";
 import type { UsageStorePort } from "./usage-store.port.js";
-import type { RunDeliveryPort } from "./run-delivery.port.js";
 
 export * from "./brief-store.port.js";
 export * from "./asset-store.port.js";
@@ -54,7 +52,10 @@ export * from "./fs-decision-store.js";
 export * from "./pg-decision-store.js";
 export * from "./fs-usage-store.js";
 export * from "./pg-usage-store.js";
-export * from "./in-process-run-delivery.js";
+// `in-process-run-delivery.js` is deliberately NOT re-exported here — it, and
+// the run-delivery registry that wires it up, live in
+// `run-delivery-registry.ts` instead (see that file's docstring for why:
+// folding it into this barrel closes a cycle back on itself).
 
 /**
  * The store registry (PT-0b2, D167 stamped). Every getter takes the scope a
@@ -182,16 +183,8 @@ const usage = new Registry<UsageStorePort>(
   (backend) => (backend === "postgres" ? new PgUsageStore(database()) : new FsUsageStore()),
 );
 
-// One adapter for the whole process (PT-6b1, D171, D174d): in-process delivery
-// today runs in the same process as the route that admits the job, so there is
-// nothing to key per tenant — a Kafka adapter (PT-6b2) would be the same,
-// scoped by topic rather than by root. Kept as a `Registry` anyway (rather
-// than the bare module-level `let` `run-delivery.port.ts` used to hold)
-// so it gets the same `set`/`reset` test seam every other store has.
-const runDelivery = new Registry<RunDeliveryPort>(
-  () => "in-process",
-  () => new InProcessRunDelivery(),
-);
+// `getRunDelivery`/`setRunDelivery`/`resetRunDelivery` live in
+// `run-delivery-registry.ts`, not here — see that file's docstring.
 
 export const getBriefStore = (scope: StorageScope): BriefStorePort => briefs.get(scope);
 export const setBriefStore = (store: BriefStorePort): void => briefs.set(store);
@@ -232,7 +225,3 @@ export const resetDecisionStore = (): void => decisions.reset();
 export const getUsageStore = (scope: StorageScope): UsageStorePort => usage.get(scope);
 export const setUsageStore = (store: UsageStorePort): void => usage.set(store);
 export const resetUsageStore = (): void => usage.reset();
-
-export const getRunDelivery = (scope: StorageScope): RunDeliveryPort => runDelivery.get(scope);
-export const setRunDelivery = (delivery: RunDeliveryPort): void => runDelivery.set(delivery);
-export const resetRunDelivery = (): void => runDelivery.reset();
