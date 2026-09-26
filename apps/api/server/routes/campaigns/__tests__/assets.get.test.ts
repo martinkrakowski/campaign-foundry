@@ -188,6 +188,22 @@ describe("GET /campaigns/assets", () => {
     expect(body.assets).toEqual([expect.objectContaining({ name: "bed.mp3", type: "audio/mpeg" })]);
   });
 
+  // The named-fetch path's campaignKnown catch (assets.get.ts) only folds a
+  // CampaignNotFoundError into the route's own 404 body — a genuine storage
+  // failure (no brief to fall back to either) must still surface as an error,
+  // not a false "not found".
+  test("named-asset fetch surfaces a genuine storage failure instead of a false 404", async () => {
+    const handler = await web(dir);
+    const { getAssetStore } = await import("../../../lib/ports/index.js");
+    const spy = vi
+      .spyOn(getAssetStore(LOCAL_TENANT), "listAssets")
+      .mockRejectedValueOnce(new Error("Disk error"));
+
+    const res = await get(handler, "?briefId=nonexistent&name=logo.png");
+    expect(res.status).toBe(500);
+    spy.mockRestore();
+  });
+
   test("returns empty list on store list failure", async () => {
     const handler = await web(dir);
     const { getAssetStore } = await import("../../../lib/ports/index.js");
