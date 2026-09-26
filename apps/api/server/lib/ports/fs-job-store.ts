@@ -133,23 +133,16 @@ export class FsJobStore implements JobStorePort {
     const existing = this.queuedTimers.get(id);
     if (existing) clearTimeout(existing);
     const timer = setTimeout(() => {
-      void this.withJobLock(id, async () => {
-        const entry = await this.getStoredJob(id);
-        if (!entry || entry.job.status !== "queued") return;
-        const updated: StoredJob = {
-          ...entry,
-          job: {
-            status: "failed",
-            done: 0,
-            total: 0,
-            log: null,
-            error: QUEUED_EXPIRED_MESSAGE,
-          },
-          settledAt: Date.now(),
-        };
-        await this.writeJobEntry(updated);
-        this.expireLater(id);
-      }).catch(() => undefined);
+      // `getStoredJob`'s own on-read staleness check (below) performs exactly
+      // this "still queued past its TTL → failed" write as a side effect — it
+      // must, so a caller polling this id sees it as failed even before this
+      // timer fires. By the time this callback runs, elapsed time is always
+      // >= QUEUED_TTL_MS, so that check is always true here; a second,
+      // duplicate write from this callback could never run (getStoredJob
+      // would already have changed the status to something other than
+      // "queued"), so this exists only to settle a row nobody ever polls —
+      // the same reason `expireLater`'s own callback exists for a settled row.
+      void this.withJobLock(id, () => this.getStoredJob(id)).catch(() => undefined);
     }, QUEUED_TTL_MS);
     timer.unref();
     this.queuedTimers.set(id, timer);

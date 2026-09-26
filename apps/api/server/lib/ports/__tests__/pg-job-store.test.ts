@@ -187,6 +187,31 @@ describe("PgJobStore (PT-6a, D171)", () => {
     }
   });
 
+  test("enqueueJob's own conflict path still answers the incumbent if it is ever reached", async () => {
+    // Same belt-and-braces proof as acquireJob's above, for the queued insert's
+    // own `on conflict … do update` path (item 2): force the pre-check to miss
+    // and confirm the insert's conflict handling still returns the incumbent.
+    const store = new PgJobStore(db, "local");
+    const first = await store.enqueueJob("camp");
+    const firstId = first.acquired ? first.jobId : "";
+    const spy = vi
+      .spyOn(
+        store as unknown as {
+          runningIncumbent: (...args: unknown[]) => Promise<string | undefined>;
+        },
+        "runningIncumbent",
+      )
+      .mockResolvedValueOnce(undefined);
+    try {
+      await expect(store.enqueueJob("camp")).resolves.toEqual({
+        acquired: false,
+        runningJobId: firstId,
+      });
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   test("a lapsed running row polls as failed without any claim ever reaping it (finding 5)", async () => {
     const store = new PgJobStore(db, "local");
     await seed(db, { id: "ghost", orgId: "local", campaignId: "camp", leaseOffsetMs: -1_000 });
