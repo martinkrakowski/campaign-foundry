@@ -312,6 +312,19 @@ describe("FsJobStore", () => {
     vi.useRealTimers();
   });
 
+  test("expireQueuedLater catches a getStoredJob rejection without unhandled rejection", async () => {
+    vi.useFakeTimers();
+    try {
+      const enq = await store.enqueueJob("camp");
+      expect(enq.acquired).toBe(true);
+      if (!enq.acquired) return;
+      vi.spyOn(store, "getStoredJob").mockRejectedValueOnce(new Error("read error"));
+      await vi.advanceTimersByTimeAsync(QUEUED_TTL_MS + 1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   test("acquireJob conditionally creates a new job or returns running incumbent", async () => {
     const first = await store.acquireJob("camp");
     expect(first.acquired).toBe(true);
