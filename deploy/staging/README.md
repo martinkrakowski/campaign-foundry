@@ -84,12 +84,21 @@ the repo. (A `read -s` inside `ssh m '…'` would run on the node, which has no 
 silence, so a pasted key would echo locally.)
 
 ```sh
-read -rs "KEY?Resend API key: " && echo && printf %s "$KEY" | ssh m 'KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl -n campaign-foundry-staging create secret generic campaign-foundry-resend --from-file=api-key=/dev/stdin'; unset KEY
+printf 'Resend API key: '; read -rs KEY; echo; [ -n "$KEY" ] && printf %s "$KEY" | ssh m 'export KUBECONFIG=/etc/rancher/k3s/k3s.yaml; kubectl -n campaign-foundry-staging create secret generic campaign-foundry-resend --from-file=api-key=/dev/stdin --dry-run=client -o yaml | kubectl apply -f -' || echo "no key entered"; unset KEY
 ```
 
-(That is zsh's prompt syntax; in bash, use `read -rsp "Resend API key: " KEY`.) If staging is
-already running, restart it so the pod picks the key up; on a fresh cluster, skip this, and the
-first deploy reads the secret:
+This works in bash and zsh, and `create --dry-run=client | apply` also replaces an existing
+secret, so it doesn't matter whether this is the first run. Paste the key at the prompt, **one
+line at a time**: if the whole block is pasted at once, `read` takes the next pasted line as the
+key. When already on the node, drop the `ssh m '…'` wrapper and `export KUBECONFIG` first.
+Confirm the key landed without showing it; a Resend key is 36 characters, which is 48 in base64:
+
+```sh
+ssh m 'KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl -n campaign-foundry-staging get secret campaign-foundry-resend -o go-template="{{len (index .data \"api-key\")}}"'
+```
+
+If staging is already running, restart it so the pod picks the key up. On a fresh cluster, skip
+this; the first deploy reads the secret:
 
 ```sh
 ssh m 'KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl -n campaign-foundry-staging rollout restart deploy/campaign-foundry'
