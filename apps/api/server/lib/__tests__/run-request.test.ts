@@ -528,4 +528,38 @@ describe("executeRunRequest org provider keys (PT-7b3a, D175)", () => {
     // Must reject, failing the run instead of using the platform geminiKey
     await expect(executeRunRequest(request)).rejects.toThrow("corrupted Gemini ciphertext");
   });
+
+  test("overlayOrgKeys resolves OpenRouter when only generatesHeadlines is specified without imageModel", async () => {
+    const orgOpenRouter = "sk-or-v1-org-only-headlines";
+    setProviderKeyStore(fakeProviderKeyStore({ openrouter: orgOpenRouter }));
+
+    const tenant: TenantContext = {
+      orgId: "org-acme",
+      userId: "user-1",
+      roles: ["owner"],
+      teamIds: [],
+    };
+    const baseEnv = runEnvironment(tenant);
+    const env = await overlayOrgKeys(baseEnv, { generatesHeadlines: true });
+
+    expect(env.providers.openRouterKey).toBe(orgOpenRouter);
+    expect(env.providers.keyOwners?.openrouter).toBe("org");
+  });
+
+  test("overlayOrgKeys falls back to all providers when options has neither imageModel nor generatesHeadlines", async () => {
+    const orgOpenRouter = "sk-or-v1-all-providers";
+    setProviderKeyStore(fakeProviderKeyStore({ openrouter: orgOpenRouter }));
+
+    const tenant: TenantContext = {
+      orgId: "org-acme",
+      userId: "user-1",
+      roles: ["owner"],
+      teamIds: [],
+    };
+    const baseEnv = runEnvironment(tenant);
+    const env = await overlayOrgKeys(baseEnv, {} as any);
+
+    expect(env.providers.openRouterKey).toBe(orgOpenRouter);
+    expect(env.providers.keyOwners?.openrouter).toBe("org");
+  });
 });
