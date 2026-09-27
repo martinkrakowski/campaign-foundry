@@ -9,10 +9,10 @@ import {
   templateFromCanonical,
 } from "@campaignfoundry/CampaignOrchestration";
 import { LOCAL_TENANT, type TenantContext } from "../tenant.js";
-import { enqueueJob, getJob, resetJobs, startQueuedJob } from "../jobs.js";
+import { enqueueJob, resetJobs, startQueuedJob } from "../jobs.js";
 import { executeRunRequest, overlayOrgKeys, type RunRequest } from "../run-request.js";
 import { resetProviderKeyStore, setProviderKeyStore } from "../ports/index.js";
-import type { Provider, ProviderKeyPort, ProviderKeySummary } from "../ports/provider-key.port.js";
+import type { Provider, ProviderKeyPort } from "../ports/provider-key.port.js";
 import { setCapabilities } from "../capabilities.js";
 import { runEnvironment, type RunEnvironment } from "../run-environment.js";
 import * as pipelineModule from "../pipeline.js";

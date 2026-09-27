@@ -6,7 +6,11 @@ import { readReport, writeReport } from "./report.js";
 import { decodeFireflyPlaintext, runEnvironment, type RunEnvironment } from "./run-environment.js";
 import type { TenantContext } from "./tenant.js";
 import { getProviderKeyStore } from "./ports/index.js";
-import { ProviderKeyUnavailableError, type ProviderKeyPort } from "./ports/provider-key.port.js";
+import {
+  ProviderKeyUnavailableError,
+  type ProviderKeyPort,
+  type Provider,
+} from "./ports/provider-key.port.js";
 import type { KeyOwner } from "./ports/usage-store.port.js";
 
 /**
