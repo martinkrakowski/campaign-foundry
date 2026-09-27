@@ -1,7 +1,7 @@
 import { Kafka, type Consumer, type EachMessagePayload } from "kafkajs";
 import { SAFE_ID_PATTERN } from "@campaignfoundry/CampaignOrchestration";
 import { kafkaSettings, type KafkaSettings } from "./config.js";
-import { startOrDrop, type RunRequest } from "./run-request.js";
+import { startOrDropWithSettled, type RunRequest } from "./run-request.js";
 
 /** Validates whether an unknown parsed payload matches the RunRequest interface. */
 export function isRunRequest(value: unknown): value is RunRequest {
@@ -47,7 +47,12 @@ export function isRunRequest(value: unknown): value is RunRequest {
 export class RunConsumer {
   private readonly consumer: Consumer;
   private readonly topic: string;
+  private readonly maxInFlight: number;
   private running = false;
+  /** Set for the whole of `stop()`, so a run settling while `disconnect()` is pending never resumes. */
+  private stopping = false;
+  private inFlight = 0;
+  private paused = false;
 
   constructor(settings?: KafkaSettings, kafkaClient?: Kafka, consumer?: Consumer) {
     const config = settings ?? kafkaSettings();
@@ -55,6 +60,7 @@ export class RunConsumer {
       throw new Error("Cannot initialize RunConsumer without Kafka settings.");
     }
     this.topic = config.topic;
+    this.maxInFlight = config.maxInFlight ?? 2;
     if (consumer) {
       this.consumer = consumer;
     } else {
@@ -78,6 +84,7 @@ export class RunConsumer {
 
   async start(): Promise<void> {
     if (this.running) return;
+    this.stopping = false;
     // Set before the first await so a concurrent `stop()` (e.g. a Nitro
     // close hook firing while `connect()` is still pending) sees a
     // consumer that is already "running" and disconnects it, rather than
@@ -146,14 +153,31 @@ export class RunConsumer {
     }
 
     const request = parsed;
-    await startOrDrop(request);
+    const result = await startOrDropWithSettled(request);
+    if (result.started) {
+      this.inFlight++;
+      if (this.inFlight >= this.maxInFlight && !this.paused) {
+        this.consumer.pause([{ topic: this.topic }]);
+        this.paused = true;
+      }
+      const onSettled = () => {
+        this.inFlight = Math.max(0, this.inFlight - 1);
+        if (this.running && !this.stopping && this.inFlight < this.maxInFlight && this.paused) {
+          this.consumer.resume([{ topic: this.topic }]);
+          this.paused = false;
+        }
+      };
+      void result.settled.then(onSettled, onSettled);
+    }
     await commitOffset();
   }
 
   async stop(): Promise<void> {
     if (this.running) {
+      this.stopping = true;
       await this.consumer.disconnect();
       this.running = false;
+      this.paused = false;
     }
   }
 }

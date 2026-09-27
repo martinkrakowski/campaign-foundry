@@ -386,6 +386,7 @@ describe("kafkaSettings (PT-6b2, D174d)", () => {
     "KAFKA_TOPIC",
     "KAFKA_GROUP_ID",
     "KAFKA_CONSUME",
+    "KAFKA_MAX_IN_FLIGHT",
   ] as const;
   const saved = Object.fromEntries(envKeys.map((k) => [k, process.env[k]]));
   const certsDir = resolve(projectRoot(), "certs");
@@ -473,6 +474,7 @@ describe("kafkaSettings (PT-6b2, D174d)", () => {
       topic: "cf.run-requests",
       groupId: "cf-workers",
       consume: false,
+      maxInFlight: 2,
     });
   });
 
@@ -488,7 +490,23 @@ describe("kafkaSettings (PT-6b2, D174d)", () => {
       topic: "custom.topic",
       groupId: "custom-group",
       consume: true,
+      maxInFlight: 2,
     });
+  });
+
+  test("respects explicit positive KAFKA_MAX_IN_FLIGHT and trims whitespace", () => {
+    process.env.KAFKA_BROKERS = "kafka1:9092";
+    process.env.KAFKA_MAX_IN_FLIGHT = "5";
+    expect(kafkaSettings()?.maxInFlight).toBe(5);
+
+    process.env.KAFKA_MAX_IN_FLIGHT = " 10 ";
+    expect(kafkaSettings()?.maxInFlight).toBe(10);
+
+    process.env.KAFKA_MAX_IN_FLIGHT = "";
+    expect(kafkaSettings()?.maxInFlight).toBe(2);
+
+    process.env.KAFKA_MAX_IN_FLIGHT = "   ";
+    expect(kafkaSettings()?.maxInFlight).toBe(2);
   });
 
   test("KAFKA_CONSUME=TRUE and 1 both result in consume: false", () => {
@@ -518,6 +536,7 @@ describe("kafkaSettings (PT-6b2, D174d)", () => {
       topic: "cf.run-requests",
       groupId: "cf-workers",
       consume: false,
+      maxInFlight: 2,
       caPath: caRel,
       clientCertPath: certRel,
       clientKeyPath: keyRel,
@@ -543,6 +562,7 @@ describe("kafkaSettings (PT-6b2, D174d)", () => {
       topic: "cf.run-requests",
       groupId: "cf-workers",
       consume: false,
+      maxInFlight: 2,
       caPath: caRel,
       ssl: {
         ca: "TEST-CA-PEM",
@@ -565,6 +585,7 @@ describe("kafkaSettings (PT-6b2, D174d)", () => {
       topic: "cf.run-requests",
       groupId: "cf-workers",
       consume: false,
+      maxInFlight: 2,
       clientCertPath: certRel,
       clientKeyPath: keyRel,
       ssl: {
@@ -706,5 +727,27 @@ describe("kafkaSettings (PT-6b2, D174d)", () => {
     process.env.KAFKA_CA_PATH = "certs/missing-ca.pem";
 
     expect(() => kafkaSettings()).toThrow(/Failed to read KAFKA_CA_PATH/);
+  });
+
+  test("a malformed KAFKA_MAX_IN_FLIGHT is a config error", () => {
+    process.env.KAFKA_BROKERS = "kafka1:9092";
+
+    process.env.KAFKA_MAX_IN_FLIGHT = "0";
+    expect(() => kafkaSettings()).toThrow(/KAFKA_MAX_IN_FLIGHT/);
+
+    process.env.KAFKA_MAX_IN_FLIGHT = "-1";
+    expect(() => kafkaSettings()).toThrow(/KAFKA_MAX_IN_FLIGHT/);
+
+    process.env.KAFKA_MAX_IN_FLIGHT = "not-a-number";
+    expect(() => kafkaSettings()).toThrow(/KAFKA_MAX_IN_FLIGHT/);
+
+    process.env.KAFKA_MAX_IN_FLIGHT = "2.5";
+    expect(() => kafkaSettings()).toThrow(/KAFKA_MAX_IN_FLIGHT/);
+
+    process.env.KAFKA_MAX_IN_FLIGHT = "9".repeat(400);
+    expect(() => kafkaSettings()).toThrow(/KAFKA_MAX_IN_FLIGHT/);
+
+    process.env.KAFKA_MAX_IN_FLIGHT = String(Number.MAX_SAFE_INTEGER + 1);
+    expect(() => kafkaSettings()).toThrow(/KAFKA_MAX_IN_FLIGHT/);
   });
 });

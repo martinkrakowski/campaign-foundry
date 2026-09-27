@@ -120,7 +120,7 @@ export function runJob(
   scope: StorageScope,
   id: string,
   work: (signal: AbortSignal) => Promise<void>,
-): void {
+): Promise<void> {
   // The deadline belongs here rather than inside the pipeline: this is the
   // scope that owns the job slot, and D73's whole point is that the slot must
   // come back.
@@ -182,7 +182,7 @@ export function runJob(
   // The loser of the race stays pending; without this an abort that arrives
   // after the work has already finished would surface as an unhandled rejection.
   expired.catch(() => undefined);
-  void (async () => {
+  return (async () => {
     try {
       await Promise.race([work(controller.signal), expired]);
     } catch (reason) {
