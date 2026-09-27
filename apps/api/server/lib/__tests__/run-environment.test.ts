@@ -42,4 +42,17 @@ describe("tenantOutputRoot (PT-0c)", () => {
       clientSecret: "secret-456",
     });
   });
+
+  test.each([
+    ["null", "null"],
+    ["an array", "[]"],
+    ["missing clientId", JSON.stringify({ clientSecret: "sec" })],
+    ["missing clientSecret", JSON.stringify({ clientId: "id" })],
+    ["empty clientId", JSON.stringify({ clientId: "", clientSecret: "sec" })],
+    ["empty clientSecret", JSON.stringify({ clientId: "id", clientSecret: "" })],
+    ["non-string clientId", JSON.stringify({ clientId: 123, clientSecret: "sec" })],
+    ["non-string clientSecret", JSON.stringify({ clientId: "id", clientSecret: true })],
+  ])("decodeFireflyPlaintext throws for %s", (_desc, input) => {
+    expect(() => decodeFireflyPlaintext(input)).toThrow();
+  });
 });

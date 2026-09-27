@@ -95,7 +95,20 @@ export function decodeFireflyPlaintext(plaintext: string): {
   clientId: string;
   clientSecret: string;
 } {
-  return JSON.parse(plaintext) as { clientId: string; clientSecret: string };
+  const parsed: unknown = JSON.parse(plaintext);
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error("Firefly plaintext must be a JSON object.");
+  }
+  const obj = parsed as Record<string, unknown>;
+  if (
+    typeof obj.clientId !== "string" ||
+    obj.clientId.length === 0 ||
+    typeof obj.clientSecret !== "string" ||
+    obj.clientSecret.length === 0
+  ) {
+    throw new Error('Firefly plaintext requires non-empty "clientId" and "clientSecret" strings.');
+  }
+  return { clientId: obj.clientId, clientSecret: obj.clientSecret };
 }
 
 /**

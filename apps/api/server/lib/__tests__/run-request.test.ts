@@ -385,11 +385,22 @@ describe("executeRunRequest org provider keys (PT-7b3a, D175)", () => {
     expect(allLogged).not.toContain("platform-gemini-secret-key-9999");
   });
 
-  test("corrupt Firefly plaintext falls back to platform Firefly credentials", async () => {
-    setProviderKeyStore(fakeProviderKeyStore({ firefly: "invalid-not-json" }));
+  test.each([
+    ["invalid JSON", "invalid-not-json"],
+    ["null", "null"],
+    ["an array", "[]"],
+    ["missing clientId", JSON.stringify({ clientSecret: "platform-sec" })],
+    ["missing clientSecret", JSON.stringify({ clientId: "platform-id" })],
+    ["empty clientId", JSON.stringify({ clientId: "", clientSecret: "platform-sec" })],
+    ["empty clientSecret", JSON.stringify({ clientId: "platform-id", clientSecret: "" })],
+    ["non-string clientId", JSON.stringify({ clientId: 123, clientSecret: "platform-sec" })],
+    ["non-string clientSecret", JSON.stringify({ clientId: "platform-id", clientSecret: true })],
+  ])("corrupt Firefly plaintext (%s) falls back to platform Firefly credentials", async (_desc, plaintext) => {
+    setProviderKeyStore(fakeProviderKeyStore({ firefly: plaintext }));
     const baseEnv = runEnvironment(LOCAL_TENANT);
     const env = await overlayOrgKeys(baseEnv);
     expect(env.providers.fireflyClientId).toBe(baseEnv.providers.fireflyClientId);
+    expect(env.providers.fireflyClientSecret).toBe(baseEnv.providers.fireflyClientSecret);
     expect(env.providers.keyOwners?.firefly).toBe("platform");
   });
 
