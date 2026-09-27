@@ -275,6 +275,69 @@ describe("PT-2d: team gates on routes (D166)", () => {
     await resPkgT1.arrayBuffer();
   });
 
+  test("GET /output/** normalises raw router params and prevents ./ or .. bypass", async () => {
+    const outDir = join(harness.outputRoot, "t1-camp", "renders");
+    mkdirSync(outDir, { recursive: true });
+    writeFileSync(join(outDir, "hero.png"), PNG);
+
+    const callWithRawPath = (pathParam: string, tenant: TenantContext) => {
+      const handler = (event: Parameters<typeof outputGetHandler>[0]) => {
+        event.context.params = { path: pathParam };
+        return outputGetHandler(event);
+      };
+      const caller = mountTenantRoute(handler, { path: "/output/**:path", tenant });
+      return caller(new Request("http://x/output/placeholder"));
+    };
+
+    // ./ detour: hidden campaign 404s for team-B, 200s for team-1
+    const resDotTB = await callWithRawPath("./t1-camp/renders/hero.png", tBMember);
+    expect(resDotTB.status).toBe(404);
+    expect(await resDotTB.json()).toEqual({ error: "Not found" });
+
+    const resDotT1 = await callWithRawPath("./t1-camp/renders/hero.png", t1Member);
+    expect(resDotT1.status).toBe(200);
+    await resDotT1.arrayBuffer();
+
+    // .. detour: hidden campaign 404s for team-B, 200s for team-1
+    const resDotDotTB = await callWithRawPath("zz/../t1-camp/renders/hero.png", tBMember);
+    expect(resDotDotTB.status).toBe(404);
+    expect(await resDotDotTB.json()).toEqual({ error: "Not found" });
+
+    const resDotDotT1 = await callWithRawPath("zz/../t1-camp/renders/hero.png", t1Member);
+    expect(resDotDotT1.status).toBe(200);
+    await resDotDotT1.arrayBuffer();
+
+    // Escaping path: rejected with 400 Invalid path BEFORE the gate (even for hidden campaign)
+    const resEscapeTB = await callWithRawPath("t1-camp/../../etc/passwd", tBMember);
+    expect(resEscapeTB.status).toBe(400);
+    expect(await resEscapeTB.json()).toEqual({ error: "Invalid path" });
+  });
+
+  test("GET /output/** gates both campaign-id positions when slug is packages", async () => {
+    const ownerStore = new PgBriefStore(harness.db, "local", "owner", ["owner"], []);
+    await ownerStore.createBrief({ ...sampleBrief, id: "packages" }, { teamId: "t1" });
+
+    const packagesOutDir = join(harness.outputRoot, "packages", "renders");
+    mkdirSync(packagesOutDir, { recursive: true });
+    writeFileSync(join(packagesOutDir, "hero.png"), PNG);
+
+    const callTB = mountTenantRoute(outputGetHandler, {
+      path: "/output/**:path",
+      tenant: tBMember,
+    });
+    const resTB = await callTB(new Request("http://x/output/packages/renders/hero.png"));
+    expect(resTB.status).toBe(404);
+    expect(await resTB.json()).toEqual({ error: "Not found" });
+
+    const callT1 = mountTenantRoute(outputGetHandler, {
+      path: "/output/**:path",
+      tenant: t1Member,
+    });
+    const resT1 = await callT1(new Request("http://x/output/packages/renders/hero.png"));
+    expect(resT1.status).toBe(200);
+    await resT1.arrayBuffer();
+  });
+
   test("PUT /campaigns/decisions answers 409 for team-B, 200 for team-1", async () => {
     await writeReport(t1Member, makeReport("t1-camp"));
 

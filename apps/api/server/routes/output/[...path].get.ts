@@ -1,4 +1,4 @@
-import { extname } from "node:path";
+import { extname, posix } from "node:path";
 import { getBriefStore, getOutputStore } from "../../lib/ports/index.js";
 
 import { requestTenant } from "../../lib/tenant.js";
@@ -55,14 +55,31 @@ export function parseByteRange(
  */
 export default defineEventHandler(async (event) => {
   const rawPath = getRouterParam(event, "path") ?? "";
-  const segments = rawPath.split("/").filter(Boolean);
-  const campaignId = segments[0] === "packages" ? segments[1] : segments[0];
+  const normalized = posix.normalize(rawPath);
+  if (normalized === ".." || normalized.startsWith("../") || posix.isAbsolute(normalized)) {
+    setResponseStatus(event, 400);
+    return { error: "Invalid path" };
+  }
+
+  const segments = normalized.split("/").filter((s) => Boolean(s) && s !== ".");
+  const candidateIds: string[] = [];
+  if (segments[0]) {
+    candidateIds.push(segments[0]);
+    if (segments[0] === "packages" && segments[1]) {
+      candidateIds.push(segments[1]);
+    }
+  }
+
   const scope = requestTenant(event);
-  if (campaignId) {
+  if (candidateIds.length > 0) {
     const briefs = getBriefStore(scope);
-    if (briefs.supportsTeams && (await briefs.campaignVisibility(campaignId)) === "hidden") {
-      setResponseStatus(event, 404);
-      return { error: "Not found" };
+    if (briefs.supportsTeams) {
+      for (const campaignId of candidateIds) {
+        if ((await briefs.campaignVisibility(campaignId)) === "hidden") {
+          setResponseStatus(event, 404);
+          return { error: "Not found" };
+        }
+      }
     }
   }
 
