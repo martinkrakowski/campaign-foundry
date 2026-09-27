@@ -661,3 +661,118 @@ describe("0011_campaign_team migration (D166, PT-2c)", () => {
     }
   });
 });
+
+describe("campaignId and resolveCampaign (PT-5a, D168, D178)", () => {
+  let db: SqlClient;
+  let store: PgBriefStore;
+
+  beforeEach(async () => {
+    db = await migratedDatabase();
+    store = new PgBriefStore(db, "local", "local");
+  });
+  afterEach(async () => {
+    await db.end();
+  });
+
+  test("StoredBrief carries campaignId matching campaign.id (PT-5a, D168)", async () => {
+    const created = await store.createBrief(brief("alpha"));
+    expect(created.campaignId).toBeDefined();
+    expect(typeof created.campaignId).toBe("string");
+
+    const { rows } = await db.query<{ id: string }>(
+      `select id from campaign where org_id = 'local' and slug = 'alpha'`,
+    );
+    expect(created.campaignId).toBe(rows[0]!.id);
+
+    const found = await store.findBriefById("alpha");
+    expect(found?.campaignId).toBe(rows[0]!.id);
+
+    const listed = await store.listBriefs();
+    expect(listed.find((b) => b.brief.id === "alpha")?.campaignId).toBe(rows[0]!.id);
+
+    const rewritten = await store.rewriteBrief(brief("alpha", "Updated"));
+    expect(rewritten.campaignId).toBe(rows[0]!.id);
+
+    const replaced = await store.replaceBrief(brief("alpha", "Replaced"));
+    expect(replaced.campaignId).toBe(rows[0]!.id);
+  });
+
+  test("a uuid and a slug resolve to the same campaign", async () => {
+    const created = await store.createBrief(brief("alpha"));
+    const uuid = created.campaignId;
+
+    const bySlug = await (store as any).resolveCampaign("alpha");
+    const byUuid = await (store as any).resolveCampaign(uuid);
+
+    expect(bySlug).toEqual({ campaignId: uuid, slug: "alpha" });
+    expect(byUuid).toEqual({ campaignId: uuid, slug: "alpha" });
+  });
+
+  test("another org's and a hidden campaign's refs are undefined", async () => {
+    // Another org's campaign
+    await db.query("insert into org (id, name) values ($1, $2)", ["other", "Other"]);
+    const otherStore = new PgBriefStore(db, "other", "local");
+    const otherCreated = await otherStore.createBrief(brief("other-camp"));
+    const otherUuid = otherCreated.campaignId;
+
+    expect(await (store as any).resolveCampaign("other-camp")).toBeUndefined();
+    expect(await (store as any).resolveCampaign(otherUuid)).toBeUndefined();
+
+    // Hidden campaign (team-scoped)
+    await db.query(
+      `insert into team (id, name, "memberCount", org_id, created_at) values ($1, $2, 0, $3, now())`,
+      ["t-secret", "Secret", "local"],
+    );
+    const adminStore = new PgBriefStore(db, "local", "admin", ["admin"]);
+    const hiddenCreated = await adminStore.createBrief(brief("hidden-camp"), {
+      teamId: "t-secret",
+    });
+    const hiddenUuid = hiddenCreated.campaignId;
+
+    const memberStore = new PgBriefStore(db, "local", "u1", [], ["t-other"]);
+    expect(await (memberStore as any).resolveCampaign("hidden-camp")).toBeUndefined();
+    expect(await (memberStore as any).resolveCampaign(hiddenUuid)).toBeUndefined();
+
+    // Positive control: admin can see it
+    expect(await (adminStore as any).resolveCampaign("hidden-camp")).toEqual({
+      campaignId: hiddenUuid,
+      slug: "hidden-camp",
+    });
+    expect(await (adminStore as any).resolveCampaign(hiddenUuid)).toEqual({
+      campaignId: hiddenUuid,
+      slug: "hidden-camp",
+    });
+  });
+
+  test("a lowercase uuid that is also a legal slug resolves as the uuid first", async () => {
+    // Campaign A has id = uuidA, slug = "slug-a"
+    const campA = await store.createBrief(brief("slug-a"));
+    const uuidA = campA.campaignId;
+
+    // Campaign B has id = uuidB, slug = uuidA (slug of B is uuid of A)
+    const campB = await store.createBrief(brief(uuidA));
+    const uuidB = campB.campaignId;
+
+    // Resolving uuidA must resolve to Campaign A (uuid wins over slug)
+    const resolvedA = await (store as any).resolveCampaign(uuidA);
+    expect(resolvedA).toEqual({ campaignId: uuidA, slug: "slug-a" });
+
+    // Resolving uuidB resolves to Campaign B
+    const resolvedB = await (store as any).resolveCampaign(uuidB);
+    expect(resolvedB).toEqual({ campaignId: uuidB, slug: uuidA });
+
+    // If a slug happens to look like a uuid but NO campaign exists with that uuid,
+    // it falls back to the slug
+    const unusedUuid = "11111111-2222-3333-4444-555555555555";
+    const campC = await store.createBrief(brief(unusedUuid));
+    const resolvedC = await (store as any).resolveCampaign(unusedUuid);
+    expect(resolvedC).toEqual({ campaignId: campC.campaignId, slug: unusedUuid });
+  });
+
+  test("a non-uuid slug never causes postgres syntax error and missing ref is undefined", async () => {
+    expect(await (store as any).resolveCampaign("non-existent-slug")).toBeUndefined();
+    expect(
+      await (store as any).resolveCampaign("00000000-0000-0000-0000-000000000000"),
+    ).toBeUndefined();
+  });
+});

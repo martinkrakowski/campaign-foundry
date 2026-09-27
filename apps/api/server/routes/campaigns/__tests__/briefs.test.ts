@@ -21,6 +21,7 @@ import {
 import { loadBrief } from "../../../lib/load-brief.js";
 
 import { LOCAL_TENANT } from "../../../lib/tenant.js";
+import { mountTenantApp, setupPgHarness } from "../../__tests__/tenant-harness.js";
 type Method = "get" | "post" | "put";
 
 const mount = (routes: { method: Method; path: string; handler: EventHandler }[]) => {
@@ -101,7 +102,11 @@ describe("GET /campaigns/briefs", () => {
     const json = (await res.json()) as { briefs: { file: string; brief: { id: string } }[] };
 
     expect(json.briefs).toHaveLength(1);
-    expect(json.briefs[0]).toMatchObject({ file: "good.yaml", brief: { id: "good" } });
+    expect(json.briefs[0]).toMatchObject({
+      file: "good.yaml",
+      brief: { id: "good" },
+      campaignId: "good",
+    });
     expect(warn).toHaveBeenCalled(); // logged the skipped malformed brief
   });
 
@@ -157,6 +162,32 @@ describe("GET /campaigns/briefs", () => {
     expect(json.briefs[0].revision).toMatch(/^[a-f0-9]{64}$/);
     const expectedHash = createHash("sha256").update(validBrief).digest("hex");
     expect(json.briefs[0].revision).toBe(expectedHash);
+  });
+
+  test("returns campaignId for each item on Postgres backend (PT-5a)", async () => {
+    const harness = await setupPgHarness();
+    try {
+      const listHandler = (await import("../briefs.get.js")).default;
+      const createHandler = (await import("../briefs.post.js")).default;
+      const call = mountTenantApp([
+        { method: "post", path: "/campaigns/briefs", handler: createHandler },
+        { method: "get", path: "/campaigns/briefs", handler: listHandler },
+      ]);
+
+      await call(jsonReq("http://x/campaigns/briefs", "POST", brief({ id: "camp-pg" })));
+      const res = await call(new Request("http://x/campaigns/briefs"));
+      expect(res.status).toBe(200);
+      const json = (await res.json()) as {
+        briefs: { file: string; brief: { id: string }; campaignId: string }[];
+      };
+      expect(json.briefs).toHaveLength(1);
+      expect(json.briefs[0].campaignId).toBeDefined();
+      expect(json.briefs[0].campaignId).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+      );
+    } finally {
+      await harness.cleanup();
+    }
   });
 });
 

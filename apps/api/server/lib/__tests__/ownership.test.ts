@@ -421,3 +421,115 @@ describe("assertSourceVisible (D166, PT-2c item 2)", () => {
     await expect(assertSourceVisible(owner, "org-wide")).resolves.toBeUndefined();
   });
 });
+
+describe("resolveCampaignRef (PT-5a, D178, D179)", () => {
+  let dir: string;
+  const origRoot = process.env.PROJECT_ROOT;
+
+  beforeEach(() => {
+    resetProjectRoot();
+    dir = mkdtempSync(join(tmpdir(), "cf-resolve-campaign-ref-"));
+    process.env.PROJECT_ROOT = dir;
+    resetBriefStore();
+  });
+
+  afterEach(() => {
+    resetBriefStore();
+    if (origRoot === undefined) delete process.env.PROJECT_ROOT;
+    else process.env.PROJECT_ROOT = origRoot;
+    resetProjectRoot();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("fs backend: resolves existing slug to slug and throws 404 for missing", async () => {
+    const { resolveCampaignRef } = (await import("../ownership.js")) as any;
+    await getBriefStore(LOCAL_TENANT).createBrief(sampleBrief);
+
+    const event = { context: { tenant: LOCAL_TENANT } } as any;
+    const slug = await resolveCampaignRef(event, "camp");
+    expect(slug).toBe("camp");
+
+    const err = await resolveCampaignRef(event, "missing").catch((e: any) => e);
+    expect(err).toBeInstanceOf(CampaignNotFoundError);
+    expect(err.statusCode).toBe(404);
+    expect(err.status).toBe(404);
+  });
+});
+
+describe("resolveCampaignRef on Postgres (PT-5a, D178)", () => {
+  let db: SqlClient;
+  let savedBackend: string | undefined;
+
+  beforeEach(async () => {
+    savedBackend = process.env.STORE_BACKEND;
+    process.env.STORE_BACKEND = "postgres";
+    db = await migratedDatabase();
+    setDatabase(db);
+    resetBriefStore();
+
+    await db.query(
+      `insert into team (id, name, "memberCount", org_id, created_at) values ($1, $2, 0, $3, now()), ($4, $5, 0, $6, now())`,
+      ["t1", "Team One", "local", "t2", "Team Two", "local"],
+    );
+  });
+
+  afterEach(async () => {
+    resetBriefStore();
+    resetDatabase();
+    if (savedBackend === undefined) delete process.env.STORE_BACKEND;
+    else process.env.STORE_BACKEND = savedBackend;
+    await db.end();
+  });
+
+  test("resolves uuid and slug to slug, throws 404 for missing, another org, or hidden", async () => {
+    const { resolveCampaignRef } = (await import("../ownership.js")) as any;
+    const ownerTenant: TenantContext = {
+      orgId: "local",
+      userId: "owner",
+      roles: ["owner"],
+      teamIds: [],
+    };
+    const created = await getBriefStore(ownerTenant).createBrief({ ...sampleBrief, id: "my-camp" });
+    const uuid = created.campaignId;
+
+    const event = { context: { tenant: ownerTenant } } as any;
+    expect(await resolveCampaignRef(event, "my-camp")).toBe("my-camp");
+    expect(await resolveCampaignRef(event, uuid)).toBe("my-camp");
+
+    // Missing
+    await expect(resolveCampaignRef(event, "missing-camp")).rejects.toThrow(CampaignNotFoundError);
+
+    // Another org
+    await db.query("insert into org (id, name) values ($1, $2)", ["other", "Other"]);
+    const otherTenant: TenantContext = {
+      orgId: "other",
+      userId: "u1",
+      roles: ["owner"],
+      teamIds: [],
+    };
+    const otherCreated = await getBriefStore(otherTenant).createBrief({
+      ...sampleBrief,
+      id: "other-camp",
+    });
+    await expect(resolveCampaignRef(event, "other-camp")).rejects.toThrow(CampaignNotFoundError);
+    await expect(resolveCampaignRef(event, otherCreated.campaignId)).rejects.toThrow(
+      CampaignNotFoundError,
+    );
+
+    // Hidden team
+    await getBriefStore(ownerTenant).createBrief(
+      { ...sampleBrief, id: "hidden-camp" },
+      { teamId: "t2" },
+    );
+    const outsiderTenant: TenantContext = {
+      orgId: "local",
+      userId: "u2",
+      roles: [],
+      teamIds: ["t1"],
+    };
+    const outsiderEvent = { context: { tenant: outsiderTenant } } as any;
+    await expect(resolveCampaignRef(outsiderEvent, "hidden-camp")).rejects.toThrow(
+      CampaignNotFoundError,
+    );
+  });
+});
