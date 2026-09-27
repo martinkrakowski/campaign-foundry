@@ -308,6 +308,22 @@ describe.each([{ backend: "fs" as const }, { backend: "postgres" as const }])(
         }
       });
 
+      // D177's correction: a blank brief cannot be a version, so a versionless
+      // campaign has nothing to copy — this must 404 like any other unknown
+      // source, never crash on the row that createCampaign minted.
+      test("a versionless source (nothing to copy yet) answers 404", async () => {
+        const harness = await setup();
+        try {
+          const { create } = mount();
+          await create(createReq({ name: "Blank Source" }));
+
+          const res = await create(createReq({ name: "Copy Of Blank", source: "blank-source" }));
+          expect(res.status).toBe(404);
+        } finally {
+          await harness.cleanup();
+        }
+      });
+
       test("dedupes the target slug against an existing campaign", async () => {
         const harness = await setup();
         try {
