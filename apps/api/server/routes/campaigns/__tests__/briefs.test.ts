@@ -1758,4 +1758,86 @@ describe("authoring briefs", () => {
     expect(warn).toHaveBeenCalled();
     spy.mockRestore();
   });
+
+  describe("reserved campaign ids", () => {
+    test.each(["cache", "jobs", "orgs", "packages"] as const)(
+      "POST /campaigns/briefs refuses reserved campaign id %s with 400",
+      async (id) => {
+        const { create } = await api();
+        const res = await create()(jsonReq("http://x/campaigns/briefs", "POST", brief({ id })));
+        expect(res.status).toBe(400);
+        expect(await res.json()).toEqual({
+          error: `"${id}" is reserved; choose another campaign id.`,
+        });
+      },
+    );
+
+    test.each(["cache", "jobs", "orgs", "packages"] as const)(
+      "POST /campaigns/briefs?replace=1 on non-existent reserved id refuses with 400",
+      async (id) => {
+        const { create } = await api();
+        const res = await create()(
+          jsonReq("http://x/campaigns/briefs?replace=1", "POST", brief({ id })),
+        );
+        expect(res.status).toBe(400);
+        expect(await res.json()).toEqual({
+          error: `"${id}" is reserved; choose another campaign id.`,
+        });
+      },
+    );
+
+    test("POST /campaigns/briefs?replace=1 on existing reserved campaign succeeds", async () => {
+      const { create } = await api();
+      const { dumpBrief } = await import("../../../lib/brief-files.js");
+      mkdirSync(join(dir, "briefs"), { recursive: true });
+      writeFileSync(
+        yamlPath("cache.yaml"),
+        dumpBrief(brief({ id: "cache", campaignMessage: "Initial" })),
+      );
+
+      const res = await create()(
+        jsonReq(
+          "http://x/campaigns/briefs?replace=1",
+          "POST",
+          brief({ id: "cache", campaignMessage: "Updated" }),
+        ),
+      );
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as { brief: { campaignMessage: string } };
+      expect(body.brief.campaignMessage).toBe("Updated");
+    });
+
+    test.each(["cache", "jobs", "orgs", "packages"] as const)(
+      "POST /campaigns/briefs/:id/duplicate refuses reserved newId %s with 400",
+      async (newId) => {
+        const { create, duplicate } = await api();
+        await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
+        const res = await duplicate()(
+          jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { newId }),
+        );
+        expect(res.status).toBe(400);
+        expect(await res.json()).toEqual({
+          error: `"${newId}" is reserved; choose another campaign id.`,
+        });
+      },
+    );
+
+    test("POST /campaigns/briefs/:id/duplicate from an existing reserved campaign succeeds", async () => {
+      const { duplicate } = await api();
+      const { dumpBrief } = await import("../../../lib/brief-files.js");
+      mkdirSync(join(dir, "briefs"), { recursive: true });
+      writeFileSync(
+        yamlPath("cache.yaml"),
+        dumpBrief(brief({ id: "cache", campaignMessage: "From cache" })),
+      );
+
+      const res = await duplicate()(
+        jsonReq("http://x/campaigns/briefs/cache/duplicate", "POST", { newId: "new-camp" }),
+      );
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as { brief: { id: string; campaignMessage: string } };
+      expect(body.brief.id).toBe("new-camp");
+      expect(body.brief.campaignMessage).toBe("From cache");
+    });
+  });
 });

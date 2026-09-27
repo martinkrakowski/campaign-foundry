@@ -38,9 +38,9 @@
     },
     {
       "file": "apps/api/server/lib/ports/fs-output-store.ts",
-      "before": "const HIDDEN_AREAS = [\"cache\", \"jobs\", \"orgs\"] as const;",
-      "after": "const HIDDEN_AREAS = [\"cache\", \"jobs\"] as const;",
-      "because": "the local output store serves orgs/*, so another org's report is readable through GET /output (CodeRabbit on #575).",
+      "before": "const HIDDEN_AREAS = RESERVED_CAMPAIGN_IDS.filter((id) => id !== \"packages\");",
+      "after": "const HIDDEN_AREAS = RESERVED_CAMPAIGN_IDS.filter((id) => id !== \"packages\" && id !== \"orgs\");",
+      "because": "the local output store serves orgs/*, so another org's report is readable through GET /output (CodeRabbit on #575). Re-anchored 2026-09-27 in FU-reserved-campaign-ids: HIDDEN_AREAS derives from RESERVED_CAMPAIGN_IDS.",
       "command": [
         "yarn",
         "vitest",

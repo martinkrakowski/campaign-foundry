@@ -1,4 +1,8 @@
-import { SAFE_ID_PATTERN, type CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
+import {
+  SAFE_ID_PATTERN,
+  isReservedCampaignId,
+  type CampaignBrief,
+} from "@campaignfoundry/CampaignOrchestration";
 import { dumpBrief, errorMessage } from "@campaignfoundry/shared";
 import { BRIEF_SOURCE_EXTS, hashBytes, isErrno } from "../brief-files.js";
 import type { SqlClient, SqlQuery } from "../db/sql-client.js";
@@ -55,6 +59,12 @@ function forbiddenTeam(teamId: string): Error {
 function assertSafeSlug(id: string): void {
   if (!SAFE_ID_PATTERN.test(id)) {
     throw new Error(`Brief id ${JSON.stringify(id)} is not a safe id.`);
+  }
+}
+
+function assertNotReserved(id: string): void {
+  if (isReservedCampaignId(id)) {
+    throw new Error(`"${id}" is reserved; choose another campaign id.`);
   }
 }
 
@@ -245,6 +255,7 @@ export class PgBriefStore implements BriefStorePort {
     teamId: string | null,
   ): Promise<StoredBrief> {
     assertSafeSlug(brief.id);
+    assertNotReserved(brief.id);
     return this.db.transaction(async (tx) => {
       if (teamId !== null) await this.assertTeamInOrg(tx, teamId);
       const { rows } = await tx.query<{ id: string }>(

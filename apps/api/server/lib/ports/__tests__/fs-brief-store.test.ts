@@ -17,7 +17,7 @@ import {
   type CampaignBrief,
 } from "@campaignfoundry/CampaignOrchestration";
 import { FsBriefStore } from "../fs-brief-store.js";
-import { hashBytes } from "../../brief-files.js";
+import { dumpBrief, hashBytes } from "../../brief-files.js";
 
 const minimalBrief: CampaignBrief = {
   schemaVersion: BRIEF_SCHEMA_VERSION,
@@ -378,5 +378,48 @@ describe("FsBriefStore", () => {
     unlock();
     await Promise.all([p1, p2]);
     expect(order).toEqual(["pOther", "p1", "p2"]);
+  });
+
+  test.each(["cache", "jobs", "orgs", "packages"] as const)(
+    "createBrief refuses reserved campaign id %s",
+    async (id) => {
+      await expect(store.createBrief({ ...minimalBrief, id })).rejects.toThrow(
+        `"${id}" is reserved; choose another campaign id.`,
+      );
+    },
+  );
+
+  test.each(["cache", "jobs", "orgs", "packages"] as const)(
+    "replaceBrief on a non-existent brief refuses reserved campaign id %s",
+    async (id) => {
+      await expect(store.replaceBrief({ ...minimalBrief, id })).rejects.toThrow(
+        `"${id}" is reserved; choose another campaign id.`,
+      );
+    },
+  );
+
+  test("stored brief with reserved id lists, reads, rewrites and replaces", async () => {
+    const cacheFile = join(dir, "cache.yaml");
+    writeFileSync(cacheFile, dumpBrief({ ...minimalBrief, id: "cache" }), "utf8");
+
+    const listed = await store.listBriefs();
+    expect(listed.some((b) => b.brief.id === "cache")).toBe(true);
+
+    const read = await store.readBrief("cache");
+    expect(read.id).toBe("cache");
+
+    const rewritten = await store.rewriteBrief({
+      ...minimalBrief,
+      id: "cache",
+      campaignMessage: "Updated cache",
+    });
+    expect(rewritten.brief.campaignMessage).toBe("Updated cache");
+
+    const replaced = await store.replaceBrief({
+      ...minimalBrief,
+      id: "cache",
+      campaignMessage: "Replaced cache",
+    });
+    expect(replaced.brief.campaignMessage).toBe("Replaced cache");
   });
 });

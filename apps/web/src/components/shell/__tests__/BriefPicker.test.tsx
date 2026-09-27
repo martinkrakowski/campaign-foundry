@@ -247,6 +247,23 @@ describe("BriefPicker create / duplicate", () => {
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.queryByLabelText("New brief id")).toBeNull();
   });
+
+  test.each(["cache", "jobs", "orgs", "packages"] as const)(
+    "rejects reserved duplicate id %s without calling API",
+    async (id) => {
+      const user = userEvent.setup();
+      const post = vi.fn((_url: string, _init: RequestInit) => json({}, 201));
+      route({ post: (url, init) => post(url, init) });
+      renderWithRun(<BriefPicker />);
+      await screen.findByText("demo.yaml");
+      await user.click(screen.getByText("Duplicate"));
+      await user.type(screen.getByLabelText("New brief id"), `${id}{Enter}`);
+      expect(
+        await screen.findByText(`"${id}" is reserved; choose another campaign id.`),
+      ).toBeTruthy();
+      expect(post).not.toHaveBeenCalled();
+    },
+  );
 });
 
 describe("BriefPicker type chip (T4)", () => {

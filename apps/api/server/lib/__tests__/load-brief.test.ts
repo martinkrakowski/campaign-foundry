@@ -82,6 +82,32 @@ describe("parseBrief", () => {
     expect(() => parseBrief(input)).toThrow(message);
   });
 
+  describe("reserved campaign ids", () => {
+    test.each(["cache", "jobs", "orgs", "packages"] as const)(
+      "accepts reserved campaign id %s so stored briefs parse on read",
+      (id) => {
+        expect(parseBrief({ ...valid, id }).id).toBe(id);
+      },
+    );
+
+    test("normal campaign id still passes", () => {
+      expect(parseBrief({ ...valid, id: "my-campaign" }).id).toBe("my-campaign");
+    });
+
+    test.each(["cache", "jobs", "orgs", "packages"] as const)(
+      "accepts non-campaign ids named %s (product and treatment)",
+      (id) => {
+        const parsed = parseBrief({
+          ...valid,
+          products: [{ id }, { id: "beta" }],
+          treatments: [{ id, layout: "headline-bottom", tone: "bold" }],
+        });
+        expect(parsed.products[0]?.id).toBe(id);
+        expect(parsed.treatments?.[0]?.id).toBe(id);
+      },
+    );
+  });
+
   describe("schemaVersion enforcement (D133)", () => {
     test("a brief without schemaVersion parses successfully and carries schemaVersion: 1", () => {
       const parsed = parseBrief(valid);

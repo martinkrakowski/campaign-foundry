@@ -1,4 +1,4 @@
-import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
+import { isReservedCampaignId, type CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { errorMessage } from "@campaignfoundry/shared";
 import { extractSourceAssetBriefIds, rewriteAssetPaths } from "../../lib/asset-files.js";
 import { isExistsError, isErrno, SYMLINK_WRITE_ERROR } from "../../lib/brief-files.js";
@@ -58,6 +58,11 @@ export default defineEventHandler(async (event) => {
     }
     teamId = rawTeamId as string | undefined;
     brief = parseBrief(briefBody);
+    const rawReplace = getQuery(event).replace;
+    const replace = (Array.isArray(rawReplace) ? rawReplace[0] : rawReplace) === "1";
+    if (!replace && isReservedCampaignId(brief.id)) {
+      throw new Error(`"${brief.id}" is reserved; choose another campaign id.`);
+    }
   } catch (error) {
     setResponseStatus(event, 400);
     return { error: errorMessage(error) };
@@ -93,6 +98,9 @@ export default defineEventHandler(async (event) => {
         const existErr = new Error(`Brief "${brief.id}" already exists.`);
         (existErr as { code?: string }).code = "EEXIST";
         throw existErr;
+      }
+      if (targetVisibility === "absent" && isReservedCampaignId(brief.id)) {
+        throw new Error(`"${brief.id}" is reserved; choose another campaign id.`);
       }
 
       // Copy any brief-scoped assets and rewrite paths only after validation succeeds (Save as…)
@@ -161,6 +169,10 @@ export default defineEventHandler(async (event) => {
     }
     if (isErrno(error, "EFORBIDDEN")) {
       setResponseStatus(event, 403);
+      return { error: errorMessage(error) };
+    }
+    if (errorMessage(error).includes("is reserved")) {
+      setResponseStatus(event, 400);
       return { error: errorMessage(error) };
     }
     throw error;
