@@ -5,6 +5,7 @@ import * as briefsApi from "@/lib/briefs-api";
 import * as providerKeysApi from "@/lib/provider-keys-api";
 import { ProviderKeysApiError } from "@/lib/provider-keys-api";
 import { authClient } from "@/lib/auth-client";
+import * as editorDirtyContext from "@/lib/editor-dirty-context";
 import { renderWithRun } from "@/__tests__/helpers";
 import { Header } from "@/components/shell/Header";
 import ProviderKeysSettingsPage from "../page";
@@ -92,6 +93,24 @@ describe("ProviderKeysSettingsPage — auth mode", () => {
     unmount();
     await act(async () => {
       resolveCaps(betterAuthCapabilities());
+      await Promise.resolve();
+    });
+    expect(consoleError).not.toHaveBeenCalled();
+  });
+
+  test("does not update state if unmounted before the capabilities promise rejects", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    let rejectCaps!: (err: unknown) => void;
+    vi.spyOn(briefsApi, "getCapabilities").mockImplementation(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectCaps = reject;
+        }),
+    );
+    const { unmount } = render(<ProviderKeysSettingsPage />);
+    unmount();
+    await act(async () => {
+      rejectCaps(new Error("too late"));
       await Promise.resolve();
     });
     expect(consoleError).not.toHaveBeenCalled();
@@ -675,5 +694,67 @@ describe("ProviderKeysSettingsPage — unsaved key material marks the page dirty
     // must still read dirty. A bug here would have the last row to go pristine wipe
     // every other row's flag.
     expect(await screen.findByRole("dialog", { name: "Unsaved edits" })).toBeTruthy();
+  });
+
+  test("the aggregate dirty-publish effect does not re-call setDirty when anyDirty is unchanged, even if setDirty's own identity changes", async () => {
+    // `setDirty` from the REAL EditorDirtyProvider is stable for the life of that
+    // one provider instance (`useCallback(fn, [])`), so nothing in this app's own
+    // tree can make its identity change without unmounting the whole page — which
+    // would also reset `dirtyRows`, and the ref would start fresh anyway. The only
+    // way to exercise "the effect re-runs on a dependency change while `anyDirty`
+    // itself is unchanged" is to control that one dependency directly: mock
+    // `useEditorDirty` so it returns a NEW `setDirty` function on a later render of
+    // the SAME mounted `BetterAuthProviderKeys`, while `dirtyRows` (hence
+    // `anyDirty`) is untouched — driven here by the list fetch resolving, which
+    // triggers a re-render but touches no dirty-row state at all.
+    vi.spyOn(briefsApi, "getCapabilities").mockResolvedValue(betterAuthCapabilities());
+    let resolveList!: (summaries: providerKeysApi.ProviderKeySummary[]) => void;
+    vi.spyOn(providerKeysApi, "listProviderKeys").mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveList = resolve;
+        }),
+    );
+    asOwner();
+
+    const setDirtyBeforeResolve = vi.fn();
+    const setDirtyAfterResolve = vi.fn();
+    let activeSetDirty = setDirtyBeforeResolve;
+    vi.spyOn(editorDirtyContext, "useEditorDirty").mockImplementation(() => ({
+      isDirty: false,
+      setDirty: activeSetDirty,
+      guardedAction: vi.fn(() => true),
+      guardedPush: vi.fn(() => true),
+    }));
+
+    render(<ProviderKeysSettingsPage />);
+    await screen.findByText("Loading…");
+
+    // Mount: `anyDirty` starts `false` (no rows exist yet — the list hasn't
+    // resolved), the ref starts `null`, `null !== false` is true, so this is a
+    // real (first) publish.
+    await waitFor(() => expect(setDirtyBeforeResolve).toHaveBeenCalledWith(false));
+    expect(setDirtyBeforeResolve).toHaveBeenCalledTimes(1);
+
+    // Swap the identity the hook resolves to, then resolve the list — this flips
+    // `phase`/`keys` but no row exists yet to make `dirtyRows` non-empty, so
+    // `anyDirty` is `false` both before and after. The effect's dependency array
+    // still changes (a new `setDirty` reference), so it reruns; the ref guard must
+    // recognise `anyDirty` is unchanged and skip the call.
+    activeSetDirty = setDirtyAfterResolve;
+    await act(async () => {
+      resolveList([]);
+      await Promise.resolve();
+    });
+    await screen.findByText("Gemini");
+
+    // The guarded effect (line 188) must never call the new identity — that is
+    // the branch this test exists to prove. A separate, unrelated effect (the
+    // "clear on unmount" one, which also depends on `setDirty`) tears down its
+    // OLD instance when `setDirty` changes identity, and ITS cleanup legitimately
+    // calls the OLD `setDirty(false)` one more time — that is a real, correct
+    // call from a different effect, not a second call from the guarded one, so
+    // it is not asserted against here.
+    expect(setDirtyAfterResolve).not.toHaveBeenCalled();
   });
 });

@@ -275,13 +275,22 @@ function ProviderRow({
 
   // Only a boolean crosses into the shared dirty context — never the typed value
   // itself (PRRT_kwDOSzP1zc6mXO6d: "never put the typed value into that context").
+  //
+  // No ref-guard here: `onDirtyChange` is a fresh closure every time the parent
+  // re-renders (it is defined inline in its `.map()`), so this effect re-runs on
+  // every parent render regardless of whether `hasInput` actually changed for
+  // THIS row — deduping that down to real transitions only would just move the
+  // guard from where the state of record lives (the parent's `dirtyRows`,
+  // `prev[provider] === dirty` below) to a second copy of the same check up
+  // here. The parent's own check is what makes a same-value call a no-op —
+  // `setDirtyRows` there returns `prev` unchanged, and React bails out of
+  // re-rendering on that referential equality — so this effect can call
+  // `onDirtyChange` unconditionally and the redundant round trip it causes on
+  // every re-render (including this row's own mount, and every sibling row's
+  // mount) settles in one extra pass, not a loop.
   const hasInput = provider === "firefly" ? clientId !== "" || clientSecret !== "" : key !== "";
-  const lastReportedDirtyRef = useRef<boolean | null>(null);
   useEffect(() => {
-    if (lastReportedDirtyRef.current !== hasInput) {
-      lastReportedDirtyRef.current = hasInput;
-      onDirtyChange(hasInput);
-    }
+    onDirtyChange(hasInput);
   }, [hasInput, onDirtyChange]);
 
   const handleSave = async (e: FormEvent) => {
