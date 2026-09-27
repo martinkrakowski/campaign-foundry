@@ -93,12 +93,19 @@ export default defineEventHandler(async (event) => {
   }
 
   const briefs = getBriefStore(scope);
-  if (briefs.supportsTeams && (await briefs.campaignVisibility(campaignId)) === "hidden") {
+  // See result.get.ts: resolve a uuid to its slug on a backend that has one
+  // (D178), pass a slug through unchanged otherwise — an unsaved draft has no
+  // campaign row yet (packaging an unsaved run's output is a supported flow),
+  // and on fs the id IS the slug (D179), so no lookup runs there. readReport
+  // below still answers undefined for a genuinely unknown ref.
+  const resolved = briefs.supportsTeams ? await briefs.resolveCampaign(campaignId) : undefined;
+  const slug = resolved?.slug ?? campaignId;
+  if (briefs.supportsTeams && (await briefs.campaignVisibility(slug)) === "hidden") {
     setResponseStatus(event, 404);
     return { error: "Campaign report not found" };
   }
 
-  const report = await readReport(scope, campaignId);
+  const report = await readReport(scope, slug);
   if (report === undefined) {
     setResponseStatus(event, 404);
     return { error: "Campaign report not found" };
@@ -111,7 +118,7 @@ export default defineEventHandler(async (event) => {
   }
 
   const outputStore = getOutputStore(scope);
-  const fsPackageStore = new FileSystemPackageStore(storageRoots(scope).outputRoot, campaignId);
+  const fsPackageStore = new FileSystemPackageStore(storageRoots(scope).outputRoot, slug);
   const packageStore: PackageStorePort = {
     async readAsset(relativePath: string): Promise<Uint8Array> {
       const lookup = await outputStore.openOutput(relativePath);
@@ -131,7 +138,7 @@ export default defineEventHandler(async (event) => {
   };
 
   const result = await new PackageForPlatformUseCase(packageStore).execute({
-    campaignId,
+    campaignId: slug,
     assets: parsed.assets,
     platforms,
     packagedAt: new Date().toISOString(),

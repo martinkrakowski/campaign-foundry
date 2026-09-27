@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "PT-5b1-routes-take-campaign-refs",
+  "mutations": [
+    {
+      "file": "apps/api/server/routes/campaigns/result.get.ts",
+      "before": "  const briefs = getBriefStore(scope);\n  const resolved = briefs.supportsTeams ? await briefs.resolveCampaign(campaignId) : undefined;\n  const slug = resolved?.slug ?? campaignId;\n  await campaignKnown(scope, slug, \"report\");\n  const report = await readReport(scope, slug);",
+      "after": "  await campaignKnown(scope, campaignId, \"report\");\n  const report = await readReport(scope, campaignId);",
+      "because": "without resolving the campaign ref to slug (and passing an unresolved slug through unchanged), GET /campaigns/result fails to find reports for campaigns addressed by uuid",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/__tests__/routes-campaign-refs.test.ts",
+        "-t",
+        "GET /campaigns/result"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

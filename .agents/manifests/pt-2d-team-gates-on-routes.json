@@ -4,9 +4,9 @@
   "mutations": [
     {
       "file": "apps/api/server/routes/campaigns/decisions.put.ts",
-      "before": "  const briefs = getBriefStore(tenant);\n  if (briefs.supportsTeams && (await briefs.campaignVisibility(campaignId)) === \"hidden\") {\n    setResponseStatus(event, 409);\n    return { error: \"This campaign has no run to review.\" };\n  }",
+      "before": "  if (briefs.supportsTeams && (await briefs.campaignVisibility(slug)) === \"hidden\") {\n    setResponseStatus(event, 409);\n    return { error: \"This campaign has no run to review.\" };\n  }",
       "after": "  // mutant: remove visibility check",
-      "because": "without the visibility check, PUT /campaigns/decisions updates decisions for a team-hidden campaign instead of answering 409",
+      "because": "without the visibility check, PUT /campaigns/decisions updates decisions for a team-hidden campaign instead of answering 409. Re-anchored 2026-09-27 by PT-5b1: campaignId is resolved to slug at the route boundary (D178) before this check, moving `const briefs = getBriefStore(tenant);` off the anchor; the mutation is unchanged in meaning.",
       "command": [
         "yarn",
         "vitest",

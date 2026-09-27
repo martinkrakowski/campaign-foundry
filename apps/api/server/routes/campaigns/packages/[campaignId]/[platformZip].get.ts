@@ -50,14 +50,22 @@ export default defineEventHandler(async (event) => {
 
   const scope = requestTenant(event);
   const briefs = getBriefStore(scope);
-  if (briefs.supportsTeams && (await briefs.campaignVisibility(campaignId)) === "hidden") {
+  // See result.get.ts: resolve a uuid to its slug on a backend that has one
+  // (D178), pass a slug through unchanged otherwise — an unsaved draft has no
+  // campaign row yet, and on fs the id IS the slug (D179), so no lookup runs
+  // there (a directory scan here would also race the platform-folder rewrite
+  // this route's own retry below exists to handle). listPackageFiles still
+  // answers undefined for a genuinely unknown ref.
+  const resolved = briefs.supportsTeams ? await briefs.resolveCampaign(campaignId) : undefined;
+  const slug = resolved?.slug ?? campaignId;
+  if (briefs.supportsTeams && (await briefs.campaignVisibility(slug)) === "hidden") {
     setResponseStatus(event, 404);
     return { error: "Not found" };
   }
 
   let files: FileEntry[];
   try {
-    const entries = await getOutputStore(scope).listPackageFiles(campaignId, platformId);
+    const entries = await getOutputStore(scope).listPackageFiles(slug, platformId);
     if (entries === undefined) {
       setResponseStatus(event, 404);
       return { error: "Not found" };

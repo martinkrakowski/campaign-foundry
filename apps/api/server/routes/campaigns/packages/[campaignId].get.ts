@@ -1,7 +1,7 @@
 import { SAFE_ID_PATTERN } from "@campaignfoundry/CampaignOrchestration";
 import { getBriefStore, getOutputStore } from "../../../lib/ports/index.js";
-
 import { requestTenant } from "../../../lib/tenant.js";
+
 /**
  * GET /campaigns/packages/:campaignId — the persisted platform manifests of a
  * campaign's packages, read through the output store. 404 if none.
@@ -14,11 +14,17 @@ export default defineEventHandler(async (event) => {
   }
   const scope = requestTenant(event);
   const briefs = getBriefStore(scope);
-  if (briefs.supportsTeams && (await briefs.campaignVisibility(campaignId)) === "hidden") {
+  // See result.get.ts: resolve a uuid to its slug on a backend that has one
+  // (D178), pass a slug through unchanged otherwise — an unsaved draft has no
+  // campaign row yet, and on fs the id IS the slug (D179), so no lookup runs
+  // there. listPackageManifests still answers empty for a genuinely unknown ref.
+  const resolved = briefs.supportsTeams ? await briefs.resolveCampaign(campaignId) : undefined;
+  const slug = resolved?.slug ?? campaignId;
+  if (briefs.supportsTeams && (await briefs.campaignVisibility(slug)) === "hidden") {
     setResponseStatus(event, 404);
     return { error: "No packages found" };
   }
-  const platforms = await getOutputStore(requestTenant(event)).listPackageManifests(campaignId);
+  const platforms = await getOutputStore(scope).listPackageManifests(slug);
   if (platforms.length === 0) {
     setResponseStatus(event, 404);
     return { error: "No packages found" };

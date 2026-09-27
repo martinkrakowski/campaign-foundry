@@ -13,6 +13,14 @@ import { getAssetStore, getBriefStore } from "../../lib/ports/index.js";
 
 import { requestTenant } from "../../lib/tenant.js";
 /**
+ * A client-chosen slug (an unsaved draft's id) never looks like this, so a ref
+ * shaped like one is a real campaign reference (D178) rather than a brand-new
+ * draft id — if it fails to resolve, the campaign genuinely does not exist,
+ * unlike a fresh slug (which this route has always accepted, creating the
+ * asset directory for a not-yet-saved brief).
+ */
+const CAMPAIGN_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/**
  * POST /campaigns/assets — store a PNG/JPEG/MP3/M4A under `assets/inputs/<briefId>/<name>`.
  *
  * Local authoring tool: writes are confined to `assets/inputs/<briefId>/` and never
@@ -74,20 +82,32 @@ export default defineEventHandler(async (event) => {
   }
 
   const briefs = getBriefStore(scope);
-  if (briefs.supportsTeams && (await briefs.campaignVisibility(briefId)) === "hidden") {
+  // On fs the id IS the slug (D179): no lookup runs there at all (no
+  // uuid concept exists on that backend either), matching this route's
+  // unconditional-write behaviour from before campaign refs existed.
+  const resolved = briefs.supportsTeams ? await briefs.resolveCampaign(briefId) : undefined;
+  if (!resolved && briefs.supportsTeams && CAMPAIGN_UUID_PATTERN.test(briefId)) {
+    setResponseStatus(event, 404);
+    return { error: `Campaign "${briefId}" not found.` };
+  }
+  // A slug that did not resolve passes through unchanged (an unsaved draft
+  // has no campaign row yet, and this route has always let a caller create
+  // its asset directory ahead of the brief being saved).
+  const slug = resolved?.slug ?? briefId;
+  if (briefs.supportsTeams && (await briefs.campaignVisibility(slug)) === "hidden") {
     setResponseStatus(event, 404);
     return { error: `Campaign "${briefId}" not found.` };
   }
 
   try {
-    const result = await getAssetStore(scope).writeAsset(briefId, name, bytes);
+    const result = await getAssetStore(scope).writeAsset(slug, name, bytes);
     setResponseStatus(event, 201);
     return { path: result.path };
   } catch (error) {
     if (isExistsError(error)) {
       setResponseStatus(event, 409);
       return {
-        error: `Asset "${getAssetStore(scope).assetRelPath(briefId, name)}" already exists.`,
+        error: `Asset "${getAssetStore(scope).assetRelPath(slug, name)}" already exists.`,
       };
     }
     throw error;

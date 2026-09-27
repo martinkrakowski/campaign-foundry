@@ -71,19 +71,44 @@ export default defineEventHandler(async (event) => {
   }
 
   const scope = requestTenant(event);
-  if (candidateIds.length > 0) {
-    const briefs = getBriefStore(scope);
-    if (briefs.supportsTeams) {
-      for (const campaignId of candidateIds) {
-        if ((await briefs.campaignVisibility(campaignId)) === "hidden") {
-          setResponseStatus(event, 404);
-          return { error: "Not found" };
-        }
+  const briefs = getBriefStore(scope);
+  const campaignSegmentIndex = segments[0] === "packages" ? 1 : 0;
+  const campaignSegment = segments[campaignSegmentIndex];
+
+  // Resolve every id-shaped segment exactly once, and reuse that single
+  // resolution for both the served path and the visibility check below.
+  // Checking visibility against the RAW segment (the old code's separate,
+  // unresolved candidateIds loop) let a uuid whose literal text collides with
+  // a different campaign's slug hide a visible campaign's own output (its
+  // uuid happens to equal a team-hidden campaign's slug) — campaignVisibility
+  // always matches by slug, never by id. On fs the id IS the slug (D179) and
+  // `supportsTeams` is false, so no lookup runs there at all, same guard
+  // every other route in this PR uses.
+  const resolvedSlugs = new Map<string, string>();
+  if (briefs.supportsTeams) {
+    for (const candidateId of candidateIds) {
+      const resolved = await briefs.resolveCampaign(candidateId);
+      if (resolved) resolvedSlugs.set(candidateId, resolved.slug);
+    }
+  }
+
+  let resolvedPath = rawPath;
+  if (campaignSegment) {
+    segments[campaignSegmentIndex] = resolvedSlugs.get(campaignSegment) ?? campaignSegment;
+    resolvedPath = segments.join("/");
+  }
+
+  if (briefs.supportsTeams) {
+    for (const candidateId of candidateIds) {
+      const slug = resolvedSlugs.get(candidateId) ?? candidateId;
+      if ((await briefs.campaignVisibility(slug)) === "hidden") {
+        setResponseStatus(event, 404);
+        return { error: "Not found" };
       }
     }
   }
 
-  const lookup = await getOutputStore(scope).openOutput(rawPath);
+  const lookup = await getOutputStore(scope).openOutput(resolvedPath);
   if (!lookup.found) {
     if (lookup.reason === "invalid") {
       setResponseStatus(event, 400);

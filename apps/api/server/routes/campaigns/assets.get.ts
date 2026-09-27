@@ -41,17 +41,28 @@ export default defineEventHandler(async (event) => {
       setResponseStatus(event, 400);
       return { error: "Invalid asset name." };
     }
+  }
+
+  // See result.get.ts: resolve a uuid to its slug on a backend that has one
+  // (D178), pass a slug through unchanged otherwise — an unsaved draft has no
+  // campaign row yet (assets are routinely uploaded before a brief is saved),
+  // and on fs the id IS the slug (D179), so no lookup runs there. The reads
+  // below already answer their own "not found" for a genuinely unknown ref.
+  const briefs = getBriefStore(scope);
+  const resolved = briefs.supportsTeams ? await briefs.resolveCampaign(briefId) : undefined;
+  const slug = resolved?.slug ?? briefId;
+
+  if (name !== undefined) {
     // D166 (PT-2c): a campaign hidden from this caller by team answers the same
     // "Asset ... not found" 404 as a missing asset, so the body never says which
     // applies. Only team visibility is checked here, not the listing: an unsaved
     // draft has no stored brief, and listing every asset just to read one lets an
     // unrelated file's disappearance turn a readable request into a 500.
-    const briefs = getBriefStore(scope);
-    if (briefs.supportsTeams && (await briefs.campaignVisibility(briefId)) === "hidden") {
+    if (briefs.supportsTeams && (await briefs.campaignVisibility(slug)) === "hidden") {
       setResponseStatus(event, 404);
       return { error: `Asset "${name}" not found.` };
     }
-    const bytes = await getAssetStore(scope).readAsset(briefId, name);
+    const bytes = await getAssetStore(scope).readAsset(slug, name);
     if (!bytes) {
       setResponseStatus(event, 404);
       return { error: `Asset "${name}" not found.` };
@@ -62,13 +73,13 @@ export default defineEventHandler(async (event) => {
     return bytes;
   }
 
-  await campaignKnown(scope, briefId, "asset");
+  await campaignKnown(scope, slug, "asset");
 
   try {
-    const assets = await getAssetStore(scope).listAssets(briefId);
+    const assets = await getAssetStore(scope).listAssets(slug);
     return { assets };
   } catch (error) {
-    console.warn(`[assets] could not read assets for brief ${briefId}: ${errorMessage(error)}`);
+    console.warn(`[assets] could not read assets for brief ${slug}: ${errorMessage(error)}`);
     return { assets: [] };
   }
 });

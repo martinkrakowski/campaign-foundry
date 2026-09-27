@@ -16,11 +16,18 @@ export default defineEventHandler(async (event) => {
   }
   const scope = requestTenant(event);
   const briefs = getBriefStore(scope);
-  if (briefs.supportsTeams && (await briefs.campaignVisibility(campaignId)) === "hidden") {
+  // See result.get.ts: resolve a uuid to its slug on a backend that has one
+  // (D178), pass a slug through unchanged otherwise — an unsaved draft has no
+  // campaign row yet, and on fs the id IS the slug (D179), so no lookup runs
+  // there. A ref that is genuinely unknown still 404s below — no job is ever
+  // running under a key nothing was ever enqueued with.
+  const resolved = briefs.supportsTeams ? await briefs.resolveCampaign(campaignId) : undefined;
+  const slug = resolved?.slug ?? campaignId;
+  if (briefs.supportsTeams && (await briefs.campaignVisibility(slug)) === "hidden") {
     setResponseStatus(event, 404);
     return { error: "No running job for campaign" };
   }
-  const jobId = await getRunningJobId(scope, campaignId);
+  const jobId = await getRunningJobId(scope, slug);
   if (!jobId) {
     setResponseStatus(event, 404);
     return { error: "No running job for campaign" };
