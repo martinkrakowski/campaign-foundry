@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "PT-7b2",
+  "mutations": [
+    {
+      "file": "apps/api/server/routes/campaigns/provider-keys/[provider].put.ts",
+      "before": "  if (!canManageProviderKeys(tenant)) {\n    setResponseStatus(event, 403);\n    return { error: \"Only an owner or admin may manage provider keys.\" };\n  }\n",
+      "after": "  if (false && !canManageProviderKeys(tenant)) {\n    setResponseStatus(event, 403);\n    return { error: \"Only an owner or admin may manage provider keys.\" };\n  }\n",
+      "because": "skip the owner/admin role check on PUT so a member could register or replace an org's key",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/provider-keys/__tests__/provider-keys.test.ts",
+        "-t",
+        "a member cannot register a provider key"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
