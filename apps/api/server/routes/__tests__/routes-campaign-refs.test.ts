@@ -95,14 +95,20 @@ describe("PT-5b1: routes take campaign refs (D178)", () => {
 
         // With a report written
         await writeReport(LOCAL_TENANT, makeReport(slug));
-        const resSlugWithReport = await call(new Request(`http://x/campaigns/result?campaignId=${slug}`));
-        const resUuidWithReport = await call(new Request(`http://x/campaigns/result?campaignId=${uuid}`));
+        const resSlugWithReport = await call(
+          new Request(`http://x/campaigns/result?campaignId=${slug}`),
+        );
+        const resUuidWithReport = await call(
+          new Request(`http://x/campaigns/result?campaignId=${uuid}`),
+        );
         expect(resSlugWithReport.status).toBe(200);
         expect(resUuidWithReport.status).toBe(200);
         expect(await resUuidWithReport.json()).toEqual(await resSlugWithReport.json());
 
         // Unknown uuid gives 404
-        const resUnknown = await call(new Request(`http://x/campaigns/result?campaignId=${UNKNOWN_UUID}`));
+        const resUnknown = await call(
+          new Request(`http://x/campaigns/result?campaignId=${UNKNOWN_UUID}`),
+        );
         expect(resUnknown.status).toBe(404);
       } finally {
         await harness.cleanup();
@@ -115,7 +121,9 @@ describe("PT-5b1: routes take campaign refs (D178)", () => {
     test("answers identical response by slug and by uuid, and 404 for unknown uuid", async () => {
       const harness = await setupPgHarness();
       try {
-        const stored = await getBriefStore(LOCAL_TENANT).createBrief(makeBrief("camp-decisions-get"));
+        const stored = await getBriefStore(LOCAL_TENANT).createBrief(
+          makeBrief("camp-decisions-get"),
+        );
         const uuid = stored.campaignId!;
         const slug = stored.brief.id;
 
@@ -130,7 +138,9 @@ describe("PT-5b1: routes take campaign refs (D178)", () => {
         expect(resUuid.status).toBe(200);
         expect(await resUuid.json()).toEqual(await resSlug.json());
 
-        const resUnknown = await call(new Request(`http://x/campaigns/decisions?campaignId=${UNKNOWN_UUID}`));
+        const resUnknown = await call(
+          new Request(`http://x/campaigns/decisions?campaignId=${UNKNOWN_UUID}`),
+        );
         expect(resUnknown.status).toBe(404);
       } finally {
         await harness.cleanup();
@@ -143,7 +153,9 @@ describe("PT-5b1: routes take campaign refs (D178)", () => {
     test("answers identical response by slug and by uuid, and 409 with missing answer for unknown uuid", async () => {
       const harness = await setupPgHarness();
       try {
-        const stored = await getBriefStore(LOCAL_TENANT).createBrief(makeBrief("camp-decisions-put"));
+        const stored = await getBriefStore(LOCAL_TENANT).createBrief(
+          makeBrief("camp-decisions-put"),
+        );
         const uuid = stored.campaignId!;
         const slug = stored.brief.id;
 
@@ -177,11 +189,18 @@ describe("PT-5b1: routes take campaign refs (D178)", () => {
         const reqUuid = new Request("http://x/campaigns/decisions", {
           method: "PUT",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ campaignId: uuid, revision: null, decisions: { "p1/1x1.png": "approved" } }),
+          body: JSON.stringify({
+            campaignId: uuid,
+            revision: null,
+            decisions: { "p1/1x1.png": "approved" },
+          }),
         });
         const resUuid = await call(reqUuid);
         expect(resUuid.status).toBe(200);
-        const uuidBody = (await resUuid.json()) as { decisions: Record<string, { verdict: string }>; revision: string };
+        const uuidBody = (await resUuid.json()) as {
+          decisions: Record<string, { verdict: string }>;
+          revision: string;
+        };
         expect(uuidBody.decisions["p1/1x1.png"].verdict).toBe("approved");
 
         // Unknown uuid gives 409
@@ -231,7 +250,9 @@ describe("PT-5b1: routes take campaign refs (D178)", () => {
         expect(await resUuid.json()).toEqual({ jobId: job.jobId });
 
         // Unknown uuid gives 404
-        const resUnknown = await call(new Request(`http://x/campaigns/jobs?campaignId=${UNKNOWN_UUID}`));
+        const resUnknown = await call(
+          new Request(`http://x/campaigns/jobs?campaignId=${UNKNOWN_UUID}`),
+        );
         expect(resUnknown.status).toBe(404);
         expect(await resUnknown.json()).toEqual({ error: "No running job for campaign" });
       } finally {
@@ -259,11 +280,15 @@ describe("PT-5b1: routes take campaign refs (D178)", () => {
         });
 
         // Unknown uuid gives missing answers
-        const resListUnknown = await callList(new Request(`http://x/campaigns/packages/${UNKNOWN_UUID}`));
+        const resListUnknown = await callList(
+          new Request(`http://x/campaigns/packages/${UNKNOWN_UUID}`),
+        );
         expect(resListUnknown.status).toBe(404);
         expect(await resListUnknown.json()).toEqual({ error: "No packages found" });
 
-        const resZipUnknown = await callZip(new Request(`http://x/campaigns/packages/${UNKNOWN_UUID}/instagram-feed.zip`));
+        const resZipUnknown = await callZip(
+          new Request(`http://x/campaigns/packages/${UNKNOWN_UUID}/instagram-feed.zip`),
+        );
         expect(resZipUnknown.status).toBe(404);
         expect(await resZipUnknown.json()).toEqual({ error: "Not found" });
 
@@ -281,8 +306,12 @@ describe("PT-5b1: routes take campaign refs (D178)", () => {
         expect(await resListUuid.json()).toEqual(await resListSlug.json());
 
         // Zip by slug and uuid
-        const resZipSlug = await callZip(new Request(`http://x/campaigns/packages/${slug}/instagram-feed.zip`));
-        const resZipUuid = await callZip(new Request(`http://x/campaigns/packages/${uuid}/instagram-feed.zip`));
+        const resZipSlug = await callZip(
+          new Request(`http://x/campaigns/packages/${slug}/instagram-feed.zip`),
+        );
+        const resZipUuid = await callZip(
+          new Request(`http://x/campaigns/packages/${uuid}/instagram-feed.zip`),
+        );
         expect(resZipSlug.status).toBe(200);
         expect(resZipUuid.status).toBe(200);
         expect(Buffer.from(await resZipUuid.arrayBuffer()).length).toBe(
@@ -370,7 +399,9 @@ describe("PT-5b1: routes take campaign refs (D178)", () => {
         });
 
         // Unknown uuid
-        const resGetUnknown = await callGet(new Request(`http://x/campaigns/pools/${UNKNOWN_UUID}`));
+        const resGetUnknown = await callGet(
+          new Request(`http://x/campaigns/pools/${UNKNOWN_UUID}`),
+        );
         expect(resGetUnknown.status).toBe(404);
         expect(await resGetUnknown.json()).toEqual({
           error: `Headline pool for brief "${UNKNOWN_UUID}" not found.`,
@@ -415,7 +446,9 @@ describe("PT-5b1: routes take campaign refs (D178)", () => {
 
         // GET by slug confirms the patch by uuid updated the slug pool
         const resGetAfterPatch = await callGet(new Request(`http://x/campaigns/pools/${slug}`));
-        const poolBody = (await resGetAfterPatch.json()) as { pool: { entries: Array<{ id: string; status: string }> } };
+        const poolBody = (await resGetAfterPatch.json()) as {
+          pool: { entries: Array<{ id: string; status: string }> };
+        };
         expect(poolBody.pool.entries[0].status).toBe("rejected");
       } finally {
         await harness.cleanup();
@@ -464,7 +497,9 @@ describe("PT-5b1: routes take campaign refs (D178)", () => {
           }),
         );
         expect(resUuid.status).toBe(201);
-        const uuidBody = (await resUuid.json()) as { pool: { briefId: string; entries: unknown[] } };
+        const uuidBody = (await resUuid.json()) as {
+          pool: { briefId: string; entries: unknown[] };
+        };
         expect(uuidBody.pool.briefId).toBe(slug);
 
         // Copy by slug
@@ -617,11 +652,15 @@ describe("PT-5b1: routes take campaign refs (D178)", () => {
         });
 
         // Unknown uuid for GET (no name)
-        const resGetUnknown = await callGet(new Request(`http://x/campaigns/assets?briefId=${UNKNOWN_UUID}`));
+        const resGetUnknown = await callGet(
+          new Request(`http://x/campaigns/assets?briefId=${UNKNOWN_UUID}`),
+        );
         expect(resGetUnknown.status).toBe(404);
 
         // Unknown uuid for GET (with name)
-        const resGetNameUnknown = await callGet(new Request(`http://x/campaigns/assets?briefId=${UNKNOWN_UUID}&name=test.png`));
+        const resGetNameUnknown = await callGet(
+          new Request(`http://x/campaigns/assets?briefId=${UNKNOWN_UUID}&name=test.png`),
+        );
         expect(resGetNameUnknown.status).toBe(404);
         expect(await resGetNameUnknown.json()).toEqual({ error: 'Asset "test.png" not found.' });
 
@@ -630,18 +669,28 @@ describe("PT-5b1: routes take campaign refs (D178)", () => {
           new Request("http://x/campaigns/assets", {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ briefId: UNKNOWN_UUID, name: "logo.png", contentBase64: PNG.toString("base64") }),
+            body: JSON.stringify({
+              briefId: UNKNOWN_UUID,
+              name: "logo.png",
+              contentBase64: PNG.toString("base64"),
+            }),
           }),
         );
         expect(resPostUnknown.status).toBe(404);
-        expect(await resPostUnknown.json()).toEqual({ error: `Campaign "${UNKNOWN_UUID}" not found.` });
+        expect(await resPostUnknown.json()).toEqual({
+          error: `Campaign "${UNKNOWN_UUID}" not found.`,
+        });
 
         // POST asset by uuid
         const resPostUuid = await callPost(
           new Request("http://x/campaigns/assets", {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ briefId: uuid, name: "uuid-asset.png", contentBase64: PNG.toString("base64") }),
+            body: JSON.stringify({
+              briefId: uuid,
+              name: "uuid-asset.png",
+              contentBase64: PNG.toString("base64"),
+            }),
           }),
         );
         expect(resPostUuid.status).toBe(201);
@@ -651,7 +700,11 @@ describe("PT-5b1: routes take campaign refs (D178)", () => {
           new Request("http://x/campaigns/assets", {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ briefId: slug, name: "slug-asset.png", contentBase64: PNG.toString("base64") }),
+            body: JSON.stringify({
+              briefId: slug,
+              name: "slug-asset.png",
+              contentBase64: PNG.toString("base64"),
+            }),
           }),
         );
         expect(resPostSlug.status).toBe(201);
@@ -664,11 +717,17 @@ describe("PT-5b1: routes take campaign refs (D178)", () => {
         expect(await resListUuid.json()).toEqual(await resListSlug.json());
 
         // GET asset stream by uuid and slug
-        const resStreamUuid = await callGet(new Request(`http://x/campaigns/assets?briefId=${uuid}&name=uuid-asset.png`));
-        const resStreamSlug = await callGet(new Request(`http://x/campaigns/assets?briefId=${slug}&name=uuid-asset.png`));
+        const resStreamUuid = await callGet(
+          new Request(`http://x/campaigns/assets?briefId=${uuid}&name=uuid-asset.png`),
+        );
+        const resStreamSlug = await callGet(
+          new Request(`http://x/campaigns/assets?briefId=${slug}&name=uuid-asset.png`),
+        );
         expect(resStreamUuid.status).toBe(200);
         expect(resStreamSlug.status).toBe(200);
-        expect(Buffer.from(await resStreamUuid.arrayBuffer())).toEqual(Buffer.from(await resStreamSlug.arrayBuffer()));
+        expect(Buffer.from(await resStreamUuid.arrayBuffer())).toEqual(
+          Buffer.from(await resStreamSlug.arrayBuffer()),
+        );
       } finally {
         await harness.cleanup();
       }
@@ -704,22 +763,34 @@ describe("PT-5b1: routes take campaign refs (D178)", () => {
         const resRenderUuid = await call(new Request(`http://x/output/${uuid}/renders/hero.png`));
         expect(resRenderSlug.status).toBe(200);
         expect(resRenderUuid.status).toBe(200);
-        expect(Buffer.from(await resRenderUuid.arrayBuffer())).toEqual(Buffer.from(await resRenderSlug.arrayBuffer()));
+        expect(Buffer.from(await resRenderUuid.arrayBuffer())).toEqual(
+          Buffer.from(await resRenderSlug.arrayBuffer()),
+        );
 
         // Package file by slug and by uuid
-        const resPkgSlug = await call(new Request(`http://x/output/packages/${slug}/instagram-feed/feed.png`));
-        const resPkgUuid = await call(new Request(`http://x/output/packages/${uuid}/instagram-feed/feed.png`));
+        const resPkgSlug = await call(
+          new Request(`http://x/output/packages/${slug}/instagram-feed/feed.png`),
+        );
+        const resPkgUuid = await call(
+          new Request(`http://x/output/packages/${uuid}/instagram-feed/feed.png`),
+        );
         expect(resPkgSlug.status).toBe(200);
         expect(resPkgUuid.status).toBe(200);
-        expect(Buffer.from(await resPkgUuid.arrayBuffer())).toEqual(Buffer.from(await resPkgSlug.arrayBuffer()));
+        expect(Buffer.from(await resPkgUuid.arrayBuffer())).toEqual(
+          Buffer.from(await resPkgSlug.arrayBuffer()),
+        );
 
         // Unknown uuid render -> 404 Not found
-        const resRenderUnknown = await call(new Request(`http://x/output/${UNKNOWN_UUID}/renders/hero.png`));
+        const resRenderUnknown = await call(
+          new Request(`http://x/output/${UNKNOWN_UUID}/renders/hero.png`),
+        );
         expect(resRenderUnknown.status).toBe(404);
         expect(await resRenderUnknown.json()).toEqual({ error: "Not found" });
 
         // Unknown uuid package -> 404 Not found
-        const resPkgUnknown = await call(new Request(`http://x/output/packages/${UNKNOWN_UUID}/instagram-feed/feed.png`));
+        const resPkgUnknown = await call(
+          new Request(`http://x/output/packages/${UNKNOWN_UUID}/instagram-feed/feed.png`),
+        );
         expect(resPkgUnknown.status).toBe(404);
         expect(await resPkgUnknown.json()).toEqual({ error: "Not found" });
       } finally {
@@ -747,10 +818,14 @@ describe("PT-5b1: routes take campaign refs (D178)", () => {
           path: "/campaigns/decisions",
           tenant: LOCAL_TENANT,
         });
-        const resDec = await callDecisions(new Request("http://x/campaigns/decisions?campaignId=camp-fs"));
+        const resDec = await callDecisions(
+          new Request("http://x/campaigns/decisions?campaignId=camp-fs"),
+        );
         expect(resDec.status).toBe(200);
 
-        const resMissing = await callResult(new Request(`http://x/campaigns/result?campaignId=${UNKNOWN_UUID}`));
+        const resMissing = await callResult(
+          new Request(`http://x/campaigns/result?campaignId=${UNKNOWN_UUID}`),
+        );
         expect(resMissing.status).toBe(404);
       } finally {
         harness.cleanup();
