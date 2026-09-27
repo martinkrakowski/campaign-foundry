@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "PT-7b3b",
+  "mutations": [
+    {
+      "file": "apps/web/src/app/(shell)/settings/providers/page.tsx",
+      "before": "  return roles.includes(\"owner\") || roles.includes(\"admin\");",
+      "after": "  return true; // mutant: drop the owner/admin check",
+      "because": "drop the owner/admin check so every role gets write controls; caught by the member read-only test",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/settings/providers/__tests__/page.test.tsx",
+        "-t",
+        "member sees the list read-only"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
