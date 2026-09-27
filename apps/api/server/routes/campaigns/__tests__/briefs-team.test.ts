@@ -466,6 +466,53 @@ describe("POST/PUT /campaigns/briefs — teamId (D166, PT-2c item 3)", () => {
   });
 });
 
+describe("duplicate by name on Postgres (D177/D178, PT-5b2)", () => {
+  const duplicateByNameReq = (sourceId: string, name: string) =>
+    new Request(`http://x/campaigns/briefs/${sourceId}/duplicate`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+
+  test("derives the slug and dedupes against a taken one, including a versionless row", async () => {
+    const harness = await setupPgHarness();
+    try {
+      await mount(owner).create(postReq(sampleBrief));
+      // "camp" itself is taken (the source); mint a versionless row at the
+      // FIRST candidate the name would derive, so the dedupe loop must skip
+      // it exactly like an already-versioned campaign.
+      await new PgBriefStore(harness.db, "local", "local").createCampaign("my-copy");
+
+      const res = await mount(owner).duplicate(duplicateByNameReq("camp", "My Copy"));
+      expect(res.status).toBe(201);
+      const json = (await res.json()) as { brief: { id: string } };
+      expect(json.brief.id).toBe("my-copy-2");
+
+      // The versionless row is untouched — no version was ever added to it.
+      const { rows } = await harness.db.query<{ count: number }>(
+        `select count(*)::int from brief_version bv
+           join campaign c on c.id = bv.campaign_id
+          where c.org_id = 'local' and c.slug = 'my-copy'`,
+      );
+      expect(rows[0]!.count).toBe(0);
+    } finally {
+      await harness.cleanup();
+    }
+  });
+
+  test("a reserved-word name is skipped and lands on the next suffix", async () => {
+    const harness = await setupPgHarness();
+    try {
+      await mount(owner).create(postReq(sampleBrief));
+      const res = await mount(owner).duplicate(duplicateByNameReq("camp", "Cache"));
+      expect(res.status).toBe(201);
+      expect(((await res.json()) as { brief: { id: string } }).brief.id).toBe("cache-2");
+    } finally {
+      await harness.cleanup();
+    }
+  });
+});
+
 describe("Save as / duplicate refuse a hidden asset source or target (D166, PT-2c items 2 and 3)", () => {
   test("Save as (POST /campaigns/briefs) 404s when a logoPath names a campaign hidden by team, and copies nothing", async () => {
     const harness = await setupPgHarness();

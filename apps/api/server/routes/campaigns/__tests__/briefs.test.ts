@@ -837,6 +837,78 @@ describe("authoring briefs", () => {
     expect(await loadBrief(yamlPath("camp-copy.yaml"))).toMatchObject({ id: "camp-copy" });
   });
 
+  test("duplicate by name derives the slug (D178) instead of taking a client id", async () => {
+    const { create, duplicate } = await api();
+    await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
+    const res = await duplicate()(
+      jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { name: "My Copy!" }),
+    );
+    expect(res.status).toBe(201);
+    const json = (await res.json()) as { file: string; brief: { id: string } };
+    expect(json.file).toBe("my-copy.yaml");
+    expect(json.brief.id).toBe("my-copy");
+  });
+
+  test("duplicate with neither newId nor name answers 400", async () => {
+    const { create, duplicate } = await api();
+    await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
+    const res = await duplicate()(
+      jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { overrides: {} }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  test("duplicate with both newId and name answers 400", async () => {
+    const { create, duplicate } = await api();
+    await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
+    const res = await duplicate()(
+      jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", {
+        newId: "camp-copy",
+        name: "Camp Copy",
+      }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  test("duplicate by name that slugifies to empty answers 400", async () => {
+    const { create, duplicate } = await api();
+    await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
+    const res = await duplicate()(
+      jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { name: "!!!" }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  test("duplicate by name dedupes against an existing brief file", async () => {
+    const { create, duplicate } = await api();
+    await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
+    await create()(jsonReq("http://x/campaigns/briefs", "POST", brief({ id: "my-copy" })));
+
+    const res = await duplicate()(
+      jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { name: "My Copy" }),
+    );
+    expect(res.status).toBe(201);
+    expect(((await res.json()) as { file: string }).file).toBe("my-copy-2.yaml");
+  });
+
+  // D179: a blank `POST /campaigns` create leaves a reserved `briefs/<slug>/`
+  // directory, invisible to `campaignVisibility` (file-existence only) — only
+  // `createCampaign` sees it. Without that, duplicate-by-name would silently
+  // land its copy inside that campaign's own reserved directory namespace.
+  test("duplicate by name skips a slug reserved by a blank-created (versionless) campaign", async () => {
+    mkdirSync(join(dir, "briefs", "my-copy"), { recursive: true });
+    const { create, duplicate } = await api();
+    await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
+
+    const res = await duplicate()(
+      jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { name: "My Copy" }),
+    );
+    expect(res.status).toBe(201);
+    expect(((await res.json()) as { file: string }).file).toBe("my-copy-2.yaml");
+    // The reserved directory itself is untouched — no brief was written into it.
+    expect(existsSync(yamlPath("my-copy.yaml"))).toBe(false);
+  });
+
   test("duplicate loads a JSON source", async () => {
     mkdirSync(join(dir, "briefs"), { recursive: true });
     writeFileSync(yamlPath("camp.json"), JSON.stringify(brief()));

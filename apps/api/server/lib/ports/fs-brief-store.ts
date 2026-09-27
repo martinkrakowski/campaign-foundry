@@ -145,36 +145,40 @@ export class FsBriefStore implements BriefStorePort {
    * Save, a different filesystem entry that a bare `<slug>/` directory never
    * blocks (no shared inode, no shared parent-of-the-file check). "Taken"
    * (the Dedupe note) is a brief file at any allowed extension OR an
-   * already-reserved directory; `withBriefLock` serialises the check-then-
-   * mkdir sequence, and `mkdir` with no `{ recursive: true }` is itself an
-   * atomic reservation — two concurrent callers of the same slug can never
-   * both succeed.
+   * already-reserved directory. No lock here — house convention (`createBrief`
+   * doesn't lock either): the caller wraps this in `withBriefLock` itself,
+   * because a caller that also copies assets and calls `createBrief`
+   * afterwards (duplicate, a sourced `POST /campaigns`) needs THAT whole
+   * sequence, not just this reservation, to be one critical section — nesting
+   * a second `withBriefLock` call on the same slug inside that caller's own
+   * would deadlock on this store's per-id chain. `mkdir` with no
+   * `{ recursive: true }` is itself an atomic reservation, so even an
+   * unlocked call is safe against another unlocked call of the same slug —
+   * only the check-then-mkdir sequence needs the caller's lock.
    */
   async createCampaign(slug: string, options?: CreateCampaignOptions): Promise<ResolvedCampaign> {
     assertNoTeam(options?.teamId);
     if (isReservedCampaignId(slug)) {
       throw new Error(`"${slug}" is reserved; choose another campaign id.`);
     }
-    return this.withBriefLock(slug, async () => {
-      if (await this.findBriefFile(slug)) {
+    if (await this.findBriefFile(slug)) {
+      const err = new Error(`Brief "${slug}" already exists.`);
+      (err as { code?: string }).code = "EEXIST";
+      throw err;
+    }
+    const dirPath = resolveConfined(this.dir, slug);
+    try {
+      await mkdir(this.dir, { recursive: true });
+      await mkdir(dirPath);
+    } catch (error) {
+      if (isErrno(error, "EEXIST")) {
         const err = new Error(`Brief "${slug}" already exists.`);
         (err as { code?: string }).code = "EEXIST";
         throw err;
       }
-      const dirPath = resolveConfined(this.dir, slug);
-      try {
-        await mkdir(this.dir, { recursive: true });
-        await mkdir(dirPath);
-      } catch (error) {
-        if (isErrno(error, "EEXIST")) {
-          const err = new Error(`Brief "${slug}" already exists.`);
-          (err as { code?: string }).code = "EEXIST";
-          throw err;
-        }
-        throw error;
-      }
-      return { campaignId: slug, slug };
-    });
+      throw error;
+    }
+    return { campaignId: slug, slug };
   }
 
   /**
