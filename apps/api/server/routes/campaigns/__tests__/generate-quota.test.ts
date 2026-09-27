@@ -68,13 +68,14 @@ describe("POST /campaigns/generate — admission is gated on the org's monthly q
   let dir: string;
   const origOut = process.env.OUTPUT_DIR;
 
-  const call = (body: unknown) => {
+  const call = (body: unknown, model = "procedural") => {
     const app = createApp();
     const router = createRouter();
     router.post("/campaigns/generate", generateHandler);
     app.use(router);
+    const query = model ? `?model=${model}` : "";
     return toWebHandler(app)(
-      new Request("http://x/campaigns/generate?model=procedural", {
+      new Request(`http://x/campaigns/generate${query}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
@@ -139,7 +140,7 @@ describe("POST /campaigns/generate — admission is gated on the org's monthly q
     await awaitSettled(body.jobId);
   });
 
-  test("an org at quota can still run on its own key", async () => {
+  test("at quota with only an unrelated org key returns 429", async () => {
     setUsageStore(usageDouble(2, 2)); // at quota!
     setProviderKeyStore({
       put: async () => {
@@ -151,11 +152,61 @@ describe("POST /campaigns/generate — admission is gated on the org's monthly q
       revoke: async () => {},
       open: async (provider) => (provider === "gemini" ? "org-key" : undefined),
     });
-    const res = await call(brief());
+    // Request OpenRouter image model while only having Gemini org key
+    const res = await call(brief(), "x-ai/grok-imagine-image-quality");
+    expect(res.status).toBe(429);
+    await expect(res.json()).resolves.toEqual({
+      error: `Campaign "camp" would exceed its org's monthly generation quota.`,
+      code: "quota_exceeded",
+    });
+    expect(runCampaignSpy).not.toHaveBeenCalled();
+  });
+
+  test("at quota with the selected provider's org key returns 202", async () => {
+    setUsageStore(usageDouble(2, 2)); // at quota!
+    setProviderKeyStore({
+      put: async () => {
+        throw new Error("not implemented");
+      },
+      list: async () => [
+        { provider: "gemini", last4: "1234", createdAt: new Date().toISOString() },
+      ],
+      revoke: async () => {},
+      open: async (provider) => (provider === "gemini" ? "org-key" : undefined),
+    });
+    // Request Imagen model (or default) matching the org's Gemini key
+    const res = await call(brief(), "imagen");
     expect(res.status).toBe(202);
     const { jobId } = (await res.json()) as { jobId: string };
     await awaitSettled(jobId);
     expect(runCampaignSpy).toHaveBeenCalledOnce();
+  });
+
+  test("under quota admits (202) either way (with selected or unrelated org key)", async () => {
+    setUsageStore(usageDouble(2, 1)); // under quota
+    setProviderKeyStore({
+      put: async () => {
+        throw new Error("not implemented");
+      },
+      list: async () => [
+        { provider: "gemini", last4: "1234", createdAt: new Date().toISOString() },
+      ],
+      revoke: async () => {},
+      open: async (provider) => (provider === "gemini" ? "org-key" : undefined),
+    });
+    // Unrelated key under quota -> 202
+    const resUnrelated = await call(brief(), "x-ai/grok-imagine-image-quality");
+    expect(resUnrelated.status).toBe(202);
+    const body1 = (await resUnrelated.json()) as { jobId: string };
+    await awaitSettled(body1.jobId);
+
+    // Selected key under quota -> 202
+    const resSelected = await call(brief(), "imagen");
+    expect(resSelected.status).toBe(202);
+    const body2 = (await resSelected.json()) as { jobId: string };
+    await awaitSettled(body2.jobId);
+
+    expect(runCampaignSpy).toHaveBeenCalledTimes(2);
   });
 
   test("a null quota is unlimited: a heavily used org is still admitted", async () => {

@@ -24,7 +24,8 @@ import {
 import { BrandComplianceChecker } from "@campaignfoundry/GovernanceAndCompliance";
 import { FileSystemExporter } from "@campaignfoundry/Distribution";
 import { err, type Result } from "@campaignfoundry/shared";
-import type { RunEnvironment } from "./run-environment.js";
+import type { Provider } from "./ports/provider-key.port.js";
+import type { ProviderSettings, RunEnvironment } from "./run-environment.js";
 import { MeteredCopyGenerator, MeteredImageGenerator } from "./metering.js";
 import { getUsageStore } from "./ports/index.js";
 import { platformZones } from "./platform-zones.js";
@@ -65,6 +66,53 @@ const FIREFLY_MODEL = "v3";
 /** `model` if set, else `fallback` — the same "unset or empty → default" rule each adapter applies internally. */
 function resolvedModel(model: string | undefined, fallback: string): string {
   return model && model.length > 0 ? model : fallback;
+}
+
+/**
+ * Select the image provider that will actually be called for the given model and provider settings (PT-7b3a).
+ * Returns undefined when procedural generation is selected or when no provider credentials exist for the selection.
+ */
+export function selectImageProvider(
+  providers: ProviderSettings,
+  selected?: string,
+): Provider | undefined {
+  if (selected === "procedural") return undefined;
+  if (selected === "firefly") {
+    if (providers.fireflyClientId && providers.fireflyClientSecret) return "firefly";
+    if (providers.geminiKey) return "gemini";
+    if (providers.openRouterKey) return "openrouter";
+    return undefined;
+  }
+  if (selected && selected.includes("/")) {
+    return providers.openRouterKey ? "openrouter" : undefined;
+  }
+  if (providers.geminiKey) return "gemini";
+  if (providers.openRouterKey) return "openrouter";
+  return undefined;
+}
+
+/**
+ * Select the image provider that will actually be called, taking into account active organization
+ * provider keys alongside platform credentials (PT-7b3a).
+ */
+export function selectImageProviderWithActiveKeys(
+  platformProviders: ProviderSettings,
+  activeProviders: ReadonlySet<Provider> | readonly Provider[],
+  selected?: string,
+): Provider | undefined {
+  const set = activeProviders instanceof Set ? activeProviders : new Set(activeProviders);
+  const effective: ProviderSettings = {
+    ...platformProviders,
+    geminiKey: platformProviders.geminiKey || (set.has("gemini") ? "active-org-key" : undefined),
+    openRouterKey:
+      platformProviders.openRouterKey || (set.has("openrouter") ? "active-org-key" : undefined),
+    fireflyClientId:
+      platformProviders.fireflyClientId || (set.has("firefly") ? "active-org-id" : undefined),
+    fireflyClientSecret:
+      platformProviders.fireflyClientSecret ||
+      (set.has("firefly") ? "active-org-secret" : undefined),
+  };
+  return selectImageProvider(effective, selected);
 }
 
 /**

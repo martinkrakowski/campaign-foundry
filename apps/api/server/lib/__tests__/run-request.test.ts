@@ -171,6 +171,8 @@ describe("executeRunRequest org provider keys (PT-7b3a, D175)", () => {
       jobId: claim.jobId,
       tenant,
       brief,
+      imageModel: "firefly",
+      generatesHeadlines: true,
       reroll: false,
     };
 
@@ -419,5 +421,108 @@ describe("executeRunRequest org provider keys (PT-7b3a, D175)", () => {
       openrouter: "platform",
       firefly: "platform",
     });
+  });
+
+  test("a decryption failure on an unused provider does not fail the run", async () => {
+    const orgKey = "org-gemini-secret-key-1111";
+    const store: ProviderKeyPort = {
+      put: async () => {
+        throw new Error("not implemented");
+      },
+      list: async () => [
+        { provider: "gemini", last4: "1111", createdAt: new Date().toISOString() },
+        { provider: "firefly", last4: "9999", createdAt: new Date().toISOString() },
+      ],
+      revoke: async () => {},
+      open: async (provider) => {
+        if (provider === "firefly") throw new Error("corrupted Firefly ciphertext");
+        if (provider === "gemini") return orgKey;
+        return undefined;
+      },
+    };
+    setProviderKeyStore(store);
+
+    const tenant: TenantContext = {
+      orgId: "org-acme",
+      userId: "user-1",
+      roles: ["owner"],
+      teamIds: [],
+    };
+
+    let seenEnv: RunEnvironment | undefined;
+    vi.spyOn(pipelineModule, "runCampaign").mockImplementation(async (env) => {
+      seenEnv = env;
+      return {
+        success: true,
+        value: {
+          assets: [],
+          halted: false,
+          log: { campaignId: "camp-org-keys" } as any,
+          policyHash: "h",
+          seed: 1,
+        },
+      };
+    });
+
+    const brief = sampleBrief();
+    const env = runEnvironment(tenant);
+    const claim = await enqueueJob(env, brief.id);
+    if (!claim.acquired) throw new Error("job not acquired");
+    await startQueuedJob(env, claim.jobId);
+
+    const request: RunRequest = {
+      jobId: claim.jobId,
+      tenant,
+      brief,
+      imageModel: "imagen",
+      reroll: false,
+    };
+
+    await executeRunRequest(request);
+
+    expect(seenEnv).toBeDefined();
+    expect(seenEnv?.providers.geminiKey).toBe(orgKey);
+    expect(seenEnv?.providers.keyOwners?.gemini).toBe("org");
+  });
+
+  test("a failure opening a key the run DOES use fails the run and does not fall back to platform", async () => {
+    const store: ProviderKeyPort = {
+      put: async () => {
+        throw new Error("not implemented");
+      },
+      list: async () => [
+        { provider: "gemini", last4: "1111", createdAt: new Date().toISOString() },
+      ],
+      revoke: async () => {},
+      open: async (provider) => {
+        if (provider === "gemini") throw new Error("corrupted Gemini ciphertext");
+        return undefined;
+      },
+    };
+    setProviderKeyStore(store);
+
+    const tenant: TenantContext = {
+      orgId: "org-acme",
+      userId: "user-1",
+      roles: ["owner"],
+      teamIds: [],
+    };
+
+    const brief = sampleBrief();
+    const env = runEnvironment(tenant);
+    const claim = await enqueueJob(env, brief.id);
+    if (!claim.acquired) throw new Error("job not acquired");
+    await startQueuedJob(env, claim.jobId);
+
+    const request: RunRequest = {
+      jobId: claim.jobId,
+      tenant,
+      brief,
+      imageModel: "imagen",
+      reroll: false,
+    };
+
+    // Must reject, failing the run instead of using the platform geminiKey
+    await expect(executeRunRequest(request)).rejects.toThrow("corrupted Gemini ciphertext");
   });
 });

@@ -5,7 +5,7 @@ import { JobCapacityError } from "../../lib/ports/fs-job-store.js";
 import { getBriefStore, getProviderKeyStore, getUsageStore } from "../../lib/ports/index.js";
 import { getRunDelivery } from "../../lib/ports/run-delivery-registry.js";
 import { parseBrief, parseRegenerateOnly } from "../../lib/load-brief.js";
-import { ALLOWED_IMAGE_MODELS } from "../../lib/pipeline.js";
+import { ALLOWED_IMAGE_MODELS, selectImageProviderWithActiveKeys } from "../../lib/pipeline.js";
 import { runEnvironment, type RunEnvironment } from "../../lib/run-environment.js";
 import type { RunRequest } from "../../lib/run-request.js";
 import { requestTenant } from "../../lib/tenant.js";
@@ -124,11 +124,18 @@ export default defineEventHandler(async (event) => {
   // so only the Postgres backend can ever refuse here (D175: only it can
   // admit an org other than the operator's at all).
   //
-  // PT-7b3a: An org with active provider keys is exempt from the quota check.
+  // PT-7b3a: An org is exempt from the quota check only when the provider the
+  // run will actually generate images with is org-keyed.
   let hasOrgKey = false;
   try {
     const activeKeys = await getProviderKeyStore(env).list();
-    hasOrgKey = activeKeys.length > 0;
+    const activeProviders = new Set(activeKeys.map((k) => k.provider));
+    const selectedProvider = selectImageProviderWithActiveKeys(
+      env.providers,
+      activeProviders,
+      imageModel,
+    );
+    hasOrgKey = selectedProvider !== undefined && activeProviders.has(selectedProvider);
   } catch {
     hasOrgKey = false;
   }

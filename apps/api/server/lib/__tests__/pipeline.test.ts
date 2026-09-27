@@ -16,6 +16,8 @@ import {
   messageFont,
   platformZones,
   runCampaign,
+  selectImageProvider,
+  selectImageProviderWithActiveKeys,
 } from "../pipeline.js";
 
 import { runEnvironment, type RunEnvironment } from "../run-environment.js";
@@ -597,6 +599,79 @@ describe("pipeline composition root", () => {
     const copyDefault = copyGenerator(envWithoutOwners);
     expect(copyDefault).toBeDefined();
     expect((copyDefault as any).keyOwner).toBe("platform");
+  });
+
+  describe("selectImageProvider and selectImageProviderWithActiveKeys (PT-7b3a)", () => {
+    const fullProviders = {
+      geminiKey: "gem-k",
+      openRouterKey: "open-k",
+      fireflyClientId: "ff-id",
+      fireflyClientSecret: "ff-sec",
+    };
+
+    test("procedural selection always selects undefined provider", () => {
+      expect(selectImageProvider(fullProviders, "procedural")).toBeUndefined();
+    });
+
+    test("firefly selection resolves firefly if credentials present, else falls back", () => {
+      expect(selectImageProvider(fullProviders, "firefly")).toBe("firefly");
+      expect(
+        selectImageProvider(
+          { geminiKey: "gem-k", openRouterKey: "open-k" },
+          "firefly",
+        ),
+      ).toBe("gemini");
+      expect(selectImageProvider({ openRouterKey: "open-k" }, "firefly")).toBe("openrouter");
+      expect(selectImageProvider({}, "firefly")).toBeUndefined();
+    });
+
+    test("model with slash selects openrouter if key present, else undefined", () => {
+      expect(
+        selectImageProvider(fullProviders, "x-ai/grok-imagine-image-quality"),
+      ).toBe("openrouter");
+      expect(
+        selectImageProvider(
+          { geminiKey: "gem-k" },
+          "x-ai/grok-imagine-image-quality",
+        ),
+      ).toBeUndefined();
+    });
+
+    test("default / imagen / auto selects gemini if key present, else openrouter, else undefined", () => {
+      expect(selectImageProvider(fullProviders, undefined)).toBe("gemini");
+      expect(selectImageProvider(fullProviders, "imagen")).toBe("gemini");
+      expect(selectImageProvider(fullProviders, "auto")).toBe("gemini");
+      expect(selectImageProvider({ openRouterKey: "open-k" }, undefined)).toBe("openrouter");
+      expect(selectImageProvider({}, undefined)).toBeUndefined();
+    });
+
+    test("selectImageProviderWithActiveKeys overlays active org keys onto platform settings", () => {
+      const emptyPlatform = {};
+      expect(
+        selectImageProviderWithActiveKeys(emptyPlatform, ["firefly"], "firefly"),
+      ).toBe("firefly");
+      expect(
+        selectImageProviderWithActiveKeys(
+          emptyPlatform,
+          new Set(["gemini"]),
+          "imagen",
+        ),
+      ).toBe("gemini");
+      expect(
+        selectImageProviderWithActiveKeys(
+          emptyPlatform,
+          ["openrouter"],
+          "x-ai/grok-imagine-image-quality",
+        ),
+      ).toBe("openrouter");
+      expect(
+        selectImageProviderWithActiveKeys(
+          emptyPlatform,
+          ["gemini"],
+          "x-ai/grok-imagine-image-quality",
+        ),
+      ).toBeUndefined();
+    });
   });
 
   describe("MESSAGE_FONT is validated against the bundled allowlist (D59)", () => {
