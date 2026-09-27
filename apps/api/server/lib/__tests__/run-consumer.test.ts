@@ -15,6 +15,8 @@ const mockConsumerDisconnect = vi.hoisted(() => vi.fn());
 const mockConsumerSubscribe = vi.hoisted(() => vi.fn());
 const mockConsumerRun = vi.hoisted(() => vi.fn());
 const mockConsumerCommitOffsets = vi.hoisted(() => vi.fn());
+const mockConsumerPause = vi.hoisted(() => vi.fn());
+const mockConsumerResume = vi.hoisted(() => vi.fn());
 const mockKafkaConstructor = vi.hoisted(() => vi.fn());
 
 vi.mock("kafkajs", () => ({
@@ -29,6 +31,8 @@ vi.mock("kafkajs", () => ({
         subscribe: mockConsumerSubscribe,
         run: mockConsumerRun,
         commitOffsets: mockConsumerCommitOffsets,
+        pause: mockConsumerPause,
+        resume: mockConsumerResume,
       };
     }
   },
@@ -167,6 +171,8 @@ describe("RunConsumer (PT-6b2, D171, D174d)", () => {
     mockConsumerSubscribe.mockReset().mockResolvedValue(undefined);
     mockConsumerRun.mockReset().mockResolvedValue(undefined);
     mockConsumerCommitOffsets.mockReset().mockResolvedValue(undefined);
+    mockConsumerPause.mockReset();
+    mockConsumerResume.mockReset();
     mockKafkaConstructor.mockReset();
 
     startQueuedJobSpy = vi.spyOn(jobs, "startQueuedJob");
@@ -618,6 +624,8 @@ describe("RunConsumer (PT-6b2, D171, D174d)", () => {
       subscribe: vi.fn(),
       run: vi.fn(),
       commitOffsets: vi.fn(),
+      pause: vi.fn(),
+      resume: vi.fn(),
     };
     const c1 = new RunConsumer(settings, undefined, customConsumer as never);
     expect(c1).toBeDefined();
@@ -628,4 +636,83 @@ describe("RunConsumer (PT-6b2, D171, D174d)", () => {
     const c2 = new RunConsumer(settings, customKafka as never);
     expect(c2).toBeDefined();
   });
+
+  test("at the cap the topic is paused, and a settled run resumes it", async () => {
+    let resolveRun1!: () => void;
+    let resolveRun2!: () => void;
+    let runCallCount = 0;
+
+    startQueuedJobSpy.mockResolvedValue(true);
+    runJobSpy.mockImplementation(() => {
+      runCallCount++;
+      if (runCallCount === 1) {
+        return new Promise<void>((r) => {
+          resolveRun1 = r;
+        });
+      }
+      return new Promise<void>((r) => {
+        resolveRun2 = r;
+      });
+    });
+
+    const commitMock = vi.fn().mockResolvedValue(undefined);
+    const consumer = new RunConsumer({ ...settings, maxInFlight: 2 });
+
+    const makePayload = (offset: string, jobId: string) =>
+      ({
+        topic: "cf.run-requests",
+        partition: 0,
+        message: {
+          offset,
+          value: Buffer.from(JSON.stringify({ ...sampleRequest(), jobId })),
+        },
+      }) as unknown as EachMessagePayload;
+
+    // First message: starts run 1 (inFlight = 1 < 2)
+    await consumer.handleMessage(makePayload("1", "job-1"), commitMock);
+    expect(mockConsumerPause).not.toHaveBeenCalled();
+    expect(commitMock).toHaveBeenCalledWith("cf.run-requests", 0, "2");
+
+    // Second message: starts run 2 (inFlight = 2 >= 2 -> cap reached!)
+    await consumer.handleMessage(makePayload("2", "job-2"), commitMock);
+    expect(mockConsumerPause).toHaveBeenCalledTimes(1);
+    expect(mockConsumerPause).toHaveBeenCalledWith([{ topic: "cf.run-requests" }]);
+    expect(mockConsumerResume).not.toHaveBeenCalled();
+    expect(commitMock).toHaveBeenCalledWith("cf.run-requests", 0, "3");
+
+    // Settle run 1 -> inFlight drops to 1 (< 2) -> resumes topic
+    resolveRun1();
+    await Promise.resolve(); // flush microtask
+    expect(mockConsumerResume).toHaveBeenCalledTimes(1);
+    expect(mockConsumerResume).toHaveBeenCalledWith([{ topic: "cf.run-requests" }]);
+
+    // Settle run 2 -> inFlight drops to 0, topic already resumed, no duplicate resume
+    resolveRun2();
+    await Promise.resolve();
+    expect(mockConsumerResume).toHaveBeenCalledTimes(1);
+  });
+
+  test("a drop does not take a slot", async () => {
+    startQueuedJobSpy.mockResolvedValue(false); // e.g. duplicate / expired
+    const commitMock = vi.fn().mockResolvedValue(undefined);
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const consumer = new RunConsumer({ ...settings, maxInFlight: 1 });
+    const payload = {
+      topic: "cf.run-requests",
+      partition: 0,
+      message: {
+        offset: "10",
+        value: Buffer.from(JSON.stringify(sampleRequest())),
+      },
+    } as unknown as EachMessagePayload;
+
+    await consumer.handleMessage(payload, commitMock);
+
+    expect(startQueuedJobSpy).toHaveBeenCalledTimes(1);
+    expect(runJobSpy).not.toHaveBeenCalled();
+    expect(mockConsumerPause).not.toHaveBeenCalled();
+    expect(commitMock).toHaveBeenCalledWith("cf.run-requests", 0, "11");
+  });
 });
+

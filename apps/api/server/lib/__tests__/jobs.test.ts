@@ -473,4 +473,51 @@ describe("the run deadline is terminal (review, #537)", () => {
       vi.useRealTimers();
     }
   });
+
+  test("runJob's promise settles on success, failure and deadline", async () => {
+    // 1. Success
+    const id1 = await createJob(LOCAL_TENANT, "camp-settle-1");
+    let resolveWork1!: () => void;
+    const p1 = runJob(
+      LOCAL_TENANT,
+      id1,
+      () =>
+        new Promise<void>((r) => {
+          resolveWork1 = r;
+        }),
+    );
+    expect(p1).toBeInstanceOf(Promise);
+    resolveWork1();
+    await expect(p1).resolves.toBeUndefined();
+
+    // 2. Failure
+    const id2 = await createJob(LOCAL_TENANT, "camp-settle-2");
+    let rejectWork2!: (e: Error) => void;
+    const p2 = runJob(
+      LOCAL_TENANT,
+      id2,
+      () =>
+        new Promise<void>((_, reject) => {
+          rejectWork2 = reject;
+        }),
+    );
+    expect(p2).toBeInstanceOf(Promise);
+    rejectWork2(new Error("work exploded"));
+    await expect(p2).resolves.toBeUndefined();
+    expect((await getJob(LOCAL_TENANT, id2))?.status).toBe("failed");
+
+    // 3. Deadline
+    vi.useFakeTimers();
+    try {
+      const id3 = await createJob(LOCAL_TENANT, "camp-settle-3");
+      const p3 = runJob(LOCAL_TENANT, id3, () => new Promise<void>(() => {}));
+      expect(p3).toBeInstanceOf(Promise);
+      await vi.advanceTimersByTimeAsync(RUN_DEADLINE_MS + 1);
+      await expect(p3).resolves.toBeUndefined();
+      expect((await getJob(LOCAL_TENANT, id3))?.status).toBe("failed");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
+

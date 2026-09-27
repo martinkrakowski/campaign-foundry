@@ -386,6 +386,7 @@ describe("kafkaSettings (PT-6b2, D174d)", () => {
     "KAFKA_TOPIC",
     "KAFKA_GROUP_ID",
     "KAFKA_CONSUME",
+    "KAFKA_MAX_IN_FLIGHT",
   ] as const;
   const saved = Object.fromEntries(envKeys.map((k) => [k, process.env[k]]));
   const certsDir = resolve(projectRoot(), "certs");
@@ -707,4 +708,21 @@ describe("kafkaSettings (PT-6b2, D174d)", () => {
 
     expect(() => kafkaSettings()).toThrow(/Failed to read KAFKA_CA_PATH/);
   });
+
+  test("a malformed KAFKA_MAX_IN_FLIGHT is a config error", () => {
+    process.env.KAFKA_BROKERS = "kafka1:9092";
+
+    process.env.KAFKA_MAX_IN_FLIGHT = "0";
+    expect(() => kafkaSettings()).toThrow(/KAFKA_MAX_IN_FLIGHT/);
+
+    process.env.KAFKA_MAX_IN_FLIGHT = "-1";
+    expect(() => kafkaSettings()).toThrow(/KAFKA_MAX_IN_FLIGHT/);
+
+    process.env.KAFKA_MAX_IN_FLIGHT = "not-a-number";
+    expect(() => kafkaSettings()).toThrow(/KAFKA_MAX_IN_FLIGHT/);
+
+    process.env.KAFKA_MAX_IN_FLIGHT = "2.5";
+    expect(() => kafkaSettings()).toThrow(/KAFKA_MAX_IN_FLIGHT/);
+  });
 });
+

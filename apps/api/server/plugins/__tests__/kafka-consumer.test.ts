@@ -303,4 +303,81 @@ describe("kafka-consumer Nitro plugin (PT-6b2, D174d)", () => {
 
     expect(customConsumer.start).toHaveBeenCalledTimes(1);
   });
+
+  test("a start that fails twice and then succeeds starts once", async () => {
+    vi.useFakeTimers();
+    try {
+      process.env.KAFKA_BROKERS = "broker1:9092";
+      process.env.KAFKA_CONSUME = "true";
+
+      const errorMock = vi.fn();
+      const logger = { error: errorMock };
+      let attempts = 0;
+      const customConsumer: ConsumerInstance = {
+        start: vi.fn().mockImplementation(async () => {
+          attempts++;
+          if (attempts < 3) {
+            throw new Error(`broker down attempt ${attempts}`);
+          }
+        }),
+        stop: vi.fn().mockResolvedValue(undefined),
+      };
+
+      const plugin = createKafkaConsumerPlugin(() => customConsumer, logger);
+      plugin({} as never);
+
+      // Immediately after plugin invocation, first attempt failed
+      await vi.advanceTimersByTimeAsync(0);
+      expect(customConsumer.start).toHaveBeenCalledTimes(1);
+
+      // Advance through backoff for retry 1 (attempt 2)
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(customConsumer.start).toHaveBeenCalledTimes(2);
+
+      // Advance through backoff for retry 2 (attempt 3)
+      await vi.advanceTimersByTimeAsync(10000);
+      expect(customConsumer.start).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("a close during backoff stops the retries", async () => {
+    vi.useFakeTimers();
+    try {
+      process.env.KAFKA_BROKERS = "broker1:9092";
+      process.env.KAFKA_CONSUME = "true";
+
+      const customConsumer: ConsumerInstance = {
+        start: vi.fn().mockRejectedValue(new Error("broker down")),
+        stop: vi.fn().mockResolvedValue(undefined),
+      };
+
+      let closeHook: (() => Promise<void>) | undefined;
+      const nitroApp: NitroApp = {
+        hooks: {
+          hook: vi.fn().mockImplementation((name, cb) => {
+            if (name === "close") closeHook = cb;
+          }),
+        },
+      };
+
+      const plugin = createKafkaConsumerPlugin(() => customConsumer, { error: vi.fn() });
+      plugin(nitroApp as never);
+
+      await vi.advanceTimersByTimeAsync(0);
+      expect(customConsumer.start).toHaveBeenCalledTimes(1);
+
+      // Close fires during backoff before retry
+      expect(closeHook).toBeDefined();
+      await closeHook!();
+
+      // Advancing time further should NOT trigger any more start attempts
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(customConsumer.start).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
+
