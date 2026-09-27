@@ -581,7 +581,7 @@ describe("pipeline composition root", () => {
     };
     const copy = copyGenerator(env);
     expect(copy).toBeDefined();
-    expect((copy as any).keyOwner).toBe("org");
+    expect(copy).toMatchObject({ keyOwner: "org" });
 
     const pipeline = buildPipeline(env, "imagen");
     expect(pipeline).toBeDefined();
@@ -599,7 +599,7 @@ describe("pipeline composition root", () => {
     };
     const copyDefault = copyGenerator(envWithoutOwners);
     expect(copyDefault).toBeDefined();
-    expect((copyDefault as any).keyOwner).toBe("platform");
+    expect(copyDefault).toMatchObject({ keyOwner: "platform" });
   });
 
   describe("imageProviderChain and primaryImageProvider (PT-7b3a)", () => {
@@ -610,16 +610,22 @@ describe("pipeline composition root", () => {
       fireflyClientSecret: "ff-sec",
     };
 
-    function meteredProviders(gen: any): string[] {
+    // Walks the constructed generator's metered fallback chain through its private
+    // fields, so it reads them as `unknown` and narrows at each step.
+    function field(value: unknown, key: string): unknown {
+      return typeof value === "object" && value !== null
+        ? (value as Record<string, unknown>)[key]
+        : undefined;
+    }
+
+    function meteredProviders(gen: unknown): string[] {
       const result: string[] = [];
-      let current: any = gen?.generator ?? gen;
-      while (current) {
-        if (current.provider) {
-          result.push(current.provider === "imagen" ? "gemini" : current.provider);
-          current = current.inner?.fallback;
-        } else {
-          break;
-        }
+      let current = field(gen, "generator") ?? gen;
+      let provider = field(current, "provider");
+      while (typeof provider === "string") {
+        result.push(provider === "imagen" ? "gemini" : provider);
+        current = field(field(current, "inner"), "fallback");
+        provider = field(current, "provider");
       }
       return result;
     }

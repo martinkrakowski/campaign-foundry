@@ -34,6 +34,13 @@ const sampleBrief = (): CampaignBrief => ({
   ],
 });
 
+/** The mocked run's log: these tests read only `campaignId`. */
+type RunLog = Extract<
+  Awaited<ReturnType<typeof pipelineModule.runCampaign>>,
+  { success: true }
+>["value"]["log"];
+const RUN_LOG = { campaignId: "camp-org-keys" } as unknown as RunLog;
+
 /** A ProviderKeyStore double for testing key resolution. */
 function fakeProviderKeyStore(keys: Partial<Record<Provider, string>>): ProviderKeyPort {
   return {
@@ -94,7 +101,7 @@ describe("executeRunRequest org provider keys (PT-7b3a, D175)", () => {
         value: {
           assets: [],
           halted: false,
-          log: { campaignId: "camp-org-keys" } as any,
+          log: RUN_LOG,
           policyHash: "h",
           seed: 1,
         },
@@ -154,7 +161,7 @@ describe("executeRunRequest org provider keys (PT-7b3a, D175)", () => {
         value: {
           assets: [],
           halted: false,
-          log: { campaignId: "camp-org-keys" } as any,
+          log: RUN_LOG,
           policyHash: "h",
           seed: 1,
         },
@@ -205,7 +212,7 @@ describe("executeRunRequest org provider keys (PT-7b3a, D175)", () => {
         value: {
           assets: [],
           halted: false,
-          log: { campaignId: "camp-org-keys" } as any,
+          log: RUN_LOG,
           policyHash: "h",
           seed: 1,
         },
@@ -263,7 +270,7 @@ describe("executeRunRequest org provider keys (PT-7b3a, D175)", () => {
         value: {
           assets: [],
           halted: false,
-          log: { campaignId: "camp-org-keys" } as any,
+          log: RUN_LOG,
           policyHash: "h",
           seed: 1,
         },
@@ -349,7 +356,7 @@ describe("executeRunRequest org provider keys (PT-7b3a, D175)", () => {
       value: {
         assets: [],
         halted: false,
-        log: { campaignId: "camp-org-keys" } as any,
+        log: RUN_LOG,
         policyHash: "h",
         seed: 1,
       },
@@ -459,7 +466,7 @@ describe("executeRunRequest org provider keys (PT-7b3a, D175)", () => {
         value: {
           assets: [],
           halted: false,
-          log: { campaignId: "camp-org-keys" } as any,
+          log: RUN_LOG,
           policyHash: "h",
           seed: 1,
         },
@@ -553,7 +560,7 @@ describe("executeRunRequest org provider keys (PT-7b3a, D175)", () => {
           value: {
             assets: [],
             halted: false,
-            log: { campaignId: "camp-org-keys" } as any,
+            log: RUN_LOG,
             policyHash: "h",
             seed: 1,
           },
@@ -628,7 +635,7 @@ describe("executeRunRequest org provider keys (PT-7b3a, D175)", () => {
         value: {
           assets: [],
           halted: false,
-          log: { campaignId: "camp-org-keys" } as any,
+          log: RUN_LOG,
           policyHash: "h",
           seed: 1,
         },
@@ -708,7 +715,7 @@ describe("executeRunRequest org provider keys (PT-7b3a, D175)", () => {
         value: {
           assets: [],
           halted: false,
-          log: { campaignId: "camp-org-keys" } as any,
+          log: RUN_LOG,
           policyHash: "h",
           seed: 1,
         },
