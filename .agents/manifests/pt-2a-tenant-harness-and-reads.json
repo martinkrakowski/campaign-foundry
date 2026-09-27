@@ -4,9 +4,9 @@
   "mutations": [
     {
       "file": "apps/api/server/routes/campaigns/pools/[briefId].get.ts",
-      "before": "    stored = await readPool(requestTenant(event), briefId);",
-      "after": "    stored = await readPool({ orgId: \"local\", userId: \"local\", roles: [\"owner\"], teamIds: [] }, briefId);",
-      "because": "without requestTenant(event), GET pools/:briefId uses LOCAL_TENANT and serves another org's copy pool (D166: the org is the isolation boundary).",
+      "before": "    stored = await readPool(scope, slug);",
+      "after": "    stored = await readPool({ orgId: \"local\", userId: \"local\", roles: [\"owner\"], teamIds: [] }, slug);",
+      "because": "without requestTenant(event), GET pools/:briefId uses LOCAL_TENANT and serves another org's copy pool (D166: the org is the isolation boundary). Re-anchored 2026-09-27 by PT-5b1: `scope` is the tenant (requestTenant(event) assigned earlier) and briefId is resolved to slug at the route boundary (D178) before this call; the mutation is unchanged in meaning.",
       "command": [
         "yarn",
         "vitest",

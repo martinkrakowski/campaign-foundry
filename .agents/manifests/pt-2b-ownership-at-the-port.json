@@ -4,9 +4,9 @@
   "mutations": [
     {
       "file": "apps/api/server/routes/campaigns/result.get.ts",
-      "before": "  await campaignKnown(scope, campaignId, \"report\");",
+      "before": "  await campaignKnown(scope, slug, \"report\");",
       "after": "  // mutant: skip campaignKnown",
-      "because": "without campaignKnown, GET /campaigns/result returns an empty 200 rather than 404 for an unowned campaign.",
+      "because": "without campaignKnown, GET /campaigns/result returns an empty 200 rather than 404 for an unowned campaign. Re-anchored 2026-09-27 by PT-5b1: campaignId is resolved to slug at the route boundary (D178) before this call; the mutation is unchanged in meaning.",
       "command": [
         "yarn",
         "vitest",
