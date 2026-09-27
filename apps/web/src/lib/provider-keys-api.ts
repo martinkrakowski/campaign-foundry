@@ -25,6 +25,21 @@ export interface ProviderKeySummary {
   readonly createdAt: string;
 }
 
+/**
+ * A malformed 200 (a truncated body, a proxy that swallowed a field) must not
+ * reach the page as if it were a real summary: `ProviderRow` calls
+ * `summary.createdAt.slice(0, 10)` unconditionally, so a missing or non-string
+ * `createdAt` would throw during render instead of landing in the page's own
+ * error state. Checked once here, on every list entry and every PUT result.
+ */
+function isProviderKeySummary(value: unknown): value is ProviderKeySummary {
+  if (typeof value !== "object" || value === null) return false;
+  const rec = value as Record<string, unknown>;
+  return (
+    isProvider(rec.provider) && typeof rec.last4 === "string" && typeof rec.createdAt === "string"
+  );
+}
+
 /** Same path as run-context `API` (see `briefs-api.ts`). */
 const API = "/api/pipeline";
 
@@ -119,10 +134,10 @@ function jsonInit(method: string, body: unknown): RequestInit {
 /** `GET /campaigns/provider-keys` — the org's registered keys, never the key itself. */
 export async function listProviderKeys(): Promise<ProviderKeySummary[]> {
   const data = await requestJson(`${API}/campaigns/provider-keys`, listFallback);
-  if (!Array.isArray(data)) {
+  if (!Array.isArray(data) || !data.every(isProviderKeySummary)) {
     throw new ProviderKeysApiError("Invalid provider keys response", 500);
   }
-  return data as ProviderKeySummary[];
+  return data;
 }
 
 /**
@@ -141,7 +156,10 @@ export async function setProviderKey(
     setFallback,
     jsonInit("PUT", payload),
   );
-  return data as ProviderKeySummary;
+  if (!isProviderKeySummary(data) || data.provider !== provider) {
+    throw new ProviderKeysApiError("Invalid provider keys response", 500);
+  }
+  return data;
 }
 
 /**

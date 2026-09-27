@@ -116,6 +116,50 @@ describe("provider-keys-api", () => {
       });
     });
 
+    test("rejects when a list entry is missing createdAt", async () => {
+      mockFetch(() => json([{ provider: "gemini", last4: "1234" }]));
+      await expect(listProviderKeys()).rejects.toMatchObject({
+        status: 500,
+        message: "Invalid provider keys response",
+      });
+    });
+
+    test("rejects when a list entry's provider is unknown", async () => {
+      mockFetch(() =>
+        json([{ provider: "openai", last4: "1234", createdAt: "2026-09-27T00:00:00.000Z" }]),
+      );
+      await expect(listProviderKeys()).rejects.toMatchObject({
+        status: 500,
+        message: "Invalid provider keys response",
+      });
+    });
+
+    test("rejects when a list entry's last4 is not a string", async () => {
+      mockFetch(() =>
+        json([{ provider: "gemini", last4: 1234, createdAt: "2026-09-27T00:00:00.000Z" }]),
+      );
+      await expect(listProviderKeys()).rejects.toMatchObject({
+        status: 500,
+        message: "Invalid provider keys response",
+      });
+    });
+
+    test("rejects when a list entry is null", async () => {
+      mockFetch(() => json([null]));
+      await expect(listProviderKeys()).rejects.toMatchObject({
+        status: 500,
+        message: "Invalid provider keys response",
+      });
+    });
+
+    test("rejects when a list entry is not an object at all", async () => {
+      mockFetch(() => json(["a string, not a summary"]));
+      await expect(listProviderKeys()).rejects.toMatchObject({
+        status: 500,
+        message: "Invalid provider keys response",
+      });
+    });
+
     test("rejects with status 0 on fetch network failure", async () => {
       vi.mocked(globalThis.fetch).mockRejectedValue(new Error("offline"));
       await expect(listProviderKeys()).rejects.toMatchObject({
@@ -204,6 +248,22 @@ describe("provider-keys-api", () => {
         clientSecret: "firefly-secret-efgh",
       });
       expect(res.last4).toBe("efgh");
+    });
+
+    test("rejects when the PUT result is missing createdAt", async () => {
+      mockFetch(() => json({ provider: "gemini", last4: "abcd" }));
+      await expect(setProviderKey("gemini", { key: "secret-key-1234-abcd" })).rejects.toMatchObject(
+        { status: 500, message: "Invalid provider keys response" },
+      );
+    });
+
+    test("rejects when the PUT result's provider does not match the request", async () => {
+      mockFetch(() =>
+        json({ provider: "openrouter", last4: "abcd", createdAt: "2026-09-27T01:00:00.000Z" }),
+      );
+      await expect(setProviderKey("gemini", { key: "secret-key-1234-abcd" })).rejects.toMatchObject(
+        { status: 500, message: "Invalid provider keys response" },
+      );
     });
 
     test("rejects with 400 and API error message for invalid key payload", async () => {
