@@ -4,7 +4,7 @@
   "mutations": [
     {
       "file": "apps/api/server/routes/campaigns/result.get.ts",
-      "before": "  const resolved = await getBriefStore(scope).resolveCampaign(campaignId);\n  const slug = resolved?.slug ?? campaignId;\n  await campaignKnown(scope, slug, \"report\");\n  const report = await readReport(scope, slug);",
+      "before": "  const briefs = getBriefStore(scope);\n  const resolved = briefs.supportsTeams ? await briefs.resolveCampaign(campaignId) : undefined;\n  const slug = resolved?.slug ?? campaignId;\n  await campaignKnown(scope, slug, \"report\");\n  const report = await readReport(scope, slug);",
       "after": "  await campaignKnown(scope, campaignId, \"report\");\n  const report = await readReport(scope, campaignId);",
       "because": "without resolving the campaign ref to slug (and passing an unresolved slug through unchanged), GET /campaigns/result fails to find reports for campaigns addressed by uuid",
       "command": [
