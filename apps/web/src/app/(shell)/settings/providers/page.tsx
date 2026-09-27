@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { getCapabilities, type HostCapabilities } from "@/lib/briefs-api";
 import { authClient } from "@/lib/auth-client";
+import { useEditorDirty } from "@/lib/editor-dirty-context";
 import {
   PROVIDERS,
   isProviderKeysApiError,
@@ -37,35 +38,91 @@ function canManageKeys(role: unknown): boolean {
   return roles.includes("owner") || roles.includes("admin");
 }
 
-type ListPhase = "loading" | "error" | "ok";
+/**
+ * Plain messages by HTTP status only — fix round PRRT_kwDOSzP1zc6mXO6b. The
+ * API's own `{ error }` text is written for an operator debugging a
+ * misconfigured host ("KEY_ENCRYPTION_KEYS is not set…",
+ * "STORE_BACKEND=postgres…") and must never reach an owner clicking Save, so
+ * nothing in this file reads `err.message` for display — every error, from
+ * every route this page calls, resolves through this one map.
+ */
+function messageForError(err: unknown): string {
+  const status = isProviderKeysApiError(err) ? err.status : undefined;
+  switch (status) {
+    case 400:
+      return "That key doesn't look right. Check it and try again.";
+    case 403:
+      return "Only owners and admins can manage provider keys.";
+    case 409:
+      return "That key was just updated somewhere else. Try again.";
+    case 503:
+      return "Provider keys aren't available on this host right now. Try again shortly.";
+    default:
+      return "Something went wrong. Try again.";
+  }
+}
+
+type ProbeState =
+  | { status: "probing" }
+  | { status: "failed" }
+  | { status: "ok"; capabilities: HostCapabilities };
 
 /**
  * Settings > provider keys (PT-7b3b). Under `AUTH_MODE=local` this asks the API
- * nothing at all — BYOK is org-scoped and local mode has no organisation — so the
- * capabilities probe is the only request until better-auth is confirmed.
+ * nothing at all — provider keys are org-scoped and local mode has no
+ * organisation — so the capabilities probe is the only request until
+ * better-auth is confirmed. A probe that fails outright (rather than resolving
+ * with a definite mode) gets its own state with a Retry, rather than leaving
+ * the route blank (fix round PRRT_kwDOSzP1zc6mXMC3 / PRRT_kwDOSzP1zc6mXO6f).
  */
 export default function ProviderKeysSettingsPage() {
-  const [capabilities, setCapabilities] = useState<HostCapabilities | null>(null);
+  const [probe, setProbe] = useState<ProbeState>({ status: "probing" });
+  // Bumped by Retry — an effect dependency, not a call inside the click handler,
+  // so the same `active`-flag cleanup this effect always had still applies to a
+  // retry's own in-flight request.
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     let active = true;
+    setProbe({ status: "probing" });
     void getCapabilities()
       .then((caps) => {
-        if (active) setCapabilities(caps);
+        if (!active) return;
+        // `briefs-api.ts`'s `getCapabilities` resolves `null` for every failure it
+        // sees itself (network error, non-2xx, malformed body) — it does not throw.
+        // A `null` answer and a rejected promise are therefore the same fact here:
+        // the probe did not get a real answer, and this page has no organisation
+        // to trust with a request until one comes back positive.
+        setProbe(caps === null ? { status: "failed" } : { status: "ok", capabilities: caps });
       })
       .catch(() => {
-        /* No settings without capabilities — the local-mode notice is the safe default. */
+        if (!active) return;
+        setProbe({ status: "failed" });
       });
     return () => {
       active = false;
     };
-  }, []);
+  }, [attempt]);
 
-  // Nothing is known yet: render nothing rather than flash the local-mode notice for
-  // a host that turns out to be better-auth once the boot probe resolves.
-  if (capabilities === null) return null;
+  // Nothing is known yet: render nothing rather than flash a wrong state for a
+  // host whose real answer hasn't landed.
+  if (probe.status === "probing") return null;
 
-  if (capabilities.auth?.mode !== "better-auth") {
+  if (probe.status === "failed") {
+    return (
+      <div className="mx-auto max-w-3xl p-4 sm:p-8">
+        <h2 className="mb-1 text-lg font-semibold text-text-emphasis">Provider keys</h2>
+        <p role="alert" className="mb-4 text-error">
+          Could not check this host's settings.
+        </p>
+        <Button size="sm" onClick={() => setAttempt((a) => a + 1)}>
+          Retry
+        </Button>
+      </div>
+    );
+  }
+
+  if (probe.capabilities.auth?.mode !== "better-auth") {
     return (
       <div className="mx-auto max-w-3xl p-4 sm:p-8">
         <h2 className="mb-1 text-lg font-semibold text-text-emphasis">Provider keys</h2>
@@ -79,6 +136,8 @@ export default function ProviderKeysSettingsPage() {
   return <BetterAuthProviderKeys />;
 }
 
+type ListPhase = "loading" | "error" | "ok";
+
 /**
  * The real page, mounted only under better-auth — so `useActiveMember` (a live
  * subscription) is never called under local mode, the same reason Header.tsx never
@@ -86,6 +145,7 @@ export default function ProviderKeysSettingsPage() {
  */
 function BetterAuthProviderKeys() {
   const activeMember = authClient.useActiveMember();
+  const { setDirty } = useEditorDirty();
   const [phase, setPhase] = useState<ListPhase>("loading");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   // Separate from `phase`: the registered keys never need to be re-derived from a
@@ -93,6 +153,8 @@ function BetterAuthProviderKeys() {
   // that asks "is the list even loaded" — by the time either fires, a `ProviderRow`
   // exists at all only because `phase === "ok"` already put it on screen.
   const [keys, setKeys] = useState<Partial<Record<Provider, ProviderKeySummary>>>({});
+  // Whether each row currently has a non-empty, unsaved field (PRRT_kwDOSzP1zc6mXO6d).
+  const [dirtyRows, setDirtyRows] = useState<Partial<Record<Provider, boolean>>>({});
 
   useEffect(() => {
     let active = true;
@@ -107,15 +169,33 @@ function BetterAuthProviderKeys() {
       })
       .catch((err: unknown) => {
         if (!active) return;
-        setErrorMessage(
-          isProviderKeysApiError(err) ? err.message : "Could not load provider keys.",
-        );
+        setErrorMessage(messageForError(err));
         setPhase("error");
       });
     return () => {
       active = false;
     };
   }, []);
+
+  // One row's typed-but-unsaved input must not read as "the page is dirty" for
+  // every other row too, and a pristine row reporting in must not clear a dirty
+  // sibling's flag — an aggregate over every row's own boolean, published as one
+  // flag rather than each row racing to call `setDirty` with its own view of the
+  // whole page.
+  const anyDirty = Object.values(dirtyRows).some(Boolean);
+  const lastPublishedDirtyRef = useRef<boolean | null>(null);
+  useEffect(() => {
+    if (lastPublishedDirtyRef.current !== anyDirty) {
+      lastPublishedDirtyRef.current = anyDirty;
+      setDirty(anyDirty);
+    }
+  }, [anyDirty, setDirty]);
+
+  // The provider outlives this route (same reason BriefEditor.tsx splits this from
+  // the effect above): clear on unmount only, so leaving this page — with or
+  // without saving — never leaves a later page prompting about a route that is
+  // long gone.
+  useEffect(() => () => setDirty(false), [setDirty]);
 
   const memberData = activeMember.data as { role?: unknown } | null | undefined;
   const canWrite = canManageKeys(memberData?.role);
@@ -125,7 +205,7 @@ function BetterAuthProviderKeys() {
       <h2 className="mb-1 text-lg font-semibold text-text-emphasis">Provider keys</h2>
       <p className="mb-6 text-[13px] text-text-muted">
         {canWrite
-          ? "Register, replace or revoke your organisation's BYOK keys."
+          ? "Register, replace or revoke your organisation's provider keys."
           : "Your organisation's registered provider keys."}
       </p>
 
@@ -153,6 +233,11 @@ function BetterAuthProviderKeys() {
                   return next;
                 });
               }}
+              onDirtyChange={(dirty) => {
+                setDirtyRows((prev) =>
+                  prev[provider] === dirty ? prev : { ...prev, [provider]: dirty },
+                );
+              }}
             />
           ))}
         </div>
@@ -167,12 +252,14 @@ function ProviderRow({
   canWrite,
   onSaved,
   onRevoked,
+  onDirtyChange,
 }: {
   readonly provider: Provider;
   readonly summary: ProviderKeySummary | undefined;
   readonly canWrite: boolean;
   readonly onSaved: (summary: ProviderKeySummary) => void;
   readonly onRevoked: () => void;
+  readonly onDirtyChange: (dirty: boolean) => void;
 }) {
   const [key, setKey] = useState("");
   const [clientId, setClientId] = useState("");
@@ -186,6 +273,17 @@ function ProviderRow({
   // locale-formatted one: deterministic across every reader and every test.
   const state = summary ? `…${summary.last4} (${summary.createdAt.slice(0, 10)})` : "none";
 
+  // Only a boolean crosses into the shared dirty context — never the typed value
+  // itself (PRRT_kwDOSzP1zc6mXO6d: "never put the typed value into that context").
+  const hasInput = provider === "firefly" ? clientId !== "" || clientSecret !== "" : key !== "";
+  const lastReportedDirtyRef = useRef<boolean | null>(null);
+  useEffect(() => {
+    if (lastReportedDirtyRef.current !== hasInput) {
+      lastReportedDirtyRef.current = hasInput;
+      onDirtyChange(hasInput);
+    }
+  }, [hasInput, onDirtyChange]);
+
   const handleSave = async (e: FormEvent) => {
     e.preventDefault();
     setSaving(true);
@@ -195,12 +293,13 @@ function ProviderRow({
       const saved = await setProviderKey(provider, payload);
       onSaved(saved);
       // Clear on success — a write-only field never echoes what was typed, and never
-      // leaves it sitting in the DOM after the save that consumed it.
+      // leaves it sitting in the DOM after the save that consumed it. This also
+      // clears the row's own dirty flag, through the effect above.
       setKey("");
       setClientId("");
       setClientSecret("");
     } catch (err) {
-      setError(isProviderKeysApiError(err) ? err.message : "Could not save the key.");
+      setError(messageForError(err));
     } finally {
       setSaving(false);
     }
@@ -213,7 +312,7 @@ function ProviderRow({
       await revokeProviderKey(provider);
       onRevoked();
     } catch (err) {
-      setError(isProviderKeysApiError(err) ? err.message : "Could not revoke the key.");
+      setError(messageForError(err));
     } finally {
       setRevoking(false);
     }

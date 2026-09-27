@@ -5,11 +5,21 @@ import * as briefsApi from "@/lib/briefs-api";
 import * as providerKeysApi from "@/lib/provider-keys-api";
 import { ProviderKeysApiError } from "@/lib/provider-keys-api";
 import { authClient } from "@/lib/auth-client";
+import { renderWithRun } from "@/__tests__/helpers";
+import { Header } from "@/components/shell/Header";
 import ProviderKeysSettingsPage from "../page";
 
 vi.mock("@/lib/auth-client", () => ({
   authClient: {
     useActiveMember: vi.fn(() => ({ data: null, isPending: false })),
+    // Bare stand-ins: only the dirty-state integration tests below mount `Header`
+    // alongside this page, and `useBetterAuthState` reads all three under
+    // better-auth — `session?.data?.user?.email` etc. is optional-chained
+    // throughout, so an unconfigured `vi.fn()` (resolving to `undefined`) is a
+    // safe default for every other test in this file, which never renders `Header`.
+    useSession: vi.fn(() => ({ data: null, isPending: false })),
+    useListOrganizations: vi.fn(() => ({ data: null, isPending: false })),
+    useActiveOrganization: vi.fn(() => ({ data: null, isPending: false })),
   },
 }));
 
@@ -69,17 +79,6 @@ describe("ProviderKeysSettingsPage — auth mode", () => {
     expect(container.textContent).toBe("");
   });
 
-  test("a rejected capabilities probe never asks for provider keys — nothing renders, no unhandled rejection", async () => {
-    const listSpy = vi.spyOn(providerKeysApi, "listProviderKeys");
-    vi.spyOn(briefsApi, "getCapabilities").mockRejectedValue(new Error("probe unreachable"));
-    const { container } = render(<ProviderKeysSettingsPage />);
-    await act(async () => {
-      await Promise.resolve();
-    });
-    expect(container.textContent).toBe("");
-    expect(listSpy).not.toHaveBeenCalled();
-  });
-
   test("does not update state if unmounted before the capabilities promise resolves", async () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
     let resolveCaps!: (caps: briefsApi.HostCapabilities) => void;
@@ -99,13 +98,65 @@ describe("ProviderKeysSettingsPage — auth mode", () => {
   });
 });
 
+describe("ProviderKeysSettingsPage — probe failure and retry (PRRT_kwDOSzP1zc6mXMC3 / PRRT_kwDOSzP1zc6mXO6f)", () => {
+  test("a probe that resolves null (briefs-api's own failure shape) shows an error and a Retry button, not a blank page", async () => {
+    vi.spyOn(briefsApi, "getCapabilities").mockResolvedValue(null);
+
+    render(<ProviderKeysSettingsPage />);
+
+    expect(await screen.findByRole("alert")).toBeTruthy();
+    expect(screen.getByText("Could not check this host's settings.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
+  });
+
+  test("a rejected probe also shows the error and Retry state, with no unhandled rejection", async () => {
+    vi.spyOn(briefsApi, "getCapabilities").mockRejectedValue(new Error("probe unreachable"));
+
+    render(<ProviderKeysSettingsPage />);
+
+    expect(await screen.findByRole("alert")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
+  });
+
+  test("Retry re-runs the probe; a successful second attempt renders the real page", async () => {
+    const user = userEvent.setup();
+    const capsSpy = vi
+      .spyOn(briefsApi, "getCapabilities")
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(betterAuthCapabilities());
+    vi.spyOn(providerKeysApi, "listProviderKeys").mockResolvedValue([]);
+    asOwner();
+
+    renderWithRun(<ProviderKeysSettingsPage />);
+
+    await screen.findByRole("button", { name: "Retry" });
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+
+    expect(await screen.findByText("Gemini")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+    expect(capsSpy).toHaveBeenCalledTimes(2);
+  });
+
+  test("Retry that fails again stays in the failure state", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(briefsApi, "getCapabilities").mockResolvedValue(null);
+
+    render(<ProviderKeysSettingsPage />);
+
+    await screen.findByRole("button", { name: "Retry" });
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+
+    expect(await screen.findByRole("button", { name: "Retry" })).toBeTruthy();
+  });
+});
+
 describe("ProviderKeysSettingsPage — list states", () => {
   test("shows a loading state while the list is in flight", async () => {
     vi.spyOn(briefsApi, "getCapabilities").mockResolvedValue(betterAuthCapabilities());
     vi.spyOn(providerKeysApi, "listProviderKeys").mockImplementation(() => new Promise(() => {}));
     asOwner();
 
-    render(<ProviderKeysSettingsPage />);
+    renderWithRun(<ProviderKeysSettingsPage />);
 
     expect(await screen.findByText("Loading…")).toBeTruthy();
   });
@@ -115,7 +166,7 @@ describe("ProviderKeysSettingsPage — list states", () => {
     vi.spyOn(providerKeysApi, "listProviderKeys").mockResolvedValue([]);
     asOwner();
 
-    render(<ProviderKeysSettingsPage />);
+    renderWithRun(<ProviderKeysSettingsPage />);
 
     expect(await screen.findByText("Gemini")).toBeTruthy();
     expect(screen.getByText("OpenRouter")).toBeTruthy();
@@ -130,12 +181,23 @@ describe("ProviderKeysSettingsPage — list states", () => {
     ]);
     asOwner();
 
-    render(<ProviderKeysSettingsPage />);
+    renderWithRun(<ProviderKeysSettingsPage />);
 
     expect(await screen.findByText("…1234 (2026-09-27)")).toBeTruthy();
   });
 
-  test("the 503 'needs Postgres' answer surfaces as the list's error message", async () => {
+  test("the guidance never says BYOK", async () => {
+    vi.spyOn(briefsApi, "getCapabilities").mockResolvedValue(betterAuthCapabilities());
+    vi.spyOn(providerKeysApi, "listProviderKeys").mockResolvedValue([]);
+    asOwner();
+
+    renderWithRun(<ProviderKeysSettingsPage />);
+
+    await screen.findByText("Gemini");
+    expect(document.body.textContent).not.toContain("BYOK");
+  });
+
+  test("a 503 on load maps to a plain message and never shows the server's own text", async () => {
     vi.spyOn(briefsApi, "getCapabilities").mockResolvedValue(betterAuthCapabilities());
     vi.spyOn(providerKeysApi, "listProviderKeys").mockRejectedValue(
       new ProviderKeysApiError(
@@ -145,22 +207,59 @@ describe("ProviderKeysSettingsPage — list states", () => {
     );
     asOwner();
 
-    render(<ProviderKeysSettingsPage />);
+    renderWithRun(<ProviderKeysSettingsPage />);
 
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toBe(
-      "Org provider keys need STORE_BACKEND=postgres: BYOK is Postgres-only, as Better Auth already is.",
+      "Provider keys aren't available on this host right now. Try again shortly.",
     );
+    // Never the raw server text or the deployment identifiers it names — the whole
+    // point of mapping by status is that these never reach the DOM at all.
+    expect(document.body.textContent).not.toContain("STORE_BACKEND");
+    expect(document.body.textContent).not.toContain("BYOK");
   });
 
-  test("a non-ProviderKeysApiError rejection falls back to a fixed sentence", async () => {
+  test("a 503 naming KEY_ENCRYPTION_KEYS on load renders neither that name nor STORE_BACKEND", async () => {
+    vi.spyOn(briefsApi, "getCapabilities").mockResolvedValue(betterAuthCapabilities());
+    vi.spyOn(providerKeysApi, "listProviderKeys").mockRejectedValue(
+      new ProviderKeysApiError(
+        "KEY_ENCRYPTION_KEYS is not set: org provider keys cannot be sealed or opened (STORE_BACKEND=postgres).",
+        503,
+      ),
+    );
+    asOwner();
+
+    renderWithRun(<ProviderKeysSettingsPage />);
+
+    expect(await screen.findByRole("alert")).toBeTruthy();
+    expect(document.body.textContent).not.toContain("KEY_ENCRYPTION_KEYS");
+    expect(document.body.textContent).not.toContain("STORE_BACKEND");
+    expect(
+      screen.getByText("Provider keys aren't available on this host right now. Try again shortly."),
+    ).toBeTruthy();
+  });
+
+  test("a non-ProviderKeysApiError rejection falls back to the generic message", async () => {
     vi.spyOn(briefsApi, "getCapabilities").mockResolvedValue(betterAuthCapabilities());
     vi.spyOn(providerKeysApi, "listProviderKeys").mockRejectedValue(new Error("boom"));
     asOwner();
 
-    render(<ProviderKeysSettingsPage />);
+    renderWithRun(<ProviderKeysSettingsPage />);
 
-    expect(await screen.findByText("Could not load provider keys.")).toBeTruthy();
+    expect(await screen.findByText("Something went wrong. Try again.")).toBeTruthy();
+  });
+
+  test("a malformed list entry (the client's own shape check) also maps to the generic message, never its own diagnostic text", async () => {
+    vi.spyOn(briefsApi, "getCapabilities").mockResolvedValue(betterAuthCapabilities());
+    vi.spyOn(providerKeysApi, "listProviderKeys").mockRejectedValue(
+      new ProviderKeysApiError("Invalid provider keys response", 500),
+    );
+    asOwner();
+
+    renderWithRun(<ProviderKeysSettingsPage />);
+
+    expect(await screen.findByText("Something went wrong. Try again.")).toBeTruthy();
+    expect(document.body.textContent).not.toContain("Invalid provider keys response");
   });
 
   test("does not update state if unmounted before listProviderKeys resolves", async () => {
@@ -175,7 +274,7 @@ describe("ProviderKeysSettingsPage — list states", () => {
     );
     asOwner();
 
-    const { unmount } = render(<ProviderKeysSettingsPage />);
+    const { unmount } = renderWithRun(<ProviderKeysSettingsPage />);
     await screen.findByText("Loading…");
     unmount();
     await act(async () => {
@@ -198,7 +297,7 @@ describe("ProviderKeysSettingsPage — list states", () => {
     );
     asOwner();
 
-    const { unmount } = render(<ProviderKeysSettingsPage />);
+    const { unmount } = renderWithRun(<ProviderKeysSettingsPage />);
     await screen.findByText("Loading…");
     unmount();
     await act(async () => {
@@ -216,7 +315,7 @@ describe("ProviderKeysSettingsPage — roles", () => {
     vi.spyOn(providerKeysApi, "listProviderKeys").mockResolvedValue([]);
     asOwner();
 
-    render(<ProviderKeysSettingsPage />);
+    renderWithRun(<ProviderKeysSettingsPage />);
 
     expect(await screen.findByLabelText("Gemini key")).toBeTruthy();
     expect(screen.getByLabelText("OpenRouter key")).toBeTruthy();
@@ -229,7 +328,7 @@ describe("ProviderKeysSettingsPage — roles", () => {
     vi.spyOn(providerKeysApi, "listProviderKeys").mockResolvedValue([]);
     asAdmin();
 
-    render(<ProviderKeysSettingsPage />);
+    renderWithRun(<ProviderKeysSettingsPage />);
 
     expect(await screen.findByLabelText("Gemini key")).toBeTruthy();
   });
@@ -241,7 +340,7 @@ describe("ProviderKeysSettingsPage — roles", () => {
     ]);
     asMember();
 
-    render(<ProviderKeysSettingsPage />);
+    renderWithRun(<ProviderKeysSettingsPage />);
 
     expect(await screen.findByText("…1234 (2026-09-27)")).toBeTruthy();
     expect(screen.queryByLabelText("Gemini key")).toBeNull();
@@ -257,7 +356,7 @@ describe("ProviderKeysSettingsPage — roles", () => {
       isPending: false,
     } as never);
 
-    render(<ProviderKeysSettingsPage />);
+    renderWithRun(<ProviderKeysSettingsPage />);
 
     expect(await screen.findByText("Gemini")).toBeTruthy();
     expect(screen.queryByLabelText("Gemini key")).toBeNull();
@@ -276,7 +375,7 @@ describe("ProviderKeysSettingsPage — write-only fields", () => {
     });
     asOwner();
 
-    render(<ProviderKeysSettingsPage />);
+    renderWithRun(<ProviderKeysSettingsPage />);
 
     const input = (await screen.findByLabelText("Gemini key")) as HTMLInputElement;
     expect(input.type).toBe("password");
@@ -305,7 +404,7 @@ describe("ProviderKeysSettingsPage — write-only fields", () => {
     });
     asOwner();
 
-    render(<ProviderKeysSettingsPage />);
+    renderWithRun(<ProviderKeysSettingsPage />);
 
     const clientId = (await screen.findByLabelText("Firefly client ID")) as HTMLInputElement;
     const clientSecret = screen.getByLabelText("Firefly client secret") as HTMLInputElement;
@@ -338,7 +437,7 @@ describe("ProviderKeysSettingsPage — write-only fields", () => {
     const revokeSpy = vi.spyOn(providerKeysApi, "revokeProviderKey").mockResolvedValue(undefined);
     asOwner();
 
-    render(<ProviderKeysSettingsPage />);
+    renderWithRun(<ProviderKeysSettingsPage />);
 
     expect(await screen.findByText("…5678 (2026-09-27)")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Revoke" }));
@@ -353,8 +452,8 @@ describe("ProviderKeysSettingsPage — write-only fields", () => {
   });
 });
 
-describe("ProviderKeysSettingsPage — error messages", () => {
-  test("a 400 from setProviderKey is shown verbatim", async () => {
+describe("ProviderKeysSettingsPage — error messages (mapped by status only)", () => {
+  test("a 400 from setProviderKey maps to a plain message, never the server's own text", async () => {
     const user = userEvent.setup();
     vi.spyOn(briefsApi, "getCapabilities").mockResolvedValue(betterAuthCapabilities());
     vi.spyOn(providerKeysApi, "listProviderKeys").mockResolvedValue([]);
@@ -363,15 +462,18 @@ describe("ProviderKeysSettingsPage — error messages", () => {
     );
     asOwner();
 
-    render(<ProviderKeysSettingsPage />);
+    renderWithRun(<ProviderKeysSettingsPage />);
     const input = await screen.findByLabelText("Gemini key");
     await user.type(input, "short");
     await user.click(submitButtonFor(input));
 
-    expect(await screen.findByText("Provide { key }, 8-4096 characters.")).toBeTruthy();
+    expect(
+      await screen.findByText("That key doesn't look right. Check it and try again."),
+    ).toBeTruthy();
+    expect(document.body.textContent).not.toContain("8-4096 characters");
   });
 
-  test("a 403 from setProviderKey is shown verbatim", async () => {
+  test("a 403 from setProviderKey maps to the 'only owners and admins' message", async () => {
     const user = userEvent.setup();
     vi.spyOn(briefsApi, "getCapabilities").mockResolvedValue(betterAuthCapabilities());
     vi.spyOn(providerKeysApi, "listProviderKeys").mockResolvedValue([]);
@@ -380,17 +482,17 @@ describe("ProviderKeysSettingsPage — error messages", () => {
     );
     asOwner();
 
-    render(<ProviderKeysSettingsPage />);
+    renderWithRun(<ProviderKeysSettingsPage />);
     const input = await screen.findByLabelText("Gemini key");
     await user.type(input, "some-key-value-1234");
     await user.click(submitButtonFor(input));
 
     expect(
-      await screen.findByText("Only an owner or admin may manage provider keys."),
+      await screen.findByText("Only owners and admins can manage provider keys."),
     ).toBeTruthy();
   });
 
-  test("a 409 from setProviderKey is shown verbatim", async () => {
+  test("a 409 from setProviderKey maps to a plain retry message", async () => {
     const user = userEvent.setup();
     vi.spyOn(briefsApi, "getCapabilities").mockResolvedValue(betterAuthCapabilities());
     vi.spyOn(providerKeysApi, "listProviderKeys").mockResolvedValue([]);
@@ -399,16 +501,17 @@ describe("ProviderKeysSettingsPage — error messages", () => {
     );
     asOwner();
 
-    render(<ProviderKeysSettingsPage />);
+    renderWithRun(<ProviderKeysSettingsPage />);
     const input = await screen.findByLabelText("OpenRouter key");
     await user.type(input, "some-key-value-1234");
-    const openRouterForm = input.closest("form") as HTMLFormElement;
-    await user.click(openRouterForm.querySelector('button[type="submit"]') as HTMLButtonElement);
+    await user.click(submitButtonFor(input));
 
-    expect(await screen.findByText("Provider key was replaced concurrently; retry.")).toBeTruthy();
+    expect(
+      await screen.findByText("That key was just updated somewhere else. Try again."),
+    ).toBeTruthy();
   });
 
-  test("a 503 from setProviderKey (KEK not configured) is shown verbatim", async () => {
+  test("a 503 from setProviderKey (KEK not configured) maps to a plain message and never names KEY_ENCRYPTION_KEYS", async () => {
     const user = userEvent.setup();
     vi.spyOn(briefsApi, "getCapabilities").mockResolvedValue(betterAuthCapabilities());
     vi.spyOn(providerKeysApi, "listProviderKeys").mockResolvedValue([]);
@@ -420,50 +523,157 @@ describe("ProviderKeysSettingsPage — error messages", () => {
     );
     asOwner();
 
-    render(<ProviderKeysSettingsPage />);
+    renderWithRun(<ProviderKeysSettingsPage />);
     const input = await screen.findByLabelText("Gemini key");
     await user.type(input, "some-key-value-1234");
     await user.click(submitButtonFor(input));
 
     expect(
       await screen.findByText(
-        "KEY_ENCRYPTION_KEYS is not set: org provider keys cannot be sealed or opened.",
+        "Provider keys aren't available on this host right now. Try again shortly.",
       ),
     ).toBeTruthy();
+    expect(document.body.textContent).not.toContain("KEY_ENCRYPTION_KEYS");
   });
 
-  test("a non-ProviderKeysApiError rejection from setProviderKey falls back to a fixed sentence", async () => {
+  test("a non-ProviderKeysApiError rejection from setProviderKey falls back to the generic message", async () => {
     const user = userEvent.setup();
     vi.spyOn(briefsApi, "getCapabilities").mockResolvedValue(betterAuthCapabilities());
     vi.spyOn(providerKeysApi, "listProviderKeys").mockResolvedValue([]);
     vi.spyOn(providerKeysApi, "setProviderKey").mockRejectedValue(new Error("boom"));
     asOwner();
 
-    render(<ProviderKeysSettingsPage />);
+    renderWithRun(<ProviderKeysSettingsPage />);
     const input = await screen.findByLabelText("Gemini key");
     await user.type(input, "some-key-value-1234");
     await user.click(submitButtonFor(input));
 
-    expect(await screen.findByText("Could not save the key.")).toBeTruthy();
+    expect(await screen.findByText("Something went wrong. Try again.")).toBeTruthy();
   });
 
-  test("a revoke failure is shown verbatim and a non-ProviderKeysApiError rejection falls back", async () => {
+  test("a revoke failure maps to a plain message, and a non-ProviderKeysApiError rejection falls back to the generic one", async () => {
     const user = userEvent.setup();
     vi.spyOn(briefsApi, "getCapabilities").mockResolvedValue(betterAuthCapabilities());
     vi.spyOn(providerKeysApi, "listProviderKeys").mockResolvedValue([
       { provider: "firefly", last4: "efgh", createdAt: "2026-09-27T00:00:00.000Z" },
     ]);
     vi.spyOn(providerKeysApi, "revokeProviderKey").mockRejectedValueOnce(
-      new ProviderKeysApiError("BYOK needs Postgres", 503),
+      new ProviderKeysApiError("Org provider keys need STORE_BACKEND=postgres", 503),
     );
     asOwner();
 
-    render(<ProviderKeysSettingsPage />);
+    renderWithRun(<ProviderKeysSettingsPage />);
     await user.click(await screen.findByRole("button", { name: "Revoke" }));
-    expect(await screen.findByText("BYOK needs Postgres")).toBeTruthy();
+    expect(
+      await screen.findByText(
+        "Provider keys aren't available on this host right now. Try again shortly.",
+      ),
+    ).toBeTruthy();
+    expect(document.body.textContent).not.toContain("STORE_BACKEND");
 
     vi.spyOn(providerKeysApi, "revokeProviderKey").mockRejectedValueOnce(new Error("boom"));
     await user.click(screen.getByRole("button", { name: "Revoke" }));
-    expect(await screen.findByText("Could not revoke the key.")).toBeTruthy();
+    expect(await screen.findByText("Something went wrong. Try again.")).toBeTruthy();
+  });
+});
+
+describe("ProviderKeysSettingsPage — unsaved key material marks the page dirty (PRRT_kwDOSzP1zc6mXO6d)", () => {
+  test("typing an unsaved key marks the page dirty — the header's own guard prompts on navigation", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(briefsApi, "getCapabilities").mockResolvedValue(betterAuthCapabilities());
+    vi.spyOn(providerKeysApi, "listProviderKeys").mockResolvedValue([]);
+    asOwner();
+
+    renderWithRun(
+      <>
+        <Header />
+        <ProviderKeysSettingsPage />
+      </>,
+    );
+
+    const input = await screen.findByLabelText("Gemini key");
+    await user.type(input, "typed-but-not-saved");
+
+    await user.click(screen.getByRole("link", { name: "Grid" }));
+
+    expect(await screen.findByRole("dialog", { name: "Unsaved edits" })).toBeTruthy();
+  });
+
+  test("clearing the only typed field un-marks the page dirty", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(briefsApi, "getCapabilities").mockResolvedValue(betterAuthCapabilities());
+    vi.spyOn(providerKeysApi, "listProviderKeys").mockResolvedValue([]);
+    asOwner();
+
+    renderWithRun(
+      <>
+        <Header />
+        <ProviderKeysSettingsPage />
+      </>,
+    );
+
+    const input = await screen.findByLabelText("Gemini key");
+    await user.type(input, "typed-then-cleared");
+    await user.clear(input);
+
+    await user.click(screen.getByRole("link", { name: "Grid" }));
+
+    expect(screen.queryByRole("dialog", { name: "Unsaved edits" })).toBeNull();
+  });
+
+  test("saving clears the dirty flag along with the field", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(briefsApi, "getCapabilities").mockResolvedValue(betterAuthCapabilities());
+    vi.spyOn(providerKeysApi, "listProviderKeys").mockResolvedValue([]);
+    vi.spyOn(providerKeysApi, "setProviderKey").mockResolvedValue({
+      provider: "gemini",
+      last4: "abcd",
+      createdAt: "2026-09-27T00:00:00.000Z",
+    });
+    asOwner();
+
+    renderWithRun(
+      <>
+        <Header />
+        <ProviderKeysSettingsPage />
+      </>,
+    );
+
+    const input = await screen.findByLabelText("Gemini key");
+    await user.type(input, "some-key-value-1234");
+    await user.click(submitButtonFor(input));
+    await waitFor(() => expect((input as HTMLInputElement).value).toBe(""));
+
+    await user.click(screen.getByRole("link", { name: "Grid" }));
+
+    expect(screen.queryByRole("dialog", { name: "Unsaved edits" })).toBeNull();
+  });
+
+  test("one row's cleared input does not clear another row's still-typed input", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(briefsApi, "getCapabilities").mockResolvedValue(betterAuthCapabilities());
+    vi.spyOn(providerKeysApi, "listProviderKeys").mockResolvedValue([]);
+    asOwner();
+
+    renderWithRun(
+      <>
+        <Header />
+        <ProviderKeysSettingsPage />
+      </>,
+    );
+
+    const geminiInput = await screen.findByLabelText("Gemini key");
+    const openRouterInput = screen.getByLabelText("OpenRouter key");
+
+    await user.type(geminiInput, "still-typed");
+    await user.type(openRouterInput, "x");
+    await user.clear(openRouterInput);
+
+    await user.click(screen.getByRole("link", { name: "Grid" }));
+
+    // OpenRouter's own row is pristine again, but Gemini's is not — the aggregate
+    // must still read dirty. A bug here would have the last row to go pristine wipe
+    // every other row's flag.
+    expect(await screen.findByRole("dialog", { name: "Unsaved edits" })).toBeTruthy();
   });
 });
