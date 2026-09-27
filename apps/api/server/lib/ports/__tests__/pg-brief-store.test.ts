@@ -173,6 +173,87 @@ describe("PgBriefStore (PT-3d, D168, D169)", () => {
     await expect(store.createBrief(brief("../evil"))).rejects.toThrow(/not a safe id/);
   });
 
+  // D177 (PT-5b2): `POST /campaigns` mints a campaign row with no version yet
+  // (createCampaign, below). This Save is that row's first — it must add
+  // version 1 to it, never refuse the slug as taken the way a genuinely
+  // existing brief still does.
+  describe("createBrief on a versionless campaign row (D177, PT-5b2)", () => {
+    test("adds version 1 to an existing row that has none, instead of EEXIST", async () => {
+      await db.query("insert into campaign (org_id, slug) values ($1, $2)", ["local", "test-camp"]);
+
+      const created = await store.createBrief(minimalBrief);
+      expect(created.campaignId).toBeTruthy();
+      expect(created.brief.id).toBe("test-camp");
+
+      const { rows } = await db.query<{ version: number }>(
+        `select bv.version from brief_version bv
+           join campaign c on c.id = bv.campaign_id
+          where c.org_id = 'local' and c.slug = 'test-camp'`,
+      );
+      expect(rows).toEqual([{ version: 1 }]);
+    });
+
+    test("a row that already has a version is still refused as EEXIST", async () => {
+      await store.createBrief(minimalBrief);
+      await expect(store.createBrief(minimalBrief)).rejects.toMatchObject({ code: "EEXIST" });
+    });
+
+    test("preserves the team createCampaign assigned when the Save passes no teamId", async () => {
+      await db.query(
+        `insert into team (id, name, "memberCount", org_id, created_at) values ($1, $2, 0, $3, now())`,
+        ["t1", "Team 1", "local"],
+      );
+      await db.query("insert into campaign (org_id, slug, team_id) values ($1, $2, $3)", [
+        "local",
+        "test-camp",
+        "t1",
+      ]);
+      const owner = new PgBriefStore(db, "local", "owner", ["owner"], []);
+      const member = new PgBriefStore(db, "local", "u2", [], ["t1"]);
+      const stranger = new PgBriefStore(db, "local", "u3", [], []);
+
+      await owner.createBrief(minimalBrief);
+
+      expect(await stranger.campaignVisibility("test-camp")).toBe("hidden");
+      expect((await member.findBriefById("test-camp"))?.brief.id).toBe("test-camp");
+    });
+
+    test("an explicit teamId on the first Save assigns it", async () => {
+      await db.query(
+        `insert into team (id, name, "memberCount", org_id, created_at) values ($1, $2, 0, $3, now())`,
+        ["t1", "Team 1", "local"],
+      );
+      await db.query("insert into campaign (org_id, slug) values ($1, $2)", ["local", "test-camp"]);
+      const owner = new PgBriefStore(db, "local", "owner", ["owner"], []);
+      const stranger = new PgBriefStore(db, "local", "u3", [], []);
+
+      await owner.createBrief(minimalBrief, { teamId: "t1" });
+
+      expect(await stranger.campaignVisibility("test-camp")).toBe("hidden");
+    });
+
+    test("a row hidden from this caller by team is still refused as EEXIST, never overwritten", async () => {
+      await db.query(
+        `insert into team (id, name, "memberCount", org_id, created_at) values ($1, $2, 0, $3, now())`,
+        ["t1", "Team 1", "local"],
+      );
+      await db.query("insert into campaign (org_id, slug, team_id) values ($1, $2, $3)", [
+        "local",
+        "test-camp",
+        "t1",
+      ]);
+      const stranger = new PgBriefStore(db, "local", "u3", [], []);
+
+      await expect(stranger.createBrief(minimalBrief)).rejects.toMatchObject({ code: "EEXIST" });
+      const { rows } = await db.query<{ count: number }>(
+        `select count(*)::int from brief_version bv
+           join campaign c on c.id = bv.campaign_id
+          where c.org_id = 'local' and c.slug = 'test-camp'`,
+      );
+      expect(rows[0]!.count).toBe(0);
+    });
+  });
+
   test("rewriteBrief writes the next version, unconditionally when no expectedRevision is given", async () => {
     await store.createBrief(minimalBrief);
     const updated = await store.rewriteBrief(brief("test-camp", "Updated message"));
