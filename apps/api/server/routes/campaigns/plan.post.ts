@@ -42,8 +42,7 @@ export default defineEventHandler(async (event) => {
 
   const scope = requestTenant(event);
   const briefs = getBriefStore(scope);
-  const hidePool =
-    briefs.supportsTeams && (await briefs.campaignVisibility(brief.id)) === "hidden";
+  const hidePool = briefs.supportsTeams && (await briefs.campaignVisibility(brief.id)) === "hidden";
 
   const input = await planInputFor(scope, brief, { hidePool });
   if (!input.success) {
