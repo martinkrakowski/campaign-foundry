@@ -314,6 +314,29 @@ describe("authoring briefs", () => {
     expect(readFileSync(campYaml())).toEqual(original);
   });
 
+  // D177/D179 (PT-5b2): `POST /campaigns`'s blank create leaves a reserved
+  // `briefs/camp/` directory, not a file — the first Save's own `camp.yaml`
+  // write is a different filesystem entry the directory never blocks.
+  test("POST without replace succeeds as the first Save onto a reserved (blank-created) slug", async () => {
+    mkdirSync(join(dir, "briefs", "camp"), { recursive: true });
+    const { create, list } = await api();
+    const res = await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
+    expect(res.status).toBe(201);
+    expect(await res.json()).toMatchObject({ file: "camp.yaml", brief: brief() });
+    expect(existsSync(join(dir, "briefs", "camp"))).toBe(true);
+
+    const listed = await list()(new Request("http://x/campaigns/briefs"));
+    const json = (await listed.json()) as { briefs: { brief: { id: string } }[] };
+    expect(json.briefs.map((b) => b.brief.id)).toEqual(["camp"]);
+
+    // A second create of the same slug — now that it has a version — is
+    // still refused exactly as before.
+    const again = await create()(
+      jsonReq("http://x/campaigns/briefs", "POST", brief({ campaignMessage: "Nope" })),
+    );
+    expect(again.status).toBe(409);
+  });
+
   test("POST without replace 409s when the id lives in a differently named file", async () => {
     mkdirSync(join(dir, "briefs"), { recursive: true });
     const original = validBrief.replace("id: good", "id: camp");

@@ -137,6 +137,61 @@ describe("POST/PUT /campaigns/briefs — teamId (D166, PT-2c item 3)", () => {
     }
   });
 
+  describe("first Save of a blank-created campaign (D177, PT-5b2)", () => {
+    test("POST without replace adds version 1 to a versionless row, and preserves its team", async () => {
+      const harness = await setupPgHarness();
+      try {
+        await harness.db.query(
+          `insert into team (id, name, "memberCount", org_id, created_at) values ($1, $2, 0, $3, now())`,
+          ["t1", "Team One", "local"],
+        );
+        await new PgBriefStore(harness.db, "local", "local").createCampaign("camp", {
+          teamId: "t1",
+        });
+
+        const res = await mount(t1Member).create(postReq(sampleBrief));
+        expect(res.status).toBe(201);
+        expect(await res.json()).toMatchObject({ file: "camp.yaml" });
+
+        const { rows } = await harness.db.query<{ team_id: string | null }>(
+          `select team_id from campaign where org_id = 'local' and slug = 'camp'`,
+        );
+        expect(rows[0]!.team_id).toBe("t1");
+
+        // A second create of the same slug — now versioned — is still refused.
+        const again = await mount(owner).create(postReq(sampleBrief));
+        expect(again.status).toBe(409);
+      } finally {
+        await harness.cleanup();
+      }
+    });
+
+    test("a versionless row hidden from this caller by team still answers 409, and is never written into", async () => {
+      const harness = await setupPgHarness();
+      try {
+        await harness.db.query(
+          `insert into team (id, name, "memberCount", org_id, created_at) values ($1, $2, 0, $3, now())`,
+          ["t1", "Team One", "local"],
+        );
+        await new PgBriefStore(harness.db, "local", "local").createCampaign("camp", {
+          teamId: "t1",
+        });
+
+        const res = await mount(t2Member).create(postReq(sampleBrief));
+        expect(res.status).toBe(409);
+
+        const { rows } = await harness.db.query<{ count: number }>(
+          `select count(*)::int from brief_version bv
+             join campaign c on c.id = bv.campaign_id
+            where c.org_id = 'local' and c.slug = 'camp'`,
+        );
+        expect(rows[0]!.count).toBe(0);
+      } finally {
+        await harness.cleanup();
+      }
+    });
+  });
+
   test("creating with a team the caller does not belong to, and is not owner/admin, answers 403", async () => {
     const harness = await setupPgHarness();
     try {
