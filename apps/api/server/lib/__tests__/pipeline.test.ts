@@ -615,25 +615,19 @@ describe("pipeline composition root", () => {
 
     test("firefly selection resolves firefly if credentials present, else falls back", () => {
       expect(selectImageProvider(fullProviders, "firefly")).toBe("firefly");
-      expect(
-        selectImageProvider(
-          { geminiKey: "gem-k", openRouterKey: "open-k" },
-          "firefly",
-        ),
-      ).toBe("gemini");
+      expect(selectImageProvider({ geminiKey: "gem-k", openRouterKey: "open-k" }, "firefly")).toBe(
+        "gemini",
+      );
       expect(selectImageProvider({ openRouterKey: "open-k" }, "firefly")).toBe("openrouter");
       expect(selectImageProvider({}, "firefly")).toBeUndefined();
     });
 
     test("model with slash selects openrouter if key present, else undefined", () => {
+      expect(selectImageProvider(fullProviders, "x-ai/grok-imagine-image-quality")).toBe(
+        "openrouter",
+      );
       expect(
-        selectImageProvider(fullProviders, "x-ai/grok-imagine-image-quality"),
-      ).toBe("openrouter");
-      expect(
-        selectImageProvider(
-          { geminiKey: "gem-k" },
-          "x-ai/grok-imagine-image-quality",
-        ),
+        selectImageProvider({ geminiKey: "gem-k" }, "x-ai/grok-imagine-image-quality"),
       ).toBeUndefined();
     });
 
@@ -647,16 +641,12 @@ describe("pipeline composition root", () => {
 
     test("selectImageProviderWithActiveKeys overlays active org keys onto platform settings", () => {
       const emptyPlatform = {};
-      expect(
-        selectImageProviderWithActiveKeys(emptyPlatform, ["firefly"], "firefly"),
-      ).toBe("firefly");
-      expect(
-        selectImageProviderWithActiveKeys(
-          emptyPlatform,
-          new Set(["gemini"]),
-          "imagen",
-        ),
-      ).toBe("gemini");
+      expect(selectImageProviderWithActiveKeys(emptyPlatform, ["firefly"], "firefly")).toBe(
+        "firefly",
+      );
+      expect(selectImageProviderWithActiveKeys(emptyPlatform, new Set(["gemini"]), "imagen")).toBe(
+        "gemini",
+      );
       expect(
         selectImageProviderWithActiveKeys(
           emptyPlatform,

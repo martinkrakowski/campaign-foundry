@@ -102,7 +102,10 @@ export async function overlayOrgKeys(
   let neededProviders: Set<Provider>;
   if (options?.providers !== undefined) {
     neededProviders = new Set(options.providers);
-  } else if (options !== undefined && ("imageModel" in options || "generatesHeadlines" in options)) {
+  } else if (
+    options !== undefined &&
+    ("imageModel" in options || "generatesHeadlines" in options)
+  ) {
     neededProviders = new Set<Provider>();
     let activeProviders: Set<Provider>;
     try {
@@ -189,7 +192,10 @@ export async function overlayOrgKeys(
  */
 export async function executeRunRequest(request: RunRequest, signal?: AbortSignal): Promise<void> {
   const baseEnv = runEnvironment(request.tenant);
-  const env = await overlayOrgKeys(baseEnv, { imageModel: request.imageModel, generatesHeadlines: request.generatesHeadlines });
+  const env = await overlayOrgKeys(baseEnv, {
+    imageModel: request.imageModel,
+    generatesHeadlines: request.generatesHeadlines,
+  });
   const { jobId, brief, imageModel, regenerateOnly, reroll, expectedRevision } = request;
   const expectedPolicyHash = await persistedPolicyHash(env, brief, reroll);
   const expectedCopyHash = await persistedCopyHash(env, brief, reroll);

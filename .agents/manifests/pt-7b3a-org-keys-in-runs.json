@@ -4,7 +4,7 @@
   "mutations": [
     {
       "file": "apps/api/server/lib/run-request.ts",
-      "before": "  const env = await overlayOrgKeys(baseEnv, { imageModel: request.imageModel, generatesHeadlines: request.generatesHeadlines });\n",
+      "before": "  const env = await overlayOrgKeys(baseEnv, {\n    imageModel: request.imageModel,\n    generatesHeadlines: request.generatesHeadlines,\n  });\n",
       "after": "  const env = baseEnv;\n",
       "because": "always use the platform key (skip the org-key lookup)",
       "command": [

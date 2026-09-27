@@ -397,14 +397,17 @@ describe("executeRunRequest org provider keys (PT-7b3a, D175)", () => {
     ["empty clientSecret", JSON.stringify({ clientId: "platform-id", clientSecret: "" })],
     ["non-string clientId", JSON.stringify({ clientId: 123, clientSecret: "platform-sec" })],
     ["non-string clientSecret", JSON.stringify({ clientId: "platform-id", clientSecret: true })],
-  ])("corrupt Firefly plaintext (%s) falls back to platform Firefly credentials", async (_desc, plaintext) => {
-    setProviderKeyStore(fakeProviderKeyStore({ firefly: plaintext }));
-    const baseEnv = runEnvironment(LOCAL_TENANT);
-    const env = await overlayOrgKeys(baseEnv);
-    expect(env.providers.fireflyClientId).toBe(baseEnv.providers.fireflyClientId);
-    expect(env.providers.fireflyClientSecret).toBe(baseEnv.providers.fireflyClientSecret);
-    expect(env.providers.keyOwners?.firefly).toBe("platform");
-  });
+  ])(
+    "corrupt Firefly plaintext (%s) falls back to platform Firefly credentials",
+    async (_desc, plaintext) => {
+      setProviderKeyStore(fakeProviderKeyStore({ firefly: plaintext }));
+      const baseEnv = runEnvironment(LOCAL_TENANT);
+      const env = await overlayOrgKeys(baseEnv);
+      expect(env.providers.fireflyClientId).toBe(baseEnv.providers.fireflyClientId);
+      expect(env.providers.fireflyClientSecret).toBe(baseEnv.providers.fireflyClientSecret);
+      expect(env.providers.keyOwners?.firefly).toBe("platform");
+    },
+  );
 
   test("defaults keyOwners to platform when baseEnv has keyOwners: undefined", async () => {
     setProviderKeyStore(fakeProviderKeyStore({}));
