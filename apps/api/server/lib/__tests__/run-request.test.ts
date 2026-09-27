@@ -2,17 +2,24 @@ import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
+import {
+  type CampaignBrief,
+  BRIEF_SCHEMA_VERSION,
+  DEFAULT_CAMPAIGN_TYPE,
+  templateFromCanonical,
+} from "@campaignfoundry/CampaignOrchestration";
 import { LOCAL_TENANT, type TenantContext } from "../tenant.js";
 import { enqueueJob, getJob, resetJobs, startQueuedJob } from "../jobs.js";
 import { executeRunRequest, type RunRequest } from "../run-request.js";
 import { resetProviderKeyStore, setProviderKeyStore } from "../ports/index.js";
 import type { Provider, ProviderKeyPort, ProviderKeySummary } from "../ports/provider-key.port.js";
 import { setCapabilities } from "../capabilities.js";
-import { runEnvironment } from "../run-environment.js";
+import { runEnvironment, type RunEnvironment } from "../run-environment.js";
 import * as pipelineModule from "../pipeline.js";
 
 const sampleBrief = (): CampaignBrief => ({
+  schemaVersion: BRIEF_SCHEMA_VERSION,
+  template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
   id: "camp-org-keys",
   targetRegion: "DE",
   targetAudience: "test-audience",
@@ -79,7 +86,7 @@ describe("executeRunRequest org provider keys (PT-7b3a, D175)", () => {
       teamIds: [],
     };
 
-    let seenEnv: pipelineModule.RunEnvironment | undefined;
+    let seenEnv: RunEnvironment | undefined;
     vi.spyOn(pipelineModule, "runCampaign").mockImplementation(async (env) => {
       seenEnv = env;
       return {
@@ -97,7 +104,7 @@ describe("executeRunRequest org provider keys (PT-7b3a, D175)", () => {
     const brief = sampleBrief();
     const env = runEnvironment(tenant);
     const claim = await enqueueJob(env, brief.id);
-    expect(claim.acquired).toBe(true);
+    if (!claim.acquired) throw new Error("job not acquired");
     await startQueuedJob(env, claim.jobId);
 
     const request: RunRequest = {
@@ -139,7 +146,7 @@ describe("executeRunRequest org provider keys (PT-7b3a, D175)", () => {
       teamIds: [],
     };
 
-    let seenEnv: pipelineModule.RunEnvironment | undefined;
+    let seenEnv: RunEnvironment | undefined;
     vi.spyOn(pipelineModule, "runCampaign").mockImplementation(async (env) => {
       seenEnv = env;
       return {
@@ -157,7 +164,7 @@ describe("executeRunRequest org provider keys (PT-7b3a, D175)", () => {
     const brief = sampleBrief();
     const env = runEnvironment(tenant);
     const claim = await enqueueJob(env, brief.id);
-    expect(claim.acquired).toBe(true);
+    if (!claim.acquired) throw new Error("job not acquired");
     await startQueuedJob(env, claim.jobId);
 
     const request: RunRequest = {
@@ -189,7 +196,7 @@ describe("executeRunRequest org provider keys (PT-7b3a, D175)", () => {
       teamIds: [],
     };
 
-    let seenEnv: pipelineModule.RunEnvironment | undefined;
+    let seenEnv: RunEnvironment | undefined;
     vi.spyOn(pipelineModule, "runCampaign").mockImplementation(async (env) => {
       seenEnv = env;
       return {
@@ -207,7 +214,7 @@ describe("executeRunRequest org provider keys (PT-7b3a, D175)", () => {
     const brief = sampleBrief();
     const env = runEnvironment(tenant);
     const claim = await enqueueJob(env, brief.id);
-    expect(claim.acquired).toBe(true);
+    if (!claim.acquired) throw new Error("job not acquired");
     await startQueuedJob(env, claim.jobId);
 
     const request: RunRequest = {
@@ -247,7 +254,7 @@ describe("executeRunRequest org provider keys (PT-7b3a, D175)", () => {
       teamIds: [],
     };
 
-    let seenEnv: pipelineModule.RunEnvironment | undefined;
+    let seenEnv: RunEnvironment | undefined;
     vi.spyOn(pipelineModule, "runCampaign").mockImplementation(async (env) => {
       seenEnv = env;
       return {
@@ -265,7 +272,7 @@ describe("executeRunRequest org provider keys (PT-7b3a, D175)", () => {
     const brief = sampleBrief();
     const env = runEnvironment(tenant);
     const claim = await enqueueJob(env, brief.id);
-    expect(claim.acquired).toBe(true);
+    if (!claim.acquired) throw new Error("job not acquired");
     await startQueuedJob(env, claim.jobId);
 
     const request: RunRequest = {
@@ -307,7 +314,7 @@ describe("executeRunRequest org provider keys (PT-7b3a, D175)", () => {
     const brief = sampleBrief();
     const env = runEnvironment(tenant);
     const claim = await enqueueJob(env, brief.id);
-    expect(claim.acquired).toBe(true);
+    if (!claim.acquired) throw new Error("job not acquired");
     await startQueuedJob(env, claim.jobId);
 
     const request: RunRequest = {
@@ -350,7 +357,7 @@ describe("executeRunRequest org provider keys (PT-7b3a, D175)", () => {
     const brief = sampleBrief();
     const env = runEnvironment(tenant);
     const claim = await enqueueJob(env, brief.id);
-    expect(claim.acquired).toBe(true);
+    if (!claim.acquired) throw new Error("job not acquired");
     await startQueuedJob(env, claim.jobId);
 
     const request: RunRequest = {
