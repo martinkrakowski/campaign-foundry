@@ -192,7 +192,7 @@ export interface KafkaSettings {
   readonly topic: string;
   readonly groupId: string;
   readonly consume: boolean;
-  readonly maxInFlight: number;
+  readonly maxInFlight?: number;
   readonly ssl?: KafkaSslConfig;
   readonly clientCertPath?: string;
   readonly clientKeyPath?: string;

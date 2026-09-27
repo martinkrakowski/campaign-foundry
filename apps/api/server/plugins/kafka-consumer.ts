@@ -16,14 +16,14 @@ export interface NitroApp {
 }
 
 export interface KafkaPluginTimer {
-  setTimeout: (cb: () => void, ms: number) => unknown;
-  clearTimeout: (id: unknown) => void;
+  setTimeout: typeof setTimeout;
+  clearTimeout: typeof clearTimeout;
   random?: () => number;
 }
 
 const defaultTimer: KafkaPluginTimer = {
-  setTimeout: (cb, ms) => setTimeout(cb, ms),
-  clearTimeout: (id) => clearTimeout(id as NodeJS.Timeout),
+  setTimeout,
+  clearTimeout,
   random: Math.random,
 };
 
@@ -54,7 +54,7 @@ export function createKafkaConsumerPlugin(
     const consumer = consumerFactory(settings);
 
     let closed = false;
-    let pendingRetryTimer: unknown = undefined;
+    let pendingRetryTimer: ReturnType<typeof setTimeout> | undefined;
     let attempt = 0;
 
     const cancelPendingRetry = () => {
