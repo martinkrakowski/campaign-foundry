@@ -78,16 +78,25 @@ ssh m 'KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl -n campaign-foundry-staging 
 Sign-in links are sent through Resend's HTTP API (D174b) from
 `campaign-foundry@midnight.krakowski.cloud`. The domain's DKIM and SPF are verified in
 Resend, and sending needs nothing else. The API key lives in the namespace's own secret,
-`campaign-foundry-resend` (key `api-key`). Create it on the node from a key you hold, so it
-never touches the repo, then restart the pod so it picks the key up:
+`campaign-foundry-resend` (key `api-key`). The key is read with echo off on YOUR terminal
+and piped to the node, so it is never shown, never lands in shell history, and never touches
+the repo. (A `read -s` inside `ssh m '…'` would run on the node, which has no terminal to
+silence, so a pasted key would echo locally.)
 
 ```sh
-ssh m 'read -rs KEY && printf %s "$KEY" | KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl -n campaign-foundry-staging create secret generic campaign-foundry-resend --from-file=api-key=/dev/stdin'
+read -rs "KEY?Resend API key: " && echo && printf %s "$KEY" | ssh m 'KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl -n campaign-foundry-staging create secret generic campaign-foundry-resend --from-file=api-key=/dev/stdin'; unset KEY
+```
+
+(That is zsh's prompt syntax; in bash, use `read -rsp "Resend API key: " KEY`.) If staging is
+already running, restart it so the pod picks the key up; on a fresh cluster, skip this, and the
+first deploy reads the secret:
+
+```sh
 ssh m 'KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl -n campaign-foundry-staging rollout restart deploy/campaign-foundry'
 ```
 
-(The first command waits for the key on stdin; paste it and press Enter.) The secret is
-optional in `app.yaml`, so a deploy without it still works and falls back to the log below.
+The secret is optional in `app.yaml`, so a deploy without it still works and falls back to
+the log below.
 
 ### First sign-in (once, owner)
 
