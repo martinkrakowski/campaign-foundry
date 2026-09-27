@@ -253,6 +253,23 @@ describe("PT-2d: team gates on routes (D166)", () => {
     const resNonCampT1 = await callT1(new Request("http://x/output/shared/preview.png"));
     expect(resNonCampT1.status).toBe(200);
     await resNonCampT1.arrayBuffer();
+
+    // Package output path: team-B gets 404, team-1 gets 200
+    const pkgOutDir = join(harness.outputRoot, "packages", "t1-camp", "instagram-feed");
+    mkdirSync(pkgOutDir, { recursive: true });
+    writeFileSync(join(pkgOutDir, "manifest.json"), "{}");
+
+    const resPkgTB = await callTB(
+      new Request("http://x/output/packages/t1-camp/instagram-feed/manifest.json"),
+    );
+    expect(resPkgTB.status).toBe(404);
+    expect(await resPkgTB.json()).toEqual({ error: "Not found" });
+
+    const resPkgT1 = await callT1(
+      new Request("http://x/output/packages/t1-camp/instagram-feed/manifest.json"),
+    );
+    expect(resPkgT1.status).toBe(200);
+    await resPkgT1.arrayBuffer();
   });
 
   test("PUT /campaigns/decisions answers 404 for team-B, 200 for team-1", async () => {
