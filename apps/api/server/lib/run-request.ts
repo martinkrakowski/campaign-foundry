@@ -136,7 +136,6 @@ export async function overlayOrgKeys(env: RunEnvironment): Promise<RunEnvironmen
       fireflyClientId,
       fireflyClientSecret,
       keyOwners,
-      keyOwner: keyOwners,
     },
   };
 }

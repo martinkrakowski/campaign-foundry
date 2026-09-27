@@ -33,7 +33,6 @@ describe("tenantOutputRoot (PT-0c)", () => {
       openrouter: "platform",
       firefly: "platform",
     });
-    expect(env.providers.keyOwner).toEqual(env.providers.keyOwners);
   });
 
   test("decodeFireflyPlaintext decodes clientId and clientSecret JSON", () => {

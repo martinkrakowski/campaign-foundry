@@ -34,7 +34,6 @@ export interface ProviderSettings {
   readonly openRouterCopyModel?: string;
   /** Whose key each provider uses (PT-7b3a, D175). Defaults to platform. */
   readonly keyOwners?: ProviderKeyOwners;
-  readonly keyOwner?: ProviderKeyOwners;
 }
 
 export interface RunEnvironment {
@@ -88,7 +87,6 @@ export function providerSettings(): ProviderSettings {
     openRouterImageModel: env.OPENROUTER_IMAGE_MODEL,
     openRouterCopyModel: env.OPENROUTER_COPY_MODEL,
     keyOwners,
-    keyOwner: keyOwners,
   };
 }
 
