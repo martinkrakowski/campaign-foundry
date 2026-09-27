@@ -9,6 +9,7 @@ import {
   TeamsNotSupportedError,
   type BriefStorePort,
   type BriefWriteOptions,
+  type CreateCampaignOptions,
   type ResolvedCampaign,
   type StoredBrief,
 } from "./brief-store.port.js";
@@ -136,6 +137,44 @@ export class FsBriefStore implements BriefStorePort {
     await writeFile(filePath, content, { encoding: "utf8", flag: "wx" });
     const revision = hashBytes(Buffer.from(content, "utf8"));
     return { campaignId: brief.id, file: `${brief.id}.yaml`, brief, revision };
+  }
+
+  /**
+   * D177/D179 (PT-5b2): `POST /campaigns`'s blank-create path. A directory,
+   * never a file — `<slug>.yaml` is what `createBrief` writes for the first
+   * Save, a different filesystem entry that a bare `<slug>/` directory never
+   * blocks (no shared inode, no shared parent-of-the-file check). "Taken"
+   * (the Dedupe note) is a brief file at any allowed extension OR an
+   * already-reserved directory; `withBriefLock` serialises the check-then-
+   * mkdir sequence, and `mkdir` with no `{ recursive: true }` is itself an
+   * atomic reservation — two concurrent callers of the same slug can never
+   * both succeed.
+   */
+  async createCampaign(slug: string, options?: CreateCampaignOptions): Promise<ResolvedCampaign> {
+    assertNoTeam(options?.teamId);
+    if (isReservedCampaignId(slug)) {
+      throw new Error(`"${slug}" is reserved; choose another campaign id.`);
+    }
+    return this.withBriefLock(slug, async () => {
+      if (await this.findBriefFile(slug)) {
+        const err = new Error(`Brief "${slug}" already exists.`);
+        (err as { code?: string }).code = "EEXIST";
+        throw err;
+      }
+      const dirPath = resolveConfined(this.dir, slug);
+      try {
+        await mkdir(this.dir, { recursive: true });
+        await mkdir(dirPath);
+      } catch (error) {
+        if (isErrno(error, "EEXIST")) {
+          const err = new Error(`Brief "${slug}" already exists.`);
+          (err as { code?: string }).code = "EEXIST";
+          throw err;
+        }
+        throw error;
+      }
+      return { campaignId: slug, slug };
+    });
   }
 
   /**

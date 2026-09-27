@@ -1,6 +1,7 @@
 import { describe, test, expect, beforeEach, afterEach } from "vitest";
 import {
   chmodSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   writeFileSync,
@@ -205,6 +206,66 @@ describe("FsBriefStore", () => {
     expect(created.revision).toBeTruthy();
 
     await expect(store.createBrief(minimalBrief)).rejects.toMatchObject({ code: "EEXIST" });
+  });
+
+  describe("createCampaign (D177/D179, PT-5b2)", () => {
+    test("mints a reserved directory, never a file", async () => {
+      const created = await store.createCampaign("fresh-slug");
+      expect(created).toEqual({ campaignId: "fresh-slug", slug: "fresh-slug" });
+      expect(existsSync(join(dir, "fresh-slug"))).toBe(true);
+      expect(existsSync(join(dir, "fresh-slug.yaml"))).toBe(false);
+      expect(await store.campaignVisibility("fresh-slug")).toBe("absent");
+      expect(await store.findBriefById("fresh-slug")).toBeUndefined();
+    });
+
+    test("a taken slug (an existing directory) is EEXIST", async () => {
+      await store.createCampaign("taken-dir");
+      await expect(store.createCampaign("taken-dir")).rejects.toMatchObject({ code: "EEXIST" });
+    });
+
+    test("a taken slug (an existing brief file) is EEXIST", async () => {
+      await store.createBrief({ ...minimalBrief, id: "taken-file" });
+      await expect(store.createCampaign("taken-file")).rejects.toMatchObject({ code: "EEXIST" });
+    });
+
+    test.each(["cache", "jobs", "orgs", "packages"] as const)(
+      "refuses a reserved campaign id %s",
+      async (id) => {
+        await expect(store.createCampaign(id)).rejects.toThrow(
+          `"${id}" is reserved; choose another campaign id.`,
+        );
+      },
+    );
+
+    test("throws TeamsNotSupportedError for a non-undefined teamId", async () => {
+      await expect(store.createCampaign("teamed", { teamId: "t1" })).rejects.toMatchObject({
+        name: "TeamsNotSupportedError",
+      });
+      await expect(store.createCampaign("teamed", { teamId: null })).rejects.toMatchObject({
+        name: "TeamsNotSupportedError",
+      });
+    });
+
+    test("the reserved directory never blocks the first Save's <slug>.yaml write", async () => {
+      await store.createCampaign("first-save");
+      const created = await store.createBrief({ ...minimalBrief, id: "first-save" });
+      expect(created.file).toBe("first-save.yaml");
+      expect(existsSync(join(dir, "first-save"))).toBe(true);
+      expect(existsSync(join(dir, "first-save.yaml"))).toBe(true);
+      expect((await store.findBriefById("first-save"))?.brief.id).toBe("first-save");
+    });
+
+    test("two concurrent creates of the same slug: exactly one wins, the other is EEXIST", async () => {
+      const results = await Promise.allSettled([
+        store.createCampaign("race-slug"),
+        store.createCampaign("race-slug"),
+      ]);
+      const fulfilled = results.filter((r) => r.status === "fulfilled");
+      const rejected = results.filter((r) => r.status === "rejected");
+      expect(fulfilled).toHaveLength(1);
+      expect(rejected).toHaveLength(1);
+      expect((rejected[0] as PromiseRejectedResult).reason).toMatchObject({ code: "EEXIST" });
+    });
   });
 
   test("rewriteBrief updates existing brief and checks revision when provided", async () => {

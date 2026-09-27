@@ -254,6 +254,77 @@ describe("PgBriefStore (PT-3d, D168, D169)", () => {
     });
   });
 
+  describe("createCampaign (D177, PT-5b2)", () => {
+    test("mints a campaign row with no version yet", async () => {
+      const created = await store.createCampaign("fresh-slug");
+      expect(created).toEqual({ campaignId: expect.any(String), slug: "fresh-slug" });
+
+      const { rows } = await db.query<{ count: number }>(
+        `select count(*)::int from brief_version where campaign_id = $1`,
+        [created.campaignId],
+      );
+      expect(rows[0]!.count).toBe(0);
+      expect(await store.findBriefById("fresh-slug")).toBeUndefined();
+      expect(await store.campaignVisibility("fresh-slug")).toBe("visible");
+    });
+
+    test("a taken slug is EEXIST, whether the existing row has a version or not", async () => {
+      await store.createCampaign("taken-blank");
+      await expect(store.createCampaign("taken-blank")).rejects.toMatchObject({ code: "EEXIST" });
+
+      await store.createBrief(brief("taken-versioned"));
+      await expect(store.createCampaign("taken-versioned")).rejects.toMatchObject({
+        code: "EEXIST",
+      });
+    });
+
+    test.each(["cache", "jobs", "orgs", "packages"] as const)(
+      "refuses a reserved campaign id %s",
+      async (id) => {
+        await expect(store.createCampaign(id)).rejects.toThrow(
+          `"${id}" is reserved; choose another campaign id.`,
+        );
+      },
+    );
+
+    test("refuses an unsafe id", async () => {
+      await expect(store.createCampaign("../evil")).rejects.toThrow(/not a safe id/);
+    });
+
+    test("honours teamId exactly like createBrief's", async () => {
+      await db.query(
+        `insert into team (id, name, "memberCount", org_id, created_at) values ($1, $2, 0, $3, now())`,
+        ["t1", "Team 1", "local"],
+      );
+      const owner = new PgBriefStore(db, "local", "owner", ["owner"], []);
+      const stranger = new PgBriefStore(db, "local", "u3", [], []);
+
+      await owner.createCampaign("team-slug", { teamId: "t1" });
+
+      expect(await stranger.campaignVisibility("team-slug")).toBe("hidden");
+    });
+
+    test("an unknown team id refuses (EFORBIDDEN), and mints no row", async () => {
+      const owner = new PgBriefStore(db, "local", "owner", ["owner"], []);
+      await expect(owner.createCampaign("no-team", { teamId: "ghost" })).rejects.toMatchObject({
+        code: "EFORBIDDEN",
+      });
+      expect(await owner.campaignVisibility("no-team")).toBe("absent");
+    });
+
+    test("two concurrent creates of the same slug: exactly one wins, the other retries", async () => {
+      const results = await Promise.allSettled([
+        store.createCampaign("race-slug"),
+        store.createCampaign("race-slug"),
+      ]);
+      const fulfilled = results.filter((r) => r.status === "fulfilled");
+      const rejected = results.filter((r) => r.status === "rejected");
+      expect(fulfilled).toHaveLength(1);
+      expect(rejected).toHaveLength(1);
+      expect((rejected[0] as PromiseRejectedResult).reason).toMatchObject({ code: "EEXIST" });
+    });
+  });
+
   test("rewriteBrief writes the next version, unconditionally when no expectedRevision is given", async () => {
     await store.createBrief(minimalBrief);
     const updated = await store.rewriteBrief(brief("test-camp", "Updated message"));

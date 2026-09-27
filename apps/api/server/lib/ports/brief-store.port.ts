@@ -22,6 +22,15 @@ export interface ResolvedCampaign {
 }
 
 /**
+ * `createCampaign`'s own options (D177, PT-5b2): a fresh mint has no
+ * revision to guard, so it takes only the team a caller who already ran
+ * `canAssignTeam` authorized — same meaning as `BriefWriteOptions.teamId`.
+ */
+export interface CreateCampaignOptions {
+  readonly teamId?: string | null;
+}
+
+/**
  * Team assignment options shared by `createBrief`, `rewriteBrief` and
  * `replaceBrief` (D166, PT-2c item 4). `teamId` is Postgres-only: `undefined`
  * means "leave as it is" for a rewrite/replace, or "no team" (null) for a
@@ -101,10 +110,28 @@ export interface BriefStorePort {
 
   /**
    * Exclusively create a new brief in storage.
-   * Fails with an EEXIST error if a brief or file with the same id already exists.
+   * Fails with an EEXIST error if a brief or file with the same id already exists,
+   * UNLESS that row is a `createCampaign` mint with no version yet (D177,
+   * PT-5b2): this write is then its first Save, adding version 1 to the
+   * existing row rather than refusing the slug as taken. A row hidden from
+   * this caller by team (D166) is refused as EEXIST either way, never
+   * written into.
    * `options.teamId` (D166 item 4): see `BriefWriteOptions`.
    */
   createBrief(brief: CampaignBrief, options?: BriefWriteOptions): Promise<StoredBrief>;
+
+  /**
+   * Mint a campaign with no version yet (D177: Create mints the campaign
+   * row; version 1 is the first Save) — the blank-create path of
+   * `POST /campaigns` (PT-5b2). A Postgres row with no `brief_version`, or a
+   * reserved `briefs/<slug>/` directory on the filesystem backend (D179: the
+   * fs id IS the slug). Fails with an EEXIST error if the slug already names
+   * a campaign (any state: versionless, versioned, or a plain brief file) or
+   * a reserved directory on fs — the caller's own dedupe loop retries the
+   * next suffix on that signal, the same one two concurrent callers of the
+   * same name race on, rather than a separate check-then-act read.
+   */
+  createCampaign(slug: string, options?: CreateCampaignOptions): Promise<ResolvedCampaign>;
 
   /**
    * Rewrite an existing brief in its own format.
