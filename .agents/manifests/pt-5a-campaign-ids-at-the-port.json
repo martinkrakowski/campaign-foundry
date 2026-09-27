@@ -4,8 +4,8 @@
   "mutations": [
     {
       "file": "apps/api/server/lib/ports/pg-brief-store.ts",
-      "before": "    if (!this.visible(row.team_id)) return undefined;",
-      "after": "    if (false) return undefined;",
+      "before": "    if (!bySlug || !this.visible(bySlug.team_id)) return undefined;",
+      "after": "    if (!bySlug) return undefined;",
       "because": "skip the visibility predicate in PgBriefStore.resolveCampaign so a team-hidden campaign resolves",
       "command": [
         "yarn",

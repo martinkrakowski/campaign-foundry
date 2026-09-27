@@ -744,6 +744,38 @@ describe("campaignId and resolveCampaign (PT-5a, D168, D178)", () => {
     });
   });
 
+  test("an uppercase uuid resolves like its lowercase form", async () => {
+    const created = await store.createBrief(brief("alpha"));
+    expect(await store.resolveCampaign(created.campaignId.toUpperCase())).toEqual({
+      campaignId: created.campaignId,
+      slug: "alpha",
+    });
+  });
+
+  test("a hidden campaign's uuid does not mask a visible campaign whose slug is that uuid", async () => {
+    await db.query(
+      `insert into team (id, name, "memberCount", org_id, created_at) values ($1, $2, 0, $3, now())`,
+      ["t-secret", "Secret", "local"],
+    );
+    const adminStore = new PgBriefStore(db, "local", "admin", ["admin"]);
+    const hidden = await adminStore.createBrief(brief("hidden-camp"), { teamId: "t-secret" });
+    // A visible, org-wide campaign whose slug is the hidden campaign's uuid.
+    const visible = await adminStore.createBrief(brief(hidden.campaignId));
+
+    const memberStore = new PgBriefStore(db, "local", "u1", [], ["t-other"]);
+    // Hidden reads as missing, so the ref falls through to the slug: the member
+    // gets the visible campaign, exactly as if the hidden one did not exist.
+    expect(await memberStore.resolveCampaign(hidden.campaignId)).toEqual({
+      campaignId: visible.campaignId,
+      slug: hidden.campaignId,
+    });
+    // The admin, who can see the hidden campaign, still gets the uuid match.
+    expect(await adminStore.resolveCampaign(hidden.campaignId)).toEqual({
+      campaignId: hidden.campaignId,
+      slug: "hidden-camp",
+    });
+  });
+
   test("a lowercase uuid that is also a legal slug resolves as the uuid first", async () => {
     // Campaign A has id = uuidA, slug = "slug-a"
     const campA = await store.createBrief(brief("slug-a"));

@@ -14,7 +14,7 @@ import type {
   StoredBrief,
 } from "./brief-store.port.js";
 
-const CANONICAL_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const CANONICAL_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** A file key ("<slug>.yaml") and the bare slug name the same row; strip a known extension. */
 function slugOf(fileOrId: string): string {
@@ -165,24 +165,24 @@ export class PgBriefStore implements BriefStorePort {
    * Answers { campaignId, slug } or undefined if absent or hidden by team.
    */
   async resolveCampaign(ref: string): Promise<ResolvedCampaign | undefined> {
-    let row: { id: string; slug: string; team_id: string | null } | undefined;
+    // A uuid-shaped ref is tried as an id first. A match the caller may not see is
+    // treated exactly as no match (PT-2d: hidden is indistinguishable from missing),
+    // so the ref still falls through to the slug lookup.
     if (CANONICAL_UUID_PATTERN.test(ref)) {
       const { rows } = await this.db.query<{ id: string; slug: string; team_id: string | null }>(
         `select id, slug, team_id from campaign where org_id = $1 and id = $2`,
-        [this.orgId, ref],
+        [this.orgId, ref.toLowerCase()],
       );
-      row = rows[0];
+      const byId = rows[0];
+      if (byId && this.visible(byId.team_id)) return { campaignId: byId.id, slug: byId.slug };
     }
-    if (!row) {
-      const { rows } = await this.db.query<{ id: string; slug: string; team_id: string | null }>(
-        `select id, slug, team_id from campaign where org_id = $1 and slug = $2`,
-        [this.orgId, ref],
-      );
-      row = rows[0];
-    }
-    if (!row) return undefined;
-    if (!this.visible(row.team_id)) return undefined;
-    return { campaignId: row.id, slug: row.slug };
+    const { rows } = await this.db.query<{ id: string; slug: string; team_id: string | null }>(
+      `select id, slug, team_id from campaign where org_id = $1 and slug = $2`,
+      [this.orgId, ref],
+    );
+    const bySlug = rows[0];
+    if (!bySlug || !this.visible(bySlug.team_id)) return undefined;
+    return { campaignId: bySlug.id, slug: bySlug.slug };
   }
 
   async listBriefs(): Promise<readonly StoredBrief[]> {

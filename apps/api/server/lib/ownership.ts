@@ -1,8 +1,7 @@
-import type { H3Event } from "h3";
 import type { StorageScope } from "./run-environment.js";
 import type { StoredBrief } from "./ports/brief-store.port.js";
 import { getAssetStore, getBriefStore, getReportStore } from "./ports/index.js";
-import { requestTenant, type TenantContext } from "./tenant.js";
+import type { TenantContext } from "./tenant.js";
 
 /**
  * The route-side half of D166 item 3's permission check: `owner`/`admin` may
@@ -65,8 +64,7 @@ export async function assertOwnedCampaign(
  * Answers the slug within the caller's tenant scope, or throws CampaignNotFoundError (HTTP 404)
  * if the campaign does not exist or is hidden by team.
  */
-export async function resolveCampaignRef(event: H3Event, ref: string): Promise<string> {
-  const scope = requestTenant(event);
+export async function resolveCampaignRef(scope: StorageScope, ref: string): Promise<string> {
   const resolved = await getBriefStore(scope).resolveCampaign(ref);
   if (!resolved) {
     throw new CampaignNotFoundError(ref);

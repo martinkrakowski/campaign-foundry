@@ -181,10 +181,12 @@ describe("GET /campaigns/briefs", () => {
         briefs: { file: string; brief: { id: string }; campaignId: string }[];
       };
       expect(json.briefs).toHaveLength(1);
-      expect(json.briefs[0].campaignId).toBeDefined();
-      expect(json.briefs[0].campaignId).toMatch(
-        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+      expect(json.briefs[0].brief.id).toBe("camp-pg");
+      const { rows } = await harness.db.query<{ id: string }>(
+        "select id from campaign where slug = $1",
+        ["camp-pg"],
       );
+      expect(json.briefs[0].campaignId).toBe(rows[0]!.id);
     } finally {
       await harness.cleanup();
     }

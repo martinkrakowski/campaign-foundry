@@ -22,7 +22,6 @@ import {
   resetReportStore,
 } from "../ports/index.js";
 import { PgBriefStore } from "../ports/pg-brief-store.js";
-import type { H3Event } from "h3";
 import {
   assertOwnedCampaign,
   assertSourceVisible,
@@ -446,11 +445,11 @@ describe("resolveCampaignRef (PT-5a, D178, D179)", () => {
   test("fs backend: resolves existing slug to slug and throws 404 for missing", async () => {
     await getBriefStore(LOCAL_TENANT).createBrief(sampleBrief);
 
-    const event = { context: { tenant: LOCAL_TENANT } } as unknown as H3Event;
-    const slug = await resolveCampaignRef(event, "camp");
+    const scope = LOCAL_TENANT;
+    const slug = await resolveCampaignRef(scope, "camp");
     expect(slug).toBe("camp");
 
-    const err = await resolveCampaignRef(event, "missing").catch((e: unknown) => e);
+    const err = await resolveCampaignRef(scope, "missing").catch((e: unknown) => e);
     expect(err).toBeInstanceOf(CampaignNotFoundError);
     expect((err as CampaignNotFoundError).statusCode).toBe(404);
     expect((err as CampaignNotFoundError).status).toBe(404);
@@ -492,12 +491,12 @@ describe("resolveCampaignRef on Postgres (PT-5a, D178)", () => {
     const created = await getBriefStore(ownerTenant).createBrief({ ...sampleBrief, id: "my-camp" });
     const uuid = created.campaignId;
 
-    const event = { context: { tenant: ownerTenant } } as unknown as H3Event;
-    expect(await resolveCampaignRef(event, "my-camp")).toBe("my-camp");
-    expect(await resolveCampaignRef(event, uuid)).toBe("my-camp");
+    const scope = ownerTenant;
+    expect(await resolveCampaignRef(scope, "my-camp")).toBe("my-camp");
+    expect(await resolveCampaignRef(scope, uuid)).toBe("my-camp");
 
     // Missing
-    await expect(resolveCampaignRef(event, "missing-camp")).rejects.toThrow(CampaignNotFoundError);
+    await expect(resolveCampaignRef(scope, "missing-camp")).rejects.toThrow(CampaignNotFoundError);
 
     // Another org
     await db.query("insert into org (id, name) values ($1, $2)", ["other", "Other"]);
@@ -511,8 +510,8 @@ describe("resolveCampaignRef on Postgres (PT-5a, D178)", () => {
       ...sampleBrief,
       id: "other-camp",
     });
-    await expect(resolveCampaignRef(event, "other-camp")).rejects.toThrow(CampaignNotFoundError);
-    await expect(resolveCampaignRef(event, otherCreated.campaignId)).rejects.toThrow(
+    await expect(resolveCampaignRef(scope, "other-camp")).rejects.toThrow(CampaignNotFoundError);
+    await expect(resolveCampaignRef(scope, otherCreated.campaignId)).rejects.toThrow(
       CampaignNotFoundError,
     );
 
@@ -527,8 +526,8 @@ describe("resolveCampaignRef on Postgres (PT-5a, D178)", () => {
       roles: [],
       teamIds: ["t1"],
     };
-    const outsiderEvent = { context: { tenant: outsiderTenant } } as unknown as H3Event;
-    await expect(resolveCampaignRef(outsiderEvent, "hidden-camp")).rejects.toThrow(
+    const outsiderScope = outsiderTenant;
+    await expect(resolveCampaignRef(outsiderScope, "hidden-camp")).rejects.toThrow(
       CampaignNotFoundError,
     );
   });
