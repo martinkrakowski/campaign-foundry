@@ -23,6 +23,7 @@ import packageZipHandler from "../campaigns/packages/[campaignId]/[platformZip].
 import outputGetHandler from "../output/[...path].get.js";
 import decisionsPutHandler from "../campaigns/decisions.put.js";
 import generatePostHandler from "../campaigns/generate.post.js";
+import planPostHandler from "../campaigns/plan.post.js";
 import jobGetHandler from "../campaigns/jobs/[id].get.js";
 import jobsIndexHandler from "../campaigns/jobs/index.get.js";
 import assetsPostHandler from "../campaigns/assets.post.js";
@@ -455,5 +456,60 @@ describe("PT-2d: team gates on routes (D166)", () => {
     );
     expect(resT1.status).toBe(200);
     expect(existsSync(join(harness.outputRoot, "packages", "t1-camp"))).toBe(true);
+  });
+
+  test("POST /campaigns/plan leaks no headlines for a hidden campaign", async () => {
+    await writePool(t1Member, {
+      briefId: "t1-camp",
+      generatedAt: "2026-09-24T00:00:00.000Z",
+      model: "test-model",
+      entries: [{ id: "h1", text: "Secret Headline", status: "approved" }],
+    });
+
+    const pooledBrief: CampaignBrief = {
+      ...sampleBrief,
+      mode: "variation",
+      variation: {
+        count: 1,
+        seed: 42,
+        axes: {
+          headline: "pool://copy",
+        },
+      },
+    };
+
+    const callTB = mountTenantRoute(planPostHandler, {
+      method: "POST",
+      path: "/campaigns/plan",
+      tenant: tBMember,
+    });
+    const resTB = await callTB(
+      new Request("http://x/campaigns/plan", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(pooledBrief),
+      }),
+    );
+    expect(resTB.status).toBe(422);
+    expect(await resTB.json()).toEqual({
+      error:
+        'Headline axis "pool://copy" needs at least one approved entry in copy pool briefs/t1-camp/pools.json.',
+    });
+
+    const callT1 = mountTenantRoute(planPostHandler, {
+      method: "POST",
+      path: "/campaigns/plan",
+      tenant: t1Member,
+    });
+    const resT1 = await callT1(
+      new Request("http://x/campaigns/plan", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(pooledBrief),
+      }),
+    );
+    expect(resT1.status).toBe(200);
+    const bodyT1 = (await resT1.json()) as { variants: Array<{ headline?: string }> };
+    expect(bodyT1.variants[0]?.headline).toBe("Secret Headline");
   });
 });

@@ -92,11 +92,15 @@ export function wantsHeadlinePool(brief: CampaignBrief): boolean {
 export async function planInputFor(
   scope: StorageScope,
   brief: CampaignBrief,
+  options?: { hidePool?: boolean },
 ): Promise<Result<PlanInput, Error>> {
   const motion = motionRatiosFor(brief.output?.platforms);
   const requested = brief.variation?.axes?.ratio as PlanInput["ratios"];
   const ratios = requested === undefined ? {} : { ratios: requested };
   if (!wantsHeadlinePool(brief)) return ok({ ...ratios, ...motion });
+  if (options?.hidePool) {
+    return ok({ ...ratios, headlines: [], ...motion });
+  }
   try {
     const stored = await readPool(scope, brief.id);
     const headlines = stored ? approvedTexts(stored.pool) : [];
