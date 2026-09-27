@@ -67,6 +67,22 @@ import {
 } from "./display-names";
 
 export const SAFE_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
+
+/**
+ * Top-level directory names under an org's output root that are reserved by
+ * the orchestrator or infrastructure and cannot be used as campaign identifiers.
+ *
+ * Mirrored from CampaignOrchestration/Treatment.vo.ts. Value-importing from the
+ * package root barrel fails the Next build (resolves .js siblings), and Treatment.vo
+ * has no subpath export in package.json (the same reason SAFE_ID_PATTERN is mirrored above).
+ */
+export const RESERVED_CAMPAIGN_IDS = ["cache", "jobs", "orgs", "packages"] as const;
+export type ReservedCampaignId = (typeof RESERVED_CAMPAIGN_IDS)[number];
+
+export function isReservedCampaignId(id: string): id is ReservedCampaignId {
+  return (RESERVED_CAMPAIGN_IDS as readonly string[]).includes(id);
+}
+
 export const HEX_COLOR_PATTERN = /^#[0-9A-Fa-f]{6}$/;
 /** Whole-second clip durations the API accepts (load-brief's MIN/MAX_DURATION_SEC). */
 export {
@@ -122,6 +138,8 @@ export function validateIdentity(state: EditorState, existingIds?: string[]): Fi
   const errors: FieldErrors = {};
   if (!SAFE_ID_PATTERN.test(state.briefId)) {
     errors.briefId = messages.briefId;
+  } else if (isReservedCampaignId(state.briefId)) {
+    errors.briefId = `"${state.briefId}" is reserved; choose another campaign id.`;
   }
   // Region and audience are rendered by the Identity section, so their errors belong to
   // it — filed under Copy they would never reach their inputs, and the error strip would
