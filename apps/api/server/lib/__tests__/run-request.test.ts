@@ -701,18 +701,12 @@ describe("executeRunRequest org provider keys (PT-7b3a, D175)", () => {
     };
 
     let seenEnv: RunEnvironment | undefined;
-    vi.mocked(generateCreative).mockImplementationOnce(async (options) => {
-      seenEnv = options.env;
+    vi.spyOn(pipelineModule, "runCampaign").mockImplementation(async (env) => {
+      seenEnv = env;
       return {
         success: true,
-        data: {
-          campaign: {
-            id: "camp-org-keys",
-            brandId: "brand-1",
-            name: "C",
-            status: "completed",
-            variants: [],
-          },
+        value: {
+          assets: [],
           halted: false,
           log: { campaignId: "camp-org-keys" } as any,
           policyHash: "h",
