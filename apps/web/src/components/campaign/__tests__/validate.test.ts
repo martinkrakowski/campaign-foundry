@@ -283,6 +283,28 @@ describe("validateIdentity", () => {
     expect(validateIdentity(valid())).toEqual({});
   });
 
+  test.each(["cache", "jobs", "orgs", "packages"] as const)(
+    "rejects reserved campaign id %s",
+    (id) => {
+      expect(validateIdentity(valid({ briefId: id })).briefId).toBe(
+        `"${id}" is reserved; choose another campaign id.`,
+      );
+    },
+  );
+
+  test.each(["cache", "jobs", "orgs", "packages"] as const)(
+    "accepts non-campaign ids named %s (product and treatment)",
+    (id) => {
+      const state = valid({
+        products: [product({ id }), product({ key: 2, id: "beta" })],
+        treatments: [{ id, layout: "headline-bottom", tone: "bold" }],
+      });
+      expect(validateProducts(state)).toEqual({});
+      expect(validateTreatments(state)).toEqual({});
+    },
+  );
+
+
   test("a new draft may not take an id that already exists", () => {
     expect(validateIdentity(valid(), ["camp"]).briefId).toMatch(/already exists/);
     expect(validateIdentity(valid(), ["other"])).toEqual({});
