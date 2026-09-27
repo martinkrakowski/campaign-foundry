@@ -59,6 +59,7 @@ import {
   getTotalErrorCount,
   motionUnavailableReason,
   SAFE_ID_PATTERN,
+  isReservedCampaignId,
   type FieldErrors,
 } from "@/components/campaign/validate";
 import {
@@ -1971,7 +1972,7 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
     // D3: a live button answers. The field shows the rule as it is typed, so this
     // backstop usually finds the error already on screen — the press still has to
     // produce a response, so it hands focus back to the field.
-    if (!SAFE_ID_PATTERN.test(newId)) {
+    if (!SAFE_ID_PATTERN.test(newId) || isReservedCampaignId(newId)) {
       saveAsFieldRef.current?.focus();
       return;
     }
@@ -2136,8 +2137,11 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   // slugified form of what was typed is offered as a click — shown, never applied
   // silently: an id that slugifies to nothing gets the refusal but no suggestion.
   const saveAsTrimmed = (saveAsId ?? "").trim();
-  const saveAsInvalid =
+  const saveAsPatternInvalid =
     saveAsId !== null && saveAsTrimmed !== "" && !SAFE_ID_PATTERN.test(saveAsTrimmed);
+  const saveAsReservedInvalid =
+    saveAsId !== null && saveAsTrimmed !== "" && isReservedCampaignId(saveAsTrimmed);
+  const saveAsInvalid = saveAsPatternInvalid || saveAsReservedInvalid;
   const saveAsSlug = slugify(saveAsId ?? "");
 
   /**
@@ -2902,9 +2906,11 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
             {saveAsInvalid ? (
               <>
                 <p className="mb-2 text-[12px] text-error" role="alert">
-                  {messages.briefId}
+                  {saveAsReservedInvalid
+                    ? messages.briefIdReserved(saveAsTrimmed)
+                    : messages.briefId}
                 </p>
-                {saveAsSlug !== "" ? (
+                {saveAsSlug !== "" && !isReservedCampaignId(saveAsSlug) ? (
                   <button
                     type="button"
                     onClick={() => setSaveAsId(saveAsSlug)}

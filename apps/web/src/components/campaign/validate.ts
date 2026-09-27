@@ -73,8 +73,9 @@ export const SAFE_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
  * the orchestrator or infrastructure and cannot be used as campaign identifiers.
  *
  * Mirrored from CampaignOrchestration/Treatment.vo.ts. Value-importing from the
- * package root barrel fails the Next build (resolves .js siblings), and Treatment.vo
- * has no subpath export in package.json (the same reason SAFE_ID_PATTERN is mirrored above).
+ * package root barrel fails the Next.js webpack build (node:fs UnhandledSchemeError
+ * via project-root.ts), and Treatment.vo has no subpath export in package.json
+ * (the same reason SAFE_ID_PATTERN is mirrored above). Pinned by validate.test.ts.
  */
 export const RESERVED_CAMPAIGN_IDS = ["cache", "jobs", "orgs", "packages"] as const;
 export type ReservedCampaignId = (typeof RESERVED_CAMPAIGN_IDS)[number];
@@ -139,7 +140,7 @@ export function validateIdentity(state: EditorState, existingIds?: string[]): Fi
   if (!SAFE_ID_PATTERN.test(state.briefId)) {
     errors.briefId = messages.briefId;
   } else if (isReservedCampaignId(state.briefId)) {
-    errors.briefId = `"${state.briefId}" is reserved; choose another campaign id.`;
+    errors.briefId = messages.briefIdReserved(state.briefId);
   }
   // Region and audience are rendered by the Identity section, so their errors belong to
   // it — filed under Copy they would never reach their inputs, and the error strip would

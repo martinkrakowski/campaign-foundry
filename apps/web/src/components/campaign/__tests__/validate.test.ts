@@ -27,12 +27,18 @@ import {
   hasSectionWarnings,
   getTotalWarningCount,
   PROHIBITED_TERMS,
+  RESERVED_CAMPAIGN_IDS,
+  isReservedCampaignId,
 } from "../validate";
 import { PROHIBITED_TERMS as DOMAIN_PROHIBITED_TERMS } from "@campaignfoundry/GovernanceAndCompliance";
 // The domain's one click-destination decision — the same one the API's boundary
 // (`validateClickDestination`, load-brief.ts) reads, so the client mirror cannot drift.
 import { clickDestinationProblem } from "@campaignfoundry/CampaignOrchestration/click-destination";
-import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
+import {
+  RESERVED_CAMPAIGN_IDS as PKG_RESERVED_CAMPAIGN_IDS,
+  isReservedCampaignId as pkgIsReservedCampaignId,
+  type CampaignBrief,
+} from "@campaignfoundry/CampaignOrchestration";
 import { CANONICAL_TEMPLATES } from "@campaignfoundry/CampaignOrchestration/creative-templates";
 import {
   initialEditorState,
@@ -283,12 +289,17 @@ describe("validateIdentity", () => {
     expect(validateIdentity(valid())).toEqual({});
   });
 
+  test("RESERVED_CAMPAIGN_IDS equals the package's list (pinned against drift)", () => {
+    expect(RESERVED_CAMPAIGN_IDS).toEqual(PKG_RESERVED_CAMPAIGN_IDS);
+    for (const id of ["cache", "jobs", "orgs", "packages", "other-id"]) {
+      expect(isReservedCampaignId(id)).toBe(pkgIsReservedCampaignId(id));
+    }
+  });
+
   test.each(["cache", "jobs", "orgs", "packages"] as const)(
     "rejects reserved campaign id %s",
     (id) => {
-      expect(validateIdentity(valid({ briefId: id })).briefId).toBe(
-        `"${id}" is reserved; choose another campaign id.`,
-      );
+      expect(validateIdentity(valid({ briefId: id })).briefId).toBe(messages.briefIdReserved(id));
     },
   );
 
