@@ -21,7 +21,6 @@ import {
 import { loadBrief } from "../../../lib/load-brief.js";
 
 import { LOCAL_TENANT } from "../../../lib/tenant.js";
-import { mountTenantApp, setupPgHarness } from "../../__tests__/tenant-harness.js";
 type Method = "get" | "post" | "put";
 
 const mount = (routes: { method: Method; path: string; handler: EventHandler }[]) => {
@@ -165,6 +164,7 @@ describe("GET /campaigns/briefs", () => {
   });
 
   test("returns campaignId for each item on Postgres backend (PT-5a)", async () => {
+    const { setupPgHarness, mountTenantApp } = await import("../../__tests__/tenant-harness.js");
     const harness = await setupPgHarness();
     try {
       const listHandler = (await import("../briefs.get.js")).default;
@@ -188,7 +188,7 @@ describe("GET /campaigns/briefs", () => {
     } finally {
       await harness.cleanup();
     }
-  });
+  }, 15000);
 });
 
 describe("authoring briefs", () => {

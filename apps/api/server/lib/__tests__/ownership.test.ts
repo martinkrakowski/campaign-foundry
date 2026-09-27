@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, test, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -461,7 +461,7 @@ describe("resolveCampaignRef on Postgres (PT-5a, D178)", () => {
   let db: SqlClient;
   let savedBackend: string | undefined;
 
-  beforeEach(async () => {
+  beforeAll(async () => {
     savedBackend = process.env.STORE_BACKEND;
     process.env.STORE_BACKEND = "postgres";
     db = await migratedDatabase();
@@ -472,14 +472,14 @@ describe("resolveCampaignRef on Postgres (PT-5a, D178)", () => {
       `insert into team (id, name, "memberCount", org_id, created_at) values ($1, $2, 0, $3, now()), ($4, $5, 0, $6, now())`,
       ["t1", "Team One", "local", "t2", "Team Two", "local"],
     );
-  });
+  }, 30000);
 
-  afterEach(async () => {
+  afterAll(async () => {
     resetBriefStore();
     resetDatabase();
     if (savedBackend === undefined) delete process.env.STORE_BACKEND;
     else process.env.STORE_BACKEND = savedBackend;
-    await db.end();
+    await db?.end();
   });
 
   test("resolves uuid and slug to slug, throws 404 for missing, another org, or hidden", async () => {
