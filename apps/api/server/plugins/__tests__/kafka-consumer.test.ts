@@ -460,4 +460,60 @@ describe("kafka-consumer Nitro plugin (PT-6b2, D174d)", () => {
     expect(backoff1).toBeGreaterThanOrEqual(1000);
     expect(backoff1).toBeLessThanOrEqual(2000);
   });
+
+  test("if closed before tryStart begins, consumer is not started", async () => {
+    process.env.KAFKA_BROKERS = "broker1:9092";
+    process.env.KAFKA_CONSUME = "true";
+
+    const customConsumer: ConsumerInstance = {
+      start: vi.fn().mockResolvedValue(undefined),
+      stop: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const nitroApp: NitroApp = {
+      hooks: {
+        hook: vi.fn().mockImplementation((name, cb) => {
+          if (name === "close") {
+            void cb();
+          }
+        }),
+      },
+    };
+
+    const plugin = createKafkaConsumerPlugin(() => customConsumer);
+    plugin(nitroApp as never);
+
+    expect(customConsumer.start).not.toHaveBeenCalled();
+  });
+
+  test("retry uses Math.random when timer does not provide a custom random function", async () => {
+    vi.useFakeTimers();
+    try {
+      process.env.KAFKA_BROKERS = "broker1:9092";
+      process.env.KAFKA_CONSUME = "true";
+
+      const customConsumer: ConsumerInstance = {
+        start: vi.fn().mockRejectedValue(new Error("start error")),
+        stop: vi.fn().mockResolvedValue(undefined),
+      };
+
+      const timerWithoutRandom: KafkaPluginTimer = {
+        setTimeout,
+        clearTimeout,
+      };
+
+      const plugin = createKafkaConsumerPlugin(
+        () => customConsumer,
+        { error: vi.fn() },
+        undefined,
+        timerWithoutRandom,
+      );
+      plugin({} as never);
+
+      await vi.advanceTimersByTimeAsync(0);
+      expect(customConsumer.start).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
