@@ -94,7 +94,7 @@ export function createKafkaConsumerPlugin(
           `[kafka-plugin] Error starting Kafka consumer (attempt ${attempt}): ${err instanceof Error ? err.message : String(err)}`,
         );
         if (closed) return;
-        const delay = calculateBackoff(attempt, timer.random ?? Math.random);
+        const delay = calculateBackoff(attempt, timer.random);
         pendingRetryTimer = timer.setTimeout(() => {
           pendingRetryTimer = undefined;
           void tryStart();

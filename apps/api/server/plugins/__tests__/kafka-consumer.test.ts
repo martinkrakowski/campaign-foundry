@@ -513,6 +513,10 @@ describe("kafka-consumer Nitro plugin (PT-6b2, D174d)", () => {
 
       await vi.advanceTimersByTimeAsync(0);
       expect(customConsumer.start).toHaveBeenCalledTimes(1);
+
+      // With no injected `random`, the first backoff is 1000 ms plus jitter below 1000 ms.
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(customConsumer.start).toHaveBeenCalledTimes(2);
     } finally {
       vi.useRealTimers();
     }
