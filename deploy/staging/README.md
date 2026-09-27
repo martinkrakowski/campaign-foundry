@@ -73,12 +73,37 @@ ssh m 'KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl -n campaign-foundry-staging 
 `deploy.sh` checks it before building anything, and refuses while it is missing, has no
 `secret` key, or is shorter than 32 characters.
 
+### Resend key (once, owner)
+
+Sign-in links are sent through Resend's HTTP API (D174b) from
+`campaign-foundry@midnight.krakowski.cloud`. The domain's DKIM and SPF are verified in
+Resend, and sending needs nothing else. The API key lives in the namespace's own secret,
+`campaign-foundry-resend` (key `api-key`). The key is read with echo off on YOUR terminal
+and piped to the node, so it is never shown, never lands in shell history, and never touches
+the repo. (A `read -s` inside `ssh m '…'` would run on the node, which has no terminal to
+silence, so a pasted key would echo locally.)
+
+```sh
+read -rs "KEY?Resend API key: " && echo && printf %s "$KEY" | ssh m 'KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl -n campaign-foundry-staging create secret generic campaign-foundry-resend --from-file=api-key=/dev/stdin'; unset KEY
+```
+
+(That is zsh's prompt syntax; in bash, use `read -rsp "Resend API key: " KEY`.) If staging is
+already running, restart it so the pod picks the key up; on a fresh cluster, skip this, and the
+first deploy reads the secret:
+
+```sh
+ssh m 'KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl -n campaign-foundry-staging rollout restart deploy/campaign-foundry'
+```
+
+The secret is optional in `app.yaml`, so a deploy without it still works and falls back to
+the log below.
+
 ### First sign-in (once, owner)
 
-With no `RESEND_API_KEY`, the magic link is written to the API log. **Anyone who can read
-that log can sign in as whoever requested a link**, so on staging log access is account
-access; set `RESEND_API_KEY` (and `EMAIL_FROM`) to send real mail instead. Request it on
-https://campaign-foundry.midnight.lan/sign-in, then read it:
+With the Resend key in place, request a link on https://campaign-foundry.midnight.lan/sign-in
+and it arrives by email. **Without it**, the magic link is written to the API log, and
+**anyone who can read that log can sign in as whoever requested a link**, so on staging log
+access is then account access. Read it with:
 
 ```sh
 ssh m 'KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl -n campaign-foundry-staging logs deploy/campaign-foundry -c api | grep "sign-in link" | tail -1'
