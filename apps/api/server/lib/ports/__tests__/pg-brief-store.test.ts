@@ -287,13 +287,10 @@ describe("PgBriefStore (PT-3d, D168, D169)", () => {
   });
 
   test.each(["cache", "jobs", "orgs", "packages"] as const)(
-    "createBrief, rewriteBrief and replaceBrief refuse reserved campaign id %s",
+    "createBrief and replaceBrief on non-existent brief refuse reserved campaign id %s",
     async (id) => {
       const b = brief(id);
       await expect(store.createBrief(b)).rejects.toThrow(
-        `"${id}" is reserved; choose another campaign id.`,
-      );
-      await expect(store.rewriteBrief(b)).rejects.toThrow(
         `"${id}" is reserved; choose another campaign id.`,
       );
       await expect(store.replaceBrief(b)).rejects.toThrow(
@@ -302,7 +299,7 @@ describe("PgBriefStore (PT-3d, D168, D169)", () => {
     },
   );
 
-  test("reading an existing campaign with a reserved id does not crash", async () => {
+  test("stored brief with reserved id lists, reads, rewrites and replaces", async () => {
     const { rows } = await db.query<{ id: string }>(
       "insert into campaign (org_id, slug) values ($1, $2) returning id",
       ["local", "cache"],
@@ -318,6 +315,18 @@ describe("PgBriefStore (PT-3d, D168, D169)", () => {
     expect(await store.findBriefFile("cache")).toBe("cache.yaml");
     expect(await store.getRevision("cache")).toBe("deadbeef");
     expect(await store.campaignVisibility("cache")).toBe("visible");
+
+    const list = await store.listBriefs();
+    expect(list.some((entry) => entry.brief.id === "cache")).toBe(true);
+
+    const read = await store.readBrief("cache");
+    expect(read.id).toBe("cache");
+
+    const rewritten = await store.rewriteBrief(brief("cache", "Updated cache"));
+    expect(rewritten.brief.campaignMessage).toBe("Updated cache");
+
+    const replaced = await store.replaceBrief(brief("cache", "Replaced cache"));
+    expect(replaced.brief.campaignMessage).toBe("Replaced cache");
   });
 });
 

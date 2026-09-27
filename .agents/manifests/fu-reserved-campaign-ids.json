@@ -13,9 +13,9 @@
         "run",
         "--project",
         "api",
-        "apps/api/server/lib/__tests__/load-brief.test.ts",
+        "apps/api/server/lib/ports/__tests__/fs-brief-store.test.ts",
         "-t",
-        "refuses reserved campaign id packages"
+        "createBrief refuses reserved campaign id packages"
       ],
       "verdict": "caught"
     }

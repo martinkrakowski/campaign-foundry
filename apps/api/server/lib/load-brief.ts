@@ -23,7 +23,6 @@ import {
   TONE_VALUES,
   isAlpha2,
   isPaletteShift,
-  isReservedCampaignId,
   isSupportedBriefSchemaVersion,
   normalizeRegion,
   parseExpiresOnMs,
@@ -1215,9 +1214,6 @@ export function parseBrief(data: unknown, opts: ParseBriefOptions = {}): Campaig
   // enforce the same path-safe slug as product/treatment ids — an unsafe id would run
   // but never persist/reload per-campaign.
   assertSafeId(record.id, "Campaign id");
-  if (isReservedCampaignId(record.id)) {
-    throw new Error(`"${record.id}" is reserved; choose another campaign id.`);
-  }
   if (!Array.isArray(record.products)) {
     throw new Error('Campaign brief field "products" must be an array.');
   }

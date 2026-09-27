@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { lstat, mkdir, readdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, resolve } from "node:path";
-import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
+import { isReservedCampaignId, type CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { errorMessage } from "@campaignfoundry/shared";
 import { resolveConfined } from "../confined-path.js";
 import { parseBriefText, type ParseBriefOptions } from "../load-brief.js";
@@ -118,6 +118,9 @@ export class FsBriefStore implements BriefStorePort {
 
   async createBrief(brief: CampaignBrief, options?: BriefWriteOptions): Promise<StoredBrief> {
     assertNoTeam(options?.teamId);
+    if (isReservedCampaignId(brief.id)) {
+      throw new Error(`"${brief.id}" is reserved; choose another campaign id.`);
+    }
     const filePath = resolveConfined(this.dir, `${brief.id}.yaml`);
     try {
       const st = await lstat(filePath);

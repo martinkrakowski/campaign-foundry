@@ -84,11 +84,9 @@ describe("parseBrief", () => {
 
   describe("reserved campaign ids", () => {
     test.each(["cache", "jobs", "orgs", "packages"] as const)(
-      "refuses reserved campaign id %s",
+      "accepts reserved campaign id %s so stored briefs parse on read",
       (id) => {
-        expect(() => parseBrief({ ...valid, id })).toThrow(
-          `"${id}" is reserved; choose another campaign id.`,
-        );
+        expect(parseBrief({ ...valid, id }).id).toBe(id);
       },
     );
 

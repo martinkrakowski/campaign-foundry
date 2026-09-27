@@ -1,4 +1,4 @@
-import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
+import { isReservedCampaignId, type CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { errorMessage } from "@campaignfoundry/shared";
 import { extractSourceAssetBriefIds, rewriteAssetPaths } from "../../../../lib/asset-files.js";
 import { isExistsError, SYMLINK_WRITE_ERROR } from "../../../../lib/brief-files.js";
@@ -77,6 +77,9 @@ export default defineEventHandler(async (event) => {
       typeof body === "object" && body !== null ? (body as Record<string, unknown>) : undefined;
     const value = record?.newId;
     assertSafeId(value, "newId");
+    if (isReservedCampaignId(value)) {
+      throw new Error(`"${value}" is reserved; choose another campaign id.`);
+    }
     newId = value;
     overrides = record?.overrides;
   } catch (error) {
