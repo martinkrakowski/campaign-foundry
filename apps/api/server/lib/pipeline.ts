@@ -24,7 +24,8 @@ import {
 import { BrandComplianceChecker } from "@campaignfoundry/GovernanceAndCompliance";
 import { FileSystemExporter } from "@campaignfoundry/Distribution";
 import { err, type Result } from "@campaignfoundry/shared";
-import type { RunEnvironment } from "./run-environment.js";
+import type { Provider } from "./ports/provider-key.port.js";
+import type { ProviderSettings, RunEnvironment } from "./run-environment.js";
 import { MeteredCopyGenerator, MeteredImageGenerator } from "./metering.js";
 import { getUsageStore } from "./ports/index.js";
 import { platformZones } from "./platform-zones.js";
@@ -68,6 +69,48 @@ function resolvedModel(model: string | undefined, fallback: string): string {
 }
 
 /**
+ * The image provider fallback chain for a given selection (PT-7b3a).
+ * - "procedural" -> []
+ * - "firefly" -> ["firefly", "gemini", "openrouter"]
+ * - slash model -> ["openrouter"]
+ * - anything else -> ["gemini", "openrouter"]
+ */
+export function imageProviderChain(selected?: string): readonly Provider[] {
+  if (selected === "procedural") return [];
+  if (selected === "firefly") return ["firefly", "gemini", "openrouter"];
+  if (selected && selected.includes("/")) return ["openrouter"];
+  return ["gemini", "openrouter"];
+}
+
+/**
+ * The primary image provider is the first member of the chain whose credentials
+ * (org or platform) are present (PT-7b3a).
+ */
+export function primaryImageProvider(
+  chain: readonly Provider[],
+  platformProviders: ProviderSettings,
+  activeProviders?: ReadonlySet<Provider> | readonly Provider[],
+): Provider | undefined {
+  const active =
+    activeProviders === undefined
+      ? undefined
+      : activeProviders instanceof Set
+        ? activeProviders
+        : new Set(activeProviders);
+  return chain.find((provider) => {
+    if (active?.has(provider)) return true;
+    switch (provider) {
+      case "firefly":
+        return Boolean(platformProviders.fireflyClientId && platformProviders.fireflyClientSecret);
+      case "gemini":
+        return Boolean(platformProviders.geminiKey);
+      case "openrouter":
+        return Boolean(platformProviders.openRouterKey);
+    }
+  });
+}
+
+/**
  * Resolve the image generator, wrapped by input-asset reuse. The primary source is
  * chosen by `selected` (the UI's model picker); procedural is always the floor.
  *
@@ -84,7 +127,7 @@ function resolvedModel(model: string | undefined, fallback: string): string {
  * `selected` (`?model=`) still decides *which* provider. `paletteShift` is
  * applied only by ProceduralBackgroundGenerator.
  */
-function imageGenerator(env: RunEnvironment, selected?: string): ImageGeneratorPort {
+export function imageGenerator(env: RunEnvironment, selected?: string): ImageGeneratorPort {
   const procedural = new ProceduralBackgroundGenerator();
   const cache = new FileSystemBackgroundCache(join(env.outputRoot, "cache"));
   const usage = getUsageStore(env);
@@ -94,7 +137,11 @@ function imageGenerator(env: RunEnvironment, selected?: string): ImageGeneratorP
     openRouterKey,
     fireflyClientId: fireflyId,
     fireflyClientSecret: fireflySecret,
+    keyOwners,
   } = env.providers;
+  const geminiOwner = keyOwners?.gemini ?? "platform";
+  const openRouterOwner = keyOwners?.openrouter ?? "platform";
+  const fireflyOwner = keyOwners?.firefly ?? "platform";
 
   // An OpenRouter generator for a given model, falling back to procedural.
   // Metered (PT-7a): every non-cached background it resolves — whether called
@@ -112,6 +159,7 @@ function imageGenerator(env: RunEnvironment, selected?: string): ImageGeneratorP
           orgId,
           "openrouter",
           resolvedModel(model, OPENROUTER_IMAGE_DEFAULT_MODEL),
+          openRouterOwner,
         )
       : procedural;
 
@@ -129,6 +177,7 @@ function imageGenerator(env: RunEnvironment, selected?: string): ImageGeneratorP
           orgId,
           "imagen",
           resolvedModel(env.providers.imagenModel, IMAGEN_DEFAULT_MODEL),
+          geminiOwner,
         )
       : openRouter(env.providers.openRouterImageModel);
 
@@ -147,14 +196,26 @@ function imageGenerator(env: RunEnvironment, selected?: string): ImageGeneratorP
           orgId,
           "firefly",
           FIREFLY_MODEL,
+          fireflyOwner,
         )
       : imagen();
 
+  const chain = imageProviderChain(selected);
   let generator: ImageGeneratorPort;
-  if (selected === "procedural") generator = procedural;
-  else if (selected === "firefly") generator = firefly();
-  else if (selected && selected.includes("/")) generator = openRouter(selected);
-  else generator = imagen(); // "auto" / "imagen" / unset → default chain
+  switch (chain[0]) {
+    case "firefly":
+      generator = firefly();
+      break;
+    case "gemini":
+      generator = imagen();
+      break;
+    case "openrouter":
+      generator = openRouter(selected);
+      break;
+    default:
+      generator = procedural;
+      break;
+  }
 
   return new AssetReusingImageGenerator(generator, env.assetRoot);
 }
@@ -265,10 +326,12 @@ export async function runCampaign(
 export function copyGenerator(env: RunEnvironment): CopyGeneratorPort | undefined {
   const apiKey = env.providers.openRouterKey;
   if (!apiKey) return undefined;
+  const openRouterOwner = env.providers.keyOwners?.openrouter ?? "platform";
   return new MeteredCopyGenerator(
     new OpenRouterCopyGenerator({ apiKey, model: env.providers.openRouterCopyModel }),
     getUsageStore(env),
     env.tenant.orgId,
     "openrouter",
+    openRouterOwner,
   );
 }

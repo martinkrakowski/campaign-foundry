@@ -12,6 +12,7 @@ import { assertSafeId, parseBrief } from "../../../lib/load-brief.js";
 import { QuotaExceededError } from "../../../lib/metering.js";
 import { copyGenerator } from "../../../lib/pipeline.js";
 import { runEnvironment } from "../../../lib/run-environment.js";
+import { overlayOrgKeys } from "../../../lib/run-request.js";
 import { requestTenant } from "../../../lib/tenant.js";
 import {
   InvalidCopyPoolError,
@@ -179,7 +180,11 @@ export default defineEventHandler(async (event) => {
     return { error: SYMLINK_WRITE_ERROR };
   }
 
-  const generator = copyGenerator(runEnvironment(scope));
+  const env = await overlayOrgKeys(runEnvironment(scope), {
+    providers: ["openrouter"],
+    primary: "openrouter",
+  });
+  const generator = copyGenerator(env);
   if (!generator) {
     setResponseStatus(event, 503);
     return { error: "OPENROUTER_API_KEY is not set" };

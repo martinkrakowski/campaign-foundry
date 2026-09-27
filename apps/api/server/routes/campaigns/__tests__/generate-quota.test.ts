@@ -6,7 +6,12 @@ import { createApp, createRouter, toWebHandler } from "h3";
 import { err } from "@campaignfoundry/shared";
 import { getRunningJobId, resetJobs } from "../../../lib/jobs.js";
 import { setCapabilities } from "../../../lib/capabilities.js";
-import { resetUsageStore, setUsageStore } from "../../../lib/ports/index.js";
+import {
+  resetProviderKeyStore,
+  resetUsageStore,
+  setProviderKeyStore,
+  setUsageStore,
+} from "../../../lib/ports/index.js";
 import type { UsageRecord, UsageStorePort } from "../../../lib/ports/usage-store.port.js";
 import { LOCAL_TENANT } from "../../../lib/tenant.js";
 import generateHandler from "../generate.post.js";
@@ -63,13 +68,14 @@ describe("POST /campaigns/generate — admission is gated on the org's monthly q
   let dir: string;
   const origOut = process.env.OUTPUT_DIR;
 
-  const call = (body: unknown) => {
+  const call = (body: unknown, model = "procedural") => {
     const app = createApp();
     const router = createRouter();
     router.post("/campaigns/generate", generateHandler);
     app.use(router);
+    const query = model ? `?model=${model}` : "";
     return toWebHandler(app)(
-      new Request("http://x/campaigns/generate?model=procedural", {
+      new Request(`http://x/campaigns/generate${query}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
@@ -105,6 +111,7 @@ describe("POST /campaigns/generate — admission is gated on the org's monthly q
   afterEach(async () => {
     await resetJobs();
     resetUsageStore();
+    resetProviderKeyStore();
     rmSync(dir, { recursive: true, force: true });
     if (origOut === undefined) delete process.env.OUTPUT_DIR;
     else process.env.OUTPUT_DIR = origOut;
@@ -131,6 +138,120 @@ describe("POST /campaigns/generate — admission is gated on the org's monthly q
     expect(body.jobId).toEqual(expect.any(String));
     expect(runCampaignSpy).toHaveBeenCalledOnce();
     await awaitSettled(body.jobId);
+  });
+
+  test("at quota with only an unrelated org key returns 429", async () => {
+    setUsageStore(usageDouble(2, 2)); // at quota!
+    setProviderKeyStore({
+      put: async () => {
+        throw new Error("not implemented");
+      },
+      list: async () => [
+        { provider: "gemini", last4: "1234", createdAt: new Date().toISOString() },
+      ],
+      revoke: async () => {},
+      open: async (provider) => (provider === "gemini" ? "org-key" : undefined),
+    });
+    // Request OpenRouter image model while only having Gemini org key
+    const res = await call(brief(), "x-ai/grok-imagine-image-quality");
+    expect(res.status).toBe(429);
+    await expect(res.json()).resolves.toEqual({
+      error: `Campaign "camp" would exceed its org's monthly generation quota.`,
+      code: "quota_exceeded",
+    });
+    expect(runCampaignSpy).not.toHaveBeenCalled();
+  });
+
+  test("at quota with a listed key that fails to open returns 429", async () => {
+    setUsageStore(usageDouble(2, 2)); // at quota!
+    setProviderKeyStore({
+      put: async () => {
+        throw new Error("not implemented");
+      },
+      list: async () => [
+        { provider: "gemini", last4: "1234", createdAt: new Date().toISOString() },
+      ],
+      revoke: async () => {},
+      open: async (provider) => {
+        if (provider === "gemini") throw new Error("corrupted ciphertext");
+        return undefined;
+      },
+    });
+    const res = await call(brief(), "imagen");
+    expect(res.status).toBe(429);
+    await expect(res.json()).resolves.toEqual({
+      error: `Campaign "camp" would exceed its org's monthly generation quota.`,
+      code: "quota_exceeded",
+    });
+    expect(runCampaignSpy).not.toHaveBeenCalled();
+  });
+
+  test("at quota with malformed Firefly JSON returns 429", async () => {
+    setUsageStore(usageDouble(2, 2)); // at quota!
+    setProviderKeyStore({
+      put: async () => {
+        throw new Error("not implemented");
+      },
+      list: async () => [
+        { provider: "firefly", last4: "1234", createdAt: new Date().toISOString() },
+      ],
+      revoke: async () => {},
+      open: async (provider) => (provider === "firefly" ? "not-valid-json" : undefined),
+    });
+    const res = await call(brief(), "firefly");
+    expect(res.status).toBe(429);
+    await expect(res.json()).resolves.toEqual({
+      error: `Campaign "camp" would exceed its org's monthly generation quota.`,
+      code: "quota_exceeded",
+    });
+    expect(runCampaignSpy).not.toHaveBeenCalled();
+  });
+
+  test("at quota with a usable primary org key returns 202", async () => {
+    setUsageStore(usageDouble(2, 2)); // at quota!
+    setProviderKeyStore({
+      put: async () => {
+        throw new Error("not implemented");
+      },
+      list: async () => [
+        { provider: "gemini", last4: "1234", createdAt: new Date().toISOString() },
+      ],
+      revoke: async () => {},
+      open: async (provider) => (provider === "gemini" ? "org-key" : undefined),
+    });
+    // Request Imagen model (or default) matching the org's Gemini key
+    const res = await call(brief(), "imagen");
+    expect(res.status).toBe(202);
+    const { jobId } = (await res.json()) as { jobId: string };
+    await awaitSettled(jobId);
+    expect(runCampaignSpy).toHaveBeenCalledOnce();
+  });
+
+  test("under quota admits (202) either way (with selected or unrelated org key)", async () => {
+    setUsageStore(usageDouble(2, 1)); // under quota
+    setProviderKeyStore({
+      put: async () => {
+        throw new Error("not implemented");
+      },
+      list: async () => [
+        { provider: "gemini", last4: "1234", createdAt: new Date().toISOString() },
+      ],
+      revoke: async () => {},
+      open: async (provider) => (provider === "gemini" ? "org-key" : undefined),
+    });
+    // Unrelated key under quota -> 202
+    const resUnrelated = await call(brief(), "x-ai/grok-imagine-image-quality");
+    expect(resUnrelated.status).toBe(202);
+    const body1 = (await resUnrelated.json()) as { jobId: string };
+    await awaitSettled(body1.jobId);
+
+    // Selected key under quota -> 202
+    const resSelected = await call(brief(), "imagen");
+    expect(resSelected.status).toBe(202);
+    const body2 = (await resSelected.json()) as { jobId: string };
+    await awaitSettled(body2.jobId);
+
+    expect(runCampaignSpy).toHaveBeenCalledTimes(2);
   });
 
   test("a null quota is unlimited: a heavily used org is still admitted", async () => {

@@ -14,11 +14,12 @@ import { join } from "node:path";
 import { createApp, createRouter, toWebHandler, type EventHandler } from "h3";
 import { createHash } from "node:crypto";
 import type { CopyGeneratorError, CopyGeneratorPort } from "@campaignfoundry/CampaignOrchestration";
+import { resetProviderKeyStore, setProviderKeyStore } from "../../../../lib/ports/index.js";
 
 const { copyGeneratorMock } = vi.hoisted(() => ({ copyGeneratorMock: vi.fn() }));
 
 vi.mock("../../../../lib/pipeline.js", () => ({
-  copyGenerator: () => copyGeneratorMock() as CopyGeneratorPort | undefined,
+  copyGenerator: (env?: unknown) => copyGeneratorMock(env) as CopyGeneratorPort | undefined,
 }));
 
 type Method = "get" | "post" | "patch";
@@ -73,6 +74,7 @@ describe("copy pool routes", () => {
     copyGeneratorMock.mockReturnValue(undefined);
   });
   afterEach(() => {
+    resetProviderKeyStore();
     rmSync(dir, { recursive: true, force: true });
     if (origRoot === undefined) delete process.env.PROJECT_ROOT;
     else process.env.PROJECT_ROOT = origRoot;
@@ -174,6 +176,40 @@ describe("copy pool routes", () => {
       { id: "h2", text: "Fresh alpine water", status: "approved" },
       { id: "h3", text: "Trim me", status: "rejected" },
     ]);
+  });
+
+  test("POST overlays the org's OpenRouter key onto the copy generator environment (PT-7b3a)", async () => {
+    const { generate } = await api();
+    const { setProviderKeyStore: setStore } = await import("../../../../lib/ports/index.js");
+    const orgKey = "org-openrouter-key-9999";
+    setStore({
+      put: async () => {
+        throw new Error("not implemented");
+      },
+      list: async () => [
+        { provider: "openrouter", last4: "9999", createdAt: new Date().toISOString() },
+      ],
+      revoke: async () => {},
+      open: async (provider) => (provider === "openrouter" ? orgKey : undefined),
+    });
+
+    const generator = fakeGenerator(["Stay wild. Stay hydrated."]);
+    copyGeneratorMock.mockReturnValue(generator);
+
+    const res = await generate()(
+      jsonReq("http://x/campaigns/pools/copy", "POST", { briefId: "camp" }),
+    );
+    expect(res.status).toBe(201);
+    expect(copyGeneratorMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providers: expect.objectContaining({
+          openRouterKey: orgKey,
+          keyOwners: expect.objectContaining({
+            openrouter: "org",
+          }),
+        }),
+      }),
+    );
   });
 
   test("POST merges with an existing pool and allocates unused ids", async () => {

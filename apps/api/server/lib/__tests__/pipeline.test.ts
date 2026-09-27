@@ -13,8 +13,11 @@ import {
   ALLOWED_IMAGE_MODELS,
   buildPipeline,
   copyGenerator,
+  imageGenerator,
+  imageProviderChain,
   messageFont,
   platformZones,
+  primaryImageProvider,
   runCampaign,
 } from "../pipeline.js";
 
@@ -563,6 +566,136 @@ describe("pipeline composition root", () => {
     expect(typeof generator?.suggestHeadlines).toBe("function");
     process.env.OPENROUTER_COPY_MODEL = "anthropic/claude-3.5-haiku";
     expect(copyGenerator(localEnv())?.model).toBe("anthropic/claude-3.5-haiku");
+  });
+
+  test("copyGenerator and buildPipeline respect provider keyOwners (PT-7b3a)", () => {
+    const env: RunEnvironment = {
+      ...localEnv(),
+      providers: {
+        geminiKey: "gemini-k",
+        openRouterKey: "openrouter-k",
+        fireflyClientId: "ff-id",
+        fireflyClientSecret: "ff-secret",
+        keyOwners: { gemini: "org", openrouter: "org", firefly: "org" },
+      },
+    };
+    const copy = copyGenerator(env);
+    expect(copy).toBeDefined();
+    expect(copy).toMatchObject({ keyOwner: "org" });
+
+    const pipeline = buildPipeline(env, "imagen");
+    expect(pipeline).toBeDefined();
+    const fireflyPipeline = buildPipeline(env, "firefly");
+    expect(fireflyPipeline).toBeDefined();
+    const openRouterPipeline = buildPipeline(env, "x-ai/grok-imagine-image-quality");
+    expect(openRouterPipeline).toBeDefined();
+
+    const envWithoutOwners: RunEnvironment = {
+      ...localEnv(),
+      providers: {
+        openRouterKey: "openrouter-k",
+        keyOwners: undefined,
+      },
+    };
+    const copyDefault = copyGenerator(envWithoutOwners);
+    expect(copyDefault).toBeDefined();
+    expect(copyDefault).toMatchObject({ keyOwner: "platform" });
+  });
+
+  describe("imageProviderChain and primaryImageProvider (PT-7b3a)", () => {
+    const fullProviders = {
+      geminiKey: "gem-k",
+      openRouterKey: "open-k",
+      fireflyClientId: "ff-id",
+      fireflyClientSecret: "ff-sec",
+    };
+
+    // Walks the constructed generator's metered fallback chain through its private
+    // fields, so it reads them as `unknown` and narrows at each step.
+    function field(value: unknown, key: string): unknown {
+      return typeof value === "object" && value !== null
+        ? (value as Record<string, unknown>)[key]
+        : undefined;
+    }
+
+    function meteredProviders(gen: unknown): string[] {
+      const result: string[] = [];
+      let current = field(gen, "generator") ?? gen;
+      let provider = field(current, "provider");
+      while (typeof provider === "string") {
+        result.push(provider === "imagen" ? "gemini" : provider);
+        current = field(field(current, "inner"), "fallback");
+        provider = field(current, "provider");
+      }
+      return result;
+    }
+
+    test("imageProviderChain returns correct fallback chain for each selection", () => {
+      expect(imageProviderChain("procedural")).toEqual([]);
+      expect(imageProviderChain("firefly")).toEqual(["firefly", "gemini", "openrouter"]);
+      expect(imageProviderChain("x-ai/grok-imagine-image-quality")).toEqual(["openrouter"]);
+      expect(imageProviderChain("foo/bar")).toEqual(["openrouter"]);
+      expect(imageProviderChain("imagen")).toEqual(["gemini", "openrouter"]);
+      expect(imageProviderChain("auto")).toEqual(["gemini", "openrouter"]);
+      expect(imageProviderChain(undefined)).toEqual(["gemini", "openrouter"]);
+      expect(imageProviderChain("")).toEqual(["gemini", "openrouter"]);
+    });
+
+    test("for each selection, the providers the constructed generator can meter equal the chain, in order", () => {
+      const fullEnv: RunEnvironment = {
+        ...localEnv(),
+        providers: fullProviders,
+      };
+      const selections = [
+        "procedural",
+        "firefly",
+        "x-ai/grok-imagine-image-quality",
+        "imagen",
+        "auto",
+        undefined,
+        "arbitrary-model",
+      ];
+      for (const selected of selections) {
+        const gen = imageGenerator(fullEnv, selected);
+        expect(meteredProviders(gen)).toEqual(imageProviderChain(selected));
+      }
+    });
+
+    test("primaryImageProvider derives the first provider with credentials present", () => {
+      const chain = ["firefly", "gemini", "openrouter"] as const;
+      expect(primaryImageProvider(chain, fullProviders)).toBe("firefly");
+      expect(primaryImageProvider(chain, { geminiKey: "gem-k", openRouterKey: "open-k" })).toBe(
+        "gemini",
+      );
+      expect(primaryImageProvider(chain, { openRouterKey: "open-k" })).toBe("openrouter");
+      expect(primaryImageProvider(chain, {})).toBeUndefined();
+    });
+
+    test("primaryImageProvider accounts for active org keys alongside platform credentials", () => {
+      const emptyPlatform = {};
+      expect(primaryImageProvider(imageProviderChain("firefly"), emptyPlatform, ["firefly"])).toBe(
+        "firefly",
+      );
+      expect(
+        primaryImageProvider(imageProviderChain("imagen"), emptyPlatform, new Set(["gemini"])),
+      ).toBe("gemini");
+      expect(
+        primaryImageProvider(imageProviderChain("x-ai/grok-imagine-image-quality"), emptyPlatform, [
+          "openrouter",
+        ]),
+      ).toBe("openrouter");
+      expect(
+        primaryImageProvider(imageProviderChain("x-ai/grok-imagine-image-quality"), emptyPlatform, [
+          "gemini",
+        ]),
+      ).toBeUndefined();
+      expect(
+        primaryImageProvider(imageProviderChain("procedural"), fullProviders, [
+          "firefly",
+          "gemini",
+        ]),
+      ).toBeUndefined();
+    });
   });
 
   describe("MESSAGE_FONT is validated against the bundled allowlist (D59)", () => {

@@ -35,7 +35,7 @@ export class PgUsageStore implements UsageStorePort {
     const { rows } = await this.db.query<{ count: string }>(
       `select count(*)::text as count from usage
        where org_id = $1 and created_at >= $2
-         and (status = 'recorded' or (status = 'reserved' and created_at >= $3))`,
+         and ((status = 'recorded' and key_owner = 'platform') or (status = 'reserved' and created_at >= $3))`,
       [orgId, monthStart.toISOString(), cutoff.toISOString()],
     );
     return Number(rows[0]!.count);
@@ -77,7 +77,7 @@ export class PgUsageStore implements UsageStorePort {
         const { rows: countRows } = await tx.query<{ count: string }>(
           `select count(*)::text as count from usage
            where org_id = $1 and created_at >= $2
-             and (status = 'recorded' or (status = 'reserved' and created_at >= $3))`,
+             and ((status = 'recorded' and key_owner = 'platform') or (status = 'reserved' and created_at >= $3))`,
           [orgId, monthStart.toISOString(), cutoff.toISOString()],
         );
         const count = Number(countRows[0]!.count);

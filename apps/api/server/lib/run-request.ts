@@ -1,10 +1,17 @@
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { completeJob, failJob, progressJob, runJob, startQueuedJob } from "./jobs.js";
 import type { parseRegenerateOnly } from "./load-brief.js";
-import { runCampaign } from "./pipeline.js";
+import { imageProviderChain, primaryImageProvider, runCampaign } from "./pipeline.js";
 import { readReport, writeReport } from "./report.js";
-import { runEnvironment, type RunEnvironment } from "./run-environment.js";
+import { decodeFireflyPlaintext, runEnvironment, type RunEnvironment } from "./run-environment.js";
 import type { TenantContext } from "./tenant.js";
+import { getProviderKeyStore } from "./ports/index.js";
+import {
+  ProviderKeyUnavailableError,
+  type Provider,
+  PROVIDERS,
+} from "./ports/provider-key.port.js";
+import type { KeyOwner } from "./ports/usage-store.port.js";
 
 /**
  * A serialisable run request (PT-6b1, D171, D174d).
@@ -58,12 +65,130 @@ async function persistedCopyHash(
   return typeof hash === "string" ? hash : undefined;
 }
 
+export interface OverlayOrgKeysOptions {
+  readonly providers?: readonly Provider[];
+  readonly primary?: Provider;
+}
+
+/**
+ * Resolves each provider's key at execution time (PT-7b3a, D175):
+ * the org's active key through `getProviderKeyStore(env).open(provider)` when one exists,
+ * else the platform's from `env.providers`.
+ *
+ * Keys are only opened for providers the run will actually call, so decrypt errors
+ * on unused providers never fail the run.
+ */
+export async function overlayOrgKeys(
+  env: RunEnvironment,
+  options?: OverlayOrgKeysOptions,
+): Promise<RunEnvironment> {
+  const keyStore = getProviderKeyStore(env);
+
+  let activeProviders: Set<Provider>;
+  try {
+    const summaries = await keyStore.list();
+    activeProviders = new Set(summaries.map((s) => s.provider));
+  } catch {
+    activeProviders = new Set();
+  }
+
+  const requestedProviders = options?.providers ?? PROVIDERS;
+  const primary =
+    options?.primary ??
+    (options?.providers
+      ? primaryImageProvider(options.providers, env.providers, activeProviders)
+      : undefined);
+
+  const neededProviders = new Set<Provider>();
+  if (primary) {
+    neededProviders.add(primary);
+  }
+  for (const provider of requestedProviders) {
+    if (activeProviders.has(provider)) {
+      neededProviders.add(provider);
+    }
+  }
+
+  const openKey = async (provider: Provider): Promise<string | undefined> => {
+    try {
+      return await keyStore.open(provider);
+    } catch (error) {
+      if (error instanceof ProviderKeyUnavailableError) return undefined;
+      if (provider === primary) throw error;
+      const errorClass = error instanceof Error ? error.constructor.name : "UnknownError";
+      console.warn(
+        `[overlay-org-keys] fallback provider "${provider}" key unavailable: ${errorClass}`,
+      );
+      return undefined;
+    }
+  };
+
+  let geminiKey = env.providers.geminiKey;
+  let geminiOwner: KeyOwner = env.providers.keyOwners?.gemini ?? "platform";
+  let openRouterKey = env.providers.openRouterKey;
+  let openRouterOwner: KeyOwner = env.providers.keyOwners?.openrouter ?? "platform";
+  let fireflyClientId = env.providers.fireflyClientId;
+  let fireflyClientSecret = env.providers.fireflyClientSecret;
+  let fireflyOwner: KeyOwner = env.providers.keyOwners?.firefly ?? "platform";
+
+  if (neededProviders.has("gemini")) {
+    const orgGemini = await openKey("gemini");
+    if (orgGemini) {
+      geminiKey = orgGemini;
+      geminiOwner = "org";
+    }
+  }
+
+  if (neededProviders.has("openrouter")) {
+    const orgOpenRouter = await openKey("openrouter");
+    if (orgOpenRouter) {
+      openRouterKey = orgOpenRouter;
+      openRouterOwner = "org";
+    }
+  }
+
+  if (neededProviders.has("firefly")) {
+    const orgFirefly = await openKey("firefly");
+    if (orgFirefly) {
+      try {
+        const decoded = decodeFireflyPlaintext(orgFirefly);
+        fireflyClientId = decoded.clientId;
+        fireflyClientSecret = decoded.clientSecret;
+        fireflyOwner = "org";
+      } catch {
+        // Non-JSON plaintext falls back to platform
+      }
+    }
+  }
+
+  const keyOwners = {
+    gemini: geminiOwner,
+    openrouter: openRouterOwner,
+    firefly: fireflyOwner,
+  };
+
+  return {
+    ...env,
+    providers: {
+      ...env.providers,
+      geminiKey,
+      openRouterKey,
+      fireflyClientId,
+      fireflyClientSecret,
+      keyOwners,
+    },
+  };
+}
+
 /**
  * Rebuilds the RunEnvironment from the tenant and executes the campaign generation,
  * including progress reporting, error handling, report fencing, and job completion.
  */
 export async function executeRunRequest(request: RunRequest, signal?: AbortSignal): Promise<void> {
-  const env = runEnvironment(request.tenant);
+  const baseEnv = runEnvironment(request.tenant);
+  const env = await overlayOrgKeys(baseEnv, {
+    providers: imageProviderChain(request.imageModel),
+  });
   const { jobId, brief, imageModel, regenerateOnly, reroll, expectedRevision } = request;
   const expectedPolicyHash = await persistedPolicyHash(env, brief, reroll);
   const expectedCopyHash = await persistedCopyHash(env, brief, reroll);

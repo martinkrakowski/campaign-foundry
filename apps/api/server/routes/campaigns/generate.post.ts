@@ -5,9 +5,13 @@ import { JobCapacityError } from "../../lib/ports/fs-job-store.js";
 import { getBriefStore, getUsageStore } from "../../lib/ports/index.js";
 import { getRunDelivery } from "../../lib/ports/run-delivery-registry.js";
 import { parseBrief, parseRegenerateOnly } from "../../lib/load-brief.js";
-import { ALLOWED_IMAGE_MODELS } from "../../lib/pipeline.js";
+import {
+  ALLOWED_IMAGE_MODELS,
+  imageProviderChain,
+  primaryImageProvider,
+} from "../../lib/pipeline.js";
 import { runEnvironment, type RunEnvironment } from "../../lib/run-environment.js";
-import type { RunRequest } from "../../lib/run-request.js";
+import { overlayOrgKeys, type RunRequest } from "../../lib/run-request.js";
 import { requestTenant } from "../../lib/tenant.js";
 import { reportRevision } from "../../lib/report.js";
 import {
@@ -123,9 +127,26 @@ export default defineEventHandler(async (event) => {
   // With STORE_BACKEND=fs the usage port is a no-op (unlimited, uncounted),
   // so only the Postgres backend can ever refuse here (D175: only it can
   // admit an org other than the operator's at all).
+  //
+  // PT-7b3a: An org is exempt from the quota check only when the provider the
+  // run will actually generate images with is org-keyed.
+  let hasOrgKey = false;
+  try {
+    const chain = imageProviderChain(imageModel);
+    const resolvedEnv = await overlayOrgKeys(env, { providers: chain });
+    const primary = primaryImageProvider(chain, resolvedEnv.providers);
+    hasOrgKey = primary !== undefined && resolvedEnv.providers.keyOwners?.[primary] === "org";
+  } catch {
+    hasOrgKey = false;
+  }
+
   const usage = getUsageStore(env);
   const quota = await usage.quota(env.tenant.orgId);
-  if (quota !== null && (await usage.countThisMonth(env.tenant.orgId, new Date())) >= quota) {
+  if (
+    !hasOrgKey &&
+    quota !== null &&
+    (await usage.countThisMonth(env.tenant.orgId, new Date())) >= quota
+  ) {
     setResponseStatus(event, 429);
     return {
       error: `Campaign "${brief.id}" would exceed its org's monthly generation quota.`,

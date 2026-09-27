@@ -4,9 +4,9 @@
   "mutations": [
     {
       "file": "apps/api/server/lib/ports/pg-usage-store.ts",
-      "before": "        const { rows: countRows } = await tx.query<{ count: string }>(\n          `select count(*)::text as count from usage\n           where org_id = $1 and created_at >= $2\n             and (status = 'recorded' or (status = 'reserved' and created_at >= $3))`,\n          [orgId, monthStart.toISOString(), cutoff.toISOString()],\n        );",
-      "after": "        const { rows: countRows } = await tx.query<{ count: string }>(\n          `select count(*)::text as count from usage\n           where org_id = $1 and created_at >= $2\n             and (status = 'recorded' and $3::text is not null)`,\n          [orgId, monthStart.toISOString(), cutoff.toISOString()],\n        );",
-      "because": "dropping the reserved status from the count in reserve permits concurrent reservations to overshoot the monthly quota",
+      "before": "        const { rows: countRows } = await tx.query<{ count: string }>(\n          `select count(*)::text as count from usage\n           where org_id = $1 and created_at >= $2\n             and ((status = 'recorded' and key_owner = 'platform') or (status = 'reserved' and created_at >= $3))`,\n          [orgId, monthStart.toISOString(), cutoff.toISOString()],\n        );",
+      "after": "        const { rows: countRows } = await tx.query<{ count: string }>(\n          `select count(*)::text as count from usage\n           where org_id = $1 and created_at >= $2\n             and ((status = 'recorded' and key_owner = 'platform') and $3::text is not null)`,\n          [orgId, monthStart.toISOString(), cutoff.toISOString()],\n        );",
+      "because": "dropping the reserved status from the count in reserve permits concurrent reservations to overshoot the monthly quota. Re-anchored 2026-09-26 by PT-7b3a: usage query filters to key_owner = 'platform'.",
       "command": [
         "yarn",
         "vitest",
