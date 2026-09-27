@@ -6554,3 +6554,45 @@ and source formatting, recorded here rather than fixed.
   - A `?next=` return URL after sign-in, which needs open-redirect review.
   - A structural import cycle through `ports/index` remains, pre-existing.
   - `apps/api` has no structured logger, so `console.warn` is the convention.
+
+## 2026-09-27 — wave platform-and-tenancy-w04 part B (PT-2b, PT-6b2, PT-6b3, PT-2c, PT-7b2, PT-2d, PT-7b3a, PT-7b3b) and staging on Postgres, Better Auth and Kafka
+
+- **Goal:** finish §4.4 part B of `docs/planning/2026-09-24_platform-and-tenancy.md`, and make staging the proving ground (owner, 2026-09-26: "not yet live … use the staging environment to perfect it").
+- **Merged, in order:**
+  - [#601](https://github.com/martinkrakowski/campaign-foundry/pull/601) (`36bb7af9`) PT-2b: campaign ownership at the port, with the web client handling 404. The owner kept drafts allowed, and the stricter body rule moved to PT-5.
+  - [#600](https://github.com/martinkrakowski/campaign-foundry/pull/600) (`59778c57`) PT-6b2: kafkajs delivery of `RunRequest`s, with `KAFKA_CONSUME` gating the consumer.
+    - Offsets commit after the start-or-drop decision.
+    - The close hook stops the consumer before closing delivery.
+    - A test's `afterEach` had deleted `certs/` at the real project root; it now removes only what it created.
+  - [#602](https://github.com/martinkrakowski/campaign-foundry/pull/602) (`ebd10cee`) staging on Postgres (CNPG) and Better Auth.
+    - `deploy.sh` checks the auth secret's length on the node, so only the length leaves it.
+    - The owner created the secret; the auto-mode classifier rightly blocked the orchestrator from writing it.
+  - [#603](https://github.com/martinkrakowski/campaign-foundry/pull/603) (`8f1ddb71`) PT-6b3: the staging KafkaTopic `cf.run-requests`, a KafkaUser with ACLs, and the certificate mounts. The consumer joined `cf-workers` with all three partitions.
+  - [#605](https://github.com/martinkrakowski/campaign-foundry/pull/605) (`af5d3373`) PT-2c: team scope on Postgres (migration `0011`, `campaignVisibility`, `supportsTeams`).
+  - [#604](https://github.com/martinkrakowski/campaign-foundry/pull/604) (`10a683f7`) PT-7b2: org provider keys sealed (migration `0012`), with routes for owners and admins.
+    - CI caught a conversion test that applied `0012` before `0011`, so `migrate()` refused it; the test now filters ids below `0011`.
+  - [#606](https://github.com/martinkrakowski/campaign-foundry/pull/606) (`b6c213ce`) PT-2d: team gates on the remaining routes.
+    - Orchestrator rule: a hidden campaign is indistinguishable from a missing one on every route, including the 409 on `decisions` and the `jobs` 404.
+    - The security fix round closed a `GET /output/**` bypass through an unnormalised path (`./` and `..` detours), plus the ungated `package` and `plan` routes.
+    - Seven bot threads were refuted with their mechanisms: the scope types, symlinks in the output root, legacy unscoped paths living only in the `local` org, and the ambiguous `packages/` path failing closed.
+  - [#607](https://github.com/martinkrakowski/campaign-foundry/pull/607) (`2f77c355`) PT-7b3a: org keys resolved at execution and metered `org` without reserving quota.
+    - The first cut exempted admission whenever the org had ANY key. Two rounds (the orchestrator's review plus the bots) made `imageProviderChain` the one rule that both `imageGenerator` and admission use.
+    - Org keys now resolve along the whole fallback chain (Firefly → Imagen → OpenRouter). A primary key that fails to open fails the run; a fallback's is treated as absent.
+    - The dead `generatesHeadlines` field was removed.
+  - [#608](https://github.com/martinkrakowski/campaign-foundry/pull/608) (`02c63558`) PT-7b3b: the provider-keys settings page and a Settings nav entry under better-auth, web-only.
+    - The role comes from Better Auth's `useActiveMember` (a comma-joined role, as `membership.ts` parses it), and the API's 403 stays the authority.
+    - Errors map by status and never render server text.
+    - Typed keys mark the page dirty, and are dropped when write access is lost.
+- **Staging:** it runs `02c63558` on Postgres, Better Auth and Kafka, with migrations through `0012`. Capabilities report `better-auth`, and the key routes answer 401 without a session. An end-to-end run through Kafka waits on the owner's first sign-in and bootstrap (README "First sign-in").
+- **Seats:** agy took the first dispatch of PT-2d, PT-7b3a and both #607 fix rounds. Its quota ran out once more, on PT-7b3b (`EXIT 3`, 0 commits), which moved to the Sonnet reserve from the recorded tip.
+- **Process findings, and the rule each leaves:**
+  - **A lane's "per-file 100%" was not the gate's number.** #608's scoped coverage runs reported 100%, and CI then failed at 99.99% on three `page.tsx` branches. Measure a file the way `test:cov` does: the root config, and an `include` glob that actually matches (a literal `(shell)` path matched nothing, and printed `All files 0` rather than an error).
+  - **`scripts/merge-prs.sh` is a zsh script** (`${(f)…}`). `sh` and `bash` both fail with a syntax error at line 89, before merging anything.
+  - **Host load reached about 80 on 16 cores from system services**, not from lanes, and the api project's PGlite suites flaked under it. A web-only diff was pushed on the lane's per-file evidence, and CI's clean runner judged it.
+  - **Converging bots are signal.** On #607, Greptile and CodeRabbit independently restated the orchestrator's own review finding (fallback keys). When two bots and a reviewer agree, it goes straight into the fix round.
+- **Follow-ups:**
+  - FU-reserve-packages-slug: `packages` is a legal campaign id and collides with the packages directory.
+  - A Kafka consumer startup retry and a concurrency cap.
+  - A gate-lock heartbeat.
+  - The web message catalog (the shell pages hard-code their copy).
+  - An Aiven Postgres version check (PG15+ for `on delete set null (team_id)`).
