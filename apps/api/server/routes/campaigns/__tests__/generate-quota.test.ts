@@ -162,7 +162,52 @@ describe("POST /campaigns/generate — admission is gated on the org's monthly q
     expect(runCampaignSpy).not.toHaveBeenCalled();
   });
 
-  test("at quota with the selected provider's org key returns 202", async () => {
+  test("at quota with a listed key that fails to open returns 429", async () => {
+    setUsageStore(usageDouble(2, 2)); // at quota!
+    setProviderKeyStore({
+      put: async () => {
+        throw new Error("not implemented");
+      },
+      list: async () => [
+        { provider: "gemini", last4: "1234", createdAt: new Date().toISOString() },
+      ],
+      revoke: async () => {},
+      open: async (provider) => {
+        if (provider === "gemini") throw new Error("corrupted ciphertext");
+        return undefined;
+      },
+    });
+    const res = await call(brief(), "imagen");
+    expect(res.status).toBe(429);
+    await expect(res.json()).resolves.toEqual({
+      error: `Campaign "camp" would exceed its org's monthly generation quota.`,
+      code: "quota_exceeded",
+    });
+    expect(runCampaignSpy).not.toHaveBeenCalled();
+  });
+
+  test("at quota with malformed Firefly JSON returns 429", async () => {
+    setUsageStore(usageDouble(2, 2)); // at quota!
+    setProviderKeyStore({
+      put: async () => {
+        throw new Error("not implemented");
+      },
+      list: async () => [
+        { provider: "firefly", last4: "1234", createdAt: new Date().toISOString() },
+      ],
+      revoke: async () => {},
+      open: async (provider) => (provider === "firefly" ? "not-valid-json" : undefined),
+    });
+    const res = await call(brief(), "firefly");
+    expect(res.status).toBe(429);
+    await expect(res.json()).resolves.toEqual({
+      error: `Campaign "camp" would exceed its org's monthly generation quota.`,
+      code: "quota_exceeded",
+    });
+    expect(runCampaignSpy).not.toHaveBeenCalled();
+  });
+
+  test("at quota with a usable primary org key returns 202", async () => {
     setUsageStore(usageDouble(2, 2)); // at quota!
     setProviderKeyStore({
       put: async () => {

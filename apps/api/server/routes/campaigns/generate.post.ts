@@ -2,12 +2,16 @@ import { setResponseHeader } from "h3";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { deleteJob, enqueueJob } from "../../lib/jobs.js";
 import { JobCapacityError } from "../../lib/ports/fs-job-store.js";
-import { getBriefStore, getProviderKeyStore, getUsageStore } from "../../lib/ports/index.js";
+import { getBriefStore, getUsageStore } from "../../lib/ports/index.js";
 import { getRunDelivery } from "../../lib/ports/run-delivery-registry.js";
 import { parseBrief, parseRegenerateOnly } from "../../lib/load-brief.js";
-import { ALLOWED_IMAGE_MODELS, selectImageProviderWithActiveKeys } from "../../lib/pipeline.js";
+import {
+  ALLOWED_IMAGE_MODELS,
+  imageProviderChain,
+  primaryImageProvider,
+} from "../../lib/pipeline.js";
 import { runEnvironment, type RunEnvironment } from "../../lib/run-environment.js";
-import type { RunRequest } from "../../lib/run-request.js";
+import { overlayOrgKeys, type RunRequest } from "../../lib/run-request.js";
 import { requestTenant } from "../../lib/tenant.js";
 import { reportRevision } from "../../lib/report.js";
 import {
@@ -128,14 +132,10 @@ export default defineEventHandler(async (event) => {
   // run will actually generate images with is org-keyed.
   let hasOrgKey = false;
   try {
-    const activeKeys = await getProviderKeyStore(env).list();
-    const activeProviders = new Set(activeKeys.map((k) => k.provider));
-    const selectedProvider = selectImageProviderWithActiveKeys(
-      env.providers,
-      activeProviders,
-      imageModel,
-    );
-    hasOrgKey = selectedProvider !== undefined && activeProviders.has(selectedProvider);
+    const chain = imageProviderChain(imageModel);
+    const resolvedEnv = await overlayOrgKeys(env, { providers: chain });
+    const primary = primaryImageProvider(chain, resolvedEnv.providers);
+    hasOrgKey = primary !== undefined && resolvedEnv.providers.keyOwners?.[primary] === "org";
   } catch {
     hasOrgKey = false;
   }
