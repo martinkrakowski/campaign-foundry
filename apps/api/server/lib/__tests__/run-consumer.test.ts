@@ -765,6 +765,59 @@ describe("RunConsumer (PT-6b2, D171, D174d)", () => {
     expect((consumer as unknown as { inFlight: number }).inFlight).toBe(0);
   });
 
+  test("a run settling while stop() awaits disconnect() does not resume", async () => {
+    let resolveRun1!: () => void;
+    let releaseDisconnect!: () => void;
+    let runCallCount = 0;
+
+    startQueuedJobSpy.mockResolvedValue(true);
+    runJobSpy.mockImplementation(() => {
+      runCallCount++;
+      if (runCallCount === 1) {
+        return new Promise<void>((r) => {
+          resolveRun1 = r;
+        });
+      }
+      return new Promise<void>(() => undefined);
+    });
+
+    const commitMock = vi.fn().mockResolvedValue(undefined);
+    const consumer = new RunConsumer({ ...settings, maxInFlight: 2 });
+    await consumer.start();
+
+    const makePayload = (offset: string, jobId: string) =>
+      ({
+        topic: "cf.run-requests",
+        partition: 0,
+        message: {
+          offset,
+          value: Buffer.from(JSON.stringify({ ...sampleRequest(), jobId })),
+        },
+      }) as unknown as EachMessagePayload;
+
+    await consumer.handleMessage(makePayload("1", "job-1"), commitMock);
+    await consumer.handleMessage(makePayload("2", "job-2"), commitMock);
+    expect(mockConsumerPause).toHaveBeenCalledTimes(1);
+
+    mockConsumerDisconnect.mockImplementationOnce(
+      () =>
+        new Promise<void>((r) => {
+          releaseDisconnect = r;
+        }),
+    );
+    const stopping = consumer.stop();
+
+    // A run settles while disconnect() is still pending: running is still true here.
+    resolveRun1();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(mockConsumerResume).not.toHaveBeenCalled();
+
+    releaseDisconnect();
+    await stopping;
+    expect(mockConsumerResume).not.toHaveBeenCalled();
+  });
+
   test("a run rejecting after stop does not throw unhandled rejection or leave negative counter", async () => {
     let rejectRun!: (err: Error) => void;
     startQueuedJobSpy.mockResolvedValue(true);

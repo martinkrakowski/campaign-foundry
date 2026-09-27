@@ -49,6 +49,8 @@ export class RunConsumer {
   private readonly topic: string;
   private readonly maxInFlight: number;
   private running = false;
+  /** Set for the whole of `stop()`, so a run settling while `disconnect()` is pending never resumes. */
+  private stopping = false;
   private inFlight = 0;
   private paused = false;
 
@@ -82,6 +84,7 @@ export class RunConsumer {
 
   async start(): Promise<void> {
     if (this.running) return;
+    this.stopping = false;
     // Set before the first await so a concurrent `stop()` (e.g. a Nitro
     // close hook firing while `connect()` is still pending) sees a
     // consumer that is already "running" and disconnects it, rather than
@@ -159,7 +162,7 @@ export class RunConsumer {
       }
       const onSettled = () => {
         this.inFlight = Math.max(0, this.inFlight - 1);
-        if (this.running && this.inFlight < this.maxInFlight && this.paused) {
+        if (this.running && !this.stopping && this.inFlight < this.maxInFlight && this.paused) {
           this.consumer.resume([{ topic: this.topic }]);
           this.paused = false;
         }
@@ -171,6 +174,7 @@ export class RunConsumer {
 
   async stop(): Promise<void> {
     if (this.running) {
+      this.stopping = true;
       await this.consumer.disconnect();
       this.running = false;
       this.paused = false;
