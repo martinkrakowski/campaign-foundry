@@ -73,12 +73,28 @@ ssh m 'KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl -n campaign-foundry-staging 
 `deploy.sh` checks it before building anything, and refuses while it is missing, has no
 `secret` key, or is shorter than 32 characters.
 
+### Resend key (once, owner)
+
+Sign-in links are sent through Resend's HTTP API (D174b) from
+`campaign-foundry@midnight.krakowski.cloud`. The domain's DKIM and SPF are verified in
+Resend, and sending needs nothing else. The API key lives in the namespace's own secret,
+`campaign-foundry-resend` (key `api-key`). Create it on the node from a key you hold, so it
+never touches the repo, then restart the pod so it picks the key up:
+
+```sh
+ssh m 'read -rs KEY && printf %s "$KEY" | KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl -n campaign-foundry-staging create secret generic campaign-foundry-resend --from-file=api-key=/dev/stdin'
+ssh m 'KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl -n campaign-foundry-staging rollout restart deploy/campaign-foundry'
+```
+
+(The first command waits for the key on stdin; paste it and press Enter.) The secret is
+optional in `app.yaml`, so a deploy without it still works and falls back to the log below.
+
 ### First sign-in (once, owner)
 
-With no `RESEND_API_KEY`, the magic link is written to the API log. **Anyone who can read
-that log can sign in as whoever requested a link**, so on staging log access is account
-access; set `RESEND_API_KEY` (and `EMAIL_FROM`) to send real mail instead. Request it on
-https://campaign-foundry.midnight.lan/sign-in, then read it:
+With the Resend key in place, request a link on https://campaign-foundry.midnight.lan/sign-in
+and it arrives by email. **Without it**, the magic link is written to the API log, and
+**anyone who can read that log can sign in as whoever requested a link**, so on staging log
+access is then account access. Read it with:
 
 ```sh
 ssh m 'KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl -n campaign-foundry-staging logs deploy/campaign-foundry -c api | grep "sign-in link" | tail -1'
