@@ -1,5 +1,9 @@
 import { SAFE_ID_PATTERN } from "@campaignfoundry/CampaignOrchestration";
-import { getOutputStore, type PackageFileEntry } from "../../../../lib/ports/index.js";
+import {
+  getBriefStore,
+  getOutputStore,
+  type PackageFileEntry,
+} from "../../../../lib/ports/index.js";
 import { measure, storeZipStream, type ZipEntry } from "../store-zip.js";
 
 import { requestTenant } from "../../../../lib/tenant.js";
@@ -44,12 +48,16 @@ export default defineEventHandler(async (event) => {
     return { error: "Invalid platform id" };
   }
 
+  const scope = requestTenant(event);
+  const briefs = getBriefStore(scope);
+  if (briefs.supportsTeams && (await briefs.campaignVisibility(campaignId)) === "hidden") {
+    setResponseStatus(event, 404);
+    return { error: "Not found" };
+  }
+
   let files: FileEntry[];
   try {
-    const entries = await getOutputStore(requestTenant(event)).listPackageFiles(
-      campaignId,
-      platformId,
-    );
+    const entries = await getOutputStore(scope).listPackageFiles(campaignId, platformId);
     if (entries === undefined) {
       setResponseStatus(event, 404);
       return { error: "Not found" };

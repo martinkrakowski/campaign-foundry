@@ -7,6 +7,7 @@ import {
   PROBE_PENDING_ERROR,
   waitForCapabilities,
 } from "../../lib/capabilities.js";
+import { getBriefStore } from "../../lib/ports/index.js";
 
 import { requestTenant } from "../../lib/tenant.js";
 /**
@@ -39,7 +40,11 @@ export default defineEventHandler(async (event) => {
     return { error: "not a variation brief" };
   }
 
-  const input = await planInputFor(requestTenant(event), brief);
+  const scope = requestTenant(event);
+  const briefs = getBriefStore(scope);
+  const hidePool = briefs.supportsTeams && (await briefs.campaignVisibility(brief.id)) === "hidden";
+
+  const input = await planInputFor(scope, brief, { hidePool });
   if (!input.success) {
     setResponseStatus(event, 422);
     return { error: input.error.message };

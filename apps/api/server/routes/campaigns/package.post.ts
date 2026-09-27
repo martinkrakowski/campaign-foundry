@@ -4,7 +4,7 @@ import {
   type PackageStorePort,
 } from "@campaignfoundry/Distribution";
 import { getCapabilities } from "../../lib/capabilities.js";
-import { getOutputStore } from "../../lib/ports/index.js";
+import { getBriefStore, getOutputStore } from "../../lib/ports/index.js";
 import { storageRoots } from "../../lib/run-environment.js";
 import { isPersistedAsset, type PersistedAsset, readReport } from "../../lib/report.js";
 
@@ -90,6 +90,12 @@ export default defineEventHandler(async (event) => {
   } catch (error) {
     setResponseStatus(event, 400);
     return { error: error instanceof Error ? error.message : "Invalid package request" };
+  }
+
+  const briefs = getBriefStore(scope);
+  if (briefs.supportsTeams && (await briefs.campaignVisibility(campaignId)) === "hidden") {
+    setResponseStatus(event, 404);
+    return { error: "Campaign report not found" };
   }
 
   const report = await readReport(scope, campaignId);

@@ -1,5 +1,5 @@
-import { extname } from "node:path";
-import { getOutputStore } from "../../lib/ports/index.js";
+import { extname, posix } from "node:path";
+import { getBriefStore, getOutputStore } from "../../lib/ports/index.js";
 
 import { requestTenant } from "../../lib/tenant.js";
 const CONTENT_TYPES: Record<string, string> = {
@@ -54,9 +54,36 @@ export function parseByteRange(
  * response's Content-Length from what is actually streamed.
  */
 export default defineEventHandler(async (event) => {
-  const lookup = await getOutputStore(requestTenant(event)).openOutput(
-    getRouterParam(event, "path") ?? "",
-  );
+  const rawPath = getRouterParam(event, "path") ?? "";
+  const normalized = posix.normalize(rawPath);
+  if (normalized === ".." || normalized.startsWith("../") || posix.isAbsolute(normalized)) {
+    setResponseStatus(event, 400);
+    return { error: "Invalid path" };
+  }
+
+  const segments = normalized.split("/").filter((s) => Boolean(s) && s !== ".");
+  const candidateIds: string[] = [];
+  if (segments[0]) {
+    candidateIds.push(segments[0]);
+    if (segments[0] === "packages" && segments[1]) {
+      candidateIds.push(segments[1]);
+    }
+  }
+
+  const scope = requestTenant(event);
+  if (candidateIds.length > 0) {
+    const briefs = getBriefStore(scope);
+    if (briefs.supportsTeams) {
+      for (const campaignId of candidateIds) {
+        if ((await briefs.campaignVisibility(campaignId)) === "hidden") {
+          setResponseStatus(event, 404);
+          return { error: "Not found" };
+        }
+      }
+    }
+  }
+
+  const lookup = await getOutputStore(scope).openOutput(rawPath);
   if (!lookup.found) {
     if (lookup.reason === "invalid") {
       setResponseStatus(event, 400);

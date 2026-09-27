@@ -92,4 +92,12 @@ describe("FsOutputStore", () => {
       });
     }
   });
+
+  test("openOutput returns reason invalid for a path that escapes the root", async () => {
+    const store = new FsOutputStore(root);
+    await expect(store.openOutput("../../etc/passwd")).resolves.toEqual({
+      found: false,
+      reason: "invalid",
+    });
+  });
 });

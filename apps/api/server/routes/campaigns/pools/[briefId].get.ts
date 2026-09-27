@@ -1,6 +1,7 @@
 import { errorMessage } from "@campaignfoundry/shared";
 import { assertSafeId } from "../../../lib/load-brief.js";
 import { InvalidCopyPoolError, readPool } from "../../../lib/pools.js";
+import { getBriefStore } from "../../../lib/ports/index.js";
 
 import { requestTenant } from "../../../lib/tenant.js";
 /**
@@ -17,6 +18,13 @@ export default defineEventHandler(async (event) => {
   } catch (error) {
     setResponseStatus(event, 400);
     return { error: errorMessage(error) };
+  }
+
+  const scope = requestTenant(event);
+  const briefs = getBriefStore(scope);
+  if (briefs.supportsTeams && (await briefs.campaignVisibility(briefId)) === "hidden") {
+    setResponseStatus(event, 404);
+    return { error: `Headline pool for brief "${briefId}" not found.` };
   }
 
   let stored;
