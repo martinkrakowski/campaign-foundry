@@ -2,7 +2,7 @@ import { setResponseHeader } from "h3";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { deleteJob, enqueueJob } from "../../lib/jobs.js";
 import { JobCapacityError } from "../../lib/ports/fs-job-store.js";
-import { getBriefStore, getUsageStore } from "../../lib/ports/index.js";
+import { getBriefStore, getProviderKeyStore, getUsageStore } from "../../lib/ports/index.js";
 import { getRunDelivery } from "../../lib/ports/run-delivery-registry.js";
 import { parseBrief, parseRegenerateOnly } from "../../lib/load-brief.js";
 import { ALLOWED_IMAGE_MODELS } from "../../lib/pipeline.js";
@@ -123,9 +123,23 @@ export default defineEventHandler(async (event) => {
   // With STORE_BACKEND=fs the usage port is a no-op (unlimited, uncounted),
   // so only the Postgres backend can ever refuse here (D175: only it can
   // admit an org other than the operator's at all).
+  //
+  // PT-7b3a: An org with active provider keys is exempt from the quota check.
+  let hasOrgKey = false;
+  try {
+    const activeKeys = await getProviderKeyStore(env).list();
+    hasOrgKey = activeKeys.length > 0;
+  } catch {
+    hasOrgKey = false;
+  }
+
   const usage = getUsageStore(env);
   const quota = await usage.quota(env.tenant.orgId);
-  if (quota !== null && (await usage.countThisMonth(env.tenant.orgId, new Date())) >= quota) {
+  if (
+    !hasOrgKey &&
+    quota !== null &&
+    (await usage.countThisMonth(env.tenant.orgId, new Date())) >= quota
+  ) {
     setResponseStatus(event, 429);
     return {
       error: `Campaign "${brief.id}" would exceed its org's monthly generation quota.`,

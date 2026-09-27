@@ -129,6 +129,33 @@ describe("PgUsageStore (PT-7a, D175)", () => {
     expect(await store.countThisMonth("local", now)).toBe(2); // exactly the quota
   });
 
+  test("org-key generations (key_owner = 'org') are not counted by countThisMonth and do not consume quota", async () => {
+    const store = new PgUsageStore(db);
+    await db.query("update org set monthly_generation_quota = $2 where id = $1", ["local", 2]);
+    const now = new Date("2026-09-24T12:00:00.000Z");
+
+    // Record an org-key generation
+    await store.record({
+      orgId: "local",
+      provider: "imagen",
+      model: "m",
+      units: 1,
+      keyOwner: "org",
+    });
+
+    // countThisMonth remains 0
+    expect(await store.countThisMonth("local", now)).toBe(0);
+
+    // Reserve should still succeed because org usage does not consume quota
+    const res1 = await store.reserve("local", now);
+    expect(res1).not.toBeNull();
+    const res2 = await store.reserve("local", now);
+    expect(res2).not.toBeNull();
+    // Third reserve hits quota of 2
+    const res3 = await store.reserve("local", now);
+    expect(res3).toBeNull();
+  });
+
   test("usage is isolated per org: one org's rows and quota never leak into another's count", async () => {
     const store = new PgUsageStore(db);
     await db.query("update org set monthly_generation_quota = $2 where id = $1", ["acme", 5]);

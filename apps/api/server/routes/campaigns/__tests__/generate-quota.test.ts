@@ -6,7 +6,12 @@ import { createApp, createRouter, toWebHandler } from "h3";
 import { err } from "@campaignfoundry/shared";
 import { getRunningJobId, resetJobs } from "../../../lib/jobs.js";
 import { setCapabilities } from "../../../lib/capabilities.js";
-import { resetUsageStore, setUsageStore } from "../../../lib/ports/index.js";
+import {
+  resetProviderKeyStore,
+  resetUsageStore,
+  setProviderKeyStore,
+  setUsageStore,
+} from "../../../lib/ports/index.js";
 import type { UsageRecord, UsageStorePort } from "../../../lib/ports/usage-store.port.js";
 import { LOCAL_TENANT } from "../../../lib/tenant.js";
 import generateHandler from "../generate.post.js";
@@ -105,6 +110,7 @@ describe("POST /campaigns/generate — admission is gated on the org's monthly q
   afterEach(async () => {
     await resetJobs();
     resetUsageStore();
+    resetProviderKeyStore();
     rmSync(dir, { recursive: true, force: true });
     if (origOut === undefined) delete process.env.OUTPUT_DIR;
     else process.env.OUTPUT_DIR = origOut;
@@ -131,6 +137,25 @@ describe("POST /campaigns/generate — admission is gated on the org's monthly q
     expect(body.jobId).toEqual(expect.any(String));
     expect(runCampaignSpy).toHaveBeenCalledOnce();
     await awaitSettled(body.jobId);
+  });
+
+  test("an org at quota can still run on its own key", async () => {
+    setUsageStore(usageDouble(2, 2)); // at quota!
+    setProviderKeyStore({
+      put: async () => {
+        throw new Error("not implemented");
+      },
+      list: async () => [
+        { provider: "gemini", last4: "1234", createdAt: new Date().toISOString() },
+      ],
+      revoke: async () => {},
+      open: async (provider) => (provider === "gemini" ? "org-key" : undefined),
+    });
+    const res = await call(brief());
+    expect(res.status).toBe(202);
+    const { jobId } = (await res.json()) as { jobId: string };
+    await awaitSettled(jobId);
+    expect(runCampaignSpy).toHaveBeenCalledOnce();
   });
 
   test("a null quota is unlimited: a heavily used org is still admitted", async () => {
