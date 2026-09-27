@@ -321,7 +321,6 @@ describe("PgBriefStore (PT-3d, D168, D169)", () => {
   });
 });
 
-
 describe("STORE_BACKEND=postgres puts briefs in the database, one store per (org, user) (PT-3d)", () => {
   const saved = process.env.STORE_BACKEND;
 

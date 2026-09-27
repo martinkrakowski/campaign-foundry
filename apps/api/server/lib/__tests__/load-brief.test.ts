@@ -111,7 +111,6 @@ describe("parseBrief", () => {
   });
 
   describe("schemaVersion enforcement (D133)", () => {
-
     test("a brief without schemaVersion parses successfully and carries schemaVersion: 1", () => {
       const parsed = parseBrief(valid);
       expect(parsed.schemaVersion).toBe(1);

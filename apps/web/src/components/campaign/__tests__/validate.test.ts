@@ -304,7 +304,6 @@ describe("validateIdentity", () => {
     },
   );
 
-
   test("a new draft may not take an id that already exists", () => {
     expect(validateIdentity(valid(), ["camp"]).briefId).toMatch(/already exists/);
     expect(validateIdentity(valid(), ["other"])).toEqual({});

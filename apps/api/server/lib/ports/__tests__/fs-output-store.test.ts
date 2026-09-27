@@ -133,4 +133,3 @@ describe("FsOutputStore", () => {
     if (pkgLookup.found) await pkgLookup.file.close();
   });
 });
-

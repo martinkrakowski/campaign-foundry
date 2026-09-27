@@ -23,7 +23,6 @@ const MISSING: OutputLookup = { found: false, reason: "missing" };
  */
 const HIDDEN_AREAS = RESERVED_CAMPAIGN_IDS.filter((id) => id !== "packages");
 
-
 function isHidden(posix: string): boolean {
   return HIDDEN_AREAS.some((area) => posix === area || posix.startsWith(`${area}/`));
 }

@@ -52,4 +52,3 @@ describe("Treatment value object", () => {
     expect(TONE_VALUES).toEqual(["bold", "subtle"]);
   });
 });
-
