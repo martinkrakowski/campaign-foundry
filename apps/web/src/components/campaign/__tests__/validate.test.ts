@@ -304,6 +304,37 @@ describe("validateIdentity", () => {
   );
 
   test.each(["cache", "jobs", "orgs", "packages"] as const)(
+    "accepts an existing campaign already named %s (only a new id is refused)",
+    (id) => {
+      const state = valid({
+        briefId: id,
+        source: {
+          kind: "file",
+          file: `${id}.yaml`,
+          loadedId: id,
+          savedSnapshot: null,
+          revision: undefined,
+        },
+      });
+      expect(validateIdentity(state).briefId).toBeUndefined();
+    },
+  );
+
+  test("refuses renaming an existing campaign to a reserved id", () => {
+    const state = valid({
+      briefId: "cache",
+      source: {
+        kind: "file",
+        file: "camp.yaml",
+        loadedId: "camp",
+        savedSnapshot: null,
+        revision: undefined,
+      },
+    });
+    expect(validateIdentity(state).briefId).toBe(messages.briefIdReserved("cache"));
+  });
+
+  test.each(["cache", "jobs", "orgs", "packages"] as const)(
     "accepts non-campaign ids named %s (product and treatment)",
     (id) => {
       const state = valid({

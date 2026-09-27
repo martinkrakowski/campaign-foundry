@@ -139,7 +139,11 @@ export function validateIdentity(state: EditorState, existingIds?: string[]): Fi
   const errors: FieldErrors = {};
   if (!SAFE_ID_PATTERN.test(state.briefId)) {
     errors.briefId = messages.briefId;
-  } else if (isReservedCampaignId(state.briefId)) {
+  } else if (
+    isReservedCampaignId(state.briefId) &&
+    // An existing campaign keeps its id: only a NEW id may not be reserved, as on the API.
+    !(state.source.kind === "file" && state.source.loadedId === state.briefId)
+  ) {
     errors.briefId = messages.briefIdReserved(state.briefId);
   }
   // Region and audience are rendered by the Identity section, so their errors belong to
