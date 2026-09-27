@@ -344,7 +344,12 @@ describe("ProviderKeysSettingsPage — write-only fields", () => {
     await user.click(screen.getByRole("button", { name: "Revoke" }));
 
     await waitFor(() => expect(revokeSpy).toHaveBeenCalledWith("openrouter"));
-    await waitFor(() => expect(screen.getAllByText("none").length).toBeGreaterThan(0));
+    // Gemini and Firefly already show "none" before the click — asserting only that
+    // SOME row says "none" would still pass with a no-op onRevoked, since two rows
+    // already say it. Assert the OpenRouter row's own text is gone, and that all
+    // three rows (not just the two that were already empty) now say "none".
+    await waitFor(() => expect(screen.queryByText("…5678 (2026-09-27)")).toBeNull());
+    expect(screen.getAllByText("none")).toHaveLength(3);
   });
 });
 

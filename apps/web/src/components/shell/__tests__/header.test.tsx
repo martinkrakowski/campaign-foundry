@@ -987,7 +987,6 @@ describe("Header — auth and organization switching (PT-1b2)", () => {
   });
 
   test("clicking Settings when clean does not prevent default (a plain link navigation)", async () => {
-    const user = userEvent.setup();
     vi.spyOn(briefsApi, "getCapabilities").mockResolvedValue({
       motion: true,
       auth: { mode: "better-auth", google: false },
@@ -998,8 +997,18 @@ describe("Header — auth and organization switching (PT-1b2)", () => {
     } as never);
 
     renderWithRun(<Header />);
+    nextMock().router.push.mockClear();
 
-    await user.click(await screen.findByRole("link", { name: "Settings" }));
+    // A clean `guardedPush` would also navigate immediately, so asserting only
+    // "no dialog appeared" cannot tell a real plain-link navigation apart from a
+    // handler that always calls `preventDefault()` + `guardedPush`. `fireEvent.click`
+    // returns `false` when a handler called `preventDefault()` on the event — assert
+    // that it did not, and that `guardedPush`'s own `router.push` was never invoked
+    // (the browser's own navigation is what would carry a plain `<a href>` click).
+    const link = await screen.findByRole("link", { name: "Settings" });
+    const notPrevented = fireEvent.click(link);
+    expect(notPrevented).toBe(true);
+    expect(nextMock().router.push).not.toHaveBeenCalled();
     expect(screen.queryByRole("dialog", { name: "Unsaved edits" })).toBeNull();
   });
 
