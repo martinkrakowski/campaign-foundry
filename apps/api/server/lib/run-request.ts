@@ -71,12 +71,7 @@ async function persistedCopyHash(
  * so it runs on platform keys exactly as today.
  */
 export async function overlayOrgKeys(env: RunEnvironment): Promise<RunEnvironment> {
-  let keyStore: ProviderKeyPort;
-  try {
-    keyStore = getProviderKeyStore(env);
-  } catch {
-    return env;
-  }
+  const keyStore = getProviderKeyStore(env);
 
   let geminiKey = env.providers.geminiKey;
   let geminiOwner: KeyOwner = env.providers.keyOwners?.gemini ?? "platform";
