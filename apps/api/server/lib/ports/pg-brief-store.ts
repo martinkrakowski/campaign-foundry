@@ -7,7 +7,14 @@ import { dumpBrief, errorMessage } from "@campaignfoundry/shared";
 import { BRIEF_SOURCE_EXTS, hashBytes, isErrno } from "../brief-files.js";
 import type { SqlClient, SqlQuery } from "../db/sql-client.js";
 import { parseBriefText, type ParseBriefOptions } from "../load-brief.js";
-import type { BriefStorePort, BriefWriteOptions, StoredBrief } from "./brief-store.port.js";
+import type {
+  BriefStorePort,
+  BriefWriteOptions,
+  ResolvedCampaign,
+  StoredBrief,
+} from "./brief-store.port.js";
+
+const CANONICAL_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** A file key ("<slug>.yaml") and the bare slug name the same row; strip a known extension. */
 function slugOf(fileOrId: string): string {
@@ -152,15 +159,42 @@ export class PgBriefStore implements BriefStorePort {
     return this.visible(row.team_id) ? "visible" : "hidden";
   }
 
+  /**
+   * Resolve a campaign reference (canonical uuid OR slug) within the caller's scope (D178, D179).
+   * Tries canonical uuid first, then falls back to slug.
+   * Answers { campaignId, slug } or undefined if absent or hidden by team.
+   */
+  async resolveCampaign(ref: string): Promise<ResolvedCampaign | undefined> {
+    // A uuid-shaped ref is tried as an id first. A match the caller may not see is
+    // treated exactly as no match (PT-2d: hidden is indistinguishable from missing),
+    // so the ref still falls through to the slug lookup.
+    if (CANONICAL_UUID_PATTERN.test(ref)) {
+      const { rows } = await this.db.query<{ id: string; slug: string; team_id: string | null }>(
+        `select id, slug, team_id from campaign where org_id = $1 and id = $2`,
+        [this.orgId, ref.toLowerCase()],
+      );
+      const byId = rows[0];
+      if (byId && this.visible(byId.team_id)) return { campaignId: byId.id, slug: byId.slug };
+    }
+    const { rows } = await this.db.query<{ id: string; slug: string; team_id: string | null }>(
+      `select id, slug, team_id from campaign where org_id = $1 and slug = $2`,
+      [this.orgId, ref],
+    );
+    const bySlug = rows[0];
+    if (!bySlug || !this.visible(bySlug.team_id)) return undefined;
+    return { campaignId: bySlug.id, slug: bySlug.slug };
+  }
+
   async listBriefs(): Promise<readonly StoredBrief[]> {
     const { rows } = await this.db.query<{
+      campaign_id: string;
       slug: string;
       body: string;
       revision: string;
       team_id: string | null;
     }>(
-      `select slug, body, revision, team_id from (
-         select distinct on (c.id) c.id, c.slug, c.team_id, bv.body, bv.revision
+      `select campaign_id, slug, body, revision, team_id from (
+         select distinct on (c.id) c.id as campaign_id, c.slug, c.team_id, bv.body, bv.revision
            from campaign c
            join brief_version bv on bv.campaign_id = c.id
           where c.org_id = $1
@@ -180,6 +214,7 @@ export class PgBriefStore implements BriefStorePort {
       const file = `${row.slug}.yaml`;
       try {
         briefs.push({
+          campaignId: row.campaign_id,
           file,
           brief: parseBriefText(file, dumpBrief(parseBody(row.body))),
           revision: row.revision,
@@ -198,6 +233,7 @@ export class PgBriefStore implements BriefStorePort {
     if (!row) return undefined;
     const file = `${id}.yaml`;
     return {
+      campaignId: row.campaign_id,
       file,
       brief: parseBriefText(file, dumpBrief(parseBody(row.body))),
       revision: row.revision,
@@ -277,7 +313,7 @@ export class PgBriefStore implements BriefStorePort {
          values ($1, 1, $2, $3, $4)`,
         [campaignId, JSON.stringify(brief), revision, this.actor],
       );
-      return { file: `${brief.id}.yaml`, brief, revision };
+      return { campaignId, file: `${brief.id}.yaml`, brief, revision };
     });
   }
 
@@ -338,7 +374,7 @@ export class PgBriefStore implements BriefStorePort {
          values ($1, $2, $3, $4, $5)`,
         [campaignId, current.version + 1, JSON.stringify(brief), revision, this.actor],
       );
-      return { file: `${brief.id}.yaml`, brief, revision };
+      return { campaignId, file: `${brief.id}.yaml`, brief, revision };
     });
   }
 

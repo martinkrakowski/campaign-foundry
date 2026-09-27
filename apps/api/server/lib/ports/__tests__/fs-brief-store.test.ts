@@ -422,4 +422,39 @@ describe("FsBriefStore", () => {
     });
     expect(replaced.brief.campaignMessage).toBe("Replaced cache");
   });
+
+  describe("campaignId and resolveCampaign (PT-5a, D178, D179)", () => {
+    test("StoredBrief carries campaignId equal to slug on fs backend (D179)", async () => {
+      const created = await store.createBrief(minimalBrief);
+      expect(created.campaignId).toBe("test-camp");
+
+      const found = await store.findBriefById("test-camp");
+      expect(found?.campaignId).toBe("test-camp");
+
+      const listed = await store.listBriefs();
+      expect(listed[0]?.campaignId).toBe("test-camp");
+
+      const rewritten = await store.rewriteBrief({
+        ...minimalBrief,
+        campaignMessage: "Rewritten",
+      });
+      expect(rewritten.campaignId).toBe("test-camp");
+
+      const replaced = await store.replaceBrief({
+        ...minimalBrief,
+        campaignMessage: "Replaced",
+      });
+      expect(replaced.campaignId).toBe("test-camp");
+    });
+
+    test("resolveCampaign answers { campaignId, slug } for existing campaign and undefined for missing", async () => {
+      await store.createBrief(minimalBrief);
+
+      const resolved = await store.resolveCampaign("test-camp");
+      expect(resolved).toEqual({ campaignId: "test-camp", slug: "test-camp" });
+
+      const missing = await store.resolveCampaign("non-existent");
+      expect(missing).toBeUndefined();
+    });
+  });
 });

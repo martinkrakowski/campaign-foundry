@@ -58,6 +58,21 @@ export async function assertOwnedCampaign(
 }
 
 /**
+ * Resolve a campaign reference (canonical uuid OR slug) from a route request event
+ * to its stored campaign slug (D178, D179, PT-5a).
+ *
+ * Answers the slug within the caller's tenant scope, or throws CampaignNotFoundError (HTTP 404)
+ * if the campaign does not exist or is hidden by team.
+ */
+export async function resolveCampaignRef(scope: StorageScope, ref: string): Promise<string> {
+  const resolved = await getBriefStore(scope).resolveCampaign(ref);
+  if (!resolved) {
+    throw new CampaignNotFoundError(ref);
+  }
+  return resolved.slug;
+}
+
+/**
  * Refuse (404) a source campaign id that EXISTS but is hidden from the caller
  * by team (D166 item 2) — never one that is merely absent. "Save as…" and
  * duplicate copy brief-scoped assets by directory name

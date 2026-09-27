@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, test, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -28,6 +28,7 @@ import {
   campaignKnown,
   canAssignTeam,
   CampaignNotFoundError,
+  resolveCampaignRef,
 } from "../ownership.js";
 
 const sampleBrief: CampaignBrief = {
@@ -419,5 +420,115 @@ describe("assertSourceVisible (D166, PT-2c item 2)", () => {
     const owner: TenantContext = { orgId: "local", userId: "owner", roles: ["owner"], teamIds: [] };
     await (getBriefStore(owner) as PgBriefStore).createBrief({ ...sampleBrief, id: "org-wide" });
     await expect(assertSourceVisible(owner, "org-wide")).resolves.toBeUndefined();
+  });
+});
+
+describe("resolveCampaignRef (PT-5a, D178, D179)", () => {
+  let dir: string;
+  const origRoot = process.env.PROJECT_ROOT;
+
+  beforeEach(() => {
+    resetProjectRoot();
+    dir = mkdtempSync(join(tmpdir(), "cf-resolve-campaign-ref-"));
+    process.env.PROJECT_ROOT = dir;
+    resetBriefStore();
+  });
+
+  afterEach(() => {
+    resetBriefStore();
+    if (origRoot === undefined) delete process.env.PROJECT_ROOT;
+    else process.env.PROJECT_ROOT = origRoot;
+    resetProjectRoot();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("fs backend: resolves existing slug to slug and throws 404 for missing", async () => {
+    await getBriefStore(LOCAL_TENANT).createBrief(sampleBrief);
+
+    const scope = LOCAL_TENANT;
+    const slug = await resolveCampaignRef(scope, "camp");
+    expect(slug).toBe("camp");
+
+    const err = await resolveCampaignRef(scope, "missing").catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(CampaignNotFoundError);
+    expect((err as CampaignNotFoundError).statusCode).toBe(404);
+    expect((err as CampaignNotFoundError).status).toBe(404);
+  });
+});
+
+describe("resolveCampaignRef on Postgres (PT-5a, D178)", () => {
+  let db: SqlClient;
+  let savedBackend: string | undefined;
+
+  beforeAll(async () => {
+    savedBackend = process.env.STORE_BACKEND;
+    process.env.STORE_BACKEND = "postgres";
+    db = await migratedDatabase();
+    setDatabase(db);
+    resetBriefStore();
+
+    await db.query(
+      `insert into team (id, name, "memberCount", org_id, created_at) values ($1, $2, 0, $3, now()), ($4, $5, 0, $6, now())`,
+      ["t1", "Team One", "local", "t2", "Team Two", "local"],
+    );
+  }, 30000);
+
+  afterAll(async () => {
+    resetBriefStore();
+    resetDatabase();
+    if (savedBackend === undefined) delete process.env.STORE_BACKEND;
+    else process.env.STORE_BACKEND = savedBackend;
+    await db?.end();
+  });
+
+  test("resolves uuid and slug to slug, throws 404 for missing, another org, or hidden", async () => {
+    const ownerTenant: TenantContext = {
+      orgId: "local",
+      userId: "owner",
+      roles: ["owner"],
+      teamIds: [],
+    };
+    const created = await getBriefStore(ownerTenant).createBrief({ ...sampleBrief, id: "my-camp" });
+    const uuid = created.campaignId;
+
+    const scope = ownerTenant;
+    expect(await resolveCampaignRef(scope, "my-camp")).toBe("my-camp");
+    expect(await resolveCampaignRef(scope, uuid)).toBe("my-camp");
+
+    // Missing
+    await expect(resolveCampaignRef(scope, "missing-camp")).rejects.toThrow(CampaignNotFoundError);
+
+    // Another org
+    await db.query("insert into org (id, name) values ($1, $2)", ["other", "Other"]);
+    const otherTenant: TenantContext = {
+      orgId: "other",
+      userId: "u1",
+      roles: ["owner"],
+      teamIds: [],
+    };
+    const otherCreated = await getBriefStore(otherTenant).createBrief({
+      ...sampleBrief,
+      id: "other-camp",
+    });
+    await expect(resolveCampaignRef(scope, "other-camp")).rejects.toThrow(CampaignNotFoundError);
+    await expect(resolveCampaignRef(scope, otherCreated.campaignId)).rejects.toThrow(
+      CampaignNotFoundError,
+    );
+
+    // Hidden team
+    await getBriefStore(ownerTenant).createBrief(
+      { ...sampleBrief, id: "hidden-camp" },
+      { teamId: "t2" },
+    );
+    const outsiderTenant: TenantContext = {
+      orgId: "local",
+      userId: "u2",
+      roles: [],
+      teamIds: ["t1"],
+    };
+    const outsiderScope = outsiderTenant;
+    await expect(resolveCampaignRef(outsiderScope, "hidden-camp")).rejects.toThrow(
+      CampaignNotFoundError,
+    );
   });
 });

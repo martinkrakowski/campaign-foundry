@@ -9,6 +9,7 @@ import {
   TeamsNotSupportedError,
   type BriefStorePort,
   type BriefWriteOptions,
+  type ResolvedCampaign,
   type StoredBrief,
 } from "./brief-store.port.js";
 import {
@@ -74,7 +75,7 @@ export class FsBriefStore implements BriefStorePort {
         const bytes = await readFile(filePath);
         const revision = hashBytes(bytes);
         const brief = parseBriefText(filePath, bytes.toString("utf8"));
-        briefs.push({ file, brief, revision });
+        briefs.push({ campaignId: brief.id, file, brief, revision });
       } catch (error) {
         console.warn(`[briefs] skipped ${file}: ${errorMessage(error)}`);
       }
@@ -134,7 +135,7 @@ export class FsBriefStore implements BriefStorePort {
     const content = serializeBrief(filePath, brief);
     await writeFile(filePath, content, { encoding: "utf8", flag: "wx" });
     const revision = hashBytes(Buffer.from(content, "utf8"));
-    return { file: `${brief.id}.yaml`, brief, revision };
+    return { campaignId: brief.id, file: `${brief.id}.yaml`, brief, revision };
   }
 
   /**
@@ -198,7 +199,7 @@ export class FsBriefStore implements BriefStorePort {
       throw error;
     }
     const revision = hashBytes(Buffer.from(content, "utf8"));
-    return { file: basename(filePath), brief, revision };
+    return { campaignId: brief.id, file: basename(filePath), brief, revision };
   }
 
   async replaceBrief(brief: CampaignBrief, options?: BriefWriteOptions): Promise<StoredBrief> {
@@ -226,6 +227,16 @@ export class FsBriefStore implements BriefStorePort {
   /** Never "hidden": the filesystem store has no team column (D166 item 5). */
   async campaignVisibility(id: string): Promise<"absent" | "visible"> {
     return (await this.findBriefFileById(id)) ? "visible" : "absent";
+  }
+
+  /**
+   * On the filesystem backend, a campaign's id is its slug (D179).
+   * Answers { campaignId: ref, slug: ref } if the brief exists, else undefined.
+   */
+  async resolveCampaign(ref: string): Promise<ResolvedCampaign | undefined> {
+    const file = await this.findBriefFileById(ref);
+    if (!file) return undefined;
+    return { campaignId: ref, slug: ref };
   }
 
   async getRevision(fileOrId: string): Promise<string | undefined> {
