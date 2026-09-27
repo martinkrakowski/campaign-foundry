@@ -1,14 +1,13 @@
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { completeJob, failJob, progressJob, runJob, startQueuedJob } from "./jobs.js";
 import type { parseRegenerateOnly } from "./load-brief.js";
-import { runCampaign, selectImageProviderWithActiveKeys } from "./pipeline.js";
+import { imageProviderChain, primaryImageProvider, runCampaign } from "./pipeline.js";
 import { readReport, writeReport } from "./report.js";
 import { decodeFireflyPlaintext, runEnvironment, type RunEnvironment } from "./run-environment.js";
 import type { TenantContext } from "./tenant.js";
 import { getProviderKeyStore } from "./ports/index.js";
 import {
   ProviderKeyUnavailableError,
-  type ProviderKeyPort,
   type Provider,
   PROVIDERS,
 } from "./ports/provider-key.port.js";
@@ -27,7 +26,6 @@ export interface RunRequest {
   readonly regenerateOnly?: ReturnType<typeof parseRegenerateOnly>;
   readonly reroll: boolean;
   readonly expectedRevision?: string | null;
-  readonly generatesHeadlines?: boolean;
 }
 
 /** The persisted report's policyHash for a variation re-roll, else undefined (no pin). */
@@ -67,22 +65,9 @@ async function persistedCopyHash(
   return typeof hash === "string" ? hash : undefined;
 }
 
-async function resolveProviderKey(
-  keyStore: ProviderKeyPort,
-  provider: Provider,
-): Promise<string | undefined> {
-  try {
-    return await keyStore.open(provider);
-  } catch (error) {
-    if (error instanceof ProviderKeyUnavailableError) return undefined;
-    throw error;
-  }
-}
-
 export interface OverlayOrgKeysOptions {
-  readonly imageModel?: string;
-  readonly generatesHeadlines?: boolean;
-  readonly providers?: Iterable<Provider>;
+  readonly providers?: readonly Provider[];
+  readonly primary?: Provider;
 }
 
 /**
@@ -99,35 +84,45 @@ export async function overlayOrgKeys(
 ): Promise<RunEnvironment> {
   const keyStore = getProviderKeyStore(env);
 
-  let neededProviders: Set<Provider>;
-  if (options?.providers !== undefined) {
-    neededProviders = new Set(options.providers);
-  } else if (
-    options !== undefined &&
-    ("imageModel" in options || "generatesHeadlines" in options)
-  ) {
-    neededProviders = new Set<Provider>();
-    let activeProviders: Set<Provider>;
-    try {
-      const summaries = await keyStore.list();
-      activeProviders = new Set(summaries.map((s) => s.provider));
-    } catch {
-      activeProviders = new Set();
-    }
-    const selected = selectImageProviderWithActiveKeys(
-      env.providers,
-      activeProviders,
-      options.imageModel,
-    );
-    if (selected) {
-      neededProviders.add(selected);
-    }
-    if (options.generatesHeadlines) {
-      neededProviders.add("openrouter");
-    }
-  } else {
-    neededProviders = new Set(PROVIDERS);
+  let activeProviders: Set<Provider>;
+  try {
+    const summaries = await keyStore.list();
+    activeProviders = new Set(summaries.map((s) => s.provider));
+  } catch {
+    activeProviders = new Set();
   }
+
+  const requestedProviders = options?.providers ?? PROVIDERS;
+  const primary =
+    options?.primary ??
+    (options?.providers
+      ? primaryImageProvider(options.providers, env.providers, activeProviders)
+      : undefined);
+
+  const neededProviders = new Set<Provider>();
+  if (primary) {
+    neededProviders.add(primary);
+  }
+  for (const provider of requestedProviders) {
+    if (activeProviders.has(provider)) {
+      neededProviders.add(provider);
+    }
+  }
+
+  const openKey = async (provider: Provider): Promise<string | undefined> => {
+    try {
+      return await keyStore.open(provider);
+    } catch (error) {
+      if (error instanceof ProviderKeyUnavailableError) return undefined;
+      if (provider === primary) throw error;
+      const errorClass =
+        error instanceof Error ? error.name || error.constructor.name : "UnknownError";
+      console.warn(
+        `[overlay-org-keys] fallback provider "${provider}" key unavailable: ${errorClass}`,
+      );
+      return undefined;
+    }
+  };
 
   let geminiKey = env.providers.geminiKey;
   let geminiOwner: KeyOwner = env.providers.keyOwners?.gemini ?? "platform";
@@ -138,7 +133,7 @@ export async function overlayOrgKeys(
   let fireflyOwner: KeyOwner = env.providers.keyOwners?.firefly ?? "platform";
 
   if (neededProviders.has("gemini")) {
-    const orgGemini = await resolveProviderKey(keyStore, "gemini");
+    const orgGemini = await openKey("gemini");
     if (orgGemini) {
       geminiKey = orgGemini;
       geminiOwner = "org";
@@ -146,7 +141,7 @@ export async function overlayOrgKeys(
   }
 
   if (neededProviders.has("openrouter")) {
-    const orgOpenRouter = await resolveProviderKey(keyStore, "openrouter");
+    const orgOpenRouter = await openKey("openrouter");
     if (orgOpenRouter) {
       openRouterKey = orgOpenRouter;
       openRouterOwner = "org";
@@ -154,7 +149,7 @@ export async function overlayOrgKeys(
   }
 
   if (neededProviders.has("firefly")) {
-    const orgFirefly = await resolveProviderKey(keyStore, "firefly");
+    const orgFirefly = await openKey("firefly");
     if (orgFirefly) {
       try {
         const decoded = decodeFireflyPlaintext(orgFirefly);
@@ -193,8 +188,7 @@ export async function overlayOrgKeys(
 export async function executeRunRequest(request: RunRequest, signal?: AbortSignal): Promise<void> {
   const baseEnv = runEnvironment(request.tenant);
   const env = await overlayOrgKeys(baseEnv, {
-    imageModel: request.imageModel,
-    generatesHeadlines: request.generatesHeadlines,
+    providers: imageProviderChain(request.imageModel),
   });
   const { jobId, brief, imageModel, regenerateOnly, reroll, expectedRevision } = request;
   const expectedPolicyHash = await persistedPolicyHash(env, brief, reroll);

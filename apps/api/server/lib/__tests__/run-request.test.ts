@@ -172,7 +172,6 @@ describe("executeRunRequest org provider keys (PT-7b3a, D175)", () => {
       tenant,
       brief,
       imageModel: "firefly",
-      generatesHeadlines: true,
       reroll: false,
     };
 
@@ -529,8 +528,189 @@ describe("executeRunRequest org provider keys (PT-7b3a, D175)", () => {
     await expect(executeRunRequest(request)).rejects.toThrow("corrupted Gemini ciphertext");
   });
 
-  test("overlayOrgKeys resolves OpenRouter when only generatesHeadlines is specified without imageModel", async () => {
-    const orgOpenRouter = "sk-or-v1-org-only-headlines";
+  test("an org-keyed Imagen fallback under Firefly meters org", async () => {
+    const origFfId = process.env.FIREFLY_CLIENT_ID;
+    const origFfSec = process.env.FIREFLY_CLIENT_SECRET;
+    process.env.FIREFLY_CLIENT_ID = "platform-firefly-id";
+    process.env.FIREFLY_CLIENT_SECRET = "platform-firefly-secret";
+
+    try {
+      const orgGeminiKey = "org-gemini-secret-key-fallback";
+      setProviderKeyStore(fakeProviderKeyStore({ gemini: orgGeminiKey }));
+
+      const tenant: TenantContext = {
+        orgId: "org-acme",
+        userId: "user-1",
+        roles: ["owner"],
+        teamIds: [],
+      };
+
+      let seenEnv: RunEnvironment | undefined;
+      vi.spyOn(pipelineModule, "runCampaign").mockImplementation(async (env) => {
+        seenEnv = env;
+        return {
+          success: true,
+          value: {
+            assets: [],
+            halted: false,
+            log: { campaignId: "camp-org-keys" } as any,
+            policyHash: "h",
+            seed: 1,
+          },
+        };
+      });
+
+      const brief = sampleBrief();
+      const env = runEnvironment(tenant);
+      const claim = await enqueueJob(env, brief.id);
+      if (!claim.acquired) throw new Error("job not acquired");
+      await startQueuedJob(env, claim.jobId);
+
+      const request: RunRequest = {
+        jobId: claim.jobId,
+        tenant,
+        brief,
+        imageModel: "firefly",
+        reroll: false,
+      };
+
+      await executeRunRequest(request);
+
+      expect(seenEnv).toBeDefined();
+      // Firefly is platform (no org Firefly key), but Gemini fallback must be org-owned
+      expect(seenEnv?.providers.geminiKey).toBe(orgGeminiKey);
+      expect(seenEnv?.providers.keyOwners?.gemini).toBe("org");
+      expect(seenEnv?.providers.keyOwners?.firefly).toBe("platform");
+    } finally {
+      if (origFfId === undefined) delete process.env.FIREFLY_CLIENT_ID;
+      else process.env.FIREFLY_CLIENT_ID = origFfId;
+      if (origFfSec === undefined) delete process.env.FIREFLY_CLIENT_SECRET;
+      else process.env.FIREFLY_CLIENT_SECRET = origFfSec;
+    }
+  });
+
+  test("a fallback key that fails to decrypt does not fail the run", async () => {
+    const fireflyPlaintext = JSON.stringify({
+      clientId: "org-firefly-client-id",
+      clientSecret: "org-firefly-secret",
+    });
+    const store: ProviderKeyPort = {
+      put: async () => {
+        throw new Error("not implemented");
+      },
+      list: async () => [
+        { provider: "firefly", last4: "1234", createdAt: new Date().toISOString() },
+        { provider: "gemini", last4: "5678", createdAt: new Date().toISOString() },
+      ],
+      revoke: async () => {},
+      open: async (provider) => {
+        if (provider === "firefly") return fireflyPlaintext;
+        if (provider === "gemini") throw new Error("corrupted Gemini fallback key");
+        return undefined;
+      },
+    };
+    setProviderKeyStore(store);
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const tenant: TenantContext = {
+      orgId: "org-acme",
+      userId: "user-1",
+      roles: ["owner"],
+      teamIds: [],
+    };
+
+    let seenEnv: RunEnvironment | undefined;
+    vi.spyOn(pipelineModule, "runCampaign").mockImplementation(async (env) => {
+      seenEnv = env;
+      return {
+        success: true,
+        value: {
+          assets: [],
+          halted: false,
+          log: { campaignId: "camp-org-keys" } as any,
+          policyHash: "h",
+          seed: 1,
+        },
+      };
+    });
+
+    const brief = sampleBrief();
+    const env = runEnvironment(tenant);
+    const claim = await enqueueJob(env, brief.id);
+    if (!claim.acquired) throw new Error("job not acquired");
+    await startQueuedJob(env, claim.jobId);
+
+    const request: RunRequest = {
+      jobId: claim.jobId,
+      tenant,
+      brief,
+      imageModel: "firefly",
+      reroll: false,
+    };
+
+    // Does NOT fail the run
+    await executeRunRequest(request);
+
+    expect(seenEnv).toBeDefined();
+    // Primary Firefly used org key
+    expect(seenEnv?.providers.fireflyClientId).toBe("org-firefly-client-id");
+    expect(seenEnv?.providers.keyOwners?.firefly).toBe("org");
+    // Gemini fallback fell back to platform key because decryption failed
+    expect(seenEnv?.providers.keyOwners?.gemini).toBe("platform");
+
+    // Warn logged provider and error class only, never key material
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining(
+        '[overlay-org-keys] fallback provider "gemini" key unavailable: Error',
+      ),
+    );
+  });
+
+  test("a primary key that fails still does fail the run", async () => {
+    const store: ProviderKeyPort = {
+      put: async () => {
+        throw new Error("not implemented");
+      },
+      list: async () => [
+        { provider: "firefly", last4: "1234", createdAt: new Date().toISOString() },
+      ],
+      revoke: async () => {},
+      open: async (provider) => {
+        if (provider === "firefly") throw new Error("corrupted Firefly primary ciphertext");
+        return undefined;
+      },
+    };
+    setProviderKeyStore(store);
+
+    const tenant: TenantContext = {
+      orgId: "org-acme",
+      userId: "user-1",
+      roles: ["owner"],
+      teamIds: [],
+    };
+
+    const brief = sampleBrief();
+    const env = runEnvironment(tenant);
+    const claim = await enqueueJob(env, brief.id);
+    if (!claim.acquired) throw new Error("job not acquired");
+    await startQueuedJob(env, claim.jobId);
+
+    const request: RunRequest = {
+      jobId: claim.jobId,
+      tenant,
+      brief,
+      imageModel: "firefly",
+      reroll: false,
+    };
+
+    await expect(executeRunRequest(request)).rejects.toThrow(
+      "corrupted Firefly primary ciphertext",
+    );
+  });
+
+  test("overlayOrgKeys resolves specific providers and respects primary option", async () => {
+    const orgOpenRouter = "sk-or-v1-explicit-primary";
     setProviderKeyStore(fakeProviderKeyStore({ openrouter: orgOpenRouter }));
 
     const tenant: TenantContext = {
@@ -540,13 +720,16 @@ describe("executeRunRequest org provider keys (PT-7b3a, D175)", () => {
       teamIds: [],
     };
     const baseEnv = runEnvironment(tenant);
-    const env = await overlayOrgKeys(baseEnv, { generatesHeadlines: true });
+    const env = await overlayOrgKeys(baseEnv, {
+      providers: ["openrouter"],
+      primary: "openrouter",
+    });
 
     expect(env.providers.openRouterKey).toBe(orgOpenRouter);
     expect(env.providers.keyOwners?.openrouter).toBe("org");
   });
 
-  test("overlayOrgKeys falls back to all providers when options has neither imageModel nor generatesHeadlines", async () => {
+  test("overlayOrgKeys defaults to all providers when options omitted", async () => {
     const orgOpenRouter = "sk-or-v1-all-providers";
     setProviderKeyStore(fakeProviderKeyStore({ openrouter: orgOpenRouter }));
 
@@ -557,7 +740,7 @@ describe("executeRunRequest org provider keys (PT-7b3a, D175)", () => {
       teamIds: [],
     };
     const baseEnv = runEnvironment(tenant);
-    const env = await overlayOrgKeys(baseEnv, {} as any);
+    const env = await overlayOrgKeys(baseEnv);
 
     expect(env.providers.openRouterKey).toBe(orgOpenRouter);
     expect(env.providers.keyOwners?.openrouter).toBe("org");

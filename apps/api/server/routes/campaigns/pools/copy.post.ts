@@ -180,7 +180,10 @@ export default defineEventHandler(async (event) => {
     return { error: SYMLINK_WRITE_ERROR };
   }
 
-  const env = await overlayOrgKeys(runEnvironment(scope), { providers: ["openrouter"] });
+  const env = await overlayOrgKeys(runEnvironment(scope), {
+    providers: ["openrouter"],
+    primary: "openrouter",
+  });
   const generator = copyGenerator(env);
   if (!generator) {
     setResponseStatus(event, 503);
