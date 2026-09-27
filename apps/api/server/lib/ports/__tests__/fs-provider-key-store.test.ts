@@ -27,11 +27,14 @@ describe("FsProviderKeyStore (PT-7b2): BYOK is Postgres-only", () => {
   });
 
   test("no error message ever contains the plaintext it was called with", async () => {
+    let thrown: unknown;
     try {
       await store.put("gemini", "sk-should-never-leak-9999", "user-1");
     } catch (error) {
-      expect(String((error as Error).message)).not.toContain("sk-should-never-leak-9999");
+      thrown = error;
     }
+    expect(thrown).toBeInstanceOf(Error);
+    expect(String((thrown as Error).message)).not.toContain("sk-should-never-leak-9999");
   });
 });
 

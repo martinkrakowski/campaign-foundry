@@ -161,8 +161,9 @@ describe("provider-keys routes (PT-7b2, D175, D176)", () => {
     setKek();
     const harness = await setupPgHarness();
     try {
-      const res = await put("unknown-provider", { key: "sk-fake" }, LOCAL_TENANT);
+      const res = await put("unknown-provider", { key: "sk-fake-valid-key" }, LOCAL_TENANT);
       expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ error: "Unknown provider" });
     } finally {
       await harness.cleanup();
     }
@@ -191,12 +192,16 @@ describe("provider-keys routes (PT-7b2, D175, D176)", () => {
       );
       expect(notAnObject.status).toBe(400);
 
-      const missingFireflyField = await put("firefly", { clientId: "only-id" }, LOCAL_TENANT);
+      const missingFireflyField = await put(
+        "firefly",
+        { clientId: "valid-client-id" },
+        LOCAL_TENANT,
+      );
       expect(missingFireflyField.status).toBe(400);
 
       const emptyFireflySecret = await put(
         "firefly",
-        { clientId: "an-id", clientSecret: "" },
+        { clientId: "valid-client-id", clientSecret: "" },
         LOCAL_TENANT,
       );
       expect(emptyFireflySecret.status).toBe(400);
