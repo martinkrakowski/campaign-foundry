@@ -26,6 +26,10 @@ export const briefId =
 export function briefIdDuplicate(conflictingId: string): string {
   return `A brief called ${conflictingId} already exists — pick a different Brief ID.`;
 }
+/** `briefId.reserved` */
+export function briefIdReserved(id: string): string {
+  return `"${id}" is reserved; choose another campaign id.`;
+}
 /**
  * Save-as: the id field wants a slug while the user is thinking of a name, so the
  * slugified form of what they typed is offered as a click — never applied silently.

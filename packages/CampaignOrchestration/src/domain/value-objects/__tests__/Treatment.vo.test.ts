@@ -1,5 +1,12 @@
 import { describe, test, expect } from "vitest";
-import { DEFAULT_TREATMENT, LAYOUT_VALUES, SAFE_ID_PATTERN, TONE_VALUES } from "../Treatment.vo.js";
+import {
+  DEFAULT_TREATMENT,
+  LAYOUT_VALUES,
+  RESERVED_CAMPAIGN_IDS,
+  SAFE_ID_PATTERN,
+  TONE_VALUES,
+  isReservedCampaignId,
+} from "../Treatment.vo.js";
 
 describe("Treatment value object", () => {
   test("SAFE_ID_PATTERN accepts lowercase-slug ids", () => {
@@ -20,6 +27,19 @@ describe("Treatment value object", () => {
       "café",
     ]) {
       expect(SAFE_ID_PATTERN.test(id), id).toBe(false);
+    }
+  });
+
+  test("RESERVED_CAMPAIGN_IDS lists orchestrator-reserved directory names", () => {
+    expect(RESERVED_CAMPAIGN_IDS).toEqual(["cache", "jobs", "orgs", "packages"]);
+  });
+
+  test("isReservedCampaignId identifies reserved campaign ids", () => {
+    for (const id of ["cache", "jobs", "orgs", "packages"]) {
+      expect(isReservedCampaignId(id), id).toBe(true);
+    }
+    for (const id of ["camp", "my-campaign", "product", "treatment", "default"]) {
+      expect(isReservedCampaignId(id), id).toBe(false);
     }
   });
 

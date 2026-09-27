@@ -285,6 +285,49 @@ describe("PgBriefStore (PT-3d, D168, D169)", () => {
     ).rejects.toThrow("boom");
     await expect(store.withBriefLock("camp", async () => "after")).resolves.toBe("after");
   });
+
+  test.each(["cache", "jobs", "orgs", "packages"] as const)(
+    "createBrief and replaceBrief on non-existent brief refuse reserved campaign id %s",
+    async (id) => {
+      const b = brief(id);
+      await expect(store.createBrief(b)).rejects.toThrow(
+        `"${id}" is reserved; choose another campaign id.`,
+      );
+      await expect(store.replaceBrief(b)).rejects.toThrow(
+        `"${id}" is reserved; choose another campaign id.`,
+      );
+    },
+  );
+
+  test("stored brief with reserved id lists, reads, rewrites and replaces", async () => {
+    const { rows } = await db.query<{ id: string }>(
+      "insert into campaign (org_id, slug) values ($1, $2) returning id",
+      ["local", "cache"],
+    );
+    await db.query(
+      `insert into brief_version (campaign_id, version, body, revision, actor)
+       values ($1, 1, $2, $3, $4)`,
+      [rows[0]!.id, JSON.stringify(brief("cache")), "deadbeef", "local"],
+    );
+
+    expect(await store.exists("cache")).toBe(true);
+    expect(await store.findBriefFileById("cache")).toBe("cache.yaml");
+    expect(await store.findBriefFile("cache")).toBe("cache.yaml");
+    expect(await store.getRevision("cache")).toBe("deadbeef");
+    expect(await store.campaignVisibility("cache")).toBe("visible");
+
+    const list = await store.listBriefs();
+    expect(list.some((entry) => entry.brief.id === "cache")).toBe(true);
+
+    const read = await store.readBrief("cache");
+    expect(read.id).toBe("cache");
+
+    const rewritten = await store.rewriteBrief(brief("cache", "Updated cache"));
+    expect(rewritten.brief.campaignMessage).toBe("Updated cache");
+
+    const replaced = await store.replaceBrief(brief("cache", "Replaced cache"));
+    expect(replaced.brief.campaignMessage).toBe("Replaced cache");
+  });
 });
 
 describe("STORE_BACKEND=postgres puts briefs in the database, one store per (org, user) (PT-3d)", () => {

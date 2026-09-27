@@ -828,6 +828,30 @@ describe("BriefPage — data flow", () => {
     expect(document.activeElement).toBe(screen.getByLabelText("New brief id"));
   });
 
+  test.each(["cache", "jobs", "orgs", "packages"] as const)(
+    "Save as... refuses reserved campaign id %s, showing reserved message and not posting",
+    async (id) => {
+      const user = userEvent.setup();
+      const calls = routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
+      renderWithRun(<Editor id="camp" />);
+      await waitForEditorReady();
+
+      await saveVia(user, "Save as");
+      await user.type(screen.getByLabelText("New brief id"), id);
+      expect(screen.getByText(messages.briefIdReserved(id))).toBeTruthy();
+
+      const saveButton = within(screen.getByRole("dialog", { name: /Save as/ })).getByRole(
+        "button",
+        {
+          name: "Save",
+        },
+      );
+      await user.click(saveButton);
+      expect(document.activeElement).toBe(screen.getByLabelText("New brief id"));
+      expect(calls.some((c) => c.method === "POST")).toBe(false);
+    },
+  );
+
   test("Save as... trims the id before posting", async () => {
     const user = userEvent.setup();
     const calls = routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });

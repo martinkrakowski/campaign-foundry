@@ -27,12 +27,18 @@ import {
   hasSectionWarnings,
   getTotalWarningCount,
   PROHIBITED_TERMS,
+  RESERVED_CAMPAIGN_IDS,
+  isReservedCampaignId,
 } from "../validate";
 import { PROHIBITED_TERMS as DOMAIN_PROHIBITED_TERMS } from "@campaignfoundry/GovernanceAndCompliance";
 // The domain's one click-destination decision — the same one the API's boundary
 // (`validateClickDestination`, load-brief.ts) reads, so the client mirror cannot drift.
 import { clickDestinationProblem } from "@campaignfoundry/CampaignOrchestration/click-destination";
-import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
+import {
+  RESERVED_CAMPAIGN_IDS as PKG_RESERVED_CAMPAIGN_IDS,
+  isReservedCampaignId as pkgIsReservedCampaignId,
+  type CampaignBrief,
+} from "@campaignfoundry/CampaignOrchestration";
 import { CANONICAL_TEMPLATES } from "@campaignfoundry/CampaignOrchestration/creative-templates";
 import {
   initialEditorState,
@@ -282,6 +288,63 @@ describe("validateIdentity", () => {
     expect(validateIdentity(valid({ briefId: "Not Safe" })).briefId).toBe(messages.briefId);
     expect(validateIdentity(valid())).toEqual({});
   });
+
+  test("RESERVED_CAMPAIGN_IDS equals the package's list (pinned against drift)", () => {
+    expect(RESERVED_CAMPAIGN_IDS).toEqual(PKG_RESERVED_CAMPAIGN_IDS);
+    for (const id of ["cache", "jobs", "orgs", "packages", "other-id"]) {
+      expect(isReservedCampaignId(id)).toBe(pkgIsReservedCampaignId(id));
+    }
+  });
+
+  test.each(["cache", "jobs", "orgs", "packages"] as const)(
+    "rejects reserved campaign id %s",
+    (id) => {
+      expect(validateIdentity(valid({ briefId: id })).briefId).toBe(messages.briefIdReserved(id));
+    },
+  );
+
+  test.each(["cache", "jobs", "orgs", "packages"] as const)(
+    "accepts an existing campaign already named %s (only a new id is refused)",
+    (id) => {
+      const state = valid({
+        briefId: id,
+        source: {
+          kind: "file",
+          file: `${id}.yaml`,
+          loadedId: id,
+          savedSnapshot: null,
+          revision: undefined,
+        },
+      });
+      expect(validateIdentity(state).briefId).toBeUndefined();
+    },
+  );
+
+  test("refuses renaming an existing campaign to a reserved id", () => {
+    const state = valid({
+      briefId: "cache",
+      source: {
+        kind: "file",
+        file: "camp.yaml",
+        loadedId: "camp",
+        savedSnapshot: null,
+        revision: undefined,
+      },
+    });
+    expect(validateIdentity(state).briefId).toBe(messages.briefIdReserved("cache"));
+  });
+
+  test.each(["cache", "jobs", "orgs", "packages"] as const)(
+    "accepts non-campaign ids named %s (product and treatment)",
+    (id) => {
+      const state = valid({
+        products: [product({ id }), product({ key: 2, id: "beta" })],
+        treatments: [{ id, layout: "headline-bottom", tone: "bold" }],
+      });
+      expect(validateProducts(state)).toEqual({});
+      expect(validateTreatments(state)).toEqual({});
+    },
+  );
 
   test("a new draft may not take an id that already exists", () => {
     expect(validateIdentity(valid(), ["camp"]).briefId).toMatch(/already exists/);

@@ -16,6 +16,17 @@ export type ToneKind = (typeof TONE_VALUES)[number];
 export const SAFE_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
 /**
+ * Top-level directory names under an org's output root that are reserved by
+ * the orchestrator or infrastructure and cannot be used as campaign identifiers.
+ */
+export const RESERVED_CAMPAIGN_IDS = ["cache", "jobs", "orgs", "packages"] as const;
+export type ReservedCampaignId = (typeof RESERVED_CAMPAIGN_IDS)[number];
+
+export function isReservedCampaignId(id: string): id is ReservedCampaignId {
+  return (RESERVED_CAMPAIGN_IDS as readonly string[]).includes(id);
+}
+
+/**
  * Treatment — a named creative treatment (layout + tone) the campaign requests.
  *
  * The pipeline produces one creative per product × aspect ratio × treatment, so

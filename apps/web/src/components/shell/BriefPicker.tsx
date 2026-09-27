@@ -16,6 +16,8 @@ import { useRun } from "@/lib/run-context";
 import { useCreateCampaign } from "@/lib/create-campaign-context";
 import { useGuardedNavigation } from "@/lib/use-guarded-navigation";
 import { campaignTypeOf, typeDisplayName } from "@/components/campaign/display-names";
+import { isReservedCampaignId } from "@/components/campaign/validate";
+import * as messages from "@/components/campaign/messages";
 
 // Mirrors CampaignOrchestration SAFE_ID_PATTERN. Value-importing the package
 // constant from source barrels fails the Next build (it resolves `.js` siblings).
@@ -105,6 +107,10 @@ export function BriefPicker() {
       setActionError(
         "New id must be a path-safe slug (lowercase letters, digits, hyphens; max 64).",
       );
+      return;
+    }
+    if (isReservedCampaignId(duplicateId)) {
+      setActionError(messages.briefIdReserved(duplicateId));
       return;
     }
     setActionError(undefined);

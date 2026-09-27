@@ -320,8 +320,15 @@ describe("PT-2d: team gates on routes (D166)", () => {
   });
 
   test("GET /output/** gates both campaign-id positions when slug is packages", async () => {
-    const ownerStore = new PgBriefStore(harness.db, "local", "owner", ["owner"], []);
-    await ownerStore.createBrief({ ...sampleBrief, id: "packages" }, { teamId: "t1" });
+    const { rows } = await harness.db.query<{ id: string }>(
+      "insert into campaign (org_id, slug, team_id) values ($1, $2, $3) returning id",
+      ["local", "packages", "t1"],
+    );
+    await harness.db.query(
+      `insert into brief_version (campaign_id, version, body, revision, actor)
+       values ($1, 1, $2, $3, $4)`,
+      [rows[0]!.id, JSON.stringify({ ...sampleBrief, id: "packages" }), "rev-packages", "owner"],
+    );
 
     const packagesOutDir = join(harness.outputRoot, "packages", "renders");
     mkdirSync(packagesOutDir, { recursive: true });
