@@ -3,6 +3,7 @@ import defaultPlugin, {
   calculateBackoff,
   createKafkaConsumerPlugin,
   type ConsumerInstance,
+  type KafkaPluginTimer,
   type NitroApp,
 } from "../kafka-consumer.js";
 
