@@ -17,6 +17,8 @@ import { FsDecisionStore } from "./fs-decision-store.js";
 import { PgDecisionStore } from "./pg-decision-store.js";
 import { FsUsageStore } from "./fs-usage-store.js";
 import { PgUsageStore } from "./pg-usage-store.js";
+import { FsProviderKeyStore } from "./fs-provider-key-store.js";
+import { PgProviderKeyStore } from "./pg-provider-key-store.js";
 import type { BriefStorePort } from "./brief-store.port.js";
 import type { AssetStorePort } from "./asset-store.port.js";
 import type { PoolStorePort } from "./pool-store.port.js";
@@ -26,6 +28,7 @@ import type { ReportStorePort } from "./report-store.port.js";
 import type { OutputStorePort } from "./output-store.port.js";
 import type { DecisionStorePort } from "./decision-store.port.js";
 import type { UsageStorePort } from "./usage-store.port.js";
+import type { ProviderKeyPort } from "./provider-key.port.js";
 
 export * from "./brief-store.port.js";
 export * from "./asset-store.port.js";
@@ -36,6 +39,7 @@ export * from "./report-store.port.js";
 export * from "./output-store.port.js";
 export * from "./decision-store.port.js";
 export * from "./usage-store.port.js";
+export * from "./provider-key.port.js";
 export * from "./run-delivery.port.js";
 export * from "./fs-brief-store.js";
 export * from "./pg-brief-store.js";
@@ -52,6 +56,8 @@ export * from "./fs-decision-store.js";
 export * from "./pg-decision-store.js";
 export * from "./fs-usage-store.js";
 export * from "./pg-usage-store.js";
+export * from "./fs-provider-key-store.js";
+export * from "./pg-provider-key-store.js";
 // `in-process-run-delivery.js` is deliberately NOT re-exported here — it, and
 // the run-delivery registry that wires it up, live in
 // `run-delivery-registry.ts` instead (see that file's docstring for why:
@@ -199,6 +205,18 @@ const usage = new Registry<UsageStorePort>(
   (backend) => (backend === "postgres" ? new PgUsageStore(database()) : new FsUsageStore()),
 );
 
+// Provider keys are org-scoped, sealed rows (PT-7b2, D175, D176), one store
+// per org over the process's database — BYOK is Postgres-only, so the fs
+// backend's build is the same store for every tenant, and every one of its
+// methods answers "needs Postgres" rather than reading or writing a file.
+const providerKeys = new Registry<ProviderKeyPort>(
+  (t) => (storeBackend() === "postgres" ? PG + scopeTenant(t).orgId : "fs"),
+  (key) =>
+    key.startsWith(PG)
+      ? new PgProviderKeyStore(database(), key.slice(PG.length))
+      : new FsProviderKeyStore(),
+);
+
 // `getRunDelivery`/`setRunDelivery`/`resetRunDelivery` live in
 // `run-delivery-registry.ts`, not here — see that file's docstring.
 
@@ -241,3 +259,8 @@ export const resetDecisionStore = (): void => decisions.reset();
 export const getUsageStore = (scope: StorageScope): UsageStorePort => usage.get(scope);
 export const setUsageStore = (store: UsageStorePort): void => usage.set(store);
 export const resetUsageStore = (): void => usage.reset();
+
+export const getProviderKeyStore = (scope: StorageScope): ProviderKeyPort =>
+  providerKeys.get(scope);
+export const setProviderKeyStore = (store: ProviderKeyPort): void => providerKeys.set(store);
+export const resetProviderKeyStore = (): void => providerKeys.reset();
