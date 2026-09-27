@@ -13,11 +13,12 @@ import {
   ALLOWED_IMAGE_MODELS,
   buildPipeline,
   copyGenerator,
+  imageGenerator,
+  imageProviderChain,
   messageFont,
   platformZones,
+  primaryImageProvider,
   runCampaign,
-  selectImageProvider,
-  selectImageProviderWithActiveKeys,
 } from "../pipeline.js";
 
 import { runEnvironment, type RunEnvironment } from "../run-environment.js";
@@ -601,7 +602,7 @@ describe("pipeline composition root", () => {
     expect((copyDefault as any).keyOwner).toBe("platform");
   });
 
-  describe("selectImageProvider and selectImageProviderWithActiveKeys (PT-7b3a)", () => {
+  describe("imageProviderChain and primaryImageProvider (PT-7b3a)", () => {
     const fullProviders = {
       geminiKey: "gem-k",
       openRouterKey: "open-k",
@@ -609,57 +610,84 @@ describe("pipeline composition root", () => {
       fireflyClientSecret: "ff-sec",
     };
 
-    test("procedural selection always selects undefined provider", () => {
-      expect(selectImageProvider(fullProviders, "procedural")).toBeUndefined();
+    function meteredProviders(gen: any): string[] {
+      const result: string[] = [];
+      let current: any = gen?.generator ?? gen;
+      while (current) {
+        if (current.provider) {
+          result.push(current.provider === "imagen" ? "gemini" : current.provider);
+          current = current.inner?.fallback;
+        } else {
+          break;
+        }
+      }
+      return result;
+    }
+
+    test("imageProviderChain returns correct fallback chain for each selection", () => {
+      expect(imageProviderChain("procedural")).toEqual([]);
+      expect(imageProviderChain("firefly")).toEqual(["firefly", "gemini", "openrouter"]);
+      expect(imageProviderChain("x-ai/grok-imagine-image-quality")).toEqual(["openrouter"]);
+      expect(imageProviderChain("foo/bar")).toEqual(["openrouter"]);
+      expect(imageProviderChain("imagen")).toEqual(["gemini", "openrouter"]);
+      expect(imageProviderChain("auto")).toEqual(["gemini", "openrouter"]);
+      expect(imageProviderChain(undefined)).toEqual(["gemini", "openrouter"]);
+      expect(imageProviderChain("")).toEqual(["gemini", "openrouter"]);
     });
 
-    test("firefly selection resolves firefly if credentials present, else falls back", () => {
-      expect(selectImageProvider(fullProviders, "firefly")).toBe("firefly");
-      expect(selectImageProvider({ geminiKey: "gem-k", openRouterKey: "open-k" }, "firefly")).toBe(
+    test("for each selection, the providers the constructed generator can meter equal the chain, in order", () => {
+      const fullEnv: RunEnvironment = {
+        ...localEnv(),
+        providers: fullProviders,
+      };
+      const selections = [
+        "procedural",
+        "firefly",
+        "x-ai/grok-imagine-image-quality",
+        "imagen",
+        "auto",
+        undefined,
+        "arbitrary-model",
+      ];
+      for (const selected of selections) {
+        const gen = imageGenerator(fullEnv, selected);
+        expect(meteredProviders(gen)).toEqual(imageProviderChain(selected));
+      }
+    });
+
+    test("primaryImageProvider derives the first provider with credentials present", () => {
+      const chain = ["firefly", "gemini", "openrouter"] as const;
+      expect(primaryImageProvider(chain, fullProviders)).toBe("firefly");
+      expect(primaryImageProvider(chain, { geminiKey: "gem-k", openRouterKey: "open-k" })).toBe(
         "gemini",
       );
-      expect(selectImageProvider({ openRouterKey: "open-k" }, "firefly")).toBe("openrouter");
-      expect(selectImageProvider({}, "firefly")).toBeUndefined();
+      expect(primaryImageProvider(chain, { openRouterKey: "open-k" })).toBe("openrouter");
+      expect(primaryImageProvider(chain, {})).toBeUndefined();
     });
 
-    test("model with slash selects openrouter if key present, else undefined", () => {
-      expect(selectImageProvider(fullProviders, "x-ai/grok-imagine-image-quality")).toBe(
-        "openrouter",
-      );
-      expect(
-        selectImageProvider({ geminiKey: "gem-k" }, "x-ai/grok-imagine-image-quality"),
-      ).toBeUndefined();
-    });
-
-    test("default / imagen / auto selects gemini if key present, else openrouter, else undefined", () => {
-      expect(selectImageProvider(fullProviders, undefined)).toBe("gemini");
-      expect(selectImageProvider(fullProviders, "imagen")).toBe("gemini");
-      expect(selectImageProvider(fullProviders, "auto")).toBe("gemini");
-      expect(selectImageProvider({ openRouterKey: "open-k" }, undefined)).toBe("openrouter");
-      expect(selectImageProvider({}, undefined)).toBeUndefined();
-    });
-
-    test("selectImageProviderWithActiveKeys overlays active org keys onto platform settings", () => {
+    test("primaryImageProvider accounts for active org keys alongside platform credentials", () => {
       const emptyPlatform = {};
-      expect(selectImageProviderWithActiveKeys(emptyPlatform, ["firefly"], "firefly")).toBe(
+      expect(primaryImageProvider(imageProviderChain("firefly"), emptyPlatform, ["firefly"])).toBe(
         "firefly",
       );
-      expect(selectImageProviderWithActiveKeys(emptyPlatform, new Set(["gemini"]), "imagen")).toBe(
-        "gemini",
-      );
       expect(
-        selectImageProviderWithActiveKeys(
-          emptyPlatform,
-          ["openrouter"],
-          "x-ai/grok-imagine-image-quality",
-        ),
+        primaryImageProvider(imageProviderChain("imagen"), emptyPlatform, new Set(["gemini"])),
+      ).toBe("gemini");
+      expect(
+        primaryImageProvider(imageProviderChain("x-ai/grok-imagine-image-quality"), emptyPlatform, [
+          "openrouter",
+        ]),
       ).toBe("openrouter");
       expect(
-        selectImageProviderWithActiveKeys(
-          emptyPlatform,
-          ["gemini"],
-          "x-ai/grok-imagine-image-quality",
-        ),
+        primaryImageProvider(imageProviderChain("x-ai/grok-imagine-image-quality"), emptyPlatform, [
+          "gemini",
+        ]),
+      ).toBeUndefined();
+      expect(
+        primaryImageProvider(imageProviderChain("procedural"), fullProviders, [
+          "firefly",
+          "gemini",
+        ]),
       ).toBeUndefined();
     });
   });

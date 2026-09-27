@@ -69,50 +69,45 @@ function resolvedModel(model: string | undefined, fallback: string): string {
 }
 
 /**
- * Select the image provider that will actually be called for the given model and provider settings (PT-7b3a).
- * Returns undefined when procedural generation is selected or when no provider credentials exist for the selection.
+ * The image provider fallback chain for a given selection (PT-7b3a).
+ * - "procedural" -> []
+ * - "firefly" -> ["firefly", "gemini", "openrouter"]
+ * - slash model -> ["openrouter"]
+ * - anything else -> ["gemini", "openrouter"]
  */
-export function selectImageProvider(
-  providers: ProviderSettings,
-  selected?: string,
-): Provider | undefined {
-  if (selected === "procedural") return undefined;
-  if (selected === "firefly") {
-    if (providers.fireflyClientId && providers.fireflyClientSecret) return "firefly";
-    if (providers.geminiKey) return "gemini";
-    if (providers.openRouterKey) return "openrouter";
-    return undefined;
-  }
-  if (selected && selected.includes("/")) {
-    return providers.openRouterKey ? "openrouter" : undefined;
-  }
-  if (providers.geminiKey) return "gemini";
-  if (providers.openRouterKey) return "openrouter";
-  return undefined;
+export function imageProviderChain(selected?: string): readonly Provider[] {
+  if (selected === "procedural") return [];
+  if (selected === "firefly") return ["firefly", "gemini", "openrouter"];
+  if (selected && selected.includes("/")) return ["openrouter"];
+  return ["gemini", "openrouter"];
 }
 
 /**
- * Select the image provider that will actually be called, taking into account active organization
- * provider keys alongside platform credentials (PT-7b3a).
+ * The primary image provider is the first member of the chain whose credentials
+ * (org or platform) are present (PT-7b3a).
  */
-export function selectImageProviderWithActiveKeys(
+export function primaryImageProvider(
+  chain: readonly Provider[],
   platformProviders: ProviderSettings,
-  activeProviders: ReadonlySet<Provider> | readonly Provider[],
-  selected?: string,
+  activeProviders?: ReadonlySet<Provider> | readonly Provider[],
 ): Provider | undefined {
-  const set = activeProviders instanceof Set ? activeProviders : new Set(activeProviders);
-  const effective: ProviderSettings = {
-    ...platformProviders,
-    geminiKey: platformProviders.geminiKey || (set.has("gemini") ? "active-org-key" : undefined),
-    openRouterKey:
-      platformProviders.openRouterKey || (set.has("openrouter") ? "active-org-key" : undefined),
-    fireflyClientId:
-      platformProviders.fireflyClientId || (set.has("firefly") ? "active-org-id" : undefined),
-    fireflyClientSecret:
-      platformProviders.fireflyClientSecret ||
-      (set.has("firefly") ? "active-org-secret" : undefined),
-  };
-  return selectImageProvider(effective, selected);
+  const active =
+    activeProviders === undefined
+      ? undefined
+      : activeProviders instanceof Set
+        ? activeProviders
+        : new Set(activeProviders);
+  return chain.find((provider) => {
+    if (active?.has(provider)) return true;
+    switch (provider) {
+      case "firefly":
+        return Boolean(platformProviders.fireflyClientId && platformProviders.fireflyClientSecret);
+      case "gemini":
+        return Boolean(platformProviders.geminiKey);
+      case "openrouter":
+        return Boolean(platformProviders.openRouterKey);
+    }
+  });
 }
 
 /**
@@ -132,7 +127,7 @@ export function selectImageProviderWithActiveKeys(
  * `selected` (`?model=`) still decides *which* provider. `paletteShift` is
  * applied only by ProceduralBackgroundGenerator.
  */
-function imageGenerator(env: RunEnvironment, selected?: string): ImageGeneratorPort {
+export function imageGenerator(env: RunEnvironment, selected?: string): ImageGeneratorPort {
   const procedural = new ProceduralBackgroundGenerator();
   const cache = new FileSystemBackgroundCache(join(env.outputRoot, "cache"));
   const usage = getUsageStore(env);
@@ -205,11 +200,22 @@ function imageGenerator(env: RunEnvironment, selected?: string): ImageGeneratorP
         )
       : imagen();
 
+  const chain = imageProviderChain(selected);
   let generator: ImageGeneratorPort;
-  if (selected === "procedural") generator = procedural;
-  else if (selected === "firefly") generator = firefly();
-  else if (selected && selected.includes("/")) generator = openRouter(selected);
-  else generator = imagen(); // "auto" / "imagen" / unset → default chain
+  switch (chain[0]) {
+    case "firefly":
+      generator = firefly();
+      break;
+    case "gemini":
+      generator = imagen();
+      break;
+    case "openrouter":
+      generator = openRouter(selected);
+      break;
+    default:
+      generator = procedural;
+      break;
+  }
 
   return new AssetReusingImageGenerator(generator, env.assetRoot);
 }
