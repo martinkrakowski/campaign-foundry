@@ -192,6 +192,7 @@ export interface KafkaSettings {
   readonly topic: string;
   readonly groupId: string;
   readonly consume: boolean;
+  readonly maxInFlight: number;
   readonly ssl?: KafkaSslConfig;
   readonly clientCertPath?: string;
   readonly clientKeyPath?: string;
@@ -271,6 +272,18 @@ export function kafkaSettings(): KafkaSettings | undefined {
   const groupId = process.env.KAFKA_GROUP_ID?.trim() || "cf-workers";
   const consume = process.env.KAFKA_CONSUME === "true";
 
+  const rawMaxInFlight = process.env.KAFKA_MAX_IN_FLIGHT;
+  let maxInFlight = 2;
+  if (rawMaxInFlight !== undefined && rawMaxInFlight.trim() !== "") {
+    const trimmed = rawMaxInFlight.trim();
+    if (!/^[1-9]\d*$/.test(trimmed)) {
+      throw new Error(
+        `Malformed KAFKA_MAX_IN_FLIGHT: must be a positive integer, got "${rawMaxInFlight}".`,
+      );
+    }
+    maxInFlight = Number(trimmed);
+  }
+
   const caPath = process.env.KAFKA_CA_PATH?.trim();
   const certPath = process.env.KAFKA_CLIENT_CERT_PATH?.trim();
   const keyPath = process.env.KAFKA_CLIENT_KEY_PATH?.trim();
@@ -299,6 +312,7 @@ export function kafkaSettings(): KafkaSettings | undefined {
     topic,
     groupId,
     consume,
+    maxInFlight,
     ...(ssl ? { ssl } : {}),
     ...(certPath ? { clientCertPath: certPath } : {}),
     ...(keyPath ? { clientKeyPath: keyPath } : {}),

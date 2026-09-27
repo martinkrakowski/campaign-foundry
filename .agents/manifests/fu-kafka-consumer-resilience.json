@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "FU-kafka-consumer-resilience",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/run-consumer.ts",
+      "before": "        this.consumer.pause([{ topic: this.topic }]);",
+      "after": "        // mutant: never pause at the cap",
+      "because": "without pausing at the cap, the consumer continues fetching runs beyond maxInFlight",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/run-consumer.test.ts",
+        "-t",
+        "at the cap the topic is paused"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

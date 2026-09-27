@@ -1,5 +1,6 @@
 import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
 import defaultPlugin, {
+  calculateBackoff,
   createKafkaConsumerPlugin,
   type ConsumerInstance,
   type NitroApp,
@@ -199,7 +200,9 @@ describe("kafka-consumer Nitro plugin (PT-6b2, D174d)", () => {
 
     expect(customConsumer.start).toHaveBeenCalledTimes(1);
     expect(errorMock).toHaveBeenCalledWith(
-      expect.stringContaining("Error starting Kafka consumer: broker connection refused"),
+      expect.stringContaining(
+        "Error starting Kafka consumer (attempt 1): broker connection refused",
+      ),
     );
   });
 
@@ -286,7 +289,7 @@ describe("kafka-consumer Nitro plugin (PT-6b2, D174d)", () => {
     await new Promise((r) => setTimeout(r, 10));
 
     expect(errorMock).toHaveBeenCalledWith(
-      expect.stringContaining("Error starting Kafka consumer: string start failure"),
+      expect.stringContaining("Error starting Kafka consumer (attempt 1): string start failure"),
     );
   });
 
@@ -323,18 +326,23 @@ describe("kafka-consumer Nitro plugin (PT-6b2, D174d)", () => {
         stop: vi.fn().mockResolvedValue(undefined),
       };
 
-      const plugin = createKafkaConsumerPlugin(() => customConsumer, logger);
+      const timer = { setTimeout, clearTimeout, random: () => 0 };
+      const plugin = createKafkaConsumerPlugin(() => customConsumer, logger, undefined, timer);
       plugin({} as never);
 
       // Immediately after plugin invocation, first attempt failed
       await vi.advanceTimersByTimeAsync(0);
       expect(customConsumer.start).toHaveBeenCalledTimes(1);
 
-      // Advance through backoff for retry 1 (attempt 2)
-      await vi.advanceTimersByTimeAsync(5000);
+      // Advance 1s: retry 1 (attempt 2) runs and fails
+      await vi.advanceTimersByTimeAsync(1000);
       expect(customConsumer.start).toHaveBeenCalledTimes(2);
 
-      // Advance through backoff for retry 2 (attempt 3)
+      // Advance 2s: retry 2 (attempt 3) runs and succeeds
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(customConsumer.start).toHaveBeenCalledTimes(3);
+
+      // Additional time passes; consumer was started, no more start calls
       await vi.advanceTimersByTimeAsync(10000);
       expect(customConsumer.start).toHaveBeenCalledTimes(3);
     } finally {
@@ -379,5 +387,77 @@ describe("kafka-consumer Nitro plugin (PT-6b2, D174d)", () => {
       vi.useRealTimers();
     }
   });
-});
 
+  test("close while start is pending and then rejects does not schedule a retry", async () => {
+    vi.useFakeTimers();
+    try {
+      process.env.KAFKA_BROKERS = "broker1:9092";
+      process.env.KAFKA_CONSUME = "true";
+
+      let rejectStart!: (err: Error) => void;
+      const startPromise = new Promise<void>((_, reject) => {
+        rejectStart = reject;
+      });
+
+      const customConsumer: ConsumerInstance = {
+        start: vi.fn().mockReturnValue(startPromise),
+        stop: vi.fn().mockResolvedValue(undefined),
+      };
+
+      let closeHook: (() => Promise<void>) | undefined;
+      const nitroApp: NitroApp = {
+        hooks: {
+          hook: vi.fn().mockImplementation((name, cb) => {
+            if (name === "close") closeHook = cb;
+          }),
+        },
+      };
+
+      const errorMock = vi.fn();
+      const plugin = createKafkaConsumerPlugin(() => customConsumer, { error: errorMock });
+      plugin(nitroApp as never);
+
+      expect(customConsumer.start).toHaveBeenCalledTimes(1);
+
+      // Close hook fires while start is pending
+      expect(closeHook).toBeDefined();
+      await closeHook!();
+      expect(customConsumer.stop).toHaveBeenCalledTimes(1);
+
+      // Now start promise rejects
+      rejectStart(new Error("broker unreachable during shutdown"));
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(errorMock).toHaveBeenCalledWith(
+        expect.stringContaining(
+          "Error starting Kafka consumer (attempt 1): broker unreachable during shutdown",
+        ),
+      );
+
+      // Advancing time should not trigger any retry
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(customConsumer.start).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("calculateBackoff returns exponential backoff with jitter up to 60s cap", () => {
+    // With zero jitter
+    expect(calculateBackoff(1, () => 0)).toBe(1000);
+    expect(calculateBackoff(2, () => 0)).toBe(2000);
+    expect(calculateBackoff(3, () => 0)).toBe(4000);
+    expect(calculateBackoff(6, () => 0)).toBe(32000);
+    expect(calculateBackoff(7, () => 0)).toBe(60000); // 64000 capped at 60000
+    expect(calculateBackoff(8, () => 0)).toBe(60000);
+
+    // With jitter: capped at 60000
+    expect(calculateBackoff(7, () => 1)).toBe(60000);
+    expect(calculateBackoff(1, () => 0.5)).toBe(1500);
+
+    // Default random produces value in expected range
+    const backoff1 = calculateBackoff(1);
+    expect(backoff1).toBeGreaterThanOrEqual(1000);
+    expect(backoff1).toBeLessThanOrEqual(2000);
+  });
+});

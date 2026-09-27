@@ -474,6 +474,7 @@ describe("kafkaSettings (PT-6b2, D174d)", () => {
       topic: "cf.run-requests",
       groupId: "cf-workers",
       consume: false,
+      maxInFlight: 2,
     });
   });
 
@@ -489,7 +490,23 @@ describe("kafkaSettings (PT-6b2, D174d)", () => {
       topic: "custom.topic",
       groupId: "custom-group",
       consume: true,
+      maxInFlight: 2,
     });
+  });
+
+  test("respects explicit positive KAFKA_MAX_IN_FLIGHT and trims whitespace", () => {
+    process.env.KAFKA_BROKERS = "kafka1:9092";
+    process.env.KAFKA_MAX_IN_FLIGHT = "5";
+    expect(kafkaSettings()?.maxInFlight).toBe(5);
+
+    process.env.KAFKA_MAX_IN_FLIGHT = " 10 ";
+    expect(kafkaSettings()?.maxInFlight).toBe(10);
+
+    process.env.KAFKA_MAX_IN_FLIGHT = "";
+    expect(kafkaSettings()?.maxInFlight).toBe(2);
+
+    process.env.KAFKA_MAX_IN_FLIGHT = "   ";
+    expect(kafkaSettings()?.maxInFlight).toBe(2);
   });
 
   test("KAFKA_CONSUME=TRUE and 1 both result in consume: false", () => {
@@ -519,6 +536,7 @@ describe("kafkaSettings (PT-6b2, D174d)", () => {
       topic: "cf.run-requests",
       groupId: "cf-workers",
       consume: false,
+      maxInFlight: 2,
       caPath: caRel,
       clientCertPath: certRel,
       clientKeyPath: keyRel,
@@ -544,6 +562,7 @@ describe("kafkaSettings (PT-6b2, D174d)", () => {
       topic: "cf.run-requests",
       groupId: "cf-workers",
       consume: false,
+      maxInFlight: 2,
       caPath: caRel,
       ssl: {
         ca: "TEST-CA-PEM",
@@ -566,6 +585,7 @@ describe("kafkaSettings (PT-6b2, D174d)", () => {
       topic: "cf.run-requests",
       groupId: "cf-workers",
       consume: false,
+      maxInFlight: 2,
       clientCertPath: certRel,
       clientKeyPath: keyRel,
       ssl: {
@@ -725,4 +745,3 @@ describe("kafkaSettings (PT-6b2, D174d)", () => {
     expect(() => kafkaSettings()).toThrow(/KAFKA_MAX_IN_FLIGHT/);
   });
 });
-

@@ -233,18 +233,21 @@ export async function executeRunRequest(request: RunRequest, signal?: AbortSigna
 
 import * as self from "./run-request.js";
 
+export type StartOrDropResult =
+  | { readonly started: true; readonly settled: Promise<void> }
+  | { readonly started: false; readonly settled?: undefined };
+
 /**
- * Shared start-or-drop logic for run delivery (PT-6b1, PT-6b2, D171, D174d).
- * Used by both InProcessRunDelivery and RunConsumer to ensure identical behavior.
+ * Shared start-or-drop logic for run delivery (PT-6b1, PT-6b2, FU-kafka-consumer-resilience, D171, D174d).
+ * Used by RunConsumer (with in-flight tracking) and InProcessRunDelivery.
  *
  * Resolves the run environment, attempts to claim the queued job via `startQueuedJob`,
- * and if claimed executes `runJob` with `executeRunRequest`.
+ * and if claimed executes `runJob` with `executeRunRequest`, returning the `settled` Promise.
  *
- * If environment resolution fails, the error is logged and false is returned so caller
- * can safely drop and commit.
+ * If environment resolution fails, the error is logged and { started: false } returned.
  * If `startQueuedJob` rejects (e.g. database down), the error is propagated so it can be retried.
  */
-export async function startOrDrop(request: RunRequest): Promise<boolean> {
+export async function startOrDropWithSettled(request: RunRequest): Promise<StartOrDropResult> {
   let env: RunEnvironment;
   try {
     env = runEnvironment(request.tenant);
@@ -252,7 +255,7 @@ export async function startOrDrop(request: RunRequest): Promise<boolean> {
     console.warn(
       `[run-delivery] Dropping run request with unresolvable environment for job "${request.jobId}": ${(error as Error).message}`,
     );
-    return false;
+    return { started: false };
   }
 
   const started = await startQueuedJob(env, request.jobId);
@@ -260,9 +263,20 @@ export async function startOrDrop(request: RunRequest): Promise<boolean> {
     console.warn(
       `[run-delivery] Dropping duplicate or expired run request for job "${request.jobId}"`,
     );
-    return false;
+    return { started: false };
   }
 
-  runJob(env, request.jobId, (signal) => self.executeRunRequest(request, signal));
-  return true;
+  const settled = Promise.resolve(
+    runJob(env, request.jobId, (signal) => self.executeRunRequest(request, signal)),
+  );
+  return { started: true, settled };
+}
+
+/**
+ * Shared start-or-drop logic for callers that do not need settlement tracking
+ * (such as InProcessRunDelivery). Delegates to `startOrDropWithSettled`.
+ */
+export async function startOrDrop(request: RunRequest): Promise<boolean> {
+  const result = await startOrDropWithSettled(request);
+  return result.started;
 }

@@ -1,7 +1,7 @@
 import { Kafka, type Consumer, type EachMessagePayload } from "kafkajs";
 import { SAFE_ID_PATTERN } from "@campaignfoundry/CampaignOrchestration";
 import { kafkaSettings, type KafkaSettings } from "./config.js";
-import { startOrDrop, type RunRequest } from "./run-request.js";
+import { startOrDropWithSettled, type RunRequest } from "./run-request.js";
 
 /** Validates whether an unknown parsed payload matches the RunRequest interface. */
 export function isRunRequest(value: unknown): value is RunRequest {
@@ -47,7 +47,10 @@ export function isRunRequest(value: unknown): value is RunRequest {
 export class RunConsumer {
   private readonly consumer: Consumer;
   private readonly topic: string;
+  private readonly maxInFlight: number;
   private running = false;
+  private inFlight = 0;
+  private paused = false;
 
   constructor(settings?: KafkaSettings, kafkaClient?: Kafka, consumer?: Consumer) {
     const config = settings ?? kafkaSettings();
@@ -55,6 +58,7 @@ export class RunConsumer {
       throw new Error("Cannot initialize RunConsumer without Kafka settings.");
     }
     this.topic = config.topic;
+    this.maxInFlight = config.maxInFlight ?? 2;
     if (consumer) {
       this.consumer = consumer;
     } else {
@@ -146,7 +150,21 @@ export class RunConsumer {
     }
 
     const request = parsed;
-    await startOrDrop(request);
+    const result = await startOrDropWithSettled(request);
+    if (result.started) {
+      this.inFlight++;
+      if (this.inFlight >= this.maxInFlight && !this.paused) {
+        this.consumer.pause([{ topic: this.topic }]);
+        this.paused = true;
+      }
+      void result.settled.then(() => {
+        this.inFlight--;
+        if (this.inFlight < this.maxInFlight && this.paused) {
+          this.consumer.resume([{ topic: this.topic }]);
+          this.paused = false;
+        }
+      });
+    }
     await commitOffset();
   }
 

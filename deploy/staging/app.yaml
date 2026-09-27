@@ -91,6 +91,8 @@ spec:
               value: cf-kafka-kafka-bootstrap:9093
             - name: KAFKA_CONSUME
               value: "true"
+            - name: KAFKA_MAX_IN_FLIGHT
+              value: "2"
             - name: KAFKA_CA_PATH
               value: certs/kafka-ca/ca.crt
             - name: KAFKA_CLIENT_CERT_PATH
@@ -128,7 +130,16 @@ spec:
         - name: web
           image: campaign-foundry
           command:
-            ["node", "node_modules/next/dist/bin/next", "start", "apps/web", "-H", "0.0.0.0", "-p", "3000"]
+            [
+              "node",
+              "node_modules/next/dist/bin/next",
+              "start",
+              "apps/web",
+              "-H",
+              "0.0.0.0",
+              "-p",
+              "3000",
+            ]
           ports:
             - name: http
               containerPort: 3000

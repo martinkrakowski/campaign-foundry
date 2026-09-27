@@ -176,7 +176,7 @@ describe("RunConsumer (PT-6b2, D171, D174d)", () => {
     mockKafkaConstructor.mockReset();
 
     startQueuedJobSpy = vi.spyOn(jobs, "startQueuedJob");
-    runJobSpy = vi.spyOn(jobs, "runJob").mockImplementation(() => {});
+    runJobSpy = vi.spyOn(jobs, "runJob").mockImplementation(async () => {});
     executeRunRequestSpy = vi
       .spyOn(runRequestModule, "executeRunRequest")
       .mockResolvedValue(undefined);
@@ -715,4 +715,3 @@ describe("RunConsumer (PT-6b2, D171, D174d)", () => {
     expect(commitMock).toHaveBeenCalledWith("cf.run-requests", 0, "11");
   });
 });
-

@@ -10,7 +10,13 @@ import {
 } from "@campaignfoundry/CampaignOrchestration";
 import { LOCAL_TENANT, type TenantContext } from "../tenant.js";
 import { enqueueJob, resetJobs, startQueuedJob } from "../jobs.js";
-import { executeRunRequest, overlayOrgKeys, type RunRequest } from "../run-request.js";
+import {
+  executeRunRequest,
+  overlayOrgKeys,
+  startOrDrop,
+  startOrDropWithSettled,
+  type RunRequest,
+} from "../run-request.js";
 import { resetProviderKeyStore, setProviderKeyStore } from "../ports/index.js";
 import type { Provider, ProviderKeyPort } from "../ports/provider-key.port.js";
 import { setCapabilities } from "../capabilities.js";
@@ -824,5 +830,87 @@ describe("executeRunRequest org provider keys (PT-7b3a, D175)", () => {
 
     expect(env.providers.openRouterKey).toBe(orgOpenRouter);
     expect(env.providers.keyOwners?.openrouter).toBe("org");
+  });
+
+  test("startOrDropWithSettled returns { started: false } when runEnvironment throws", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const request: RunRequest = {
+      jobId: "00000000-0000-0000-0000-000000000001",
+      tenant: { orgId: "../invalid", userId: "u1" } as never,
+      brief: sampleBrief(),
+      reroll: false,
+    };
+    const res = await startOrDropWithSettled(request);
+    expect(res).toEqual({ started: false });
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Dropping run request with unresolvable environment"),
+    );
+
+    // startOrDrop delegates and returns false
+    const boolRes = await startOrDrop(request);
+    expect(boolRes).toBe(false);
+  });
+
+  test("startOrDropWithSettled returns { started: false } when startQueuedJob returns false", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const tenant: TenantContext = {
+      orgId: "org-test-drop",
+      userId: "user-1",
+      roles: ["admin"],
+      teamIds: [],
+    };
+    const request: RunRequest = {
+      jobId: "00000000-0000-0000-0000-000000000099",
+      tenant,
+      brief: sampleBrief(),
+      reroll: false,
+    };
+
+    const res = await startOrDropWithSettled(request);
+    expect(res).toEqual({ started: false });
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Dropping duplicate or expired run request"),
+    );
+
+    const boolRes = await startOrDrop(request);
+    expect(boolRes).toBe(false);
+  });
+
+  test("startOrDropWithSettled returns { started: true, settled } when queued job claimed", async () => {
+    const tenant: TenantContext = {
+      orgId: "org-test-start",
+      userId: "user-1",
+      roles: ["admin"],
+      teamIds: [],
+    };
+    const brief = sampleBrief();
+    const env = runEnvironment(tenant);
+    const claim = await enqueueJob(env, brief.id);
+    if (!claim.acquired) throw new Error("not acquired");
+
+    vi.spyOn(pipelineModule, "runCampaign").mockResolvedValue({
+      success: true,
+      value: {
+        assets: [],
+        halted: false,
+        log: RUN_LOG,
+        policyHash: "h",
+        seed: 1,
+      },
+    });
+
+    const request: RunRequest = {
+      jobId: claim.jobId,
+      tenant,
+      brief,
+      reroll: false,
+    };
+
+    const res = await startOrDropWithSettled(request);
+    expect(res.started).toBe(true);
+    if (!res.started) throw new Error("expected started");
+    expect(res.settled).toBeInstanceOf(Promise);
+
+    await expect(res.settled).resolves.toBeUndefined();
   });
 });
