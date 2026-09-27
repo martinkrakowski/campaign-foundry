@@ -100,4 +100,37 @@ describe("FsOutputStore", () => {
       reason: "invalid",
     });
   });
+
+  test("HIDDEN_AREAS hides cache, jobs and orgs, while packages remain served", async () => {
+    mkdirSync(join(root, "cache"), { recursive: true });
+    writeFileSync(join(root, "cache", "data.json"), "{}");
+    mkdirSync(join(root, "jobs"), { recursive: true });
+    writeFileSync(join(root, "jobs", "job.json"), "{}");
+    mkdirSync(join(root, "orgs", "tenant"), { recursive: true });
+    writeFileSync(join(root, "orgs", "tenant", "data.json"), "{}");
+    mkdirSync(join(root, "packages", "camp", "instagram-feed"), { recursive: true });
+    writeFileSync(join(root, "packages", "camp", "instagram-feed", "manifest.json"), "{}");
+
+    const store = new FsOutputStore(root);
+    await expect(store.openOutput("cache/data.json")).resolves.toEqual({
+      found: false,
+      reason: "missing",
+    });
+    await expect(store.openOutput("jobs/job.json")).resolves.toEqual({
+      found: false,
+      reason: "missing",
+    });
+    await expect(store.openOutput("orgs/tenant/data.json")).resolves.toEqual({
+      found: false,
+      reason: "missing",
+    });
+
+    const pkgLookup = await store.openOutput("packages/camp/instagram-feed/manifest.json");
+    expect(pkgLookup).toMatchObject({
+      found: true,
+      file: { name: "manifest.json" },
+    });
+    if (pkgLookup.found) await pkgLookup.file.close();
+  });
 });
+
