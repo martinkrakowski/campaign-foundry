@@ -288,6 +288,17 @@ function ProviderRow({
   // `onDirtyChange` unconditionally and the redundant round trip it causes on
   // every re-render (including this row's own mount, and every sibling row's
   // mount) settles in one extra pass, not a loop.
+  // Losing write access (the active membership changed to a read-only role)
+  // hides the form, so drop whatever was typed into it: the key leaves memory,
+  // and the page stops reporting an unsaved key nobody can see or save.
+  useEffect(() => {
+    if (!canWrite) {
+      setKey("");
+      setClientId("");
+      setClientSecret("");
+    }
+  }, [canWrite]);
+
   const hasInput = provider === "firefly" ? clientId !== "" || clientSecret !== "" : key !== "";
   useEffect(() => {
     onDirtyChange(hasInput);

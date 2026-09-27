@@ -6,7 +6,7 @@ import * as providerKeysApi from "@/lib/provider-keys-api";
 import { ProviderKeysApiError } from "@/lib/provider-keys-api";
 import { authClient } from "@/lib/auth-client";
 import * as editorDirtyContext from "@/lib/editor-dirty-context";
-import { renderWithRun } from "@/__tests__/helpers";
+import { renderWithRun, ShellProviders } from "@/__tests__/helpers";
 import { Header } from "@/components/shell/Header";
 import ProviderKeysSettingsPage from "../page";
 
@@ -616,6 +616,31 @@ describe("ProviderKeysSettingsPage — unsaved key material marks the page dirty
     await user.click(screen.getByRole("link", { name: "Grid" }));
 
     expect(await screen.findByRole("dialog", { name: "Unsaved edits" })).toBeTruthy();
+  });
+
+  test("losing write access drops the typed key, so the page is no longer dirty", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(briefsApi, "getCapabilities").mockResolvedValue(betterAuthCapabilities());
+    vi.spyOn(providerKeysApi, "listProviderKeys").mockResolvedValue([]);
+    asOwner();
+
+    const tree = (
+      <>
+        <Header />
+        <ProviderKeysSettingsPage />
+      </>
+    );
+    const { rerender } = renderWithRun(tree);
+
+    await user.type(await screen.findByLabelText("Gemini key"), "typed-then-demoted");
+
+    asMember();
+    rerender(<ShellProviders>{tree}</ShellProviders>);
+    await waitFor(() => expect(screen.queryByLabelText("Gemini key")).toBeNull());
+
+    await user.click(screen.getByRole("link", { name: "Grid" }));
+
+    expect(screen.queryByRole("dialog", { name: "Unsaved edits" })).toBeNull();
   });
 
   test("clearing the only typed field un-marks the page dirty", async () => {
