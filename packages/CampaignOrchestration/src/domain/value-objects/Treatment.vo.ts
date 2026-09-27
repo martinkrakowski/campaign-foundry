@@ -27,6 +27,28 @@ export function isReservedCampaignId(id: string): id is ReservedCampaignId {
 }
 
 /**
+ * Derive a campaign slug from a display name (D178: the server derives the
+ * slug at Create). Mirrored from `apps/web/src/components/campaign/editor-state.ts:220`
+ * — the web imports only type-level from this package's root (the barrel
+ * pulls `node:fs` into the client bundle via `project-root.ts`, the same
+ * reason `RESERVED_CAMPAIGN_IDS` is mirrored in `apps/web/.../validate.ts`),
+ * so it keeps its own copy rather than importing this one; `Treatment.vo.test.ts`
+ * pins the same cases both copies must agree on. Lowercase, a run of
+ * non-`[a-z0-9]` becomes one hyphen, leading/trailing hyphens trimmed, cut to
+ * 64 characters, and — because the cut can land mid-hyphen-run — trimmed
+ * again. An input with no letter or digit answers `""`; the caller decides
+ * what that means (PT-5b2: a 400).
+ */
+export function slugify(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 64)
+    .replace(/-+$/, "");
+}
+
+/**
  * Treatment — a named creative treatment (layout + tone) the campaign requests.
  *
  * The pipeline produces one creative per product × aspect ratio × treatment, so
