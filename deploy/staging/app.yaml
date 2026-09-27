@@ -63,8 +63,10 @@ spec:
             # It starts empty; the seeded file data comes back with PT-8's import.
             - name: STORE_BACKEND
               value: postgres
-            # Better Auth: sign-in is required. With no RESEND_API_KEY the magic link
-            # is written to the API log (LogMailer); read it with kubectl logs.
+            # Better Auth: sign-in is required. Magic links go out through Resend's API
+            # once the owner creates the campaign-foundry-resend secret (README
+            # "Resend key"); until then the secret is absent (optional) and the link is
+            # written to the API log (LogMailer).
             - name: AUTH_MODE
               value: better-auth
             - name: WEB_ORIGIN
@@ -74,6 +76,15 @@ spec:
                 secretKeyRef:
                   name: campaign-foundry-auth
                   key: secret
+            - name: RESEND_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: campaign-foundry-resend
+                  key: api-key
+                  optional: true
+            # A sender on midnight.krakowski.cloud, whose DKIM and SPF are verified in Resend.
+            - name: EMAIL_FROM
+              value: Campaign Foundry <campaign-foundry@midnight.krakowski.cloud>
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
