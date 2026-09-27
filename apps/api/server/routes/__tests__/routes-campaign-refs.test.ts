@@ -568,6 +568,35 @@ describe("PT-5b1: routes take campaign refs (D178)", () => {
       }
     });
 
+    test("rethrows a non-CampaignNotFoundError raised while resolving the ref", async () => {
+      const harness = await setupPgHarness();
+      try {
+        const stored = await getBriefStore(LOCAL_TENANT).createBrief(
+          makeBrief("camp-copy-resolve-fail"),
+        );
+        const uuid = stored.campaignId!;
+        const dbError = new Error("connection reset");
+        vi.spyOn(getBriefStore(LOCAL_TENANT), "resolveCampaign").mockRejectedValueOnce(dbError);
+
+        const call = mountTenantRoute(poolsCopyHandler, {
+          method: "POST",
+          path: "/campaigns/pools/copy",
+          tenant: LOCAL_TENANT,
+        });
+        const res = await call(
+          new Request("http://x/campaigns/pools/copy", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ briefId: uuid, count: 2 }),
+          }),
+        );
+        expect(res.status).toBe(500);
+      } finally {
+        vi.restoreAllMocks();
+        await harness.cleanup();
+      }
+    });
+
     test("scans the brief directory once for the source on fs (no separate resolve lookup)", async () => {
       const harness = setupFsHarness();
       try {
@@ -783,6 +812,35 @@ describe("PT-5b1: routes take campaign refs (D178)", () => {
           }),
         );
         expect(resFailed.status).toBe(500);
+      } finally {
+        vi.restoreAllMocks();
+        await harness.cleanup();
+      }
+    });
+
+    test("rethrows a non-CampaignNotFoundError raised while resolving the source ref", async () => {
+      const harness = await setupPgHarness();
+      try {
+        const stored = await getBriefStore(LOCAL_TENANT).createBrief(
+          makeBrief("camp-dup-resolve-fail"),
+        );
+        const uuid = stored.campaignId!;
+        const dbError = new Error("connection reset");
+        vi.spyOn(getBriefStore(LOCAL_TENANT), "resolveCampaign").mockRejectedValueOnce(dbError);
+
+        const call = mountTenantRoute(briefDuplicateHandler, {
+          method: "POST",
+          path: "/campaigns/briefs/:id/duplicate",
+          tenant: LOCAL_TENANT,
+        });
+        const res = await call(
+          new Request(`http://x/campaigns/briefs/${uuid}/duplicate`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ newId: "dup-resolve-fail-copy" }),
+          }),
+        );
+        expect(res.status).toBe(500);
       } finally {
         vi.restoreAllMocks();
         await harness.cleanup();
