@@ -285,7 +285,32 @@ describe("PgBriefStore (PT-3d, D168, D169)", () => {
     ).rejects.toThrow("boom");
     await expect(store.withBriefLock("camp", async () => "after")).resolves.toBe("after");
   });
+
+  test.each(["cache", "jobs", "orgs", "packages"] as const)(
+    "createBrief, rewriteBrief and replaceBrief refuse reserved campaign id %s",
+    async (id) => {
+      const b = brief(id);
+      await expect(store.createBrief(b)).rejects.toThrow(
+        `"${id}" is reserved; choose another campaign id.`,
+      );
+      await expect(store.rewriteBrief(b)).rejects.toThrow(
+        `"${id}" is reserved; choose another campaign id.`,
+      );
+      await expect(store.replaceBrief(b)).rejects.toThrow(
+        `"${id}" is reserved; choose another campaign id.`,
+      );
+    },
+  );
+
+  test("reading an existing campaign with a reserved id does not crash", async () => {
+    await db.query("insert into campaign (org_id, slug) values ($1, $2)", ["local", "cache"]);
+    expect(await store.exists("cache")).toBe(true);
+    expect(await store.findBriefFileById("cache")).toBe("cache.yaml");
+    expect(await store.findBriefFile("cache")).toBe("cache.yaml");
+    expect(await store.campaignVisibility("cache")).toBe("visible");
+  });
 });
+
 
 describe("STORE_BACKEND=postgres puts briefs in the database, one store per (org, user) (PT-3d)", () => {
   const saved = process.env.STORE_BACKEND;
