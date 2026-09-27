@@ -5,7 +5,7 @@ import {
   withDecisionLock,
   type Verdict,
 } from "../../lib/decisions.js";
-import { DecisionConflictError } from "../../lib/ports/index.js";
+import { DecisionConflictError, getBriefStore } from "../../lib/ports/index.js";
 import { reportRevision } from "../../lib/report.js";
 import { requestTenant } from "../../lib/tenant.js";
 
@@ -40,6 +40,11 @@ export default defineEventHandler(async (event) => {
   if (problem !== undefined) {
     setResponseStatus(event, 400);
     return { error: problem };
+  }
+  const briefs = getBriefStore(tenant);
+  if (briefs.supportsTeams && (await briefs.campaignVisibility(campaignId)) === "hidden") {
+    setResponseStatus(event, 404);
+    return { error: `Campaign "${campaignId}" not found.` };
   }
   // Under the campaign's decision lock, so the run a verdict is stamped with is
   // the report it stays against: a report write retires under the same lock.

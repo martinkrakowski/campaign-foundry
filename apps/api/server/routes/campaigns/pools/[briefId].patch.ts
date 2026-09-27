@@ -14,6 +14,7 @@ import {
   withPoolLock,
   writePool,
 } from "../../../lib/pools.js";
+import { getBriefStore } from "../../../lib/ports/index.js";
 
 import { requestTenant } from "../../../lib/tenant.js";
 interface EntryPatch {
@@ -122,6 +123,12 @@ export default defineEventHandler(async (event) => {
   } catch (error) {
     setResponseStatus(event, 400);
     return { error: errorMessage(error) };
+  }
+
+  const briefs = getBriefStore(scope);
+  if (briefs.supportsTeams && (await briefs.campaignVisibility(briefId)) === "hidden") {
+    setResponseStatus(event, 404);
+    return { error: `Headline pool for brief "${briefId}" not found.` };
   }
 
   if (await isPoolDirSymlink(scope, briefId)) {

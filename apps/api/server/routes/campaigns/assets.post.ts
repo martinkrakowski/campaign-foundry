@@ -9,7 +9,7 @@ import {
 } from "../../lib/asset-files.js";
 import { isExistsError } from "../../lib/brief-files.js";
 import { assertSafeId } from "../../lib/load-brief.js";
-import { getAssetStore } from "../../lib/ports/index.js";
+import { getAssetStore, getBriefStore } from "../../lib/ports/index.js";
 
 import { requestTenant } from "../../lib/tenant.js";
 /**
@@ -71,6 +71,12 @@ export default defineEventHandler(async (event) => {
   } else if (!hasAllowedImageMagic(bytes)) {
     setResponseStatus(event, 400);
     return { error: "Asset must be a PNG or JPEG image." };
+  }
+
+  const briefs = getBriefStore(scope);
+  if (briefs.supportsTeams && (await briefs.campaignVisibility(briefId)) === "hidden") {
+    setResponseStatus(event, 404);
+    return { error: `Campaign "${briefId}" not found.` };
   }
 
   try {

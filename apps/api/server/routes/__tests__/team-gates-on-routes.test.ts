@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, afterEach } from "vitest";
+import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -8,6 +8,7 @@ import {
   type CampaignBrief,
   PipelineExecutionLog,
 } from "@campaignfoundry/CampaignOrchestration";
+import { err } from "@campaignfoundry/shared";
 import { setCapabilities } from "../../lib/capabilities.js";
 import { resetJobs } from "../../lib/jobs.js";
 import { writePool } from "../../lib/pools.js";
@@ -21,12 +22,15 @@ import packageZipHandler from "../campaigns/packages/[campaignId]/[platformZip].
 import outputGetHandler from "../output/[...path].get.js";
 import decisionsPutHandler from "../campaigns/decisions.put.js";
 import generatePostHandler from "../campaigns/generate.post.js";
+import jobGetHandler from "../campaigns/jobs/[id].get.js";
 import assetsPostHandler from "../campaigns/assets.post.js";
-import {
-  mountTenantRoute,
-  setupPgHarness,
-  type PgHarness,
-} from "./tenant-harness.js";
+import { mountTenantRoute, setupPgHarness, type PgHarness } from "./tenant-harness.js";
+
+const runCampaignSpy = vi.hoisted(() => vi.fn(async () => err(new Error("stub: route gate test"))));
+vi.mock("../../lib/pipeline.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../lib/pipeline.js")>();
+  return { ...actual, runCampaign: runCampaignSpy };
+});
 
 const PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
@@ -79,8 +83,27 @@ describe("PT-2d: team gates on routes (D166)", () => {
     await ownerStore.createBrief(sampleBrief, { teamId: "t1" });
   });
 
+  const jobCall = (id: string, tenant: TenantContext) => {
+    const caller = mountTenantRoute(jobGetHandler, {
+      path: "/campaigns/jobs/:id",
+      tenant,
+    });
+    return caller(new Request(`http://x/campaigns/jobs/${id}`));
+  };
+
+  async function awaitSettled(jobId: string, tenant: TenantContext): Promise<void> {
+    const deadline = Date.now() + 5_000;
+    while (Date.now() < deadline) {
+      const body = (await (await jobCall(jobId, tenant)).json()) as { status: string };
+      if (body.status === "completed" || body.status === "failed") return;
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    throw new Error(`timed out waiting for job ${jobId} to settle`);
+  }
+
   afterEach(async () => {
     await resetJobs();
+    runCampaignSpy.mockClear();
     setCapabilities({ motion: false, reason: "not probed" });
     await harness.cleanup();
   });
@@ -298,6 +321,8 @@ describe("PT-2d: team gates on routes (D166)", () => {
       }),
     );
     expect(resDraftTB.status).toBe(202);
+    const { jobId: draftJobId } = (await resDraftTB.json()) as { jobId: string };
+    await awaitSettled(draftJobId, tBMember);
 
     const callT1 = mountTenantRoute(generatePostHandler, {
       method: "POST",
@@ -312,6 +337,8 @@ describe("PT-2d: team gates on routes (D166)", () => {
       }),
     );
     expect(resT1.status).toBe(202);
+    const { jobId: t1JobId } = (await resT1.json()) as { jobId: string };
+    await awaitSettled(t1JobId, t1Member);
   });
 
   test("POST /campaigns/assets answers 404 for team-B, 201 for team-1", async () => {

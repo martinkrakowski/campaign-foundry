@@ -2,7 +2,7 @@ import { setResponseHeader } from "h3";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { deleteJob, enqueueJob } from "../../lib/jobs.js";
 import { JobCapacityError } from "../../lib/ports/fs-job-store.js";
-import { getUsageStore } from "../../lib/ports/index.js";
+import { getBriefStore, getUsageStore } from "../../lib/ports/index.js";
 import { getRunDelivery } from "../../lib/ports/run-delivery-registry.js";
 import { parseBrief, parseRegenerateOnly } from "../../lib/load-brief.js";
 import { ALLOWED_IMAGE_MODELS } from "../../lib/pipeline.js";
@@ -97,6 +97,12 @@ export default defineEventHandler(async (event) => {
   } catch {
     setResponseStatus(event, 500);
     return { error: "Could not read the run environment.", campaignId: brief.id };
+  }
+
+  const briefs = getBriefStore(env);
+  if (briefs.supportsTeams && (await briefs.campaignVisibility(brief.id)) === "hidden") {
+    setResponseStatus(event, 404);
+    return { error: `Campaign "${brief.id}" not found.` };
   }
 
   const reroll = regenerateOnly !== undefined;

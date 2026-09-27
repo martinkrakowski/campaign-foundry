@@ -1,5 +1,5 @@
 import { extname } from "node:path";
-import { getOutputStore } from "../../lib/ports/index.js";
+import { getBriefStore, getOutputStore } from "../../lib/ports/index.js";
 
 import { requestTenant } from "../../lib/tenant.js";
 const CONTENT_TYPES: Record<string, string> = {
@@ -54,9 +54,19 @@ export function parseByteRange(
  * response's Content-Length from what is actually streamed.
  */
 export default defineEventHandler(async (event) => {
-  const lookup = await getOutputStore(requestTenant(event)).openOutput(
-    getRouterParam(event, "path") ?? "",
-  );
+  const rawPath = getRouterParam(event, "path") ?? "";
+  const segments = rawPath.split("/").filter(Boolean);
+  const campaignId = segments[0] === "packages" ? segments[1] : segments[0];
+  const scope = requestTenant(event);
+  if (campaignId) {
+    const briefs = getBriefStore(scope);
+    if (briefs.supportsTeams && (await briefs.campaignVisibility(campaignId)) === "hidden") {
+      setResponseStatus(event, 404);
+      return { error: "Not found" };
+    }
+  }
+
+  const lookup = await getOutputStore(scope).openOutput(rawPath);
   if (!lookup.found) {
     if (lookup.reason === "invalid") {
       setResponseStatus(event, 400);

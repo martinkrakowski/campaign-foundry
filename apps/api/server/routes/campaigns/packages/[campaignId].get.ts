@@ -1,5 +1,5 @@
 import { SAFE_ID_PATTERN } from "@campaignfoundry/CampaignOrchestration";
-import { getOutputStore } from "../../../lib/ports/index.js";
+import { getBriefStore, getOutputStore } from "../../../lib/ports/index.js";
 
 import { requestTenant } from "../../../lib/tenant.js";
 /**
@@ -11,6 +11,12 @@ export default defineEventHandler(async (event) => {
   if (!SAFE_ID_PATTERN.test(campaignId)) {
     setResponseStatus(event, 400);
     return { error: "Invalid campaign id" };
+  }
+  const scope = requestTenant(event);
+  const briefs = getBriefStore(scope);
+  if (briefs.supportsTeams && (await briefs.campaignVisibility(campaignId)) === "hidden") {
+    setResponseStatus(event, 404);
+    return { error: "No packages found" };
   }
   const platforms = await getOutputStore(requestTenant(event)).listPackageManifests(campaignId);
   if (platforms.length === 0) {
