@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   BRIEF_SCHEMA_VERSION,
@@ -17,6 +17,7 @@ import { PgBriefStore } from "../../lib/ports/pg-brief-store.js";
 import type { TenantContext } from "../../lib/tenant.js";
 import poolGetHandler from "../campaigns/pools/[briefId].get.js";
 import poolPatchHandler from "../campaigns/pools/[briefId].patch.js";
+import packagePostHandler from "../campaigns/package.post.js";
 import packageListHandler from "../campaigns/packages/[campaignId].get.js";
 import packageZipHandler from "../campaigns/packages/[campaignId]/[platformZip].get.js";
 import outputGetHandler from "../output/[...path].get.js";
@@ -416,5 +417,43 @@ describe("PT-2d: team gates on routes (D166)", () => {
     const resT1 = await callT1(new Request("http://x/campaigns/jobs?campaignId=t1-camp"));
     expect(resT1.status).toBe(200);
     expect(await resT1.json()).toEqual({ jobId });
+  });
+
+  test("POST /campaigns/package answers 404 for team-B, 200 for team-1, and writes nothing for team-B", async () => {
+    await writeReport(t1Member, makeReport("t1-camp"));
+    const outDir = join(harness.outputRoot, "p1");
+    mkdirSync(outDir, { recursive: true });
+    writeFileSync(join(outDir, "1x1.png"), PNG);
+
+    const callTB = mountTenantRoute(packagePostHandler, {
+      method: "POST",
+      path: "/campaigns/package",
+      tenant: tBMember,
+    });
+    const resTB = await callTB(
+      new Request("http://x/campaigns/package", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ campaignId: "t1-camp", platforms: ["instagram-feed"] }),
+      }),
+    );
+    expect(resTB.status).toBe(404);
+    expect(await resTB.json()).toEqual({ error: "Campaign report not found" });
+    expect(existsSync(join(harness.outputRoot, "packages", "t1-camp"))).toBe(false);
+
+    const callT1 = mountTenantRoute(packagePostHandler, {
+      method: "POST",
+      path: "/campaigns/package",
+      tenant: t1Member,
+    });
+    const resT1 = await callT1(
+      new Request("http://x/campaigns/package", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ campaignId: "t1-camp", platforms: ["instagram-feed"] }),
+      }),
+    );
+    expect(resT1.status).toBe(200);
+    expect(existsSync(join(harness.outputRoot, "packages", "t1-camp"))).toBe(true);
   });
 });
