@@ -565,6 +565,29 @@ describe("pipeline composition root", () => {
     expect(copyGenerator(localEnv())?.model).toBe("anthropic/claude-3.5-haiku");
   });
 
+  test("copyGenerator and buildPipeline respect provider keyOwners (PT-7b3a)", () => {
+    const env: RunEnvironment = {
+      ...localEnv(),
+      providers: {
+        geminiKey: "gemini-k",
+        openRouterKey: "openrouter-k",
+        fireflyClientId: "ff-id",
+        fireflyClientSecret: "ff-secret",
+        keyOwners: { gemini: "org", openrouter: "org", firefly: "org" },
+      },
+    };
+    const copy = copyGenerator(env);
+    expect(copy).toBeDefined();
+    expect((copy as any).keyOwner).toBe("org");
+
+    const pipeline = buildPipeline(env, "imagen");
+    expect(pipeline).toBeDefined();
+    const fireflyPipeline = buildPipeline(env, "firefly");
+    expect(fireflyPipeline).toBeDefined();
+    const openRouterPipeline = buildPipeline(env, "x-ai/grok-imagine-image-quality");
+    expect(openRouterPipeline).toBeDefined();
+  });
+
   describe("MESSAGE_FONT is validated against the bundled allowlist (D59)", () => {
     const orig = process.env.MESSAGE_FONT;
     afterEach(() => {

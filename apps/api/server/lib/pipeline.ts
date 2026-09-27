@@ -94,7 +94,12 @@ function imageGenerator(env: RunEnvironment, selected?: string): ImageGeneratorP
     openRouterKey,
     fireflyClientId: fireflyId,
     fireflyClientSecret: fireflySecret,
+    keyOwners,
+    keyOwner,
   } = env.providers;
+  const geminiOwner = keyOwners?.gemini ?? keyOwner?.gemini ?? "platform";
+  const openRouterOwner = keyOwners?.openrouter ?? keyOwner?.openrouter ?? "platform";
+  const fireflyOwner = keyOwners?.firefly ?? keyOwner?.firefly ?? "platform";
 
   // An OpenRouter generator for a given model, falling back to procedural.
   // Metered (PT-7a): every non-cached background it resolves — whether called
@@ -112,6 +117,7 @@ function imageGenerator(env: RunEnvironment, selected?: string): ImageGeneratorP
           orgId,
           "openrouter",
           resolvedModel(model, OPENROUTER_IMAGE_DEFAULT_MODEL),
+          openRouterOwner,
         )
       : procedural;
 
@@ -129,6 +135,7 @@ function imageGenerator(env: RunEnvironment, selected?: string): ImageGeneratorP
           orgId,
           "imagen",
           resolvedModel(env.providers.imagenModel, IMAGEN_DEFAULT_MODEL),
+          geminiOwner,
         )
       : openRouter(env.providers.openRouterImageModel);
 
@@ -147,6 +154,7 @@ function imageGenerator(env: RunEnvironment, selected?: string): ImageGeneratorP
           orgId,
           "firefly",
           FIREFLY_MODEL,
+          fireflyOwner,
         )
       : imagen();
 
@@ -265,10 +273,13 @@ export async function runCampaign(
 export function copyGenerator(env: RunEnvironment): CopyGeneratorPort | undefined {
   const apiKey = env.providers.openRouterKey;
   if (!apiKey) return undefined;
+  const openRouterOwner =
+    env.providers.keyOwners?.openrouter ?? env.providers.keyOwner?.openrouter ?? "platform";
   return new MeteredCopyGenerator(
     new OpenRouterCopyGenerator({ apiKey, model: env.providers.openRouterCopyModel }),
     getUsageStore(env),
     env.tenant.orgId,
     "openrouter",
+    openRouterOwner,
   );
 }

@@ -114,6 +114,267 @@ describe("executeRunRequest org provider keys (PT-7b3a, D175)", () => {
     // The run must use the org's active key, not the platform key
     expect(seenEnv?.providers.geminiKey).toBe(orgKey);
     // Providers must record whose key each provider uses
-    expect((seenEnv?.providers as any).keyOwners?.gemini).toBe("org");
+    expect(seenEnv?.providers.keyOwners?.gemini).toBe("org");
+    expect(seenEnv?.providers.keyOwners?.openrouter).toBe("platform");
+    expect(seenEnv?.providers.keyOwners?.firefly).toBe("platform");
+  });
+
+  test("resolves OpenRouter and Firefly org keys when active, decoding Firefly JSON", async () => {
+    const orgOpenRouterKey = "org-openrouter-secret-key-2222";
+    const fireflyPlaintext = JSON.stringify({
+      clientId: "org-firefly-client-id",
+      clientSecret: "org-firefly-secret",
+    });
+    setProviderKeyStore(
+      fakeProviderKeyStore({
+        openrouter: orgOpenRouterKey,
+        firefly: fireflyPlaintext,
+      }),
+    );
+
+    const tenant: TenantContext = {
+      orgId: "org-acme",
+      userId: "user-1",
+      roles: ["owner"],
+      teamIds: [],
+    };
+
+    let seenEnv: pipelineModule.RunEnvironment | undefined;
+    vi.spyOn(pipelineModule, "runCampaign").mockImplementation(async (env) => {
+      seenEnv = env;
+      return {
+        success: true,
+        value: {
+          assets: [],
+          halted: false,
+          log: { campaignId: "camp-org-keys" } as any,
+          policyHash: "h",
+          seed: 1,
+        },
+      };
+    });
+
+    const brief = sampleBrief();
+    const env = runEnvironment(tenant);
+    const claim = await enqueueJob(env, brief.id);
+    expect(claim.acquired).toBe(true);
+    await startQueuedJob(env, claim.jobId);
+
+    const request: RunRequest = {
+      jobId: claim.jobId,
+      tenant,
+      brief,
+      reroll: false,
+    };
+
+    await executeRunRequest(request);
+
+    expect(seenEnv).toBeDefined();
+    expect(seenEnv?.providers.openRouterKey).toBe(orgOpenRouterKey);
+    expect(seenEnv?.providers.keyOwners?.openrouter).toBe("org");
+    expect(seenEnv?.providers.fireflyClientId).toBe("org-firefly-client-id");
+    expect(seenEnv?.providers.fireflyClientSecret).toBe("org-firefly-secret");
+    expect(seenEnv?.providers.keyOwners?.firefly).toBe("org");
+    expect(seenEnv?.providers.keyOwners?.gemini).toBe("platform");
+  });
+
+  test("a revoked key falls back to the platform key", async () => {
+    // open returns undefined for revoked or unconfigured keys
+    setProviderKeyStore(fakeProviderKeyStore({ gemini: undefined }));
+
+    const tenant: TenantContext = {
+      orgId: "org-acme",
+      userId: "user-1",
+      roles: ["owner"],
+      teamIds: [],
+    };
+
+    let seenEnv: pipelineModule.RunEnvironment | undefined;
+    vi.spyOn(pipelineModule, "runCampaign").mockImplementation(async (env) => {
+      seenEnv = env;
+      return {
+        success: true,
+        value: {
+          assets: [],
+          halted: false,
+          log: { campaignId: "camp-org-keys" } as any,
+          policyHash: "h",
+          seed: 1,
+        },
+      };
+    });
+
+    const brief = sampleBrief();
+    const env = runEnvironment(tenant);
+    const claim = await enqueueJob(env, brief.id);
+    expect(claim.acquired).toBe(true);
+    await startQueuedJob(env, claim.jobId);
+
+    const request: RunRequest = {
+      jobId: claim.jobId,
+      tenant,
+      brief,
+      reroll: false,
+    };
+
+    await executeRunRequest(request);
+
+    expect(seenEnv).toBeDefined();
+    expect(seenEnv?.providers.geminiKey).toBe("platform-gemini-secret-key-9999");
+    expect(seenEnv?.providers.keyOwners?.gemini).toBe("platform");
+  });
+
+  test("falls back to platform keys when provider key store throws ProviderKeyUnavailableError", async () => {
+    const store: ProviderKeyPort = {
+      put: async () => {
+        throw new Error("not implemented");
+      },
+      list: async () => {
+        throw new Error("not implemented");
+      },
+      revoke: async () => {},
+      open: async () => {
+        const { ProviderKeyUnavailableError } = await import("../ports/provider-key.port.js");
+        throw new ProviderKeyUnavailableError("BYOK needs Postgres");
+      },
+    };
+    setProviderKeyStore(store);
+
+    const tenant: TenantContext = {
+      orgId: "org-acme",
+      userId: "user-1",
+      roles: ["owner"],
+      teamIds: [],
+    };
+
+    let seenEnv: pipelineModule.RunEnvironment | undefined;
+    vi.spyOn(pipelineModule, "runCampaign").mockImplementation(async (env) => {
+      seenEnv = env;
+      return {
+        success: true,
+        value: {
+          assets: [],
+          halted: false,
+          log: { campaignId: "camp-org-keys" } as any,
+          policyHash: "h",
+          seed: 1,
+        },
+      };
+    });
+
+    const brief = sampleBrief();
+    const env = runEnvironment(tenant);
+    const claim = await enqueueJob(env, brief.id);
+    expect(claim.acquired).toBe(true);
+    await startQueuedJob(env, claim.jobId);
+
+    const request: RunRequest = {
+      jobId: claim.jobId,
+      tenant,
+      brief,
+      reroll: false,
+    };
+
+    await executeRunRequest(request);
+
+    expect(seenEnv).toBeDefined();
+    expect(seenEnv?.providers.geminiKey).toBe("platform-gemini-secret-key-9999");
+    expect(seenEnv?.providers.keyOwners?.gemini).toBe("platform");
+  });
+
+  test("propagates unexpected store error during key resolution", async () => {
+    const store: ProviderKeyPort = {
+      put: async () => {
+        throw new Error("not implemented");
+      },
+      list: async () => {
+        throw new Error("not implemented");
+      },
+      revoke: async () => {},
+      open: async () => {
+        throw new Error("database connection lost");
+      },
+    };
+    setProviderKeyStore(store);
+
+    const tenant: TenantContext = {
+      orgId: "org-acme",
+      userId: "user-1",
+      roles: ["owner"],
+      teamIds: [],
+    };
+
+    const brief = sampleBrief();
+    const env = runEnvironment(tenant);
+    const claim = await enqueueJob(env, brief.id);
+    expect(claim.acquired).toBe(true);
+    await startQueuedJob(env, claim.jobId);
+
+    const request: RunRequest = {
+      jobId: claim.jobId,
+      tenant,
+      brief,
+      reroll: false,
+    };
+
+    await expect(executeRunRequest(request)).rejects.toThrow("database connection lost");
+  });
+
+  test("no key appears in a log, response or RunRequest", async () => {
+    const orgKey = "org-gemini-secret-key-1111";
+    setProviderKeyStore(fakeProviderKeyStore({ gemini: orgKey }));
+
+    const logSpy = vi.spyOn(console, "log");
+    const warnSpy = vi.spyOn(console, "warn");
+    const errorSpy = vi.spyOn(console, "error");
+    const infoSpy = vi.spyOn(console, "info");
+
+    const tenant: TenantContext = {
+      orgId: "org-acme",
+      userId: "user-1",
+      roles: ["owner"],
+      teamIds: [],
+    };
+
+    vi.spyOn(pipelineModule, "runCampaign").mockImplementation(async () => ({
+      success: true,
+      value: {
+        assets: [],
+        halted: false,
+        log: { campaignId: "camp-org-keys" } as any,
+        policyHash: "h",
+        seed: 1,
+      },
+    }));
+
+    const brief = sampleBrief();
+    const env = runEnvironment(tenant);
+    const claim = await enqueueJob(env, brief.id);
+    expect(claim.acquired).toBe(true);
+    await startQueuedJob(env, claim.jobId);
+
+    const request: RunRequest = {
+      jobId: claim.jobId,
+      tenant,
+      brief,
+      imageModel: "imagen",
+      reroll: false,
+    };
+
+    // Assert RunRequest does not carry key
+    expect(JSON.stringify(request)).not.toContain(orgKey);
+    expect(JSON.stringify(request)).not.toContain("platform-gemini-secret-key-9999");
+
+    await executeRunRequest(request);
+
+    // Assert no key was logged
+    const allLogged = [
+      ...logSpy.mock.calls.flat(),
+      ...warnSpy.mock.calls.flat(),
+      ...errorSpy.mock.calls.flat(),
+      ...infoSpy.mock.calls.flat(),
+    ].join(" ");
+    expect(allLogged).not.toContain(orgKey);
+    expect(allLogged).not.toContain("platform-gemini-secret-key-9999");
   });
 });

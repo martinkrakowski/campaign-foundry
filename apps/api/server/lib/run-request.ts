@@ -3,8 +3,11 @@ import { completeJob, failJob, progressJob, runJob, startQueuedJob } from "./job
 import type { parseRegenerateOnly } from "./load-brief.js";
 import { runCampaign } from "./pipeline.js";
 import { readReport, writeReport } from "./report.js";
-import { runEnvironment, type RunEnvironment } from "./run-environment.js";
+import { decodeFireflyPlaintext, runEnvironment, type RunEnvironment } from "./run-environment.js";
 import type { TenantContext } from "./tenant.js";
+import { getProviderKeyStore } from "./ports/index.js";
+import { ProviderKeyUnavailableError, type ProviderKeyPort } from "./ports/provider-key.port.js";
+import type { KeyOwner } from "./ports/usage-store.port.js";
 
 /**
  * A serialisable run request (PT-6b1, D171, D174d).
@@ -59,11 +62,93 @@ async function persistedCopyHash(
 }
 
 /**
+ * Resolves each provider's key at execution time (PT-7b3a, D175):
+ * the org's active key through `getProviderKeyStore(env).open(provider)` when one exists,
+ * else the platform's from `env.providers`.
+ *
+ * A request never carries a key (it crosses Kafka); a key revoked before the run starts is not used.
+ * The file backend never has org keys (its store refuses with ProviderKeyUnavailableError),
+ * so it runs on platform keys exactly as today.
+ */
+export async function overlayOrgKeys(env: RunEnvironment): Promise<RunEnvironment> {
+  let keyStore: ProviderKeyPort;
+  try {
+    keyStore = getProviderKeyStore(env);
+  } catch {
+    return env;
+  }
+
+  let geminiKey = env.providers.geminiKey;
+  let geminiOwner: KeyOwner = env.providers.keyOwners?.gemini ?? "platform";
+  let openRouterKey = env.providers.openRouterKey;
+  let openRouterOwner: KeyOwner = env.providers.keyOwners?.openrouter ?? "platform";
+  let fireflyClientId = env.providers.fireflyClientId;
+  let fireflyClientSecret = env.providers.fireflyClientSecret;
+  let fireflyOwner: KeyOwner = env.providers.keyOwners?.firefly ?? "platform";
+
+  try {
+    const orgGemini = await keyStore.open("gemini");
+    if (orgGemini) {
+      geminiKey = orgGemini;
+      geminiOwner = "org";
+    }
+  } catch (error) {
+    if (!(error instanceof ProviderKeyUnavailableError)) throw error;
+  }
+
+  try {
+    const orgOpenRouter = await keyStore.open("openrouter");
+    if (orgOpenRouter) {
+      openRouterKey = orgOpenRouter;
+      openRouterOwner = "org";
+    }
+  } catch (error) {
+    if (!(error instanceof ProviderKeyUnavailableError)) throw error;
+  }
+
+  try {
+    const orgFirefly = await keyStore.open("firefly");
+    if (orgFirefly) {
+      try {
+        const decoded = decodeFireflyPlaintext(orgFirefly);
+        fireflyClientId = decoded.clientId;
+        fireflyClientSecret = decoded.clientSecret;
+        fireflyOwner = "org";
+      } catch {
+        // If stored plaintext is not JSON, ignore
+      }
+    }
+  } catch (error) {
+    if (!(error instanceof ProviderKeyUnavailableError)) throw error;
+  }
+
+  const keyOwners = {
+    gemini: geminiOwner,
+    openrouter: openRouterOwner,
+    firefly: fireflyOwner,
+  };
+
+  return {
+    ...env,
+    providers: {
+      ...env.providers,
+      geminiKey,
+      openRouterKey,
+      fireflyClientId,
+      fireflyClientSecret,
+      keyOwners,
+      keyOwner: keyOwners,
+    },
+  };
+}
+
+/**
  * Rebuilds the RunEnvironment from the tenant and executes the campaign generation,
  * including progress reporting, error handling, report fencing, and job completion.
  */
 export async function executeRunRequest(request: RunRequest, signal?: AbortSignal): Promise<void> {
-  const env = runEnvironment(request.tenant);
+  const baseEnv = runEnvironment(request.tenant);
+  const env = await overlayOrgKeys(baseEnv);
   const { jobId, brief, imageModel, regenerateOnly, reroll, expectedRevision } = request;
   const expectedPolicyHash = await persistedPolicyHash(env, brief, reroll);
   const expectedCopyHash = await persistedCopyHash(env, brief, reroll);
