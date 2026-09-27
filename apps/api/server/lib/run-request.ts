@@ -115,8 +115,7 @@ export async function overlayOrgKeys(
     } catch (error) {
       if (error instanceof ProviderKeyUnavailableError) return undefined;
       if (provider === primary) throw error;
-      const errorClass =
-        error instanceof Error ? error.name || error.constructor.name : "UnknownError";
+      const errorClass = error instanceof Error ? error.constructor.name : "UnknownError";
       console.warn(
         `[overlay-org-keys] fallback provider "${provider}" key unavailable: ${errorClass}`,
       );

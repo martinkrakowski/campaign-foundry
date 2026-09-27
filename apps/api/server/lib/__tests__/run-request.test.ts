@@ -667,6 +667,85 @@ describe("executeRunRequest org provider keys (PT-7b3a, D175)", () => {
     );
   });
 
+  test("a fallback key that fails with non-Error rejection logs UnknownError and does not fail run", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const store: ProviderKeyPort = {
+      put: async () => {
+        throw new Error("not implemented");
+      },
+      list: async () => [
+        { provider: "firefly", last4: "1234", createdAt: new Date().toISOString() },
+        { provider: "gemini", last4: "5678", createdAt: new Date().toISOString() },
+      ],
+      revoke: async () => {},
+      open: async (provider) => {
+        if (provider === "firefly") {
+          return JSON.stringify({
+            clientId: "org-firefly-client-id",
+            clientSecret: "org-firefly-client-secret",
+          });
+        }
+        if (provider === "gemini") {
+          return Promise.reject("raw-string-failure");
+        }
+        return undefined;
+      },
+    };
+    setProviderKeyStore(store);
+
+    const tenant: TenantContext = {
+      orgId: "org-acme",
+      userId: "user-1",
+      roles: ["owner"],
+      teamIds: [],
+    };
+
+    let seenEnv: RunEnvironment | undefined;
+    vi.mocked(generateCreative).mockImplementationOnce(async (options) => {
+      seenEnv = options.env;
+      return {
+        success: true,
+        data: {
+          campaign: {
+            id: "camp-org-keys",
+            brandId: "brand-1",
+            name: "C",
+            status: "completed",
+            variants: [],
+          },
+          halted: false,
+          log: { campaignId: "camp-org-keys" } as any,
+          policyHash: "h",
+          seed: 1,
+        },
+      };
+    });
+
+    const brief = sampleBrief();
+    const env = runEnvironment(tenant);
+    const claim = await enqueueJob(env, brief.id);
+    if (!claim.acquired) throw new Error("job not acquired");
+    await startQueuedJob(env, claim.jobId);
+
+    const request: RunRequest = {
+      jobId: claim.jobId,
+      tenant,
+      brief,
+      imageModel: "firefly",
+      reroll: false,
+    };
+
+    await executeRunRequest(request);
+
+    expect(seenEnv).toBeDefined();
+    expect(seenEnv?.providers.keyOwners?.gemini).toBe("platform");
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining(
+        '[overlay-org-keys] fallback provider "gemini" key unavailable: UnknownError',
+      ),
+    );
+  });
+
   test("a primary key that fails still does fail the run", async () => {
     const store: ProviderKeyPort = {
       put: async () => {
