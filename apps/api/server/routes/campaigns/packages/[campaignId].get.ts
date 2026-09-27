@@ -14,10 +14,11 @@ export default defineEventHandler(async (event) => {
   }
   const scope = requestTenant(event);
   const briefs = getBriefStore(scope);
-  // See result.get.ts: resolve a uuid to its slug, pass a slug through unchanged
-  // (an unsaved draft has no campaign row yet); listPackageManifests still
-  // answers empty for a ref that is genuinely unknown either way.
-  const resolved = await briefs.resolveCampaign(campaignId);
+  // See result.get.ts: resolve a uuid to its slug on a backend that has one
+  // (D178), pass a slug through unchanged otherwise — an unsaved draft has no
+  // campaign row yet, and on fs the id IS the slug (D179), so no lookup runs
+  // there. listPackageManifests still answers empty for a genuinely unknown ref.
+  const resolved = briefs.supportsTeams ? await briefs.resolveCampaign(campaignId) : undefined;
   const slug = resolved?.slug ?? campaignId;
   if (briefs.supportsTeams && (await briefs.campaignVisibility(slug)) === "hidden") {
     setResponseStatus(event, 404);

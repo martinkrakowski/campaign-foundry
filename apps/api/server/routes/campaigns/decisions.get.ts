@@ -16,10 +16,12 @@ export default defineEventHandler(async (event) => {
     return { error: "Invalid campaign id" };
   }
   const scope = requestTenant(event);
-  // See result.get.ts: resolve a uuid to its slug, pass a slug through unchanged
-  // (an unsaved draft has no campaign row yet); campaignKnown still 404s a ref
-  // that is genuinely unknown either way.
-  const resolved = await getBriefStore(scope).resolveCampaign(campaignId);
+  // See result.get.ts: resolve a uuid to its slug on a backend that has one
+  // (D178); pass a slug through unchanged otherwise — an unsaved draft has no
+  // campaign row yet, and on fs the id IS the slug (D179), so no lookup runs
+  // at all there. campaignKnown still 404s a ref that is genuinely unknown.
+  const briefs = getBriefStore(scope);
+  const resolved = briefs.supportsTeams ? await briefs.resolveCampaign(campaignId) : undefined;
   const slug = resolved?.slug ?? campaignId;
   await campaignKnown(scope, slug, "report");
   return getDecisionStore(scope).readDecisions(slug);

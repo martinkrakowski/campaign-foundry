@@ -519,6 +519,52 @@ describe("PT-5b1: routes take campaign refs (D178)", () => {
         await harness.cleanup();
       }
     });
+
+    test("answers the brief's own 404 and rethrows other errors from a brief that vanishes right after resolving (race)", async () => {
+      const harness = await setupPgHarness();
+      try {
+        const stored = await getBriefStore(LOCAL_TENANT).createBrief(makeBrief("camp-copy-race"));
+        const uuid = stored.campaignId!;
+        const store = getBriefStore(LOCAL_TENANT);
+
+        const call = mountTenantRoute(poolsCopyHandler, {
+          method: "POST",
+          path: "/campaigns/pools/copy",
+          tenant: LOCAL_TENANT,
+        });
+
+        // The brief resolves (a campaign row exists) but has vanished by the
+        // time the route looks it up for its content — the same shape a
+        // concurrent delete would leave. Answers the route's own 404, same as
+        // an unresolvable ref.
+        vi.spyOn(store, "findBriefById").mockResolvedValueOnce(undefined);
+        const resVanished = await call(
+          new Request("http://x/campaigns/pools/copy", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ briefId: uuid, count: 2 }),
+          }),
+        );
+        expect(resVanished.status).toBe(404);
+        expect(await resVanished.json()).toEqual({ error: `Brief "${uuid}" not found.` });
+
+        // A genuine storage failure at that same lookup is never folded into
+        // the brief's 404 — it surfaces as its own error.
+        const dbError = new Error("connection reset");
+        vi.spyOn(store, "findBriefById").mockRejectedValueOnce(dbError);
+        const resFailed = await call(
+          new Request("http://x/campaigns/pools/copy", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ briefId: uuid, count: 2 }),
+          }),
+        );
+        expect(resFailed.status).toBe(500);
+      } finally {
+        vi.restoreAllMocks();
+        await harness.cleanup();
+      }
+    });
   });
 
   // (9) PUT /campaigns/briefs/:id
@@ -582,6 +628,33 @@ describe("PT-5b1: routes take campaign refs (D178)", () => {
         await harness.cleanup();
       }
     });
+
+    test("rethrows a non-CampaignNotFoundError raised while resolving the ref", async () => {
+      const harness = await setupPgHarness();
+      try {
+        const stored = await getBriefStore(LOCAL_TENANT).createBrief(makeBrief("camp-put-race"));
+        const uuid = stored.campaignId!;
+        const dbError = new Error("connection reset");
+        vi.spyOn(getBriefStore(LOCAL_TENANT), "resolveCampaign").mockRejectedValueOnce(dbError);
+
+        const call = mountTenantRoute(briefPutHandler, {
+          method: "PUT",
+          path: "/campaigns/briefs/:id",
+          tenant: LOCAL_TENANT,
+        });
+        const res = await call(
+          new Request(`http://x/campaigns/briefs/${uuid}`, {
+            method: "PUT",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(makeBrief(uuid)),
+          }),
+        );
+        expect(res.status).toBe(500);
+      } finally {
+        vi.restoreAllMocks();
+        await harness.cleanup();
+      }
+    });
   });
 
   // (10) POST /campaigns/briefs/:id/duplicate
@@ -630,6 +703,52 @@ describe("PT-5b1: routes take campaign refs (D178)", () => {
         );
         expect(resSlug.status).toBe(201);
       } finally {
+        await harness.cleanup();
+      }
+    });
+
+    test("answers the source's own 404 and rethrows other errors from a source that vanishes right after resolving (race)", async () => {
+      const harness = await setupPgHarness();
+      try {
+        const stored = await getBriefStore(LOCAL_TENANT).createBrief(makeBrief("camp-dup-race"));
+        const uuid = stored.campaignId!;
+        const store = getBriefStore(LOCAL_TENANT);
+
+        const call = mountTenantRoute(briefDuplicateHandler, {
+          method: "POST",
+          path: "/campaigns/briefs/:id/duplicate",
+          tenant: LOCAL_TENANT,
+        });
+
+        // The source resolves (a campaign row exists) but has vanished by the
+        // time the route looks it up for its content — the same shape a
+        // concurrent delete would leave. Answers the route's own 404, same as
+        // an unresolvable ref.
+        vi.spyOn(store, "findBriefById").mockResolvedValueOnce(undefined);
+        const resVanished = await call(
+          new Request(`http://x/campaigns/briefs/${uuid}/duplicate`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ newId: "dup-race-vanished" }),
+          }),
+        );
+        expect(resVanished.status).toBe(404);
+        expect(await resVanished.json()).toEqual({ error: `Brief "${uuid}" not found.` });
+
+        // A genuine storage failure at that same lookup is never folded into
+        // the source's 404 — it surfaces as its own error.
+        const dbError = new Error("connection reset");
+        vi.spyOn(store, "findBriefById").mockRejectedValueOnce(dbError);
+        const resFailed = await call(
+          new Request(`http://x/campaigns/briefs/${uuid}/duplicate`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ newId: "dup-race-failed" }),
+          }),
+        );
+        expect(resFailed.status).toBe(500);
+      } finally {
+        vi.restoreAllMocks();
         await harness.cleanup();
       }
     });

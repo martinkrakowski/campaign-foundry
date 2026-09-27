@@ -82,14 +82,17 @@ export default defineEventHandler(async (event) => {
   }
 
   const briefs = getBriefStore(scope);
-  const resolved = await briefs.resolveCampaign(briefId);
-  if (!resolved && CAMPAIGN_UUID_PATTERN.test(briefId)) {
+  // On fs the id IS the slug (D179): no lookup runs there at all (no
+  // uuid concept exists on that backend either), matching this route's
+  // unconditional-write behaviour from before campaign refs existed.
+  const resolved = briefs.supportsTeams ? await briefs.resolveCampaign(briefId) : undefined;
+  if (!resolved && briefs.supportsTeams && CAMPAIGN_UUID_PATTERN.test(briefId)) {
     setResponseStatus(event, 404);
     return { error: `Campaign "${briefId}" not found.` };
   }
-  // A slug that did not resolve passes through unchanged (D179 on fs; an
-  // unsaved draft has no campaign row yet, and this route has always let a
-  // caller create its asset directory ahead of the brief being saved).
+  // A slug that did not resolve passes through unchanged (an unsaved draft
+  // has no campaign row yet, and this route has always let a caller create
+  // its asset directory ahead of the brief being saved).
   const slug = resolved?.slug ?? briefId;
   if (briefs.supportsTeams && (await briefs.campaignVisibility(slug)) === "hidden") {
     setResponseStatus(event, 404);

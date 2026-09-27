@@ -43,11 +43,13 @@ export default defineEventHandler(async (event) => {
     }
   }
 
-  // See result.get.ts: resolve a uuid to its slug, pass a slug through unchanged
-  // (an unsaved draft has no campaign row yet — assets are routinely uploaded
-  // before a brief is saved); the reads below already answer their own "not
-  // found" for a ref that is genuinely unknown either way.
-  const resolved = await getBriefStore(scope).resolveCampaign(briefId);
+  // See result.get.ts: resolve a uuid to its slug on a backend that has one
+  // (D178), pass a slug through unchanged otherwise — an unsaved draft has no
+  // campaign row yet (assets are routinely uploaded before a brief is saved),
+  // and on fs the id IS the slug (D179), so no lookup runs there. The reads
+  // below already answer their own "not found" for a genuinely unknown ref.
+  const briefs = getBriefStore(scope);
+  const resolved = briefs.supportsTeams ? await briefs.resolveCampaign(briefId) : undefined;
   const slug = resolved?.slug ?? briefId;
 
   if (name !== undefined) {
@@ -56,7 +58,6 @@ export default defineEventHandler(async (event) => {
     // applies. Only team visibility is checked here, not the listing: an unsaved
     // draft has no stored brief, and listing every asset just to read one lets an
     // unrelated file's disappearance turn a readable request into a 500.
-    const briefs = getBriefStore(scope);
     if (briefs.supportsTeams && (await briefs.campaignVisibility(slug)) === "hidden") {
       setResponseStatus(event, 404);
       return { error: `Asset "${name}" not found.` };

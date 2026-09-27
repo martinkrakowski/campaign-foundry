@@ -22,10 +22,14 @@ export default defineEventHandler(async (event) => {
   if (typeof campaignId !== "string") return EMPTY;
   const scope = requestTenant(event);
   // A uuid ref resolves to its slug; a ref that does not resolve (a slug with
-  // no campaign row yet — an unsaved draft, D179 on fs) passes through
-  // unchanged, exactly as it did before campaign refs existed. campaignKnown
-  // below still answers 404 for a ref that is truly unknown either way.
-  const resolved = await getBriefStore(scope).resolveCampaign(campaignId);
+  // no campaign row yet — an unsaved draft) passes through unchanged, exactly
+  // as it did before campaign refs existed. campaignKnown below still answers
+  // 404 for a ref that is truly unknown either way. On fs the id IS the slug
+  // (D179): skip the lookup entirely, same guard the hidden-campaign checks
+  // elsewhere use, so this never performs a directory scan the route did not
+  // make before.
+  const briefs = getBriefStore(scope);
+  const resolved = briefs.supportsTeams ? await briefs.resolveCampaign(campaignId) : undefined;
   const slug = resolved?.slug ?? campaignId;
   await campaignKnown(scope, slug, "report");
   const report = await readReport(scope, slug);

@@ -22,11 +22,13 @@ export default defineEventHandler(async (event) => {
 
   const scope = requestTenant(event);
   const briefs = getBriefStore(scope);
-  // See result.get.ts: resolve a uuid to its slug, pass a slug through unchanged
-  // (an unsaved draft has no campaign row yet — a pool can be curated before a
-  // brief is saved, pools/copy.post.ts's inline-brief path); readPool below
-  // still answers undefined for a ref that is genuinely unknown either way.
-  const resolved = await briefs.resolveCampaign(briefId);
+  // See result.get.ts: resolve a uuid to its slug on a backend that has one
+  // (D178), pass a slug through unchanged otherwise — an unsaved draft has no
+  // campaign row yet (a pool can be curated before a brief is saved,
+  // pools/copy.post.ts's inline-brief path), and on fs the id IS the slug
+  // (D179), so no lookup runs there. readPool below still answers undefined
+  // for a genuinely unknown ref.
+  const resolved = briefs.supportsTeams ? await briefs.resolveCampaign(briefId) : undefined;
   const slug = resolved?.slug ?? briefId;
   if (briefs.supportsTeams && (await briefs.campaignVisibility(slug)) === "hidden") {
     setResponseStatus(event, 404);

@@ -49,23 +49,6 @@ export default defineEventHandler(async (event) => {
     return { error: errorMessage(error) };
   }
 
-  let slug: string;
-  try {
-    slug = await resolveCampaignRef(scope, id);
-  } catch (error) {
-    if (error instanceof CampaignNotFoundError) {
-      setResponseStatus(event, 404);
-      return { error: `Brief "${id}" not found.` };
-    }
-    throw error;
-  }
-
-  if (brief.id !== id && brief.id !== slug) {
-    setResponseStatus(event, 400);
-    return { error: `Path id "${id}" does not match brief.id "${brief.id}".` };
-  }
-  const briefToSave = brief.id === slug ? brief : { ...brief, id: slug };
-
   const store = getBriefStore(scope);
   // Checked before canAssignTeam, matching briefs.post.ts (D166, PT-2c,
   // coderabbit thread U_YF): an fs backend (item 5) answers 400 for any
@@ -73,6 +56,9 @@ export default defineEventHandler(async (event) => {
   // anyway. PUT does no Save-as asset copying, so this is a consistency fix
   // here, not an orphan-file one — the ordering keeps the two routes' rules
   // identical rather than diverging only because PUT has nothing to copy.
+  // Kept ahead of the ref resolve below too, matching this route's order
+  // before campaign refs existed (D178/D179 must not move a validation a
+  // caller already depends on behind an existence check it didn't have).
   if (teamId !== undefined && !store.supportsTeams) {
     setResponseStatus(event, 400);
     return { error: new TeamsNotSupportedError().message };
@@ -86,6 +72,28 @@ export default defineEventHandler(async (event) => {
           : `Not authorized to assign team "${teamId}".`,
     };
   }
+
+  // Resolve a uuid to its slug (D178). On fs the id IS the slug (D179): no
+  // store lookup is needed or performed — `supportsTeams` is false there,
+  // same guard the existing hidden-campaign checks already use.
+  let slug = id;
+  if (store.supportsTeams) {
+    try {
+      slug = await resolveCampaignRef(scope, id);
+    } catch (error) {
+      if (error instanceof CampaignNotFoundError) {
+        setResponseStatus(event, 404);
+        return { error: `Brief "${id}" not found.` };
+      }
+      throw error;
+    }
+  }
+
+  if (brief.id !== id && brief.id !== slug) {
+    setResponseStatus(event, 400);
+    return { error: `Path id "${id}" does not match brief.id "${brief.id}".` };
+  }
+  const briefToSave = brief.id === slug ? brief : { ...brief, id: slug };
 
   const rawRevision = getQuery(event).revision;
   const expectedRevision = Array.isArray(rawRevision) ? rawRevision[0] : rawRevision;
