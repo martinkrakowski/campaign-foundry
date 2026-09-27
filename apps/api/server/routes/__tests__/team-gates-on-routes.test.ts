@@ -13,6 +13,7 @@ import { setCapabilities } from "../../lib/capabilities.js";
 import { createJob, resetJobs } from "../../lib/jobs.js";
 import { writePool } from "../../lib/pools.js";
 import { writeReport } from "../../lib/report.js";
+import { FsBriefStore } from "../../lib/ports/fs-brief-store.js";
 import { PgBriefStore } from "../../lib/ports/pg-brief-store.js";
 import type { TenantContext } from "../../lib/tenant.js";
 import poolGetHandler from "../campaigns/pools/[briefId].get.js";
@@ -27,7 +28,12 @@ import planPostHandler from "../campaigns/plan.post.js";
 import jobGetHandler from "../campaigns/jobs/[id].get.js";
 import jobsIndexHandler from "../campaigns/jobs/index.get.js";
 import assetsPostHandler from "../campaigns/assets.post.js";
-import { mountTenantRoute, setupPgHarness, type PgHarness } from "./tenant-harness.js";
+import {
+  mountTenantRoute,
+  setupFsHarness,
+  setupPgHarness,
+  type PgHarness,
+} from "./tenant-harness.js";
 
 const runCampaignSpy = vi.hoisted(() => vi.fn(async () => err(new Error("stub: route gate test"))));
 vi.mock("../../lib/pipeline.js", async (importOriginal) => {
@@ -574,5 +580,115 @@ describe("PT-2d: team gates on routes (D166)", () => {
     expect(resT1.status).toBe(200);
     const bodyT1 = (await resT1.json()) as { variants: Array<{ headline?: string }> };
     expect(bodyT1.variants[0]?.headline).toBe("Secret Headline");
+  });
+
+  test("on the file backend (supportsTeams false), campaignVisibility is never called and routes behave as before", async () => {
+    const fsHarness = setupFsHarness();
+    try {
+      const visibilitySpy = vi.spyOn(FsBriefStore.prototype, "campaignVisibility");
+
+      const fsStore = new FsBriefStore(join(fsHarness.projectRoot, "briefs"));
+      mkdirSync(join(fsHarness.projectRoot, "briefs"), { recursive: true });
+      await fsStore.createBrief(sampleBrief);
+
+      await writePool(t1Member, {
+        briefId: "t1-camp",
+        generatedAt: "2026-09-24T00:00:00.000Z",
+        model: "test-model",
+        entries: [{ id: "h1", text: "headline", status: "approved" }],
+      });
+
+      const outDir = join(fsHarness.outputRoot, "t1-camp", "renders");
+      mkdirSync(outDir, { recursive: true });
+      writeFileSync(join(outDir, "hero.png"), PNG);
+
+      await writeReport(t1Member, makeReport("t1-camp"));
+
+      // 1. GET /campaigns/pools/:briefId
+      const callPool = mountTenantRoute(poolGetHandler, {
+        path: "/campaigns/pools/:briefId",
+        tenant: t1Member,
+      });
+      const resPool = await callPool(new Request("http://x/campaigns/pools/t1-camp"));
+      expect(resPool.status).toBe(200);
+
+      // 2. GET /output/**
+      const callOutput = mountTenantRoute(outputGetHandler, {
+        path: "/output/**:path",
+        tenant: t1Member,
+      });
+      const resOutput = await callOutput(new Request("http://x/output/t1-camp/renders/hero.png"));
+      expect(resOutput.status).toBe(200);
+      await resOutput.arrayBuffer();
+
+      // 3. PUT /campaigns/decisions
+      const callDecisions = mountTenantRoute(decisionsPutHandler, {
+        method: "PUT",
+        path: "/campaigns/decisions",
+        tenant: t1Member,
+      });
+      const resDecisions = await callDecisions(
+        new Request("http://x/campaigns/decisions", {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            campaignId: "t1-camp",
+            revision: null,
+            decisions: { "p1/1x1/default": "approved" },
+          }),
+        }),
+      );
+      expect(resDecisions.status).toBe(200);
+
+      // 4. POST /campaigns/package
+      const p1Dir = join(fsHarness.outputRoot, "p1");
+      mkdirSync(p1Dir, { recursive: true });
+      writeFileSync(join(p1Dir, "1x1.png"), PNG);
+      const callPackage = mountTenantRoute(packagePostHandler, {
+        method: "POST",
+        path: "/campaigns/package",
+        tenant: t1Member,
+      });
+      const resPackage = await callPackage(
+        new Request("http://x/campaigns/package", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ campaignId: "t1-camp", platforms: ["instagram-feed"] }),
+        }),
+      );
+      expect(resPackage.status).toBe(200);
+
+      // 5. POST /campaigns/plan
+      const pooledBrief: CampaignBrief = {
+        ...sampleBrief,
+        mode: "variation",
+        variation: {
+          count: 1,
+          seed: 42,
+          axes: {
+            headline: "pool://copy",
+          },
+        },
+      };
+      const callPlan = mountTenantRoute(planPostHandler, {
+        method: "POST",
+        path: "/campaigns/plan",
+        tenant: t1Member,
+      });
+      const resPlan = await callPlan(
+        new Request("http://x/campaigns/plan", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(pooledBrief),
+        }),
+      );
+      expect(resPlan.status).toBe(200);
+
+      // Assert that campaignVisibility was NEVER called on the file backend
+      expect(visibilitySpy).not.toHaveBeenCalled();
+      visibilitySpy.mockRestore();
+    } finally {
+      fsHarness.cleanup();
+    }
   });
 });
