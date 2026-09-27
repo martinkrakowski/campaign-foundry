@@ -1,5 +1,5 @@
 import { SAFE_ID_PATTERN } from "@campaignfoundry/CampaignOrchestration";
-import { campaignKnown } from "../../lib/ownership.js";
+import { campaignKnown, resolveCampaignRef } from "../../lib/ownership.js";
 import { getDecisionStore } from "../../lib/ports/index.js";
 import { requestTenant } from "../../lib/tenant.js";
 
@@ -16,6 +16,7 @@ export default defineEventHandler(async (event) => {
     return { error: "Invalid campaign id" };
   }
   const scope = requestTenant(event);
-  await campaignKnown(scope, campaignId, "report");
-  return getDecisionStore(scope).readDecisions(campaignId);
+  const slug = await resolveCampaignRef(scope, campaignId);
+  await campaignKnown(scope, slug, "report");
+  return getDecisionStore(scope).readDecisions(slug);
 });

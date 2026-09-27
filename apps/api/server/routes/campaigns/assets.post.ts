@@ -9,6 +9,7 @@ import {
 } from "../../lib/asset-files.js";
 import { isExistsError } from "../../lib/brief-files.js";
 import { assertSafeId } from "../../lib/load-brief.js";
+import { CampaignNotFoundError, resolveCampaignRef } from "../../lib/ownership.js";
 import { getAssetStore, getBriefStore } from "../../lib/ports/index.js";
 
 import { requestTenant } from "../../lib/tenant.js";
@@ -73,21 +74,32 @@ export default defineEventHandler(async (event) => {
     return { error: "Asset must be a PNG or JPEG image." };
   }
 
+  let slug: string;
+  try {
+    slug = await resolveCampaignRef(scope, briefId);
+  } catch (error) {
+    if (error instanceof CampaignNotFoundError) {
+      setResponseStatus(event, 404);
+      return { error: `Campaign "${briefId}" not found.` };
+    }
+    throw error;
+  }
+
   const briefs = getBriefStore(scope);
-  if (briefs.supportsTeams && (await briefs.campaignVisibility(briefId)) === "hidden") {
+  if (briefs.supportsTeams && (await briefs.campaignVisibility(slug)) === "hidden") {
     setResponseStatus(event, 404);
     return { error: `Campaign "${briefId}" not found.` };
   }
 
   try {
-    const result = await getAssetStore(scope).writeAsset(briefId, name, bytes);
+    const result = await getAssetStore(scope).writeAsset(slug, name, bytes);
     setResponseStatus(event, 201);
     return { path: result.path };
   } catch (error) {
     if (isExistsError(error)) {
       setResponseStatus(event, 409);
       return {
-        error: `Asset "${getAssetStore(scope).assetRelPath(briefId, name)}" already exists.`,
+        error: `Asset "${getAssetStore(scope).assetRelPath(slug, name)}" already exists.`,
       };
     }
     throw error;

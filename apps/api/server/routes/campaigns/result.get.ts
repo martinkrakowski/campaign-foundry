@@ -1,4 +1,4 @@
-import { campaignKnown } from "../../lib/ownership.js";
+import { campaignKnown, resolveCampaignRef } from "../../lib/ownership.js";
 import { readReport } from "../../lib/report.js";
 import { requestTenant } from "../../lib/tenant.js";
 
@@ -20,7 +20,8 @@ export default defineEventHandler(async (event) => {
   // treat that (and any non-string, and absence) as no campaign → empty.
   if (typeof campaignId !== "string") return EMPTY;
   const scope = requestTenant(event);
-  await campaignKnown(scope, campaignId, "report");
-  const report = await readReport(scope, campaignId);
+  const slug = await resolveCampaignRef(scope, campaignId);
+  await campaignKnown(scope, slug, "report");
+  const report = await readReport(scope, slug);
   return report === undefined ? EMPTY : report;
 });

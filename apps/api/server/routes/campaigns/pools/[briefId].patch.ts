@@ -14,8 +14,8 @@ import {
   withPoolLock,
   writePool,
 } from "../../../lib/pools.js";
+import { CampaignNotFoundError, resolveCampaignRef } from "../../../lib/ownership.js";
 import { getBriefStore } from "../../../lib/ports/index.js";
-
 import { requestTenant } from "../../../lib/tenant.js";
 interface EntryPatch {
   readonly id: string;
@@ -125,13 +125,24 @@ export default defineEventHandler(async (event) => {
     return { error: errorMessage(error) };
   }
 
+  let slug: string;
+  try {
+    slug = await resolveCampaignRef(scope, briefId);
+  } catch (error) {
+    if (error instanceof CampaignNotFoundError) {
+      setResponseStatus(event, 404);
+      return { error: `Headline pool for brief "${briefId}" not found.` };
+    }
+    throw error;
+  }
+
   const briefs = getBriefStore(scope);
-  if (briefs.supportsTeams && (await briefs.campaignVisibility(briefId)) === "hidden") {
+  if (briefs.supportsTeams && (await briefs.campaignVisibility(slug)) === "hidden") {
     setResponseStatus(event, 404);
     return { error: `Headline pool for brief "${briefId}" not found.` };
   }
 
-  if (await isPoolDirSymlink(scope, briefId)) {
+  if (await isPoolDirSymlink(scope, slug)) {
     setResponseStatus(event, 400);
     return { error: SYMLINK_WRITE_ERROR };
   }
@@ -139,10 +150,10 @@ export default defineEventHandler(async (event) => {
   const rawRevision = getQuery(event).revision;
   const expectedRevision = Array.isArray(rawRevision) ? rawRevision[0] : rawRevision;
 
-  return withPoolLock(scope, briefId, async () => {
+  return withPoolLock(scope, slug, async () => {
     let stored;
     try {
-      stored = await readPool(scope, briefId);
+      stored = await readPool(scope, slug);
     } catch (error) {
       if (!(error instanceof InvalidCopyPoolError)) throw error;
       setResponseStatus(event, 422);

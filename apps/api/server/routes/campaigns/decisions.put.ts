@@ -6,6 +6,7 @@ import {
   type Verdict,
 } from "../../lib/decisions.js";
 import { DecisionConflictError, getBriefStore } from "../../lib/ports/index.js";
+import { CampaignNotFoundError, resolveCampaignRef } from "../../lib/ownership.js";
 import { reportRevision } from "../../lib/report.js";
 import { requestTenant } from "../../lib/tenant.js";
 
@@ -41,8 +42,18 @@ export default defineEventHandler(async (event) => {
     setResponseStatus(event, 400);
     return { error: problem };
   }
+  let slug: string;
+  try {
+    slug = await resolveCampaignRef(tenant, campaignId);
+  } catch (error) {
+    if (error instanceof CampaignNotFoundError) {
+      setResponseStatus(event, 409);
+      return { error: "This campaign has no run to review." };
+    }
+    throw error;
+  }
   const briefs = getBriefStore(tenant);
-  if (briefs.supportsTeams && (await briefs.campaignVisibility(campaignId)) === "hidden") {
+  if (briefs.supportsTeams && (await briefs.campaignVisibility(slug)) === "hidden") {
     setResponseStatus(event, 409);
     return { error: "This campaign has no run to review." };
   }
@@ -50,13 +61,13 @@ export default defineEventHandler(async (event) => {
   // the report it stays against: a report write retires under the same lock.
   // The lock is per process; across processes the store's own compare-and-swap
   // (one step in Postgres; D79 on files) refuses the loser.
-  return withDecisionLock(tenant, campaignId, async (store) => {
-    const run = await reportRevision(tenant, campaignId);
+  return withDecisionLock(tenant, slug, async (store) => {
+    const run = await reportRevision(tenant, slug);
     if (run === undefined) {
       setResponseStatus(event, 409);
       return { error: "This campaign has no run to review." };
     }
-    const current = await store.readDecisions(campaignId);
+    const current = await store.readDecisions(slug);
     if (current.revision !== expected) {
       setResponseStatus(event, 409);
       return { error: "These decisions changed in another tab.", revision: current.revision };
@@ -71,7 +82,7 @@ export default defineEventHandler(async (event) => {
     try {
       // The store checks the revision again in the write itself: another process's
       // save between this read and this write is a 409 too, not a silent overwrite.
-      const revision = await store.writeDecisions(campaignId, next, expected);
+      const revision = await store.writeDecisions(slug, next, expected);
       return { decisions: next, revision };
     } catch (error) {
       if (!(error instanceof DecisionConflictError)) throw error;

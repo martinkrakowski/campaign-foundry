@@ -21,7 +21,11 @@ import {
   withPoolLock,
   writePool,
 } from "../../../lib/pools.js";
-import { assertOwnedCampaign, CampaignNotFoundError } from "../../../lib/ownership.js";
+import {
+  assertOwnedCampaign,
+  CampaignNotFoundError,
+  resolveCampaignRef,
+} from "../../../lib/ownership.js";
 
 const DEFAULT_COUNT = 10;
 const MAX_COUNT = 25;
@@ -164,9 +168,20 @@ export default defineEventHandler(async (event) => {
   }
 
   if (brief === undefined) {
+    let slug: string;
     try {
-      const found = await assertOwnedCampaign(scope, briefId);
+      slug = await resolveCampaignRef(scope, briefId);
+    } catch (error) {
+      if (error instanceof CampaignNotFoundError) {
+        setResponseStatus(event, 404);
+        return { error: `Brief "${briefId}" not found.` };
+      }
+      throw error;
+    }
+    try {
+      const found = await assertOwnedCampaign(scope, slug);
       brief = found.brief;
+      briefId = slug;
     } catch (error) {
       if (error instanceof CampaignNotFoundError) {
         setResponseStatus(event, 404);

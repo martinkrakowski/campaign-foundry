@@ -1,7 +1,11 @@
 import { errorMessage } from "@campaignfoundry/shared";
 import { assertSafeId } from "../../lib/load-brief.js";
 import { ASSET_NAME_PATTERN, assetContentType } from "../../lib/asset-files.js";
-import { campaignKnown } from "../../lib/ownership.js";
+import {
+  CampaignNotFoundError,
+  campaignKnown,
+  resolveCampaignRef,
+} from "../../lib/ownership.js";
 import { getAssetStore, getBriefStore } from "../../lib/ports/index.js";
 
 import { requestTenant } from "../../lib/tenant.js";
@@ -41,17 +45,34 @@ export default defineEventHandler(async (event) => {
       setResponseStatus(event, 400);
       return { error: "Invalid asset name." };
     }
+  }
+
+  let slug: string;
+  try {
+    slug = await resolveCampaignRef(scope, briefId);
+  } catch (error) {
+    if (error instanceof CampaignNotFoundError) {
+      if (name !== undefined) {
+        setResponseStatus(event, 404);
+        return { error: `Asset "${name}" not found.` };
+      }
+      throw error;
+    }
+    throw error;
+  }
+
+  if (name !== undefined) {
     // D166 (PT-2c): a campaign hidden from this caller by team answers the same
     // "Asset ... not found" 404 as a missing asset, so the body never says which
     // applies. Only team visibility is checked here, not the listing: an unsaved
     // draft has no stored brief, and listing every asset just to read one lets an
     // unrelated file's disappearance turn a readable request into a 500.
     const briefs = getBriefStore(scope);
-    if (briefs.supportsTeams && (await briefs.campaignVisibility(briefId)) === "hidden") {
+    if (briefs.supportsTeams && (await briefs.campaignVisibility(slug)) === "hidden") {
       setResponseStatus(event, 404);
       return { error: `Asset "${name}" not found.` };
     }
-    const bytes = await getAssetStore(scope).readAsset(briefId, name);
+    const bytes = await getAssetStore(scope).readAsset(slug, name);
     if (!bytes) {
       setResponseStatus(event, 404);
       return { error: `Asset "${name}" not found.` };
@@ -62,13 +83,13 @@ export default defineEventHandler(async (event) => {
     return bytes;
   }
 
-  await campaignKnown(scope, briefId, "asset");
+  await campaignKnown(scope, slug, "asset");
 
   try {
-    const assets = await getAssetStore(scope).listAssets(briefId);
+    const assets = await getAssetStore(scope).listAssets(slug);
     return { assets };
   } catch (error) {
-    console.warn(`[assets] could not read assets for brief ${briefId}: ${errorMessage(error)}`);
+    console.warn(`[assets] could not read assets for brief ${slug}: ${errorMessage(error)}`);
     return { assets: [] };
   }
 });

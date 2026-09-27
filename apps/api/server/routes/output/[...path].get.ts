@@ -71,6 +71,17 @@ export default defineEventHandler(async (event) => {
   }
 
   const scope = requestTenant(event);
+  let resolvedPath = rawPath;
+  const campaignSegmentIndex = segments[0] === "packages" ? 1 : 0;
+  const campaignSegment = segments[campaignSegmentIndex];
+  if (campaignSegment) {
+    const resolved = await getBriefStore(scope).resolveCampaign(campaignSegment);
+    if (resolved) {
+      segments[campaignSegmentIndex] = resolved.slug;
+      resolvedPath = segments.join("/");
+    }
+  }
+
   if (candidateIds.length > 0) {
     const briefs = getBriefStore(scope);
     if (briefs.supportsTeams) {
@@ -83,7 +94,7 @@ export default defineEventHandler(async (event) => {
     }
   }
 
-  const lookup = await getOutputStore(scope).openOutput(rawPath);
+  const lookup = await getOutputStore(scope).openOutput(resolvedPath);
   if (!lookup.found) {
     if (lookup.reason === "invalid") {
       setResponseStatus(event, 400);

@@ -4,6 +4,7 @@ import {
   getOutputStore,
   type PackageFileEntry,
 } from "../../../../lib/ports/index.js";
+import { CampaignNotFoundError, resolveCampaignRef } from "../../../../lib/ownership.js";
 import { measure, storeZipStream, type ZipEntry } from "../store-zip.js";
 
 import { requestTenant } from "../../../../lib/tenant.js";
@@ -49,15 +50,25 @@ export default defineEventHandler(async (event) => {
   }
 
   const scope = requestTenant(event);
+  let slug: string;
+  try {
+    slug = await resolveCampaignRef(scope, campaignId);
+  } catch (error) {
+    if (error instanceof CampaignNotFoundError) {
+      setResponseStatus(event, 404);
+      return { error: "Not found" };
+    }
+    throw error;
+  }
   const briefs = getBriefStore(scope);
-  if (briefs.supportsTeams && (await briefs.campaignVisibility(campaignId)) === "hidden") {
+  if (briefs.supportsTeams && (await briefs.campaignVisibility(slug)) === "hidden") {
     setResponseStatus(event, 404);
     return { error: "Not found" };
   }
 
   let files: FileEntry[];
   try {
-    const entries = await getOutputStore(scope).listPackageFiles(campaignId, platformId);
+    const entries = await getOutputStore(scope).listPackageFiles(slug, platformId);
     if (entries === undefined) {
       setResponseStatus(event, 404);
       return { error: "Not found" };

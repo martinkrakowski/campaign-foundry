@@ -4,6 +4,7 @@ import {
   type PackageStorePort,
 } from "@campaignfoundry/Distribution";
 import { getCapabilities } from "../../lib/capabilities.js";
+import { CampaignNotFoundError, resolveCampaignRef } from "../../lib/ownership.js";
 import { getBriefStore, getOutputStore } from "../../lib/ports/index.js";
 import { storageRoots } from "../../lib/run-environment.js";
 import { isPersistedAsset, type PersistedAsset, readReport } from "../../lib/report.js";
@@ -92,13 +93,24 @@ export default defineEventHandler(async (event) => {
     return { error: error instanceof Error ? error.message : "Invalid package request" };
   }
 
+  let slug: string;
+  try {
+    slug = await resolveCampaignRef(scope, campaignId);
+  } catch (error) {
+    if (error instanceof CampaignNotFoundError) {
+      setResponseStatus(event, 404);
+      return { error: "Campaign report not found" };
+    }
+    throw error;
+  }
+
   const briefs = getBriefStore(scope);
-  if (briefs.supportsTeams && (await briefs.campaignVisibility(campaignId)) === "hidden") {
+  if (briefs.supportsTeams && (await briefs.campaignVisibility(slug)) === "hidden") {
     setResponseStatus(event, 404);
     return { error: "Campaign report not found" };
   }
 
-  const report = await readReport(scope, campaignId);
+  const report = await readReport(scope, slug);
   if (report === undefined) {
     setResponseStatus(event, 404);
     return { error: "Campaign report not found" };
@@ -111,7 +123,7 @@ export default defineEventHandler(async (event) => {
   }
 
   const outputStore = getOutputStore(scope);
-  const fsPackageStore = new FileSystemPackageStore(storageRoots(scope).outputRoot, campaignId);
+  const fsPackageStore = new FileSystemPackageStore(storageRoots(scope).outputRoot, slug);
   const packageStore: PackageStorePort = {
     async readAsset(relativePath: string): Promise<Uint8Array> {
       const lookup = await outputStore.openOutput(relativePath);
@@ -131,7 +143,7 @@ export default defineEventHandler(async (event) => {
   };
 
   const result = await new PackageForPlatformUseCase(packageStore).execute({
-    campaignId,
+    campaignId: slug,
     assets: parsed.assets,
     platforms,
     packagedAt: new Date().toISOString(),

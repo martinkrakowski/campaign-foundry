@@ -16,6 +16,7 @@ import {
   assertOwnedCampaign,
   assertSourceVisible,
   CampaignNotFoundError,
+  resolveCampaignRef,
 } from "../../../../lib/ownership.js";
 
 import { requestTenant } from "../../../../lib/tenant.js";
@@ -87,9 +88,20 @@ export default defineEventHandler(async (event) => {
     return { error: errorMessage(error) };
   }
 
+  let sourceSlug: string;
+  try {
+    sourceSlug = await resolveCampaignRef(scope, id);
+  } catch (error) {
+    if (error instanceof CampaignNotFoundError) {
+      setResponseStatus(event, 404);
+      return { error: `Brief "${id}" not found.` };
+    }
+    throw error;
+  }
+
   let source;
   try {
-    source = await assertOwnedCampaign(scope, id);
+    source = await assertOwnedCampaign(scope, sourceSlug);
   } catch (error) {
     if (error instanceof CampaignNotFoundError) {
       setResponseStatus(event, 404);
@@ -138,7 +150,7 @@ export default defineEventHandler(async (event) => {
       // the destination brief absent). createBrief is exclusive (wx); writing
       // the dest pool first left an orphan when the dest file existed but was
       // unparseable — findBriefById skips those, then wx turns into a 409.
-      const sourcePool = await readPool(scope, id);
+      const sourcePool = await readPool(scope, sourceSlug);
 
       // D166 item 2 (PT-2c, greptile thread U90U): every additional source id
       // — extracted from the ORIGINAL brief, before the primary source's own
@@ -150,15 +162,15 @@ export default defineEventHandler(async (event) => {
       // them — checking everything first, copying everything after, matches
       // briefs.post.ts's Save-as loop.
       const additionalSourceIds = extractSourceAssetBriefIds(brief, newId).filter(
-        (fromId) => fromId !== id,
+        (fromId) => fromId !== sourceSlug,
       );
       for (const fromId of additionalSourceIds) {
         await assertSourceVisible(scope, fromId);
       }
 
       // Copy assets from source brief to new brief, and any referenced brief-scoped assets
-      const sourceMap = await getAssetStore(scope).copyAssets(id, newId);
-      brief = rewriteAssetPaths(brief, id, newId, sourceMap);
+      const sourceMap = await getAssetStore(scope).copyAssets(sourceSlug, newId);
+      brief = rewriteAssetPaths(brief, sourceSlug, newId, sourceMap);
       for (const fromId of additionalSourceIds) {
         const addMap = await getAssetStore(scope).copyAssets(fromId, newId);
         brief = rewriteAssetPaths(brief, fromId, newId, addMap);
@@ -171,7 +183,7 @@ export default defineEventHandler(async (event) => {
       // could interleave. The source pool needs no lock: writePool renames atomically.
       await withPoolLock(scope, newId, async () => {
         if (sourcePool) {
-          await copyPool(scope, id, newId);
+          await copyPool(scope, sourceSlug, newId);
         } else {
           await deletePool(scope, newId);
         }

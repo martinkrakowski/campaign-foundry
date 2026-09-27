@@ -1,9 +1,10 @@
 import { errorMessage } from "@campaignfoundry/shared";
 import { assertSafeId } from "../../../lib/load-brief.js";
+import { CampaignNotFoundError, resolveCampaignRef } from "../../../lib/ownership.js";
 import { InvalidCopyPoolError, readPool } from "../../../lib/pools.js";
 import { getBriefStore } from "../../../lib/ports/index.js";
-
 import { requestTenant } from "../../../lib/tenant.js";
+
 /**
  * GET /campaigns/pools/:briefId — return the persisted copy pool with the
  * revision of the bytes it was read from, or 404. A hand-edited file that is
@@ -21,15 +22,26 @@ export default defineEventHandler(async (event) => {
   }
 
   const scope = requestTenant(event);
+  let slug: string;
+  try {
+    slug = await resolveCampaignRef(scope, briefId);
+  } catch (error) {
+    if (error instanceof CampaignNotFoundError) {
+      setResponseStatus(event, 404);
+      return { error: `Headline pool for brief "${briefId}" not found.` };
+    }
+    throw error;
+  }
+
   const briefs = getBriefStore(scope);
-  if (briefs.supportsTeams && (await briefs.campaignVisibility(briefId)) === "hidden") {
+  if (briefs.supportsTeams && (await briefs.campaignVisibility(slug)) === "hidden") {
     setResponseStatus(event, 404);
     return { error: `Headline pool for brief "${briefId}" not found.` };
   }
 
   let stored;
   try {
-    stored = await readPool(requestTenant(event), briefId);
+    stored = await readPool(scope, slug);
   } catch (error) {
     if (!(error instanceof InvalidCopyPoolError)) throw error;
     setResponseStatus(event, 422);
