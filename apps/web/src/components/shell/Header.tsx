@@ -303,6 +303,7 @@ export function MobileAuthSection({
   authError,
   onSwitchOrg,
   onSignOut,
+  onGoToSettings,
 }: {
   readonly email?: string;
   readonly organizations?: Array<{ id: string; name: string }> | null;
@@ -310,6 +311,8 @@ export function MobileAuthSection({
   readonly authError?: string | null;
   readonly onSwitchOrg: (orgId: string) => void;
   readonly onSignOut: () => void;
+  /** PT-7b3b item 4 — absent only from the file's own standalone-render test. */
+  readonly onGoToSettings?: () => void;
 }) {
   const hasMultipleOrgs = Boolean(organizations && organizations.length > 1);
 
@@ -345,13 +348,24 @@ export function MobileAuthSection({
       )}
       <div className="flex items-center justify-between text-xs">
         <span className="truncate font-mono text-text-secondary">{email}</span>
-        <button
-          type="button"
-          onClick={onSignOut}
-          className="rounded px-2 py-1 text-text-muted transition-colors hover:text-error"
-        >
-          Sign out
-        </button>
+        <div className="flex items-center gap-1">
+          {onGoToSettings && (
+            <button
+              type="button"
+              onClick={onGoToSettings}
+              className="rounded px-2 py-1 text-text-muted transition-colors hover:text-text-emphasis"
+            >
+              Settings
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={onSignOut}
+            className="rounded px-2 py-1 text-text-muted transition-colors hover:text-error"
+          >
+            Sign out
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -378,7 +392,7 @@ function useBetterAuthState() {
   // A reload (switch) or a navigation to /sign-in (sign-out) discards whatever the
   // operator hasn't saved, exactly like the tab links `handleTabClick` guards below —
   // so both gestures go through the same guard, never the API call directly.
-  const { guardedAction } = useGuardedNavigation();
+  const { guardedAction, guardedPush, isDirty } = useGuardedNavigation();
 
   const email = session?.data?.user?.email;
   const organizations = orgs?.data;
@@ -424,13 +438,48 @@ function useBetterAuthState() {
     guardedAction(() => void signOutNow());
   };
 
-  return { email, organizations, activeOrgId, authError, handleSwitchOrg, handleSignOut };
+  // PT-7b3b item 4 — the Settings nav entry. Same modified-click bypass as the
+  // desktop tabs' own `handleTabClick` (new tab / new window / download stays the
+  // browser's job); a plain click routes through `guardedPush` so unsaved edits get
+  // the same one confirm dialog every other guarded navigation here uses.
+  const handleSettingsClick = (e: React.MouseEvent): void => {
+    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+    if (isDirty) {
+      e.preventDefault();
+      guardedPush("/settings/providers");
+    }
+  };
+
+  // The mobile menu's Settings entry is a `<button>`, like "Sign out" beside it — not
+  // an `<a>`, so no modified-click bypass applies — and `guardedPush` alone is both
+  // the guard and the navigation.
+  const goToSettings = (): void => {
+    guardedPush("/settings/providers");
+  };
+
+  return {
+    email,
+    organizations,
+    activeOrgId,
+    authError,
+    handleSwitchOrg,
+    handleSignOut,
+    handleSettingsClick,
+    goToSettings,
+  };
 }
 
 /** Desktop-only: the org switcher (when there's more than one) and the user menu. */
 export function BetterAuthSection() {
-  const { email, organizations, activeOrgId, authError, handleSwitchOrg, handleSignOut } =
-    useBetterAuthState();
+  const {
+    email,
+    organizations,
+    activeOrgId,
+    authError,
+    handleSwitchOrg,
+    handleSignOut,
+    handleSettingsClick,
+  } = useBetterAuthState();
   const hasMultipleOrgs = Boolean(organizations && organizations.length > 1);
 
   return (
@@ -454,6 +503,15 @@ export function BetterAuthSection() {
           ))}
         </select>
       )}
+      {/* PT-7b3b item 4 — shown only here, inside the block Header already gates on
+          `capabilities?.auth?.mode === "better-auth"` (line ~164). */}
+      <Link
+        href="/settings/providers"
+        onClick={handleSettingsClick}
+        className="text-xs font-medium text-text-muted transition-colors hover:text-text-emphasis"
+      >
+        Settings
+      </Link>
       <UserMenu email={email} onSignOut={handleSignOut} />
     </div>
   );
@@ -461,8 +519,15 @@ export function BetterAuthSection() {
 
 /** The `authControls` Header hands `MobileMenu` under better-auth mode. */
 export function BetterAuthMobileControls() {
-  const { email, organizations, activeOrgId, authError, handleSwitchOrg, handleSignOut } =
-    useBetterAuthState();
+  const {
+    email,
+    organizations,
+    activeOrgId,
+    authError,
+    handleSwitchOrg,
+    handleSignOut,
+    goToSettings,
+  } = useBetterAuthState();
 
   return (
     <MobileAuthSection
@@ -472,6 +537,7 @@ export function BetterAuthMobileControls() {
       authError={authError}
       onSwitchOrg={handleSwitchOrg}
       onSignOut={handleSignOut}
+      onGoToSettings={goToSettings}
     />
   );
 }

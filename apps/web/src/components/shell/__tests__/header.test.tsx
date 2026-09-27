@@ -950,4 +950,123 @@ describe("Header — auth and organization switching (PT-1b2)", () => {
     }) as HTMLSelectElement;
     expect(select.value).toBe("fallback-org");
   });
+
+  test("the Settings nav entry is present under better-auth (desktop and mobile), absent under local", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(briefsApi, "getCapabilities").mockResolvedValue({
+      motion: true,
+      auth: { mode: "local", google: false },
+    });
+    renderWithRun(<Header />);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(screen.queryByRole("link", { name: "Settings" })).toBeNull();
+    await user.click(screen.getByLabelText("Open menu"));
+    const localDialog = await screen.findByRole("dialog", { name: "Menu" });
+    expect(within(localDialog).queryByRole("button", { name: "Settings" })).toBeNull();
+  });
+
+  test("under better-auth, the Settings link is present on desktop and in the mobile menu", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(briefsApi, "getCapabilities").mockResolvedValue({
+      motion: true,
+      auth: { mode: "better-auth", google: false },
+    });
+    vi.mocked(authClient.useSession).mockReturnValue({
+      data: { user: { email: "settings@example.com" } },
+      isPending: false,
+    } as never);
+
+    renderWithRun(<Header />);
+
+    const link = await screen.findByRole("link", { name: "Settings" });
+    expect(link.getAttribute("href")).toBe("/settings/providers");
+
+    await user.click(screen.getByLabelText("Open menu"));
+    const dialog = await screen.findByRole("dialog", { name: "Menu" });
+    expect(within(dialog).getByRole("button", { name: "Settings" })).toBeTruthy();
+  });
+
+  test("clicking Settings when clean does not prevent default (a plain link navigation)", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(briefsApi, "getCapabilities").mockResolvedValue({
+      motion: true,
+      auth: { mode: "better-auth", google: false },
+    });
+    vi.mocked(authClient.useSession).mockReturnValue({
+      data: { user: { email: "settings@example.com" } },
+      isPending: false,
+    } as never);
+
+    renderWithRun(<Header />);
+
+    await user.click(await screen.findByRole("link", { name: "Settings" }));
+    expect(screen.queryByRole("dialog", { name: "Unsaved edits" })).toBeNull();
+  });
+
+  test("a modified click on Settings is left to the browser even while dirty", async () => {
+    vi.spyOn(briefsApi, "getCapabilities").mockResolvedValue({
+      motion: true,
+      auth: { mode: "better-auth", google: false },
+    });
+    vi.mocked(authClient.useSession).mockReturnValue({
+      data: { user: { email: "settings@example.com" } },
+      isPending: false,
+    } as never);
+
+    renderDirty(<Header />);
+
+    const link = await screen.findByRole("link", { name: "Settings" });
+    fireEvent.click(link, { metaKey: true });
+    expect(screen.queryByRole("dialog", { name: "Unsaved edits" })).toBeNull();
+  });
+
+  test("clicking Settings while dirty asks for confirmation before navigating, same guard as the tabs", async () => {
+    const user = userEvent.setup();
+    nextMock().router.push.mockClear();
+    vi.spyOn(briefsApi, "getCapabilities").mockResolvedValue({
+      motion: true,
+      auth: { mode: "better-auth", google: false },
+    });
+    vi.mocked(authClient.useSession).mockReturnValue({
+      data: { user: { email: "settings@example.com" } },
+      isPending: false,
+    } as never);
+
+    renderDirty(<Header />);
+
+    const link = await screen.findByRole("link", { name: "Settings" });
+    await user.click(link);
+
+    const dialog = screen.getByRole("dialog", { name: "Unsaved edits" });
+    expect(dialog).toBeTruthy();
+    expect(nextMock().router.push).not.toHaveBeenCalled();
+
+    await user.click(within(dialog).getByRole("button", { name: "Leave" }));
+    expect(nextMock().router.push).toHaveBeenCalledWith("/settings/providers");
+  });
+
+  test("clicking Settings in the mobile menu while dirty asks for confirmation, same guard as sign-out", async () => {
+    const user = userEvent.setup();
+    nextMock().router.push.mockClear();
+    vi.spyOn(briefsApi, "getCapabilities").mockResolvedValue({
+      motion: true,
+      auth: { mode: "better-auth", google: false },
+    });
+    vi.mocked(authClient.useSession).mockReturnValue({
+      data: { user: { email: "settings@example.com" } },
+      isPending: false,
+    } as never);
+
+    renderDirty(<Header />);
+
+    await user.click(screen.getByLabelText("Open menu"));
+    const dialog = await screen.findByRole("dialog", { name: "Menu" });
+    await user.click(within(dialog).getByRole("button", { name: "Settings" }));
+
+    expect(screen.getByRole("dialog", { name: "Unsaved edits" })).toBeTruthy();
+    expect(nextMock().router.push).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Leave" }));
+    await waitFor(() => expect(nextMock().router.push).toHaveBeenCalledWith("/settings/providers"));
+  });
 });
