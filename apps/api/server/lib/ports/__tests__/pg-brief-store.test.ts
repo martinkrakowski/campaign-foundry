@@ -303,10 +303,20 @@ describe("PgBriefStore (PT-3d, D168, D169)", () => {
   );
 
   test("reading an existing campaign with a reserved id does not crash", async () => {
-    await db.query("insert into campaign (org_id, slug) values ($1, $2)", ["local", "cache"]);
+    const { rows } = await db.query<{ id: string }>(
+      "insert into campaign (org_id, slug) values ($1, $2) returning id",
+      ["local", "cache"],
+    );
+    await db.query(
+      `insert into brief_version (campaign_id, version, body, revision, actor)
+       values ($1, 1, $2, $3, $4)`,
+      [rows[0]!.id, JSON.stringify(brief("cache")), "deadbeef", "local"],
+    );
+
     expect(await store.exists("cache")).toBe(true);
     expect(await store.findBriefFileById("cache")).toBe("cache.yaml");
     expect(await store.findBriefFile("cache")).toBe("cache.yaml");
+    expect(await store.getRevision("cache")).toBe("deadbeef");
     expect(await store.campaignVisibility("cache")).toBe("visible");
   });
 });

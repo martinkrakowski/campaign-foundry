@@ -1,4 +1,8 @@
-import { SAFE_ID_PATTERN, type CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
+import {
+  SAFE_ID_PATTERN,
+  isReservedCampaignId,
+  type CampaignBrief,
+} from "@campaignfoundry/CampaignOrchestration";
 import { dumpBrief, errorMessage } from "@campaignfoundry/shared";
 import { BRIEF_SOURCE_EXTS, hashBytes, isErrno } from "../brief-files.js";
 import type { SqlClient, SqlQuery } from "../db/sql-client.js";
@@ -55,6 +59,9 @@ function forbiddenTeam(teamId: string): Error {
 function assertSafeSlug(id: string): void {
   if (!SAFE_ID_PATTERN.test(id)) {
     throw new Error(`Brief id ${JSON.stringify(id)} is not a safe id.`);
+  }
+  if (isReservedCampaignId(id)) {
+    throw new Error(`"${id}" is reserved; choose another campaign id.`);
   }
 }
 
