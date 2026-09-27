@@ -3,12 +3,22 @@ import type { ParseBriefOptions } from "../load-brief.js";
 
 /**
  * A brief as persisted in storage with its metadata.
+ * `campaignId` is the campaign surrogate uuid (Postgres) or slug (filesystem, D179).
  * `file` identifies the stored object/key; `revision` is its SHA-256 content digest.
  */
 export interface StoredBrief {
+  readonly campaignId: string;
   readonly file: string;
   readonly brief: CampaignBrief;
   readonly revision: string;
+}
+
+/**
+ * A campaign reference resolved to its immutable surrogate id and slug (D178, D179).
+ */
+export interface ResolvedCampaign {
+  readonly campaignId: string;
+  readonly slug: string;
 }
 
 /**
@@ -135,4 +145,11 @@ export interface BriefStorePort {
    * Execute a critical section with per-brief concurrency locking.
    */
   withBriefLock<T>(briefId: string, fn: () => Promise<T>): Promise<T>;
+
+  /**
+   * Resolve a campaign reference (canonical uuid OR slug) within the caller's scope (D178, D179).
+   * If `ref` matches a canonical uuid shape, resolves by id first, then falls back to slug.
+   * Answers `{ campaignId, slug }` or `undefined` if absent or hidden by team.
+   */
+  resolveCampaign(ref: string): Promise<ResolvedCampaign | undefined>;
 }

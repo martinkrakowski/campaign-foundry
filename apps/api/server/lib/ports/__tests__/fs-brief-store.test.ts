@@ -450,10 +450,10 @@ describe("FsBriefStore", () => {
     test("resolveCampaign answers { campaignId, slug } for existing campaign and undefined for missing", async () => {
       await store.createBrief(minimalBrief);
 
-      const resolved = await (store as any).resolveCampaign("test-camp");
+      const resolved = await store.resolveCampaign("test-camp");
       expect(resolved).toEqual({ campaignId: "test-camp", slug: "test-camp" });
 
-      const missing = await (store as any).resolveCampaign("non-existent");
+      const missing = await store.resolveCampaign("non-existent");
       expect(missing).toBeUndefined();
     });
   });
