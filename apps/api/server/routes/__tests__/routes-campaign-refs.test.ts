@@ -6,11 +6,12 @@ import {
   DEFAULT_CAMPAIGN_TYPE,
   templateFromCanonical,
   type CampaignBrief,
+  type CopyGeneratorPort,
   PipelineExecutionLog,
 } from "@campaignfoundry/CampaignOrchestration";
 import { writeReport } from "../../lib/report.js";
 import { writePool } from "../../lib/pools.js";
-import { getAssetStore, getBriefStore, getJobStore } from "../../lib/ports/index.js";
+import { getBriefStore, getJobStore } from "../../lib/ports/index.js";
 import * as pipeline from "../../lib/pipeline.js";
 import resultGetHandler from "../campaigns/result.get.js";
 import decisionsGetHandler from "../campaigns/decisions.get.js";
@@ -242,6 +243,8 @@ describe("PT-5b1: routes take campaign refs (D178)", () => {
         // Enqueue a job
         const jobStore = getJobStore(LOCAL_TENANT);
         const job = await jobStore.enqueueJob(slug);
+        expect(job.acquired).toBe(true);
+        if (!job.acquired) throw new Error("Expected job to be acquired");
 
         const resSlug = await call(new Request(`http://x/campaigns/jobs?campaignId=${slug}`));
         const resUuid = await call(new Request(`http://x/campaigns/jobs?campaignId=${uuid}`));
@@ -465,11 +468,11 @@ describe("PT-5b1: routes take campaign refs (D178)", () => {
         const uuid = stored.campaignId!;
         const slug = stored.brief.id;
 
-        const fakeGenerator = {
+        const fakeGenerator: CopyGeneratorPort = {
           model: "mock-model",
           suggestHeadlines: vi.fn().mockResolvedValue(["Headline One", "Headline Two"]),
         };
-        vi.spyOn(pipeline, "copyGenerator").mockReturnValue(fakeGenerator as any);
+        vi.spyOn(pipeline, "copyGenerator").mockReturnValue(fakeGenerator);
 
         const call = mountTenantRoute(poolsCopyHandler, {
           method: "POST",
