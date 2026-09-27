@@ -10,7 +10,7 @@ import {
 } from "@campaignfoundry/CampaignOrchestration";
 import { err } from "@campaignfoundry/shared";
 import { setCapabilities } from "../../lib/capabilities.js";
-import { resetJobs } from "../../lib/jobs.js";
+import { createJob, resetJobs } from "../../lib/jobs.js";
 import { writePool } from "../../lib/pools.js";
 import { writeReport } from "../../lib/report.js";
 import { PgBriefStore } from "../../lib/ports/pg-brief-store.js";
@@ -23,6 +23,7 @@ import outputGetHandler from "../output/[...path].get.js";
 import decisionsPutHandler from "../campaigns/decisions.put.js";
 import generatePostHandler from "../campaigns/generate.post.js";
 import jobGetHandler from "../campaigns/jobs/[id].get.js";
+import jobsIndexHandler from "../campaigns/jobs/index.get.js";
 import assetsPostHandler from "../campaigns/assets.post.js";
 import { mountTenantRoute, setupPgHarness, type PgHarness } from "./tenant-harness.js";
 
@@ -395,5 +396,25 @@ describe("PT-2d: team gates on routes (D166)", () => {
       }),
     );
     expect(resT1.status).toBe(201);
+  });
+
+  test("GET /campaigns/jobs?campaignId= answers 404 for team-B, 200 for team-1", async () => {
+    const jobId = await createJob(t1Member, "t1-camp");
+
+    const callTB = mountTenantRoute(jobsIndexHandler, {
+      path: "/campaigns/jobs",
+      tenant: tBMember,
+    });
+    const resTB = await callTB(new Request("http://x/campaigns/jobs?campaignId=t1-camp"));
+    expect(resTB.status).toBe(404);
+    expect(await resTB.json()).toEqual({ error: "No running job for campaign" });
+
+    const callT1 = mountTenantRoute(jobsIndexHandler, {
+      path: "/campaigns/jobs",
+      tenant: t1Member,
+    });
+    const resT1 = await callT1(new Request("http://x/campaigns/jobs?campaignId=t1-camp"));
+    expect(resT1.status).toBe(200);
+    expect(await resT1.json()).toEqual({ jobId });
   });
 });
