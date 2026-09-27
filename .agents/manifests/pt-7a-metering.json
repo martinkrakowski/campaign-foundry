@@ -4,9 +4,9 @@
   "mutations": [
     {
       "file": "apps/api/server/routes/campaigns/generate.post.ts",
-      "before": "  if (quota !== null && (await usage.countThisMonth(env.tenant.orgId, new Date())) >= quota) {",
-      "after": "  if (quota !== null && (await usage.countThisMonth(env.tenant.orgId, new Date())) > quota) {",
-      "because": "off-by-one on the quota comparison would admit a run exactly at quota instead of refusing it (D175)",
+      "before": "  if (\n    !hasOrgKey &&\n    quota !== null &&\n    (await usage.countThisMonth(env.tenant.orgId, new Date())) >= quota\n  ) {",
+      "after": "  if (\n    !hasOrgKey &&\n    quota !== null &&\n    (await usage.countThisMonth(env.tenant.orgId, new Date())) > quota\n  ) {",
+      "because": "off-by-one on the quota comparison would admit a run exactly at quota instead of refusing it (D175). Re-anchored 2026-09-26 by PT-7b3a: active org keys exempt an org from quota checks.",
       "command": [
         "yarn",
         "vitest",
