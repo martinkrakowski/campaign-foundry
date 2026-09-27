@@ -88,15 +88,22 @@ export default defineEventHandler(async (event) => {
     return { error: errorMessage(error) };
   }
 
-  let sourceSlug: string;
-  try {
-    sourceSlug = await resolveCampaignRef(scope, id);
-  } catch (error) {
-    if (error instanceof CampaignNotFoundError) {
-      setResponseStatus(event, 404);
-      return { error: `Brief "${id}" not found.` };
+  // Resolve a uuid source to its slug on a backend that has one (D178). On fs
+  // the id IS the slug (D179) and findBriefById below matches by slug only —
+  // skipping this call there avoids scanning the whole brief directory twice
+  // for the same source (once here, once in assertOwnedCampaign below).
+  const briefs = getBriefStore(scope);
+  let sourceSlug = id;
+  if (briefs.supportsTeams) {
+    try {
+      sourceSlug = await resolveCampaignRef(scope, id);
+    } catch (error) {
+      if (error instanceof CampaignNotFoundError) {
+        setResponseStatus(event, 404);
+        return { error: `Brief "${id}" not found.` };
+      }
+      throw error;
     }
-    throw error;
   }
 
   let source;

@@ -9,6 +9,7 @@ import { errorMessage } from "@campaignfoundry/shared";
 import { BrandComplianceChecker } from "@campaignfoundry/GovernanceAndCompliance";
 import { isErrno, SYMLINK_WRITE_ERROR } from "../../../lib/brief-files.js";
 import { assertSafeId, parseBrief } from "../../../lib/load-brief.js";
+import { getBriefStore } from "../../../lib/ports/index.js";
 import { QuotaExceededError } from "../../../lib/metering.js";
 import { copyGenerator } from "../../../lib/pipeline.js";
 import { runEnvironment } from "../../../lib/run-environment.js";
@@ -168,15 +169,22 @@ export default defineEventHandler(async (event) => {
   }
 
   if (brief === undefined) {
-    let slug: string;
-    try {
-      slug = await resolveCampaignRef(scope, briefId);
-    } catch (error) {
-      if (error instanceof CampaignNotFoundError) {
-        setResponseStatus(event, 404);
-        return { error: `Brief "${briefId}" not found.` };
+    // Resolve a uuid ref to its slug on a backend that has one (D178). On fs
+    // the id IS the slug (D179) and findBriefById below matches by slug
+    // only — skipping this call there avoids scanning the whole brief
+    // directory twice for the same brief (once here, once just below).
+    const briefs = getBriefStore(scope);
+    let slug = briefId;
+    if (briefs.supportsTeams) {
+      try {
+        slug = await resolveCampaignRef(scope, briefId);
+      } catch (error) {
+        if (error instanceof CampaignNotFoundError) {
+          setResponseStatus(event, 404);
+          return { error: `Brief "${briefId}" not found.` };
+        }
+        throw error;
       }
-      throw error;
     }
     try {
       const found = await assertOwnedCampaign(scope, slug);

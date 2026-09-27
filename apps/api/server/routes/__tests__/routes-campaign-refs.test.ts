@@ -12,6 +12,8 @@ import {
 import { writeReport } from "../../lib/report.js";
 import { writePool } from "../../lib/pools.js";
 import { getBriefStore, getJobStore } from "../../lib/ports/index.js";
+import { FsBriefStore } from "../../lib/ports/fs-brief-store.js";
+import type { TenantContext } from "../../lib/tenant.js";
 import * as pipeline from "../../lib/pipeline.js";
 import resultGetHandler from "../campaigns/result.get.js";
 import decisionsGetHandler from "../campaigns/decisions.get.js";
@@ -565,6 +567,40 @@ describe("PT-5b1: routes take campaign refs (D178)", () => {
         await harness.cleanup();
       }
     });
+
+    test("scans the brief directory once for the source on fs (no separate resolve lookup)", async () => {
+      const harness = setupFsHarness();
+      try {
+        await getBriefStore(LOCAL_TENANT).createBrief(makeBrief("camp-copy-fs-scan"));
+
+        const fakeGenerator: CopyGeneratorPort = {
+          model: "mock-model",
+          suggestHeadlines: vi.fn().mockResolvedValue(["Headline One"]),
+        };
+        vi.spyOn(pipeline, "copyGenerator").mockReturnValue(fakeGenerator);
+        const findSpy = vi.spyOn(FsBriefStore.prototype, "findBriefById");
+
+        const call = mountTenantRoute(poolsCopyHandler, {
+          method: "POST",
+          path: "/campaigns/pools/copy",
+          tenant: LOCAL_TENANT,
+        });
+        const res = await call(
+          new Request("http://x/campaigns/pools/copy", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ briefId: "camp-copy-fs-scan", count: 1 }),
+          }),
+        );
+        expect(res.status).toBe(201);
+        // On fs the id IS the slug (D179): resolving the ref and then loading
+        // its content must not scan the brief directory twice for the same id.
+        expect(findSpy.mock.calls.filter(([id]) => id === "camp-copy-fs-scan")).toHaveLength(1);
+      } finally {
+        vi.restoreAllMocks();
+        harness.cleanup();
+      }
+    });
   });
 
   // (9) PUT /campaigns/briefs/:id
@@ -752,6 +788,36 @@ describe("PT-5b1: routes take campaign refs (D178)", () => {
         await harness.cleanup();
       }
     });
+
+    test("scans the brief directory once for the source on fs (no separate resolve lookup)", async () => {
+      const harness = setupFsHarness();
+      try {
+        await getBriefStore(LOCAL_TENANT).createBrief(makeBrief("camp-dup-fs-scan"));
+        const findSpy = vi.spyOn(FsBriefStore.prototype, "findBriefById");
+
+        const call = mountTenantRoute(briefDuplicateHandler, {
+          method: "POST",
+          path: "/campaigns/briefs/:id/duplicate",
+          tenant: LOCAL_TENANT,
+        });
+        const res = await call(
+          new Request("http://x/campaigns/briefs/camp-dup-fs-scan/duplicate", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ newId: "camp-dup-fs-scan-copy" }),
+          }),
+        );
+        expect(res.status).toBe(201);
+        // On fs the id IS the slug (D179): resolving the source ref and then
+        // loading its content must not scan the brief directory twice for the
+        // same source id. (A separate call checks the NEW id's own visibility
+        // and is unaffected by this.)
+        expect(findSpy.mock.calls.filter(([id]) => id === "camp-dup-fs-scan")).toHaveLength(1);
+      } finally {
+        vi.restoreAllMocks();
+        harness.cleanup();
+      }
+    });
   });
 
   // (11) GET and POST /campaigns/assets
@@ -917,6 +983,89 @@ describe("PT-5b1: routes take campaign refs (D178)", () => {
         expect(await resPkgUnknown.json()).toEqual({ error: "Not found" });
       } finally {
         await harness.cleanup();
+      }
+    });
+
+    test("checks visibility on the resolved slug, not the raw segment (uuid/slug collision)", async () => {
+      const harness = await setupPgHarness();
+      try {
+        await harness.db.query(
+          `insert into team (id, name, "memberCount", org_id, created_at) values ($1, $2, 0, $3, now())`,
+          ["t-hidden", "Hidden Team", "local"],
+        );
+
+        // Visible campaign V: no team, so visible to every caller (D166 item 2).
+        const visible = await getBriefStore(LOCAL_TENANT).createBrief(
+          makeBrief("camp-collision-v"),
+        );
+        const visibleUuid = visible.campaignId!;
+        const visibleSlug = visible.brief.id;
+
+        // Hidden campaign H: its own SLUG is literally V's uuid, assigned to a
+        // team this test's caller does not belong to. campaignVisibility
+        // matches by slug, so checking it against the raw, unresolved uuid
+        // segment (rather than the slug it resolves to) would find H instead
+        // of V and wrongly hide V's own output.
+        const hidden = await getBriefStore(LOCAL_TENANT).createBrief(makeBrief(visibleUuid), {
+          teamId: "t-hidden",
+        });
+        const hiddenUuid = hidden.campaignId!;
+
+        const renderDir = join(harness.outputRoot, visibleSlug, "renders");
+        mkdirSync(renderDir, { recursive: true });
+        writeFileSync(join(renderDir, "hero.png"), PNG);
+
+        // A caller in neither team — H is hidden from it, V (team-less) is not.
+        const restricted: TenantContext = {
+          orgId: "local",
+          userId: "restricted",
+          roles: [],
+          teamIds: [],
+        };
+        const call = mountTenantRoute(outputGetHandler, {
+          path: "/output/**:path",
+          tenant: restricted,
+        });
+
+        // V's own uuid resolves to V's own slug for the visibility check, not
+        // to H just because H's slug happens to be that same uuid text.
+        const resVisible = await call(
+          new Request(`http://x/output/${visibleUuid}/renders/hero.png`),
+        );
+        expect(resVisible.status).toBe(200);
+        expect(Buffer.from(await resVisible.arrayBuffer())).toEqual(PNG);
+
+        // Reverse direction: H's own (real) uuid is still hidden -> 404.
+        const resHidden = await call(new Request(`http://x/output/${hiddenUuid}/renders/hero.png`));
+        expect(resHidden.status).toBe(404);
+        expect(await resHidden.json()).toEqual({ error: "Not found" });
+      } finally {
+        await harness.cleanup();
+      }
+    });
+
+    test("makes no brief-store lookup on fs (D179: the id is already the slug)", async () => {
+      const harness = setupFsHarness();
+      try {
+        await getBriefStore(LOCAL_TENANT).createBrief(makeBrief("camp-output-fs"));
+        const renderDir = join(harness.outputRoot, "camp-output-fs", "renders");
+        mkdirSync(renderDir, { recursive: true });
+        writeFileSync(join(renderDir, "hero.png"), PNG);
+
+        const resolveSpy = vi.spyOn(FsBriefStore.prototype, "resolveCampaign");
+        try {
+          const call = mountTenantRoute(outputGetHandler, {
+            path: "/output/**:path",
+            tenant: LOCAL_TENANT,
+          });
+          const res = await call(new Request("http://x/output/camp-output-fs/renders/hero.png"));
+          expect(res.status).toBe(200);
+          expect(resolveSpy).not.toHaveBeenCalled();
+        } finally {
+          resolveSpy.mockRestore();
+        }
+      } finally {
+        harness.cleanup();
       }
     });
   });
