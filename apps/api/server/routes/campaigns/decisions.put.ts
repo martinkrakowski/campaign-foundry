@@ -6,7 +6,6 @@ import {
   type Verdict,
 } from "../../lib/decisions.js";
 import { DecisionConflictError, getBriefStore } from "../../lib/ports/index.js";
-import { CampaignNotFoundError, resolveCampaignRef } from "../../lib/ownership.js";
 import { reportRevision } from "../../lib/report.js";
 import { requestTenant } from "../../lib/tenant.js";
 
@@ -42,17 +41,13 @@ export default defineEventHandler(async (event) => {
     setResponseStatus(event, 400);
     return { error: problem };
   }
-  let slug: string;
-  try {
-    slug = await resolveCampaignRef(tenant, campaignId);
-  } catch (error) {
-    if (error instanceof CampaignNotFoundError) {
-      setResponseStatus(event, 409);
-      return { error: "This campaign has no run to review." };
-    }
-    throw error;
-  }
   const briefs = getBriefStore(tenant);
+  // See result.get.ts: resolve a uuid to its slug, pass a slug through unchanged
+  // (an unsaved draft has no campaign row yet). A ref that is genuinely unknown
+  // still 409s below, the same as before campaign refs existed — reportRevision
+  // finds nothing stored under it either way.
+  const resolved = await briefs.resolveCampaign(campaignId);
+  const slug = resolved?.slug ?? campaignId;
   if (briefs.supportsTeams && (await briefs.campaignVisibility(slug)) === "hidden") {
     setResponseStatus(event, 409);
     return { error: "This campaign has no run to review." };

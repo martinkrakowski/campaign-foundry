@@ -1,6 +1,5 @@
 import { errorMessage } from "@campaignfoundry/shared";
 import { assertSafeId } from "../../../lib/load-brief.js";
-import { CampaignNotFoundError, resolveCampaignRef } from "../../../lib/ownership.js";
 import { InvalidCopyPoolError, readPool } from "../../../lib/pools.js";
 import { getBriefStore } from "../../../lib/ports/index.js";
 import { requestTenant } from "../../../lib/tenant.js";
@@ -22,18 +21,13 @@ export default defineEventHandler(async (event) => {
   }
 
   const scope = requestTenant(event);
-  let slug: string;
-  try {
-    slug = await resolveCampaignRef(scope, briefId);
-  } catch (error) {
-    if (error instanceof CampaignNotFoundError) {
-      setResponseStatus(event, 404);
-      return { error: `Headline pool for brief "${briefId}" not found.` };
-    }
-    throw error;
-  }
-
   const briefs = getBriefStore(scope);
+  // See result.get.ts: resolve a uuid to its slug, pass a slug through unchanged
+  // (an unsaved draft has no campaign row yet — a pool can be curated before a
+  // brief is saved, pools/copy.post.ts's inline-brief path); readPool below
+  // still answers undefined for a ref that is genuinely unknown either way.
+  const resolved = await briefs.resolveCampaign(briefId);
+  const slug = resolved?.slug ?? briefId;
   if (briefs.supportsTeams && (await briefs.campaignVisibility(slug)) === "hidden") {
     setResponseStatus(event, 404);
     return { error: `Headline pool for brief "${briefId}" not found.` };

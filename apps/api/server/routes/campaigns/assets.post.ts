@@ -9,10 +9,17 @@ import {
 } from "../../lib/asset-files.js";
 import { isExistsError } from "../../lib/brief-files.js";
 import { assertSafeId } from "../../lib/load-brief.js";
-import { CampaignNotFoundError, resolveCampaignRef } from "../../lib/ownership.js";
 import { getAssetStore, getBriefStore } from "../../lib/ports/index.js";
 
 import { requestTenant } from "../../lib/tenant.js";
+/**
+ * A client-chosen slug (an unsaved draft's id) never looks like this, so a ref
+ * shaped like one is a real campaign reference (D178) rather than a brand-new
+ * draft id — if it fails to resolve, the campaign genuinely does not exist,
+ * unlike a fresh slug (which this route has always accepted, creating the
+ * asset directory for a not-yet-saved brief).
+ */
+const CAMPAIGN_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /**
  * POST /campaigns/assets — store a PNG/JPEG/MP3/M4A under `assets/inputs/<briefId>/<name>`.
  *
@@ -74,18 +81,16 @@ export default defineEventHandler(async (event) => {
     return { error: "Asset must be a PNG or JPEG image." };
   }
 
-  let slug: string;
-  try {
-    slug = await resolveCampaignRef(scope, briefId);
-  } catch (error) {
-    if (error instanceof CampaignNotFoundError) {
-      setResponseStatus(event, 404);
-      return { error: `Campaign "${briefId}" not found.` };
-    }
-    throw error;
-  }
-
   const briefs = getBriefStore(scope);
+  const resolved = await briefs.resolveCampaign(briefId);
+  if (!resolved && CAMPAIGN_UUID_PATTERN.test(briefId)) {
+    setResponseStatus(event, 404);
+    return { error: `Campaign "${briefId}" not found.` };
+  }
+  // A slug that did not resolve passes through unchanged (D179 on fs; an
+  // unsaved draft has no campaign row yet, and this route has always let a
+  // caller create its asset directory ahead of the brief being saved).
+  const slug = resolved?.slug ?? briefId;
   if (briefs.supportsTeams && (await briefs.campaignVisibility(slug)) === "hidden") {
     setResponseStatus(event, 404);
     return { error: `Campaign "${briefId}" not found.` };

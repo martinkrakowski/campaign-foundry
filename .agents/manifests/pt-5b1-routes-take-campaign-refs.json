@@ -4,9 +4,9 @@
   "mutations": [
     {
       "file": "apps/api/server/routes/campaigns/result.get.ts",
-      "before": "  const scope = requestTenant(event);\n  const slug = await resolveCampaignRef(scope, campaignId);\n  await campaignKnown(scope, slug, \"report\");\n  const report = await readReport(scope, slug);\n  return report === undefined ? EMPTY : report;",
-      "after": "  const scope = requestTenant(event);\n  await campaignKnown(scope, campaignId, \"report\");\n  const report = await readReport(scope, campaignId);\n  return report === undefined ? EMPTY : report;",
-      "because": "without resolving the campaign ref to slug, GET /campaigns/result fails to find reports for campaigns addressed by uuid",
+      "before": "  const resolved = await getBriefStore(scope).resolveCampaign(campaignId);\n  const slug = resolved?.slug ?? campaignId;\n  await campaignKnown(scope, slug, \"report\");\n  const report = await readReport(scope, slug);",
+      "after": "  await campaignKnown(scope, campaignId, \"report\");\n  const report = await readReport(scope, campaignId);",
+      "because": "without resolving the campaign ref to slug (and passing an unresolved slug through unchanged), GET /campaigns/result fails to find reports for campaigns addressed by uuid",
       "command": [
         "yarn",
         "vitest",

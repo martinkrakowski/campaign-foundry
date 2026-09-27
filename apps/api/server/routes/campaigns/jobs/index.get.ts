@@ -1,6 +1,5 @@
 import { SAFE_ID_PATTERN } from "@campaignfoundry/CampaignOrchestration";
 import { getRunningJobId } from "../../../lib/jobs.js";
-import { CampaignNotFoundError, resolveCampaignRef } from "../../../lib/ownership.js";
 import { getBriefStore } from "../../../lib/ports/index.js";
 import { requestTenant } from "../../../lib/tenant.js";
 
@@ -16,17 +15,13 @@ export default defineEventHandler(async (event) => {
     return { error: "Invalid campaign id" };
   }
   const scope = requestTenant(event);
-  let slug: string;
-  try {
-    slug = await resolveCampaignRef(scope, campaignId);
-  } catch (error) {
-    if (error instanceof CampaignNotFoundError) {
-      setResponseStatus(event, 404);
-      return { error: "No running job for campaign" };
-    }
-    throw error;
-  }
   const briefs = getBriefStore(scope);
+  // See result.get.ts: resolve a uuid to its slug, pass a slug through unchanged
+  // (an unsaved draft has no campaign row yet). A ref that is genuinely unknown
+  // still 404s below — no job is ever running under a key nothing was ever
+  // enqueued with — the same as before campaign refs existed.
+  const resolved = await briefs.resolveCampaign(campaignId);
+  const slug = resolved?.slug ?? campaignId;
   if (briefs.supportsTeams && (await briefs.campaignVisibility(slug)) === "hidden") {
     setResponseStatus(event, 404);
     return { error: "No running job for campaign" };

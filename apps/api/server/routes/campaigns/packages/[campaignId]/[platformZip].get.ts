@@ -4,7 +4,6 @@ import {
   getOutputStore,
   type PackageFileEntry,
 } from "../../../../lib/ports/index.js";
-import { CampaignNotFoundError, resolveCampaignRef } from "../../../../lib/ownership.js";
 import { measure, storeZipStream, type ZipEntry } from "../store-zip.js";
 
 import { requestTenant } from "../../../../lib/tenant.js";
@@ -50,17 +49,12 @@ export default defineEventHandler(async (event) => {
   }
 
   const scope = requestTenant(event);
-  let slug: string;
-  try {
-    slug = await resolveCampaignRef(scope, campaignId);
-  } catch (error) {
-    if (error instanceof CampaignNotFoundError) {
-      setResponseStatus(event, 404);
-      return { error: "Not found" };
-    }
-    throw error;
-  }
   const briefs = getBriefStore(scope);
+  // See result.get.ts: resolve a uuid to its slug, pass a slug through unchanged
+  // (an unsaved draft has no campaign row yet); listPackageFiles still answers
+  // undefined for a ref that is genuinely unknown either way.
+  const resolved = await briefs.resolveCampaign(campaignId);
+  const slug = resolved?.slug ?? campaignId;
   if (briefs.supportsTeams && (await briefs.campaignVisibility(slug)) === "hidden") {
     setResponseStatus(event, 404);
     return { error: "Not found" };

@@ -4,7 +4,6 @@ import {
   type PackageStorePort,
 } from "@campaignfoundry/Distribution";
 import { getCapabilities } from "../../lib/capabilities.js";
-import { CampaignNotFoundError, resolveCampaignRef } from "../../lib/ownership.js";
 import { getBriefStore, getOutputStore } from "../../lib/ports/index.js";
 import { storageRoots } from "../../lib/run-environment.js";
 import { isPersistedAsset, type PersistedAsset, readReport } from "../../lib/report.js";
@@ -93,18 +92,13 @@ export default defineEventHandler(async (event) => {
     return { error: error instanceof Error ? error.message : "Invalid package request" };
   }
 
-  let slug: string;
-  try {
-    slug = await resolveCampaignRef(scope, campaignId);
-  } catch (error) {
-    if (error instanceof CampaignNotFoundError) {
-      setResponseStatus(event, 404);
-      return { error: "Campaign report not found" };
-    }
-    throw error;
-  }
-
   const briefs = getBriefStore(scope);
+  // See result.get.ts: resolve a uuid to its slug, pass a slug through unchanged
+  // (an unsaved draft has no campaign row yet — packaging an unsaved run's
+  // output is a supported flow); readReport below still answers undefined for
+  // a ref that is genuinely unknown either way.
+  const resolved = await briefs.resolveCampaign(campaignId);
+  const slug = resolved?.slug ?? campaignId;
   if (briefs.supportsTeams && (await briefs.campaignVisibility(slug)) === "hidden") {
     setResponseStatus(event, 404);
     return { error: "Campaign report not found" };

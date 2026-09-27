@@ -1,7 +1,7 @@
 import { errorMessage } from "@campaignfoundry/shared";
 import { assertSafeId } from "../../lib/load-brief.js";
 import { ASSET_NAME_PATTERN, assetContentType } from "../../lib/asset-files.js";
-import { CampaignNotFoundError, campaignKnown, resolveCampaignRef } from "../../lib/ownership.js";
+import { campaignKnown } from "../../lib/ownership.js";
 import { getAssetStore, getBriefStore } from "../../lib/ports/index.js";
 
 import { requestTenant } from "../../lib/tenant.js";
@@ -43,19 +43,12 @@ export default defineEventHandler(async (event) => {
     }
   }
 
-  let slug: string;
-  try {
-    slug = await resolveCampaignRef(scope, briefId);
-  } catch (error) {
-    if (error instanceof CampaignNotFoundError) {
-      if (name !== undefined) {
-        setResponseStatus(event, 404);
-        return { error: `Asset "${name}" not found.` };
-      }
-      throw error;
-    }
-    throw error;
-  }
+  // See result.get.ts: resolve a uuid to its slug, pass a slug through unchanged
+  // (an unsaved draft has no campaign row yet — assets are routinely uploaded
+  // before a brief is saved); the reads below already answer their own "not
+  // found" for a ref that is genuinely unknown either way.
+  const resolved = await getBriefStore(scope).resolveCampaign(briefId);
+  const slug = resolved?.slug ?? briefId;
 
   if (name !== undefined) {
     // D166 (PT-2c): a campaign hidden from this caller by team answers the same

@@ -1,6 +1,6 @@
 import { SAFE_ID_PATTERN } from "@campaignfoundry/CampaignOrchestration";
-import { campaignKnown, resolveCampaignRef } from "../../lib/ownership.js";
-import { getDecisionStore } from "../../lib/ports/index.js";
+import { campaignKnown } from "../../lib/ownership.js";
+import { getBriefStore, getDecisionStore } from "../../lib/ports/index.js";
 import { requestTenant } from "../../lib/tenant.js";
 
 /**
@@ -16,7 +16,11 @@ export default defineEventHandler(async (event) => {
     return { error: "Invalid campaign id" };
   }
   const scope = requestTenant(event);
-  const slug = await resolveCampaignRef(scope, campaignId);
+  // See result.get.ts: resolve a uuid to its slug, pass a slug through unchanged
+  // (an unsaved draft has no campaign row yet); campaignKnown still 404s a ref
+  // that is genuinely unknown either way.
+  const resolved = await getBriefStore(scope).resolveCampaign(campaignId);
+  const slug = resolved?.slug ?? campaignId;
   await campaignKnown(scope, slug, "report");
   return getDecisionStore(scope).readDecisions(slug);
 });
