@@ -4,9 +4,9 @@
   "mutations": [
     {
       "file": "apps/api/server/routes/campaigns/decisions.put.ts",
-      "before": "  const briefs = getBriefStore(tenant);\n  if (briefs.supportsTeams && (await briefs.campaignVisibility(campaignId)) === \"hidden\") {\n    setResponseStatus(event, 404);\n    return { error: `Campaign \"${campaignId}\" not found.` };\n  }",
+      "before": "  const briefs = getBriefStore(tenant);\n  if (briefs.supportsTeams && (await briefs.campaignVisibility(campaignId)) === \"hidden\") {\n    setResponseStatus(event, 409);\n    return { error: \"This campaign has no run to review.\" };\n  }",
       "after": "  // mutant: remove visibility check",
-      "because": "without the visibility check, PUT /campaigns/decisions updates decisions for a team-hidden campaign instead of answering 404",
+      "because": "without the visibility check, PUT /campaigns/decisions updates decisions for a team-hidden campaign instead of answering 409",
       "command": [
         "yarn",
         "vitest",
@@ -15,7 +15,7 @@
         "api",
         "apps/api/server/routes/__tests__/team-gates-on-routes.test.ts",
         "-t",
-        "PUT /campaigns/decisions answers 404 for team-B"
+        "PUT /campaigns/decisions answers 409 for team-B"
       ],
       "verdict": "caught"
     }

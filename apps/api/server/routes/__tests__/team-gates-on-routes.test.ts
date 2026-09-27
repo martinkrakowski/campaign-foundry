@@ -272,7 +272,7 @@ describe("PT-2d: team gates on routes (D166)", () => {
     await resPkgT1.arrayBuffer();
   });
 
-  test("PUT /campaigns/decisions answers 404 for team-B, 200 for team-1", async () => {
+  test("PUT /campaigns/decisions answers 409 for team-B, 200 for team-1", async () => {
     await writeReport(t1Member, makeReport("t1-camp"));
 
     const callTB = mountTenantRoute(decisionsPutHandler, {
@@ -291,8 +291,8 @@ describe("PT-2d: team gates on routes (D166)", () => {
         }),
       }),
     );
-    expect(resTB.status).toBe(404);
-    expect(await resTB.json()).toEqual({ error: 'Campaign "t1-camp" not found.' });
+    expect(resTB.status).toBe(409);
+    expect(await resTB.json()).toEqual({ error: "This campaign has no run to review." });
 
     const callT1 = mountTenantRoute(decisionsPutHandler, {
       method: "PUT",

@@ -43,8 +43,8 @@ export default defineEventHandler(async (event) => {
   }
   const briefs = getBriefStore(tenant);
   if (briefs.supportsTeams && (await briefs.campaignVisibility(campaignId)) === "hidden") {
-    setResponseStatus(event, 404);
-    return { error: `Campaign "${campaignId}" not found.` };
+    setResponseStatus(event, 409);
+    return { error: "This campaign has no run to review." };
   }
   // Under the campaign's decision lock, so the run a verdict is stamped with is
   // the report it stays against: a report write retires under the same lock.
