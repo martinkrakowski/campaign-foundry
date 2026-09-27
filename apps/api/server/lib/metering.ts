@@ -10,10 +10,7 @@ import type {
 } from "@campaignfoundry/CampaignOrchestration";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { errorMessage } from "@campaignfoundry/shared";
-import type { UsageStorePort } from "./ports/usage-store.port.js";
-
-/** Whose key paid for a generation. Always the platform's until PT-7b (BYOK). */
-const KEY_OWNER = "platform";
+import type { KeyOwner, UsageRecord, UsageStorePort } from "./ports/usage-store.port.js";
 
 /**
  * Thrown by a metered wrapper instead of calling the provider (PT-7a, D175, fix
@@ -78,6 +75,22 @@ async function releaseUsage(usage: UsageStorePort, reservationId: string): Promi
 }
 
 /**
+ * A usage-store failure must not fail a generation the provider already produced
+ * and the caller already paid for: the row is unrecoverable from here, so this
+ * logs enough to reconcile by hand (org, provider, model, units) and swallows
+ * the error.
+ */
+async function recordUsage(usage: UsageStorePort, record: UsageRecord): Promise<void> {
+  try {
+    await usage.record(record);
+  } catch (error) {
+    console.warn(
+      `[metering] could not record usage (org ${record.orgId}, provider ${record.provider}, model ${record.model}, units ${record.units}): ${errorMessage(error)}`,
+    );
+  }
+}
+
+/**
  * Meters one image provider (PT-7a, D175, H2; r2 concurrency under PT-7a2).
  * `pipeline.ts`'s `imageGenerator()` wraps the raw adapter it constructs —
  * `GeminiImageGenerator`, `OpenRouterImageGenerator`, `FireflyImageGenerator` —
@@ -93,15 +106,24 @@ async function releaseUsage(usage: UsageStorePort, reservationId: string): Promi
  * `QuotaExceededError` is thrown before any provider call. On success, the
  * reservation is settled to 'recorded'; on failure, cached result, or
  * fallback delegation, it is released in a finally block.
+ *
+ * BYOK exemption (PT-7b3a, D175): when `keyOwner` is `"org"`, reservation and
+ * quota checks are skipped entirely. An org-key generation is still recorded
+ * with `keyOwner = "org"`.
  */
 export class MeteredImageGenerator implements ImageGeneratorPort {
+  private readonly keyOwner: KeyOwner;
+
   constructor(
     private readonly inner: ImageGeneratorPort,
     private readonly usage: UsageStorePort,
     private readonly orgId: string,
     private readonly provider: BackgroundSource,
     private readonly model: string,
-  ) {}
+    keyOwner: KeyOwner = "platform",
+  ) {
+    this.keyOwner = keyOwner;
+  }
 
   async resolveBackground(
     product: Product,
@@ -109,6 +131,20 @@ export class MeteredImageGenerator implements ImageGeneratorPort {
     context: BackgroundContext,
     signal?: AbortSignal,
   ): Promise<BackgroundResult> {
+    if (this.keyOwner === "org") {
+      const result = await this.inner.resolveBackground(product, ratio, context, signal);
+      if (!result.cached && result.source === this.provider) {
+        await recordUsage(this.usage, {
+          orgId: this.orgId,
+          provider: this.provider,
+          model: this.model,
+          units: 1,
+          keyOwner: "org",
+        });
+      }
+      return result;
+    }
+
     const parentScope = reservationScope.getStore();
     let reservationId: string;
     let reservedBySelf = false;
@@ -142,7 +178,7 @@ export class MeteredImageGenerator implements ImageGeneratorPort {
           provider: this.provider,
           model: this.model,
           units: 1,
-          keyOwner: KEY_OWNER,
+          keyOwner: "platform",
         });
         settled = true;
       }
@@ -171,18 +207,35 @@ export class MeteredImageGenerator implements ImageGeneratorPort {
  * in a finally block on failure.
  */
 export class MeteredCopyGenerator implements CopyGeneratorPort {
+  private readonly keyOwner: KeyOwner;
+
   constructor(
     private readonly inner: CopyGeneratorPort,
     private readonly usage: UsageStorePort,
     private readonly orgId: string,
     private readonly provider: string,
-  ) {}
+    keyOwner: KeyOwner = "platform",
+  ) {
+    this.keyOwner = keyOwner;
+  }
 
   get model(): string {
     return this.inner.model;
   }
 
   async suggestHeadlines(input: CopyGeneratorInput): Promise<readonly string[]> {
+    if (this.keyOwner === "org") {
+      const headlines = await this.inner.suggestHeadlines(input);
+      await recordUsage(this.usage, {
+        orgId: this.orgId,
+        provider: this.provider,
+        model: this.inner.model,
+        units: headlines.length,
+        keyOwner: "org",
+      });
+      return headlines;
+    }
+
     const reservationId = await this.usage.reserve(this.orgId);
     if (reservationId === null) {
       throw new QuotaExceededError(this.orgId);
@@ -195,7 +248,7 @@ export class MeteredCopyGenerator implements CopyGeneratorPort {
         provider: this.provider,
         model: this.inner.model,
         units: headlines.length,
-        keyOwner: KEY_OWNER,
+        keyOwner: "platform",
       });
       settled = true;
       return headlines;

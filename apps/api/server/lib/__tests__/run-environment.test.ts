@@ -1,6 +1,6 @@
 import { describe, test, expect } from "vitest";
 import { join } from "node:path";
-import { runEnvironment, tenantOutputRoot } from "../run-environment.js";
+import { decodeFireflyPlaintext, runEnvironment, tenantOutputRoot } from "../run-environment.js";
 import { LOCAL_TENANT, type TenantContext } from "../tenant.js";
 
 const org = (orgId: string): TenantContext => ({ ...LOCAL_TENANT, orgId, userId: "u1" });
@@ -24,5 +24,23 @@ describe("tenantOutputRoot (PT-0c)", () => {
   test("runEnvironment resolves a tenant's own output root", () => {
     const local = runEnvironment(LOCAL_TENANT);
     expect(runEnvironment(org("acme")).outputRoot).toBe(join(local.outputRoot, "orgs", "acme"));
+  });
+
+  test("runEnvironment records default keyOwner as platform for all providers", () => {
+    const env = runEnvironment(LOCAL_TENANT);
+    expect(env.providers.keyOwners).toEqual({
+      gemini: "platform",
+      openrouter: "platform",
+      firefly: "platform",
+    });
+    expect(env.providers.keyOwner).toEqual(env.providers.keyOwners);
+  });
+
+  test("decodeFireflyPlaintext decodes clientId and clientSecret JSON", () => {
+    const json = JSON.stringify({ clientId: "id-123", clientSecret: "secret-456" });
+    expect(decodeFireflyPlaintext(json)).toEqual({
+      clientId: "id-123",
+      clientSecret: "secret-456",
+    });
   });
 });

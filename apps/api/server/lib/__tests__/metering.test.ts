@@ -497,6 +497,91 @@ describe("MeteredImageGenerator (PT-7a, D175)", () => {
       expect(usage.settled.map((s) => s.record.model)).toEqual(["imagen-1", "imagen-2"]);
     });
   });
+
+  describe("MeteredImageGenerator BYOK org keys (PT-7b3a, D175)", () => {
+    test("an org-key generation records with keyOwner: 'org' and skips reservation and quota even when org is at quota", async () => {
+      const usage = statefulUsage(2, 2); // at quota!
+      const inner: ImageGeneratorPort = {
+        resolveBackground: async () => ({ image: new Uint8Array([1]), source: "imagen" }),
+      };
+      const meter = new MeteredImageGenerator(
+        inner,
+        usage,
+        "acme",
+        "imagen",
+        "imagen-4.0-generate-001",
+        "org",
+      );
+      const result = await meter.resolveBackground(product, ratio(), context);
+      expect(result).toEqual({ image: new Uint8Array([1]), source: "imagen" });
+      expect(usage.records).toEqual([
+        {
+          orgId: "acme",
+          provider: "imagen",
+          model: "imagen-4.0-generate-001",
+          units: 1,
+          keyOwner: "org",
+        },
+      ]);
+    });
+
+    test("an org-key cached result records nothing", async () => {
+      const usage = fakeUsage();
+      const inner: ImageGeneratorPort = {
+        resolveBackground: async () => ({
+          image: new Uint8Array([1]),
+          source: "imagen",
+          cached: true,
+        }),
+      };
+      const meter = new MeteredImageGenerator(
+        inner,
+        usage,
+        "acme",
+        "imagen",
+        "imagen-4.0-generate-001",
+        "org",
+      );
+      await meter.resolveBackground(product, ratio(), context);
+      expect(usage.records).toEqual([]);
+    });
+
+    test("an org-key generation records nothing when work was done by a fallback provider", async () => {
+      const usage = fakeUsage();
+      const inner: ImageGeneratorPort = {
+        resolveBackground: async () => ({ image: new Uint8Array([1]), source: "imagen" }),
+      };
+      const meter = new MeteredImageGenerator(inner, usage, "acme", "firefly", "v3", "org");
+      const result = await meter.resolveBackground(product, ratio(), context);
+      expect(result.source).toBe("imagen");
+      expect(usage.records).toEqual([]);
+    });
+
+    test("an org-key usage-store record failure still returns result and warns", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      const usage = fakeUsage();
+      usage.record = async () => {
+        throw new Error("db failure");
+      };
+      const inner: ImageGeneratorPort = {
+        resolveBackground: async () => ({ image: new Uint8Array([1]), source: "imagen" }),
+      };
+      const meter = new MeteredImageGenerator(
+        inner,
+        usage,
+        "acme",
+        "imagen",
+        "imagen-4.0-generate-001",
+        "org",
+      );
+      const result = await meter.resolveBackground(product, ratio(), context);
+      expect(result).toEqual({ image: new Uint8Array([1]), source: "imagen" });
+      expect(warn).toHaveBeenCalledOnce();
+      expect(warn.mock.calls[0]![0]).toContain("could not record usage");
+      expect(warn.mock.calls[0]![0]).toContain("db failure");
+      warn.mockRestore();
+    });
+  });
 });
 
 describe("MeteredCopyGenerator (PT-7a, D175)", () => {
@@ -575,5 +660,52 @@ describe("MeteredCopyGenerator (PT-7a, D175)", () => {
     expect(usage.reservations).toHaveLength(1);
     expect(usage.released).toEqual([usage.reservations[0]]);
     expect(usage.settled).toHaveLength(0);
+  });
+
+  describe("BYOK org-key metering (PT-7b3a, D175)", () => {
+    test("records with keyOwner: 'org' and skips reservation and quota even when org is at quota", async () => {
+      const usage = statefulUsage(1, 1); // at quota!
+      const inner: CopyGeneratorPort = {
+        model: "openai/gpt-4o-mini",
+        suggestHeadlines: async () => ["Headline 1", "Headline 2"],
+      };
+      const meter = new MeteredCopyGenerator(inner, usage, "acme", "openrouter", "org");
+      const headlines = await meter.suggestHeadlines({
+        brief: {} as CopyGeneratorInput["brief"],
+        count: 2,
+      });
+      expect(headlines).toEqual(["Headline 1", "Headline 2"]);
+      expect(usage.records).toEqual([
+        {
+          orgId: "acme",
+          provider: "openrouter",
+          model: "openai/gpt-4o-mini",
+          units: 2,
+          keyOwner: "org",
+        },
+      ]);
+    });
+
+    test("a usage record failure still returns headlines and warns", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      const usage = fakeUsage();
+      usage.record = async () => {
+        throw new Error("db disk full");
+      };
+      const inner: CopyGeneratorPort = {
+        model: "openai/gpt-4o-mini",
+        suggestHeadlines: async () => ["Headline 1"],
+      };
+      const meter = new MeteredCopyGenerator(inner, usage, "acme", "openrouter", "org");
+      const headlines = await meter.suggestHeadlines({
+        brief: {} as CopyGeneratorInput["brief"],
+        count: 1,
+      });
+      expect(headlines).toEqual(["Headline 1"]);
+      expect(warn).toHaveBeenCalledOnce();
+      expect(warn.mock.calls[0]![0]).toContain("could not record usage");
+      expect(warn.mock.calls[0]![0]).toContain("db disk full");
+      warn.mockRestore();
+    });
   });
 });

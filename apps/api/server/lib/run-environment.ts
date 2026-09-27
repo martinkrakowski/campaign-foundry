@@ -16,6 +16,13 @@ import { LOCAL_TENANT, type TenantContext } from "./tenant.js";
  * resolving `OUTPUT_DIR` again after its test had moved on).
  */
 
+/** Whose credentials each provider uses (PT-7b3a, D175). */
+export type ProviderKeyOwners = {
+  readonly gemini: "org" | "platform";
+  readonly openrouter: "org" | "platform";
+  readonly firefly: "org" | "platform";
+};
+
 /** Provider credentials and model choices. Absent keys disable that provider. */
 export interface ProviderSettings {
   readonly geminiKey?: string;
@@ -25,6 +32,9 @@ export interface ProviderSettings {
   readonly imagenModel?: string;
   readonly openRouterImageModel?: string;
   readonly openRouterCopyModel?: string;
+  /** Whose key each provider uses (PT-7b3a, D175). Defaults to platform. */
+  readonly keyOwners?: ProviderKeyOwners;
+  readonly keyOwner?: ProviderKeyOwners;
 }
 
 export interface RunEnvironment {
@@ -64,6 +74,11 @@ export function messageFont(): string {
 export function providerSettings(): ProviderSettings {
   loadEnv();
   const env = process.env;
+  const keyOwners: ProviderKeyOwners = {
+    gemini: "platform",
+    openrouter: "platform",
+    firefly: "platform",
+  };
   return {
     geminiKey: env.GEMINI_API_KEY ?? env.GOOGLE_API_KEY,
     openRouterKey: env.OPENROUTER_API_KEY,
@@ -72,7 +87,17 @@ export function providerSettings(): ProviderSettings {
     imagenModel: env.IMAGEN_MODEL,
     openRouterImageModel: env.OPENROUTER_IMAGE_MODEL,
     openRouterCopyModel: env.OPENROUTER_COPY_MODEL,
+    keyOwners,
+    keyOwner: keyOwners,
   };
+}
+
+/** Decode Firefly client id and secret from plaintext JSON string (PT-7b3a). */
+export function decodeFireflyPlaintext(plaintext: string): {
+  clientId: string;
+  clientSecret: string;
+} {
+  return JSON.parse(plaintext) as { clientId: string; clientSecret: string };
 }
 
 /**
