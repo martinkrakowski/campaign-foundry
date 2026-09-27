@@ -142,7 +142,9 @@ export default defineEventHandler(async (event) => {
 
   if (source === undefined) {
     try {
-      const created = await withDerivedSlug(name, (slug) => store.createCampaign(slug, { teamId }));
+      const created = await withDerivedSlug(name, (slug) =>
+        store.withBriefLock(slug, () => store.createCampaign(slug, { teamId })),
+      );
       setResponseStatus(event, 201);
       return { campaignId: created.campaignId, slug: created.slug };
     } catch (error) {
