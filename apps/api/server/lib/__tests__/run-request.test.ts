@@ -10,7 +10,7 @@ import {
 } from "@campaignfoundry/CampaignOrchestration";
 import { LOCAL_TENANT, type TenantContext } from "../tenant.js";
 import { enqueueJob, getJob, resetJobs, startQueuedJob } from "../jobs.js";
-import { executeRunRequest, type RunRequest } from "../run-request.js";
+import { executeRunRequest, overlayOrgKeys, type RunRequest } from "../run-request.js";
 import { resetProviderKeyStore, setProviderKeyStore } from "../ports/index.js";
 import type { Provider, ProviderKeyPort, ProviderKeySummary } from "../ports/provider-key.port.js";
 import { setCapabilities } from "../capabilities.js";
@@ -383,5 +383,30 @@ describe("executeRunRequest org provider keys (PT-7b3a, D175)", () => {
     ].join(" ");
     expect(allLogged).not.toContain(orgKey);
     expect(allLogged).not.toContain("platform-gemini-secret-key-9999");
+  });
+
+  test("corrupt Firefly plaintext falls back to platform Firefly credentials", async () => {
+    setProviderKeyStore(fakeProviderKeyStore({ firefly: "invalid-not-json" }));
+    const baseEnv = runEnvironment(LOCAL_TENANT);
+    const env = await overlayOrgKeys(baseEnv);
+    expect(env.providers.fireflyClientId).toBe(baseEnv.providers.fireflyClientId);
+    expect(env.providers.keyOwners?.firefly).toBe("platform");
+  });
+
+  test("defaults keyOwners to platform when baseEnv has keyOwners: undefined", async () => {
+    setProviderKeyStore(fakeProviderKeyStore({}));
+    const baseEnv: RunEnvironment = {
+      ...runEnvironment(LOCAL_TENANT),
+      providers: {
+        ...runEnvironment(LOCAL_TENANT).providers,
+        keyOwners: undefined,
+      },
+    };
+    const env = await overlayOrgKeys(baseEnv);
+    expect(env.providers.keyOwners).toEqual({
+      gemini: "platform",
+      openrouter: "platform",
+      firefly: "platform",
+    });
   });
 });

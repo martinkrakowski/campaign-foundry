@@ -586,6 +586,17 @@ describe("pipeline composition root", () => {
     expect(fireflyPipeline).toBeDefined();
     const openRouterPipeline = buildPipeline(env, "x-ai/grok-imagine-image-quality");
     expect(openRouterPipeline).toBeDefined();
+
+    const envWithoutOwners: RunEnvironment = {
+      ...localEnv(),
+      providers: {
+        openRouterKey: "openrouter-k",
+        keyOwners: undefined,
+      },
+    };
+    const copyDefault = copyGenerator(envWithoutOwners);
+    expect(copyDefault).toBeDefined();
+    expect((copyDefault as any).keyOwner).toBe("platform");
   });
 
   describe("MESSAGE_FONT is validated against the bundled allowlist (D59)", () => {

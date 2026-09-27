@@ -61,6 +61,18 @@ async function persistedCopyHash(
   return typeof hash === "string" ? hash : undefined;
 }
 
+async function resolveProviderKey(
+  keyStore: ProviderKeyPort,
+  provider: Provider,
+): Promise<string | undefined> {
+  try {
+    return await keyStore.open(provider);
+  } catch (error) {
+    if (error instanceof ProviderKeyUnavailableError) return undefined;
+    throw error;
+  }
+}
+
 /**
  * Resolves each provider's key at execution time (PT-7b3a, D175):
  * the org's active key through `getProviderKeyStore(env).open(provider)` when one exists,
@@ -81,40 +93,28 @@ export async function overlayOrgKeys(env: RunEnvironment): Promise<RunEnvironmen
   let fireflyClientSecret = env.providers.fireflyClientSecret;
   let fireflyOwner: KeyOwner = env.providers.keyOwners?.firefly ?? "platform";
 
-  try {
-    const orgGemini = await keyStore.open("gemini");
-    if (orgGemini) {
-      geminiKey = orgGemini;
-      geminiOwner = "org";
-    }
-  } catch (error) {
-    if (!(error instanceof ProviderKeyUnavailableError)) throw error;
+  const orgGemini = await resolveProviderKey(keyStore, "gemini");
+  if (orgGemini) {
+    geminiKey = orgGemini;
+    geminiOwner = "org";
   }
 
-  try {
-    const orgOpenRouter = await keyStore.open("openrouter");
-    if (orgOpenRouter) {
-      openRouterKey = orgOpenRouter;
-      openRouterOwner = "org";
-    }
-  } catch (error) {
-    if (!(error instanceof ProviderKeyUnavailableError)) throw error;
+  const orgOpenRouter = await resolveProviderKey(keyStore, "openrouter");
+  if (orgOpenRouter) {
+    openRouterKey = orgOpenRouter;
+    openRouterOwner = "org";
   }
 
-  try {
-    const orgFirefly = await keyStore.open("firefly");
-    if (orgFirefly) {
-      try {
-        const decoded = decodeFireflyPlaintext(orgFirefly);
-        fireflyClientId = decoded.clientId;
-        fireflyClientSecret = decoded.clientSecret;
-        fireflyOwner = "org";
-      } catch {
-        // If stored plaintext is not JSON, ignore
-      }
+  const orgFirefly = await resolveProviderKey(keyStore, "firefly");
+  if (orgFirefly) {
+    try {
+      const decoded = decodeFireflyPlaintext(orgFirefly);
+      fireflyClientId = decoded.clientId;
+      fireflyClientSecret = decoded.clientSecret;
+      fireflyOwner = "org";
+    } catch {
+      // Non-JSON plaintext falls back to platform
     }
-  } catch (error) {
-    if (!(error instanceof ProviderKeyUnavailableError)) throw error;
   }
 
   const keyOwners = {
