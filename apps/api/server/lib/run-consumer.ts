@@ -157,13 +157,14 @@ export class RunConsumer {
         this.consumer.pause([{ topic: this.topic }]);
         this.paused = true;
       }
-      void result.settled.then(() => {
-        this.inFlight--;
-        if (this.inFlight < this.maxInFlight && this.paused) {
+      const onSettled = () => {
+        this.inFlight = Math.max(0, this.inFlight - 1);
+        if (this.running && this.inFlight < this.maxInFlight && this.paused) {
           this.consumer.resume([{ topic: this.topic }]);
           this.paused = false;
         }
-      });
+      };
+      void result.settled.then(onSettled, onSettled);
     }
     await commitOffset();
   }
@@ -172,6 +173,7 @@ export class RunConsumer {
     if (this.running) {
       await this.consumer.disconnect();
       this.running = false;
+      this.paused = false;
     }
   }
 }

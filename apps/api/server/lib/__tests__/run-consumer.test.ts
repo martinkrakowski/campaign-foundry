@@ -657,6 +657,7 @@ describe("RunConsumer (PT-6b2, D171, D174d)", () => {
 
     const commitMock = vi.fn().mockResolvedValue(undefined);
     const consumer = new RunConsumer({ ...settings, maxInFlight: 2 });
+    await consumer.start();
 
     const makePayload = (offset: string, jobId: string) =>
       ({
@@ -713,5 +714,86 @@ describe("RunConsumer (PT-6b2, D171, D174d)", () => {
     expect(runJobSpy).not.toHaveBeenCalled();
     expect(mockConsumerPause).not.toHaveBeenCalled();
     expect(commitMock).toHaveBeenCalledWith("cf.run-requests", 0, "11");
+  });
+
+  test("settling after stop does not call resume on disconnected consumer or leave counter negative", async () => {
+    let resolveRun1!: () => void;
+    let resolveRun2!: () => void;
+    let runCallCount = 0;
+
+    startQueuedJobSpy.mockResolvedValue(true);
+    runJobSpy.mockImplementation(() => {
+      runCallCount++;
+      if (runCallCount === 1) {
+        return new Promise<void>((r) => {
+          resolveRun1 = r;
+        });
+      }
+      return new Promise<void>((r) => {
+        resolveRun2 = r;
+      });
+    });
+
+    const commitMock = vi.fn().mockResolvedValue(undefined);
+    const consumer = new RunConsumer({ ...settings, maxInFlight: 2 });
+    await consumer.start();
+
+    const makePayload = (offset: string, jobId: string) =>
+      ({
+        topic: "cf.run-requests",
+        partition: 0,
+        message: {
+          offset,
+          value: Buffer.from(JSON.stringify({ ...sampleRequest(), jobId })),
+        },
+      }) as unknown as EachMessagePayload;
+
+    await consumer.handleMessage(makePayload("1", "job-1"), commitMock);
+    await consumer.handleMessage(makePayload("2", "job-2"), commitMock);
+    expect(mockConsumerPause).toHaveBeenCalledTimes(1);
+
+    await consumer.stop();
+    expect(mockConsumerDisconnect).toHaveBeenCalledTimes(1);
+
+    // Settle runs after stop
+    resolveRun1();
+    await Promise.resolve();
+    resolveRun2();
+    await Promise.resolve();
+
+    expect(mockConsumerResume).not.toHaveBeenCalled();
+    expect((consumer as unknown as { inFlight: number }).inFlight).toBe(0);
+  });
+
+  test("a run rejecting after stop does not throw unhandled rejection or leave negative counter", async () => {
+    let rejectRun!: (err: Error) => void;
+    startQueuedJobSpy.mockResolvedValue(true);
+    runJobSpy.mockImplementation(() => {
+      return new Promise<void>((_, reject) => {
+        rejectRun = reject;
+      });
+    });
+
+    const commitMock = vi.fn().mockResolvedValue(undefined);
+    const consumer = new RunConsumer({ ...settings, maxInFlight: 2 });
+    await consumer.start();
+
+    const payload = {
+      topic: "cf.run-requests",
+      partition: 0,
+      message: {
+        offset: "1",
+        value: Buffer.from(JSON.stringify(sampleRequest())),
+      },
+    } as unknown as EachMessagePayload;
+
+    await consumer.handleMessage(payload, commitMock);
+    await consumer.stop();
+
+    rejectRun(new Error("run error after stop"));
+    await Promise.resolve();
+
+    expect(mockConsumerResume).not.toHaveBeenCalled();
+    expect((consumer as unknown as { inFlight: number }).inFlight).toBe(0);
   });
 });
