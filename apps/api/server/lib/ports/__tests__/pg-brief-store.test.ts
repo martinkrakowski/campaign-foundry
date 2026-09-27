@@ -586,14 +586,16 @@ describe("0011_campaign_team migration (D166, PT-2c)", () => {
     const db = pgliteClient();
     try {
       const all = await loadMigrations();
-      const upTo0010 = all.filter((m) => !m.id.startsWith("0011"));
+      // Everything below 0011: a later migration applied first would make
+      // migrate() refuse 0011 as out of order.
+      const upTo0010 = all.filter((m) => m.id < "0011");
       await migrate(db, upTo0010);
 
       const { rows: inserted } = await db.query<{ id: string }>(
         `insert into campaign (org_id, slug) values ('local', 'pre-migration') returning id`,
       );
 
-      expect(await migrate(db, all)).toEqual(["0011_campaign_team"]);
+      expect((await migrate(db, all))[0]).toBe("0011_campaign_team");
 
       const { rows } = await db.query<{ team_id: string | null }>(
         `select team_id from campaign where id = $1`,
