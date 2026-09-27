@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "PT-7b3a",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/run-request.ts",
+      "before": "  const env = await overlayOrgKeys(baseEnv);\n",
+      "after": "  const env = baseEnv;\n",
+      "because": "always use the platform key (skip the org-key lookup)",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/run-request.test.ts",
+        "-t",
+        "resolves the org's active key"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
