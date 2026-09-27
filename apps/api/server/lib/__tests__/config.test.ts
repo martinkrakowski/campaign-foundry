@@ -743,5 +743,11 @@ describe("kafkaSettings (PT-6b2, D174d)", () => {
 
     process.env.KAFKA_MAX_IN_FLIGHT = "2.5";
     expect(() => kafkaSettings()).toThrow(/KAFKA_MAX_IN_FLIGHT/);
+
+    process.env.KAFKA_MAX_IN_FLIGHT = "9".repeat(400);
+    expect(() => kafkaSettings()).toThrow(/KAFKA_MAX_IN_FLIGHT/);
+
+    process.env.KAFKA_MAX_IN_FLIGHT = String(Number.MAX_SAFE_INTEGER + 1);
+    expect(() => kafkaSettings()).toThrow(/KAFKA_MAX_IN_FLIGHT/);
   });
 });

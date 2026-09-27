@@ -276,12 +276,13 @@ export function kafkaSettings(): KafkaSettings | undefined {
   let maxInFlight = 2;
   if (rawMaxInFlight !== undefined && rawMaxInFlight.trim() !== "") {
     const trimmed = rawMaxInFlight.trim();
-    if (!/^[1-9]\d*$/.test(trimmed)) {
+    const parsed = Number(trimmed);
+    if (!/^[1-9]\d*$/.test(trimmed) || !Number.isSafeInteger(parsed)) {
       throw new Error(
         `Malformed KAFKA_MAX_IN_FLIGHT: must be a positive integer, got "${rawMaxInFlight}".`,
       );
     }
-    maxInFlight = Number(trimmed);
+    maxInFlight = parsed;
   }
 
   const caPath = process.env.KAFKA_CA_PATH?.trim();
