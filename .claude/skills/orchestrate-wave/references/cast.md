@@ -11,8 +11,15 @@ fail with a misleading error rather than "no such model".
   around 2026-09-30); `agy gemini-3.8-flash-high` when its quota is back; `opencode
   openrouter/z-ai/glm-5.3-flash --variant max`, probed 2026-09-28 (trivial dispatch passed in 33 s
   for $0.002), for bounded lanes.
-- **Pre-PR reviewer for high-risk lanes:** `grok-4.7` — a **PROPOSAL**, not yet adopted by the
-  owner, so label it that way.
+- **Reviewer (grok):** `grok-4.7` only. **Never `grok-4.7-build-fast`**, which consumes 2× the
+  tokens (owner, 2026-09-28). Adopted 2026-09-28 for three jobs:
+  - independent plan review of lane rows before dispatch (first run: the PT-5c2–PT-5e rows);
+  - a pre-PR diff review of high-risk lanes (security, tenancy, persistence);
+  - the second fix round when a lane's first round doesn't converge.
+
+  It is not a first-pass implementer: the weekly quota drains fast. For reviews, run
+  `grok --prompt-file <brief> --model grok-4.7 --effort high --permission-mode plan` (read-only)
+  in a detached worktree. Record each call's usage in the wave record.
 - **Local LM Studio models are not a lane seat.** The 30B at 10.10.0.220 runs on the orchestrator's
   own machine and made it unresponsive under memory pressure. Evaluated 2026-09-28; one-off text
   jobs only.
