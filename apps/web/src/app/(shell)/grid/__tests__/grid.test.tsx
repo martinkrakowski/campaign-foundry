@@ -913,6 +913,10 @@ describe("GridPage — motion cells", () => {
  */
 const classes = (el: Element): readonly string[] => el.className.split(/\s+/);
 
+/** The page campaign's uuid and slug — two names for one campaign (D178). */
+const PAGE_UUID = "018f6d2a-9c3e-7b4a-8d21-3f9e2a5b6c7d";
+const PAGE_SLUG = "autumn-launch";
+
 describe("GridPage — control boundaries carry border-control", () => {
   test("the pager, the native filter selects, and the unselected decision arms", async () => {
     const thirty = Array.from({ length: 30 }, (_, i) =>
@@ -938,5 +942,31 @@ describe("GridPage — control boundaries carry border-control", () => {
       expect(classes(arm)).toContain("border-border-control");
       expect(classes(arm)).not.toContain("border-border");
     }
+  });
+});
+
+describe("GridPage — the page's ?campaign= (PT-5c3, D180)", () => {
+  afterEach(() => window.history.replaceState(null, "", "/grid"));
+
+  test("loads from a uuid query whose report keys the campaign's slug, and the assets render", async () => {
+    window.history.replaceState(null, "", `/grid?campaign=${PAGE_UUID}`);
+    // The page is addressed by the uuid (D178); the persisted report keys by the
+    // slug — the report's log.campaignId is a DIFFERENT string from the query.
+    mockPipelineApi({
+      result: (url) => {
+        if (url.includes("/campaigns/result")) {
+          return url.includes(`campaignId=${PAGE_UUID}`)
+            ? json({
+                halted: false,
+                assets: [makeAsset({ backgroundSource: "imagen" })],
+                log: { entries: [], campaignId: PAGE_SLUG },
+              })
+            : json({ halted: false, assets: [], log: null });
+        }
+        return json({ error: "Not found" }, 404);
+      },
+    });
+    renderWithRun(<GridPage />);
+    expect(await screen.findByText("alpha @ 1:1 · default")).toBeTruthy();
   });
 });
