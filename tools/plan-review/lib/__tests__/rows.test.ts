@@ -57,7 +57,6 @@ describe("rowHash", () => {
   });
 
   test("an id that is a prefix of another id's cell matches only its own row", () => {
-    expect(rowHash(plan, "PT-5b1")).toBe(rowHash(plan, "PT-5b1"));
     const longer = `${plan}\n| **PT-5a2** | A longer id sharing the prefix. |`;
     expect(rowHash(longer, "PT-5a")).toBe(rowHash(plan, "PT-5a"));
   });
