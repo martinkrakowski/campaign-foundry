@@ -889,4 +889,113 @@ describe("FsJobStore", () => {
     const { RUN_DEADLINE_MS } = await import("../../jobs.js");
     expect(RUN_DEADLINE_MS).toBe(JOB_TTL_MS);
   });
+
+  test("progressJob on a stale running job reaps it and does not update progress", async () => {
+    vi.useFakeTimers();
+    try {
+      const id = await store.createJob("campaign-stale-progress");
+      // Backdate createdAt to be stale
+      const raw = JSON.parse(readFileSync(store.jobPath(id), "utf8")) as StoredJob;
+      writeFileSync(
+        store.jobPath(id),
+        JSON.stringify({ ...raw, createdAt: Date.now() - (JOB_TTL_MS + STALE_GRACE_MS + 1000) }),
+        "utf8",
+      );
+      (store as unknown as { memoryCache: Map<string, unknown> }).memoryCache.clear();
+
+      // progressJob should reap the stale job and return without updating progress
+      await store.progressJob(id, 5, 10);
+
+      // The job should now be failed, not running with updated progress
+      const stored = await store.getStoredJob(id);
+      expect(stored?.job.status).toBe("failed");
+      expect(stored?.job.error).toBe(STALE_RUNNING_MESSAGE);
+      expect(stored?.job.done).toBe(0);
+      expect(stored?.job.total).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("completeJob on a stale running job reaps it and throws JobLeaseLostError", async () => {
+    vi.useFakeTimers();
+    try {
+      const id = await store.createJob("campaign-stale-complete");
+      // Backdate createdAt to be stale
+      const raw = JSON.parse(readFileSync(store.jobPath(id), "utf8")) as StoredJob;
+      writeFileSync(
+        store.jobPath(id),
+        JSON.stringify({ ...raw, createdAt: Date.now() - (JOB_TTL_MS + STALE_GRACE_MS + 1000) }),
+        "utf8",
+      );
+      (store as unknown as { memoryCache: Map<string, unknown> }).memoryCache.clear();
+
+      // completeJob should reap the stale job and throw JobLeaseLostError
+      await expect(store.completeJob(id, payload())).rejects.toBeInstanceOf(JobLeaseLostError);
+
+      // The job should now be failed
+      const stored = await store.getStoredJob(id);
+      expect(stored?.job.status).toBe("failed");
+      expect(stored?.job.error).toBe(STALE_RUNNING_MESSAGE);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("failJob on a stale running job reaps it and throws JobLeaseLostError", async () => {
+    vi.useFakeTimers();
+    try {
+      const id = await store.createJob("campaign-stale-fail");
+      // Backdate createdAt to be stale
+      const raw = JSON.parse(readFileSync(store.jobPath(id), "utf8")) as StoredJob;
+      writeFileSync(
+        store.jobPath(id),
+        JSON.stringify({ ...raw, createdAt: Date.now() - (JOB_TTL_MS + STALE_GRACE_MS + 1000) }),
+        "utf8",
+      );
+      (store as unknown as { memoryCache: Map<string, unknown> }).memoryCache.clear();
+
+      // failJob should reap the stale job and throw JobLeaseLostError
+      await expect(store.failJob(id, "error")).rejects.toBeInstanceOf(JobLeaseLostError);
+
+      // The job should now be failed (with the stale running message, not the provided error)
+      const stored = await store.getStoredJob(id);
+      expect(stored?.job.status).toBe("failed");
+      expect(stored?.job.error).toBe(STALE_RUNNING_MESSAGE);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("progressJob updates progress on a running job", async () => {
+    const id = await store.createJob("campaign-progress");
+    await store.progressJob(id, 5, 10);
+    const stored = await store.getStoredJob(id);
+    expect(stored?.job.done).toBe(5);
+    expect(stored?.job.total).toBe(10);
+    expect(stored?.job.status).toBe("running");
+  });
+
+  test("getStoredJob reaps a stale running job from cache", async () => {
+    vi.useFakeTimers();
+    try {
+      const id = await store.createJob("campaign-cached-stale");
+      // Read once to populate cache with current time
+      expect((await store.getStoredJob(id))?.job.status).toBe("running");
+
+      // Advance time past the stale threshold
+      vi.advanceTimersByTime(JOB_TTL_MS + STALE_GRACE_MS + 1000);
+
+      // Second read should reap from cache (cache has the original createdAt, but time has advanced)
+      const stored = await store.getStoredJob(id);
+      expect(stored?.job.status).toBe("failed");
+      expect(stored?.job.error).toBe(STALE_RUNNING_MESSAGE);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("progressJob on non-existent job is a no-op", async () => {
+    await expect(store.progressJob("00000000-0000-0000-0000-000000000000", 5, 10)).resolves.toBeUndefined();
+  });
 });
