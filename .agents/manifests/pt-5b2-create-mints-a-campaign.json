@@ -4,7 +4,7 @@
   "mutations": [
     {
       "file": "apps/api/server/routes/campaigns/index.post.ts",
-      "before": "      if (!isExistsError(error)) throw error;",
+      "before": "      if (!(error instanceof SlugTakenError)) throw error;",
       "after": "      throw error; // mutant: never retries the next suffix, dropping the dedupe loop",
       "because": "dropping the dedupe loop's retry lets a second create of the same name collide, refusing instead of taking the next suffix (D178)",
       "command": [
