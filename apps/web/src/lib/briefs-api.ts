@@ -3,6 +3,7 @@ import type {
   CopyPool,
   CopyPoolEntryStatus,
 } from "@campaignfoundry/CampaignOrchestration";
+import { CAMPAIGN_TYPES, type CampaignType } from "@campaignfoundry/CampaignOrchestration/campaign-types";
 import { handleAuthError, type NoMembershipError } from "./auth-errors";
 
 export type {
@@ -19,6 +20,14 @@ export interface BriefEntry {
   brief: CampaignBrief;
   /** SHA-256 of the file's bytes, for the conditional write (API E1.0). */
   revision?: string;
+  /**
+   * The campaign's own id (PT-5a): the uuid on Postgres, the slug on fs
+   * (D179) — absent only from a response that predates it (`createBrief`/
+   * `updateBrief`/`duplicateCampaign` never echo it; `listBriefs` always
+   * does). `BriefEditor`'s route-match uses this alongside `brief.id` so a
+   * uuid-addressed route finds its entry in the listing (D178).
+   */
+  campaignId?: string;
 }
 
 export interface AssetUploadResult {
@@ -258,7 +267,7 @@ function asBriefEntry(data: unknown): BriefEntry {
   if (typeof data !== "object" || data === null) {
     throw new BriefsApiError("Invalid response", 200);
   }
-  const rec = data as { file?: unknown; brief?: unknown; revision?: unknown };
+  const rec = data as { file?: unknown; brief?: unknown; revision?: unknown; campaignId?: unknown };
   // `typeof [] === "object"`, and listing consumers read `brief.products.length`.
   if (
     typeof rec.file !== "string" ||
@@ -271,8 +280,12 @@ function asBriefEntry(data: unknown): BriefEntry {
   if (!Array.isArray((rec.brief as { products?: unknown }).products)) {
     throw new BriefsApiError("Invalid response", 200);
   }
-  const entry: BriefEntry = { file: rec.file, brief: rec.brief as CampaignBrief };
-  return typeof rec.revision === "string" ? { ...entry, revision: rec.revision } : entry;
+  let entry: BriefEntry = { file: rec.file, brief: rec.brief as CampaignBrief };
+  if (typeof rec.revision === "string") entry = { ...entry, revision: rec.revision };
+  // `listBriefs` carries it (PT-5a); `createBrief`/`updateBrief`/`duplicateCampaign`
+  // answer a bare `{ file, brief, revision? }` and never this field.
+  if (typeof rec.campaignId === "string") entry = { ...entry, campaignId: rec.campaignId };
+  return entry;
 }
 
 export async function listBriefs(): Promise<BriefEntry[]> {
@@ -310,26 +323,119 @@ export async function updateBrief(
 }
 
 /**
- * D71 — the duplicate contract's overrides, exactly the route's own: region and
- * audience only. Anything else (notably `mode`) is a 400 — the copy inherits the
- * source's mode.
+ * POST /campaigns/briefs/:id/duplicate, by name (PT-5c1, D178): the server
+ * derives the target slug from `name`, deduplicated per org — the caller
+ * never picks an id, and a name collision is never a 409, it is a different
+ * slug. Answers the copy's stored brief, same shape `createBrief` answers
+ * (`campaignId` absent — see `asBriefEntry`), so the caller reads the new
+ * id off `brief.id` and routes through `campaignRoute`.
+ *
+ * The legacy `{ newId, overrides }` body (`duplicateBrief`, client-minted id)
+ * retired with this lane (PT-5c2 removes it from the route next) — nothing
+ * in the web may mint a campaign id any more (D177).
  */
-export interface DuplicateOverrides {
-  readonly targetRegion?: string;
-  readonly targetAudience?: string;
-}
-
-export async function duplicateBrief(
-  id: string,
-  newId: string,
-  overrides?: DuplicateOverrides,
-): Promise<BriefEntry> {
+export async function duplicateCampaign(id: string, name: string): Promise<BriefEntry> {
   return asBriefEntry(
     await requestJson(
       `${API}/campaigns/briefs/${encodeURIComponent(id)}/duplicate`,
-      jsonInit("POST", { newId, overrides }),
+      jsonInit("POST", { name }),
     ),
   );
+}
+
+/** Body for `createCampaign` — `POST /campaigns` (D177, D178). */
+export interface CreateCampaignBody {
+  readonly name: string;
+  readonly type: CampaignType;
+  /** A source campaign's id (uuid or slug): its latest version becomes version 1. */
+  readonly source?: string;
+}
+
+/** `POST /campaigns`'s 201 answer: the minted campaign's id and slug. */
+export interface CreatedCampaign {
+  readonly campaignId: string;
+  readonly slug: string;
+  /** Present only for a sourced create, which writes a version immediately. */
+  readonly revision?: string;
+}
+
+function asCreatedCampaign(data: unknown): CreatedCampaign {
+  if (typeof data !== "object" || data === null) {
+    throw new BriefsApiError("Invalid response", 200);
+  }
+  const rec = data as { campaignId?: unknown; slug?: unknown; revision?: unknown };
+  if (typeof rec.campaignId !== "string" || typeof rec.slug !== "string") {
+    throw new BriefsApiError("Invalid response", 200);
+  }
+  return {
+    campaignId: rec.campaignId,
+    slug: rec.slug,
+    ...(typeof rec.revision === "string" ? { revision: rec.revision } : {}),
+  };
+}
+
+/**
+ * Mint a campaign (D177, D178): the one path left that creates one. With no
+ * `source`, a blank campaign with no version yet; with one, that source's
+ * latest version becomes version 1. The server derives and dedupes the slug
+ * from `name` — the caller never picks an id.
+ */
+export async function createCampaign(input: CreateCampaignBody): Promise<CreatedCampaign> {
+  return asCreatedCampaign(await requestJson(`${API}/campaigns`, jsonInit("POST", input)));
+}
+
+/**
+ * `GET /campaigns/:id`'s answer (PT-5b3): a campaign's display name, type and
+ * whether it has any saved version. `id` is a uuid or a slug (D178, D179).
+ */
+export interface CampaignMeta {
+  readonly campaignId: string;
+  readonly slug: string;
+  readonly name: string | null;
+  readonly type: CampaignType | null;
+  readonly hasVersion: boolean;
+}
+
+/**
+ * Resolve a campaign's meta by uuid or slug. `null` for a 404 (unknown or
+ * hidden by team, PT-2d) — never thrown, so the editor's not-found state can
+ * tell it apart from a real request failure.
+ */
+export async function getCampaign(ref: string, signal?: AbortSignal): Promise<CampaignMeta | null> {
+  let res: Response;
+  try {
+    res = await fetch(`${API}/campaigns/${encodeURIComponent(ref)}`, { signal });
+  } catch {
+    throw new BriefsApiError("Network error", 0);
+  }
+  if (res.status === 404) return null;
+  const data = await parseJsonBody(res);
+  if (!res.ok) {
+    handleAuthError(res.status, data);
+    throw new BriefsApiError(errorFrom(data, `Request failed (HTTP ${res.status})`), res.status);
+  }
+  if (typeof data !== "object" || data === null) {
+    throw new BriefsApiError("Invalid response", 200);
+  }
+  const rec = data as Record<string, unknown>;
+  if (
+    typeof rec.campaignId !== "string" ||
+    typeof rec.slug !== "string" ||
+    typeof rec.hasVersion !== "boolean"
+  ) {
+    throw new BriefsApiError("Invalid response", 200);
+  }
+  const type =
+    typeof rec.type === "string" && (CAMPAIGN_TYPES as readonly string[]).includes(rec.type)
+      ? (rec.type as CampaignType)
+      : null;
+  return {
+    campaignId: rec.campaignId,
+    slug: rec.slug,
+    name: typeof rec.name === "string" ? rec.name : null,
+    type,
+    hasVersion: rec.hasVersion,
+  };
 }
 
 export function formatBytes(bytes: number): string {

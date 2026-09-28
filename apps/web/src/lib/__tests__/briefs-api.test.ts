@@ -6,9 +6,11 @@ import { API } from "@/lib/run-context";
 import {
   BriefsApiError,
   createBrief,
-  duplicateBrief,
+  createCampaign,
+  duplicateCampaign,
   formatBytes,
   generatePool,
+  getCampaign,
   getCapabilities,
   getPool,
   isBriefsApiError,
@@ -112,6 +114,15 @@ describe("listBriefs", () => {
     await expect(listBriefs()).resolves.toEqual([{ file: "camp.yaml", brief }]);
   });
 
+  test("carries campaignId (PT-5a) when the entry has one", async () => {
+    mockFetch(() =>
+      json({ briefs: [{ file: "camp.yaml", brief, campaignId: "3f9b" }] }),
+    );
+    await expect(listBriefs()).resolves.toEqual([
+      { file: "camp.yaml", brief, campaignId: "3f9b" },
+    ]);
+  });
+
   test("returns an empty list when the payload is missing or not an object", async () => {
     mockFetch(() => json({}));
     await expect(listBriefs()).resolves.toEqual([]);
@@ -139,7 +150,7 @@ describe("listBriefs", () => {
   });
 });
 
-describe("createBrief / duplicateBrief / uploadAsset", () => {
+describe("createBrief / duplicateCampaign / uploadAsset", () => {
   const write = { file: "camp.yaml", brief };
 
   test("POSTs a create and replace", async () => {
@@ -154,26 +165,15 @@ describe("createBrief / duplicateBrief / uploadAsset", () => {
     expect(urls[1]).toBe(`${API}/campaigns/briefs?replace=1`);
   });
 
-  test("POSTs a duplicate with { newId }", async () => {
+  test("POSTs a duplicate with { name } — never a client-picked id (D177)", async () => {
     mockFetch((url, init) => {
       expect(url).toBe(`${API}/campaigns/briefs/camp/duplicate`);
-      expect(JSON.parse(String(init.body))).toEqual({ newId: "copy" });
-      return json({ file: "copy.yaml", brief: { ...brief, id: "copy" } }, 201);
+      expect(JSON.parse(String(init.body))).toEqual({ name: "Copy of Camp" });
+      return json({ file: "copy-of-camp.yaml", brief: { ...brief, id: "copy-of-camp" } }, 201);
     });
-    const result = await duplicateBrief("camp", "copy");
-    expect(result.file).toBe("copy.yaml");
-    expect(result.brief.id).toBe("copy");
-  });
-
-  test("POSTs the route's overrides body when the caller hands overrides over (D71)", async () => {
-    mockFetch((_url, init) => {
-      expect(JSON.parse(String(init.body))).toEqual({
-        newId: "copy",
-        overrides: { targetRegion: "EU", targetAudience: "b" },
-      });
-      return json({ file: "copy.yaml", brief: { ...brief, id: "copy" } }, 201);
-    });
-    await duplicateBrief("camp", "copy", { targetRegion: "EU", targetAudience: "b" });
+    const result = await duplicateCampaign("camp", "Copy of Camp");
+    expect(result.file).toBe("copy-of-camp.yaml");
+    expect(result.brief.id).toBe("copy-of-camp");
   });
 
   test("uploads an asset", async () => {
@@ -237,6 +237,113 @@ describe("createBrief / duplicateBrief / uploadAsset", () => {
     await expect(createBrief(brief)).rejects.toMatchObject({
       message: "Request failed (HTTP 400)",
     });
+  });
+});
+
+describe("createCampaign — POST /campaigns (D177, D178)", () => {
+  test("POSTs the name and type and answers the minted id and slug", async () => {
+    mockFetch((url, init) => {
+      expect(url).toBe(`${API}/campaigns`);
+      expect(JSON.parse(String(init.body))).toEqual({ name: "Summer Spark", type: "social-post" });
+      return json({ campaignId: "c1", slug: "summer-spark" }, 201);
+    });
+    await expect(createCampaign({ name: "Summer Spark", type: "social-post" })).resolves.toEqual({
+      campaignId: "c1",
+      slug: "summer-spark",
+    });
+  });
+
+  test("carries a sourced create's revision, and the source id", async () => {
+    mockFetch((_url, init) => {
+      expect(JSON.parse(String(init.body))).toEqual({
+        name: "Copy",
+        type: "social-post",
+        source: "camp",
+      });
+      return json({ campaignId: "c2", slug: "copy", revision: "rev-1" }, 201);
+    });
+    await expect(
+      createCampaign({ name: "Copy", type: "social-post", source: "camp" }),
+    ).resolves.toEqual({ campaignId: "c2", slug: "copy", revision: "rev-1" });
+  });
+
+  test("rejects an invalid or missing 201 body", async () => {
+    mockFetch(() => json({ slug: "x" }, 201));
+    await expect(
+      createCampaign({ name: "X", type: "social-post" }),
+    ).rejects.toMatchObject({ message: "Invalid response" });
+    mockFetch(() => json(null, 201));
+    await expect(
+      createCampaign({ name: "X", type: "social-post" }),
+    ).rejects.toMatchObject({ message: "Invalid response" });
+  });
+
+  test("surfaces the API's error (a 400 unslugifiable name, a 409 race)", async () => {
+    mockFetch(() => json({ error: '"name" must contain at least one letter or digit.' }, 400));
+    await expect(createCampaign({ name: "!!!", type: "social-post" })).rejects.toMatchObject({
+      status: 400,
+    });
+  });
+});
+
+describe("getCampaign — GET /campaigns/:id (PT-5b3)", () => {
+  test("answers the meta for a uuid or a slug", async () => {
+    mockFetch((url) => {
+      expect(url).toBe(`${API}/campaigns/summer-spark`);
+      return json({
+        campaignId: "c1",
+        slug: "summer-spark",
+        name: "Summer Spark",
+        type: "social-post",
+        hasVersion: false,
+      });
+    });
+    await expect(getCampaign("summer-spark")).resolves.toEqual({
+      campaignId: "c1",
+      slug: "summer-spark",
+      name: "Summer Spark",
+      type: "social-post",
+      hasVersion: false,
+    });
+  });
+
+  test("answers null on a 404 — unknown or hidden, indistinguishable on purpose", async () => {
+    mockFetch(() => json({ error: 'Campaign "x" not found.' }, 404));
+    await expect(getCampaign("x")).resolves.toBeNull();
+  });
+
+  test("normalises a pre-lane campaign's null name/type", async () => {
+    mockFetch(() =>
+      json({ campaignId: "c1", slug: "old", name: null, type: null, hasVersion: true }),
+    );
+    await expect(getCampaign("old")).resolves.toEqual({
+      campaignId: "c1",
+      slug: "old",
+      name: null,
+      type: null,
+      hasVersion: true,
+    });
+  });
+
+  test("drops a type the web's own vocabulary does not recognise", async () => {
+    mockFetch(() =>
+      json({ campaignId: "c1", slug: "old", name: "Old", type: "banner", hasVersion: false }),
+    );
+    await expect(getCampaign("old")).resolves.toMatchObject({ type: null });
+  });
+
+  test("rejects a malformed 200 body", async () => {
+    mockFetch(() => json({ slug: "x" }));
+    await expect(getCampaign("x")).rejects.toMatchObject({ message: "Invalid response" });
+    mockFetch(() => json(null));
+    await expect(getCampaign("x")).rejects.toMatchObject({ message: "Invalid response" });
+  });
+
+  test("throws the API's error on a non-404 failure, and wraps a network failure", async () => {
+    mockFetch(() => json({ error: "nope" }, 500));
+    await expect(getCampaign("x")).rejects.toMatchObject({ message: "nope", status: 500 });
+    vi.mocked(globalThis.fetch).mockRejectedValue(new TypeError("offline"));
+    await expect(getCampaign("x")).rejects.toMatchObject({ message: "Network error", status: 0 });
   });
 });
 
