@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { BRIEF_KEY, isStoredBrief } from "@/lib/run-context";
 import { SAFE_ID_PATTERN } from "@/components/campaign/validate";
+import { campaignRoute } from "@/lib/campaign-route";
 
 /**
  * D37: the bare `/brief` route never renders an editor — the URL is the single source
@@ -24,7 +25,7 @@ export default function BriefIndexPage() {
     // SAFE_ID_PATTERN is the one rule a brief id answers to (the same one the
     // Save-as backstop and the [id] route enforce): a malformed id cannot name a
     // brief, so it is refused here rather than sent to a route that cannot load it.
-    if (id !== undefined && SAFE_ID_PATTERN.test(id)) router.replace(`/brief/${id}`);
+    if (id !== undefined && SAFE_ID_PATTERN.test(id)) router.replace(campaignRoute(id));
     else router.replace("/grid");
   }, [router]);
   return null;
