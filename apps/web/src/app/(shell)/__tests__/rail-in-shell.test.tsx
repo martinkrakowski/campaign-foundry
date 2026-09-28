@@ -220,6 +220,17 @@ const routes = (): Call[] => {
         json({ briefs: [{ file: "clip.yaml", revision: "r1", brief: railBrief }] }),
       );
     }
+    // PT-5c1 (D178): GET /campaigns/:id — the load effect's fallback for an id
+    // the listing does not carry. Every id this file's tests use is either "clip"
+    // (in the listing above) or "nope" (deliberately unknown), so this always 404s.
+    if (
+      method === "GET" &&
+      u.startsWith(`${API}/campaigns/`) &&
+      !u.startsWith(`${API}/campaigns/briefs`) &&
+      !u.startsWith(`${API}/campaigns/capabilities`)
+    ) {
+      return Promise.resolve(json({ error: "not found" }, 404));
+    }
     if (u.includes("/campaigns/preview-frame")) {
       return Promise.resolve(
         new Response(new Uint8Array([137, 80, 78, 71, 1, 2, 3, 4]), {

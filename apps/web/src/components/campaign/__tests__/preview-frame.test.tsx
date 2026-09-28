@@ -286,10 +286,14 @@ describe("PreviewFrame (D52)", () => {
 
 describe("renaming a fresh draft must not blank the preview frame", () => {
   /**
-   * The two halves of the defect: `patch` re-slugs `briefId` on a new draft,
-   * and frame identity includes `brief.id`. Typing Campaign Name therefore
-   * moves identity per keystroke and the painted `<img>` is replaced by the
-   * SVG placeholder — the flicker identity exists to prevent.
+   * PT-5c1 (D178) — `patch` no longer re-slugs `briefId` on a new draft (the id
+   * is server-derived and display-only now); this test used to pin that a
+   * PER-KEYSTROKE identity change did not blank the frame. That specific churn
+   * is structurally impossible now — `briefId` never moves while typing a name
+   * — but frame identity (`brief.id`) staying put while OTHER brief fields
+   * change under typing is still the invariant worth proving: a naive
+   * `previewKey` keyed on the whole brief, rather than on the fields that
+   * actually change the render, would still blank the frame here.
    */
   test("on a new draft with a product, typing Campaign Name keeps the last painted frame", async () => {
     vi.useFakeTimers();
@@ -303,7 +307,7 @@ describe("renaming a fresh draft must not blank the preview frame", () => {
     });
     state = editorReducer(state, { type: "patch", patch: { campaignName: "S" } });
     expect(state.source.kind).toBe("new");
-    expect(state.briefId).toBe("s");
+    expect(state.briefId).toBe("");
 
     const dock = (next: typeof state) => {
       const props = previewDockProps(next)!;
@@ -324,10 +328,11 @@ describe("renaming a fresh draft must not blank the preview frame", () => {
     for (const name of ["Su", "Sum", "Summer"]) {
       state = editorReducer(state, { type: "patch", patch: { campaignName: name } });
       view.rerender(dock(state));
-      expect(state.briefId).toBe(name.toLowerCase());
+      // D178: the id is server-derived now — typing a name never moves it.
+      expect(state.briefId).toBe("");
       expect(
         view.container.querySelector("img"),
-        `the painted frame must survive typing ${JSON.stringify(name)} (slug ${state.briefId})`,
+        `the painted frame must survive typing ${JSON.stringify(name)}`,
       ).not.toBeNull();
       expect(view.container.querySelector("svg")).toBeNull();
       expect(view.container.querySelector("img")!.getAttribute("src")).toBe(src);
