@@ -2119,6 +2119,43 @@ describe("collect — the plan-review gate (FU-plan-review-gate)", () => {
     expect(status.waves[0]?.lanes.map((lane) => lane.lane)).toEqual(["PT-5a"]);
   });
 
+  test("a directory whose name differs from the events' wave id still gathers the gate's facts", async () => {
+    // wave-event.sh writes a wave id like `wave5` to $root/wave5 — the
+    // directory stripped of its prefix is "5", which matches no event. The
+    // gate's facts match the wave the events themselves claim, the same
+    // identity the merge groups by: here the dispatch is found, and the
+    // plan edited after its review is flagged.
+    const { rowHash } = await import("../../plan-review/lib/rows.js");
+    const edited = PLAN.replace("exposed and resolvable", "hidden and unresolvable");
+    const reviewAndDispatch =
+      `${JSON.stringify({
+        ts: "2026-09-28T10:00:00Z",
+        wave: "wave5",
+        lane: "_plan",
+        stage: "plan-review",
+        event: "settled",
+        detail: {
+          plan: "docs/planning/plan.md",
+          reviewer: "plan-review-seat",
+          rows: { "PT-5a": rowHash(PLAN, "PT-5a") },
+          verdict: "clear",
+        },
+      })}\n` + dispatchLine("PT-5a");
+    const status = await collect(
+      fakeDeps({
+        dirs: { [ROOT]: ["wave5"], [`${ROOT}/wave5`]: ["events.jsonl"] },
+        files: {
+          [`${ROOT}/wave5/events.jsonl`]: reviewAndDispatch,
+          "docs/planning/plan.md": edited,
+        },
+      }),
+      ROOT,
+      "2026-09-28T12:00:00Z",
+    );
+    const row = status.waves.find((wave) => wave.id === "5")?.lanes[0];
+    expect(row?.derived.planReview).toBe("dispatched on an unreviewed row");
+  });
+
   test("a lane that never dispatched carries no plan-review facts", async () => {
     const reviewAndLane =
       reviewLine({ "PT-5a": "aa" }) +

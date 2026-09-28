@@ -289,7 +289,7 @@ export async function collect(
           lane,
           worktrees,
           log,
-          await planReviewFor(deps, dirEvents, wave, lane),
+          await planReviewFor(deps, dirEvents, lane),
         );
         rows.push({ wave, lane, reportedPr, obs });
       }
@@ -341,10 +341,9 @@ export async function collect(
 async function planReviewFor(
   deps: CollectDeps,
   dirEvents: readonly WaveEvent[],
-  wave: string,
   lane: string,
 ): Promise<PlanReviewObservation | undefined> {
-  const facts = planReviewFacts(dirEvents, wave, lane);
+  const facts = planReviewFacts(dirEvents, lane);
   if (facts.dispatchedAt === undefined) return undefined;
   if (facts.reviewedPlan === undefined) {
     return { ...facts, rowHashMissing: "the governing review named no plan file" };

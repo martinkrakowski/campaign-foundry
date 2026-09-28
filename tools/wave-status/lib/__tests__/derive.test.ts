@@ -276,7 +276,7 @@ describe("the plan-review flag (FU-plan-review-gate)", () => {
       review({ "pt-5b1": "stale", "pt-5a": "aa" }, "clear", "2026-09-28T10:00:00Z"),
       dispatch("pt-5a", "2026-09-28T11:00:00Z"),
     ];
-    expect(planReviewFacts(events, "W", "pt-5a")).toEqual({
+    expect(planReviewFacts(events, "pt-5a")).toEqual({
       dispatchedAt: "2026-09-28T11:00:00Z",
       reviewedPlan: "docs/planning/p.md",
       reviewedHash: "aa",
@@ -285,7 +285,7 @@ describe("the plan-review flag (FU-plan-review-gate)", () => {
 
   test("a review that settled after the dispatch never counts as reviewed", () => {
     const events = [dispatch("pt-5a"), review({ "pt-5a": "aa" }, "clear", "2026-09-28T12:00:00Z")];
-    expect(planReviewFacts(events, "W", "pt-5a")).toEqual({
+    expect(planReviewFacts(events, "pt-5a")).toEqual({
       dispatchedAt: "2026-09-28T11:00:00Z",
     });
   });
@@ -299,7 +299,7 @@ describe("the plan-review flag (FU-plan-review-gate)", () => {
       dispatch("pt-5a", "2026-09-28T11:00:00Z"),
       review({ "pt-5a": "aa" }, "clear", "2026-09-28T11:00:00Z"),
     ];
-    expect(planReviewFacts(events, "W", "pt-5a")).toEqual({
+    expect(planReviewFacts(events, "pt-5a")).toEqual({
       dispatchedAt: "2026-09-28T11:00:00Z",
     });
   });
@@ -309,7 +309,7 @@ describe("the plan-review flag (FU-plan-review-gate)", () => {
       review({ "pt-5a": "aa" }, "clear", "2026-09-28T11:00:00Z"),
       dispatch("pt-5a", "2026-09-28T11:00:00Z"),
     ];
-    expect(planReviewFacts(events, "W", "pt-5a")).toEqual({
+    expect(planReviewFacts(events, "pt-5a")).toEqual({
       dispatchedAt: "2026-09-28T11:00:00Z",
       reviewedPlan: "docs/planning/p.md",
       reviewedHash: "aa",
@@ -325,7 +325,7 @@ describe("the plan-review flag (FU-plan-review-gate)", () => {
       review({ "pt-5a": "bb" }, "changes-required", "2026-09-28T10:00:00Z"),
       dispatch("pt-5a"),
     ];
-    expect(planReviewFacts(events, "W", "pt-5a")).toEqual({
+    expect(planReviewFacts(events, "pt-5a")).toEqual({
       dispatchedAt: "2026-09-28T11:00:00Z",
       reviewedPlan: "docs/planning/p.md",
     });
@@ -333,7 +333,7 @@ describe("the plan-review flag (FU-plan-review-gate)", () => {
 
   test("a review whose verdict is not clear never counts as reviewed", () => {
     const events = [review({ "pt-5a": "aa" }, "changes-required"), dispatch("pt-5a")];
-    expect(planReviewFacts(events, "W", "pt-5a")).toEqual({
+    expect(planReviewFacts(events, "pt-5a")).toEqual({
       dispatchedAt: "2026-09-28T11:00:00Z",
       reviewedPlan: "docs/planning/p.md",
     });
@@ -341,7 +341,7 @@ describe("the plan-review flag (FU-plan-review-gate)", () => {
 
   test("a lane absent from the review's rows has no reviewed hash", () => {
     const events = [review({ "pt-5b1": "aa" }), dispatch("pt-5a")];
-    expect(planReviewFacts(events, "W", "pt-5a")).toEqual({
+    expect(planReviewFacts(events, "pt-5a")).toEqual({
       dispatchedAt: "2026-09-28T11:00:00Z",
       reviewedPlan: "docs/planning/p.md",
     });
@@ -352,14 +352,14 @@ describe("the plan-review flag (FU-plan-review-gate)", () => {
       review({ "pt-5a": "aa" }, "clear", "2026-09-28T10:00:00Z", "OTHER"),
       dispatch("pt-5a"),
     ];
-    expect(planReviewFacts(events, "W", "pt-5a")).toEqual({
+    expect(planReviewFacts(events, "pt-5a")).toEqual({
       dispatchedAt: "2026-09-28T11:00:00Z",
     });
   });
 
   test("a lane that never dispatched carries no facts at all", () => {
     const events = [review({ "pt-5a": "aa" })];
-    expect(planReviewFacts(events, "W", "pt-5a")).toEqual({});
+    expect(planReviewFacts(events, "pt-5a")).toEqual({});
   });
 
   test("an unparseable ts on either side is irrelevant — the log's order decides", () => {
@@ -370,7 +370,7 @@ describe("the plan-review flag (FU-plan-review-gate)", () => {
       review({ "pt-5a": "aa" }, "clear", "not-a-date"),
       dispatch("pt-5a", "not-a-date-either"),
     ];
-    expect(planReviewFacts(events, "W", "pt-5a")).toEqual({
+    expect(planReviewFacts(events, "pt-5a")).toEqual({
       dispatchedAt: "not-a-date-either",
       reviewedPlan: "docs/planning/p.md",
       reviewedHash: "aa",
@@ -385,7 +385,7 @@ describe("the plan-review flag (FU-plan-review-gate)", () => {
       stage: "plan-review",
       event: "settled",
     };
-    expect(planReviewFacts([bare, dispatch("pt-5a")], "W", "pt-5a")).toEqual({
+    expect(planReviewFacts([bare, dispatch("pt-5a")], "pt-5a")).toEqual({
       dispatchedAt: "2026-09-28T11:00:00Z",
     });
   });
@@ -395,7 +395,7 @@ describe("the plan-review flag (FU-plan-review-gate)", () => {
       ...review({ "pt-5a": "aa" }),
       detail: { rows: { "pt-5a": "aa" }, verdict: "clear" },
     };
-    expect(planReviewFacts([noPlan, dispatch("pt-5a")], "W", "pt-5a")).toEqual({
+    expect(planReviewFacts([noPlan, dispatch("pt-5a")], "pt-5a")).toEqual({
       dispatchedAt: "2026-09-28T11:00:00Z",
       reviewedHash: "aa",
     });
@@ -403,7 +403,7 @@ describe("the plan-review flag (FU-plan-review-gate)", () => {
       ...review({ "pt-5a": "aa" }),
       detail: { plan: "", rows: { "pt-5a": "aa" }, verdict: "clear" },
     };
-    expect(planReviewFacts([emptyPlan, dispatch("pt-5a")], "W", "pt-5a")).toEqual({
+    expect(planReviewFacts([emptyPlan, dispatch("pt-5a")], "pt-5a")).toEqual({
       dispatchedAt: "2026-09-28T11:00:00Z",
       reviewedHash: "aa",
     });
@@ -417,7 +417,7 @@ describe("the plan-review flag (FU-plan-review-gate)", () => {
       stage: "plan-review",
       event: "started",
     };
-    expect(planReviewFacts([started, dispatch("pt-5a")], "W", "pt-5a")).toEqual({
+    expect(planReviewFacts([started, dispatch("pt-5a")], "pt-5a")).toEqual({
       dispatchedAt: "2026-09-28T11:00:00Z",
     });
   });

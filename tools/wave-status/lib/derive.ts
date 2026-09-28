@@ -88,32 +88,36 @@ export function deriveLane(obs: LaneObservation): DerivedLane {
 /**
  * The plan-review facts the collector gathers for one lane: when it
  * dispatched, the plan file of the review that governed the dispatch, and
- * the row hash that review recorded for the lane. The governing review is
- * the gate's one rule (`governingPlanReview`): the latest `plan-review
- * settled` event for the wave that precedes the dispatch in LOG ORDER —
- * never a timestamp comparison, which an equal second can hide — and its
- * verdict must be `clear` for the lane to count as reviewed: an earlier
- * clear never survives a later settled review of any verdict.
+ * the row hash that review recorded for the lane. Waves match by the
+ * events' own `wave` field — the same identity the merge groups by — never
+ * by a directory name stripped of its prefix, which diverges from the
+ * events whenever a wave id itself starts with "wave". The governing review
+ * is the gate's one rule (`governingPlanReview`): the latest `plan-review
+ * settled` event for the dispatch's own wave that precedes the dispatch in
+ * LOG ORDER — never a timestamp comparison, which an equal second can hide
+ * — and its verdict must be `clear` for the lane to count as reviewed: an
+ * earlier clear never survives a later settled review of any verdict.
  */
 export function planReviewFacts(
   events: readonly WaveEvent[],
-  wave: string,
   lane: string,
 ): PlanReviewObservation {
   let dispatchedAt: string | undefined;
   let dispatchIndex = -1;
+  let dispatchWave = "";
   for (let i = events.length - 1; i >= 0; i--) {
     const event = events[i];
-    if (event.wave !== wave || event.lane !== lane) continue;
+    if (event.lane !== lane) continue;
     if (event.stage === "dispatch" && event.event === "started") {
       dispatchedAt = event.ts;
       dispatchIndex = i;
+      dispatchWave = event.wave;
       break;
     }
   }
   if (dispatchedAt === undefined) return {};
 
-  const review = governingPlanReview(events, wave, dispatchIndex);
+  const review = governingPlanReview(events, dispatchWave, dispatchIndex);
   if (review === undefined) return { dispatchedAt };
   const reviewedHash =
     review.event.detail?.verdict === "clear"
