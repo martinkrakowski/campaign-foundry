@@ -9,6 +9,7 @@ import { useCreateCampaign } from "@/lib/create-campaign-context";
 import { RATIO_VALUES } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import { useGuardedNavigation } from "@/lib/use-guarded-navigation";
 import { listAssets, formatBytes, type AssetEntry } from "@/lib/briefs-api";
+import { campaignRoute } from "@/lib/campaign-route";
 import { AssetPickerDrawer } from "@/components/campaign/AssetPickerDrawer";
 
 /**
@@ -157,7 +158,7 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   // holds — a delimiter in it must identify the brief, not reshape the route. And a
   // BLANK brief (id "") means the shell released its campaign on /brief/new, so the
   // honest target is the new-brief route, never the bare redirector (the loop).
-  const editHref = brief.id ? `/brief/${encodeURIComponent(brief.id)}` : "/brief/new";
+  const editHref = brief.id ? campaignRoute(brief.id) : "/brief/new";
   const handleEditClick = (e: React.MouseEvent) => {
     e.preventDefault();
     onNavigate?.();
