@@ -508,45 +508,48 @@ describe("BriefPage — data flow", () => {
 
   test("Save as... creates a copy under the new id and closes the dialog", async () => {
     const user = userEvent.setup();
-    const calls = routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
-    renderWithRun(<Editor id="camp" />);
-    await waitForEditorReady();
-
-    await saveVia(user, "Save as");
-    await user.type(screen.getByLabelText("New brief id"), "copy");
-    await user.click(
-      within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
-    );
-
-    await waitFor(() => expect(calls.some((c) => c.method === "POST")).toBe(true));
-    await waitFor(() => expect(screen.queryByLabelText("New brief id")).toBeNull());
-  });
-
-  test("a failed Save as... keeps the dialog open and shows why", async () => {
-    const user = userEvent.setup();
-    routes({
+    // PT-5c1 (D177, D178): Save as... mints through POST /campaigns (the name),
+    // then completes it as a first Save (POST /campaigns/briefs, the minted slug).
+    const calls = routes({
       list: () => json({ briefs: [entry("camp", "r1")] }),
-      post: () => json({ error: "already exists" }, 409),
+      meta: () => json(blankCampaignMeta("copy")),
     });
     renderWithRun(<Editor id="camp" />);
     await waitForEditorReady();
 
     await saveVia(user, "Save as");
-    await user.type(screen.getByLabelText("New brief id"), "copy");
+    await user.type(screen.getByLabelText("New campaign name"), "Copy");
     await user.click(
       within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
     );
 
-    // The collision (a 409 the listing did not foresee) asks first (D9); the
-    // overwrite itself is the retry.
-    const prompt = await screen.findByRole("dialog", { name: messages.saveAsOverwriteTitle });
-    await user.click(within(prompt).getByRole("button", { name: messages.saveAsOverwriteConfirm }));
+    await waitFor(() => expect(calls.filter((c) => c.method === "POST").length).toBe(2));
+    await waitFor(() => expect(screen.queryByLabelText("New campaign name")).toBeNull());
+  });
 
-    // The retry failed too: the error is on screen and the Save-as dialog is still
-    // open, exactly the answer any save failure gives.
+  test("a failed Save as... keeps the dialog open and shows why", async () => {
+    const user = userEvent.setup();
+    // PT-5c1 (D177, D178): a collision is never written and never silently failed —
+    // it is a refused MINT now, with no overwrite decision to retry (the server
+    // dedupes the name into a different slug; a 409 here means the mint itself
+    // failed for some other reason).
+    routes({
+      list: () => json({ briefs: [entry("camp", "r1")] }),
+      post: (url) => (url.endsWith("/campaigns") ? json({ error: "already exists" }, 409) : json({}, 201)),
+    });
+    renderWithRun(<Editor id="camp" />);
+    await waitForEditorReady();
+
+    await saveVia(user, "Save as");
+    await user.type(screen.getByLabelText("New campaign name"), "Copy");
+    await user.click(
+      within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
+    );
+
+    // The refusal surfaces on the still-open Save-as dialog, exactly the answer
+    // any save failure gives.
     expect(await screen.findByText(/already exists/)).toBeTruthy();
-    expect(screen.getByLabelText("New brief id")).toBeTruthy();
-    expect(screen.queryByRole("dialog", { name: messages.saveAsOverwriteTitle })).toBeNull();
+    expect(screen.getByLabelText("New campaign name")).toBeTruthy();
   });
 
   test("the Save as... field is the kit input, so it has the focus halo it lacked", async () => {
@@ -556,7 +559,7 @@ describe("BriefPage — data flow", () => {
     await waitForEditorReady();
 
     await saveVia(user, "Save as");
-    const field = screen.getByLabelText("New brief id");
+    const field = screen.getByLabelText("New campaign name");
     expect(field.className).toContain("focus:ring-brand-primary/25");
     expect(field.className).toContain("focus:border-brand-primary");
   });
@@ -575,7 +578,7 @@ describe("BriefPage — data flow", () => {
         name: "Cancel",
       }),
     );
-    expect(screen.queryByLabelText("New brief id")).toBeNull();
+    expect(screen.queryByLabelText("New campaign name")).toBeNull();
   });
 
   test("New brief... opens the create dialog rather than navigating (W1)", async () => {
