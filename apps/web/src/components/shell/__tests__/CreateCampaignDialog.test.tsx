@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, vi } from "vitest";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
   CAMPAIGN_TYPES,
@@ -219,6 +219,37 @@ describe("CreateCampaignDialog", () => {
     expect(screen.getByRole("dialog", { name: messages.createCampaignTitle })).toBeTruthy();
     // An invalid name never reaches the mint — nothing is created for nothing.
     expect(create).not.toHaveBeenCalled();
+  });
+
+  // PRRT_kwDOSzP1zc6m3XNB: `creating` is state, so it disables Create only after
+  // a re-render. Both clicks are dispatched inside ONE `act`, so the first
+  // click's `setCreating(true)` cannot disable the button before the second
+  // lands. That is what exercises the synchronous latch itself.
+  test("a double activation of Create mints only one campaign", async () => {
+    let releaseMint!: () => void;
+    const create = vi.spyOn(createCampaignLib, "createCampaign").mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          releaseMint = () => resolve({ campaignId: "c-1" });
+        }),
+    );
+    const user = userEvent.setup();
+    renderDialog();
+    const dialog = await openDialog(user);
+    await user.type(within(dialog).getByLabelText(messages.campaignNameLabel), "Twice");
+    const confirm = within(dialog).getByRole("button", { name: messages.createCampaignConfirm });
+
+    act(() => {
+      fireEvent.click(confirm);
+      fireEvent.click(confirm);
+    });
+    await waitFor(() => expect(create).toHaveBeenCalled());
+    expect(create).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      releaseMint();
+    });
+    expect(create).toHaveBeenCalledTimes(1);
   });
 
   test("the dialog never shows the slug the name derives (D65)", async () => {

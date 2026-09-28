@@ -260,7 +260,16 @@ export function CreateCampaignDialog() {
     guardReturnFocusRef.current = null;
   }, [guardOpen, createDialogOpen, draftHasWork]);
 
+  // A synchronous latch: `creating` is state, so it only disables the buttons
+  // after a re-render. Two activations inside one render window (a double
+  // click, or Enter plus a click, or Create plus Start over) would otherwise
+  // each reach `createCampaign` and mint two campaigns, the second orphaned.
+  // Same pattern as Save as (`saveAsInFlightRef`) and the picker's duplicate.
+  const createInFlightRef = useRef(false);
+
   const runCreate = async () => {
+    if (createInFlightRef.current) return;
+    createInFlightRef.current = true;
     setRefusal(null);
     setCreating(true);
     try {
@@ -280,6 +289,7 @@ export function CreateCampaignDialog() {
       setRefusal(unknownErrorMessage(error, messages.createCampaignFailed));
     } finally {
       setCreating(false);
+      createInFlightRef.current = false;
     }
   };
 
