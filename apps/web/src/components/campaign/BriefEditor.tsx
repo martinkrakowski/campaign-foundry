@@ -31,6 +31,8 @@ import { campaignRoute } from "@/lib/campaign-route";
 import {
   initialEditorState,
   toBrief,
+  fromBrief,
+  editorReducer,
   isDirtySinceSave,
   isDirtySinceApply,
   isPristine,
@@ -491,6 +493,17 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   const history = useEditorHistory(initialEditorState());
   const { state, dispatch } = history;
   useHistoryKeys(history);
+  /**
+   * PT-5c1 fix round (msczF) — the versionless-campaign route effect below is not
+   * keyed on `state` (only on `routeId` and the listing), so its closure holds
+   * `state` as of the render that (re)created it, not whatever the user has typed
+   * by the time the async `getCampaign` answer lands. A ref, mirrored on every
+   * render, is what lets that async callback read the LATEST draft at the moment
+   * it actually needs to decide whether seeding it would clobber real edits —
+   * `editor-history.ts`'s `actions` ref does the same thing for the same reason.
+   */
+  const stateRef = useRef(state);
+  stateRef.current = state;
   const [briefs, setBriefs] = useState<BriefEntry[]>([]);
   const [briefsLoaded, setBriefsLoaded] = useState(false);
   // D83/F-A — a listing that failed is a different fact from one that came back
@@ -504,6 +517,17 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   // The Save-as dialog's field: where the empty-name guard hands focus back (D3).
   const saveAsFieldRef = useRef<HTMLInputElement | null>(null);
   const saveAsDialogRef = useRef<HTMLDivElement | null>(null);
+  // mscym — a synchronous latch `handleSaveAs` checks and sets before its first
+  // await: `saving` is state, so two activations inside one render window (a
+  // double click, a stray Enter-plus-click) both reach the handler before React
+  // re-renders the disabled button. A ref closes that window; `saving` still
+  // drives the button's own visual disabled/loading state.
+  const saveAsInFlightRef = useRef(false);
+  // msczP — the campaign `handleSaveAs` minted, held across a failed first-save
+  // retry of the SAME Save as… so the retry writes into it instead of minting a
+  // second one. Cleared on success and on every dialog close/open below — it
+  // exists only for "try that exact attempt again", never across sessions.
+  const savedAsMintRef = useRef<{ campaignId: string; slug: string } | null>(null);
   // The Save-as dialog is `aria-modal` but was hand-rolled, so it had no Escape and
   // no focus containment: Cancel was the only way out, and Tab walked off into the
   // editor behind the scrim. The kit hook every other overlay uses supplies both,
@@ -513,7 +537,10 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
     // Not while the write is in flight — the mint and the first-save write are
     // two requests, and a dismissal mid-sequence must not race `router.replace`.
     onClose: () => {
-      if (!saving) setSaveAsName(null);
+      if (!saving) {
+        savedAsMintRef.current = null;
+        setSaveAsName(null);
+      }
     },
     dialogRef: saveAsDialogRef,
     initialFocusRef: saveAsFieldRef,
@@ -745,6 +772,24 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   // the editor never follows `runBrief`, or the two would be two sources of truth
   // for the same question — the bug this fixes.
   const [unknownId, setUnknownId] = useState<string | null>(null);
+  // mscy8 — a failed `GET /campaigns/:id` used to be silently discarded, leaving
+  // the route on an unseeded editor with no way out. Recorded per route (compared
+  // against `routeId` at render, never rendered stale for a route the user has
+  // since left) with a retry that re-runs the lookup — the same shape the
+  // listing's own `briefsFailed`/`loadBriefs()` retry already uses.
+  const [metaFailed, setMetaFailed] = useState<string | null>(null);
+  const [metaRetryNonce, setMetaRetryNonce] = useState(0);
+  const retryMeta = useCallback(() => setMetaRetryNonce((n) => n + 1), []);
+  /**
+   * msczA/mscdR — `meta.hasVersion` with no matching listing entry refreshes the
+   * listing once, on the theory that the listing was read a moment too early.
+   * Without a bound, a version that never shows up in a refreshed listing (the
+   * listing itself failing open, or a genuinely inconsistent store) refetches
+   * forever: each refresh reruns this effect, finds `hasVersion` again, and
+   * refreshes again. One retry per route, tracked here — a second miss for the
+   * SAME route falls through to not-found instead.
+   */
+  const versionRetriedRouteRef = useRef<string | null>(null);
   useEffect(() => {
     if (routeId === undefined) return;
     // SAFE_ID_PATTERN is the one rule a brief id answers to (the same one the
@@ -770,6 +815,7 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
     );
     if (match) {
       setUnknownId(null);
+      setMetaFailed(null);
       resolvedSlugRef.current = { routeId, slug: match.brief.id };
       dispatch({
         type: "load",
@@ -797,24 +843,35 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
       try {
         meta = await getCampaign(routeId);
       } catch {
-        // A transient failure reads as "could not tell", same as a failed
-        // listing — never as "no such campaign". Nothing to show here beyond
-        // what the listing's own failure state already offers a retry for.
+        // mscy8 — a transient failure used to read as "nothing happened"; it is
+        // now recorded and offered a retry, the same as a failed listing.
+        if (!cancelled) setMetaFailed(routeId);
         return;
       }
       if (cancelled) return;
       if (!meta) {
         setUnknownId(routeId);
+        setMetaFailed(null);
         return;
       }
       if (meta.hasVersion) {
+        if (versionRetriedRouteRef.current === routeId) {
+          // Already refreshed once for this exact route and the version still
+          // did not show up — a second miss is not "the listing was a moment
+          // early" any more (msczA/mscdR).
+          setUnknownId(routeId);
+          setMetaFailed(null);
+          return;
+        }
         // A race: the listing was read before this campaign's version landed
         // (or landed since). Refresh it rather than opening a blank draft over
         // real content — the refreshed listing re-runs this effect and finds
         // the match the ordinary way.
+        versionRetriedRouteRef.current = routeId;
         void loadBriefs();
         return;
       }
+      setMetaFailed(null);
       // The blank editor a versionless campaign opens: exactly what the
       // retired seed effect used to produce, seeded from the server instead
       // of a `localStorage` payload, and reproducible on every reload — a
@@ -822,21 +879,61 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
       // same restraint the seed effect kept), so its Save is a first Save
       // (`createBrief` with the minted slug, which the API turns into
       // version 1).
+      //
+      // The seed's own baseline (PT-5c1 fix round, root cause) — built the same
+      // way the live dispatches below build it (`fromBrief` + the name patch +
+      // the preset), but on a SCRATCH state, so it exists regardless of whether
+      // those dispatches actually run against the live draft this time.
       setUnknownId(null);
       resolvedSlugRef.current = { routeId, slug: meta.slug };
       const brief: CampaignBrief = { ...blankBrief(), id: meta.slug };
-      dispatch({ type: "load", brief });
-      dispatch({ type: "patch", patch: { campaignName: meta.name ?? "" } });
-      dispatch({ type: "applyPreset", campaignType: meta.type ?? DEFAULT_CAMPAIGN_TYPE });
-      setRunBrief(brief);
-      setAttempted(false);
-      setTouched(new Set());
-      setTouchedSections(new Set());
+      let seed = fromBrief(brief);
+      seed = editorReducer(seed, {
+        type: "patch",
+        patch: { campaignName: meta.name ?? "" },
+      });
+      seed = editorReducer(seed, {
+        type: "applyPreset",
+        campaignType: meta.type ?? DEFAULT_CAMPAIGN_TYPE,
+      });
+      // msczF — a slow lookup must not erase edits typed while it was in
+      // flight. `stateRef` (not `state`) because this callback's closure is
+      // from whenever the effect last (re)ran, not from the latest render.
+      // Only an UNATTACHED "new" draft (no `seeded` yet) is ever at risk of
+      // holding edits that belong to THIS route with nothing recorded to lose
+      // — a loaded file, or a "new" draft already seeded for a DIFFERENT
+      // campaign, is stale content that must be replaced regardless.
+      const live = stateRef.current;
+      const liveIsUnattachedNew = live.source.kind === "new" && live.source.seeded === undefined;
+      if (!liveIsUnattachedNew || isPristine(live)) {
+        dispatch({ type: "load", brief });
+        dispatch({ type: "patch", patch: { campaignName: meta.name ?? "" } });
+        dispatch({ type: "applyPreset", campaignType: meta.type ?? DEFAULT_CAMPAIGN_TYPE });
+        setRunBrief(brief);
+        setAttempted(false);
+        setTouched(new Set());
+        setTouchedSections(new Set());
+      }
+      dispatch({
+        type: "markSeeded",
+        campaignId: meta.campaignId,
+        slug: meta.slug,
+        campaignName: seed.campaignName,
+        snapshot: toBrief(seed),
+      });
     })();
     return () => {
       cancelled = true;
     };
-  }, [routeId, routeAlreadyResolved, briefs, briefsLoaded, briefsFailed, setRunBrief]);
+  }, [
+    routeId,
+    routeAlreadyResolved,
+    briefs,
+    briefsLoaded,
+    briefsFailed,
+    setRunBrief,
+    metaRetryNonce,
+  ]);
 
   /**
    * D83/F-A — where a failed listing is allowed to speak: exactly where the
@@ -845,8 +942,20 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
    * listing handleSave issues after a successful write — changes nothing on
    * screen, and `/brief/new` never needs the listing at all.
    */
+  // mscdq — `routeMatchesLoaded` is always false for a blank-at-route campaign
+  // (`source.kind` stays `"new"` until its first Save), so a failed focus-time
+  // refresh used to replace its editor with this listing-failure screen even
+  // though it is already showing the route it names. `routeAlreadyResolved`
+  // covers that resolved-but-unsaved case too.
   const failedRouteId =
-    briefsFailed && routeId !== undefined && !routeMatchesLoaded ? routeId : null;
+    briefsFailed && routeId !== undefined && !routeAlreadyResolved ? routeId : null;
+  // mscy8 — the id, never a bare boolean, the same shape `failedRouteId` above
+  // takes and for the same reason: compared against `routeId` so a route the
+  // user has since left cannot keep this screen up, and narrowed to `string`
+  // at every read site rather than an `routeId ?? ""` a route change can
+  // never actually reach (the effect that sets `metaFailed` gates it on this
+  // route's own `getCampaign` call, and `routeId` is defined wherever it runs).
+  const failedMetaId = metaFailed !== null && metaFailed === routeId ? metaFailed : null;
 
   // Arriving here means the last campaign is no longer the one being worked on. Let go
   // of it in the shell too: while it stayed active the selector kept advertising it and
@@ -1447,7 +1556,7 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
     // the shell's panels would be controls mutating a draft nobody can see.
     // D83/F-A: the same silence while a failed listing stands in for a route the
     // editor could not load — this page is not an editor in that state either.
-    if (unknownId !== null || failedRouteId !== null) {
+    if (unknownId !== null || failedRouteId !== null || failedMetaId !== null) {
       setTopPanels(null);
       return;
     }
@@ -1474,6 +1583,7 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
     outlineActivate,
     unknownId,
     failedRouteId,
+    failedMetaId,
   ]);
   useEffect(() => () => setTopPanels(null), []);
 
@@ -1493,7 +1603,7 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   useEffect(() => {
     // The M3 gate, plus the failed-listing silence (D83/F-A): no editor, nothing
     // published.
-    if (unknownId !== null || failedRouteId !== null) {
+    if (unknownId !== null || failedRouteId !== null || failedMetaId !== null) {
       setPanels(null);
       return;
     }
@@ -1559,6 +1669,7 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
     touchSectionFromEvent,
     unknownId,
     failedRouteId,
+    failedMetaId,
     selectedCreative,
     occupancy,
     canAdd,
@@ -1802,7 +1913,7 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
    * not assumed: see the comment on `EditorPanelPublisherContext`.
    */
   useEffect(() => {
-    if (unknownId !== null || failedRouteId !== null) {
+    if (unknownId !== null || failedRouteId !== null || failedMetaId !== null) {
       setRail(null);
       return;
     }
@@ -1814,7 +1925,7 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
       // Keeping the state below the publish point means a scrub writes none.
       content: <PlayheadHost durationSec={previewDurationSec} rail={railSlot} />,
     });
-  }, [railSlot, previewDurationSec, setRail, unknownId, failedRouteId]);
+  }, [railSlot, previewDurationSec, setRail, unknownId, failedRouteId, failedMetaId]);
   useEffect(() => () => setRail(null), []);
 
   /**
@@ -1990,10 +2101,15 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
    * with it — nothing left in this flow to validate an id against.
    *
    * A step-2 failure (the mint held, the first-save write did not) leaves an
-   * orphan versionless campaign server-side — a known, accepted gap of this
-   * two-step client flow (recorded under Deviations), the same shape
-   * `index.post.ts`'s own sourced-create already guards against for ITS
-   * single request, which this one is not.
+   * orphan versionless campaign server-side unless the SAME Save as… is
+   * retried (msczP): `savedAsMintRef` holds the mint across that retry, so it
+   * writes into the campaign already reserved instead of minting another. A
+   * cancelled dialog (or a fresh Save as… opened later) does not retry it —
+   * there is no web-side delete, so a mint abandoned that way stays reserved
+   * outside normal listings; a known, accepted gap of this client flow
+   * (recorded under Deviations), the same shape `index.post.ts`'s own
+   * sourced-create already guards against for ITS single request, which this
+   * one is not.
    */
   const handleSaveAs = async (rawName: string) => {
     if (refuseInvalid()) return;
@@ -2002,10 +2118,33 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
       saveAsFieldRef.current?.focus();
       return;
     }
+    // mscym — see `saveAsInFlightRef`'s own comment: this check-and-set has to
+    // happen before the first `await`, or two synchronous activations both
+    // pass it.
+    if (saveAsInFlightRef.current) return;
+    saveAsInFlightRef.current = true;
     setSaving(true);
     setPersistError(undefined);
     try {
-      const minted = await createCampaign({ name, type: state.type });
+      // msczP — reuse a mint already held from a failed first-save retry of
+      // this SAME attempt, rather than minting a second campaign for one
+      // Save as….
+      const minted = savedAsMintRef.current ?? (await createCampaign({ name, type: state.type }));
+      savedAsMintRef.current = minted;
+      // mscy6 — the copy's own display name is what was actually typed here,
+      // not whatever `state.campaignName` still holds from the source being
+      // copied. The thread's own mechanism does not exist to fix: `toBrief`
+      // never emits a name (`CampaignBrief` has no such field — only `id`,
+      // the slug `minted.slug` already supplies below), and the listing
+      // never renders one either (`BriefPicker`/`IdentitySection` both show
+      // `brief.id`, already the right slug). What DOES read `campaignName`
+      // is local draft state — the in-flight preview, and the Identity field
+      // itself before a first save — so that is what this patches. The
+      // FOUND-branch of the route effect above never re-patches it from
+      // `meta.name` either, so once this campaign is reopened as a saved
+      // file, its display name is its slug everywhere, same as any other
+      // saved campaign — a real, separate gap this fix does not close.
+      dispatch({ type: "patch", patch: { campaignName: name } });
       const brief = toBrief(state);
       // The write, not its answer: the copy is opened by navigating to it — the
       // route's own load effect reads it back from the server, the same as any
@@ -2013,16 +2152,25 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
       // the response in place.
       await createBrief({ ...brief, id: minted.slug });
       purgeDraftFromStorage(state);
-      // Refreshed before the navigation, so the destination's own load effect
-      // finds the copy in the listing the moment the URL changes, rather than
-      // falling through to a second `GET /campaigns/:id` round trip.
-      await loadBriefs();
+      savedAsMintRef.current = null;
       setSaveAsName(null);
+      // msczJ — the write above has already succeeded: the copy is safely
+      // stored, so a refresh failure from here on is never a Save as…
+      // failure, and must not leave the dialog open for a retry that would
+      // mint a SECOND copy of a campaign that already exists. Best-effort
+      // only — the destination route's own load effect finds the copy via
+      // `GET /campaigns/:id` even if this refresh failed.
+      try {
+        await loadBriefs();
+      } catch {
+        /* best-effort refresh; see above */
+      }
       router.replace(campaignRoute(minted.campaignId));
     } catch (error) {
       setPersistError(unknownErrorMessage(error, "Save as failed"));
     } finally {
       setSaving(false);
+      saveAsInFlightRef.current = false;
     }
   };
 
@@ -2237,7 +2385,13 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
             who left the column on YAML through this item comes back to the form
             after a reload. */
           { label: messages.editorYamlItem, onSelect: () => chooseColumnView("yaml") },
-          { label: messages.editorSaveAs, onSelect: () => setSaveAsName("") },
+          {
+            label: messages.editorSaveAs,
+            onSelect: () => {
+              savedAsMintRef.current = null;
+              setSaveAsName("");
+            },
+          },
           { label: messages.editorRevert, onSelect: handleRevert },
         ]}
       />
@@ -2571,6 +2725,32 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
     );
   }
 
+  // mscy8 — the listing succeeded, but resolving THIS route's own metadata
+  // failed. Same chrome and the same reasoning as the listing-failure state
+  // below (never "start a new brief" — a versionless campaign may already sit
+  // at this exact route), but its own retry: pressing it re-runs only the
+  // lookup this route needs, not the whole listing.
+  if (failedMetaId !== null) {
+    return (
+      <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 p-4 pb-24 sm:p-8">
+        <div role="alert" className="rounded-xl border border-border bg-surface p-6">
+          <p className="text-[13px] text-text-primary">{messages.briefMetaFailed(failedMetaId)}</p>
+          <div className="mt-4 flex items-center gap-4">
+            <Button variant="secondary" onClick={retryMeta}>
+              {messages.briefMetaFailedRetry}
+            </Button>
+            <Link
+              href="/grid"
+              className="text-[13px] font-medium text-brand-primary underline hover:text-text-emphasis"
+            >
+              {messages.briefNotFoundGrid}
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // D83/F-A — the listing failed, not the campaign. Same chrome as the not-found
   // state (`role="alert"`, no sidebar panels — the gates above), but the copy
   // names the real fact and the way out is the truth: the read failed, so retry
@@ -2849,17 +3029,15 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
             className="w-full max-w-md rounded-xl border border-border bg-surface p-6"
           >
             <h3 id="save-as-title" className="mb-4 text-sm font-semibold text-text-emphasis">
-              Save as...
+              {messages.saveAsDialogTitle}
             </h3>
-            <p className="mb-4 text-[12px] text-text-muted">
-              This creates a copy under a new name. The original stays as it is.
-            </p>
+            <p className="mb-4 text-[12px] text-text-muted">{messages.saveAsDialogLead}</p>
             {/* The kit's input, so the Save-as field has the same focus halo as
                 every other field in the editor — this one had none at all. */}
             <Input
               type="text"
-              aria-label="New campaign name"
-              placeholder="e.g. Summer Spark copy"
+              aria-label={messages.saveAsNameLabel}
+              placeholder={messages.saveAsNamePlaceholder}
               value={saveAsName}
               onChange={(e) => setSaveAsName(e.target.value)}
               className="mb-4"
@@ -2876,7 +3054,14 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
               {/* Held back only while the write is in flight, for the reason the
                   focus trap's `onClose` gives — and visibly, so a press that does
                   nothing is not the answer a user gets. */}
-              <Button variant="ghost" disabled={saving} onClick={() => setSaveAsName(null)}>
+              <Button
+                variant="ghost"
+                disabled={saving}
+                onClick={() => {
+                  savedAsMintRef.current = null;
+                  setSaveAsName(null);
+                }}
+              >
                 Cancel
               </Button>
             </div>
