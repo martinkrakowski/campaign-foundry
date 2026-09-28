@@ -1471,13 +1471,12 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
       };
     }
     case "patch": {
-      let patch = action.patch;
-      if (patch.campaignName !== undefined && state.source.kind === "new") {
-        patch = {
-          ...patch,
-          briefId: slugify(patch.campaignName),
-        };
-      }
+      // PT-5c1 (D178) — the id is server-derived and display-only now
+      // (`POST /campaigns` mints it, `campaignRoute` carries it): typing a
+      // name no longer slugifies `briefId`. A caller that wants `briefId` to
+      // move still may — the mutation manifest and the pool-reset branch
+      // below both anchor on `patch.briefId` changing on its own.
+      const patch = action.patch;
       const next = { ...state, ...patch };
       if (patch.briefId === undefined || patch.briefId === state.briefId) return next;
       return {

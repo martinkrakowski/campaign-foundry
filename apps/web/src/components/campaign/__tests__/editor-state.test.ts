@@ -210,13 +210,14 @@ describe("editorReducer — identity and copy", () => {
     expect(reduce(base(), { type: "setMode", mode: "variation" }).mode).toBe("variation");
   });
 
-  test("patching campaignName on a new draft derives briefId via slugify", () => {
-    const next = reduce(base(), {
+  test("patching campaignName on a new draft leaves briefId alone (PT-5c1, D178) — the id is server-derived and display-only", () => {
+    const seeded = { ...base(), briefId: "server-minted-slug" };
+    const next = reduce(seeded, {
       type: "patch",
       patch: { campaignName: "Summer Launch 2026!" },
     });
     expect(next.campaignName).toBe("Summer Launch 2026!");
-    expect(next.briefId).toBe("summer-launch-2026");
+    expect(next.briefId).toBe("server-minted-slug");
   });
 
   test("patching campaignName on a file-loaded draft does not re-derive briefId", () => {
@@ -4032,6 +4033,7 @@ describe("setMode and the mode-incompatible format (S4/D99)", () => {
         type: "patch",
         patch: {
           campaignName: "camp",
+          briefId: "camp",
           targetRegion: "DE",
           targetAudience: "a",
           campaignMessage: "Hi",
@@ -4263,6 +4265,7 @@ describe("the campaign type preset (T2 / D108–D112)", () => {
         type: "patch",
         patch: {
           campaignName: "camp",
+          briefId: "camp",
           targetRegion: "DE",
           targetAudience: "a",
           campaignMessage: "Hi",
@@ -4283,6 +4286,7 @@ describe("the campaign type preset (T2 / D108–D112)", () => {
         type: "patch",
         patch: {
           campaignName: "camp",
+          briefId: "camp",
           targetRegion: "DE",
           targetAudience: "a",
           campaignMessage: "Hi",
