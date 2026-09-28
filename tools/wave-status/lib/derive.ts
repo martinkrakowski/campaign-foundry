@@ -98,10 +98,7 @@ export function deriveLane(obs: LaneObservation): DerivedLane {
  * — and its verdict must be `clear` for the lane to count as reviewed: an
  * earlier clear never survives a later settled review of any verdict.
  */
-export function planReviewFacts(
-  events: readonly WaveEvent[],
-  lane: string,
-): PlanReviewObservation {
+export function planReviewFacts(events: readonly WaveEvent[], lane: string): PlanReviewObservation {
   let dispatchedAt: string | undefined;
   let dispatchIndex = -1;
   let dispatchWave = "";

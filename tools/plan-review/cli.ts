@@ -239,7 +239,9 @@ async function check(args: readonly string[], io: PlanReviewIo): Promise<number>
     // not be read as "nothing to compare" — the gate fails closed.
     const parsed = asHashRecord(decisionsDetail);
     if (parsed === undefined) {
-      io.logError(`the latest plan-review event for wave ${wave} carries a malformed decisions map`);
+      io.logError(
+        `the latest plan-review event for wave ${wave} carries a malformed decisions map`,
+      );
       return 2;
     }
     decisions = parsed;

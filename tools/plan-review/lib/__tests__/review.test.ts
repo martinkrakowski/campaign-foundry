@@ -45,7 +45,8 @@ describe("governingPlanReview — the gate's one rule, run by both of its faces"
       governingPlanReview([review({ detail: { rows: {}, verdict: "clear" } })], "W")?.plan,
     ).toBeUndefined();
     expect(
-      governingPlanReview([review({ detail: { plan: "", rows: {}, verdict: "clear" } })], "W")?.plan,
+      governingPlanReview([review({ detail: { plan: "", rows: {}, verdict: "clear" } })], "W")
+        ?.plan,
     ).toBeUndefined();
   });
 

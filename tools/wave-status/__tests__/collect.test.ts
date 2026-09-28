@@ -2194,7 +2194,12 @@ describe("collect — the plan-review gate (FU-plan-review-gate)", () => {
         [`${ROOT}/waveR/events.jsonl`]:
           line("R", "docs/planning/plan.md", rowHash(PLAN, "PT-5a"), "2026-09-28T10:00:00Z") +
           dispatchLine("PT-5a") +
-          line("OTHER", "docs/planning/plan-c.md", rowHash(planC, "PT-5a"), "2026-09-28T12:00:00Z") +
+          line(
+            "OTHER",
+            "docs/planning/plan-c.md",
+            rowHash(planC, "PT-5a"),
+            "2026-09-28T12:00:00Z",
+          ) +
           line("R", "docs/planning/plan-b.md", rowHash(planB, "PT-5a"), "2026-09-28T13:00:00Z"),
         "docs/planning/plan.md": PLAN,
         "docs/planning/plan-b.md": planB,
