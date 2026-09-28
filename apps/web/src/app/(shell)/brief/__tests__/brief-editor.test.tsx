@@ -4734,6 +4734,47 @@ describe("the route is the source of truth (D37)", () => {
     expect(await screen.findByText(messages.briefNotFound("Not Safe"))).toBeTruthy();
   });
 
+  test("a GET /campaigns/:id failure reads as inconclusive, never as unknown", async () => {
+    // PT-5c1 (D178) — not in the listing (a versionless campaign never is),
+    // and the meta fetch itself fails: this must NOT settle into the
+    // not-found state (that would be a false "no such campaign" for a
+    // request that simply could not be answered), and the listing's own
+    // failure state already offers the retry.
+    routes({
+      list: () => json({ briefs: [] }),
+      meta: () => json({ error: "boom" }, 500),
+    });
+    renderWithRun(<Editor id="fresh" />);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.queryByText(messages.briefNotFound("fresh"))).toBeNull();
+    // Neither the not-found nor the listing-failed gate fired — the editor
+    // renders its ordinary (still pristine, never seeded) form, exactly as it
+    // would while a slow-but-live meta fetch is still in flight.
+    expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("");
+  });
+
+  test("a campaign the meta fetch finds already versioned re-fetches the listing instead of opening blank", async () => {
+    // The race PT-5c1's meta fallback guards: the listing was read before
+    // this campaign's version landed (or landed since). Opening a blank
+    // draft over real content would be a silent data-loss trap; refreshing
+    // the listing lets the ordinary match path find it instead. The meta
+    // handler mutates `listed` itself, standing in for "the version landed
+    // by the time this answered" — so the `loadBriefs()` the hasVersion
+    // branch triggers picks up the real content, not another empty list.
+    let listed: readonly ReturnType<typeof entry>[] = [];
+    routes({
+      list: () => json({ briefs: listed }),
+      meta: () => {
+        listed = [entry("camp", "r1")];
+        return json({ campaignId: "camp", slug: "camp", name: null, type: null, hasVersion: true });
+      },
+    });
+    renderWithRun(<Editor id="camp" />);
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"),
+    );
+  });
+
   test("the /brief/new draft survives a reload, under one stable key (H6)", async () => {
     const user = userEvent.setup();
     routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
