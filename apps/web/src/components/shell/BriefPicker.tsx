@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Button,
   Input,
@@ -40,6 +40,12 @@ export function BriefPicker() {
   const [duplicateTarget, setDuplicateTarget] = useState<BriefEntry | null>(null);
   const [duplicateName, setDuplicateName] = useState("");
   const [duplicating, setDuplicating] = useState(false);
+  // mscyu — a synchronous latch `confirmDuplicate` checks and sets before its
+  // first await: `duplicating` is state, so a double form submission (two
+  // Enter presses, a click that lands before the button disables) can both
+  // reach the handler before React re-renders. A ref closes that window;
+  // `duplicating` still drives the button's own disabled/loading state.
+  const duplicatingRef = useRef(false);
 
   // (Re)load the list each time the picker opens. Parse defensively so an API error
   // surfaces as an error state, not a misleading empty list.
@@ -114,6 +120,15 @@ export function BriefPicker() {
     }
     setActionError(undefined);
     guardedAction(() => {
+      // mscyu — checked and set as the first thing the guarded action does, not
+      // before `guardedAction` is called: a DIRTY editor parks this action
+      // behind a confirm and may never run it (Cancel discards it, never
+      // clearing a flag set before the park) — the race this closes is two
+      // submissions reaching here before `duplicating` (state) re-renders the
+      // disabled button, which `guardedAction` calls `action()` for
+      // synchronously, in order, when the editor is not dirty.
+      if (duplicatingRef.current) return;
+      duplicatingRef.current = true;
       void (async () => {
         setDuplicating(true);
         try {
@@ -136,6 +151,7 @@ export function BriefPicker() {
           setActionError(unknownErrorMessage(err, "Duplicate failed"));
         } finally {
           setDuplicating(false);
+          duplicatingRef.current = false;
         }
       })();
     });

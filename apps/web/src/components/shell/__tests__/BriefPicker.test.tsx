@@ -4,7 +4,7 @@ import { render } from "@testing-library/react";
 import { ShellProviders } from "@/__tests__/helpers";
 import { useEditorDirty } from "@/lib/editor-dirty-context";
 import { CreateCampaignProvider } from "@/lib/create-campaign-context";
-import { screen, waitFor, within } from "@testing-library/react";
+import { screen, waitFor, within, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
   EMPTY_REPORT,
@@ -166,6 +166,46 @@ describe("BriefPicker create / duplicate", () => {
     await waitFor(() =>
       expect(screen.queryByRole("dialog", { name: "Load a campaign brief" })).toBeNull(),
     );
+  });
+
+  // mscyu — `duplicating` (state) needs a re-render to disable the submit
+  // button, so two submissions inside one render window both used to reach
+  // `duplicateCampaign` and each create a copy.
+  test("a double submission of Duplicate creates only one copy (mscyu)", async () => {
+    const user = userEvent.setup();
+    const copy = { id: "demo-copy", targetRegion: "DE", products: [{ id: "a" }] };
+    let duplicateCalls = 0;
+    let release!: () => void;
+    const gate = new Promise<Response>((resolve) => {
+      release = () => resolve(json({ file: "demo-copy.yaml", brief: copy }, 201));
+    });
+    mockPipelineApi({
+      post: (url) => {
+        if (url.includes("/duplicate")) {
+          duplicateCalls += 1;
+          return gate;
+        }
+        return json({ jobId: "job-1" }, 202);
+      },
+      result: (url) =>
+        url.includes("/campaigns/briefs") ? json({ briefs: [demo] }) : json(EMPTY_REPORT),
+    });
+    renderWithRun(<BriefPicker />);
+    await screen.findByText("demo.yaml");
+    await user.click(screen.getByText("Duplicate"));
+    await user.type(screen.getByLabelText("New campaign name"), "Demo Copy");
+    const submit = screen
+      .getAllByRole("button", { name: "Duplicate" })
+      .find((el) => el.getAttribute("type") === "submit")!;
+    // Two rapid activations before `duplicating` can re-render the button.
+    fireEvent.click(submit);
+    fireEvent.click(submit);
+    await waitFor(() => expect(duplicateCalls).toBeGreaterThan(0));
+    expect(duplicateCalls).toBe(1);
+
+    release();
+    await waitFor(() => expect(nextMock().router.push).toHaveBeenCalledWith("/brief/demo-copy"));
+    expect(duplicateCalls).toBe(1);
   });
 
   test("on a dirty editor, accepting the guard on Duplicate prompts exactly once, POSTs, and navigates (D67)", async () => {
