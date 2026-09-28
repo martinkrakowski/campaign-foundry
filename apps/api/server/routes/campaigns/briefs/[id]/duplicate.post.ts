@@ -367,15 +367,19 @@ export default defineEventHandler(async (event) => {
   };
 
   try {
-    const created =
-      target.kind === "newId"
-        ? await attempt(target.value, reserveVisible(target.value))
-        : await (() => {
-            const displayName = target.value;
-            return withDerivedSlug(displayName, (slug) =>
-              attempt(slug, reserveMinted(slug, displayName)),
-            );
-          })();
+    let created: StoredBrief;
+    if (target.kind === "newId") {
+      created = await attempt(target.value, reserveVisible(target.value));
+    } else {
+      // A local `const` (never the ternary form above) so TypeScript's
+      // narrowing of `target.kind === "name"` survives into the closure
+      // `withDerivedSlug` invokes — `target.value` itself does not narrow
+      // inside a nested function.
+      const displayName = target.value;
+      created = await withDerivedSlug(displayName, (slug) =>
+        attempt(slug, reserveMinted(slug, displayName)),
+      );
+    }
     setResponseStatus(event, 201);
     return { file: created.file, brief: created.brief };
   } catch (error) {
