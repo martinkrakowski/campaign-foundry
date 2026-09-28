@@ -693,7 +693,9 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   const routeMatchesLoaded =
     routeLoadedId !== undefined &&
     (routeLoadedId === routeId ||
-      (resolvedSlug?.routeId === routeId && resolvedSlug.slug === routeLoadedId));
+      (resolvedSlug !== null &&
+        resolvedSlug.routeId === routeId &&
+        resolvedSlug.slug === routeLoadedId));
 
   // D11 recovery: reinstate an auto-saved draft, once per draft key and only when it
   // actually differs from what is on screen. Keying on the draft rather than on mount

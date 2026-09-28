@@ -6,16 +6,14 @@ import {
   CAMPAIGN_TYPE_PRESETS,
   DEFAULT_CAMPAIGN_TYPE,
 } from "@campaignfoundry/CampaignOrchestration/campaign-types";
-import { DISPLAY_SIZE_VALUES } from "@campaignfoundry/CampaignOrchestration/display-sizes";
 import { CreateCampaignProvider, useCreateCampaign } from "@/lib/create-campaign-context";
-import { CREATE_SEED_KEY } from "@/lib/create-campaign";
-import { ShellProviders, json, mockPipelineApi, nextMock } from "@/__tests__/helpers";
+import { campaignRoute } from "@/lib/campaign-route";
+import { BriefsApiError } from "@/lib/briefs-api";
+import { ShellProviders, nextMock } from "@/__tests__/helpers";
 import {
   editorReducer,
   initialEditorState,
-  normalizeDraftState,
   saveDraftToStorage,
-  toBrief,
 } from "@/components/campaign/editor-state";
 import {
   formatDisplayName,
@@ -26,13 +24,6 @@ import * as messages from "@/components/campaign/messages";
 import * as createCampaignLib from "@/lib/create-campaign";
 import { getFocusableDialogElements } from "@/components/ui";
 import { CreateCampaignDialog } from "../CreateCampaignDialog";
-import NewBriefPage from "@/app/(shell)/brief/new/page";
-// The real gate the run paths hit, imported across apps for the test below —
-// the same cross-app import editor-state.test.ts makes, for the same reason.
-import { parseBrief } from "../../../../../api/server/lib/load-brief";
-
-/** The run paths' parse options, as the API builds them. */
-const RUN = { enforceCapabilities: true, capabilities: { motion: true } };
 
 /** Opens the dialog the way the shell's entry points do, so the closed state is real. */
 const Harness = () => {
@@ -214,6 +205,7 @@ describe("CreateCampaignDialog", () => {
   });
 
   test("Create with an empty name is refused in the status line, and the dialog stays open", async () => {
+    const create = vi.spyOn(createCampaignLib, "createCampaign");
     const user = userEvent.setup();
     renderDialog();
     const dialog = await openDialog(user);
@@ -225,7 +217,8 @@ describe("CreateCampaignDialog", () => {
       within(dialog).getByLabelText(messages.campaignNameLabel).getAttribute("aria-invalid"),
     ).toBe("true");
     expect(screen.getByRole("dialog", { name: messages.createCampaignTitle })).toBeTruthy();
-    expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
+    // An invalid name never reaches the mint — nothing is created for nothing.
+    expect(create).not.toHaveBeenCalled();
   });
 
   test("the dialog never shows the slug the name derives (D65)", async () => {
@@ -237,209 +230,99 @@ describe("CreateCampaignDialog", () => {
     expect(container.textContent).not.toContain("summer-spark");
   });
 
-  test("Create from elsewhere stashes the Identity step, closes the dialog, and pushes the seam's route", async () => {
+  test("Create posts the typed name and type, closes the dialog, and routes to the minted campaign (D177, D178)", async () => {
+    const create = vi
+      .spyOn(createCampaignLib, "createCampaign")
+      .mockResolvedValue({ campaignId: "c1" });
     const user = userEvent.setup();
     renderDialog();
     await openDialog(user);
     await fillValid(user);
     await user.click(screen.getByRole("button", { name: messages.createCampaignConfirm }));
 
-    await waitFor(() => expect(nextMock().router.push).toHaveBeenCalledWith("/brief/new"));
-    // D98: the landing branch belongs to the caller — off the blank route the baton
-    // crosses the navigation this push causes, and it is Identity, not Copy: the
-    // dialog no longer answers Identity, and both its fields are required by
-    // `validateIdentity`.
-    expect(localStorage.getItem("cf:step-handoff")).toBe("identity");
-    expect(JSON.parse(localStorage.getItem(CREATE_SEED_KEY) as string)).toEqual({
-      name: "Summer Spark",
-      type: "social-post",
-    });
+    expect(create).toHaveBeenCalledWith({ name: "Summer Spark", type: "social-post" });
+    await waitFor(() =>
+      expect(nextMock().router.push).toHaveBeenCalledWith(campaignRoute("c1")),
+    );
     await waitFor(() =>
       expect(screen.queryByRole("dialog", { name: messages.createCampaignTitle })).toBeNull(),
     );
   });
 
   test("Create with no tile chosen stores type social-post", async () => {
+    const create = vi
+      .spyOn(createCampaignLib, "createCampaign")
+      .mockResolvedValue({ campaignId: "c1" });
     const user = userEvent.setup();
     renderDialog();
     await openDialog(user);
     await fillValid(user);
     await user.click(screen.getByRole("button", { name: messages.createCampaignConfirm }));
 
-    await waitFor(() => expect(nextMock().router.push).toHaveBeenCalledWith("/brief/new"));
-    expect(JSON.parse(localStorage.getItem(CREATE_SEED_KEY) as string)).toEqual({
-      name: "Summer Spark",
-      type: "social-post",
-    });
+    await waitFor(() => expect(nextMock().router.push).toHaveBeenCalledWith(campaignRoute("c1")));
+    expect(create).toHaveBeenCalledWith({ name: "Summer Spark", type: "social-post" });
   });
 
-  test("Create on the blank route leaves the baton to the mounted editor's seed effect", async () => {
-    nextMock().nav.pathname = "/brief/new";
+  /**
+   * PT-5c1 — the preset the type applies (Randomized/variation for
+   * short-video, D109) is no longer something this dialog hands an editor
+   * through a seed: `POST /campaigns` stores only `{ name, type }` server-side
+   * (PT-5b3), and `/brief/<campaignId>` applies the type's preset itself from
+   * `GET /campaigns/:id` (see `BriefEditor`'s own tests for that proof). This
+   * dialog's job stops at sending the right type.
+   */
+  test('choosing short-video sends { name, type: "short-video" } to the mint', async () => {
+    const create = vi
+      .spyOn(createCampaignLib, "createCampaign")
+      .mockResolvedValue({ campaignId: "c1" });
     const user = userEvent.setup();
     renderDialog();
-    await openDialog(user);
-    await fillValid(user);
-    await user.click(screen.getByRole("button", { name: messages.createCampaignConfirm }));
-
-    await waitFor(() => expect(nextMock().router.push).toHaveBeenCalledWith("/brief/new"));
-    // Never both: in place, the editor's seed effect moves the cursor itself.
-    expect(localStorage.getItem("cf:step-handoff")).toBeNull();
-  });
-
-  test('choosing short-video stores { name, type: "short-video" } and the editor that consumes it is Randomized', async () => {
-    const user = userEvent.setup();
-    const view = renderDialog();
     const dialog = await openDialog(user);
     await fillValid(user);
     await user.click(within(dialog).getByRole("button", { name: "short-video" }));
     await user.click(within(dialog).getByRole("button", { name: messages.createCampaignConfirm }));
 
-    await waitFor(() => expect(nextMock().router.push).toHaveBeenCalledWith("/brief/new"));
-    expect(JSON.parse(localStorage.getItem(CREATE_SEED_KEY) as string)).toEqual({
-      name: "Summer Spark",
-      type: "short-video",
-    });
-    view.unmount();
-
-    localStorage.setItem("cf:brief-picked", "1");
-    localStorage.removeItem("cf:presentation");
-    mockPipelineApi({
-      result: (url) =>
-        String(url).includes("/campaigns/capabilities")
-          ? json({ motion: true })
-          : String(url).includes("/campaigns/briefs")
-            ? json({ briefs: [] })
-            : json({ halted: false, assets: [], log: null }),
-    });
-    nextMock().nav.pathname = "/brief/new";
-    render(
-      <ShellProviders>
-        <CreateCampaignProvider>
-          <NewBriefPage />
-        </CreateCampaignProvider>
-      </ShellProviders>,
-    );
-    await waitFor(() =>
-      expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
-        "Summer Spark",
-      ),
-    );
-    expect(screen.getByRole("button", { name: "variation" }).getAttribute("aria-pressed")).toBe(
-      "true",
-    );
-    expect(screen.getByRole("button", { name: "brief" }).getAttribute("aria-pressed")).toBe(
-      "false",
-    );
+    await waitFor(() => expect(nextMock().router.push).toHaveBeenCalledWith(campaignRoute("c1")));
+    expect(create).toHaveBeenCalledWith({ name: "Summer Spark", type: "short-video" });
   });
 
-  test('choosing display-ad stores { name, type: "display-ad" } and the editor that consumes it runs (D117)', async () => {
+  test('choosing display-ad sends { name, type: "display-ad" } to the mint', async () => {
+    const create = vi
+      .spyOn(createCampaignLib, "createCampaign")
+      .mockResolvedValue({ campaignId: "c1" });
     const user = userEvent.setup();
-    const view = renderDialog();
+    renderDialog();
     const dialog = await openDialog(user);
     await fillValid(user);
     await user.click(within(dialog).getByRole("button", { name: "display-ad" }));
     await user.click(within(dialog).getByRole("button", { name: messages.createCampaignConfirm }));
 
-    await waitFor(() => expect(nextMock().router.push).toHaveBeenCalledWith("/brief/new"));
-    expect(JSON.parse(localStorage.getItem(CREATE_SEED_KEY) as string)).toEqual({
-      name: "Summer Spark",
-      type: "display-ad",
-    });
-    view.unmount();
+    await waitFor(() => expect(nextMock().router.push).toHaveBeenCalledWith(campaignRoute("c1")));
+    expect(create).toHaveBeenCalledWith({ name: "Summer Spark", type: "display-ad" });
+  });
 
-    localStorage.setItem("cf:brief-picked", "1");
-    localStorage.removeItem("cf:presentation");
-    mockPipelineApi({
-      result: (url) =>
-        String(url).includes("/campaigns/capabilities")
-          ? json({ motion: true })
-          : String(url).includes("/campaigns/briefs")
-            ? json({ briefs: [] })
-            : json({ halted: false, assets: [], log: null }),
-    });
-    nextMock().nav.pathname = "/brief/new";
-    render(
-      <ShellProviders>
-        <CreateCampaignProvider>
-          <NewBriefPage />
-        </CreateCampaignProvider>
-      </ShellProviders>,
-    );
+  test("a refused mint keeps the dialog open, says so, and does not navigate", async () => {
+    const create = vi
+      .spyOn(createCampaignLib, "createCampaign")
+      .mockRejectedValue(new BriefsApiError("Request failed (HTTP 500)", 500));
+    const user = userEvent.setup();
+    renderDialog();
+    const dialog = await openDialog(user);
+    await fillValid(user);
+    await user.click(within(dialog).getByRole("button", { name: messages.createCampaignConfirm }));
+
     await waitFor(() =>
-      expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
-        "Summer Spark",
+      expect(within(createDialog()).getByRole("status").textContent).toBe(
+        "Request failed (HTTP 500)",
       ),
     );
-    // Classic mode — static + brief is legal, the D110 invariant the preset rides on.
-    expect(screen.getByRole("button", { name: "brief" }).getAttribute("aria-pressed")).toBe("true");
-    expect(screen.getByRole("button", { name: "variation" }).getAttribute("aria-pressed")).toBe(
-      "false",
-    );
-    // A3's three display profiles start selected. SG1 — the editor is one column,
-    // so the Output section's platform cards are already mounted; the walk to the
-    // Output step this used to need is gone with the wizard.
-    for (const id of ["google-display-html", "display-web-html"]) {
-      expect(screen.getByRole("button", { name: id }).getAttribute("aria-pressed")).toBe("true");
-    }
-    // The D117 proof — end to end against the run path, not the preset table:
-    // the editor's own autosaved state → toBrief → parseBrief with the run
-    // paths' enforceCapabilities gate, and the five IAB sizes come out derived.
-    await waitFor(() => expect(localStorage.getItem("cf:draft:new")).toBeTruthy());
-    const draft = JSON.parse(localStorage.getItem("cf:draft:new") as string) as {
-      state: Record<string, unknown>;
-    };
-    const state = normalizeDraftState(draft.state);
-    expect(state.platforms).toEqual(["google-display-html", "display-web-html"]);
-    // Identity and products are the user's answers, not the seed's (D108) — fill
-    // them the way the editor's own controls dispatch, then run the D117 proof:
-    // toBrief → parseBrief with the run paths' enforceCapabilities gate, and the
-    // five IAB sizes come out derived.
-    const identified = editorReducer(state, {
-      type: "patch",
-      patch: { targetRegion: "DE", targetAudience: "a", campaignMessage: "Hi" },
-    });
-    const completed = identified.products.reduce(
-      (acc, product) =>
-        editorReducer(acc, {
-          type: "setProduct",
-          key: product.key,
-          patch: { name: `Product ${product.key}` },
-        }),
-      identified,
-    );
-    const brief = toBrief(completed);
-    expect(brief.output?.sizes).toEqual([...DISPLAY_SIZE_VALUES]);
-    expect(() => parseBrief(brief, RUN)).not.toThrow();
+    expect(within(createDialog()).getAllByRole("status")).toHaveLength(1);
+    expect(screen.getByRole("dialog", { name: messages.createCampaignTitle })).toBeTruthy();
+    expect(nextMock().router.push).not.toHaveBeenCalled();
+    expect(create).toHaveBeenCalledTimes(1);
   });
 
-  test("a blocked store keeps the dialog open, says so, and neither navigates nor leaves a seed", async () => {
-    const setItem = vi.spyOn(localStorage, "setItem").mockImplementation(() => {
-      throw new Error("blocked");
-    });
-    const user = userEvent.setup();
-    try {
-      renderDialog();
-      const dialog = await openDialog(user);
-      await fillValid(user);
-      await user.click(
-        within(dialog).getByRole("button", { name: messages.createCampaignConfirm }),
-      );
-
-      await waitFor(() =>
-        expect(within(createDialog()).getByRole("status").textContent).toBe(
-          messages.createCampaignBlocked,
-        ),
-      );
-      expect(within(createDialog()).getAllByRole("status")).toHaveLength(1);
-      expect(screen.getByRole("dialog", { name: messages.createCampaignTitle })).toBeTruthy();
-      expect(nextMock().router.push).not.toHaveBeenCalled();
-      expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
-    } finally {
-      setItem.mockRestore();
-    }
-  });
-
-  test("Discard and close leaves no seed behind and resets the fields (D67, confirmed)", async () => {
+  test("Discard and close resets the fields — a cancelled create leaves nothing behind (D67, confirmed)", async () => {
     const user = userEvent.setup();
     renderDialog();
     await openDialog(user);
@@ -453,7 +336,6 @@ describe("CreateCampaignDialog", () => {
     await waitFor(() =>
       expect(screen.queryByRole("dialog", { name: messages.createCampaignTitle })).toBeNull(),
     );
-    expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
     // A fresh open starts fresh: a cancelled create left nothing behind.
     await user.click(screen.getByRole("button", { name: "open" }));
     expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe("");
@@ -481,49 +363,50 @@ describe("the abandoned-draft two-way (W3 / F19)", () => {
     return screen.findByRole("dialog", { name: messages.resumeDraftTitle });
   };
 
-  test("a stale blank draft with no editor mounted asks before the seed overwrites it", async () => {
+  test("a stale blank draft with no editor mounted asks before the mint proceeds", async () => {
     stashAbandonedDraft();
+    const create = vi.spyOn(createCampaignLib, "createCampaign");
     const user = userEvent.setup();
     renderDialog();
     const prompt = await raiseTwoWay(user);
 
     expect(within(prompt).getByText(messages.resumeDraftQuestion)).toBeTruthy();
-    // Asking publishes nothing — the create is held until the user answers.
-    expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
+    // Asking mints nothing — the create is held until the user answers.
+    expect(create).not.toHaveBeenCalled();
     expect(nextMock().router.push).not.toHaveBeenCalled();
   });
 
-  test("Resume publishes no seed, keeps the draft, and lands on the blank route without the baton", async () => {
+  test("Resume mints nothing, keeps the draft, and lands on the blank route", async () => {
     stashAbandonedDraft();
+    const create = vi.spyOn(createCampaignLib, "createCampaign");
     const user = userEvent.setup();
     renderDialog();
     const prompt = await raiseTwoWay(user);
     await user.click(within(prompt).getByRole("button", { name: messages.resumeDraftResume }));
 
     await waitFor(() => expect(nextMock().router.push).toHaveBeenCalledWith("/brief/new"));
-    expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
+    expect(create).not.toHaveBeenCalled();
     // F19's whole point: the abandoned draft is exactly where it was, so the
     // recovery effect restores it untouched on the blank route.
     expect(localStorage.getItem("cf:draft:new")).not.toBeNull();
-    // And never the step baton: the restored draft resumes where the user left
-    // off, not on Copy.
-    expect(localStorage.getItem("cf:step-handoff")).toBeNull();
     await waitFor(() =>
       expect(screen.queryByRole("dialog", { name: messages.createCampaignTitle })).toBeNull(),
     );
   });
 
-  test("Start over publishes the seed and proceeds — one prompt for the whole gesture", async () => {
+  test("Start over mints the campaign and proceeds — one prompt for the whole gesture", async () => {
     stashAbandonedDraft();
+    const create = vi
+      .spyOn(createCampaignLib, "createCampaign")
+      .mockResolvedValue({ campaignId: "c1" });
     const user = userEvent.setup();
     renderDialog();
     const prompt = await raiseTwoWay(user);
     await user.click(within(prompt).getByRole("button", { name: messages.resumeDraftStartOver }));
 
-    await waitFor(() => expect(nextMock().router.push).toHaveBeenCalledWith("/brief/new"));
-    expect(JSON.parse(localStorage.getItem(CREATE_SEED_KEY) as string).name).toBe("Summer Spark");
-    expect(localStorage.getItem("cf:step-handoff")).toBe("identity");
-    // One gesture, one answer: the seed's publication must not re-ask.
+    await waitFor(() => expect(nextMock().router.push).toHaveBeenCalledWith(campaignRoute("c1")));
+    expect(create).toHaveBeenCalledWith({ name: "Summer Spark", type: "social-post" });
+    // One gesture, one answer: minting must not re-ask.
     expect(screen.queryAllByRole("dialog", { name: messages.resumeDraftTitle })).toHaveLength(0);
   });
 
@@ -534,8 +417,8 @@ describe("the abandoned-draft two-way (W3 / F19)", () => {
     // `setCreating(true)` runs in this click handler, so React flushes the
     // disabled re-render before the next click; a same-frame pair is the
     // overwrite-latch case, not this one.
-    let release!: (value: { id: string; route: string }) => void;
-    const held = new Promise<{ id: string; route: string }>((resolve) => {
+    let release!: (value: { campaignId: string }) => void;
+    const held = new Promise<{ campaignId: string }>((resolve) => {
       release = resolve;
     });
     const create = vi.spyOn(createCampaignLib, "createCampaign").mockReturnValue(held);
@@ -547,67 +430,65 @@ describe("the abandoned-draft two-way (W3 / F19)", () => {
     await user.click(startOver);
 
     expect(create).toHaveBeenCalledTimes(1);
-    release({ id: "", route: "/brief/new" });
+    release({ campaignId: "c1" });
     await waitFor(() => expect(nextMock().router.push).toHaveBeenCalledTimes(1));
-    expect(nextMock().router.push).toHaveBeenCalledWith("/brief/new");
+    expect(nextMock().router.push).toHaveBeenCalledWith(campaignRoute("c1"));
   });
 
-  test("Start over with a blocked store shows the refusal on the form and publishes nothing", async () => {
+  test("Start over with a refused mint shows the refusal on the form and does not navigate", async () => {
     stashAbandonedDraft();
+    const create = vi
+      .spyOn(createCampaignLib, "createCampaign")
+      .mockRejectedValue(new BriefsApiError("Request failed (HTTP 500)", 500));
     const user = userEvent.setup();
     renderDialog();
     const prompt = await raiseTwoWay(user);
 
-    const setItem = vi.spyOn(localStorage, "setItem").mockImplementation(() => {
-      throw new Error("blocked");
-    });
-    try {
-      await user.click(within(prompt).getByRole("button", { name: messages.resumeDraftStartOver }));
+    await user.click(within(prompt).getByRole("button", { name: messages.resumeDraftStartOver }));
 
-      await waitFor(() =>
-        expect(within(createDialog()).getByRole("status").textContent).toBe(
-          messages.createCampaignBlocked,
-        ),
-      );
-      // The two-way must come down: the status line lives on the form it covers.
-      expect(screen.queryByRole("dialog", { name: messages.resumeDraftTitle })).toBeNull();
-      expect(screen.getByRole("dialog", { name: messages.createCampaignTitle })).toBeTruthy();
-      expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
-        "Summer Spark",
-      );
-      expect(nextMock().router.push).not.toHaveBeenCalled();
-      expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
-    } finally {
-      setItem.mockRestore();
-    }
+    await waitFor(() =>
+      expect(within(createDialog()).getByRole("status").textContent).toBe(
+        "Request failed (HTTP 500)",
+      ),
+    );
+    // The two-way must come down: the status line lives on the form it covers.
+    expect(screen.queryByRole("dialog", { name: messages.resumeDraftTitle })).toBeNull();
+    expect(screen.getByRole("dialog", { name: messages.createCampaignTitle })).toBeTruthy();
+    expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
+      "Summer Spark",
+    );
+    expect(nextMock().router.push).not.toHaveBeenCalled();
+    expect(create).toHaveBeenCalledTimes(1);
   });
 
   test("a stored but pristine draft asks nothing — a pristine draft holds no work to lose", async () => {
     saveDraftToStorage(initialEditorState());
+    vi.spyOn(createCampaignLib, "createCampaign").mockResolvedValue({ campaignId: "c1" });
     const user = userEvent.setup();
     renderDialog();
     await openDialog(user);
     await fillValid(user);
     await user.click(screen.getByRole("button", { name: messages.createCampaignConfirm }));
 
-    await waitFor(() => expect(nextMock().router.push).toHaveBeenCalledWith("/brief/new"));
+    await waitFor(() => expect(nextMock().router.push).toHaveBeenCalledWith(campaignRoute("c1")));
     expect(screen.queryAllByRole("dialog", { name: messages.resumeDraftTitle })).toHaveLength(0);
   });
 
-  test("Escape and Cancel on the two-way return to the form and publish nothing; a reopened dialog starts at the form", async () => {
+  test("Escape and Cancel on the two-way return to the form and mint nothing; a reopened dialog starts at the form", async () => {
     stashAbandonedDraft();
+    const create = vi.spyOn(createCampaignLib, "createCampaign");
     const user = userEvent.setup();
     renderDialog();
     await raiseTwoWay(user);
     fireEvent.keyDown(window, { key: "Escape" });
 
-    // Back to the form, answers intact; nothing was published, the draft untouched.
+    // Back to the form, answers intact; nothing was minted, the draft untouched.
     expect(screen.queryByRole("dialog", { name: messages.resumeDraftTitle })).toBeNull();
     expect(screen.getByRole("dialog", { name: messages.createCampaignTitle })).toBeTruthy();
     expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
       "Summer Spark",
     );
-    expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
+    expect(create).not.toHaveBeenCalled();
     expect(localStorage.getItem("cf:draft:new")).not.toBeNull();
 
     // Cancel dismisses the same way — and the two-way raises again on a fresh
@@ -680,10 +561,10 @@ describe("the inline discard guard (W2(a) / D90)", () => {
       expect(screen.queryByRole("dialog", { name: messages.createCampaignTitle })).toBeNull(),
     );
     expect(screen.queryByText(messages.discardGuardTitle)).toBeNull();
-    expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
   });
 
   test("a dirty Cancel does not close — the guard asks in the footer and names what would be dropped", async () => {
+    const create = vi.spyOn(createCampaignLib, "createCampaign");
     const user = userEvent.setup();
     renderDialog();
     const dialog = await openDialog(user);
@@ -697,8 +578,8 @@ describe("the inline discard guard (W2(a) / D90)", () => {
     // The row it replaced is gone while it shows.
     expect(screen.queryByRole("button", { name: messages.confirmCancel })).toBeNull();
     expect(screen.queryByRole("button", { name: messages.createCampaignConfirm })).toBeNull();
-    // Asking publishes nothing, and the guard adds no second live region.
-    expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
+    // Asking mints nothing, and the guard adds no second live region.
+    expect(create).not.toHaveBeenCalled();
     expect(within(dialog).getAllByRole("status")).toHaveLength(1);
   });
 
@@ -740,7 +621,6 @@ describe("the inline discard guard (W2(a) / D90)", () => {
     expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
       "Summer Spark",
     );
-    expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
   });
 
   test("the scrim asks on a dirty draft, and asks once — the second click keeps editing", async () => {
@@ -886,151 +766,62 @@ describe("CC6 — three tile groups, named for what the user is making (D162)", 
     }
   });
 
-  test("selecting short-video produces mode: variation through the preset (asserting resulting mode)", async () => {
+  /**
+   * PT-5c1 — which preset mode the type produces is now BriefEditor's own
+   * proof (it applies the preset from `GET /campaigns/:id`'s `type`, not
+   * from anything this dialog hands it). This dialog's contract stops at
+   * sending the one selected type to the mint.
+   */
+  test("selecting short-video sends type short-video, not the earlier tile in another group", async () => {
+    const create = vi
+      .spyOn(createCampaignLib, "createCampaign")
+      .mockResolvedValue({ campaignId: "c1" });
     const user = userEvent.setup();
-    const view = renderDialog();
+    renderDialog();
     const dialog = await openDialog(user);
     await fillValid(user);
     await user.click(within(dialog).getByRole("button", { name: "short-video" }));
     await user.click(within(dialog).getByRole("button", { name: messages.createCampaignConfirm }));
 
-    expect(JSON.parse(localStorage.getItem(CREATE_SEED_KEY) as string)).toEqual({
-      name: "Summer Spark",
-      type: "short-video",
-    });
-    view.unmount();
-
-    localStorage.setItem("cf:brief-picked", "1");
-    localStorage.removeItem("cf:presentation");
-    mockPipelineApi({
-      result: (url) =>
-        String(url).includes("/campaigns/capabilities")
-          ? json({ motion: true })
-          : String(url).includes("/campaigns/briefs")
-            ? json({ briefs: [] })
-            : json({ halted: false, assets: [], log: null }),
-    });
-    nextMock().nav.pathname = "/brief/new";
-    render(
-      <ShellProviders>
-        <CreateCampaignProvider>
-          <NewBriefPage />
-        </CreateCampaignProvider>
-      </ShellProviders>,
-    );
-    await waitFor(() =>
-      expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
-        "Summer Spark",
-      ),
-    );
-    // Assert the resulting mode comes from CAMPAIGN_TYPE_PRESETS["short-video"].mode ("variation")
-    expect(screen.getByRole("button", { name: "variation" }).getAttribute("aria-pressed")).toBe(
-      "true",
-    );
-    expect(screen.getByRole("button", { name: "brief" }).getAttribute("aria-pressed")).toBe(
-      "false",
-    );
+    await waitFor(() => expect(nextMock().router.push).toHaveBeenCalledWith(campaignRoute("c1")));
+    expect(create).toHaveBeenCalledWith({ name: "Summer Spark", type: "short-video" });
   });
 
-  test("selecting a static type produces its own preset's mode (brief) through the preset", async () => {
+  test("selecting a static type sends that type", async () => {
+    const create = vi
+      .spyOn(createCampaignLib, "createCampaign")
+      .mockResolvedValue({ campaignId: "c1" });
     const user = userEvent.setup();
-    const view = renderDialog();
+    renderDialog();
     const dialog = await openDialog(user);
     await fillValid(user);
     await user.click(within(dialog).getByRole("button", { name: "display-ad" }));
     await user.click(within(dialog).getByRole("button", { name: messages.createCampaignConfirm }));
 
-    expect(JSON.parse(localStorage.getItem(CREATE_SEED_KEY) as string)).toEqual({
-      name: "Summer Spark",
-      type: "display-ad",
-    });
-    view.unmount();
-
-    localStorage.setItem("cf:brief-picked", "1");
-    localStorage.removeItem("cf:presentation");
-    mockPipelineApi({
-      result: (url) =>
-        String(url).includes("/campaigns/capabilities")
-          ? json({ motion: true })
-          : String(url).includes("/campaigns/briefs")
-            ? json({ briefs: [] })
-            : json({ halted: false, assets: [], log: null }),
-    });
-    nextMock().nav.pathname = "/brief/new";
-    render(
-      <ShellProviders>
-        <CreateCampaignProvider>
-          <NewBriefPage />
-        </CreateCampaignProvider>
-      </ShellProviders>,
-    );
-    await waitFor(() =>
-      expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
-        "Summer Spark",
-      ),
-    );
-    // Assert the resulting mode comes from CAMPAIGN_TYPE_PRESETS["display-ad"].mode ("brief")
-    expect(screen.getByRole("button", { name: "brief" }).getAttribute("aria-pressed")).toBe("true");
-    expect(screen.getByRole("button", { name: "variation" }).getAttribute("aria-pressed")).toBe(
-      "false",
-    );
+    await waitFor(() => expect(nextMock().router.push).toHaveBeenCalledWith(campaignRoute("c1")));
+    expect(create).toHaveBeenCalledWith({ name: "Summer Spark", type: "display-ad" });
   });
 
-  test("applyPreset runs once per selection, not once per group", async () => {
+  test("selecting across groups sends only the last-selected type — the mint runs once per Create", async () => {
     const user = userEvent.setup();
-    const createSpy = vi.spyOn(createCampaignLib, "createCampaign");
-    try {
-      const view = renderDialog();
-      const dialog = await openDialog(user);
-      await fillValid(user);
+    const createSpy = vi
+      .spyOn(createCampaignLib, "createCampaign")
+      .mockResolvedValue({ campaignId: "c1" });
+    renderDialog();
+    const dialog = await openDialog(user);
+    await fillValid(user);
 
-      // Select in static group then in motion group
-      await user.click(within(dialog).getByRole("button", { name: "paid-social" }));
-      await user.click(within(dialog).getByRole("button", { name: "short-video" }));
-      await user.click(
-        within(dialog).getByRole("button", { name: messages.createCampaignConfirm }),
-      );
+    // Select in static group then in motion group
+    await user.click(within(dialog).getByRole("button", { name: "paid-social" }));
+    await user.click(within(dialog).getByRole("button", { name: "short-video" }));
+    await user.click(within(dialog).getByRole("button", { name: messages.createCampaignConfirm }));
 
-      // Create seeds only once for the single selected type
-      expect(createSpy).toHaveBeenCalledTimes(1);
-      expect(createSpy).toHaveBeenCalledWith({
-        name: "Summer Spark",
-        type: "short-video",
-      });
-      view.unmount();
-
-      localStorage.setItem("cf:brief-picked", "1");
-      localStorage.removeItem("cf:presentation");
-      mockPipelineApi({
-        result: (url) =>
-          String(url).includes("/campaigns/capabilities")
-            ? json({ motion: true })
-            : String(url).includes("/campaigns/briefs")
-              ? json({ briefs: [] })
-              : json({ halted: false, assets: [], log: null }),
-      });
-      nextMock().nav.pathname = "/brief/new";
-      render(
-        <ShellProviders>
-          <CreateCampaignProvider>
-            <NewBriefPage />
-          </CreateCampaignProvider>
-        </ShellProviders>,
-      );
-      await waitFor(() =>
-        expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
-          "Summer Spark",
-        ),
-      );
-      // The seed was consumed exactly once by applyPreset (seed key is spent)
-      expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
-      const draft = JSON.parse(localStorage.getItem("cf:draft:new") as string) as {
-        state: { type: string; mode: string };
-      };
-      expect(draft.state.type).toBe("short-video");
-      expect(draft.state.mode).toBe("variation");
-    } finally {
-      createSpy.mockRestore();
-    }
+    // The mint runs once, for the single selected type.
+    expect(createSpy).toHaveBeenCalledTimes(1);
+    expect(createSpy).toHaveBeenCalledWith({
+      name: "Summer Spark",
+      type: "short-video",
+    });
+    await waitFor(() => expect(nextMock().router.push).toHaveBeenCalledWith(campaignRoute("c1")));
   });
 });

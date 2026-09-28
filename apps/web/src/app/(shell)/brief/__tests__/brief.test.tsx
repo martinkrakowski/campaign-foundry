@@ -112,7 +112,11 @@ describe("/brief/new — resume or create (PT-5c1, W3)", () => {
       }),
     );
     renderNewBriefPage();
-    expect(await screen.findByLabelText("Campaign Name")).toHaveValue("Half-written");
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(
+        "Half-written",
+      ),
+    );
     expect(nextMock().router.replace).not.toHaveBeenCalled();
     expect(screen.getByTestId("dialog-open").textContent).toBe("false");
   });
