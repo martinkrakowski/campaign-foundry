@@ -584,6 +584,18 @@ describe("BriefPage — data flow", () => {
     expect(screen.queryByLabelText("New campaign name")).toBeNull();
   });
 
+  test("Escape dismisses the Save as... dialog while no write is in flight", async () => {
+    const user = userEvent.setup();
+    routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
+    renderWithRun(<Editor id="camp" />);
+    await waitForEditorReady();
+
+    await saveVia(user, "Save as");
+    expect(screen.getByLabelText("New campaign name")).toBeTruthy();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByLabelText("New campaign name")).toBeNull();
+  });
+
   test("New brief... opens the create dialog rather than navigating (W1)", async () => {
     const user = userEvent.setup();
     routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
@@ -4773,6 +4785,66 @@ describe("the route is the source of truth (D37)", () => {
     await waitFor(() =>
       expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"),
     );
+  });
+
+  test("a uuid URL and a slug URL both load the same campaign, and a uuid route survives a listing refresh", async () => {
+    const user = userEvent.setup();
+    const uuid = "3f9c7f2e-8b1a-4e9d-9c2b-1a2b3c4d5e6f";
+    const withUuid = { ...entry("camp", "r1"), campaignId: uuid };
+    // PT-5a added `campaignId` to each listing item (D178): a uuid-addressed
+    // route matches on it, a slug-addressed one on `brief.id`, and both name
+    // the same campaign.
+    routes({ list: () => json({ briefs: [withUuid] }) });
+    renderWithRun(<Editor id={uuid} />);
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"),
+    );
+
+    // A real edit, then a listing refresh (a window focus): `routeLoadedId`
+    // (the file source's own id) is the SLUG "camp", never the uuid the URL
+    // carries — without resolving through `resolvedSlugRef`, this refresh
+    // would look like the route never loaded and re-dispatch `load` over the
+    // edit below (the exact clobber `routeMatchesLoaded` exists to prevent).
+    await user.type(screen.getByLabelText("Target Audience"), " more");
+    fireEvent.focus(window);
+    await new Promise((r) => setTimeout(r, 20));
+    expect((screen.getByLabelText("Target Audience") as HTMLInputElement).value).toBe(
+      brief("camp").targetAudience + " more",
+    );
+  });
+
+  test("a route change cancels an in-flight meta fetch rather than dispatching it onto the new route", async () => {
+    const pending: Record<string, Array<(r: Response) => void>> = { a: [], b: [] };
+    routes({
+      list: () => json({ briefs: [] }),
+      meta: (id) => new Promise<Response>((resolve) => pending[id]!.push(resolve)),
+    });
+    const view = renderWithRun(<Editor id="a" />);
+    await waitFor(() => expect(pending.a.length).toBeGreaterThan(0));
+
+    // The route changes before "a"'s meta fetch ever answers — its cleanup
+    // must mark it cancelled, so the answer below (a fresh mint for "a")
+    // never dispatches a stale `load` onto whatever "b" has become.
+    view.rerender(
+      <ShellProviders>
+        <CreateCampaignProvider>
+          <Editor id="b" />
+          <CreateCampaignDialog />
+        </CreateCampaignProvider>
+      </ShellProviders>,
+    );
+    await waitFor(() => expect(pending.b.length).toBeGreaterThan(0));
+
+    for (const resolve of pending.a) resolve(json(blankCampaignMeta("a")));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    // "a"'s own answer(s) never dispatch here — the page is still deciding "b",
+    // never showing "a"'s campaign id.
+    expect(screen.queryByText("a")).toBeNull();
+
+    for (const resolve of pending.b) resolve(json(blankCampaignMeta("b")));
+    await waitFor(() => expect(screen.getByText("b")).toBeTruthy());
   });
 
   test("the /brief/new draft survives a reload, under one stable key (H6)", async () => {
