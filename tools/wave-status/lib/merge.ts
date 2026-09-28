@@ -1,4 +1,5 @@
 import { deriveLane } from "./derive.js";
+import { PLAN_REVIEW_LANE } from "../../plan-review/lib/rows.js";
 import type { DerivedLane, LaneObservation, LaneStatus, WaveEvent, WaveStatus } from "./types.js";
 
 /**
@@ -32,6 +33,9 @@ export function mergeStatus(
   const seatByKey = new Map<string, string>();
 
   const remember = (wave: string, lane: string): void => {
+    // The reserved token reviews the wave; it is never a lane and never a
+    // row on the page, whatever feed carries it.
+    if (lane === PLAN_REVIEW_LANE) return;
     let group = groups.get(wave);
     if (group === undefined) {
       group = { id: wave, lanes: [] };

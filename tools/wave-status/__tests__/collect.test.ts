@@ -2084,9 +2084,53 @@ describe("collect — the plan-review gate (FU-plan-review-gate)", () => {
     expect(laneRow(status, "PT-9")?.derived.planReview).toBeUndefined();
   });
 
+  test("a wave whose only event is a review shows no _plan row and probes nothing for it", async () => {
+    // The reserved token reviews the wave; it is not a lane. Once a review
+    // event exists, _plan used to reach the process probe, the gate-log
+    // lookup, the PR join and the state rollups — where a settled event with
+    // no process behind it classified as vanished.
+    const seen: string[] = [];
+    const status = await collect(
+      {
+        ...fakeDeps(tree(reviewLine({ "PT-5a": "aa" }))),
+        pgrep: async (pattern) => {
+          seen.push(pattern);
+          return 0;
+        },
+      },
+      ROOT,
+      "2026-09-28T12:00:00Z",
+    );
+    expect(status.waves[0]?.lanes).toEqual([]);
+    expect(seen).toEqual([]);
+  });
+
+  test("a review beside a real lane leaves that lane as the wave's only row", async () => {
+    const reviewAndLane =
+      reviewLine({ "PT-5a": "aa" }) +
+      `${JSON.stringify({
+        ts: "2026-09-28T10:30:00Z",
+        wave: "R",
+        lane: "PT-5a",
+        stage: "implement",
+        event: "started",
+      })}\n`;
+    const status = await laneAt(reviewAndLane);
+    expect(status.waves[0]?.lanes.map((lane) => lane.lane)).toEqual(["PT-5a"]);
+  });
+
   test("a lane that never dispatched carries no plan-review facts", async () => {
-    const status = await laneAt(reviewLine({ "PT-5a": "aa" }));
-    expect(laneRow(status, "_plan")?.derived.planReview).toBeUndefined();
+    const reviewAndLane =
+      reviewLine({ "PT-5a": "aa" }) +
+      `${JSON.stringify({
+        ts: "2026-09-28T10:30:00Z",
+        wave: "R",
+        lane: "PT-5a",
+        stage: "implement",
+        event: "started",
+      })}\n`;
+    const status = await laneAt(reviewAndLane);
+    expect(laneRow(status, "PT-5a")?.derived.planReview).toBeUndefined();
   });
 
   test("the row hash comes from the plan the governing review named, not the directory's latest review", async () => {

@@ -7,7 +7,7 @@ import { planReviewFacts } from "./derive.js";
 import { mergeStatus } from "./merge.js";
 import { readBacklog } from "./backlog.js";
 import { artifactPathFor } from "../../plan-verify/lib/artifact.js";
-import { rowHash } from "../../plan-review/lib/rows.js";
+import { PLAN_REVIEW_LANE, rowHash } from "../../plan-review/lib/rows.js";
 import type {
   LaneObservation,
   PlanReviewObservation,
@@ -238,8 +238,13 @@ export async function collect(
           dirEvents = readEvents(text).events;
           for (const event of dirEvents) {
             events.push(event);
-            eventLanes.add(event.lane);
-            if (event.pr !== undefined) reportedPrByLane.set(event.lane, event.pr);
+            // The reserved token reviews the wave; it is never a lane — no
+            // row, no probe, no gate-log lookup, no PR join. The events stay
+            // in dirEvents, where the plan-review derivation reads them.
+            if (event.lane !== PLAN_REVIEW_LANE) {
+              eventLanes.add(event.lane);
+              if (event.pr !== undefined) reportedPrByLane.set(event.lane, event.pr);
+            }
           }
         } catch {
           // W3 writes events.jsonl; absent or unreadable is "nobody reported", not an error.
