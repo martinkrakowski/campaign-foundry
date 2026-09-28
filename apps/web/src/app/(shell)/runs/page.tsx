@@ -1,7 +1,13 @@
 "use client";
 
 import { useMemo } from "react";
-import { assetKey, assetLabel, encodeMinutes, useRun } from "@/lib/run-context";
+import {
+  assetKey,
+  assetLabel,
+  encodeMinutes,
+  usePageCampaignParam,
+  useRun,
+} from "@/lib/run-context";
 import { MiniChip } from "@/components/ui";
 
 /**
@@ -10,6 +16,8 @@ import { MiniChip } from "@/components/ui";
  * per-run persistence (see the plan's follow-ups).
  */
 export default function RunsPage() {
+  // D180 — this page addresses a campaign by `?campaign=<id>`.
+  usePageCampaignParam();
   const {
     brief,
     assets,

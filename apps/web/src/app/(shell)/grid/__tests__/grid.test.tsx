@@ -19,6 +19,7 @@ import {
   DECISIONS_CONFLICT_MESSAGE,
   DECISIONS_UNREADABLE_MESSAGE,
   useRun,
+  API,
 } from "@/lib/run-context";
 import GridPage from "../page";
 import { typeDisplayName } from "@/components/campaign/display-names";
@@ -962,6 +963,15 @@ describe("GridPage — the page's ?campaign= (PT-5c3, D180)", () => {
                 log: { entries: [], campaignId: PAGE_SLUG },
               })
             : json({ halted: false, assets: [], log: null });
+        }
+        if (url === `${API}/campaigns/${PAGE_UUID}`) {
+          return json({
+            campaignId: PAGE_UUID,
+            slug: PAGE_SLUG,
+            name: "Autumn Launch",
+            type: "social-post",
+            hasVersion: true,
+          });
         }
         return json({ error: "Not found" }, 404);
       },
