@@ -208,12 +208,47 @@ export class FsBriefStore implements BriefStorePort {
     // own exclusive-create write — the `mkdir` just above already proved
     // this directory (and so this file within it) didn't exist a moment ago,
     // so nothing else could have raced it into existence.
-    await writeFile(
-      resolveConfined(dirPath, CAMPAIGN_META_FILE),
-      JSON.stringify({ name: options?.name ?? null, type: options?.type ?? null }),
-      { encoding: "utf8", flag: "wx" },
-    );
+    //
+    // coderabbit PRRT_kwDOSzP1zc6miLda / qodo PRRT_kwDOSzP1zc6miLvn: a failed
+    // write (ENOSPC, EACCES) must not leave the `mkdir` above as an orphaned,
+    // permanent reservation — the caller never receives a `ResolvedCampaign`
+    // to `releaseCampaign`, so nothing else would ever clean it up. Undo only
+    // what THIS call created (the meta file, if it landed, then the now-empty
+    // directory) and propagate the original error unchanged; both cleanup
+    // steps swallow their own failure (e.g. the file never got written) so
+    // the caller sees the write's error, not a masking one.
+    try {
+      await writeFile(
+        resolveConfined(dirPath, CAMPAIGN_META_FILE),
+        JSON.stringify({ name: options?.name ?? null, type: options?.type ?? null }),
+        { encoding: "utf8", flag: "wx" },
+      );
+    } catch (error) {
+      await unlink(resolveConfined(dirPath, CAMPAIGN_META_FILE)).catch(() => undefined);
+      await rmdir(dirPath).catch(() => undefined);
+      throw error;
+    }
     return { campaignId: slug, slug };
+  }
+
+  /**
+   * True when `briefs/<slug>` exists but is not a genuine directory — most
+   * concerningly a symlink, which could point outside the briefs root
+   * (coderabbit/qodo PRRT_kwDOSzP1zc6miLvl, PRRT_kwDOSzP1zc6miLvm). The same
+   * stance `FsPoolStore.isPoolDirSymlink` takes for a pool's own directory.
+   * `lstat` never follows the final component, so a symlink reports as
+   * `!isDirectory()` here without ever touching its target. ENOENT (never
+   * reserved) is absent, not unsafe.
+   */
+  private async isCampaignDirUnsafe(slug: string): Promise<boolean> {
+    let st;
+    try {
+      st = await lstat(resolveConfined(this.dir, slug));
+    } catch (error) {
+      if (isErrno(error, "ENOENT")) return false;
+      throw error;
+    }
+    return !st.isDirectory();
   }
 
   /**
@@ -221,11 +256,15 @@ export class FsBriefStore implements BriefStorePort {
    * pre-lane reservation (or a versioned brief with no reserved directory at
    * all, the common case for every campaign that existed before this lane)
    * has no meta file to read; any other read/parse failure propagates,
-   * fail-closed like the rest of this store.
+   * fail-closed like the rest of this store. A symlinked `<slug>` directory
+   * (PRRT_kwDOSzP1zc6miLvl) is never read through: it answers "no metadata"
+   * exactly like ENOENT, the same fail-closed shape `campaignVisibility`
+   * already gives a hidden campaign.
    */
   private async readCampaignMeta(
     slug: string,
   ): Promise<{ name: string | null; type: string | null } | undefined> {
+    if (await this.isCampaignDirUnsafe(slug)) return undefined;
     let raw: string;
     try {
       raw = await readFile(resolveConfined(this.dir, slug, CAMPAIGN_META_FILE), "utf8");
@@ -273,10 +312,16 @@ export class FsBriefStore implements BriefStorePort {
    * fallback the old unconditional `rmdir` needed lives in this `readdir`
    * check now (a slug never reserved, or one with something else in it), so
    * `rmdir` itself runs only once both are already ruled out — its own
-   * failure (e.g. EACCES on the parent) propagates unchanged.
+   * failure (e.g. EACCES on the parent) propagates unchanged. A symlinked
+   * `<slug>` directory (PRRT_kwDOSzP1zc6miLvm) is refused BEFORE any
+   * `readdir`/`unlink` — enumerating or deleting through it could touch a
+   * file outside the briefs root — so `isCampaignDirUnsafe` runs first, and
+   * a caller sees the same `false` a leftover-pool-file refusal gives, never
+   * a distinguishing error.
    */
   async releaseCampaign(slug: string): Promise<boolean> {
     if (await this.findBriefFileById(slug)) return false;
+    if (await this.isCampaignDirUnsafe(slug)) return false;
     const dirPath = resolveConfined(this.dir, slug);
     let entries: string[];
     try {
