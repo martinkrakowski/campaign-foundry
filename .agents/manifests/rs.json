@@ -157,9 +157,9 @@
     },
     {
       "file": "apps/web/src/components/campaign/BriefEditor.tsx",
-      "before": "    if (unknownId !== null || failedRouteId !== null) {\n      setRail(null);\n      return;\n    }",
-      "after": "    if (unknownId !== null || failedRouteId !== null) {\n      return;\n    }",
-      "because": "The M3/D83 half of the same gate, and the order is what makes it a real claim: the editor mounts on the blank draft and publishes a rail, and only when the listing comes back WITHOUT this id does `unknownId` become non-null. A gate that merely returned early would leave that first rail on screen beside \"no such brief\", previewing a draft the page is not offering to edit. Flagged in review as executed-but-unasserted; it has a test now.",
+      "before": "    if (unknownId !== null || failedRouteId !== null || failedMetaId !== null) {\n      setRail(null);\n      return;\n    }",
+      "after": "    if (unknownId !== null || failedRouteId !== null || failedMetaId !== null) {\n      return;\n    }",
+      "because": "The M3/D83 half of the same gate, and the order is what makes it a real claim: the editor mounts on the blank draft and publishes a rail, and only when the listing comes back WITHOUT this id does `unknownId` become non-null. A gate that merely returned early would leave that first rail on screen beside \"no such brief\", previewing a draft the page is not offering to edit. Flagged in review as executed-but-unasserted; it has a test now. (Re-anchored, PT-5c1 fix round: the gate's condition grew a third term, `failedMetaId !== null` (mscy8's own metadata-fetch failure state) — same shape, same claim, only the guard's own text moved.)",
       "command": [
         "yarn",
         "vitest",
