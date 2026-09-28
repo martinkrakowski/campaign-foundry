@@ -458,6 +458,109 @@ describe("runCli check", () => {
     expect(errors.join("\n")).toContain("could not read");
   });
 
+  test("a present but malformed decisions map is a broken record, not no decisions", async () => {
+    // A non-string decision hash must not read as "the review recorded no
+    // decisions": the gate would stop comparing a decision row that changed.
+    const dir = tempDir();
+    const planPath = writePlan(dir);
+    const logdir = writeLog(join(dir, "waves"), [
+      `${JSON.stringify({
+        ts: "2026-09-28T10:00:00Z",
+        wave: "W",
+        lane: PLAN_REVIEW_LANE,
+        stage: "plan-review",
+        event: "settled",
+        detail: {
+          plan: planPath,
+          reviewer: "plan-review-seat",
+          rows: { "PT-5a": rowHash(plan, "PT-5a") },
+          decisions: { D177: 7 },
+          verdict: "clear",
+        },
+      })}\n`,
+    ]);
+    const errors: string[] = [];
+    const code = await runCli({
+      ...io([], errors),
+      argv: ["check", planPath, "--logdir", logdir, "--wave", "W", "PT-5a"],
+    });
+    expect(code).toBe(2);
+    expect(errors.join("\n")).toContain("malformed decisions map");
+  });
+
+  test("a torn line newer than the review fails the gate, naming the line", async () => {
+    // The review parsed, but the writer died mid-line after it: whatever the
+    // tail held, the log cannot say the review is still the latest word.
+    const dir = tempDir();
+    const planPath = writePlan(dir);
+    mkdirSync(join(dir, "waves"), { recursive: true });
+    const logPath = join(dir, "waves", "events.jsonl");
+    writeFileSync(
+      logPath,
+      `${reviewLine("W", {
+        plan: planPath,
+        reviewer: "plan-review-seat",
+        rows: { "PT-5a": rowHash(plan, "PT-5a") },
+        verdict: "clear",
+      })}{"ts":"2026-09-28T10:00:01Z","wave":"W"`,
+    );
+    const errors: string[] = [];
+    const code = await runCli({
+      ...io([], errors),
+      argv: ["check", planPath, "--logdir", join(dir, "waves"), "--wave", "W", "PT-5a"],
+    });
+    expect(code).toBe(2);
+    expect(errors.join("\n")).toContain("unreadable line(s) 2");
+  });
+
+  test("a rejected line newer than the review fails the gate", async () => {
+    const dir = tempDir();
+    const planPath = writePlan(dir);
+    const logdir = writeLog(join(dir, "waves"), [
+      reviewLine("W", {
+        plan: planPath,
+        reviewer: "plan-review-seat",
+        rows: { "PT-5a": rowHash(plan, "PT-5a") },
+        verdict: "clear",
+      }),
+      `${JSON.stringify({
+        ts: "2026-09-28T10:00:01Z",
+        wave: "W",
+        lane: PLAN_REVIEW_LANE,
+        stage: "plan-review",
+        event: "skipped",
+      })}\n`,
+    ]);
+    const errors: string[] = [];
+    const code = await runCli({
+      ...io([], errors),
+      argv: ["check", planPath, "--logdir", logdir, "--wave", "W", "PT-5a"],
+    });
+    expect(code).toBe(2);
+    expect(errors.join("\n")).toContain("unreadable line(s) 2");
+  });
+
+  test("an unreadable line older than the review does not block — the review supersedes it", async () => {
+    const dir = tempDir();
+    const planPath = writePlan(dir);
+    const logdir = writeLog(join(dir, "waves"), [
+      "\n",
+      '{"ts":"2026-09-28T09:00:00Z","wave":"W"',
+      "\n",
+      reviewLine("W", {
+        plan: planPath,
+        reviewer: "plan-review-seat",
+        rows: { "PT-5a": rowHash(plan, "PT-5a") },
+        verdict: "clear",
+      }),
+    ]);
+    const code = await runCli({
+      ...io(),
+      argv: ["check", planPath, "--logdir", logdir, "--wave", "W", "PT-5a"],
+    });
+    expect(code).toBe(0);
+  });
+
   test.each([
     ["a missing --logdir value", ["check", "p.md", "--logdir"]],
     ["an unknown option", ["check", "p.md", "--logdir", "d", "--wave", "W", "--pr", "1", "PT-5a"]],

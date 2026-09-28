@@ -1,6 +1,7 @@
 import { readEvents } from "../wave-status/lib/events.js";
 import { asHashRecord, PLAN_REVIEW_LANE, rowHash } from "./lib/rows.js";
 import { relative, resolve } from "node:path";
+import type { WaveEvent } from "../wave-status/lib/types.js";
 
 /**
  * The plan-review gate's command face. `hashes` fingerprints the rows an
@@ -114,6 +115,35 @@ function rowDiff(markdown: string, id: string, reviewed: string): string | undef
   return current === reviewed ? undefined : id;
 }
 
+/**
+ * The log as the gate reads it: every event with the line it came from, and
+ * every line the reader cannot accept — a rejected line, or the torn tail of
+ * a file whose writer died mid-line. One walk through the same reader the
+ * whole system parses with, line by line, so the gate's view of "unreadable"
+ * is the reader's own, never a second opinion.
+ */
+function readLog(text: string): {
+  readonly events: readonly WaveEvent[];
+  readonly lineOf: readonly number[];
+  readonly unreadable: readonly number[];
+} {
+  const physical = text.split("\n");
+  if (text.endsWith("\n")) physical.pop(); // the artifact of the trailing newline, not a line
+  const events: WaveEvent[] = [];
+  const lineOf: number[] = [];
+  const unreadable: number[] = [];
+  for (let i = 0; i < physical.length; i++) {
+    if (physical[i].trim() === "") continue;
+    const read = readEvents(physical[i]);
+    for (const event of read.events) {
+      events.push(event);
+      lineOf.push(i);
+    }
+    if (read.events.length === 0) unreadable.push(i);
+  }
+  return { events, lineOf, unreadable };
+}
+
 async function check(args: readonly string[], io: PlanReviewIo): Promise<number> {
   const parsed = parseCheckArgs(args);
   if (parsed === undefined) {
@@ -131,16 +161,34 @@ async function check(args: readonly string[], io: PlanReviewIo): Promise<number>
     return 2;
   }
 
-  const reviews = readEvents(eventsText).events.filter(
-    (event) =>
+  const log = readLog(eventsText);
+  let reviewIndex = -1;
+  for (let i = log.events.length - 1; i >= 0; i--) {
+    const event = log.events[i];
+    if (
       event.wave === wave &&
       event.lane === PLAN_REVIEW_LANE &&
       event.stage === "plan-review" &&
-      event.event === "settled",
-  );
-  const review = reviews[reviews.length - 1];
-  if (review === undefined) {
+      event.event === "settled"
+    ) {
+      reviewIndex = i;
+      break;
+    }
+  }
+  if (reviewIndex === -1) {
     io.logError(`no plan-review settled event for wave ${wave} in ${logPath}`);
+    return 2;
+  }
+  const review = log.events[reviewIndex];
+
+  // Fail closed on an unreadable tail: a line the reader cannot accept that
+  // is newer than the chosen review leaves the log's own word unknown — the
+  // chosen review may already have been superseded by one that never parsed.
+  const tornAfter = log.unreadable.filter((line) => line > log.lineOf[reviewIndex]);
+  if (tornAfter.length > 0) {
+    io.logError(
+      `${logPath} has unreadable line(s) ${tornAfter.map((line) => line + 1).join(", ")} after the latest plan-review event — the log tail cannot be read`,
+    );
     return 2;
   }
 
@@ -195,7 +243,19 @@ async function check(args: readonly string[], io: PlanReviewIo): Promise<number>
     return 2;
   }
 
-  const decisions = asHashRecord(review.detail?.decisions) ?? {};
+  const decisionsDetail = review.detail?.decisions;
+  let decisions: Record<string, string> = {};
+  if (decisionsDetail !== undefined) {
+    // An absent decisions field is a review that recorded none; a present
+    // one that fails to read is a broken record, and a broken record may
+    // not be read as "nothing to compare" — the gate fails closed.
+    const parsed = asHashRecord(decisionsDetail);
+    if (parsed === undefined) {
+      io.logError(`the latest plan-review event for wave ${wave} carries a malformed decisions map`);
+      return 2;
+    }
+    decisions = parsed;
+  }
   const diffs = [
     rowDiff(markdown, laneId, reviewed),
     ...Object.entries(decisions).map(([id, hash]) => rowDiff(markdown, id, hash)),
