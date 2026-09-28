@@ -42,6 +42,15 @@ export interface AssetStorePort {
   copyAssets(fromBriefId: string, toBriefId: string): Promise<Record<string, string>>;
 
   /**
+   * Delete every asset stored under a brief (PT-5b2 fix-round item 2: undoing
+   * a `copyAssets` this same request made into a slug whose `createCampaign`
+   * reservation is about to be released, because a later step — the
+   * additional-source visibility check, or the first-version `createBrief` —
+   * failed). A no-op when the brief has no assets.
+   */
+  deleteAssets(briefId: string): Promise<void>;
+
+  /**
    * Compute the canonical relative path for an asset (`assets/inputs/<briefId>/<name>`).
    */
   assetRelPath(briefId: string, name: string): string;

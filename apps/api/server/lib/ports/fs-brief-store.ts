@@ -1,5 +1,14 @@
 import { randomBytes } from "node:crypto";
-import { lstat, mkdir, readdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import {
+  lstat,
+  mkdir,
+  readdir,
+  readFile,
+  rename,
+  rmdir,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
 import { basename, dirname, extname, resolve } from "node:path";
 import { isReservedCampaignId, type CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { errorMessage } from "@campaignfoundry/shared";
@@ -186,6 +195,25 @@ export class FsBriefStore implements BriefStorePort {
       throw error;
     }
     return { campaignId: slug, slug };
+  }
+
+  /**
+   * See `BriefStorePort.releaseCampaign` (PT-5b2 fix-round item 2). "Holds no
+   * brief file" is `findBriefFileById`, the same id-parsed lookup
+   * `createCampaign` itself now checks; "nothing else" is `rmdir` (never
+   * recursive) refusing a non-empty directory outright — the caller deletes
+   * the campaign's pool (its own file inside this same directory) first, so
+   * a leftover `pools.json` alone never blocks the release.
+   */
+  async releaseCampaign(slug: string): Promise<boolean> {
+    if (await this.findBriefFileById(slug)) return false;
+    try {
+      await rmdir(resolveConfined(this.dir, slug));
+      return true;
+    } catch (error) {
+      if (isErrno(error, "ENOENT") || isErrno(error, "ENOTEMPTY")) return false;
+      throw error;
+    }
   }
 
   /**

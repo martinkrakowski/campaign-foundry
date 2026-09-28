@@ -179,4 +179,21 @@ describe("FsAssetStore", () => {
     expect(await store.copyAssets("empty-src", "dst")).toEqual({});
     expect(existsSync(join(dir, "dst"))).toBe(false);
   });
+
+  describe("deleteAssets (PT-5b2 fix-round item 2)", () => {
+    test("removes every asset stored under a brief", async () => {
+      await store.writeAsset("camp-1", "logo.png", pngBytes);
+      await store.writeAsset("camp-1", "banner.jpg", jpegBytes);
+      await store.deleteAssets("camp-1");
+      expect(existsSync(join(dir, "camp-1"))).toBe(false);
+    });
+
+    test("is a no-op when the brief has no assets", async () => {
+      await expect(store.deleteAssets("never-had-assets")).resolves.toBeUndefined();
+    });
+
+    test("is a no-op for an unsafe id (never escapes the confined root)", async () => {
+      await expect(store.deleteAssets("../escape")).resolves.toBeUndefined();
+    });
+  });
 });

@@ -398,6 +398,30 @@ export class PgBriefStore implements BriefStorePort {
   }
 
   /**
+   * See `BriefStorePort.releaseCampaign` (PT-5b2 fix-round item 2). One
+   * statement: the `not exists` guard is the same "still zero versions"
+   * check `createBriefInternal`'s conflict branch reads, so a concurrent
+   * first-version `createBrief` racing this delete either wins outright (a
+   * version already exists, so this deletes nothing and answers `false`) or
+   * this delete wins first (the row is gone before that transaction's own
+   * `select … for update` can see it). The caller's own `withBriefLock`
+   * already rules the second case out for two requests on the same
+   * process — campaigns are never otherwise deleted, so this delete only
+   * ever fires from the same request that reserved the row moments before,
+   * inside the SAME lock.
+   */
+  async releaseCampaign(slug: string): Promise<boolean> {
+    const { rows } = await this.db.query<{ id: string }>(
+      `delete from campaign
+        where org_id = $1 and slug = $2
+          and not exists (select 1 from brief_version where campaign_id = campaign.id)
+       returning id`,
+      [this.orgId, slug],
+    );
+    return rows.length > 0;
+  }
+
+  /**
    * The compare-and-swap (D79) inside the write's own transaction: `select …
    * for update` on the campaign row serialises every writer targeting this
    * brief, so the version this reads and the version it inserts are one

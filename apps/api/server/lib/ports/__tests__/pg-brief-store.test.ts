@@ -381,6 +381,27 @@ describe("PgBriefStore (PT-3d, D168, D169)", () => {
     });
   });
 
+  describe("releaseCampaign (PT-5b2 fix-round item 2)", () => {
+    test("deletes a versionless row and answers true", async () => {
+      await store.createCampaign("mint-only");
+      expect(await store.releaseCampaign("mint-only")).toBe(true);
+      const { rows } = await db.query<{ count: number }>(
+        `select count(*)::int from campaign where org_id = 'local' and slug = 'mint-only'`,
+      );
+      expect(rows[0]!.count).toBe(0);
+    });
+
+    test("leaves a versioned row untouched and answers false", async () => {
+      await store.createBrief(minimalBrief);
+      expect(await store.releaseCampaign("test-camp")).toBe(false);
+      expect(await store.findBriefById("test-camp")).toMatchObject({ brief: { id: "test-camp" } });
+    });
+
+    test("answers false for a slug that was never reserved", async () => {
+      expect(await store.releaseCampaign("nope")).toBe(false);
+    });
+  });
+
   test("rewriteBrief writes the next version, unconditionally when no expectedRevision is given", async () => {
     await store.createBrief(minimalBrief);
     const updated = await store.rewriteBrief(brief("test-camp", "Updated message"));

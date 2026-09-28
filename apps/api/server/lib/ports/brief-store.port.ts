@@ -134,6 +134,21 @@ export interface BriefStorePort {
   createCampaign(slug: string, options?: CreateCampaignOptions): Promise<ResolvedCampaign>;
 
   /**
+   * Undo a `createCampaign` reservation that a later step (asset copy, the
+   * first-version `createBrief`) failed to complete (PT-5b2 fix-round item
+   * 2): deletes the Postgres row, or removes the fs reserved directory,
+   * ONLY if it still holds no version/brief — never touches one a
+   * concurrent writer's own Save has since completed. Answers whether it
+   * actually removed anything, so the caller knows whether to also clean up
+   * copied assets (only ever correct when the campaign itself is gone too —
+   * never after a real, versioned brief). On fs, delete the campaign's pool
+   * first (`deletePool`, a no-op when absent): the pool file lives inside
+   * the same reserved directory this removes, and removing a non-empty
+   * directory must fail closed, not silently take the pool with it.
+   */
+  releaseCampaign(slug: string): Promise<boolean>;
+
+  /**
    * Rewrite an existing brief in its own format.
    * If expectedRevision is provided, verifies revision match before writing;
    * otherwise throws an error with code ECONFLICT.

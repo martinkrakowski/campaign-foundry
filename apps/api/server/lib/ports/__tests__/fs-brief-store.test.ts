@@ -301,6 +301,31 @@ describe("FsBriefStore", () => {
     );
   });
 
+  describe("releaseCampaign (PT-5b2 fix-round item 2)", () => {
+    test("removes an empty reserved directory and answers true", async () => {
+      await store.createCampaign("mint-only");
+      expect(await store.releaseCampaign("mint-only")).toBe(true);
+      expect(existsSync(join(dir, "mint-only"))).toBe(false);
+    });
+
+    test("leaves a real brief untouched and answers false", async () => {
+      await store.createBrief(minimalBrief);
+      expect(await store.releaseCampaign("test-camp")).toBe(false);
+      expect(existsSync(join(dir, "test-camp.yaml"))).toBe(true);
+    });
+
+    test("answers false, not a crash, for a non-empty directory (a leftover pool file)", async () => {
+      await store.createCampaign("mint-only");
+      writeFileSync(join(dir, "mint-only", "pools.json"), "{}");
+      expect(await store.releaseCampaign("mint-only")).toBe(false);
+      expect(existsSync(join(dir, "mint-only"))).toBe(true);
+    });
+
+    test("answers false for a slug that was never reserved", async () => {
+      expect(await store.releaseCampaign("nope")).toBe(false);
+    });
+  });
+
   test("rewriteBrief updates existing brief and checks revision when provided", async () => {
     const created = await store.createBrief(minimalBrief);
     const updated = await store.rewriteBrief(
