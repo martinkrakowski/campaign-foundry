@@ -279,6 +279,11 @@ export class FsBriefStore implements BriefStorePort {
     return (await this.findBriefFileById(id)) ? "visible" : "absent";
   }
 
+  /** See `BriefStorePort.campaignTeam` (PT-5b2 fix-round item 1): no team column (D166 item 5). */
+  async campaignTeam(slug: string): Promise<string | null | undefined> {
+    return (await this.findBriefFileById(slug)) ? null : undefined;
+  }
+
   /**
    * On the filesystem backend, a campaign's id is its slug (D179).
    * Answers { campaignId: ref, slug: ref } if the brief exists, else undefined.

@@ -548,6 +548,73 @@ describe("duplicate by name on Postgres (D177/D178, PT-5b2)", () => {
   });
 });
 
+// qodo PRRT_kwDOSzP1zc6mgEyD (HIGH, security): a copy of a team-scoped source
+// made through either duplicate path must inherit the source's team, not
+// default to org-wide. The legacy `newId` path never inherited a team either
+// (createBrief(brief) with no options) — a pre-existing hole PT-2c left, not
+// one PT-5b2 opened; both paths are fixed together.
+describe("duplicate inherits the source campaign's team (PT-5b2 fix-round item 1)", () => {
+  test("legacy newId: the copy is still team-1, and hidden from a team-B member", async () => {
+    const harness = await setupPgHarness();
+    try {
+      await harness.db.query(
+        `insert into team (id, name, "memberCount", org_id, created_at) values
+           ($1, $2, 0, $3, now()), ($4, $5, 0, $3, now())`,
+        ["t1", "Team One", "local", "t2", "Team Two"],
+      );
+      await new PgBriefStore(harness.db, "local", "owner", ["owner"], []).createBrief(sampleBrief, {
+        teamId: "t1",
+      });
+
+      const res = await mount(t1Member).duplicate(duplicateReq("camp", "camp-copy"));
+      expect(res.status).toBe(201);
+
+      const { rows } = await harness.db.query<{ team_id: string | null }>(
+        `select team_id from campaign where org_id = 'local' and slug = 'camp-copy'`,
+      );
+      expect(rows[0]!.team_id).toBe("t1");
+
+      const t2Store = new PgBriefStore(harness.db, "local", "u2", [], ["t2"]);
+      expect(await t2Store.campaignVisibility("camp-copy")).toBe("hidden");
+    } finally {
+      await harness.cleanup();
+    }
+  });
+
+  test("by name: the copy is still team-1, and hidden from a team-B member", async () => {
+    const harness = await setupPgHarness();
+    try {
+      await harness.db.query(
+        `insert into team (id, name, "memberCount", org_id, created_at) values
+           ($1, $2, 0, $3, now()), ($4, $5, 0, $3, now())`,
+        ["t1", "Team One", "local", "t2", "Team Two"],
+      );
+      await new PgBriefStore(harness.db, "local", "owner", ["owner"], []).createBrief(sampleBrief, {
+        teamId: "t1",
+      });
+
+      const res = await mount(t1Member).duplicate(
+        new Request(`http://x/campaigns/briefs/camp/duplicate`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ name: "Camp Copy" }),
+        }),
+      );
+      expect(res.status).toBe(201);
+
+      const { rows } = await harness.db.query<{ team_id: string | null }>(
+        `select team_id from campaign where org_id = 'local' and slug = 'camp-copy'`,
+      );
+      expect(rows[0]!.team_id).toBe("t1");
+
+      const t2Store = new PgBriefStore(harness.db, "local", "u2", [], ["t2"]);
+      expect(await t2Store.campaignVisibility("camp-copy")).toBe("hidden");
+    } finally {
+      await harness.cleanup();
+    }
+  });
+});
+
 describe("Save as / duplicate refuse a hidden asset source or target (D166, PT-2c items 2 and 3)", () => {
   test("Save as (POST /campaigns/briefs) 404s when a logoPath names a campaign hidden by team, and copies nothing", async () => {
     const harness = await setupPgHarness();

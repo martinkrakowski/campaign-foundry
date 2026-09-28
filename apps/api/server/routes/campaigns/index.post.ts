@@ -84,7 +84,7 @@ export default defineEventHandler(async (event) => {
 
   let name: string;
   let source: string | undefined;
-  let teamId: string | undefined;
+  let teamId: string | null | undefined;
   try {
     const body: unknown = await readBody(event);
     const record =
@@ -118,10 +118,14 @@ export default defineEventHandler(async (event) => {
       }
     }
 
+    // `null` (PT-5b2 fix-round item 1) clears a sourced create to org-wide
+    // instead of inheriting the source's team — `canAssignTeam` below already
+    // refuses it for anyone but an owner/admin, the same as `null` does for
+    // `briefs/[id].put.ts`.
     const rawTeamId = record?.teamId;
     if (rawTeamId !== undefined) {
-      if (typeof rawTeamId !== "string") {
-        throw new Error('"teamId" must be a string.');
+      if (rawTeamId !== null && typeof rawTeamId !== "string") {
+        throw new Error('"teamId" must be a string or null.');
       }
       teamId = rawTeamId;
     }
@@ -137,7 +141,12 @@ export default defineEventHandler(async (event) => {
   }
   if (teamId !== undefined && !canAssignTeam(scope, teamId)) {
     setResponseStatus(event, 403);
-    return { error: `Not authorized to assign team "${teamId}".` };
+    return {
+      error:
+        teamId === null
+          ? "Not authorized to clear this campaign's team."
+          : `Not authorized to assign team "${teamId}".`,
+    };
   }
 
   if (source === undefined) {
@@ -164,6 +173,12 @@ export default defineEventHandler(async (event) => {
   // Resolve a uuid source to its slug on a backend that has one (D178). On fs
   // the id IS the slug (D179), so no lookup runs there.
   let sourceSlug = source;
+  // PT-5b2 fix-round item 1 (security): an explicit `teamId` (validated by
+  // `canAssignTeam` above, including "explicit null clears to org-wide,
+  // owner/admin only") wins; omitted, the copy inherits the SOURCE's own
+  // team — the same visibility the caller could already see, never widened
+  // to org-wide by omission.
+  let sourceTeamId: string | null | undefined;
   if (store.supportsTeams) {
     try {
       sourceSlug = await resolveCampaignRef(scope, source);
@@ -174,7 +189,9 @@ export default defineEventHandler(async (event) => {
       }
       throw error;
     }
+    sourceTeamId = await store.campaignTeam(sourceSlug);
   }
+  const effectiveTeamId = teamId !== undefined ? teamId : sourceTeamId;
 
   let sourceBrief;
   try {
@@ -217,7 +234,7 @@ export default defineEventHandler(async (event) => {
     }
     let brief: CampaignBrief = { ...template, id: targetSlug };
     return store.withBriefLock(targetSlug, async () => {
-      await store.createCampaign(targetSlug, { teamId });
+      await store.createCampaign(targetSlug, { teamId: effectiveTeamId });
 
       const sourcePool = await readPool(scope, sourceSlug);
       const additionalSourceIds = extractSourceAssetBriefIds(brief, targetSlug).filter(
@@ -234,7 +251,7 @@ export default defineEventHandler(async (event) => {
         brief = rewriteAssetPaths(brief, fromId, targetSlug, addMap);
       }
 
-      const created: StoredBrief = await store.createBrief(brief, { teamId });
+      const created: StoredBrief = await store.createBrief(brief, { teamId: effectiveTeamId });
       await withPoolLock(scope, targetSlug, async () => {
         if (sourcePool) {
           await copyPool(scope, sourceSlug, targetSlug);

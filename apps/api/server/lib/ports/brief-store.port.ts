@@ -179,4 +179,17 @@ export interface BriefStorePort {
    * Answers `{ campaignId, slug }` or `undefined` if absent or hidden by team.
    */
   resolveCampaign(ref: string): Promise<ResolvedCampaign | undefined>;
+
+  /**
+   * A campaign's own team assignment, for a caller that already resolved and
+   * owns it (duplicate, a sourced `POST /campaigns`, PT-5b2 fix-round item
+   * 1): `null` for org-wide, a team id, or `undefined` when the slug is
+   * absent or hidden from this caller by team. A copy with no explicit
+   * `teamId` inherits this value, so a member's team-scoped source never
+   * becomes an org-wide copy by omission — the same visibility the caller
+   * could already see, carried forward, no extra permission check needed.
+   * The fs backend has no team column (D166 item 5): `null` when the brief
+   * exists, `undefined` otherwise.
+   */
+  campaignTeam(slug: string): Promise<string | null | undefined>;
 }

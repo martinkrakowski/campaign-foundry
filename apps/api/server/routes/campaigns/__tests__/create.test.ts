@@ -506,6 +506,63 @@ describe.each([{ backend: "fs" as const }, { backend: "postgres" as const }])(
           }
         });
 
+        // qodo PRRT_kwDOSzP1zc6mgEyD (HIGH, security): a sourced create with
+        // no explicit teamId must inherit the source's team, not default to
+        // org-wide.
+        test("with no explicit teamId, inherits the source's team, hidden from another team's member", async () => {
+          const harness = await setup();
+          const pgHarness = harness as Awaited<ReturnType<typeof setupPgHarness>>;
+          try {
+            await pgHarness.db.query(
+              `insert into team (id, name, "memberCount", org_id, created_at) values
+                 ($1, $2, 0, $3, now()), ($4, $5, 0, $3, now())`,
+              ["t1", "Team One", "local", "t2", "Team Two"],
+            );
+            const owner = new PgBriefStore(pgHarness.db, "local", "owner", ["owner"], []);
+            await owner.createBrief(sampleBrief("source-camp"), { teamId: "t1" });
+
+            const res = await mount(t1Member).create(
+              createReq({ name: "Copy Of Teamed", source: "source-camp" }),
+            );
+            expect(res.status).toBe(201);
+            const { slug } = (await res.json()) as { slug: string };
+
+            const { rows } = await pgHarness.db.query<{ team_id: string | null }>(
+              `select team_id from campaign where org_id = 'local' and slug = $1`,
+              [slug],
+            );
+            expect(rows[0]!.team_id).toBe("t1");
+
+            const t2Store = new PgBriefStore(pgHarness.db, "local", "u2", [], ["t2"]);
+            expect(await t2Store.campaignVisibility(slug)).toBe("hidden");
+          } finally {
+            await harness.cleanup();
+          }
+        });
+
+        // The rule's other half: clearing a team-scoped source to org-wide
+        // (explicit teamId: null) is an owner/admin action, exactly like
+        // canAssignTeam already requires for createBrief.
+        test("an explicit teamId: null on a sourced create is refused for a plain member", async () => {
+          const harness = await setup();
+          const pgHarness = harness as Awaited<ReturnType<typeof setupPgHarness>>;
+          try {
+            await pgHarness.db.query(
+              `insert into team (id, name, "memberCount", org_id, created_at) values ($1, $2, 0, $3, now())`,
+              ["t1", "Team One", "local"],
+            );
+            const owner = new PgBriefStore(pgHarness.db, "local", "owner", ["owner"], []);
+            await owner.createBrief(sampleBrief("source-camp"), { teamId: "t1" });
+
+            const res = await mount(t1Member).create(
+              createReq({ name: "Copy Cleared", source: "source-camp", teamId: null }),
+            );
+            expect(res.status).toBe(403);
+          } finally {
+            await harness.cleanup();
+          }
+        });
+
         test("a malformed source pool answers 422, and writes no brief", async () => {
           const harness = await setup();
           const pgHarness = harness as Awaited<ReturnType<typeof setupPgHarness>>;

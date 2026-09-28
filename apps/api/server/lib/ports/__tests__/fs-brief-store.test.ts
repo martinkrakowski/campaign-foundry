@@ -208,6 +208,14 @@ describe("FsBriefStore", () => {
     await expect(store.createBrief(minimalBrief)).rejects.toMatchObject({ code: "EEXIST" });
   });
 
+  describe("campaignTeam (PT-5b2 fix-round item 1)", () => {
+    test("answers null for an existing brief (no team column), undefined for absent", async () => {
+      await store.createBrief(minimalBrief);
+      expect(await store.campaignTeam("test-camp")).toBeNull();
+      expect(await store.campaignTeam("nope")).toBeUndefined();
+    });
+  });
+
   describe("createCampaign (D177/D179, PT-5b2)", () => {
     test("mints a reserved directory, never a file", async () => {
       const created = await store.createCampaign("fresh-slug");

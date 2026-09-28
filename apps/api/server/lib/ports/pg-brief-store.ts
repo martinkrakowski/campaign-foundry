@@ -160,6 +160,17 @@ export class PgBriefStore implements BriefStorePort {
     return this.visible(row.team_id) ? "visible" : "hidden";
   }
 
+  /** See `BriefStorePort.campaignTeam` (PT-5b2 fix-round item 1). */
+  async campaignTeam(slug: string): Promise<string | null | undefined> {
+    const { rows } = await this.db.query<{ team_id: string | null }>(
+      `select team_id from campaign where org_id = $1 and slug = $2`,
+      [this.orgId, slug],
+    );
+    const row = rows[0];
+    if (!row || !this.visible(row.team_id)) return undefined;
+    return row.team_id;
+  }
+
   /**
    * Resolve a campaign reference (canonical uuid OR slug) within the caller's scope (D178, D179).
    * Tries canonical uuid first, then falls back to slug.

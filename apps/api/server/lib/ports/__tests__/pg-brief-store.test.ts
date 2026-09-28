@@ -283,6 +283,33 @@ describe("PgBriefStore (PT-3d, D168, D169)", () => {
     });
   });
 
+  describe("campaignTeam (PT-5b2 fix-round item 1)", () => {
+    test("answers null for an org-wide campaign, the team id for a team-scoped one", async () => {
+      await db.query(
+        `insert into team (id, name, "memberCount", org_id, created_at) values ($1, $2, 0, $3, now())`,
+        ["t1", "Team 1", "local"],
+      );
+      const owner = new PgBriefStore(db, "local", "owner", ["owner"], []);
+      await owner.createBrief(brief("org-wide"));
+      await owner.createBrief(brief("teamed"), { teamId: "t1" });
+
+      expect(await owner.campaignTeam("org-wide")).toBeNull();
+      expect(await owner.campaignTeam("teamed")).toBe("t1");
+    });
+
+    test("answers undefined for an absent slug, and for one hidden by team", async () => {
+      await db.query(
+        `insert into team (id, name, "memberCount", org_id, created_at) values ($1, $2, 0, $3, now())`,
+        ["t1", "Team 1", "local"],
+      );
+      await store.createBrief(brief("teamed"), { teamId: "t1" });
+      const outsider = new PgBriefStore(db, "local", "u2", [], ["t2"]);
+
+      expect(await store.campaignTeam("nope")).toBeUndefined();
+      expect(await outsider.campaignTeam("teamed")).toBeUndefined();
+    });
+  });
+
   describe("createCampaign (D177, PT-5b2)", () => {
     test("mints a campaign row with no version yet", async () => {
       const created = await store.createCampaign("fresh-slug");

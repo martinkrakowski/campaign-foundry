@@ -153,6 +153,13 @@ export default defineEventHandler(async (event) => {
   // for the same source (once here, once in assertOwnedCampaign below).
   const briefs = getBriefStore(scope);
   let sourceSlug = id;
+  // PT-5b2 fix-round item 1 (security): a copy inherits the SOURCE's own
+  // team when the caller supplies none — the same visibility the caller
+  // could already see (they just proved they own `sourceSlug`), never a
+  // widening to org-wide by omission. `undefined` here (fs, or the
+  // theoretically-unreachable "hidden after we just asserted ownership")
+  // behaves like "no team" for a fresh insert, same as before this fix.
+  let sourceTeamId: string | null | undefined;
   if (briefs.supportsTeams) {
     try {
       sourceSlug = await resolveCampaignRef(scope, id);
@@ -163,6 +170,7 @@ export default defineEventHandler(async (event) => {
       }
       throw error;
     }
+    sourceTeamId = await briefs.campaignTeam(sourceSlug);
   }
 
   let source;
@@ -243,7 +251,7 @@ export default defineEventHandler(async (event) => {
         brief = rewriteAssetPaths(brief, fromId, targetSlug, addMap);
       }
 
-      const created = await getBriefStore(scope).createBrief(brief);
+      const created = await getBriefStore(scope).createBrief(brief, { teamId: sourceTeamId });
       // The dest pool write (or the stale-pool delete when the source has none)
       // runs under withPoolLock(targetSlug) as well as the brief lock: they are
       // different maps, so without it a concurrent POST /campaigns/pools/:targetSlug
@@ -269,7 +277,7 @@ export default defineEventHandler(async (event) => {
   };
   /** The `name` path's claim (D177/D179): also sees an fs reserved directory. */
   const reserveMinted = (targetSlug: string) => async (): Promise<void> => {
-    await getBriefStore(scope).createCampaign(targetSlug);
+    await getBriefStore(scope).createCampaign(targetSlug, { teamId: sourceTeamId });
   };
 
   try {
