@@ -979,4 +979,21 @@ describe("GridPage — the page's ?campaign= (PT-5c3, D180)", () => {
     renderWithRun(<GridPage />);
     expect(await screen.findByText("alpha @ 1:1 · default")).toBeTruthy();
   });
+
+  test("an unknown id shows the empty state", async () => {
+    window.history.replaceState(null, "", `/grid?campaign=${PAGE_UUID}`);
+    // Unknown: the meta read answers what a missing campaign answers (404).
+    mockPipelineApi({ result: () => json({ error: "Not found" }, 404) });
+    renderWithRun(<GridPage />);
+    expect(await screen.findByText(/Start orchestrating assets/)).toBeTruthy();
+  });
+
+  test("a hidden id shows the same empty state (PT-2d: hidden reads as missing)", async () => {
+    window.history.replaceState(null, "", `/grid?campaign=${PAGE_UUID}`);
+    // Hidden by team: the API answers the same 404 the unknown id does (PT-2d),
+    // so the page cannot tell them apart — and must not try to.
+    mockPipelineApi({ result: () => json({ error: "Not found" }, 404) });
+    renderWithRun(<GridPage />);
+    expect(await screen.findByText(/Start orchestrating assets/)).toBeTruthy();
+  });
 });
