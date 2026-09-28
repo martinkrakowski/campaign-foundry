@@ -1,195 +1,57 @@
-import { describe, test, expect, vi, afterEach } from "vitest";
-import { CREATE_SEED_KEY, createCampaign, subscribeToSeed, takeSeed } from "../create-campaign";
-import { stashStep } from "../use-step-navigation";
+import { describe, test, expect } from "vitest";
+import { createCampaign } from "../create-campaign";
 import { BriefsApiError } from "../briefs-api";
 import { API } from "@/lib/run-context";
-import { EMPTY_REPORT, json, mockPipelineApi } from "@/__tests__/helpers";
+import { json, mockPipelineApi } from "@/__tests__/helpers";
 
 const seed = { name: "Summer Spark", type: "social-post" as const };
 
-afterEach(() => {
-  localStorage.clear();
-});
-
-describe("createCampaign (D65 — the seam)", () => {
-  test("resolves with the wave-1 result: no id, the blank route", async () => {
-    await expect(createCampaign(seed)).resolves.toEqual({ id: "", route: "/brief/new" });
-  });
-
-  test("publishes the seed under cf:create-seed and notifies subscribers", async () => {
-    const listener = vi.fn();
-    const stop = subscribeToSeed(listener);
-    await createCampaign(seed);
-    expect(listener).toHaveBeenCalledTimes(1);
-    expect(JSON.parse(localStorage.getItem(CREATE_SEED_KEY) as string)).toEqual(seed);
-    stop();
-  });
-
-  test("a dropped subscription is not notified", async () => {
-    const listener = vi.fn();
-    subscribeToSeed(listener)();
-    await createCampaign(seed);
-    expect(listener).not.toHaveBeenCalled();
-  });
-
-  test("a blocked store still resolves, does not notify, and reports the failed write", async () => {
-    const listener = vi.fn();
-    const stop = subscribeToSeed(listener);
-    const setItem = vi.spyOn(localStorage, "setItem").mockImplementation(() => {
-      throw new Error("blocked");
-    });
-    try {
-      await expect(createCampaign(seed)).resolves.toBeNull();
-      expect(listener).not.toHaveBeenCalled();
-      expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
-    } finally {
-      setItem.mockRestore();
-      stop();
-    }
-  });
-});
-
-describe("createCampaign with a source (W2 / D71 — the duplicate path)", () => {
-  const fromSource = { ...seed, source: "winter-wild" };
-
-  test("duplicates the source and returns the copy's route", async () => {
+describe("createCampaign — POST /campaigns (D177, D178)", () => {
+  test("mints a blank campaign and answers its server-minted id", async () => {
     mockPipelineApi({
-      result: () => json(EMPTY_REPORT),
       post: (url, init) => {
-        expect(url).toBe(`${API}/campaigns/briefs/winter-wild/duplicate`);
-        // The copy's id is derived here from the name. D97 — the overrides body is
-        // empty: the dialog answers no Identity field, so the copy inherits the
-        // source's answers wholesale.
-        expect(JSON.parse(String(init.body))).toEqual({
-          newId: "summer-spark",
-          overrides: {},
-        });
-        return json(
-          { file: "summer-spark.yaml", brief: { id: "summer-spark", products: [] } },
-          201,
-        );
+        expect(url).toBe(`${API}/campaigns`);
+        expect(JSON.parse(String(init.body))).toEqual(seed);
+        return json({ campaignId: "c1", slug: "summer-spark" }, 201);
       },
     });
-    await expect(createCampaign(fromSource)).resolves.toEqual({
-      id: "summer-spark",
-      route: "/brief/summer-spark",
-    });
+    await expect(createCampaign(seed)).resolves.toEqual({ campaignId: "c1" });
   });
 
-  test("publishes no seed on the source path — the seed is the blank route's alone", async () => {
+  test("a refused create rejects with the API's error — never a null contract", async () => {
     mockPipelineApi({
-      post: () => json({ file: "x.yaml", brief: { id: "x", products: [] } }, 201),
+      post: () => json({ error: '"name" must contain at least one letter or digit.' }, 400),
     });
-    const listener = vi.fn();
-    const stop = subscribeToSeed(listener);
-    await createCampaign(fromSource);
-    // A source create lands on /brief/<newId>, where no editor spends the seed —
-    // a key left alive would let the next /brief/new visit load blank over and
-    // purge the draft there (the bug W3 / #186 closed).
-    expect(listener).not.toHaveBeenCalled();
-    expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
-    stop();
+    const err: unknown = await createCampaign(seed).then(
+      () => null,
+      (e) => e,
+    );
+    expect(err).toBeInstanceOf(BriefsApiError);
+    expect((err as BriefsApiError).status).toBe(400);
+  });
+});
+
+describe("createCampaign with a source (W2 / D71)", () => {
+  const fromSource = { ...seed, source: "winter-wild" };
+
+  test("sends the source and answers the copy's id", async () => {
+    mockPipelineApi({
+      post: (url, init) => {
+        expect(url).toBe(`${API}/campaigns`);
+        expect(JSON.parse(String(init.body))).toEqual(fromSource);
+        return json({ campaignId: "c2", slug: "summer-spark", revision: "rev-1" }, 201);
+      },
+    });
+    await expect(createCampaign(fromSource)).resolves.toEqual({ campaignId: "c2" });
   });
 
-  test("a refused duplicate rejects with the API's error — never the null contract", async () => {
-    mockPipelineApi({ post: () => json({ error: 'Brief "summer-spark" already exists.' }, 409) });
+  test("a refused sourced create rejects with the API's error", async () => {
+    mockPipelineApi({ post: () => json({ error: 'Brief "winter-wild" not found.' }, 404) });
     const err: unknown = await createCampaign(fromSource).then(
       () => null,
       (e) => e,
     );
     expect(err).toBeInstanceOf(BriefsApiError);
-    expect((err as BriefsApiError).status).toBe(409);
-  });
-});
-
-describe("takeSeed — the baton is spent by a read", () => {
-  test("returns the payload and clears the key, once", async () => {
-    await createCampaign(seed);
-    expect(takeSeed()).toEqual(seed);
-    expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
-    expect(takeSeed()).toBeNull();
-  });
-
-  test("answers null when no seed was published", () => {
-    expect(takeSeed()).toBeNull();
-  });
-
-  test("answers null on a key a hand-edited store corrupted", () => {
-    localStorage.setItem(CREATE_SEED_KEY, "{not json");
-    expect(takeSeed()).toBeNull();
-    expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
-  });
-
-  test("answers null when the store throws on read", () => {
-    vi.spyOn(localStorage, "getItem").mockImplementation(() => {
-      throw new Error("blocked");
-    });
-    try {
-      expect(takeSeed()).toBeNull();
-    } finally {
-      vi.restoreAllMocks();
-    }
-  });
-
-  // A parse is not a check: syntactically valid JSON that is not a seed must
-  // still spend the key, so a bad baton cannot poison the next mount. F5 — the
-  // first three entries are the old-shape seeds the deployed builds write; a
-  // half-applied seed would be a brief with a name and nothing else, silently,
-  // so the guard discards them wholesale.
-  test.each([
-    [
-      "an old-shape seed from the previous build",
-      { name: "Summer Spark", targetRegion: "EU", targetAudience: "trail runners", mode: "brief" },
-    ],
-    [
-      "the #217 two-field seed carrying the retired mode",
-      { name: "Summer Spark", mode: "variation" },
-    ],
-    [
-      "a half-old seed carrying an audience only",
-      { name: "Summer Spark", targetAudience: "trail runners", mode: "brief" },
-    ],
-    ["a non-string field", { name: 42, type: "social-post" }],
-    ["a missing type", { name: "Summer Spark" }],
-    // "display-ad" joined the vocabulary in A5 (D117); "banner" is still outside it.
-    ["an unknown type", { name: "Summer Spark", type: "banner" }],
-    [
-      "both the new type and the retired mode",
-      { name: "Summer Spark", type: "social-post", mode: "variation" },
-    ],
-    ["a JSON array", ["Summer Spark", "EU"]],
-    ["a bare string", "Summer Spark"],
-  ] as const)("answers null on %s and still spends the key", (_label, value) => {
-    localStorage.setItem(CREATE_SEED_KEY, JSON.stringify(value));
-    expect(takeSeed()).toBeNull();
-    expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
-  });
-
-  test("a seed with an extra unknown field is accepted", () => {
-    const withExtra = { ...seed, extra: "forward-compat" };
-    localStorage.setItem(CREATE_SEED_KEY, JSON.stringify(withExtra));
-    expect(takeSeed()).toEqual(withExtra);
-  });
-
-  test("a refused seed spends the companion step baton; an absent seed leaves it", () => {
-    stashStep("copy");
-    expect(takeSeed()).toBeNull();
-    expect(localStorage.getItem("cf:step-handoff")).toBe("copy");
-
-    const refuse = (value: unknown) => {
-      stashStep("identity");
-      localStorage.setItem(CREATE_SEED_KEY, JSON.stringify(value));
-      expect(takeSeed()).toBeNull();
-      expect(localStorage.getItem("cf:step-handoff")).toBeNull();
-    };
-    // The four-field seed the oldest deployed build wrote…
-    refuse({
-      name: "Summer Spark",
-      targetRegion: "EU",
-      targetAudience: "trail runners",
-      mode: "brief",
-    });
-    // …and the #217 two-field one D108 retired — same discard, same baton spend.
-    refuse({ name: "Summer Spark", mode: "variation" });
+    expect((err as BriefsApiError).status).toBe(404);
   });
 });

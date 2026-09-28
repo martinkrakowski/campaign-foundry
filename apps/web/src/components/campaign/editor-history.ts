@@ -16,10 +16,14 @@ import { isTypingTarget } from "@/lib/use-step-navigation";
 /**
  * Actions that never enter the history as an undo step. The first four are server
  * answers: a capability verdict, a pool read, an apply receipt, a save receipt.
- * The last three replace the baseline and are handled separately — they also
- * clear both stacks.
+ * `markSeeded` (PT-5c1 fix round) is a fifth: the campaign identity and clean
+ * baseline `GET /campaigns/:id` answered with, installed on a "new" source —
+ * an edit typed before it landed must survive an undo exactly as it survives
+ * the dispatch itself (msczF), and an undo must never step BACK to a draft
+ * with no campaign to save into. The last three replace the baseline and are
+ * handled separately — they also clear both stacks.
  */
-const SERVER_ANSWER_TYPES = ["setCapabilities", "loadPool", "apply", "save"] as const;
+const SERVER_ANSWER_TYPES = ["setCapabilities", "loadPool", "apply", "save", "markSeeded"] as const;
 
 /** Actions that replace the draft wholesale: a new baseline, so history is moot. */
 const BASELINE_TYPES = ["load", "discard", "restore"] as const;
@@ -85,10 +89,16 @@ function coalesceKeyOf(action: EditorAction): string | null {
  * the revision the next conditional save is guarded by), the copy pool, the apply
  * snapshot and the capabilities verdict. A step back through history restores the
  * draft around them, so an undo can never turn the next save into a conflict.
+ *
+ * `briefId` joins them for the same reason (PT-5c1 fix round, msczF): once a
+ * campaign is minted, `briefId` is server-owned exactly as `source` is — D178
+ * retired the last patch that ever set it from a keystroke (`IdentitySection`
+ * dispatches `campaignName` only). `markSeeded` sets it precisely so an undo
+ * back to the pre-seed baseline cannot un-set it and send Save an empty id.
  */
 function carryServerFields(target: EditorState, current: EditorState): EditorState {
   const carried = { ...target } as Record<string, unknown>;
-  for (const key of ["source", "pool", "appliedSnapshot", "capabilities"] as const) {
+  for (const key of ["source", "pool", "appliedSnapshot", "capabilities", "briefId"] as const) {
     carried[key] = current[key];
   }
   return carried as unknown as EditorState;

@@ -210,13 +210,14 @@ describe("editorReducer — identity and copy", () => {
     expect(reduce(base(), { type: "setMode", mode: "variation" }).mode).toBe("variation");
   });
 
-  test("patching campaignName on a new draft derives briefId via slugify", () => {
-    const next = reduce(base(), {
+  test("patching campaignName on a new draft leaves briefId alone (PT-5c1, D178) — the id is server-derived and display-only", () => {
+    const seeded = { ...base(), briefId: "server-minted-slug" };
+    const next = reduce(seeded, {
       type: "patch",
       patch: { campaignName: "Summer Launch 2026!" },
     });
     expect(next.campaignName).toBe("Summer Launch 2026!");
-    expect(next.briefId).toBe("summer-launch-2026");
+    expect(next.briefId).toBe("server-minted-slug");
   });
 
   test("patching campaignName on a file-loaded draft does not re-derive briefId", () => {
@@ -1227,6 +1228,34 @@ describe("draft storage", () => {
     expect(getDraftKey(loaded)).toBe("cf:draft:camp");
   });
 
+  // PT-5c1 fix round (mscyy/mscdk) — root cause: a versionless campaign used to
+  // stay keyed on the literal `cf:draft:new` `generateTempId` always returns,
+  // colliding with every OTHER versionless campaign and with `/brief/new`
+  // itself. `markSeeded` gives it its own key.
+  test("a seeded versionless campaign's draft key is its own campaign id, never the shared cf:draft:new", () => {
+    const seeded = reduce(base(), {
+      type: "markSeeded",
+      campaignId: "seed-campaign-1",
+      slug: "seed-campaign-1",
+      campaignName: "Seed Campaign",
+      snapshot: savedBrief({ id: "seed-campaign-1" }),
+    });
+    expect(getDraftKey(seeded)).toBe("cf:draft:seed-campaign-1");
+    expect(getDraftKey(seeded)).not.toBe("cf:draft:new");
+    // A second, unrelated versionless campaign gets its OWN key — the collision
+    // mscyy names is two campaigns sharing one autosave slot.
+    const seededOther = reduce(base(), {
+      type: "markSeeded",
+      campaignId: "seed-campaign-2",
+      slug: "seed-campaign-2",
+      campaignName: "Another Seed",
+      snapshot: savedBrief({ id: "seed-campaign-2" }),
+    });
+    expect(getDraftKey(seededOther)).not.toBe(getDraftKey(seeded));
+    // `/brief/new` itself is untouched: still the shared key.
+    expect(getDraftKey(base())).toBe("cf:draft:new");
+  });
+
   test("a saved draft round-trips and can be purged", () => {
     const state = { ...base(), briefId: "camp" };
     saveDraftToStorage(state);
@@ -1670,6 +1699,45 @@ describe("draft storage", () => {
     const corrupt = { ...state, variation: null };
     localStorage.setItem(getDraftKey(state), JSON.stringify({ state: corrupt, timestamp: 1 }));
     expect(loadDraftFromStorage(state)?.variation).toEqual(base().variation);
+  });
+
+  // PT-5c1 fix round — a seeded "new" source has to round-trip through
+  // localStorage exactly like a file source's `savedSnapshot` does, or a
+  // restored draft loses the campaign identity `markSeeded` gave it and its
+  // autosave falls back onto the shared `cf:draft:new` key.
+  test("normalizeDraftState round-trips a seeded new source, canonicalised like a file source's snapshot", () => {
+    // The same X16 case the file-source test below pins (a hand-authored
+    // `enabled: true` spelled out on a template layer) — proves this branch
+    // actually calls `canonicalBrief`, not just copies the raw snapshot through.
+    const canonicalTpl = templateFromCanonical(DEFAULT_CAMPAIGN_TYPE);
+    const spelledOutTpl: BriefTemplate = {
+      ...canonicalTpl,
+      layers: canonicalTpl.layers.map((layer, i) =>
+        i === 0 ? { ...layer, enabled: true } : layer,
+      ),
+    };
+    const raw = {
+      ...base(),
+      source: {
+        kind: "new",
+        tempId: "new",
+        seeded: {
+          campaignId: "seed-9",
+          slug: "seed-9",
+          campaignName: "Seed Nine",
+          snapshot: savedBrief({ id: "seed-9", template: spelledOutTpl }),
+        },
+      },
+    };
+    const normalized = normalizeDraftState(raw as unknown as Record<string, unknown>);
+    expect(normalized.source.kind).toBe("new");
+    const seeded = normalized.source.kind === "new" ? normalized.source.seeded : undefined;
+    expect(seeded?.campaignId).toBe("seed-9");
+    expect(seeded?.slug).toBe("seed-9");
+    expect(seeded?.campaignName).toBe("Seed Nine");
+    // Canonicalised: the spelled-out default is gone, same as a file source's
+    // `savedSnapshot` after normalization.
+    expect("enabled" in seeded!.snapshot.template.layers[0]).toBe(false);
   });
 
   test("an unusable product entry is replaced, not dereferenced, so the draft survives", () => {
@@ -2187,6 +2255,116 @@ describe("isPristine", () => {
     expect(isPristine(initialEditorState())).toBe(true);
     expect(isPristine(initialEditorState("variation"))).toBe(true);
     expect(isPristine(reduce(base(), { type: "patch", patch: { briefId: "x" } }))).toBe(false);
+  });
+
+  // PT-5c1 fix round (mscda) — root cause: a versionless campaign's editor
+  // used to open with `source.kind: "new"` and no seed, so `isPristine`
+  // compared it to a BLANK draft instead of the seed it actually opened with —
+  // a just-created campaign (its name and preset already applied) always read
+  // as dirty, and BriefEditor's exit prompt (`!isPristine && isDirtySinceSave`)
+  // fired on every exit with zero user edits.
+  test("a freshly seeded versionless campaign is pristine, and a real edit after seeding is not", () => {
+    // The exact sequence BriefEditor's route effect runs: `fromBrief` on the
+    // blank campaign, then the name and preset patches — computed once here as
+    // the seed's own baseline (what `markSeeded`'s `snapshot` carries), and
+    // dispatched again onto the live draft (what the user actually sees), the
+    // same as the production code's `seed`/live split (msczF).
+    const blank = savedBrief({ id: "seed-1", campaignMessage: "" });
+    let seed = fromBrief(blank);
+    seed = editorReducer(seed, { type: "patch", patch: { campaignName: "Summer Spark" } });
+    seed = editorReducer(seed, { type: "applyPreset", campaignType: DEFAULT_CAMPAIGN_TYPE });
+    const reseeded = reduce(
+      base(),
+      { type: "load", brief: blank },
+      { type: "patch", patch: { campaignName: "Summer Spark" } },
+      { type: "applyPreset", campaignType: DEFAULT_CAMPAIGN_TYPE },
+      {
+        type: "markSeeded",
+        campaignId: "seed-1",
+        slug: "seed-1",
+        campaignName: seed.campaignName,
+        snapshot: toBrief(seed),
+      },
+    );
+    expect(isPristine(reseeded)).toBe(true);
+    expect(isDirtySinceSave(reseeded)).toBe(true); // never saved — still true by definition
+    // The exit-prompt formula BriefEditor uses: clean until a real edit.
+    expect(!isPristine(reseeded) && isDirtySinceSave(reseeded)).toBe(false);
+    const edited = reduce(reseeded, {
+      type: "patch",
+      patch: { campaignMessage: "Hello" },
+    });
+    expect(isPristine(edited)).toBe(false);
+    expect(!isPristine(edited) && isDirtySinceSave(edited)).toBe(true);
+  });
+
+  // msczF — a slow metadata lookup must not erase edits typed before it lands.
+  // BriefEditor's guard is "only an unattached new draft (no seed yet) that is
+  // no longer pristine skips the load/patch/applyPreset dispatches"; `markSeeded`
+  // itself always adopts the campaign's identity regardless, so Save still
+  // writes to the right campaign.
+  test("markSeeded adopts the campaign's briefId even when the draft already has unsaved edits", () => {
+    const edited = reduce(base(), {
+      type: "patch",
+      patch: { campaignMessage: "typed before the lookup landed" },
+    });
+    expect(isPristine(edited)).toBe(false);
+    const seeded = reduce(edited, {
+      type: "markSeeded",
+      campaignId: "seed-2",
+      slug: "seed-2",
+      campaignName: "Seed Two",
+      snapshot: savedBrief({ id: "seed-2" }),
+    });
+    // The user's edit survives untouched — markSeeded never dispatched `load`.
+    expect(seeded.campaignMessage).toBe("typed before the lookup landed");
+    // But Save now has somewhere real to write: the campaign's own id, not the
+    // draft's original blank one.
+    expect(seeded.briefId).toBe("seed-2");
+    expect(seeded.source.kind === "new" ? seeded.source.seeded?.campaignId : null).toBe("seed-2");
+    // And it correctly still reads as dirty — the user really did type something.
+    expect(isPristine(seeded)).toBe(false);
+  });
+
+  test("markSeeded is a no-op once the source already has a file identity", () => {
+    const loaded = reduce(base(), {
+      type: "load",
+      brief: savedBrief(),
+      entry: { file: "camp.yaml" },
+    });
+    const after = reduce(loaded, {
+      type: "markSeeded",
+      campaignId: "irrelevant",
+      slug: "irrelevant",
+      campaignName: "Irrelevant",
+      snapshot: savedBrief({ id: "irrelevant" }),
+    });
+    expect(after).toBe(loaded);
+  });
+});
+
+describe("discard on a seeded versionless campaign", () => {
+  test("reverts to the seed, not a blank draft, and keeps the campaign's identity", () => {
+    const seeded = reduce(base(), {
+      type: "markSeeded",
+      campaignId: "seed-3",
+      slug: "seed-3",
+      campaignName: "Seed Three",
+      snapshot: savedBrief({ id: "seed-3", campaignMessage: "from the seed" }),
+    });
+    const edited = reduce(seeded, {
+      type: "patch",
+      patch: { campaignMessage: "a change to throw away" },
+    });
+    const discarded = reduce(edited, { type: "discard" });
+    expect(discarded.campaignMessage).toBe("from the seed");
+    expect(discarded.campaignName).toBe("Seed Three");
+    expect(discarded.briefId).toBe("seed-3");
+    expect(discarded.source.kind === "new" ? discarded.source.seeded?.campaignId : null).toBe(
+      "seed-3",
+    );
+    // Clean again, exactly as the freshly-seeded draft was.
+    expect(isPristine(discarded)).toBe(true);
   });
 });
 
@@ -4032,6 +4210,7 @@ describe("setMode and the mode-incompatible format (S4/D99)", () => {
         type: "patch",
         patch: {
           campaignName: "camp",
+          briefId: "camp",
           targetRegion: "DE",
           targetAudience: "a",
           campaignMessage: "Hi",
@@ -4263,6 +4442,7 @@ describe("the campaign type preset (T2 / D108–D112)", () => {
         type: "patch",
         patch: {
           campaignName: "camp",
+          briefId: "camp",
           targetRegion: "DE",
           targetAudience: "a",
           campaignMessage: "Hi",
@@ -4283,6 +4463,7 @@ describe("the campaign type preset (T2 / D108–D112)", () => {
         type: "patch",
         patch: {
           campaignName: "camp",
+          briefId: "camp",
           targetRegion: "DE",
           targetAudience: "a",
           campaignMessage: "Hi",

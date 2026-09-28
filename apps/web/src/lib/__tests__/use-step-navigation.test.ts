@@ -1,16 +1,17 @@
-import { describe, test, expect, vi } from "vitest";
+import { describe, test, expect } from "vitest";
 import { createElement } from "react";
 import { render } from "@testing-library/react";
-import { stashStep, takeStashedStep, isTypingTarget } from "../use-step-navigation";
+import { isTypingTarget } from "../use-step-navigation";
 
 /**
- * SG1 — what is left of this file's suite.
+ * SG1 / PT-5c1 — what is left of this file's suite.
  *
  * The walk's own describes (`useStepNavigation`, `useStepSwipe`, `useStepKeys`,
  * `useBecameTrue`, `swipeDirection`, `overlayIsOpen`, `STEP_TRANSITION_MS`) went
  * with the hooks they covered: the wizard is retired (SG-D2), so those tests
- * protected nothing a user could reach. What remains covers the two exports that
- * still have live callers.
+ * protected nothing a user could reach. The step baton's own describe
+ * (`stashStep`/`takeStashedStep`) went with PT-5c1, which retired both call
+ * sites. What remains covers the one export that still has a live caller.
  */
 
 describe("isTypingTarget", () => {
@@ -36,30 +37,5 @@ describe("isTypingTarget", () => {
     expect(isTypingTarget(window)).toBe(false);
     expect(isTypingTarget(document)).toBe(false);
     expect(isTypingTarget(null)).toBe(false);
-  });
-});
-
-describe("the step baton (H5)", () => {
-  test("takeStashedStep spends the baton by reading it", () => {
-    stashStep("copy");
-    expect(takeStashedStep()).toBe("copy");
-    expect(localStorage.getItem("cf:step-handoff")).toBeNull();
-    expect(takeStashedStep()).toBeNull();
-  });
-
-  test("a storage that throws on write does not break the save that was stashing", () => {
-    vi.spyOn(localStorage, "setItem").mockImplementation(() => {
-      throw new Error("blocked");
-    });
-    expect(() => stashStep("output")).not.toThrow();
-    vi.restoreAllMocks();
-  });
-
-  test("a storage that throws on read answers with no baton at all", () => {
-    vi.spyOn(localStorage, "getItem").mockImplementation(() => {
-      throw new Error("blocked");
-    });
-    expect(takeStashedStep()).toBeNull();
-    vi.restoreAllMocks();
   });
 });

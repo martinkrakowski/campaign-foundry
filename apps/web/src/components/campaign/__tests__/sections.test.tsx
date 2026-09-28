@@ -47,6 +47,31 @@ describe("IdentitySection", () => {
     expect(dispatch).toHaveBeenCalledWith({ type: "patch", patch: { targetAudience: "a" } });
   });
 
+  test("PT-5c1 (D178) — typing a name never dispatches a briefId patch; the id readout is a separate, read-only control", async () => {
+    const user = userEvent.setup();
+    const dispatch = vi.fn();
+    render(
+      <IdentitySection
+        state={state({ briefId: "server-minted-slug", campaignName: "My Campaign" })}
+        dispatch={dispatch}
+        errors={{}}
+      />,
+    );
+    await user.type(screen.getByLabelText("Campaign Name"), "Summer Launch 2026!");
+    for (const call of dispatch.mock.calls) {
+      expect((call[0] as { patch?: Record<string, unknown> }).patch).not.toHaveProperty("briefId");
+    }
+    // The id readout is a span with a copy button, never an input the typed name
+    // could reach — the slug is server-derived and display-only (D178). Asserting
+    // on the tag name of `getByText`'s own match cannot fail: `getByText` matches
+    // TEXT NODES, so an editable input holding this value would make the lookup
+    // itself throw (naming a missing element, not this defect) rather than fail
+    // this assertion — mscc-. Assert the absence directly instead: the value is
+    // visible as text, and no textbox anywhere holds it.
+    expect(screen.getByText("server-minted-slug")).toBeTruthy();
+    expect(screen.queryByDisplayValue("server-minted-slug")).toBeNull();
+  });
+
   test("the brief id is editable on a new draft and read-only once loaded from a file", () => {
     const { unmount } = render(<IdentitySection state={state()} dispatch={vi.fn()} errors={{}} />);
     expect(screen.getByLabelText("Campaign Name").hasAttribute("readonly")).toBe(false);
@@ -172,7 +197,7 @@ describe("IdentitySection", () => {
     );
     const copyBtn = screen.getByRole("button", { name: "Copy brief ID" }) as HTMLButtonElement;
     expect(copyBtn.disabled).toBe(true);
-    expect(screen.getByText("This is the brief id — made from the name")).toBeTruthy();
+    expect(screen.getByText("This is the brief id — assigned by the server")).toBeTruthy();
   });
 
   test("shows a per-field error and a count badge on the heading", () => {

@@ -22,11 +22,12 @@ import {
   type PosterVariant,
   type RatioOption,
 } from "@/components/ui";
-import { stashStep } from "@/lib/use-step-navigation";
 import { createCampaign } from "@/lib/create-campaign";
+import { campaignRoute } from "@/lib/campaign-route";
 import { useCreateCampaign } from "@/lib/create-campaign-context";
 import { useGuardedNavigation } from "@/lib/use-guarded-navigation";
 import { hasRecoverableDraft } from "@/components/campaign/editor-state";
+import { unknownErrorMessage } from "@/lib/briefs-api";
 import {
   formatDisplayName,
   modeDisplayName,
@@ -34,15 +35,6 @@ import {
   typeDisplayName,
 } from "@/components/campaign/display-names";
 import * as messages from "@/components/campaign/messages";
-
-/**
- * The step Create lands on (D98) — the baton's payload, spent by the editor's
- * mount. No longer Copy (D66): D66 sent Create past Identity because the dialog
- * answered Identity; under D97 it does not — region and audience are unanswered
- * here and both are required by `validateIdentity`, so landing on Copy would drop
- * the user one step past two empty required fields.
- */
-const IDENTITY_STEP = "identity";
 
 /**
  * D162 / CC6: The four campaign types grouped by what the user is making, not
@@ -268,30 +260,36 @@ export function CreateCampaignDialog() {
     guardReturnFocusRef.current = null;
   }, [guardOpen, createDialogOpen, draftHasWork]);
 
+  // A synchronous latch: `creating` is state, so it only disables the buttons
+  // after a re-render. Two activations inside one render window (a double
+  // click, or Enter plus a click, or Create plus Start over) would otherwise
+  // each reach `createCampaign` and mint two campaigns, the second orphaned.
+  // Same pattern as Save as (`saveAsInFlightRef`) and the picker's duplicate.
+  const createInFlightRef = useRef(false);
+
   const runCreate = async () => {
+    if (createInFlightRef.current) return;
+    createInFlightRef.current = true;
     setRefusal(null);
     setCreating(true);
     try {
+      // D177, D178 (PT-5c1) — the mint IS the create: `POST /campaigns` answers
+      // the id the moment this resolves, and every campaign route (uuid or
+      // slug, #613) understands it — there is no longer a blank route to land
+      // on first. A refused mint (a blank name that slugifies to nothing, a
+      // 500, a dropped connection) REJECTS — it stays open and says so, the
+      // typed answers still here for a retry. Dismiss the two-way first:
+      // Start over calls this path while the overlay is up, and the status
+      // line lives on the form underneath it.
       const result = await createCampaign({ name, type });
-      // A blocked store is not a create: stay open and say so. Do not throw — the
-      // typed answers must still be here for a retry. Dismiss the two-way first:
-      // Start over calls this path while the overlay is up, and the status line
-      // lives on the form underneath it.
-      if (result === null) {
-        setResumePrompt(false);
-        setRefusal(messages.createCampaignBlocked);
-        return;
-      }
-      // D98 — the landing branch belongs to the caller, not the editor. Already on
-      // the blank route: the mounted editor's seed effect moves the cursor itself.
-      // Anywhere else: the step baton crosses the navigation this push causes, and
-      // the editor's mount effect spends it. Never both — the baton is spent by a
-      // read, so an unspent one would move the next mount's cursor.
-      if (pathname !== "/brief/new") stashStep(IDENTITY_STEP);
       closeAndReset();
-      router.push(result.route);
+      router.push(campaignRoute(result.campaignId));
+    } catch (error) {
+      setResumePrompt(false);
+      setRefusal(unknownErrorMessage(error, messages.createCampaignFailed));
     } finally {
       setCreating(false);
+      createInFlightRef.current = false;
     }
   };
 
@@ -304,15 +302,17 @@ export function CreateCampaignDialog() {
       return;
     }
     setNameInvalid(false);
-    // W3 (F19) — before the seed publishes, ask about the abandoned draft it would
-    // overwrite. The scope term is the lane's heart, and both halves are mandatory:
+    // W3 (F19) — before minting a brand-new campaign, ask about the abandoned
+    // draft it would leave stranded. The scope term is the lane's heart, and
+    // both halves are mandatory:
     //
     // `isDirty && pathname === "/brief/new"` — only there do the guard's question and
     // this one concern the *same* draft. `setDirty` is driven by any mounted editor,
     // not just the blank one, so without the route term a stale `cf:draft:new` from an
     // earlier session plus a dirty editor on a named route would stay silent and the
-    // seed would overwrite the blank draft unasked — F19 unfixed. On the blank route,
-    // asking again after the guard's "Leave" would be the D67 double prompt.
+    // user would mint a second campaign with the first abandoned draft unmentioned —
+    // F19 unfixed. On the blank route, asking again after the guard's "Leave" would
+    // be the D67 double prompt.
     //
     // No capture-before-the-guard is needed: `guardedAction` never clears the flag and
     // no navigation has happened, so the value at press time is the value at gesture
@@ -324,8 +324,9 @@ export function CreateCampaignDialog() {
     await runCreate();
   };
 
-  /** Resume: the draft stays on disk, no seed is published, no baton is stashed —
-   *  the recovery effect restores the draft where the user left off. */
+  /** Resume: the draft stays on disk, nothing is minted — `/brief/new` finds
+   *  a recoverable draft (`hasRecoverableDraft`) and resumes the editor from
+   *  it, rather than opening the dialog again (PT-5c1). */
   const handleResume = () => {
     closeAndReset();
     router.push("/brief/new");
@@ -496,7 +497,7 @@ export function CreateCampaignDialog() {
           </Button>
           {/* The user's original intent, confirmed once the risk is named.
            *  Same in-flight hold as the form's Create: a second press would
-           *  republish the seed, and under D64(b) mint a second campaign. */}
+           *  mint a second campaign (D177). */}
           <Button
             type="button"
             size="sm"

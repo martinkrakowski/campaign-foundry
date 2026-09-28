@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "PT-5c1",
+  "mutations": [
+    {
+      "file": "apps/web/src/components/campaign/editor-state.ts",
+      "before": "      const patch = action.patch;\n",
+      "after": "      let patch = action.patch;\n      if (patch.campaignName !== undefined && state.source.kind === \"new\") {\n        patch = { ...patch, briefId: slugify(patch.campaignName) };\n      }\n",
+      "because": "the client re-derives the campaign id from the typed name instead of leaving the server-minted slug alone (D178) — IdentitySection's id readout would change while the user types, and Save could send an id the server never minted",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/editor-state.test.ts",
+        "-t",
+        "leaves briefId alone"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
