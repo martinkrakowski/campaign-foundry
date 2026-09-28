@@ -1,5 +1,8 @@
 import { createHash } from "node:crypto";
 
+/** The reserved lane token a plan review is emitted under — never a real lane's name. */
+export const PLAN_REVIEW_LANE = "_plan";
+
 /**
  * The leading cell of a plan's lane-table row, exactly as plans write it:
  * `| **<id>** | …`. The rest of the line is never parsed into cells, so a row
@@ -26,4 +29,15 @@ export function rowHash(markdown: string, id: string): string {
   }
   const normalised = matches[0].trim().replace(/\s+/g, " ");
   return createHash("sha256").update(normalised, "utf8").digest("hex");
+}
+
+/** The hash map a plan-review event's detail carries, or `undefined` for anything else. */
+export function asHashRecord(value: unknown): Record<string, string> | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  const record: Record<string, string> = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (typeof item !== "string") return undefined;
+    record[key] = item;
+  }
+  return record;
 }

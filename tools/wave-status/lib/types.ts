@@ -45,6 +45,23 @@ export type PrChecks = "none" | "pending" | "pass" | "fail" | "unknown";
  */
 export type PrThreadSignal = number | "unknown";
 
+/**
+ * The plan-review gate's facts about one lane, gathered by the collector: the
+ * when of its dispatch, the row hash the wave's clear review recorded, and the
+ * row's hash at collection time. The flag itself is derived (derive.ts), never
+ * gathered — the collector only reads, it does not conclude.
+ */
+export interface PlanReviewObservation {
+  /** The ts of the lane's `dispatch started` event, when there was one. */
+  readonly dispatchedAt?: string;
+  /** The lane's row hash from the latest clear review that preceded the dispatch. */
+  readonly reviewedHash?: string;
+  /** The lane row's hash, taken from the plan at collection time. */
+  readonly rowHash?: string;
+  /** Why `rowHash` is absent — the plan could not be read, or holds no unambiguous row for the lane. */
+  readonly rowHashMissing?: string;
+}
+
 export interface LaneObservation {
   readonly log?: {
     readonly bytes: number;
@@ -52,6 +69,7 @@ export interface LaneObservation {
     readonly tail: string;
   };
   readonly gateLog?: string;
+  readonly planReview?: PlanReviewObservation;
   readonly alive: boolean;
   readonly pr?: {
     readonly number: number;
@@ -88,6 +106,13 @@ export interface DerivedLane {
   readonly log?: LaneObservation["log"];
   readonly pr?: LaneObservation["pr"];
   readonly diff?: LaneObservation["diff"];
+  /**
+   * The plan-review gate's flag, verbatim: "dispatched on an unreviewed row".
+   * A derived annotation, not a lane state — the page's inline state copy is
+   * held to the module's by parity tests that cannot see this field, so the
+   * flag rides beside the state, never inside it.
+   */
+  readonly planReview?: string;
 }
 
 export interface LaneStatus {

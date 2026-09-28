@@ -23,6 +23,7 @@ import {
   type PrFact,
   type TailHandle,
 } from "../lib/collect.js";
+import type { WaveStatus } from "../lib/types.js";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -1999,5 +2000,92 @@ describe("realDeps — the process-level wiring", () => {
 
   test("realDeps does not fix planVerifyArtifactPath at module load", () => {
     expect(realDeps.planVerifyArtifactPath).toBeUndefined();
+  });
+});
+
+describe("collect — the plan-review gate (FU-plan-review-gate)", () => {
+  const PLAN = [
+    "# The plan",
+    "",
+    "| Lane | Delivers |",
+    "|---|---|",
+    "| **PT-5a** | The campaign id, exposed and resolvable. |",
+  ].join("\n");
+
+  const reviewLine = (rows: Record<string, string>, verdict = "clear"): string =>
+    `${JSON.stringify({
+      ts: "2026-09-28T10:00:00Z",
+      wave: "R",
+      lane: "_plan",
+      stage: "plan-review",
+      event: "settled",
+      detail: { plan: "docs/planning/plan.md", reviewer: "plan-review-seat", rows, verdict },
+    })}\n`;
+
+  const dispatchLine = (lane: string): string =>
+    `${JSON.stringify({
+      ts: "2026-09-28T11:00:00Z",
+      wave: "R",
+      lane,
+      stage: "dispatch",
+      event: "started",
+    })}\n`;
+
+  const tree = (events: string, plan = PLAN): FakeTree => ({
+    dirs: { [ROOT]: ["waveR"], [`${ROOT}/waveR`]: ["events.jsonl"] },
+    files: { [`${ROOT}/waveR/events.jsonl`]: events, "docs/planning/plan.md": plan },
+  });
+
+  const laneAt = async (events: string, plan?: string): Promise<WaveStatus> =>
+    collect(fakeDeps(tree(events, plan)), ROOT, "2026-09-28T12:00:00Z");
+
+  const planHash = (): Promise<string> =>
+    import("node:crypto").then(({ createHash }) =>
+      createHash("sha256")
+        .update("| **PT-5a** | The campaign id, exposed and resolvable. |", "utf8")
+        .digest("hex"),
+    );
+
+  const laneRow = (status: WaveStatus, lane: string) =>
+    status.waves[0]?.lanes.find((l) => l.lane === lane);
+
+  test("a lane dispatched on a reviewed, unchanged row gathers no flag", async () => {
+    const status = await laneAt(reviewLine({ "PT-5a": await planHash() }) + dispatchLine("PT-5a"));
+    expect(laneRow(status, "PT-5a")?.derived.planReview).toBeUndefined();
+  });
+
+  test("a plan edited after the review flags the lane", async () => {
+    const edited = PLAN.replace("exposed and resolvable", "hidden and unresolvable");
+    const status = await laneAt(
+      reviewLine({ "PT-5a": await planHash() }) + dispatchLine("PT-5a"),
+      edited,
+    );
+    expect(laneRow(status, "PT-5a")?.derived.planReview).toBe("dispatched on an unreviewed row");
+  });
+
+  test("a lane dispatched with no review for the wave is flagged", async () => {
+    const status = await laneAt(dispatchLine("PT-5a"));
+    expect(laneRow(status, "PT-5a")?.derived.planReview).toBe("dispatched on an unreviewed row");
+  });
+
+  test("a plan file that cannot be read says why instead of guessing a hash", async () => {
+    const deps = fakeDeps({
+      dirs: { [ROOT]: ["waveR"], [`${ROOT}/waveR`]: ["events.jsonl"] },
+      files: {
+        [`${ROOT}/waveR/events.jsonl`]: reviewLine({ "PT-5a": "aa" }) + dispatchLine("PT-5a"),
+      },
+    });
+    const status = await collect(deps, ROOT, "2026-09-28T12:00:00Z");
+    expect(laneRow(status, "PT-5a")?.derived.planReview).toBeUndefined();
+  });
+
+  test("a plan without an unambiguous row for the lane is silence, not a verdict", async () => {
+    const status = await laneAt(reviewLine({ "PT-9": "aa" }) + dispatchLine("PT-9"));
+    expect(laneRow(status, "PT-9")?.derived.planReview).toBeUndefined();
+  });
+
+  test("a lane that never dispatched carries no plan-review facts", async () => {
+    const status = await laneAt(reviewLine({ "PT-5a": "aa" }));
+    expect(laneRow(status, "_plan")?.derived.planReview).toBeUndefined();
   });
 });

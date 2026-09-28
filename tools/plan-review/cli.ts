@@ -1,5 +1,5 @@
 import { readEvents } from "../wave-status/lib/events.js";
-import { rowHash } from "./lib/rows.js";
+import { asHashRecord, PLAN_REVIEW_LANE, rowHash } from "./lib/rows.js";
 
 /**
  * The plan-review gate's command face. `hashes` fingerprints the rows an
@@ -16,9 +16,6 @@ export interface PlanReviewIo {
   readonly logError: (text: string) => void;
   readonly readFile: (path: string) => Promise<string>;
 }
-
-/** The reserved lane token the review is emitted under — never a real lane's name. */
-export const PLAN_REVIEW_LANE = "_plan";
 
 const USAGE =
   "usage: plan:review hashes <plan.md> <id>…\n" +
@@ -93,17 +90,6 @@ function parseCheckArgs(args: readonly string[]): CheckArgs | undefined {
   const wave = flags.get("--wave");
   if (positionals.length !== 2 || logdir === undefined || wave === undefined) return undefined;
   return { plan: positionals[0], laneId: positionals[1], logdir, wave };
-}
-
-/** The hash map an event's detail carries, or `undefined` for anything else. */
-function asHashRecord(value: unknown): Record<string, string> | undefined {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
-  const record: Record<string, string> = {};
-  for (const [key, item] of Object.entries(value)) {
-    if (typeof item !== "string") return undefined;
-    record[key] = item;
-  }
-  return record;
 }
 
 /** Why `id`'s row no longer matches `reviewed`, or `undefined` when it does. */

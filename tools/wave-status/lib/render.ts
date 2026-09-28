@@ -107,6 +107,15 @@ function gateCell(lane: LaneStatus): string {
   return `${exit}${coverage}`;
 }
 
+/**
+ * The plan-review gate's flag, verbatim or absent. A flag is a disagreement
+ * between what was reviewed and what the row is now — it is shown, never
+ * resolved into a lane state.
+ */
+function planReviewCell(lane: LaneStatus): string {
+  return lane.derived.planReview === undefined ? ABSENT : lane.derived.planReview;
+}
+
 /** The tones mirror the page: failed red, settled green, started cyan, absent dim. */
 const COLUMNS: readonly Column[] = [
   { header: "lane", cell: laneCell, paint: (_lane, text) => text },
@@ -174,6 +183,11 @@ const COLUMNS: readonly Column[] = [
       );
       return `${head}${text.slice(exitEnd)}`;
     },
+  },
+  {
+    header: "plan review",
+    cell: planReviewCell,
+    paint: (lane, text) => withCode(lane.derived.planReview === undefined ? DIM : RED, text),
   },
 ];
 

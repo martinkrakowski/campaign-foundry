@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { rowHash } from "../rows.js";
+import { asHashRecord, rowHash } from "../rows.js";
 
 const plan = [
   "# The plan",
@@ -66,5 +66,22 @@ describe("rowHash", () => {
     expect(rowHash(plan, "D177")).toMatch(/^[0-9a-f]{64}$/);
     const edited = plan.replace("Create is a server call.", "Create is a client call.");
     expect(rowHash(edited, "D177")).not.toBe(rowHash(plan, "D177"));
+  });
+});
+
+describe("asHashRecord", () => {
+  test("a map whose every value is a string is accepted verbatim", () => {
+    expect(asHashRecord({ "PT-5a": "aa", D177: "bb" })).toEqual({ "PT-5a": "aa", D177: "bb" });
+  });
+
+  test("an empty map is a valid, empty record", () => {
+    expect(asHashRecord({})).toEqual({});
+  });
+
+  test("a non-object, an array, a null, or a map with a non-string value is refused", () => {
+    expect(asHashRecord("rows")).toBeUndefined();
+    expect(asHashRecord(["aa"])).toBeUndefined();
+    expect(asHashRecord(null)).toBeUndefined();
+    expect(asHashRecord({ "PT-5a": 7 })).toBeUndefined();
   });
 });

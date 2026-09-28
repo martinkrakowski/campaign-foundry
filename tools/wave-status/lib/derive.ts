@@ -1,4 +1,5 @@
-import type { DerivedLane, LaneObservation } from "./types.js";
+import { asHashRecord, PLAN_REVIEW_LANE } from "../../plan-review/lib/rows.js";
+import type { DerivedLane, LaneObservation, PlanReviewObservation, WaveEvent } from "./types.js";
 
 export function parseLastExit(tail: string): number | undefined {
   const lines = tail.split("\n");
@@ -70,13 +71,84 @@ export function deriveLane(obs: LaneObservation): DerivedLane {
     parsedGate !== undefined && (parsedGate.exit !== undefined || parsedGate.coverage !== undefined)
       ? parsedGate
       : undefined;
+  const planReview = obs.planReview === undefined ? undefined : planReviewFlag(obs.planReview);
 
   return {
     ...(exit !== undefined ? { exit } : {}),
     ...(gate !== undefined ? { gate } : {}),
+    ...(planReview !== undefined ? { planReview } : {}),
     alive: obs.alive,
     ...(obs.log !== undefined ? { log: obs.log } : {}),
     ...(obs.pr !== undefined ? { pr: obs.pr } : {}),
     ...(obs.diff !== undefined ? { diff: obs.diff } : {}),
   };
+}
+
+/**
+ * The plan the wave's reviews were taken against: the `plan` the latest
+ * `plan-review settled` event in the directory named. `undefined` when no
+ * review was recorded there — there is no plan path to read, and the flag for
+ * a dispatched lane is then exactly the no-review case.
+ */
+export function latestPlanReviewPlan(events: readonly WaveEvent[]): string | undefined {
+  for (let i = events.length - 1; i >= 0; i--) {
+    const event = events[i];
+    if (event.stage !== "plan-review" || event.event !== "settled") continue;
+    const plan = event.detail?.plan;
+    if (typeof plan === "string" && plan !== "") return plan;
+  }
+  return undefined;
+}
+
+/**
+ * The plan-review facts the collector gathers for one lane: when it
+ * dispatched, and the row hash the wave's clear review recorded for it. A
+ * review counts only when it was `settled` with verdict `clear` under the
+ * reserved `_plan` lane, for this wave, and precedes the dispatch in ts — an
+ * unparseable ts on either side is silence, and silence is never read as
+ * reviewed. The latest qualifying review wins.
+ */
+export function planReviewFacts(
+  events: readonly WaveEvent[],
+  wave: string,
+  lane: string,
+): PlanReviewObservation {
+  let dispatchedAt: string | undefined;
+  for (const event of events) {
+    if (event.wave !== wave || event.lane !== lane) continue;
+    if (event.stage === "dispatch" && event.event === "started") dispatchedAt = event.ts;
+  }
+  if (dispatchedAt === undefined) return {};
+
+  // An unparseable dispatch ts is silence, and silence is never read as
+  // reviewed: "before" cannot be established, so no review qualifies.
+  const dispatchMs = Date.parse(dispatchedAt);
+  if (Number.isNaN(dispatchMs)) return { dispatchedAt };
+  let reviewedHash: string | undefined;
+  for (const event of events) {
+    if (event.wave !== wave || event.lane !== PLAN_REVIEW_LANE) continue;
+    if (event.stage !== "plan-review" || event.event !== "settled") continue;
+    if (event.detail?.verdict !== "clear") continue;
+    const ts = Date.parse(event.ts);
+    if (Number.isNaN(ts) || ts > dispatchMs) continue;
+    const hash = asHashRecord(event.detail?.rows)?.[lane];
+    if (hash !== undefined) reviewedHash = hash;
+  }
+  return { dispatchedAt, ...(reviewedHash !== undefined ? { reviewedHash } : {}) };
+}
+
+/**
+ * The plan-review gate's flag, derived and never gathered: a lane dispatched
+ * on a row that had no `clear` review before the dispatch — or whose reviewed
+ * hash differs from the row's hash at collection time — is "dispatched on an
+ * unreviewed row". When the row cannot be re-read at all, the read failed,
+ * not the review: that is "nobody looked", which is silence, the same way an
+ * events-only row's missing observation is silence — never a verdict invented
+ * from a read that failed.
+ */
+export function planReviewFlag(obs: PlanReviewObservation): string | undefined {
+  if (obs.dispatchedAt === undefined) return undefined;
+  if (obs.reviewedHash === undefined) return "dispatched on an unreviewed row";
+  if (obs.rowHash === undefined) return undefined;
+  return obs.rowHash === obs.reviewedHash ? undefined : "dispatched on an unreviewed row";
 }

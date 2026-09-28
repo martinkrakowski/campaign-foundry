@@ -3,8 +3,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { runCli, errorText, PLAN_REVIEW_LANE } from "../cli.js";
-import { rowHash } from "../lib/rows.js";
+import { runCli, errorText } from "../cli.js";
+import { asHashRecord, PLAN_REVIEW_LANE, rowHash } from "../lib/rows.js";
 
 const dirs: string[] = [];
 const tempDir = (): string => {

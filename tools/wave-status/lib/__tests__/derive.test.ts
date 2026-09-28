@@ -1,5 +1,14 @@
 import { describe, test, expect } from "vitest";
-import { deriveLane, parseGateLog, parseLastExit } from "../derive.js";
+import {
+  deriveLane,
+  latestPlanReviewPlan,
+  parseGateLog,
+  parseLastExit,
+  planReviewFacts,
+  planReviewFlag,
+} from "../derive.js";
+import { laneState } from "../lane-state.js";
+import type { LaneObservation, WaveEvent } from "../types.js";
 
 const coverageSummary = (overrides: Record<string, string> = {}): string =>
   [
@@ -179,5 +188,204 @@ describe("deriveLane — derived facts stay absent when the observation lacks th
     const derived = deriveLane({ alive: true, pr, diff });
     expect(derived.pr).toEqual(pr);
     expect(derived.diff).toEqual(diff);
+  });
+});
+
+describe("the plan-review flag (FU-plan-review-gate)", () => {
+  const dispatch = (lane = "pt-5a", ts = "2026-09-28T11:00:00Z"): WaveEvent => ({
+    ts,
+    wave: "W",
+    lane,
+    stage: "dispatch",
+    event: "started",
+  });
+  const review = (
+    rows: Record<string, string>,
+    verdict = "clear",
+    ts = "2026-09-28T10:00:00Z",
+    wave = "W",
+  ): WaveEvent => ({
+    ts,
+    wave,
+    lane: "_plan",
+    stage: "plan-review",
+    event: "settled",
+    detail: { plan: "docs/planning/p.md", rows, verdict },
+  });
+
+  test("a lane dispatched on a reviewed, unchanged row carries no flag", () => {
+    const derived = deriveLane({
+      alive: false,
+      planReview: {
+        dispatchedAt: "2026-09-28T11:00:00Z",
+        reviewedHash: "aa",
+        rowHash: "aa",
+      },
+    });
+    expect(derived.planReview).toBeUndefined();
+  });
+
+  test("a lane dispatched on a row that changed after the review is flagged", () => {
+    const derived = deriveLane({
+      alive: false,
+      planReview: { dispatchedAt: "2026-09-28T11:00:00Z", reviewedHash: "aa", rowHash: "bb" },
+    });
+    expect(derived.planReview).toBe("dispatched on an unreviewed row");
+  });
+
+  test("a lane dispatched with no clear review before it is flagged", () => {
+    const derived = deriveLane({
+      alive: false,
+      planReview: { dispatchedAt: "2026-09-28T11:00:00Z" },
+    });
+    expect(derived.planReview).toBe("dispatched on an unreviewed row");
+  });
+
+  test("a flag is an annotation beside the state, never a lane state", () => {
+    const status = {
+      wave: "W",
+      lane: "pt-5a",
+      disagreements: [],
+      derived: deriveLane({
+        alive: false,
+        planReview: { dispatchedAt: "2026-09-28T11:00:00Z" },
+      }),
+    };
+    expect(laneState(status, Date.now())).toBe("vanished");
+  });
+
+  test("a lane that never dispatched carries no flag, whatever its facts say", () => {
+    expect(planReviewFlag({ rowHash: "aa", reviewedHash: "bb" })).toBeUndefined();
+  });
+
+  test("a row that cannot be re-read at collection time is silence, never a verdict", () => {
+    const derived = deriveLane({
+      alive: false,
+      planReview: {
+        dispatchedAt: "2026-09-28T11:00:00Z",
+        reviewedHash: "aa",
+        rowHashMissing: "the plan file could not be read",
+      },
+    });
+    expect(derived.planReview).toBeUndefined();
+  });
+
+  test("planReviewFacts reads the dispatch ts and the latest clear review's hash for the lane", () => {
+    const events = [
+      dispatch("pt-5b1", "2026-09-28T09:00:00Z"),
+      review({ "pt-5b1": "old" }, "clear", "2026-09-28T08:00:00Z"),
+      review({ "pt-5b1": "stale", "pt-5a": "aa" }, "clear", "2026-09-28T10:00:00Z"),
+      dispatch("pt-5a", "2026-09-28T11:00:00Z"),
+    ];
+    expect(planReviewFacts(events, "W", "pt-5a")).toEqual({
+      dispatchedAt: "2026-09-28T11:00:00Z",
+      reviewedHash: "aa",
+    });
+  });
+
+  test("a review that settled after the dispatch never counts as reviewed", () => {
+    const events = [dispatch("pt-5a"), review({ "pt-5a": "aa" }, "clear", "2026-09-28T12:00:00Z")];
+    expect(planReviewFacts(events, "W", "pt-5a")).toEqual({
+      dispatchedAt: "2026-09-28T11:00:00Z",
+    });
+  });
+
+  test("a review whose verdict is not clear never counts as reviewed", () => {
+    const events = [review({ "pt-5a": "aa" }, "changes-required"), dispatch("pt-5a")];
+    expect(planReviewFacts(events, "W", "pt-5a")).toEqual({
+      dispatchedAt: "2026-09-28T11:00:00Z",
+    });
+  });
+
+  test("a lane absent from the review's rows has no reviewed hash", () => {
+    const events = [review({ "pt-5b1": "aa" }), dispatch("pt-5a")];
+    expect(planReviewFacts(events, "W", "pt-5a")).toEqual({
+      dispatchedAt: "2026-09-28T11:00:00Z",
+    });
+  });
+
+  test("another wave's review never covers this wave's dispatch", () => {
+    const events = [
+      review({ "pt-5a": "aa" }, "clear", "2026-09-28T10:00:00Z", "OTHER"),
+      dispatch("pt-5a"),
+    ];
+    expect(planReviewFacts(events, "W", "pt-5a")).toEqual({
+      dispatchedAt: "2026-09-28T11:00:00Z",
+    });
+  });
+
+  test("a lane that never dispatched carries no facts at all", () => {
+    const events = [review({ "pt-5a": "aa" })];
+    expect(planReviewFacts(events, "W", "pt-5a")).toEqual({});
+  });
+
+  test("an unparseable dispatch ts is silence: the lane is never read as reviewed", () => {
+    const events = [
+      review({ "pt-5a": "aa" }, "clear", "2026-09-28T10:00:00Z"),
+      dispatch("pt-5a", "not-a-date"),
+    ];
+    expect(planReviewFacts(events, "W", "pt-5a")).toEqual({
+      dispatchedAt: "not-a-date",
+    });
+  });
+
+  test("an unparseable review ts never counts as before the dispatch", () => {
+    const events = [review({ "pt-5a": "aa" }, "clear", "not-a-date"), dispatch("pt-5a")];
+    expect(planReviewFacts(events, "W", "pt-5a")).toEqual({
+      dispatchedAt: "2026-09-28T11:00:00Z",
+    });
+  });
+
+  test("latestPlanReviewPlan names the plan the latest review carried", () => {
+    const events = [
+      review({ "pt-5a": "aa" }, "clear", "2026-09-28T10:00:00Z"),
+      review({ "pt-5a": "bb" }, "clear", "2026-09-28T11:00:00Z"),
+    ];
+    const withPlan = events.map((event, i) => ({
+      ...event,
+      detail: { ...event.detail, plan: i === 0 ? "docs/planning/old.md" : "docs/planning/new.md" },
+    }));
+    expect(latestPlanReviewPlan(withPlan)).toBe("docs/planning/new.md");
+    expect(latestPlanReviewPlan([dispatch()])).toBeUndefined();
+  });
+
+  test("a review event that names no plan is no plan path", () => {
+    const noPlan: WaveEvent = {
+      ...review({ "pt-5a": "aa" }),
+      detail: { rows: { "pt-5a": "aa" }, verdict: "clear" },
+    };
+    expect(latestPlanReviewPlan([noPlan])).toBeUndefined();
+    const emptyPlan: WaveEvent = {
+      ...review({ "pt-5a": "aa" }),
+      detail: { plan: "", rows: { "pt-5a": "aa" }, verdict: "clear" },
+    };
+    expect(latestPlanReviewPlan([emptyPlan])).toBeUndefined();
+  });
+
+  test("a review event with no detail at all covers nothing", () => {
+    const bare: WaveEvent = {
+      ts: "2026-09-28T10:00:00Z",
+      wave: "W",
+      lane: "_plan",
+      stage: "plan-review",
+      event: "settled",
+    };
+    expect(planReviewFacts([bare, dispatch("pt-5a")], "W", "pt-5a")).toEqual({
+      dispatchedAt: "2026-09-28T11:00:00Z",
+    });
+  });
+
+  test("a _plan event that is not a settled review is skipped", () => {
+    const started: WaveEvent = {
+      ts: "2026-09-28T10:00:00Z",
+      wave: "W",
+      lane: "_plan",
+      stage: "plan-review",
+      event: "started",
+    };
+    expect(planReviewFacts([started, dispatch("pt-5a")], "W", "pt-5a")).toEqual({
+      dispatchedAt: "2026-09-28T11:00:00Z",
+    });
+    expect(latestPlanReviewPlan([started])).toBeUndefined();
   });
 });
