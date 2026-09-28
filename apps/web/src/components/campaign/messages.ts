@@ -1001,6 +1001,13 @@ export const campaignNameRequired = "No name yet — give the campaign a name.";
 export const createCampaignBlocked =
   "Could not create the campaign — this window cannot keep the answers. Try Create campaign again in a regular window.";
 /**
+ * `create.failed` — PT-5c1 fix round (mscya): the mint request itself was
+ * refused (a network error, a 5xx) with no more specific answer to show —
+ * every other string on this form already comes from this file, so its
+ * fallback does too rather than staying an inline literal.
+ */
+export const createCampaignFailed = "Could not create the campaign.";
+/**
  * W3 (F19) — the two-way the create dialog asks before a seed overwrites an
  * abandoned draft. Its own question inside its own dialog, never the navigation
  * guard's: the guard speaks about the editor the user is leaving, this one about
@@ -1084,6 +1091,29 @@ export function briefListFailed(id: string): string {
 }
 /** The failed listing's way out: re-read the store where the user is standing. */
 export const briefListFailedRetry = "Try again";
+
+/**
+ * `brief.metaFailed` — PT-5c1 fix round (mscy8): a versionless campaign's own
+ * `GET /campaigns/:id` failed, which says nothing about the listing (that
+ * succeeded — the id just was not in it) or about whether the campaign exists.
+ * Same voice as `briefListFailed`, its own retry: the id it names is what
+ * failed to answer.
+ */
+export function briefMetaFailed(id: string): string {
+  return `${id}'s details could not be read — nothing has been changed.`;
+}
+/** The failed lookup's way out: re-read just this route's metadata. */
+export const briefMetaFailedRetry = "Try again";
+
+/* ── Save as… (D9, PT-5c1 / D177, D178) ───────────────────────────────────── */
+
+/** PT-5c1 fix round (mscya): the rest of this file already speaks for this
+ * dialog's every other string, so these join it rather than staying literals. */
+export const saveAsDialogTitle = "Save as...";
+export const saveAsDialogLead =
+  "This creates a copy under a new name. The original stays as it is.";
+export const saveAsNameLabel = "New campaign name";
+export const saveAsNamePlaceholder = "e.g. Summer Spark copy";
 
 /* ── The create dialog's inline discard guard (W2(a) / D90) ───────────────── */
 
