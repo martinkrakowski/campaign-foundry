@@ -34,6 +34,11 @@ const SERVER_KEYS: readonly (keyof EditorState)[] = [
   "pool",
   "appliedSnapshot",
   "capabilities",
+  // PT-5c1 fix round — `briefId` joins the carried set: post-D178 it is
+  // server-owned exactly as `source` is (no draft action sets it any more),
+  // and `markSeeded` needs an undo to preserve the campaign identity it
+  // installs the same way an undo already preserves `source` itself.
+  "briefId",
 ];
 
 const pick = (state: EditorState, keys: readonly string[]): Record<string, unknown> =>
@@ -144,6 +149,32 @@ describe("useEditorHistory — undo restores the draft and carries the server an
     expect(after.variation.headline).toBe(edited.variation.headline);
     expect(after.capabilities).toEqual(capabilities);
   });
+
+  // PT-5c1 fix round (msczF) — the exact race: the user types before the
+  // campaign's metadata lands, then it lands and `markSeeded` installs the
+  // identity. An undo after that must revert the EDIT, never the identity —
+  // reverting `briefId` back to "" would send the next Save with no
+  // campaign to write into.
+  test("undo after markSeeded reverts the edit but keeps the campaign identity it installed", () => {
+    const hook = render();
+    send(hook, { type: "patch", patch: { campaignMessage: "typed early" } });
+    send(hook, {
+      type: "markSeeded",
+      campaignId: "camp-1",
+      slug: "camp-1",
+      campaignName: "",
+      snapshot: blankBrief(),
+    });
+    expect(hook.result.current.state.briefId).toBe("camp-1");
+    act(() => hook.result.current.undo());
+    const after = hook.result.current.state;
+    // The typed edit is gone…
+    expect(after.campaignMessage).toBe("");
+    // …but the identity `markSeeded` installed is not — an undo must never
+    // strand the draft with no campaign to save into.
+    expect(after.briefId).toBe("camp-1");
+    expect(after.source.kind === "new" ? after.source.seeded?.campaignId : null).toBe("camp-1");
+  });
 });
 
 describe("useEditorHistory — the exclusion set is real actions (R4)", () => {
@@ -152,6 +183,16 @@ describe("useEditorHistory — the exclusion set is real actions (R4)", () => {
     ["loadPool", { type: "loadPool", briefId: "", pool: null }],
     ["apply", { type: "apply" }],
     ["save", { type: "save" }],
+    [
+      "markSeeded",
+      {
+        type: "markSeeded",
+        campaignId: "camp-1",
+        slug: "camp-1",
+        campaignName: "Camp",
+        snapshot: blankBrief(),
+      },
+    ],
   ];
 
   test.each(serverAnswers)("%s alone creates no undo step", (_name, action) => {

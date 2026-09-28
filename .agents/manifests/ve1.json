@@ -38,9 +38,9 @@
     },
     {
       "file": "apps/web/src/components/campaign/editor-history.ts",
-      "before": "[\"setCapabilities\", \"loadPool\", \"apply\", \"save\"]",
-      "after": "[\"setCapabilities\", \"loadPool\", \"apply\"]",
-      "because": "Make save undoable: the save receipt is a server answer (R4), and an undo step over it would present a draft revert that also implies an unsent write — the revision guard then lies about what has been saved. (Re-anchored by ANCHORS: the recorded text was reformatted or moved, not changed — the after-text is re-wrapped the same way, and the edit it encodes, the claim and the command are untouched.)",
+      "before": "[\"setCapabilities\", \"loadPool\", \"apply\", \"save\", \"markSeeded\"]",
+      "after": "[\"setCapabilities\", \"loadPool\", \"apply\", \"markSeeded\"]",
+      "because": "Make save undoable: the save receipt is a server answer (R4), and an undo step over it would present a draft revert that also implies an unsent write — the revision guard then lies about what has been saved. (Re-anchored by ANCHORS: the recorded text was reformatted or moved, not changed — the after-text is re-wrapped the same way, and the edit it encodes, the claim and the command are untouched. Re-anchored again, PT-5c1 fix round: the array gained a fifth member, \"markSeeded\" (also a server answer, never a draft edit) — same claim about \"save\" specifically, same test, only the array's own text moved.)",
       "command": [
         "yarn",
         "vitest",

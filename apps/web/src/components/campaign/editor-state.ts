@@ -287,7 +287,27 @@ export interface TimelineDraft {
 }
 
 export type EditorSource =
-  | { kind: "new"; tempId: string }
+  | {
+      kind: "new";
+      tempId: string;
+      /**
+       * PT-5c1 fix round (mscyy/mscda/mscdq/mscdk/mscdR) — a versionless campaign
+       * (`POST /campaigns` with no source) is a "new" draft, but not the unnamed,
+       * unattached one `/brief/new` opens: it already has a server identity (a
+       * campaign id and a slug) and a clean baseline the moment its metadata is
+       * read back. `generateTempId` always returns the literal `"new"` (H6/D37),
+       * so `tempId` alone cannot tell "this campaign's own new draft" from "the
+       * shared unnamed draft" — `seeded` is what does: present, it is this
+       * campaign's identity and the state `markSeeded` installed (or found already
+       * on screen) as clean; absent, this is `/brief/new` exactly as before.
+       */
+      seeded?: {
+        campaignId: string;
+        slug: string;
+        campaignName: string;
+        snapshot: CampaignBrief;
+      };
+    }
   | {
       kind: "file";
       file: string;
@@ -660,6 +680,23 @@ export type EditorAction =
   | {
       type: "setCapabilities";
       capabilities: { motion: boolean; reason?: string };
+    }
+  | {
+      /**
+       * PT-5c1 fix round — installs (or re-installs) a versionless campaign's
+       * server identity and clean baseline on a `"new"` source (a no-op on a
+       * `"file"` source: once a campaign has a version, `savedSnapshot` is its
+       * baseline instead). Adopts `briefId` unconditionally — a draft the user
+       * has already started typing into keeps every field it holds, but still
+       * needs the campaign's real id so Save writes to it rather than minting
+       * a second campaign (msczF's guard on the caller is what decides whether
+       * the OTHER fields — name, type, preset — get applied too).
+       */
+      type: "markSeeded";
+      campaignId: string;
+      slug: string;
+      campaignName: string;
+      snapshot: CampaignBrief;
     };
 
 /**
@@ -1471,13 +1508,12 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
       };
     }
     case "patch": {
-      let patch = action.patch;
-      if (patch.campaignName !== undefined && state.source.kind === "new") {
-        patch = {
-          ...patch,
-          briefId: slugify(patch.campaignName),
-        };
-      }
+      // PT-5c1 (D178) — the id is server-derived and display-only now
+      // (`POST /campaigns` mints it, `campaignRoute` carries it): typing a
+      // name no longer slugifies `briefId`. A caller that wants `briefId` to
+      // move still may — the mutation manifest and the pool-reset branch
+      // below both anchor on `patch.briefId` changing on its own.
+      const patch = action.patch;
       const next = { ...state, ...patch };
       if (patch.briefId === undefined || patch.briefId === state.briefId) return next;
       return {
@@ -2309,6 +2345,34 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
         },
       };
     }
+    case "markSeeded": {
+      // A no-op once the source already has a file identity (PT-5c1: a versioned
+      // campaign's baseline is its `savedSnapshot`, not this one) — and a no-op on
+      // a stale answer for a route the editor has since navigated away from, since
+      // `EditorSource` carries no route of its own to check here; the caller
+      // (BriefEditor's route effect) is what gates a late answer from reaching this
+      // dispatch at all.
+      if (state.source.kind !== "new") return state;
+      const snapshot = canonicalBrief(action.snapshot);
+      return {
+        ...state,
+        // Adopted unconditionally (msczF): a draft the user already started typing
+        // into keeps every field it holds, but still needs the campaign's real id
+        // — the one `createBrief`/`updateBrief` writes to — or Save mints a SECOND
+        // campaign instead of saving into this one.
+        briefId: action.slug,
+        source: {
+          kind: "new",
+          tempId: state.source.tempId,
+          seeded: {
+            campaignId: action.campaignId,
+            slug: action.slug,
+            campaignName: action.campaignName,
+            snapshot,
+          },
+        },
+      };
+    }
     case "discard": {
       if (state.source.kind === "file" && state.source.savedSnapshot) {
         return {
@@ -2316,6 +2380,24 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
             file: state.source.file,
             revision: state.source.revision,
           }),
+          capabilities: state.capabilities,
+        };
+      }
+      if (state.source.kind === "new" && state.source.seeded) {
+        // Same shape as the file branch above: discard reverts to the last CLEAN
+        // answer this draft has, which for a versionless campaign is the seed
+        // (name, type, preset) rather than a totally blank draft — and it keeps
+        // the campaign's identity, the same reason the file branch keeps `file`.
+        const { campaignId, slug, campaignName, snapshot } = state.source.seeded;
+        return {
+          ...fromBrief(snapshot),
+          briefId: slug,
+          campaignName,
+          source: {
+            kind: "new",
+            tempId: state.source.tempId,
+            seeded: { campaignId, slug, campaignName, snapshot },
+          },
           capabilities: state.capabilities,
         };
       }
@@ -2896,17 +2978,29 @@ export function fromBrief(
 }
 
 /**
- * True when the draft still matches a freshly-opened editor in the same mode. A new
- * source counts as dirty by definition, so this is what "has the user actually typed
- * anything?" has to ask before prompting or auto-saving.
+ * True when the draft still matches its clean baseline. For an unattached `/brief/new`
+ * draft that baseline is a freshly-opened editor in the same mode — a new source counts
+ * as dirty by definition, so this is what "has the user actually typed anything?" has to
+ * ask before prompting or auto-saving. For a versionless campaign that has been seeded
+ * (PT-5c1 fix round, mscda) the baseline is the seed itself — the load plus the name,
+ * type and preset patches `markSeeded` recorded — not a blank draft: a just-created
+ * campaign is clean the moment it opens, and only a real edit makes it dirty.
  */
 export function isPristine(state: EditorState): boolean {
+  const seeded = state.source.kind === "new" ? state.source.seeded : undefined;
+  const baselineName = seeded ? seeded.campaignName : initialEditorState(state.mode).campaignName;
   // `campaignName` is not part of the brief — only its slug is, as `id`. So a name made
   // entirely of characters the slug strips ("!!!") leaves the brief identical to a blank
   // one, and comparing briefs alone would call that pristine: the draft would never be
   // autosaved and leaving would not prompt, so the typed name would vanish without a word.
-  if (state.campaignName !== initialEditorState(state.mode).campaignName) return false;
-  return JSON.stringify(toBrief(state)) === JSON.stringify(toBrief(initialEditorState(state.mode)));
+  if (state.campaignName !== baselineName) return false;
+  const baselineBrief = seeded ? seeded.snapshot : toBrief(initialEditorState(state.mode));
+  // `valuesEqual`, not a raw stringify compare (X30-style trap): `baselineBrief` for a
+  // seeded source is a stored snapshot, not a fresh `toBrief()` call, so it is not
+  // guaranteed to share `toBrief`'s own key order — a key-order-sensitive compare would
+  // read a just-seeded campaign as dirty the instant it opened, the exact regression
+  // this function exists to close.
+  return valuesEqual(toBrief(state), baselineBrief);
 }
 
 /**
@@ -3038,7 +3132,15 @@ export function draftKeyFor(id: string): string {
 }
 
 export function getDraftKey(state: EditorState): string {
-  const id = state.source.kind === "file" ? state.source.loadedId : state.source.tempId;
+  // PT-5c1 fix round (mscyy/mscdk) — a seeded "new" source has its own campaign
+  // identity; keying its autosave on that (never on the literal `"new"`
+  // `generateTempId` always returns) keeps it out of the shared `cf:draft:new`
+  // key `/brief/new` — and every OTHER versionless campaign — would otherwise
+  // collide on.
+  const id =
+    state.source.kind === "file"
+      ? state.source.loadedId
+      : (state.source.seeded?.campaignId ?? state.source.tempId);
   return draftKeyFor(id);
 }
 
@@ -3338,7 +3440,19 @@ export function normalizeDraftState(raw: Record<string, unknown>): EditorState {
           ...resolvedSource,
           savedSnapshot: canonicalBrief(resolvedSource.savedSnapshot),
         }
-      : resolvedSource;
+      : resolvedSource.kind === "new" && resolvedSource.seeded
+        ? {
+            ...resolvedSource,
+            // Same canonicalisation as the file branch above, and for the same
+            // reason: a stored seed reaches here unvalidated, and `isPristine`'s
+            // `valuesEqual` compare must not read a spelled-out default as a real
+            // difference from a restored draft.
+            seeded: {
+              ...resolvedSource.seeded,
+              snapshot: canonicalBrief(resolvedSource.seeded.snapshot),
+            },
+          }
+        : resolvedSource;
   const v = (
     typeof raw.variation === "object" && raw.variation !== null ? raw.variation : {}
   ) as Record<string, unknown>;

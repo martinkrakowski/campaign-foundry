@@ -12,10 +12,10 @@ import {
 import { API, useRun } from "@/lib/run-context";
 import { useEditorDirty } from "@/lib/editor-dirty-context";
 import { CreateCampaignProvider } from "@/lib/create-campaign-context";
-import { CREATE_SEED_KEY, createCampaign, takeSeed } from "@/lib/create-campaign";
 import { CreateCampaignDialog } from "@/components/shell/CreateCampaignDialog";
 import { BrowseBriefsButton } from "@/components/shell/Sidebar";
 import type { BriefEntry } from "@/lib/briefs-api";
+import { campaignRoute } from "@/lib/campaign-route";
 import { DEFAULT_CAMPAIGN_TYPE } from "@campaignfoundry/CampaignOrchestration/campaign-types";
 import { clickDestinationProblem } from "@campaignfoundry/CampaignOrchestration/click-destination";
 import { templateFromCanonical } from "@campaignfoundry/CampaignOrchestration/brief-template";
@@ -131,6 +131,24 @@ const entry = (id: string, revision?: string) => ({
   revision,
 });
 
+/**
+ * `GET /campaigns/:id`'s answer for a fresh, versionless campaign (PT-5c1,
+ * PT-5b3) — the shape `<Editor id={id} />` needs, with no listing entry, to
+ * resolve into a working blank draft whose `briefId` is `id` from the first
+ * render, the same way a real `POST /campaigns` mint (never a typed name,
+ * which derives nothing client-side any more, D178) would seed it.
+ */
+const blankCampaignMeta = (
+  id: string,
+  overrides: { name?: string | null; type?: string | null } = {},
+) => ({
+  campaignId: id,
+  slug: id,
+  name: overrides.name ?? null,
+  type: overrides.type ?? null,
+  hasVersion: false,
+});
+
 /** Route each call by URL+method; unmatched calls fail loudly rather than hanging.
  *  The write handlers receive the parsed request body, so a test can echo it back —
  *  what the real routes do (`parseBrief(await readBody(...))`), key order included. */
@@ -139,6 +157,8 @@ const routes = (handlers: {
   post?: (url: string, body?: Record<string, unknown>) => Response | Promise<Response>;
   put?: (url: string, body?: Record<string, unknown>) => Response | Promise<Response>;
   capabilities?: () => Response | Promise<Response>;
+  /** `GET /campaigns/:id` — PT-5c1's campaign-meta lookup, keyed by the uuid/slug in the URL. */
+  meta?: (id: string) => Response | Promise<Response>;
 }) => {
   const calls: { url: string; method: string; body?: Record<string, unknown> }[] = [];
   vi.mocked(globalThis.fetch).mockImplementation((url, init) => {
@@ -157,6 +177,36 @@ const routes = (handlers: {
     }
     if (method === "GET" && u.startsWith(`${API}/campaigns/briefs`)) {
       return Promise.resolve(handlers.list?.() ?? json({ briefs: [] }));
+    }
+    // PT-5c1 (D178) — `GET /campaigns/:id`: the load effect's fallback for an id the
+    // listing does not carry (a versionless campaign never is). Opt-in only, via
+    // `handlers.meta` — an id this suite did not ask about answers 404 by falling
+    // through to the catch-all below, the same as any other unconfigured route,
+    // rather than a blanket "every id is a fresh blank campaign" default that would
+    // turn every "unknown id" test into a false pass. Use `blankCampaignMeta(id)`
+    // for the common "a working blank-at-route draft" case.
+    if (
+      handlers.meta &&
+      method === "GET" &&
+      u.startsWith(`${API}/campaigns/`) &&
+      !u.startsWith(`${API}/campaigns/briefs`) &&
+      !u.startsWith(`${API}/campaigns/capabilities`) &&
+      !u.slice(`${API}/campaigns/`.length).includes("/")
+    ) {
+      const id = u.slice(u.lastIndexOf("/") + 1);
+      return Promise.resolve(handlers.meta(id));
+    }
+    // PT-5c1 (D177, D178) — `POST /campaigns`: the mint. Answered separately from the
+    // brief-write default below, whose shape (`{ file, brief, revision }`) is wrong for
+    // it. The default names the campaign after `name` itself (test fixtures pass
+    // already slug-shaped names — "fresh", "copy", "elsewhere" — so this needs no
+    // per-test handler for the common case); a test asserting a REAL dedupe or a
+    // refusal still supplies its own `post`.
+    if (method === "POST" && u === `${API}/campaigns`) {
+      const name = typeof parsed?.name === "string" ? parsed.name : "x";
+      return Promise.resolve(
+        handlers.post?.(u, parsed) ?? json({ campaignId: name, slug: name }, 201),
+      );
     }
     // The defaults match what the real routes answer — `{ file, brief, revision }`:
     // a write mock less truthful than the route sends the next lane home green on
@@ -324,13 +374,17 @@ describe("BriefPage — data flow", () => {
 
   test("a new draft is saved with a POST carrying what was typed", async () => {
     const user = userEvent.setup();
-    const calls = routes({});
-    // A blank draft is a route now, so ask for it directly instead of clicking the
-    // editor back to empty.
-    renderWithRun(<NewEditor />);
-    await waitFor(() =>
-      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
-    );
+    // PT-5c1 (D178): a blank draft's id is server-minted now — <Editor id="fresh" />
+    // with no listing entry resolves through GET /campaigns/:id into a blank,
+    // "new"-source draft whose briefId is already "fresh", the same as a real
+    // POST /campaigns mint would seed it.
+    const calls = routes({ meta: () => json(blankCampaignMeta("fresh")) });
+    renderWithRun(<Editor id="fresh" />);
+    // Not a wait on campaignName === "" — that is also the pristine DEFAULT, true
+    // before the GET /campaigns/:id fetch this route depends on has even resolved
+    // (a waitFor on an already-true condition proves nothing). The id readout only
+    // ever shows "fresh" once the server-derived slug has actually landed.
+    await waitFor(() => expect(screen.getByText("fresh")).toBeTruthy());
 
     await fillValidDraft(user);
 
@@ -342,7 +396,7 @@ describe("BriefPage — data flow", () => {
     await saveVia(user, "Save");
 
     const post = await waitFor(() => {
-      const call = calls.find((c) => c.method === "POST");
+      const call = calls.find((c) => c.method === "POST" && c.url.includes("/campaigns/briefs"));
       expect(call).toBeTruthy();
       return call!;
     });
@@ -456,45 +510,49 @@ describe("BriefPage — data flow", () => {
 
   test("Save as... creates a copy under the new id and closes the dialog", async () => {
     const user = userEvent.setup();
-    const calls = routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
-    renderWithRun(<Editor id="camp" />);
-    await waitForEditorReady();
-
-    await saveVia(user, "Save as");
-    await user.type(screen.getByLabelText("New brief id"), "copy");
-    await user.click(
-      within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
-    );
-
-    await waitFor(() => expect(calls.some((c) => c.method === "POST")).toBe(true));
-    await waitFor(() => expect(screen.queryByLabelText("New brief id")).toBeNull());
-  });
-
-  test("a failed Save as... keeps the dialog open and shows why", async () => {
-    const user = userEvent.setup();
-    routes({
+    // PT-5c1 (D177, D178): Save as... mints through POST /campaigns (the name),
+    // then completes it as a first Save (POST /campaigns/briefs, the minted slug).
+    const calls = routes({
       list: () => json({ briefs: [entry("camp", "r1")] }),
-      post: () => json({ error: "already exists" }, 409),
+      meta: () => json(blankCampaignMeta("copy")),
     });
     renderWithRun(<Editor id="camp" />);
     await waitForEditorReady();
 
     await saveVia(user, "Save as");
-    await user.type(screen.getByLabelText("New brief id"), "copy");
+    await user.type(screen.getByLabelText("New campaign name"), "Copy");
     await user.click(
       within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
     );
 
-    // The collision (a 409 the listing did not foresee) asks first (D9); the
-    // overwrite itself is the retry.
-    const prompt = await screen.findByRole("dialog", { name: messages.saveAsOverwriteTitle });
-    await user.click(within(prompt).getByRole("button", { name: messages.saveAsOverwriteConfirm }));
+    await waitFor(() => expect(calls.filter((c) => c.method === "POST").length).toBe(2));
+    await waitFor(() => expect(screen.queryByLabelText("New campaign name")).toBeNull());
+  });
 
-    // The retry failed too: the error is on screen and the Save-as dialog is still
-    // open, exactly the answer any save failure gives.
+  test("a failed Save as... keeps the dialog open and shows why", async () => {
+    const user = userEvent.setup();
+    // PT-5c1 (D177, D178): a collision is never written and never silently failed —
+    // it is a refused MINT now, with no overwrite decision to retry (the server
+    // dedupes the name into a different slug; a 409 here means the mint itself
+    // failed for some other reason).
+    routes({
+      list: () => json({ briefs: [entry("camp", "r1")] }),
+      post: (url) =>
+        url.endsWith("/campaigns") ? json({ error: "already exists" }, 409) : json({}, 201),
+    });
+    renderWithRun(<Editor id="camp" />);
+    await waitForEditorReady();
+
+    await saveVia(user, "Save as");
+    await user.type(screen.getByLabelText("New campaign name"), "Copy");
+    await user.click(
+      within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
+    );
+
+    // The refusal surfaces on the still-open Save-as dialog, exactly the answer
+    // any save failure gives.
     expect(await screen.findByText(/already exists/)).toBeTruthy();
-    expect(screen.getByLabelText("New brief id")).toBeTruthy();
-    expect(screen.queryByRole("dialog", { name: messages.saveAsOverwriteTitle })).toBeNull();
+    expect(screen.getByLabelText("New campaign name")).toBeTruthy();
   });
 
   test("the Save as... field is the kit input, so it has the focus halo it lacked", async () => {
@@ -504,7 +562,7 @@ describe("BriefPage — data flow", () => {
     await waitForEditorReady();
 
     await saveVia(user, "Save as");
-    const field = screen.getByLabelText("New brief id");
+    const field = screen.getByLabelText("New campaign name");
     expect(field.className).toContain("focus:ring-brand-primary/25");
     expect(field.className).toContain("focus:border-brand-primary");
   });
@@ -523,7 +581,19 @@ describe("BriefPage — data flow", () => {
         name: "Cancel",
       }),
     );
-    expect(screen.queryByLabelText("New brief id")).toBeNull();
+    expect(screen.queryByLabelText("New campaign name")).toBeNull();
+  });
+
+  test("Escape dismisses the Save as... dialog while no write is in flight", async () => {
+    const user = userEvent.setup();
+    routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
+    renderWithRun(<Editor id="camp" />);
+    await waitForEditorReady();
+
+    await saveVia(user, "Save as");
+    expect(screen.getByLabelText("New campaign name")).toBeTruthy();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByLabelText("New campaign name")).toBeNull();
   });
 
   test("New brief... opens the create dialog rather than navigating (W1)", async () => {
@@ -546,7 +616,7 @@ describe("BriefPage — data flow", () => {
   test("the blank route stays blank, however loud the shell is about its active brief", async () => {
     localStorage.setItem("cf:brief", JSON.stringify(brief("camp")));
     const calls = routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
-    renderWithRun(<NewEditor />);
+    renderWithRun(<Editor />);
 
     // wait for the listing, which is what used to trigger the adoption: a blank draft is
     // pristine, so the dirty guard let it through and `camp` landed in the form. The
@@ -561,7 +631,7 @@ describe("BriefPage — data flow", () => {
   test("New brief... on a dirty blank route asks once, then opens the dialog (W1)", async () => {
     const user = userEvent.setup();
     routes({});
-    renderWithRun(<NewEditor />);
+    renderWithRun(<Editor />);
     await waitFor(() =>
       expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
     );
@@ -591,7 +661,7 @@ describe("BriefPage — data flow", () => {
   test("a clean editor's New brief opens the dialog without asking (W1)", async () => {
     const user = userEvent.setup();
     routes({});
-    renderWithRun(<NewEditor />);
+    renderWithRun(<Editor />);
     await waitFor(() =>
       expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
     );
@@ -607,7 +677,7 @@ describe("BriefPage — data flow", () => {
   test("declining the prompt keeps what was typed and opens no dialog (W1)", async () => {
     const user = userEvent.setup();
     routes({});
-    renderWithRun(<NewEditor />);
+    renderWithRun(<Editor />);
     await waitFor(() =>
       expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
     );
@@ -627,21 +697,28 @@ describe("BriefPage — data flow", () => {
 
   test("Save as... on the blank route also stops the URL calling it new", async () => {
     const user = userEvent.setup();
+    // PT-5c1 (D178): the ONLY blank editor at routeId === undefined is W3's resume
+    // of an abandoned draft now (a fresh, routeless mount can never gain a briefId,
+    // D178) — seed one with an id already, the shape a pre-lane build would have
+    // left, and Save as... still mints a BRAND NEW campaign from the typed name.
+    saveDraftToStorage({ ...initialEditorState(), briefId: "fresh", campaignName: "fresh" });
     routes({});
-    renderWithRun(<NewEditor />);
+    renderWithRun(<Editor />);
     await waitFor(() =>
-      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("fresh"),
     );
     await fillValidDraft(user, "fresh");
 
     await saveVia(user, "Save as");
-    await user.type(screen.getByLabelText("New brief id"), "elsewhere");
+    await user.type(screen.getByLabelText("New campaign name"), "elsewhere");
     await user.click(
       within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
     );
 
-    // D37: the copy's identity lives in the URL — the route must stop calling it new.
-    await waitFor(() => expect(nextMock().router.replace).toHaveBeenCalledWith("/brief/elsewhere"));
+    // D37: the copy's identity lives in the URL — the mint's own campaignId names it.
+    await waitFor(() =>
+      expect(nextMock().router.replace).toHaveBeenCalledWith(campaignRoute("elsewhere")),
+    );
   });
 
   test("Save as... keeps the copy's revision, so the next save still guards the write", async () => {
@@ -651,7 +728,9 @@ describe("BriefPage — data flow", () => {
     let listed: BriefEntry[] = [entry("camp", "r1")];
     const calls = routes({
       list: () => json({ briefs: listed }),
-      post: (_url, body) => {
+      meta: () => json(blankCampaignMeta("copy")),
+      post: (url, body) => {
+        if (url.endsWith("/campaigns")) return json({ campaignId: "copy", slug: "copy" }, 201);
         const stored = { file: "copy.yaml", brief: body as never, revision: "rev-copy" };
         listed = [...listed, stored];
         return json(stored, 201);
@@ -661,11 +740,11 @@ describe("BriefPage — data flow", () => {
     await waitForEditorReady();
 
     await saveVia(user, "Save as");
-    await user.type(screen.getByLabelText("New brief id"), "copy");
+    await user.type(screen.getByLabelText("New campaign name"), "Copy");
     await user.click(
       within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
     );
-    await waitFor(() => expect(screen.queryByLabelText("New brief id")).toBeNull());
+    await waitFor(() => expect(screen.queryByLabelText("New campaign name")).toBeNull());
     // W1: the rerender keeps the wrapper's tree shape (provider + dialog), so the
     // editor instance survives and the route prop change is what drives the load.
     view.rerender(
@@ -690,85 +769,24 @@ describe("BriefPage — data flow", () => {
     );
   });
 
-  test("Save as... onto the id this route already names adopts the stored copy in place", async () => {
-    const user = userEvent.setup();
-    const calls = routes({
-      list: () => json({ briefs: [entry("camp", "r1")] }),
-      // a stored answer without a revision is the `entry`-less shape the load path
-      // must tolerate (the same case "a write response without a revision" covers
-      // for handleSave)
-      post: (_url, body) => json({ file: "camp.yaml", brief: body as never }, 201),
-    });
-    renderWithRun(
-      <>
-        <RunBriefProbe />
-        <Editor id="camp" />
-      </>,
-    );
-    await waitForEditorReady();
-
-    await saveVia(user, "Save as");
-    await user.type(screen.getByLabelText("New brief id"), "camp");
-    await user.click(
-      within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
-    );
-
-    // the id is taken (the listing knows it): the overwrite dialog asks, and the
-    // user's accept is what retries with ?replace=1 (D9)
-    const prompt = await screen.findByRole("dialog", { name: messages.saveAsOverwriteTitle });
-    await user.click(within(prompt).getByRole("button", { name: messages.saveAsOverwriteConfirm }));
-    await waitFor(() =>
-      expect(calls.some((c) => c.method === "POST" && c.url.includes("replace=1"))).toBe(true),
-    );
-
-    // ...and the stored copy was adopted in place: both dialogs close, the shell
-    // follows it, and the URL never needed to move. Same-id overwrite does not
-    // unmount the editor, so the overwrite dialog has to clear on the success path.
-    await waitFor(() => expect(screen.queryByLabelText("New brief id")).toBeNull());
-    await waitFor(() =>
-      expect(screen.queryByRole("dialog", { name: messages.saveAsOverwriteTitle })).toBeNull(),
-    );
-    await waitFor(() => expect(screen.getByTestId("run-brief").textContent).toBe("camp"));
-    expect(nextMock().router.replace).not.toHaveBeenCalled();
-  });
-
-  test("Save as... with a non-slug id never reaches createBrief, and the field says why", async () => {
-    const user = userEvent.setup();
-    const calls = routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
-    renderWithRun(<Editor id="camp" />);
-    await waitForEditorReady();
-
-    // a campaign *name* where a slug is wanted — the exact input that once left the
-    // page as a 288-byte POST and came back a bare 400
-    await saveVia(user, "Save as");
-    await user.type(screen.getByLabelText("New brief id"), "Trail Blaze 2026");
-    await user.click(
-      within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
-    );
-
-    expect(writes(calls)).toEqual([]);
-    expect(screen.getByText(messages.briefId)).toBeTruthy();
-    expect(screen.getByLabelText("New brief id")).toBeTruthy();
-  });
-
   test("neither Escape nor Cancel dismisses Save as… while the write is in flight", async () => {
     const user = userEvent.setup();
-    // A POST that never answers, so the dialog stays mid-write for the whole test.
+    // A mint POST that never answers, so the dialog stays mid-write for the whole test.
     routes({
       list: () => json({ briefs: [entry("camp", "r1")] }),
-      post: () => new Promise<Response>(() => {}),
+      post: (url) => (url.endsWith("/campaigns") ? new Promise<Response>(() => {}) : json({}, 201)),
     });
     renderWithRun(<Editor id="camp" />);
     await waitForEditorReady();
 
     await saveVia(user, "Save as");
-    await user.type(screen.getByLabelText("New brief id"), "trail-blaze-2026");
+    await user.type(screen.getByLabelText("New campaign name"), "Trail Blaze 2026");
     const dialog = screen.getByRole("dialog", { name: /Save as/ });
     await user.click(within(dialog).getByRole("button", { name: "Save" }));
 
-    // `handleSaveAs` captured the draft before awaiting and dispatches `load` — a
-    // full state replace — when the server answers. Dismissing here would hand the
-    // user an editable page whose edits that pending load is about to discard.
+    // `handleSaveAs` captured the draft before awaiting and mints, then saves, before
+    // navigating away. Dismissing here would hand the user an editable page whose
+    // pending adoption is about to discard their edits.
     await user.keyboard("{Escape}");
     expect(screen.getByRole("dialog", { name: /Save as/ })).toBeTruthy();
     expect(
@@ -776,100 +794,46 @@ describe("BriefPage — data flow", () => {
     ).toBe(true);
   });
 
-  test("Save as... offers the slugified form of a name as a click, never a silent rewrite", async () => {
+  test("pressing Save with a blank name hands focus back to the field, and posts nothing", async () => {
     const user = userEvent.setup();
     const calls = routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
     renderWithRun(<Editor id="camp" />);
     await waitForEditorReady();
 
     await saveVia(user, "Save as");
-    await user.type(screen.getByLabelText("New brief id"), "Trail Blaze 2026");
-    await user.click(await screen.findByRole("button", { name: 'Try "trail-blaze-2026" instead' }));
-
-    // the offer fills the field with the slug the user can see and accept
-    expect((screen.getByLabelText("New brief id") as HTMLInputElement).value).toBe(
-      "trail-blaze-2026",
-    );
-    await user.click(
-      within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
-    );
-    await waitFor(() => expect(calls.some((c) => c.method === "POST")).toBe(true));
-  });
-
-  test("Save as... refuses an id that slugifies to nothing, with no suggestion to offer", async () => {
-    const user = userEvent.setup();
-    routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
-    renderWithRun(<Editor id="camp" />);
-    await waitForEditorReady();
-
-    await saveVia(user, "Save as");
-    await user.type(screen.getByLabelText("New brief id"), "!!!");
-    expect(screen.getByText(messages.briefId)).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /instead/ })).toBeNull();
-  });
-
-  test("pressing Save with an invalid id answers by handing focus back to the field", async () => {
-    const user = userEvent.setup();
-    routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
-    renderWithRun(<Editor id="camp" />);
-    await waitForEditorReady();
-
-    await saveVia(user, "Save as");
-    await user.type(screen.getByLabelText("New brief id"), "!!!");
-    // the press comes from somewhere else on the page, not the already-focused field
+    // D3: never a dead primary button — the Save button stays pressable on an
+    // empty name (PT-5c1: no client-side id validation is left to gate it on),
+    // and the press is how the refusal answers.
     const saveButton = within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", {
       name: "Save",
     });
-    saveButton.focus();
     await user.click(saveButton);
 
-    // D3: a live button answers — the guard hands focus back to the field the rule
-    // is about, so the press produces a visible response instead of silence
-    expect(document.activeElement).toBe(screen.getByLabelText("New brief id"));
+    expect(document.activeElement).toBe(screen.getByLabelText("New campaign name"));
+    expect(calls.some((c) => c.method === "POST")).toBe(false);
   });
 
-  test.each(["cache", "jobs", "orgs", "packages"] as const)(
-    "Save as... refuses reserved campaign id %s, showing reserved message and not posting",
-    async (id) => {
-      const user = userEvent.setup();
-      const calls = routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
-      renderWithRun(<Editor id="camp" />);
-      await waitForEditorReady();
-
-      await saveVia(user, "Save as");
-      await user.type(screen.getByLabelText("New brief id"), id);
-      expect(screen.getByText(messages.briefIdReserved(id))).toBeTruthy();
-
-      const saveButton = within(screen.getByRole("dialog", { name: /Save as/ })).getByRole(
-        "button",
-        {
-          name: "Save",
-        },
-      );
-      await user.click(saveButton);
-      expect(document.activeElement).toBe(screen.getByLabelText("New brief id"));
-      expect(calls.some((c) => c.method === "POST")).toBe(false);
-    },
-  );
-
-  test("Save as... trims the id before posting", async () => {
+  test("Save as... trims the name before posting", async () => {
     const user = userEvent.setup();
-    const calls = routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
+    const calls = routes({
+      list: () => json({ briefs: [entry("camp", "r1")] }),
+      meta: () => json(blankCampaignMeta("my-brief")),
+    });
     renderWithRun(<Editor id="camp" />);
     await waitForEditorReady();
 
     await saveVia(user, "Save as");
-    await user.type(screen.getByLabelText("New brief id"), " my-brief ");
+    await user.type(screen.getByLabelText("New campaign name"), " my-brief ");
     await user.click(
       within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
     );
 
-    const post = await waitFor(() => {
-      const call = calls.find((c) => c.method === "POST");
+    const mint = await waitFor(() => {
+      const call = calls.find((c) => c.method === "POST" && c.url.endsWith("/campaigns"));
       expect(call).toBeTruthy();
       return call!;
     });
-    expect((post.body as { id?: string }).id).toBe("my-brief");
+    expect((mint.body as { name?: string }).name).toBe("my-brief");
   });
 
   test("two consecutive saves of a loaded brief both succeed — the second carries the revision the first was handed back", async () => {
@@ -998,12 +962,11 @@ describe("BriefPage — data flow", () => {
   test("a 409 on a first-time save has no baseline to adopt the fresh revision against", async () => {
     const user = userEvent.setup();
     routes({
+      meta: () => json(blankCampaignMeta("fresh")),
       post: () => json({ error: 'Brief "fresh" already exists.', revision: "rev-fresh" }, 409),
     });
-    renderWithRun(<NewEditor />);
-    await waitFor(() =>
-      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
-    );
+    renderWithRun(<Editor id="fresh" />);
+    await waitFor(() => expect(screen.getByText("fresh")).toBeTruthy());
     await fillValidDraft(user, "fresh");
 
     await saveVia(user, "Save");
@@ -1051,7 +1014,9 @@ describe("BriefPage — data flow", () => {
     let listed: BriefEntry[] = [entry("camp", "r1")];
     routes({
       list: () => json({ briefs: listed }),
-      post: () => {
+      meta: () => json(blankCampaignMeta("copy")),
+      post: (url) => {
+        if (url.endsWith("/campaigns")) return json({ campaignId: "copy", slug: "copy" }, 201);
         listed = [...listed, { file: "copy.yaml", brief: stored, revision: "rev-copy" }];
         return json({ file: "copy.yaml", brief: stored, revision: "rev-copy" }, 201);
       },
@@ -1060,11 +1025,11 @@ describe("BriefPage — data flow", () => {
     await waitForEditorReady();
 
     await saveVia(user, "Save as");
-    await user.type(screen.getByLabelText("New brief id"), "copy");
+    await user.type(screen.getByLabelText("New campaign name"), "Copy");
     await user.click(
       within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
     );
-    await waitFor(() => expect(screen.queryByLabelText("New brief id")).toBeNull());
+    await waitFor(() => expect(screen.queryByLabelText("New campaign name")).toBeNull());
     // W1: the rerender keeps the wrapper's tree shape (provider + dialog), so the
     // editor instance survives and the route prop change is what drives the load.
     view.rerender(
@@ -1097,7 +1062,7 @@ describe("BriefPage — data flow", () => {
     localStorage.setItem("cf:brief", JSON.stringify(brief("camp")));
     saveDraftToStorage(fromBrief(brief("camp"), { file: "camp.yaml" }));
 
-    renderWithRun(<NewEditor />);
+    renderWithRun(<Editor />);
 
     // D37/H5: the last-opened record survives — visiting /brief/new opens no brief,
     // so it must not destroy the pointer to the one the user opened last. (The bare
@@ -1115,9 +1080,15 @@ describe("BriefPage — data flow", () => {
   test("saving on the blank route stops the URL calling it new", async () => {
     const user = userEvent.setup();
     routes({});
-    renderWithRun(<NewEditor />);
+    // PT-5c1 (D177): the ONLY blank editor left at routeId === undefined is W3's
+    // resume of an abandoned draft (a fresh, routeless mount can never gain a
+    // briefId any more, since typing no longer derives one, D178) — so this is
+    // exercised as a resumed draft that already carries an id, the same shape a
+    // pre-lane build's autosave would have left.
+    saveDraftToStorage({ ...initialEditorState(), briefId: "fresh", campaignName: "fresh" });
+    renderWithRun(<Editor />);
     await waitFor(() =>
-      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("fresh"),
     );
 
     await fillValidDraft(user, "fresh");
@@ -1136,8 +1107,12 @@ describe("BriefPage — data flow", () => {
     const user = userEvent.setup();
     // the PUT/POST echoes what was sent, so the stored snapshot matches the draft
     // and the chip can actually read clean
-    routes({ post: (_url, body) => json({ file: "fresh.yaml", brief: body, revision: "r1" }) });
-    renderWithRun(<NewEditor />);
+    routes({
+      meta: () => json(blankCampaignMeta("fresh")),
+      post: (_url, body) => json({ file: "fresh.yaml", brief: body, revision: "r1" }),
+    });
+    renderWithRun(<Editor id="fresh" />);
+    await waitFor(() => expect(screen.getByText("fresh")).toBeTruthy());
 
     // Corrected with the pristine-chip fix: an untouched editor holds a blank form,
     // so the chip has nothing to report yet — it appears once the draft has content.
@@ -1306,7 +1281,7 @@ describe("BriefPage — data flow", () => {
   test("a Revert of a never-saved draft purges its recovery copy (L1, new source)", async () => {
     const user = userEvent.setup();
     routes({});
-    renderWithRun(<NewEditor />);
+    renderWithRun(<Editor />);
     await waitFor(() =>
       expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
     );
@@ -1552,7 +1527,7 @@ describe("BriefPage — data flow", () => {
     // Save is the verb itself now (one press); Save as… sits in the overflow.
     await saveVia(user, "Save");
     await saveVia(user, "Save as");
-    await user.type(screen.getByLabelText("New brief id"), "elsewhere");
+    await user.type(screen.getByLabelText("New campaign name"), "Elsewhere");
     await user.click(
       within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
     );
@@ -1598,7 +1573,7 @@ describe("BriefPage — data flow", () => {
     // rejects the brief. The structural validation now carries the destination.
     const user = userEvent.setup();
     const calls = routes({});
-    renderWithRun(<NewEditor />);
+    renderWithRun(<Editor />);
     await waitFor(() =>
       expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
     );
@@ -1616,199 +1591,204 @@ describe("BriefPage — data flow", () => {
     ).toBeTruthy();
   });
 
-  test("Save as… onto an existing id asks before overwriting, and honours a refusal", async () => {
-    const user = userEvent.setup();
-    globalThis.confirm = vi.fn(() => false);
-    const calls = routes({ list: () => json({ briefs: [entry("taken", "r1")] }) });
-    renderWithRun(<NewEditor />);
-    await waitFor(() =>
-      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
-    );
-
-    await fillValidDraft(user);
-
-    await saveVia(user, "Save as");
-    await user.type(screen.getByLabelText("New brief id"), "taken");
-    await user.click(
-      within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
-    );
-
-    // The pre-flight check knows the id is taken: the attempt writes nothing and
-    // the overwrite dialog asks (D9 — the visible decision, never an auto-resend).
-    const prompt = await screen.findByRole("dialog", { name: messages.saveAsOverwriteTitle });
-    await user.click(within(prompt).getByRole("button", { name: messages.confirmCancel }));
-
-    // The refusal held: no write left the page, and the Save-as dialog stands
-    // ready to answer differently.
-    expect(calls.some((c) => c.method === "POST")).toBe(false);
-    expect(screen.getByLabelText("New brief id")).toBeTruthy();
-    expect(screen.queryByRole("dialog", { name: messages.saveAsOverwriteTitle })).toBeNull();
-  });
-
-  test("accepting the overwrite retries with ?replace=1", async () => {
-    const user = userEvent.setup();
-    const calls = routes({ list: () => json({ briefs: [entry("taken", "r1")] }) });
-    renderWithRun(<NewEditor />);
-    await waitFor(() =>
-      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
-    );
-
-    await fillValidDraft(user);
-
-    await saveVia(user, "Save as");
-    await user.type(screen.getByLabelText("New brief id"), "taken");
-    await user.click(
-      within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
-    );
-
-    // the dialog is the decision point; the confirm is what sends the overwrite
-    const prompt = await screen.findByRole("dialog", { name: messages.saveAsOverwriteTitle });
-    await user.click(within(prompt).getByRole("button", { name: messages.saveAsOverwriteConfirm }));
-
-    await waitFor(() => expect(calls.find((c) => c.method === "POST")?.url).toContain("replace=1"));
-  });
-
-  test("a double activation of the overwrite confirm posts once", async () => {
-    const user = userEvent.setup();
-    const calls = routes({ list: () => json({ briefs: [entry("taken", "r1")] }) });
-    renderWithRun(<NewEditor />);
-    await waitFor(() =>
-      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
-    );
-
-    await fillValidDraft(user);
-
-    await saveVia(user, "Save as");
-    await user.type(screen.getByLabelText("New brief id"), "taken");
-    await user.click(
-      within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
-    );
-
-    const prompt = await screen.findByRole("dialog", { name: messages.saveAsOverwriteTitle });
-    const confirm = within(prompt).getByRole("button", { name: messages.saveAsOverwriteConfirm });
-    // Two activations in the same frame: `saving` has not flushed, so a state
-    // check would still let both through. The synchronous ref is what collapses
-    // them to one write.
-    fireEvent.click(confirm);
-    fireEvent.click(confirm);
-
-    await waitFor(() => expect(writes(calls).length).toBe(1));
-    expect(writes(calls)[0].url).toContain("replace=1");
-  });
-
-  test("a 409 from a brief that appeared since the list was fetched offers the same overwrite", async () => {
-    const user = userEvent.setup();
-    let posts = 0;
-    const calls = routes({
-      post: () => {
-        posts += 1;
-        return posts === 1
-          ? json({ error: "already exists" }, 409)
-          : json({ file: "copy.yaml", brief: brief("copy") }, 201);
-      },
-    });
-    renderWithRun(<NewEditor />);
-    await waitFor(() =>
-      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
-    );
-
-    await fillValidDraft(user);
-
-    await saveVia(user, "Save as");
-    await user.type(screen.getByLabelText("New brief id"), "copy");
-    await user.click(
-      within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
-    );
-
-    // the first attempt posted WITHOUT replace; its 409 opens the same dialog the
-    // pre-flight check uses — one decision point, whichever way the collision was found
-    await waitFor(() => expect(posts).toBe(1));
-    const prompt = await screen.findByRole("dialog", { name: messages.saveAsOverwriteTitle });
-    expect(calls.filter((c) => c.method === "POST")[0].url).not.toContain("replace=1");
-
-    await user.click(within(prompt).getByRole("button", { name: messages.saveAsOverwriteConfirm }));
-    await waitFor(() => expect(posts).toBe(2));
-    expect(calls.filter((c) => c.method === "POST")[1].url).toContain("replace=1");
-  });
-
-  test("refusing the 409 overwrite leaves the copy unwritten", async () => {
-    const user = userEvent.setup();
-    let posts = 0;
-    const calls = routes({
-      post: () => {
-        posts += 1;
-        return json({ error: "already exists" }, 409);
-      },
-    });
-    renderWithRun(<NewEditor />);
-    await waitFor(() =>
-      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
-    );
-
-    await fillValidDraft(user);
-
-    await saveVia(user, "Save as");
-    await user.type(screen.getByLabelText("New brief id"), "copy");
-    await user.click(
-      within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
-    );
-
-    const prompt = await screen.findByRole("dialog", { name: messages.saveAsOverwriteTitle });
-    await user.click(within(prompt).getByRole("button", { name: messages.confirmCancel }));
-
-    await waitFor(() => expect(posts).toBe(1));
-    expect(calls.some((c) => c.method === "POST" && c.url.includes("replace=1"))).toBe(false);
-    expect(screen.getByLabelText("New brief id")).toBeTruthy();
-  });
-
-  test("neither Escape nor Cancel dismisses the overwrite dialog while the retry write is in flight", async () => {
-    const user = userEvent.setup();
-    // The listing knows the id is taken, so the dialog opens without a write; the
-    // confirm's retry POST never answers.
-    routes({
-      list: () => json({ briefs: [entry("taken", "r1")] }),
-      post: () => new Promise<Response>(() => {}),
-    });
-    renderWithRun(<NewEditor />);
-    await waitFor(() =>
-      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
-    );
-
-    await fillValidDraft(user);
-
-    await saveVia(user, "Save as");
-    await user.type(screen.getByLabelText("New brief id"), "taken");
-    await user.click(
-      within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
-    );
-
-    const prompt = await screen.findByRole("dialog", { name: messages.saveAsOverwriteTitle });
-    await user.click(within(prompt).getByRole("button", { name: messages.saveAsOverwriteConfirm }));
-    expect(screen.getByRole("dialog", { name: messages.saveAsOverwriteTitle })).toBeTruthy();
-
-    // #163's saving guard: a dismissal mid-write would hand the user an editable
-    // page whose pending adoption is about to discard their edits.
-    await user.keyboard("{Escape}");
-    expect(screen.getByRole("dialog", { name: messages.saveAsOverwriteTitle })).toBeTruthy();
-  });
-
   test("a non-409 Save as… failure is reported", async () => {
     const user = userEvent.setup();
-    routes({ post: () => json({ error: "disk full" }, 500) });
-    renderWithRun(<NewEditor />);
+    // PT-5c1 (D177): a fresh, routeless editor can never gain a briefId any more
+    // (typing derives nothing, D178) — seed one the way W3's resume would find it.
+    saveDraftToStorage({ ...initialEditorState(), briefId: "fresh", campaignName: "fresh" });
+    routes({
+      post: (url) =>
+        url.endsWith("/campaigns") ? json({ error: "disk full" }, 500) : json({}, 201),
+    });
+    renderWithRun(<Editor />);
     await waitFor(() =>
-      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("fresh"),
     );
-
-    await fillValidDraft(user);
+    await fillValidDraft(user, "fresh");
 
     await saveVia(user, "Save as");
-    await user.type(screen.getByLabelText("New brief id"), "copy");
+    await user.type(screen.getByLabelText("New campaign name"), "Copy");
     await user.click(
       within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
     );
 
     expect(await screen.findByText(/disk full/)).toBeTruthy();
+  });
+
+  // mscym — `saving` (state) needs a re-render to disable the button, so two
+  // activations that land inside one render window both used to reach
+  // `handleSaveAs` and each mint its own campaign.
+  test("a double activation of Save as mints only one campaign (mscym)", async () => {
+    const user = userEvent.setup();
+    let mintCalls = 0;
+    let releaseMint!: () => void;
+    const gate = new Promise<Response>((resolve) => {
+      releaseMint = () => resolve(json({ campaignId: "copy", slug: "copy" }, 201));
+    });
+    routes({
+      list: () => json({ briefs: [entry("camp", "r1")] }),
+      meta: () => json(blankCampaignMeta("copy")),
+      post: (url) => {
+        if (url.endsWith("/campaigns")) {
+          mintCalls += 1;
+          return gate;
+        }
+        return json({ file: "copy.yaml", brief: brief("copy"), revision: "r" }, 201);
+      },
+    });
+    renderWithRun(<Editor id="camp" />);
+    await waitForEditorReady();
+
+    await saveVia(user, "Save as");
+    await user.type(screen.getByLabelText("New campaign name"), "Copy");
+    const saveBtn = within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", {
+      name: "Save",
+    });
+    // Two activations before React's own `disabled` re-render can land — both
+    // dispatched inside ONE `act`, so the first click's `setSaving(true)`
+    // does not flush (and disable the real DOM button) between them. That is
+    // what actually exercises `saveAsInFlightRef`'s own early return: two
+    // separate `fireEvent.click` calls would let the first click's re-render
+    // disable the button before the second ever reached the handler.
+    act(() => {
+      fireEvent.click(saveBtn);
+      fireEvent.click(saveBtn);
+    });
+    await waitFor(() => expect(mintCalls).toBeGreaterThan(0));
+    expect(mintCalls).toBe(1);
+
+    releaseMint();
+    await waitFor(() => expect(screen.queryByLabelText("New campaign name")).toBeNull());
+    expect(mintCalls).toBe(1);
+  });
+
+  // mscy6 — the typed Save as… name is the COPY's name, carried on
+  // `POST /campaigns`. The open draft is the SOURCE and keeps its own name:
+  // patching it here used to observe a state production never keeps (a
+  // routeless mount, router mocked, so no navigation reloads the copy) and
+  // to rename the source whenever the write failed.
+  test("Save as… sends the typed name on the mint and leaves the source name in place (mscy6)", async () => {
+    const user = userEvent.setup();
+    // A NEVER-saved source (D9: Save as… does not require the source to be
+    // saved first) — the case where the Identity field reads `campaignName`
+    // rather than a loaded file's slug, so a rename of the source is visible.
+    saveDraftToStorage({ ...initialEditorState(), briefId: "fresh", campaignName: "Original" });
+    const calls = routes({});
+    renderWithRun(<Editor />);
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("Original"),
+    );
+    await fillValidDraft(user, "fresh");
+
+    await saveVia(user, "Save as");
+    await user.type(screen.getByLabelText("New campaign name"), "A New Name");
+    await user.click(
+      within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
+    );
+    await waitFor(() => expect(screen.queryByLabelText("New campaign name")).toBeNull());
+    expect(calls.find((c) => c.url.endsWith("/campaigns"))?.body?.name).toBe("A New Name");
+    // `fillValidDraft` set the source's name to "fresh". The mint took
+    // "A New Name"; the field that is still open did not.
+    expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("fresh");
+  });
+
+  // The mint succeeds and the first-save write fails — the only order in
+  // which a source rename could stick, because the name is sent before the
+  // write and the dialog stays open for a retry. The source's Campaign Name
+  // must still be the one the editor had open.
+  test("a failed Save as… write leaves the source campaign's name unchanged", async () => {
+    const user = userEvent.setup();
+    const calls = routes({
+      meta: () => json(blankCampaignMeta("fresh", { name: "Original" })),
+      post: (url) =>
+        url.endsWith("/campaigns")
+          ? json({ campaignId: "copy", slug: "copy" }, 201)
+          : json({ error: "disk full" }, 500),
+    });
+    renderWithRun(<Editor id="fresh" />);
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("Original"),
+    );
+    await fillValidDraft(user, "Original");
+
+    await saveVia(user, "Save as");
+    await user.type(screen.getByLabelText("New campaign name"), "A New Name");
+    await user.click(
+      within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
+    );
+
+    expect(await screen.findByText(/disk full/)).toBeTruthy();
+    expect(calls.find((c) => c.url.endsWith("/campaigns"))?.body?.name).toBe("A New Name");
+    expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("Original");
+  });
+
+  // msczJ — once `createBrief` has already succeeded, a failed listing refresh
+  // is not a Save as… failure: the copy is safely stored, so the dialog must
+  // close and the editor must navigate to it regardless.
+  test("a listing refresh failure after a successful Save as… still navigates to the copy (msczJ)", async () => {
+    const user = userEvent.setup();
+    let listShouldFail = false;
+    routes({
+      list: () =>
+        listShouldFail ? json({ error: "boom" }, 500) : json({ briefs: [entry("camp", "r1")] }),
+      meta: () => json(blankCampaignMeta("copy")),
+    });
+    renderWithRun(<Editor id="camp" />);
+    await waitForEditorReady();
+    // The initial mount's own listing succeeded — only the refresh Save as…
+    // triggers after its own write is what fails.
+    listShouldFail = true;
+
+    await saveVia(user, "Save as");
+    await user.type(screen.getByLabelText("New campaign name"), "Copy");
+    await user.click(
+      within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
+    );
+    // The dialog closes — never left open offering a retry that would mint a
+    // second copy of a campaign that is already saved.
+    await waitFor(() => expect(screen.queryByLabelText("New campaign name")).toBeNull());
+  });
+
+  // msczP — a failed first-save write after a successful mint must not mint a
+  // second campaign on retry: the SAME Save as… reuses the held campaign.
+  // (Web-side only: there is no delete, so a retry that never comes leaves the
+  // reservation orphaned — the same accepted gap the doc comment records.)
+  test("a retry after a failed first save reuses the minted campaign instead of minting again (msczP)", async () => {
+    const user = userEvent.setup();
+    let mintCalls = 0;
+    let briefFailuresLeft = 1;
+    routes({
+      list: () => json({ briefs: [entry("camp", "r1")] }),
+      meta: () => json(blankCampaignMeta("copy")),
+      post: (url) => {
+        if (url.endsWith("/campaigns")) {
+          mintCalls += 1;
+          return json({ campaignId: "copy", slug: "copy" }, 201);
+        }
+        if (briefFailuresLeft > 0) {
+          briefFailuresLeft -= 1;
+          return json({ error: "disk full" }, 500);
+        }
+        return json({ file: "copy.yaml", brief: brief("copy"), revision: "r" }, 201);
+      },
+    });
+    renderWithRun(<Editor id="camp" />);
+    await waitForEditorReady();
+
+    await saveVia(user, "Save as");
+    await user.type(screen.getByLabelText("New campaign name"), "Copy");
+    const saveBtn = within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", {
+      name: "Save",
+    });
+    await user.click(saveBtn);
+    expect(await screen.findByText(/disk full/)).toBeTruthy();
+    expect(mintCalls).toBe(1);
+
+    // Retry the SAME attempt — the dialog is still open, the name unchanged.
+    await user.click(saveBtn);
+    await waitFor(() => expect(screen.queryByLabelText("New campaign name")).toBeNull());
+    // Still only ONE mint: the retry wrote into the campaign already reserved.
+    expect(mintCalls).toBe(1);
   });
 
   test("a route brief is re-attached to its file when the listing knows it", async () => {
@@ -2097,11 +2077,9 @@ describe("BriefPage — capabilities and motion", () => {
 
   test("a motion brief authored from scratch saves with its motion policy (host with motion)", async () => {
     const user = userEvent.setup();
-    const calls = routes({});
-    renderWithRun(<NewEditor />);
-    await waitFor(() =>
-      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
-    );
+    const calls = routes({ meta: () => json(blankCampaignMeta("fresh")) });
+    renderWithRun(<Editor id="fresh" />);
+    await waitFor(() => expect(screen.getByText("fresh")).toBeTruthy());
     await fillValidDraft(user);
     await user.click(screen.getByText("Randomized"));
 
@@ -2133,7 +2111,7 @@ describe("BriefPage — capabilities and motion", () => {
   test("motion without a kind or a duration blocks Save, and the error reaches its input", async () => {
     const user = userEvent.setup();
     const calls = routes({});
-    renderWithRun(<NewEditor />);
+    renderWithRun(<Editor />);
     await waitFor(() =>
       expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
     );
@@ -2211,7 +2189,7 @@ describe("BriefPage — capabilities and motion", () => {
           commits += 1;
         }}
       >
-        <NewEditor />
+        <Editor />
       </Profiler>,
     );
     await waitFor(() =>
@@ -2299,7 +2277,7 @@ describe("BriefPage — capabilities and motion", () => {
           commits += 1;
         }}
       >
-        <NewEditor />
+        <Editor />
       </Profiler>,
     );
     await waitFor(() =>
@@ -2389,7 +2367,7 @@ describe("BriefPage — capabilities and motion", () => {
           commits += 1;
         }}
       >
-        <NewEditor />
+        <Editor />
       </Profiler>,
     );
     await waitFor(() =>
@@ -2423,27 +2401,35 @@ describe("BriefPage — capabilities and motion", () => {
       return <span data-testid="dirty-probe">{isDirty ? "dirty" : "clean"}</span>;
     };
     const user = userEvent.setup();
-    const calls = routes({});
+    const calls = routes({ meta: () => json(blankCampaignMeta("fresh")) });
     const view = renderWithRun(
       <>
         <DirtyProbe />
-        <NewEditor />
+        <Editor id="fresh" />
       </>,
     );
-    await waitFor(() =>
-      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
-    );
+    // PT-5c1 fix round (mscda, root cause) — a blank-at-route campaign IS
+    // pristine the instant it opens: `markSeeded` records the seed (the load
+    // plus the name/type/preset patches) as the CLEAN baseline, so a just
+    // -created campaign with zero user edits does not prompt "Unsaved edits"
+    // on the way out. Before this fix `isPristine` compared it to a BLANK
+    // draft instead of its own seed — an id already differing from "" made
+    // every fresh campaign read as dirty from the first render, and this
+    // exact test used to pin that as intentional. It was the bug.
+    // A single combined wait, not "fresh" then a synchronous assertion: the id
+    // landing and the dirty flag publishing are two different effects, and a
+    // poll that only waits for the first can catch the DOM between them.
+    await waitFor(() => expect(screen.getByText("fresh")).toBeTruthy());
     expect(screen.getByTestId("dirty-probe").textContent).toBe("clean");
 
-    // A first real edit sets it.
-    await fillValidDraft(user);
-    expect(screen.getByTestId("dirty-probe").textContent).toBe("dirty");
+    // A no-op edit — replaying the value a field already holds — still dispatches
+    // a `patch` (a new `state` object), but `isPristine`/`isDirtySinceSave`
+    // recompute to the same booleans as before, so the flag must not flip.
+    fireEvent.change(screen.getByLabelText("Campaign Name"), { target: { value: "" } });
+    expect(screen.getByTestId("dirty-probe").textContent).toBe("clean");
 
-    // An edit that changes nothing does not toggle it: replaying the value a field
-    // already holds still dispatches a `patch` (a new `state` object), but
-    // `isPristine`/`isDirtySinceSave` recompute to the same booleans as before, so
-    // the flag must not flip off and back on.
-    fireEvent.change(screen.getByLabelText("Campaign Name"), { target: { value: "fresh" } });
+    // A first real edit — still dirty, unsurprisingly, but now for content too.
+    await fillValidDraft(user);
     expect(screen.getByTestId("dirty-probe").textContent).toBe("dirty");
 
     // A save clears it: the saved snapshot now matches the draft.
@@ -2568,17 +2554,21 @@ describe("BriefPage — capabilities and motion", () => {
       localStorage.clear();
       localStorage.setItem("cf:brief-picked", "1");
       const user = userEvent.setup();
-      const calls = routes({});
-      const view = renderWithRun(<NewEditor />);
+      // PT-5c1 (D178): both callers below fill the draft under the id "fresh" —
+      // a blank, routeless `<Editor />` can never gain a briefId any more
+      // (typing derives nothing), so this observes the same blank-at-route
+      // shape `GET /campaigns/:id` would seed a real create with.
+      const calls = routes({ meta: () => json(blankCampaignMeta("fresh")) });
+      const view = renderWithRun(<Editor id="fresh" />);
       // `finally`, not a plain trailing `unmount()`: a throw anywhere below
       // (a `waitFor` that never resolves, a label that moved) must still
       // unmount this render rather than leave it mounted for whatever runs
       // next — the one thing this function's caller cannot do on its behalf,
       // since `view` lives only in this closure.
       try {
-        await waitFor(() =>
-          expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
-        );
+        // Not a wait on campaignName === "" — that is also the pristine DEFAULT,
+        // true before GET /campaigns/:id has even resolved.
+        await waitFor(() => expect(screen.getByText("fresh")).toBeTruthy());
         await fill(user);
 
         // (c) — captured before anything else moves focus (Save's own click included).
@@ -3052,7 +3042,7 @@ describe("BriefPage — the refusal, in the one column (D3 / D38 / M1 / H2)", ()
   test("Save's refusal marks every failing section at once", async () => {
     const user = userEvent.setup();
     routes({});
-    renderWithRun(<NewEditor />);
+    renderWithRun(<Editor />);
     await waitFor(() =>
       expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
     );
@@ -3102,7 +3092,7 @@ describe("BriefPage — the refusal, in the one column (D3 / D38 / M1 / H2)", ()
   test("a refused Save speaks its refusal, and exactly once (D38)", async () => {
     const user = userEvent.setup();
     routes({});
-    renderWithRun(<NewEditor />);
+    renderWithRun(<Editor />);
     await waitFor(() =>
       expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
     );
@@ -4159,11 +4149,9 @@ describe("BriefPage — the run slot: Validate → Generate (SG9)", () => {
 
   test("a never-saved brief is still runnable, and running it writes nothing", async () => {
     const user = userEvent.setup();
-    const calls = routes({});
-    renderWithRun(<NewEditor />);
-    await waitFor(() =>
-      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
-    );
+    const calls = routes({ meta: () => json(blankCampaignMeta("fresh")) });
+    renderWithRun(<Editor id="fresh" />);
+    await waitFor(() => expect(screen.getByText("fresh")).toBeTruthy());
     await fillValidDraft(user, "fresh");
 
     // The capability D35 preserved when "Apply to run" was retired: a brand-new brief
@@ -4202,7 +4190,7 @@ describe("BriefPage — the run slot: Validate → Generate (SG9)", () => {
     renderWithRun(
       <>
         <Header />
-        <NewEditor />
+        <Editor />
       </>,
     );
     await waitFor(() => expect(screen.getByLabelText("Campaign Name")).toBeTruthy());
@@ -4353,11 +4341,9 @@ describe("BriefPage — the run slot: Validate → Generate (SG9)", () => {
   test("a validation is closed by a listing that takes the id out from under it", async () => {
     const user = userEvent.setup();
     let listed: readonly ReturnType<typeof entry>[] = [];
-    routes({ list: () => json({ briefs: listed }) });
-    renderWithRun(<NewEditor />);
-    await waitFor(() =>
-      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
-    );
+    routes({ list: () => json({ briefs: listed }), meta: () => json(blankCampaignMeta("fresh")) });
+    renderWithRun(<Editor id="fresh" />);
+    await waitFor(() => expect(screen.getByText("fresh")).toBeTruthy());
     await fillValidDraft(user, "fresh");
 
     await user.click(slot(messages.editorValidate) as HTMLElement);
@@ -4391,11 +4377,10 @@ describe("BriefPage — the run slot: Validate → Generate (SG9)", () => {
         // identical content, nothing shared by reference with the last answer.
         return json({ briefs: listed.map((e) => ({ ...e })) });
       },
+      meta: () => json(blankCampaignMeta("fresh")),
     });
-    renderWithRun(<NewEditor />);
-    await waitFor(() =>
-      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
-    );
+    renderWithRun(<Editor id="fresh" />);
+    await waitFor(() => expect(screen.getByText("fresh")).toBeTruthy());
     await waitFor(() => expect(lists).toBe(1));
     await fillValidDraft(user, "fresh");
 
@@ -4589,7 +4574,7 @@ describe("BriefPage — the validation view (SG10 / SG-D13, SG-D14)", () => {
   test("a never-attempted draft reports its errors here, with no field showing one yet", async () => {
     const user = userEvent.setup();
     routes({});
-    renderWithRun(<NewEditor />);
+    renderWithRun(<Editor />);
     await waitFor(() =>
       expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
     );
@@ -4935,422 +4920,354 @@ describe("the route is the source of truth (D37)", () => {
     expect(await screen.findByText(messages.briefNotFound("Not Safe"))).toBeTruthy();
   });
 
+  test("a GET /campaigns/:id failure reads as inconclusive, never as unknown — and offers its own retry (mscy8)", async () => {
+    // PT-5c1 (D178) — not in the listing (a versionless campaign never is),
+    // and the meta fetch itself fails: this must NOT settle into the
+    // not-found state (that would be a false "no such campaign" for a
+    // request that simply could not be answered).
+    //
+    // mscy8 — nor may it settle into a silent, unseeded, INTERACTIVE editor:
+    // a failure that is never recorded leaves the operator typing into a
+    // draft that names no real campaign, with no sign anything went wrong.
+    // It gets its own failure state and its own retry, the same shape the
+    // listing's failure state already has.
+    let fail = true;
+    routes({
+      list: () => json({ briefs: [] }),
+      meta: (id) => (fail ? json({ error: "boom" }, 500) : json(blankCampaignMeta(id))),
+    });
+    renderWithRun(<Editor id="fresh" />);
+    expect(await screen.findByText(messages.briefMetaFailed("fresh"))).toBeTruthy();
+    expect(screen.queryByText(messages.briefNotFound("fresh"))).toBeNull();
+    // Not an editor while this stands: the not-found state's own comment names
+    // the same M3 rule this state shares (no sidebar panels, no draft to type
+    // into).
+    expect(screen.queryByLabelText("Campaign Name")).toBeNull();
+
+    // The retry re-runs only this route's lookup — pressing it after the
+    // transient clears finds the real, working blank draft.
+    fail = false;
+    const user = userEvent.setup();
+    await user.click(screen.getByText(messages.briefMetaFailedRetry));
+    // No name was seeded (`blankCampaignMeta`'s default), so the field falls
+    // back to displaying the campaign's own id, exactly as a fresh mint's
+    // Identity field always does.
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("fresh"),
+    );
+    expect(screen.queryByText(messages.briefMetaFailed("fresh"))).toBeNull();
+  });
+
+  test("a campaign the meta fetch finds already versioned re-fetches the listing instead of opening blank", async () => {
+    // The race PT-5c1's meta fallback guards: the listing was read before
+    // this campaign's version landed (or landed since). Opening a blank
+    // draft over real content would be a silent data-loss trap; refreshing
+    // the listing lets the ordinary match path find it instead. The meta
+    // handler mutates `listed` itself, standing in for "the version landed
+    // by the time this answered" — so the `loadBriefs()` the hasVersion
+    // branch triggers picks up the real content, not another empty list.
+    let listed: readonly ReturnType<typeof entry>[] = [];
+    routes({
+      list: () => json({ briefs: listed }),
+      meta: () => {
+        listed = [entry("camp", "r1")];
+        return json({ campaignId: "camp", slug: "camp", name: null, type: null, hasVersion: true });
+      },
+    });
+    renderWithRun(<Editor id="camp" />);
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"),
+    );
+  });
+
+  test("a version that never shows up in the refreshed listing falls to not-found after one retry, not forever (msczA)", async () => {
+    // Unlike the test above, the listing never actually gains the campaign —
+    // a genuinely inconsistent answer, not a one-beat-late race. Without a
+    // bound, each refreshed (still-empty) listing reruns this effect, finds
+    // `hasVersion` again, and refreshes again: an endless metadata/listing
+    // cycle for a route sitting open and idle.
+    let listCalls = 0;
+    routes({
+      list: () => {
+        listCalls += 1;
+        return json({ briefs: [] });
+      },
+      meta: () =>
+        json({ campaignId: "camp", slug: "camp", name: null, type: null, hasVersion: true }),
+    });
+    renderWithRun(<Editor id="camp" />);
+    expect(await screen.findByText(messages.briefNotFound("camp"))).toBeTruthy();
+    // One bounded retry: the initial mount's listing, plus one refresh the
+    // `hasVersion` branch triggered, and NEVER another `loadBriefs()` beyond
+    // it — the property msczA is actually about (the route effect can rerun
+    // for reasons unrelated to this fix and re-ask `GET /campaigns/:id` even
+    // once settled; what must never happen is another LISTING refetch).
+    const settledListCalls = listCalls;
+    expect(settledListCalls).toBe(2);
+    await new Promise((r) => setTimeout(r, 30));
+    expect(listCalls).toBe(settledListCalls);
+  });
+
+  test("a uuid URL and a slug URL both load the same campaign, and a uuid route survives a listing refresh", async () => {
+    const user = userEvent.setup();
+    const uuid = "3f9c7f2e-8b1a-4e9d-9c2b-1a2b3c4d5e6f";
+    const withUuid = { ...entry("camp", "r1"), campaignId: uuid };
+    // PT-5a added `campaignId` to each listing item (D178): a uuid-addressed
+    // route matches on it, a slug-addressed one on `brief.id`, and both name
+    // the same campaign.
+    routes({ list: () => json({ briefs: [withUuid] }) });
+    renderWithRun(<Editor id={uuid} />);
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"),
+    );
+
+    // A real edit, then a listing refresh (a window focus): `routeLoadedId`
+    // (the file source's own id) is the SLUG "camp", never the uuid the URL
+    // carries — without resolving through `resolvedSlugRef`, this refresh
+    // would look like the route never loaded and re-dispatch `load` over the
+    // edit below (the exact clobber `routeMatchesLoaded` exists to prevent).
+    await user.type(screen.getByLabelText("Target Audience"), " more");
+    fireEvent.focus(window);
+    await new Promise((r) => setTimeout(r, 20));
+    expect((screen.getByLabelText("Target Audience") as HTMLInputElement).value).toBe(
+      brief("camp").targetAudience + " more",
+    );
+  });
+
+  test("a route change cancels an in-flight meta fetch rather than dispatching it onto the new route", async () => {
+    const pending: Record<string, Array<(r: Response) => void>> = { a: [], b: [] };
+    routes({
+      list: () => json({ briefs: [] }),
+      meta: (id) => new Promise<Response>((resolve) => pending[id]!.push(resolve)),
+    });
+    const view = renderWithRun(<Editor id="a" />);
+    await waitFor(() => expect(pending.a.length).toBeGreaterThan(0));
+
+    // The route changes before "a"'s meta fetch ever answers — its cleanup
+    // must mark it cancelled, so the answer below (a fresh mint for "a")
+    // never dispatches a stale `load` onto whatever "b" has become.
+    view.rerender(
+      <ShellProviders>
+        <CreateCampaignProvider>
+          <Editor id="b" />
+          <CreateCampaignDialog />
+        </CreateCampaignProvider>
+      </ShellProviders>,
+    );
+    await waitFor(() => expect(pending.b.length).toBeGreaterThan(0));
+
+    for (const resolve of pending.a) resolve(json(blankCampaignMeta("a")));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    // "a"'s own answer(s) never dispatch here — the page is still deciding "b",
+    // never showing "a"'s campaign id.
+    expect(screen.queryByText("a")).toBeNull();
+
+    for (const resolve of pending.b) resolve(json(blankCampaignMeta("b")));
+    await waitFor(() => expect(screen.getByText("b")).toBeTruthy());
+  });
+
+  test("a route change cancels an in-flight meta fetch even when it fails, never rendering a failure for the abandoned route", async () => {
+    const pending: Record<string, Array<(r: Response) => void>> = { a: [], b: [] };
+    const rejecters: Record<string, Array<() => void>> = { a: [], b: [] };
+    routes({
+      list: () => json({ briefs: [] }),
+      meta: (id) =>
+        new Promise<Response>((resolve, reject) => {
+          pending[id]!.push(resolve);
+          rejecters[id]!.push(reject);
+        }),
+    });
+    const view = renderWithRun(<Editor id="a" />);
+    await waitFor(() => expect(pending.a.length).toBeGreaterThan(0));
+
+    view.rerender(
+      <ShellProviders>
+        <CreateCampaignProvider>
+          <Editor id="b" />
+          <CreateCampaignDialog />
+        </CreateCampaignProvider>
+      </ShellProviders>,
+    );
+    await waitFor(() => expect(pending.b.length).toBeGreaterThan(0));
+
+    // "a"'s fetch FAILS after the route has already moved on — the cleanup's
+    // `cancelled` flag must suppress `setMetaFailed` for it, or "b"'s screen
+    // would flash a failure state that names the wrong (abandoned) route.
+    for (const reject of rejecters.a) reject();
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.queryByText(messages.briefMetaFailed("a"))).toBeNull();
+
+    for (const resolve of pending.b) resolve(json(blankCampaignMeta("b")));
+    await waitFor(() => expect(screen.getByText("b")).toBeTruthy());
+  });
+
+  test("a route change to another versionless campaign replaces a stale seed rather than skipping it", async () => {
+    // The msczF no-clobber guard only ever holds an UNATTACHED "new" draft
+    // back from a `load` — a "new" source already seeded for a DIFFERENT
+    // campaign is exactly as stale as a loaded file's content, and must be
+    // replaced the same way.
+    routes({ list: () => json({ briefs: [] }), meta: (id) => json(blankCampaignMeta(id)) });
+    const view = renderWithRun(<Editor id="a" />);
+    await waitFor(() => expect(screen.getByText("a")).toBeTruthy());
+
+    view.rerender(
+      <ShellProviders>
+        <CreateCampaignProvider>
+          <Editor id="b" />
+          <CreateCampaignDialog />
+        </CreateCampaignProvider>
+      </ShellProviders>,
+    );
+    await waitFor(() => expect(screen.getByText("b")).toBeTruthy());
+    expect(screen.queryByText("a")).toBeNull();
+  });
+
   test("the /brief/new draft survives a reload, under one stable key (H6)", async () => {
     const user = userEvent.setup();
     routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
+    // PT-5c1 (D177): /brief/new no longer starts a blank editor on a fresh
+    // visit (create always mints through POST /campaigns first) — the one way
+    // it still shows a typeable blank editor is W3's resume, so this H6 claim
+    // is exercised through that path: seed a recoverable draft first.
+    saveDraftToStorage({ ...initialEditorState(), campaignName: "Abandoned" });
 
     const first = renderWithRun(<NewEditor />);
     await waitFor(() =>
-      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("Abandoned"),
     );
     await fillValidDraft(user, "typed");
     await waitFor(() => expect(localStorage.getItem("cf:draft:new")).not.toBeNull());
     first.unmount();
 
-    // The reload lands on the same route and finds the draft it left.
+    // The reload finds the SAME draft, under the same stable key — resumed
+    // again, not started fresh.
     renderWithRun(<NewEditor />);
     await waitFor(() =>
       expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("typed"),
     );
   });
-});
 
-describe("the create seed (W1)", () => {
-  beforeEach(() => {
-    localStorage.clear();
-    localStorage.setItem("cf:brief-picked", "1");
+  // PT-5c1 fix round — root cause (mscyy/mscdk): a versionless campaign used to
+  // open with `source.kind: "new"` and NO seed, so its autosave used
+  // `generateTempId`'s literal `"new"` — the exact key `/brief/new` itself uses.
+  // Two different campaigns (and `/brief/new`) all wrote to ONE recovery slot.
+  test("a seeded versionless campaign autosaves under its own campaign id, never the shared cf:draft:new key", async () => {
+    const user = userEvent.setup();
+    routes({ meta: () => json(blankCampaignMeta("fresh")) });
+    renderWithRun(<Editor id="fresh" />);
+    await waitFor(() => expect(screen.getByText("fresh")).toBeTruthy());
+    await user.type(screen.getByLabelText("Target Audience"), "x");
+    await waitFor(() => expect(localStorage.getItem("cf:draft:fresh")).not.toBeNull());
+    // Never under the shared key `/brief/new` (and every OTHER versionless
+    // campaign) would otherwise collide on.
+    expect(localStorage.getItem("cf:draft:new")).toBeNull();
   });
 
-  const fillDialog = async (
-    user: ReturnType<typeof userEvent.setup>,
-    root: { getByLabelText: typeof screen.getByLabelText; getByRole: typeof screen.getByRole },
-  ) => {
-    await user.type(root.getByLabelText(messages.campaignNameLabel), "Summer Spark");
-    await user.click(root.getByRole("button", { name: messages.createCampaignConfirm }));
-  };
+  // mscdq — `routeMatchesLoaded` is always false for a blank-at-route campaign
+  // (`source.kind` stays "new" until its first Save), so a failed focus-time
+  // listing refresh used to replace its editor with the listing-failure screen
+  // even though the editor is already showing exactly the route it names.
+  test("a failed focus-time listing refresh never replaces a resolved blank campaign's editor", async () => {
+    let listShouldFail = false;
+    routes({
+      list: () => (listShouldFail ? json({ error: "boom" }, 500) : json({ briefs: [] })),
+      meta: () => json(blankCampaignMeta("fresh")),
+    });
+    renderWithRun(<Editor id="fresh" />);
+    await waitFor(() => expect(screen.getByText("fresh")).toBeTruthy());
+    expect(screen.getByLabelText("Campaign Name")).toBeTruthy();
 
-  test("the guard asks exactly once for a dirty editor, before the dialog opens, and Create applies the seed in place", async () => {
-    nextMock().nav.pathname = "/brief/new";
-    // Everything presentation: every section stays mounted, so the applied values
-    // are assertable directly — the landing claim has its own tests below.
-    const user = userEvent.setup();
-    routes({});
-    renderWithRun(
-      <>
-        <BrowseBriefsButton />
-        <NewEditor />
-      </>,
-    );
-    await waitFor(() =>
-      expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
-        "",
-      ),
-    );
-    await user.type(screen.getByLabelText(messages.campaignNameLabel), "typed");
-
-    // The sidebar's gesture: the guard asks first (D67)…
-    await user.click(screen.getByRole("button", { name: /Create new/ }));
-    const prompt = await screen.findByRole("dialog", { name: "Unsaved edits" });
-    // …and the create dialog is not open yet.
-    expect(screen.queryByRole("dialog", { name: messages.createCampaignTitle })).toBeNull();
-    await user.click(within(prompt).getByRole("button", { name: "Leave" }));
-
-    await fillDialog(
-      user,
-      within(await screen.findByRole("dialog", { name: messages.createCampaignTitle })),
-    );
-
-    // F8: the same-URL push resets nothing, so the seed was applied in place —
-    // and never through requestReplace (D67): one question for the whole gesture.
-    await waitFor(() =>
-      expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
-        "Summer Spark",
-      ),
-    );
-    // D97 — the seed answers name and mode only: region and audience stay blank,
-    // waiting for the Identity step this landing is now on (D98).
-    expect((screen.getByLabelText("Target Region") as HTMLInputElement).value).toBe("");
-    expect((screen.getByLabelText(messages.targetAudienceLabel) as HTMLInputElement).value).toBe(
-      "",
-    );
-    expect(screen.queryByRole("dialog", { name: messages.createCampaignTitle })).toBeNull();
-    await new Promise((resolve) => setTimeout(resolve, 25));
-    expect(screen.queryAllByRole("dialog", { name: "Unsaved edits" })).toHaveLength(0);
+    listShouldFail = true;
+    fireEvent.focus(window);
+    await new Promise((r) => setTimeout(r, 30));
+    // Still the editor — never the listing-failure alert — because this
+    // route is already resolved (`routeAlreadyResolved`), the same guarantee
+    // a loaded FILE source already had.
+    expect(screen.getByLabelText("Campaign Name")).toBeTruthy();
+    expect(screen.queryByText(messages.briefListFailedRetry)).toBeNull();
   });
 
-  test("an in-place seed lands on Identity with the name applied (D98)", async () => {
-    nextMock().nav.pathname = "/brief/new";
+  // msczF — a slow `GET /campaigns/:id` must not erase edits typed while it was
+  // in flight, and the campaign's identity must still land once it does answer
+  // (so Save writes to the real campaign, not an unattached draft).
+  test("edits typed before a slow metadata lookup lands survive it, and the campaign's identity is still adopted", async () => {
     const user = userEvent.setup();
-    routes({});
-    renderWithRun(
-      <>
-        <BrowseBriefsButton />
-        <NewEditor />
-      </>,
+    let resolveMeta: ((r: Response) => void) | null = null;
+    routes({
+      list: () => json({ briefs: [] }),
+      meta: () => new Promise<Response>((resolve) => (resolveMeta = resolve)),
+    });
+    renderWithRun(<Editor id="fresh" />);
+    await waitFor(() => expect(resolveMeta).not.toBeNull());
+
+    // The user starts typing before the lookup has answered at all.
+    await user.type(screen.getByLabelText("Target Audience"), "typed early");
+
+    resolveMeta!(json(blankCampaignMeta("fresh", { name: "Server Name" })));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    // The edit survives — the seed never clobbered it.
+    expect((screen.getByLabelText("Target Audience") as HTMLInputElement).value).toBe(
+      "typed early",
     );
+    // But the campaign's identity is still adopted: Save now writes to
+    // "fresh", not an orphaned unattached draft.
+    const calls = routes({ meta: () => json(blankCampaignMeta("fresh")) });
+    await fillValidDraft(user, "fresh");
     await waitFor(() =>
-      expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
-        "",
+      expect((screen.getByRole("button", { name: /^Save$/ }) as HTMLButtonElement).disabled).toBe(
+        false,
       ),
     );
-    await user.type(screen.getByLabelText(messages.campaignNameLabel), "typed");
-
-    await user.click(screen.getByRole("button", { name: /Create new/ }));
-    const prompt = await screen.findByRole("dialog", { name: "Unsaved edits" });
-    await user.click(within(prompt).getByRole("button", { name: "Leave" }));
-    await fillDialog(
-      user,
-      within(await screen.findByRole("dialog", { name: messages.createCampaignTitle })),
-    );
-
-    // D98 — "lands on Identity" is true by construction since SG1: Identity is
-    // the first section of the one column, so there is no cursor to place and no
-    // way to arrive one step past two empty required fields. What is left to
-    // assert is that the seed APPLIED and spent its key.
-    await waitFor(() => expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull());
-    expect(document.getElementById("identity")).toBeTruthy();
-    // The seed rode a patch action, so the slug was derived in the reducer (F18) —
-    // the Identity readout shows it; the dialog never did.
-    expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
-      "Summer Spark",
-    );
-    expect(screen.getByText("summer-spark")).toBeTruthy();
-  });
-
-  test("after an in-place seed, no step baton remains (the leftover-baton pin)", async () => {
-    nextMock().nav.pathname = "/brief/new";
-    const user = userEvent.setup();
-    routes({});
-    renderWithRun(
-      <>
-        <BrowseBriefsButton />
-        <NewEditor />
-      </>,
-    );
-    await waitFor(() =>
-      expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
-        "",
-      ),
-    );
-    await user.type(screen.getByLabelText(messages.campaignNameLabel), "typed");
-
-    await user.click(screen.getByRole("button", { name: /Create new/ }));
-    const prompt = await screen.findByRole("dialog", { name: "Unsaved edits" });
-    await user.click(within(prompt).getByRole("button", { name: "Leave" }));
-    await fillDialog(
-      user,
-      within(await screen.findByRole("dialog", { name: messages.createCampaignTitle })),
-    );
-
-    await waitFor(() =>
-      expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
-        "Summer Spark",
-      ),
-    );
-    // `takeSeed` spends the companion baton as well as the seed. SG1 removed the
-    // baton's only APPLIER (the step cursor), so a leftover can no longer move
-    // anything — but it is still written on the cross-route create path, and a key
-    // that is written and never cleared is a leak this pin catches.
-    expect(localStorage.getItem("cf:step-handoff")).toBeNull();
-  });
-
-  test("after a refused Save, an in-place seed arrives with nothing red — attempted is reset", async () => {
-    nextMock().nav.pathname = "/brief/new";
-    const user = userEvent.setup();
-    routes({});
-    renderWithRun(
-      <>
-        <BrowseBriefsButton />
-        <NewEditor />
-      </>,
-    );
-    await waitFor(() =>
-      expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
-        "",
-      ),
-    );
-    await user.type(screen.getByLabelText(messages.campaignNameLabel), "typed");
-    // A refused Save sets attempted: every error shows and the status refuses.
-    // (It was a refused Next before SG1 — the wizard's own gesture; Save is the
-    // verb that carries the refusal now, and it is the same `attempted` flag.)
     await saveVia(user, "Save");
-    expect(await screen.findByText(/Not saved yet/)).toBeTruthy();
-
-    await user.click(screen.getByRole("button", { name: /Create new/ }));
-    const prompt = await screen.findByRole("dialog", { name: "Unsaved edits" });
-    await user.click(within(prompt).getByRole("button", { name: "Leave" }));
-    await fillDialog(
-      user,
-      within(await screen.findByRole("dialog", { name: messages.createCampaignTitle })),
-    );
-
-    // The arrival is not red: the seed reset attempted/touched (L1.1).
-    await waitFor(() => expect(screen.queryByText(/Not saved yet/)).toBeNull());
-    expect(screen.getByText(/New brief — fill/)).toBeTruthy();
-  });
-
-  test("a seed created elsewhere is applied on mount, and both batons are spent", async () => {
-    routes({});
-    // What the dialog's Create does from another route (verified in its own suite):
-    // publish the seed, stash the landing step, then push.
-    await act(async () => {
-      await createCampaign({ name: "Summer Spark", type: "social-post" });
-    });
-    localStorage.setItem("cf:step-handoff", "identity");
-
-    nextMock().nav.pathname = "/brief/new";
-    renderWithRun(<NewEditor />);
-    // The APPLIED field, never only the spent key: the landing itself stopped
-    // being a claim when SG1 deleted the cursor, so the seed's effect on the
-    // draft is the whole assertion.
     await waitFor(() =>
-      expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
-        "Summer Spark",
-      ),
-    );
-    expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
-    // NOT the step baton. `takeSeed` spends that only for a REFUSED seed (its own
-    // suite pins both directions); an accepted one leaves it, because it used to
-    // be H5's to apply. SG1 deleted the applier, so a cross-route create now
-    // leaves `cf:step-handoff` behind — a dead key nothing reads. Asserting it
-    // were null here would be asserting a fix this lane has not made.
-    expect(localStorage.getItem("cf:step-handoff")).toBe("identity");
-  });
-
-  test("a paid-social seed sets the editor's mode and the Randomized section list", async () => {
-    routes({});
-    // The T2 dialog bridge maps the mode panel's Randomized choice to the
-    // paid-social type (D108); T3 replaces the panel with the type field.
-    await act(async () => {
-      await createCampaign({ name: "Summer Spark", type: "paid-social" });
-    });
-
-    nextMock().nav.pathname = "/brief/new";
-    renderWithRun(<NewEditor />);
-    await waitFor(() =>
-      expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
-        "Summer Spark",
-      ),
-    );
-    expect(screen.getByRole("button", { name: "variation" }).getAttribute("aria-pressed")).toBe(
-      "true",
-    );
-    expect(screen.getByRole("button", { name: "brief" }).getAttribute("aria-pressed")).toBe(
-      "false",
-    );
-    // Two controls carry this name now: the Sections outline's row and the
-    // sidebar accordion, which the mode publishes on its own since SG1 dropped
-    // the `presentation` term from its gate. The claim is about the mode's
-    // section LIST, so the count is what it is and Treatments is the discriminator.
-    expect(screen.getAllByRole("button", { name: "Variation Policy" }).length).toBeGreaterThan(0);
-    expect(screen.queryByRole("button", { name: "Treatments" })).toBeNull();
-  });
-
-  test("an old-shape seed from the previous build is discarded, not half-applied (F5)", async () => {
-    routes({});
-    // What the currently deployed build writes: the four-field seed. Accepting it
-    // would seed a brief with a name and nothing else, silently — the guard
-    // discards it wholesale and the user starts clean.
-    localStorage.setItem(
-      CREATE_SEED_KEY,
-      JSON.stringify({
-        name: "Summer Spark",
-        targetRegion: "EU",
-        targetAudience: "trail runners",
-        mode: "brief",
-      }),
-    );
-    nextMock().nav.pathname = "/brief/new";
-    renderWithRun(<NewEditor />);
-    await waitFor(() => expect(screen.getByLabelText(messages.campaignNameLabel)).toBeTruthy());
-    // No partial patch: even the name is not seeded — the seed was discarded whole.
-    expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe("");
-    expect((screen.getByLabelText(messages.targetRegionLabel) as HTMLInputElement).value).toBe("");
-    expect((screen.getByLabelText(messages.targetAudienceLabel) as HTMLInputElement).value).toBe(
-      "",
-    );
-    // Spent, not retried: a refused baton cannot poison the next mount either.
-    expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
-  });
-
-  test("a rejected legacy seed also spends its landing baton, so the editor lands on Identity (D98)", async () => {
-    routes({});
-    // Both keys the previously deployed build left after an interrupted create —
-    // the old four-field seed and the Copy baton that skipped Identity. takeSeed
-    // in isolation and the navigation hook in isolation each look fine; the bug
-    // is the interaction: a refused seed that does not spend the companion baton
-    // lets the mount effect apply "copy" and land a blank brief one step past
-    // two empty required fields.
-    localStorage.setItem(
-      "cf:create-seed",
-      JSON.stringify({
-        name: "Summer Spark",
-        targetRegion: "EU",
-        targetAudience: "trail runners",
-        mode: "brief",
-      }),
-    );
-    localStorage.setItem("cf:step-handoff", "copy");
-    nextMock().nav.pathname = "/brief/new";
-    renderWithRun(<NewEditor />);
-
-    // SG1 — the "lands on Identity" half of this test is retired with the cursor:
-    // a leftover baton has nothing to move. What remains, and is the defect the
-    // test was written for, is that the refused seed SPENDS the companion baton
-    // rather than leaving it behind.
-    await waitFor(() => expect(localStorage.getItem("cf:step-handoff")).toBeNull());
-
-    // Discard: no name, region or audience seeded.
-    expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe("");
-    expect((screen.getByLabelText(messages.targetRegionLabel) as HTMLInputElement).value).toBe("");
-    expect((screen.getByLabelText(messages.targetAudienceLabel) as HTMLInputElement).value).toBe(
-      "",
+      expect(calls.some((c) => c.method === "POST" && c.body?.id === "fresh")).toBe(true),
     );
   });
 
-  test("the #217 {name, mode} seed is discarded, not half-applied, and spends its baton (D108)", async () => {
-    routes({});
-    // What the previously deployed build wrote: the two-field seed. It is
-    // refused whole — no name seeded, the mode stays Classic — and the
-    // companion baton is spent rather than left behind.
-    localStorage.setItem(
-      CREATE_SEED_KEY,
-      JSON.stringify({ name: "Summer Spark", mode: "variation" }),
-    );
-    localStorage.setItem("cf:step-handoff", "copy");
-    nextMock().nav.pathname = "/brief/new";
-    renderWithRun(<NewEditor />);
-    await waitFor(() => expect(screen.getByLabelText(messages.campaignNameLabel)).toBeTruthy());
-    expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe("");
-    expect(screen.getByRole("button", { name: "brief" }).getAttribute("aria-pressed")).toBe("true");
-    expect(screen.getByRole("button", { name: "variation" }).getAttribute("aria-pressed")).toBe(
-      "false",
-    );
-    // Both keys cleared: a refused baton cannot poison the next mount either.
-    expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
-    expect(localStorage.getItem("cf:step-handoff")).toBeNull();
-  });
-
-  test("a paid-social seed is applied once — a platform toggled off stays off (D109)", async () => {
-    routes({});
-    localStorage.setItem(
-      CREATE_SEED_KEY,
-      JSON.stringify({ name: "Summer Spark", type: "paid-social" }),
-    );
-    nextMock().nav.pathname = "/brief/new";
+  // The msczF keep-edits path used to autosave those keystrokes under the
+  // shared `cf:draft:new` key while `GET /campaigns/:id` was still in flight,
+  // then leave that copy behind once `markSeeded` moved the key. The abandoned
+  // `/brief/new` draft W3 resume reads must survive the whole window, and the
+  // kept edits must land under the campaign's own key once the lookup resolves.
+  test("edits typed before a named route resolves autosave under that campaign, never cf:draft:new", async () => {
     const user = userEvent.setup();
-    const view = renderWithRun(<NewEditor />);
-    await waitFor(() =>
-      expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
-        "Summer Spark",
-      ),
-    );
-    // The preset arrived: the paid platforms are on, mode is Randomized.
-    expect(
-      screen.getByRole("button", { name: "instagram-story" }).getAttribute("aria-pressed"),
-    ).toBe("true");
-    expect(screen.getByRole("button", { name: "brief" }).getAttribute("aria-pressed")).toBe(
-      "false",
-    );
-    // The user's change: one platform off.
-    await user.click(screen.getByRole("button", { name: "tiktok" }));
-    expect(screen.getByRole("button", { name: "tiktok" }).getAttribute("aria-pressed")).toBe(
-      "false",
-    );
-    // The remount this used to force with a presentation switch is gone with the
-    // toggle — and the full remount below is the stronger form of the same
-    // question anyway (the reload case), so nothing it proved is lost.
-    // A full remount does not re-apply the preset: the seed was spent by
-    // its one read, so the user's toggled-off platform survives the return.
-    view.unmount();
-    renderWithRun(<NewEditor />);
-    await waitFor(() =>
-      expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
-        "Summer Spark",
-      ),
-    );
-    expect(screen.getByRole("button", { name: "tiktok" }).getAttribute("aria-pressed")).toBe(
-      "false",
-    );
-    // Nothing is left to re-apply.
-    expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
-    expect(takeSeed()).toBeNull();
-  });
+    saveDraftToStorage({ ...initialEditorState(), campaignName: "Abandoned" });
+    const abandoned = localStorage.getItem("cf:draft:new");
+    expect(abandoned).not.toBeNull();
 
-  test("a malformed seed leaves a working blank editor rather than throwing", async () => {
-    routes({});
-    // Syntactically valid, structurally not a seed — takeSeed must spend it as null.
-    localStorage.setItem(CREATE_SEED_KEY, JSON.stringify({ name: 42 }));
-    nextMock().nav.pathname = "/brief/new";
-    renderWithRun(<NewEditor />);
-    await waitFor(() => expect(screen.getByLabelText(messages.campaignNameLabel)).toBeTruthy());
-    expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe("");
-    expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
-    const user = userEvent.setup();
-    await user.type(screen.getByLabelText(messages.campaignNameLabel), "spark");
-    expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
-      "spark",
-    );
-  });
-
-  test("a seed published while a named brief is open is not applied in place", async () => {
-    routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
-    renderWithRun(<Editor id="camp" />);
-    await waitFor(() =>
-      expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
-        "camp",
-      ),
-    );
-
-    await act(async () => {
-      await createCampaign({ name: "Other", type: "paid-social" });
+    let resolveMeta: ((r: Response) => void) | null = null;
+    routes({
+      list: () => json({ briefs: [] }),
+      meta: () => new Promise<Response>((resolve) => (resolveMeta = resolve)),
     });
-    // The gate is the route: the named brief stays on screen, and the seed waits in
-    // the store for a blank-route mount to spend it.
-    expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
-      "camp",
+    renderWithRun(<Editor id="fresh" />);
+    await waitFor(() => expect(resolveMeta).not.toBeNull());
+
+    await user.type(screen.getByLabelText("Target Audience"), "typed early");
+    await act(async () => {
+      await Promise.resolve();
+    });
+    // The in-flight window writes nothing: the abandoned draft is byte-identical,
+    // and the campaign key does not exist yet (the server has not named it).
+    expect(localStorage.getItem("cf:draft:new")).toBe(abandoned);
+    expect(localStorage.getItem("cf:draft:fresh")).toBeNull();
+
+    resolveMeta!(json(blankCampaignMeta("fresh", { name: "Server Name" })));
+    await waitFor(() => expect(localStorage.getItem("cf:draft:fresh")).not.toBeNull());
+    expect(localStorage.getItem("cf:draft:new")).toBe(abandoned);
+    const stored = JSON.parse(localStorage.getItem("cf:draft:fresh") as string) as {
+      state: { targetAudience: string };
+    };
+    expect(stored.state.targetAudience).toBe("typed early");
+    expect((screen.getByLabelText("Target Audience") as HTMLInputElement).value).toBe(
+      "typed early",
     );
-    expect(localStorage.getItem(CREATE_SEED_KEY)).not.toBeNull();
   });
 });
 
@@ -5400,8 +5317,12 @@ describe("the abandoned-draft two-way (W3 / F19)", () => {
     const prompt = await screen.findByRole("dialog", { name: messages.resumeDraftTitle });
     // Start over proceeds exactly as the unguarded create.
     await user.click(within(prompt).getByRole("button", { name: messages.resumeDraftStartOver }));
-    await waitFor(() => expect(localStorage.getItem(CREATE_SEED_KEY)).not.toBeNull());
-    // One gesture, one answer: the publication must not re-ask.
+    // PT-5c1 (D177, D178): Start over mints through POST /campaigns and routes to
+    // the minted campaign — there is no more in-place seed to publish.
+    await waitFor(() =>
+      expect(nextMock().router.push).toHaveBeenCalledWith(campaignRoute("Summer Spark")),
+    );
+    // One gesture, one answer: the mint must not re-ask.
     expect(screen.queryAllByRole("dialog", { name: messages.resumeDraftTitle })).toHaveLength(0);
   });
 
@@ -5412,7 +5333,7 @@ describe("the abandoned-draft two-way (W3 / F19)", () => {
     renderWithRun(
       <>
         <BrowseBriefsButton />
-        <NewEditor />
+        <Editor />
       </>,
     );
     await waitFor(() =>
@@ -5432,15 +5353,12 @@ describe("the abandoned-draft two-way (W3 / F19)", () => {
       within(await screen.findByRole("dialog", { name: messages.createCampaignTitle })),
     );
 
-    // One question for the whole gesture (D67): the seed applies in place, and
-    // the two-way about the very draft the guard just discussed never opens.
+    // One question for the whole gesture (D67): the mint proceeds, and the
+    // two-way about the very draft the guard just discussed never opens.
     await waitFor(() =>
-      expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
-        "Summer Spark",
-      ),
+      expect(nextMock().router.push).toHaveBeenCalledWith(campaignRoute("Summer Spark")),
     );
     expect(screen.queryAllByRole("dialog", { name: messages.resumeDraftTitle })).toHaveLength(0);
-    expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
   });
 
   test("a pristine editor with no stored draft raises neither the guard nor the two-way", async () => {
@@ -5450,7 +5368,7 @@ describe("the abandoned-draft two-way (W3 / F19)", () => {
     renderWithRun(
       <>
         <BrowseBriefsButton />
-        <NewEditor />
+        <Editor />
       </>,
     );
     await waitFor(() =>
@@ -5467,9 +5385,7 @@ describe("the abandoned-draft two-way (W3 / F19)", () => {
     // dialog: the create proceeds exactly as it did before W3.
     await fillDialog(user, within(dialog));
     await waitFor(() =>
-      expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
-        "Summer Spark",
-      ),
+      expect(nextMock().router.push).toHaveBeenCalledWith(campaignRoute("Summer Spark")),
     );
     expect(screen.queryAllByRole("dialog", { name: messages.resumeDraftTitle })).toHaveLength(0);
   });
@@ -5520,7 +5436,7 @@ describe("a failed listing is its own state (D83 / F-A)", () => {
   test("/brief/new with a rejected listing still renders the blank editor", async () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
     routes({ list: () => json({ error: "boom" }, 500) });
-    renderWithRun(<NewEditor />);
+    renderWithRun(<Editor />);
 
     // Wait for the listing to have actually FAILED before asserting anything about the
     // editor. Campaign Name is "" on first paint and /brief/new never awaits the listing,
@@ -5724,8 +5640,10 @@ describe("a failed listing is its own state (D83 / F-A)", () => {
     const calls = routes({
       list: () =>
         listFails ? json({ error: "boom" }, 500) : json({ briefs: [entry("camp", "r1")] }),
-      // The copy is created; the refresh adoptSavedCopy awaits on the way out fails.
-      post: () => {
+      // The mint succeeds; the first-save write that completes it succeeds too —
+      // it is the LISTING REFRESH `handleSaveAs` awaits on the way out that fails.
+      post: (url) => {
+        if (url.endsWith("/campaigns")) return json({ campaignId: "copy-1", slug: "copy-1" }, 201);
         listFails = true;
         return json({ file: "copy-1.yaml", brief: brief("copy-1"), revision: "mock-rev" }, 201);
       },
@@ -5734,11 +5652,11 @@ describe("a failed listing is its own state (D83 / F-A)", () => {
     await waitForEditorReady();
 
     await saveVia(user, "Save as");
-    await user.type(screen.getByLabelText("New brief id"), "copy-1");
+    await user.type(screen.getByLabelText("New campaign name"), "Copy 1");
     await user.click(
       within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
     );
-    await waitFor(() => expect(calls.some((c) => c.method === "POST")).toBe(true));
+    await waitFor(() => expect(calls.filter((c) => c.method === "POST").length).toBe(2));
     await waitFor(() =>
       expect(error).toHaveBeenCalledWith("Failed to load briefs:", expect.anything()),
     );
@@ -5779,7 +5697,7 @@ describe("the pre-type draft (T2 / D112)", () => {
     localStorage.setItem("cf:draft:new", JSON.stringify(stored));
 
     nextMock().nav.pathname = "/brief/new";
-    renderWithRun(<NewEditor />);
+    renderWithRun(<Editor />);
     await waitFor(() =>
       expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
         "Restored",
@@ -5809,7 +5727,7 @@ describe("VE1 — undo and redo in the editor", () => {
   test("⌘Z steps back over a typed word; ⇧⌘Z replays it", async () => {
     const user = userEvent.setup();
     routes({});
-    renderWithRun(<NewEditor />);
+    renderWithRun(<Editor />);
     await waitFor(() => expect(nameField().value).toBe(""));
     await user.type(nameField(), "Spring");
     await waitFor(() => expect(nameField().value).toBe("Spring"));
@@ -5824,7 +5742,7 @@ describe("VE1 — undo and redo in the editor", () => {
   test("Ctrl+Z undoes where ⌘Z does", async () => {
     const user = userEvent.setup();
     routes({});
-    renderWithRun(<NewEditor />);
+    renderWithRun(<Editor />);
     await waitFor(() => expect(nameField().value).toBe(""));
     await user.type(nameField(), "Spring");
     fireEvent.keyDown(document.body, { key: "z", ctrlKey: true });
@@ -5834,7 +5752,7 @@ describe("VE1 — undo and redo in the editor", () => {
   test("⌘Z inside a text field is left to the field's own undo", async () => {
     const user = userEvent.setup();
     routes({});
-    renderWithRun(<NewEditor />);
+    renderWithRun(<Editor />);
     await waitFor(() => expect(nameField().value).toBe(""));
     await user.type(nameField(), "Spring");
     // The caret is in the field: the chord belongs to the field's native undo.
@@ -5856,7 +5774,7 @@ describe("VE1 — undo and redo in the editor", () => {
   test("the autosaved draft stays exactly EditorState's keys through an undo and a retype", async () => {
     const user = userEvent.setup();
     routes({});
-    renderWithRun(<NewEditor />);
+    renderWithRun(<Editor />);
     await waitFor(() => expect(nameField().value).toBe(""));
     await user.type(nameField(), "Spring");
     await user.type(audienceField(), "Family");
@@ -5877,7 +5795,7 @@ describe("VE1 — undo and redo in the editor", () => {
   test("undoing back to pristine purges the autosaved draft", async () => {
     const user = userEvent.setup();
     routes({});
-    renderWithRun(<NewEditor />);
+    renderWithRun(<Editor />);
     await waitFor(() => expect(nameField().value).toBe(""));
     await user.type(nameField(), "Spring");
     await waitFor(() => expect(localStorage.getItem("cf:draft:new")).not.toBeNull());
@@ -5899,7 +5817,7 @@ describe("VE1 — undo and redo in the editor", () => {
     // eats the very draft the mount came for. The return-to-pristine purge must
     // know this render is the START, not a RETURN.
     saveDraftToStorage({ ...initialEditorState(), capabilities: { motion: true } });
-    renderWithRun(<NewEditor />);
+    renderWithRun(<Editor />);
     await waitFor(() => expect(nameField().value).toBe(""));
     // Let the capabilities answer land and its (still-pristine) render flush.
     await new Promise((r) => setTimeout(r, 50));
@@ -5914,7 +5832,7 @@ describe("VE1 — undo and redo in the editor", () => {
   test("⌘Z inside an open dialog does not edit the draft behind it", async () => {
     const user = userEvent.setup();
     routes({});
-    renderWithRun(<NewEditor />);
+    renderWithRun(<Editor />);
     await waitFor(() => expect(nameField().value).toBe(""));
     await user.type(nameField(), "Spring");
     await saveVia(user, "Save as");

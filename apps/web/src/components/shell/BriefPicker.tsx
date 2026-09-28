@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Button,
   Input,
@@ -10,18 +10,18 @@ import {
   DialogBody,
   DialogFoot,
 } from "@/components/ui";
-import { duplicateBrief, listBriefs, unknownErrorMessage, type BriefEntry } from "@/lib/briefs-api";
+import {
+  duplicateCampaign,
+  listBriefs,
+  unknownErrorMessage,
+  type BriefEntry,
+} from "@/lib/briefs-api";
+import { campaignRoute } from "@/lib/campaign-route";
 import { useRouter } from "next/navigation";
 import { useRun } from "@/lib/run-context";
 import { useCreateCampaign } from "@/lib/create-campaign-context";
 import { useGuardedNavigation } from "@/lib/use-guarded-navigation";
 import { campaignTypeOf, typeDisplayName } from "@/components/campaign/display-names";
-import { isReservedCampaignId } from "@/components/campaign/validate";
-import * as messages from "@/components/campaign/messages";
-
-// Mirrors CampaignOrchestration SAFE_ID_PATTERN. Value-importing the package
-// constant from source barrels fails the Next build (it resolves `.js` siblings).
-const BRIEF_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
 /**
  * Modal that lists the briefs in the project's `briefs/` folder so a reviewer can
@@ -38,8 +38,14 @@ export function BriefPicker() {
   const [error, setError] = useState(false);
   const [actionError, setActionError] = useState<string | undefined>();
   const [duplicateTarget, setDuplicateTarget] = useState<BriefEntry | null>(null);
-  const [duplicateId, setDuplicateId] = useState("");
+  const [duplicateName, setDuplicateName] = useState("");
   const [duplicating, setDuplicating] = useState(false);
+  // mscyu — a synchronous latch `confirmDuplicate` checks and sets before its
+  // first await: `duplicating` is state, so a double form submission (two
+  // Enter presses, a click that lands before the button disables) can both
+  // reach the handler before React re-renders. A ref closes that window;
+  // `duplicating` still drives the button's own disabled/loading state.
+  const duplicatingRef = useRef(false);
 
   // (Re)load the list each time the picker opens. Parse defensively so an API error
   // surfaces as an error state, not a misleading empty list.
@@ -73,7 +79,7 @@ export function BriefPicker() {
    */
   const select = (entry: BriefEntry) => {
     guardedAction(() => {
-      router.push(`/brief/${entry.brief.id}`);
+      router.push(campaignRoute(entry.campaignId ?? entry.brief.id));
       closeBriefPicker();
     });
   };
@@ -99,26 +105,34 @@ export function BriefPicker() {
    * user had even answered. And there is no nested guard on the navigation: the
    * guard does not clear the dirty flag, so a second `guardedAction` here would
    * park again and ask "Unsaved edits" a second time for one gesture.
+   *
+   * PT-5c1 (D177, D178): the field takes a NAME, not an id — the server derives
+   * and dedupes the slug, so there is nothing left to validate client-side
+   * beyond "not blank"; a name collision is never a 409, it is a different slug.
    */
   const confirmDuplicate = () => {
     /* istanbul ignore next -- the form only renders while a target is selected */
     if (!duplicateTarget) return;
-    if (!BRIEF_ID_PATTERN.test(duplicateId)) {
-      setActionError(
-        "New id must be a path-safe slug (lowercase letters, digits, hyphens; max 64).",
-      );
-      return;
-    }
-    if (isReservedCampaignId(duplicateId)) {
-      setActionError(messages.briefIdReserved(duplicateId));
+    const name = duplicateName.trim();
+    if (name === "") {
+      setActionError("Name the duplicate before saving it.");
       return;
     }
     setActionError(undefined);
     guardedAction(() => {
+      // mscyu — checked and set as the first thing the guarded action does, not
+      // before `guardedAction` is called: a DIRTY editor parks this action
+      // behind a confirm and may never run it (Cancel discards it, never
+      // clearing a flag set before the park) — the race this closes is two
+      // submissions reaching here before `duplicating` (state) re-renders the
+      // disabled button, which `guardedAction` calls `action()` for
+      // synchronously, in order, when the editor is not dirty.
+      if (duplicatingRef.current) return;
+      duplicatingRef.current = true;
       void (async () => {
         setDuplicating(true);
         try {
-          await duplicateBrief(duplicateTarget.brief.id, duplicateId);
+          const copy = await duplicateCampaign(duplicateTarget.brief.id, name);
           try {
             setEntries(await listBriefs());
           } catch {
@@ -128,12 +142,16 @@ export function BriefPicker() {
           // from here would leave the URL describing whichever brief was open before.
           // No second guard here: `guardedAction` does not clear the dirty flag, so a
           // nested one would park again and ask "Unsaved edits" a second time.
-          router.push(`/brief/${duplicateId}`);
+          // `duplicate` answers the copy's stored brief (`{ file, brief }`), never
+          // a `campaignId` — the slug is the route (D179: on fs the id IS the
+          // slug; on Postgres the slug still resolves, D178).
+          router.push(campaignRoute(copy.brief.id));
           closeBriefPicker();
         } catch (err) {
           setActionError(unknownErrorMessage(err, "Duplicate failed"));
         } finally {
           setDuplicating(false);
+          duplicatingRef.current = false;
         }
       })();
     });
@@ -208,7 +226,7 @@ export function BriefPicker() {
                   className="shrink-0 px-3 text-[11px] font-medium text-text-muted hover:text-text-emphasis"
                   onClick={() => {
                     setDuplicateTarget(entry);
-                    setDuplicateId("");
+                    setDuplicateName("");
                     setActionError(undefined);
                   }}
                 >
@@ -234,9 +252,10 @@ export function BriefPicker() {
               <span className="font-mono text-text-primary">{duplicateTarget.brief.id}</span> as
             </p>
             <Input
-              value={duplicateId}
-              onChange={(e) => setDuplicateId(e.target.value)}
-              aria-label="New brief id"
+              value={duplicateName}
+              onChange={(e) => setDuplicateName(e.target.value)}
+              aria-label="New campaign name"
+              placeholder="e.g. Summer Spark copy"
               invalid={Boolean(actionError)}
             />
             {actionError ? <p className="text-[11px] text-error">{actionError}</p> : null}
