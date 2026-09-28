@@ -9,7 +9,9 @@ import {
 } from "@campaignfoundry/CampaignOrchestration";
 import type { TenantContext } from "../../../lib/tenant.js";
 import * as loadBrief from "../../../lib/load-brief.js";
-import { getBriefStore } from "../../../lib/ports/index.js";
+import * as pools from "../../../lib/pools.js";
+import { InvalidCopyPoolError } from "../../../lib/ports/pool-store.port.js";
+import { getAssetStore, getBriefStore, getPoolStore } from "../../../lib/ports/index.js";
 import { PgBriefStore } from "../../../lib/ports/pg-brief-store.js";
 import createHandler from "../index.post.js";
 import briefsGetHandler from "../briefs.get.js";
@@ -463,6 +465,113 @@ describe.each([{ backend: "fs" as const }, { backend: "postgres" as const }])(
         }
       });
 
+      // PT-5b2 fix-round item 2 (coderabbit PRRT_kwDOSzP1zc6mgBvA / qodo
+      // PRRT_kwDOSzP1zc6mgEyP): a failure AFTER createCampaign reserved the
+      // slug must release it — a retry gets the SAME slug, never `-2`, and no
+      // versionless row/directory is left behind.
+      test("copyAssets failing after reservation releases it: a retry gets the same slug", async () => {
+        const harness = await setup();
+        try {
+          const { create, createBrief } = mount();
+          await createBrief(
+            new Request("http://x/campaigns/briefs", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify(sampleBrief("source-camp")),
+            }),
+          );
+          const spy = vi
+            .spyOn(getAssetStore(LOCAL_TENANT), "copyAssets")
+            .mockRejectedValueOnce(Object.assign(new Error("EIO"), { code: "EIO" }));
+          const failed = await create(createReq({ name: "Copy Of Source", source: "source-camp" }));
+          expect(failed.status).toBe(500);
+          spy.mockRestore();
+
+          expect(await getBriefStore(LOCAL_TENANT).campaignTeam("copy-of-source")).toBeUndefined();
+
+          const retried = await create(
+            createReq({ name: "Copy Of Source", source: "source-camp" }),
+          );
+          expect(retried.status).toBe(201);
+          expect(((await retried.json()) as { slug: string }).slug).toBe("copy-of-source");
+        } finally {
+          await harness.cleanup();
+        }
+      });
+
+      test("createBrief failing after reservation releases it and the assets already copied", async () => {
+        const harness = await setup();
+        try {
+          const { create, createBrief } = mount();
+          await createBrief(
+            new Request("http://x/campaigns/briefs", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify(sampleBrief("source-camp")),
+            }),
+          );
+          const spy = vi
+            .spyOn(getBriefStore(LOCAL_TENANT), "createBrief")
+            .mockRejectedValueOnce(Object.assign(new Error("EIO"), { code: "EIO" }));
+          const failed = await create(createReq({ name: "Copy Of Source", source: "source-camp" }));
+          expect(failed.status).toBe(500);
+          spy.mockRestore();
+
+          expect(await getBriefStore(LOCAL_TENANT).campaignTeam("copy-of-source")).toBeUndefined();
+          expect(await getAssetStore(LOCAL_TENANT).listAssets("copy-of-source")).toEqual([]);
+
+          const retried = await create(
+            createReq({ name: "Copy Of Source", source: "source-camp" }),
+          );
+          expect(retried.status).toBe(201);
+          expect(((await retried.json()) as { slug: string }).slug).toBe("copy-of-source");
+        } finally {
+          await harness.cleanup();
+        }
+      });
+
+      // PT-5b2 fix-round item 3 (qodo PRRT_kwDOSzP1zc6mgEyM): an EEXIST raised
+      // AFTER the reservation held (a concurrent writer's own Save landing
+      // version 1 on the SAME slug) must answer 409, never be mistaken for a
+      // taken candidate and retried onto "-2" — which would abandon the
+      // racing writer's own save silently.
+      test("a Save racing between reservation and the first-version write answers 409, not a retry", async () => {
+        const harness = await setup();
+        try {
+          const { create, createBrief } = mount();
+          await createBrief(
+            new Request("http://x/campaigns/briefs", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify(sampleBrief("source-camp")),
+            }),
+          );
+          const store = getBriefStore(LOCAL_TENANT);
+          const assetStore = getAssetStore(LOCAL_TENANT);
+          const originalCopyAssets = assetStore.copyAssets.bind(assetStore);
+          const spy = vi
+            .spyOn(assetStore, "copyAssets")
+            .mockImplementationOnce(async (from: string, to: string) => {
+              // Simulate a concurrent writer's own plain Save landing version 1
+              // on the reserved slug BEFORE this attempt's own createBrief runs.
+              await store.createBrief({ ...sampleBrief(to), campaignMessage: "Racer's own save" });
+              return originalCopyAssets(from, to);
+            });
+
+          const res = await create(createReq({ name: "Copy Of Source", source: "source-camp" }));
+          expect(res.status).toBe(409);
+          spy.mockRestore();
+
+          // The racing writer's own version 1 survived untouched, and no
+          // second candidate ("-2") was ever minted.
+          const raced = await store.findBriefById("copy-of-source");
+          expect(raced?.brief.campaignMessage).toBe("Racer's own save");
+          expect(await store.campaignTeam("copy-of-source-2")).toBeUndefined();
+        } finally {
+          await harness.cleanup();
+        }
+      });
+
       if (backend === "postgres") {
         test("an unexpected resolveCampaign failure (not CampaignNotFoundError) surfaces as 500", async () => {
           const harness = await setup();
@@ -584,6 +693,60 @@ describe.each([{ backend: "fs" as const }, { backend: "postgres" as const }])(
             const listed = await mount().list(new Request("http://x/campaigns/briefs"));
             const listedJson = (await listed.json()) as { briefs: { brief: { id: string } }[] };
             expect(listedJson.briefs.map((b) => b.brief.id)).toEqual(["source-camp"]);
+
+            // PT-5b2 fix-round item 2: readPool runs before any slug is ever
+            // reserved, so nothing needs releasing — a retry gets the SAME
+            // slug, never "-2".
+            expect(
+              await getBriefStore(LOCAL_TENANT).campaignTeam("copy-of-broken"),
+            ).toBeUndefined();
+            const retried = await create(
+              createReq({ name: "Copy Of Broken", source: "source-camp" }),
+            );
+            expect(retried.status).toBe(422);
+          } finally {
+            await harness.cleanup();
+          }
+        });
+
+        // The preflight readPool above cannot catch a source pool that
+        // becomes malformed AFTER it but before this attempt's own copyPool
+        // call reads it again (a narrow, real race — copyPool re-reads the
+        // source to rewrite its briefId, C9/D71) — that failure lands
+        // post-reservation and must release it too.
+        // copyPool runs AFTER createBrief, so this race hits when the brief
+        // itself is already real and versioned — releaseCampaign correctly
+        // leaves it alone (never after a real, versioned brief) even though
+        // this specific write (the pool) never landed.
+        test("a source pool that only fails validation during the copy answers 422, leaving the already-written brief alone", async () => {
+          const harness = await setup();
+          try {
+            const { create, createBrief } = mount();
+            await createBrief(
+              new Request("http://x/campaigns/briefs", {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify(sampleBrief("source-camp")),
+              }),
+            );
+            await getPoolStore(LOCAL_TENANT).writePool({
+              briefId: "source-camp",
+              generatedAt: new Date().toISOString(),
+              model: "test-model",
+              entries: [{ id: "e1", text: "Hi", status: "approved" }],
+            });
+            const spy = vi
+              .spyOn(pools, "copyPool")
+              .mockRejectedValueOnce(new InvalidCopyPoolError("source-camp", "raced invalid"));
+
+            const res = await create(createReq({ name: "Copy Of Source", source: "source-camp" }));
+            expect(res.status).toBe(422);
+            spy.mockRestore();
+
+            expect(await getBriefStore(LOCAL_TENANT).campaignTeam("copy-of-source")).toBeNull();
+            expect(
+              (await getBriefStore(LOCAL_TENANT).findBriefById("copy-of-source"))?.brief.id,
+            ).toBe("copy-of-source");
           } finally {
             await harness.cleanup();
           }
@@ -629,6 +792,11 @@ describe.each([{ backend: "fs" as const }, { backend: "postgres" as const }])(
             expect(
               existsSync(join(pgHarness.projectRoot, "assets", "inputs", "copy-of-hidden-ref")),
             ).toBe(false);
+            // PT-5b2 fix-round item 2: assertSourceVisible runs before any
+            // slug is ever reserved — nothing to release.
+            expect(
+              await getBriefStore(LOCAL_TENANT).campaignTeam("copy-of-hidden-ref"),
+            ).toBeUndefined();
           } finally {
             await harness.cleanup();
           }
@@ -667,6 +835,37 @@ describe.each([{ backend: "fs" as const }, { backend: "postgres" as const }])(
             expect(
               existsSync(join(pgHarness.projectRoot, "assets", "inputs", slug, "shared.png")),
             ).toBe(true);
+          } finally {
+            await harness.cleanup();
+          }
+        });
+
+        test("an unexpected assertSourceVisible failure (not CampaignNotFoundError) surfaces as 500", async () => {
+          const harness = await setup();
+          const pgHarness = harness as Awaited<ReturnType<typeof setupPgHarness>>;
+          try {
+            const owner = new PgBriefStore(pgHarness.db, "local", "owner", ["owner"], []);
+            await owner.createBrief(sampleBrief("other-camp"));
+            await owner.createBrief({
+              ...sampleBrief("multi-source"),
+              products: [
+                {
+                  id: "p1",
+                  name: "P1",
+                  primaryColor: "#1473E6",
+                  logoPath: "assets/inputs/other-camp/shared.png",
+                },
+              ],
+            });
+            const spy = vi
+              .spyOn(getBriefStore(LOCAL_TENANT), "campaignVisibility")
+              .mockRejectedValueOnce(Object.assign(new Error("EIO"), { code: "EIO" }));
+
+            const res = await mount().create(
+              createReq({ name: "Copy Of Multi Source", source: "multi-source" }),
+            );
+            expect(res.status).toBe(500);
+            spy.mockRestore();
           } finally {
             await harness.cleanup();
           }
@@ -725,6 +924,28 @@ describe.each([{ backend: "fs" as const }, { backend: "postgres" as const }])(
         try {
           const res = await mount().create(createReq({ name: "Orphan", source: "nope" }));
           expect(res.status).toBe(404);
+        } finally {
+          await harness.cleanup();
+        }
+      });
+
+      test("an unexpected preflight readPool failure (not InvalidCopyPoolError) surfaces as 500", async () => {
+        const harness = await setup();
+        try {
+          const { create, createBrief } = mount();
+          await createBrief(
+            new Request("http://x/campaigns/briefs", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify(sampleBrief("source-camp")),
+            }),
+          );
+          const spy = vi
+            .spyOn(getPoolStore(LOCAL_TENANT), "readPool")
+            .mockRejectedValueOnce(Object.assign(new Error("EIO"), { code: "EIO" }));
+          const res = await create(createReq({ name: "Copy", source: "source-camp" }));
+          expect(res.status).toBe(500);
+          spy.mockRestore();
         } finally {
           await harness.cleanup();
         }

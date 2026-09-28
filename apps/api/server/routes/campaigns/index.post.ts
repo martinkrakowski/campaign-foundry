@@ -31,15 +31,26 @@ import { requestTenant } from "../../lib/tenant.js";
 const CANONICAL_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
+ * Marks an EEXIST raised while claiming the CANDIDATE slug itself — the only
+ * failure `withDerivedSlug`'s retry loop may retry past (PT-5b2 fix-round
+ * item 3). A conflict raised AFTER a successful reservation (a concurrent
+ * writer's own Save landing version 1 on this exact slug between the
+ * reservation and here, say) is a real, reportable conflict, never a taken
+ * candidate to skip past — `attempt` below only ever throws this from its
+ * own reservation step, nowhere else.
+ */
+class SlugTakenError extends Error {}
+
+/**
  * Derive a slug from `name` (D178: the server derives the slug — the same
  * rule `duplicate.post.ts` uses, duplicated there rather than imported,
  * since a route file is not a shared module) and hand each candidate to
  * `attempt` until one is not taken: the base, then `-2`, `-3`, … — skipping a
  * reserved id and a uuid-shaped candidate (it would collide with D178's ref
  * resolution, #613) — staying within 64 characters by trimming the base
- * before the suffix. `attempt` performs the actual write; a collision is ITS
- * conflict signal (`isExistsError`), the same one two concurrent callers of
- * the same name race on, never a separate check-then-act read here. The
+ * before the suffix. Only a `SlugTakenError` retries the next suffix; any
+ * other failure — including an ordinary EEXIST `attempt` raises for a reason
+ * other than the candidate itself being taken — propagates immediately. The
  * caller guarantees `slugify(name)` is non-empty before calling.
  */
 async function withDerivedSlug<T>(name: string, attempt: (slug: string) => Promise<T>): Promise<T> {
@@ -51,7 +62,7 @@ async function withDerivedSlug<T>(name: string, attempt: (slug: string) => Promi
     try {
       return await attempt(candidate);
     } catch (error) {
-      if (!isExistsError(error)) throw error;
+      if (!(error instanceof SlugTakenError)) throw error;
     }
   }
 }
@@ -68,13 +79,23 @@ async function withDerivedSlug<T>(name: string, attempt: (slug: string) => Promi
  * (D179) — through `createCampaign`. `type` is validated against the known
  * campaign types but not stored anywhere yet (D177's correction: a blank
  * brief cannot be a version, and `campaign` has no `type` column); the
- * eventual first Save's own brief body carries it, the same as any other
- * brief field.
+ * eventual first Save's own brief body carries it.
  *
  * With a `source`: that campaign's latest version becomes version 1, exactly
  * as `duplicate.post.ts`'s `newId` path does today — brief-scoped assets and
  * the copy pool included. `type` is ignored; the copy carries the source
- * brief's own `type`.
+ * brief's own `type`. `teamId` omitted inherits the source's own team (PT-5b2
+ * fix-round item 1, security); an explicit value (including `null`, clearing
+ * to org-wide) goes through `canAssignTeam` exactly like `createBrief`'s.
+ *
+ * PT-5b2 fix-round items 2/3: `readPool` and the additional-source visibility
+ * check run once, before any slug is ever reserved — a malformed pool or a
+ * hidden reference answers 422/404 without minting anything. Once a
+ * candidate IS reserved (`createCampaign`), a later failure (asset copy, the
+ * first-version `createBrief`, the pool write) releases that reservation
+ * (`releaseCampaign`, `deleteAssets`) and propagates as-is — never retried
+ * onto a different suffix, even when the failure is itself EEXIST-shaped
+ * (a concurrent writer's own Save racing this exact slug).
  *
  * Answers 201 `{ campaignId, slug, revision? }` — `revision` only for a
  * sourced create, which writes a version; a blank create has none yet.
@@ -152,7 +173,14 @@ export default defineEventHandler(async (event) => {
   if (source === undefined) {
     try {
       const created = await withDerivedSlug(name, (slug) =>
-        store.withBriefLock(slug, () => store.createCampaign(slug, { teamId })),
+        store.withBriefLock(slug, async () => {
+          try {
+            return await store.createCampaign(slug, { teamId });
+          } catch (error) {
+            if (isExistsError(error)) throw new SlugTakenError();
+            throw error;
+          }
+        }),
       );
       setResponseStatus(event, 201);
       return { campaignId: created.campaignId, slug: created.slug };
@@ -218,6 +246,35 @@ export default defineEventHandler(async (event) => {
     return { error: errorMessage(error) };
   }
 
+  // PT-5b2 fix-round item 2 (coderabbit PRRT_kwDOSzP1zc6mgBvA): resolve the
+  // source pool and check every additional source id's visibility BEFORE any
+  // slug is ever reserved — these depend only on `sourceSlug`/`template`, not
+  // on which candidate eventually wins, so a malformed pool or a hidden
+  // reference 422s/404s without minting (and then having to release) a
+  // versionless row or directory for nothing.
+  let sourcePool;
+  try {
+    sourcePool = await readPool(scope, sourceSlug);
+  } catch (error) {
+    if (!(error instanceof InvalidCopyPoolError)) throw error;
+    setResponseStatus(event, 422);
+    return { error: error.message };
+  }
+  const additionalSourceIds = extractSourceAssetBriefIds(template, sourceSlug).filter(
+    (fromId) => fromId !== sourceSlug,
+  );
+  try {
+    for (const fromId of additionalSourceIds) {
+      await assertSourceVisible(scope, fromId);
+    }
+  } catch (error) {
+    if (error instanceof CampaignNotFoundError) {
+      setResponseStatus(event, 404);
+      return { error: `Brief "${error.campaignId}" not found.` };
+    }
+    throw error;
+  }
+
   /**
    * Mint `targetSlug` with `createCampaign` (the only check that also sees an
    * fs reserved directory, D179 — `campaignVisibility` cannot, since it
@@ -227,39 +284,61 @@ export default defineEventHandler(async (event) => {
    * sequence: `createCampaign` no longer locks internally (it would deadlock
    * nested inside this one), by the same house convention `createBrief`
    * follows — the caller owns the lock.
+   *
+   * The reservation and the copy/write are two separate failure domains
+   * (PT-5b2 fix-round items 2/3): an EEXIST from `createCampaign` itself
+   * means the candidate is taken (`SlugTakenError`, retried by
+   * `withDerivedSlug`); anything after — including an EEXIST from
+   * `createBrief` racing a concurrent Save — means the reservation held and
+   * this failure is real. That second case releases the reservation and any
+   * assets already copied for it, then propagates the original error
+   * unmodified, so the route's own catch reports it (409 for that race,
+   * naming the slug the store's own message already carries — never
+   * retried onto a different suffix).
    */
   const attempt = async (targetSlug: string): Promise<ResolvedCampaign & { revision: string }> => {
-    if (await isPoolDirSymlink(scope, targetSlug)) {
-      throw new Error(SYMLINK_WRITE_ERROR);
-    }
-    let brief: CampaignBrief = { ...template, id: targetSlug };
     return store.withBriefLock(targetSlug, async () => {
-      await store.createCampaign(targetSlug, { teamId: effectiveTeamId });
-
-      const sourcePool = await readPool(scope, sourceSlug);
-      const additionalSourceIds = extractSourceAssetBriefIds(brief, targetSlug).filter(
-        (fromId) => fromId !== sourceSlug,
-      );
-      for (const fromId of additionalSourceIds) {
-        await assertSourceVisible(scope, fromId);
+      if (await isPoolDirSymlink(scope, targetSlug)) {
+        throw new Error(SYMLINK_WRITE_ERROR);
       }
-
-      const sourceMap = await getAssetStore(scope).copyAssets(sourceSlug, targetSlug);
-      brief = rewriteAssetPaths(brief, sourceSlug, targetSlug, sourceMap);
-      for (const fromId of additionalSourceIds) {
-        const addMap = await getAssetStore(scope).copyAssets(fromId, targetSlug);
-        brief = rewriteAssetPaths(brief, fromId, targetSlug, addMap);
+      try {
+        await store.createCampaign(targetSlug, { teamId: effectiveTeamId });
+      } catch (error) {
+        if (isExistsError(error)) throw new SlugTakenError();
+        throw error;
       }
-
-      const created: StoredBrief = await store.createBrief(brief, { teamId: effectiveTeamId });
-      await withPoolLock(scope, targetSlug, async () => {
-        if (sourcePool) {
-          await copyPool(scope, sourceSlug, targetSlug);
-        } else {
-          await deletePool(scope, targetSlug);
+      try {
+        let brief: CampaignBrief = { ...template, id: targetSlug };
+        const sourceMap = await getAssetStore(scope).copyAssets(sourceSlug, targetSlug);
+        brief = rewriteAssetPaths(brief, sourceSlug, targetSlug, sourceMap);
+        for (const fromId of additionalSourceIds) {
+          const addMap = await getAssetStore(scope).copyAssets(fromId, targetSlug);
+          brief = rewriteAssetPaths(brief, fromId, targetSlug, addMap);
         }
-      });
-      return { campaignId: created.campaignId, slug: targetSlug, revision: created.revision };
+
+        const created: StoredBrief = await store.createBrief(brief, { teamId: effectiveTeamId });
+        await withPoolLock(scope, targetSlug, async () => {
+          if (sourcePool) {
+            await copyPool(scope, sourceSlug, targetSlug);
+          } else {
+            await deletePool(scope, targetSlug);
+          }
+        });
+        return { campaignId: created.campaignId, slug: targetSlug, revision: created.revision };
+      } catch (error) {
+        // The pool lives inside the same reserved directory `releaseCampaign`
+        // removes on fs (D177/D179): deleted first (a no-op if nothing was
+        // ever written), or `releaseCampaign`'s own `rmdir` would refuse a
+        // non-empty directory and answer false for no reason.
+        await withPoolLock(scope, targetSlug, () => deletePool(scope, targetSlug));
+        const released = await store.releaseCampaign(targetSlug);
+        // Only when the campaign itself is gone too: `releaseCampaign`
+        // answers false once a real, versioned brief exists (e.g. `createBrief`
+        // succeeded and only the pool write after it failed) — an asset
+        // directory that belongs to that real brief must never be deleted.
+        if (released) await getAssetStore(scope).deleteAssets(targetSlug);
+        throw error;
+      }
     });
   };
 
@@ -272,10 +351,13 @@ export default defineEventHandler(async (event) => {
       setResponseStatus(event, 400);
       return { error: errorMessage(error) };
     }
-    // D166 item 2: an additional source id hidden from this caller by team.
-    if (error instanceof CampaignNotFoundError) {
-      setResponseStatus(event, 404);
-      return { error: `Brief "${error.campaignId}" not found.` };
+    // PT-5b2 fix-round items 3/5: a conflict AFTER the reservation held (a
+    // concurrent writer's own Save racing this exact slug) — never retried,
+    // and the message already names the slug the store's own error carries,
+    // never the raw `name` (qodo PRRT_kwDOSzP1zc6mgAEv's sibling finding).
+    if (isExistsError(error)) {
+      setResponseStatus(event, 409);
+      return { error: errorMessage(error) };
     }
     // An unknown teamId, from createCampaign inside `attempt` (see the
     // blank-create catch above for why this is the one realistic failure
