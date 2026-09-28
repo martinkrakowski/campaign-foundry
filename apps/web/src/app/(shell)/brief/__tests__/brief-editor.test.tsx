@@ -5059,8 +5059,12 @@ describe("the abandoned-draft two-way (W3 / F19)", () => {
     const prompt = await screen.findByRole("dialog", { name: messages.resumeDraftTitle });
     // Start over proceeds exactly as the unguarded create.
     await user.click(within(prompt).getByRole("button", { name: messages.resumeDraftStartOver }));
-    await waitFor(() => expect(localStorage.getItem(CREATE_SEED_KEY)).not.toBeNull());
-    // One gesture, one answer: the publication must not re-ask.
+    // PT-5c1 (D177, D178): Start over mints through POST /campaigns and routes to
+    // the minted campaign — there is no more in-place seed to publish.
+    await waitFor(() =>
+      expect(nextMock().router.push).toHaveBeenCalledWith(campaignRoute("Summer Spark")),
+    );
+    // One gesture, one answer: the mint must not re-ask.
     expect(screen.queryAllByRole("dialog", { name: messages.resumeDraftTitle })).toHaveLength(0);
   });
 
@@ -5091,15 +5095,12 @@ describe("the abandoned-draft two-way (W3 / F19)", () => {
       within(await screen.findByRole("dialog", { name: messages.createCampaignTitle })),
     );
 
-    // One question for the whole gesture (D67): the seed applies in place, and
-    // the two-way about the very draft the guard just discussed never opens.
+    // One question for the whole gesture (D67): the mint proceeds, and the
+    // two-way about the very draft the guard just discussed never opens.
     await waitFor(() =>
-      expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
-        "Summer Spark",
-      ),
+      expect(nextMock().router.push).toHaveBeenCalledWith(campaignRoute("Summer Spark")),
     );
     expect(screen.queryAllByRole("dialog", { name: messages.resumeDraftTitle })).toHaveLength(0);
-    expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
   });
 
   test("a pristine editor with no stored draft raises neither the guard nor the two-way", async () => {
@@ -5126,9 +5127,7 @@ describe("the abandoned-draft two-way (W3 / F19)", () => {
     // dialog: the create proceeds exactly as it did before W3.
     await fillDialog(user, within(dialog));
     await waitFor(() =>
-      expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
-        "Summer Spark",
-      ),
+      expect(nextMock().router.push).toHaveBeenCalledWith(campaignRoute("Summer Spark")),
     );
     expect(screen.queryAllByRole("dialog", { name: messages.resumeDraftTitle })).toHaveLength(0);
   });
