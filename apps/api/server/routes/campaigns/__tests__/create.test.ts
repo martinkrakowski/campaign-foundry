@@ -1,5 +1,5 @@
-import { describe, test, expect } from "vitest";
-import { existsSync } from "node:fs";
+import { describe, test, expect, vi } from "vitest";
+import { existsSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   BRIEF_SCHEMA_VERSION,
@@ -8,6 +8,9 @@ import {
   type CampaignBrief,
 } from "@campaignfoundry/CampaignOrchestration";
 import type { TenantContext } from "../../../lib/tenant.js";
+import * as loadBrief from "../../../lib/load-brief.js";
+import { getBriefStore } from "../../../lib/ports/index.js";
+import { PgBriefStore } from "../../../lib/ports/pg-brief-store.js";
 import createHandler from "../index.post.js";
 import briefsGetHandler from "../briefs.get.js";
 import resultGetHandler from "../result.get.js";
@@ -25,6 +28,7 @@ import {
 } from "../../__tests__/tenant-harness.js";
 
 const t1Member: TenantContext = { orgId: "local", userId: "u1", roles: [], teamIds: ["t1"] };
+const t2Member: TenantContext = { orgId: "local", userId: "u2", roles: [], teamIds: ["t2"] };
 
 const createReq = (body: unknown) =>
   new Request("http://x/campaigns", {
@@ -106,10 +110,50 @@ describe.each([{ backend: "fs" as const }, { backend: "postgres" as const }])(
       }
     });
 
+    test("a non-object body answers 400 rather than throwing", async () => {
+      const harness = await setup();
+      try {
+        const res = await mount().create(createReq(42));
+        expect(res.status).toBe(400);
+      } finally {
+        await harness.cleanup();
+      }
+    });
+
     test("an invalid type answers 400", async () => {
       const harness = await setup();
       try {
         const res = await mount().create(createReq({ name: "Bad Type", type: "nonsense" }));
+        expect(res.status).toBe(400);
+      } finally {
+        await harness.cleanup();
+      }
+    });
+
+    test("a non-string source answers 400", async () => {
+      const harness = await setup();
+      try {
+        const res = await mount().create(createReq({ name: "Bad Source", source: 123 }));
+        expect(res.status).toBe(400);
+      } finally {
+        await harness.cleanup();
+      }
+    });
+
+    test("an empty-string source answers 400", async () => {
+      const harness = await setup();
+      try {
+        const res = await mount().create(createReq({ name: "Bad Source", source: "" }));
+        expect(res.status).toBe(400);
+      } finally {
+        await harness.cleanup();
+      }
+    });
+
+    test("a non-string teamId answers 400 before parsing anything else", async () => {
+      const harness = await setup();
+      try {
+        const res = await mount().create(createReq({ name: "Bad Team", teamId: 42 }));
         expect(res.status).toBe(400);
       } finally {
         await harness.cleanup();
@@ -248,6 +292,20 @@ describe.each([{ backend: "fs" as const }, { backend: "postgres" as const }])(
       });
     }
 
+    test("an unexpected createCampaign failure (not EFORBIDDEN) surfaces as 500", async () => {
+      const harness = await setup();
+      try {
+        const spy = vi
+          .spyOn(getBriefStore(LOCAL_TENANT), "createCampaign")
+          .mockRejectedValueOnce(Object.assign(new Error("EIO"), { code: "EIO" }));
+        const res = await mount().create(createReq({ name: "Broken" }));
+        expect(res.status).toBe(500);
+        spy.mockRestore();
+      } finally {
+        await harness.cleanup();
+      }
+    });
+
     describe("sourced create (copies the source's latest version as version 1)", () => {
       test("mints the campaign, writes version 1, and answers a revision", async () => {
         const harness = await setup();
@@ -277,6 +335,292 @@ describe.each([{ backend: "fs" as const }, { backend: "postgres" as const }])(
           await harness.cleanup();
         }
       });
+
+      test("copies the source's pool into the new slug", async () => {
+        const harness = await setup();
+        try {
+          const { create, createBrief } = mount();
+          await createBrief(
+            new Request("http://x/campaigns/briefs", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify(sampleBrief("source-camp")),
+            }),
+          );
+          const { getPoolStore } = await import("../../../lib/ports/index.js");
+          await getPoolStore(LOCAL_TENANT).writePool({
+            briefId: "source-camp",
+            generatedAt: new Date().toISOString(),
+            model: "test-model",
+            entries: [{ id: "e1", text: "Hi there", status: "approved" }],
+          });
+
+          const res = await create(createReq({ name: "Copy Of Source", source: "source-camp" }));
+          expect(res.status).toBe(201);
+          const { slug } = (await res.json()) as { slug: string };
+          const copied = await getPoolStore(LOCAL_TENANT).readPool(slug);
+          expect(copied?.pool.entries).toEqual([
+            { id: "e1", text: "Hi there", status: "approved" },
+          ]);
+          if (backend === "fs") {
+            expect(existsSync(join(harness.projectRoot, "briefs", slug, "pools.json"))).toBe(true);
+          }
+        } finally {
+          await harness.cleanup();
+        }
+      });
+
+      test("an unexpected parseBrief failure on the re-validated source answers 400", async () => {
+        const harness = await setup();
+        try {
+          const { create, createBrief } = mount();
+          await createBrief(
+            new Request("http://x/campaigns/briefs", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify(sampleBrief("source-camp")),
+            }),
+          );
+          const spy = vi.spyOn(loadBrief, "parseBrief").mockImplementationOnce(() => {
+            throw new Error("mock: source brief no longer valid");
+          });
+          const res = await create(createReq({ name: "Copy", source: "source-camp" }));
+          expect(res.status).toBe(400);
+          spy.mockRestore();
+        } finally {
+          await harness.cleanup();
+        }
+      });
+
+      test("an unexpected assertOwnedCampaign failure (not CampaignNotFoundError) surfaces as 500", async () => {
+        const harness = await setup();
+        try {
+          const { create, createBrief } = mount();
+          await createBrief(
+            new Request("http://x/campaigns/briefs", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify(sampleBrief("source-camp")),
+            }),
+          );
+          const spy = vi
+            .spyOn(getBriefStore(LOCAL_TENANT), "findBriefById")
+            .mockRejectedValueOnce(Object.assign(new Error("EIO"), { code: "EIO" }));
+          const res = await create(createReq({ name: "Copy", source: "source-camp" }));
+          expect(res.status).toBe(500);
+          spy.mockRestore();
+        } finally {
+          await harness.cleanup();
+        }
+      });
+
+      // withDerivedSlug's retry loop and the outer catch's specific branches
+      // (symlink, hidden-source 404, EFORBIDDEN, InvalidCopyPoolError) cover
+      // every ANTICIPATED failure inside `attempt`; anything else — a raw
+      // storage failure copying assets, here — must still surface as an
+      // uncaught 500, never be swallowed as a false 422/404/403.
+      test("an unanticipated failure inside attempt (asset copy) surfaces as 500", async () => {
+        const harness = await setup();
+        try {
+          const { create, createBrief } = mount();
+          await createBrief(
+            new Request("http://x/campaigns/briefs", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify(sampleBrief("source-camp")),
+            }),
+          );
+          const { getAssetStore } = await import("../../../lib/ports/index.js");
+          const spy = vi
+            .spyOn(getAssetStore(LOCAL_TENANT), "copyAssets")
+            .mockRejectedValueOnce(Object.assign(new Error("EIO"), { code: "EIO" }));
+          const res = await create(createReq({ name: "Copy", source: "source-camp" }));
+          expect(res.status).toBe(500);
+          spy.mockRestore();
+        } finally {
+          await harness.cleanup();
+        }
+      });
+
+      if (backend === "postgres") {
+        test("an unexpected resolveCampaign failure (not CampaignNotFoundError) surfaces as 500", async () => {
+          const harness = await setup();
+          try {
+            const { create, createBrief } = mount();
+            await createBrief(
+              new Request("http://x/campaigns/briefs", {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify(sampleBrief("source-camp")),
+              }),
+            );
+            const spy = vi
+              .spyOn(getBriefStore(LOCAL_TENANT), "resolveCampaign")
+              .mockRejectedValueOnce(Object.assign(new Error("EIO"), { code: "EIO" }));
+            const res = await create(createReq({ name: "Copy", source: "source-camp" }));
+            expect(res.status).toBe(500);
+            spy.mockRestore();
+          } finally {
+            await harness.cleanup();
+          }
+        });
+
+        test("teamId the caller may not assign on a sourced create answers 403", async () => {
+          const harness = await setup();
+          try {
+            const { create, createBrief } = mount();
+            await createBrief(
+              new Request("http://x/campaigns/briefs", {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify(sampleBrief("source-camp")),
+              }),
+            );
+            const res = await create(
+              createReq({ name: "Copy", source: "source-camp", teamId: "ghost" }),
+            );
+            expect(res.status).toBe(403);
+          } finally {
+            await harness.cleanup();
+          }
+        });
+
+        test("a malformed source pool answers 422, and writes no brief", async () => {
+          const harness = await setup();
+          const pgHarness = harness as Awaited<ReturnType<typeof setupPgHarness>>;
+          try {
+            const { create, createBrief } = mount();
+            await createBrief(
+              new Request("http://x/campaigns/briefs", {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify(sampleBrief("source-camp")),
+              }),
+            );
+            await pgHarness.db.query(
+              `insert into pool (org_id, campaign_id, body, revision) values ($1, $2, $3, $4)`,
+              ["local", "source-camp", "{not-json", "deadbeef"],
+            );
+            const res = await create(createReq({ name: "Copy Of Broken", source: "source-camp" }));
+            expect(res.status).toBe(422);
+            const listed = await mount().list(new Request("http://x/campaigns/briefs"));
+            const listedJson = (await listed.json()) as { briefs: { brief: { id: string } }[] };
+            expect(listedJson.briefs.map((b) => b.brief.id)).toEqual(["source-camp"]);
+          } finally {
+            await harness.cleanup();
+          }
+        });
+
+        // D166 item 2: the source brief's own logoPath names a THIRD campaign,
+        // hidden from this caller by team — checked before any copy runs.
+        test("a source referencing a campaign hidden by team answers 404, and copies nothing", async () => {
+          const harness = await setup();
+          const pgHarness = harness as Awaited<ReturnType<typeof setupPgHarness>>;
+          try {
+            await pgHarness.db.query(
+              `insert into team (id, name, "memberCount", org_id, created_at) values
+                 ($1, $2, 0, $3, now()), ($4, $5, 0, $3, now())`,
+              ["t1", "Team One", "local", "t2", "Team Two"],
+            );
+            const owner = new PgBriefStore(pgHarness.db, "local", "owner", ["owner"], []);
+            await owner.createBrief(sampleBrief("t1-camp"), { teamId: "t1" });
+            const hiddenAssets = join(pgHarness.projectRoot, "assets", "inputs", "t1-camp");
+            mkdirSync(hiddenAssets, { recursive: true });
+            writeFileSync(join(hiddenAssets, "secret.png"), "T1-SECRET");
+
+            const t2Store = new PgBriefStore(pgHarness.db, "local", "u2", [], ["t2"]);
+            await t2Store.createBrief(
+              {
+                ...sampleBrief("t2-source"),
+                products: [
+                  {
+                    id: "p1",
+                    name: "P1",
+                    primaryColor: "#1473E6",
+                    logoPath: "assets/inputs/t1-camp/secret.png",
+                  },
+                ],
+              },
+              { teamId: "t2" },
+            );
+
+            const res = await mount(t2Member).create(
+              createReq({ name: "Copy Of Hidden Ref", source: "t2-source" }),
+            );
+            expect(res.status).toBe(404);
+            expect(
+              existsSync(join(pgHarness.projectRoot, "assets", "inputs", "copy-of-hidden-ref")),
+            ).toBe(false);
+          } finally {
+            await harness.cleanup();
+          }
+        });
+
+        // D166 item 2's happy path: an additional source id the caller CAN
+        // see — its assets copy into the new campaign too, not just the
+        // primary source's.
+        test("a source referencing a visible campaign also copies that campaign's assets", async () => {
+          const harness = await setup();
+          const pgHarness = harness as Awaited<ReturnType<typeof setupPgHarness>>;
+          try {
+            const owner = new PgBriefStore(pgHarness.db, "local", "owner", ["owner"], []);
+            await owner.createBrief(sampleBrief("other-camp"));
+            const otherAssets = join(pgHarness.projectRoot, "assets", "inputs", "other-camp");
+            mkdirSync(otherAssets, { recursive: true });
+            writeFileSync(join(otherAssets, "shared.png"), "SHARED-LOGO");
+
+            await owner.createBrief({
+              ...sampleBrief("multi-source"),
+              products: [
+                {
+                  id: "p1",
+                  name: "P1",
+                  primaryColor: "#1473E6",
+                  logoPath: "assets/inputs/other-camp/shared.png",
+                },
+              ],
+            });
+
+            const res = await mount().create(
+              createReq({ name: "Copy Of Multi Source", source: "multi-source" }),
+            );
+            expect(res.status).toBe(201);
+            const { slug } = (await res.json()) as { slug: string };
+            expect(
+              existsSync(join(pgHarness.projectRoot, "assets", "inputs", slug, "shared.png")),
+            ).toBe(true);
+          } finally {
+            await harness.cleanup();
+          }
+        });
+      }
+
+      if (backend === "fs") {
+        test("refuses a symlinked briefs/<slug> directory with 400", async () => {
+          const harness = await setup();
+          const fsHarness = harness as Awaited<ReturnType<typeof setupFsHarness>>;
+          try {
+            const { create, createBrief } = mount();
+            await createBrief(
+              new Request("http://x/campaigns/briefs", {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify(sampleBrief("source-camp")),
+              }),
+            );
+            const elsewhere = join(fsHarness.tmpDir, "elsewhere");
+            mkdirSync(elsewhere, { recursive: true });
+            symlinkSync(elsewhere, join(fsHarness.projectRoot, "briefs", "linked-copy"));
+
+            const res = await create(createReq({ name: "Linked Copy", source: "source-camp" }));
+            expect(res.status).toBe(400);
+            expect(await res.json()).toEqual({ error: "Refusing to write through a symlink." });
+            expect(existsSync(join(elsewhere, "linked-copy.yaml"))).toBe(false);
+          } finally {
+            await harness.cleanup();
+          }
+        });
+      }
 
       test("ignores type: the copy carries the source brief's own type", async () => {
         const harness = await setup();

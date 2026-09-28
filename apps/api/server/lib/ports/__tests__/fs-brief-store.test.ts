@@ -266,6 +266,19 @@ describe("FsBriefStore", () => {
       expect(rejected).toHaveLength(1);
       expect((rejected[0] as PromiseRejectedResult).reason).toMatchObject({ code: "EEXIST" });
     });
+
+    const canDenyWrite = process.platform !== "win32" && process.getuid?.() !== 0;
+    test.skipIf(!canDenyWrite)(
+      "rethrows a non-EEXIST mkdir failure (e.g. EACCES) unchanged",
+      async () => {
+        chmodSync(dir, 0o000);
+        try {
+          await expect(store.createCampaign("denied")).rejects.toMatchObject({ code: "EACCES" });
+        } finally {
+          chmodSync(dir, 0o755);
+        }
+      },
+    );
   });
 
   test("rewriteBrief updates existing brief and checks revision when provided", async () => {

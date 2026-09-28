@@ -1199,6 +1199,21 @@ describe("authoring briefs", () => {
       expect(existsSync(yamlPath("dest", "pools.json"))).toBe(false);
     });
 
+    // withDerivedSlug's retry loop only ever retries an EEXIST (a slug
+    // collision); anything else — InvalidCopyPoolError here — must propagate
+    // on the FIRST candidate, never masked as "taken" and retried past.
+    test("duplicate by name of a brief whose source pool is malformed answers 422, not retried", async () => {
+      const { create, duplicate } = await api();
+      await create()(jsonReq("http://x/campaigns/briefs", "POST", pooledSource()));
+      mkdirSync(yamlPath("camp"), { recursive: true });
+      writeFileSync(yamlPath("camp", "pools.json"), "{not-json");
+      const res = await duplicate()(
+        jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { name: "Dest" }),
+      );
+      expect(res.status).toBe(422);
+      expect(existsSync(yamlPath("dest.yaml"))).toBe(false);
+    });
+
     test("duplicate of a source pool whose briefId does not match its directory answers 422", async () => {
       const { create, duplicate } = await api();
       await create()(jsonReq("http://x/campaigns/briefs", "POST", pooledSource()));
