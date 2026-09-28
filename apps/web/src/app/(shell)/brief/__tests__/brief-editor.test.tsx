@@ -5198,6 +5198,46 @@ describe("the route is the source of truth (D37)", () => {
       expect(calls.some((c) => c.method === "POST" && c.body?.id === "fresh")).toBe(true),
     );
   });
+
+  // The msczF keep-edits path used to autosave those keystrokes under the
+  // shared `cf:draft:new` key while `GET /campaigns/:id` was still in flight,
+  // then leave that copy behind once `markSeeded` moved the key. The abandoned
+  // `/brief/new` draft W3 resume reads must survive the whole window, and the
+  // kept edits must land under the campaign's own key once the lookup resolves.
+  test("edits typed before a named route resolves autosave under that campaign, never cf:draft:new", async () => {
+    const user = userEvent.setup();
+    saveDraftToStorage({ ...initialEditorState(), campaignName: "Abandoned" });
+    const abandoned = localStorage.getItem("cf:draft:new");
+    expect(abandoned).not.toBeNull();
+
+    let resolveMeta: ((r: Response) => void) | null = null;
+    routes({
+      list: () => json({ briefs: [] }),
+      meta: () => new Promise<Response>((resolve) => (resolveMeta = resolve)),
+    });
+    renderWithRun(<Editor id="fresh" />);
+    await waitFor(() => expect(resolveMeta).not.toBeNull());
+
+    await user.type(screen.getByLabelText("Target Audience"), "typed early");
+    await act(async () => {
+      await Promise.resolve();
+    });
+    // The in-flight window writes nothing: the abandoned draft is byte-identical,
+    // and the campaign key does not exist yet (the server has not named it).
+    expect(localStorage.getItem("cf:draft:new")).toBe(abandoned);
+    expect(localStorage.getItem("cf:draft:fresh")).toBeNull();
+
+    resolveMeta!(json(blankCampaignMeta("fresh", { name: "Server Name" })));
+    await waitFor(() => expect(localStorage.getItem("cf:draft:fresh")).not.toBeNull());
+    expect(localStorage.getItem("cf:draft:new")).toBe(abandoned);
+    const stored = JSON.parse(localStorage.getItem("cf:draft:fresh") as string) as {
+      state: { targetAudience: string };
+    };
+    expect(stored.state.targetAudience).toBe("typed early");
+    expect((screen.getByLabelText("Target Audience") as HTMLInputElement).value).toBe(
+      "typed early",
+    );
+  });
 });
 
 describe("the abandoned-draft two-way (W3 / F19)", () => {

@@ -1086,13 +1086,23 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   // session may purge.
   const draftDivergedRef = useRef(false);
   useEffect(() => {
+    // A named route is an unattached "new" draft until its lookup lands, so
+    // the key is the shared `cf:draft:new`. A keystroke saved in that window
+    // overwrites the abandoned `/brief/new` draft W3 resume reads, and
+    // `markSeeded` moving the key would leave that copy behind. Skip until
+    // the route has resolved. `markSeeded` changes `state` (and
+    // `routeAlreadyResolved`), so this effect runs again and writes the kept
+    // edits under the campaign's own key. The diverged flag stays unset
+    // across the skip: the pristine purge below must not delete `cf:draft:new`
+    // either, including one this session never wrote.
+    if (!isPristine(state) && routeId !== undefined && !routeAlreadyResolved) return;
     if (!isPristine(state)) {
       draftDivergedRef.current = true;
       saveDraftToStorage(state);
       return;
     }
     if (draftDivergedRef.current) purgeDraftFromStorage(state);
-  }, [state]);
+  }, [state, routeId, routeAlreadyResolved]);
 
   // The projection, exactly once: `toBrief(state)` is what Save sends, and the D35
   // handoff, the rail's YAML view and `draftDiffers` all read this one object rather
