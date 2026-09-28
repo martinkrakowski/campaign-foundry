@@ -278,6 +278,18 @@ Rules:
 - Open a PR against main with `gh pr create` (title = commit summary; body = what/why,
   verification incl. the coverage line, and a **Deviations** section). Do NOT merge.
 - Append a session-log entry (Mode / Changes / Decisions / Left open).
+- Measure a file's coverage the way the gate does. Run `npx vitest run --coverage
+  --coverage.reporter=json --coverage.reportsDirectory=<dir> --coverage.thresholds.lines=0
+  --coverage.thresholds.branches=0 --coverage.thresholds.functions=0
+  --coverage.thresholds.statements=0 <test files>`, then read each changed file's entry in
+  `<dir>/coverage-final.json` and list any uncovered function or statement line. A
+  `--coverage.include` path containing `(shell)` matches nothing (parentheses are glob syntax) and
+  prints `All files 0`; never report 100% from it. A claim of per-file 100% without that listing is
+  not evidence.
+- If `test:cov` fails ONLY with timeouts in test files you did not touch, and the host's load
+  average is far above its core count (`uptime`), do not retry more than once. Show those files pass
+  alone, report the load, push, and let CI's clean runner be the gate. Never raise a test timeout to
+  get through.
 
 Final message: PR URL, files changed, coverage line, deviations. Nothing else.
 If you cannot produce a PR URL and a passing gate, say **STUCK** and what blocks it —

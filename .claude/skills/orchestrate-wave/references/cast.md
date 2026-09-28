@@ -3,6 +3,27 @@
 Re-probe before trusting any row: `grok models`, `agy models`, `opencode models`. Two of these
 fail with a misleading error rather than "no such model".
 
+## Current seats
+
+**2026-09-28.**
+
+- **Implementers:** Sonnet 5 (subagent) is the reserve while the agy quota is exhausted (it resets
+  around 2026-09-30); `agy gemini-3.8-flash-high` when its quota is back; `opencode
+  openrouter/z-ai/glm-5.3-flash --variant max`, probed 2026-09-28 (trivial dispatch passed in 33 s
+  for $0.002), for bounded lanes.
+- **Pre-PR reviewer for high-risk lanes:** `grok-4.7` — a **PROPOSAL**, not yet adopted by the
+  owner, so label it that way.
+- **Local LM Studio models are not a lane seat.** The 30B at 10.10.0.220 runs on the orchestrator's
+  own machine and made it unresponsive under memory pressure. Evaluated 2026-09-28; one-off text
+  jobs only.
+- **The headless-opencode rule:** `< /dev/null`, or `opencode run` waits on stdin and never reaches
+  the model.
+
+## History (superseded)
+
+Every section below this point is kept as the record; it is not the current cast. See "Current
+seats" above.
+
 ## Seat defaults — owner's instruction, 2026-09-25 (wave platform-and-tenancy-w01): agy for every lane
 
 **This supersedes the 2026-09-15 implementer and remediator rows below; every other seat in that table stands.**
