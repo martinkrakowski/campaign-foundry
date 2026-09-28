@@ -437,17 +437,17 @@ export class PgBriefStore implements BriefStorePort {
            from campaign c where c.org_id = $1 and c.id = $2`,
         [this.orgId, ref.toLowerCase()],
       );
-      const byId = rows[0];
-      if (byId && this.visible(byId.team_id)) return toMeta(byId);
+      const metaById = rows[0];
+      if (metaById && this.visible(metaById.team_id)) return toMeta(metaById);
     }
     const { rows } = await this.db.query<Row>(
       `select c.id, c.slug, c.name, c.type, c.team_id, ${selectHasVersion}
          from campaign c where c.org_id = $1 and c.slug = $2`,
       [this.orgId, ref],
     );
-    const bySlug = rows[0];
-    if (!bySlug || !this.visible(bySlug.team_id)) return undefined;
-    return toMeta(bySlug);
+    const metaBySlug = rows[0];
+    if (!metaBySlug || !this.visible(metaBySlug.team_id)) return undefined;
+    return toMeta(metaBySlug);
   }
 
   /**
