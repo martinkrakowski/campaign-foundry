@@ -291,7 +291,12 @@ describe("FsBriefStore", () => {
     test.skipIf(!canDenyWrite)(
       "rethrows a non-EEXIST mkdir failure (e.g. EACCES) unchanged",
       async () => {
-        chmodSync(dir, 0o000);
+        // 0o555 (read+execute, no write): the findBriefFile/findBriefFileById
+        // "taken" checks (readdir/lstat, read-only) still succeed — chmod
+        // 0o000 made THOSE throw EACCES first, so the mkdir catch this test
+        // means to exercise was never reached. Only mkdir's own need to
+        // write a new entry into this.dir fails.
+        chmodSync(dir, 0o555);
         try {
           await expect(store.createCampaign("denied")).rejects.toMatchObject({ code: "EACCES" });
         } finally {
@@ -324,6 +329,26 @@ describe("FsBriefStore", () => {
     test("answers false for a slug that was never reserved", async () => {
       expect(await store.releaseCampaign("nope")).toBe(false);
     });
+
+    const canDenyWriteRelease = process.platform !== "win32" && process.getuid?.() !== 0;
+    test.skipIf(!canDenyWriteRelease)(
+      "rethrows a non-ENOENT/ENOTEMPTY rmdir failure (e.g. EACCES) unchanged",
+      async () => {
+        await store.createCampaign("mint-only");
+        // 0o555 (read+execute, no write): findBriefFileById's own readdir
+        // still succeeds — only rmdir's need to unlink the entry from its
+        // parent fails, so this exercises releaseCampaign's own catch
+        // rather than an earlier read failing first.
+        chmodSync(dir, 0o555);
+        try {
+          await expect(store.releaseCampaign("mint-only")).rejects.toMatchObject({
+            code: "EACCES",
+          });
+        } finally {
+          chmodSync(dir, 0o755);
+        }
+      },
+    );
   });
 
   test("rewriteBrief updates existing brief and checks revision when provided", async () => {
