@@ -1662,18 +1662,18 @@ describe("BriefPage — data flow", () => {
     expect(mintCalls).toBe(1);
   });
 
-  // mscy6 — the copy's own display name is what was typed in the Save as…
-  // dialog, not whatever the SOURCE campaign's name still is.
-  test("Save as… carries the typed name onto the copy's own draft (mscy6)", async () => {
+  // mscy6 — the typed Save as… name is the COPY's name, carried on
+  // `POST /campaigns`. The open draft is the SOURCE and keeps its own name:
+  // patching it here used to observe a state production never keeps (a
+  // routeless mount, router mocked, so no navigation reloads the copy) and
+  // to rename the source whenever the write failed.
+  test("Save as… sends the typed name on the mint and leaves the source name in place (mscy6)", async () => {
     const user = userEvent.setup();
     // A NEVER-saved source (D9: Save as… does not require the source to be
-    // saved first) — the one case where the Identity field actually reads
-    // `campaignName` rather than a loaded file's own slug (`IdentitySection`
-    // shows the slug, never the name, once `source.kind === "file"` — the
-    // Save-as write itself already carries the right id via `minted.slug`
-    // regardless; this is the only surface `campaignName` reaches).
+    // saved first) — the case where the Identity field reads `campaignName`
+    // rather than a loaded file's slug, so a rename of the source is visible.
     saveDraftToStorage({ ...initialEditorState(), briefId: "fresh", campaignName: "Original" });
-    routes({});
+    const calls = routes({});
     renderWithRun(<Editor />);
     await waitFor(() =>
       expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("Original"),
@@ -1686,9 +1686,40 @@ describe("BriefPage — data flow", () => {
       within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
     );
     await waitFor(() => expect(screen.queryByLabelText("New campaign name")).toBeNull());
-    // The draft's own display name now reads the typed Save as… name, not
-    // whatever it held before ("fresh", from `fillValidDraft` above).
-    expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("A New Name");
+    expect(calls.find((c) => c.url.endsWith("/campaigns"))?.body?.name).toBe("A New Name");
+    // `fillValidDraft` set the source's name to "fresh". The mint took
+    // "A New Name"; the field that is still open did not.
+    expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("fresh");
+  });
+
+  // The mint succeeds and the first-save write fails — the only order in
+  // which a source rename could stick, because the name is sent before the
+  // write and the dialog stays open for a retry. The source's Campaign Name
+  // must still be the one the editor had open.
+  test("a failed Save as… write leaves the source campaign's name unchanged", async () => {
+    const user = userEvent.setup();
+    const calls = routes({
+      meta: () => json(blankCampaignMeta("fresh", { name: "Original" })),
+      post: (url) =>
+        url.endsWith("/campaigns")
+          ? json({ campaignId: "copy", slug: "copy" }, 201)
+          : json({ error: "disk full" }, 500),
+    });
+    renderWithRun(<Editor id="fresh" />);
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("Original"),
+    );
+    await fillValidDraft(user, "Original");
+
+    await saveVia(user, "Save as");
+    await user.type(screen.getByLabelText("New campaign name"), "A New Name");
+    await user.click(
+      within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
+    );
+
+    expect(await screen.findByText(/disk full/)).toBeTruthy();
+    expect(calls.find((c) => c.url.endsWith("/campaigns"))?.body?.name).toBe("A New Name");
+    expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("Original");
   });
 
   // msczJ — once `createBrief` has already succeeded, a failed listing refresh

@@ -2141,20 +2141,15 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
       // Save as….
       const minted = savedAsMintRef.current ?? (await createCampaign({ name, type: state.type }));
       savedAsMintRef.current = minted;
-      // mscy6 — the copy's own display name is what was actually typed here,
-      // not whatever `state.campaignName` still holds from the source being
-      // copied. The thread's own mechanism does not exist to fix: `toBrief`
-      // never emits a name (`CampaignBrief` has no such field — only `id`,
-      // the slug `minted.slug` already supplies below), and the listing
-      // never renders one either (`BriefPicker`/`IdentitySection` both show
-      // `brief.id`, already the right slug). What DOES read `campaignName`
-      // is local draft state — the in-flight preview, and the Identity field
-      // itself before a first save — so that is what this patches. The
-      // FOUND-branch of the route effect above never re-patches it from
-      // `meta.name` either, so once this campaign is reopened as a saved
-      // file, its display name is its slug everywhere, same as any other
-      // saved campaign — a real, separate gap this fix does not close.
-      dispatch({ type: "patch", patch: { campaignName: name } });
+      // The typed name is the COPY's name, and it goes out on the mint above
+      // (`createCampaign({ name })`) — the server stores it, and opening the
+      // copy later reads it back. `toBrief` has no name field (only `id`,
+      // which `minted.slug` supplies below). Patching `campaignName` onto
+      // `state` here would rename the draft that is still open, the SOURCE,
+      // before this write runs. A failed write would leave that rename on
+      // screen and in the source's autosave; cancelling the dialog would not
+      // put the old name back. A successful write navigates to the copy, and
+      // the route load replaces the field, so the patch never arrived there.
       const brief = toBrief(state);
       // The write, not its answer: the copy is opened by navigating to it — the
       // route's own load effect reads it back from the server, the same as any
